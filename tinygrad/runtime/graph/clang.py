@@ -1,5 +1,5 @@
 from typing import List, Dict, cast
-import ctypes
+import ctypes, itertools
 from tinygrad.helpers import dedup, cpu_time_execution, DEBUG, to_function_name
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.device import Buffer, Device
@@ -34,8 +34,8 @@ class ClangGraph(GraphRunner):
     prerendered = [device.renderer._render(ji.prg.p.uops) for i,ji in enumerate(jit_cache)]
     rendered_funcs = [device.renderer._render_body(f'j{i}'+prerendered[i][0], *prerendered[i][1:], ji.prg.p.uops) for i,ji in enumerate(jit_cache)]
 
-    defines = device.renderer._render_defines() if hasattr(device.renderer, '_render_defines') else ""
-    entry = device.renderer._render_entry("batched", targs) if hasattr(device.renderer, '_render_entry') else ""
+    defines = '\n'.join(set(itertools.chain.from_iterable(device.renderer._render_defines(ji.prg.p.uops) for ji in jit_cache)))
+    entry = device.renderer._render_entry("batched", targs)
     code = defines + '\n' + '\n'.join([''.join(f) for f in rendered_funcs]) + '\n'.join(batched) + '\n' + entry
 
     if DEBUG >= 4: print(code)
