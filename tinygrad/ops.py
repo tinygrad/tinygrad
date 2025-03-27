@@ -858,12 +858,15 @@ def track_rewrites(named=False, name_fxn:Callable|None=None):
     return __wrapper
   return _decorator
 
+active_rewrites:list[TrackedGraphRewrite] = []
 def track_matches(func):
   def _track_func(*args, **kwargs):
-    if TRACK_MATCH_STATS >= 2 and tracked_ctxs:
+    if tracking:=(TRACK_MATCH_STATS >= 2 and tracked_ctxs):
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
-      tracked_ctxs[-1].append(TrackedGraphRewrite(loc, args[0], kwargs.get("bottom_up", False), [], kwargs.get("name", None)))
+      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0], kwargs.get("bottom_up", False), [], kwargs.get("name", None)))
+      active_rewrites.append(ctx)
     ret = func(*args, **kwargs)
+    if tracking: active_rewrites.pop()
     return ret
   return _track_func
 
@@ -883,7 +886,7 @@ class TrackedPatternMatcher(PatternMatcher):
           match_stats[p][0] += 1
           match_stats[p][3] += (et:=time.perf_counter()-st)
           if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and len(tracked_ctxs) != 0: tracked_ctxs[-1][-1].matches.append((uop, ret, p))
+          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((uop, ret, p))
           return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
     return None
