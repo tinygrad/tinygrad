@@ -665,27 +665,15 @@ class Kernel:
       ctx[1].add(buf_id)
       if (k := ctx[0]).lds[buf_id]:
         global_st: ShapeTracker = global_access.src[1].arg
+        local_shape = tuple(1 if st == 0 or i < k.global_dims or (i >= k.first_reduce and i < k.first_upcast) else global_st.shape[i]
+                            for i,st in enumerate(global_st.real_strides(True)))
+        store_st = load_st = ShapeTracker.from_shape(local_shape)
+        local_buffer = UOp(Ops.DEFINE_LOCAL, global_access.dtype.ptr(size=store_st.real_size(), local=True), (), f"temp{buf_id}")
         if global_access.op == Ops.LOAD:
-          local_shape = tuple(1 if st == 0 or i < k.global_dims else global_st.shape[i] for i,st in enumerate(global_st.real_strides(True)))
-          store_st = load_st = ShapeTracker.from_shape(local_shape)
-          # load_st = load_st.permute((0,1,2,4,3))
-          # store_st = store_st.permute((0,1,2,4,3))
-          # this works for no locals
-          if buf_id == 2:
-            load_st = load_st.permute((0,2,1))
-            store_st = store_st.permute((0,2,1))
-          if buf_id == 1:
-            load_st = load_st.permute((2,1,0))
-            store_st = store_st.permute((2,1,0))
-          print(f"{global_st=}\n{store_st=}\n{load_st=}")
-          local_buffer = UOp(Ops.DEFINE_LOCAL, global_access.dtype.ptr(size=store_st.real_size(), local=True), (), f"temp{buf_id}")
           global_access = global_access.replace(src=(global_access.src[0], global_st.to_uop()))
           local_store = UOp.store(local_buffer, store_st.to_uop(), global_access)
           return UOp(Ops.LOAD, global_access.dtype, (local_buffer, load_st.to_uop(), local_store))
         if global_access.op == Ops.STORE:
-          local_shape = tuple(1 if i < k.global_dims else s for i,s in enumerate(k.output_shape))
-          store_st = load_st = ShapeTracker.from_shape(local_shape)
-          local_buffer = UOp(Ops.DEFINE_LOCAL, global_access.src[2].dtype.ptr(size=store_st.real_size(), local=True), (), f"temp{buf_id}")
           local_store = UOp.store(local_buffer, store_st.to_uop(), global_access.src[2])
           local_load = UOp(Ops.LOAD, local_buffer.dtype.base, (local_buffer, load_st.to_uop(), local_store))
           return global_access.replace(src=(global_access.src[0], global_access.src[1], local_load))
