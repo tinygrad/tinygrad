@@ -9,15 +9,25 @@ function intersectRect(r1, r2) {
 }
 
 const allWorkers = [];
-window.renderGraph = function(graph, additions) {
+let workerUrl = null;
+window.renderGraph = async function(graph, additions, name) {
+  if (workerUrl == null) {
+    const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/lib/worker.js"].map(u => fetch(u)));
+    workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
+  }
   while (allWorkers.length) {
     const { worker, timeout } = allWorkers.pop();
     worker.terminate();
     clearTimeout(timeout);
   }
 
+  if (name === "View Memory Graph") {
+    return renderMemoryGraph(graph);
+  }
+  d3.select("#bars").html("");
+
   // ** start calculating the new layout (non-blocking)
-  worker = new Worker("/lib/worker.js");
+  worker = new Worker(workerUrl);
   const progressMessage = document.querySelector(".progress-message");
   const timeout = setTimeout(() => {
     progressMessage.style.display = "block";
@@ -53,8 +63,132 @@ window.renderGraph = function(graph, additions) {
       points.push(intersectRect(g.node(e.w), points[points.length-1]));
       return line(points);
     }).attr("marker-end", "url(#arrowhead)");
-    // +arrow heads
-    d3.select("#render").append("defs").append("marker").attr("id", "arrowhead").attr("viewBox", "0 -5 10 10").attr("refX", 10).attr("refY", 0)
-      .attr("markerWidth", 6).attr("markerHeight", 6).attr("orient", "auto").append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", "#4a4b57");
   };
+}
+
+
+DTYPE_SIZE = {"bool": 1, "char": 1, "uchar": 1, "short": 2, "ushort": 2, "int": 4, "uint": 4,
+              "long": 8, "ulong": 8, "half": 2, "bfloat": 2, "float": 4, "double": 8}
+function getBuffer(e) {
+  const [_, size, dtype, device, num] = e.label.split("\n");
+  return {nbytes:size*DTYPE_SIZE[dtype.split("dtypes.")[1]], dtype, device:device.split(" ")[1], num:parseInt(num.split(" ")[1])};
+}
+function pluralize(num, name, alt=null) {
+  return num === 1 ? `${num} ${name}` : `${num} ${alt ?? name+'s'}`
+}
+
+function renderMemoryGraph(graph) {
+  // ** construct alloc/free traces
+  // we can map reads/writes from the kernel graph
+  const actions = [];
+  const children = new Map(); // {buffer: [...assign]}
+  for (const [k,v] of Object.entries(graph)) {
+    if (!v.label.startsWith("ASSIGN")) continue;
+    actions.push({ op: "write", buffer: v.src[0] });
+    for (const ks of graph[v.src[1]].src) {
+      const node = graph[ks];
+      const s = node.label.startsWith("ASSIGN") ? node.src[0] : ks;
+      if (!children.has(s)) children.set(s, []);
+      children.get(s).push(v);
+      if (s !== v.src[0]) actions.push({ op: "read", buffer: s });
+    }
+  }
+  const prealloc = new Set();
+  const traces = [];
+  for (const a of actions) {
+    // a buffer is allocated immediately before the first write
+    // TODO: we don't know the buffer is preallocated if there's only an assign in the graph
+    if (a.op === "write") {
+      traces.push({ type: "alloc", buffer: a.buffer });
+    }
+    else {
+      if (traces.find(t => t.buffer === a.buffer && t.type === "alloc") == null) {
+        prealloc.add(a.buffer);
+      }
+      else if (a === actions.findLast(({ buffer }) => buffer === a.buffer)) {
+        traces.push({type: "free", buffer: a.buffer });
+      }
+    }
+  }
+  // ** get coordinates and layout for each buffer
+  const ret = {};
+  let timestep = 0; // x
+  let memUsed = 0; // y
+  for (const id of prealloc) {
+    const buf = getBuffer(graph[id]);
+    ret[id] = { x: [timestep], y: [memUsed], buf, id };
+    memUsed += buf.nbytes;
+  }
+  let peak = memUsed;
+  const liveBufs = [...prealloc];
+  for (const t of traces) {
+    const buf = getBuffer(graph[t.buffer]);
+    const idx = liveBufs.findLastIndex(b => t.buffer === b);
+    // alloc
+    if (idx === -1) {
+      liveBufs.push(t.buffer);
+      ret[t.buffer] = { x: [timestep], y: [memUsed], buf, id: t.buffer };
+      memUsed += buf.nbytes;
+      peak = Math.max(memUsed, peak);
+      timestep += 1;
+    } // free
+    else {
+      memUsed -= buf.nbytes;
+      timestep += 1;
+      const removed = ret[liveBufs.splice(idx, 1)[0]];
+      removed.x.push(timestep);
+      removed.y.push(removed.y.at(-1));
+      if (idx < liveBufs.length) {
+        for (let j=idx; j<liveBufs.length; j++) {
+          const b = ret[liveBufs[j]];
+          b.x.push(timestep, timestep);
+          b.y.push(b.y.at(-1), b.y.at(-1)-buf.nbytes);
+        }
+      }
+    }
+  }
+  for (const id of liveBufs) {
+    const b = ret[id];
+    b.x.push(timestep);
+    b.y.push(b.y.at(-1));
+  }
+  // ** render traces
+  const render = d3.select("#bars");
+  const yscale = d3.scaleLinear().domain([0, peak]).range([576, 0]);
+  const xscale = d3.scaleLinear().domain([0, timestep]).range([0, 1024]);
+  const xaxis = d3.axisBottom(xscale);
+  const axesGroup = render.append("g").attr("id", "axes");
+  const nbytes_format = (d) => d3.format(".3~s")(d)+"B";
+  axesGroup.append("g").call(d3.axisLeft(yscale).tickFormat(nbytes_format));
+  axesGroup.append("g").attr("transform", `translate(0, ${yscale.range()[0]})`).call(d3.axisBottom(xscale).tickFormat(() => ""));
+  const polygonGroup = render.append("g").attr("id", "polygons");
+  const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
+  const polygons = polygonGroup.selectAll("polygon").data(Object.values(ret)).join("polygon").attr("points", (d) => {
+    const xs = d.x.map(t => xscale(t));
+    const y1 = d.y.map(t => yscale(t));
+    const y2 = d.y.map(t => yscale(t+d.buf.nbytes));
+    const p0 = xs.map((x, i) => `${x},${y1[i]}`);
+    const p1 = xs.map((x, i) => `${x},${y2[i]}`).reverse();
+    return `${p0.join(' ')} ${p1.join(' ')}`;
+  }).attr("fill", d => `#${colors[d.buf.num % colors.length]}`).on("mouseover", (e, { id, buf, x }) => {
+    d3.select(e.currentTarget).attr("stroke", "rgba(26, 27, 38, 0.8)").attr("stroke-width", 0.8);
+    const metadata = document.querySelector(".container.metadata");
+    document.getElementById("current-buf")?.remove();
+    const { num, dtype, nbytes, ...rest } = buf;
+    let label = `<BUFFER n${num} ${dtype} ${nbytes_format(nbytes)}>\nalive for ${pluralize(x[x.length-1]-x[0], 'timestep')}`;
+    label += '\n'+Object.entries(rest).map(([k, v]) => `${k}=${v}`).join('\n');
+    const buf_children = children.get(id);
+    if (buf_children) {
+      label += `\n${pluralize(buf_children.length, 'child', 'children')}\n`;
+      label += buf_children.map((c,i) => `[${i+1}] `+graph[c.src[1]].label.split("\n")[1]).join("\n");
+    }
+    metadata.appendChild(Object.assign(document.createElement("pre"), { innerText: label, id: "current-buf", className: "wrap" }));
+  }).on("mouseout", (e, _) => {
+    d3.select(e.currentTarget).attr("stroke", null).attr("stroke-width", null);
+    document.getElementById("current-buf")?.remove()
+  });
+  // TODO: add the toposort graph here
+  document.querySelector(".progress-message").style.display = "none";
+  d3.select("#nodes").html("");
+  d3.select("#edges").html("");
 }

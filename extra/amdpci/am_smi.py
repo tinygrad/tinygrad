@@ -79,6 +79,8 @@ class AMSMI(AMDev):
     self.psp:AM_PSP = AM_PSP(self)
     self.smu:AM_SMU = AM_SMU(self)
 
+    for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu]: ip.init_sw()
+
   def read_pci_state(self):
     with open(f"/sys/bus/pci/devices/{self.pcibus}/power_state", "r") as f: return f.read().strip().rstrip()
 

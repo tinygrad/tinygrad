@@ -60,7 +60,7 @@ class TestKiTS19Dataset(ExternalTestDatasets):
     if use_old_dataloader:
       dataset = iterate(list(Path(tempfile.gettempdir()).glob("case_*")), preprocessed_dir=preproc_pth, val=val, shuffle=shuffle, bs=batch_size)
     else:
-      dataset = iter(batch_load_unet3d(preproc_pth, batch_size=batch_size, val=val, shuffle=shuffle, seed=seed))
+      dataset = batch_load_unet3d(preproc_pth, batch_size=batch_size, val=val, shuffle=shuffle, seed=seed)
 
     return iter(dataset)
 
