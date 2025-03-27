@@ -1452,7 +1452,7 @@ class TestLinearizer(unittest.TestCase):
   def test_lds_single_buffer(self):
     ast = lds_basic_ast
     k = Kernel(ast)
-    k.apply_opt(Opt(OptOps.LDS, 0, ((4,4), None, None)))
+    k.apply_opt(Opt(OptOps.LDS, 1, ((4,4), None, None)))
     k.linearize()
     count = len([uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL and uop.dtype == dtypes.float.vec(16)])
     assert count == 1, f"{count=}, {1}"
@@ -1461,7 +1461,7 @@ class TestLinearizer(unittest.TestCase):
   def test_lds_double_buffer(self):
     ast = lds_basic_ast
     k = Kernel(ast)
-    opts = [Opt(OptOps.LDS, 0, ((4,4), None, None)), Opt(OptOps.LDS, 1, ((4,4), None, None))]
+    opts = [Opt(OptOps.LDS, 1, ((4,4), None, None)), Opt(OptOps.LDS, 2, ((4,4), None, None))]
     for opt in opts: k.apply_opt(opt)
     k.linearize()
     count = len([uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL and uop.dtype == dtypes.float.ptr(16)])
