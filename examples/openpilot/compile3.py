@@ -1,6 +1,7 @@
 import os, sys, pickle, time
 import numpy as np
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
+if "ONNXFLOAT32" not in os.environ: os.environ["ONNXFLOAT32"] = "0" if bool(os.environ["FLOAT16"]) else "1"
 if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
 if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
 if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"

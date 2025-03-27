@@ -130,8 +130,6 @@ def benchmark_model(m, devices, validate_outs=False):
     open_csv.writeheader()
   open_csv.writerow(CSV)
 
-  if "ONNXFLOAT32" in os.environ: del os.environ["ONNXFLOAT32"]
-
 def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
   assert len(tiny_out) == len(onnx_out) and tiny_out.keys() == onnx_out.keys()
   for k in tiny_out.keys():

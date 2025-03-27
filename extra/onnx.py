@@ -1,5 +1,5 @@
 from typing import Any, Sequence, cast, Literal, Callable
-import dataclasses, functools, io, math, types
+import dataclasses, functools, io, math, types, warnings
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple
 from tinygrad.dtype import DType, ConstType, dtypes
@@ -22,8 +22,7 @@ def dtype_parse(onnx_dtype: int) -> DType:
   }
   if onnx_dtype in unsupported: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
   dtype = supported[onnx_dtype]
-  float32 = bool(getenv("ONNXFLOAT32", 0))
-  if (float32 and dtypes.is_float(dtype)) or not is_dtype_supported(dtype): dtype = dtypes.float32
+  if (bool(getenv("ONNXFLOAT32", 0)) and dtypes.is_float(dtype)) or not is_dtype_supported(dtype): dtype = dtypes.float32
   return dtype
 
 def attribute_parse(onnx_attribute: AttributeProto):
@@ -129,16 +128,16 @@ class OnnxRunner:
     self.onnx_ops = onnx_ops
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
-    float32 = bool(getenv("ONNXFLOAT32", 0))
     if spec.is_optional and value is None: return None
     if spec.is_sequence:
       if not isinstance(value, Sequence): raise RuntimeError(f"{name} received {value}, expected a sequence type")
       sequence = [Tensor(v, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(v, Tensor) else v for v in value]
       if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for {name} sequence must be homogeneous")
-      if not float32 and not all(t.dtype is spec.dtype for t in sequence): raise RuntimeError(f"Dtypes for {name} sequence should all be {spec.dtype}")
+      if not all(t.dtype is spec.dtype for t in sequence):
+        warnings.warn(f"Dtypes for {name} sequence should all be {spec.dtype}", RuntimeWarning)
       return sequence
     tensor = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
-    if not float32 and tensor.dtype is not spec.dtype: raise RuntimeError(f"{name} has {tensor.dtype} dtype, should be {spec.dtype}")
+    if tensor.dtype is not spec.dtype: warnings.warn(f"{name} has {tensor.dtype} dtype, should be {spec.dtype}", RuntimeWarning)
     for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):
       if isinstance(onnx_dim, str):
         onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, int(user_dim_input))

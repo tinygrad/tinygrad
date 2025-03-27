@@ -68,7 +68,7 @@ class TestOnnxModel(unittest.TestCase):
       os.system(f"flameprof {temp('net.prof')} > {temp('prof.svg')}")
       ps = stats.sort_stats(pstats.SortKey.TIME)
       ps.print_stats(30)
-    if "ONNXFLOAT32" in os.environ: del os.environ["ONNXFLOAT32"]
+    del os.environ["ONNXFLOAT32"]
 
   def test_openpilot_model(self):
     os.environ["ONNXFLOAT32"] = "1"
@@ -101,7 +101,7 @@ class TestOnnxModel(unittest.TestCase):
     Tensor.no_grad = False
     print(tinygrad_out, torch_out)
     np.testing.assert_allclose(tinygrad_out, torch_out, atol=1e-4, rtol=1e-2)
-    if "ONNXFLOAT32" in os.environ: del os.environ["ONNXFLOAT32"]
+    del os.environ["ONNXFLOAT32"]
 
   @unittest.skip("slow")
   def test_efficientnet(self):
