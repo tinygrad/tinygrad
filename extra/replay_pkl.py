@@ -38,7 +38,9 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
           elif k.full_shape[-3:] == (32,3,3):
             # NOTE: there's an issue with the 7 -> 8 upcast and the valid removal
-            if knum not in [52,56,60] and k.full_shape[-4]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
+            #blacklist = [52,56,60]
+            blacklist = []
+            if knum not in blacklist and k.full_shape[-4]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
             # 3x3 dwconv
             k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
             k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
