@@ -148,8 +148,9 @@ class WebGPUProgram:
 
     if buf_patch:
       copy_buffer_to_buffer(self.dev, tmp_bufs[0], 0, bufs[0], 0, webgpu.wgpuBufferGetSize(bufs[0]), encoder=command_encoder)
+      # TODO: ensure destruction happens after compute is done
       webgpu.wgpuBufferDestroy(tmp_bufs[0])
-  
+
   def __call__(self, *bufs, global_size=(1,1,1), local_size=(1,1,1), vals=(), wait=False):
     wait = wait and self.timestamp_supported
 
@@ -219,8 +220,9 @@ class WebGpuDevice(Compiled):
     device_res = _run(webgpu.wgpuAdapterRequestDeviceF, webgpu.WGPURequestDeviceCallbackInfo, webgpu.WGPURequestDeviceCallback,
     webgpu.WGPURequestDeviceStatus__enumvalues, 1, 2, adapter_res, dev_desc)
 
+    from tinygrad.runtime.graph.webgpu import WebGPUGraph
     super().__init__(device, WebGpuAllocator(device_res), WGSLRenderer(), Compiler(),
-      functools.partial(WebGPUProgram, (device_res, webgpu.WGPUFeatureName_TimestampQuery in supported)))
+      functools.partial(WebGPUProgram, (device_res, webgpu.WGPUFeatureName_TimestampQuery in supported)), WebGPUGraph)
 
   def synchronize(self):
     _run(webgpu.wgpuQueueOnSubmittedWorkDone2, webgpu.WGPUQueueWorkDoneCallbackInfo2, webgpu.WGPUQueueWorkDoneCallback2,
