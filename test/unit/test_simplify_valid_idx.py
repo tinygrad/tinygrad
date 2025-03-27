@@ -46,6 +46,7 @@ class TestHelpers(unittest.TestCase):
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid):
     load = full_graph_rewrite(load.sink()).src[0]
+    print(f"{load=}")
     idx, valid = load.src[0].src[1], load.src[0].src[2]
     self.assertEqual(idx.render(simplify=False), sidx)
     self.assertEqual(valid.render(simplify=False), svalid)
@@ -123,6 +124,20 @@ class TestValidIdxSimplification(unittest.TestCase):
     self.check(load,
       "(((ridx0*2)+(ridx3*-1))+1)",
       "(ridx2<1)")
+
+  def test_valid_becomes_const1(self):
+    # from DSP mobilenetv2
+    ridx0 = Range(0, 30)
+    ridx1 = Range(1, 7)
+    ridx2 = Range(2, 2)
+    alu11 = (ridx1+ridx2)
+    alu15 = ((alu11+1)//7)
+    idx = (alu15*-31)+(((((alu11+218)//224)+ridx0)%30)*1568)
+    valid = (ridx2<1)&(ridx1<6)
+    load = get_gated_load_uop(valid, idx)
+    self.check(load,
+      "(ridx0*1568)",
+      "((ridx2<1)&(ridx1<6))")
 
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
