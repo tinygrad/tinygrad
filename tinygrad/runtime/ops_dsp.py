@@ -43,13 +43,12 @@ class DSPRenderer(ClangRenderer):
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
 
-  def _render_entry(self, function_name, bufs) -> str: return ""
-  def _render_body(self, function_name, kernel, bufs, uops): return super().render_kernel(function_name, kernel, bufs, uops)
+  # def _render_body(self, function_name, kernel, bufs, uops): return super().render_kernel(function_name, kernel, bufs, uops)
 
-  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    return self._render_defines(function_name) + "\n" + self._render_body(function_name, kernel, bufs, uops) + "\n" + self._render_entry(function_name, bufs)
+  # def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+  #   return self._render_defines() + "\n" + self._render_body(function_name, kernel, bufs, uops) + "\n" + self._render_entry(function_name, bufs)
 
-  def _render_defines(self, function_name):
+  def _render_defines(self):
     return '''struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency; _Bool set_dcvs_params;
                  short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3]; }; int HAP_power_set(void*, void*);
             typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;
