@@ -28,6 +28,8 @@ if __name__ == "__main__":
           k = beam_search(k, dsp_bufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
         elif not getenv("NOOPT"):
           if knum == 1:
+            k.apply_opt(Opt(OptOps.UNROLL, 2, 0))
+            # more UNROLLs aren't working well here, but they should be
             k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
           elif knum == 66:
