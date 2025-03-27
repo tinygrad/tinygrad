@@ -46,7 +46,6 @@ class TestHelpers(unittest.TestCase):
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid):
     load = full_graph_rewrite(load.sink()).src[0]
-    print(f"{load=}")
     idx, valid = load.src[0].src[1], load.src[0].src[2]
     self.assertEqual(idx.render(simplify=False), sidx)
     self.assertEqual(valid.render(simplify=False), svalid)
