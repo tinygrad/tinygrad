@@ -131,14 +131,16 @@
     flex-direction: row;
     gap: 8px;
   }
-  .btn {
-    outline: none;
-    background-color: #1a1b26;
+  .btn, .copy-btn {
+    background: #1a1b26;
     border: 1px solid #4a4b56;
     color: #f0f0f5;
-    border-radius: 8px;
     padding: 6px;
     cursor: pointer;
+  }
+  .btn {
+    outline: none;
+    border-radius: 8px;
     height: 32px;
     display: flex;
     align-items: center;
@@ -146,19 +148,14 @@
     text-decoration: none;
   }
   .btn:hover {
-    background-color: #2a2b36;
+    background: #2a2b36;
     border-color: #5a5b66;
   }
   .copy-btn {
-    background-color: #1a1b26;
-    border: 1px solid #4a4b56;
-    color: #f0f0f5;
     border-radius: 5px;
     position: absolute;
-    padding: 6px;
-    right: 8px;
-    top: 5px;
-    cursor: pointer;
+    top: 1px;
+    right: 10px;
   }
   .code-container {
     position: relative;
@@ -248,26 +245,36 @@
   const toPath = ([fp, lineno]) => `${fp.replaceAll("\\", "/").split("/").pop()}:${lineno}`;
   const vsCodeOpener = (parts) => Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
-  const highlightedCodeBlock = (code, lang, wrap) => {
+  const highlightedCodeBlock = (() => {
+  let firstBlock = true;
+  return (code, lang, wrap) => {
     const container = document.createElement("div");
     container.className = "code-container";
-    const pre = Object.assign(document.createElement("pre"), { className: wrap ? "wrap" : "" });
-    const codeEl = Object.assign(document.createElement("code"), { className: `language-${lang} code-block`, textContent: code });
+    const pre = document.createElement("pre");
+    if (wrap) pre.className = "wrap";
+    const codeEl = document.createElement("code");
+    codeEl.className = `language-${lang} code-block`;
+    codeEl.textContent = code;
     pre.appendChild(codeEl);
     container.appendChild(pre);
-    const copyBtn = document.createElement("button");
-    copyBtn.className = "copy-btn";
-    copyBtn.textContent = "Copy";
-    copyBtn.onclick = () => {
-      navigator.clipboard.writeText(code).then(() => {
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => copyBtn.textContent = "Copy", 1500);
-      });
-    };
-    container.appendChild(copyBtn);
+    if (!firstBlock) {
+      const btn = document.createElement("button");
+      btn.className = "copy-btn";
+      btn.textContent = "Copy";
+      btn.onclick = () => {
+        navigator.clipboard.writeText(code).then(() => {
+          btn.textContent = "Copied!";
+          setTimeout(() => btn.textContent = "Copy", 1500);
+        });
+      };
+      container.appendChild(btn);
+    }
+    firstBlock = false;
     hljs.highlightElement(codeEl);
     return container;
   };
+  })();
+
   const coloredToHTML = (str) => {
     const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
     return str.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
