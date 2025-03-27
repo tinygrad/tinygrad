@@ -149,6 +149,20 @@
     background-color: #2a2b36;
     border-color: #5a5b66;
   }
+  .copy-btn {
+    background-color: #1a1b26;
+    border: 1px solid #4a4b56;
+    color: #f0f0f5;
+    border-radius: 5px;
+    position: absolute;
+    padding: 6px;
+    right: 8px;
+    top: 5px;
+    cursor: pointer;
+  }
+  .code-container {
+    position: relative;
+  }
   .collapsed .container {
     display: none;
   }
@@ -235,12 +249,24 @@
   const vsCodeOpener = (parts) => Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
   const highlightedCodeBlock = (code, lang, wrap) => {
-    const pre = Object.assign(document.createElement("pre"), {className: wrap ? "wrap" : ""});
-    // NOTE: since code is in textContent, we don't need DOMPurify
-    const codeEl = Object.assign(document.createElement("code"), { className: `language-${lang} code-block`, textContent: code});
+    const container = document.createElement("div");
+    container.className = "code-container";
+    const pre = Object.assign(document.createElement("pre"), { className: wrap ? "wrap" : "" });
+    const codeEl = Object.assign(document.createElement("code"), { className: `language-${lang} code-block`, textContent: code });
     pre.appendChild(codeEl);
+    container.appendChild(pre);
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "copy-btn";
+    copyBtn.textContent = "Copy";
+    copyBtn.onclick = () => {
+      navigator.clipboard.writeText(code).then(() => {
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => copyBtn.textContent = "Copy", 1500);
+      });
+    };
+    container.appendChild(copyBtn);
     hljs.highlightElement(codeEl);
-    return pre;
+    return container;
   };
   const coloredToHTML = (str) => {
     const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
