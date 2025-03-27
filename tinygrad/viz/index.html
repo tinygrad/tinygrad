@@ -264,6 +264,7 @@
     const pad = 16;
     const R = { x: x0+pad, y: mainRect.top+pad, width: x1-x0-2*pad, height: mainRect.height-2*pad };
     const r = document.querySelector("#render").getBoundingClientRect();
+    if (r.width === 0) return;
     const scale = Math.min(R.width/r.width, R.height/r.height);
     const [tx, ty] = [R.x+(R.width-r.width*scale)/2, R.y+(R.height-r.height*scale)/2];
     svg.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
@@ -496,6 +497,9 @@
       const totalRewrites = ret.length-1;
       currentRewrite = Math.min(totalRewrites, currentRewrite+1)
       main()
+    }
+    if (event.key == " ") {
+      document.getElementById("zoom-to-fit-btn").click();
     }
   })
   main()
