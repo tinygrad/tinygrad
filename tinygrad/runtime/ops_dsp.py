@@ -43,11 +43,6 @@ class DSPRenderer(ClangRenderer):
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
 
-  # def _render_body(self, function_name, kernel, bufs, uops): return super().render_kernel(function_name, kernel, bufs, uops)
-
-  # def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-  #   return self._render_defines() + "\n" + self._render_body(function_name, kernel, bufs, uops) + "\n" + self._render_entry(function_name, bufs)
-
   def _render_defines(self):
     return '''struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency; _Bool set_dcvs_params;
                  short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3]; }; int HAP_power_set(void*, void*);
@@ -67,7 +62,6 @@ class DSPRenderer(ClangRenderer):
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
     msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ["return 0; }"]
-    # return ret + '\n' + '\n'.join(msrc)
     return '\n'.join(msrc)
 
 def rpc_sc(method=0, ins=0, outs=0, fds=0): return (method << 24) | (ins << 16) | (outs << 8) | fds
