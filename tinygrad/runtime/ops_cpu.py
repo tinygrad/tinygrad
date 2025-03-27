@@ -3,7 +3,6 @@ from tinygrad.helpers import capstone_flatdump, getenv
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.renderer.cstyle import ClangRenderer
-from tinygrad.runtime.graph.cpu import CPUGraph
 
 class ClangJITCompiler(Compiler):
   def __init__(self, cachekey="compile_clang_jit"): super().__init__(cachekey)
@@ -20,7 +19,6 @@ class ClangJITCompiler(Compiler):
   def disassemble(self, lib:bytes): return capstone_flatdump(lib)
 
 class ClangDevice(Compiled):
-  def __init__(self, device:str): super().__init__(device, MallocAllocator, ClangRenderer(), ClangJITCompiler(), CPUProgram,
-               functools.partial(CPUGraph, self))
+  def __init__(self, device:str): super().__init__(device, MallocAllocator, ClangRenderer(), ClangJITCompiler(), CPUProgram)
 
 CPUDevice = ClangDevice
