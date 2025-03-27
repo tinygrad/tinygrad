@@ -1445,11 +1445,11 @@ class TestLinearizer(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       k.apply_opt(Opt(OptOps.LDS, 0, ((4,4), None, None))) # invalid buffer
     with self.assertRaises(KernelOptError):
-      k.apply_opt(Opt(OptOps.LDS, 1, ((4,4), 32, None))) # more threads than elements
+      k.apply_opt(Opt(OptOps.LDS, 1, ((4,4), (32,1), None))) # more threads than elements
     with self.assertRaises(KernelOptError):
-      k.apply_opt(Opt(OptOps.LDS, 1, ((4,4), 32, (0,1,2)))) # invalid permutation
+      k.apply_opt(Opt(OptOps.LDS, 1, ((4,4), None, (0,1,2)))) # invalid permutation
     with self.assertRaises(KernelOptError):
-      k.apply_opt(Opt(OptOps.LDS, 1, ((4,4), 32, (0,0)))) # invalid permutation
+      k.apply_opt(Opt(OptOps.LDS, 1, ((4,4), None, (0,0)))) # invalid permutation
 
   @unittest.expectedFailure
   def test_lds_single_buffer(self):
