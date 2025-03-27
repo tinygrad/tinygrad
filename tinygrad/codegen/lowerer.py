@@ -188,7 +188,7 @@ pm_lowerer = PatternMatcher([
 def view_to_mask(x:UOp):
   from tinygrad.shape.shapetracker import ShapeTracker, View
   st = cast(ShapeTracker, x.st).simplify()
-  print("view_to_mask", st.views)
+  #print("view_to_mask", st.views)
   if len(st.views) > 1: return None
   if st.views[-1].mask is None: return None
   return ShapeTracker((View(st.shape, (0,)*len(st.shape), 0, st.views[-1].mask, False),))
@@ -231,7 +231,7 @@ pm_quant = symbolic+PatternMatcher([
     UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v"),)).where(UPat.cvar(), UPat(Ops.CONST, arg=0))).cast(dtypes.float).named("ld"),
       lambda ld,v,c1: ld*c1),
   # fixed point mult, replace (x.float()*c1+c2).int() with an int expression
-  ((UPat.var("x").cast(dtypes.float)*UPat.cvar("c1")+UPat.cvar("c2")).cast(dtypes.int),
+  ((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("c2")).cast(dtypes.int),
    lambda x,c1,c2: (x * (c1 * FP).cast(dtypes.int) + (c2 * FP).cast(dtypes.int)) // FP),
   # where move
   (UPat.var("valid").where(UPat.var("yes"), UPat(Ops.CONST, arg=0))*UPat.var("mul"), lambda valid, yes, mul:
