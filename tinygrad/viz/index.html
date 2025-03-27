@@ -247,22 +247,19 @@
     const container = document.createElement("div");
     container.className = "code-container";
     const pre = document.createElement("pre");
-    if (wrap) pre.className = "wrap";
-    const codeEl = document.createElement("code");
+    pre.className = wrap ? "wrap" : "";
+    const codeEl = pre.appendChild(document.createElement("code"));
     codeEl.className = `language-${lang} code-block`;
     codeEl.textContent = code;
-    pre.appendChild(codeEl);
     container.appendChild(pre);
     if (addCopy) {
-      const btn = document.createElement("button");
+      const btn = container.appendChild(document.createElement("button"));
       btn.className = "copy-btn";
       btn.textContent = "Copy";
-      btn.onclick = () =>
-        navigator.clipboard.writeText(code).then(() => {
-          btn.textContent = "Copied!";
-          setTimeout(() => (btn.textContent = "Copy"), 1500);
-        });
-      container.appendChild(btn);
+      btn.onclick = () => navigator.clipboard.writeText(code).then(() => {
+        btn.textContent = "Copied!";
+        setTimeout(() => btn.textContent = "Copy", 1500);
+      });
     }
     hljs.highlightElement(codeEl);
     return container;
