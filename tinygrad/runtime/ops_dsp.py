@@ -51,8 +51,9 @@ class DSPRenderer(ClangRenderer):
       'unsigned long long HAP_perf_get_time_us(void);'] + super()._render_defines(uops)
 
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str:
-    msrc = ['int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {', 'HAP_power_set((void*)handle, (void*)&req);',
-            'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};']
+    msrc = ['int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
+            'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};',
+            'HAP_power_set((void*)handle, (void*)&req);']
     msrc += ['if ((sc>>24) != 2) return 0;']
     msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
     msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
@@ -265,7 +266,7 @@ static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd,
 return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}'''
 
 class MockDSPRenderer(DSPRenderer):
-  def _render_defines(self, uops) -> list[str]: return []
+  def _render_defines(self, uops) -> list[str]: return ClangRenderer._render_defines(uops)
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str:
     # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
     # control register 21 is HEX_REG_QEMU_INSN_CNT, 0x6a15c000 loads it
