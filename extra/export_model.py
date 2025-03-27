@@ -9,58 +9,8 @@ from collections import OrderedDict
 
 EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CPU", "CUDA", "GPU"]
 
-<<<<<<< HEAD
 def export_model_clang(ex: ExportSpec, buf_names: dict[Buffer|UOp, str], weight_names: dict[Buffer|UOp, str]|None=None,
                        model_name="model", wasm=False):
-=======
-def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
-  functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
-  for ji in run.jit_cache:
-    fxn: ProgramSpec = ji.prg.p
-    functions[fxn.function_name] = fxn.src   # NOTE: this assumes all with the same name are the same
-    cargs = []
-    for i,arg in enumerate(ji.bufs):
-      key = id(arg)
-      if key not in bufs:
-        if key in special_names:
-          bufs[key] = (special_names[key], arg.size*arg.dtype.itemsize, arg.dtype, key)
-        else:
-          bufs[key] = (f"buf_{bufnum}", arg.size*arg.dtype.itemsize, arg.dtype, key)
-          bufnum += 1
-          if i > 0: bufs_to_save[bufs[key][0]] = arg   # if first usage of a buffer is not an output, and it's not a special name
-      cargs.append(bufs[key][0])
-    cargs += [var for var in fxn.vars if getattr(var, "op", None) is Ops.DEFINE_VAR] # symbolic vars; is it necessary or sufficient to check for DEFINE_VAR?
-    statements.append((fxn.function_name, cargs, fxn.global_size, fxn.local_size))
-
-  return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
-
-def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
-  assert hasattr(model, "forward") or callable(model), "model needs a forward function"
-  @TinyJit
-  def run(*x):
-    out = model.forward(*x) if hasattr(model, "forward") else model(*x)
-    assert isinstance(out, (tuple, list, Tensor)), "model output must be a Tensor, tuple, or a list of Tensors for export"
-    out = [out] if isinstance(out, Tensor) else out
-    return [o.realize() for o in out]
-
-  # twice to run the JIT
-  for _ in range(2): the_output = run(*args)
-  special_names = {}
-
-  # hack to put the inputs back
-  for (j,i),idx in run.input_replace.items():
-    realized_input = args[idx].lazydata.base.realized
-    run.jit_cache[j].bufs[i] = realized_input
-    special_names[id(realized_input)] = f'input{idx}'
-
-  # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
-  for i, output in enumerate(the_output):
-    special_names[id(output.lazydata.base.realized)] = f'output{i}'
-  return run, special_names
-
-def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]],
-  bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str], weight_names={}, model_name="model", symbolic_vars={}, wasm=False) -> str:
->>>>>>> master
   headers = ["#include <tgmath.h>"]
   cprog = list(ex.kernels.values())
   dtype_map = {dtypes.int: "int", dtypes.float: "float", dtypes.uchar: "unsigned char", dtypes.char: "signed char", dtypes.half: "__fp16",
