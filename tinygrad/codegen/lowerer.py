@@ -129,8 +129,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   return acc.assign(ret)
 
 def lower_load_store(ctx: IndexContext, x: UOp):
-  # idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
-  idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
+  idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
   buf = x.src[0]
   if x.op is Ops.LOAD:
     barrier = (UOp(Ops.BARRIER, dtypes.void, (x.src[2],)),) if x.src[0].op is Ops.DEFINE_LOCAL else ()
