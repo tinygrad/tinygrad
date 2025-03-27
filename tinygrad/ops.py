@@ -840,8 +840,8 @@ class TrackedGraphRewrite:
   loc: tuple[str, int]                                                                       # location that called graph_rewrite
   sink: UOp                                                                                  # the sink input to graph_rewrite
   bottom_up: bool
-  matches: list[tuple[UOp, UOp, UPat]] = field(default_factory=list)                         # before+after of all the matches
-  name: Optional[str] = None
+  matches: list[tuple[UOp, UOp, UPat]]                                                       # before+after of all the matches
+  name: str|None
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, int] = {}
@@ -857,6 +857,15 @@ def track_rewrites(named=False, name_fxn:Callable|None=None):
       return ret
     return __wrapper
   return _decorator
+
+def track_matches(func):
+  def _track_func(*args, **kwargs):
+    if TRACK_MATCH_STATS >= 2 and tracked_ctxs:
+      loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
+      tracked_ctxs[-1].append(TrackedGraphRewrite(loc, args[0], kwargs.get("bottom_up", False), [], kwargs.get("name", None)))
+    ret = func(*args, **kwargs)
+    return ret
+  return _track_func
 
 class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
@@ -939,15 +948,13 @@ class RewriteContext:
     self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
     return ret
 
+@track_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> UOp:
-  if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up, name=name))
   rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
   return rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.top_down_rewrite(sink)
 
+@track_matches
 def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> dict[UOp, UOp]:
-  if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up, name=name))
   rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
   return {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
 
