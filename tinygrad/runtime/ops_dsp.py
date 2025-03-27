@@ -265,8 +265,9 @@ static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd,
 return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}'''
 
 class MockDSPRenderer(DSPRenderer):
-  def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
-    ret = ClangRenderer.render_kernel(self, function_name, kernel, bufs, uops, prefix)
+  def _render_defines(self, uops) -> list[str]: return []
+  def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str: return ""
+  def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str:
     # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
     # control register 21 is HEX_REG_QEMU_INSN_CNT, 0x6a15c000 loads it
     msrc = [mockdsp_boilerplate, 'void _start(void) {']
@@ -283,7 +284,7 @@ class MockDSPRenderer(DSPRenderer):
     for i,b in enumerate(bufs):
       if isinstance(b[1][0], PtrDType): msrc.append(f"write(1, buf{i}, {b[1][0].size*b[1][0].itemsize});")
     msrc.append('exit(0); }')
-    return ret + '\n' + '\n'.join(msrc)
+    return '\n'.join(msrc)
 
 class MockDSPProgram:
   def __init__(self, name:str, lib:bytes): self.lib = lib
