@@ -66,16 +66,19 @@ lds_basic_ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
                   UOp(Ops.STORE, dtypes.void, arg=None, src=(
                     UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(256), arg=0, src=()),
                       UOp(Ops.VIEW, dtypes.void,
-                          arg=ShapeTracker(views=(View(shape=(16, 16), strides=(16, 1), offset=0, mask=None, contiguous=True),)), src=()),
+                          arg=ShapeTracker(views=(View(shape=(16, 16), strides=(16, 1), offset=0, mask=None, contiguous=True),)),
+                          src=()),
                       UOp(Ops.ADD, dtypes.float, arg=None, src=(
                         UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                           UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(256), arg=1, src=()),
                           UOp(Ops.VIEW, dtypes.void,
-                              arg=ShapeTracker(views=(View(shape=(16, 16), strides=(16, 1), offset=0, mask=None, contiguous=True),)), src=()),)),
+                              arg=ShapeTracker(views=(View(shape=(16, 16), strides=(16, 1), offset=0, mask=None, contiguous=True),)),
+                              src=()),)),
                         UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                           UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(256), arg=2, src=()),
                           UOp(Ops.VIEW, dtypes.void,
-                              arg=ShapeTracker(views=(View(shape=(16, 16), strides=(16, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),))
+                              arg=ShapeTracker(views=(View(shape=(16, 16), strides=(16, 1), offset=0, mask=None, contiguous=True),)),
+                              src=()),)),)),)),))
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
