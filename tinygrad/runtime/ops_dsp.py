@@ -122,7 +122,7 @@ conv_pm = PatternMatcher([
 #dsp_pm = conv_pm+PatternMatcher([
 dsp_pm = PatternMatcher([
   # convert load char32 to load char128
-  (UPat(Ops.LOAD, (dtypes.uchar.vec(64), dtypes.uchar.vec(32)), src=(UPat.var("buf").cast(),), name="load"),
+  (UPat(Ops.LOAD, (dtypes.uchar.vec(96), dtypes.uchar.vec(64), dtypes.uchar.vec(32)), src=(UPat.var("buf").cast(),), name="load"),
    lambda load, buf: load.replace(dtype=dtypes.uchar.vec(128),
      src=(buf.cast(buf.dtype.base.vec(128).ptr(size=buf.dtype.size, local=buf.dtype.local)),)+load.src[1:]).gep(tuple(range(0, load.dtype.count)))),
   # GEP on REDUCE
