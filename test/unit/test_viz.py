@@ -103,6 +103,13 @@ class TestViz(unittest.TestCase):
     key = get_metadata(keys, contexts)[1][0]
     self.assertEqual(key, "output_(a+b) n2")
 
+  @unittest.expectedFailure
+  def test_name_in_positional_arg(self):
+    @track_rewrites(named=True)
+    def test(sink): return graph_rewrite(sink, symbolic, None, False, "name")
+    test(UOp.variable("a", 0, 1))
+    self.assertEqual(contexts[0].pop().name, "name")
+
   # NOTE: CONST UOps do not get nodes in the graph
   def test_dont_create_const_nodes(self):
     a = UOp.variable("a", 0, 10)
