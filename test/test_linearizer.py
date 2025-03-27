@@ -62,6 +62,21 @@ def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, d
     assert wmmas == 0, "tensor core is incorrectly triggered"
     assert tcs == 0, "tensor core opt is incorrectly included"
 
+lds_basic_ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
+                  UOp(Ops.STORE, dtypes.void, arg=None, src=(
+                    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(256), arg=0, src=()),
+                      UOp(Ops.VIEW, dtypes.void,
+                          arg=ShapeTracker(views=(View(shape=(16, 16), strides=(16, 1), offset=0, mask=None, contiguous=True),)), src=()),
+                      UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                        UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(256), arg=1, src=()),
+                          UOp(Ops.VIEW, dtypes.void,
+                              arg=ShapeTracker(views=(View(shape=(16, 16), strides=(16, 1), offset=0, mask=None, contiguous=True),)), src=()),)),
+                        UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(256), arg=2, src=()),
+                          UOp(Ops.VIEW, dtypes.void,
+                              arg=ShapeTracker(views=(View(shape=(16, 16), strides=(16, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),))
+
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
     # NOTE: this realize exists because Tensor.numpy calls .contiguous() internally
@@ -1420,6 +1435,37 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_ast(ast, [Tensor.randn(8*32).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.op is Ops.STORE][0]
     assert out.src[-1].op is Ops.VECTORIZE and out.src[-1].dtype.count != 1
+
+  def test_lds_args(self):
+    ast = lds_basic_ast
+    k = Kernel(ast)
+    with self.assertRaises(KernelOptError):
+      k.apply_opt(Opt(OptOps.LDS, 0, ((4,4), None, None))) # invalid buffer
+    with self.assertRaises(KernelOptError):
+      k.apply_opt(Opt(OptOps.LDS, 1, ((4,4), 32, None))) # more threads than elements
+    with self.assertRaises(KernelOptError):
+      k.apply_opt(Opt(OptOps.LDS, 1, ((4,4), 32, (0,1,2)))) # invalid permutation
+    with self.assertRaises(KernelOptError):
+      k.apply_opt(Opt(OptOps.LDS, 1, ((4,4), 32, (0,0)))) # invalid permutation
+
+  @unittest.expectedFailure
+  def test_lds_single_buffer(self):
+    ast = lds_basic_ast
+    k = Kernel(ast)
+    k.apply_opt(Opt(OptOps.LDS, 0, ((4,4), None, None)))
+    k.linearize()
+    count = len([uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL and uop.dtype == dtypes.float.vec(16)])
+    assert count == 1, f"{count=}, {1}"
+
+  @unittest.expectedFailure
+  def test_lds_double_buffer(self):
+    ast = lds_basic_ast
+    k = Kernel(ast)
+    opts = [Opt(OptOps.LDS, 0, ((4,4), None, None)), Opt(OptOps.LDS, 1, ((4,4), None, None))]
+    for opt in opts: k.apply_opt(opt)
+    k.linearize()
+    count = len([uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL and uop.dtype == dtypes.float.ptr(16)])
+    assert count == 2, f"{count=}, {1}"
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):

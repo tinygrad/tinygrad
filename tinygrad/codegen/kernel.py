@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
-from tinygrad.ops import PatternMatcher
+from tinygrad.ops import PatternMatcher, UPat
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
@@ -332,6 +332,12 @@ class Kernel:
     except KernelOptError:
       return False
 
+  def apply_lds(self, buffer, shape, threads, layout) -> bool:
+    """ Attempts to apply lds optimization
+    If local dims size is smaller than the specified threads, localize dims as necessary
+    """
+    return True
+
   def real_axis(self, opt:Opt):
     if opt.axis is None: return -1
     if opt.op is OptOps.UNROLL: return self.first_reduce+opt.axis
@@ -349,6 +355,25 @@ class Kernel:
       check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.opts.tensor_cores), "tensor core opts must have valid tc_select")
       check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
+      self.applied_opts.append(opt)
+      return
+
+    if opt.op is OptOps.LDS:
+      check(opt.axis is not None, "lds should specify buffer")
+      check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 3, "lds must have shape, threads and layout")
+      buffer = opt.axis
+      check(buffer in (1,2), f"axis should be a valid input buffer, {buffer=}")
+      args = cast(tuple, opt.arg)
+      tile_shape = args[0]
+      # check(tile size is <= to buffer size)
+      threads = args[1]
+      tile_layout = args[2]
+      if threads is None: threads = prod(tile_shape) # if threads is not specified, use tile size as amt
+      check(threads <= prod(tile_shape), f"you don't want more threads than elements on the tile; {threads=} > elements {prod(tile_shape)}")
+      if tile_layout is None: tile_layout = tuple(range(len(tile_shape)))
+      check(len(tile_layout) == len(tile_shape), f"perm size should be {len(tile_shape)}; is {len(tile_layout)} instead")
+      # check(tile_layout is a valid permutation)
+      check(self.apply_lds(buffer, tile_shape, threads, tile_layout))
       self.applied_opts.append(opt)
       return
 
@@ -655,6 +680,15 @@ class Kernel:
 
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
+  def lds(self, ast) -> UOp:
+    def transform_load(ctx:tuple[Kernel, set[UOp]], global_load:UOp):
+      if global_load in ctx[1] or global_load.src[0].op is not Ops.DEFINE_GLOBAL: return None
+      ctx[1].add(global_load)
+      print(global_load)
+      return None
+
+    return graph_rewrite(ast, PatternMatcher([(UPat(Ops.LOAD, name="global_load"), transform_load)]), ctx=(self, set()))
+
   # **** this is the lowerer ****
 
   @track_rewrites()
@@ -663,6 +697,7 @@ class Kernel:
     if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
 
     modified_ast = self.get_optimized_ast(name_override)
+    if any(opt.op == OptOps.LDS for opt in self.applied_opts): modified_ast = self.lds(modified_ast)
     if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
 
     if DEBUG >= 3:
