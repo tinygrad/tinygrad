@@ -1,39 +1,30 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, pathlib, fcntl, os
+import ctypes, collections, time, dataclasses, functools, pathlib, fcntl, os, importlib
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
 from tinygrad.runtime.autogen.am import am, mp_11_0
+from tinygrad.runtime.support.amd import AMDRegBase, collect_registers
 from tinygrad.runtime.support.allocator import TLSFAllocator
-from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
+from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
 @dataclasses.dataclass(frozen=True)
-class AMRegister:
-  adev:AMDev; reg_off:int; reg_fields:dict[str, tuple[int, int]] # noqa: E702
+class AMRegister(AMDRegBase):
+  adev:AMDev; hwip:int # noqa: E702
 
-  def _parse_kwargs(self, **kwargs):
-    mask, values = 0xffffffff, 0
-    for k, v in kwargs.items():
-      if k not in self.reg_fields: raise ValueError(f"Unknown register field: {k}. {self.reg_fields.keys()}")
-      m, s = self.reg_fields[k]
-      if v & (m>>s) != v: raise ValueError(f"Value {v} for {k} is out of range {m=} {s=}")
-      mask &= ~m
-      values |= v << s
-    return mask, values
+  @property
+  def addr(self): return self.adev.regs_offset[self.hwip][0][self.segment] + self.offset
 
-  def build(self, **kwargs) -> int: return self._parse_kwargs(**kwargs)[1]
+  def read(self): return self.adev.rreg(self.addr)
+  def read_bitfields(self) -> dict[str, int]: return self.decode(self.read())
 
-  def update(self, **kwargs): self.write(value=self.read(), **kwargs)
+  def write(self, _am_val:int=0, **kwargs): self.adev.wreg(self.addr, _am_val | self.encode(**kwargs))
 
-  def write(self, value=0, **kwargs):
-    mask, values = self._parse_kwargs(**kwargs)
-    self.adev.wreg(self.reg_off, (value & mask) | values)
-
-  def read(self, **kwargs): return self.adev.rreg(self.reg_off) & self._parse_kwargs(**kwargs)[0]
+  def update(self, **kwargs): self.write(self.encode(**{**self.read_bitfields(), **kwargs}))
 
 class AMFirmware:
   def __init__(self, adev):
-    def fmt_ver(hwip): return f"{adev.ip_versions[hwip]//10000}_{(adev.ip_versions[hwip]//100)%100}_{adev.ip_versions[hwip]%100}"
+    def fmt_ver(hwip): return '_'.join(map(str, adev.ip_ver[hwip]))
 
     # Load SOS firmware
     self.sos_fw = {}
@@ -108,12 +99,7 @@ class AMPageTableEntry:
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
-
-    f = (am.AMDGPU_PTE_VALID if valid else 0) | ((am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE) if not table else 0) \
-      | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE if not table and self.lv != am.AMDGPU_VM_PTB else 0) \
-      | ((am.AMDGPU_PTE_SYSTEM) if system else 0) | ((am.AMDGPU_PTE_SNOOPED) if snooped else 0) \
-      | (am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC) if uncached else 0)
-    self.entries[entry_id] = (paddr & 0x0000FFFFFFFFF000) | f
+    self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, system, snooped, valid, extra=(paddr & 0x0000FFFFFFFFF000))
 
 class AMPageTableTraverseContext:
   def __init__(self, adev, pt, vaddr, create_pts=False, free_pts=False):
@@ -130,7 +116,7 @@ class AMPageTableTraverseContext:
       pt.set_entry(pte_idx, self.adev.mm.palloc(0x1000, zero=True), table=True, valid=True)
       entry = pt.entries[pte_idx]
 
-    assert entry & am.AMDGPU_PDE_PTE == 0, f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
+    assert not self.adev.gmc.is_pte_huge_page(entry), f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
     child_page_table = AMPageTableEntry(self.adev, entry & 0x0000FFFFFFFFF000, lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
@@ -156,7 +142,7 @@ class AMPageTableTraverseContext:
       if self.create_pts:
         while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while pt.lv!=am.AMDGPU_VM_PTB and (pt.entries[pte_idx] & am.AMDGPU_PDE_PTE != am.AMDGPU_PDE_PTE): pt, pte_idx, pte_covers = self.level_down()
+        while pt.lv!=am.AMDGPU_VM_PTB and not self.adev.gmc.is_pte_huge_page(pt.entries[pte_idx]): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, 512 - pte_idx)
       assert entries > 0, "Invalid entries"
@@ -175,6 +161,15 @@ class AMMemoryManager:
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
     self.root_page_table = AMPageTableEntry(self.adev, self.palloc(0x1000, zero=not self.adev.smi_dev, boot=True), lv=am.AMDGPU_VM_PDB1)
 
+  def _frag_size(self, va, sz, must_cover=True):
+    """
+    Calculate the tlb fragment size for a given virtual address and size.
+    If must_cover is True, the fragment size must cover the size, otherwise the biggest fragment size that fits the size is returned.
+    Fragment 0 is 4KB, 1 is 8KB and so on.
+    """
+    va_pwr2_div, sz_pwr2_div, sz_pwr2_max = va & -(va) if va > 0 else (1 << 63), sz & -(sz), (1 << (sz.bit_length() - 1))
+    return (min(va_pwr2_div, sz_pwr2_div) if must_cover else min(va_pwr2_div, sz_pwr2_max)).bit_length() - 1 - 12
+
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False) -> AMMapping:
     if AM_DEBUG >= 2: print(f"am {self.adev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
 
@@ -185,8 +180,8 @@ class AMMemoryManager:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
           assert pt.entries[pte_idx + pte_off] & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
-          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers,
-            uncached=uncached, system=system, snooped=snooped, frag=0 if pte_covers == 0x1000 else 0x9, valid=True)
+          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
+                       frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
     # Invalidate TLB after mappings.
     self.adev.gmc.flush_tlb(ip='GC', vmid=0)
@@ -211,13 +206,24 @@ class AMMemoryManager:
 
     if contigous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
+      # Traverse the PT to find the largest contiguous sizes we need to allocate. Try to allocate the longest segment to reduce TLB pressure.
       paddrs = []
-      try:
-        ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
-        for _, _, _, seg_cnt, seg_size in ctx.next(size): paddrs += [(self.palloc(seg_size, zero=False), seg_size) for _ in range(seg_cnt)]
-      except MemoryError:
-        for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-        raise
+      ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
+      for off, _, _, seg_cnt, seg_size in ctx.next(size):
+        rem_len = seg_cnt * seg_size
+        while rem_len > 0:
+          # Try to allocate as long segment (power of 2) as possible
+          cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, rem_len) + 12), None
+          while cont_seg_sz >= 0x1000:
+            try: paddr = self.palloc(cont_seg_sz, zero=True)
+            except MemoryError: cont_seg_sz //= 2
+            else: break
+
+          if paddr is not None: paddrs += [(paddr, cont_seg_sz)]
+          else:
+            for paddr, _ in paddrs: self.pa_allocator.free(paddr)
+            raise MemoryError(f"Failed to allocate contigous a page. (allocation size={size:#x})")
+          rem_len, off = rem_len - cont_seg_sz, off + cont_seg_sz
 
     return self.map_range(va, size, paddrs, uncached=uncached)
 
@@ -268,7 +274,7 @@ class AMDev:
     self.fw = AMFirmware(self)
 
     # Initialize IP blocks
-    self.soc21:AM_SOC21 = AM_SOC21(self)
+    self.soc:AM_SOC = AM_SOC(self)
     self.gmc:AM_GMC = AM_GMC(self)
     self.ih:AM_IH = AM_IH(self)
     self.psp:AM_PSP = AM_PSP(self)
@@ -280,10 +286,14 @@ class AMDev:
       if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
       self.partial_boot = False
 
+    # Init sw for all IP blocks
+    for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init_sw()
+
+    # Init hw for IP blocks where it is needed
     if not self.partial_boot:
       if self.psp.is_sos_alive() and self.smu.is_smu_alive(): self.smu.mode1_reset()
-      for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]:
-        ip.init()
+      for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu]:
+        ip.init_hw()
         if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
     # Booting done
@@ -291,24 +301,22 @@ class AMDev:
 
     # Re-initialize main blocks
     for ip in [self.gfx, self.sdma]:
-      ip.init()
+      ip.init_hw()
       if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
     self.smu.set_clocks(level=-1) # last level, max perf.
-    self.gfx.set_clockgating_state()
+    for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(am_version)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
-    for ip in [self.sdma, self.gfx]: ip.fini()
+    for ip in [self.sdma, self.gfx]: ip.fini_hw()
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
 
   def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
-
-  def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__[f"{ip}_HWIP"]][inst][seg]
 
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
@@ -339,7 +347,7 @@ class AMDev:
     for _ in range(timeout):
       if ((rval:=reg.read()) & mask) == value: return rval
       time.sleep(0.001)
-    raise RuntimeError(f'wait_reg timeout reg=0x{reg.reg_off:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
+    raise RuntimeError(f'wait_reg timeout reg=0x{reg.addr:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
 
   def _run_discovery(self):
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.
@@ -354,7 +362,7 @@ class AMDev:
     # Mapping of HW IP to Discovery HW IP
     hw_id_map = {am.__dict__[x]: int(y) for x,y in am.hw_id_map}
     self.regs_offset:dict[int, dict[int, list]] = collections.defaultdict(dict)
-    self.ip_versions:dict[int, int] = {}
+    self.ip_ver:dict[int, tuple[int, int, int]] = {}
 
     for num_die in range(ihdr.num_dies):
       dhdr = am.struct_die_header.from_address(ctypes.addressof(bhdr) + ihdr.die_info[num_die].die_offset)
@@ -366,31 +374,23 @@ class AMDev:
         for hw_ip in range(1, am.MAX_HWIP):
           if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id:
             self.regs_offset[hw_ip][ip.instance_number] = list(ba)
-            self.ip_versions[hw_ip] = int(f"{ip.major:02d}{ip.minor:02d}{ip.revision:02d}")
+            self.ip_ver[hw_ip] = (ip.major, ip.minor, ip.revision)
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
 
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(bhdr) + bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
 
-  def _ip_module(self, prefix:str, hwip):
-    version = [self.ip_versions[hwip]//10000, (self.ip_versions[hwip]//100)%100, self.ip_versions[hwip]%100]
-    for ver in [version, version[:2]+[0], version[:1]+[0, 0]]:
-      try: return __import__(f"tinygrad.runtime.autogen.am.{prefix}_{ver[0]}_{ver[1]}_{ver[2]}", fromlist=[f"{prefix}_{ver[0]}_{ver[1]}_{ver[2]}"])
+  def _ip_module(self, prefix:str, hwip, prever_prefix:str=""):
+    for ver in [self.ip_ver[hwip], self.ip_ver[hwip][:2]+(0,), self.ip_ver[hwip][:1]+(0, 0)]:
+      try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{prefix}_{prever_prefix}{ver[0]}_{ver[1]}_{ver[2]}")
       except ImportError: pass
-    raise ImportError(f"am {self.devfmt}: failed to load {prefix} module with version {version}")
+    raise ImportError(f"am {self.devfmt}: failed to load {prefix} module with version {self.ip_ver[hwip]}")
 
   def _build_regs(self):
     mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("NBIO", self._ip_module("nbio", am.NBIO_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
-      ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP))]
-    for base, module in mods:
-      rpref = "mm" if base == "MP1" else "reg" # MP1 regs starts with mm
-      reg_names: set[str] = set(k[len(rpref):] for k in module.__dict__.keys() if k.startswith(rpref) and not k.endswith("_BASE_IDX"))
-      reg_fields: dict[str, dict[str, tuple]] = collections.defaultdict(dict)
-      for k, val in module.__dict__.items():
-        if k.endswith("_MASK") and ((rname:=k.split("__")[0]) in reg_names):
-          reg_fields[rname][k[2+len(rname):-5].lower()] = (val, module.__dict__.get(f"{k[:-5]}__SHIFT", val.bit_length() - 1))
+      ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP)),
+      ("HDP", self._ip_module("hdp", am.HDP_HWIP))]
 
-      for k, regval in module.__dict__.items():
-        if k.startswith(rpref) and not k.endswith("_BASE_IDX") and (base_idx:=getattr(module, f"{k}_BASE_IDX", None)) is not None:
-          setattr(self, k, AMRegister(self, self.ip_base(base, 0, base_idx) + regval, reg_fields.get(k[len(rpref):], {})))
+    for ip, module in mods:
+      self.__dict__.update(collect_registers(module, cls=functools.partial(AMRegister, adev=self, hwip=getattr(am, f"{ip}_HWIP"))))

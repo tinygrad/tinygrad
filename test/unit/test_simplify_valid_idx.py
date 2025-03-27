@@ -46,7 +46,7 @@ class TestHelpers(unittest.TestCase):
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid):
     load = full_graph_rewrite(load.sink()).src[0]
-    idx, valid = load.src[0].src[1], load.src[2]
+    idx, valid = load.src[0].src[1], load.src[0].src[2]
     self.assertEqual(idx.render(simplify=False), sidx)
     self.assertEqual(valid.render(simplify=False), svalid)
 
@@ -133,7 +133,7 @@ class TestImageSimplification(unittest.TestCase):
     idx0, idx1 = idx.src[0], idx.src[1]
     self.assertEqual(idx0.render(simplify=False), sidx0)
     self.assertEqual(idx1.render(simplify=False), sidx1)
-    if svalid is not None: self.assertEqual(load.src[2].render(simplify=False), svalid)
+    if svalid is not None: self.assertEqual(load.src[0].src[2].render(simplify=False), svalid)
 
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
@@ -260,7 +260,7 @@ class TestImageSimplification(unittest.TestCase):
     self.check(load,
                "((((idx2*2)+ridx0)<11)&((((idx1*8)+ridx1)<3)!=True))",
                "(((idx0+((idx1*512)+(ridx1*64)))+832)%1024)",
-               "((((idx2*2)+ridx0)+(((idx1+((ridx1+5)//8))+1)//2))+-4)")
+               "(((((idx1+((ridx1+5)//8))+1)//2)+((idx2*2)+ridx0))+-4)")
 
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)

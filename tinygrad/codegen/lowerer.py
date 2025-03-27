@@ -2,11 +2,12 @@
 import functools, itertools, operator, math
 from dataclasses import dataclass
 from typing import cast
-from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop
+from tinygrad.dtype import dtypes, PtrDType, least_upper_dtype
+from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop, GroupOp
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
+from tinygrad.helpers import all_int, prod, partition, flatten, unwrap, QUANTIZE
 from tinygrad.codegen.expander import expand_rewrite
+from tinygrad.codegen.symbolic import symbolic
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> list[list[int]]|None:
@@ -115,14 +116,17 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
   alu_op: Ops = x.arg[0]
   ret = x.src[0]
-  if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
-    ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
-    ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [ret.gep(i) for i in range(ret.dtype.count)])
-  if not len(reduce_range): return ret
-  # create ACC and assign
+  # create acc
   acc = UOp(Ops.DEFINE_ACC, x.dtype, (x.const_like(identity_element(alu_op, x.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
   ctx.acc_num += 1
-  return acc.assign(acc.alu(alu_op, ret))
+  if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
+    ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
+    ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [acc]+[ret.gep(i) for i in range(ret.dtype.count)])
+  else:
+    ret = acc.alu(alu_op, ret)
+  if not len(reduce_range): return ret
+  # create ACC and assign
+  return acc.assign(ret)
 
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
@@ -153,9 +157,65 @@ pm_lowerer = PatternMatcher([
   # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),
+  (UPat(Ops.IGNORE, name="x"), lambda x: x.src[0]),
+])
+
+# **** this is the "quantization preprocessor", it makes ONNX quantized models, and probably also others, actually use ints ****
+
+def view_to_mask(x:UOp):
+  from tinygrad.shape.shapetracker import ShapeTracker, View
+  st = cast(ShapeTracker, x.st)
+  if len(st.views) > 1: return None
+  if st.views[-1].mask is None: return None
+  return ShapeTracker((View(st.shape, (0,)*len(st.shape), 0, st.views[-1].mask, False),))
+
+FP = (1 << 16)
+pm_quant = symbolic+PatternMatcher([
+  # cast after add/mul
+  (UPat.var("x").cast(dtypes.float32) + UPat.var("y").cast(dtypes.float32),
+   lambda x,y: (x.cast(least_upper_dtype(x.dtype, y.dtype))+y.cast(least_upper_dtype(x.dtype, y.dtype))).cast(dtypes.float32)),
+  (UPat.var("x").cast(dtypes.float32) * UPat.var("y").cast(dtypes.float32),
+   lambda x,y: (x.cast(least_upper_dtype(x.dtype, y.dtype))*y.cast(least_upper_dtype(x.dtype, y.dtype))).cast(dtypes.float32)),
+  # MUL after reduce
+  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("x") * UPat.cvar("c"),), name="r"), lambda x,c,r: r.replace(src=(x,))*c),
+  # CAST after reduce (doesn't work if it's a size change)
+  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.CAST, src=(UPat.var("x"),)),), name="r"),
+    lambda x,r: r.replace(dtype=x.dtype, src=(x,)).cast(r.dtype) if dtypes.is_float(r.dtype) else None),
+  # x*c1 + y*c2 -> (x+y)*c1 (if c1 and c2 are close floats)
+  (UPat.var("x")*UPat.cvar("c1", dtype=dtypes.floats) + UPat.var("y")*UPat.cvar("c2", dtype=dtypes.floats),
+   lambda x,y,c1,c2: (x+y)*c1 if abs(c1.arg-c2.arg) < 1e-9 else None),
+  # mul 0 * c1 is 0
+  (UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v"),)).where(UPat.cvar("c1"), UPat(Ops.CONST, arg=0)) *
+   UPat(Ops.LOAD, src=(UPat(), UPat(Ops.VIEW, name="v"))).cast(dtypes.int).cast(dtypes.float).named("ld"), lambda ld,v,c1: ld*c1),
+  # mul (with plus) 0 * c1 is 0
+  (UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v"),)).where(UPat.cvar("c1"), UPat(Ops.CONST, arg=0)) *
+   (UPat(Ops.LOAD, src=(UPat(), UPat(Ops.VIEW, name="v"))).cast(dtypes.int) + \
+    UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v"),)).where(UPat.cvar(), UPat(Ops.CONST, arg=0))).cast(dtypes.float).named("ld"),
+      lambda ld,v,c1: ld*c1),
+  # fixed point mult, replace (x.float()*c1+c2).int() with an int expression
+  ((UPat.var("x").cast(dtypes.float)*UPat.cvar("c1")+UPat.cvar("c2")).cast(dtypes.int),
+   lambda x,c1,c2: (x * (c1 * FP).cast(dtypes.int) + (c2 * FP).cast(dtypes.int)) // FP),
+  # where move
+  (UPat.var("valid").where(UPat.var("yes"), UPat(Ops.CONST, arg=0))*UPat.var("mul"), lambda valid, yes, mul:
+    (yes*mul*valid.where(UOp.const(mul.dtype, 1), UOp.const(mul.dtype, 0))) if yes.op is not Ops.CONST or yes.arg != 1 else None),
+  ((UPat.var("x")*UPat.cvar("c"))*(UPat.var().where(UPat(Ops.CONST, arg=1), UPat(Ops.CONST, arg=0)).named("v")), lambda x,c,v: (x*v)*c),
+  (UPat.var("x").cast().named('c') * UPat.var('valid').where(UPat(Ops.CONST, arg=1), UPat(Ops.CONST, arg=0)), lambda x,c,valid:
+    (x*valid.where(UOp.const(x.dtype, 1), UOp.const(x.dtype, 0))).cast(c.dtype)),
+  ((UPat.var('x') * UPat.var('v1').where(UPat(Ops.CONST, arg=1), UPat(Ops.CONST, arg=0)) *
+    UPat.var('v2').where(UPat(Ops.CONST, arg=1), UPat(Ops.CONST, arg=0))).named("mul"), lambda x, mul, v1, v2:
+    x * (v1&v2).where(UOp.const(mul.dtype, 1), UOp.const(mul.dtype, 0))),
+  # don't care
+  (UPat(Ops.STORE, name="x"), lambda x:
+    x.replace(src=(x.src[0], UOp(Ops.IGNORE, src=(x.src[1],), arg=mm), UOp(Ops.IGNORE, x.src[2].dtype, src=(x.src[2],), arg=mm),)) \
+      if x.src[1].op is not Ops.IGNORE and (mm:=view_to_mask(x.src[1])) is not None else None),
+  (UPat(Ops.IGNORE, src=(UPat((*GroupOp.ALU, Ops.CAST), name="alu"),), name="ig"),
+   lambda ig,alu: alu.replace(src=tuple(UOp(Ops.IGNORE, x.dtype, (x,), ig.arg) for x in alu.src))),
+  (UPat(Ops.IGNORE, src=(UPat.cvar("c"),), name="ig"), lambda ig, c: c),
+  (UPat(Ops.IGNORE, src=(UPat(Ops.VALID, name="v"),), name="ig"), lambda ig, v: UOp.const(dtypes.bool, True) if v.src[0].arg == ig.arg else None),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
+  if QUANTIZE and opts.device in {"CPU", "DSP"}: ast = graph_rewrite(ast, pm_quant, name="quantize")
   sink = graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
   # expand_rewrite turns this into a vectorized program
   return expand_rewrite(sink)

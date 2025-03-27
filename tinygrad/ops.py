@@ -32,7 +32,7 @@ class SimpleMathTrait:
   def mul(self, x, reverse=False): return self._binop(Ops.MUL, x, reverse)
   def bitwise_and(self, x, reverse=False): return self._binop(Ops.AND, x, reverse)
   def bitwise_or(self, x, reverse=False): return self._binop(Ops.OR, x, reverse)
-  def xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse)
+  def bitwise_xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse)
   def idiv(self, x, reverse=False): return self._binop(Ops.IDIV, x, reverse)
   def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
   def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
@@ -48,7 +48,7 @@ class SimpleMathTrait:
   def __mod__(self, x): return self.mod(x)
   def __and__(self, x): return self.bitwise_and(x)
   def __or__(self, x): return self.bitwise_or(x)
-  def __xor__(self, x): return self.xor(x)
+  def __xor__(self, x): return self.bitwise_xor(x)
 
   def __radd__(self, x): return self.add(x, True)
   def __rsub__(self, x): return self.sub(x, True)
@@ -57,7 +57,7 @@ class SimpleMathTrait:
   def __rfloordiv__(self, x): return self.idiv(x, True)
   def __rand__(self, x): return self.bitwise_and(x, True)
   def __ror__(self, x): return self.bitwise_or(x, True)
-  def __rxor__(self, x): return self.xor(x, True)
+  def __rxor__(self, x): return self.bitwise_xor(x, True)
   def __rmod__(self, x): return self.mod(x, True)
 
   def __lt__(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
@@ -114,10 +114,10 @@ class Ops(FastEnum):
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
 
   # reduce
-  REDUCE_AXIS = auto()
+  REDUCE_AXIS = auto(); REDUCE = auto() # noqa: E702
 
   # helper ops
-  GEP = auto(); VECTORIZE = auto(); CAT = auto() # noqa: E702
+  GEP = auto(); VECTORIZE = auto(); CAT = auto(); PTRCAT = auto() # noqa: E702
 
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
@@ -132,8 +132,8 @@ class Ops(FastEnum):
   WMMA = auto()
 
   # BinaryOps
-  ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
+  MUL = auto(); SHL = auto(); SHR = auto(); IDIV = auto(); ADD = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto() # noqa: E702
+  XOR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
 
   # TernaryOps
   WHERE = auto(); MULACC = auto() # noqa: E702
@@ -151,7 +151,10 @@ class Ops(FastEnum):
   # device
   DEVICE = auto()
   MULTI = auto()
-  CUSTOM = auto()
+
+  # CUSTOMI is inline
+  CUSTOM = auto(); CUSTOMI = auto() # noqa: E702
+  IGNORE = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
@@ -278,6 +281,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return nodes
     return _toposort(self, cache=set())
 
+  # returns map of UOps to their children in the graph rooted by self
+  def get_children_map(self) -> dict[UOp, dict[UOp, None]]:
+    ret: dict[UOp, dict[UOp, None]] = {}
+    for u in self.toposort:
+      for s in u.src: ret.setdefault(s, {})[u] = None
+    return ret
+
   @functools.cached_property
   def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]: return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
 
@@ -289,8 +299,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.MULTI:
       return ShapeTracker.from_shape(
         tuple(sum(y.shape[a] for y in self.real_lbs) if a == self.axis else s for a,s in enumerate(self.real_lbs[0].shape)))
-    if self.op is Ops.BUFFER: return ShapeTracker.from_shape((self.size,))
-    if self.op is Ops.KERNEL: return ShapeTracker.from_shape(self.arg.ast.shape)
+    if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
+    if self.op is Ops.KERNEL: return ShapeTracker.from_shape((self.arg.ast.size,))
     # these ops define a ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
@@ -298,7 +308,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op in GroupOp.Buffer: return vsrc[0] if len(vsrc:=[x.st for x in self.src if x.op is Ops.VIEW]) != 0 else None
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
-    if self.op in {Ops.BITCAST, Ops.BUFFER_VIEW}:
+    if self.op is Ops.BITCAST:
       shape = src_sts[0].shape
       if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
     # only reduce ops are allowed to change shape, everything else derives shape from sources
@@ -316,7 +326,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
-  def size(self) -> int: return self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
+  def size(self) -> int: return self.arg[0] if self.op is Ops.BUFFER_VIEW else self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # *** uop evaluation ***
 
@@ -364,6 +374,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
   def cast(self, dtype:DType): return UOp(Ops.CAST, dtype, (self,))
+  def cast_vec(self, dtype:DType): return UOp(Ops.CAST, dtype.vec(self.dtype.count), (self,))
   def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:Union[tuple[int, ...], int]):
     if isinstance(i, int):
@@ -511,6 +522,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
+    if self.op is Ops.BUFFER: return self
     assert self.op is Ops.ASSIGN, f"must be ASSIGN {self.op}"
     return self.src[0].base
   @property
@@ -523,9 +535,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.device import Buffer
     assert isinstance(self.device, str), f"buffer not supported on multi {self.device}"
     buffers[self] = ret = Buffer(self.device, self.size, self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base)
+    ret.ref(1)
     return ret
   @property
-  def realized(self) -> Optional[Buffer]: return self.buffer if self.op is Ops.BUFFER else None
+  def realized(self) -> Optional[Buffer]: return self.buffer if self.op is Ops.BUFFER and self.buffer.is_allocated() else None
   @property
   def is_realized(self) -> bool:
     return all(x.base.realized is not None for x in self.base.real_lbs) if self.base.op is Ops.MULTI else self.base.realized is not None
@@ -591,6 +604,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):
       (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
       if self.op is Ops.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
+      if self.op is Ops.SUB: return s0_vmin-s1_vmax, s0_vmax-s1_vmin
+      if self.op is Ops.AND and s1_vmin == s1_vmax and s0_vmin >= 0 and s1_vmin >= 0: return min(0, s0_vmin), min(s0_vmax, s1_vmax)
       if self.op is Ops.MUL: return min(vals:=(s0_vmin*s1_vmin, s0_vmin*s1_vmax, s0_vmax*s1_vmin, s0_vmax*s1_vmax)), max(vals)
       # SHL/SHR on consts only
       if self.op is Ops.SHL and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] << t[2], t[1] << t[2]
@@ -621,6 +636,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else self.arg[1].vmax
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
+    if self.op is Ops.CAST: return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
   @functools.cached_property
@@ -685,7 +701,7 @@ def get_location() -> tuple[str, int]:
   # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
   while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "rewriter.py", "schedule.py", "multi.py",
                                                                                         "symbolic.py", "expander.py", "lowerer.py", "cstyle.py",
-                                                                                        "linearize.py"}:
+                                                                                        "linearize.py", "devectorizer.py"}:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
@@ -697,7 +713,7 @@ class UPat(MathTrait):
   def __init__(self, op:Optional[Union[Ops, tuple[Ops, ...], set[Ops]]]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None,
                src:Optional[Union[tuple[UPat, ...], list[UPat], UPat]]=None, arg:Any=None,
                name:Optional[str]=None, allow_any_len:bool=False, location=None, custom_early_reject:Optional[set[Ops]]=None):
-    assert op is None or isinstance(op, Ops) or isinstance(op, tuple) or isinstance(op, set), "op must be Ops or tuple of Ops"
+    assert op is None or isinstance(op, (Ops, tuple, set)), "op must be Ops or tuple of Ops"
     self.op: Optional[tuple[Ops, ...]] = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
     self.dtype: Optional[tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
@@ -723,6 +739,7 @@ class UPat(MathTrait):
 
   @staticmethod
   def any(*src): return UPatAny(src=src)
+  def or_casted(self, name:str|None=None): return UPat.any(self if name is None else self.named(name), UPat(Ops.CAST, name=name, src=(self,)))
 
   @staticmethod
   @functools.lru_cache(None)
@@ -741,7 +758,7 @@ class UPat(MathTrait):
   def gep(self, i:int): return UPat(Ops.GEP, None, (self,), (i,))
   def load(self, *src:UPat, **kwargs): return UPat(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
-  def assign(self, x:UPat): return UPat(Ops.ASSIGN, self.dtype, (self,x))
+  def assign(self, x:UPat, **kwargs): return UPat(Ops.ASSIGN, self.dtype, (self,x), **kwargs)
 
   def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
   def alu(self, op:Ops, *src:UPat):
@@ -823,8 +840,8 @@ class TrackedGraphRewrite:
   loc: tuple[str, int]                                                                       # location that called graph_rewrite
   sink: UOp                                                                                  # the sink input to graph_rewrite
   bottom_up: bool
-  matches: list[tuple[UOp, UOp, UPat]] = field(default_factory=list)                         # before+after of all the matches
-  name: Optional[str] = None
+  matches: list[tuple[UOp, UOp, UPat]]                                                       # before+after of all the matches
+  name: str|None
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, int] = {}
@@ -840,6 +857,15 @@ def track_rewrites(named=False, name_fxn:Callable|None=None):
       return ret
     return __wrapper
   return _decorator
+
+def track_matches(func):
+  def _track_func(*args, **kwargs):
+    if TRACK_MATCH_STATS >= 2 and tracked_ctxs:
+      loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
+      tracked_ctxs[-1].append(TrackedGraphRewrite(loc, args[0], kwargs.get("bottom_up", False), [], kwargs.get("name", None)))
+    ret = func(*args, **kwargs)
+    return ret
+  return _track_func
 
 class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
@@ -891,10 +917,23 @@ def launch_viz(env_str:str, data:str):
 # *** simple graph rewrite engine ***
 
 class RewriteContext:
-  def __init__(self, pm, ctx=None):
+  def __init__(self, pm, ctx=None, children=None):
     self.pm: PatternMatcher = pm
-    self.ctx = ctx
+    self.ctx = self if children is not None else ctx
     self.replace: dict[UOp, UOp] = {}
+    self.children = children
+  # TODO: is this function always right?
+  def update_children(self):
+    # add any new children from UOps that were replaced
+    for u in self.replace.values():
+      for s in u.src: self.children.setdefault(s, {})[u] = None
+    # find any children that were replaced and replace them
+    for k,v in self.children.items():
+      new_child: dict[UOp, None] = {}
+      for tv in v:
+        while (nv:=self.replace.get(tv, None)) is not None and nv is not tv: tv = nv
+        new_child[tv] = None
+      self.children[k] = new_child
   def top_down_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_src = tuple([self.top_down_rewrite(x) for x in n.src])
@@ -909,15 +948,14 @@ class RewriteContext:
     self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
     return ret
 
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> UOp:
-  if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up, name=name))
-  return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).top_down_rewrite(sink)
+@track_matches
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> UOp:
+  rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
+  return rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.top_down_rewrite(sink)
 
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> dict[UOp, UOp]:
-  if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up, name=name))
-  rewrite_ctx = RewriteContext(pm, ctx)
+@track_matches
+def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> dict[UOp, UOp]:
+  rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
   return {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
 
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
@@ -949,22 +987,28 @@ ConstLike = Union[ConstType, Variable, tuple[ConstType, ...]]
 # *** UOp merge views and swizzling ***
 
 merge_views = PatternMatcher([
-  # VIEW(VIEW) merges to a single VIEW
-  (UPat(Ops.VIEW, name="vm1", src=(UPat(Ops.VIEW, name="vm2"),)), lambda vm1,vm2: vm2.replace(arg=vm2.st+vm1.st)),
-  # remove VIEW if it's contiguous and same as the base shape
-  (UPat(Ops.VIEW, name="vm", src=(UPat(GroupOp.All-{Ops.DEVICE}, name="x"),)), lambda vm,x: x if vm.st.contiguous and x.shape == vm.shape else None),
+  # merge adjacent views
+  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="v2"),), name="v1"), lambda v1,v2: v2.replace(arg=v2.arg+v1.arg)),
   # merge unmasked const views
-  (UPat(Ops.VIEW, name="view", src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="const", src=(UPat(Ops.VIEW, name="st"),) ),)),
-   lambda st,const,view: const.replace(src=(st.replace(arg=st.st+view.st),)) if all(v.mask is None for v in (st.st+view.st).views) else None),
+  (UPat(Ops.VIEW, name="v", src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="const"),)),
+   lambda v,const: const.replace(src=(const.src[0].replace(arg=const.st+v.st),)) if all(x.mask is None for x in (const.st+v.st).views) else None),
+  # merge view on load/store/valid
+  (UPat(Ops.VIEW, name="v", src=(UPat((Ops.LOAD, Ops.STORE, Ops.VALID), name="b"),)),
+   lambda b,v: b.replace(src=tuple((s.st+v.st).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
+  # remove view if it's a contiguous and the shapes match
+  (UPat(Ops.VIEW, name="v", src=(UPat(GroupOp.All-{Ops.DEVICE}, name="x"),)), lambda v,x: x if v.arg.contiguous and x.shape == v.shape else None),
+  # remove mask if there's a zero in the masked dim
+  (UPat(Ops.VIEW, name="v", src=(UPat(),)),
+   lambda v: v.const_like(0) if (mask:=v.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
+  # movement ops apply a new view on the base
+  (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
 ])
 
-# push VIEW to parents
 view_left = merge_views+PatternMatcher([
-  # VIEW(CONST) becomes VALID
-  (UPat(Ops.VIEW, name="vm", src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),)), lambda vm,x: x.valid(vm.st)),
-  # VIEW before elementwise/buffer ops
-  (UPat(Ops.VIEW, name="vm", src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN}, name="e"),)),
-   lambda e,vm: e.replace(src=tuple(s if s.st is None else s.view(vm.st) if s is s.base else s.base.view(s.st+vm.st) for s in e.src))),
-  (UPat(Ops.VIEW, name="vm", src=(UPat(GroupOp.Buffer, name="b"),)),
-   lambda b,vm: b.replace(src=tuple((s.st+vm.st).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
+  # do not push masked view before unsafe pad ops
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="e"),), name="view"),
+   lambda e,view: e.contiguous().view(view.st) if any(v.mask is not None for v in view.st.views) else None),
+  # view before elementwise ops
+  (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST}, name="e"),), name="view"),
+   lambda e,view: e.replace(src=tuple(s.view(s.st+view.st) if s.op is Ops.VIEW else s.view(view.st) for s in e.src))),
 ])

@@ -1,16 +1,17 @@
 from __future__ import annotations
-from typing import Any, cast
-import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select
+from typing import Any, cast, ClassVar
+import os, ctypes, ctypes.util, struct, hashlib, functools, mmap, errno, array, contextlib, sys, select
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
 from tinygrad.ops import sint
-from tinygrad.device import BufferSpec, CPUProgram
+from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
-from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, pci, vfio
-from tinygrad.runtime.autogen.am import am
-from tinygrad.runtime.support.compiler_hip import AMDCompiler
+from tinygrad.renderer.llvmir import AMDLLVMRenderer
+from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, pci, vfio, sqtt
+from tinygrad.runtime.autogen.am import am, gc_11_0_0
+from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
@@ -18,19 +19,24 @@ if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint
 regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0106, 0x0107
 
 EVENT_INDEX_PARTIAL_FLUSH = 4 # based on a comment in nvd.h
+WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
+WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
 COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 
-def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
-def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
+def gfxreg(reg): return reg + amd_gpu.GC_BASE__INST0_SEG0 - amd_gpu.PACKET3_SET_SH_REG_START
+def ucfgreg(reg, pkt3_set:bool=True): return reg + amd_gpu.GC_BASE__INST0_SEG1 - (amd_gpu.PACKET3_SET_UCONFIG_REG_START if pkt3_set else 0)
+def nbioreg(reg): return reg + amd_gpu.NBIO_BASE__INST0_SEG2
+
+# This can potentially be shared with AMRegister._parse_kwargs. NOTE: This is hardcoded to gfx11, bitfields might be different in other gfxvers.
+# Currently not a problem because this is only used by sqtt and sqtt is only supported on 7900xtx
+def encode_bitfields(regname: str, **kwargs) -> int:
+  return functools.reduce(lambda x,y: x|y, [v << getattr(gc_11_0_0, f'{regname}__{k.upper()}__SHIFT') for k,v in kwargs.items()], 0)
 
 class AMDSignal(HCQSignal):
   def __init__(self, base_addr:int|None=None, **kwargs):
-    super().__init__(AMDDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100)
-
-  def __del__(self):
-    if isinstance(self.base_addr, int): AMDDevice.signals_pool.append(self.base_addr)
+    super().__init__(base_addr, **kwargs, timestamp_divider=100, dev_t=AMDDevice)
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
@@ -42,6 +48,11 @@ class AMDComputeQueue(HWQueue):
       self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True, uncached=True))
 
   def pkt3(self, cmd, *vals): self.q(amd_gpu.PACKET3(cmd, len(vals) - 1), *vals)
+
+  def sqtt_userdata(self, data, *extra_dwords):
+    data_ints = [x[0] for x in struct.iter_unpack('<I', bytes(data))] + list(extra_dwords)
+    for i in range(0, len(data_ints), 2):
+      self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_USERDATA_2), *data_ints[i:i+2])
 
   def wait_reg_mem(self, value, mask=0xffffffff, mem=None, reg_req=None, reg_done=None):
     wrm_info_dw = amd_gpu.WAIT_REG_MEM_MEM_SPACE(int(mem is not None)) | amd_gpu.WAIT_REG_MEM_OPERATION(int(mem is None)) \
@@ -75,6 +86,83 @@ class AMDComputeQueue(HWQueue):
     self.acquire_mem()
     return self
 
+  def spi_config(self, tracing:bool):
+    spi_config_cntl = encode_bitfields('SPI_CONFIG_CNTL', ps_pkr_priority_cntl=3, exp_priority_order=3, gpr_write_priority=0x2c688,
+                                       enable_sqg_bop_events=int(tracing), enable_sqg_top_events=int(tracing))
+    self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSPI_CONFIG_CNTL), spi_config_cntl)
+
+  def sqtt_config(self, tracing:bool):
+    sq_thread_trace_ctrl = encode_bitfields('SQ_THREAD_TRACE_CTRL', draw_event_en=1, spi_stall_en=1, sq_stall_en=1, reg_at_hwm=2, hiwater=1,
+                                            rt_freq=amd_gpu.SQ_TT_RT_FREQ_4096_CLK, util_timer=amd_gpu.SQ_TT_UTIL_TIMER_250_CLK, mode=int(tracing))
+    self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_CTRL), sq_thread_trace_ctrl)
+
+  def grbm_gfx_index(self, **kwargs):
+    self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regGRBM_GFX_INDEX), encode_bitfields('GRBM_GFX_INDEX', **kwargs))
+
+  # Magic values from mesa/src/amd/vulkan/radv_sqtt.c:radv_emit_spi_config_cntl and src/amd/common/ac_sqtt.c:ac_sqtt_emit_start
+  def start_trace(self, buf0s:list[HCQBuffer], se_mask:int):
+    self.memory_barrier()
+    self.spi_config(tracing=True)
+    # One buffer for one SE, mesa does it with a single buffer and ac_sqtt_get_data_offset, but this is simpler and should work just as well
+    for se in range(len(buf0s)):
+      self.grbm_gfx_index(se_index=se, instance_broadcast_writes=1) # select se, broadcast to all instances in that se
+      buf0_lo, buf0_hi = data64_le(buf0s[se].va_addr>>12)
+      self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_BUF0_SIZE),
+                encode_bitfields('SQ_THREAD_TRACE_BUF0_SIZE', base_hi=buf0_hi, size=buf0s[se].size>>12))
+      self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_BUF0_BASE), buf0_lo)
+      # NOTE: SQTT can only trace instructions on one simd per se, this selects first simd in first wgp in first sa.
+      # For RGP to display instruction trace it has to see it on first SE. Howerver ACE/MEC/whatever does the dispatching starting with second se,
+      # and on amdgpu/non-AM it also does weird things with dispatch order inside se: around 7 times out of 10 it starts from the last cu, but
+      # sometimes not, especially if the kernel has more than one wavefront which means that kernels with small global size might get unlucky and
+      # be dispatched on something else and not be seen in instruction tracing tab. You can force the wavefronts of a kernel to be dispatched on the
+      # CUs you want to by disabling other CUs via bits in regCOMPUTE_STATIC_THREAD_MGMT_SE<x> and trace even kernels that only have one wavefront.
+      self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_MASK),
+                encode_bitfields('SQ_THREAD_TRACE_MASK', wtype_include=amd_gpu.SQ_TT_WTYPE_INCLUDE_CS_BIT, simd_sel=0, wgp_sel=0, sa_sel=0))
+      REG_INCLUDE = amd_gpu.SQ_TT_TOKEN_MASK_SQDEC_BIT | amd_gpu.SQ_TT_TOKEN_MASK_SHDEC_BIT | amd_gpu.SQ_TT_TOKEN_MASK_GFXUDEC_BIT | \
+                    amd_gpu.SQ_TT_TOKEN_MASK_COMP_BIT | amd_gpu.SQ_TT_TOKEN_MASK_CONTEXT_BIT | amd_gpu.SQ_TT_TOKEN_MASK_CONTEXT_BIT
+      TOKEN_EXCLUDE = 1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT
+      if not (se_mask >> se) & 0b1:
+        TOKEN_EXCLUDE |= 1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT | 1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT | \
+                         1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT | 1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT | \
+                         1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
+      self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_TOKEN_MASK),
+                encode_bitfields('SQ_THREAD_TRACE_TOKEN_MASK', reg_include=REG_INCLUDE, token_exclude=TOKEN_EXCLUDE, bop_events_token_include=1))
+      # Enable SQTT
+      self.sqtt_config(tracing=True)
+    # Restore global broadcasting
+    self.grbm_gfx_index(se_broadcast_writes=1, sa_broadcast_writes=1, instance_broadcast_writes=1)
+    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_THREAD_TRACE_ENABLE), 1)
+    self.memory_barrier()
+    return self
+
+  # Magic values from src/amd/common/ac_sqtt.c:ac_sqtt_emit_stop and src/amd/common/ac_sqtt.c:ac_sqtt_emit_wait
+  def stop_trace(self, ses: int, wptrs: HCQBuffer):
+    self.memory_barrier()
+    # Start shutting everything down
+    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_THREAD_TRACE_ENABLE), 0)
+    self.pkt3(amd_gpu.PACKET3_EVENT_WRITE, amd_gpu.EVENT_TYPE(amd_gpu.THREAD_TRACE_FINISH) | amd_gpu.EVENT_INDEX(0))
+    # For each SE wait for finish to complete and copy regSQ_THREAD_TRACE_WPTR to know where in the buffer trace data ends
+    for se in range(ses):
+      self.grbm_gfx_index(se_index=se, instance_broadcast_writes=1) # select se, broadcast to all instances in that se
+      # Wait for FINISH_PENDING==0
+      self.pkt3(amd_gpu.PACKET3_WAIT_REG_MEM, amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
+                ucfgreg(amd_gpu.regSQ_THREAD_TRACE_STATUS, False), 0, 0, gc_11_0_0.SQ_THREAD_TRACE_STATUS__FINISH_PENDING_MASK, 4)
+      # Wait for FINISH_DONE!=0
+      self.pkt3(amd_gpu.PACKET3_WAIT_REG_MEM, amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_NEQ),
+                ucfgreg(amd_gpu.regSQ_THREAD_TRACE_STATUS, False), 0, 0, gc_11_0_0.SQ_THREAD_TRACE_STATUS__FINISH_DONE_MASK, 4)
+      # Disable SQTT
+      self.sqtt_config(tracing=False)
+      # Wait for BUSY==0
+      self.pkt3(amd_gpu.PACKET3_WAIT_REG_MEM, amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
+                ucfgreg(amd_gpu.regSQ_THREAD_TRACE_STATUS, False), 0, 0, gc_11_0_0.SQ_THREAD_TRACE_STATUS__BUSY_MASK, 4)
+      # Copy WPTR to memory (src_sel = perf, dst_sel = tc_l2, wr_confirm = True), ucfgreg with False adds GC_BASE__INST0_SEG1 but not pkt3 reg offset
+      self.pkt3(amd_gpu.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_WPTR, False), 0, *data64_le(wptrs.va_addr+(se*4)))
+    # Restore global broadcasting
+    self.grbm_gfx_index(se_broadcast_writes=1, sa_broadcast_writes=1, instance_broadcast_writes=1)
+    self.spi_config(tracing=False)
+    self.memory_barrier()
+    return self
+
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
     self.bind_args_state(args_state)
 
@@ -96,6 +184,20 @@ class AMDComputeQueue(HWQueue):
 
     user_regs += [*data64_le(args_state.ptr)]
 
+    if prg.dev.sqtt_enabled:
+      self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_pipeline_bind(
+        _0=sqtt.union_rgp_sqtt_marker_pipeline_bind_0(_0=sqtt.struct_rgp_sqtt_marker_pipeline_bind_0_0(
+          identifier=sqtt.RGP_SQTT_MARKER_IDENTIFIER_BIND_PIPELINE,
+          bind_point=1, # compute
+        )),
+        _1=sqtt.union_rgp_sqtt_marker_pipeline_bind_1(api_pso_hash=data64_le(prg.libhash[0])),
+      ))
+      self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_event(
+        _0=sqtt.union_rgp_sqtt_marker_event_0(_0=sqtt.struct_rgp_sqtt_marker_event_0_0(has_thread_dims=1)),
+        _2=sqtt.union_rgp_sqtt_marker_event_2(cmd_id=prg.dev.cmd_id),
+      ), *global_size)
+      prg.dev.cmd_id += 1
+
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8))
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC1), prg.rsrc1, prg.rsrc2)
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC3), 0)
@@ -103,7 +205,7 @@ class AMDComputeQueue(HWQueue):
     if prg.dev.has_scratch_base_registers:
       self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO), *data64_le(prg.dev.scratch.va_addr >> 8))
     if prg.dev.target < 110000: self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.mmCP_COHER_START_DELAY), 0x20)
-    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_RESTART_X), 0, 0, 0, 0)
+    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_RESTART_X), 0, 0, 0)
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE0), 0xFFFFFFFF, 0xFFFFFFFF)
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE2), 0xFFFFFFFF, 0xFFFFFFFF)
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE4), 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
@@ -113,6 +215,7 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_RESOURCE_LIMITS), 0)
 
     self.pkt3(amd_gpu.PACKET3_DISPATCH_DIRECT, *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN)
+    if prg.dev.sqtt_enabled: self.pkt3(amd_gpu.PACKET3_EVENT_WRITE, amd_gpu.EVENT_TYPE(amd_gpu.THREAD_TRACE_MARKER) | amd_gpu.EVENT_INDEX(0))
     self.pkt3(amd_gpu.PACKET3_EVENT_WRITE, amd_gpu.EVENT_TYPE(amd_gpu.CS_PARTIAL_FLUSH) | amd_gpu.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
     return self
 
@@ -151,7 +254,7 @@ class AMDComputeQueue(HWQueue):
     for i, value in enumerate(cmds): dev.compute_queue.ring[(dev.compute_queue.put_value + i) % len(dev.compute_queue.ring)] = value
 
     dev.compute_queue.put_value += len(cmds)
-    dev.compute_queue.signal_doorbell()
+    dev.compute_queue.signal_doorbell(dev)
 
 class AMDCopyQueue(HWQueue):
   def __init__(self, max_copy_size=0x40000000):
@@ -235,7 +338,7 @@ class AMDCopyQueue(HWQueue):
       dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
       dev.sdma_queue.put_value += rem_packet_cnt * 4
 
-    dev.sdma_queue.signal_doorbell()
+    dev.sdma_queue.signal_doorbell(dev)
 
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
@@ -245,33 +348,36 @@ class AMDProgram(HCQProgram):
     image, sections, _ = elf_loader(self.lib)
     self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), BufferSpec(cpu_access=True, nolru=True))
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
-
-    entry_point = min(sh.header.sh_addr for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS and sh.header.sh_flags & libc.SHF_ALLOC)
-    self.group_segment_size = image[entry_point:entry_point+4].cast("I")[0]
-    self.private_segment_size = image[entry_point+4:entry_point+8].cast("I")[0]
-    self.kernargs_segment_size = image[entry_point+8:entry_point+12].cast("I")[0]
-
+    rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
+    text_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".text"), -1)
+    assert rodata_entry >= 0 and text_entry >= 0, ".text or .rodata section not found"
+    self.group_segment_size = image[rodata_entry:rodata_entry+4].cast("I")[0]
+    self.private_segment_size = image[rodata_entry+4:rodata_entry+8].cast("I")[0]
+    self.kernargs_segment_size = image[rodata_entry+8:rodata_entry+12].cast("I")[0]
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
     if lds_size > (self.dev.dev_iface.props['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requested: group_segment_size")
 
     # Ensure scratch size
     self.dev._ensure_has_local_memory(self.private_segment_size)
 
-    code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + entry_point) # NOTE: this is wrong, it's not this object
+    code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + rodata_entry) # NOTE: this is wrong, it's not this object
     assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
 
     # Set rsrc1.priv=1 on gfx11 to workaround cwsr.
     self.rsrc1: int = code.compute_pgm_rsrc1 | ((1 << 20) if 110000 <= self.dev.target < 120000 else 0)
     self.rsrc2: int = code.compute_pgm_rsrc2 | (lds_size << 15)
-    self.prog_addr: int = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
-
+    self.prog_addr: int = self.lib_gpu.va_addr + rodata_entry + code.kernel_code_entry_byte_offset
+    if code.kernel_code_entry_byte_offset == 0: self.prog_addr = self.lib_gpu.va_addr + text_entry
     # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution.
     # The packet is represented as a pointer and set up in SGPRs. Space for the packet is allocated as part of the kernel arguments.
     self.enable_dispatch_ptr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
     self.enable_private_segment_sgpr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
     additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
 
-    super().__init__(CLikeArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
+    if dev.sqtt_enabled: self.libhash: tuple[int, int] = struct.unpack('<Q', hashlib.md5(self.lib).digest()[:8])*2
+
+    super().__init__(CLikeArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, lib=self.lib,
+                     base=self.lib_gpu.va_addr)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))
@@ -288,6 +394,9 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
 
 MAP_FIXED, MAP_NORESERVE, MAP_LOCKED = 0x10, 0x400, 0 if OSX else 0x2000
 
+@dataclass(frozen=True)
+class ProfileSQTTEvent(ProfileEvent): device:str; se:int; blob:bytes; itrace:bool # noqa: E702
+
 @dataclass
 class AMDQueueDesc:
   ring: memoryview
@@ -296,11 +405,14 @@ class AMDQueueDesc:
   doorbell: memoryview
   put_value: int = 0
 
-  def signal_doorbell(self):
+  def signal_doorbell(self, dev):
     self.write_ptr[0] = self.put_value
 
     # Ensure all prior writes are visible to the GPU.
     if CPUProgram.atomic_lib is not None: CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
+
+    # Flush hdp if queue is in dev mem.
+    if dev.driverless and getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1): dev.dev_iface.adev.gmc.flush_hdp()
     self.doorbell[0] = self.put_value
 
 class KFDIface:
@@ -453,7 +565,8 @@ class PCIIface:
       HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
 
     supported_sizes = int(HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDONLY).read(), 16)
-    HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write(str(supported_sizes.bit_length() - 1))
+    try: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write(str(supported_sizes.bit_length() - 1))
+    except OSError as e: raise RuntimeError(f"Cannot resize BAR: {e}. Ensure the resizable BAR option is enabled on your system.") from e
 
     # Try to init vfio. Use it if success.
     if PCIIface.vfio:
@@ -501,9 +614,10 @@ class PCIIface:
     pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
     self.cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=pci.PCI_COMMAND)
 
+    gfxver = int(f"{self.adev.ip_ver[am.GC_HWIP][0]:02d}{self.adev.ip_ver[am.GC_HWIP][1]:02d}{self.adev.ip_ver[am.GC_HWIP][2]:02d}")
     array_count = self.adev.gc_info.gc_num_sa_per_se * self.adev.gc_info.gc_num_se
     simd_count = 2 * array_count * (self.adev.gc_info.gc_num_wgp0_per_sa + self.adev.gc_info.gc_num_wgp1_per_sa)
-    self.props = {'simd_count': 2 * simd_count, 'simd_per_cu': 2, 'array_count': array_count, 'gfx_target_version': self.adev.ip_versions[am.GC_HWIP],
+    self.props = {'simd_count': 2 * simd_count, 'simd_per_cu': 2, 'array_count': array_count, 'gfx_target_version': gfxver,
       'max_slots_scratch_cu': self.adev.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.adev.gc_info.gc_max_waves_per_simd,
       'simd_arrays_per_engine': self.adev.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.adev.gc_info.gc_lds_size}
 
@@ -562,21 +676,19 @@ class PCIIface:
   def device_fini(self): self.adev.fini()
 
 class AMDDevice(HCQCompiled):
+  devices: ClassVar[list[HCQCompiled]] = []
+  signal_pages: ClassVar[list[Any]] = []
+  signal_pool: ClassVar[list[int]] = []
+
   driverless:bool = not HWInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
-  signals_page:Any = None
-  signals_pool:list[int] = []
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
     self.target = int(self.dev_iface.props['gfx_target_version'])
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
-    if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
-
-    if AMDDevice.signals_page is None:
-      AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, host=True, uncached=True, cpu_access=True)
-      AMDDevice.signals_pool = [AMDDevice.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
-    else: self.dev_iface.map(AMDDevice.signals_page)
+    if self.target < 100300 or self.target >= 130000: raise RuntimeError(f"Unsupported arch: {self.arch}")
+    if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {self.arch}")
 
     self.max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] - 1
     self.max_wave_id = self.dev_iface.props['max_waves_per_simd'] * self.dev_iface.props['simd_per_cu'] - 1
@@ -587,6 +699,7 @@ class AMDDevice(HCQCompiled):
     vgpr_size_per_cu = 0x60000 if self.target in {110000, 110001, 120000, 120001} else 0x40000
     wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * (self.max_cu_id + 1), mmap.PAGESIZE)
     ctl_stack_size = round_up(12 * (self.max_cu_id + 1) * (self.max_wave_id + 1) + 8 + 40, mmap.PAGESIZE)
+    if self.target//10000 == 10: ctl_stack_size = min(ctl_stack_size, 0x7000)
     debug_memory_size = round_up((self.max_cu_id + 1) * (self.max_wave_id + 1) * 32, 64)
 
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x800000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
@@ -594,12 +707,28 @@ class AMDDevice(HCQCompiled):
 
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
 
-    super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
+    super().__init__(device, AMDAllocator(self), AMDLLVMRenderer() if getenv("AMD_LLVM", 0) else AMDRenderer(self.arch),
+                     AMDLLVMCompiler(self.arch) if getenv("AMD_LLVM", 0) else HIPCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
 
     # Scratch setup
     self.max_private_segment_size = 0
     self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
+
+    # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
+    self.sqtt_enabled = PROFILE and bool(getenv("SQTT", 0))
+    if self.sqtt_enabled:
+      if self.arch != 'gfx1100': raise RuntimeError('SQ Thread Tracing is only supported on 7900XTX')
+      if not self.driverless and (ppfeaturemask:=int(HWInterface('/sys/module/amdgpu/parameters/ppfeaturemask', os.O_RDONLY).read(), 16)) & 0x8000:
+        raise RuntimeError("SQTT can't be enabled because of hardware bug, to workaround either use driverless or add "
+                           f"ppfeaturemask={(ppfeaturemask&~0x8000):#x} (current {ppfeaturemask=:#x} & ~PP_GFXOFF_MASK) to amdgpu module parameters\n"
+                           "For more information read https://github.com/tinygrad/tinygrad/blob/master/extra/sqtt/README.md")
+      SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
+      SQTT_NUM = self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine']
+      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(cpu_access=True, nolru=True)) for _ in range(SQTT_NUM)]
+      self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", 2) # -1 enable all, 0 disable all, >0 bitmask for where to enable instruction tracing
+      self.cmd_id = 0
+      AMDComputeQueue().start_trace(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
@@ -624,11 +753,27 @@ class AMDDevice(HCQCompiled):
       self.max_private_segment_size = required
 
   def invalidate_caches(self):
-    AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)
-    self.timeline_value += 1
+    AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.next_timeline()).submit(self)
     self.synchronize()
 
   def on_device_hang(self): self.dev_iface.on_device_hang()
+
+  def _at_profile_finalize(self):
+    if self.sqtt_enabled:
+      wptrs_buf = self.allocator.alloc(round_up(len(self.sqtt_buffers), 0x1000), BufferSpec(cpu_access=True, nolru=True))
+      wptrs = to_mv(wptrs_buf.va_addr, wptrs_buf.size)
+      AMDComputeQueue().stop_trace(len(self.sqtt_buffers), wptrs_buf).signal(self.timeline_signal, self.next_timeline()).submit(self)
+      self.synchronize()
+      if DEBUG>=2: print('Saving SQTT in profile...')
+      for i,buf0 in enumerate(self.sqtt_buffers):
+        wptr = ((struct.unpack('<I', wptrs[i*4:i*4+4])[0] & 0x1FFFFFFF) - ((buf0.va_addr//32) & 0x1FFFFFFF)) * 32
+        if DEBUG>=2: print(f'Se {i} blob size {wptr:#x}')
+        assert wptr >= 0 and wptr <= buf0.size, f"{wptr} > {buf0.size}, should never happen"
+        # When sqtt buffer overflows, wptr stops at the last dword
+        if wptr >= buf0.size-32: print(f"WARNING: SQTT BUFFER IS FULL (SE {i})! INCREASE SQTT BUFFER SIZE WITH SQTT_BUFFER_SIZE=X (in MB)")
+        self.allocator._copyout(sqtt_buf:=memoryview(bytearray(wptr)), buf0)
+        Compiled.profile_events += [ProfileSQTTEvent(self.device, i, bytes(sqtt_buf), bool((self.sqtt_itrace_se_mask >> i) & 0b1))]
+    super()._at_profile_finalize()
 
   def finalize(self):
     self.synchronize()

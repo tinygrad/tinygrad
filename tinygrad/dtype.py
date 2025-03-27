@@ -54,6 +54,8 @@ class PtrDType(DType):
   def vec(self, sz:int) -> DType:
     assert self.v == 1, f"can't vectorize ptr {self} with size {sz}"
     if sz == 1: return self  # sz=1 is a scalar
+    if isinstance(self, ImageDType):
+      return ImageDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz, self.size, self.shape)
     return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz, self.size)
   def ptr(self, size=-1, local=False): raise RuntimeError("can't make a pointer from a pointer")
   @property
@@ -154,7 +156,7 @@ if (env_default_float := getenv("DEFAULT_FLOAT", "")):
   assert dtypes.is_float(dtypes.default_float), f"{env_default_float} is not a float dtype"
 
 DTypeLike = Union[str, DType]
-def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType) else getattr(dtypes, dtype)
+def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType) else getattr(dtypes, dtype.lower())
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support weak type and complex type
@@ -169,7 +171,7 @@ def _get_recursive_parents(dtype:DType) -> set[DType]:
 @functools.lru_cache(None)
 def least_upper_dtype(*ds:DType) -> DType:
   return min(set.intersection(*[_get_recursive_parents(d) for d in ds])) if not (images:=[d for d in ds if isinstance(d, ImageDType)]) else images[0]
-def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.float32)
+def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void"))}
 INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void"}
@@ -178,7 +180,7 @@ def sum_acc_dtype(dt:DType):
   # default acc dtype for sum
   if dtypes.is_unsigned(dt): return least_upper_dtype(dt, dtypes.uint)
   if dtypes.is_int(dt) or dt == dtypes.bool: return least_upper_dtype(dt, dtypes.int)
-  return least_upper_dtype(dt, dtypes.float)
+  return least_upper_dtype(dt, to_dtype(getenv("SUM_DTYPE", "float32")))
 
 def truncate_fp16(x):
   try: return struct.unpack("@e", struct.pack("@e", float(x)))[0]

@@ -4,8 +4,8 @@
   <title>tinygrad viz</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="data:;base64,iVBORw0KGgo=">
-  <script src="assets/d3js.org/d3.v5.min.js" charset="utf-8"></script>
-  <script src="assets/dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
+  <script src="assets/d3js.org/d3.v7.min.js" charset="utf-8"></script>
+  <script src="assets/dagrejs.github.io/project/dagre/latest/dagre.min.js"></script>
   <script src="lib/graph.js"></script>
   <link rel="stylesheet" href="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/default.min.css">
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
@@ -15,11 +15,8 @@
   <style>
   * {
     box-sizing: border-box;
-    margin-block-start: initial;
-    margin-block-end: initial;
-  }
-  button {
-    outline: none;
+    margin: 0;
+    padding: 0;
   }
   html, body {
     color: #f0f0f5;
@@ -34,6 +31,7 @@
     font-variation-settings: "wdth" 100;
     font-size: 14px;
     overflow: hidden;
+    background-color: #08090e;
   }
   a {
     color: #4a90e2;
@@ -59,7 +57,7 @@
     cursor: default;
     user-select: none;
   }
-  .node rect {
+  rect {
     stroke: #4a4b57;
     stroke-width: 1.4px;
     rx: 8px;
@@ -69,9 +67,9 @@
     color: #08090e;
     font-weight: 350;
   }
-  .edgePath path {
+  .edgePath {
     stroke: #4a4b57;
-    fill: #4a4b57;
+    fill: none;
     stroke-width: 1.4px;
   }
   .main-container {
@@ -82,40 +80,36 @@
   }
   .container {
     background-color: #0f1018;
+    padding: 20px;
+    z-index: 2;
+    position: relative;
+    height: 100%;
   }
-  .container > * + *, .rewrite-container > * + * {
+  .container > * + *, .rewrite-container > * + *, .kernel-list > * + * {
     margin-top: 12px;
   }
+  .kernel-list > ul > * + * {
+    margin-top: 4px;
+  }
   .graph {
-    background-color: #08090e;
     position: absolute;
     inset: 0;
     z-index: 1;
   }
   .kernel-list-parent {
-    position: relative;
     width: 15%;
-    padding: 50px 20px 20px 20px;
+    padding-top: 50px;
     border-right: 1px solid #4a4b56;
-    z-index: 2;
   }
   .kernel-list {
     width: 100%;
     height: 100%;
     overflow-y: auto;
   }
-  .kernel-list > ul > * + * {
-    margin-top: 4px;
-  }
   .metadata {
-    position: relative;
     width: 20%;
-    padding: 20px;
-    background-color: #0f1018;
     border-left: 1px solid #4a4b56;
-    z-index: 2;
     margin-left: auto;
-    height: 100%;
     overflow-y: auto;
   }
   .resize-handle {
@@ -128,13 +122,6 @@
     z-index: 3;
     background-color: transparent;
   }
-  #kernel-resize-handle {
-    right: 0;
-  }
-  #metadata-resize-handle {
-    margin-top: 0;
-    left: 0;
-  }
   .floating-container {
     position: fixed;
     top: 10px;
@@ -144,42 +131,26 @@
     flex-direction: row;
     gap: 8px;
   }
-  .nav-btn {
+  .btn {
+    outline: none;
     background-color: #1a1b26;
     border: 1px solid #4a4b56;
     color: #f0f0f5;
-    height: 32px;
     border-radius: 8px;
+    padding: 6px;
     cursor: pointer;
-    text-decoration: none;
+    height: 32px;
     display: flex;
     align-items: center;
-    padding: 0 6px;
-    font-weight: bold;
-  }
-  .collapse-btn {
-    width: 32px;
-    padding: 6px;
-  }
-  .btn {
-    height: 32px;
-    background-color: #1a1b26;
-    border: 1px solid #4a4b56;
-    color: #f0f0f5;
-    border-radius: 8px;
-    cursor: pointer;
-    transition-duration: .5s;
+    justify-content: center;
+    text-decoration: none;
   }
   .btn:hover {
     background-color: #2a2b36;
     border-color: #5a5b66;
-    color: #ffffff;
-    transform: translateY(-1px);
   }
-  .collapsed .kernel-list, .collapsed .metadata {
-    width: 0;
-    padding: 0;
-    overflow: hidden;
+  .collapsed .container {
+    display: none;
   }
   .rewrite-list {
     display: flex;
@@ -198,21 +169,41 @@
     border-radius: 8px;
     padding: 8px;
   }
+  .progress-message {
+    position: absolute;
+    z-index: 2;
+    left: 50%;
+    top: 2%;
+    color: #ffd230;
+    display: none;
+  }
+  #zoom-to-fit-btn {
+    position: absolute;
+    left: 50%;
+    bottom: 5%;
+    display: none;
+  }
   </style>
 </head>
 <body>
   <div class="main-container">
     <div class="floating-container">
       <button class="btn collapse-btn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 19l-7-7 7-7"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20"><path d="M15 19l-7-7 7-7"/></svg>
       </button>
       <a class="btn nav-btn" href="/profiler">Profiler</a>
     </div>
-    <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
+    <div class="container kernel-list-parent"><div class="kernel-list"></div></div>
     <div class="graph">
-      <svg id="graph-svg">
-        <g id="render"></g>
+      <div class="progress-message">Rendering new layout...</div>
+      <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
+        <g id="render">
+          <g id="edges"></g>
+          <g id="nodes"></g>
+          <g id="bars"></g>
+        </g>
       </svg>
+      <button class="btn" id="zoom-to-fit-btn">Zoom to fit</button>
     </div>
     <div class="container metadata"></div>
   </div>
@@ -253,6 +244,23 @@
     })
   }
 
+  // **** base graph svg
+  const svg = d3.select("#graph-svg");
+  const inner = svg.select("g");
+  const zoom = d3.zoom().scaleExtent([0.05, 2]).on("zoom", ({ transform }) => {
+    inner.attr("transform", transform);
+  });
+  svg.call(zoom);
+  // zoom to fit into view
+  const observer = new IntersectionObserver((e) => {
+    const { width, height } = render.getBBox();
+    if (width*height === 0) return;
+    const btn = document.getElementById("zoom-to-fit-btn");
+    btn.style.display = e[0].isIntersecting ? "none" : "block";
+  });
+  observer.observe(document.getElementById("render"));
+  document.getElementById("zoom-to-fit-btn").addEventListener("click", () => svg.call(zoom.transform, d3.zoomIdentity));
+
   // **** main loop
   var ret = [];
   var cache = {};
@@ -263,14 +271,12 @@
   var expandKernel = true;
   const evtSources = [];
   async function main() {
-    const mainContainer = document.querySelector('.main-container');
     // ***** LHS kernels list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
       currentKernel = -1;
     }
-    const kernelListParent = document.querySelector(".container.kernel-list-parent");
-    const kernelList = document.querySelector(".container.kernel-list");
+    const kernelList = document.querySelector(".kernel-list");
     kernelList.innerHTML = "";
     kernels.forEach(([key, items], i) => {
       const kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "",
@@ -342,12 +348,13 @@
       };
     }
     if (ret.length === 0) return;
-    renderGraph(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || []);
+    renderGraph(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], kernel.name);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
     metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
     metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true));
+    appendResizer(metadata, { minWidth: 20, maxWidth: 50 });
     // ** code blocks
     let code = ret[currentRewrite].uop;
     let lang = "python"
@@ -392,47 +399,38 @@
     } else {
       metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(kernel.loc)}.` }));
     }
-    // ***** collapse/expand
-    let isCollapsed = false;
-    const collapseBtn = document.querySelector(".collapse-btn");
-    collapseBtn.addEventListener("click", () => {
-      isCollapsed = !isCollapsed;
-      mainContainer.classList.toggle("collapsed", isCollapsed);
-      kernelListParent.style.display = isCollapsed ? "none" : "block";
-      metadata.style.display = isCollapsed ? "none" : "block";
-      collapseBtn.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
-    });
-    // ***** resizer
-    function createResizer(element, width, type) {
-      const { minWidth, maxWidth } = width;
-      const handle = Object.assign(document.createElement("div"), { id: `${type}-resize-handle`, className: "resize-handle" });
-      element.appendChild(handle);
-
-      const resize = (e) => {
-        const change = e.clientX - element.dataset.startX;
-        const adjustedChange = type === "kernel" ? change : -change;
-        const newWidth = ((Number(element.dataset.startWidth) + adjustedChange) / Number(element.dataset.containerWidth)) * 100;
-        if (newWidth >= minWidth && newWidth <= maxWidth) {
-          element.style.width = `${newWidth}%`;
-        }
-      };
-
-      handle.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        element.dataset.startX = e.clientX;
-        element.dataset.containerWidth = mainContainer.getBoundingClientRect().width;
-        element.dataset.startWidth = element.getBoundingClientRect().width;
-
-        document.documentElement.addEventListener("mousemove", resize, false);
-        document.documentElement.addEventListener("mouseup", () => {
-          document.documentElement.removeEventListener("mousemove", resize, false);
-          element.style.userSelect = "initial";
-        }, { once: true });
-      });
-    }
-    createResizer(kernelListParent, { minWidth: 15, maxWidth: 50 }, "kernel"); // left resizer
-    createResizer(metadata, { minWidth: 20, maxWidth: 50 }, "metadata"); // right resizer
   }
+
+  // **** collapse/expand
+  let isCollapsed = false;
+  const mainContainer = document.querySelector('.main-container');
+  document.querySelector(".collapse-btn").addEventListener("click", (e) => {
+    isCollapsed = !isCollapsed;
+    mainContainer.classList.toggle("collapsed", isCollapsed);
+    e.target.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
+  });
+  // **** resizer
+  function appendResizer(element, { minWidth, maxWidth }, left=false) {
+    const handle = Object.assign(document.createElement("div"), { className: "resize-handle", style: left ? "right: 0" : "left: 0; margin-top: 0" });
+    element.appendChild(handle);
+    const resize = (e) => {
+      const change = e.clientX - element.dataset.startX;
+      let newWidth = ((Number(element.dataset.startWidth)+(left ? change : -change))/Number(element.dataset.containerWidth))*100;
+      element.style.width = `${Math.max(minWidth, Math.min(maxWidth, newWidth))}%`;
+    };
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      element.dataset.startX = e.clientX;
+      element.dataset.containerWidth = mainContainer.getBoundingClientRect().width;
+      element.dataset.startWidth = element.getBoundingClientRect().width;
+      document.documentElement.addEventListener("mousemove", resize, false);
+      document.documentElement.addEventListener("mouseup", () => {
+        document.documentElement.removeEventListener("mousemove", resize, false);
+        element.style.userSelect = "initial";
+      }, { once: true });
+    });
+  }
+  appendResizer(document.querySelector(".kernel-list-parent"), { minWidth: 15, maxWidth: 50 }, left=true);
 
   // **** keyboard shortcuts
   document.addEventListener("keydown", async function(event) {

@@ -8,6 +8,8 @@ buffer_spec = PatternMatcher([
   (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
   (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE)), name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
+  (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),), name="buf_view"),
+   lambda buf_view: isinstance(buf_view.arg, tuple) and len(buf_view.arg) == 2 and all(isinstance(arg, (int, UOp)) for arg in buf_view.arg)),
 ])
 
 # *** this is the spec of a Tensor in UOp ***
@@ -18,7 +20,7 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
    lambda mv,x: (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
    # "make things that can't be images not images" can change the buffer dtype
    # this is fine as long as it's a realized buffer and base dtypes match.
-   ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.is_realized)),
+   ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.base.op is Ops.BUFFER)),
   (UPat(Ops.VIEW, src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE}),)), lambda: False),
 
   # Tensor variable bindings
@@ -36,12 +38,24 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
   # NOTE: the arg here specifies clone=True, which prevents folding same device copy
   (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("x"))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
 
-  # ASSIGN changes the value of a realized buffer
+  # ASSIGN changes the value of a buffer
   (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))),
-   lambda assign,target,new_val: target.is_realized and (assign.dtype == target.dtype == new_val.dtype)),
+   lambda assign,target,new_val: target.base.op is Ops.BUFFER and (assign.dtype == target.dtype == new_val.dtype)),
 ])
 
 # ***** uop type spec *****
+
+def validate_index(idx:UOp, mask:UOp|None=None):
+  # this checks for out of bounds access. it is not complete but should catch some issues
+  if mask is None and not isinstance(idx.dtype, ImageDType):
+    # WEBGPU has a BITCAST in the index. TODO: fix
+    if any(x.op in {Ops.DEFINE_VAR, Ops.BITCAST} or (x.op is Ops.SPECIAL and any(not isinstance(y, int) for y in x.arg[1:])) for x in idx.toposort):
+      return True
+    vmin, vmax, sz = idx.src[1].vmin, idx.src[1].vmax, cast(PtrDType, idx.src[0].dtype).size
+    if sz != -1 and (vmin < 0 or vmax >= sz):
+      print(f"OUT OF BOUNDS ACCESS in INDEX {vmin} - {vmax} not in 0 - {sz}")
+      return False
+  return True
 
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
@@ -72,12 +86,14 @@ spec = PatternMatcher([
   # **** new style load/store ****
 
   # INDEX is used in new style load/store
-  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat())), lambda: True),
+  # INDEX takes a <buf, alu, gate?>
+  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat()), name="idx"), validate_index),
+  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(), UPat(dtype=dtypes.bool, name="mask")), name="idx"), validate_index),
 
-  # LOAD takes a <bufidx, alt?, gate?, barrier?>
+  # LOAD takes a <bufidx, alt?, barrier?>
   (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)),)), lambda: True),
   (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)), UPat((Ops.IF, Ops.BARRIER)))), lambda: True),
-  (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)), UPat.var("alt"), UPat(dtype=dtypes.bool)), name="ld"), lambda ld,alt: ld.dtype == alt.dtype),
+  (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)), UPat.var("alt")), name="ld"), lambda ld,alt: ld.dtype == alt.dtype),
 
   # STORE takes a <bufidx, val, gate?>
   (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat((Ops.INDEX, Ops.CAST)), UPat())), lambda: True),
@@ -89,7 +105,7 @@ spec = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.CMPNE), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype.base == y.dtype.base),
   # and SHL/SHR, the shift distance can be an int
   (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),
-  (UPat(Ops.IDIV, name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
+  (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(GroupOp.ALU, name="x"), lambda x: all(x.dtype.base == y.dtype.base for y in x.src)),
 
   (UPat(Ops.ASSIGN, src=(UPat((Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL)), UPat())), lambda: True),
@@ -110,11 +126,12 @@ spec = PatternMatcher([
   (UPat(Ops.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.count and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat((Ops.BITCAST, Ops.CAST), src=(UPat(),), name="x"), lambda x: x.arg is None),
   (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
+  (UPat(Ops.BARRIER, dtypes.void), lambda: True), # BARRIERs can also happen at the end of loops
 
   # NOTE: for testing, we let sinks be anything
   #(UPat(Ops.SINK, src=UPat(Ops.STORE)), lambda: True),
   (UPat((Ops.NAME, Ops.SINK), dtypes.void), lambda: True),
-  (UPat((Ops.NOOP, Ops.CUSTOM)), lambda: True),
+  (UPat((Ops.NOOP, Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
@@ -123,12 +140,10 @@ spec = PatternMatcher([
 # *** this is the spec of a Kernel in UOp ***
 
 kernel_spec = buffer_spec+PatternMatcher([
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.ASSIGN))), lambda: True),
-  # assign has a buffer view and kernel source, it can optionally depend on other assigns
-  (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
-  # view/sink/const/bind/var can also exist in the kernel graph
-  (UPat((Ops.VIEW, Ops.SINK, Ops.CONST, Ops.BIND, Ops.DEFINE_VAR)), lambda: True),
-  (UPat(GroupOp.All), lambda: False),
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN))), lambda: True),
+  # assign has a buffer and kernel source, it can optionally depend on other assigns
+  (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
+  (UPat(GroupOp.All-{Ops.SINK}), lambda: False),
 ])
 
 # *** this is the UOp shape spec ***

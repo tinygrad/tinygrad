@@ -3,7 +3,7 @@
 # not a stable API, but works
 
 import torch, functools
-from tinygrad import Tensor, TinyJit
+from tinygrad import Tensor, TinyJit, Device
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import get_single_element, Context, OSX
 from tinygrad.dtype import _from_torch_dtype
@@ -24,7 +24,9 @@ def custom_kernel(data: torch.Tensor, device="CUDA") -> torch.Tensor:
 
   with Context(BEAM=2): f(tg_out, tg_data)
 
-  # Since realize() is called in f(), at this point tinygrad has finished the computation and the data is valid.
+  # Wait for computation to finish and the data is valid.
+  Device[device].synchronize()
+
   return out
 
 if __name__ == "__main__":
