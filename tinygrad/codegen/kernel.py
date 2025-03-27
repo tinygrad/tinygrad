@@ -684,6 +684,7 @@ class Kernel:
     #if __debug__: type_verify(list(modified_ast.toposort), shape_spec)
 
     is_conv = (len(self.full_shape) == 6 and self.full_shape[2:4] == (3,3))
+    is_conv = is_conv or (len(self.full_shape) == 6 and self.full_shape[3:5] == (3,3))
     is_conv = is_conv or (len(self.full_shape) == 7 and self.full_shape[3:5] == (3,3))
     is_conv = is_conv or self.full_shape[-2:] == (3,3)
     self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts, is_conv))

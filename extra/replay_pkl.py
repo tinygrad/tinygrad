@@ -34,7 +34,8 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 8))
           elif k.full_shape[-3:] == (32,3,3):
-            if k.full_shape[0] != 30 and k.full_shape[-4]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
+            # NOTE: there's an issue with the 7 -> 8 upcast and the valid removal
+            if knum not in [52,56,60] and k.full_shape[-4]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
             # 3x3 dwconv
             k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
             k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
