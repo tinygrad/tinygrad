@@ -583,7 +583,9 @@ class TestJitFree(unittest.TestCase):
     pre_free = GlobalCounters.mem_used
     fxn.captured.free_intermediates()
     savings_after_free = pre_free - GlobalCounters.mem_used
-    self.assertEqual(savings_after_free, 2024)
+
+    # Different allocator implementations have different savings.
+    self.assertEqual(savings_after_free, 8196 if hasattr(Device[Device.DEFAULT].allocator, '_offset') else 2024)
     out = fxn(Tensor([11,1,2,3,4]))
     self.assertEqual(out.item(), 13600)
 

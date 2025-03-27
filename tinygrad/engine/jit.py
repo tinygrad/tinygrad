@@ -166,7 +166,9 @@ class CapturedJit(Generic[ReturnType]):
     depends: set[Buffer|None] = set([None])
     update_depends(depends, self.jit_cache)
     for b in depends:
-      if b is not None: b.deallocate()
+      if b is not None:
+        b.deallocate()
+        if b._base is not None and b._base.allocated_views == 0: b._base.deallocate()
     self.__post_init__()   # reset the graph state
 
   # jit exec
