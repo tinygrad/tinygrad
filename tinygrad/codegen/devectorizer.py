@@ -48,19 +48,15 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
           offsets[i+3] = {}
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for grp in grouped_offsets:
-      load_size = len(grp)
-      if load_size == 32 and buf.arg not in [0, 3]:
-        # make loads of 32 be 128, skip the bias and the output (fix this)
-        load_size = 128
       # get the index offset for this element. using [0] is okay, because they are the same
       lidx = midx.src[offsets[grp[0]][0]]
-      if load_size > 1: lidx = lidx.cast(ptrdtype.base.vec(load_size).ptr(size=ptrdtype.size, local=ptrdtype.local))
+      if len(grp) > 1: lidx = lidx.cast(ptrdtype.base.vec(len(grp)).ptr(size=ptrdtype.size, local=ptrdtype.local))
       # set the idxs of the output
       for i,g in enumerate(grp):
         for oo in offsets[g]: idxs[oo] = global_offset+i
       # add this lidx to the CAT
       ret.append(lidx)
-      global_offset += load_size
+      global_offset += len(grp)
   assert None not in idxs, f"some idxs are missing {idxs}"
   # this base thing is for image, we want the CAT to be a normal pointer
   post_cat = UOp(Ops.PTRCAT, ptrdtype.base.ptr(size=ptrdtype.size, local=ptrdtype.local).vec(vec.dtype.count), tuple(ret))
