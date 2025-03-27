@@ -116,9 +116,41 @@ migrate_indexing = PatternMatcher([
   (UPat(Ops.STORE, name="root"), create_gate),
 ])
 
+pm_store_ignore = PatternMatcher([
+  (UPat().index(UPat(), UPat(name="mask")).store(UPat()).named("store"),
+   lambda store,mask: store.replace(src=(store.src[0], UOp(Ops.IGNORE, src=(store.src[1], mask)))) if store.src[1].op is not Ops.IGNORE else None),
+])
+
+pm_move_ignore = PatternMatcher([
+  # IGNORE on SELF is nothing
+  (UPat(Ops.IGNORE, src=(UPat(name="x"), UPat(name="x"))), lambda x: x.const_like(True)),
+  # IGNORE on a CONST is nothing
+  (UPat(Ops.IGNORE, src=(UPat((Ops.CONST, Ops.VCONST), name="c"), UPat())), lambda c: c),
+  # move the IGNOREs
+  (UPat(Ops.IGNORE, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.VECTORIZE), name="alu"), UPat.var("mask")), name="ig"),
+   lambda ig,alu,mask: alu.replace(src=tuple(UOp(Ops.IGNORE, x.dtype, (x, mask)) for x in alu.src))),
+])
+
+pm_delete_ignore = PatternMatcher([
+  # IGNORE on SELF is nothing
+  (UPat(Ops.IGNORE, src=(UPat(name="x"), UPat())), lambda x: x),
+])
+
 def expand_rewrite(sink:UOp) -> UOp:
   # initial symbolic + migrate indexing (remove this)
   sink = graph_rewrite(sink, sym+migrate_indexing)
 
+  # store IGNORE
+  sink = graph_rewrite(sink, pm_store_ignore, name="store_ignore")
+
+  # move IGNORE
+  sink = graph_rewrite(sink, pm_move_ignore, name="move_ignore")
+
+  # remove surviving ignores
+  sink = graph_rewrite(sink, sym+pm_delete_ignore, name="ignore_done")
+
   # expand
-  return graph_rewrite(sink, sym+expander)
+  sink = graph_rewrite(sink, sym+expander)
+
+  return sink
+

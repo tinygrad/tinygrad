@@ -13,6 +13,8 @@ from tinygrad.renderer import Renderer
 
 def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   if getenv("UNSAFE_DISABLE_MASK", 0): mask = None
+  if buf.arg == 0: mask = None
+
   # generate the individual indexes
   midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i), mask.gep(i) if mask is not None else None) for i in range(vec.dtype.count)]),
                        symbolic_flat+commutative+load_store_indexing, name=f"index_buf_{buf.arg}")
@@ -163,7 +165,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   must_divide = True
   if ctx is not None and ctx.device == "DSP":
     lengths = [128,64,32,16,8,4]
-    if ls.dtype.count in [192, 288, 160, 96, 544]: return None  # leave these as loads
+    #if ls.dtype.count in [192, 288, 160, 96, 544]: return None  # leave these as loads
     must_divide = False
   elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
     pass
@@ -276,8 +278,8 @@ pm_render = PatternMatcher([
   # give any loads that are masked an alt value
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat())).or_casted(),), name="x"), lambda x: x.replace(src=x.src+(x.const_like(0),))),
   # gate any stores that aren't gated with ifs
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store"),
-    lambda store,idx: UOp(Ops.STORE, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
+  #(UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store"),
+  #  lambda store,idx: UOp(Ops.STORE, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
 ])
 
 # *** uop graph ***
