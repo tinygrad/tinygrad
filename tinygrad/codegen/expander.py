@@ -116,6 +116,8 @@ migrate_indexing = PatternMatcher([
   (UPat(Ops.STORE, name="root"), create_gate),
 ])
 
+# **** IGNORE support ****
+
 pm_store_ignore = PatternMatcher([
   (UPat().index(UPat(), UPat(name="mask")).store(UPat()).named("store"),
    lambda store,mask: store.replace(src=(store.src[0], UOp(Ops.IGNORE, src=(store.src[1], mask)))) if store.src[1].op is not Ops.IGNORE else None),
@@ -146,11 +148,8 @@ def expand_rewrite(sink:UOp) -> UOp:
   # move IGNORE
   sink = graph_rewrite(sink, pm_move_ignore, name="move_ignore")
 
-  # remove surviving ignores
-  sink = graph_rewrite(sink, sym+pm_delete_ignore, name="ignore_done")
-
-  # expand
-  sink = graph_rewrite(sink, sym+expander)
+  # expand + remove surviving ignores
+  sink = graph_rewrite(sink, pm_delete_ignore+sym+expander)
 
   return sink
 
