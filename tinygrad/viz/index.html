@@ -262,7 +262,7 @@
     const x0 = document.querySelector(".kernel-list-parent").getBoundingClientRect().right;
     const x1 = document.querySelector(".metadata").getBoundingClientRect().left;
     const pad = 16;
-    const R = { x: x0+pad, y: mainRect.top+pad, width: x1-x0-2*pad, height: mainRect.height-2*pad };
+    const R = { x: x0+pad, y: mainRect.top+pad, width: (x1>0 ? x1-x0 : mainRect.width)-2*pad, height: mainRect.height-2*pad };
     const r = document.querySelector("#render").getBoundingClientRect();
     if (r.width === 0) return;
     const scale = Math.min(R.width/r.width, R.height/r.height);
@@ -416,7 +416,8 @@
   document.querySelector(".collapse-btn").addEventListener("click", (e) => {
     isCollapsed = !isCollapsed;
     mainContainer.classList.toggle("collapsed", isCollapsed);
-    e.target.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
+    e.currentTarget.blur();
+    e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
   });
   // **** resizer
   function appendResizer(element, { minWidth, maxWidth }, left=false) {
