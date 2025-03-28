@@ -8,12 +8,33 @@ from tinygrad.engine.realize import CompiledRunner
 from tinygrad.renderer import ProgramSpec
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 
+def move_jit_cache_bufs_to_dev(jit_cache, device="DSP"):
+  assign = {}
+  def move_buffer(b):
+    if b in assign: return assign[b]
+
+    if b._base is not None:
+      newbuf = Buffer(device, b.size, b.dtype, base=move_buffer(b._base), offset=b.offset)
+    else:
+      newbuf = Buffer(device, b.size, b.dtype)
+      if b.is_allocated(): newbuf.ensure_allocated().copyin(b.as_buffer())
+    assign[b] = newbuf
+    return assign[b]
+
+  for item in jit_cache:
+    for b in item.bufs:
+      if b is not None: move_buffer(b)
+  return [ExecItem(item.prg, [assign.get(b,b) for b in item.bufs]) for item in jit_cache]
+
 if __name__ == "__main__":
   with Context(DEBUG=0):
     with open(sys.argv[1], "rb") as f:
       fxn: TinyJit = pickle.load(f)
       print(f"{f.tell()/1e6:.2f}M loaded")
     print(type(fxn))
+
+  # Move all buffers to DSP device.
+  fxn.captured.jit_cache = move_jit_cache_bufs_to_dev(fxn.captured.jit_cache, "DSP")
 
   knum = 1
   for ei in fxn.captured.jit_cache:
