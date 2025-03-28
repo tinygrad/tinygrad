@@ -131,7 +131,7 @@
     flex-direction: row;
     gap: 8px;
   }
-  .btn, .copy-btn {
+  .btn {
     outline: none;
     background-color: #1a1b26;
     border: 1px solid #4a4b56;
@@ -148,14 +148,6 @@
   .btn:hover {
     background-color: #2a2b36;
     border-color: #5a5b66;
-  }
-  .copy-btn { 
-    position: absolute;
-    top: 5px;
-    right: 10px;
-  }
-  .code-container {
-    position: relative;
   }
   .collapsed .container {
     display: none;
@@ -240,28 +232,14 @@
   const toPath = ([fp, lineno]) => `${fp.replaceAll("\\", "/").split("/").pop()}:${lineno}`;
   const vsCodeOpener = (parts) => Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
-  const highlightedCodeBlock = (code, lang, wrap, addCopy = false) => {
-    const container = document.createElement("div");
-    container.className = "code-container";
-    const pre = document.createElement("pre");
-    pre.className = wrap ? "wrap" : "";
-    const codeEl = pre.appendChild(document.createElement("code"));
-    codeEl.className = `language-${lang} code-block`;
-    codeEl.textContent = code;
-    container.appendChild(pre);
-    if (addCopy) {
-      const btn = container.appendChild(document.createElement("button"));
-      btn.className = "copy-btn";
-      btn.textContent = "Copy";
-      btn.onclick = () => navigator.clipboard.writeText(code).then(() => {
-        btn.textContent = "Copied!";
-        setTimeout(() => btn.textContent = "Copy", 1500);
-      });
-    }
+  const highlightedCodeBlock = (code, lang, wrap) => {
+    const pre = Object.assign(document.createElement("pre"), {className: wrap ? "wrap" : ""});
+    // NOTE: since code is in textContent, we don't need DOMPurify
+    const codeEl = Object.assign(document.createElement("code"), { className: `language-${lang} code-block`, textContent: code});
+    pre.appendChild(codeEl);
     hljs.highlightElement(codeEl);
-    return container;
+    return pre;
   };
-
   const coloredToHTML = (str) => {
     const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
     return str.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
@@ -384,7 +362,7 @@
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
     metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
-    metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true, false));
+    metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true));
     appendResizer(metadata, { minWidth: 20, maxWidth: 50 });
     // ** code blocks
     let code = ret[currentRewrite].uop;
@@ -393,7 +371,8 @@
       code = kernel.kernel_code;
       lang = "cpp";
     }
-    metadata.appendChild(highlightedCodeBlock(code, lang, false, true));
+    const codeBlock = highlightedCodeBlock(code, lang, false);
+    metadata.appendChild(codeBlock);
     // ** rewrite list
     if (kernel.match_count >= 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
