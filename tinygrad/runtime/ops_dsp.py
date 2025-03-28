@@ -193,6 +193,7 @@ def prefetch_l1(ld:UOp, idx:UOp):
   return ld.replace(src=ld.src+(x1, x2))
 
 def prefetch_l2(ld:UOp, idx:UOp):
+  if not getenv("PREFETCHL2", 0): return None
   if ld.src[-1].op is Ops.CUSTOM: return None
   ranges = sorted([x for x in ld.src[0].src[0].toposort if x.op is Ops.RANGE], key=lambda x: x.arg)
   if len(ranges):
