@@ -4,7 +4,7 @@ from tinygrad import Device, Context
 from tinygrad.device import Buffer
 from tinygrad.helpers import getenv, BEAM
 from tinygrad.engine.jit import TinyJit
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.engine.realize import CompiledRunner, ExecItem
 from tinygrad.renderer import ProgramSpec
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 
