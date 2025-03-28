@@ -9,12 +9,13 @@ from tinygrad.runtime.support.allocator import TLSFAllocator
 
 # **************** memory planning ****************
 
-def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noopt_buffers=None, debug_prefix="") -> dict[Buffer, Buffer]:
+def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ignore_checks=False, debug_prefix="") -> dict[Buffer, Buffer]:
   if NO_MEMORY_PLANNER: return {}
   first_appearance, last_appearance, buf_to_opt = {}, {}, set()
   for i,u in enumerate(buffers):
     for buf in u:
-      if buf.is_allocated() or buf.base.is_allocated() or buf.lb_refcount > 0 or (noopt_buffers is not None and buf.base in noopt_buffers): continue
+      should_skip = buf.is_allocated() or buf.base.is_allocated() or buf.lb_refcount > 0 or (noopt_buffers is not None and buf.base in noopt_buffers)
+      if not ignore_checks and should_skip: continue
       if buf.base not in first_appearance: first_appearance[buf.base] = i
       last_appearance[buf.base] = i
       buf_to_opt.add(buf)
@@ -63,6 +64,6 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
 
 def memory_planner(schedule:list[ScheduleItem]) -> list[ScheduleItem]:
   # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
-  assigned = _internal_memory_planner([si.bufs for si in schedule],
+  assigned = _internal_memory_planner([list(si.bufs) for si in schedule],
                                       noopt_buffers={b for si in schedule if si.ast.op is not Ops.SINK for b in si.bufs})
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs), si.metadata) for si in schedule]
