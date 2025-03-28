@@ -198,11 +198,11 @@ def prefetch_l2(ld:UOp, idx:UOp):
   if len(ranges):
     nidx = idx.src[1]
     if nidx.op is Ops.ADD and nidx.src[1].op is Ops.CONST: nidx = nidx.src[0]
-    nlen_uop = (nidx.substitute({ranges[-1]: ranges[-1].src[1]}) - nidx.substitute({ranges[-1]: ranges[-1].src[0]})).simplify()
-    if nlen_uop.op is Ops.CONST:
-      nlen = min(8192, nlen_uop.arg)
-    else:
-      nlen = 8192
+    zero_ranges = {r:r.const_like(0) for r in ranges[:-1]}
+    nlen_uop = (nidx.substitute({ranges[-1]: ranges[-1].src[1], **zero_ranges}) -
+                nidx.substitute({ranges[-1]: ranges[-1].src[0], **zero_ranges})).simplify()
+    assert nlen_uop.op is Ops.CONST
+    nlen = min(32768, nlen_uop.arg)
     nidx = nidx.substitute({ranges[-1]: ranges[-1].src[0]})
     x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], nidx, UOp.const(dtypes.int, nlen)), arg="__builtin_HEXAGON_Y4_l2fetch({0}+{1}, {2});")
     return ld.replace(src=ld.src+(x1,))
