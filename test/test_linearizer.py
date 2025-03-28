@@ -11,7 +11,7 @@ from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
+from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, ExecItem
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
 from tinygrad.dtype import DType, dtypes
 
@@ -25,28 +25,26 @@ def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer
   bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
   return s[-1].ast, bufs
 
-def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0):
-  a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
+def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0):
+  a, b = Tensor.rand(M, K, dtype=dtype_in).realize(), Tensor.rand(K, N, dtype=dtype_in).realize()
   np_a, np_b = a.numpy(), b.numpy()
-  r = a.matmul(b, dtype=dtype_out)
-  sched = r.schedule()
-  realized_ast = sched[-1].ast
-  run_schedule(sched)
-  out = r.numpy()
-  k = Kernel(realized_ast)
+  c = a.matmul(b, dtype=dtype_out)
+  si = c.schedule()[-1]
+  k = Kernel(si.ast)
   k.apply_tensor_cores(1, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
-  k.linearize()
+  prg = k.to_program()
   assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
-  np_c = np_a @ np_b
+  ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
+  ei.run(wait=True)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
   else: tc_atol, tc_rtol = 5e-3, 1e-4
-  np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
+  np.testing.assert_allclose(c.numpy(), np_a@np_b, atol=tc_atol, rtol=tc_rtol)
 
-def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
+def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
                                          ensure_triggered:bool=True):
-  a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
+  a, b = Tensor.rand(M, K, dtype=dtype_in), Tensor.rand(K, N, dtype=dtype_in)
   r = a.matmul(b, dtype=dtype_out)
   sched = r.schedule()
   realized_ast = sched[-1].ast
