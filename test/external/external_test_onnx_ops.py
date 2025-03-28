@@ -40,9 +40,6 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["squeezed"]
     self.helper_test_single_op("Squeeze", inputs, attributes, outputs)
 
-  def test_resize(self):
-    ...
-
   # division innacuracy is sensitive to rounding
   @unittest.expectedFailure
   def test_resize_failure(self):
