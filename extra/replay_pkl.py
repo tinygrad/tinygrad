@@ -33,21 +33,16 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
           elif knum == 66:
-            k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
             k.apply_opt(Opt(OptOps.PADTO, 0, 128))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
           elif k.full_shape[-3:] == (32,3,3):
-            # NOTE: there's an issue with the 7 -> 8 upcast and the valid removal
-            #blacklist = [52,56,60]
-            blacklist = []
-            if knum not in blacklist and k.full_shape[-4]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
+            if k.full_shape[-4]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
             # 3x3 dwconv
             k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
             k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
             k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-3, 32))
             if k.full_shape[-4]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 4))
-            #elif k.full_shap[-4] == 7: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 7))
-            #elif k.full_shape[-4] == 14: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 2))
           elif len(k.full_shape) == 3 and k.full_shape[1] == 32:
             if k.full_shape[0]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 4))
             # weight without more

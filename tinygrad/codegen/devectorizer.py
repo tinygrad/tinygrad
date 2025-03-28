@@ -99,11 +99,6 @@ load_store_folding = PatternMatcher([
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.const_like(0)
-  if getenv("DEBUG_SIMPLIFY"):
-    print("****")
-    print("idx in: ", start_idx.render())
-    print("valid:  ", valid.render())
-    print("simp:   ", idx.render())
   if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx, valid)
 
   # wait for it to be image indexed before running simplification
@@ -166,8 +161,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   must_divide = True
   if ctx is not None and ctx.device == "DSP":
     lengths = [128,64,32,16,8,4]
-    if ls.dtype.count < 128: return None
-    #if ls.dtype.count in [192, 288, 160, 96, 544]: return None  # leave these as loads
+    if ls.dtype.count < 128: return None # leave these as loads (probably means something is broken)
     must_divide = False
   elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
     pass

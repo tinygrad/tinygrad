@@ -149,7 +149,4 @@ def expand_rewrite(sink:UOp) -> UOp:
   sink = graph_rewrite(sink, pm_move_ignore, name="move_ignore")
 
   # expand + remove surviving ignores
-  sink = graph_rewrite(sink, pm_delete_ignore+sym+expander)
-
-  return sink
-
+  return graph_rewrite(sink, pm_delete_ignore+sym+expander)
