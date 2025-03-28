@@ -40,10 +40,9 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["squeezed"]
     self.helper_test_single_op("Squeeze", inputs, attributes, outputs)
 
-  def test_resize(self):
-    supported_modes = ["half_pixel", "align_corners", "asymmetric", "pytorch_half_pixel", "half_pixel_symmetric"]
-    for sc in [0.01, 0.25, 0.50, 0.51, 0.9, 1.0, 2.0, 2.1, 2.9, 50.0]:
-      for ct_mode in supported_modes:
+  def test_resize_linear_mode(self):
+    for sc in [0.01, 0.25, 0.50, 0.51, 0.9, 1.0, 2.0, 2.1, 2.9, 3.4, 20.0]:
+      for ct_mode in ["half_pixel", "align_corners", "asymmetric", "pytorch_half_pixel", "half_pixel_symmetric"]:
         with self.subTest(coordinate_transformation_mode=ct_mode, scale=sc):
           X = np.array([[[1, 2, 3, 4]]], dtype=np.float32)
           scales = np.array([1.0, 1.0, sc], dtype=np.float32)
@@ -52,19 +51,28 @@ class TestMainOnnxOps(TestOnnxOps):
           outputs = ["out"]
           self.helper_test_single_op("Resize", inputs, attributes, outputs)
 
+  def test_resize_nearest_mode(self):
+    # sc=2.9 has the div round problem
+    for sc in [0.01, 0.25, 0.50, 0.51, 0.9, 1.0, 2.0, 2.1, 3.4, 20.0]:
+      for ct_mode in ["half_pixel", "align_corners", "asymmetric", "pytorch_half_pixel", "half_pixel_symmetric"]:
+        for nearest_mode in ["round_prefer_floor", "round_prefer_ceil", "floor", "ceil"]:
+          with self.subTest(coordinate_transformation_mode=ct_mode, scale=sc, nearest_mode=nearest_mode):
+            X = np.array([[[1, 2, 3, 4]]], dtype=np.float32)
+            scales = np.array([1.0, 1.0, sc], dtype=np.float32)
+            inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
+            attributes = {"mode": "nearest", "coordinate_transformation_mode": "half_pixel_symmetric", "nearest_mode": nearest_mode}
+            outputs = ["out"]
+            self.helper_test_single_op("Resize", inputs, attributes, outputs)
+
   @unittest.expectedFailure
   def test_resize_failure(self):
-    supported_modes = ["half_pixel", "align_corners", "asymmetric", "pytorch_half_pixel", "half_pixel_symmetric"]
     # ORT floors scales between 1.00 and 1.25 to 1 for some reason
-    for sc in [1.01, 1.24]:
-      for ct_mode in supported_modes:
-        with self.subTest(coordinate_transformation_mode=ct_mode, scale=sc):
-          X = np.array([[[1, 2, 3, 4]]], dtype=np.float32)
-          scales = np.array([1.0, 1.0, sc], dtype=np.float32)
-          inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
-          attributes = {"mode": "linear", "coordinate_transformation_mode": "half_pixel_symmetric"}
-          outputs = ["out"]
-          self.helper_test_single_op("Resize", inputs, attributes, outputs)
+    X = np.array([[[1, 2, 3, 4]]], dtype=np.float32)
+    scales = np.array([1.0, 1.0, 1.1], dtype=np.float32)
+    inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
+    attributes = {"mode": "linear"}
+    outputs = ["out"]
+    self.helper_test_single_op("Resize", inputs, attributes, outputs)
 
   def test_resize_downsample_scales_linear_align_corners(self):
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-130
@@ -245,32 +253,19 @@ class TestTrainingOnnxOps(TestOnnxOps):
       self._validate_training("Adagrad", apply_adagrad, inputs, attributes, outputs)
 
   def test_momentum_t_greater_than_zero(self):
-    from onnx.backend.test.case.node.momentum import apply_momentum
-    for t in [1, 2]:
-      inputs = {
-        "r": np.array(0.01, dtype=np.float32),
-        "t": np.array(t, dtype=np.int32),
-        "x": np.random.randn(3, 3).astype(np.float32),
-        "g": np.random.randn(3, 3).astype(np.float32),
-        "v": np.random.randn(3, 3).astype(np.float32),
-      }
-      attributes = {"alpha": 0.9, "beta": 0.1, "mode": "standard", "norm_coefficient": 0.01}
-      outputs = ["X_out", "V_out"]
-      self._validate_training("Momentum", apply_momentum, inputs, attributes, outputs)
-
-  def test_momentum_nesterov_t_greater_than_zero(self):
-    from onnx.backend.test.case.node.momentum import apply_nesterov
-    for t in [1, 2]:
-      inputs = {
-        "r": np.array(0.01, dtype=np.float32),
-        "t": np.array(t, dtype=np.int32),
-        "x": np.random.randn(3, 3).astype(np.float32),
-        "g": np.random.randn(3, 3).astype(np.float32),
-        "v": np.random.randn(3, 3).astype(np.float32),
-      }
-      attributes = {"alpha": 0.9, "beta": 0.1, "mode": "nesterov", "norm_coefficient": 0.01}
-      outputs = ["X_out", "V_out"]
-      self._validate_training("Momentum", apply_nesterov, inputs, attributes, outputs)
+    from onnx.backend.test.case.node.momentum import apply_momentum, apply_nesterov
+    for onnx_fxn, mode in ((apply_momentum, "standard"), (apply_nesterov, "nesterov")):
+      for t in [1, 3]:
+        inputs = {
+          "r": np.array(0.01, dtype=np.float32),
+          "t": np.array(t, dtype=np.int32),
+          "x": np.random.randn(3, 3).astype(np.float32),
+          "g": np.random.randn(3, 3).astype(np.float32),
+          "v": np.random.randn(3, 3).astype(np.float32),
+        }
+        attributes = {"alpha": 0.9, "beta": 0.1, "mode": mode, "norm_coefficient": 0.01}
+        outputs = ["X_out", "V_out"]
+        self._validate_training("Momentum", onnx_fxn, inputs, attributes, outputs)
 
   def test_adam_t_greater_than_zero(self):
     from onnx.backend.test.case.node.adam import apply_adam

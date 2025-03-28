@@ -458,8 +458,8 @@ def get_onnx_ops():
       elif mode == "floor": index = index.floor()
       elif mode == "ceil": index = index.ceil()
       else: raise ValueError(f"invalid {nearest_mode=}")
-      return index.cast(dtypes.int32).clip(0, input_dim-1)
-    def _apply_transformation(index: Tensor, input_dim, scale_dim, roi_dim, mode):
+      return index.clip(0, input_dim-1).int()
+    def _apply_transformation(index: Tensor, input_dim, scale_dim, mode):
       output_dim = index.shape[0]
       if mode == "half_pixel": index = (index + 0.5) / scale_dim - 0.5
       elif mode == "align_corners": index = Tensor(0).reshape(1) if output_dim == 1 else index * (input_dim - 1) / (output_dim - 1)
@@ -477,27 +477,24 @@ def get_onnx_ops():
     X = X.permute(*perm)
 
     input_shape = cast(tuple[int, ...], X.shape[2:])
-    if scales is not None: assert all(sc==1 for sc in scales[:-len(input_shape)]), "don't support resizing batch_size dim or channel dim"
-    if sizes is not None: assert tuple(sizes[:-2]) == tuple(X.shape[X.ndim-len(sizes):-2]),  "don't support resizing batch_size dim or channel dim"
+    if scales is not None: assert all(sc==1 for sc in scales[:-len(input_shape)]), "resizing batch_size dim or channel dim not supported"
+    if sizes is not None: assert tuple(sizes[:-2]) == tuple(X.shape[X.ndim-len(sizes):-2]),  "resizing batch_size dim or channel dim not supported"
     assert (scales is not None) ^ (sizes is not None), "only provide one of `scales` or `sizes`"
 
     scales, sizes = (None if scales is None else scales[-len(input_shape):]), (None if sizes is None else sizes[-len(input_shape):])
     if sizes is not None:
       if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
         scale_fxn = min if keep_aspect_ratio_policy == "not_larger" else max
-        scales = [scale_fxn([sizes[i] / input_shape[i] for i in range(len(input_shape)) if i+2 in axes])] * 2
-        sizes = [int((scales[0] * input_shape[i]) + 0.5) if i+2 in axes else input_shape[i] for i in range(X.ndim-2)]
-      else:
-        scales = [size / input_shape for size, input_shape in zip(sizes, input_shape)]
-    else:
-      sizes = [int(sc*sh) for sc, sh in zip(scales, input_shape)]
-    regions = [[st, ed] for st, ed in zip(roi, roi[len(roi)//2:])] if isinstance(roi, list) and roi else [[0.0, 0.0]] * (X.ndim-2)
+        scale = scale_fxn(sz / sh for sz,sh in zip(sizes, input_shape))
+        sizes, scales = [int(scale * sh + 0.5) for sh in input_shape], [scale]*len(input_shape)
+      else: scales = [sz / sh for sz, sh in zip(sizes, input_shape)]
+    else: sizes = [int(sc * sh) for sc, sh in zip(scales, input_shape)]
 
     # NOTE: this transformation makes it so that we can't just call Tensor.interpolate
     # in Tensor.interpolate, we use indexes without any transformation
     indexes = []
-    for shape, size, scale, region in zip(input_shape, sizes, scales, regions):
-      indexes.append(_apply_transformation(Tensor.arange(size), shape, scale, region, coordinate_transformation_mode))
+    for shape, size, scale in zip(input_shape, sizes, scales):
+      indexes.append(_apply_transformation(Tensor.arange(size), shape, scale, coordinate_transformation_mode))
 
     if mode == "nearest":
       indexes = [_apply_nearest_mode(index, shape, nearest_mode) for (index, shape) in zip(indexes, input_shape)]
