@@ -36,7 +36,7 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   prg = k.to_program()
   assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
-  ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in sched[-1].bufs], sched[-1].metadata)
+  ei = ExecItem(CompiledRunner(replace(prg, device=Device.DEFAULT)), [x.ensure_allocated() for x in sched[-1].bufs], sched[-1].metadata)
   ei.run(wait=True)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
