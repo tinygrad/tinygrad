@@ -2218,7 +2218,6 @@ def test_lds_helper(opts:list[Opt], expected_bufs, N=16, M=16, K=16):
 class TestLDS(unittest.TestCase):
   # test invalid args
   # test no reshape opt after lds
-  # test lds 0 naive
   # test lds 0 with opts extensive
   # test lds 0 with TC
   # test lds 0 with TC3
@@ -2237,11 +2236,13 @@ class TestLDS(unittest.TestCase):
     test_lds_helper(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None)], expected_bufs=[(1,1),(1,16)])
     test_lds_helper(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None), Opt(OptOps.LDS, 2, None)], expected_bufs=[(0,16),(1,16),(2,16)])
 
+  # unroll doesn't change local output buffer size
   def test_lds_output_unroll(self):
     for sz in [0,2,4,8]:
       test_lds_helper(opts=[Opt(OptOps.UNROLL, 0, sz), Opt(OptOps.LDS, 0, None)], expected_bufs=[(0,1)])
 
   def test_lds_output_local(self):
+    # if only locals are applied, local buffer size for output should be prod(locals)
     basic_local_opts = [Opt(OptOps.LOCAL, 0, 2),
                         Opt(OptOps.LDS, 0, None)]
     test_lds_helper(opts=basic_local_opts, expected_bufs=[(0,2)])
@@ -2260,6 +2261,52 @@ class TestLDS(unittest.TestCase):
                        Opt(OptOps.LOCAL, 0, 16),
                        Opt(OptOps.LDS, 0, None)]
     test_lds_helper(opts=full_local_opts, expected_bufs=[(0,256)])
+
+  def test_lds_output_upcast(self):
+    # if only upcasts are applied, local buffer size for output should be prod(locals)
+    basic_upcast_opts = [Opt(OptOps.UPCAST, 0, 2),
+                        Opt(OptOps.LDS, 0, None)]
+    test_lds_helper(opts=basic_upcast_opts, expected_bufs=[(0,2)])
+
+    multi_upcast_opts = [Opt(OptOps.UPCAST, 0, 2),
+                        Opt(OptOps.UPCAST, 0, 8),
+                        Opt(OptOps.LDS, 0, None)]
+    test_lds_helper(opts=multi_upcast_opts, expected_bufs=[(0,16)])
+
+    multi_axis_upcast_opts = [Opt(OptOps.UPCAST, 1, 2),
+                             Opt(OptOps.UPCAST, 0, 2),
+                             Opt(OptOps.LDS, 0, None)]
+    test_lds_helper(opts=multi_axis_upcast_opts, expected_bufs=[(0,4)])
+
+    full_upcast_opts = [Opt(OptOps.UPCAST, 1, 16),
+                       Opt(OptOps.UPCAST, 0, 16),
+                       Opt(OptOps.LDS, 0, None)]
+    test_lds_helper(opts=full_upcast_opts, expected_bufs=[(0,256)])
+
+  def test_lds_output_local_upcast(self):
+    # for locals and upcasts size is no longer product as upcast can be applied to local dimensions
+    # if an upcast is applied to a local dimension, then local output buffer size remains unchanged
+    # local buffer size for output is prod(locals) * prod(upcast for global)
+    opts = [Opt(OptOps.LOCAL, 0, 2),
+            Opt(OptOps.UPCAST, 1, 2),
+            Opt(OptOps.LDS, 0, None)]
+    test_lds_helper(opts=opts, expected_bufs=[(0,4)])
+
+    opts = [Opt(OptOps.LOCAL, 0, 2),
+            Opt(OptOps.UPCAST, 0, 4),
+            Opt(OptOps.LOCAL, 1, 8),
+            Opt(OptOps.LDS, 0, None)]
+    test_lds_helper(opts=opts, expected_bufs=[(0,64)])
+
+    opts = [Opt(OptOps.LOCAL, 0, 16),
+            Opt(OptOps.UPCAST, 1, 2),
+            Opt(OptOps.LDS, 0, None)]
+    test_lds_helper(opts=opts, expected_bufs=[(0,16)])
+
+    opts = [Opt(OptOps.UPCAST, 0, 16),
+            Opt(OptOps.UPCAST, 0, 16),
+            Opt(OptOps.LDS, 0, None)]
+    test_lds_helper(opts=opts, expected_bufs=[(0,256)])
 
 
 if __name__ == "__main__":
