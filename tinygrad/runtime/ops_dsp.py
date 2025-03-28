@@ -188,9 +188,24 @@ def add_to_mul(c:UOp, x:UOp):
 def prefetch_l1(ld:UOp, idx:UOp):
   if ld.src[-1].op is Ops.CUSTOM: return None
   ranges = sorted([x for x in ld.src[0].src[0].toposort if x.op is Ops.RANGE], key=lambda x: x.arg)
-  x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], idx.src[1]+UOp.const(dtypes.int, ld.dtype.count*2),), arg="__builtin_HEXAGON_Y2_dcfetch({0}+{1});")
-  x2 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], idx.src[1].substitute({ranges[-1]: ranges[-1].src[0]}),), arg="__builtin_HEXAGON_Y2_dcfetch({0}+{1});")
+  x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], idx.src[1]+UOp.const(dtypes.int, ld.dtype.count*2)), arg="__builtin_HEXAGON_Y2_dcfetch({0}+{1});")
+  x2 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], idx.src[1].substitute({ranges[-1]: ranges[-1].src[0]})), arg="__builtin_HEXAGON_Y2_dcfetch({0}+{1});")
   return ld.replace(src=ld.src+(x1, x2))
+
+def prefetch_l2(ld:UOp, idx:UOp):
+  if ld.src[-1].op is Ops.CUSTOM: return None
+  ranges = sorted([x for x in ld.src[0].src[0].toposort if x.op is Ops.RANGE], key=lambda x: x.arg)
+  if len(ranges):
+    nidx = idx.src[1]
+    if nidx.op is Ops.ADD and nidx.src[1].op is Ops.CONST: nidx = nidx.src[0]
+    nlen_uop = (nidx.substitute({ranges[-1]: ranges[-1].src[1]}) - nidx.substitute({ranges[-1]: ranges[-1].src[0]})).simplify()
+    if nlen_uop.op is Ops.CONST:
+      nlen = min(8192, nlen_uop.arg)
+    else:
+      nlen = 8192
+    nidx = nidx.substitute({ranges[-1]: ranges[-1].src[0]})
+    x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], nidx, UOp.const(dtypes.int, nlen)), arg="__builtin_HEXAGON_Y4_l2fetch({0}+{1}, {2});")
+    return ld.replace(src=ld.src+(x1,))
 
 def vectorize_shuffle(vec:UOp):
   if not all(s.op in {Ops.GEP, Ops.CONST} for s in vec.src): return None
@@ -254,8 +269,11 @@ def vectorize_shuffle(vec:UOp):
   return None
 
 dsp_pm_late = PatternMatcher([
-  # prefetch L1 (breaks the index check!)
+  # prefetch L1
   (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld"), prefetch_l1),
+
+  # prefetch L2
+  (UPat(Ops.LOAD, dtype=dtypes.uchar.vec(128), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld"), prefetch_l2),
 
   # 64 -> 128
   #(UPat(Ops.LOAD, dtype=dtypes.uchar.vec(64), src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, name="idx"),)),)),
