@@ -13,7 +13,7 @@ class CPUGraph(GraphRunner):
     if not issubclass(type(device.renderer), ClangRenderer) and not isinstance(device.renderer, ClangRenderer): raise GraphException
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 
-    self.base_bufs = dedup(b.base for ji in jit_cache for b in ji.bufs if b not in input_rawbuffers)
+    self.base_bufs = dedup(b.base for ji in jit_cache for b in ji.bufs if b is not None and b not in input_rawbuffers)
     self.base_rawbufs = [b._buf for b in self.base_bufs]
 
     targs = [(f"arg{i}", (x.dtype.ptr(), False)) for i,x in enumerate(input_rawbuffers)] + \
@@ -27,15 +27,15 @@ class CPUGraph(GraphRunner):
     batched = ["void batched("+','.join([f"{device.renderer.render_dtype(x[1][0])} {x[0]}" for x in targs])+") {"]
     for i, ji in enumerate(jit_cache):
       args = [render_arg(buf) for buf in ji.bufs] + [x.expr for x in cast(CompiledRunner, ji.prg).p.vars]
-      batched.append(f"  {to_function_name(ji.prg.p.name)}({','.join(args)});")
+      batched.append(f"  {to_function_name(cast(CompiledRunner, ji.prg).p.name)}({','.join(args)});")
     batched.append("}")
 
-    prerendered = [device.renderer._render(ji.prg.p.uops) for i,ji in enumerate(jit_cache)]
-    rendered_funcs = dedup(device.renderer._render_body(prerendered[i][0], *prerendered[i][1:], ji.prg.p.uops) for i,ji in enumerate(jit_cache))
+    prep = [device.renderer._render(cast(CompiledRunner, ji.prg).p.uops) for i,ji in enumerate(jit_cache)]
+    funcs = dedup(device.renderer._render_body(prep[i][0], *prep[i][1:], cast(CompiledRunner, ji.prg).p.uops) for i,ji in enumerate(jit_cache))
 
-    defines = '\n'.join(set(itertools.chain.from_iterable(device.renderer._render_defines(ji.prg.p.uops) for ji in jit_cache)))
+    defines = '\n'.join(set(itertools.chain.from_iterable(device.renderer._render_defines(cast(CompiledRunner, ji.prg).p.uops) for ji in jit_cache)))
     entry = device.renderer._render_entry("batched", targs)
-    code = defines + '\n' + '\n'.join([''.join(f) for f in rendered_funcs]) + '\n'.join(batched) + '\n' + entry
+    code = defines + '\n' + '\n'.join([''.join(f) for f in funcs]) + '\n'.join(batched) + '\n' + entry
 
     if DEBUG >= 4: print(code)
     self.clprg = device.runtime("batched", device.compiler.compile_cached(code))
