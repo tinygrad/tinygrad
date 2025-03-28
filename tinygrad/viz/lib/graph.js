@@ -9,7 +9,12 @@ function intersectRect(r1, r2) {
 }
 
 const allWorkers = [];
-window.renderGraph = function(graph, additions, name) {
+let workerUrl = null;
+window.renderGraph = async function(graph, additions, name) {
+  if (workerUrl == null) {
+    const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/lib/worker.js"].map(u => fetch(u)));
+    workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
+  }
   while (allWorkers.length) {
     const { worker, timeout } = allWorkers.pop();
     worker.terminate();
@@ -22,7 +27,7 @@ window.renderGraph = function(graph, additions, name) {
   d3.select("#bars").html("");
 
   // ** start calculating the new layout (non-blocking)
-  worker = new Worker("/lib/worker.js");
+  worker = new Worker(workerUrl);
   const progressMessage = document.querySelector(".progress-message");
   const timeout = setTimeout(() => {
     progressMessage.style.display = "block";
@@ -58,9 +63,6 @@ window.renderGraph = function(graph, additions, name) {
       points.push(intersectRect(g.node(e.w), points[points.length-1]));
       return line(points);
     }).attr("marker-end", "url(#arrowhead)");
-    // +arrow heads
-    d3.select("#render").append("defs").append("marker").attr("id", "arrowhead").attr("viewBox", "0 -5 10 10").attr("refX", 10).attr("refY", 0)
-      .attr("markerWidth", 6).attr("markerHeight", 6).attr("orient", "auto").append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", "#4a4b57");
   };
 }
 

@@ -713,7 +713,7 @@ class UPat(MathTrait):
   def __init__(self, op:Optional[Union[Ops, tuple[Ops, ...], set[Ops]]]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None,
                src:Optional[Union[tuple[UPat, ...], list[UPat], UPat]]=None, arg:Any=None,
                name:Optional[str]=None, allow_any_len:bool=False, location=None, custom_early_reject:Optional[set[Ops]]=None):
-    assert op is None or isinstance(op, Ops) or isinstance(op, tuple) or isinstance(op, set), "op must be Ops or tuple of Ops"
+    assert op is None or isinstance(op, (Ops, tuple, set)), "op must be Ops or tuple of Ops"
     self.op: Optional[tuple[Ops, ...]] = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
     self.dtype: Optional[tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
@@ -840,8 +840,8 @@ class TrackedGraphRewrite:
   loc: tuple[str, int]                                                                       # location that called graph_rewrite
   sink: UOp                                                                                  # the sink input to graph_rewrite
   bottom_up: bool
-  matches: list[tuple[UOp, UOp, UPat]] = field(default_factory=list)                         # before+after of all the matches
-  name: Optional[str] = None
+  matches: list[tuple[UOp, UOp, UPat]]                                                       # before+after of all the matches
+  name: str|None
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, int] = {}
@@ -857,6 +857,18 @@ def track_rewrites(named=False, name_fxn:Callable|None=None):
       return ret
     return __wrapper
   return _decorator
+
+active_rewrites:list[TrackedGraphRewrite] = []
+def track_matches(func):
+  def _track_func(*args, **kwargs):
+    if tracking:=(TRACK_MATCH_STATS >= 2 and tracked_ctxs):
+      loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
+      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0], kwargs.get("bottom_up", False), [], kwargs.get("name", None)))
+      active_rewrites.append(ctx)
+    ret = func(*args, **kwargs)
+    if tracking: active_rewrites.pop()
+    return ret
+  return _track_func
 
 class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
@@ -874,7 +886,7 @@ class TrackedPatternMatcher(PatternMatcher):
           match_stats[p][0] += 1
           match_stats[p][3] += (et:=time.perf_counter()-st)
           if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and len(tracked_ctxs) != 0: tracked_ctxs[-1][-1].matches.append((uop, ret, p))
+          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((uop, ret, p))
           return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -939,15 +951,13 @@ class RewriteContext:
     self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
     return ret
 
+@track_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> UOp:
-  if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up, name=name))
   rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
   return rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.top_down_rewrite(sink)
 
+@track_matches
 def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> dict[UOp, UOp]:
-  if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up, name=name))
   rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
   return {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
 
