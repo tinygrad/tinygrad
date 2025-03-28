@@ -2241,6 +2241,7 @@ class TestLDS(unittest.TestCase):
     for sz in [0,2,4,8]:
       helper_lds_allclose(opts=[Opt(OptOps.UNROLL, 0, sz), Opt(OptOps.LDS, 0, None)], expected_bufs=[(0,1)])
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_lds_output_local(self):
     # if only locals are applied, local buffer size for output should be prod(locals)
 
@@ -2285,6 +2286,7 @@ class TestLDS(unittest.TestCase):
                        Opt(OptOps.LDS, 0, None)]
     helper_lds_allclose(opts=full_upcast_opts, expected_bufs=[(0,256)])
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_lds_output_local_upcast(self):
     # for locals and upcasts size is no longer product as upcast can be applied to local dimensions
     # if an upcast is applied to a local dimension, then local output buffer size remains unchanged
