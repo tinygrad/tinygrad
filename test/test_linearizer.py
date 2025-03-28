@@ -2242,24 +2242,24 @@ class TestLDS(unittest.TestCase):
       test_lds_helper(opts=[Opt(OptOps.UNROLL, 0, sz), Opt(OptOps.LDS, 0, None)], expected_bufs=[(0,1)])
 
   def test_lds_output_local(self):
-    opts = [Opt(OptOps.LOCAL, 0, 2),
-            Opt(OptOps.LDS, 0, None)]
-    test_lds_helper(opts=opts, expected_bufs=[(0,2)]) # basic local
+    basic_local_opts = [Opt(OptOps.LOCAL, 0, 2),
+                        Opt(OptOps.LDS, 0, None)]
+    test_lds_helper(opts=basic_local_opts, expected_bufs=[(0,2)])
 
-    opts = [Opt(OptOps.LOCAL, 0, 2),
-            Opt(OptOps.LOCAL, 0, 8),
-            Opt(OptOps.LDS, 0, None)]
-    test_lds_helper(opts=opts, expected_bufs=[(0,16)]) # multi local
+    multi_local_opts = [Opt(OptOps.LOCAL, 0, 2),
+                        Opt(OptOps.LOCAL, 0, 8),
+                        Opt(OptOps.LDS, 0, None)]
+    test_lds_helper(opts=multi_local_opts, expected_bufs=[(0,16)])
 
-    opts = [Opt(OptOps.LOCAL, 1, 2),
-            Opt(OptOps.LOCAL, 0, 2),
-            Opt(OptOps.LDS, 0, None)]
-    test_lds_helper(opts=opts, expected_bufs=[(0,4)]) # multi axis
+    multi_axis_local_opts = [Opt(OptOps.LOCAL, 1, 2),
+                             Opt(OptOps.LOCAL, 0, 2),
+                             Opt(OptOps.LDS, 0, None)]
+    test_lds_helper(opts=multi_axis_local_opts, expected_bufs=[(0,4)])
 
-    opts = [Opt(OptOps.LOCAL, 0, 16),
-            Opt(OptOps.LOCAL, 0, 16),
-            Opt(OptOps.LDS, 0, None)]
-    test_lds_helper(opts=opts, expected_bufs=[(0,256)]) # full
+    full_local_opts = [Opt(OptOps.LOCAL, 0, 16),
+                       Opt(OptOps.LOCAL, 0, 16),
+                       Opt(OptOps.LDS, 0, None)]
+    test_lds_helper(opts=full_local_opts, expected_bufs=[(0,256)])
 
 
 if __name__ == "__main__":
