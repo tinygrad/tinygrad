@@ -63,6 +63,7 @@ if __name__ == "__main__":
           elif len(k.full_shape) == 2:
             if k.full_shape[0]%128 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
           elif len(k.full_shape) == 1:
+            if k.full_shape[0]%128 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 128))
             for sz in [128,64,32]:
               if k.full_shape[0]%sz == 0:
                 k.apply_opt(Opt(OptOps.UPCAST, 0, sz))
