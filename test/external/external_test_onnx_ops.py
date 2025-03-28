@@ -206,8 +206,8 @@ class TestTrainingOnnxOps(TestOnnxOps):
   # NOTE: ORT doesn't actually support training ops on cpu so we test using functions provided by onnx
   DOMAIN = AI_ONNX_PREVIEW_TRAINING_DOMAIN
   def _validate_training(self, op:str, onnx_fxn, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str]):
-    opts.pop("mode", None)
     model = self.helper_build_model(op, inps, opts, outs)
+    opts.pop("mode", None)
     runner = OnnxRunner(model)
     tiny_out = runner(inps)
     onnx_out = onnx_fxn(**inps, **opts)

@@ -40,7 +40,7 @@ class TinygradBackend(Backend):
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
-# BUG: we don't match ONNX and ORT due to rounding after div inaccuracy with floats
+# BUG: we don't match ONNX and ORT due to rounding after div (div causes slight numerical inaccuracy)
 backend_test.exclude('test_dynamicquantizelinear_cpu')
 backend_test.exclude('test_dynamicquantizelinear_expanded_cpu')
 

@@ -281,7 +281,7 @@ def get_onnx_ops():
   # ***** Unary Ops (math) *****
   def Not(x:Tensor): return x.logical_not()
   def Clip(x: Tensor, min:Tensor|None=None, max:Tensor|None=None):
-    return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max).cast(x.dtype)
+    return x.clip(dtypes.min(x.dtype) if min is None else min, dtypes.max(x.dtype) if max is None else max)
 
   # ***** Unary Ops (activation) *****
   def Softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
@@ -358,7 +358,7 @@ def get_onnx_ops():
   def Flatten(x:Tensor, axis:int=1): return x.reshape(prod(x.shape[0:axis]), -1)
   def Expand(x:Tensor, shape:list[int]): return x.expand(_broadcast_shape(x.shape, tuple(shape)))
   def Shrink(x:Tensor, bias:float=0.0, lambd:float=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
-  def Transpose(x:Tensor, perm:list[int]|None=None): return x.permute(order=list(range(x.ndim)[::-1]) if perm is None else perm)
+  def Transpose(x:Tensor, perm:list[int]|None=None): return x.permute(order=list(range(x.ndim-1, -1, -1)) if perm is None else perm)
 
   # TODO: add test for when axes is None
   def Squeeze(data:Tensor, axes:list[int]|None=None):
