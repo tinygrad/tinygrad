@@ -620,7 +620,7 @@ class Kernel:
               local_shape = tuple(1 if st == 0 or i < wd or (i >= self.first_reduce and i < tcd) else src_st.shape[i] \
                                   for i,st in enumerate(src_st.real_strides()))
               st = store_st = ShapeTracker.from_shape(local_shape)
-              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), f"temp{i}")
+              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), i*7)
               if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
               local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
               srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
@@ -690,18 +690,18 @@ class Kernel:
           # amd  => shape (256, 256, 16, 16, 256, 16) strides (65536, 0, 1, 4096, 16, 0),
           # noop => shape (256, 256, 16, 16, 256, 16) strides (65536, 0, 0, 4096, 16, 1)
           # this permutes what each thread is responsible for storing and loading
-          perm = (0,1,5,3,4,2)
+          perm = (0,1,5,3,4,2,6,7)
           store_st = store_st.permute(perm)
           global_st = global_st.permute(perm)
 
           # this permutes local layout
-          store_st = store_st.permute((0,1,3,2,4,5))
-          load_st = load_st.permute((0,1,2,5,4,3))
+          # store_st = store_st.permute((0,1,3,2,4,5,6,7))
+          # load_st = load_st.permute((0,1,2,5,4,3,6,7))
         if buf.arg == 2:
           print("permuting buffer 2")
           # amd  => shape (256, 256, 16, 16, 256, 16) strides (0, 16, 1, 4096, 65536, 0)
           # noop => shape (256, 256, 16, 16, 256, 16) strides (0, 16, 1, 0, 65536, 4096)
-          perm = (0,1,2,5,4,3)
+          perm = (0,1,2,5,4,3,6,7)
           store_st = store_st.permute(perm)
           global_st = global_st.permute(perm)
 
