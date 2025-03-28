@@ -64,6 +64,6 @@ def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ign
 
 def memory_planner(schedule:list[ScheduleItem]) -> list[ScheduleItem]:
   # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
-  assigned = _internal_memory_planner([si.bufs for si in schedule],
+  assigned = _internal_memory_planner([list(si.bufs) for si in schedule],
                                       noopt_buffers={b for si in schedule if si.ast.op is not Ops.SINK for b in si.bufs})
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs), si.metadata) for si in schedule]
