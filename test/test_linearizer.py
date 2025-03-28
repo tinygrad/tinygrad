@@ -29,6 +29,7 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   a, b = Tensor.rand(M, K, dtype=dtype_in), Tensor.rand(K, N, dtype=dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, dtype=dtype_out)
+  if dtype_in == dtypes.bfloat16: r = r.float()
   realized_ast, bufs = helper_realized_ast(r)
   k = Kernel(realized_ast)
   k.apply_tensor_cores(1, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
@@ -39,7 +40,8 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
   else: tc_atol, tc_rtol = 5e-3, 1e-4
-  np.testing.assert_allclose(r.numpy(), np_a @ np_b, atol=tc_atol, rtol=tc_rtol)
+  c = bufs[0].numpy().reshape((N,M))
+  np.testing.assert_allclose(c, np_a @ np_b, atol=tc_atol, rtol=tc_rtol)
 
 def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
                                          ensure_triggered:bool=True):
