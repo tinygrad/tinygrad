@@ -666,11 +666,6 @@ class Kernel:
       if (k := ctx[0]).lds[buf.arg]:
         global_st: ShapeTracker = global_access.src[1].arg
         gd, fr, fu = k.global_dims, k.first_reduce, k.first_upcast
-        # local shapetracker
-        # size 1 if it is global dimension
-        # output size if it is local dimension
-        # size 1 if it is reduce dimension
-        # size n if stride in upcast != 1
         shape=[]
         for i, st in enumerate(global_st.real_strides(True)):
           if i < gd: shape.append(1)
@@ -679,35 +674,7 @@ class Kernel:
           elif i < fu: shape.append(1)
           elif st != 0: shape.append(cast(int, global_st.shape[i]))
           else: shape.append(1)
-        local_shape = tuple(shape) # amd_matmul style
-        # local_shape_noop = tuple(1 if st == 0 or i < gd or (i >= fr and i < fu) else global_st.shape[i] for i,st in enumerate(global_st.real_strides(True)))
-        # print(f"{local_shape_noop=} {local_shape=}")
-        store_st = load_st = ShapeTracker.from_shape(local_shape)
-
-        perm = tuple(range(len(local_shape)))
-        if buf.arg == 1:
-          print("permuting buffer 1")
-          # amd  => shape (256, 256, 16, 16, 256, 16) strides (65536, 0, 1, 4096, 16, 0),
-          # noop => shape (256, 256, 16, 16, 256, 16) strides (65536, 0, 0, 4096, 16, 1)
-          # this permutes what each thread is responsible for storing and loading
-          perm = (0,1,5,3,4,2,6,7)
-          store_st = store_st.permute(perm)
-          global_st = global_st.permute(perm)
-
-          # this permutes local layout
-          # store_st = store_st.permute((0,1,3,2,4,5,6,7))
-          # load_st = load_st.permute((0,1,2,5,4,3,6,7))
-        if buf.arg == 2:
-          print("permuting buffer 2")
-          # amd  => shape (256, 256, 16, 16, 256, 16) strides (0, 16, 1, 4096, 65536, 0)
-          # noop => shape (256, 256, 16, 16, 256, 16) strides (0, 16, 1, 0, 65536, 4096)
-          perm = (0,1,2,5,4,3,6,7)
-          store_st = store_st.permute(perm)
-          global_st = global_st.permute(perm)
-
-          # perm_2 = (0,1,3,2,4,5)
-          # store_st = store_st.permute((0,1,3,2,4,5))
-          # load_st = load_st.permute((0,1,2,5,4,3))
+        store_st = load_st = ShapeTracker.from_shape(tuple(shape))
 
         local_buffer = UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(size=store_st.real_size(), local=True), (), buf.arg)
         if global_access.op == Ops.LOAD:
