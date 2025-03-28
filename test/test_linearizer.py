@@ -2231,44 +2231,23 @@ class TestLDS(unittest.TestCase):
     assert len(local_buffers) == 1 and (buf:=local_buffers[0]).arg == 0 and buf.dtype == dtypes.float.ptr(1, local=True)
 
   def test_lds_0_locals(self):
-    for l1 in [0,2,4,16]:
-      for l0 in [0,2,4,16]:
-        opts: list[Opt] = []
-        if l1 != 0: opts = opts + [Opt(OptOps.LOCAL, 1, l1)]
-        if l0 != 0: opts = opts + [Opt(OptOps.LOCAL, 0, l0)]
-        opts = opts + [Opt(OptOps.LDS, 0, None)]
-        uops = test_lds_helper(opts)
-        local_buffers = [uop for uop in uops if uop.op is Ops.DEFINE_LOCAL]
-        expected_size = max(1, l0) * max(1, l1)
-        assert len(local_buffers) == 1 and (buf:=local_buffers[0]).arg == 0 and buf.dtype == dtypes.float.ptr(expected_size, local=True)
-
-  def test_lds_0_locals_grok(self):
-    local_sizes = [0, 2, 4, 16]
+    local_sizes = [0, 2, 4, 8, 16]
 
     for l1 in local_sizes:
       for l0 in local_sizes:
         opts: list[Opt] = []
-
-        if l1 != 0:
-          opts.append(Opt(OptOps.LOCAL, 1, l1))
-        if l0 != 0:
-          opts.append(Opt(OptOps.LOCAL, 0, l0))
-
+        if l1 != 0: opts.append(Opt(OptOps.LOCAL, 1, l1))
+        if l0 != 0: opts.append(Opt(OptOps.LOCAL, 0, l0))
         opts.append(Opt(OptOps.LDS, 0, None))
 
         uops = test_lds_helper(opts)
-
         local_buffers = [uop for uop in uops if uop.op is Ops.DEFINE_LOCAL]
 
-        expected_size = max(1, l0) * max(1, l1)
-
-        assert len(local_buffers) == 1, f"Expected exactly 1 local buffer, got {len(local_buffers)} for l0={l0}, l1={l1}"
-
+        assert len(local_buffers) == 1, f"Expected exactly 1 local buffer, got {len(local_buffers)}"
         buf = local_buffers[0]
-        assert buf.arg == 0, f"Expected buffer argument index 0, got {buf.arg} for l0={l0}, l1={l1}"
-
-        expected_dtype = dtypes.float.ptr(expected_size, local=True)
-        assert buf.dtype == expected_dtype, f"Expected dtype {expected_dtype}, got {buf.dtype} for l0={l0}, l1={l1}"
+        assert buf.arg == 0, f"Expected buffer argument index 0, got {buf.arg}"
+        expected_dtype = dtypes.float.ptr(max(1, l0) * max(1, l1), local=True)
+        assert buf.dtype == expected_dtype, f"Expected buffer dtype {expected_dtype}, got {buf.dtype} for {l0=}, {l1=}"
 
 
 if __name__ == "__main__":
