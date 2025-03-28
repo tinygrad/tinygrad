@@ -360,7 +360,6 @@ def get_onnx_ops():
   def Shrink(x:Tensor, bias:float=0.0, lambd:float=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
   def Transpose(x:Tensor, perm:list[int]|None=None): return x.permute(order=list(range(x.ndim-1, -1, -1)) if perm is None else perm)
 
-  # TODO: add test for when axes is None
   def Squeeze(data:Tensor, axes:list[int]|None=None):
     return data.squeeze() if axes is None else functools.reduce(lambda d, dim: d.squeeze(dim), sorted(axes, reverse=True), data)
   def Unsqueeze(data:Tensor, axes:list[int]): return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(axes), data)
@@ -463,12 +462,10 @@ def get_onnx_ops():
     def _apply_transformation(index: Tensor, input_dim, scale_dim, roi_dim, mode):
       output_dim = index.shape[0]
       if mode == "half_pixel": index = (index + 0.5) / scale_dim - 0.5
-      elif mode == "align_corners":
-        if output_dim == 1: index = Tensor([]) if output_dim < 1 else Tensor([0])
-        else: index = index * (input_dim - 1) / (output_dim - 1)
+      elif mode == "align_corners": index = Tensor(0).reshape(1) if output_dim == 1 else index * (input_dim - 1) / (output_dim - 1)
       elif mode == "asymmetric": index = index / scale_dim
-      elif mode == "pytorch_half_pixel": index = (index + 0.5) / scale_dim - 0.5 if output_dim != 1 else Tensor([-0.5])
-      elif mode == "half_pixel_symmetric": index = (input_dim / 2) * (1-(output_dim / (scale_dim * input_dim))) + (index + 0.5) / scale_dim - 0.5
+      elif mode == "pytorch_half_pixel": index = Tensor(-0.5).reshape(1) if output_dim == 1 else (index + 0.5) / scale_dim - 0.5
+      elif mode == "half_pixel_symmetric": index = (input_dim / 2) * (1 - (output_dim / (scale_dim * input_dim))) + (index + 0.5) / scale_dim - 0.5
       else: raise ValueError(f"invalid {coordinate_transformation_mode=}")
       return index.clip(0, input_dim-1)
 

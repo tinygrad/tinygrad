@@ -40,15 +40,32 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["squeezed"]
     self.helper_test_single_op("Squeeze", inputs, attributes, outputs)
 
-  # division innacuracy is sensitive to rounding
+  def test_resize(self):
+    supported_modes = ["half_pixel", "align_corners", "asymmetric", "pytorch_half_pixel", "half_pixel_symmetric"]
+    for sc in [0.01, 0.25, 0.50, 0.51, 0.9, 1.0, 2.0, 2.1, 2.9, 50.0]:
+      for ct_mode in supported_modes:
+        with self.subTest(coordinate_transformation_mode=ct_mode, scale=sc):
+          X = np.array([[[1, 2, 3, 4]]], dtype=np.float32)
+          scales = np.array([1.0, 1.0, sc], dtype=np.float32)
+          inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
+          attributes = {"mode": "linear", "coordinate_transformation_mode": "half_pixel_symmetric"}
+          outputs = ["out"]
+          self.helper_test_single_op("Resize", inputs, attributes, outputs)
+
+  # TODO: fix
   @unittest.expectedFailure
   def test_resize_failure(self):
-    X = np.array([[[1, 2, 3, 4]]], dtype=np.float32)
-    scales = np.array([1.0, 1.0, 5.0], dtype=np.float32)
-    inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
-    attributes = {"mode": "nearest", "coordinate_transformation_mode": "half_pixel", "nearest_mode": "ceil"}
-    outputs = ["out"]
-    self.helper_test_single_op("Resize", inputs, attributes, outputs)
+    supported_modes = ["half_pixel", "align_corners", "asymmetric", "pytorch_half_pixel", "half_pixel_symmetric"]
+    # scales between 1.00 and 1.25 are floored to 1 for some reason
+    for sc in [1.01, 1.24]:
+      for ct_mode in supported_modes:
+        with self.subTest(coordinate_transformation_mode=ct_mode, scale=sc):
+          X = np.array([[[1, 2, 3, 4]]], dtype=np.float32)
+          scales = np.array([1.0, 1.0, sc], dtype=np.float32)
+          inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
+          attributes = {"mode": "linear", "coordinate_transformation_mode": "half_pixel_symmetric"}
+          outputs = ["out"]
+          self.helper_test_single_op("Resize", inputs, attributes, outputs)
 
   def test_resize_downsample_scales_linear_align_corners(self):
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-130
