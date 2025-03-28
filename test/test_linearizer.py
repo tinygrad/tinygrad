@@ -2199,9 +2199,19 @@ class TestKernelOpts(unittest.TestCase):
     ]
     helper_linearizer_opt(r, [x[0] for x in opts_shapes], color_sizes=[x[1] for x in opts_shapes])
 
-class TestLDS(unittest.TestCase):
+def test_lds_helper(opts:list[Opt], N:int=16, M:int=16, K:int=16) -> list[UOp]:
+  a, b = Tensor.rand(N, K), Tensor.rand(K, N)
+  realized_ast, bufs = helper_realized_ast(a @ b)
+  k = Kernel(realized_ast)
+  for opt in opts:
+    k.apply_opt(opt)
+  prg = CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
+  prg.exec(bufs)
+  np.testing.assert_allclose(bufs[0].numpy().reshape((N,N)), a.numpy() @ b.numpy())
+  return k.uops
 
-  # test lds args
+class TestLDS(unittest.TestCase):
+  # test invalid args
   # test no reshape opt after lds
   # test lds 0 naive
   # test lds 0 with opts extensive
@@ -2209,91 +2219,57 @@ class TestLDS(unittest.TestCase):
   # test lds 0 with TC3
   # test lds 0 with TC padded
 
-  def test_lds_args(self):
-    N = 16
-    a, b = Tensor.rand(N, N), Tensor.rand(N, N)
-    realized_ast, _ = helper_realized_ast(a @ b)
-    valid_opts = [Opt(OptOps.LDS, 0, None),
-                  Opt(OptOps.LDS, 1, None),
-                  Opt(OptOps.LDS, 2, None)]
-    for opt in valid_opts:
-      k = Kernel(realized_ast)
-      k.apply_opt(opt)
-
-    invalid_opts = [Opt(OptOps.LDS, -1, None),
-                    Opt(OptOps.LDS, 3, None)]
-    for opt in invalid_opts:
-      k = Kernel(realized_ast)
-      with self.assertRaises(KernelOptError):
-        k.apply_opt(opt)
+  def test_lds_valid_args(self):
+    test_lds_helper(opts=[Opt(OptOps.LDS, 0, None)])
+    test_lds_helper(opts=[Opt(OptOps.LDS, 1, None)])
+    test_lds_helper(opts=[Opt(OptOps.LDS, 2, None)])
+    test_lds_helper(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None), Opt(OptOps.LDS, 2, None)])
 
   def test_lds_0_basic(self):
-    N = 16
-    a, b = Tensor.rand(N, N), Tensor.rand(N, N)
-    realized_ast, bufs = helper_realized_ast(a @ b)
-    k = Kernel(realized_ast)
-    k.apply_opt(Opt(OptOps.LDS, 0, None))
-    k.linearize()
-    local_buffers = [uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL]
-    assert len(local_buffers) == 1
-    local_buffer = local_buffers[0]
-    assert local_buffer.arg == 0
-    assert local_buffer.dtype == dtypes.float.ptr(1, local=True)
-    print(bufs[0].numpy())
-    np.testing.assert_allclose(bufs[0].numpy(), a.numpy() @ b.numpy())
+    uops = test_lds_helper(opts=[Opt(OptOps.LDS, 0, None)])
+    local_buffers = [uop for uop in uops if uop.op is Ops.DEFINE_LOCAL]
+    assert len(local_buffers) == 1 and (buf:=local_buffers[0]).arg == 0 and buf.dtype == dtypes.float.ptr(1, local=True)
 
-  # def test_lds_0_basic_2(self):
-  #   N = 16
-  #   a, b = Tensor.rand(N, N), Tensor.rand(N, N)
-  #   s = Tensor.schedule(a @ b)
-  #   sched = (a @ b).schedule()
-  # #   realized_ast = sched[-1].ast
-  #   run_schedule(s[:-1])
-  #   assert s[-1].ast.op is Ops.SINK, f"expects a SINK {s[-1]}"
-  #   realized_ast = s[-1].ast
-    
-  #   k = Kernel(realized_ast)
-  #   k.apply_opt(Opt(OptOps.LDS, 0, None))
-  #   k.linearize()
-  #   local_buffers = [uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL]
-  #   assert len(local_buffers) == 1
-  #   local_buffer = local_buffers[0]
-  #   assert local_buffer.arg == 0
-  #   assert local_buffer.dtype == dtypes.float.ptr(1, local=True)
+  def test_lds_0_locals(self):
+    for l1 in [0,2,4,16]:
+      for l0 in [0,2,4,16]:
+        opts: list[Opt] = []
+        if l1 != 0: opts = opts + [Opt(OptOps.LOCAL, 1, l1)]
+        if l0 != 0: opts = opts + [Opt(OptOps.LOCAL, 0, l0)]
+        opts = opts + [Opt(OptOps.LDS, 0, None)]
+        uops = test_lds_helper(opts)
+        local_buffers = [uop for uop in uops if uop.op is Ops.DEFINE_LOCAL]
+        expected_size = max(1, l0) * max(1, l1)
+        assert len(local_buffers) == 1 and (buf:=local_buffers[0]).arg == 0 and buf.dtype == dtypes.float.ptr(expected_size, local=True)
 
-  #   run_schedule(s[-1:])
-  #   bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
-  #   print(bufs[0].numpy())
-  #   np.testing.assert_allclose(bufs[0].numpy(), a.numpy() @ b.numpy())
+  def test_lds_0_locals_grok(self):
+    local_sizes = [0, 2, 4, 16]
 
-  # def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer]]:
-  # if isinstance(r, Tensor): r = [r]
-  # s = Tensor.schedule(*r)
-  # run_schedule(s[:-1])  # run all kernels except the last one
-  # assert s[-1].ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {s[-1]}"
-  # # now all input buffers in s[-1] should be realized
-  # # create fresh buffers for the outputs
-  # bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
-  # return s[-1].ast, bufs
+    for l1 in local_sizes:
+      for l0 in local_sizes:
+        opts: list[Opt] = []
 
-  # def test_lds_0_basic(self):
-  #   a, b = Tensor.rand(m, k), Tensor.rand(k, n, dtype=dtype_in)
-  #   np_a, np_b = a.numpy(), b.numpy()
-  #   r = a.matmul(b, dtype=dtype_out)
-  #   sched = r.schedule()
-  #   realized_ast = sched[-1].ast
-  #   run_schedule(sched)
-  #   out = r.numpy()
-  #   k = Kernel(realized_ast)
-  #   k.apply_tensor_cores(1, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
-  #   k.linearize()
-  #   assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
-  #   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
-  #   np_c = np_a @ np_b
-  #   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
-  #   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
-  #   else: tc_atol, tc_rtol = 5e-3, 1e-4
-  #   np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
+        if l1 != 0:
+          opts.append(Opt(OptOps.LOCAL, 1, l1))
+        if l0 != 0:
+          opts.append(Opt(OptOps.LOCAL, 0, l0))
 
-if __name__ == '__main__':
+        opts.append(Opt(OptOps.LDS, 0, None))
+
+        uops = test_lds_helper(opts)
+
+        local_buffers = [uop for uop in uops if uop.op is Ops.DEFINE_LOCAL]
+
+        expected_size = max(1, l0) * max(1, l1)
+
+        assert len(local_buffers) == 1, f"Expected exactly 1 local buffer, got {len(local_buffers)} for l0={l0}, l1={l1}"
+
+        buf = local_buffers[0]
+        assert buf.arg == 0, f"Expected buffer argument index 0, got {buf.arg} for l0={l0}, l1={l1}"
+
+        expected_dtype = dtypes.float.ptr(expected_size, local=True)
+        assert buf.dtype == expected_dtype, f"Expected dtype {expected_dtype}, got {buf.dtype} for l0={l0}, l1={l1}"
+
+
+if __name__ == "__main__":
   unittest.main()
