@@ -687,13 +687,23 @@ class Kernel:
         perm = tuple(range(len(local_shape)))
         if buf.arg == 1:
           # noop => shape (256, 256, 16, 16, 256, 16) strides (65536, 0, 0, 4096, 16, 1)
+          # this permutes what each thread is responsible for storing and loading
           perm = (0,1,5,3,4,2)
-          store_st = store_st.permute(perm)
-          global_st = global_st.permute(perm)
+          # store_st = store_st.permute(perm)
+          # global_st = global_st.permute(perm)
+
+          # this permutes local layout
+          # store_st = store_st.permute((0,1,3,2,4,5))
+          # load_st = load_st.permute((0,1,2,5,4,3))
+        # if buf.arg == 2:
+          # noop => shape (256, 256, 16, 16, 256, 16) strides (65536, 0, 0, 4096, 16, 1)
+          # perm = (0,1,5,3,4,2)
+          # store_st = store_st.permute(perm)
+          # global_st = global_st.permute(perm)
 
           # perm_2 = (0,1,3,2,4,5)
-          store_st = store_st.permute((0,1,3,2,4,5))
-          load_st = load_st.permute((0,1,2,5,4,3))
+          # store_st = store_st.permute((0,1,3,2,4,5))
+          # load_st = load_st.permute((0,1,2,5,4,3))
 
         local_buffer = UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(size=store_st.real_size(), local=True), (), buf.arg)
         if global_access.op == Ops.LOAD:
