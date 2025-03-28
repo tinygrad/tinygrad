@@ -2215,6 +2215,7 @@ def helper_lds_allclose(opts:list[Opt], expected_bufs, N=16, M=16, K=16):
     expected_dtype = dtypes.float.ptr(expected_bufs[i][1], local=True)
     assert local_buffer.dtype == expected_dtype, f"Expected buffer dtype {expected_dtype}, got {local_buffer.dtype} for {opts=}"
 
+@unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
 class TestLDS(unittest.TestCase):
   # test invalid args
   # test no reshape opt after lds
