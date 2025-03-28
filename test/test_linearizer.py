@@ -2311,6 +2311,5 @@ class TestLDS(unittest.TestCase):
             Opt(OptOps.LDS, 0, None)]
     test_lds_helper(opts=opts, expected_bufs=[(0,256)])
 
-
 if __name__ == "__main__":
   unittest.main()
