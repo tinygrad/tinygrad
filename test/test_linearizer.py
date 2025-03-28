@@ -26,21 +26,22 @@ def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer
   return s[-1].ast, bufs
 
 def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0):
-  a, b = Tensor.rand(M, K, dtype=dtype_in).realize(), Tensor.rand(K, N, dtype=dtype_in).realize()
+  a, b = Tensor.rand(M, K, dtype=dtype_in), Tensor.rand(K, N, dtype=dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
-  c = a.matmul(b, dtype=dtype_out)
-  si = c.schedule()[-1]
-  k = Kernel(si.ast)
+  r = a.matmul(b, dtype=dtype_out)
+  sched = r.schedule()
+  realized_ast = sched[-1].ast
+  k = Kernel(realized_ast)
   k.apply_tensor_cores(1, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
   prg = k.to_program()
   assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
-  ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
+  ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in sched[-1].bufs], sched[-1].metadata)
   ei.run(wait=True)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
   else: tc_atol, tc_rtol = 5e-3, 1e-4
-  np.testing.assert_allclose(c.numpy(), np_a@np_b, atol=tc_atol, rtol=tc_rtol)
+  np.testing.assert_allclose(r.numpy(), np_a @ np_b, atol=tc_atol, rtol=tc_rtol)
 
 def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
                                          ensure_triggered:bool=True):
