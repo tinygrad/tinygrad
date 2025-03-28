@@ -2304,9 +2304,9 @@ class TestLDS(unittest.TestCase):
     opts = [Opt(OptOps.LOCAL, 0, 16),
             Opt(OptOps.UPCAST, 1, 2),
             Opt(OptOps.LDS, 0, None)]
-    test_lds_helper(opts=opts, expected_bufs=[(0,16)])
+    test_lds_helper(opts=opts, expected_bufs=[(0,16)]) # upcasting local
 
-    opts = [Opt(OptOps.UPCAST, 0, 16),
+    opts = [Opt(OptOps.LOCAL, 0, 16),
             Opt(OptOps.UPCAST, 0, 16),
             Opt(OptOps.LDS, 0, None)]
     test_lds_helper(opts=opts, expected_bufs=[(0,256)])
