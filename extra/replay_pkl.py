@@ -43,6 +43,8 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
             k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-3, 32))
             if k.full_shape[-4]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 4))
+            # if this is small, swap it
+            if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.SWAP, 0, 1))
           elif len(k.full_shape) == 3 and k.full_shape[1] == 32:
             if k.full_shape[0]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 4))
             # weight without more
@@ -56,7 +58,7 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
             if k.full_shape[1]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
             # if this is small, just upcast it
-            if k.full_shape[0] <= 3: k.apply_opt(Opt(OptOps.UPCAST, 0, 0))
+            if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.UPCAST, 0, 0))
           elif len(k.full_shape) == 2:
             if k.full_shape[0]%128 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
           elif len(k.full_shape) == 1:
@@ -65,6 +67,12 @@ if __name__ == "__main__":
               if k.full_shape[0]%sz == 0:
                 k.apply_opt(Opt(OptOps.UPCAST, 0, sz))
                 break
+          if k.full_shape[0]%2 == 0 and False:
+            k.apply_opt(Opt(OptOps.LOCAL, 0, k.full_shape[0]//2))
+            for i in range(1, k.first_reduce-1): k.apply_opt(Opt(OptOps.LOCAL, 1, 0))
+          else:
+            # TODO: fix padding
+            for i in range(1, k.first_reduce): k.apply_opt(Opt(OptOps.LOCAL, 1, 0))
         p2 = k.to_program()
         new_ei = replace(ei, prg=CompiledRunner(p2), bufs=dsp_bufs)
         new_ei.run()
