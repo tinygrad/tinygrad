@@ -164,7 +164,8 @@ class CapturedJit(Generic[ReturnType]):
     for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
 
   def free_intermediates(self):
-    update_depends(depends:=set([None]), self.jit_cache)
+    depends: set[Buffer|None] = set([None])
+    update_depends(depends, self.jit_cache)
     for b in depends:
       if b is not None:
         b.deallocate()
@@ -174,7 +175,7 @@ class CapturedJit(Generic[ReturnType]):
   def optimize_weights(self):
     blacklist = [t.lazydata.buffer for t in get_parameters(self.ret)]
     asgn = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
-    self.jit_cache = [ExecItem(item.prg, [asgn.get(b,b) for b in item.bufs]) for item in self.jit_cache]
+    self.jit_cache = [ExecItem(item.prg, [asgn.get(b,b) if b is not None else None for b in item.bufs]) for item in self.jit_cache]
     for old, new in asgn.items():
       if old.is_allocated(): new.ensure_allocated().copyin(old.as_buffer())
     self.__post_init__()
