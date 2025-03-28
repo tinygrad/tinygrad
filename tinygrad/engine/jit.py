@@ -172,10 +172,10 @@ class CapturedJit(Generic[ReturnType]):
     self.__post_init__()   # reset the graph state
 
   def optimize_weights(self):
-    update_depends(depends:=set([None]), self.jit_cache)
-    assigned = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in depends]], ignore_checks=True)
-    self.jit_cache = [ExecItem(item.prg, [assigned.get(b,b) for b in item.bufs]) for item in self.jit_cache]
-    for old, new in assigned.items():
+    blacklist = [t.lazydata.buffer for t in get_parameters(self.ret)]
+    asgn = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
+    self.jit_cache = [ExecItem(item.prg, [asgn.get(b,b) for b in item.bufs]) for item in self.jit_cache]
+    for old, new in asgn.items():
       if old.is_allocated(): new.ensure_allocated().copyin(old.as_buffer())
     self.__post_init__()
 

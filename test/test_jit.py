@@ -606,6 +606,8 @@ class TestJitFree(unittest.TestCase):
     self.assertEqual(x.item(), 8)
 
   def test_optimize_weights(self):
+    if not hasattr(Device[Device.DEFAULT].allocator, '_offset'): raise unittest.SkipTest("optimize_weights useless")
+
     ext_tensor = Tensor([1,24,23,45,1])
     ext_tensor_2 = Tensor([2,2,2,2,2])
     @TinyJit
@@ -617,9 +619,7 @@ class TestJitFree(unittest.TestCase):
       self.assertEqual(out.item(), 11400+200*i)
     assert len(set([b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None])) == 4
     fxn.captured.optimize_weights()
-
-    # ext_tensor and ext_tensor_2 are the same tensor now.
-    assert len(set([b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None])) == 3
+    assert len(set([b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None])) == 2
 
     out = fxn(Tensor([11,1,2,3,4]))
     self.assertEqual(out.item(), 13600)
