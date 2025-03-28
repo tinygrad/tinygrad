@@ -680,9 +680,21 @@ class Kernel:
           elif st != 0: shape.append(cast(int, global_st.shape[i]))
           else: shape.append(1)
         local_shape = tuple(shape) # amd_matmul style
-        local_shape_noop = tuple(1 if st == 0 or i < gd or (i >= fr and i < fu) else global_st.shape[i] for i,st in enumerate(global_st.real_strides(True)))
-        print(f"{local_shape_noop=} {local_shape=}")
+        # local_shape_noop = tuple(1 if st == 0 or i < gd or (i >= fr and i < fu) else global_st.shape[i] for i,st in enumerate(global_st.real_strides(True)))
+        # print(f"{local_shape_noop=} {local_shape=}")
         store_st = load_st = ShapeTracker.from_shape(local_shape)
+
+        perm = tuple(range(len(local_shape)))
+        if buf.arg == 1:
+          # noop => shape (256, 256, 16, 16, 256, 16) strides (65536, 0, 0, 4096, 16, 1)
+          perm = (0,1,5,3,4,2)
+          store_st = store_st.permute(perm)
+          global_st = global_st.permute(perm)
+
+          # perm_2 = (0,1,3,2,4,5)
+          store_st = store_st.permute((0,1,3,2,4,5))
+          load_st = load_st.permute((0,1,2,5,4,3))
+
         local_buffer = UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(size=store_st.real_size(), local=True), (), buf.arg)
         if global_access.op == Ops.LOAD:
           global_access = global_access.replace(src=(global_access.src[0], global_st.to_uop()))
