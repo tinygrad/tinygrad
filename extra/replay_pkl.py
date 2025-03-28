@@ -55,6 +55,8 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
             k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
             if k.full_shape[1]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+            # if this is small, just upcast it
+            if k.full_shape[0] <= 3: k.apply_opt(Opt(OptOps.UPCAST, 0, 0))
           elif len(k.full_shape) == 2:
             if k.full_shape[0]%128 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
           elif len(k.full_shape) == 1:
