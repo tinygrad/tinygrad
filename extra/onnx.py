@@ -82,7 +82,7 @@ class OnnxNode:
 # ***** python const *****
 required_input_python_consts: dict[str, tuple[int, ...]] = {
   "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
-  "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
+  "CumSum": (1,), "TopK": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
   "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
   **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
   **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
@@ -195,6 +195,7 @@ def get_onnx_ops():
     return [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
 
   def _resolve_pool_pads(x:Tensor, p_, k_, d_, s_, auto_pad:AUTO_PAD_OPTIONS):
+    if auto_pad == "VALID": return [0]*(len(k_)*2)
     i_, (s_,d_,p_) = x.shape[-len(k_):], (make_tuple(x, len(k_)*2) for x in (s_, d_, p_))
     if auto_pad == "NOTSET": return _onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2)
     o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
@@ -408,11 +409,9 @@ def get_onnx_ops():
 
   def MaxPool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, dilations:list[int]|int=1, pads:list[int]|int=0,
               storage_order:int=0, strides:list[int]|int=1):
-    ret = X.max_pool2d(kernel_shape, strides, dilations, _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad), ceil_mode=ceil_mode)
-    # tests expect indices with int64 dtype
-    # TODO: if there are repeated values, this is wrong
-    indices = ((ret.reshape(-1, 1) == X.reshape(1, -1)) * Tensor.arange(X.numel(), dtype=dtypes.int64).unsqueeze(0)).sum(1).reshape(ret.shape)
-    return ret.cast(X.dtype), indices.transpose(-2, -1) if storage_order else indices
+    pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
+    ret, idx = X.max_pool2d(kernel_shape, strides, dilations, pads, ceil_mode=ceil_mode, return_indices=True)
+    return ret, idx.transpose(-2, -1).cast(dtypes.int64) if storage_order else idx.cast(dtypes.int64)
 
   def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
           kernel_shape:list[int]|None=None, pads:list[int]|int=0, strides:list[int]|int=1):
@@ -435,11 +434,7 @@ def get_onnx_ops():
     return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads, output_padding=output_padding)
 
   def MaxUnpool(xT: Tensor, xI: Tensor, outshape: list[int]|None=None, kernel_shape:list[int]=None, pads:list[int]|int=0, strides:list[int]|int=1):
-    pads, strides = (make_tuple(x, len(xI.shape)) for x in (pads, strides))
-    out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
-    ret = (xI.reshape(-1, 1)._one_hot_along_dim(prod(out_sh)) * xT.reshape(-1, 1)).sum(0).reshape(1, 1, *out_sh)
-    if outshape is not None and outshape != ret.shape: pads = _auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")
-    return ret.pad(_onnx_pads_to_tiny_pads(pads))
+    return Tensor.max_unpool2d(xT, xI, kernel_shape, strides, 1, pads, outshape if outshape is None else tuple(outshape))
 
   def GlobalAveragePool(X:Tensor): return X.mean(axis=tuple(range(2, X.ndim)), keepdim=True)
   def GlobalMaxPool(X:Tensor): return X.max(axis=tuple(range(2, X.ndim)), keepdim=True)
@@ -520,6 +515,10 @@ def get_onnx_ops():
     if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
     return X.permute(*[perm.index(i) for i in range(len(perm))]) if perm else X
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
+
+  def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):
+    val, idx = X.topk(K if isinstance(K, int) else K[0], axis, largest, sorted)
+    return val, idx.cast(dtypes.int64)
 
   # ***** Neural Network Ops *****
   def BatchNormalization(X:Tensor, scale:Tensor, B:Tensor, input_mean:Tensor, input_var:Tensor, epsilon:float=1e-05, momentum:float=0.9,
@@ -673,7 +672,8 @@ def get_onnx_ops():
       x_sh = list(x.shape)
       ret_shape = x_sh[:axis] + list(indices.shape) + x_sh[axis+1:]
       if indices.ndim > 1: indices = indices.flatten()
-      indices = [_cached_to_python_const(indices)] if indices.shape == () else [x_sh[axis]+x if x<0 else x for x in _cached_to_python_const(indices)]
+      indices = [_cached_to_python_const(indices)] if indices.shape == () else _cached_to_python_const(indices)
+      indices = [x_sh[axis]+x if x<0 else x for x in indices]
       args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x_sh)] for i in indices] # type: ignore
       return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
     # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
@@ -722,7 +722,14 @@ def get_onnx_ops():
   def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
     out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
-    return _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype).contiguous()
+    if out_dtype == dtypes.uchar:
+      # this appears to work in practice, at least for uchar out_dtype. it folds with the quantize stuff
+      ret = _clamp_cast((x / y_scale + 0.4999999 + y_zero_point).int(), out_dtype)
+    else:
+      ret = _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype)
+    # you need both NHWC=1 DONT_GROUP_REDUCES=1 for this to work
+    if getenv("NHWC") and len(ret.shape) == 4: return ret.permute(0,2,3,1).contiguous().permute(0,3,1,2)
+    return ret.contiguous()
 
   def DynamicQuantizeLinear(x: Tensor):
     # only support uint8
@@ -733,6 +740,10 @@ def get_onnx_ops():
     return y, scale, zero_point
 
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
+    WEIGHT_SHIFT = 4
+    if getenv("NHWC") and len(x.shape) == 4 and x.shape[2:] == (1,1) and x.shape[1]%WEIGHT_SHIFT == 0:
+      # DSP swizzle memory
+      x = x.reshape(x.shape[0], x.shape[1]//WEIGHT_SHIFT, WEIGHT_SHIFT).permute(1,0,2).contiguous().permute(1,0,2).reshape(x.shape)
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
     return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
 

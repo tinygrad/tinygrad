@@ -69,7 +69,10 @@ setup(name='tinygrad',
             "bottle",
             "ggml-python",
             "capstone",
-            "ml_dtypes"
+            "ml_dtypes",
+            "pycocotools",
+            "boto3",
+            "pandas"
         ],
         'docs': [
             "mkdocs",

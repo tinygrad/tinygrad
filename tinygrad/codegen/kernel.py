@@ -37,7 +37,8 @@ class TensorCoreOptions:
 
 class Kernel:
   def __init__(self, ast:UOp, opts:Optional[Renderer]=None):
-    if ast.op is Ops.SINK: self.ast = ast
+    assert ast.op is Ops.SINK, ast.op
+    self.ast = ast
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     # verify AST matches the spec
@@ -101,9 +102,6 @@ class Kernel:
 
   @property
   def membufs(self) -> list[UOp]: return dedup([x.src[0] for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
-
-  # TODO: these need more tests or it might silently be no-op
-  def float4_axis(self, i:int): return [x-self.first_upcast for x in self.sts[i].unit_stride_axes() if x >= self.first_upcast and self.sts[i].shape[x]%4 == 0]  # noqa: E501
 
   def upcasted_axis(self, i:int) -> list[tuple[int, Optional[sint], bool]]:
     upcasted_shape, upcasted_stride = self.sts[i].shape[self.first_upcast:], self.sts[i].real_strides()[self.first_upcast:]
@@ -461,7 +459,8 @@ class Kernel:
 
     if self.opts.has_local and self.opts.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
-      if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:  # noqa: E501
+      if not [x for x in self.sts[0].unit_stride_axes() if x >= self.first_upcast and self.sts[0].shape[x]%4 == 0] and \
+        self.first_reduce <= 2 and self.first_reduce < self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
         # TODO: use 1024 if it's allowed in a smarter way
         for sz in ([256, 16] if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
@@ -503,10 +502,12 @@ class Kernel:
     for axis in to_upcast[::-1]: self.apply_opt(Opt(OptOps.UPCAST, axis, 0))
 
     # potentially do more upcasts of non reduce axes based on a heuristic
+    is_dsp = self.opts is not None and self.opts.device == "DSP"
     upcasted_axis: set[int] = set()
     while resolve(prod(self.sts[0].shape[:self.first_reduce]) >= 1024):
       xb_choices = []
-      for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
+      # consider all the non reduce axes, and a 3 or 4 reduce. (128 on the DSP)
+      for axis, upcast_amount in itertools.product(range(self.first_reduce), ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
         # if we haven't upcasted it, it's not symbolic, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
         if axis not in upcasted_axis and isinstance(self.full_shape[axis], int) and self.full_shape[axis]%upcast_amount == 0 and any(st.views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index, st in enumerate(self.sts)):  # noqa: E501
           xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in self.sts), sum(st.views[-1].strides[axis] for st in self.sts), axis, upcast_amount))  # noqa: E501
@@ -608,10 +609,12 @@ class Kernel:
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
-            if swizzle: srcs[i] = src.view(get_tc_swizzle_st((src if src.op is Ops.LOAD else src.src[0]).st_arg.shape, *swizzle))
+            src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
+            if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
-              local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
+              local_shape = tuple(1 if st == 0 or i < wd or (i >= self.first_reduce and i < tcd) else src_st.shape[i] \
+                                  for i,st in enumerate(src_st.real_strides()))
               st = store_st = ShapeTracker.from_shape(local_shape)
               local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), f"temp{i}")
               if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
@@ -664,10 +667,12 @@ class Kernel:
 
     if DEBUG >= 3:
       print(self.name)
-      if getenv("RAWAST"): print(self.ast)
+      if DEBUG >= 5: print(self.ast)
       for i,(buf,st) in enumerate([(buf,st) for buf,st in zip(self.bufs, self.sts) if buf.op not in {Ops.CONST, Ops.VALID}]):
-        print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s}", st.real_strides())
+        print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s} {str(st.real_strides()):30s}",
+              str(st) if DEBUG >= 4 else "")
       print(self.applied_opts)
+      if DEBUG >= 5: print(modified_ast)
     # verify AST matches the spec after applying opts
     if __debug__: type_verify(list(modified_ast.toposort))
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this

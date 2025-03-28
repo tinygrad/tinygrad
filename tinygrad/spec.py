@@ -1,7 +1,7 @@
 from typing import cast
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
-from tinygrad.helpers import all_same, all_int, dedup, prod
+from tinygrad.helpers import all_same, dedup, prod
 
 buffer_spec = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
@@ -9,7 +9,7 @@ buffer_spec = PatternMatcher([
   (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE)), name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),), name="buf_view"),
-   lambda buf_view: isinstance(buf_view.arg, tuple) and len(buf_view.arg) == 2 and all_int(buf_view.arg)),
+   lambda buf_view: isinstance(buf_view.arg, tuple) and len(buf_view.arg) == 2 and all(isinstance(arg, (int, UOp)) for arg in buf_view.arg)),
 ])
 
 # *** this is the spec of a Tensor in UOp ***
@@ -45,6 +45,18 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 
 # ***** uop type spec *****
 
+def validate_index(idx:UOp, mask:UOp|None=None):
+  # this checks for out of bounds access. it is not complete but should catch some issues
+  if mask is None and not isinstance(idx.dtype, ImageDType):
+    # WEBGPU has a BITCAST in the index. TODO: fix
+    if any(x.op in {Ops.DEFINE_VAR, Ops.BITCAST} or (x.op is Ops.SPECIAL and any(not isinstance(y, int) for y in x.arg[1:])) for x in idx.toposort):
+      return True
+    vmin, vmax, sz = idx.src[1].vmin, idx.src[1].vmax, cast(PtrDType, idx.src[0].dtype).size
+    if sz != -1 and (vmin < 0 or vmax >= sz):
+      print(f"OUT OF BOUNDS ACCESS in INDEX {vmin} - {vmax} not in 0 - {sz}")
+      return False
+  return True
+
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
 spec = PatternMatcher([
@@ -74,12 +86,14 @@ spec = PatternMatcher([
   # **** new style load/store ****
 
   # INDEX is used in new style load/store
-  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat())), lambda: True),
+  # INDEX takes a <buf, alu, gate?>
+  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat()), name="idx"), validate_index),
+  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(), UPat(dtype=dtypes.bool, name="mask")), name="idx"), validate_index),
 
-  # LOAD takes a <bufidx, alt?, gate?, barrier?>
+  # LOAD takes a <bufidx, alt?, barrier?>
   (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)),)), lambda: True),
   (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)), UPat((Ops.IF, Ops.BARRIER)))), lambda: True),
-  (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)), UPat.var("alt"), UPat(dtype=dtypes.bool)), name="ld"), lambda ld,alt: ld.dtype == alt.dtype),
+  (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)), UPat.var("alt")), name="ld"), lambda ld,alt: ld.dtype == alt.dtype),
 
   # STORE takes a <bufidx, val, gate?>
   (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat((Ops.INDEX, Ops.CAST)), UPat())), lambda: True),
@@ -126,10 +140,10 @@ spec = PatternMatcher([
 # *** this is the spec of a Kernel in UOp ***
 
 kernel_spec = buffer_spec+PatternMatcher([
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.ASSIGN))), lambda: True),
-  # assign has a buffer view and kernel source, it can optionally depend on other assigns
-  (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
-  (UPat(GroupOp.All-{Ops.SINK, Ops.VIEW}), lambda: False),
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN))), lambda: True),
+  # assign has a buffer and kernel source, it can optionally depend on other assigns
+  (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
+  (UPat(GroupOp.All-{Ops.SINK}), lambda: False),
 ])
 
 # *** this is the UOp shape spec ***

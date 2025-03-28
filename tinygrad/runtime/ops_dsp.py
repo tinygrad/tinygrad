@@ -16,15 +16,20 @@ dsp_pm = PatternMatcher([
    lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+32))) for i in range(0, 128, 32)),
      arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
   (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
-                      "__builtin_shufflevector({0}, {1}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 else None),
+    "__builtin_shufflevector({0}, {1}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
 ])
 
 dsp_pm_late = PatternMatcher([
-  (UPat.var("x")+UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}")),
-  (UPat.var("x")*UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}")),
-  (UPat.var("x")//UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}")),
+  (UPat.var("x")+UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
+  (UPat.var("x")*UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
+  (UPat.var("x")//UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat(Ops.DEFINE_ACC, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar.vec(128), name="d", allow_any_len=True),
    lambda d: d.replace(src=(UOp(Ops.CUSTOMI, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:])),
+])
+
+# NOTE: this just increases readability of the generated code
+dsp_string = PatternMatcher([
+  (UPat(Ops.CONST, (dtypes.int8, dtypes.uint8), name="x"), lambda ctx,x: str(x.arg)),
 ])
 
 class DSPRenderer(ClangRenderer):
@@ -34,20 +39,21 @@ class DSPRenderer(ClangRenderer):
   kernel_prefix = "__attribute__((noinline)) "
   pre_matcher = dsp_pm
   extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher
+  string_rewrite = dsp_string+ClangRenderer.string_rewrite
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
-  code_for_op = {**ClangRenderer.code_for_op, Ops.SIN: lambda x,dtype: f"__builtin_sin({x})",
-                 Ops.LOG2: lambda x,dtype: f"__builtin_log2l({x})" if dtype == dtypes.float64 else f"__builtin_log2f({x})",
-                 Ops.EXP2: lambda x,dtype: f"__builtin_exp2l({x})" if dtype == dtypes.float64 else f"__builtin_exp2f({x})"}
+  code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
 
-  def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
-    ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
-    msrc = ['''/* DSP boilerplate */ struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency;
+  def _render_defines(self, uops) -> list[str]:
+    return ['''/* DSP boilerplate */ struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency;
       _Bool set_dcvs_params; short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3];};''','int HAP_power_set(void*, void*);',
       'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
       'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
-      'unsigned long long HAP_perf_get_time_us(void);', 'int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
-      'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};',
-      'HAP_power_set((void*)handle, (void*)&req);']
+      'unsigned long long HAP_perf_get_time_us(void);'] + super()._render_defines(uops)
+
+  def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str:
+    msrc = ['int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
+            'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};',
+            'HAP_power_set((void*)handle, (void*)&req);']
     msrc += ['if ((sc>>24) != 2) return 0;']
     msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
     msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
@@ -57,7 +63,7 @@ class DSPRenderer(ClangRenderer):
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
     msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ["return 0; }"]
-    return ret + '\n' + '\n'.join(msrc)
+    return '\n'.join(msrc)
 
 def rpc_sc(method=0, ins=0, outs=0, fds=0): return (method << 24) | (ins << 16) | (outs << 8) | fds
 def rpc_prep_args(ins=None, outs=None, in_fds=None):
@@ -136,8 +142,11 @@ class DSPDevice(Compiled):
       with tempfile.NamedTemporaryFile(delete=False) as self.link_ld:
         self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
         self.link_ld.flush()
+
+      from tinygrad.runtime.graph.cpu import CPUGraph
       super().__init__(device, DSPAllocator(self), DSPRenderer(),
-        ClangCompiler("compile_dsp", ["-shared"] + compiler_args + [f"-T{self.link_ld.name}"], 'llvm-objdump'), functools.partial(DSPProgram, self))
+        ClangCompiler("compile_dsp", ["-shared"] + compiler_args + [f"-T{self.link_ld.name}"], 'llvm-objdump'), functools.partial(DSPProgram, self),
+        functools.partial(CPUGraph, self))
       fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
       self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
       ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
@@ -260,8 +269,8 @@ static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd,
 return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}'''
 
 class MockDSPRenderer(DSPRenderer):
-  def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
-    ret = ClangRenderer.render_kernel(self, function_name, kernel, bufs, uops, prefix)
+  def _render_defines(self, uops) -> list[str]: return ClangRenderer._render_defines(self, uops)
+  def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str:
     # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
     # control register 21 is HEX_REG_QEMU_INSN_CNT, 0x6a15c000 loads it
     msrc = [mockdsp_boilerplate, 'void _start(void) {']
@@ -278,7 +287,7 @@ class MockDSPRenderer(DSPRenderer):
     for i,b in enumerate(bufs):
       if isinstance(b[1][0], PtrDType): msrc.append(f"write(1, buf{i}, {b[1][0].size*b[1][0].itemsize});")
     msrc.append('exit(0); }')
-    return ret + '\n' + '\n'.join(msrc)
+    return '\n'.join(msrc)
 
 class MockDSPProgram:
   def __init__(self, name:str, lib:bytes): self.lib = lib

@@ -519,7 +519,7 @@ class TestTypeSpec(unittest.TestCase):
     with self.assertRaises(AttributeError): Tensor([1, 2, 3], dtype="nonexistdtype")
     with self.assertRaises(AttributeError): Tensor([1, 2, 3], dtype="")
 
-    np.testing.assert_equal(Tensor(n).sum(acc_dtype="int16").numpy(), Tensor(n).sum(acc_dtype=dtypes.int16).numpy())
+    np.testing.assert_equal(Tensor(n).sum(dtype="int16").numpy(), Tensor(n).sum(dtype=dtypes.int16).numpy())
 
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_creation(self, default_int, default_float):
@@ -721,21 +721,21 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float64)).sum().dtype == dtypes.float64
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16")
-  def test_sum_acc_dtype(self):
+  def test_sum_dtype_arg(self):
     t = Tensor([40000, 40000], dtype=dtypes.float16)
     # default float16 sum returns in float16, overflowed in this case
     assert t.sum().dtype == dtypes.float16
     assert math.isinf(t.sum().numpy().item())
-    # specifiying acc_dtype and it's not downcasted
-    assert t.sum(acc_dtype=dtypes.float32).dtype == dtypes.float32
-    np.testing.assert_allclose(t.sum(acc_dtype=dtypes.float32).numpy(), 80000)
+    # specifiying dtype and it's not downcasted
+    assert t.sum(dtype=dtypes.float32).dtype == dtypes.float32
+    np.testing.assert_allclose(t.sum(dtype=dtypes.float32).numpy(), 80000)
 
-  def test_prod_acc_dtype(self):
+  def test_prod_dtype_arg(self):
     t = Tensor([100, 200], dtype=dtypes.int32)
     assert t.prod().dtype == dtypes.int32
     np.testing.assert_allclose(t.prod().numpy(), 20000)
-    assert t.prod(acc_dtype=dtypes.float32).dtype == dtypes.float32
-    np.testing.assert_allclose(t.prod(acc_dtype=dtypes.float32).numpy(), 20000)
+    assert t.prod(dtype=dtypes.float32).dtype == dtypes.float32
+    np.testing.assert_allclose(t.prod(dtype=dtypes.float32).numpy(), 20000)
 
   def test_mean(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).mean().dtype == dtypes.float32
@@ -776,8 +776,8 @@ class TestAutoCastType(unittest.TestCase):
     t1 = Tensor([0, 1], dtype=dt1)
     t2 = Tensor([0, 1], dtype=dt2)
     assert (t1 @ t2).dtype == least_upper_dtype(dt1, dt2)
-    # if acc_dtype is specified, return in acc_dtype
-    assert (t1.matmul(t2, acc_dtype=acc_dt).dtype == acc_dt)
+    # if dtype is specified, return in dtype
+    assert (t1.matmul(t2, dtype=acc_dt).dtype == acc_dt)
 
   @staticmethod
   def check_where_alternate_input_other(input_, other, data_type):
@@ -851,6 +851,7 @@ class TestAutoCastType(unittest.TestCase):
     np.testing.assert_allclose(t.grad.numpy(), [1, 0])
 
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "very slow")
+  @unittest.skipIf(CI and Device.DEFAULT == "AMD", "very slow")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Binding size is larger than the maximum storage buffer binding size")
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_mean_half_precision_underflow(self):
