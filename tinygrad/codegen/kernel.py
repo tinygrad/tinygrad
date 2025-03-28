@@ -666,9 +666,45 @@ class Kernel:
       if (k := ctx[0]).lds[buf.arg]:
         global_st: ShapeTracker = global_access.src[1].arg
         gd, fr, fu = k.global_dims, k.first_reduce, k.first_upcast
-        local_shape = tuple(1 if st == 0 or i < gd or (i >= fr and i < fu) else global_st.shape[i] for i,st in enumerate(global_st.real_strides(True)))
+        shape = []
+        for i, st in enumerate(global_st.real_strides(True)[:fr]):
+          if i < gd: shape.append(1)
+          else: shape.append(cast(int, k.output_shape[i]))
+        # print(f"{global_st.shape=}, {global_st.real_strides(True)=}")
+        # print(f"{k.upcasted_axis(buf.arg)}")
+        # print(shape)
+        # print(f"{fr=} {fu=}")
+        for i, st in enumerate(global_st.real_strides(True)[fr:]):
+          if i < fu - fr: shape.append(1)
+          elif st != 0 and not k.upcasted_axis(buf.arg)[i-(fu-fr)][2]: shape.append(cast(int, global_st.shape[i+fr]))
+          else: shape.append(1)
+
+        print(shape)
+        # exit()
+          # print(k.upcasted_axis(buf.arg))
+        # take the locals size from output but upcast size from buffer
+
+        # local shapetracker
+        # size 1 if it is global dimension
+        # output size if it is local dimension
+        # size 1 if it is reduce dimension
+        # size n if stride in upcast != 1
+
+        # local_shape = tuple(1 if i < gd else sz for i,sz in enumerate(k.output_shape[:fr]))
+        # local_shape_store = tuple(1 if st == 0 or (i >= fr and i < fu) else k.output_shape[i] for i,st in enumerate(k.sts[0].real_strides(True)))
+        # local_shape = tuple(1 if  i < gd else k.output_shape[i] if i < fr else 1 if st == 0 or i < fu else global_st.shape[i] for i,st in enumerate(global_st.real_strides(True)))
+        local_shape = tuple(shape)
         store_st = load_st = ShapeTracker.from_shape(local_shape)
         local_buffer = UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(size=store_st.real_size(), local=True), (), buf.arg)
+        perm=(0,1,2,3,4,5)
+        if buf.arg == 1:
+          perm = (0,1,5,3,4,2)
+        else:
+          perm = (0,1,2,5,4,3)
+        print(store_st)
+        # store_st = store_st.permute(perm)
+        load_st = load_st.permute(perm)
+        global_st = global_st.permute(perm)
         if global_access.op == Ops.LOAD:
           global_access = global_access.replace(src=(global_access.src[0], global_st.to_uop()))
           local_store = UOp.store(local_buffer, store_st.to_uop(), global_access)
@@ -694,11 +730,11 @@ class Kernel:
 
     if DEBUG >= 3:
       print(self.name)
-      if DEBUG >= 5: print(self.ast)
+      if DEBUG >= 4: print(self.ast)
       for i,(buf,st) in enumerate([(buf,st) for buf,st in zip(self.bufs, self.sts) if buf.op not in {Ops.CONST, Ops.VALID}]):
         print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s}", st.real_strides())
       print(self.applied_opts)
-      if DEBUG >= 5: print(modified_ast)
+      if DEBUG >= 4: print(modified_ast)
     # verify AST matches the spec after applying opts
     if __debug__: type_verify(list(modified_ast.toposort))
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
