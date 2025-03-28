@@ -2236,13 +2236,14 @@ class TestLDS(unittest.TestCase):
     test_lds_helper(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None)], expected_bufs=[(1,1),(1,16)])
     test_lds_helper(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None), Opt(OptOps.LDS, 2, None)], expected_bufs=[(0,16),(1,16),(2,16)])
 
-  # unroll doesn't change local output buffer size
   def test_lds_output_unroll(self):
+    # unroll doesn't change local output buffer size
     for sz in [0,2,4,8]:
       test_lds_helper(opts=[Opt(OptOps.UNROLL, 0, sz), Opt(OptOps.LDS, 0, None)], expected_bufs=[(0,1)])
 
   def test_lds_output_local(self):
     # if only locals are applied, local buffer size for output should be prod(locals)
+
     basic_local_opts = [Opt(OptOps.LOCAL, 0, 2),
                         Opt(OptOps.LDS, 0, None)]
     test_lds_helper(opts=basic_local_opts, expected_bufs=[(0,2)])
@@ -2264,6 +2265,7 @@ class TestLDS(unittest.TestCase):
 
   def test_lds_output_upcast(self):
     # if only upcasts are applied, local buffer size for output should be prod(locals)
+
     basic_upcast_opts = [Opt(OptOps.UPCAST, 0, 2),
                         Opt(OptOps.LDS, 0, None)]
     test_lds_helper(opts=basic_upcast_opts, expected_bufs=[(0,2)])
@@ -2287,6 +2289,7 @@ class TestLDS(unittest.TestCase):
     # for locals and upcasts size is no longer product as upcast can be applied to local dimensions
     # if an upcast is applied to a local dimension, then local output buffer size remains unchanged
     # local buffer size for output is prod(locals) * prod(upcast for global)
+
     opts = [Opt(OptOps.LOCAL, 0, 2),
             Opt(OptOps.UPCAST, 1, 2),
             Opt(OptOps.LDS, 0, None)]
