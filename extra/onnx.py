@@ -470,12 +470,18 @@ def get_onnx_ops():
       return index.clip(0, input_dim-1)
 
     if antialias: raise NotImplementedError("antialias is not implemented")
-    scales, sizes = (None if scales is None else scales[2-(X.ndim-len(scales)):]), (None if sizes is None else sizes[2-(X.ndim-len(sizes)):])
-    # we pre permute the axes and permute back after resize
-    axes, input_shape, = (axes or list(range(X.ndim))), cast(tuple[int, ...], X.shape[2:]),
+    axes = axes or list(range(X.ndim))
     perm = [a for a in range(len(X.shape)) if a not in axes] + list(axes)
+    # we pre-permute the axes and permute back after resize
+    # the permute aligns X's axes to scales, sizes, and roi
     X = X.permute(*perm)
 
+    input_shape = cast(tuple[int, ...], X.shape[2:])
+    if scales is not None: assert all(sc==1 for sc in scales[:-len(input_shape)]), "don't support resizing batch_size dim or channel dim"
+    if sizes is not None: assert tuple(sizes[:-2]) == tuple(X.shape[X.ndim-len(sizes):-2]),  "don't support resizing batch_size dim or channel dim"
+    assert (scales is not None) ^ (sizes is not None), "only provide one of `scales` or `sizes`"
+
+    scales, sizes = (None if scales is None else scales[-len(input_shape):]), (None if sizes is None else sizes[-len(input_shape):])
     if sizes is not None:
       if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
         scale_fxn = min if keep_aspect_ratio_policy == "not_larger" else max

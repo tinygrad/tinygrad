@@ -52,11 +52,10 @@ class TestMainOnnxOps(TestOnnxOps):
           outputs = ["out"]
           self.helper_test_single_op("Resize", inputs, attributes, outputs)
 
-  # TODO: fix
   @unittest.expectedFailure
   def test_resize_failure(self):
     supported_modes = ["half_pixel", "align_corners", "asymmetric", "pytorch_half_pixel", "half_pixel_symmetric"]
-    # scales between 1.00 and 1.25 are floored to 1 for some reason
+    # ORT floors scales between 1.00 and 1.25 to 1 for some reason
     for sc in [1.01, 1.24]:
       for ct_mode in supported_modes:
         with self.subTest(coordinate_transformation_mode=ct_mode, scale=sc):
