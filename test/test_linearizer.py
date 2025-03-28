@@ -2200,14 +2200,14 @@ class TestKernelOpts(unittest.TestCase):
     helper_linearizer_opt(r, [x[0] for x in opts_shapes], color_sizes=[x[1] for x in opts_shapes])
 
 def test_lds_helper(opts:list[Opt], expected_bufs, N=16, M=16, K=16):
-  a, b = Tensor.rand(N, K), Tensor.rand(K, M)
+  a, b = Tensor.rand(M, K), Tensor.rand(K, N)
   realized_ast, bufs = helper_realized_ast(a @ b)
   k = Kernel(realized_ast)
   for opt in opts:
     k.apply_opt(opt)
   prg = k.to_program()
   CompiledRunner(replace(prg, device=Device.DEFAULT)).exec(bufs)
-  np.testing.assert_allclose(bufs[0].numpy().reshape((N,N)), a.numpy() @ b.numpy(), atol=1e-4, rtol=1e-4)
+  np.testing.assert_allclose(bufs[0].numpy().reshape((M,N)), a.numpy() @ b.numpy(), atol=1e-4, rtol=1e-4)
   local_buffers = [uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL]
   assert len(local_buffers) == len(expected_bufs), f"Expected exactly {len(expected_bufs)} local buffers, got {len(local_buffers)}"
   for i,local_buffer in enumerate(local_buffers):
