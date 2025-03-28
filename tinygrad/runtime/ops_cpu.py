@@ -1,4 +1,4 @@
-import platform, subprocess, sys, functools
+import platform, subprocess, sys
 from tinygrad.helpers import capstone_flatdump, getenv
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.runtime.support.elf import jit_loader

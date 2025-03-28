@@ -1,15 +1,15 @@
-from typing import List, Dict, cast
-import ctypes, itertools
-from tinygrad.helpers import dedup, cpu_time_execution, DEBUG, to_function_name
+from typing import cast
+import itertools
+from tinygrad.helpers import dedup, DEBUG, to_function_name
 from tinygrad.engine.jit import GraphRunner, GraphException
-from tinygrad.device import Buffer, Device
+from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.ops import Variable
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes
 from tinygrad.renderer.cstyle import ClangRenderer
 
 class CPUGraph(GraphRunner):
-  def __init__(self, device, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, device, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     if not issubclass(type(device.renderer), ClangRenderer) and not isinstance(device.renderer, ClangRenderer): raise GraphException
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 
@@ -40,5 +40,5 @@ class CPUGraph(GraphRunner):
     if DEBUG >= 4: print(code)
     self.clprg = device.runtime("batched", device.compiler.compile_cached(code))
 
-  def __call__(self, rawbufs: List[Buffer], var_vals: Dict[Variable, int], wait=False):
+  def __call__(self, rawbufs: list[Buffer], var_vals: dict[Variable, int], wait=False):
     return self.clprg(*[x._buf for x in rawbufs], *self.base_rawbufs, *[x[1] for x in sorted(var_vals.items(), key=lambda x: x[0].expr)], wait=wait)
