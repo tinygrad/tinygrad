@@ -452,23 +452,6 @@ def get_onnx_ops():
   def Resize(X:Tensor, roi:list[float]|None=None, scales:list[float]|None=None, sizes:list[int]|None=None, antialias:int=0,
             axes:list[int]|None=None, coordinate_transformation_mode:str='half_pixel', cubic_coeff_a:float=-0.75, exclude_outside:int=0,
             extrapolation_value:float=0.0, keep_aspect_ratio_policy:str='stretch', mode:str='nearest', nearest_mode:str='round_prefer_floor'):
-    def _apply_nearest_mode(index: Tensor, input_dim, mode: str):
-      if mode == "round_prefer_floor": index = (index - 0.5).ceil()
-      elif mode == "round_prefer_ceil": index = (index + 0.5).floor()
-      elif mode == "floor": index = index.floor()
-      elif mode == "ceil": index = index.ceil()
-      else: raise ValueError(f"invalid {nearest_mode=}")
-      return index.clip(0, input_dim-1).int()
-    def _apply_transformation(index: Tensor, input_dim, scale_dim, mode):
-      output_dim = index.shape[0]
-      if mode == "half_pixel": index = (index + 0.5) / scale_dim - 0.5
-      elif mode == "align_corners": index = Tensor(0).reshape(1) if output_dim == 1 else index * (input_dim - 1) / (output_dim - 1)
-      elif mode == "asymmetric": index = index / scale_dim
-      elif mode == "pytorch_half_pixel": index = Tensor(-0.5).reshape(1) if output_dim == 1 else (index + 0.5) / scale_dim - 0.5
-      elif mode == "half_pixel_symmetric": index = (input_dim / 2) * (1 - (output_dim / (scale_dim * input_dim))) + (index + 0.5) / scale_dim - 0.5
-      else: raise ValueError(f"invalid {coordinate_transformation_mode=}")
-      return index.clip(0, input_dim-1)
-
     if antialias: raise NotImplementedError("antialias is not implemented")
     axes = axes or list(range(X.ndim))
     perm = [a for a in range(len(X.shape)) if a not in axes] + list(axes)
@@ -492,11 +475,27 @@ def get_onnx_ops():
 
     # NOTE: this transformation makes it so that we can't just call Tensor.interpolate
     # in Tensor.interpolate, we use indexes without any transformation
+    def _apply_transformation(input_dim, output_dim, scale_dim, mode):
+      index = Tensor.arange(output_dim, requires_grad=False, device=X.device)
+      if mode == "half_pixel": index = (index + 0.5) / scale_dim - 0.5
+      elif mode == "align_corners": index = Tensor(0).reshape(1) if output_dim == 1 else index * (input_dim - 1) / (output_dim - 1)
+      elif mode == "asymmetric": index = index / scale_dim
+      elif mode == "pytorch_half_pixel": index = Tensor(-0.5).reshape(1) if output_dim == 1 else (index + 0.5) / scale_dim - 0.5
+      elif mode == "half_pixel_symmetric": index = (input_dim / 2) * (1 - (output_dim / (scale_dim * input_dim))) + (index + 0.5) / scale_dim - 0.5
+      else: raise ValueError(f"invalid {coordinate_transformation_mode=}")
+      return index.clip(0, input_dim-1)
     indexes = []
-    for shape, size, scale in zip(input_shape, sizes, scales):
-      indexes.append(_apply_transformation(Tensor.arange(size), shape, scale, coordinate_transformation_mode))
+    for input_dim, output_dim, scale in zip(input_shape, sizes, scales):
+      indexes.append(_apply_transformation(input_dim, output_dim, scale, coordinate_transformation_mode))
 
     if mode == "nearest":
+      def _apply_nearest_mode(index: Tensor, input_dim, mode: str):
+        if mode == "round_prefer_floor": index = (index - 0.5).ceil()
+        elif mode == "round_prefer_ceil": index = (index + 0.5).floor()
+        elif mode == "floor": index = index.floor()
+        elif mode == "ceil": index = index.ceil()
+        else: raise ValueError(f"invalid {nearest_mode=}")
+        return index.clip(0, input_dim-1).int()
       indexes = [_apply_nearest_mode(index, shape, nearest_mode) for (index, shape) in zip(indexes, input_shape)]
       X = X[(..., *Tensor.meshgrid(*indexes))]
     if mode == "linear":

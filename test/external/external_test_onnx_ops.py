@@ -59,17 +59,18 @@ class TestMainOnnxOps(TestOnnxOps):
           with self.subTest(coordinate_transformation_mode=ct_mode, scale=sc, nearest_mode=nearest_mode):
             X = np.array([[[1, 2, 3, 4]]], dtype=np.float32)
             scales = np.array([1.0, 1.0, sc], dtype=np.float32)
-            inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
+            inputs = {"X": X, "": np.array([], dtype=np.float32), "scales": scales}
             attributes = {"mode": "nearest", "coordinate_transformation_mode": "half_pixel_symmetric", "nearest_mode": nearest_mode}
             outputs = ["out"]
             self.helper_test_single_op("Resize", inputs, attributes, outputs)
 
   @unittest.expectedFailure
   def test_resize_failure(self):
-    # ORT floors scales between 1.00 and 1.25 to 1 for some reason
-    X = np.array([[[1, 2, 3, 4]]], dtype=np.float32)
-    scales = np.array([1.0, 1.0, 1.1], dtype=np.float32)
-    inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
+    # ORT floors scales when output_dim - input_dim < 1
+    # ONNX's example resize does not have this behavior
+    X = np.array([[[1,2,3]]], dtype=np.float32)
+    scales = np.array([1.0, 1.0, 1.33], dtype=np.float32)
+    inputs = {"X": X, "": np.array([], dtype=np.float32), "scales": scales}
     attributes = {"mode": "linear"}
     outputs = ["out"]
     self.helper_test_single_op("Resize", inputs, attributes, outputs)
@@ -78,7 +79,7 @@ class TestMainOnnxOps(TestOnnxOps):
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-130
     X = np.array([[[[1, 2, 3, 4], [5, 6, 7, 8]]]], dtype=np.float32)
     scales = np.array([1.0, 1.0, 0.6, 0.6], dtype=np.float32)
-    inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
+    inputs = {"X": X, "": np.array([], dtype=np.float32), "scales": scales}
     attributes = {"mode": "linear", "coordinate_transformation_mode": "align_corners"}
     outputs = ["Y"]
     self.helper_test_single_op("Resize", inputs, attributes, outputs)
