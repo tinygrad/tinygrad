@@ -665,10 +665,10 @@ class Kernel:
       ctx[1].add(buf.arg)
       if (k := ctx[0]).lds[buf.arg]:
         global_st: ShapeTracker = global_access.src[1].arg
-        local_shape = tuple(1 if st == 0 or i < k.global_dims or (i >= k.first_reduce and i < k.first_upcast) else global_st.shape[i]
-                            for i,st in enumerate(global_st.real_strides(True)))
+        gd, fr, fu = k.global_dims, k.first_reduce, k.first_upcast
+        local_shape = tuple(1 if st == 0 or i < gd or (i >= fr and i < fu) else global_st.shape[i] for i,st in enumerate(global_st.real_strides(True)))
         store_st = load_st = ShapeTracker.from_shape(local_shape)
-        local_buffer = UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(size=store_st.real_size(), local=True), (), f"temp{buf.arg}")
+        local_buffer = UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(size=store_st.real_size(), local=True), (), buf.arg)
         if global_access.op == Ops.LOAD:
           global_access = global_access.replace(src=(global_access.src[0], global_st.to_uop()))
           local_store = UOp.store(local_buffer, store_st.to_uop(), global_access)
