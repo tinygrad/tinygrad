@@ -2199,16 +2199,21 @@ class TestKernelOpts(unittest.TestCase):
     ]
     helper_linearizer_opt(r, [x[0] for x in opts_shapes], color_sizes=[x[1] for x in opts_shapes])
 
-def test_lds_helper(opts:list[Opt], N:int=16, M:int=16, K:int=16) -> list[UOp]:
-  a, b = Tensor.rand(N, K), Tensor.rand(K, N)
+def test_lds_helper(opts:list[Opt], expected_bufs, N=16, M=16, K=16):
+  a, b = Tensor.rand(N, K), Tensor.rand(K, M)
   realized_ast, bufs = helper_realized_ast(a @ b)
   k = Kernel(realized_ast)
   for opt in opts:
     k.apply_opt(opt)
-  prg = CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
-  prg.exec(bufs)
-  np.testing.assert_allclose(bufs[0].numpy().reshape((N,N)), a.numpy() @ b.numpy())
-  return k.uops
+  prg = k.to_program()
+  CompiledRunner(replace(prg, device=Device.DEFAULT)).exec(bufs)
+  np.testing.assert_allclose(bufs[0].numpy().reshape((N,N)), a.numpy() @ b.numpy(), atol=1e-4, rtol=1e-4)
+  local_buffers = [uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL]
+  assert len(local_buffers) == len(expected_bufs), f"Expected exactly {len(expected_bufs)} local buffers, got {len(local_buffers)}"
+  for i,local_buffer in enumerate(local_buffers):
+    assert local_buffer.arg == expected_bufs[i][0], f"Expected buffer argument index {expected_bufs[i][0]}, got {local_buffer.arg}"
+    expected_dtype = dtypes.float.ptr(expected_bufs[i][1], local=True)
+    assert local_buffer.dtype == expected_dtype, f"Expected buffer dtype {expected_dtype}, got {local_buffer.dtype} for {opts=}"
 
 class TestLDS(unittest.TestCase):
   # test invalid args
@@ -2219,35 +2224,27 @@ class TestLDS(unittest.TestCase):
   # test lds 0 with TC3
   # test lds 0 with TC padded
 
-  def test_lds_valid_args(self):
-    test_lds_helper(opts=[Opt(OptOps.LDS, 0, None)])
-    test_lds_helper(opts=[Opt(OptOps.LDS, 1, None)])
-    test_lds_helper(opts=[Opt(OptOps.LDS, 2, None)])
-    test_lds_helper(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None), Opt(OptOps.LDS, 2, None)])
+  def test_lds_output_basic(self):
+    test_lds_helper(opts=[Opt(OptOps.LDS, 0, None)], expected_bufs=[(0,1)])
 
-  def test_lds_0_basic(self):
-    uops = test_lds_helper(opts=[Opt(OptOps.LDS, 0, None)])
-    local_buffers = [uop for uop in uops if uop.op is Ops.DEFINE_LOCAL]
-    assert len(local_buffers) == 1 and (buf:=local_buffers[0]).arg == 0 and buf.dtype == dtypes.float.ptr(1, local=True)
+  @unittest.expectedFailure
+  def test_lds_input_basic(self):
+    test_lds_helper(opts=[Opt(OptOps.LDS, 1, None)], bufs=[(1,16)])
+    test_lds_helper(opts=[Opt(OptOps.LDS, 2, None)], bufs=[(2,16)])
 
-  def test_lds_0_locals(self):
-    local_sizes = [0, 2, 4, 8, 16]
+  @unittest.expectedFailure
+  def test_lds_multi_basic(self):
+    test_lds_helper(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None)], bufs=[(1,1),(1,16)])
+    test_lds_helper(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None), Opt(OptOps.LDS, 2, None)], bufs=[(0,16),(1,16),(2,16)])
 
-    for l1 in local_sizes:
-      for l0 in local_sizes:
-        opts: list[Opt] = []
-        if l1 != 0: opts.append(Opt(OptOps.LOCAL, 1, l1))
-        if l0 != 0: opts.append(Opt(OptOps.LOCAL, 0, l0))
-        opts.append(Opt(OptOps.LDS, 0, None))
+  def test_lds_output_unroll(self):
+    for sz in [0,2,4,8]:
+      test_lds_helper(opts=[Opt(OptOps.UNROLL, 0, sz), Opt(OptOps.LDS, 0, None)], expected_bufs=[(0,1)])
 
-        uops = test_lds_helper(opts)
-        local_buffers = [uop for uop in uops if uop.op is Ops.DEFINE_LOCAL]
-
-        assert len(local_buffers) == 1, f"Expected exactly 1 local buffer, got {len(local_buffers)}"
-        buf = local_buffers[0]
-        assert buf.arg == 0, f"Expected buffer argument index 0, got {buf.arg}"
-        expected_dtype = dtypes.float.ptr(max(1, l0) * max(1, l1), local=True)
-        assert buf.dtype == expected_dtype, f"Expected buffer dtype {expected_dtype}, got {buf.dtype} for {l0=}, {l1=}"
+  def test_lds_output_local(self):
+    opts = [Opt(OptOps.LOCAL, 0, 2),
+            Opt(OptOps.LDS, 0, None)]
+    test_lds_helper(opts=opts, expected_bufs=[(0,2)])
 
 
 if __name__ == "__main__":

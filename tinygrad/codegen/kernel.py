@@ -678,23 +678,11 @@ class Kernel:
           elif i < fu: shape.append(1)
           elif st != 0 and not k.upcasted_axis(buf.arg)[i-fu][2]: shape.append(cast(int, global_st.shape[i]))
           else: shape.append(1)
-
-        local_shape = tuple(shape)
-        # local_shape = tuple(1 if  i < gd else k.output_shape[i] if i < fr else 1 if st == 0 or i < fu else global_st.shape[i] for i,st in enumerate(global_st.real_strides(True)))
-        local_shape_noop = tuple(1 if st == 0 or i < k.global_dims or (i >= k.first_reduce and i < k.first_upcast) else global_st.shape[i]
-                            for i,st in enumerate(global_st.real_strides(True)))
-        store_st = ShapeTracker.from_shape(local_shape)
-        load_st = ShapeTracker.from_shape(local_shape)
+        local_shape = tuple(shape) # amd_matmul style
+        local_shape_noop = tuple(1 if st == 0 or i < gd or (i >= fr and i < fu) else global_st.shape[i] for i,st in enumerate(global_st.real_strides(True)))
+        print(f"{local_shape_noop=} {local_shape=}")
+        store_st = load_st = ShapeTracker.from_shape(local_shape_noop)
         local_buffer = UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(size=store_st.real_size(), local=True), (), buf.arg)
-        # perm=(0,1,3,2,4,5,6)
-        if buf.arg == 1:
-          perm = (0,1,5,3,4,2)
-        else:
-          perm = (0,1,2,5,4,3)
-        # print(store_st)
-        # # store_st = store_st.permute(perm)
-        load_st = load_st.permute(perm)
-        global_st = global_st.permute(perm)
         if global_access.op == Ops.LOAD:
           global_access = global_access.replace(src=(global_access.src[0], global_st.to_uop()))
           local_store = UOp.store(local_buffer, store_st.to_uop(), global_access)
