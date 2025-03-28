@@ -1,7 +1,7 @@
 from typing import Any, Sequence, cast, Literal, Callable
 import dataclasses, functools, io, math, types
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
-from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple
+from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported
 
@@ -272,7 +272,8 @@ def get_onnx_ops():
   def OptionalGetElement(x:Tensor|None=None): return x if x is not None else Tensor([])
   def ConstantOfShape(shape:list[int], value:Tensor|None=None):
     if value is None: value = Tensor(0, dtype=dtypes.float32)
-    return Tensor.ones(*shape, dtype=value.dtype) * (value if shape != [0] else 1)
+    if shape == [0]: return Tensor([], dtype=value.dtype)
+    return value.expand(shape)
 
   def Size(data:Tensor): return data.numel()
   def Shape(data:Tensor, end:int|None=None, start:int=0): return Tensor(data.shape[start:end], dtype=dtypes.int64)
@@ -289,13 +290,8 @@ def get_onnx_ops():
   def HardSigmoid(x:Tensor, alpha:float=0.2, beta:float=0.5): return (alpha*x + beta).clip(0, 1)
   def Gelu(x:Tensor, approximate:str|None=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
   def BiasGelu(x: Tensor, bias: Tensor, approximate: str | None = None) -> Tensor: return Gelu(x + bias, approximate)
-  def FastGelu(x:Tensor, bias:Tensor|None=None):
-    # this is tanh approximated
-    return (x + bias).gelu() if bias is not None else x.gelu()
-  # TODO: fix this
-  def PRelu(X:Tensor, slope:Tensor):
-    slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope
-    return (X > 0).where(X, X * slope)
+  def FastGelu(x:Tensor, bias:Tensor|None=None): return (x + bias).gelu() if bias is not None else x.gelu() # this is tanh approximated
+  def PRelu(X:Tensor, slope:Tensor): return (X > 0).where(X, X * slope)
   def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leaky_relu(alpha)
   def ThresholdedRelu(X:Tensor, alpha:float=1.0): return (X > alpha).where(X, 0)
   def LogSoftmax(x: Tensor, axis:int=-1): return x.log_softmax(axis)
@@ -304,7 +300,7 @@ def get_onnx_ops():
   # ***** Unary Ops (broadcasted) *****
   def Add(x:Tensor,y:Tensor, broadcast=None, axis=None): return x + y if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else (x + y).cast(x.dtype)
   def Sub(x:Tensor|int,y:Tensor): return x - y # some test has input as int
-  def Div(x:Tensor,y:Tensor): return (x/y).cast(x.dtype)
+  def Div(x:Tensor,y:Tensor): return x.div(y, rounding_mode='trunc' if dtypes.is_int(x.dtype) else None)
   def Less(x:Tensor,y:Tensor): return x < y
   def LessOrEqual(x:Tensor,y:Tensor): return x <= y
   def Greater(x:Tensor,y:Tensor): return x > y
@@ -322,7 +318,6 @@ def get_onnx_ops():
     return x % y
 
   # ***** Casting Ops *****
-  # TODO: saturate
   def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_parse(to))
   def CastLike(x:Tensor, target_type:Tensor, saturate:int=1): return x.cast(target_type.dtype)
 
@@ -461,24 +456,23 @@ def get_onnx_ops():
     def _apply_nearest_mode(index: Tensor, input_dim, mode: str):
       if mode == "round_prefer_floor": index = (index - 0.5).ceil()
       elif mode == "round_prefer_ceil": index = (index + 0.5).floor()
-      elif mode in ["floor", "ceil"]: index = getattr(index, mode)()
+      elif mode == "floor": index = index.floor()
+      elif mode == "ceil": index = index.ceil()
       else: raise ValueError(f"invalid {nearest_mode=}")
       return index.cast(dtypes.int32).clip(0, input_dim-1)
     def _apply_transformation(index: Tensor, input_dim, scale_dim, roi_dim, mode):
-      # TODO: needs more testing, not confident in this
-      # NOTE: their reference implementation differ from the implementation in their reference docs
-      # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py
-      # https://github.com/onnx/onnx/blob/main/docs/Operators.md#Resize
-      output_dim = scale_dim * input_dim
+      output_dim = index.shape[0]
       if mode == "half_pixel": index = (index + 0.5) / scale_dim - 0.5
-      elif mode == "align_corners": index = index * (input_dim - 1) / (output_dim - 1) if output_dim != 1 else Tensor([0])
+      elif mode == "align_corners":
+        if output_dim == 1: index = Tensor([]) if output_dim < 1 else Tensor([0])
+        else: index = index * (input_dim - 1) / (output_dim - 1)
       elif mode == "asymmetric": index = index / scale_dim
       elif mode == "pytorch_half_pixel": index = (index + 0.5) / scale_dim - 0.5 if output_dim != 1 else Tensor([-0.5])
-      elif mode == "half_pixel_symmetric": index = input_dim / 2 * (1 - int(output_dim) / output_dim) + (index + 0.5) / scale_dim - 0.5
-      elif mode == "tf_crop_and_resize": index = roi_dim[0] * (input_dim - 1) + index * ((roi_dim[1] - roi_dim[0]) * (input_dim - 1) / (output_dim - 1))
+      elif mode == "half_pixel_symmetric": index = (input_dim / 2) * (1-(output_dim / (scale_dim * input_dim))) + (index + 0.5) / scale_dim - 0.5
       else: raise ValueError(f"invalid {coordinate_transformation_mode=}")
       return index.clip(0, input_dim-1)
 
+    if antialias: raise NotImplementedError("antialias is not implemented")
     scales, sizes = (None if scales is None else scales[2-(X.ndim-len(scales)):]), (None if sizes is None else sizes[2-(X.ndim-len(sizes)):])
     # we pre permute the axes and permute back after resize
     axes, input_shape, = (axes or list(range(X.ndim))), cast(tuple[int, ...], X.shape[2:]),
@@ -513,7 +507,7 @@ def get_onnx_ops():
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
         X = X.gather(i, low).lerp(X.gather(i, high), perc)
     if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
-    return X.permute(*[perm.index(i) for i in range(len(perm))]) if perm else X
+    return X.permute(*argsort(perm)) if perm else X
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
   def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):
@@ -540,12 +534,12 @@ def get_onnx_ops():
     x = x.reshape(x.shape[0], x.shape[1], -1).layernorm(eps=epsilon).reshape(x.shape)
     return x * scale.reshape(1, -1, *[1] * (x.ndim-2)) + bias.reshape(1, -1, *[1] * (x.ndim-2))
   def LayerNormalization(x:Tensor, scale:Tensor, bias:Tensor, axis:int=-1, epsilon:float=1e-05, stash_type:int=1):
-    assert stash_type == 1, "only float32 is supported"
     axes = tuple(i for i in range(axis if axis >= 0 else x.ndim + axis, x.ndim))
     mean = x.mean(axis=axes, keepdim=True)
     return x.layernorm(axes, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).square().mean(axis=axes, keepdim=True).add(epsilon).rsqrt()
-  def GroupNormalization(x:Tensor, scale:Tensor, bias:Tensor, num_groups:int, epsilon:float=1e-05):
-    return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
+  def GroupNormalization(x:Tensor, scale:Tensor, bias:Tensor, num_groups:int, epsilon:float=1e-05, stash_type:int=1):
+    x = x.reshape(x.shape[0], num_groups, -1).layernorm(eps=epsilon).reshape(x.shape)
+    return x * scale.reshape(1, -1, *[1] * (x.ndim-2)) + bias.reshape(1, -1, *[1] * (x.ndim-2))
   def MeanVarianceNormalization(x:Tensor, axis:list[int]=[0,2,3]):
     return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
   def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma:Tensor, beta:Tensor|None=None, bias:Tensor|None=None, epsilon:float=1e-12):
@@ -762,7 +756,7 @@ def get_onnx_ops():
     return _qlinearop_quantized(Tensor.mul, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], c_scale, c_zero_point)
 
   def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int):
-    assert channels_last == 0, "unsure what this does"
+    assert channels_last == 0, "TODO NHWC"
     return _qlinearop_float(GlobalAveragePool, [X], [x_zero_point], [x_scale], y_scale, y_zero_point)
 
   def ConvInteger(x: Tensor, w: Tensor, x_zero_point: Tensor | int = 0, w_zero_point: Tensor | int = 0, B: Tensor | None = None, **opts) -> Tensor:
@@ -772,7 +766,6 @@ def get_onnx_ops():
     return _op_integer(Tensor.matmul, [A,B], [a_zero_point,b_zero_point])
 
   # ***** Training Ops *****
-  # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
   # NOTE: onnx training ops actually don't need the state for optim, all the ops work in a functional way, but we still can reuse optim.py code
   @_onnx_training(3)
   def Adagrad(R:Tensor, T:int, *inputs:Tensor, decay_factor:float=0.0, epsilon:float=0.0, norm_coefficient:float=0.0):
@@ -789,7 +782,7 @@ def get_onnx_ops():
           norm_coefficient_post:float=0.0):
     from tinygrad.nn.optim import Adam as TinyAdam
     X, G, V, H = inputs
-    G, V, H = G.detach(), V.detach(), H.detach()  # TODO we shouldn't need these detaches
+    G, V, H = G.detach(), V.detach(), H.detach()
     X.grad = norm_coefficient * X.detach() + G
     opt = TinyAdam([X], b1=alpha, b2=beta, eps=epsilon)
     opt.m, opt.v, opt.lr = [V], [H], R
@@ -805,13 +798,12 @@ def get_onnx_ops():
 
   @_onnx_training(3)
   def Momentum(R:Tensor, T:int, *inputs:Tensor, alpha:float, beta:float, mode:str, norm_coefficient:float):
-    from tinygrad.nn.optim import SGD
-    X, G, V = inputs
-    G, V = G.detach(), V.detach()
-    X.grad = (norm_coefficient * X.detach() + G) * (beta if T > 0 else 1)
-    opt = SGD([X], momentum=alpha, nesterov=(mode=="nesterov"))
-    opt.b, opt.lr = [V], R
-    opt.step()
+    X, G, V = (i.detach() for i in inputs)
+    grad = norm_coefficient * X + G
+    # NOTE: this beta_adjusted term makes it so we can't use SGD for nesterov
+    beta_adjusted = beta if T > 0 else 1
+    V.assign(alpha * V + grad * beta_adjusted)
+    X.assign(X - R * (V if mode == "standard" else (grad + alpha * V)))
     return [X, V]
 
   def Gradient(*inputs:Tensor, y:str, intermediate_tensors:dict[str, Tensor], **_):

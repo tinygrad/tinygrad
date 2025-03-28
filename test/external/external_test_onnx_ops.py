@@ -5,27 +5,62 @@
 from typing import Any
 import unittest, onnx, tempfile
 import numpy as np
+from tinygrad.frontend.onnx import OnnxRunner
 from extra.onnx_helpers import validate
+from onnx.defs import ONNX_DOMAIN, AI_ONNX_PREVIEW_TRAINING_DOMAIN
 
 class TestOnnxOps(unittest.TestCase):
   DOMAIN = None
-  def helper_test_single_op(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str], rtol=1e-3, atol=1e-6):
+  def helper_build_model(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str]):
     onnx_inputs = [onnx.helper.make_tensor_value_info(name, onnx.helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inps.items()]
     onnx_outputs = [onnx.helper.make_empty_tensor_value_info(name) for name in outs]
     nodes = [onnx.helper.make_node(op, list(inps), list(outs), domain=self.DOMAIN, **opts)]
     graph = onnx.helper.make_graph(nodes, f"test_{op.lower()}", onnx_inputs, onnx_outputs)
     model = onnx.helper.make_model(graph, producer_name=f"test_{op.lower()}")
+    return model
+
+  def helper_test_single_op(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str], rtol=1e-3, atol=1e-6):
+    model = self.helper_build_model(op, inps, opts, outs)
     with tempfile.NamedTemporaryFile() as tmp:
       onnx.save(model, tmp.name)
       validate(tmp.name, inps, rtol, atol)
 
 class TestMainOnnxOps(TestOnnxOps):
-  DOMAIN = ""
+  DOMAIN = ONNX_DOMAIN
   def test_reshape(self):
     inputs = {"in": np.arange(6, dtype=np.float32), "shape": np.array([2,3], dtype=np.int64)}
     attributes = {}
     outputs = ["out"]
     self.helper_test_single_op("Reshape", inputs, attributes, outputs)
+
+  def test_squeeze(self):
+    # axes is None
+    inputs = {"data": np.random.randn(1, 3, 1, 1).astype(np.float32)}
+    attributes = {}
+    outputs = ["squeezed"]
+    self.helper_test_single_op("Squeeze", inputs, attributes, outputs)
+
+  def test_resize(self):
+    ...
+
+  # division innacuracy is sensitive to rounding
+  @unittest.expectedFailure
+  def test_resize_failure(self):
+    X = np.array([[[1, 2, 3, 4]]], dtype=np.float32)
+    scales = np.array([1.0, 1.0, 5.0], dtype=np.float32)
+    inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
+    attributes = {"mode": "nearest", "coordinate_transformation_mode": "half_pixel", "nearest_mode": "ceil"}
+    outputs = ["out"]
+    self.helper_test_single_op("Resize", inputs, attributes, outputs)
+
+  def test_resize_downsample_scales_linear_align_corners(self):
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-130
+    X = np.array([[[[1, 2, 3, 4], [5, 6, 7, 8]]]], dtype=np.float32)
+    scales = np.array([1.0, 1.0, 0.6, 0.6], dtype=np.float32)
+    inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
+    attributes = {"mode": "linear", "coordinate_transformation_mode": "align_corners"}
+    outputs = ["Y"]
+    self.helper_test_single_op("Resize", inputs, attributes, outputs)
 
   def test_conv(self):
     # test VALID auto_pad
@@ -48,8 +83,15 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["y"]
     self.helper_test_single_op("Gather", inputs, attributes, outputs)
 
-  def test_maxunpool(self):
-    # test_maxunpool_export_with_output_shape_cpu
+  def test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True(self):
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-13
+    inputs = {"x": np.random.randn(1, 1, 32, 32, 32).astype(np.float32)}
+    attributes = {"kernel_shape": (5, 5, 5), "strides": (3, 3, 3), "dilations": (2, 2, 2), "count_include_pad": 1, "ceil_mode": True}
+    outputs = ["y"]
+    self.helper_test_single_op("AveragePool", inputs, attributes, outputs)
+
+  def test_maxunpool_export_with_output_shape(self):
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-91
     xT = np.array([[[[5, 6], [7, 8]]]], dtype=np.float32)
     xI = np.array([[[[5, 7], [13, 15]]]], dtype=np.int64)
     output_shape = np.array((1, 1, 5, 5), dtype=np.int64)
@@ -138,6 +180,99 @@ class TestMainOnnxOps(TestOnnxOps):
         attributes = {}
         outputs = ["Y"]
         self.helper_test_single_op("QLinearMatMul", inputs, attributes, outputs)
+
+  def test_qlinearmatmul_2D_int8_float16(self): self._run_qlinearmatmul_test(np.int8, np.float16, 2)
+  def test_qlinearmatmul_3D_int8_float16(self): self._run_qlinearmatmul_test(np.int8, np.float16, 3)
+  def test_qlinearmatmul_2D_int8_float32(self): self._run_qlinearmatmul_test(np.int8, np.float32, 2)
+  def test_qlinearmatmul_3D_int8_float32(self): self._run_qlinearmatmul_test(np.int8, np.float32, 3)
+  def _run_qlinearmatmul_test(self, quant_type, dtype, dims):
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-111
+    if dims == 2:
+      a = np.array([[208, 236, 0, 238], [3, 214, 255, 29]])
+      b = np.array([[152, 51, 244], [60, 26, 255], [0, 127, 246], [127, 254, 247]])
+    else:
+      a = np.array([[[208, 236, 0, 238], [3, 214, 255, 29]], [[208, 236, 0, 238], [3, 214, 255, 29]]])
+      b = np.array([[[152, 51, 244], [60, 26, 255], [0, 127, 246], [127, 254, 247]], [[152, 51, 244], [60, 26, 255], [0, 127, 246], [127, 254, 247]]])
+    if quant_type == np.int8:
+      a = a - 127
+      b = b - 127
+    a = a.astype(quant_type)
+    b = b.astype(quant_type)
+    inputs = {
+      "a": a, "a_scale": np.array([0.0066], dtype=dtype), "a_zero_point": np.array([113-127] if quant_type == np.int8 else [113], dtype=quant_type),
+      "b": b, "b_scale": np.array([0.00705], dtype=dtype), "b_zero_point": np.array([114-127] if quant_type == np.int8 else [114], dtype=quant_type),
+      "y_scale": np.array([0.0107], dtype=dtype), "y_zero_point": np.array([118 - 127] if quant_type == np.int8 else [118], dtype=quant_type)
+    }
+    self.helper_test_single_op("QLinearMatMul", inputs, {}, ["y"],)
+
+class TestTrainingOnnxOps(TestOnnxOps):
+  # NOTE: ORT doesn't actually support training ops on cpu so we test using functions provided by onnx
+  DOMAIN = AI_ONNX_PREVIEW_TRAINING_DOMAIN
+  def _validate_training(self, op:str, onnx_fxn, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str]):
+    opts.pop("mode", None)
+    model = self.helper_build_model(op, inps, opts, outs)
+    runner = OnnxRunner(model)
+    tiny_out = runner(inps)
+    onnx_out = onnx_fxn(**inps, **opts)
+    for (nm, t_out), o_out in  zip(tiny_out.items(), onnx_out):
+      np.testing.assert_allclose(t_out.numpy(), o_out, rtol=1e-3, atol=1e-6, err_msg=f"{nm} failed")
+
+  def test_adagrad_t_greater_than_zero(self):
+    from onnx.backend.test.case.node.adagrad import apply_adagrad
+    for t in [1, 2]:
+      inputs = {
+        "r": np.array(0.01, dtype=np.float32),
+        "t": np.array(t, dtype=np.int32),
+        "x": np.random.randn(3, 3).astype(np.float32),
+        "g": np.random.randn(3, 3).astype(np.float32),
+        "h": np.random.randn(3, 3).astype(np.float32),
+      }
+      attributes = {"decay_factor": 0.1, "epsilon": 1e-6, "norm_coefficient": 0.01}
+      outputs = ["X_out", "H_out"]
+      self._validate_training("Adagrad", apply_adagrad, inputs, attributes, outputs)
+
+  def test_momentum_t_greater_than_zero(self):
+    from onnx.backend.test.case.node.momentum import apply_momentum
+    for t in [1, 2]:
+      inputs = {
+        "r": np.array(0.01, dtype=np.float32),
+        "t": np.array(t, dtype=np.int32),
+        "x": np.random.randn(3, 3).astype(np.float32),
+        "g": np.random.randn(3, 3).astype(np.float32),
+        "v": np.random.randn(3, 3).astype(np.float32),
+      }
+      attributes = {"alpha": 0.9, "beta": 0.1, "mode": "standard", "norm_coefficient": 0.01}
+      outputs = ["X_out", "V_out"]
+      self._validate_training("Momentum", apply_momentum, inputs, attributes, outputs)
+
+  def test_momentum_nesterov_t_greater_than_zero(self):
+    from onnx.backend.test.case.node.momentum import apply_nesterov
+    for t in [1, 2]:
+      inputs = {
+        "r": np.array(0.01, dtype=np.float32),
+        "t": np.array(t, dtype=np.int32),
+        "x": np.random.randn(3, 3).astype(np.float32),
+        "g": np.random.randn(3, 3).astype(np.float32),
+        "v": np.random.randn(3, 3).astype(np.float32),
+      }
+      attributes = {"alpha": 0.9, "beta": 0.1, "mode": "nesterov", "norm_coefficient": 0.01}
+      outputs = ["X_out", "V_out"]
+      self._validate_training("Momentum", apply_nesterov, inputs, attributes, outputs)
+
+  def test_adam_t_greater_than_zero(self):
+    from onnx.backend.test.case.node.adam import apply_adam
+    for t in [1, 2]:
+      inputs = {
+        "r": np.array(0.01, dtype=np.float32),
+        "t": np.array(t, dtype=np.int32),
+        "x": np.random.randn(3, 3).astype(np.float32),
+        "g": np.random.randn(3, 3).astype(np.float32),
+        "v": np.random.randn(3, 3).astype(np.float32),
+        "h": np.random.randn(3, 3).astype(np.float32),
+      }
+      attributes = { "alpha": 0.9, "beta": 0.999, "epsilon": 1e-8, "norm_coefficient": 0.01, "norm_coefficient_post": 0.02 }
+      outputs = ["X_new", "V_new", "H_new"]
+      self._validate_training("Adam", apply_adam, inputs, attributes, outputs)
 
 class TestContribOnnxOps(TestOnnxOps):
   DOMAIN = "com.microsoft"

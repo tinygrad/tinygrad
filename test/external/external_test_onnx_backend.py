@@ -40,22 +40,31 @@ class TinygradBackend(Backend):
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
-# BUG: buggy onnx tests
-backend_test.exclude('test_adam_multiple_cpu')
-backend_test.exclude('test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True_cpu')
-
-# BUG: onnxruntime 1.20.1 fails these tests too
-backend_test.exclude('test_qlinearmatmul_2D_int8_float16_cpu')
-backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
-backend_test.exclude('test_qlinearmatmul_2D_int8_float32_cpu')
-backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
-
-# BUG: we don't match ORT here due to some div inaccuracy with floats
+# BUG: we don't match ONNX and ORT due to rounding after div inaccuracy with floats
 backend_test.exclude('test_dynamicquantizelinear_cpu')
 backend_test.exclude('test_dynamicquantizelinear_expanded_cpu')
 
-# BUG: we match ORT, tested in TestMainOnnxOps.test_maxunpool
+# BUG: ORT fails these tests and this is not testable vs ORT
+backend_test.exclude('test_PReLU_1d_multiparam_cpu')
+backend_test.exclude('test_PReLU_2d_multiparam_cpu')
+backend_test.exclude('test_PReLU_3d_multiparam_cpu')
+backend_test.exclude('test_adam_multiple_cpu')
+
+# BUG: ORT fails these tests but we match ORT
+# tested in TestMainOnnxOps.test_maxunpool_export_with_output_shape
 backend_test.exclude('test_maxunpool_export_with_output_shape_cpu')
+# tested in TestMainOnnxOps.test_resize_downsample_scales_linear_align_corners
+backend_test.exclude('resize_downsample_scales_linear_align_corners')
+# tested in TestMainOnnxOps.test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True
+backend_test.exclude('test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True_cpu')
+# tested in TestMainOnnxOps.test_qlinearmatmul_2D_int8_float16
+backend_test.exclude('test_qlinearmatmul_2D_int8_float16_cpu')
+# tested in TestMainOnnxOps.test_qlinearmatmul_3D_int8_float16
+backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
+# tested in TestMainOnnxOps.test_qlinearmatmul_2D_int8_float32
+backend_test.exclude('test_qlinearmatmul_2D_int8_float32_cpu')
+# tested in TestMainOnnxOps.test_qlinearmatmul_3D_int8_float32
+backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
 
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):
@@ -159,19 +168,20 @@ backend_test.exclude('test_deform_conv_*')
 backend_test.exclude('test_lppool_*')
 backend_test.exclude('test_scan_*')
 backend_test.exclude('test_split_to_sequence_*')
-backend_test.exclude('test_resize_downsample_scales_cubic_*') # unsure how to implement cubic
-backend_test.exclude('test_resize_downsample_sizes_cubic_*') # unsure how to implement cubic
-backend_test.exclude('test_resize_upsample_scales_cubic_*') # unsure how to implement cubic
-backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to implement cubic
-backend_test.exclude('test_ai_onnx_ml_tree_ensemble_*') # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/aionnxml/op_tree_ensemble.py#L121
+backend_test.exclude('test_ai_onnx_ml_tree_ensemble_*')
 
 # rest of the failing tests
+backend_test.exclude('test_resize_downsample_scales_cubic_*') # cubic not implemented
+backend_test.exclude('test_resize_downsample_sizes_cubic_*') # cubic not implemented
+backend_test.exclude('test_resize_upsample_scales_cubic_*') # cubic not implemented
+backend_test.exclude('test_resize_upsample_sizes_cubic_*') # cubic not implemented
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
-backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
+backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # tf_crop_and_resize not implemented
+backend_test.exclude('test_resize_tf_crop_and_resize_axes_2_3_cpu') # tf_crop_and_resize not implemented
+backend_test.exclude('test_resize_tf_crop_and_resize_axes_3_2_cpu') # tf_crop_and_resize not implemented
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
-backend_test.exclude('test_group_normalization_*') # numerical inaccuracy problem. Current Group Normalization OP fails test
 
 backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
