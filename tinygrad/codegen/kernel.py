@@ -686,20 +686,24 @@ class Kernel:
 
         perm = tuple(range(len(local_shape)))
         if buf.arg == 1:
+          print("permuting buffer 1")
+          # amd  => shape (256, 256, 16, 16, 256, 16) strides (65536, 0, 1, 4096, 16, 0),
           # noop => shape (256, 256, 16, 16, 256, 16) strides (65536, 0, 0, 4096, 16, 1)
           # this permutes what each thread is responsible for storing and loading
           perm = (0,1,5,3,4,2)
-          # store_st = store_st.permute(perm)
-          # global_st = global_st.permute(perm)
+          store_st = store_st.permute(perm)
+          global_st = global_st.permute(perm)
 
           # this permutes local layout
-          # store_st = store_st.permute((0,1,3,2,4,5))
-          # load_st = load_st.permute((0,1,2,5,4,3))
-        # if buf.arg == 2:
-          # noop => shape (256, 256, 16, 16, 256, 16) strides (65536, 0, 0, 4096, 16, 1)
-          # perm = (0,1,5,3,4,2)
-          # store_st = store_st.permute(perm)
-          # global_st = global_st.permute(perm)
+          store_st = store_st.permute((0,1,3,2,4,5))
+          load_st = load_st.permute((0,1,2,5,4,3))
+        if buf.arg == 2:
+          print("permuting buffer 2")
+          # amd  => shape (256, 256, 16, 16, 256, 16) strides (0, 16, 1, 4096, 65536, 0)
+          # noop => shape (256, 256, 16, 16, 256, 16) strides (0, 16, 1, 0, 65536, 4096)
+          perm = (0,1,2,5,4,3)
+          store_st = store_st.permute(perm)
+          global_st = global_st.permute(perm)
 
           # perm_2 = (0,1,3,2,4,5)
           # store_st = store_st.permute((0,1,3,2,4,5))
