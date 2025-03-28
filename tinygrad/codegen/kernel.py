@@ -677,7 +677,7 @@ class Kernel:
           # elif i < fr: shape.append(cast(int, k.output_shape[i]))
           elif i < fr: shape.append(cast(int, global_st.shape[i]) if st != 0 else 1)
           elif i < fu: shape.append(1)
-          elif st != 0 or k.upcasted_axis(buf.arg)[i-fu][2]: shape.append(cast(int, global_st.shape[i]))
+          elif st != 0: shape.append(cast(int, global_st.shape[i]))
           else: shape.append(1)
         local_shape = tuple(shape) # amd_matmul style
         local_shape_noop = tuple(1 if st == 0 or i < gd or (i >= fr and i < fu) else global_st.shape[i] for i,st in enumerate(global_st.real_strides(True)))
