@@ -2,10 +2,12 @@ import unittest
 from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableTraverseContext
 from tinygrad.runtime.support.am.ip import AM_GMC
 from tinygrad.runtime.support.amd import import_module
+from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import mv_address
 
 class FakeGMC(AM_GMC):
-  def __init__(self):
+  def __init__(self, adev):
+    self.adev = adev
     self.vm_base = 0x0
     self.address_space_mask = (1 << 44) - 1
   def init_hw(self): pass
@@ -19,9 +21,10 @@ class FakeAM:
     self.is_booting, self.smi_dev = True, False
     self.pcidev = FakePCIDev()
     self.vram = memoryview(bytearray(4 << 30))
-    self.gmc = FakeGMC()
+    self.gmc = FakeGMC(self)
     self.mm = AMMemoryManager(self, vram_size=4 << 30)
     self.is_booting = False
+    self.ip_ver = {am.GC_HWIP: (11, 0, 0)}
   def paddr2cpu(self, paddr:int) -> int: return paddr + mv_address(self.vram)
   def paddr2mc(self, paddr:int) -> int: return paddr
 
