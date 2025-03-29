@@ -25,6 +25,7 @@ np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
   def test_benchmark_openpilot_model(self):
+    os.environ["ONNXFLOAT32"] = "1"
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
     run_onnx = OnnxRunner(onnx_model)
     def get_inputs():
@@ -67,8 +68,10 @@ class TestOnnxModel(unittest.TestCase):
       os.system(f"flameprof {temp('net.prof')} > {temp('prof.svg')}")
       ps = stats.sort_stats(pstats.SortKey.TIME)
       ps.print_stats(30)
+    del os.environ["ONNXFLOAT32"]
 
   def test_openpilot_model(self):
+    os.environ["ONNXFLOAT32"] = "1"
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
     run_onnx = OnnxRunner(onnx_model)
     print("got run_onnx")
@@ -98,6 +101,7 @@ class TestOnnxModel(unittest.TestCase):
     Tensor.no_grad = False
     print(tinygrad_out, torch_out)
     np.testing.assert_allclose(tinygrad_out, torch_out, atol=1e-4, rtol=1e-2)
+    del os.environ["ONNXFLOAT32"]
 
   @unittest.skip("slow")
   def test_efficientnet(self):
