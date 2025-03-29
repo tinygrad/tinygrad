@@ -656,21 +656,22 @@ class Kernel:
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
   def apply_tc(self, ast) -> UOp:
-    def transform(ctx:tuple[Kernel, TensorCore, set[bool]], reduce_op:UOp):
-      print("applying tc", reduce_op)
+    def transform(ctx:tuple[Kernel, TensorCore, set[UOp]], reduce_op:UOp):
       if len(ctx[2]): return None
-      print("applying tc", reduce_op)
-      ctx[2].add(True)
+      ctx[2].add(reduce_op)
       k, tc = ctx[0], ctx[1]
 
-      gd, fu = k.global_dims, k.first_upcast
+      gd, fr, fu = k.global_dims, k.first_reduce, k.first_upcast
       def get_upcast_axes(buf): # upcast along non-zero dimensions of (tc_reduce + tc_upcast)
         upcast_axes = int(math.log2(tc.elements_per_thread[buf]))
         return tuple((fu + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
       def get_tc_swizzle_st(shape, local_perm, upcast_perm):
-        offset = (fu - (gd + len(local_perm)))
+        offset = (fu - (fr - 1))
+        # print((gd + len(local_perm)))
+        # print(fr)
+        # offset = (fu - fr)
         permaxis = list(range(gd)) \
-          + [gd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(gd + len(local_perm), fu)) \
+          + [gd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(fr-1, fu)) \
           + [gd + x + (offset if x >= len(local_perm) else 0) for x in upcast_perm] + list(range(fu + len(upcast_perm), len(shape)))
         return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
       srcs = list((reduce_op.src[0] if reduce_op.src[0].op is not Ops.CAST else reduce_op.src[0].src[0]).src)
