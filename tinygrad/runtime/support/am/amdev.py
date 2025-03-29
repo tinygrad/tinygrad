@@ -1,8 +1,8 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, functools, pathlib, fcntl, os, importlib
+import ctypes, collections, time, dataclasses, functools, pathlib, fcntl, os
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
 from tinygrad.runtime.autogen.am import am, mp_11_0
-from tinygrad.runtime.support.amd import AMDRegBase, collect_registers
+from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
@@ -381,11 +381,7 @@ class AMDev:
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(bhdr) + bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
 
-  def _ip_module(self, prefix:str, hwip, prever_prefix:str=""):
-    for ver in [self.ip_ver[hwip], self.ip_ver[hwip][:2]+(0,), self.ip_ver[hwip][:1]+(0, 0)]:
-      try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{prefix}_{prever_prefix}{ver[0]}_{ver[1]}_{ver[2]}")
-      except ImportError: pass
-    raise ImportError(f"am {self.devfmt}: failed to load {prefix} module with version {self.ip_ver[hwip]}")
+  def _ip_module(self, prefix:str, hwip, prever_prefix:str=""): return import_module(prefix, self.ip_ver[hwip], prever_prefix)
 
   def _build_regs(self):
     mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("NBIO", self._ip_module("nbio", am.NBIO_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
