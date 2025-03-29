@@ -656,10 +656,11 @@ class Kernel:
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
   def apply_tc(self, ast) -> UOp:
-    def transform(ctx:tuple[Kernel, TensorCore, bool], reduce_op:UOp):
+    def transform(ctx:tuple[Kernel, TensorCore, set[bool]], reduce_op:UOp):
       print("applying tc", reduce_op)
-      if ctx[2]: return None
-      ctx = (ctx[0], ctx[1], True)
+      if len(ctx[2]): return None
+      print("applying tc", reduce_op)
+      ctx[2].add(True)
       k, tc = ctx[0], ctx[1]
 
       gd, fu = k.global_dims, k.first_upcast
@@ -688,8 +689,6 @@ class Kernel:
       new_axes = reduce_op.arg[1][:-len(tc_reduce_axes)]
       print(new_axes)
 
-      # return tc_uop
-      # new_axes = reduce_op.axes[]
       return reduce_op.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if new_axes else tc_uop
 
     codes = []
@@ -702,7 +701,7 @@ class Kernel:
     for tc in self.opts.tensor_cores:
       # print(f"{tuple(codes)[:len(tc.opts)]=} {tc.opts=}")
       if tuple(codes)[:len(tc.opts)] == tc.opts: # only first opts should match
-        return graph_rewrite(ast, view_left + PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="reduce_op"), transform)]), ctx=(self, tc, False))
+        return graph_rewrite(ast, view_left + PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="reduce_op"), transform)]), ctx=(self, tc, set()))
     return ast
 
   # **** this is the lowerer ****
