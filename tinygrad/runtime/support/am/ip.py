@@ -126,8 +126,9 @@ class AM_GMC(AM_IP):
 
   def on_interrupt(self):
     for ip in ["MM", "GC"]:
-      st, va = self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_STATUS_LO32').read(), self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_LO32').read()
-      va = (va | (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_HI32').read()) << 32) << 12
+      st = self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS{'_LO32' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else ''}").read()
+      va = (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_LO32').read()
+            | (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_HI32').read()) << 32) << 12
       if st: raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {st:#x} {va:#x}")
 
 class AM_SMU(AM_IP):
