@@ -415,15 +415,16 @@ class Kernel:
       check(axis < self.first_upcast, "cannot pad upcasted")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
       if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}, cache={}), f"cannot pad {r}")
-      padded = False
+      # padded = False
       for i,st in enumerate(self.sts):
         if (s:=st.shape[axis]) == 1: continue  # reduced
         check(s > amt//4, f"pad adds more than quadruple the work {st.shape[axis]=} > {amt//4=}")
         if (ru := round_up(cast(int, s), amt) - s):
           # pad right seems to be faster
           self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
-          padded = True
-      check(padded, "nothing was padded")
+          # padded = True
+      # check(padded, "nothing was padded")
+      return
 
     if append_opt: self.applied_opts.append(opt)
     if self.simplify_ones() and self.tensor_core_opts:
