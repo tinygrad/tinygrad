@@ -262,6 +262,16 @@ class Kernel:
             applied_tc_opts.append(rlu_opt)
 
           self.applied_opts.extend(applied_tc_opts)
+
+          # hand-coded TC opts
+          for dim in [0,1]:
+            szs = [sz for sz in [5,4,3,2] if self.full_shape[dim] % sz == 0]
+            if szs: self.apply_opt(Opt(OptOps.UPCAST, dim, szs[0]))
+
+          for dim in [0,1]:
+            szs = [sz for sz in [2] if self.full_shape[dim] % sz == 0]
+            if szs: self.apply_opt(Opt(OptOps.LOCAL, dim, szs[0]))
+
           return self
         except KernelOptError: continue
     return self
