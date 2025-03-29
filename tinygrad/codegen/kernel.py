@@ -299,6 +299,35 @@ class Kernel:
           # self.tensor_core = tc
           # self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
           # return True
+
+          # try additional opts
+          
+          # for opt in [OptOps.UPCAST]:
+          #   for axis in [0,1]:
+          #     for size in [4,2]:
+          #       try:
+          #         self.apply_opt(Opt(opt, axis, size))
+          #       except:
+          #         print(f"extra opt {Opt(opt, axis, size)} failed")
+          
+          # for opt in [OptOps.LOCAL]:
+          #   for axis in [0,1]:
+          #     for size in [2]:
+          #       try:
+          #         self.apply_opt(Opt(opt, axis, size))
+          #       except:
+          #         print(f"extra opt {Opt(opt, axis, size)} failed")
+
+                # except KernelOptError:
+                  # print("no extra opts")
+
+                # self.apply_opt(pad_opt, append_opt=FALSE) 
+            # for axis, dim in enumerate(tc.dims):
+                # pad_opt = Opt(OptOps.PADTO, axis, dim)
+                # self.apply_opt(pad_opt, append_opt=False) # PADTO might fail
+                # applied_tc_opts.append(pad_opt)
+          
+
           return self
         except KernelOptError:
           print("failed")
