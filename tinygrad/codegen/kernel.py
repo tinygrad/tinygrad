@@ -265,12 +265,13 @@ class Kernel:
 
           # hand-coded TC opts
           for dim in [0,1]:
-            szs = [sz for sz in [5,4,3,2] if self.full_shape[dim] % sz == 0]
-            if szs: self.apply_opt(Opt(OptOps.UPCAST, dim, szs[0]))
+            if dim < self.global_dims:
+              szs = [sz for sz in [5,4,3,2] if self.full_shape[dim] % sz == 0]
+              if szs: self.apply_opt(Opt(OptOps.UPCAST, dim, szs[0]))
 
-          for dim in [0,1]:
-            szs = [sz for sz in [2] if self.full_shape[dim] % sz == 0]
-            if szs: self.apply_opt(Opt(OptOps.LOCAL, dim, szs[0]))
+          # for dim in [0,1]:
+              szs = [sz for sz in [2] if self.full_shape[dim] % sz == 0]
+              if szs: self.apply_opt(Opt(OptOps.LOCAL, dim, szs[0]))
 
           return self
         except KernelOptError: continue
@@ -589,7 +590,6 @@ class Kernel:
       if opt.op is OptOps.UNROLL: opts.append("r0")
       if opt.op is OptOps.UPCAST: opts.append(f"u{opt.axis}")
       if opt.op is OptOps.LOCAL: opts.append(f"l{opt.axis}")
-    print(opts)
 
     return graph_rewrite(ast, view_left + PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="op"), transform)]),
                          ctx=(self, self.opts.tensor_cores, tuple(opts), set()))
