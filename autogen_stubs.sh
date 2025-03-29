@@ -342,16 +342,6 @@ generate_am() {
   fixup $BASE/am/soc24.py
 
   clang2py -k cdefstum \
-    extra/amdpci/headers/soc21_enum.h \
-    -o $BASE/am/soc21.py
-  fixup $BASE/am/soc21.py
-
-  clang2py -k cdefstum \
-    extra/amdpci/headers/soc24_enum.h \
-    -o $BASE/am/soc24.py
-  fixup $BASE/am/soc24.py
-
-  clang2py -k cdefstum \
     extra/amdpci/headers/mp_13_0_0_offset.h \
     extra/amdpci/headers/mp_13_0_0_sh_mask.h \
     -o $BASE/am/mp_13_0_0.py

@@ -146,7 +146,7 @@ class AM_SMU(AM_IP):
 
   def mode1_reset(self):
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
-    if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0): self._send_msg(2, 0, debug=True)
+    if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0): self._send_msg(DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
     else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
     time.sleep(0.5) # 500ms
 
