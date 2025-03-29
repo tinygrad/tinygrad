@@ -27,6 +27,6 @@ def collect_registers(module, cls=AMDRegBase) -> dict[str, AMDRegBase]:
 
 def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
   for ver in [version, version[:2]+(0,), version[:1]+(0, 0)]:
-    try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{name}_{version_prefix}{'_'.join(map(str, version))}")
+    try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{name}_{version_prefix}{'_'.join(map(str, ver))}")
     except ImportError: pass
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")
