@@ -667,8 +667,9 @@ class Kernel:
         return tuple((fu + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
       def get_tc_swizzle_st(shape, local_perm, upcast_perm):
         offset = (fu - (fr - 1))
+        offset = (fu - (gd + len(local_perm)))
         permaxis = list(range(gd)) \
-          + [gd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(fr-1, fu)) \
+          + [gd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(gd + len(local_perm), fu)) \
           + [gd + x + (offset if x >= len(local_perm) else 0) for x in upcast_perm] + list(range(fu + len(upcast_perm), len(shape)))
         return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
       srcs = list((reduce_op.src[0] if reduce_op.src[0].op is not Ops.CAST else reduce_op.src[0].src[0]).src)
