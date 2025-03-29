@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, struct
+import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, struct, functools
 assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
@@ -328,27 +328,48 @@ class DSPRenderer(ClangRenderer):
   extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher+pretty_render
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
+  extra_args = ['int global_idx']
 
   def _render_defines(self, uops) -> list[str]:
     return ['''/* DSP boilerplate */ struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency;
       _Bool set_dcvs_params; short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3];};''','int HAP_power_set(void*, void*);',
       'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
       'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
-      'unsigned long long HAP_perf_get_time_us(void);'] + super()._render_defines(uops)
+      'unsigned long long HAP_perf_get_time_us(void);', 'typedef unsigned long qurt_thread_t;', 'void qurt_thread_exit(int);',
+      'typedef struct qurt_thread_attr { unsigned long long _bSpace[128/sizeof(unsigned long long)]; }qurt_thread_attr_t;',
+      'void qurt_thread_attr_init (qurt_thread_attr_t *attr);', 'int qurt_thread_join(qurt_thread_t tid, int *status);',
+      'int qurt_thread_create (qurt_thread_t *thread_id, qurt_thread_attr_t *attr, void (*entrypoint) (void *), void *arg);',
+      'void qurt_thread_attr_set_stack_addr(qurt_thread_attr_t *attr, void* stack_addr);',
+      'void qurt_thread_attr_set_stack_size(qurt_thread_attr_t *attr, unsigned int stack_size);',
+      'void qurt_thread_attr_set_name(qurt_thread_attr_t *attr, const char *name);',
+      'void qurt_thread_attr_set_tcb_partition(qurt_thread_attr_t *attr, int partition);'] + super()._render_defines(uops)
 
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str:
-    msrc = ['int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
+    msrc = ['typedef struct all_args {', *[f'int sz_or_val_{i}; int off{i}; void *buf_{i};' for i in range(len(bufs))], '} all_args_t;'
+            'void threader(all_args_t* args) {']
+    msrc += [f"{function_name}({', '.join([(f'args->buf_{i}' if isinstance(b[1][0], PtrDType) else f'args->sz_or_val_{i}') for i,b in enumerate(bufs)])}, 1);"]
+    msrc += ['qurt_thread_exit(0); }'
+            'int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
             'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};',
             'HAP_power_set((void*)handle, (void*)&req);']
     msrc += ['if ((sc>>24) != 2) return 0;']
-    msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
-    msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
-    msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += ['all_args_t args = { 0 };']
+    msrc += [f'args.sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
+    msrc += [f'args.off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'args.buf_{i} = HAP_mmap(0,args.sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+args.off{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
-    msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0], PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
+    msrc += ["char stack[0x1000];"]
+    msrc += ["qurt_thread_attr_t attr = { 0 };"]
+    msrc += ['qurt_thread_attr_set_stack_addr(&attr, (void*)stack);']
+    msrc += ['qurt_thread_attr_set_stack_size(&attr, 0x1000);']
+    msrc += ['qurt_thread_attr_set_name(&attr, "DSP_thread");']
+    msrc += ['qurt_thread_attr_set_tcb_partition(&attr, 1);']
+    msrc += ["qurt_thread_t thread_; int ret = qurt_thread_create(&thread_, &attr, (void (*)(void*))threader, (void*)&args);"]
+    # msrc += [f"{function_name}({', '.join([(f'args.buf_{i}' if isinstance(b[1][0], PtrDType) else f'args.sz_or_val_{i}') for i,b in enumerate(bufs)])}, 0);"]
+    msrc += ['int status;', f"qurt_thread_join(thread_, &status);"]
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
-    msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
-    msrc += ["return 0; }"]
+    msrc += [f'HAP_munmap(args.buf_{i}, args.sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += ["return ret; }"]
     return '\n'.join(msrc)
 
 def rpc_sc(method=0, ins=0, outs=0, fds=0): return (method << 24) | (ins << 16) | (outs << 8) | fds
@@ -423,10 +444,19 @@ class DSPDevice(Compiled):
     try:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
-      sections = ['hash', 'text', 'rela.plt', 'got', 'got.plt', 'dynamic', 'dynsym', 'dynstr', 'plt', 'data', 'bss']
-      sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
+      # sections = ['hash', 'text', 'rela.plt', 'got', 'got.plt', 'dynamic', 'dynsym', 'dynstr', 'plt', 'data', 'bss']
+      # sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
+      # with tempfile.NamedTemporaryFile(delete=False) as self.link_ld:
+      #   self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
+      #   self.link_ld.flush()
+
+      contiguous_sections = ['hash', 'dynamic', 'got', 'got.plt', 'dynsym', 'dynstr']
+      aligned_sections = ['text', 'rela.plt', 'plt', 'data', 'bss']
+      contiguous_entries = "\n".join([f".{sec} : {{ *(.{sec}) }}" for sec in contiguous_sections])
+      aligned_entries = "\n".join([f".{sec} : ALIGN(4096) {{ *(.{sec}) }}" for sec in aligned_sections])
+      sections_link = f"{contiguous_entries}\n{aligned_entries}"
       with tempfile.NamedTemporaryFile(delete=False) as self.link_ld:
-        self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
+        self.link_ld.write(f"SECTIONS {{ . = 0x0;\n{sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
         self.link_ld.flush()
 
       from tinygrad.runtime.graph.cpu import CPUGraph
