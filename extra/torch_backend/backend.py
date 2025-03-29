@@ -217,8 +217,9 @@ def convolution_overrideable(input, weight, bias, stride, padding, dilation, tra
   if TORCH_DEBUG >= 1:
     print(f"convolution {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
   input, weight, bias = unwrap(input), unwrap(weight), unwrap(bias) if bias is not None else None
-  if not transposed: return wrap(input.conv2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding))
-  return wrap(input.conv_transpose2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding))
+  # TODO: fix test_biased_conv2d fails without realize()
+  if not transposed: return wrap(input.conv2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding).realize())
+  return wrap(input.conv_transpose2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding).realize())
 
 @torch.library.impl("aten::convolution_backward_overrideable", "privateuseone")
 def convolution_backward_overrideable(grad_out, input, weight, stride, padding, dilation, transposed, output_padding, groups, output_mask):
@@ -232,6 +233,29 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
   grads = out.gradient(*[t for t,m in zip([input, weight, bias], output_mask) if m], gradient=grad_out)
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
 
+@torch.library.impl("aten::slice.Tensor", "privateuseone")
+@wrap_view_op
+def slice_tensor(self, dim=0, start=None, end=None, step=1):
+  slices = [slice(None)] * self.ndim
+  slices[dim] = slice(start, end, step)
+  return self[slices]
+
+@torch.library.impl("aten::slice_backward", "privateuseone")
+def slice_backward(grad_out, input_sizes, dim=0, start=None, end=None, step=1):
+  grad_input = Tensor.zeros(input_sizes).contiguous()
+  slices = [slice(None)] * len(input_sizes)
+  slices[dim] = slice(start, end, step)
+  grad_input[slices] = unwrap(grad_out)
+  return wrap(grad_input)
+
+@torch.library.impl("aten::select_backward", "privateuseone")
+def select_backward(grad_out, input_sizes, dim, index):
+  grad_input = Tensor.zeros(input_sizes).contiguous()
+  slices = [slice(None)] * len(input_sizes)
+  slices[dim] = index
+  grad_input[slices] = unwrap(grad_out)
+  return wrap(grad_input)
+
 def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
   return wrap(unwrap(self).avg_pool2d(kernel_size, stride if stride != [] else None, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
 
@@ -244,23 +268,39 @@ for dim in [2, 3]:
   torch.library.impl(f"aten::avg_pool{dim}d", "privateuseone")(avg_pool)
   torch.library.impl(f"aten::avg_pool{dim}d_backward", "privateuseone")(avg_pool_backward)
 
-def pad_forward(self, padding, mode=None): return wrap(Tensor.pad(unwrap(self), padding, mode=mode))
+def pad_forward(self, padding, mode="constant", value=0):
+  return wrap(Tensor.pad(unwrap(self), padding, mode=mode, value=value))
 
 def pad_backward(grad_out, self, padding, mode):
   self, grad_out = unwrap(self), unwrap(grad_out)
   out = Tensor.pad(self, padding, mode=mode)
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
-for dim in [1, 2, 3]:
-  for pad_type, mode in [("replication", "replicate"), ("reflection", "reflect")]:
-    torch.library.impl(f"aten::{pad_type}_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode=mode))
-    torch.library.impl(f"aten::{pad_type}_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode=mode))
+class Pad(torch.autograd.Function):
+  @staticmethod
+  def forward(ctx, input, pad, mode="constant", value=0):
+    ctx.save_for_backward(input)
+    ctx.pad, ctx.mode, ctx.value = pad, mode, value
+    output = pad_forward(input, pad, mode=mode, value=value)
+    return output
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    grad_input = pad_backward(grad_output, input, ctx.pad, mode=ctx.mode)
+    return grad_input, None, None, None
+
+def tinygrad_pad_autograd(input, pad, mode="constant", value=0): return Pad.apply(input, pad, mode, value)
+torch.nn.functional.pad = tinygrad_pad_autograd
 
 def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
 for i,pre in enumerate(["", "bi", "tri"]):
   torch.library.impl(f"aten::upsample_{pre}linear{i+1}d", "privateuseone")(functools.partial(upsample, mode="linear"))
   torch.library.impl(f"aten::upsample_nearest{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest"))
   torch.library.impl(f"aten::_upsample_nearest_exact{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
+
+@torch.library.impl("aten::cumsum", "privateuseone")
+def cumsum(self, dim): return wrap(unwrap(self).cumsum(dim).contiguous())
 
 @torch.library.impl("aten::scatter_add.out", "privateuseone")
 @inplace_fn("out")
@@ -275,8 +315,10 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
-    unwrap(dest).assign(unwrap(src).cast(cast_dtype).to(to_device))
-    if realize: Tensor.realize(unwrap(dest))
+    src, dest = unwrap(src), unwrap(dest)
+    if dest.lazydata.is_realized: src = src.contiguous()
+    dest.assign(src.cast(cast_dtype).to(to_device))
+    if realize: Tensor.realize(dest)
   elif src.is_tiny and dest.is_cpu:
     # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
@@ -545,7 +587,14 @@ def wrap_fxn(k,f):
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
 if TORCH_DEBUG:
+  from torch.overrides import TorchFunctionMode, resolve_name
   from torch.utils._python_dispatch import TorchDispatchMode
+  class FuntionLog(TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+      # print(f"Function Log: {resolve_name(func)} (*{args}, **{kwargs})")
+      print(f"Function Log: {resolve_name(func)}")
+      return func(*args, **(kwargs or {}))
+  (_function_log:=FuntionLog()).__enter__()
   class DispatchLog(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
       #print(f"Dispatch Log: {func}(*{args}, **{kwargs})")
