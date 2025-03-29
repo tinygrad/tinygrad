@@ -264,14 +264,11 @@ class Kernel:
           self.applied_opts.extend(applied_tc_opts)
 
           # hand-coded TC opts
-          for dim in [0,1]:
+          for dim in [1,0]:
             if dim < self.global_dims:
               szs = [sz for sz in [5,4,3,2] if self.full_shape[dim] % sz == 0]
               if szs: self.apply_opt(Opt(OptOps.UPCAST, dim, szs[0]))
-
-          # for dim in [0,1]:
-              szs = [sz for sz in [2] if self.full_shape[dim] % sz == 0]
-              if szs: self.apply_opt(Opt(OptOps.LOCAL, dim, szs[0]))
+          if self.global_dims and self.full_shape[dim] % 2: self.apply_opt(Opt(OptOps.LOCAL, 0, 2))
 
           return self
         except KernelOptError: continue
