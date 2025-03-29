@@ -259,12 +259,12 @@ class Kernel:
     """
     if self.reduceop is not None and self.reduceop.arg[0] is Ops.ADD:
       # TODO: handle dtypes and cast
-      mul_op = self.reduceop.src[0]
-      if mul_op.op is not Ops.MUL: return self
       tc_select = TC_SELECT.value
       tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
-      print(tensor_cores)
       for tc in tensor_cores:
+        has_cast = self.reduceop.src[0].op is Ops.CAST
+        mul_op = self.reduceop.src[0].src[0] if has_cast else self.reduceop.src[0]
+        if mul_op.op is not Ops.MUL or self.reduceop.dtype != tc.dtype_out or mul_op.dtype != tc.dtype_in: continue
 
         applied_tc_opts = []
         try:
@@ -699,23 +699,27 @@ class Kernel:
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
   def apply_tc(self, ast) -> UOp:
-    def transform(ctx:tuple[Kernel, TensorCore, set[UOp]], reduce_op:UOp):
-      if len(ctx[2]): return None
-      ctx[2].add(reduce_op)
-      k, tc = ctx[0], ctx[1]
+    def transform(ctx:tuple[Kernel, list[TensorCore], list[str], set[UOp]], op:UOp):
+      k, tcs, opts, applied = ctx
+      pluggable_tcs = [tc for tc in tcs if tc.opts == opts[:len(tc.opts)]]
+      has_cast = op.src[0].op is Ops.CAST
+      mul_op = op.src[0].src[0] if has_cast else op.src[0]
+      pluggable_tcs = [tc for tc in pluggable_tcs if op.dtype == tc.dtype_out and mul_op.dtype == tc.dtype_in]
+      if len(applied) or len(pluggable_tcs) == 0: return None
+      applied.add(op)
+      tc = pluggable_tcs[0]
 
-      gd, fr, fu = k.global_dims, k.first_reduce, k.first_upcast
+      gd, fu = k.global_dims, k.first_upcast
       def get_upcast_axes(buf): # upcast along non-zero dimensions of (tc_reduce + tc_upcast)
         upcast_axes = int(math.log2(tc.elements_per_thread[buf]))
         return tuple((fu + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
       def get_tc_swizzle_st(shape, local_perm, upcast_perm):
-        offset = (fu - (fr - 1))
         offset = (fu - (gd + len(local_perm)))
         permaxis = list(range(gd)) \
           + [gd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(gd + len(local_perm), fu)) \
           + [gd + x + (offset if x >= len(local_perm) else 0) for x in upcast_perm] + list(range(fu + len(upcast_perm), len(shape)))
         return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
-      srcs = list((reduce_op.src[0] if reduce_op.src[0].op is not Ops.CAST else reduce_op.src[0].src[0]).src)
+      srcs = list((op.src[0] if op.src[0].op is not Ops.CAST else op.src[0].src[0]).src)
       for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
         src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
         if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
@@ -728,23 +732,27 @@ class Kernel:
         UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
         UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
       tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
-      new_axes = reduce_op.arg[1][:-len(tc_reduce_axes)]
+      new_axes = op.arg[1][:-len(tc_reduce_axes)]
 
-      return reduce_op.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if new_axes else tc_uop
+      return op.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if new_axes else tc_uop
 
-    codes = []
+    opts = []
     for opt in self.applied_opts:
       if opt.op in (OptOps.GROUP, OptOps.GROUPTOP): return ast
-      if opt.op is OptOps.UNROLL: codes.append("r0")
-      if opt.op is OptOps.UPCAST: codes.append(f"u{opt.axis}")
-      if opt.op is OptOps.LOCAL: codes.append(f"l{opt.axis}")
-    print(codes)
+      if opt.op is OptOps.UNROLL: opts.append("r0")
+      if opt.op is OptOps.UPCAST: opts.append(f"u{opt.axis}")
+      if opt.op is OptOps.LOCAL: opts.append(f"l{opt.axis}")
+    print(opts)
 
-    for tc in self.opts.tensor_cores:
+    return graph_rewrite(ast, view_left + PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="op"), transform)]),
+                         ctx=(self, self.opts.tensor_cores, tuple(opts), set()))
+    # for tc in self.opts.tensor_cores:
+      # has_cast = reduceop.src[0].op is Ops.CAST
+      # mul_op = reduceop.src[0].src[0] if has_cast else self.reduceop.src[0]
+      # if mul_op.op is not Ops.MUL or reduceop.dtype != tc.dtype_out or mul_op.dtype != tc.dtype_in: continue
       # print(f"{tuple(codes)[:len(tc.opts)]=} {tc.opts=}")
-      if tuple(codes)[:len(tc.opts)] == tc.opts: # only first opts should match
-        return graph_rewrite(ast, view_left + PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="reduce_op"), transform)]), ctx=(self, tc, set()))
-    return ast
+      # if tuple(codes)[:len(tc.opts)] == tc.opts: # only first opts should match
+    # return ast
 
   # **** this is the lowerer ****
 
@@ -755,8 +763,6 @@ class Kernel:
 
     modified_ast = self.get_optimized_ast(name_override)
     modified_ast = self.apply_tc(modified_ast)
-    # print(modified_ast)
-    # exit()
     if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
 
     if DEBUG >= 3:
