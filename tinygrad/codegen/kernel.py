@@ -667,9 +667,6 @@ class Kernel:
         return tuple((fu + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
       def get_tc_swizzle_st(shape, local_perm, upcast_perm):
         offset = (fu - (fr - 1))
-        # print((gd + len(local_perm)))
-        # print(fr)
-        # offset = (fu - fr)
         permaxis = list(range(gd)) \
           + [gd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(fr-1, fu)) \
           + [gd + x + (offset if x >= len(local_perm) else 0) for x in upcast_perm] + list(range(fu + len(upcast_perm), len(shape)))
@@ -688,7 +685,6 @@ class Kernel:
         UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
       tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
       new_axes = reduce_op.arg[1][:-len(tc_reduce_axes)]
-      print(new_axes)
 
       return reduce_op.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if new_axes else tc_uop
 
