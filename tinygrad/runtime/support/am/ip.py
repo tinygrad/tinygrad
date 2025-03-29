@@ -138,8 +138,7 @@ class AM_SMU(AM_IP):
   def init_hw(self):
     self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)))
     self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)))
-    # self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0)
-    self._send_msg(0x6, 0)
+    self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0)
 
   def is_smu_alive(self):
     with contextlib.suppress(RuntimeError): self._send_msg(self.smu_mod.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
@@ -186,8 +185,7 @@ class AM_GFX(AM_IP):
     self.adev.gmc.init_hub("GC")
 
     # NOTE: Golden reg for gfx11. No values for this reg provided. The kernel just ors 0x20000000 to this reg.
-    # self.adev.regTCP_CNTL.write(self.adev.regTCP_CNTL.read() | 0x20000000)
-    self.adev.regDB_MEM_CONFIG.write(self.adev.regDB_MEM_CONFIG.read() | 0x00008000)
+    self.adev.regTCP_CNTL.write(self.adev.regTCP_CNTL.read() | 0x20000000)
 
     self.adev.regRLC_SRM_CNTL.update(srm_enable=1, auto_incr_addr=1)
 
@@ -381,8 +379,9 @@ class AM_PSP(AM_IP):
       self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=not self.adev.partial_boot, boot=True)
 
   def init_hw(self):
+    spl_key = am.PSP_FW_TYPE_PSP_SPL if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0) else am.PSP_FW_TYPE_PSP_KDB
     sos_components_load_order = [
-      (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE), (am.PSP_FW_TYPE_PSP_SPL, am.PSP_BL__LOAD_TOS_SPL_TABLE),
+      (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE), (spl_key, am.PSP_BL__LOAD_TOS_SPL_TABLE),
       (am.PSP_FW_TYPE_PSP_SYS_DRV, am.PSP_BL__LOAD_SYSDRV), (am.PSP_FW_TYPE_PSP_SOC_DRV, am.PSP_BL__LOAD_SOCDRV),
       (am.PSP_FW_TYPE_PSP_INTF_DRV, am.PSP_BL__LOAD_INTFDRV), (am.PSP_FW_TYPE_PSP_DBG_DRV, am.PSP_BL__LOAD_DBGDRV),
       (am.PSP_FW_TYPE_PSP_RAS_DRV, am.PSP_BL__LOAD_RASDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV)]
