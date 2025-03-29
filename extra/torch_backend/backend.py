@@ -3,16 +3,16 @@
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import getenv, flatten
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib, math, operator, functools, inspect
+import torch, pathlib, math, operator, functools, inspect, itertools, collections, sys, weakref
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
-def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
+def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or torch.tiny.current_device()}"
 def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
 
 import torch.utils.cpp_extension
@@ -24,10 +24,14 @@ def unwrap(x:torch.Tensor) -> Tensor:
 class TinyBackend:
   def is_initialized(self): return True
   def is_available(self): return True
-  def current_device(self): return 0
+  def current_device(self): return 0 # TODO:
   def _is_in_bad_fork(self): return False
   def manual_seed_all(self, seed: int): Tensor.manual_seed(seed)
   def device_count(self): return getenv("GPUS", 1) # TODO: device count in tiny?
+  def get_device_properties(self, i):
+    # TODO: stub
+    props = {"total_memory": 1, "multi_processor_count": 1}
+    return collections.namedtuple("props", props)(**props)
 torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
@@ -168,7 +172,7 @@ def as_strided(tensor:Tensor, size, stride, storage_offset=None):
   # TODO: this is heavyweight
   st = ShapeTracker((View.create(tuple(tensor.shape)), View.create(tuple(size), tuple(stride), 0 if storage_offset is None else storage_offset)))
   ret = tensor
-  if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
+  #if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
   if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
   for mo in cached_to_movement_ops(tuple(tensor.shape), st): ret = apply_mop(ret, mo)
   return ret
@@ -202,15 +206,15 @@ def max_unpool2d(self:torch.Tensor, indices:torch.Tensor, output_size):
 
 @torch.library.impl("aten::arange", "privateuseone")
 def arange(end, dtype=None, device=None, pin_memory=None):
-  return wrap(Tensor.arange(0, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+  return wrap(Tensor.arange(0, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device)))
 
 @torch.library.impl("aten::arange.start", "privateuseone")
 def arange_start(start, end, dtype=None, device=None, pin_memory=None):
-  return wrap(Tensor.arange(start, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+  return wrap(Tensor.arange(start, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device)))
 
 @torch.library.impl("aten::arange.start_step", "privateuseone")
 def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None):
-  return wrap(Tensor.arange(start, end, step, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+  return wrap(Tensor.arange(start, end, step, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device)))
 
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
@@ -554,7 +558,6 @@ if TORCH_DEBUG:
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
-import weakref
 _torch_modules_with_buffers: weakref.WeakSet[torch.nn.Module] = weakref.WeakSet()
 def register_torch_buffer(mod, _name, _buffer): _torch_modules_with_buffers.add(mod)
 def get_real_tinygrad_buffers():
@@ -591,3 +594,66 @@ def _optimizer_patched_init(self, *args, **kwargs):
   _optimizer_init(self, *args, **kwargs)
   self.register_step_post_hook(realize_optimizer_step)
 torch.optim.Optimizer.__init__ = _optimizer_patched_init
+
+# NOTE: patches for multigpu
+_torch_scatter = torch.nn.parallel.comm.scatter
+def _torch_patched_scatter(self: torch.Tensor, devices, chunk_sizes=None, dim=0, streams=None):
+  if not self.is_tiny: return _torch_scatter(self, devices, chunk_sizes, dim, streams)
+  self = unwrap(self)
+  # NOTE: copied from Tensor.shard, torch expects tuple of tensors
+  sz = self.shape[dim] // len(devices)
+  assert chunk_sizes is None or all(s == sz for s in chunk_sizes), "uneven chunk sizes not supported"
+  devices = [_from_torch_device(torch.device("tiny", d)) for d in devices]
+  sizes = [max(0, min(sz, self.shape[dim] - sz*i)) for i in range(len(devices))]
+  lbs = []
+  for sz,off in zip(sizes, itertools.accumulate(sizes, initial=0)):
+    lbs.append(self.shrink(tuple((0,s) if i != dim else (off,off+sz) for i,s in enumerate(self.shape))))
+  sharded_lbs = [wrap(lb.to(d)) for lb,d in zip(lbs, devices)]
+  return tuple(sharded_lbs)
+torch.nn.parallel.comm.scatter = _torch_patched_scatter
+
+_torch_broadcast_coalesced = torch.nn.parallel.comm.broadcast_coalesced
+def _torch_patched_broadcast_coalesced(tensors, devices, buffer_size=10485760):
+  if tensors and not tensors[0].is_tiny: return _torch_broadcast_coalesced(tensors, devices, buffer_size)
+  # NOTE: ignoring buffer_size and straightforward broadcast
+  return [[wrap(unwrap(x).to(_from_torch_device(torch.device("tiny", i)))) for x in tensors] for i in devices]
+torch.nn.parallel.comm.broadcast_coalesced = _torch_patched_broadcast_coalesced
+
+_torch_parallel_apply = torch.nn.parallel.parallel_apply
+def _torch_patched_parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
+  if not inputs[0][0].is_tiny: return _torch_parallel_apply(modules, inputs, kwargs_tup, devices)
+  if kwargs_tup is None: kwargs_tup = ({},) * len(modules)
+  if devices is None: devices = (torch.device("tiny"),) * len(modules)
+  return [m(*i, **k) for m,i,k,d in zip(modules, inputs, kwargs_tup, devices)]
+for m in ['torch.nn.parallel.parallel_apply', 'torch.nn.parallel.data_parallel']:
+  sys.modules[m].parallel_apply = _torch_patched_parallel_apply
+
+_torch_gather = torch.nn.parallel.comm.gather
+def _torch_patched_gather(tensors, dim, dest_index):
+  if not tensors[0].is_tiny: return _torch_gather(tensors, dim, dest_index)
+  return wrap(Tensor.cat(*(unwrap(x).to(_from_torch_device(torch.device("tiny", dest_index))) for x in tensors), dim=dim))
+torch.nn.parallel.comm.gather = _torch_patched_gather
+
+class TinyDistributedBackend:
+  rank = 0
+  size = 1
+  # TODO: move these off CPU
+  def allreduce(self, tensors, opts):
+    tensors_cpu = [x.cpu() for x in tensors]
+    for a,b in zip(tensors, tensors_cpu):
+      assert a.device.index == self.rank
+      torch.distributed.all_reduce(b, op=opts.reduceOp)
+      a.copy_(b)
+  def broadcast(self, tensors, opts):
+    tensors_cpu = [x.cpu() for x in tensors]
+    for a,b in zip(tensors, tensors_cpu):
+      assert a.device.index == self.rank
+      torch.distributed.broadcast(b, src=opts.rootRank)
+      a.copy_(b)
+  def allgather(self, outputs, inputs, opts):
+    inputs_cpu = [x.cpu() for x in inputs]
+    outputs_cpu = [[torch.empty_like(x) for _ in range(self.size)] for x in inputs_cpu]
+    for a,b in zip(outputs_cpu,inputs_cpu): torch.distributed.all_gather(a,b)
+    for a,b in zip(flatten(outputs),flatten(outputs_cpu)): a.copy_(b)
+
+mod.register_dist_backend(TinyDistributedBackend)
