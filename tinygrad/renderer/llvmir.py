@@ -32,7 +32,7 @@ def lcast(input_type:DType, output_type:DType):
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
 # https://github.com/corsix/amx
-def render_wmma(ctx, wmma: UOp) -> str:
+def render_wmma_amx(ctx, wmma: UOp) -> str:
   def AMX(op, gpr): return f'call void asm sideeffect ".word (0x201000+($0<<5)+0$1-((0$1>>4)*6))", "i,r,~{{memory}}"(i32 {op}, i64 {gpr}) #0; AMX'
 
   return "\n".join([
@@ -43,6 +43,24 @@ def render_wmma(ctx, wmma: UOp) -> str:
     *[f'  {ctx[wmma]}_st{i} = add i64 {ctx[wmma]}_ptr_amx2, {i*4<<56 | i*64}\n  {AMX(5,f"{ctx[wmma]}_st{i}")} stz' for i in range(16)], # stz
       f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 1})", "~{{memory}}"() #0; AMX clr',             # clr
       f'  {ctx[wmma]} = load {ldt(wmma.dtype)}, ptr {ctx[wmma]}_amx2, align {wmma.dtype.itemsize}'])
+
+def render_wmma_amd(ctx, wmma: UOp) -> str:
+  dt_map = {dtypes.half: "f16", dtypes.float: "f32"}
+  if wmma.arg[0] == "WMMA_16_16_16_half_half" and wmma.dtype == dtypes.half.vec(8): return "\n".join([
+    f"{ctx[wmma]}_1 = shufflevector <8 x half> {ctx[wmma.src[2]]}, <8 x half> poison, <16 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, "+\
+      "i32 6, i32 7, i32 poison, i32 poison, i32 poison, i32 poison, i32 poison, i32 poison, i32 poison, i32 poison>",
+    f"{ctx[wmma]}_2 = shufflevector <16 x half> <half poison, half 0.0, half poison, half 0.0, half poison, half 0.0, half poison, "+\
+      "half 0.0, half poison, half 0.0, half poison, half 0.0, half poison, half 0.0, half poison, half 0.0>, <16 x half> "+\
+      f"{ctx[wmma]}_1, <16 x i32> <i32 16, i32 1,i32 17,i32 3,i32 18,i32 5,i32 19,i32 7,i32 20,i32 9,i32 21,i32 11,i32 22,i32 13,i32 23,i32 15>",
+    f"{ctx[wmma]}_3 = tail call contract <16 x half> @llvm.amdgcn.wmma.f16.16x16x16.f16(<16 x half>{ctx[wmma.src[0]]}, <16 x half> {ctx[wmma.src[1]]}\
+      , <16 x half> {ctx[wmma]}_2, i1 false)",
+    f"{ctx[wmma]}= shufflevector <16 x half> {ctx[wmma]}_3, <16 x half> undef, <8 x i32> <i32 0, i32 2, i32 4, i32 6, i32 8, i32 10, i32 12, i32 14>",
+  ])
+  # https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AMDGPU/GlobalISel/llvm.amdgcn.wmma_32.ll
+  # example: %wmma0 = call <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.f16(<16 x half> %v99,<16 x half> %v100,<8 x float> %v101)
+  return f"{ctx[wmma]} = call {ldt(wmma.dtype)} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype.scalar()]}.16x16x16." + \
+    f"{dt_map[wmma.src[0].dtype.scalar()]}(" + ",".join([f"{ldt(w.dtype)} {ctx[w]}" for w in wmma.src]) + (", i1 false)" \
+      if wmma.dtype.scalar() != dtypes.float else ")")
 
 # llvm ops, lop[<dtype>][<op>]
 unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
@@ -99,9 +117,6 @@ base_rewrite = PatternMatcher([
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
-
-  # wmma
-  (UPat(Ops.WMMA, name="wmma"), render_wmma),
 ])
 
 def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
@@ -115,7 +130,7 @@ class LLVMRenderer(Renderer):
   has_local = False
   has_shared = False
   global_max: tuple[int, ...] | None = None
-  string_rewrite = base_rewrite
+  string_rewrite = base_rewrite +  PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
   if AMX: tensor_cores = ClangRenderer.amx_tc
 
   extra_matcher = PatternMatcher([
@@ -213,8 +228,10 @@ class AMDLLVMRenderer(LLVMRenderer):
   has_shared = True
   shared_max = AMDRenderer.shared_max
   global_max = AMDRenderer.global_max
+  tensor_cores = AMDRenderer.tensor_cores
   abi = "amdgpu_kernel"
   string_rewrite = base_rewrite + PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
+    (UPat(Ops.WMMA, name="wmma"), render_wmma_amd),
   ])
