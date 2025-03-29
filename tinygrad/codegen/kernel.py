@@ -684,11 +684,9 @@ class Kernel:
         UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
         UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
         UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
-      tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
+      return UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
 
-      print(tc_uop)
-
-      return tc_uop
+      # return tc_uop
       # new_axes = reduce_op.axes[]
       # return reduce_op.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
 
@@ -702,7 +700,7 @@ class Kernel:
     for tc in self.opts.tensor_cores:
       # print(f"{tuple(codes)[:len(tc.opts)]=} {tc.opts=}")
       if tuple(codes)[:len(tc.opts)] == tc.opts: # only first opts should match
-        return graph_rewrite(ast, PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="reduce_op"), transform)]), ctx=(self, tc, False))
+        return graph_rewrite(ast, view_left + PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="reduce_op"), transform)]), ctx=(self, tc, False))
     return ast
 
   # **** this is the lowerer ****
@@ -714,6 +712,8 @@ class Kernel:
 
     modified_ast = self.get_optimized_ast(name_override)
     modified_ast = self.apply_tc(modified_ast)
+    print(modified_ast)
+    # exit()
     if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
 
     if DEBUG >= 3:
