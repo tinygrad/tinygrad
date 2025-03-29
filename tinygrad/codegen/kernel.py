@@ -746,13 +746,6 @@ class Kernel:
 
     return graph_rewrite(ast, view_left + PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="op"), transform)]),
                          ctx=(self, self.opts.tensor_cores, tuple(opts), set()))
-    # for tc in self.opts.tensor_cores:
-      # has_cast = reduceop.src[0].op is Ops.CAST
-      # mul_op = reduceop.src[0].src[0] if has_cast else self.reduceop.src[0]
-      # if mul_op.op is not Ops.MUL or reduceop.dtype != tc.dtype_out or mul_op.dtype != tc.dtype_in: continue
-      # print(f"{tuple(codes)[:len(tc.opts)]=} {tc.opts=}")
-      # if tuple(codes)[:len(tc.opts)] == tc.opts: # only first opts should match
-    # return ast
 
   # **** this is the lowerer ****
 
