@@ -257,81 +257,29 @@ class Kernel:
       1: allows kernels with multiple reduce axes and also multiplication of Ops.CAST'd buffers
       2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
     """
-    print("here")
     if self.reduceop is not None and self.reduceop.arg[0] is Ops.ADD:
-      # mul_op = self.reduceop.src[0].src[0] if has_cast else 
+      # TODO: handle dtypes and cast
       mul_op = self.reduceop.src[0]
       if mul_op.op is not Ops.MUL: return self
       tc_select = TC_SELECT.value
       tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
       print(tensor_cores)
       for tc in tensor_cores:
-        # tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
-        # can only fuse reduces with the same tc options
-        # assert all_same(tensor_core_opts)
-        # if tensor_core_opts[0] is None: continue
-        # self.tensor_core_opts = tc_opts = tensor_core_opts[0]
 
-        # attempt to pad the tensor axes that require it
         applied_tc_opts = []
         try:
-          for axis, dim in enumerate(tc.dims):
-            pad_opt = Opt(OptOps.PADTO, axis, dim)
-            self.apply_opt(pad_opt, append_opt=False) # PADTO might fail
-            applied_tc_opts.append(pad_opt)
-        except KernelOptError:
-          print("padd issue")
-          # continue
-        try:
-          # tensor core -- unroll the reduce dim (K), upcast and local the inner and outer dims (N, M)
-          # for opt in tc.opts
-          for dim, amt in tc.get_reduce_axes():
-            reduce_op = Opt(OptOps.UNROLL, 0, amt)
-            self.apply_opt(reduce_op, append_opt=False)
-            applied_tc_opts.append(reduce_op)
-          for opt in tc.opts:
-            if opt[0]=="r": continue
-            lu_opt = Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL}[opt[0]], int(opt[1]), 2)
-            self.apply_opt(lu_opt, append_opt=False)
-            applied_tc_opts.append(lu_opt)
+          try:
+            for axis, dim in enumerate(tc.dims): # always attempt to pad the tensor core axes, might fail
+              self.apply_opt((pad_opt := Opt(OptOps.PADTO, axis, dim)), append_opt=False) # PADTO might fail
+              applied_tc_opts.append(pad_opt)
+          except KernelOptError: pass
+          for opt in tc.opts: # tensor core -- unroll the reduce dim (K), upcast and local the inner and outer dims (N, M)
+            self.apply_opt((rlu_opt := Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL,"r":OptOps.UNROLL}[opt[0]], int(opt[1]), 2)), append_opt=False)
+            applied_tc_opts.append(rlu_opt)
 
           self.applied_opts.extend(applied_tc_opts)
-          # self.tensor_core = tc
-          # self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
-          # return True
-
-          # try additional opts
-          
-          # for opt in [OptOps.UPCAST]:
-          #   for axis in [0,1]:
-          #     for size in [4,2]:
-          #       try:
-          #         self.apply_opt(Opt(opt, axis, size))
-          #       except:
-          #         print(f"extra opt {Opt(opt, axis, size)} failed")
-          
-          # for opt in [OptOps.LOCAL]:
-          #   for axis in [0,1]:
-          #     for size in [2]:
-          #       try:
-          #         self.apply_opt(Opt(opt, axis, size))
-          #       except:
-          #         print(f"extra opt {Opt(opt, axis, size)} failed")
-
-                # except KernelOptError:
-                  # print("no extra opts")
-
-                # self.apply_opt(pad_opt, append_opt=FALSE) 
-            # for axis, dim in enumerate(tc.dims):
-                # pad_opt = Opt(OptOps.PADTO, axis, dim)
-                # self.apply_opt(pad_opt, append_opt=False) # PADTO might fail
-                # applied_tc_opts.append(pad_opt)
-          
-
           return self
-        except KernelOptError:
-          print("failed")
-          # continue
+        except KernelOptError: continue
     return self
 
   # def _create_tc_opts(self, reduceop:UOp, tc:TensorCore, axis:int, opt_level:int) -> Optional[TensorCoreOptions]:

@@ -17,8 +17,7 @@ def get_kernel(renderer:Renderer, ast:UOp) -> Kernel:
   k = Kernel(ast, opts=renderer).required_optimizations()
   if not NOOPT:
     k.apply_tc_optimizations()
-    # if not k.apply_tensor_cores(getenv("TC", 1)):
-    # k.hand_coded_optimizations()
+    if len(k.applied_opts) == 0: k.hand_coded_optimizations()
     if BEAM >= 1:
       from tinygrad.engine.search import beam_search, bufs_from_lin
       kb = Kernel(ast, opts=renderer).required_optimizations()
