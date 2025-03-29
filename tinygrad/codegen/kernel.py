@@ -374,7 +374,7 @@ class Kernel:
     if opt.op is OptOps.LOCAL:    # cyan
       # NOTE: LLVM/CPU can use locals too, but they are treated the same as globals (still helpful for L1 cache)
       # it's disabled for now since it makes BEAM slow for little gain
-      check(self.opts.has_local, "target does not support local")
+      #check(self.opts.has_local, "target does not support local")
       check(axis < self.global_dims, "local is for globals")
       self.shift_to(axis, amt, insert_before=self.first_reduce)
       self.local_dims += 1
@@ -585,8 +585,13 @@ class Kernel:
         # otherwise we just replace the VIEW source
         return ret.replace(src=(st_uop,)) if len(op.src) == 1 else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
       if op.op is Ops.SINK:
+        range_split_axis = ()
+        if self.full_shape[self.first_reduce:self.first_reduce+3] == (3,3,32) and self.full_shape[-1] != 7:
+          #range_split_axis = (self.first_reduce-2, self.first_reduce-1)
+          #range_split_axis = (self.first_reduce-1,)
+          pass
         return ret.replace(arg = KernelInfo(to_function_name(self.name) if name_override is None else name_override,
-                                            self.local_dims, self.upcasted, self.dont_use_locals))
+                                            self.local_dims, self.upcasted, self.dont_use_locals, range_split_axis))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
 
@@ -678,7 +683,11 @@ class Kernel:
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
     #if __debug__: type_verify(list(modified_ast.toposort), shape_spec)
 
-    self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
+    is_conv = (len(self.full_shape) == 6 and self.full_shape[2:4] == (3,3))
+    is_conv = is_conv or (len(self.full_shape) == 6 and self.full_shape[3:5] == (3,3))
+    is_conv = is_conv or (len(self.full_shape) == 7 and self.full_shape[3:5] == (3,3))
+    is_conv = is_conv or self.full_shape[-2:] == (3,3)
+    self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts, is_conv))
     if DEBUG >= 5: print_uops(self.uops)
     return self
 

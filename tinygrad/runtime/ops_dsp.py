@@ -4,42 +4,328 @@ assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.ops import Ops, UOp
-from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG
+from tinygrad.codegen.symbolic import gep_pushing
+from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG, get_single_element, dedup, all_same
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.ops import PatternMatcher, UPat
 
+def multi_mul(a0, a1, b0, b1, c0, c1, d0=None, d1=None, acc=None):
+  swizzle = []
+  for i in range(32):
+    swizzle.append(i)
+    swizzle.append(32+i)
+    swizzle.append(64+i)
+    swizzle.append(96+i)
+  swizzle = tuple(swizzle)
+  if a0.op is not Ops.CAST:
+    #print("rejected on a0")
+    return None
+  if a1.op is not Ops.CAST:
+    #print("rejected on a1")
+    return None
+  if d0 is None:
+    if c0.src[0].op is Ops.GEP and c0.src[0].arg == (2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118, 122, 126):
+      #print("here0", c0.src[0].arg)
+      #if c0.src[0].arg == (2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118, 122, 126):
+      d0 = c0.src[0].src[0].gep(tuple(i+1 for i in c0.src[0].arg)).cast(dtypes.int.vec(32))
+    else:
+      d0 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
+  if d1 is None:
+    #if c1.src[0].op is Ops.GEP: print("here1", c1.src[0].arg)
+    d1 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
+  assert a0.op is Ops.CAST
+  assert b0.op is Ops.CAST
+  assert c0.op is Ops.CAST
+  assert d0.op is Ops.CAST
+  assert a1.op is Ops.CAST
+  assert b1.op is Ops.CAST
+  assert c1.op is Ops.CAST
+  assert d1.op is Ops.CAST
+  dt1 = a0.src[0].dtype.scalar().vec(128)
+  dt2 = a1.src[0].dtype.scalar().vec(128)
+  m0 = UOp(Ops.CAT, dt1, src=(a0.src[0],b0.src[0],c0.src[0],d0.src[0])).gep(swizzle)
+  m1 = UOp(Ops.CAT, dt2, src=(a1.src[0],b1.src[0],c1.src[0],d1.src[0])).gep(swizzle)
+  simp_m1 = m1.simplify()
+  if simp_m1.op is Ops.GEP and simp_m1.arg == simp_m1.arg[0:4]*32:
+    # Vx32.w+=vrmpy(Vu32.ub,Rt32.b) -> __builtin_HEXAGON_V6_vrmpybus_acc
+    # Vx32.uw+=vrmpy(Vu32.ub,Rt32.ub) -> __builtin_HEXAGON_V6_vrmpyub_acc
+    scalar_m1 = simp_m1.src[0].gep(simp_m1.arg[0:4])
+    if acc is not None:
+      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, scalar_m1.bitcast(dtypes.uint)), "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
+    else:
+      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, scalar_m1.bitcast(dtypes.uint)), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
+  if acc is not None:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, m1), "__builtin_HEXAGON_V6_vrmpybusv_acc_128B({0}, {1}, {2})")
+  else:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, m1), "__builtin_HEXAGON_V6_vrmpybusv_128B({0}, {1})")
+
+# __builtin_HEXAGON_A2_vraddub_acc
+
+def gep_on_reduce(gep, alu):
+  if gep.dtype.vcount == 1: return None
+  return UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count),
+     tuple(x.gep(gep.arg) if x.op is not Ops.RANGE else x for x in alu.src), alu.arg) if not isinstance(gep.dtype, PtrDType) and \
+      alu.dtype.count >= gep.dtype.count else None
+
+def multi_add_int32(**aa):
+  if 'acc' in aa:
+    acc = aa['acc']
+    del aa['acc']
+  else:
+    acc = None
+  if 'd0' not in aa:
+    c0 = aa['c0']
+    if c0.src[0].op is Ops.GEP and c0.src[0].arg == (2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118, 122, 126):
+      #print("here0", c0.src[0].arg)
+      #if c0.src[0].arg == (2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118, 122, 126):
+      d0 = c0.src[0].src[0].gep(tuple(i+1 for i in c0.src[0].arg)).cast(dtypes.int.vec(32))
+    else:
+      d0 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
+    aa['d0'] = d0
+  swizzle = []
+  for i in range(32):
+    swizzle.append(i)
+    swizzle.append(32+i)
+    swizzle.append(64+i)
+    swizzle.append(96+i)
+  for x in aa.values():
+    assert x.src[0].dtype.scalar() is dtypes.uchar
+    assert x.op is Ops.CAST
+  swizzle = tuple(swizzle)
+  m0 = UOp(Ops.CAT, dtypes.uchar.vec(128), src=tuple(aa[k].src[0] for k in sorted(aa.keys()))).gep(swizzle)
+  if acc is not None:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, UOp.const(dtypes.uint, 0x01010101)),
+               "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
+  else:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, UOp.const(dtypes.uint, 0x01010101)), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
+
+def multi_add_int2(**aa):
+  r0 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(x.src[0].gep(0) for x in aa.values()))
+  r1 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(x.src[0].gep(1) for x in aa.values()))
+  return UOp(Ops.CUSTOMI, dtypes.int.vec(2), (r0.bitcast(dtypes.int64), r1.bitcast(dtypes.int64)), arg="__builtin_HEXAGON_A2_vraddub({0}, {1})")
+
+conv_pm = PatternMatcher([
+  # __builtin_HEXAGON_V6_vrmpybus x3
+  (UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1"), multi_mul),
+  (UPat(name="acc") + UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1"), multi_mul),
+
+  # __builtin_HEXAGON_V6_vrmpybus x3
+  (UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
+  (UPat(name="acc") + UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
+])
+
+#dsp_pm = conv_pm+PatternMatcher([
 dsp_pm = PatternMatcher([
+  # convert load char32 to load char128
+  (UPat(Ops.LOAD, (dtypes.uchar.vec(96), dtypes.uchar.vec(64), dtypes.uchar.vec(32)), src=(UPat.var("buf").cast(),), name="load"),
+   lambda load, buf: load.replace(dtype=dtypes.uchar.vec(128),
+     src=(buf.cast(buf.dtype.base.vec(128).ptr(size=buf.dtype.size, local=buf.dtype.local)),)+load.src[1:]).gep(tuple(range(0, load.dtype.count)))),
+  # GEP on REDUCE
+  (UPat(Ops.GEP, src=(UPat(Ops.REDUCE, name='alu'),), name='gep'), gep_on_reduce),
+  # no swizzle down convert
   (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
    lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+32))) for i in range(0, 128, 32)),
      arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
-  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
-    "__builtin_shufflevector({0}, {1}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
-])
+
+  # swizzle down convert
+  #(((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
+  # lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+128, 4))) for i in range(0, 4)),
+  #   arg="__builtin_HEXAGON_V6_vshuffb_128B(__builtin_HEXAGON_V6_vshuffb_128B(__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))))")),
+
+  #(UPat(Ops.CAST, name="x") * UPat(Ops.CAST, name="y"), lambda x,y: (x.src[0]*y.src[0]).cast(x.dtype)),
+  #(UPat(Ops.GEP, name="g").cast().named("cast"),
+  # lambda g,cast: g.src[0].cast(cast.dtype.scalar()).broadcast(len(g.arg)) if all(x==0 for x in g.arg) else None),
+
+  # REDUCE int4 -> 2xint2, int8 -> 4xint2
+  (UPat(Ops.REDUCE, dtype=dtypes.int.vec(4), name="r"),
+   lambda r: UOp(Ops.CAT, r.dtype, (gep_on_reduce(r.gep((0,1)), r), gep_on_reduce(r.gep((2,3)), r)))),
+  (UPat(Ops.REDUCE, dtype=dtypes.int.vec(8), name="r"),
+   lambda r: UOp(Ops.CAT, r.dtype, (gep_on_reduce(r.gep((0,1)), r), gep_on_reduce(r.gep((2,3)), r),
+                                    gep_on_reduce(r.gep((4,5)), r), gep_on_reduce(r.gep((6,7)), r)))),
+
+  # __builtin_HEXAGON_V6_vrmpybus
+  (UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
+  (UPat(name="acc") + UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
+
+  # build __builtin_HEXAGON_V6_vrmpybus_128B
+  (UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0")+UPat(Ops.CAST,name="d0"), multi_add_int32),
+  (UPat(name="acc") + UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0")+UPat(Ops.CAST,name="d0"), multi_add_int32),
+
+  # build __builtin_HEXAGON_A2_vraddub
+  (UPat(Ops.CAST,dtype=dtypes.int.vec(2),name="a0")+UPat(Ops.CAST,name="a1")+UPat(Ops.CAST,name="a2")+UPat(Ops.CAST,name="a3")+ \
+   UPat(Ops.CAST,dtype=dtypes.int.vec(2),name="a4")+UPat(Ops.CAST,name="a5")+UPat(Ops.CAST,name="a6")+UPat(Ops.CAST,name="a7"), multi_add_int2),
+
+  # we upcast 3 as 4
+  (UPat(Ops.REDUCE, name="r", src=(UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") +
+                                   UPat(name="b0")*UPat(name="b1") + UPat(name="c0")*UPat(name="c1"),), allow_any_len=True),
+   lambda r, **kwargs: r.replace(src=(multi_mul(**kwargs),)+r.src[1:])),
+  (UPat(Ops.REDUCE, name="r", src=(UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0"),
+                                   ), allow_any_len=True),
+   lambda r, **kwargs: r.replace(src=(multi_add_int32(**kwargs),)+r.src[1:])),
+
+  # mul by const on GEP
+  (UPat(Ops.GEP, src=(UPat.var('x'),), name="gep")*UPat.cvar("c", vec=False),
+   lambda x, gep, c: (x.gep(gep.arg[0])*c.arg).broadcast(c.dtype.count) if all_same(gep.arg) and c.dtype.count > 1 else None),
+])+gep_pushing
+
+def add_to_mul(c:UOp, x:UOp):
+  if c.arg.startswith("__builtin_HEXAGON_V6_vrmpybus_128B"):
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
+  elif c.arg.startswith("__builtin_HEXAGON_V6_vrmpybusv_128B"):
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpybusv_acc_128B({0}, {1}, {2})")
+  elif 'acc' in c.arg and x.op is not Ops.CUSTOM:
+    return c.replace(src=(x+c.src[0], c.src[1], c.src[2]))
+  else:
+    return None
+
+def prefetch_l1(ld:UOp, idx:UOp):
+  if ld.src[-1].op is Ops.CUSTOM: return None
+  ranges = sorted([x for x in ld.src[0].src[0].toposort if x.op is Ops.RANGE], key=lambda x: x.arg)
+  x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], idx.src[1]+UOp.const(dtypes.int, ld.dtype.count*2)), arg="__builtin_HEXAGON_Y2_dcfetch({0}+{1});")
+  x2 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], idx.src[1].substitute({ranges[-1]: ranges[-1].src[0]})), arg="__builtin_HEXAGON_Y2_dcfetch({0}+{1});")
+  return ld.replace(src=ld.src+(x1, x2))
+
+def prefetch_l2(ld:UOp, idx:UOp):
+  if not getenv("PREFETCHL2", 0): return None
+  if ld.src[-1].op is Ops.CUSTOM: return None
+  ranges = sorted([x for x in ld.src[0].src[0].toposort if x.op is Ops.RANGE], key=lambda x: x.arg)
+  if len(ranges):
+    nidx = idx.src[1]
+    if nidx.op is Ops.ADD and nidx.src[1].op is Ops.CONST: nidx = nidx.src[0]
+    zero_ranges = {r:r.const_like(0) for r in ranges[:-1]}
+    nlen_uop = (nidx.substitute({ranges[-1]: ranges[-1].src[1], **zero_ranges}) -
+                nidx.substitute({ranges[-1]: ranges[-1].src[0], **zero_ranges})).simplify()
+    if nlen_uop.arg > 8192: return None  # too much to prefetch. "L2FETCH is best performed in sizes less than 8 KB"
+    nidx = nidx.substitute({ranges[-1]: ranges[-1].src[0]})
+    x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], nidx, UOp.const(dtypes.int, nlen_uop.arg)), arg="__builtin_HEXAGON_Y4_l2fetch({0}+{1}, {2});")
+    return ld.replace(src=ld.src+(x1,))
+
+def vectorize_shuffle(vec:UOp):
+  if not all(s.op in {Ops.GEP, Ops.CONST} for s in vec.src): return None
+  gepped = dedup([s.src[0] for s in vec.src if s.op is Ops.GEP])
+  if len(gepped) == 0: return None
+  if len(gepped) == 1:
+    arg = []
+    for s in vec.src:
+      if s.op is Ops.GEP:
+        arg.append(s.arg[0])
+      else:
+        arg.append(-1)
+    str_arg = ','.join([f'{y:4d}' for y in arg])
+    full_arg = "__builtin_shufflevector({0}, {0}, "+str_arg+")"
+    return UOp(Ops.CUSTOM, vec.dtype, tuple(gepped), full_arg)
+  if not all(x.dtype.scalar() is dtypes.uchar for x in gepped): return None
+  if not all_same([x.dtype.count for x in gepped]) or gepped[0].dtype.count != vec.dtype.count: return None
+  if len(gepped) == 2:
+    arg = []
+    for s in vec.src:
+      if s.op is Ops.GEP:
+        if s.src[0] is gepped[0]:
+          arg.append(s.arg[0])
+          continue
+        if s.src[0] is gepped[1]:
+          arg.append(gepped[0].dtype.count + s.arg[0])
+          continue
+      arg.append(-1)
+    str_arg = ','.join([f'{y:4d}' for y in arg])
+    full_arg = "__builtin_shufflevector({0}, {1}, "+str_arg+")"
+    return UOp(Ops.CUSTOM, vec.dtype, tuple(gepped), full_arg)
+  if len(gepped) != 3: return None
+  arg = []
+  for s in vec.src:
+    if s.op is Ops.GEP:
+      if s.src[0] is gepped[0]:
+        arg.append(s.arg[0])
+        continue
+      if s.src[0] is gepped[1]:
+        arg.append(gepped[0].dtype.count + s.arg[0])
+        continue
+    arg.append(-1)
+  arg2 = []
+  for i,s in enumerate(vec.src):
+    if s.op is Ops.GEP:
+      if s.src[0] is gepped[2]:
+        arg2.append(vec.dtype.count + s.arg[0])
+        continue
+    if s.op is Ops.CONST:
+      arg2.append(-1)
+      continue
+    arg2.append(i)
+  str_arg = ','.join([f'{y:4d}' for y in arg])
+  str_arg2 = ','.join([f'{y:4d}' for y in arg2])
+  full_arg = "__builtin_shufflevector(__builtin_shufflevector({0}, {1}, "+str_arg+"), {2}, "+str_arg2+")"
+  return UOp(Ops.CUSTOM, vec.dtype, tuple(gepped), full_arg)
+
+  #vv = []
+  #for i in range(64):
+  #src = "__builtin_shufflevector({0}, {1})"
+  return None
 
 dsp_pm_late = PatternMatcher([
-  (UPat.var("x")+UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
-  (UPat.var("x")*UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
-  (UPat.var("x")//UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
+  # prefetch L1
+  (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld"), prefetch_l1),
+
+  # prefetch L2
+  (UPat(Ops.LOAD, dtype=dtypes.uchar.vec(128), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld"), prefetch_l2),
+
+  # 64 -> 128
+  #(UPat(Ops.LOAD, dtype=dtypes.uchar.vec(64), src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, name="idx"),)),)),
+  # lambda idx: idx.cast(dtypes.uchar.vec(128).ptr(idx.dtype.size)).load(dtype=dtypes.uchar.vec(128)).gep(tuple(range(0,64)))),
+
+  # unaligned load
+  #(UPat(Ops.LOAD, src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, src=(UPat(), UPat()+UPat.cvar("c"))),), name="ptr"),), dtype=dtypes.uchar.vec(128)),
+  # lambda c,ptr: UOp(Ops.CUSTOM, dtype=dtypes.uchar.vec(128), src=(ptr,), arg='vmemu({0})')),
+
+  (UPat(Ops.VECTORIZE, dtypes.uchar.vec(128), name="vec"), vectorize_shuffle),
+
+  # __builtin_HEXAGON_V6_vrmpybus_acc_128B
+  (UPat(Ops.CUSTOMI, dtype=dtypes.int.vec(32), name="c")+UPat.var("x"), add_to_mul),
+
+  # add acc to __builtin_HEXAGON_A2_vraddub (must be after the reduce expansion)
+  (UPat(Ops.CUSTOMI, name="cu", arg="__builtin_HEXAGON_A2_vraddub({0}, {1})") + UPat.var("x"),
+   lambda x,cu: cu.replace(dtype=dtypes.int64, src=(x.bitcast(dtypes.int64), cu.src[0], cu.src[1]),
+                           arg="__builtin_HEXAGON_A2_vraddub_acc({0}, {1}, {2})").bitcast(dtypes.int.vec(2))),
+
+  #(UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"),
+  # lambda ld, bc: ld.src[0].src[0].cast(bc.dtype.ptr(ld.src[0].dtype.size)).load(dtype=bc.dtype)),
+  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
+    "__builtin_shufflevector({0}, {1}, "+','.join([f'{y:4d}' for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
+  (UPat.var("x")+UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI or x.arg != "{0}" else None),
+  (UPat.var("x")*UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI or x.arg != "{0}" else None),
+  (UPat.var("x")//UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI or x.arg != "{0}" else None),
   (UPat(Ops.DEFINE_ACC, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar.vec(128), name="d", allow_any_len=True),
    lambda d: d.replace(src=(UOp(Ops.CUSTOMI, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:])),
 ])
 
-# NOTE: this just increases readability of the generated code
-dsp_string = PatternMatcher([
-  (UPat(Ops.CONST, (dtypes.int8, dtypes.uint8), name="x"), lambda ctx,x: str(x.arg)),
+pretty_render = PatternMatcher([
+  # makes rendering nicer
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, dtype=(dtypes.uint8, dtypes.int8)), name="v"),
+   lambda v: UOp(Ops.VECTORIZE, v.dtype, src=tuple(UOp(Ops.CUSTOMI, x.dtype, src=(UOp.const(dtypes.int, x.arg),), arg="{0}") for x in v.src))),
 ])
+
+vmemu_support = """
+__attribute__ ((always_inline)) unsigned_char128 vmemu(unsigned_char128 *addr) {
+  unsigned_char128 out;
+  __asm__ __volatile__( "%0 = vmem(%1);" : "=v" (out) : "r"(addr) : "memory");
+  return out;
+}
+"""
 
 class DSPRenderer(ClangRenderer):
   device = "DSP"
   supports_float4 = True
   buffer_suffix = " restrict __attribute__((align_value(128)))"
+  #kernel_prefix = vmemu_support + "__attribute__((noinline)) "
   kernel_prefix = "__attribute__((noinline)) "
   pre_matcher = dsp_pm
-  extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher
-  string_rewrite = dsp_string+ClangRenderer.string_rewrite
+  extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher+pretty_render
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
 

@@ -80,6 +80,9 @@ spec = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(Ops.VIEW))), lambda: True),
   (UPat(Ops.LOAD, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(Ops.VIEW), UPat(Ops.STORE))), lambda: True),
 
+  # all loads (we add Ops.CUSTOM as fake sources on this for l1fetch)
+  (UPat(Ops.LOAD), lambda: True),
+
   # early STORE has a <buf, shapetracker, val>
   (UPat(Ops.STORE, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(Ops.VIEW), UPat())), lambda: True),
 
