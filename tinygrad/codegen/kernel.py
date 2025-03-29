@@ -304,7 +304,6 @@ class Kernel:
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
-      check(not self.tensor_core, "can't group with tensor cores")
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
@@ -349,8 +348,7 @@ class Kernel:
       check(padded, "nothing was padded")
 
     if append_opt: self.applied_opts.append(opt)
-    if self.simplify_ones() and self.tensor_core_opts:
-      self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
+    self.simplify_ones()
 
   def required_optimizations(self) -> Kernel:
     if isinstance(self.membufs[0].dtype, ImageDType):
@@ -560,7 +558,7 @@ class Kernel:
         return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
       srcs = list((op.src[0] if op.src[0].op is not Ops.CAST else op.src[0].src[0]).src)
       for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
-        src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
+        src_st = unwrap((src if src.op is Ops.LOAD else src.src[0]).st)
         if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
 
       tc_reduce_axes = tuple(fu + ax for ax, _ in tc.get_reduce_axes())
