@@ -171,7 +171,6 @@ backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # anti
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
-backend_test.exclude('test_group_normalization_*') # numerical inaccuracy problem. Current Group Normalization OP fails test
 
 backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
