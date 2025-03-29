@@ -239,6 +239,69 @@ class Kernel:
 
   # ******************** high level optimizers ********************
 
+  def apply_tc_optimizations(self) -> Kernel:
+    """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
+    Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
+
+    Keyword arguments:
+    use_tensor_cores -- controls how tensor cores are applied (default 1)
+      0: will disable any tensor core matching
+      1: enable tensor cores
+      2: apply tensor core shape but don't use UOp.WMMA
+    extra_opts -- additional Opt's to apply after the tensor core instead of the hand-coded additional Opt's (default None)
+    tc_select -- specifies which tensor core(s) to use for optimization (default -1)
+      -1: iterates through all available tensor cores in order and uses the first one that matches the requirements (dims and dtypes)
+      [0-N]: uses only the n'th tensor core available; useful for search
+    tc_opt -- controls which kinds of kernels may be eligible for tensor cores application (default 2 during BEAM, 0 otherwise)
+      0: applies to only kernels with a single reduce axis and direct Ops.LOAD into Ops.MUL
+      1: allows kernels with multiple reduce axes and also multiplication of Ops.CAST'd buffers
+      2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
+    """
+    print("here")
+    if self.reduceop is not None and self.reduceop.arg[0] is Ops.ADD:
+      tc_select = TC_SELECT.value
+      tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
+      print(tensor_cores)
+      for tc in tensor_cores:
+        # tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
+        # can only fuse reduces with the same tc options
+        # assert all_same(tensor_core_opts)
+        # if tensor_core_opts[0] is None: continue
+        # self.tensor_core_opts = tc_opts = tensor_core_opts[0]
+
+        # attempt to pad the tensor axes that require it
+        applied_tc_opts = []
+        try:
+          for axis, dim in enumerate(tc.dims):
+            pad_opt = Opt(OptOps.PADTO, axis, dim)
+            self.apply_opt(pad_opt, append_opt=False) # PADTO might fail
+            applied_tc_opts.append(pad_opt)
+        except KernelOptError:
+          print("padd issue")
+          # continue
+        try:
+          # tensor core -- unroll the reduce dim (K), upcast and local the inner and outer dims (N, M)
+          # for opt in tc.opts
+          for dim, amt in tc.get_reduce_axes():
+            reduce_op = Opt(OptOps.UNROLL, 0, amt)
+            self.apply_opt(reduce_op, append_opt=False)
+            applied_tc_opts.append(reduce_op)
+          for opt in tc.opts:
+            if opt[0]=="r": continue
+            lu_opt = Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL}[opt[0]], int(opt[1]), 2)
+            self.apply_opt(lu_opt, append_opt=False)
+            applied_tc_opts.append(lu_opt)
+
+          self.applied_opts.extend(applied_tc_opts)
+          # self.tensor_core = tc
+          # self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
+          # return True
+          return self
+        except KernelOptError:
+          print("failed")
+          # continue
+    return self
+
   # def _create_tc_opts(self, reduceop:UOp, tc:TensorCore, axis:int, opt_level:int) -> Optional[TensorCoreOptions]:
   #   has_cast = tc.dtype_in != tc.dtype_out
   #   if has_cast and not (reduceop.src[0].op is Ops.CAST and reduceop.src[0].dtype == tc.dtype_out): return None
@@ -397,7 +460,7 @@ class Kernel:
       self.upcast()
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
-      check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
+      # check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
       check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
@@ -415,15 +478,15 @@ class Kernel:
       check(axis < self.first_upcast, "cannot pad upcasted")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
       if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}, cache={}), f"cannot pad {r}")
-      # padded = False
+      padded = False
       for i,st in enumerate(self.sts):
         if (s:=st.shape[axis]) == 1: continue  # reduced
         check(s > amt//4, f"pad adds more than quadruple the work {st.shape[axis]=} > {amt//4=}")
         if (ru := round_up(cast(int, s), amt) - s):
           # pad right seems to be faster
           self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
-          # padded = True
-      # check(padded, "nothing was padded")
+          padded = True
+      check(padded, "nothing was padded")
       return
 
     if append_opt: self.applied_opts.append(opt)
@@ -712,7 +775,7 @@ class Kernel:
 
     modified_ast = self.get_optimized_ast(name_override)
     modified_ast = self.apply_tc(modified_ast)
-    print(modified_ast)
+    # print(modified_ast)
     # exit()
     if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
 
