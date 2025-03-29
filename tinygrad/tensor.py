@@ -761,6 +761,20 @@ class Tensor(SimpleMathTrait):
     return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
 
   @staticmethod
+  def randperm_generator(n:int) -> Tensor:
+    """
+    Creates a random permutation of integers from 0 to n - 1.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    print(Tensor.randperm_generator(5).numpy())
+    ```
+    """
+    if n <= 0:
+      raise ValueError(f"randperm_generator expects n > 0, but got {n}")
+    return Tensor.rand(n).sort(dim=0)[1]
+
+  @staticmethod
   def normal(*shape, mean=0.0, std=1.0, requires_grad:bool|None=None, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a normal distribution with the given `mean` and standard deviation `std`.
