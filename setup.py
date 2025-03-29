@@ -52,7 +52,7 @@ setup(name='tinygrad',
         ],
         'testing': testing_minimal + [
             "pillow",
-            "onnx==1.16.0",
+            "onnx==1.17.0",
             "onnx2torch",
             "onnxruntime",
             "opencv-python",

@@ -464,7 +464,7 @@ def get_onnx_ops():
       elif mode in ["floor", "ceil"]: index = getattr(index, mode)()
       else: raise ValueError(f"invalid {nearest_mode=}")
       return index.cast(dtypes.int32).clip(0, input_dim-1)
-    def _apply_transformation(index: Tensor, input_dim, scale_dim, roi_dim, mode):
+    def _apply_transformation(index: Tensor, input_dim, scale_dim, mode):
       # TODO: needs more testing, not confident in this
       # NOTE: their reference implementation differ from the implementation in their reference docs
       # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py
@@ -475,8 +475,7 @@ def get_onnx_ops():
       elif mode == "asymmetric": index = index / scale_dim
       elif mode == "pytorch_half_pixel": index = (index + 0.5) / scale_dim - 0.5 if output_dim != 1 else Tensor([-0.5])
       elif mode == "half_pixel_symmetric": index = input_dim / 2 * (1 - int(output_dim) / output_dim) + (index + 0.5) / scale_dim - 0.5
-      elif mode == "tf_crop_and_resize": index = roi_dim[0] * (input_dim - 1) + index * ((roi_dim[1] - roi_dim[0]) * (input_dim - 1) / (output_dim - 1))
-      else: raise ValueError(f"invalid {coordinate_transformation_mode=}")
+      else: raise NotImplementedError(f"invalid {coordinate_transformation_mode=}")
       return index.clip(0, input_dim-1)
 
     scales, sizes = (None if scales is None else scales[2-(X.ndim-len(scales)):]), (None if sizes is None else sizes[2-(X.ndim-len(sizes)):])
@@ -494,13 +493,12 @@ def get_onnx_ops():
         scales = [size / input_shape for size, input_shape in zip(sizes, input_shape)]
     else:
       sizes = [int(sc*sh) for sc, sh in zip(scales, input_shape)]
-    regions = [[st, ed] for st, ed in zip(roi, roi[len(roi)//2:])] if isinstance(roi, list) and roi else [[0.0, 0.0]] * (X.ndim-2)
 
     # NOTE: this transformation makes it so that we can't just call Tensor.interpolate
     # in Tensor.interpolate, we use indexes without any transformation
     indexes = []
-    for shape, size, scale, region in zip(input_shape, sizes, scales, regions):
-      indexes.append(_apply_transformation(Tensor.arange(size), shape, scale, region, coordinate_transformation_mode))
+    for shape, size, scale in zip(input_shape, sizes, scales):
+      indexes.append(_apply_transformation(Tensor.arange(size), shape, scale, coordinate_transformation_mode))
 
     if mode == "nearest":
       indexes = [_apply_nearest_mode(index, shape, nearest_mode) for (index, shape) in zip(indexes, input_shape)]
