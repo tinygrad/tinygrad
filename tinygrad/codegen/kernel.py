@@ -259,6 +259,9 @@ class Kernel:
     """
     print("here")
     if self.reduceop is not None and self.reduceop.arg[0] is Ops.ADD:
+      # mul_op = self.reduceop.src[0].src[0] if has_cast else 
+      mul_op = self.reduceop.src[0]
+      if mul_op.op is not Ops.MUL: return self
       tc_select = TC_SELECT.value
       tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
       print(tensor_cores)
@@ -460,7 +463,7 @@ class Kernel:
       self.upcast()
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
-      # check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
+      check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
       check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
@@ -755,6 +758,7 @@ class Kernel:
 
     codes = []
     for opt in self.applied_opts:
+      if opt.op in (OptOps.GROUP, OptOps.GROUPTOP): return ast
       if opt.op is OptOps.UNROLL: codes.append("r0")
       if opt.op is OptOps.UPCAST: codes.append(f"u{opt.axis}")
       if opt.op is OptOps.LOCAL: codes.append(f"l{opt.axis}")
