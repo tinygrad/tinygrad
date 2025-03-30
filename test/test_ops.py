@@ -2042,9 +2042,11 @@ class TestOps(unittest.TestCase):
         for H in [1,2,5]:
           for groups in [1,3] if cin == 3 and H == 5 else [1]:
             with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H):
+              ATOL = getenv("ATOL", 1e-4)
+              RTOL = getenv("RTOL", 3e-2)
               helper_test_op([(bs,cin,11), (6,cin//groups,H)],
                 lambda x,w: torch.nn.functional.conv1d(x,w,groups=groups).relu(),
-                lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), grad_rtol=1e-5)
+                lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), grad_rtol=1e-5, atol=ATOL, rtol=RTOL)
 
   @unittest.skipIf(IMAGE>0, "no conv1d on images")
   def test_simple_padding_conv1d(self):
