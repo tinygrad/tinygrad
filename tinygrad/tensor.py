@@ -2423,6 +2423,26 @@ class Tensor(SimpleMathTrait):
     """
     return self._split_cumalu(axis, Ops.ADD)
 
+  def cumprod(self, axis:int|Sequence[int]|None=None, dtype: dtypes|None=None, keepdim=False) -> Tensor:
+    """
+    Returns the cumulative product of the elements of the tensor along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the cumulative product is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(1, 7).reshape(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.cumprod(axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.cumprod(axis=1).numpy())
+    ``` 
+    """
+    return self._split_cumalu(axis, Ops.MUL)
+
   def cummax(self, axis:int=0) -> Tensor:
     """
     Computes the cumulative max of the tensor along the specified `axis`.
