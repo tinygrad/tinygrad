@@ -158,6 +158,19 @@ class CapturedJit(Generic[ReturnType]):
     self._input_replace: dict[tuple[int, int], int] = self.input_replace
     self._first_run = True
     self._clear_inputs()
+    # For model export, TODO: make this a helper function instead?
+    self.empty_bufs: set[Buffer] = set()
+    self.weight_bufs: set[Buffer] = set()
+    self.buf_names: dict[Buffer, str] = dict()
+    seen_bufs, ctr = set([None] + [t.lazydata.base.realized for t in get_parameters(self.ret)]), 0
+    # TODO: is this always correct for assigning weight_bufs?
+    for ei in self.jit_cache:
+      for i, buf in enumerate(ei.bufs):
+        if buf not in seen_bufs:
+          (self.empty_bufs if i == 0 else self.weight_bufs).add(buf)
+          self.buf_names[buf] = f"buf_{ctr}"
+          ctr += 1
+          seen_bufs.add(buf)
 
   def _clear_inputs(self):
     for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None

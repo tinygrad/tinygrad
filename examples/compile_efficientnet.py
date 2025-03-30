@@ -1,8 +1,7 @@
 from pathlib import Path
 from extra.models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
-from tinygrad.nn.state import get_state_dict, safe_save, safe_load, load_state_dict
-from extra.export_model import export_model
+#from extra.export_model import export_model
 from tinygrad.export import export_webgpu # refactor in progress to move only webgpu export into tinygrad/tinygrad
 from tinygrad.helpers import getenv, fetch
 import ast
