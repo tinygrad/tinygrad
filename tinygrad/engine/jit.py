@@ -150,6 +150,7 @@ class CapturedJit(Generic[ReturnType]):
 
   def __reduce__(self):
     # TODO: free_intermediates here?
+    self.optimize_weights()
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
                             self.expected_names, self.expected_st_vars_dtype_device)
 
@@ -183,6 +184,14 @@ class CapturedJit(Generic[ReturnType]):
         b.deallocate()
         if b._base is not None and b._base.allocated_views == 0: b._base.deallocate()
     self.__post_init__()   # reset the graph state
+
+  def optimize_weights(self):
+    blacklist = [t.lazydata.buffer for t in get_parameters(self.ret)]
+    asgn = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
+    self.jit_cache = [ExecItem(item.prg, [asgn.get(b,b) if b is not None else None for b in item.bufs]) for item in self.jit_cache]
+    for old, new in asgn.items():
+      if old.is_allocated(): new.ensure_allocated().copyin(old.as_buffer())
+    self.__post_init__()
 
   # jit exec
   def __call__(self, input_buffers:list[Buffer], var_vals:dict[Variable, int]) -> ReturnType:
