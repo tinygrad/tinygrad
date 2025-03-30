@@ -3,7 +3,7 @@ import time
 import numpy as np
 np.set_printoptions(suppress=True, linewidth=1000)
 import functools
-from tinygrad import Tensor, nn, Device, GlobalCounters
+from tinygrad import Tensor, nn, Device, GlobalCounters, Context
 from tinygrad.helpers import Timing, getenv
 from extra.models.llama import Transformer, convert_from_huggingface
 
@@ -22,9 +22,15 @@ class MixtureFeedForward:
     g = g.squeeze() # (BS, length, num_experts) -> (num_experts,)
     probs, sel = g.topk(self.activated_experts)
 
+    with Context(SPLIT_REDUCEOP=0, FUSE_ARANGE=1):
+      selected_gate_projs = self.gate_proj[sel]
+      selected_up_projs = self.up_proj[sel]
+      selected_down_projs = self.down_proj[sel]
+      selected_gate_projs.realize(selected_up_projs, selected_down_projs)
+
     # run MoE
-    x_up_gate = x.dot(self.gate_proj[sel].permute(0,2,1)).silu() * x.dot(self.up_proj[sel].permute(0,2,1))
-    x_down = x_up_gate.dot(self.down_proj[sel].permute(0,2,1))
+    x_up_gate = x.dot(selected_gate_projs.permute(0,2,1)).silu() * x.dot(selected_up_projs.permute(0,2,1))
+    x_down = x_up_gate.dot(selected_down_projs.permute(0,2,1))
     return (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
 
 # model is bf16, 1.3B active, 6.9B total
@@ -37,7 +43,12 @@ def fetch_weights() -> dict[str, Tensor]:
   m3 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00003-of-00003.safetensors").to(Device.DEFAULT)
   return {**nn.state.safe_load(m1), **nn.state.safe_load(m2), **nn.state.safe_load(m3)}
 
+def filter_layers(state, layers):
+  lay = [f"model.layers.{i}." for i in range(layers)]
+  return {k: v for k, v in state.items() if not k.startswith("model.layers.") or any(k.startswith(l) for l in lay)}
+
 if __name__ == "__main__":
+  LAYERS = 8
   if getenv("TORCH"):
     from transformers import OlmoeForCausalLM, AutoTokenizer
     model = OlmoeForCausalLM.from_pretrained("allenai/OLMoE-1B-7B-0924")
@@ -49,13 +60,15 @@ if __name__ == "__main__":
     exit(0)
 
   with Timing("create model: "):
-    model = Transformer(n_layers=16, dim=2048, hidden_dim=1024, n_heads=16, norm_eps=1e-5, qk_norm=1e-5, max_context=1024,
+    # model = Transformer(n_layers=16, dim=2048, hidden_dim=1024, n_heads=16, norm_eps=1e-5, qk_norm=1e-5, max_context=1024,
+    #                     vocab_size=50304, feed_forward=functools.partial(MixtureFeedForward, 64, 8))
+    model = Transformer(n_layers=LAYERS, dim=2048, hidden_dim=1024, n_heads=16, norm_eps=1e-5, qk_norm=1e-5, max_context=1024,
                         vocab_size=50304, feed_forward=functools.partial(MixtureFeedForward, 64, 8))
     model_state_dict = nn.state.get_state_dict(model)
     del model_state_dict['freqs_cis']
 
   with Timing("load weights to GPU: "):
-    nhf_state = convert_from_huggingface(fetch_weights(), model, 16, 16)
+    nhf_state = convert_from_huggingface(filter_layers(fetch_weights(), LAYERS), model, 16, 16)
     # NOTE: i'm not sure this actually needs float32, it may just change the type of things downstream from it. but doesn't match torch w/o this
     for needs_float32 in ['tok_embeddings.weight']: nhf_state[needs_float32] = nhf_state[needs_float32].float()
   print(f"ram used: {GlobalCounters.mem_used/1e9:.2f} GB")
@@ -85,6 +98,22 @@ if __name__ == "__main__":
     start_pos += 1
     print(toks)
     print(tokenizer.decode(toks))
+
+  ### LAYER = 2
+  # old: JITBEAM=2 fastest token 34.77 ms, 28.8 tok/s
+  # new: JITBEAM=2 fastest token 9.49 ms, 105.4 tok/s  3.7x speedup
+
+  ### LAYER = 4
+  # old: JITBEAM=2 fastest token 64.87 ms, 15.4 tok/s
+  # new: JITBEAM=2 fastest token 14.19 ms, 70.5 tok/s  4.7x speedup
+
+  ### LAYER = 8
+  # old: JITBEAM=2 fastest token 123.58 ms, 8.1 tok/s
+  # new: JITBEAM=2 fastest token 23.02 ms, 43.4 tok/s  5.4x speedup
+
+  ### LAYER = 16
+  # ??? 6x speedup?
+
   print(f"fastest token {min(timings)*1e3:.2f} ms, {1/min(timings):.1f} tok/s")
 
   if temperature == 0:
