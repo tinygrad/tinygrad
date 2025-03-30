@@ -2393,11 +2393,8 @@ class Tensor(SimpleMathTrait):
   def _cumalu(self, axis:int, op:Ops, _include_initial=False) -> Tensor:
     assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
     pl_sz = self.shape[axis] - int(not _include_initial)
-    pooled = (self.transpose(axis, -1)
-                 .pad((pl_sz, -int(_include_initial)), value=identity_element(op, self.dtype))
-                 ._pool((self.shape[axis],)))
-    return {Ops.ADD: pooled.sum, Ops.MAX: pooled.max, Ops.MUL: pooled.prod}[op](-1).transpose(axis, -1)
-
+    pooled = self.transpose(axis,-1).pad((pl_sz, -int(_include_initial)), value=identity_element(op, self.dtype))._pool((self.shape[axis],))
+    return cast(Callable[[int], Tensor], {Ops.ADD: pooled.sum, Ops.MAX: pooled.max, Ops.MUL: pooled.prod}[op])(-1).transpose(axis, -1)
   def _split_cumalu(self, axis:int, op:Ops) -> Tensor:
     axis = self._resolve_dim(axis)
     if self.ndim == 0 or 0 in self.shape: return self
