@@ -347,7 +347,7 @@ generate_am() {
     -o $BASE/am/mp_13_0_0.py
   fixup $BASE/am/mp_13_0_0.py
 
-  14_0_3 reuses 14_0_2
+  # 14_0_3 reuses 14_0_2
   clang2py -k cdefstum \
     extra/amdpci/headers/mp_14_0_2_offset.h \
     extra/amdpci/headers/mp_14_0_2_sh_mask.h \
