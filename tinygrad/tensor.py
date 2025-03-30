@@ -2410,7 +2410,7 @@ class Tensor(SimpleMathTrait):
     base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
     def fix(x: Tensor) -> Tensor: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
     return {Ops.ADD: lambda a, b: a + b, Ops.MAX: lambda a, b: a.maximum(b), Ops.MUL: lambda a, b: a * b}[op](fix(ret), fix(base))
-  
+
   def cumsum(self, axis:int=0) -> Tensor:
     """
     Computes the cumulative sum of the tensor along the specified `axis`.
