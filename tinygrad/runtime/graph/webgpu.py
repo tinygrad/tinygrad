@@ -78,8 +78,8 @@ def render_js(cj: CapturedJit, in_bufs:dict[Buffer, int], in_vars:dict[Variable,
     return f"{args[in_bufs[arg]]} instanceof {js_type(arg.dtype)}" if isinstance(arg, Buffer) else f'typeof {args[in_vars[arg]]} === "number"'
   validation = [f"if (!({check(arg)})) {{ throw new Error(`arg {i} type: ${{typeof {args[i]}}} is not as expected`) }}" for arg, i in arg_idx.items()]
 
-  input_writer_bufs = [f"""const gpuWriteBuffer{i} = device.createBuffer({{size:{names[buf]}.size,
-                usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST}});""" for buf, i in in_bufs.items()]
+  input_writer_bufs = [f"""const gpuWriteBuffer{i} = device.createBuffer({{size:{names[arg]}.size,
+                usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST}});""" for arg, i in arg_idx.items()]
   input_writers = [f"""
       device.queue.writeBuffer(gpuWriteBuffer{i}, 0, {f"_input{i}" if isinstance(var, Buffer) else f"new {js_type(var.dtype)}([{var.expr}])"});
       commandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, {names[var]}, 0, gpuWriteBuffer{i}.size);""" for var, i in arg_idx.items()]
