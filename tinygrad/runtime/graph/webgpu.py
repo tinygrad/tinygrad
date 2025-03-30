@@ -1,10 +1,8 @@
-from typing import cast, Iterable
-import ctypes
-from tinygrad.helpers import dedup, merge_dicts
+from typing import cast
+from tinygrad.helpers import merge_dicts
 from tinygrad.engine.jit import GraphRunner, GraphException, CapturedJit
 from tinygrad.engine.realize import ExecItem, CompiledRunner
-from tinygrad.runtime.autogen import webgpu
-from tinygrad.runtime.ops_webgpu import read_buffer, WebGPUProgram
+from tinygrad.runtime.ops_webgpu import WebGPUProgram, execute_commands
 from tinygrad.device import Buffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.ops import Variable
@@ -17,38 +15,18 @@ class WebGPUGraph(GraphRunner):
 
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg._prg, WebGPUProgram) for ji in jit_cache): raise GraphException
-    self.jc_idx_with_updatable_rawbufs = dedup([x[0] for x in self.input_replace.keys()])
 
   def __call__(self, rawbufs: list[Buffer], var_vals: dict[Variable, int], wait=False) -> float|None:
     for (j,i),idx in self.input_replace.items(): self.jit_cache[j].bufs[i] = rawbufs[idx]
     wait = wait and self.timestamp_supported
 
-    # TODO: refactor to deduplicate encoder/wait with ops_webgpu.WebGPUProgram.__call__
-    command_encoder = webgpu.wgpuDeviceCreateCommandEncoder(self._dev, webgpu.WGPUCommandEncoderDescriptor())
-    comp_pass_desc = webgpu.WGPUComputePassDescriptor(nextInChain=None)
+    def callback(command_encoder, comp_pass_desc):
+      for ji in self.jit_cache:
+        _prg = cast(WebGPUProgram, (prg:=cast(CompiledRunner, ji.prg))._prg)
+        vals = tuple(var_vals[k] for k in prg.p.vars)
+        _prg.add_compute_pass(command_encoder, comp_pass_desc, *[b._buf for b in ji.bufs], global_size=prg.p.launch_dims(var_vals)[0], vals=vals)
 
-    if wait:
-      query_set = webgpu.wgpuDeviceCreateQuerySet(self._dev, webgpu.WGPUQuerySetDescriptor(type=webgpu.WGPUQueryType_Timestamp, count=2))
-      query_buf = webgpu.wgpuDeviceCreateBuffer(self._dev,
-        webgpu.WGPUBufferDescriptor(size=16, usage=webgpu.WGPUBufferUsage_QueryResolve | webgpu.WGPUBufferUsage_CopySrc))
-      comp_pass_desc.timestampWrites = ctypes.pointer(webgpu.WGPUComputePassTimestampWrites(
-        querySet=query_set, beginningOfPassWriteIndex=0, endOfPassWriteIndex=1))
-
-    for ji in self.jit_cache:
-      _prg = cast(WebGPUProgram, (prg:=cast(CompiledRunner, ji.prg))._prg)
-      vals = tuple(var_vals[k] for k in prg.p.vars)
-      _prg.add_compute_pass(command_encoder, comp_pass_desc, *[b._buf for b in ji.bufs], global_size=prg.p.launch_dims(var_vals)[0], vals=vals)
-
-    if wait: webgpu.wgpuCommandEncoderResolveQuerySet(command_encoder, query_set, 0, 2, query_buf, 0)
-
-    cmd_buf = webgpu.wgpuCommandEncoderFinish(command_encoder, webgpu.WGPUCommandBufferDescriptor())
-    webgpu.wgpuQueueSubmit(webgpu.wgpuDeviceGetQueue(self._dev), 1, (webgpu.WGPUCommandBuffer*1)(cmd_buf))
-
-    if wait:
-      time = ((timestamps:=read_buffer(self._dev, query_buf).cast("Q").tolist())[1] - timestamps[0]) / 1e9
-      webgpu.wgpuBufferDestroy(query_buf)
-      webgpu.wgpuQuerySetDestroy(query_set)
-      return time
+    return execute_commands(self._dev, callback, wait)
 
 def js_type(dtype: DType) -> str:
   return f"{'Uint' if dtype in dtypes.uints else 'Int' if (dtype in dtypes.sints or dtype == dtypes.bool) else 'Float'}{8*dtype.itemsize}Array"
