@@ -422,7 +422,7 @@ def train_retinanet():
   config["lr"] = lr = getenv("LR", 0.0001 * (BS / 256))
   config["lr_warmup_epochs"] = lr_warmup_epochs = getenv("LR_WARMUP_EPOCHS", 1)
   config["lr_warmup_factor"] = lr_warmup_factor = getenv("LR_WARMUP_FACTOR", 1e-3)
-  config["loss_scaler"] = loss_scaler = getenv("LOSS_SCALER", 256.0 if dtypes.default_float == dtypes.float16 else 1.0)
+  config["loss_scaler"] = loss_scaler = getenv("LOSS_SCALER", 2**11 if dtypes.default_float == dtypes.float16 else 1.0)
   config["default_float"] = dtypes.default_float.name
 
   if SEED: Tensor.manual_seed(SEED)
