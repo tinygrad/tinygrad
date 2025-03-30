@@ -1,6 +1,5 @@
 from __future__ import annotations
 import itertools, functools, math
-from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
@@ -10,8 +9,8 @@ from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap, ContextVar
-from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, USE_TC, AMX, CAPTURE_PROCESS_REPLAY
+from tinygrad.helpers import colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap, ContextVar
+from tinygrad.helpers import DEBUG, TC_SELECT, CAPTURE_PROCESS_REPLAY
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.linearize import linearize_uop
@@ -252,6 +251,8 @@ class Kernel:
         if self.reduceop.dtype != tc.dtype_out or mul_op.dtype != tc.dtype_in: continue
         # add check for LOAD, refactor should not change behaviour, we can address this later
         if mul_op.src[0].op != Ops.LOAD or ((cast_op:=mul_op.src[0]).op == Ops.CAST and cast_op.src[0].op != Ops.LOAD): return self
+        # commenting check for LOAD as it does not seem to have any effect on test_ops.py
+        # if mul_op.src[0].op != Ops.LOAD or ((cast_op:=mul_op.src[0]).op == Ops.CAST and cast_op.src[0].op != Ops.LOAD): return self
         applied_tc_opts = []
         try:
           try:
