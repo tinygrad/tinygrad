@@ -254,8 +254,10 @@ class Kernel:
         try:
           try:
             for axis, dim in enumerate(tc.dims): # always attempt to pad the tensor core axes, might fail
+              if axis < len(self.full_shape) and dim > self.full_shape[axis]: return self
               self.apply_opt((pad_opt := Opt(OptOps.PADTO, axis, dim)), append_opt=False) # PADTO might fail
               applied_tc_opts.append(pad_opt)
+              print(f"{self.full_shape}")
           except KernelOptError: pass
           for opt in tc.opts: # tensor core -- unroll the reduce dim (K), upcast and local the inner and outer dims (N, M)
             self.apply_opt((rlu_opt := Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL,"r":OptOps.UNROLL}[opt[0]], int(opt[1]), 2)), append_opt=False)
