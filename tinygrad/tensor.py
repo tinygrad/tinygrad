@@ -2397,7 +2397,7 @@ class Tensor(SimpleMathTrait):
                  .pad((pl_sz, -int(_include_initial)), value=identity_element(op, self.dtype))
                  ._pool((self.shape[axis],)))
     return {Ops.ADD: pooled.sum, Ops.MAX: pooled.max, Ops.MUL: pooled.prod}[op](-1).transpose(axis, -1)
-  
+
   def _split_cumalu(self, axis:int, op:Ops) -> Tensor:
     axis = self._resolve_dim(axis)
     if self.ndim == 0 or 0 in self.shape: return self
@@ -2410,7 +2410,7 @@ class Tensor(SimpleMathTrait):
     base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
     def fix(x: Tensor) -> Tensor: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
     return {Ops.ADD: lambda a, b: a + b, Ops.MAX: lambda a, b: a.maximum(b), Ops.MUL: lambda a, b: a * b}[op](fix(ret), fix(base))
-
+  
   def cumsum(self, axis:int=0) -> Tensor:
     """
     Computes the cumulative sum of the tensor along the specified `axis`.
@@ -2427,10 +2427,7 @@ class Tensor(SimpleMathTrait):
 
   def cumprod(self, axis:int|Sequence[int]|None=None, dtype: dtypes|None=None, keepdim=False) -> Tensor:
     """
-    Returns the cumulative product of the elements of the tensor along the specified axis or axes.
-
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
-    which the cumulative product is computed and whether the reduced dimensions are retained.
+    Computes the cumulative product of the elements of the tensor along the specified `axis`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(1, 7).reshape(2, 3)
@@ -2439,9 +2436,6 @@ class Tensor(SimpleMathTrait):
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.cumprod(axis=0).numpy())
     ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.cumprod(axis=1).numpy())
-    ``` 
     """
     return self._split_cumalu(axis, Ops.MUL)
 
