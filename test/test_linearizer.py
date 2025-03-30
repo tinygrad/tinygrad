@@ -1066,6 +1066,25 @@ class TestLinearizer(unittest.TestCase):
       helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_codegen(self):
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
+      n, m, k = tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2]
+      a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
+      r = a.matmul(b, dtype=tc.dtype_out)
+      sched = r.schedule()
+      realized_ast = sched[-1].ast
+      kernel = Kernel(realized_ast)
+      kernel.apply_tensor_cores(1, axis=0, tc_select=-1, tc_opt=2)
+      kernel.linearize()
+      prg = kernel.to_program()
+      if Device.DEFAULT == "LLVM":
+        assert "0x201000" in prg.src
+      elif Device.DEFAULT == "AMD" and getenv("AMD_LLVM", 0):
+        assert "@llvm.amdgcn.wmma" in prg.src
+      else:
+        assert "__WMMA_" in prg.src
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       if (getenv("EMULATE_CUDA") or getenv("EMULATE_METAL")) and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
