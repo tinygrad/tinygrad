@@ -52,8 +52,9 @@ class PythonProgram:
               for (m,o),v,g in zip(inp[0], val, inp[2]):
                 if g: _store(m, o+j, v)
           else:
-            for (m,o),v,g in zip(*inp):
-              if g: _store(m, o, v)
+            for mog,v,g in zip(*inp):
+              if len(mog) == 3: g = mog[2]
+              if g: _store(mog[0], mog[1], v)
           i += 1
           continue
         if uop is Ops.ENDRANGE:
