@@ -250,7 +250,6 @@ class Kernel:
       for tc in tensor_cores:
         if self.reduceop.dtype != tc.dtype_out or mul_op.dtype != tc.dtype_in: continue
         # add check for LOAD, refactor should not change behaviour, we can address this later
-        if mul_op.src[0].op != Ops.LOAD or ((cast_op:=mul_op.src[0]).op == Ops.CAST and cast_op.src[0].op != Ops.LOAD): return self
         # commenting check for LOAD as it does not seem to have any effect on test_ops.py
         # if mul_op.src[0].op != Ops.LOAD or ((cast_op:=mul_op.src[0]).op == Ops.CAST and cast_op.src[0].op != Ops.LOAD): return self
         applied_tc_opts = []
