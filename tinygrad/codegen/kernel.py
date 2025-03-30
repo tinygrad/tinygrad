@@ -241,23 +241,27 @@ class Kernel:
       1: allows kernels with multiple reduce axes and also multiplication of Ops.CAST'd buffers
       2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
     """
-    if self.reduceop is not None and self.reduceop.arg[0] is Ops.ADD:
+    if self.reduceop is not None and self.reduceop.arg[0] is Ops.ADD and len(self.output_shape) >= 3:
       # TODO: handle dtypes and cast
       tc_select = TC_SELECT.value
       tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
+      has_cast = self.reduceop.src[0].op is Ops.CAST
+      mul_op = self.reduceop.src[0].src[0] if has_cast else self.reduceop.src[0]
+      if mul_op.op is not Ops.MUL: return self
       for tc in tensor_cores:
-        has_cast = self.reduceop.src[0].op is Ops.CAST
-        mul_op = self.reduceop.src[0].src[0] if has_cast else self.reduceop.src[0]
-        if mul_op.op is not Ops.MUL or self.reduceop.dtype != tc.dtype_out or mul_op.dtype != tc.dtype_in: continue
-
+        if self.reduceop.dtype != tc.dtype_out or mul_op.dtype != tc.dtype_in: continue
+        # add check for LOAD, refactor should not change behaviour, we can address this later
+        if mul_op.src[0].op != Ops.LOAD or ((cast_op:=mul_op.src[0]).op == Ops.CAST and cast_op.src[0].op != Ops.LOAD): return self
         applied_tc_opts = []
         try:
           try:
-            for axis, dim in enumerate(tc.dims): # always attempt to pad the tensor core axes, might fail
-              if axis < len(self.full_shape) and dim > self.full_shape[axis]: return self
+            print(self.colored_shape())
+            for axis, dim in enumerate(tc.dims): # attempt to pad the tensor core axes, avoid excessive padding
+              if axis == 2: axis = self.first_reduce
+              print(f"{axis}, {self.full_unupcasted_shape=} {self.reduceop}")
+              if dim > self.full_shape[axis]: return self
               self.apply_opt((pad_opt := Opt(OptOps.PADTO, axis, dim)), append_opt=False) # PADTO might fail
               applied_tc_opts.append(pad_opt)
-              print(f"{self.full_shape}")
           except KernelOptError: pass
           for opt in tc.opts: # tensor core -- unroll the reduce dim (K), upcast and local the inner and outer dims (N, M)
             self.apply_opt((rlu_opt := Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL,"r":OptOps.UNROLL}[opt[0]], int(opt[1]), 2)), append_opt=False)
@@ -266,11 +270,14 @@ class Kernel:
           self.applied_opts.extend(applied_tc_opts)
 
           # hand-coded TC opts
-          for dim in [1,0]:
-            if dim < self.global_dims:
-              szs = [sz for sz in [5,4,3,2] if self.full_shape[dim] % sz == 0]
-              if szs: self.apply_opt(Opt(OptOps.UPCAST, dim, szs[0]))
-          if self.global_dims and self.full_shape[0] % 2: self.apply_opt(Opt(OptOps.LOCAL, 0, 2))
+          # for dim in [1,0]:
+          #   if dim < self.global_dims:
+          #     szs = [sz for sz in [5,4,3,2] if self.full_shape[dim] % sz == 0]
+          #     if szs: self.apply_opt(Opt(OptOps.UPCAST, dim, szs[0]))
+          # if self.global_dims and self.full_shape[0] % 2: self.apply_opt(Opt(OptOps.LOCAL, 0, 2))
+
+          # self.apply_opt(Opt(OptOps.UPCAST, 2, 4))
+          # self.apply_opt(Opt(OptOps.UPCAST, 3, 4))
 
           return self
         except KernelOptError: continue
