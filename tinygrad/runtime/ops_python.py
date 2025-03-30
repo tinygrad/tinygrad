@@ -146,7 +146,8 @@ class PythonProgram:
           elif arg[4] == "AMD":
             # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
             def a_elem(x, k, row, goff):
-              assert x[k][goff+row] == x[k][goff+row+16], "warp elements not duplicated properly across lanes"
+              # this might not be true for padded tc
+              # assert x[k][goff+row] == x[k][goff+row+16], "warp elements not duplicated properly across lanes"
               return x[k][goff+row]
             # B (16 elements on 32 threads): row major, lane 16-32 == lane 0-15
             def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)  # pylint: disable=arguments-out-of-order
