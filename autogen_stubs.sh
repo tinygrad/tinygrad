@@ -449,6 +449,12 @@ generate_am() {
   fixup $BASE/am/nbio_7_9_0.py
 
   clang2py -k cdefstum \
+    extra/amdpci/headers/nbio_7_11_0_offset.h \
+    extra/amdpci/headers/nbio_7_11_0_sh_mask.h \
+    -o $BASE/am/nbio_7_11_0.py
+  fixup $BASE/am/nbio_7_11_0.py
+
+  clang2py -k cdefstum \
     extra/amdpci/headers/osssys_6_0_0_offset.h \
     extra/amdpci/headers/osssys_6_0_0_sh_mask.h \
     -o $BASE/am/osssys_6_0_0.py
