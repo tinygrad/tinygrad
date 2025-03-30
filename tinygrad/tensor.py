@@ -2425,7 +2425,7 @@ class Tensor(SimpleMathTrait):
     """
     return self._split_cumalu(axis, Ops.ADD)
 
-  def cumprod(self, axis:int|Sequence[int]|None=None, dtype: dtypes|None=None, keepdim=False) -> Tensor:
+  def cumprod(self, axis:int) -> Tensor:
     """
     Computes the cumulative product of the elements of the tensor along the specified `axis`.
 
