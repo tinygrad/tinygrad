@@ -1,10 +1,9 @@
-from typing import Callable, Sequence, Optional, cast
+from typing import Callable, Sequence, Optional
 import types
 from tinygrad import Tensor, TinyJit, UOp, Device
 from tinygrad.device import Buffer
 from tinygrad.engine.jit import CapturedJit, _prepare_jit_inputs, GraphRunner
 from tinygrad.nn.state import get_state_dict, load_state_dict, safe_save
-from tinygrad.runtime.graph.webgpu import render_js
 
 """
 Things we do here for model export. TODO: Should TinyJit/CapturedJit do any of these?
@@ -63,6 +62,8 @@ def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None
   """
   Exports a javascript WebGPU implementation of a model together with its `state_dict`.
   """
+  from tinygrad.runtime.graph.webgpu import render_js
+
   captured_jit, in_bufs, in_vars, weight_names = export_init(model, inputs, state_dict, fix_contiguous)
 
   js_code = render_js(captured_jit, in_bufs, in_vars, weight_names, model_name, save_weights)
