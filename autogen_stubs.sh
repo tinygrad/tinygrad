@@ -294,6 +294,7 @@ generate_vfio() {
 generate_am() {
   clang2py -k cdefstum \
     extra/amdpci/headers/v11_structs.h \
+    extra/amdpci/headers/v12_structs.h \
     extra/amdpci/headers/amdgpu_vm.h \
     extra/amdpci/headers/discovery.h \
     extra/amdpci/headers/amdgpu_ucode.h \
@@ -310,9 +311,20 @@ generate_am() {
 
   clang2py -k cdefstum \
     extra/hip_gpu_driver/kfd_pm4_headers_ai.h \
+    extra/hip_gpu_driver/soc15d.h \
+    -o $BASE/am/pm4_soc15.py
+  fixup $BASE/am/pm4_soc15.py
+
+  clang2py -k cdefstum \
+    extra/hip_gpu_driver/kfd_pm4_headers_ai.h \
     extra/hip_gpu_driver/nvd.h \
     -o $BASE/am/pm4_nv.py
   fixup $BASE/am/pm4_nv.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/vega10_enum.h \
+    -o $BASE/am/vega10.py
+  fixup $BASE/am/vega10.py
 
   clang2py -k cdefstum \
     extra/amdpci/headers/navi10_enum.h \
@@ -335,11 +347,25 @@ generate_am() {
     -o $BASE/am/mp_13_0_0.py
   fixup $BASE/am/mp_13_0_0.py
 
+  14_0_3 reuses 14_0_2
+  clang2py -k cdefstum \
+    extra/amdpci/headers/mp_14_0_2_offset.h \
+    extra/amdpci/headers/mp_14_0_2_sh_mask.h \
+    -o $BASE/am/mp_14_0_3.py
+  fixup $BASE/am/mp_14_0_3.py
+
   clang2py -k cdefstum \
     extra/amdpci/headers/mp_11_0_offset.h \
     extra/amdpci/headers/mp_11_0_sh_mask.h \
     -o $BASE/am/mp_11_0.py
   fixup $BASE/am/mp_11_0.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/gc_9_4_3_offset.h \
+    extra/amdpci/headers/gc_9_4_3_sh_mask.h \
+    extra/amdpci/overlay/gc_9_4_3.h \
+    -o $BASE/am/gc_9_4_3.py
+  fixup $BASE/am/gc_9_4_3.py
 
   clang2py -k cdefstum \
     extra/amdpci/headers/gc_10_3_0_offset.h \
@@ -358,6 +384,13 @@ generate_am() {
     extra/amdpci/headers/gc_12_0_0_sh_mask.h \
     -o $BASE/am/gc_12_0_0.py
   fixup $BASE/am/gc_12_0_0.py
+
+  clang2py -k cdefstum \
+    extra/hip_gpu_driver/sdma_registers.h \
+    extra/hip_gpu_driver/vega10_sdma_pkt_open.h \
+    --clang-args="-I/opt/rocm/include -x c++" \
+    -o $BASE/am/sdma_4_0_0.py
+  fixup $BASE/am/sdma_4_0_0.py
 
   clang2py -k cdefstum \
     extra/hip_gpu_driver/sdma_registers.h \
@@ -392,6 +425,12 @@ generate_am() {
   fixup $BASE/am/nbio_2_3_0.py
 
   clang2py -k cdefstum \
+    extra/amdpci/headers/mmhub_4_1_0_offset.h \
+    extra/amdpci/headers/mmhub_4_1_0_sh_mask.h \
+    -o $BASE/am/mmhub_4_1_0.py
+  fixup $BASE/am/mmhub_4_1_0.py
+
+  clang2py -k cdefstum \
     extra/amdpci/headers/nbio_4_3_0_offset.h \
     extra/amdpci/headers/nbio_4_3_0_sh_mask.h \
     -o $BASE/am/nbio_4_3_0.py
@@ -404,10 +443,22 @@ generate_am() {
   fixup $BASE/am/nbif_6_3_1.py
 
   clang2py -k cdefstum \
+    extra/amdpci/headers/nbio_7_9_0_offset.h \
+    extra/amdpci/headers/nbio_7_9_0_sh_mask.h \
+    -o $BASE/am/nbio_7_9_0.py
+  fixup $BASE/am/nbio_7_9_0.py
+
+  clang2py -k cdefstum \
     extra/amdpci/headers/osssys_6_0_0_offset.h \
     extra/amdpci/headers/osssys_6_0_0_sh_mask.h \
     -o $BASE/am/osssys_6_0_0.py
   fixup $BASE/am/osssys_6_0_0.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/osssys_7_0_0_offset.h \
+    extra/amdpci/headers/osssys_7_0_0_sh_mask.h \
+    -o $BASE/am/osssys_7_0_0.py
+  fixup $BASE/am/osssys_7_0_0.py
 
   clang2py -k cdefstum \
     extra/amdpci/headers/smu_v13_0_0_ppsmc.h \
@@ -417,10 +468,26 @@ generate_am() {
   fixup $BASE/am/smu_v13_0_0.py
 
   clang2py -k cdefstum \
+    extra/amdpci/headers/smu_v14_0_0_pmfw.h \
+    extra/amdpci/headers/smu_v14_0_2_ppsmc.h \
+    extra/amdpci/headers/smu14_driver_if_v14_0_0.h \
+    extra/amdpci/headers/smu14_driver_if_v14_0.h \
+    extra/amdpci/headers/amdgpu_smu.h \
+    --clang-args="-include stdint.h" \
+    -o $BASE/am/smu_v14_0_3.py
+  fixup $BASE/am/smu_v14_0_3.py
+
+  clang2py -k cdefstum \
     extra/amdpci/headers/hdp_6_0_0_offset.h \
     extra/amdpci/headers/hdp_6_0_0_sh_mask.h \
     -o $BASE/am/hdp_6_0_0.py
   fixup $BASE/am/hdp_6_0_0.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/hdp_7_0_0_offset.h \
+    extra/amdpci/headers/hdp_7_0_0_sh_mask.h \
+    -o $BASE/am/hdp_7_0_0.py
+  fixup $BASE/am/hdp_7_0_0.py
 }
 
 generate_sqtt() {

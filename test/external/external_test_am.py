@@ -1,10 +1,13 @@
 import unittest
 from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableTraverseContext
 from tinygrad.runtime.support.am.ip import AM_GMC
+from tinygrad.runtime.support.amd import import_module
+from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import mv_address
 
 class FakeGMC(AM_GMC):
-  def __init__(self):
+  def __init__(self, adev):
+    self.adev = adev
     self.vm_base = 0x0
     self.address_space_mask = (1 << 44) - 1
   def init_hw(self): pass
@@ -18,9 +21,10 @@ class FakeAM:
     self.is_booting, self.smi_dev = True, False
     self.pcidev = FakePCIDev()
     self.vram = memoryview(bytearray(4 << 30))
-    self.gmc = FakeGMC()
+    self.gmc = FakeGMC(self)
     self.mm = AMMemoryManager(self, vram_size=4 << 30)
     self.is_booting = False
+    self.ip_ver = {am.GC_HWIP: (11, 0, 0)}
   def paddr2cpu(self, paddr:int) -> int: return paddr + mv_address(self.vram)
   def paddr2mc(self, paddr:int) -> int: return paddr
 
@@ -170,6 +174,20 @@ class TestAMPageTable(unittest.TestCase):
                    (0x0, 0x4000), (0x10000, 0x4000), (0x10000, 0x40000), (0x10001000, 0x40000), (0x100001000, 0x3000)]:
       must_cover_checker(va, sz)
       not_cover_checker(va, sz)
+
+class TestAM(unittest.TestCase):
+  def test_imports(self):
+    with self.assertRaises(ImportError): import_module("gc", (7, 0, 0))
+    x = import_module("gc", (11, 0, 0))
+    assert x.__name__ == "tinygrad.runtime.autogen.am.gc_11_0_0"
+    x = import_module("gc", (11, 6, 0))
+    assert x.__name__ == "tinygrad.runtime.autogen.am.gc_11_0_0"
+    x = import_module("gc", (12, 0, 0))
+    assert x.__name__ == "tinygrad.runtime.autogen.am.gc_12_0_0"
+    x = import_module("gc", (10, 3, 0))
+    assert x.__name__ == "tinygrad.runtime.autogen.am.gc_10_3_0"
+    x = import_module("gc", (10, 3, 3))
+    assert x.__name__ == "tinygrad.runtime.autogen.am.gc_10_3_0"
 
 if __name__ == "__main__":
   unittest.main()
