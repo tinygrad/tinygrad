@@ -80,10 +80,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   group_for_reduces = sum([any(l.st_arg.shape[i]!=ast.src[0].st_arg.shape[i] for l in local_loads) for i in range(first_reduce,first_upcasted)])
   global_dims = first_reduce-ki.local_dims
 
-  if opts.has_threaded_global:
-    idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True)
-    idxs += [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(g)), i) for i,g in enumerate(full_shape[global_dims:first_reduce])]
-  elif opts.has_local:
+  if opts.has_local:
     if ki.dont_use_locals:
       assert ki.local_dims == 0, "can't use locals if there's no local dims"
       idxs = get_grouped_dims("idx", full_shape[:global_dims], opts.global_max, reverse=True)

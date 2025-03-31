@@ -169,7 +169,7 @@ class CapturedJit(Generic[ReturnType]):
     for b in depends:
       if b is not None:
         if b.is_allocated(): b.deallocate()
-        if b._base is not None and b._base.allocated_views == 0: b._base.deallocate()
+        if b._base is not None and b._base.allocated_views == 0 and b._base.is_allocated(): b._base.deallocate()
     self.__post_init__()   # reset the graph state
 
   def optimize_weights(self):

@@ -287,8 +287,8 @@ def vectorize_shuffle(vec:UOp):
 
 def multicore_range(r:UOp):
   if getenv("MULTICORE", 0) != 1: return None
-  if any(x.op is Ops.DEFINE_VAR for x in r.toposort): return None
-  core = UOp(Ops.DEFINE_VAR, dtypes.int, arg=("core", 0, 1))
+  if any(x.op is Ops.SPECIAL for x in r.toposort): return None
+  core = UOp(Ops.SPECIAL, dtypes.int, arg=("g0", 0, 1))
   start = (core.eq(0)).where(r.src[0], r.src[1]//2)
   end = (core.eq(0)).where(r.src[1]//2, r.src[1])
   return r.replace(src=(start,end))
@@ -345,7 +345,6 @@ pretty_render = PatternMatcher([
 class DSPRenderer(ClangRenderer):
   device = "DSP"
   supports_float4 = True
-  has_threaded_global = True
   global_max = (2, 1, 1)
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
@@ -362,7 +361,7 @@ class DSPRenderer(ClangRenderer):
       'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
       'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
       'unsigned long long HAP_perf_get_time_us(void);', 'typedef unsigned long qurt_thread_t;', 'void qurt_thread_exit(int);',
-      'typedef struct _qurt_barrier { char padding[32]; } qurt_barrier_t;', 'int qurt_barrier_init(qurt_barrier_t*, unsigned int);',
+      'typedef struct _qurt_barrier { char padding[64]; } qurt_barrier_t;', 'int qurt_barrier_init(qurt_barrier_t*, unsigned int);',
       'int qurt_barrier_wait(qurt_barrier_t*);',
       'typedef struct _qurt_thread_attr { char name[16]; unsigned char tcb_partition; unsigned char affinity; unsigned short priority;',
       'unsigned char asid; unsigned char bus_priority; unsigned short timetest_id; unsigned int stack_size; void *stack_addr; char padding[96]; } qurt_thread_attr_t;',
@@ -380,7 +379,7 @@ class DSPRenderer(ClangRenderer):
             'HAP_power_set((void*)handle, (void*)&req);']
     msrc += ['if ((sc>>24) != 2) return 0;']
     if sync_cnt > 0:
-      msrc += [f"qurt_barrier_t* sync = malloc({sync_cnt} * 32);"]
+      msrc += [f"qurt_barrier_t* sync = malloc({sync_cnt} * sizeof(qurt_barrier_t));"]
       msrc += [f"qurt_barrier_init(&sync[{i}], 2);" for i in range(sync_cnt)]
     else: msrc += [f"qurt_barrier_t* sync = 0x0;"]
     msrc += ['all_args_t args = { 0 };']
@@ -390,7 +389,7 @@ class DSPRenderer(ClangRenderer):
     msrc += ['args.sync = sync;']
     msrc += ["qurt_thread_attr_t attr = { 0 };"]
     msrc += ["attr.name[0] = 't';", "attr.priority = 255;", "attr.asid = 0;"]
-    msrc += ["attr.stack_size = 1024;", "attr.stack_addr = malloc(1024);"]
+    msrc += ["attr.stack_size = (64 << 10);", "attr.stack_addr = malloc(attr.stack_size);"]
     msrc += [""]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
     msrc += ["qurt_thread_t thread_ = 0; qurt_thread_create(&thread_, &attr, (void (*)(void*))threader, (void*)&args);"]
@@ -399,6 +398,7 @@ class DSPRenderer(ClangRenderer):
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
     msrc += [f'HAP_munmap(args.buf_{i}, args.sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ['free(attr.stack_addr);']
+    if sync_cnt > 0: msrc += ['free(sync);']
     msrc += ["return 0; }"]
     return '\n'.join(msrc)
 
@@ -474,13 +474,8 @@ class DSPDevice(Compiled):
     try:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
-      # sections = ['hash', 'text', 'rela.plt', 'got', 'got.plt', 'dynamic', 'dynsym', 'dynstr', 'plt', 'data', 'bss']
-      # sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
-      contiguous_sections = ['hash', 'dynamic', 'got', 'got.plt', 'dynsym', 'dynstr']
-      aligned_sections = ['text', 'rela.plt', 'plt', 'data', 'bss']
-      contiguous_entries = "\n".join([f".{sec} : {{ *(.{sec}) }}" for sec in contiguous_sections])
-      aligned_entries = "\n".join([f".{sec} : ALIGN(4096) {{ *(.{sec}) }}" for sec in aligned_sections])
-      sections_link = f"{contiguous_entries}\n{aligned_entries}"
+      sections = ['text', 'rela.plt', 'rela.dyn', 'plt', 'data', 'bss', 'hash', 'dynamic', 'got', 'got.plt', 'dynsym', 'dynstr', 'symtab', 'shstrtab', 'strtab']
+      sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
       with tempfile.NamedTemporaryFile(delete=False) as self.link_ld:
         self.link_ld.write(f"SECTIONS {{ . = 0x0;\n{sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
         self.link_ld.flush()
