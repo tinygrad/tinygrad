@@ -200,7 +200,10 @@ def prefetch_l2(ld:UOp, idx:UOp):
   ranges = sorted([x for x in ld.src[0].src[0].toposort if x.op is Ops.RANGE], key=lambda x: x.arg)
   if len(ranges):
     nidx = idx.src[1]
-    if nidx.op is Ops.ADD and nidx.src[1].op is Ops.CONST: nidx = nidx.src[0]
+    const = 0
+    if nidx.op is Ops.ADD and nidx.src[1].op is Ops.CONST:
+      const = nidx.src[1].arg
+      nidx = nidx.src[0]
     zero_ranges = {r:r.const_like(0) for r in ranges[:-1]}
     nlen_uop = (nidx.substitute({ranges[-1]: ranges[-1].src[1], **zero_ranges}) -
                 nidx.substitute({ranges[-1]: ranges[-1].src[0], **zero_ranges})).simplify()
@@ -216,7 +219,7 @@ def prefetch_l2(ld:UOp, idx:UOp):
       fetch_lines = max(fetch_lines, 8)
 
       # fetch up to 8192
-      x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], nidx, UOp.const(dtypes.int, fetch_lines)),
+      x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], nidx+const, UOp.const(dtypes.int, fetch_lines)),
                arg="__builtin_HEXAGON_Y4_l2fetch({0}+{1}, 0x808000|{2});")
     return ld.replace(src=ld.src+(x1,))
 
@@ -294,7 +297,7 @@ dsp_pm_late = PatternMatcher([
   (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld"), prefetch_l1),
 
   # prefetch L2
-  (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(8), dtypes.uchar.vec(128)),
+  (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(8), dtypes.uchar.vec(128), dtypes.int.vec(32)),
         src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld", allow_any_len=True), prefetch_l2),
 
   # 64 -> 128
