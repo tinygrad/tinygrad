@@ -427,7 +427,6 @@ def batch_crop(inputs, crop_size):
     with torch.no_grad():
         crop_mask_batch = make_random_square_masks(inputs, crop_size)
         cropped_batch = torch.masked_select(inputs, crop_mask_batch).view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
-        # breakpoint()
         return cropped_batch
 
 def batch_flip_lr(batch_images, flip_chance=.5):

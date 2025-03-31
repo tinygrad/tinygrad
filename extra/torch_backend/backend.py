@@ -67,9 +67,12 @@ def realize_with_views(self: Tensor, views: Tensor):
   if not self.lazydata.st.contiguous: raise ValueError("base of view must be contiguous") # TODO: support?
   self.replace(self.clone().realize())
   for v in views:
-    ret = self
-    st = ShapeTracker(self.lazydata.st.views + v.lazydata.st.views) # TODO: is this right?
-    for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
+    if v.shape == ():
+      ret = self.reshape((-1,)).shrink(((o:=v.lazydata.st.views[-1].offset, o+1),)).reshape(())
+    else:
+      ret = self
+      st = ShapeTracker(self.lazydata.st.views + v.lazydata.st.views) # TODO: is this right?
+      for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
     v.replace(ret)
 def maybe_realize_storage(self: Tensor) -> bool:
   if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
