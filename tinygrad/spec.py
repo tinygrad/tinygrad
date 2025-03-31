@@ -1,7 +1,7 @@
 from typing import cast
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
-from tinygrad.helpers import all_same, dedup, prod
+from tinygrad.helpers import all_same, dedup, prod, getenv
 
 buffer_spec = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
@@ -46,6 +46,7 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 # ***** uop type spec *****
 
 def validate_index(idx:UOp, mask:UOp|None=None):
+  if getenv("IGNORE_OOB"): return True
   # this checks for out of bounds access. it is not complete but should catch some issues
   if mask is None and not isinstance(idx.dtype, ImageDType):
     # WEBGPU has a BITCAST in the index. TODO: fix

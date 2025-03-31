@@ -482,8 +482,11 @@ class Kernel:
         k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
 
       # make all non first dimensions local
-      # TODO: fix padding
-      for i in range(1, k.first_reduce): k.apply_opt(Opt(OptOps.LOCAL, 1, 0))
+      if k.full_shape[0]%2 == 1: k.apply_opt(Opt(OptOps.PADTO, 0, 2))
+      k.apply_opt(Opt(OptOps.LOCAL, 0, k.full_shape[0]//2))
+      for i in range(1, k.first_reduce-1): k.apply_opt(Opt(OptOps.LOCAL, 1, 0))
+
+      #for i in range(1, k.first_reduce): k.apply_opt(Opt(OptOps.LOCAL, 1, 0))
 
       return self
 

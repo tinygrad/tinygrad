@@ -99,6 +99,11 @@ load_store_folding = PatternMatcher([
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.const_like(0)
+  if getenv("DEBUG_SIMPLIFY"):
+    print("****")
+    print("idx in: ", start_idx.render())
+    print("valid:  ", valid.render())
+    print("simp:   ", idx.render())
   if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx, valid)
 
   # wait for it to be image indexed before running simplification
