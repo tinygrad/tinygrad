@@ -639,13 +639,8 @@ class Kernel:
         # otherwise we just replace the VIEW source
         return ret.replace(src=(st_uop,)) if len(op.src) == 1 else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
       if op.op is Ops.SINK:
-        range_split_axis = ()
-        if self.full_shape[self.first_reduce:self.first_reduce+3] == (3,3,32) and self.full_shape[-1] != 7:
-          #range_split_axis = (self.first_reduce-2, self.first_reduce-1)
-          #range_split_axis = (self.first_reduce-1,)
-          pass
         return ret.replace(arg = KernelInfo(to_function_name(self.name) if name_override is None else name_override,
-                                            self.local_dims, self.upcasted, self.dont_use_locals, range_split_axis))
+                                            self.local_dims, self.upcasted, self.dont_use_locals))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
 

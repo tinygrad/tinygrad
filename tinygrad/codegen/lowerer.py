@@ -101,16 +101,6 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
     assert isinstance(g, int), "needs to be int to upcast/unroll"
     idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(g), tuple(range(g))),), ((i,g),)))
 
-  # range splitting
-  for i in ki.range_split_axis:
-    rng = idxs[i]
-    #rngv = UOp(Ops.VECTORIZE, rng.dtype.vec(2),
-    #           (rng.const_like(rng.src[0]), rng.replace(src=(rng.src[0]+1, rng.src[1]))))
-    #idxs[i] = UOp(Ops.UNROLL, rng.dtype, (rngv,), ((0, 2),),)
-    rngv = UOp(Ops.VECTORIZE, rng.dtype.vec(3),
-               (rng.const_like(rng.src[0]), rng.replace(src=(rng.src[0]+1, rng.src[1]-1)), rng.const_like(rng.src[1]-1)))
-    idxs[i] = UOp(Ops.UNROLL, rng.dtype, (rngv,), ((rng.arg, 3),),)
-
   # late indexes (group for reduce)
   ridxs = idxs[:]
   for a in range(first_reduce, first_reduce+group_for_reduces):
