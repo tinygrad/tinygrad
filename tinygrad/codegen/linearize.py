@@ -34,23 +34,27 @@ def append_to_block(ctx:tuple[dict[UOp, tuple[UOp, ...]], dict[UOp, list[UOp]]],
   old_blocks: dict[tuple[UOp, ...], UOp] = {}
   new_blocks: dict[tuple[UOp, ...], list[UOp]] = {}
 
+  seen_u = set()
   for u in x.src:
     if u.op is Ops.BLOCK:
-      # merge sibling blocks. NOTE: blocks must only have one output source
-      assert u.arg.ctx not in old_blocks, "sibling should never have been created"
-      old_blocks[u.arg.ctx] = u
+      if u not in seen_u:
+        # merge sibling blocks. NOTE: blocks must only have one output source
+        assert u.arg.ctx not in old_blocks, "sibling should never have been created"
+        old_blocks[u.arg.ctx] = u
     elif u.op not in DONT_PLACE_IN_BLOCK and set(children[u]).issubset(in_this_block):
-      # if it can go in blocks and all its children are in the block, we add it to the block
-      if (block_ctx:=block_ctxs[u]) == x.arg.ctx:
-        # if it's the same context, we place the UOp in this block and append the parents to its srcs
-        new_srcs.extend(u.src)
-        to_append.append(u)
-      else:
-        # if it's a different context, we create a new block with this UOp
-        new_blocks.setdefault(block_ctx, []).append(u)
+      if u not in seen_u:
+        # if it can go in blocks and all its children are in the block, we add it to the block
+        if (block_ctx:=block_ctxs[u]) == x.arg.ctx:
+          # if it's the same context, we place the UOp in this block and append the parents to its srcs
+          new_srcs.extend(u.src)
+          to_append.append(u)
+        else:
+          # if it's a different context, we create a new block with this UOp
+          new_blocks.setdefault(block_ctx, []).append(u)
     else:
       # otherwise, we keep it in the srcs
       new_srcs.append(u)
+    seen_u.add(u)
   if len(to_append) == 0 and len(new_blocks) == 0: return None
 
   for rng,lst in new_blocks.items():
@@ -112,7 +116,8 @@ def block_merge(ctx, x:UOp):
       # keep it in srcs
       new_srcs.append(u)
   if len(to_append) == 0 and len(placed) == 0: return None
-  return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(tuple(sorted(new_ctx, key=lambda x: x.tuplize)), tuple(to_append)+x.arg.lst, x.arg.end))
+  return UOp(x.op, dtypes.void, tuple(new_srcs),
+             BasicBlock(tuple(dedup(sorted(new_ctx, key=lambda x: x.tuplize))), tuple(to_append)+x.arg.lst, x.arg.end))
 
 pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
 
@@ -165,6 +170,11 @@ def block_reorder(in_block:UOp):
   assert len(newlst) == len(in_block.arg.lst), f"len mismatch {len(newlst)} != {len(in_block.arg.lst)}"
   return in_block.replace(arg=BasicBlock(in_block.arg.ctx, tuple(newlst)))
 
+def upsettingly_promote_blockend(be:UOp):
+  new_srcs = tuple(b.replace(arg=BasicBlock(be.arg.ctx, b.arg.lst)) if b.op is Ops.BLOCK else b for b in be.src)
+  return be.replace(src=new_srcs) if be.src != new_srcs else None
+pm_force_upcast_block = PatternMatcher([(UPat(Ops.BLOCKEND, name="be"), upsettingly_promote_blockend)])
+
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
@@ -211,7 +221,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
     if not len(forks): break
     sink = sink.substitute(forks)
 
-  # combine matching BLOCKENDS
+  # combine matching BLOCKENDS, the keys of this dictionary are the RANGE UOps, values are the BLOCKENDs
   blockends_to_arg: dict[UOp, list[UOp]] = {}
   for be in sink.toposort:
     if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg.end, []).append(be)
@@ -229,6 +239,10 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
 
   # final rewrite to merge all blocks into one
   sink = graph_rewrite(sink, pm_block_merge, ctx=children)
+
+  # if there's BLOCKENDs left in the graph, we might have to merge. TODO: is there a better way to handle this?
+  while (newsink := graph_rewrite(sink, pm_force_upcast_block)) is not sink:
+    sink = graph_rewrite(newsink, pm_block_merge, ctx=children, name="bad_merge")
 
   # there should just be one block left, with a few parents with 0 srcs (now done in a rewriter)
   sink = graph_rewrite(sink, pm_block_finalize)

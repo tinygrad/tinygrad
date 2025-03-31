@@ -45,7 +45,7 @@ base_rewrite = PatternMatcher([
   # new load/store
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx')), allow_any_len=True),
    lambda ctx,buf,idx: f"({ctx[buf]}+{strip_parens(ctx[idx]) if idx.arg == Ops.ADD else ctx[idx]})"),
-  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat.var("gate"))).or_casted('bidx'), UPat.var("var"))),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat.var("gate"))).or_casted('bidx'), UPat.var("var")), allow_any_len=True),
    lambda ctx,bidx,var,gate: f"({ctx[gate]}?*{ctx[bidx]}:{ctx[var]})"),
   (UPat(Ops.LOAD, src=(UPat.var('bidx'),), allow_any_len=True), lambda ctx,bidx: f"*{ctx[bidx]}"),
   (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var")), allow_any_len=True), lambda ctx,bidx,var: f"*{ctx[bidx]} = {ctx[var]};"),
@@ -121,7 +121,7 @@ class CStyleLanguage(Renderer):
     return self.type_map.get(scalar:=dt.scalar(), scalar.name)
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
-  def render(self, uops:list[UOp]) -> str:
+  def _render(self, uops:list[UOp]) -> tuple[str, list[str], list[tuple[str,tuple[DType,bool]]]]:
     r: dict[UOp, str] = {}
     self.r = r
 
@@ -173,7 +173,8 @@ class CStyleLanguage(Renderer):
     del self.r
 
     # NOTE: this relies on bufs dict preserving order
-    return self.render_kernel(name, kernel, list(bufs.values()), uops)
+    return (name, kernel, list(bufs.values()))
+  def render(self, uops:list[UOp]) -> str: return self.render_kernel(*self._render(uops), uops)
 
 class ClangRenderer(CStyleLanguage):
   device = "CPU"
@@ -202,7 +203,7 @@ class ClangRenderer(CStyleLanguage):
     alignment = 2**int(math.log2(dt.itemsize)) if getenv("ALIGNED", 1) else 1
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({alignment}),vector_size({dt.itemsize})));"
 
-  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+  def _render_defines(self, uops) -> list[str]:
     prefix = [self.render_vector_prefix(dt) for dt in uops_to_dtypes(uops) if dt.count > 1]
     # https://github.com/corsix/amx
     for name, (N, M, _), dtype_in, _, _, _, _, _ in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
@@ -217,7 +218,13 @@ class ClangRenderer(CStyleLanguage):
   AMX_SET(0);\n  for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(4, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}
   AMX(0, (int *)(&data2), 0ull<<62); AMX(1, (int *)(&data1), 0ull<<62); AMX(12, 0, 0ull);
   for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(5, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}\n  AMX_SET(1);\n  return data0;\n}}"""] # noqa: E501
-    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+    return prefix
+  def _render_body(self, function_name, kernel, bufs, uops, pref=None) -> str: return super().render_kernel(function_name, kernel, bufs, uops, pref)
+  def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str: return ""
+
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+    defines = '\n'.join(self._render_defines(uops))
+    return defines + "\n" + self._render_body(function_name, kernel, bufs, uops, prefix) + "\n" + self._render_entry(function_name, bufs)
 
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
