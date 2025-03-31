@@ -1,5 +1,6 @@
 import numpy as np
 from tinygrad.helpers import getenv
+from tinygrad.dtype import _to_np_dtype
 from tinygrad import dtypes, Tensor
 
 dtype_in = dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else dtypes.float
@@ -13,18 +14,23 @@ K = getenv("K", N)
 CNT = getenv("CNT", 10)
 ATOL = getenv("ATOL", 1e-4)
 RTOL = getenv("RTOL", 3e-2)
+INT_LOW = getenv("INT_LOW", 0)
+INT_HIGH = getenv("INT_HIGH", 10)
 
 if __name__ == "__main__":
   def init_matrix(rows, cols):
+    rng = np.random.default_rng()
+    # NOTE: numpy does not support bfloat16
+    if (np_dtype := _to_np_dtype(dtype_in)) is None: np_dtype = np.float32
     if dtype_in in dtypes.ints:
-      return Tensor.randint((rows, cols), dtype=dtype_in).realize()
-    return Tensor.rand(rows, cols, dtype=dtype_in).realize()
+      return Tensor(rng.integers(INT_LOW, INT_HIGH, (rows, cols), dtype=np_dtype)).realize()
+    return Tensor(rng.random((rows, cols), dtype=np.float32).astype(np_dtype)).cast(dtype_in).realize()
 
   a, b = init_matrix(M, K), init_matrix(K, N)
   for i in range(CNT):
     if i > 0 and getenv("RAND", 0) != 0:
       a, b = init_matrix(M, K), init_matrix(K, N)
-    c = a.matmul(b, acc_dtype=acc_dtype).realize()
+    c = a.matmul(b, dtype=acc_dtype).realize()
 
   ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
   res = c.numpy()

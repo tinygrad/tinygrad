@@ -92,9 +92,12 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
       c10::Device device,
       OpaqueHandle opaque_handle,
       c10::IntArrayRef sizes,
-      c10::IntArrayRef strides)
-      : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes)
-        { this->sizes_and_strides_.set_strides(strides); }
+      c10::IntArrayRef strides,
+      int64_t storage_offset)
+      : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes) {
+    this->sizes_and_strides_.set_strides(strides);
+    this->storage_offset_ = storage_offset;
+  }
 };
 }
 
@@ -109,27 +112,23 @@ int register_hook() {
 }
 int temp_register_hook = register_hook();
 
-at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype) {
+at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceIndex device_index) {
   // TODO: we have to get the dtype and the shape from the tinygrad Tensor
   std::vector<int64_t> sizes = py_obj.attr("shape").cast<std::vector<int64_t>>();
 
-  // Last dimension stride is 1 for contiguous row-major layout
-  std::vector<int64_t> strides(sizes.size());
-  if (sizes.size() >= 1) {
-    strides[sizes.size() - 1] = 1;
-
-    // Compute strides from right to left
-    for (int64_t i = sizes.size() - 2; i >= 0; --i) {
-      strides[i] = strides[i + 1] * sizes[i + 1];
-    }
+  py::list views = py_obj.attr("lazydata").attr("st").attr("views");
+  std::vector<int64_t> strides = views[views.size() - 1].attr("strides").cast<std::vector<int64_t>>();
+  int64_t storage_offset = 0;
+  for (auto& v: views) {
+    storage_offset += v.attr("offset").cast<int64_t>(); // TODO: is this correct?
   }
 
   return at::detail::make_tensor<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>>(
     at::DispatchKeySet(at::DispatchKey::PrivateUse1),
     c10::scalarTypeToTypeMeta(dtype),
-    at::Device(at::kPrivateUse1),
+    at::Device(at::kPrivateUse1, device_index),
     std::make_shared<c10::SafePyObject>(py_obj.release().ptr(), getPyInterpreter()),
-    sizes, strides);
+    sizes, strides, storage_offset);
 }
 
 py::object unwrap_tensor(const at::Tensor &tensor) {

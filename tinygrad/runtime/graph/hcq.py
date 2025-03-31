@@ -184,8 +184,7 @@ class HCQGraph(MultiGraphRunner):
       self.comp_queues[dev].submit(dev, hcq_var_vals)
       if (copy_queue:=self.copy_queues.get(dev, None)) is not None: copy_queue.submit(dev, hcq_var_vals)
 
-      self.last_timeline[dev] = (dev.timeline_signal, dev.timeline_value)
-      dev.timeline_value += 1
+      self.last_timeline[dev] = (dev.timeline_signal, dev.next_timeline())
 
     if wait:
       st = time.perf_counter()

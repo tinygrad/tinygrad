@@ -202,8 +202,8 @@ runs:
       if: inputs.webgpu == 'true' && runner.os == 'macOS'
       shell: bash
       run: |
-        sudo mkdir -p /usr/local/lib
-        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.dylib -o /usr/local/lib/libwebgpu_dawn.dylib
+        brew tap wpmed92/dawn
+        brew install dawn
 
     # **** LLVM ****
 
@@ -212,8 +212,10 @@ runs:
       shell: bash
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+        echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-19 main" | sudo tee /etc/apt/sources.list.d/llvm.list
         sudo apt update -y || true
-        sudo apt install -y --no-install-recommends llvm-dev
+        sudo apt install -y --no-install-recommends libllvm19 clang-19 lld-19
 
     - name: Install LLVM (macOS)
       if: inputs.llvm == 'true' && runner.os == 'macOS'

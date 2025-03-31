@@ -658,9 +658,9 @@ def train_bert():
   # ** hyperparameters **
   BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 11 * len(GPUS) if dtypes.default_float in (dtypes.float16, dtypes.bfloat16) else 8 * len(GPUS))
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
-  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.00011 * math.sqrt(BS/66))
+  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.000175 * math.sqrt(BS/96))
 
-  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3630000 // BS)
+  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3300000 // BS)
   warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", 1)
   max_eval_steps     = config["MAX_EVAL_STEPS"]         = getenv("MAX_EVAL_STEPS", (10000 + EVAL_BS - 1) // EVAL_BS) # EVAL_BS * MAX_EVAL_STEPS >= 10000
   eval_step_freq     = config["EVAL_STEP_FREQ"]         = getenv("EVAL_STEP_FREQ", int((math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS)) # Round down
@@ -669,7 +669,7 @@ def train_bert():
   save_ckpt_dir      = config["SAVE_CKPT_DIR"]          = getenv("SAVE_CKPT_DIR", "./ckpts")
   init_ckpt          = config["INIT_CKPT_DIR"]          = getenv("INIT_CKPT_DIR", BASEDIR)
 
-  loss_scaler        = config["LOSS_SCALER"]            = getenv("LOSS_SCALER", 2.0**10 if dtypes.default_float == dtypes.float16 else 1.0)
+  loss_scaler        = config["LOSS_SCALER"]            = getenv("LOSS_SCALER", 2.0**11 if dtypes.default_float == dtypes.float16 else 1.0)
   decay              = config["DECAY"]                  = getenv("DECAY", 0.01)
   epsilon            = config["EPSILON"]                = getenv("EPSILON", 1e-6)
   poly_power         = config["POLY_POWER"]             = getenv("POLY_POWER", 1.0)
@@ -826,7 +826,7 @@ def train_bert():
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*BS, "step_num": i})
       if getenv("RESET_STEP", 0): train_step_bert.reset()
-      else: train_step_bert.captured.free_intermediates()
+      elif train_step_bert.captured is not None: train_step_bert.captured.free_intermediates()
       eval_lm_losses = []
       eval_clsf_losses = []
       eval_lm_accs = []
@@ -853,14 +853,14 @@ def train_bert():
         et = time.time()
         eval_times.append(et - st)
 
-        if BENCHMARK and j == BENCHMARK:
+        if BENCHMARK and (j+1) == min(BENCHMARK, max_eval_steps):
           # assume INITMLPERF has BENCHMARK set
           if MLLOGGER and INITMLPERF:
             MLLOGGER.event(key=mllog_constants.INIT_STOP, value=None)
           return
 
       if getenv("RESET_STEP", 0): eval_step_bert.reset()
-      else: eval_step_bert.captured.free_intermediates()
+      elif eval_step_bert.captured is not None: eval_step_bert.captured.free_intermediates()
       del eval_data
       avg_lm_loss = sum(eval_lm_losses) / len(eval_lm_losses)
       avg_clsf_loss = sum(eval_clsf_losses) / len(eval_clsf_losses)
@@ -899,6 +899,9 @@ def train_bert():
           MLLOGGER.end(key=mllog_constants.RUN_STOP, metadata=dict(status=mllog_constants.SUCCESS))
         # stop once hitting the target
         break
+
+    # should not happen, BENCHMARK not properly terminated
+    if BENCHMARK: assert i < BENCHMARK, i
 
     if getenv("CKPT") and i % save_ckpt_freq == 0:
       if MLLOGGER and RUNMLPERF:

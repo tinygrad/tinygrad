@@ -103,7 +103,7 @@ class Int8Embedding:
     if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).unsqueeze(-1)
     big_shp = idx.shape+(self.vocab_sz, self.embed_sz)
     arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), (self.weight.cast(self.scale.dtype).T*self.scale).T
-    return (arange == idx).mul(vals).sum(-2, acc_dtype=vals.dtype)
+    return (arange == idx).mul(vals).sum(-2, dtype=vals.dtype)
 
 def NF4Linear(block_size):
   _CODE = [
