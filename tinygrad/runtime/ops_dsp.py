@@ -195,7 +195,7 @@ def prefetch_l1(ld:UOp, idx:UOp):
   return ld.replace(src=ld.src+(x1, x2))
 
 def prefetch_l2(ld:UOp, idx:UOp):
-  if not getenv("PREFETCHL2", 0): return None
+  if not getenv("PREFETCHL2", 1): return None
   if ld.src[-1].op is Ops.CUSTOM and 'l2fetch' in ld.src[-1].arg: return None
   ranges = sorted([x for x in ld.src[0].src[0].toposort if x.op is Ops.RANGE], key=lambda x: x.arg)
   if len(ranges):
@@ -294,7 +294,8 @@ dsp_pm_late = PatternMatcher([
   (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld"), prefetch_l1),
 
   # prefetch L2
-  (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(8), dtypes.uchar.vec(128)), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld", allow_any_len=True), prefetch_l2),
+  (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(8), dtypes.uchar.vec(128)),
+        src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld", allow_any_len=True), prefetch_l2),
 
   # 64 -> 128
   #(UPat(Ops.LOAD, dtype=dtypes.uchar.vec(64), src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, name="idx"),)),)),
