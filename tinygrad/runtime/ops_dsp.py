@@ -204,12 +204,20 @@ def prefetch_l2(ld:UOp, idx:UOp):
     zero_ranges = {r:r.const_like(0) for r in ranges[:-1]}
     nlen_uop = (nidx.substitute({ranges[-1]: ranges[-1].src[1], **zero_ranges}) -
                 nidx.substitute({ranges[-1]: ranges[-1].src[0], **zero_ranges})).simplify()
-    if nlen_uop.arg > 8192: return None  # too much to prefetch. "L2FETCH is best performed in sizes less than 8 KB"
     nidx = nidx.substitute({ranges[-1]: ranges[-1].src[0]})
+    buf_lines_total = (idx.src[0].dtype.size+127)//128
+    if buf_lines_total < 8192//128:
+      # if the total buffer size is sub 8k, fetch it all
+      x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], UOp.const(dtypes.int, buf_lines_total)),
+               arg="__builtin_HEXAGON_Y4_l2fetch({0}, 0x808000|{1});")
+    else:
+      fetch_lines = 8
+      if nlen_uop.arg <= 8192: fetch_lines = (nlen_uop.arg+127)//128
+      fetch_lines = max(fetch_lines, 8)
 
-    # fetch 8 lines
-    arg = (128<<16) | (128 << 8) | 8
-    x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], nidx, UOp.const(dtypes.int, arg)), arg="__builtin_HEXAGON_Y4_l2fetch({0}+{1}, {2});")
+      # fetch up to 8192
+      x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], nidx, UOp.const(dtypes.int, fetch_lines)),
+               arg="__builtin_HEXAGON_Y4_l2fetch({0}+{1}, 0x808000|{2});")
     return ld.replace(src=ld.src+(x1,))
 
 def vectorize_shuffle(vec:UOp):
