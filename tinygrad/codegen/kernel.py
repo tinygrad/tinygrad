@@ -725,9 +725,7 @@ class Kernel:
     if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
 
     modified_ast = self.get_optimized_ast(name_override)
-    print(f"gd={self.global_dims}, fr={self.first_reduce}, fu={self.first_upcast}")
     modified_ast = self.apply_tc(modified_ast)
-    print(modified_ast)
     if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
 
     if DEBUG >= 3:
