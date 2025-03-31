@@ -2386,7 +2386,8 @@ class Tensor(SimpleMathTrait):
     assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
     pl_sz = self.shape[axis] - int(not _include_initial)
     pooled = self.transpose(axis,-1).pad((pl_sz, -int(_include_initial)), value=identity_element(op, self.dtype))._pool((self.shape[axis],))
-    return cast(Callable[[int], Tensor], {Ops.ADD: pooled.sum, Ops.MAX: pooled.max, Ops.MUL: pooled.prod}[op])(-1).transpose(axis, -1)
+    return {Ops.ADD: pooled.sum(-1), Ops.MAX: pooled.max(-1), Ops.MUL: pooled.prod(-1)}[op].transpose(axis, -1)
+
   def _split_cumalu(self, axis:int, op:Ops) -> Tensor:
     axis = self._resolve_dim(axis)
     if self.ndim == 0 or 0 in self.shape: return self
@@ -2398,7 +2399,7 @@ class Tensor(SimpleMathTrait):
     base = ret[..., -1]._cumalu(-1, op, _include_initial=True)
     base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
     def fix(x: Tensor) -> Tensor: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    return {Ops.ADD: lambda a, b: a + b, Ops.MAX: lambda a, b: a.maximum(b), Ops.MUL: lambda a, b: a * b}[op](fix(ret), fix(base))
+    return {Ops.ADD: Tensor.__add__, Ops.MAX: Tensor.maximum, Ops.MUL: Tensor.__mul__}[op](fix(ret), fix(base))
 
   def cumsum(self, axis:int=0) -> Tensor:
     """
