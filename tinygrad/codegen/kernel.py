@@ -711,8 +711,16 @@ class Kernel:
         tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
 
         print(tc_uop)
-
-        new_axes = reduce_op.axis_arg[:-len(tc_reduce_axes)]
+        print(reduce_op.axis_arg)
+        new_axes = list(reduce_op.axis_arg)
+        for axis in reduce_op.axis_arg:
+          print(axis)
+          print(tc_reduce_axes)
+          if axis in tc_reduce_axes: new_axes.remove(axis)
+        new_axes = tuple(new_axes)
+        # exit()
+        # exit()
+        # new_axes = reduce_op.axis_arg[:-len(tc_reduce_axes)]
 
         applied.add(reduce_op)
 
