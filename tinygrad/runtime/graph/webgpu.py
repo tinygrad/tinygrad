@@ -80,12 +80,8 @@ def render_js(cj: CapturedJit, in_bufs:dict[Buffer, int], in_vars:dict[Variable,
     return f"{args[in_bufs[arg]]} instanceof {js_type(arg.dtype)}" if isinstance(arg, Buffer) else f'typeof {args[in_vars[arg]]} === "number"'
   validation = [f"if (!({check(arg)})) {{ throw new Error(`arg {i} type: ${{typeof {args[i]}}} is not as expected`) }}" for arg, i in arg_idx.items()]
 
-  input_writer_bufs = [f"""const gpuWriteBuffer{i} = device.createBuffer({{size:{names[arg]}.size,
-                usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST}});""" for arg, i in arg_idx.items()]
-  input_writers = [f"""
-      device.queue.writeBuffer(gpuWriteBuffer{i}, 0, {f"_input{i}" if isinstance(var, Buffer) else f"new {js_type(var.dtype)}([{var.expr}])"});
-      commandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, {names[var]}, 0, gpuWriteBuffer{i}.size);""" for var, i in arg_idx.items()]
-
+  input_writers = [f'device.queue.writeBuffer({names[var]}, 0, {f"_input{i}" if isinstance(var, Buffer) else \
+                                                                f"new {js_type(var.dtype)}([{var.expr}])"});' for var, i in arg_idx.items()]
   output_reader_bufs = [f"""const gpuReadBuffer{i} = device.createBuffer({{size:{names[buf]}.size,
                         usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ}});""" for buf, i in out_bufs.items()]
   output_readers = [f"""await gpuReadBuffer{i}.mapAsync(GPUMapMode.READ);
@@ -142,7 +138,7 @@ const {model_name} = (() => {{
   {kernel_declarations}
   const setupNet = async ({"state_dict" if not save_weights else "safetensor"}) => {{
     {"const metadata = getTensorMetadata(safetensor);" if not not save_weights else ""}
-    {j(symbolic_js_bufs + empty_js_bufs + weight_js_bufs + input_writer_bufs + output_reader_bufs, 2)}
+    {j(symbolic_js_bufs + empty_js_bufs + weight_js_bufs + output_reader_bufs, 2)}
     const kernels = [{",".join(ei.prg.p.function_name for ei in all_eis)}];
     const pipelines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{
       layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));
