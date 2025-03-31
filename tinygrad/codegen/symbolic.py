@@ -4,7 +4,7 @@ import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType
-from tinygrad.helpers import partition, all_same, prod, getenv, DEBUG, flatten, get_single_element
+from tinygrad.helpers import partition, all_same, prod, getenv, DEBUG, flatten, get_single_element, ceildiv
 from tinygrad.codegen.transcendental import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
@@ -97,6 +97,9 @@ def lt_folding(x:UOp, c:int) -> UOp|None:
   p, np = partition(split_uop(x, Ops.ADD), lambda u: u.const_factor() == 1)
   if np and (d:=math.gcd(*[u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
     return cast(UOp, functools.reduce(operator.add, np).divides(d))<(c//d)
+  # different kind
+  if np and (d:=math.gcd(*[u.const_factor() for u in np])) > 1 and not p:
+    return cast(UOp, functools.reduce(operator.add, np).divides(d))<ceildiv(c,d)
   return None
 
 def canonicalize_simplex(X:UOp) -> UOp|None:
