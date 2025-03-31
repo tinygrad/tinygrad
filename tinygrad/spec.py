@@ -54,7 +54,7 @@ def validate_index(idx:UOp, mask:UOp|None=None):
       return True
     vmin, vmax, sz = idx.src[1].vmin, idx.src[1].vmax, cast(PtrDType, idx.src[0].dtype).size
     if sz != -1 and (vmin < 0 or vmax >= sz):
-      print(f"OUT OF BOUNDS ACCESS in INDEX {vmin} - {vmax} not in 0 - {sz}")
+      print(f"OUT OF BOUNDS ACCESS in INDEX {vmin} - {vmax} not in 0 - {sz}. {idx.src[1].render()=}")
       return False
   return True
 
