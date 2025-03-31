@@ -24,6 +24,7 @@ if __name__ == "__main__":
         k = Kernel(p.ast, Device["DSP"].renderer)
         dsp_bufs = [Buffer("DSP", 8192+b.size, b.dtype).view(b.size, b.dtype, 4096) for b in ei.bufs]
         k.hand_coded_optimizations()
+        #if knum == 13: k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
         p2 = k.to_program()
         new_ei = replace(ei, prg=CompiledRunner(p2), bufs=dsp_bufs)
         new_ei.run()
