@@ -34,23 +34,27 @@ def append_to_block(ctx:tuple[dict[UOp, tuple[UOp, ...]], dict[UOp, list[UOp]]],
   old_blocks: dict[tuple[UOp, ...], UOp] = {}
   new_blocks: dict[tuple[UOp, ...], list[UOp]] = {}
 
+  seen_u = set()
   for u in x.src:
     if u.op is Ops.BLOCK:
-      # merge sibling blocks. NOTE: blocks must only have one output source
-      assert u.arg.ctx not in old_blocks, "sibling should never have been created"
-      old_blocks[u.arg.ctx] = u
+      if u not in seen_u:
+        # merge sibling blocks. NOTE: blocks must only have one output source
+        assert u.arg.ctx not in old_blocks, "sibling should never have been created"
+        old_blocks[u.arg.ctx] = u
     elif u.op not in DONT_PLACE_IN_BLOCK and set(children[u]).issubset(in_this_block):
-      # if it can go in blocks and all its children are in the block, we add it to the block
-      if (block_ctx:=block_ctxs[u]) == x.arg.ctx:
-        # if it's the same context, we place the UOp in this block and append the parents to its srcs
-        new_srcs.extend(u.src)
-        to_append.append(u)
-      else:
-        # if it's a different context, we create a new block with this UOp
-        new_blocks.setdefault(block_ctx, []).append(u)
+      if u not in seen_u:
+        # if it can go in blocks and all its children are in the block, we add it to the block
+        if (block_ctx:=block_ctxs[u]) == x.arg.ctx:
+          # if it's the same context, we place the UOp in this block and append the parents to its srcs
+          new_srcs.extend(u.src)
+          to_append.append(u)
+        else:
+          # if it's a different context, we create a new block with this UOp
+          new_blocks.setdefault(block_ctx, []).append(u)
     else:
       # otherwise, we keep it in the srcs
       new_srcs.append(u)
+    seen_u.add(u)
   if len(to_append) == 0 and len(new_blocks) == 0: return None
 
   for rng,lst in new_blocks.items():
