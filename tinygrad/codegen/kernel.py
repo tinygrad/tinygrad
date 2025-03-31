@@ -614,8 +614,8 @@ class Kernel:
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
   def apply_tc(self, ast) -> UOp:
-    def transform(ctx:tuple[KernelInfo, list[TensorCore], set[UOp]], reduce_op:UOp):
-      kernel_info, tcs, applied = ctx
+    def transform(ctx:tuple[KernelInfo, str, list[TensorCore], set[UOp]], reduce_op:UOp):
+      kernel_info, device, tcs, applied = ctx
       has_cast = reduce_op.src[0].op is Ops.CAST
       mul_op = reduce_op.src[0].src[0] if has_cast else reduce_op.src[0]
       if len(applied) or mul_op.op is not Ops.MUL or len(reduce_op.axis_arg) == 0: return None
@@ -652,7 +652,7 @@ class Kernel:
           if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
         tc_reduce_axes = tuple(fu + ax for ax, _ in tc.get_reduce_axes())
         tc_upcast_axes = (get_upcast_axes(tc,0), get_upcast_axes(tc,1), get_upcast_axes(tc,2))
-        wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, "METAL", tc.threads, tc_upcast_axes, tc_reduce_axes)
+        wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, device, tc.threads, tc_upcast_axes, tc_reduce_axes)
         wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
           UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
           UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
@@ -666,7 +666,7 @@ class Kernel:
         if (wmma:=plug_tc(tc)) is not None: return wmma
 
     return graph_rewrite(ast, view_left + PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="reduce_op"), transform)]),
-                         ctx=(ast.arg, self.opts.tensor_cores, set()))
+                         ctx=(ast.arg, self.opts.device, self.opts.tensor_cores, set()))
 
   # **** this is the lowerer ****
 
