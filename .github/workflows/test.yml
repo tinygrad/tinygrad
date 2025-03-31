@@ -497,7 +497,9 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=min
     - name: Run test_tiny on DSP
-      run: DEBUG=2 DSP=1 python test/test_tiny.py
+      run: |
+        DEBUG=2 DSP=1 python test/test_tiny.py
+        DEBUG=2 DSP=1 python test/test_graph.py TestGraph.test_order_2_writes_to_same_buf
     - name: Test transcendentals
       run: CC=clang-19 PYTHONPATH="." DEBUG=2 DSP=1 python test/test_transcendental.py TestTranscendentalVectorized
     - name: Test quantize onnx
