@@ -656,13 +656,16 @@ class Kernel:
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
   def apply_tc(self, ast) -> UOp:
-    def transform(ctx:tuple[KernelInfo, list[TensorCore], set[UOp]], reduce_op:UOp):
+    def transform(ctx:tuple[KernelInfo, list[TensorCore], set[UOp]], reduce_op:UOp) -> UOp|None:
       kernel_info, tcs, applied = ctx
-      if len(applied): return None
+      has_cast = reduce_op.src[0].op is Ops.CAST
+      mul_op = reduce_op.src[0].src[0] if has_cast else reduce_op.src[0]
+      if len(applied) or mul_op.op is not Ops.MUL: return None
       print(kernel_info)
       print(reduce_op)
       reduce_st = unwrap(reduce_op.st)
 
+      if len(reduce_op.axis_arg) == 0: return None
       fr = reduce_op.axis_arg[0]
       global_dims = fr - kernel_info.local_dims
       first_upcast = len(reduce_st.shape) - kernel_info.upcasted
@@ -680,6 +683,8 @@ class Kernel:
         return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
 
       def plug_tc(tc: TensorCore) -> UOp|None:
+        if tc.dtype_out != reduce_op.dtype or tc.dtype_in != mul_op.dtype: return None
+
         if (tc_local:=len(tc.get_local_axes())) > kernel_info.local_dims: return None # not enough local dims
         # print("local dims okay")
         if (tc_reduce:=len(tc.get_reduce_axes())) > len(reduce_op.axis_arg): return None # not enough reduce dims
@@ -696,29 +701,28 @@ class Kernel:
         for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
           src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
           if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
+        tc_reduce_axes = tuple(fu + ax for ax, _ in tc.get_reduce_axes())
+        tc_upcast_axes = (get_upcast_axes(tc,0), get_upcast_axes(tc,1), get_upcast_axes(tc,2))
+        wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, "METAL", tc.threads, tc_upcast_axes, tc_reduce_axes)
+        wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
+          UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
+          UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
+          UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
+        tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
 
-          tc_reduce_axes = tuple(fu + ax for ax, _ in tc.get_reduce_axes())
-          tc_upcast_axes = (get_upcast_axes(tc,0), get_upcast_axes(tc,1), get_upcast_axes(tc,2))
-          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, "METAL", tc.threads, tc_upcast_axes, tc_reduce_axes)
-          wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
-            UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
-            UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
-            UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
-          tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
-          new_axes = reduce_op.axis_arg[:-len(tc_reduce_axes)]
+        print(tc_uop)
 
-          applied.add(reduce_op)
+        new_axes = reduce_op.axis_arg[:-len(tc_reduce_axes)]
 
-          return reduce_op.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if new_axes else tc_uop
+        applied.add(reduce_op)
 
-        # if any(sz != 2 for sz in reduce_op.full_shape[:])
-        return None
+        return reduce_op.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if new_axes else tc_uop
 
       for tc in tcs:
-        if (wmma:=plug_tc(tc)): return wmma
+        if (wmma:=plug_tc(tc)) is not None: return wmma
 
-      exit()
-      # return None
+      # exit()
+      return None
 
     return graph_rewrite(ast, view_left + PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="reduce_op"), transform)]),
                          ctx=(ast.arg, self.opts.tensor_cores, set()))
