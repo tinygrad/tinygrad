@@ -9,6 +9,7 @@
 ::: tinygrad.Tensor.isclose
 ::: tinygrad.Tensor.mean
 ::: tinygrad.Tensor.var
+::: tinygrad.Tensor.var_mean
 ::: tinygrad.Tensor.std
 ::: tinygrad.Tensor.std_mean
 ::: tinygrad.Tensor.softmax
@@ -35,6 +36,7 @@
 ::: tinygrad.Tensor.interpolate
 ::: tinygrad.Tensor.scatter
 ::: tinygrad.Tensor.scatter_reduce
+::: tinygrad.Tensor.masked_select
 ::: tinygrad.Tensor.sort
 ::: tinygrad.Tensor.topk
 
