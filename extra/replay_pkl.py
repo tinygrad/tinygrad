@@ -23,6 +23,8 @@ if __name__ == "__main__":
         p: ProgramSpec = ei.prg.p
         k = Kernel(p.ast, Device["DSP"].renderer)
         dsp_bufs = [Buffer("DSP", 8192+b.size, b.dtype).view(b.size, b.dtype, 4096) for b in ei.bufs]
+        k.hand_coded_optimizations()
+        """
         if BEAM:
           from tinygrad.engine.search import beam_search
           k = beam_search(k, dsp_bufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
@@ -73,6 +75,7 @@ if __name__ == "__main__":
           else:
             # TODO: fix padding
             for i in range(1, k.first_reduce): k.apply_opt(Opt(OptOps.LOCAL, 1, 0))
+        """
         p2 = k.to_program()
         new_ei = replace(ei, prg=CompiledRunner(p2), bufs=dsp_bufs)
         new_ei.run()
