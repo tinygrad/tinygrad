@@ -429,7 +429,7 @@
       }
       if (event.key == "ArrowDown") {
         event.preventDefault()
-        return setState({ currentUOp:0, currentRewrite:0, currentKernel:Math.max(kernels.length-1, currentKernel+1) });
+        return setState({ currentUOp:0, currentRewrite:0, currentKernel:Math.min(kernels.length-1, currentKernel+1) });
       }
     }
     if (event.key == "Enter") {
