@@ -216,7 +216,7 @@ def prefetch_l2(ld:UOp, idx:UOp):
                arg="__builtin_HEXAGON_Y4_l2fetch({0}, 0x808000|{1});")
     else:
       fetch_lines = 8
-      if nlen_uop.arg <= 8192: fetch_lines = ((nlen_uop.arg+127)//128)*2+1
+      if nlen_uop.op is Ops.CONST and nlen_uop.arg <= 8192: fetch_lines = ((nlen_uop.arg+127)//128)*2+1
       fetch_lines = max(fetch_lines, 8)
 
       # fetch up to 8192
