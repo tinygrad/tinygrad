@@ -1562,24 +1562,18 @@ class Tensor(SimpleMathTrait):
     idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
     return x[idxs]
 
-  # def nonzero(self, as_tuple=False) -> Tensor|tuple[Tensor, ...]:
-  #   if self.numel() == 0: return Tensor([], device=self.device, dtype=dtypes.int64).reshape(0,)
-  #   if self.ndim == 0: return Tensor([], device=self.device, dtype=dtypes.int64).reshape(1, 0)
-    
-  #   flat_t = self.reshape(-1)
-  #   m = flat_t.cast(dtype=dtypes.int64) if flat_t.dtype == dtypes.bool else (flat_t != 0).cast(dtype=dtypes.int64)
-  #   cumsum = m.cumsum(0)
-  #   nz = cumsum[-1].item()
-    
-  #   if nz == 0: return Tensor([], device=self.device, dtype=dtypes.int64).reshape(0, self.ndim)
-    
-  #   idxs = (cumsum.unsqueeze(1) - Tensor.arange(1, nz + 1, device=self.device, dtype=dtypes.int64).unsqueeze(0)).abs().argmin(axis=0)\
-  #     .cast(dtype=dtypes.int64)
-  #   coords, _ = functools.reduce(lambda acc, s: (acc[0] + [acc[1] % s], acc[1] // s), self.shape[::-1], ([], idxs))
-  #   coords.reverse() 
-  #   return tuple(coords) if as_tuple else Tensor.stack(*coords, dim=-1)
+  def nonzero(self) -> Tensor:
+    """
+    Returns a tensor of the indices of the non-zero elements of `self`.
 
-  def nonzero(self, as_tuple=False) -> Tensor|tuple[Tensor, ...]:
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.nonzero().numpy())
+    ```
+    """
     if self.numel() == 0: return Tensor([], device=self.device, dtype=dtypes.int64).reshape(0, self.ndim)
     if self.ndim == 0: return Tensor([], device=self.device, dtype=dtypes.int64).reshape(1, 0)
     mask = (self != 0).flatten()
@@ -1588,8 +1582,8 @@ class Tensor(SimpleMathTrait):
     coords = []
     for dim in reversed(self.shape):
       coords.append(nonzero_flat % dim)
-      nonzero_flat = nonzero_flat // dim
-    return tuple(reversed(coords)) if as_tuple else Tensor.stack(*reversed(coords), dim=1)
+      nonzero_flat //= dim
+    return Tensor.stack(*reversed(coords), dim=1)
   
   # ***** reduce ops *****
 
