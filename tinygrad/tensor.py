@@ -970,7 +970,7 @@ class Tensor(SimpleMathTrait):
     order_arg = tuple(self._resolve_dim(x) for x in argfix(order, *args))
     if sorted(order_arg) != list(range(self.ndim)): raise RuntimeError(f"order is not a valid permutation, getting {order_arg}")
     return self._apply_uop(UOp.permute, arg=order_arg)
-  
+
   def as_strided(self, size, stride, storage_offset=0) -> Tensor:
     """
     Creates a view of this tensor with the specified size, stride, and storage offset.
@@ -978,7 +978,7 @@ class Tensor(SimpleMathTrait):
     storage_size = self.numel()*self.dtype.itemsize
     needed = storage_offset + sum((s-1)*st for s, st in zip(size, stride)) if size else 0
     if needed and (needed+1)*self.dtype.itemsize > storage_size:
-        raise RuntimeError(f"setStorage: sizes {size}, strides {stride}, offset {storage_offset} require {(needed+1)*self.dtype.itemsize} but got {storage_size}")
+      raise RuntimeError(f"setStorage: sizes {size}, strides {stride}, offset {storage_offset} require {(needed+1)*self.dtype.itemsize} but got {storage_size}")
     if any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
     if self.numel() == 1 or prod(size) == 1: return self.flatten()[storage_offset].reshape(size)
     idx = storage_offset + sum(Tensor.arange(s).reshape([s if i==j else 1 for i in range(len(size))]) * st for j, (s, st) in enumerate(zip(size, stride)))
