@@ -53,7 +53,7 @@ def export_init(model: Callable, inputs: Sequence, state_dict:dict[str,Tensor]={
   in_vars: dict[UOp, int] = {arg.unbind()[0]: i for i, arg in enumerate(reusable_inputs) if isinstance(arg, UOp)}
 
   weight_names = {v.lazydata.base.realized: k for k,v in state_dict.items()}
-  weight_names.update({buf: weight_names.get(buf, cj.buf_names[buf]) for buf in cj.weight_bufs})
+  weight_names.update({buf: weight_names.get(buf, default_name) for buf, default_name in cj.sort_bufs(exclude=in_bufs)[0].items()})
 
   return cj, in_bufs, in_vars, weight_names
 

@@ -35,16 +35,18 @@ def render_idx(idx:Variable|int): return idx.simplify().render() if isinstance(i
 
 def render_js(cj: CapturedJit, in_bufs:dict[Buffer, int], in_vars:dict[Variable, int], weight_names:dict[Buffer, str],
               model_name="model", save_weights=True) -> str:
-  names:dict[Buffer|Variable:str] = merge_dicts([cj.buf_names, {b:f"in_buf_{i}" for b,i in in_bufs.items()}, {v:f"sym_{i}" for v,i in in_vars.items()}])
+  weight_bufs, empty_bufs = cj.sort_bufs(exclude=in_bufs)
+  names:dict[Buffer|Variable:str] = merge_dicts([weight_bufs, empty_bufs,
+                                                 {b:f"in_buf_{i}" for b,i in in_bufs.items()}, {v:f"sym_{i}" for v,i in in_vars.items()}])
   assert isinstance(cj.ret, list) and all(isinstance(t, Tensor) and t.lazydata.base.is_realized for t in cj.ret)
   out_bufs = cast(dict[Buffer, int], {t.lazydata.base.realized: i for i, t in enumerate(cj.ret)})
   names.update({b:f"out_buf_{i}" for b,i in out_bufs.items()})
 
   # Render model data
-  empty_bufs = [f"const {names[b]} = createEmptyBuf({b.nbytes});" for b in list(in_bufs.keys()) + list(out_bufs.keys()) + list(cj.empty_bufs)]
-  symbolic_bufs = [f"const {names[var]} = createUniformBuf({var.dtype.itemsize});" for var in in_vars.keys()]
+  empty_js_bufs = [f"const {names[b]} = createEmptyBuf({b.nbytes});" for b in list(in_bufs.keys()) + list(out_bufs.keys()) + list(empty_bufs.keys())]
+  symbolic_js_bufs = [f"const {names[var]} = createUniformBuf({var.dtype.itemsize});" for var in in_vars.keys()]
   def map_wt(buf): return f"state_dict['{weight_names[buf]}']" if not save_weights else f"getTensorBuffer(safetensor,metadata['{weight_names[buf]}'])"
-  weight_bufs = [f"const {names[buf]} = createWeightBuf({buf.nbytes}, {map_wt(buf)});" for buf in cj.weight_bufs]
+  weight_js_bufs = [f"const {names[buf]} = createWeightBuf({buf.nbytes}, {map_wt(buf)});" for buf in weight_bufs]
 
   # TODO: condense this code; use one command encoder per graph runner
   # Render model transforms
@@ -100,7 +102,7 @@ def render_js(cj: CapturedJit, in_bufs:dict[Buffer, int], in_vars:dict[Variable,
     return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(
       ([k, v]) => [k, {...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}]));
   };\n""" if save_weights else ""
-  max_buf_nbytes = max([buf.nbytes for buf in cj.weight_bufs.union(cj.empty_bufs)] + [4])
+  max_buf_nbytes = max([buf.nbytes for buf in merge_dicts([weight_bufs, empty_bufs])] + [4])
 
   def j(to_join: list, num_indents: int): return ("\n" + num_indents * "  ").join(to_join)
   prg = f"""if (!navigator.gpu) throw new Error("WebGPU not supported.");
@@ -140,7 +142,7 @@ const {model_name} = (() => {{
   {kernel_declarations}
   const setupNet = async ({"state_dict" if not save_weights else "safetensor"}) => {{
     {"const metadata = getTensorMetadata(safetensor);" if not not save_weights else ""}
-    {j(symbolic_bufs + empty_bufs + weight_bufs + input_writer_bufs + output_reader_bufs, 2)}
+    {j(symbolic_js_bufs + empty_js_bufs + weight_js_bufs + input_writer_bufs + output_reader_bufs, 2)}
     const kernels = [{",".join(ei.prg.p.function_name for ei in all_eis)}];
     const pipelines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{
       layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));
