@@ -124,9 +124,6 @@ pm_store_ignore = PatternMatcher([
    lambda store,mask: store.replace(src=(store.src[0], UOp(Ops.IGNORE, src=(store.src[1], mask)))) if store.src[1].op is not Ops.IGNORE else None),
 ])
 
-# seen ((ridx0<13)&(((UNROLL((0, 1, 2, 3), ((4, 4),))+(ridx0*4))%52)<49))
-# ignore ((ridx0<13)&((((UNROLL((0, 1, 2, 3), ((4, 4),))*32)+(UNROLL((0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31), ((3, 32),))+(ridx0*128)))%1664)<1568))
-
 def debug_ignore(x, y):
   if getenv("DEBUG_IGNORE"):
     print("****")

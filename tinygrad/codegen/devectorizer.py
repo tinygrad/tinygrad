@@ -290,7 +290,7 @@ pm_render = PatternMatcher([
 
 from dataclasses import dataclass
 from tinygrad.ops import identity_element
-from tinygrad.helpers import partition, dedup, get_single_element
+from tinygrad.helpers import partition
 
 @dataclass
 class ReduceContext:
