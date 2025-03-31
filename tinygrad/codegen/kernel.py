@@ -614,8 +614,8 @@ class Kernel:
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
   def apply_tc(self, ast) -> UOp:
-    def transform(ctx:tuple[KernelInfo, str, list[TensorCore], set[UOp]], reduce_op:UOp):
-      kernel_info, device, tcs, applied = ctx
+    def transform(ctx:tuple[KernelInfo, str, list[TensorCore], str, set[UOp]], reduce_op:UOp):
+      kernel_info, device, tcs, use_tensor_cores, applied = ctx
       has_cast = reduce_op.src[0].op is Ops.CAST
       mul_op = reduce_op.src[0].src[0] if has_cast else reduce_op.src[0]
       if len(applied) or mul_op.op is not Ops.MUL or len(reduce_op.axis_arg) == 0: return None
@@ -650,23 +650,34 @@ class Kernel:
             if int(u[1]) == i and src_st.real_strides(True)[fu+tc_reduce+ax] != 0: return None # checks the order of upcasts
 
           if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
+          if use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
+            local_shape = tuple(1 if st == 0 or i < gd or (i >= fr and i < fu) else src_st.shape[i] for i,st in enumerate(src_st.real_strides(True)))
+            st = store_st = ShapeTracker.from_shape(local_shape)
+            local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), f"temp{i}")
+            if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
+            local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
+            srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
+
         tc_reduce_axes = tuple(fu + ax for ax, _ in tc.get_reduce_axes())
         tc_upcast_axes = (get_upcast_axes(tc,0), get_upcast_axes(tc,1), get_upcast_axes(tc,2))
-        wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, device, tc.threads, tc_upcast_axes, tc_reduce_axes)
-        wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
-          UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
-          UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
-          UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
-        applied.add(reduce_op)
-        tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
+        if use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, device, tc.threads, tc_upcast_axes, tc_reduce_axes)
+          wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
+            UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
+            UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
+            UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
+          tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
+        else: # for TC=3 MUL/SUM instead of WMMA
+          tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
         new_axes = tuple(ax for ax in reduce_op.axis_arg if ax not in tc_reduce_axes)
+        applied.add(reduce_op)
         return reduce_op.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if new_axes else tc_uop
 
       for tc in tcs:
         if (wmma:=plug_tc(tc)) is not None: return wmma
 
     return graph_rewrite(ast, view_left + PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="reduce_op"), transform)]),
-                         ctx=(ast.arg, self.opts.device, self.opts.tensor_cores, set()))
+                         ctx=(ast.arg, self.opts.device, self.opts.tensor_cores, self.use_tensor_cores, set()))
 
   # **** this is the lowerer ****
 
@@ -676,7 +687,7 @@ class Kernel:
     if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
 
     modified_ast = self.get_optimized_ast(name_override)
-    modified_ast = self.apply_tc(modified_ast)
+    if self.use_tensor_cores != 2: modified_ast = self.apply_tc(modified_ast)
     if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
 
     if DEBUG >= 3:
