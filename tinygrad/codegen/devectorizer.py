@@ -270,12 +270,48 @@ pm_render = PatternMatcher([
     lambda store,idx: UOp(Ops.STORE, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
 ])
 
+def my_cat_vec(sink, store, loop, load1, load2, lt, idx, vconst, rng, add_loads, mul, rng2, mul2):
+  if rng2 is not None and rng2.arg < rng.arg: return None
+  max = rng.src[1]
+  if lt.arg >= max.arg: return None
+  # store1
+  rng = rng.replace(src=(rng.src[0], lt))
+  loop = loop.replace(src=tuple(rng*mul+rng2*mul2 if add is None else rng*mul+add for _ in range(loop.dtype.count)))
+  load1.src[0].src = load1.src[0].src[:2]
+  load1.src[0].src[1].src = (loop, load1.src[0].src[1].src[1])
+  add_loads.src=(load1,UOp.const(dtypes.int, 0))
+
+  # store2
+  rng_new = UOp.range(dtype=dtypes.int, idx=1000, start=lt.arg, end=max.arg)
+  loop2 = loop.replace(src=tuple(rng_new*mul+rng2.replace(arg=10001)*mul2 if add is None else rng_new*mul+add.replace(arg=10001) for _ in range(loop.dtype.count)))
+  load2.src[0].src = load2.src[0].src[:2]
+  load2.src[0].src[1].src = (loop2, load2.src[0].src[1].src[1])
+  store2 = UOp(Ops.STORE, store.dtype, src=(store.src[0].replace(src=(store.src[0].src[0], loop2+vconst)), load2+UOp.const(dtypes.int, 0)))
+  ret = sink.replace(src=(store, store2,))
+  return ret
+
+pm_split = PatternMatcher([
+  (UPat(Ops.SINK, name="sink", src=(UPat(Ops.STORE, name="store", src=(
+                                      UPat(Ops.INDEX, name="idx", src=(
+                                        UPat(Ops.VECTORIZE),
+                                        UPat(Ops.ADD, src=(
+                                          UPat(Ops.VECTORIZE, name="loop", src=(UPat(Ops.RANGE, name="rng")*UPat.var("mul")+UPat(Ops.RANGE, name="rng2")*UPat.var("mul2"))),
+                                          UPat(Ops.VCONST, name="vconst"))))),
+                                      UPat(Ops.ADD, name="add_loads", src=(
+                                        UPat(Ops.LOAD, name="load1", src=(
+                                          UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(Ops.VECTORIZE, src=UPat(Ops.CMPLT, src=(UPat(), UPat.cvar("lt")))))))),
+                                        UPat(Ops.LOAD, name="load2"))))))), my_cat_vec)
+])
+
+
 # *** uop graph ***
 
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
+
+  sink = graph_rewrite(sink, pm_split)
 
   # devectorize is optional
   if DEVECTORIZE >= 2: sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)
