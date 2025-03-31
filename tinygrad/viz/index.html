@@ -244,12 +244,6 @@
     ret.appendChild(code);
     return ret;
   }
-  const coloredToHTML = (str) => {
-    const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
-    return str.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
-      return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
-    })
-  }
 
   // **** base graph svg
   const zoom = d3.zoom().scaleExtent([0.05, 2]).on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
@@ -290,34 +284,31 @@
     }
     const kernelList = document.querySelector(".kernel-list");
     kernelList.innerHTML = "";
-    kernels.forEach(([key, items], i) => {
-      const kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "",
-        style: "overflow-x: auto; cursor: initial;" });
+    for (const [i,k] of kernels.entries()) {
+      const ul = kernelList.appendChild(document.createElement("ul"));
       if (i === currentKernel) {
-        requestAnimationFrame(() => kernelUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
+        ul.className = "active";
+        requestAnimationFrame(() => ul.scrollIntoView({ behavior: "auto", block: "nearest" }));
       }
-      const p = Object.assign(document.createElement("p"), { id: `kernel-${key}`, innerHTML: coloredToHTML(key), style: "cursor: pointer;"});
-      kernelUl.appendChild(p)
-      items.forEach((u, j) => {
-        const rwUl = Object.assign(document.createElement("ul"), {
-          innerText: u.name ? `${u.name} - ${u.match_count}` : `${toPath(u.loc)} - ${u.match_count}`, key: `uop-rewrite-${j}`,
-          className: (j === currentUOp && i == currentKernel) ? "active" : "" })
-        if (j === currentUOp) {
-          requestAnimationFrame(() => rwUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
-        }
-        rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
-        rwUl.onclick = (e) => {
+      const p = ul.appendChild(document.createElement("p"));
+      p.innerHTML = k[0].replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
+        const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
+        return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
+      });
+      p.onclick = () => {
+        setState(i === currentKernel ? { expandKernel:!expandKernel } : { expandKernel:true, currentKernel:i, currentUOp:0, currentRewrite:0 });
+      }
+      for (const [j,u] of k[1].entries()) {
+        const inner = ul.appendChild(document.createElement("ul"));
+        if (i === currentKernel && j === currentUOp) inner.className = "active";
+        inner.innerText = `${u.name ?? toPath(u.loc)} - ${u.match_count}`;
+        inner.style.display = i === currentKernel && expandKernel ? "block" : "none";
+        inner.onclick = (e) => {
           e.stopPropagation();
           setState({ currentUOp:j, currentKernel:i, currentRewrite:0 });
         }
-        kernelUl.appendChild(rwUl)
-      })
-      p.onclick = () => {
-        if (i === currentKernel) return setState({ expandKernel:!expandKernel });
-        setState({ expandKernel:true, currentKernel:i, currentUOp:0, currentRewrite:0 });
       }
-      kernelList.appendChild(kernelUl);
-    });
+    }
     // ***** UOp graph
     if (currentKernel == -1) return;
     const kernel = kernels[currentKernel][1][currentUOp];
