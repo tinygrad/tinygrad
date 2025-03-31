@@ -684,16 +684,10 @@ class Kernel:
 
       def plug_tc(tc: TensorCore) -> UOp|None:
         if tc.dtype_out != reduce_op.dtype or tc.dtype_in != mul_op.dtype: return None
-
         if (tc_local:=len(tc.get_local_axes())) > kernel_info.local_dims: return None # not enough local dims
-        # print("local dims okay")
         if (tc_reduce:=len(tc.get_reduce_axes())) > len(reduce_op.axis_arg): return None # not enough reduce dims
-        # print("reduce dims okay")
         if (tc_upcast:=len(tc.get_upcast_axes())) > kernel_info.upcasted - len(tc.get_reduce_axes()): return None # not enough upcast dims
-        # print("upcast dims okay")
 
-        print(reduce_op.full_shape[gd:gd+tc_local])
-        print(reduce_op.full_shape[fu:fu+tc_reduce+tc_upcast])
         if any(sz != 2 for sz in reduce_op.full_shape[gd:gd+tc_local]): return None # local dims are not the right size
         if any(sz != 2 for sz in reduce_op.full_shape[fu:fu+tc_reduce+tc_upcast]): return None # unroll/upcast dims are not the right size
 
@@ -711,25 +705,13 @@ class Kernel:
         tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
 
         print(tc_uop)
-        print(reduce_op.axis_arg)
-        new_axes = list(reduce_op.axis_arg)
-        for axis in reduce_op.axis_arg:
-          print(axis)
-          print(tc_reduce_axes)
-          if axis in tc_reduce_axes: new_axes.remove(axis)
-        new_axes = tuple(new_axes)
-        # exit()
-        # exit()
-        # new_axes = reduce_op.axis_arg[:-len(tc_reduce_axes)]
-
         applied.add(reduce_op)
-
+        new_axes = tuple(ax for ax in reduce_op.axis_arg if ax not in tc_reduce_axes)
         return reduce_op.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if new_axes else tc_uop
 
       for tc in tcs:
         if (wmma:=plug_tc(tc)) is not None: return wmma
 
-      # exit()
       return None
 
     return graph_rewrite(ast, view_left + PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="reduce_op"), transform)]),
