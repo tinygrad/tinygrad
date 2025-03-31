@@ -314,6 +314,7 @@ class TinyJit(Generic[ReturnType]):
 
       # set this for next run
       self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, st_vars_dtype_device)
+      self.captured.optimize_weights()
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None
