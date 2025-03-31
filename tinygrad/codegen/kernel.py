@@ -694,6 +694,8 @@ class Kernel:
           src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
           for ax,l in enumerate(tc.get_local_axes()):
             if int(l[1]) == i and src_st.real_strides(True)[gd+ax] != 0: return None
+          for ax,u in enumerate(tc.get_upcast_axes()):
+            if int(u[1]) == i and src_st.real_strides(True)[fu+tc_reduce+ax] != 0: return None
           # check if the correct dimensions are localized and upcasted
 
           if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
