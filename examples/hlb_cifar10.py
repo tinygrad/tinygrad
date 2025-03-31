@@ -276,7 +276,7 @@ def train_cifar():
 
   set_seed(getenv('SEED', hyp['seed']))
 
-  X_train, Y_train, X_test, Y_test = nn.datasets.cifar()
+  X_train, Y_train, X_test, Y_test = nn.datasets.cifar(device=Device.DEFAULT)
   # one-hot encode labels
   Y_train, Y_test = Y_train.one_hot(10), Y_test.one_hot(10)
   # preprocess data
