@@ -5,6 +5,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import Context, CI, dedup, from_mv
 from tinygrad.dtype import dtypes
+from tinygrad.engine.jit import TinyJit
 from tinygrad.engine.realize import ExecItem, BufferXfer, get_runner, CompiledRunner
 
 np.random.seed(1337)
@@ -76,6 +77,17 @@ def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
 @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
 @unittest.skipIf(CI and Device.DEFAULT=="METAL", "no ICB in CI, creation of graph fails")
 class TestGraph(unittest.TestCase):
+  def test_simple_graph(self):
+    @TinyJit
+    def f(a, b): return (a+b).realize(), (a-b).realize(), (a*b).realize()
+    for _ in range(3):
+      a = Tensor(np.random.randn(10, 10))
+      b = Tensor(np.random.randn(10, 10))
+      c, d, e = f(a, b)
+      np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
+      np.testing.assert_allclose(d.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
+      np.testing.assert_allclose(e.numpy(), a.numpy()*b.numpy(), atol=1e-4, rtol=1e-5)
+
   def test_order_2_writes_to_same_buf(self):
     d0 = Device.DEFAULT
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(5)]
