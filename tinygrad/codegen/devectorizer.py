@@ -276,14 +276,14 @@ def my_cat_vec(sink, store, loop, load1, load2, lt, idx, vconst, rng, add_loads,
   if lt.arg >= max.arg: return None
   # store1
   rng = rng.replace(src=(rng.src[0], lt))
-  loop = loop.replace(src=tuple(rng*mul+rng2*mul2 if add is None else rng*mul+add for _ in range(loop.dtype.count)))
+  loop = loop.replace(src=tuple(rng*mul+rng2*mul2 for _ in range(loop.dtype.count)))
   load1.src[0].src = load1.src[0].src[:2]
   load1.src[0].src[1].src = (loop, load1.src[0].src[1].src[1])
   add_loads.src=(load1,UOp.const(dtypes.int, 0))
 
   # store2
   rng_new = UOp.range(dtype=dtypes.int, idx=1000, start=lt.arg, end=max.arg)
-  loop2 = loop.replace(src=tuple(rng_new*mul+rng2.replace(arg=10001)*mul2 if add is None else rng_new*mul+add.replace(arg=10001) for _ in range(loop.dtype.count)))
+  loop2 = loop.replace(src=tuple(rng_new*mul+rng2.replace(arg=10001)*mul2 for _ in range(loop.dtype.count)))
   load2.src[0].src = load2.src[0].src[:2]
   load2.src[0].src[1].src = (loop2, load2.src[0].src[1].src[1])
   store2 = UOp(Ops.STORE, store.dtype, src=(store.src[0].replace(src=(store.src[0].src[0], loop2+vconst)), load2+UOp.const(dtypes.int, 0)))
