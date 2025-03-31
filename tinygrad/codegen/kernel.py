@@ -255,6 +255,9 @@ class Kernel:
         applied_tc_opts = []
         try:
           try:
+
+            # pad last reduce & unroll last reduce (offset len(full_shape) - global_dims)
+
             for axis, dim in enumerate(tc.dims): # pad the tensor core axes
               if axis == 2: axis = self.first_reduce
               if dim > self.full_shape[axis]: return self # avoid excessive padding
