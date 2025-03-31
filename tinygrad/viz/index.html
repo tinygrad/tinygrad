@@ -392,10 +392,7 @@
             metadata.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${diffHtml}</code>`, className: "wrap" }));
           }
         }
-        gUl.addEventListener("click", () => {
-          currentRewrite = i;
-          main();
-        });
+        gUl.addEventListener("click", () => setState({ currentRewrite: i }));
       }
     } else {
       metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(kernel.loc)}.` }));
