@@ -661,8 +661,6 @@ class Kernel:
       has_cast = reduce_op.src[0].op is Ops.CAST
       mul_op = reduce_op.src[0].src[0] if has_cast else reduce_op.src[0]
       if len(applied) or mul_op.op is not Ops.MUL: return None
-      print(kernel_info)
-      print(reduce_op)
       reduce_st = unwrap(reduce_op.st)
 
       if len(reduce_op.axis_arg) == 0: return None
@@ -694,6 +692,10 @@ class Kernel:
         srcs = list((reduce_op.src[0] if reduce_op.src[0].op is not Ops.CAST else reduce_op.src[0].src[0]).src)
         for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
           src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
+          for ax,l in enumerate(tc.get_local_axes()):
+            if int(l[1]) == i and src_st.real_strides()[gd+ax] != 0: return None
+          # check if the correct dimensions are localized and upcasted
+
           if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
         tc_reduce_axes = tuple(fu + ax for ax, _ in tc.get_reduce_axes())
         tc_upcast_axes = (get_upcast_axes(tc,0), get_upcast_axes(tc,1), get_upcast_axes(tc,2))
@@ -703,7 +705,6 @@ class Kernel:
           UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
           UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
         tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
-
         print(tc_uop)
         applied.add(reduce_op)
         new_axes = tuple(ax for ax in reduce_op.axis_arg if ax not in tc_reduce_axes)
