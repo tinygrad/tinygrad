@@ -54,6 +54,7 @@ view_ops = {
   "aten.view.dtype": lambda self,dtype: self.bitcast(_from_torch_dtype(dtype)),
   "aten.expand": Tensor.expand,
   "aten.t": Tensor.transpose,
+  "aten.transpose.int": Tensor.transpose,
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.detach": Tensor.detach,
@@ -286,9 +287,6 @@ for i,pre in enumerate(["", "bi", "tri"]):
   torch.library.impl(f"aten::upsample_{pre}linear{i+1}d", "privateuseone")(functools.partial(upsample, mode="linear"))
   torch.library.impl(f"aten::upsample_nearest{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest"))
   torch.library.impl(f"aten::_upsample_nearest_exact{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
-
-@torch.library.impl("aten::cumsum", "privateuseone")
-def cumsum(self, dim): return wrap(unwrap(self).cumsum(dim).contiguous())
 
 @torch.library.impl("aten::scatter_add.out", "privateuseone")
 @inplace_fn("out")
@@ -551,7 +549,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
     Tensor.linspace(start, stop, steps, **({"dtype": _from_torch_dtype(dtype)} if dtype is not None else {})),
   "aten.topk": Tensor.topk,
-  "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value),
+  "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value).contiguous(),
+  "aten.cumsum": lambda self, dim: self.cumsum(dim).contiguous(), # TODO: fix test_simple_cumsum, fails without contiguous for shapes >512
   "aten.logsumexp": lambda self, axis, keepdim=False: self.logsumexp(axis[0], keepdim=keepdim),
   "aten.roll": Tensor.roll,
   "aten.logcumsumexp": Tensor.logcumsumexp,
