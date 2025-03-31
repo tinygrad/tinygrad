@@ -348,7 +348,6 @@ def train_retinanet():
   from examples.mlperf.initializers import FrozenBatchNorm2d, Conv2dNormal, Conv2dKaimingUniform, Conv2dHeNormal, Linear, Conv2d
   from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize
   from extra.models import resnet
-  from extra.lr_scheduler import LambdaLR
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
   from tinygrad.helpers import colored, Context
@@ -381,17 +380,9 @@ def train_retinanet():
 
     x, y_boxes, y_labels, matches, anchors, cookie = next(it)
     return x.shard(GPUS, axis=0).realize(), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), cookie
-  
-  def _create_lr_scheduler(optim:Optimizer, start_iter:int, warmup_iters:int, warmup_factor:float):
-    def _lr_lambda(e):
-      e = e + start_iter
-      if e >= warmup_iters: return 1.0
-      alpha = float(e) / warmup_iters
-      return warmup_factor * (1 - alpha) + alpha
-    return LambdaLR(optim, _lr_lambda)
 
   @TinyJit
-  def _train_step(model, optim, lr_scheduler, loss_scaler, x, **kwargs):
+  def _train_step(model, optim, loss_scaler, x, **kwargs):
     with Context(BEAM=TRAIN_BEAM):
       optim.zero_grad()
 
@@ -402,7 +393,6 @@ def train_retinanet():
       for t in optim.params: t.grad = t.grad.contiguous() / loss_scaler
 
       optim.step()
-      lr_scheduler.step()
 
       return loss.realize(), losses
   
@@ -420,8 +410,6 @@ def train_retinanet():
   config["train_beam"] = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   config["eval_beam"] = EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
   config["lr"] = lr = getenv("LR", 0.0001 * (BS / 256))
-  config["lr_warmup_epochs"] = lr_warmup_epochs = getenv("LR_WARMUP_EPOCHS", 1)
-  config["lr_warmup_factor"] = lr_warmup_factor = getenv("LR_WARMUP_FACTOR", 1e-3)
   config["loss_scaler"] = loss_scaler = getenv("LOSS_SCALER", 2**11 if dtypes.default_float == dtypes.float16 else 1.0)
   config["default_float"] = dtypes.default_float.name
 
@@ -459,13 +447,13 @@ def train_retinanet():
   # ** lr scheduler **
   config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(len(train_dataset.imgs.keys()), BS) // BS
   config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(len(val_dataset.imgs.keys()), BS) // BS)
-  start_iter, warmup_iters = start_epoch * steps_in_train_epoch, lr_warmup_epochs * steps_in_train_epoch
-  lr_scheduler = _create_lr_scheduler(optim, start_iter, warmup_iters, lr_warmup_factor)
+  start_iter = start_epoch * steps_in_train_epoch
 
   # ** resume from checkpointing **
   if (ckpt:=getenv("RESUME", "")):
-    load_training_state(model, optim, lr_scheduler, safe_load(ckpt))
-    start_epoch = int(lr_scheduler.epoch_counter.item() / steps_in_train_epoch)
+    # TODO: Address resuming from checkpoint
+    # load_training_state(model, optim, lr_scheduler, safe_load(ckpt))
+    # start_epoch = int(lr_scheduler.epoch_counter.item() / steps_in_train_epoch)
     print(f"resuming from {ckpt} at epoch {start_epoch}")
 
   # ** initialize wandb **
@@ -494,7 +482,7 @@ def train_retinanet():
       GlobalCounters.reset()
 
       x, y_bboxes, y_labels, matches, anchors, proc = proc
-      loss, losses = _train_step(model, optim, lr_scheduler, loss_scaler, x, labels=y_labels, matches=matches, anchors=anchors, bboxes=y_bboxes)
+      loss, losses = _train_step(model, optim, loss_scaler, x, labels=y_labels, matches=matches, anchors=anchors, bboxes=y_bboxes)
 
       pt = time.perf_counter()
 
@@ -611,7 +599,8 @@ def train_retinanet():
           fn = ckpt_dir / Path(f"{time.strftime('%Y%m%d_%H%M%S')}_e{e}_seed{SEED}.safe")
 
         print(f"saving ckpt to {fn}")
-        safe_save(get_training_state(model, optim, lr_scheduler), fn)
+        # TODO: Address model checkpointing without lr_scheduler
+        # safe_save(get_training_state(model, optim), fn)
 
       if val_metric >= target_metric:
         print(colored(f"target metric reached: {val_metric:.2f}/{target_metric:.2f}", color="green"))
