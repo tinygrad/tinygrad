@@ -48,11 +48,12 @@ def render_js(cj: CapturedJit, in_bufs:dict[Buffer, int], in_vars:dict[Variable,
   def map_wt(buf): return f"state_dict['{weight_names[buf]}']" if not save_weights else f"getTensorBuffer(safetensor,metadata['{weight_names[buf]}'])"
   weight_js_bufs = [f"const {names[buf]} = createWeightBuf({buf.nbytes}, {map_wt(buf)});" for buf in weight_bufs]
 
-  # TODO: condense this code; use one command encoder per graph runner
+  # TODO: condense this code
   # Render model transforms
   kernels: dict[str, str] = {}
   all_eis: list[ExecItem] = []
-  rendered_calls, ctr = [], 0
+  encoders, ctr = [], 0
+  def j(to_join: list, num_indents: int): return ("\n" + num_indents * "  ").join(to_join)
   def render_call(ei: ExecItem, ctr) -> str:
     arg_names = ", ".join([names[buf] for buf in ei.bufs] + [names[var] for var in ei.prg.p.vars])
     return f"addComputePass(commandEncoder, pipelines[{ctr}], [{arg_names}], " + \
@@ -60,15 +61,23 @@ def render_js(cj: CapturedJit, in_bufs:dict[Buffer, int], in_vars:dict[Variable,
 
   for ji in cj._jit_cache:
     if isinstance(ji.prg, WebGPUGraph):
+      graphed_calls = []
       for graphed_ji in ji.prg.jit_cache:
         all_eis.append(graphed_ji)
         kernels[graphed_ji.prg.p.function_name] = graphed_ji.prg.p.src
-        rendered_calls.append(render_call(graphed_ji, ctr))
+        graphed_calls.append(render_call(graphed_ji, ctr))
         ctr += 1
+      encoders.append(f"""commandEncoder = device.createCommandEncoder();
+{j(graphed_calls, 3)}
+gpuCommands = commandEncoder.finish();
+device.queue.submit([gpuCommands]);""")
     else:
       all_eis.append(ji)
       kernels[ji.prg.p.function_name] = ji.prg.p.src
-      rendered_calls.append(render_call(ji, ctr))
+      encoders.append(f"""commandEncoder = device.createCommandEncoder();
+{render_call(ji, ctr)}
+gpuCommands = commandEncoder.finish();
+device.queue.submit([gpuCommands]);""")
       ctr += 1
   kernel_declarations = '\n\n'.join([f"const {name} = `{code.replace(name, 'main')}`;" for name, code in kernels.items()])
 
@@ -100,7 +109,6 @@ def render_js(cj: CapturedJit, in_bufs:dict[Buffer, int], in_vars:dict[Variable,
   };\n""" if save_weights else ""
   max_buf_nbytes = max([buf.nbytes for buf in merge_dicts([weight_bufs, empty_bufs])] + [4])
 
-  def j(to_join: list, num_indents: int): return ("\n" + num_indents * "  ").join(to_join)
   prg = f"""if (!navigator.gpu) throw new Error("WebGPU not supported.");
 const adapter = await navigator.gpu.requestAdapter();
 const device = await adapter.requestDevice({{
@@ -144,12 +152,11 @@ const {model_name} = (() => {{
       layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));
 
     return [async ({",".join(args)}) => {{
-      {j(validation, 3)}
-      const commandEncoder = device.createCommandEncoder();
-      {j(input_writers + rendered_calls + outbuf_copies, 3)}
-      const gpuCommands = commandEncoder.finish();
-      device.queue.submit([gpuCommands]);
-      {j(output_readers, 3)}
+      let commandEncoder, gpuCommands;
+      {j(validation + input_writers, 3)}
+      {j(encoders, 3)}
+      commandEncoder = device.createCommandEncoder();
+      {j(outbuf_copies + [f"gpuCommands = commandEncoder.finish(); device.queue.submit([gpuCommands]);"] + output_readers, 3)}
       return {output_return};
     }}, device]
   }}
