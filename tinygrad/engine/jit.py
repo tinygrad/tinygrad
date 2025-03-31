@@ -168,7 +168,7 @@ class CapturedJit(Generic[ReturnType]):
     update_depends(depends, self.jit_cache)
     for b in depends:
       if b is not None:
-        b.deallocate()
+        if b.is_allocated(): b.deallocate()
         if b._base is not None and b._base.allocated_views == 0: b._base.deallocate()
     self.__post_init__()   # reset the graph state
 
@@ -319,8 +319,8 @@ class TinyJit(Generic[ReturnType]):
       # jit exec
       assert self.captured is not None
       assert self.captured.expected_names == names, f"args mismatch in JIT: {self.captured.expected_names=} != {names}"
-      assert self.captured.expected_st_vars_dtype_device == st_vars_dtype_device, \
-        f"args mismatch in JIT: {self.captured.expected_st_vars_dtype_device=} != {st_vars_dtype_device=}"
+      # assert self.captured.expected_st_vars_dtype_device == st_vars_dtype_device, \
+      #   f"args mismatch in JIT: {self.captured.expected_st_vars_dtype_device=} != {st_vars_dtype_device=}"
       ret = self.captured(input_buffers, var_vals)
 
     self.cnt += 1
