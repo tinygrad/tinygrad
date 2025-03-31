@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
-from tinygrad.ops import PatternMatcher
+from tinygrad.ops import PatternMatcher, UPat
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
@@ -595,46 +595,46 @@ class Kernel:
         axes = reduced_axes(self.first_reduce + self.group_for_reduces, self.shape_len)
         grouped_axes = reduced_axes(self.first_reduce, self.first_reduce + self.group_for_reduces)
 
-        if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
-          wd, tcd = self.global_dims, self.first_upcast
-          def get_upcast_axes(buf): # upcast along non-zero dimensions of (tc_reduce + tc_upcast)
-            upcast_axes = int(math.log2(tc.elements_per_thread[buf]))
-            return tuple((tcd + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
-          def get_tc_swizzle_st(shape, local_perm, upcast_perm):
-            offset = (tcd - (wd + len(local_perm)))
-            permaxis = list(range(wd)) \
-              + [wd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(wd + len(local_perm), tcd)) \
-              + [wd + x + (offset if x >= len(local_perm) else 0) for x in upcast_perm] + list(range(tcd + len(upcast_perm), len(shape)))
-            return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
+        # if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
+        #   wd, tcd = self.global_dims, self.first_upcast
+        #   def get_upcast_axes(buf): # upcast along non-zero dimensions of (tc_reduce + tc_upcast)
+        #     upcast_axes = int(math.log2(tc.elements_per_thread[buf]))
+        #     return tuple((tcd + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
+        #   def get_tc_swizzle_st(shape, local_perm, upcast_perm):
+        #     offset = (tcd - (wd + len(local_perm)))
+        #     permaxis = list(range(wd)) \
+        #       + [wd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(wd + len(local_perm), tcd)) \
+        #       + [wd + x + (offset if x >= len(local_perm) else 0) for x in upcast_perm] + list(range(tcd + len(upcast_perm), len(shape)))
+        #     return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
 
-          srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
-          for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
-            src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
-            if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
+        #   srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
+        #   for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
+        #     src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
+        #     if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
 
-            if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
-              local_shape = tuple(1 if st == 0 or i < wd or (i >= self.first_reduce and i < tcd) else src_st.shape[i] \
-                                  for i,st in enumerate(src_st.real_strides()))
-              st = store_st = ShapeTracker.from_shape(local_shape)
-              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), f"temp{i}")
-              if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
-              local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
-              srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
+        #     if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
+        #       local_shape = tuple(1 if st == 0 or i < wd or (i >= self.first_reduce and i < tcd) else src_st.shape[i] \
+        #                           for i,st in enumerate(src_st.real_strides()))
+        #       st = store_st = ShapeTracker.from_shape(local_shape)
+        #       local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), f"temp{i}")
+        #       if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
+        #       local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
+        #       srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
 
-          tc_reduce_axes = tuple(tcd + ax for ax, _ in tc.get_reduce_axes())
-          if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
-            tc_upcast_axes = (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
-            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
-            wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
-              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
-              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
-              UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
-            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
+        #   tc_reduce_axes = tuple(tcd + ax for ax, _ in tc.get_reduce_axes())
+        #   if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
+        #     tc_upcast_axes = (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
+        #     wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
+        #     wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
+        #       UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
+        #       UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
+        #       UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
+        #     tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
 
-          else: # for TC=3 MUL/SUM instead of WMMA
-            tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
+        #   else: # for TC=3 MUL/SUM instead of WMMA
+        #     tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
 
-          return ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
+        #   return ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
 
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
@@ -655,6 +655,74 @@ class Kernel:
 
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
+  def apply_tc(self, ast) -> UOp:
+    def transform(ctx:tuple[KernelInfo, list[TensorCore], set[UOp]], reduce_op:UOp):
+      kernel_info, tcs, applied = ctx
+      if len(applied): return None
+      print(kernel_info)
+      print(reduce_op)
+      reduce_st = unwrap(reduce_op.st)
+
+      fr = reduce_op.axis_arg[0]
+      global_dims = fr - kernel_info.local_dims
+      first_upcast = len(reduce_st.shape) - kernel_info.upcasted
+      gd, fu = global_dims, first_upcast
+
+      print(f"{gd=}, {fr=}, {fu=}")
+      def get_upcast_axes(tc:TensorCore, buf): # upcast along non-zero dimensions of (tc_reduce + tc_upcast)
+        upcast_axes = int(math.log2(tc.elements_per_thread[buf]))
+        return tuple((fu + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
+      def get_tc_swizzle_st(shape, local_perm, upcast_perm):
+        offset = (fu - (gd + len(local_perm)))
+        permaxis = list(range(gd)) \
+          + [gd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(gd + len(local_perm), fu)) \
+          + [gd + x + (offset if x >= len(local_perm) else 0) for x in upcast_perm] + list(range(fu + len(upcast_perm), len(shape)))
+        return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
+
+      def plug_tc(tc: TensorCore) -> UOp|None:
+        if (tc_local:=len(tc.get_local_axes())) > kernel_info.local_dims: return None # not enough local dims
+        # print("local dims okay")
+        if (tc_reduce:=len(tc.get_reduce_axes())) > len(reduce_op.axis_arg): return None # not enough reduce dims
+        # print("reduce dims okay")
+        if (tc_upcast:=len(tc.get_upcast_axes())) > kernel_info.upcasted - len(tc.get_reduce_axes()): return None # not enough upcast dims
+        # print("upcast dims okay")
+
+        print(reduce_op.full_shape[gd:gd+tc_local])
+        print(reduce_op.full_shape[fu:fu+tc_reduce+tc_upcast])
+        if any(sz != 2 for sz in reduce_op.full_shape[gd:gd+tc_local]): return None # local dims are not the right size
+        if any(sz != 2 for sz in reduce_op.full_shape[fu:fu+tc_reduce+tc_upcast]): return None # unroll/upcast dims are not the right size
+
+        srcs = list((reduce_op.src[0] if reduce_op.src[0].op is not Ops.CAST else reduce_op.src[0].src[0]).src)
+        for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
+          src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
+          if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
+
+          tc_reduce_axes = tuple(fu + ax for ax, _ in tc.get_reduce_axes())
+          tc_upcast_axes = (get_upcast_axes(tc,0), get_upcast_axes(tc,1), get_upcast_axes(tc,2))
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, "METAL", tc.threads, tc_upcast_axes, tc_reduce_axes)
+          wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
+            UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
+            UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
+            UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
+          tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
+          new_axes = reduce_op.axis_arg[:-len(tc_reduce_axes)]
+
+          applied.add(reduce_op)
+
+          return reduce_op.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if new_axes else tc_uop
+
+        # if any(sz != 2 for sz in reduce_op.full_shape[:])
+        return None
+
+      for tc in tcs:
+        if (wmma:=plug_tc(tc)): return wmma
+
+      exit()
+      # return None
+
+    return graph_rewrite(ast, view_left + PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="reduce_op"), transform)]),
+                         ctx=(ast.arg, self.opts.tensor_cores, set()))
+
   # **** this is the lowerer ****
 
   @track_rewrites()
@@ -663,6 +731,9 @@ class Kernel:
     if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
 
     modified_ast = self.get_optimized_ast(name_override)
+    print(f"gd={self.global_dims}, fr={self.first_reduce}, fu={self.first_upcast}")
+    modified_ast = self.apply_tc(modified_ast)
+    print(modified_ast)
     if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
 
     if DEBUG >= 3:
