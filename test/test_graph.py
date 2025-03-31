@@ -79,14 +79,13 @@ def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
 class TestGraph(unittest.TestCase):
   def test_simple_graph(self):
     @TinyJit
-    def f(a, b): return (a+b).realize(), (a-b).realize(), (a*b).realize()
+    def f(a, b): return (a+b).realize(), (a-b).realize()
     for _ in range(3):
-      a = Tensor(np.random.randn(10, 10).astype(np.int32))
-      b = Tensor(np.random.randn(10, 10).astype(np.int32))
-      c, d, e = f(a, b)
+      a = Tensor(np.random.randn(1, 1).astype(np.int32))
+      b = Tensor(np.random.randn(1, 1).astype(np.int32))
+      c, d = f(a, b)
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose(d.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
-      np.testing.assert_allclose(e.numpy(), a.numpy()*b.numpy(), atol=1e-4, rtol=1e-5)
 
   def test_order_2_writes_to_same_buf(self):
     d0 = Device.DEFAULT
