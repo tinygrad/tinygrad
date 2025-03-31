@@ -256,7 +256,7 @@ class Kernel:
         try:
           try:
 
-            # pad last reduce & unroll last reduce (offset len(full_shape) - global_dims)
+            # pad last reduce & unroll last reduce (offset len(full_shape) - global_dims), not sure if this is always true
 
             for axis, dim in enumerate(tc.dims): # pad the tensor core axes
               if axis == 2: axis = self.first_reduce
