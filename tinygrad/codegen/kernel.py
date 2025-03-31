@@ -614,7 +614,7 @@ class Kernel:
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
   def apply_tc(self, ast) -> UOp:
-    def transform(ctx:tuple[KernelInfo, str, list[TensorCore], str, set[UOp]], reduce_op:UOp):
+    def transform(ctx:tuple[KernelInfo, str, list[TensorCore], int, set[UOp]], reduce_op:UOp):
       kernel_info, device, tcs, use_tensor_cores, applied = ctx
       has_cast = reduce_op.src[0].op is Ops.CAST
       mul_op = reduce_op.src[0].src[0] if has_cast else reduce_op.src[0]
