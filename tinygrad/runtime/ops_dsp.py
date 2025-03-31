@@ -270,6 +270,14 @@ def vectorize_shuffle(vec:UOp):
   #src = "__builtin_shufflevector({0}, {1})"
   return None
 
+def multicore_range(r:UOp):
+  if getenv("MULTICORE", 0) != 1: return None
+  if any(x.op is Ops.DEFINE_VAR for x in r.toposort): return None
+  core = UOp(Ops.DEFINE_VAR, dtypes.int, arg=("core", 0, 1))
+  start = (core.eq(0)).where(r.src[0], r.src[1]//2)
+  end = (core.eq(0)).where(r.src[1]//2, r.src[1])
+  return r.replace(src=(start,end))
+
 dsp_pm_late = PatternMatcher([
   # prefetch L1
   (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld"), prefetch_l1),
@@ -307,6 +315,9 @@ dsp_pm_late = PatternMatcher([
    lambda x,y: x//UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI or x.arg != "{0}" else None),
   (UPat(Ops.DEFINE_ACC, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar.vec(128), name="d", allow_any_len=True),
    lambda d: d.replace(src=(UOp(Ops.CUSTOMI, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:])),
+
+  # multicore
+  (UPat(Ops.RANGE, name="r", arg=0), multicore_range),
 ])
 
 pretty_render = PatternMatcher([

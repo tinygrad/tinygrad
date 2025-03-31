@@ -27,5 +27,9 @@ if __name__ == "__main__":
         #if knum == 13: k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
         p2 = k.to_program()
         new_ei = replace(ei, prg=CompiledRunner(p2), bufs=dsp_bufs)
-        new_ei.run()
+        if getenv("MULTICORE", 0) == 1:
+          new_ei.run({p2.vars[0]: 0})
+          new_ei.run({p2.vars[0]: 1})
+        else:
+          new_ei.run()
       knum += 1
