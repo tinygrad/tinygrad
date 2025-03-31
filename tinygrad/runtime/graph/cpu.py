@@ -11,6 +11,7 @@ from tinygrad.renderer.cstyle import ClangRenderer
 class CPUGraph(GraphRunner):
   def __init__(self, device, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     if not issubclass(type(device.renderer), ClangRenderer) and not isinstance(device.renderer, ClangRenderer): raise GraphException
+    print('in cpu graph', flush=True)
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 
     self.base_bufs = dedup(b.base for ji in jit_cache for b in ji.bufs if b is not None and b not in input_rawbuffers)
@@ -37,7 +38,7 @@ class CPUGraph(GraphRunner):
     entry = device.renderer._render_entry("batched", targs)
     code = defines + '\n' + '\n'.join([''.join(f) for f in funcs]) + '\n'.join(batched) + '\n' + entry
 
-    if DEBUG >= 4: print(code)
+    if DEBUG >= 4: print(code, flush=True)
     self.clprg = device.runtime("batched", device.compiler.compile_cached(code))
 
   def __call__(self, rawbufs: list[Buffer], var_vals: dict[Variable, int], wait=False):
