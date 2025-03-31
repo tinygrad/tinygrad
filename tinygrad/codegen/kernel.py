@@ -693,10 +693,9 @@ class Kernel:
         for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
           src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
           for ax,l in enumerate(tc.get_local_axes()):
-            if int(l[1]) == i and src_st.real_strides(True)[gd+ax] != 0: return None
+            if int(l[1]) == i and src_st.real_strides(True)[gd+ax] != 0: return None # checks the order of locals
           for ax,u in enumerate(tc.get_upcast_axes()):
-            if int(u[1]) == i and src_st.real_strides(True)[fu+tc_reduce+ax] != 0: return None
-          # check if the correct dimensions are localized and upcasted
+            if int(u[1]) == i and src_st.real_strides(True)[fu+tc_reduce+ax] != 0: return None # checks the order of upcast
 
           if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
         tc_reduce_axes = tuple(fu + ax for ax, _ in tc.get_reduce_axes())
