@@ -8,26 +8,27 @@ function intersectRect(r1, r2) {
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
 
-const allWorkers = [];
-window.renderGraph = function(graph, additions, name) {
-  while (allWorkers.length) {
-    const { worker, timeout } = allWorkers.pop();
-    worker.terminate();
-    clearTimeout(timeout);
-  }
-
+let [workerUrl, worker, timeout] = [null, null, null];
+window.renderGraph = async function(graph, additions, name) {
   if (name === "View Memory Graph") {
     return renderMemoryGraph(graph);
   }
   d3.select("#bars").html("");
 
   // ** start calculating the new layout (non-blocking)
-  worker = new Worker("/lib/worker.js");
+  if (worker == null) {
+    const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/lib/worker.js"].map(u => fetch(u)));
+    workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
+    worker = new Worker(workerUrl);
+  } else {
+    worker.terminate();
+    worker = new Worker(workerUrl);
+  }
+  if (timeout != null) clearTimeout(timeout);
   const progressMessage = document.querySelector(".progress-message");
-  const timeout = setTimeout(() => {
+  timeout = setTimeout(() => {
     progressMessage.style.display = "block";
   }, 2000);
-  allWorkers.push({worker, timeout});
   worker.postMessage({graph, additions});
 
   worker.onmessage = (e) => {
@@ -58,9 +59,6 @@ window.renderGraph = function(graph, additions, name) {
       points.push(intersectRect(g.node(e.w), points[points.length-1]));
       return line(points);
     }).attr("marker-end", "url(#arrowhead)");
-    // +arrow heads
-    d3.select("#render").append("defs").append("marker").attr("id", "arrowhead").attr("viewBox", "0 -5 10 10").attr("refX", 10).attr("refY", 0)
-      .attr("markerWidth", 6).attr("markerHeight", 6).attr("orient", "auto").append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", "#4a4b57");
   };
 }
 

@@ -38,6 +38,10 @@ def helper_alloc_rawbuffer(device, fill=False):
       rawbuf.copyin(Tensor(data).realize().lazydata.base.realized.as_buffer())
   return rawbuf
 
+def helper_create_offset_rawbuffer(base, offset=0):
+  x = Buffer(base.device, base.size-offset, base.dtype, base=base, offset=offset)
+  return x.ensure_allocated()
+
 def helper_run_jit(jis, bufs, out_buffers):
   for rawbuf in out_buffers:
     mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
@@ -225,6 +229,19 @@ class TestGraph(unittest.TestCase):
       [helper_copy_op(d2, b0[1], b2[0]), helper_copy_op(d3, b0[2], b3[0])],
       [helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
        helper_exec_op(d0, b0[5], [b0[0], b0[2]])],
+    ]
+
+    helper_test_graphs(Device[d0].graph, graphs)
+
+  def test_graph_offset_bufs(self):
+    d0 = Device.DEFAULT
+    if not hasattr(Device[d0].allocator, "_offset"): self.skipTest("device does not support _offset")
+
+    b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(1)]
+    b0 += [helper_create_offset_rawbuffer(b0[0]), helper_create_offset_rawbuffer(b0[0])]
+
+    graphs = [
+      [helper_copy_op(d0, b0[0], b0[2]), helper_exec_op(d0, b0[1], [b0[0], b0[2]])],
     ]
 
     helper_test_graphs(Device[d0].graph, graphs)

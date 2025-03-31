@@ -504,7 +504,7 @@ def load_checkpoint_enc(checkpoint_path, model: ContentVec, optimizer=None, skip
         obj, v = getattr(parent, "weight"), weight_norm(weight_v, weight_g, 0)
         weight_g, weight_v, parent, skip = None, None, None, False
       if not skip and obj.shape == v.shape:
-        if "feature_extractor" in key and (isinstance(parent, nn.GroupNorm) or isinstance(parent, nn.LayerNorm)):  # cast
+        if "feature_extractor" in key and (isinstance(parent, (nn.GroupNorm, nn.LayerNorm))):  # cast
           obj.assign(v.to(obj.device).float())
         else:
           obj.assign(v.to(obj.device))
