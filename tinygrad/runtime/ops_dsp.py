@@ -336,13 +336,11 @@ class DSPRenderer(ClangRenderer):
       'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
       'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
       'unsigned long long HAP_perf_get_time_us(void);', 'typedef unsigned long qurt_thread_t;', 'void qurt_thread_exit(int);',
-      'typedef struct qurt_thread_attr { unsigned long long _bSpace[128/sizeof(unsigned long long)]; }qurt_thread_attr_t;',
-      'void qurt_thread_attr_init (qurt_thread_attr_t *attr);', 'int qurt_thread_join(qurt_thread_t tid, int *status);',
+      'typedef struct _qurt_thread_attr { char name[16]; unsigned char tcb_partition; unsigned char affinity; unsigned short priority;',
+      'unsigned char asid; unsigned char bus_priority; unsigned short timetest_id; unsigned int stack_size; void *stack_addr; } qurt_thread_attr_t;',
+      'int qurt_thread_join(qurt_thread_t tid, int *status);', 'void* malloc(unsigned int);',
       'int qurt_thread_create (qurt_thread_t *thread_id, qurt_thread_attr_t *attr, void (*entrypoint) (void *), void *arg);',
-      'void qurt_thread_attr_set_stack_addr(qurt_thread_attr_t *attr, void* stack_addr);',
-      'void qurt_thread_attr_set_stack_size(qurt_thread_attr_t *attr, unsigned int stack_size);',
-      'void qurt_thread_attr_set_name(qurt_thread_attr_t *attr, const char *name);',
-      'void qurt_thread_attr_set_tcb_partition(qurt_thread_attr_t *attr, int partition);'] + super()._render_defines(uops)
+      ] + super()._render_defines(uops)
 
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str:
     msrc = ['typedef struct all_args {', *[f'int sz_or_val_{i}; int off{i}; void *buf_{i};' for i in range(len(bufs))], '} all_args_t;'
@@ -358,18 +356,15 @@ class DSPRenderer(ClangRenderer):
     msrc += [f'args.off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += [f'args.buf_{i} = HAP_mmap(0,args.sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+args.off{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
-    msrc += ["char stack[0x1000];"]
     msrc += ["qurt_thread_attr_t attr = { 0 };"]
-    msrc += ['qurt_thread_attr_set_stack_addr(&attr, (void*)stack);']
-    msrc += ['qurt_thread_attr_set_stack_size(&attr, 0x1000);']
-    msrc += ['qurt_thread_attr_set_name(&attr, "DSP_thread");']
-    msrc += ['qurt_thread_attr_set_tcb_partition(&attr, 1);']
-    msrc += ["qurt_thread_t thread_; int ret = qurt_thread_create(&thread_, &attr, (void (*)(void*))threader, (void*)&args);"]
-    # msrc += [f"{function_name}({', '.join([(f'args.buf_{i}' if isinstance(b[1][0], PtrDType) else f'args.sz_or_val_{i}') for i,b in enumerate(bufs)])}, 0);"]
+    msrc += ["attr.name[0] = 't';", "attr.priority = 255;", "attr.asid = 0;"]
+    msrc += ["attr.stack_size = 1024;", "attr.stack_addr = malloc(1024);"]
+    msrc += ["qurt_thread_t thread_; qurt_thread_create(&thread_, &attr, (void (*)(void*))threader, (void*)&args);"]
+    msrc += [f"{function_name}({', '.join([(f'args.buf_{i}' if isinstance(b[1][0], PtrDType) else f'args.sz_or_val_{i}') for i,b in enumerate(bufs)])}, 0);"]
     msrc += ['int status;', f"qurt_thread_join(thread_, &status);"]
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
     msrc += [f'HAP_munmap(args.buf_{i}, args.sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
-    msrc += ["return ret; }"]
+    msrc += ["return 0; }"]
     return '\n'.join(msrc)
 
 def rpc_sc(method=0, ins=0, outs=0, fds=0): return (method << 24) | (ins << 16) | (outs << 8) | fds
