@@ -133,7 +133,13 @@ for i in [
 ]:
   torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_backward, f=getattr(aten, i)))
 
+@torch.library.impl("aten::_linalg_eigh", "privateuseone")
+def _linalg_eigh(A, UPLO="L", compute_v=True): return tuple(t.to("tiny") for t in aten._linalg_eigh(A.cpu(), UPLO, compute_v))
+
 # *** end bad functions on CPU ***
+
+@torch.library.impl("aten::equal", "privateuseone")
+def equal(self, other): return (st:=unwrap(self)).shape==(ot:=unwrap(other)).shape and st.eq(ot).all().item()
 
 @torch.library.impl("aten::zero_", "privateuseone")
 @inplace_fn("x")
@@ -159,6 +165,20 @@ def cached_to_movement_ops(shape, st) -> list:
   mops = to_movement_ops(st)
   if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
   return mops
+
+@torch.library.impl("aten::unfold", "privateuseone")
+def unfold(self, d, size, step):
+  self = unwrap(self)
+
+  if d < 0: d += self.ndim
+  assert 0 <= d < self.ndim
+  assert size <= self.shape[d]
+
+  idx = [slice(None)] * self.ndim
+  idx[d] = Tensor.arange(size).unsqueeze(0) + Tensor.arange(0, self.shape[d]-size+step, step).unsqueeze(-1)
+  ret = self[idx].permute(list(range(d+1)) + list(range(d+2, self.ndim+1)) + [d+1])
+
+  return wrap(ret)
 
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
@@ -488,7 +508,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
     self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype))),
   "aten.random_.from": inplace_fn("self")(lambda self, from_, to:
     self.assign(Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype))),
-  "aten.uniform_": inplace_fn("self")(lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high))),
+  "aten.uniform_": inplace_fn("self")(lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high, dtype=self.dtype))),
   "aten.normal_": inplace_fn("self")(lambda self, mean=0, std=1: self.assign(Tensor.normal(*self.shape, mean=mean, std=std))),
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,

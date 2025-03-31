@@ -3,4 +3,5 @@ imagenet_bak
 mnist
 open-images-v6TEST
 cifar-10-batches-py
-cifar-data.pt
+cifar-data-tiny.pt
+cifar-data-torch.pt

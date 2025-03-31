@@ -1,4 +1,5 @@
-import tinygrad.frontend.torch
+from tinygrad import getenv
+if getenv("TINY_BACKEND"): import tinygrad.frontend.torch
 
 
 # Note: The one change we need to make if we're in Colab is to uncomment this below block.
@@ -77,9 +78,8 @@ hyp = {
             'every_n_steps': 5,
         },
         'train_epochs': 12.1,
-        # 'device': 'cuda',
-        'device': 'tiny',
-        'data_location': 'extra/datasets/cifar-data.pt',
+        'device': 'tiny' if getenv("TINY_BACKEND") else 'cuda' if torch.cuda.is_available() else 'cpu',
+        'data_location': f'extra/datasets/cifar-data{"-tiny" if getenv("TINY_BACKEND") else "-torch"}.pt',
     }
 }
 
@@ -411,7 +411,7 @@ def make_random_square_masks(inputs, mask_size):
 
 def batch_cutmix(inputs, targets, patch_size):
     with torch.no_grad():
-        batch_permuted = torch.randperm(inputs.shape[0], device='cuda')
+        batch_permuted = torch.randperm(inputs.shape[0], device=hyp['misc']['device'])
         cutmix_batch_mask = make_random_square_masks(inputs, patch_size)
         if cutmix_batch_mask is None:
             return inputs, targets # if the mask is None, then that's because the patch size was set to 0 and we will not be using cutmix today.
@@ -427,6 +427,7 @@ def batch_crop(inputs, crop_size):
     with torch.no_grad():
         crop_mask_batch = make_random_square_masks(inputs, crop_size)
         cropped_batch = torch.masked_select(inputs, crop_mask_batch).view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
+        # breakpoint()
         return cropped_batch
 
 def batch_flip_lr(batch_images, flip_chance=.5):
@@ -461,7 +462,7 @@ class NetworkEMA(nn.Module):
 @torch.no_grad()
 def get_batches(data_dict, key, batchsize, epoch_fraction=1., cutmix_size=None):
     num_epoch_examples = len(data_dict[key]['images'])
-    shuffled = torch.randperm(num_epoch_examples, device='cuda')
+    shuffled = torch.randperm(num_epoch_examples, device=hyp['misc']['device'])
     if epoch_fraction < 1:
         shuffled = shuffled[:batchsize * round(epoch_fraction * shuffled.shape[0]/batchsize)] # TODO: Might be slightly inaccurate, let's fix this later... :) :D :confetti: :fireworks:
         num_epoch_examples = shuffled.shape[0]
@@ -471,6 +472,7 @@ def get_batches(data_dict, key, batchsize, epoch_fraction=1., cutmix_size=None):
     ## batches (which skip the last batch if it's not a full batch), but everything seems to be (and hopefully is! :D) properly shuffled. :)
     if key == 'train':
         images = batch_crop(data_dict[key]['images'], crop_size) # TODO: hardcoded image size for now?
+        # breakpoint()
         images = batch_flip_lr(images)
         images, targets = batch_cutmix(images, data_dict[key]['targets'], patch_size=cutmix_size)
     else:
@@ -564,9 +566,10 @@ def main():
     lr_sched      = torch.optim.lr_scheduler.OneCycleLR(opt,  max_lr=non_bias_params['lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps, anneal_strategy='linear', cycle_momentum=False)
     lr_sched_bias = torch.optim.lr_scheduler.OneCycleLR(opt_bias, max_lr=bias_params['lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps, anneal_strategy='linear', cycle_momentum=False)
 
-    ## For accurately timing GPU code
-    starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-    torch.cuda.synchronize() ## clean up any pre-net setup operations
+    if hyp['misc']['device'] == 'cuda':
+        ## For accurately timing GPU code
+        starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+        torch.cuda.synchronize() ## clean up any pre-net setup operations
 
 
     if True: ## Sometimes we need a conditional/for loop here, this is placed to save the trouble of needing to indent
@@ -574,8 +577,9 @@ def main():
           #################
           # Training Mode #
           #################
-          torch.cuda.synchronize()
-          starter.record()
+          if hyp['misc']['device'] == 'cuda':
+              torch.cuda.synchronize()
+              starter.record()
           net.train()
 
           loss_train = None
@@ -621,9 +625,10 @@ def main():
                   # We warm up our ema's decay/momentum value over training exponentially according to the hyp config dictionary (this lets us move fast, then average strongly at the end).
                   net_ema.update(net, decay=projected_ema_decay_val*(current_steps/total_train_steps)**hyp['misc']['ema']['decay_pow'])
 
-          ender.record()
-          torch.cuda.synchronize()
-          total_time_seconds += 1e-3 * starter.elapsed_time(ender)
+          if hyp['misc']['device'] == 'cuda':
+              ender.record()
+              torch.cuda.synchronize()
+              total_time_seconds += 1e-3 * starter.elapsed_time(ender)
 
           ####################
           # Evaluation  Mode #
