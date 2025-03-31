@@ -202,7 +202,8 @@ def prefetch_l2(ld:UOp, idx:UOp):
     nidx = idx.src[1]
     const = 0
     if nidx.op is Ops.ADD and nidx.src[1].op is Ops.CONST:
-      const = nidx.src[1].arg
+      # NOTE: this causes access alignment issues
+      #const = nidx.src[1].arg
       nidx = nidx.src[0]
     zero_ranges = {r:r.const_like(0) for r in ranges[:-1]}
     nlen_uop = (nidx.substitute({ranges[-1]: ranges[-1].src[1], **zero_ranges}) -
@@ -215,7 +216,7 @@ def prefetch_l2(ld:UOp, idx:UOp):
                arg="__builtin_HEXAGON_Y4_l2fetch({0}, 0x808000|{1});")
     else:
       fetch_lines = 8
-      if nlen_uop.arg <= 8192: fetch_lines = (nlen_uop.arg+127)//128
+      if nlen_uop.arg <= 8192: fetch_lines = ((nlen_uop.arg+127)//128)*2+1
       fetch_lines = max(fetch_lines, 8)
 
       # fetch up to 8192
