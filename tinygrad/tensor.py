@@ -1562,6 +1562,28 @@ class Tensor(SimpleMathTrait):
     idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
     return x[idxs]
 
+  def nonzero(self) -> Tensor:
+    """
+    Returns a tensor of the indices of the non-zero elements of `self`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.nonzero().numpy())
+    ```
+    """
+    if self.numel() == 0: return Tensor([], dtype=dtypes.int64).reshape(0, self.ndim)
+    if self.ndim == 0: return Tensor([], dtype=dtypes.int64).reshape(1, 0)
+    mask = (self != 0).flatten()
+    if not mask.any().item(): return Tensor([], dtype=dtypes.int64).reshape(0, self.ndim)
+    nonzero_flat = Tensor.arange(self.numel(), dtype=dtypes.int64).masked_select(mask)
+    coords = []
+    for dim in reversed(self.shape):
+      coords.append(nonzero_flat % dim)
+      nonzero_flat //= dim
+    return Tensor.stack(*reversed(coords), dim=1)
   # ***** reduce ops *****
 
   def _reduce(self, op:Ops, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
