@@ -115,10 +115,6 @@ def cummax(self, dim):
   cummax, indices = aten.cummax(self.cpu(), dim)
   return (cummax.tiny(), indices.tiny())
 
-@torch.library.impl("aten::nonzero", "privateuseone")
-# TODO: move to tinygrad
-def nonzero(self): return aten.nonzero(self.cpu()).tiny()
-
 def upsample_backward(grad_out, output_size, input_size, *args, f=None): return f(grad_out.cpu(), output_size, input_size, *args).tiny()
 
 for i in [
@@ -514,6 +510,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
     Tensor.linspace(start, stop, steps, **({"dtype": _from_torch_dtype(dtype)} if dtype is not None else {})),
   "aten.topk": Tensor.topk,
+  "aten.nonzero": Tensor.nonzero,
   "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value),
   "aten.logsumexp": lambda self, axis, keepdim=False: self.logsumexp(axis[0], keepdim=keepdim),
   "aten.roll": Tensor.roll,

@@ -1562,6 +1562,35 @@ class Tensor(SimpleMathTrait):
     idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
     return x[idxs]
 
+  # def nonzero(self, as_tuple=False) -> Tensor|tuple[Tensor, ...]:
+  #   if self.numel() == 0: return Tensor([], device=self.device, dtype=dtypes.int64).reshape(0,)
+  #   if self.ndim == 0: return Tensor([], device=self.device, dtype=dtypes.int64).reshape(1, 0)
+    
+  #   flat_t = self.reshape(-1)
+  #   m = flat_t.cast(dtype=dtypes.int64) if flat_t.dtype == dtypes.bool else (flat_t != 0).cast(dtype=dtypes.int64)
+  #   cumsum = m.cumsum(0)
+  #   nz = cumsum[-1].item()
+    
+  #   if nz == 0: return Tensor([], device=self.device, dtype=dtypes.int64).reshape(0, self.ndim)
+    
+  #   idxs = (cumsum.unsqueeze(1) - Tensor.arange(1, nz + 1, device=self.device, dtype=dtypes.int64).unsqueeze(0)).abs().argmin(axis=0)\
+  #     .cast(dtype=dtypes.int64)
+  #   coords, _ = functools.reduce(lambda acc, s: (acc[0] + [acc[1] % s], acc[1] // s), self.shape[::-1], ([], idxs))
+  #   coords.reverse() 
+  #   return tuple(coords) if as_tuple else Tensor.stack(*coords, dim=-1)
+
+  def nonzero(self, as_tuple=False) -> Tensor|tuple[Tensor, ...]:
+    if self.numel() == 0: return Tensor([], device=self.device, dtype=dtypes.int64).reshape(0, self.ndim)
+    if self.ndim == 0: return Tensor([], device=self.device, dtype=dtypes.int64).reshape(1, 0)
+    mask = (self != 0).flatten()
+    if not mask.any().item(): return Tensor([], device=self.device, dtype=dtypes.int64).reshape(0, self.ndim)
+    nonzero_flat = Tensor.arange(self.numel(), device=self.device, dtype=dtypes.int64).masked_select(mask)
+    coords = []
+    for dim in reversed(self.shape):
+      coords.append(nonzero_flat % dim)
+      nonzero_flat = nonzero_flat // dim
+    return tuple(reversed(coords)) if as_tuple else Tensor.stack(*reversed(coords), dim=1)
+  
   # ***** reduce ops *****
 
   def _reduce(self, op:Ops, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
