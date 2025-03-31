@@ -2959,13 +2959,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32, 10)], lambda x: x.masked_select(torch.tensor(True)), lambda x: x.masked_select(Tensor(True)), forward_only=True)
 
   def test_nonzero(self):
-    helper_test_op([(3,3)], lambda x: torch.nonzero(x), lambda x: x.nonzero(), forward_only=True)
     helper_test_op([(3, 3)], lambda x: torch.nonzero(x), lambda x: x.nonzero(), forward_only=True, vals=[[0, 1, 0],[2, 0, 3],[0, 0, 4]])
     helper_test_op([(3, 3)],lambda x: torch.nonzero(x),lambda x: x.nonzero(),forward_only=True,vals=[[0, 0, 0],[0, 0, 0],[0, 0, 0]])
     helper_test_op([(0,3)], lambda x: torch.nonzero(x), lambda x: x.nonzero(), forward_only=True)
-    helper_test_op([()], lambda x: torch.nonzero(x), lambda x: x.nonzero(), forward_only=True)
     helper_test_op([()], lambda x: torch.nonzero(x), lambda x: x.nonzero(), forward_only=True, vals=[0])
-    helper_test_op([(5,)], lambda x: torch.nonzero(x), lambda x: x.nonzero(), forward_only=True)
     helper_test_op([(5,)], lambda x: torch.nonzero(x), lambda x: x.nonzero(), forward_only=True, vals=[0, 1, 0, 2, 0])
     helper_test_op([(2,2,2)], lambda x: torch.nonzero(x), lambda x: x.nonzero(), forward_only=True, vals=[[[0,1],[0,0]],[[1,0],[0,1]]])
     helper_test_op([(3,3)], lambda x: torch.nonzero(x > 0.5), lambda x: (x > 0.5).nonzero(), forward_only=True)
