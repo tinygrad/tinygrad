@@ -54,7 +54,7 @@ class TestTorchBackend(unittest.TestCase):
     a = torch.Tensor([1,2,3,4]).to(device)
     np.testing.assert_equal(a[:3].cpu().numpy(), [1,2,3])
     np.testing.assert_equal(a[1:].cpu().numpy(), [2,3,4])
-  
+
   def test_as_strided(self):
     a = torch.arange(70, device=device).reshape(1,1,10,7)
     a = a.as_strided((1,1,10,5), (0,0,7,1), storage_offset=0)
