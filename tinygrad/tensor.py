@@ -984,7 +984,7 @@ class Tensor(SimpleMathTrait):
     idx = storage_offset + sum(Tensor.arange(s).reshape([s if i==j else 1 for i in range(len(size))])*st
                                for j,(s,st) in enumerate(zip(size,stride)))
     return self.flatten().gather(0, idx.reshape(-1)).reshape(size)
-  
+
   def flip(self, axis, *args) -> Tensor:
     """
     Returns a tensor that reverses the order of the original tensor along given `axis`.
