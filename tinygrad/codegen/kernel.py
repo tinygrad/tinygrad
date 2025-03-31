@@ -594,48 +594,6 @@ class Kernel:
           return tuple(i for i in range(start, stop) if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
         axes = reduced_axes(self.first_reduce + self.group_for_reduces, self.shape_len)
         grouped_axes = reduced_axes(self.first_reduce, self.first_reduce + self.group_for_reduces)
-
-        # if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
-        #   wd, tcd = self.global_dims, self.first_upcast
-        #   def get_upcast_axes(buf): # upcast along non-zero dimensions of (tc_reduce + tc_upcast)
-        #     upcast_axes = int(math.log2(tc.elements_per_thread[buf]))
-        #     return tuple((tcd + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
-        #   def get_tc_swizzle_st(shape, local_perm, upcast_perm):
-        #     offset = (tcd - (wd + len(local_perm)))
-        #     permaxis = list(range(wd)) \
-        #       + [wd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(wd + len(local_perm), tcd)) \
-        #       + [wd + x + (offset if x >= len(local_perm) else 0) for x in upcast_perm] + list(range(tcd + len(upcast_perm), len(shape)))
-        #     return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
-
-        #   srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
-        #   for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
-        #     src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
-        #     if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
-
-        #     if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
-        #       local_shape = tuple(1 if st == 0 or i < wd or (i >= self.first_reduce and i < tcd) else src_st.shape[i] \
-        #                           for i,st in enumerate(src_st.real_strides()))
-        #       st = store_st = ShapeTracker.from_shape(local_shape)
-        #       local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), f"temp{i}")
-        #       if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
-        #       local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
-        #       srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
-
-        #   tc_reduce_axes = tuple(tcd + ax for ax, _ in tc.get_reduce_axes())
-        #   if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
-        #     tc_upcast_axes = (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
-        #     wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
-        #     wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
-        #       UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
-        #       UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
-        #       UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
-        #     tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
-
-        #   else: # for TC=3 MUL/SUM instead of WMMA
-        #     tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
-
-        #   return ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
-
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
