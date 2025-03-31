@@ -56,7 +56,6 @@ view_ops = {
   "aten.t": Tensor.transpose,
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.unsqueeze": Tensor.unsqueeze,
-  "aten.repeat": Tensor.repeat,
   "aten.detach": Tensor.detach,
 }
 
@@ -64,7 +63,7 @@ for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "p
 
 # in place operations with views
 def realize_with_views(self: Tensor, views: Tensor):
-  if not self.lazydata.st.contiguous: raise ValueError("base of view must be contiguous") # TODO: support?
+  if not self.lazydata.st.contiguous: self.replace(self.contiguous())
   self.replace(self.clone().realize())
   for v in views:
     ret = self
@@ -108,10 +107,6 @@ def index_put(self, indices, values, accumulate=False):
 
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
-
-@torch.library.impl("aten::cumprod", "privateuseone")
-# TODO: move to tinygrad
-def cumprod(self, dim, dtype=None): return aten.cumprod(self.cpu(), dim, dtype=dtype).tiny()
 
 @torch.library.impl("aten::cummax", "privateuseone")
 def cummax(self, dim):
@@ -163,20 +158,26 @@ def cached_to_movement_ops(shape, st) -> list:
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 @torch.library.impl("aten::as_strided", "privateuseone")
-@wrap_view_op
-def as_strided(tensor:Tensor, size, stride, storage_offset=None):
-  # TODO: this is heavyweight
-  st = ShapeTracker((View.create(tuple(tensor.shape)), View.create(tuple(size), tuple(stride), 0 if storage_offset is None else storage_offset)))
-  ret = tensor
-  if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
-  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
-  for mo in cached_to_movement_ops(tuple(tensor.shape), st): ret = apply_mop(ret, mo)
-  return ret
+def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
+  storage_offset = storage_offset or tensor.storage_offset()
+  @wrap_view_op
+  def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
+    # multiple as_strided do not compound
+    base = canonical_base(tensor)
+    # TODO: this is heavyweight
+    st = ShapeTracker(base.lazydata.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
+    ret = base
+    if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
+    if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
+    for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
+    return ret
+  return _as_strided(tensor, size, stride, storage_offset)
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
   if TORCH_DEBUG: print(f"empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
-  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype), device=_from_torch_device(device))
+  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype), device=_from_torch_device(device)).contiguous()
+  # TODO: should return with requested strides
   return wrap(ret)
 
 @torch.library.impl("aten::empty.memory_format", "privateuseone")
@@ -275,14 +276,18 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
-    unwrap(dest).assign(unwrap(src).cast(cast_dtype).to(to_device))
-    if realize: Tensor.realize(unwrap(dest))
+    src,dest = unwrap(src),unwrap(dest)
+    # TODO we need to properly match dest shape and strides, not blindly assign
+    if dest.lazydata.st.contiguous or dest.lazydata.is_realized: src = src.contiguous() # this only solves some cases
+    dest.assign(src.cast(cast_dtype).to(to_device))
+    if realize: Tensor.realize(dest)
   elif src.is_tiny and dest.is_cpu:
     # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
     dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
   elif src.is_cpu and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
+    # TODO we need to properly match dest shape and strides, not blindly assign
     unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
     if realize: Tensor.realize(unwrap(dest))
   else:
@@ -388,7 +393,7 @@ simple_tensor_methods = [
   # modify
   "tril", "triu",
   # reduce
-  "all", "any", "argmax", "argmin", "cumsum",
+  "all", "any", "argmax", "argmin", "cumsum", "cumprod",
   # complex
   "avg_pool2d", "linspace"]
 
@@ -482,6 +487,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.scatter.value_reduce": Tensor.scatter,
   "aten.gather": lambda self, dim, index: self.gather(dim, index.cast(dtypes.int)),
   "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
+  "aten.repeat": lambda x,*repeats: Tensor.repeat(x,*repeats).contiguous(), # not a view
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
   "aten.random_": inplace_fn("self")(lambda self:

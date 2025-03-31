@@ -826,7 +826,7 @@ def train_bert():
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*BS, "step_num": i})
       if getenv("RESET_STEP", 0): train_step_bert.reset()
-      else: train_step_bert.captured.free_intermediates()
+      elif train_step_bert.captured is not None: train_step_bert.captured.free_intermediates()
       eval_lm_losses = []
       eval_clsf_losses = []
       eval_lm_accs = []
@@ -853,14 +853,14 @@ def train_bert():
         et = time.time()
         eval_times.append(et - st)
 
-        if BENCHMARK and j == BENCHMARK:
+        if BENCHMARK and (j+1) == min(BENCHMARK, max_eval_steps):
           # assume INITMLPERF has BENCHMARK set
           if MLLOGGER and INITMLPERF:
             MLLOGGER.event(key=mllog_constants.INIT_STOP, value=None)
           return
 
       if getenv("RESET_STEP", 0): eval_step_bert.reset()
-      else: eval_step_bert.captured.free_intermediates()
+      elif eval_step_bert.captured is not None: eval_step_bert.captured.free_intermediates()
       del eval_data
       avg_lm_loss = sum(eval_lm_losses) / len(eval_lm_losses)
       avg_clsf_loss = sum(eval_clsf_losses) / len(eval_clsf_losses)
@@ -899,6 +899,9 @@ def train_bert():
           MLLOGGER.end(key=mllog_constants.RUN_STOP, metadata=dict(status=mllog_constants.SUCCESS))
         # stop once hitting the target
         break
+
+    # should not happen, BENCHMARK not properly terminated
+    if BENCHMARK: assert i < BENCHMARK, i
 
     if getenv("CKPT") and i % save_ckpt_freq == 0:
       if MLLOGGER and RUNMLPERF:
