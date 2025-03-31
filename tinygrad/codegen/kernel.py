@@ -255,11 +255,10 @@ class Kernel:
         applied_tc_opts = []
         try:
           try:
-            print(self.colored_shape())
-            for axis, dim in enumerate(tc.dims): # attempt to pad the tensor core axes, avoid excessive padding
+            for axis, dim in enumerate(tc.dims): # pad the tensor core axes
               if axis == 2: axis = self.first_reduce
-              print(f"{axis}, {self.full_unupcasted_shape=} {self.reduceop}")
-              if dim > self.full_shape[axis]: return self
+              if dim > self.full_shape[axis]: return self # avoid excessive padding
+              if self.full_shape[axis] % dim == 0: continue # dim needs no pad
               self.apply_opt((pad_opt := Opt(OptOps.PADTO, axis, dim)), append_opt=False) # PADTO might fail
               applied_tc_opts.append(pad_opt)
           except KernelOptError: pass
