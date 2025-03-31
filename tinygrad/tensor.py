@@ -972,18 +972,19 @@ class Tensor(SimpleMathTrait):
     return self._apply_uop(UOp.permute, arg=order_arg)
 
   def as_strided(self, size, stride, storage_offset=0) -> Tensor:
-    """
-    Creates a view of this tensor with the specified size, stride, and storage offset.
-    """
+    """Creates a view with custom stride/offset"""
     storage_size = self.numel()*self.dtype.itemsize
-    needed = storage_offset + sum((s-1)*st for s, st in zip(size, stride)) if size else 0
+    needed = storage_offset + sum((s-1)*st for s,st in zip(size,stride)) if size else 0
     if needed and (needed+1)*self.dtype.itemsize > storage_size:
-      raise RuntimeError(f"setStorage: sizes {size}, strides {stride}, offset {storage_offset} require {(needed+1)*self.dtype.itemsize} but got {storage_size}")
-    if any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
+      req = (needed+1)*self.dtype.itemsize  # calc required bytes
+      raise RuntimeError(f"setStorage: sizes {size}, strides {stride}, offset {storage_offset} require {req} but got {storage_size}")
+    if any(s < 0 for s in stride):
+      raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
     if self.numel() == 1 or prod(size) == 1: return self.flatten()[storage_offset].reshape(size)
-    idx = storage_offset + sum(Tensor.arange(s).reshape([s if i==j else 1 for i in range(len(size))]) * st for j, (s, st) in enumerate(zip(size, stride)))
+    idx = storage_offset + sum(Tensor.arange(s).reshape([s if i==j else 1 for i in range(len(size))])*st
+                               for j,(s,st) in enumerate(zip(size,stride)))
     return self.flatten().gather(0, idx.reshape(-1)).reshape(size)
-
+  
   def flip(self, axis, *args) -> Tensor:
     """
     Returns a tensor that reverses the order of the original tensor along given `axis`.
