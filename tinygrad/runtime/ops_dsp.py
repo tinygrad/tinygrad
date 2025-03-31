@@ -117,7 +117,6 @@ conv_pm = PatternMatcher([
   (UPat(name="acc") + UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
 ])
 
-#dsp_pm = conv_pm+PatternMatcher([
 dsp_pm = PatternMatcher([
   # convert load char32 to load char128
   (UPat(Ops.LOAD, (dtypes.uchar.vec(96), dtypes.uchar.vec(64), dtypes.uchar.vec(32)), src=(UPat.var("buf").cast(),), name="load"),
@@ -305,19 +304,10 @@ pretty_render = PatternMatcher([
    lambda v: UOp(Ops.VECTORIZE, v.dtype, src=tuple(UOp(Ops.CUSTOMI, x.dtype, src=(UOp.const(dtypes.int, x.arg),), arg="{0}") for x in v.src))),
 ])
 
-vmemu_support = """
-__attribute__ ((always_inline)) unsigned_char128 vmemu(unsigned_char128 *addr) {
-  unsigned_char128 out;
-  __asm__ __volatile__( "%0 = vmem(%1);" : "=v" (out) : "r"(addr) : "memory");
-  return out;
-}
-"""
-
 class DSPRenderer(ClangRenderer):
   device = "DSP"
   supports_float4 = True
   buffer_suffix = " restrict __attribute__((align_value(128)))"
-  #kernel_prefix = vmemu_support + "__attribute__((noinline)) "
   kernel_prefix = "__attribute__((noinline)) "
   pre_matcher = dsp_pm
   extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher+pretty_render

@@ -725,12 +725,8 @@ def get_onnx_ops():
       ret = _clamp_cast((x / y_scale + 0.4999999 + y_zero_point).int(), out_dtype)
     else:
       ret = _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype)
+
     # you need both NHWC=1 DONT_GROUP_REDUCES=1 for this to work
-
-    #if ret.shape[0] == 1 and ret.shape[2:] == (14,14):
-    #  ret = ret.pad(((0,0), (0,0), (0,0), (0,2)))
-    #  print("padding", ret.shape)
-
     if getenv("NHWC") and len(ret.shape) == 4:
       in_chans = ret.shape[1]
       if ret.shape[1] == 3 or in_chans%32 != 0:

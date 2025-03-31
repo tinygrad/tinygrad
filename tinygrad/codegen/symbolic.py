@@ -267,10 +267,7 @@ symbolic_flat = symbolic+PatternMatcher([
   # ** combine terms (opinionated) **
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
-  # TODO: this is an issue with DSP mul const (or is it still with the reduce lowerer change?)
-  ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c if x.dtype.count == 1 else None),
-  # factorize
-  #((UPat.var("x")*UPat.cvar("c1") + UPat.var("y")*UPat.cvar("c2")), lambda x,c1,y,c2: (x*(c2//c1) + y)*c1 if c2.arg%c1.arg == 0 else None),
+  ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
 ])
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
