@@ -135,8 +135,8 @@ def realize_before_view(ctx:GrouperContext, view:UOp, tr:UOp) -> None:
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x, None) for x in s.src if x.op not in DONT_PUSH_VIEWS)),
-  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
-  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
+  # always realize ASSIGN/CONTIGUOUS/GroupOp.Meta
+  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}, name="tr"), realize),
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, name="view", src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"),)), realize_before_view),
   # realize before COPY
@@ -331,8 +331,8 @@ def unbind_variable(ctx:tuple[dict[Variable, int], tuple[UOp, ...]], var:UOp, va
 add_buffer_ops = PatternMatcher([
   # LOAD
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x:UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx[1].index(x)), x.st.to_uop(), dtype=x.dtype)),
-  # STORE (except for COPY/BUFFER_VIEW)
-  (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
+  # STORE (except for meta ops)
+  (UPat(Ops.SINK, src=(UPat(GroupOp.Meta, name="x"),)), lambda x:x),
   # partial assign can store to a non-contiguous ShapeTracker
   (UPat(Ops.SINK, src=(UPat(Ops.ASSIGN, name="x"),)),
    lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.src[0].base.size), (), 0), x.src[0].st.to_uop(), x.src[1]).sink()),
