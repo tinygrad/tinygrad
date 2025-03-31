@@ -1,7 +1,8 @@
 # this converts a lowerer program into a vectorized program
 
 import functools, itertools, operator
-from tinygrad.helpers import AMX, dedup, flatten, all_same, prod
+from tinygrad.helpers import AMX, dedup, flatten, all_same, prod, getenv
+from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, graph_rewrite
 from tinygrad.codegen.symbolic import sym
 
@@ -123,9 +124,24 @@ pm_store_ignore = PatternMatcher([
    lambda store,mask: store.replace(src=(store.src[0], UOp(Ops.IGNORE, src=(store.src[1], mask)))) if store.src[1].op is not Ops.IGNORE else None),
 ])
 
+# seen ((ridx0<13)&(((UNROLL((0, 1, 2, 3), ((4, 4),))+(ridx0*4))%52)<49))
+# ignore ((ridx0<13)&((((UNROLL((0, 1, 2, 3), ((4, 4),))*32)+(UNROLL((0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31), ((3, 32),))+(ridx0*128)))%1664)<1568))
+
+def debug_ignore(x, y):
+  if getenv("DEBUG_IGNORE"):
+    print("****")
+    print("seen  ", x.render())
+    print("ignore", y.render())
+  # this is totally wrong
+  return x.const_like(True)
+
 pm_move_ignore = PatternMatcher([
   # IGNORE on SELF is nothing
   (UPat(Ops.IGNORE, src=(UPat(name="x"), UPat(name="x"))), lambda x: x.const_like(True)),
+  # IGNORE debug
+  (UPat(Ops.IGNORE, src=(UPat(dtype=dtypes.bool, name="x"), UPat(dtype=dtypes.bool, name="y"))), debug_ignore),
+  # IGNORE with AND on SELF is nothing (is this right?)
+  #(UPat(Ops.IGNORE, src=(UPat(name="x"), UPat(name="x") & UPat())), lambda x: x.const_like(True)),
   # IGNORE on a CONST is nothing
   (UPat(Ops.IGNORE, src=(UPat((Ops.CONST, Ops.VCONST), name="c"), UPat())), lambda c: c),
   # move the IGNOREs
