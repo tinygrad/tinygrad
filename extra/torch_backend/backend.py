@@ -101,10 +101,6 @@ def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   ret = aten._index_put_impl_(self.cpu(), [x.cpu() if isinstance(x, torch.Tensor) else None for x in indices], values.cpu(), accumulate, unsafe).to(self.device)
   return wrap(unwrap(self).assign(unwrap(ret)))
 
-@torch.library.impl("aten::index.Tensor", "privateuseone")
-def index_tensor(x, y):
-  return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).to(x.device)
-
 @torch.library.impl("aten::index_put", "privateuseone")
 def index_put(self, indices, values, accumulate=False):
   return aten.index_put(self.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in indices], values.cpu(), accumulate).tiny()
@@ -143,6 +139,9 @@ def _linalg_eigh(A, UPLO="L", compute_v=True): return tuple(t.to("tiny") for t i
 
 @torch.library.impl("aten::equal", "privateuseone")
 def equal(self, other): return (st:=unwrap(self)).shape==(ot:=unwrap(other)).shape and st.eq(ot).all().item()
+
+@torch.library.impl("aten::index.Tensor", "privateuseone")
+def index_tensor(x, y): return wrap(unwrap(x)._getitem([unwrap(z) if isinstance(z, torch.Tensor) else z for z in y]))
 
 @torch.library.impl("aten::zero_", "privateuseone")
 @inplace_fn("x")
@@ -492,6 +491,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.mean.dim": Tensor.mean,
   "aten.min": Tensor.min,
   "aten.max": Tensor.max,
+  "aten.amin": Tensor.min,
+  "aten.amax": Tensor.max,
   "aten.mm": Tensor.matmul,
   "aten.mv": Tensor.matmul,
   "aten.dot": Tensor.dot,
@@ -593,7 +594,7 @@ from torch.nn.modules import Module
 def backward_hook(model:Module, _grad_input, _grad_out):
   grads_to_realize = [unwrap(p.grad) for p in model.parameters() if p.grad is not None]
   if len(grads_to_realize): Tensor.realize(*grads_to_realize)
-def module_hook(module:Module, _name, _submodule): module.register_backward_hook(backward_hook)
+def module_hook(module:Module, _name, _submodule): module.register_full_backward_hook(backward_hook)
 torch.nn.modules.module.register_module_module_registration_hook(module_hook)
 
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
