@@ -392,9 +392,11 @@ class DSPRenderer(ClangRenderer):
     msrc += ["attr.stack_size = (64 << 10);", "attr.stack_addr = malloc(attr.stack_size);"]
     msrc += [""]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
-    msrc += ["qurt_thread_t thread_ = 0; qurt_thread_create(&thread_, &attr, (void (*)(void*))threader, (void*)&args);"]
+    if getenv("MULTICORE", 0) != 0:
+      msrc += ["qurt_thread_t thread_ = 0; qurt_thread_create(&thread_, &attr, (void (*)(void*))threader, (void*)&args);"]
     msrc += [f"{function_name}({', '.join([(f'args.buf_{i}' if isinstance(b[1][0], PtrDType) else f'args.sz_or_val_{i}') for i,b in enumerate(bufs)])}, 0, args.sync);"]
-    msrc += ['int status;', f"qurt_thread_join(thread_, &status);"]
+    if getenv("MULTICORE", 0) != 0:
+      msrc += ['int status;', f"qurt_thread_join(thread_, &status);"]
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
     msrc += [f'HAP_munmap(args.buf_{i}, args.sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ['free(attr.stack_addr);']

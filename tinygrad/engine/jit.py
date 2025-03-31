@@ -319,8 +319,8 @@ class TinyJit(Generic[ReturnType]):
       # jit exec
       assert self.captured is not None
       assert self.captured.expected_names == names, f"args mismatch in JIT: {self.captured.expected_names=} != {names}"
-      # assert self.captured.expected_st_vars_dtype_device == st_vars_dtype_device, \
-      #   f"args mismatch in JIT: {self.captured.expected_st_vars_dtype_device=} != {st_vars_dtype_device=}"
+      assert self.captured.expected_st_vars_dtype_device == st_vars_dtype_device, \
+        f"args mismatch in JIT: {self.captured.expected_st_vars_dtype_device=} != {st_vars_dtype_device=}"
       ret = self.captured(input_buffers, var_vals)
 
     self.cnt += 1

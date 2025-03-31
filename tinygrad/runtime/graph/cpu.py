@@ -1,6 +1,6 @@
 from typing import cast
 import itertools
-from tinygrad.helpers import dedup, DEBUG, to_function_name
+from tinygrad.helpers import dedup, DEBUG, to_function_name, getenv
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
@@ -28,7 +28,7 @@ class CPUGraph(GraphRunner):
     for i, ji in enumerate(jit_cache):
       args = [render_arg(buf) for buf in ji.bufs] + [x.expr for x in cast(CompiledRunner, ji.prg).p.vars]
       batched.append(f"  {to_function_name(cast(CompiledRunner, ji.prg).p.name)}({','.join(args)}, gl0, 0x0);")
-      batched.append(f"  qurt_barrier_wait(&(((qurt_barrier_t*)sync)[{i}]));")
+      if getenv("MULTICORE", 0) != 0: batched.append(f"  qurt_barrier_wait(&(((qurt_barrier_t*)sync)[{i}]));")
     batched.append("}")
 
     prep = [device.renderer._render(cast(CompiledRunner, ji.prg).p.uops) for i,ji in enumerate(jit_cache)]
@@ -38,7 +38,7 @@ class CPUGraph(GraphRunner):
     entry = device.renderer._render_entry("batched", targs, sync_cnt=len(jit_cache))
     code = defines + '\n' + '\n'.join([''.join(f) for f in funcs]) + '\n'.join(batched) + '\n' + entry
 
-    if DEBUG >= 4: print(code, flush=True)
+    if DEBUG >= 4: print(code)
     self.clprg = device.runtime("batched", device.compiler.compile_cached(code))
 
   def __call__(self, rawbufs: list[Buffer], var_vals: dict[Variable, int], wait=False):
