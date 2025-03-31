@@ -243,7 +243,7 @@ def slice_tensor(self, dim=0, start=None, end=None, step=1):
   return self[slices]
 
 @torch.library.impl("aten::slice_backward", "privateuseone")
-def slice_backward(grad_out, input_sizes, dim=0, start=None, end=None, step=1):
+def slice_backward(grad_out, input_sizes, dim, start, end, step):
   grad_input = Tensor.zeros(input_sizes).contiguous()
   slices = [slice(None)] * len(input_sizes)
   slices[dim] = slice(start, end, step)
