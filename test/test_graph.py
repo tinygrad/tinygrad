@@ -81,8 +81,8 @@ class TestGraph(unittest.TestCase):
     @TinyJit
     def f(a, b): return (a+b).realize(), (a-b).realize(), (a*b).realize()
     for _ in range(3):
-      a = Tensor(np.random.randn(10, 10))
-      b = Tensor(np.random.randn(10, 10))
+      a = Tensor(np.random.randn(10, 10).astype(np.int32))
+      b = Tensor(np.random.randn(10, 10).astype(np.int32))
       c, d, e = f(a, b)
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose(d.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
