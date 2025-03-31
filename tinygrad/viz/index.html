@@ -242,6 +242,7 @@
       link.textContent = `${loc[0].split("/").at(-1)}:${loc[1]}`+"\n\n";
     }
     ret.appendChild(code);
+    ret.addEventListener('click', () => navigator.clipboard.writeText(code.innerText));
     return ret;
   }
 
