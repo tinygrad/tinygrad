@@ -133,6 +133,8 @@ class ClangCompiler(Compiler):
 
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
+    from tinygrad.runtime.graph.cpu import CPUGraph
+
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",  "-mhvx=v65", "-mhvx-length=128b"]
     try:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
@@ -143,7 +145,6 @@ class DSPDevice(Compiled):
         self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
         self.link_ld.flush()
 
-      from tinygrad.runtime.graph.cpu import CPUGraph
       super().__init__(device, DSPAllocator(self), DSPRenderer(),
         ClangCompiler("compile_dsp", ["-shared"] + compiler_args + [f"-T{self.link_ld.name}"], 'llvm-objdump'), functools.partial(DSPProgram, self),
         functools.partial(CPUGraph, self))
@@ -154,7 +155,8 @@ class DSPDevice(Compiled):
       self.init_dsp()
       RPCListener(self).start()
     except FileNotFoundError:
-      super().__init__(device, MallocAllocator, MockDSPRenderer(), ClangCompiler(None, ["-static"] + compiler_args, 'llvm-objdump'), MockDSPProgram)
+      super().__init__(device, MallocAllocator, MockDSPRenderer(), ClangCompiler(None, ["-static"] + compiler_args, 'llvm-objdump'), MockDSPProgram,
+      functools.partial(CPUGraph, self))
 
   def open_lib(self, lib):
     self.binded_lib, self.binded_lib_off = lib, 0
