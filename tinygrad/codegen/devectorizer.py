@@ -4,7 +4,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
 from tinygrad.ops import graph_rewrite, GroupOp
-from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym
+from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
 from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
@@ -13,15 +13,18 @@ from tinygrad.renderer import Renderer
 
 def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   if getenv("UNSAFE_DISABLE_MASK", 0): mask = None
-  # first, extract all the relevant offsets
+  # generate the individual indexes
+  midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i), mask.gep(i) if mask is not None else None) for i in range(vec.dtype.count)]),
+                       symbolic_flat+load_store_indexing, name=f"index_buf_{buf.arg}")
+  # extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
-    idx = vec.gep(i).simplify()
+    idx: Any = midx.src[i].src[1]
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    if mask is not None: root_src = (mask.gep(i).simplify(), root_src)
+    if len(midx.src[i].src) == 3: root_src = (midx.src[i].src[2], root_src)
     offsets_rootsrc[root_src].setdefault(arg, []).append(i)
 
   # the buf.dtype is always a pointer
@@ -31,12 +34,11 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   ret = []
   idxs: list[int|None] = [None]*vec.dtype.count
   global_offset = 0
-  for rootsrc, offsets in offsets_rootsrc.items():
+  for offsets in offsets_rootsrc.values():
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for grp in grouped_offsets:
       # get the index offset for this element. using [0] is okay, because they are the same
-      oidx = vec.gep(offsets[grp[0]][0])
-      lidx = UOp(Ops.INDEX, buf.dtype, (buf, oidx, rootsrc[0]) if mask is not None else (buf, oidx))
+      lidx = midx.src[offsets[grp[0]][0]]
       if len(grp) > 1: lidx = lidx.cast(ptrdtype.base.vec(len(grp)).ptr(size=ptrdtype.size, local=ptrdtype.local))
       # set the idxs of the output
       for i,g in enumerate(grp):

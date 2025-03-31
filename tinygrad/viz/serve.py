@@ -21,7 +21,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 # NOTE: if any extra rendering in VIZ fails, we don't crash
 def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
   try: return fxn(*args, **kwargs)
-  except Exception as e: return f"ERROR: {e}"
+  except Exception as e: return f"ERROR in {fxn.__name__}: {e}"
 
 # ** Metadata for a track_rewrites scope
 
@@ -33,10 +33,10 @@ class GraphRewriteMetadata(TypedDict):
   name: str|None                         # optional name of the rewrite
 
 @functools.lru_cache(None)
-def _prg(k:Kernel): return k.to_program().src
+def render_program(k:Kernel): return k.opts.render(k.uops)
 def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
   return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
-          "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None, "name":v.name}
+          "kernel_code":pcall(render_program, k) if isinstance(k, Kernel) else None, "name":v.name}
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
   return [(k.name if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]
 
@@ -49,10 +49,9 @@ class GraphRewriteDetails(TypedDict):
   changed_nodes: list[int]|None          # the changed UOp id + all its parents ids
   upat: tuple[tuple[str, int], str]|None # [loc, source_code] of the matched UPat
 
-def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
+def uop_to_json(x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
-  # NOTE: this is [id, [label, src_ids, color]]
-  graph: dict[int, tuple[str, list[int], str]] = {}
+  graph: dict[int, dict] = {}
   excluded: set[UOp] = set()
   for u in (toposort:=x.toposort):
     # always exclude DEVICE/CONST/UNIQUE
@@ -72,7 +71,7 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
       if x in excluded:
         if x.op is Ops.CONST and dtypes.is_float(u.dtype): label += f"\nCONST{idx} {x.arg:g}"
         else: label += f"\n{x.op.name}{idx} {x.arg}"
-    graph[id(u)] = (label, [id(x) for x in u.src if x not in excluded], uops_colors.get(u.op, "#ffffff"))
+    graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff")}
   return graph
 
 def get_details(k:Any, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:

@@ -22,7 +22,7 @@ CHUNK_CLASSES = {
 }
 
 def pretty(val, pad=0) -> str:
-  if isinstance(val, ctypes.Structure) or isinstance(val, ctypes.Union):
+  if isinstance(val, (ctypes.Structure, ctypes.Union)):
     nl = '\n' # old python versions don't support \ in f-strings
     return f"{val.__class__.__name__}({nl}{' '*(pad+2)}{(f', {nl}'+' '*(pad+2)).join([f'{field[0]}={pretty(getattr(val, field[0]), pad=pad+2)}' for field in val._fields_])}{nl}{' '*pad})"
   if isinstance(val, ctypes.Array):

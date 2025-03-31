@@ -501,14 +501,11 @@ class Tensor(SimpleMathTrait):
     if not dtypes.is_float(dtype := to_dtype(dtype or dtypes.default_float)): raise ValueError(f"rand only supports float dtypes, got {dtype}")
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
-    _device = device = Device.canonicalize(device)
+    device = Device.canonicalize(device)
 
     # if shape has 0, return zero tensor
-    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
+    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
     num = ceildiv(numel * dtype.itemsize, 4)
-
-    # when using MOCKGPU and NV generate rand on CPU
-    if getenv("MOCKGPU") and device.startswith("NV"): device = "CPU"
 
     # generate per device seeds and rng counter if we haven't seen this device yet
     if device not in Tensor._device_seeds:
@@ -532,12 +529,7 @@ class Tensor(SimpleMathTrait):
     one = Tensor.ones_like(bits, device=bits.device, dtype=dtype).bitcast(uint_dtype)
     bits = bits.rshift((dtype.itemsize * 8) - nmant).bitwise_or(one)
     # bitcast back to the original dtype and reshape
-    out = bits.bitcast(dtype)[:numel].sub(1).reshape(shape)
-
-    # move back to the original device if we were using MOCKGPU
-    if getenv("MOCKGPU") and _device: out = out.to(_device)
-
-    out.requires_grad = kwargs.get("requires_grad")
+    out = bits.bitcast(dtype)[:numel].sub(1).reshape(shape).requires_grad_(kwargs.get("requires_grad"))
     return out.contiguous() if contiguous else out
 
   # ***** creation helper functions *****

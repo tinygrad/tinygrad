@@ -275,17 +275,20 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
 
   # simplify uop given that valid is True
   for expr,v in bounds.items():
+    v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     # some expr has lower bound > upper bound -> valid is an empty set and we return None
-    if v[0] is not None and v[1] is not None and v[0] > v[1]: return None
-
+    if v0 > v1: return None
+    # whole node became a const
+    if v0 == v1:
+      uop = uop.substitute({expr:expr.const_like(v0)}).simplify()
+      continue
     # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
     candidates = []
-    if expr.op is Ops.ADD and v[0] == 1 and all(u.op in GroupOp.Irreducible for u in split_uop(expr, Ops.ADD)):
+    if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in split_uop(expr, Ops.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
       candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
     # try checking the whole clause
-    if expr in uop.toposort:
-      candidates.append([(expr, UOp.variable("fake", expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1], expr.dtype))])
+    if expr in uop.toposort: candidates.append([(expr, UOp.variable("fake", v0, v1, expr.dtype))])
 
     for candidate in candidates:
       # if every branch in candidate gives the same simplified uop, we can rewrite the uop
@@ -314,11 +317,11 @@ def simplify_valid(valid:UOp) -> UOp|None:
 # ***** threefry *****
 
 def threefry2x32(x: UOp, key: UOp):
-  # split x into two uint32, since x in a uint64
+  # split x and key from uint64 to two uint32
   x0, x1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
+  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
 
   rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
-  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
   ks = [key1, key0 ^ key1 ^ 0x1BD11BDA, key0]
   xr = [x0 + ks[-1], x1 + ks[0]]
   for i in range(5):
