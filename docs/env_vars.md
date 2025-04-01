@@ -30,7 +30,7 @@ These control the behavior of core tinygrad even when used as a library.
 
 Variable | Possible Value(s) | Description
 ---|---|---
-DEBUG               | [1-6]      | enable debugging output (operations, timings, speed, generated code and more)
+DEBUG               | [1-7]      | enable debugging output (operations, timings, speed, generated code and more)
 GPU                 | [1]        | enable the GPU (OpenCL) backend
 CUDA                | [1]        | enable CUDA backend
 AMD                 | [1]        | enable AMD backend
