@@ -7,8 +7,8 @@ from tinygrad.ops import UOp, Ops
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import CI
-from test.external.fuzz_linearizer import compare_linearizer
-from test.helpers import ast_const
+from external.fuzz_linearizer import compare_linearizer
+from helpers import ast_const
 
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
