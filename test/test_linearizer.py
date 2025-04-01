@@ -2237,6 +2237,7 @@ def helper_lds_allclose(opts:list[Opt], expected_bufs, N=16, M=16, K=16):
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
 class TestLDS(unittest.TestCase):
+  # lds tile size for inputs are the same size as the memory accessed by each thread inside the reduce loop
   # test no reshape opt after lds? maybe true for lds_swap
   # test lds 0 with TC / TC3 / TC padded
 
@@ -2344,31 +2345,50 @@ class TestLDS(unittest.TestCase):
 
   @unittest.expectedFailure
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  def test_lds_output_local_upcast(self):
-    # for locals and upcasts size is no longer product as upcast can be applied to local dimensions
-    # if an upcast is applied to a local dimension, then local output buffer size remains unchanged
-    # local buffer size for output is prod(locals) * prod(upcast for global)
-
+  def test_lds_full(self):
     opts = [Opt(OptOps.LOCAL, 0, 2),
             Opt(OptOps.UPCAST, 1, 2),
-            Opt(OptOps.LDS, 0, None)]
-    helper_lds_allclose(opts=opts, expected_bufs=[(0,4)])
+            Opt(OptOps.LDS, 0, None),
+            Opt(OptOps.LDS, 1, None),
+            Opt(OptOps.LDS, 2, None)]
+    helper_lds_allclose(opts=opts, expected_bufs=[(0,4),(1,2),(2,2)])
 
     opts = [Opt(OptOps.LOCAL, 0, 2),
             Opt(OptOps.UPCAST, 0, 4),
             Opt(OptOps.LOCAL, 1, 8),
-            Opt(OptOps.LDS, 0, None)]
-    helper_lds_allclose(opts=opts, expected_bufs=[(0,64)])
+            Opt(OptOps.LDS, 0, None),
+            Opt(OptOps.LDS, 1, None),
+            Opt(OptOps.LDS, 2, None)]
+    helper_lds_allclose(opts=opts, expected_bufs=[(0,64),(1,8),(2,8)])
 
     opts = [Opt(OptOps.LOCAL, 0, 16),
             Opt(OptOps.UPCAST, 1, 2),
-            Opt(OptOps.LDS, 0, None)]
-    helper_lds_allclose(opts=opts, expected_bufs=[(0,16)]) # upcasting local
+            Opt(OptOps.LDS, 0, None),
+            Opt(OptOps.LDS, 1, None),
+            Opt(OptOps.LDS, 2, None)]
+    helper_lds_allclose(opts=opts, expected_bufs=[(0,16),(1,16),(2,1)]) # upcasting local
 
     opts = [Opt(OptOps.LOCAL, 0, 16),
             Opt(OptOps.UPCAST, 0, 16),
-            Opt(OptOps.LDS, 0, None)]
-    helper_lds_allclose(opts=opts, expected_bufs=[(0,256)])
+            Opt(OptOps.LDS, 0, None),
+            Opt(OptOps.LDS, 1, None),
+            Opt(OptOps.LDS, 2, None)]
+    helper_lds_allclose(opts=opts, expected_bufs=[(0,256),(1,16),(2,16)])
+
+    opts = [Opt(OptOps.LOCAL, 1, 16),
+            Opt(OptOps.UPCAST, 1, 16),
+            Opt(OptOps.LDS, 0, None),
+            Opt(OptOps.LDS, 1, None),
+            Opt(OptOps.LDS, 2, None)]
+    helper_lds_allclose(opts=opts, expected_bufs=[(0,16),(1,1),(2,16)])
+
+    opts = [Opt(OptOps.LOCAL, 1, 4),
+            Opt(OptOps.UNROLL, 0, 2),
+            Opt(OptOps.UPCAST, 0, 2),
+            Opt(OptOps.LDS, 0, None),
+            Opt(OptOps.LDS, 1, None),
+            Opt(OptOps.LDS, 2, None)]
+    helper_lds_allclose(opts=opts, expected_bufs=[(0,8),(1,4),(2,8)])
 
 if __name__ == "__main__":
   unittest.main()
