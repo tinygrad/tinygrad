@@ -13,7 +13,7 @@ function intersectRect(r1, r2) {
 }
 
 let [workerUrl, worker, timeout] = [null, null, null];
-async function renderDAG(graph, additions, recenter=false) {
+async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
@@ -30,6 +30,7 @@ async function renderDAG(graph, additions, recenter=false) {
   worker.onmessage = (e) => {
     progressMessage.style.display = "none";
     clearTimeout(timeout);
+    d3.select("#bars").html("");
     const g = dagre.graphlib.json.read(e.data);
     // draw nodes
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
@@ -53,6 +54,7 @@ async function renderDAG(graph, additions, recenter=false) {
     }).attr("marker-end", "url(#arrowhead)");
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
+
 }
 
 // ** Memory graph (WIP)
@@ -181,6 +183,7 @@ function renderMemoryGraph(graph) {
   document.querySelector(".progress-message").style.display = "none";
   d3.select("#nodes").html("");
   d3.select("#edges").html("");
+  document.getElementById("zoom-to-fit-btn").click();
 }
 
 // ** zoom and recentering
@@ -311,7 +314,11 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
-  renderDAG(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
+  if (kernel.name == "View Memory Graph") {
+    renderMemoryGraph(ret[currentRewrite].graph);
+  } else {
+    renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
+  }
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
   const [code, lang] = kernel.kernel_code != null ? [kernel.kernel_code, "cpp"] : [ret[currentRewrite].uop, "python"];
