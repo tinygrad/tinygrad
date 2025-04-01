@@ -9,7 +9,7 @@ function intersectRect(r1, r2) {
 }
 
 let [workerUrl, worker, timeout] = [null, null, null];
-window.renderGraph = async function(graph, additions, name) {
+window.renderGraph = async function(graph, additions, name, recenter=false) {
   if (name === "View Memory Graph") {
     return renderMemoryGraph(graph);
   }
@@ -59,6 +59,7 @@ window.renderGraph = async function(graph, additions, name) {
       points.push(intersectRect(g.node(e.w), points[points.length-1]));
       return line(points);
     }).attr("marker-end", "url(#arrowhead)");
+    if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
 }
 
