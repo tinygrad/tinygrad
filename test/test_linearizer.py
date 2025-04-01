@@ -2262,21 +2262,17 @@ class TestLDS(unittest.TestCase):
       with self.assertRaises(KernelOptError):
         k.apply_opt(opt)
 
-  @unittest.expectedFailure
   def test_lds_output_basic(self):
     helper_lds_allclose(opts=[Opt(OptOps.LDS, 0, None)], expected_bufs=[(0,1)])
 
-  @unittest.expectedFailure
   def test_lds_input_basic(self):
     helper_lds_allclose(opts=[Opt(OptOps.LDS, 1, None)], expected_bufs=[(1,1)])
     helper_lds_allclose(opts=[Opt(OptOps.LDS, 2, None)], expected_bufs=[(2,1)])
 
-  @unittest.expectedFailure
   def test_lds_multi_basic(self):
     helper_lds_allclose(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None)], expected_bufs=[(0,1),(1,1)])
     helper_lds_allclose(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None), Opt(OptOps.LDS, 2, None)], expected_bufs=[(0,1),(1,1),(2,1)])
 
-  @unittest.expectedFailure
   def test_lds_unroll(self):
     # unroll doesn't change local output buffer size
     for sz in [2,4,8]:
@@ -2284,7 +2280,6 @@ class TestLDS(unittest.TestCase):
       helper_lds_allclose(opts=[Opt(OptOps.UNROLL, 0, sz), Opt(OptOps.LDS, 1, None)], expected_bufs=[(1,sz)])
       helper_lds_allclose(opts=[Opt(OptOps.UNROLL, 0, sz), Opt(OptOps.LDS, 2, None)], expected_bufs=[(2,sz)])
 
-  @unittest.expectedFailure
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_lds_local(self):
     # if only locals are applied, local buffer size for output should be prod(locals)
@@ -2316,7 +2311,6 @@ class TestLDS(unittest.TestCase):
                        Opt(OptOps.LDS, 2, None)]
     helper_lds_allclose(opts=full_local_opts, expected_bufs=[(0,256),(1,16),(2,16)])
 
-  @unittest.expectedFailure
   def test_lds_upcast(self):
     # if only upcasts are applied, local buffer size for output should be prod(upcast)
 
@@ -2347,7 +2341,6 @@ class TestLDS(unittest.TestCase):
                         Opt(OptOps.LDS, 2, None)]
     helper_lds_allclose(opts=full_upcast_opts, expected_bufs=[(0,256),(1,16),(2,16)])
 
-  @unittest.expectedFailure
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_lds_tc(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
@@ -2394,7 +2387,6 @@ class TestLDS(unittest.TestCase):
               Opt(OptOps.LDS, 2, None)]
       helper_lds_allclose(opts=opts, expected_bufs=[(0,N*M),(1,M*K),(2,K*N)], N=N+3, M=M+3, K=K+3, dtype_in=tc.dtype_in, acc_dtype=tc.dtype_out)
 
-  @unittest.expectedFailure
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_lds_full(self):
     opts = [Opt(OptOps.LOCAL, 0, 2),
