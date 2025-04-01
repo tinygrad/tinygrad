@@ -669,7 +669,8 @@ class Kernel:
       print(self.name)
       if DEBUG >= 5: print(self.ast)
       for i,(buf,st) in enumerate([(buf,st) for buf,st in zip(self.bufs, self.sts) if buf.op not in {Ops.CONST, Ops.VALID}]):
-        print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s}", st.real_strides())
+        print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s} {str(st.real_strides()):30s}",
+              str(st) if DEBUG >= 4 else "")
       print(self.applied_opts)
       if DEBUG >= 5: print(modified_ast)
     # verify AST matches the spec after applying opts
@@ -678,7 +679,7 @@ class Kernel:
     #if __debug__: type_verify(list(modified_ast.toposort), shape_spec)
 
     self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
-    if DEBUG >= 5: print_uops(self.uops)
+    if DEBUG >= 6: print_uops(self.uops)
     return self
 
   def to_program(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> ProgramSpec:

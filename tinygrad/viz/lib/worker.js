@@ -1,5 +1,3 @@
-importScripts("../assets/dagrejs.github.io/project/dagre/latest/dagre.min.js");
-
 const NODE_PADDING = 10;
 const LINE_HEIGHT = 14;
 const canvas = new OffscreenCanvas(0, 0);

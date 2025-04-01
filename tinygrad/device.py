@@ -94,7 +94,7 @@ class Buffer:
                lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
     if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
-    self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
+    self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = device, size, dtype, options, offset, 0
     if base is None:
       assert offset == 0, "base buffers can't have offset"
       self._base = None
@@ -122,6 +122,7 @@ class Buffer:
       self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferSpec(external_ptr=external_ptr)
     if self._base is not None:
       self._base.ensure_allocated()
+      self._base.allocated_views += 1
       assert hasattr(self.allocator, "_offset"), "offset function required for view"
       self._buf: Any = self.allocator._offset(self.base._buf, self.nbytes, self.offset)
     else:
@@ -133,6 +134,7 @@ class Buffer:
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
+    elif self._base is not None: self._base.allocated_views -= 1
     del self._buf
   def __reduce__(self):
     buf = None
