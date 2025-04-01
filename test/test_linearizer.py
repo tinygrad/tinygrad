@@ -2233,7 +2233,7 @@ def helper_lds_allclose(opts:list[Opt], expected_bufs, N=16, M=16, K=16):
     assert local_buffers[i].arg == buf, f"Expected buffer argument index {buf}, got {local_buffers[i].arg}"
     expected_dtype = dtypes.float.ptr(sz, local=True)
     assert local_buffers[i].dtype == expected_dtype, f"Expected buffer dtype {expected_dtype}, got {local_buffers[i].dtype} for {opts=}"
-    # figure out a smart way of checkign all access to the global buffer are proxied through the local buffer
+    # figure out a smart way of checking all access to the global buffer are proxied through the local buffer
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
 class TestLDS(unittest.TestCase):
