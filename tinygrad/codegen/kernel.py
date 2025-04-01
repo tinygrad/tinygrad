@@ -447,7 +447,7 @@ class Kernel:
         k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
         k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-3, 32))
         if k.full_shape[len(k.full_shape)-4]%4 == 0:
-          if len(k.full_shape)-4 <= 8: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 0))
+          if k.full_shape[len(k.full_shape)-4] <= 8: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 0))
           else: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 4))
         # if this is small, swap it
         # NOTE: this is breaking something (should be fixed w/o padto)
