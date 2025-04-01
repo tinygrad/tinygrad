@@ -452,6 +452,7 @@ class Kernel:
       elif k.full_shape[-4:] == (32,3,3,3):
         # 3x3 normal conv
         k.apply_opt(Opt(OptOps.UNROLL, 2, 0))
+        k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
         # more UNROLLs aren't working well here, but they should be
         k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
         k.apply_opt(Opt(OptOps.UPCAST, 1, 4))

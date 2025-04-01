@@ -258,7 +258,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
   children:set[weakref.ref[UOp]] = field(default_factory=set)
-  def __post_init__(self): assert all(isinstance(x, UOp) for x in self.src)
+  def __post_init__(self):
+    if self.op is Ops.MUL: assert all_same([x.dtype for x in self.src])
+    assert all(isinstance(x, UOp) for x in self.src)
   def __del__(self):
     if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
     if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg))) is not None:

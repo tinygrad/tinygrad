@@ -302,7 +302,7 @@ def reduce_to_acc(ctx:ReduceContext, x:UOp):
   if len(reduce_range) == 0: return ret
   if all(y not in reduce_range for y in ret.toposort):
     # TODO: this shouldn't be here
-    return ret*prod([y.src[1] for y in reduce_range])
+    return ret*prod([y.src[1] for y in reduce_range]).broadcast(ret.dtype.count)
   alu_op = x.arg
   # create acc
   acc = UOp(Ops.DEFINE_ACC, x.dtype, (x.const_like(identity_element(alu_op, x.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
