@@ -1,10 +1,10 @@
 import pickle, sys
 from dataclasses import replace
-from tinygrad import Device, Context, Tensor
+from tinygrad import Device, Context, Tensor, GlobalCounters
 from tinygrad.device import Buffer
 from tinygrad.helpers import getenv, BEAM
 from tinygrad.engine.jit import TinyJit
-from tinygrad.engine.realize import CompiledRunner, ExecItem
+from tinygrad.engine.realize import CompiledRunner, ExecItem, ScheduleItem, lower_schedule_item
 from tinygrad.renderer import ProgramSpec
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 import numpy as np
@@ -48,12 +48,29 @@ if __name__ == "__main__":
       if knum == (pknum:=getenv("KNUM", 0)) or pknum == 0:
         p: ProgramSpec = ei.prg.p
         k = Kernel(p.ast, Device["DSP"].renderer)
+
+        if getenv("VALIDATE"):
+          with Context(NOOPT=1):
+            lower_schedule_item(ScheduleItem(p.ast, ei.bufs)).run()
+            correct = ei.bufs[0].numpy()
+            GlobalCounters.kernel_count -= 1
+
         #if knum != 1 and not getenv("NOOPT"): k.hand_coded_optimizations()
         if not getenv("NOOPT"): k.hand_coded_optimizations()
+        #if knum == 6:
+        #  k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
+        #  k.apply_opt(Opt(OptOps.UPCAST, 1, 32))
+        #  k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
+
         p2 = k.to_program()
         new_ei = replace(ei, prg=CompiledRunner(p2))
         new_ei.run()
         new_jit.append(new_ei)
+        test = ei.bufs[0].numpy()
+
+        if getenv("VALIDATE"):
+          import numpy as np
+          np.testing.assert_allclose(correct, test, rtol=1e-3, atol=1e-3)
       knum += 1
 
   if getenv("RUN_JIT", 0):

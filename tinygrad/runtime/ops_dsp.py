@@ -53,13 +53,13 @@ def multi_mul(a0, a1, b0, b1, c0, c1, d0=None, d1=None, acc=None):
     # Vx32.uw+=vrmpy(Vu32.ub,Rt32.ub) -> __builtin_HEXAGON_V6_vrmpyub_acc
     scalar_m1 = simp_m1.src[0].gep(simp_m1.arg[0:4])
     if acc is not None:
-      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, scalar_m1.bitcast(dtypes.uint)), "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
+      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, scalar_m1.bitcast(dtypes.uint)), "__builtin_HEXAGON_V6_vrmpyub_acc_128B({0}, {1}, {2})")
     else:
-      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, scalar_m1.bitcast(dtypes.uint)), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
+      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, scalar_m1.bitcast(dtypes.uint)), "__builtin_HEXAGON_V6_vrmpyub_128B({0}, {1})")
   if acc is not None:
-    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, m1), "__builtin_HEXAGON_V6_vrmpybusv_acc_128B({0}, {1}, {2})")
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, m1), "__builtin_HEXAGON_V6_vrmpyubv_acc_128B({0}, {1}, {2})")
   else:
-    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, m1), "__builtin_HEXAGON_V6_vrmpybusv_128B({0}, {1})")
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, m1), "__builtin_HEXAGON_V6_vrmpyubv_128B({0}, {1})")
 
 # __builtin_HEXAGON_A2_vraddub_acc
 
@@ -96,11 +96,12 @@ def multi_add_int32(**aa):
   m0 = UOp(Ops.CAT, dtypes.uchar.vec(128), src=tuple(aa[k].src[0] for k in sorted(aa.keys()))).gep(swizzle)
   if acc is not None:
     return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, UOp.const(dtypes.uint, 0x01010101)),
-               "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
+               "__builtin_HEXAGON_V6_vrmpyub_acc_128B({0}, {1}, {2})")
   else:
-    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, UOp.const(dtypes.uint, 0x01010101)), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, UOp.const(dtypes.uint, 0x01010101)), "__builtin_HEXAGON_V6_vrmpyub_128B({0}, {1})")
 
 def multi_add_int2(**aa):
+  return None
   if 'acc' in aa:
     acc = aa['acc']
     del aa['acc']
@@ -122,8 +123,9 @@ conv_pm = PatternMatcher([
    UPat(name="c0")*UPat(name="c1"), multi_mul),
 
   # __builtin_HEXAGON_V6_vrmpybus x3
-  (UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
-  (UPat(name="acc") + UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
+  # this is wrong
+  #(UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
+  #(UPat(name="acc") + UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
 ])
 
 dsp_pm = PatternMatcher([
@@ -176,10 +178,10 @@ dsp_pm = PatternMatcher([
 ])+gep_pushing
 
 def add_to_mul(c:UOp, x:UOp):
-  if c.arg.startswith("__builtin_HEXAGON_V6_vrmpybus_128B"):
-    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
-  elif c.arg.startswith("__builtin_HEXAGON_V6_vrmpybusv_128B"):
-    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpybusv_acc_128B({0}, {1}, {2})")
+  if c.arg.startswith("__builtin_HEXAGON_V6_vrmpyub_128B"):
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpyub_acc_128B({0}, {1}, {2})")
+  elif c.arg.startswith("__builtin_HEXAGON_V6_vrmpyubv_128B"):
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpyubv_acc_128B({0}, {1}, {2})")
   elif 'acc' in c.arg and x.op is not Ops.CUSTOM:
     return c.replace(src=(x+c.src[0], c.src[1], c.src[2]))
   else:
@@ -311,7 +313,7 @@ dsp_pm_late = PatternMatcher([
 
   (UPat(Ops.VECTORIZE, dtypes.uchar.vec(128), name="vec"), vectorize_shuffle),
 
-  # __builtin_HEXAGON_V6_vrmpybus_acc_128B
+  # __builtin_HEXAGON_V6_vrmpyub_acc_128B
   (UPat(Ops.CUSTOMI, dtype=dtypes.int.vec(32), name="c")+UPat.var("x"), add_to_mul),
 
   # add acc to __builtin_HEXAGON_A2_vraddub (must be after the reduce expansion)
