@@ -139,6 +139,7 @@ def _mulhi_i32_u32(a:UOp, b: int): return ((a.cast(dtypes.uint64) * b) >> 32).ca
 def fast_idiv_i32(x: UOp, d: int) -> UOp|None:
   if not resolve(x>=0,False) or d == dtypes.min(x.dtype): return None  # for signed ints taking the absolute value can overflow
   sign = 1 if d > 0 else -1
+  assert x.vmax <= dtypes.max(x.dtype)
   m,s = magicgu(x.vmax, abs(d))
   if s<=32:
     newm=m<<(32-s)
