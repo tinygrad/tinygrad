@@ -147,7 +147,7 @@ def fast_idiv_i32(x: UOp, d: int) -> UOp|None:
     return sign * _mulhi_i32_u32(x, newm)
   if m.bit_length() <= 32:
     sign * _mulhi_i32_u32(x, m) >> (s-32)
-  assert m.bit_length() == 33
+  assert m.bit_length() == 33, f"Unexpected long m: {m} for {x.vmax=} and {d=}"
   assert False
 
 powers_of_two = {2**i:i for i in range(64)}
