@@ -448,7 +448,7 @@ class Kernel:
         k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-3, 32))
         k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 4))
         # if this is small, swap it
-        # NOTE: this is breaking the stores cause we do a bad job masking the store
+        # NOTE: this is breaking something
         #if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.SWAP, 0, 1))
       elif k.full_shape[-4:] == (32,3,3,3):
         # 3x3 normal conv
@@ -473,7 +473,7 @@ class Kernel:
         k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
         if k.full_shape[1]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
         # if the more is small, upcast it
-        #if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.UPCAST, 0, 0))
+        if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.UPCAST, 0, 0))
       elif len(k.full_shape) == 2 and k.first_reduce == 1:
         # unroll to 4 if we can
         if k.full_shape[k.first_reduce]%4 == 0: k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
