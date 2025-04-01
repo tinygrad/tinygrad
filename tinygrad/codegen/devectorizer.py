@@ -2,7 +2,7 @@ from typing import Optional, Any, Callable, cast
 import functools, operator, itertools
 from collections import defaultdict
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import dtypes, ImageDType, PtrDType
+from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
 from tinygrad.ops import graph_rewrite, GroupOp
 from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
@@ -134,21 +134,13 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
       return m, s
   assert False
 
-def _mulhi_i32_u32(a:UOp, b: int): return ((a.cast(dtypes.uint64) * b) >> 32).cast(dtypes.int32)
-
-def fast_idiv_i32(x: UOp, d: int) -> UOp|None:
+def fast_idiv(x: UOp, d: int) -> UOp|None:
   if not resolve(x>=0,False) or d == dtypes.min(x.dtype): return None  # for signed ints taking the absolute value can overflow
   sign = 1 if d > 0 else -1
-  assert x.vmax <= dtypes.max(x.dtype)
-  m,s = magicgu(x.vmax, abs(d))
-  if s<=32:
-    newm=m<<(32-s)
-    assert newm.bit_length() <= 32
-    return sign * _mulhi_i32_u32(x, newm)
-  if m.bit_length() <= 32:
-    return sign * _mulhi_i32_u32(x, m) >> (s-32)
-  assert m.bit_length() == 33, f"Unexpected long m: {m} for {x.vmax=} and {d=}"
-  assert False
+  m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
+  if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
+  if (next_dtype := promo_lattice(x.dtype)[-1]).is_int() and is_dtype_supported(next_dtype): # assumes next int will be twice as big
+    if m <= dtypes.max(next_dtype): return sign * ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
 
 powers_of_two = {2**i:i for i in range(64)}
 @functools.lru_cache(None)
@@ -162,10 +154,9 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.arg, 0)) else None)]
   if Ops.SHR in ops:
-    pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None)]
-    if is_dtype_supported(dtypes.uint64):
-      pat += [(UPat.var("x", dtypes.int32)//UPat.cvar("d"), lambda x, d: fast_idiv_i32(x, d.arg))]
-              # (UPat.var("x", dtypes.int32)%UPat.cvar("d"), lambda x, d: x - d*f if (f:=fast_idiv_i32(x, d.arg)) is not None else None)]
+    pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None),
+            (UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda x, d: fast_idiv(x, d.arg))]
+              # (UPat.var("x", dtypes.int32)%UPat.cvar("d"), lambda x, d: x - d*f if (f:=fast_idiv(x, d.arg)) is not None else None)]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
