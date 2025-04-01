@@ -2237,10 +2237,8 @@ def helper_lds_allclose(opts:list[Opt], expected_bufs, N=16, M=16, K=16):
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
 class TestLDS(unittest.TestCase):
-  # test no reshape opt after lds
-  # test lds 0 with TC
-  # test lds 0 with TC3
-  # test lds 0 with TC padded
+  # test no reshape opt after lds? maybe true for lds_swap
+  # test lds 0 with TC / TC3 / TC padded
 
   def test_lds_args(self):
     realized_ast, _ = helper_realized_ast(Tensor.rand(4, 4) @ Tensor.rand(4, 4))
