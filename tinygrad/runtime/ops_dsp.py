@@ -165,10 +165,10 @@ dsp_pm = PatternMatcher([
   # we upcast 3 as 4
   (UPat(Ops.REDUCE, name="r", src=(UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") +
                                    UPat(name="b0")*UPat(name="b1") + UPat(name="c0")*UPat(name="c1"),), allow_any_len=True),
-   lambda r, **kwargs: r.replace(src=(multi_mul(**kwargs),)+r.src[1:])),
+   lambda r, **kwargs: r.replace(src=(mm,)+r.src[1:]) if (mm:=multi_mul(**kwargs)) else None),
   (UPat(Ops.REDUCE, name="r", src=(UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0"),
                                    ), allow_any_len=True),
-   lambda r, **kwargs: r.replace(src=(multi_add_int32(**kwargs),)+r.src[1:])),
+   lambda r, **kwargs: r.replace(src=(mm,)+r.src[1:]) if (mm:=multi_add_int32(**kwargs)) else None),
 
   # mul by const on GEP
   (UPat(Ops.GEP, src=(UPat.var('x'),), name="gep")*UPat.cvar("c", vec=False),
