@@ -323,8 +323,8 @@ class TestSymbolic(unittest.TestCase):
 
   def test_add_div(self):
     # careful about the lower bounds and upper bounds
-    self.helper_test_variable((Variable("a", 0, 5)-2)//4, -1, 0, "((a+-2)//4)")
-    self.helper_test_variable((Variable("a", 0, 5)-1)//4, -1, 1, "((a+-1)//4)")
+    self.helper_test_variable((Variable("a", 0, 5)-2)//4, 0, 0, "0")
+    self.helper_test_variable((Variable("a", 0, 5)-1)//4, 0, 1, "((a+-1)//4)")
     self.helper_test_variable((Variable("a", 0, 5))//4, 0, 1, "(a//4)")
     self.helper_test_variable((Variable("a", 0, 5)+1)//4, 0, 1, "((a+1)//4)")
     self.helper_test_variable((Variable("a", 0, 5)+2)//4, 0, 1, "((a+2)//4)")

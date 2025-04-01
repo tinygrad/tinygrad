@@ -616,9 +616,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if self.op is Ops.MOD and s1_vmin > 0:
         return (0, s1_vmax-1) if s0_vmin >= 0 else (-(s1_vmax-1), s1_vmax-1)
       if self.op is Ops.IDIV:
-        if s1_vmin == s1_vmax:  # min/max are equal in a CONST
-          if s1_vmin > 0: return s0_vmin//s1_vmin, s0_vmax//s1_vmin
-          if s1_vmin < 0 and s0_vmin >= 0: return -(s0_vmax//-s1_vmin), -(s0_vmin//-s1_vmin)
+        if (c:=s1_vmin) == s1_vmax:  # min/max are equal in a CONST
+          if c > 0: return cdiv(s0_vmin,c), cdiv(s0_vmax,c)
+          if c < 0 and s0_vmin >= 0: return cdiv(s0_vmax,c), cdiv(s0_vmin,c)
         # don't know exact bounds, but know the sign
         if (s0_vmax <= 0 and s1_vmin < 0) or (s0_vmin >= 0 and s1_vmin > 0): return 0, dtypes.max(self.dtype)
         if (s0_vmax <= 0 and s1_vmin > 0) or (s0_vmin >= 0 and s1_vmin < 0): return dtypes.min(self.dtype), 0
