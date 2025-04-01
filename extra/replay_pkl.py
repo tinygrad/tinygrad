@@ -48,14 +48,11 @@ if __name__ == "__main__":
       if knum == (pknum:=getenv("KNUM", 0)) or pknum == 0:
         p: ProgramSpec = ei.prg.p
         k = Kernel(p.ast, Device["DSP"].renderer)
-        k.hand_coded_optimizations()
+        if knum != 1 and not getenv("NOOPT"): k.hand_coded_optimizations()
         #if knum == 13: k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
         p2 = k.to_program()
         new_ei = replace(ei, prg=CompiledRunner(p2))
-        if getenv("MULTICORE", 0) == 1:
-          new_ei.run()
-        else:
-          new_ei.run()
+        new_ei.run()
         new_jit.append(new_ei)
       knum += 1
 
