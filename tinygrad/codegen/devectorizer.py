@@ -146,7 +146,7 @@ def fast_idiv_i32(x: UOp, d: int) -> UOp|None:
     assert newm.bit_length() <= 32
     return sign * _mulhi_i32_u32(x, newm)
   if m.bit_length() <= 32:
-    sign * _mulhi_i32_u32(x, m) >> (s-32)
+    return sign * _mulhi_i32_u32(x, m) >> (s-32)
   assert m.bit_length() == 33, f"Unexpected long m: {m} for {x.vmax=} and {d=}"
   assert False
 
