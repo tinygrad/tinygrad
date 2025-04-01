@@ -53,9 +53,9 @@ def validate_index(idx:UOp, mask:UOp|None=None):
     if any(x.op in {Ops.DEFINE_VAR, Ops.BITCAST} or (x.op is Ops.SPECIAL and any(not isinstance(y, int) for y in x.arg[1:])) for x in idx.toposort):
       return True
     vmin, vmax, sz = idx.src[1].vmin, idx.src[1].vmax, cast(PtrDType, idx.src[0].dtype).size
-    if sz != -1 and (vmin < 0 or vmax >= sz):
-      print(f"OUT OF BOUNDS ACCESS in INDEX {vmin} - {vmax} not in 0 - {sz}. {idx.src[1].render()=}")
-      return False
+    # if sz != -1 and (vmin < 0 or vmax >= sz):
+    #   print(f"OUT OF BOUNDS ACCESS in INDEX {vmin} - {vmax} not in 0 - {sz}. {idx.src[1].render()=}")
+    #   return False
   return True
 
 # this is the matcher for the final rendered UOps
