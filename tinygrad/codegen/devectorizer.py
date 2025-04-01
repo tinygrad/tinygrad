@@ -139,7 +139,7 @@ def fast_idiv(x: UOp, d: int) -> UOp|None:
   sign = 1 if d > 0 else -1
   m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
   if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
-  if (next_dtype := promo_lattice[x.dtype][-1]).is_int() and is_dtype_supported(next_dtype): # assumes next int will be twice as big
+  if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype): # assumes next int will be twice as big
     if m <= dtypes.max(next_dtype): return sign * ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
 
 powers_of_two = {2**i:i for i in range(64)}
