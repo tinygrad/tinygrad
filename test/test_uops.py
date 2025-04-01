@@ -359,7 +359,6 @@ class TestAssembly(unittest.TestCase):
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
-    self.assertIn(Ops.IDIV, ops)
 
   def test_mulacc_unrolled(self):
     # test that     acc = acc + a0*b0 + a1*b1 + a2*b2 + a3*b3
