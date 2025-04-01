@@ -42,13 +42,13 @@ class AMDComputeQueue(HWQueue):
   def pkt3(self, cmd, *vals): self.q(self.pm4.PACKET3(cmd, len(vals) - 1), *vals)
 
   def wreg(self, reg:AMDReg, *args:sint, **kwargs:int):
-     if bool(args) == bool(kwargs): raise RuntimeError('One (and only one) of *args or **kwargs must be specified')
-     if self.pm4.PACKET3_SET_SH_REG_START <= reg.addr < self.pm4.PACKET3_SET_SH_REG_END:
-       set_packet, set_packet_start = self.pm4.PACKET3_SET_SH_REG, self.pm4.PACKET3_SET_SH_REG_START
-     elif self.pm4.PACKET3_SET_UCONFIG_REG_START <= reg.addr < self.pm4.PACKET3_SET_UCONFIG_REG_START + 2**16-1:
-       set_packet, set_packet_start = self.pm4.PACKET3_SET_UCONFIG_REG, self.pm4.PACKET3_SET_UCONFIG_REG_START
-     else: raise RuntimeError(f'Cannot set {reg.name} ({reg.addr}) via pm4 packet')
-     self.pkt3(set_packet, reg.addr - set_packet_start, *(args or (reg.encode(**kwargs),)))
+    if bool(args) == bool(kwargs): raise RuntimeError('One (and only one) of *args or **kwargs must be specified')
+    if self.pm4.PACKET3_SET_SH_REG_START <= reg.addr < self.pm4.PACKET3_SET_SH_REG_END:
+      set_packet, set_packet_start = self.pm4.PACKET3_SET_SH_REG, self.pm4.PACKET3_SET_SH_REG_START
+    elif self.pm4.PACKET3_SET_UCONFIG_REG_START <= reg.addr < self.pm4.PACKET3_SET_UCONFIG_REG_START + 2**16-1:
+      set_packet, set_packet_start = self.pm4.PACKET3_SET_UCONFIG_REG, self.pm4.PACKET3_SET_UCONFIG_REG_START
+    else: raise RuntimeError(f'Cannot set {reg.name} ({reg.addr}) via pm4 packet')
+    self.pkt3(set_packet, reg.addr - set_packet_start, *(args or (reg.encode(**kwargs),)))
 
   @contextlib.contextmanager
   def pred_exec(self, xcc_mask:int):
