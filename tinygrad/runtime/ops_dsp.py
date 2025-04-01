@@ -257,6 +257,9 @@ def vectorize_shuffle(vec:UOp):
   gepped = dedup([s.src[0] for s in vec.src if s.op is Ops.GEP])
   if len(gepped) == 0: return None
   if len(gepped) == 1:
+    # this pattern is broken in DSP clang
+    if gepped[0].dtype.count == 4: return None
+    #return None
     arg = []
     for s in vec.src:
       if s.op is Ops.GEP:
