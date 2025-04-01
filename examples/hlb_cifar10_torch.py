@@ -1,3 +1,5 @@
+# https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py with optional tiny backend
+
 from tinygrad import getenv
 if getenv("TINY_BACKEND"): import tinygrad.frontend.torch
 
@@ -669,6 +671,6 @@ def main():
 
 if __name__ == "__main__":
     acc_list = []
-    for run_num in range(2):
+    for run_num in range(getenv("RUNS", 25)):
         acc_list.append(torch.tensor(main()))
     print("Mean and variance:", (torch.mean(torch.stack(acc_list)).item(), torch.var(torch.stack(acc_list)).item()))
