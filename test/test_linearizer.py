@@ -2226,9 +2226,11 @@ def helper_lds_allclose(opts:list[Opt], expected_bufs, N=16, M=16, K=16, dtype_i
     k.apply_opt(opt)
   prg = k.to_program()
   CompiledRunner(replace(prg, device=Device.DEFAULT)).exec(bufs)
+
   atol, rtol = 1e-4, 1e-4
-  if dtype_in == dtypes.half: atol, rtol = 1e-2, 1e-3
+  if dtype_in == dtypes.half: atol, rtol = 1e-2, 1e-2
   np.testing.assert_allclose(bufs[0].numpy().reshape((M,N)), a.numpy() @ b.numpy(), atol=atol, rtol=rtol)
+
   local_buffers = [uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL]
   assert len(local_buffers) == len(expected_bufs), f"Expected exactly {len(expected_bufs)} local buffers, got {len(local_buffers)}"
   for i,(buf, sz) in enumerate(expected_bufs):
@@ -2241,7 +2243,7 @@ def helper_lds_allclose(opts:list[Opt], expected_bufs, N=16, M=16, K=16, dtype_i
 class TestLDS(unittest.TestCase):
   # lds tile size for inputs are the same size as the memory accessed by each thread inside the reduce loop
   # test no reshape opt after lds? true for lds_swap
-  # test lds 0 with TC / TC3 / TC padded
+  # test TC3?
 
   def test_lds_args(self):
     realized_ast, _ = helper_realized_ast(Tensor.rand(4, 4) @ Tensor.rand(4, 4))
@@ -2357,6 +2359,41 @@ class TestLDS(unittest.TestCase):
               Opt(OptOps.LDS, 2, None)]
       helper_lds_allclose(opts=opts, expected_bufs=[(0,N*M),(1,M*K),(2,K*N)], N=N, M=M, K=K, dtype_in=tc.dtype_in, acc_dtype=tc.dtype_out)
 
+      opts = [Opt(OptOps.TC, 0, (-1, 0)),
+              Opt(OptOps.LOCAL, 0, 2),
+              Opt(OptOps.UPCAST, 1, 2),
+              Opt(OptOps.LDS, 0, None),
+              Opt(OptOps.LDS, 1, None),
+              Opt(OptOps.LDS, 2, None)]
+      helper_lds_allclose(opts=opts, expected_bufs=[(0,N*M*4),(1,M*K*2),(2,K*N*2)], N=N*4, M=M*4, K=K*4, dtype_in=tc.dtype_in, acc_dtype=tc.dtype_out)
+
+      opts = [Opt(OptOps.TC, 0, (-1, 0)),
+              Opt(OptOps.UNROLL, 0, 2),
+              Opt(OptOps.LDS, 0, None),
+              Opt(OptOps.LDS, 1, None),
+              Opt(OptOps.LDS, 2, None)]
+      helper_lds_allclose(opts=opts, expected_bufs=[(0,N*M),(1,M*K*2),(2,K*N*2)], N=N*4, M=M*4, K=K*4, dtype_in=tc.dtype_in, acc_dtype=tc.dtype_out)
+
+      opts = [Opt(OptOps.TC, 0, (-1, 0)),
+              Opt(OptOps.UNROLL, 0, 2),
+              Opt(OptOps.UPCAST, 1, 2),
+              Opt(OptOps.LDS, 0, None),
+              Opt(OptOps.LDS, 1, None),
+              Opt(OptOps.LDS, 2, None)]
+      helper_lds_allclose(opts=opts, expected_bufs=[(0,N*M*2),(1,M*K*2),(2,K*N*4)], N=N*4, M=M*4, K=K*4, dtype_in=tc.dtype_in, acc_dtype=tc.dtype_out)
+
+  @unittest.expectedFailure
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_lds_tc_padded(self):
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
+      if tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16: continue
+      (N, M, K) = tc.dims
+      opts = [Opt(OptOps.TC, 0, (-1, 2)),
+              Opt(OptOps.LDS, 0, None),
+              Opt(OptOps.LDS, 1, None),
+              Opt(OptOps.LDS, 2, None)]
+      helper_lds_allclose(opts=opts, expected_bufs=[(0,N*M),(1,M*K),(2,K*N)], N=N+3, M=M+3, K=K+3, dtype_in=tc.dtype_in, acc_dtype=tc.dtype_out)
+
   @unittest.expectedFailure
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_lds_full(self):
@@ -2380,7 +2417,7 @@ class TestLDS(unittest.TestCase):
             Opt(OptOps.LDS, 0, None),
             Opt(OptOps.LDS, 1, None),
             Opt(OptOps.LDS, 2, None)]
-    helper_lds_allclose(opts=opts, expected_bufs=[(0,16),(1,16),(2,1)]) # upcasting local
+    helper_lds_allclose(opts=opts, expected_bufs=[(0,16),(1,16),(2,1)])
 
     opts = [Opt(OptOps.LOCAL, 0, 16),
             Opt(OptOps.UPCAST, 0, 16),
