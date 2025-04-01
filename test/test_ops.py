@@ -586,8 +586,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: 2/x)
 
   def test_mod(self):
-    a = [-4, 7, 5, 4, -7, 8]
-    b = [2, -3, 8, -2, 3, 5]
+    a = [-4, 7, 5, 4, -7, 8, -9]
+    b = [2, -3, 8, -2, 3, 5, -5]
     for float_a in [True, False]:
       for float_b in [True, False]:
         va = [float(ai) for ai in a] if float_a else a
