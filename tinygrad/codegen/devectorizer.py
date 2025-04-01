@@ -270,23 +270,28 @@ pm_render = PatternMatcher([
     lambda store,idx: UOp(Ops.STORE, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
 ])
 
-def my_cat_vec(sink, store, loop, load1, load2, lt, idx, vconst, rng, add_loads, mul, rng2, mul2):
+def my_cat_vec(sink, store, loop_store, load1, load2, lt, idx, vconst, rng, add_loads, mul, rng2, mul2, loop_read):
   if rng2 is not None and rng2.arg < rng.arg: return None
-  max = rng.src[1]
-  if lt.arg >= max.arg: return None
+  split_rng2 = lt.arg == rng2.src[1].arg//2
+  max = rng2.src[1] if split_rng2 else rng.src[1]
+  if lt.arg != max.arg//2: return None
   # store1
-  rng = rng.replace(src=(rng.src[0], lt))
-  loop = loop.replace(src=tuple(rng*mul+rng2*mul2 for _ in range(loop.dtype.count)))
+  if split_rng2: rng2 = rng2.replace(src=(rng2.src[0], lt))
+  else: rng = rng.replace(src=(rng.src[0], lt))
+  loop_store = loop_store.replace(src=tuple(rng*mul+rng2*mul2 for _ in range(loop_store.dtype.count)))
+  loop_read = loop_read.replace(src=tuple(loop_read.src[0].src[0]+rng2*mul2 if split_rng2 else rng*mul+loop_read.src[0].src[1] for _ in range(loop_read.dtype.count)))
   load1.src[0].src = load1.src[0].src[:2]
-  load1.src[0].src[1].src = (loop, load1.src[0].src[1].src[1])
-  add_loads.src=(load1,UOp.const(dtypes.int, 0))
+  load1.src[0].src[1].src = (loop_read, load1.src[0].src[1].src[1])
+  store = UOp(Ops.STORE, store.dtype, src=(store.src[0].replace(src=(store.src[0].src[0], loop_store+vconst)), load1+UOp.const(dtypes.int, 0)))
 
   # store2
-  rng_new = UOp.range(dtype=dtypes.int, idx=1000, start=lt.arg, end=max.arg)
-  loop2 = loop.replace(src=tuple(rng_new*mul+rng2.replace(arg=10001)*mul2 for _ in range(loop.dtype.count)))
+  rng_new = UOp.range(dtype=dtypes.int, idx=10001 if split_rng2 else 10000, start=lt.arg, end=max.arg)
+  loop_store2 = loop_store.replace(src=tuple(rng.replace(arg=10000)*mul+rng_new*mul2 if split_rng2 else rng_new*mul+rng2.replace(arg=10001)*mul2 for _ in range(loop_read.dtype.count)))
+  if split_rng2: loop_read2 = loop_read.replace(src=tuple(loop_read.src[0].src[0].src[0].replace(arg=10000)*loop_read.src[0].src[0].src[1]+rng_new*mul2 for _ in range(loop_read.dtype.count)))
+  else:          loop_read2 = loop_store2
   load2.src[0].src = load2.src[0].src[:2]
-  load2.src[0].src[1].src = (loop2, load2.src[0].src[1].src[1])
-  store2 = UOp(Ops.STORE, store.dtype, src=(store.src[0].replace(src=(store.src[0].src[0], loop2+vconst)), load2+UOp.const(dtypes.int, 0)))
+  load2.src[0].src[1].src = (loop_read2, load2.src[0].src[1].src[1])
+  store2 = UOp(Ops.STORE, store.dtype, src=(store.src[0].replace(src=(store.src[0].src[0], loop_store2+vconst)), load2+UOp.const(dtypes.int, 0)))
   ret = sink.replace(src=(store, store2,))
   return ret
 
@@ -295,11 +300,11 @@ pm_split = PatternMatcher([
                                       UPat(Ops.INDEX, name="idx", src=(
                                         UPat(Ops.VECTORIZE),
                                         UPat(Ops.ADD, src=(
-                                          UPat(Ops.VECTORIZE, name="loop", src=(UPat(Ops.RANGE, name="rng")*UPat.var("mul")+UPat(Ops.RANGE, name="rng2")*UPat.var("mul2"))),
+                                          UPat(Ops.VECTORIZE, name="loop_store", src=(UPat(Ops.RANGE, name="rng")*UPat.var("mul")+UPat(Ops.RANGE, name="rng2")*UPat.var("mul2"))),
                                           UPat(Ops.VCONST, name="vconst"))))),
                                       UPat(Ops.ADD, name="add_loads", src=(
                                         UPat(Ops.LOAD, name="load1", src=(
-                                          UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(Ops.VECTORIZE, src=UPat(Ops.CMPLT, src=(UPat(), UPat.cvar("lt")))))))),
+                                          UPat(Ops.INDEX, src=(UPat(), UPat(Ops.ADD, src=(UPat(Ops.VECTORIZE, name="loop_read"), UPat())), UPat(Ops.VECTORIZE, src=UPat(Ops.CMPLT, src=(UPat(), UPat.cvar("lt")))))))),
                                         UPat(Ops.LOAD, name="load2"))))))), my_cat_vec)
 ])
 
