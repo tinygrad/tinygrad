@@ -442,15 +442,15 @@ class Kernel:
       # special path for DSP
       if k.full_shape[-3:] == (32,3,3):
         # 3x3 dwconv
-        #if k.full_shape[-4]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
+        if k.full_shape[-4]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
         k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
         k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
         k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-3, 32))
         if k.full_shape[len(k.full_shape)-4]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 4))
         # if this is small, swap it
         # NOTE: this is breaking something (should be fixed w/o padto)
-        if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.SWAP, 0, 1))
         # kernel 23 is broken with this
+        #if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.SWAP, 0, 1))
         #if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.UPCAST, 0, 0))
       elif k.full_shape[-4:] == (32,3,3,3):
         # 3x3 normal conv
@@ -462,29 +462,30 @@ class Kernel:
       elif len(k.full_shape) == 3 and k.full_shape[1] == 32 and k.first_reduce == 2:
         # weight that's exactly 32
         # NOTE: this pad might be broken
-        #if k.full_shape[0]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 4))
+        if k.full_shape[0]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 4))
         k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
         k.apply_opt(Opt(OptOps.UPCAST, 1, 32))
         if k.full_shape[0]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
       elif len(k.full_shape) == 4 and k.full_shape[2] == 32 and k.first_reduce == 3:
         # weight that has more than 32
-        # NOTE: this pad is broken
-        #if k.full_shape[1]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, 1, 4))
+        # NOTE: this pad is broken on kernel 50
+        if k.full_shape[1]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, 1, 4))
         # weight with more
-        k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
+        k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
         k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
         if k.full_shape[1]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
-        # if the more is small, upcast it
-        if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.UPCAST, 0, 0))
+        # if the more is small, upcast it (kernel 50 is broken with this)
+        #if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.UPCAST, 0, 0))
       elif len(k.full_shape) == 2 and k.first_reduce == 1:
         # unroll to 4 if we can
         if k.full_shape[k.first_reduce]%4 == 0: k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
         # always pad to 128
+        # NOTE: this breaks kernel 66
         #if k.full_shape[0]%128 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 128))
         if k.full_shape[0]%128 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
       elif len(k.full_shape) == 1 and k.full_shape[0] > 32:
         # pad to 128 and run on 128
-        #if k.full_shape[0]%128 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 128))
+        if k.full_shape[0]%128 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 128))
         if k.full_shape[0]%128 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
 
       # make all non first dimensions local

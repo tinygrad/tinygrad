@@ -184,6 +184,7 @@ def fixed_point_mul(x, c1, cc, y=None, c2=None):
     return ((x.cast(FP_DTYPE)*(c1*FP).cast(FP_DTYPE) + (cc*FP).cast(FP_DTYPE)) // FP).cast(dtypes.int)
 
 def fixed_const_reduce(r, gate, c1):
+  # TODO: this is doable
   st = gate.src[0].arg
   print(st, r.arg)
   #return c1
@@ -237,7 +238,7 @@ pm_quant = symbolic+PatternMatcher([
 
   # where on two adds
   (UPat.var("x") + UPat.var("v").where(UPat.var("a0"), UPat.var("a1")) + UPat.var("v").where(UPat.var("b0"), UPat.var("b1")),
-    lambda x,v,a0,a1,b0,b1: x + v.where(a0+a1, b0+b1)),
+    lambda x,v,a0,a1,b0,b1: x + v.where(a0+b0, a1+b1)),
 
   # split REDUCE into multiple reduces (who remembers FOIL?)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.CAST, name="v1")+UPat.var("c1")) * UPat(Ops.CAST, name="v2",), name="r"),
