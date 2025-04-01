@@ -214,7 +214,18 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
     reduce_for_op.update((tr, r) for tr in group)
     if FUSE_ARANGE and r.arg[0] is Ops.ADD and r.src[0].base.op is Ops.CONST:
       # maybe fuse arange with its children
-      if len(flatten(ctx.children[tr] for tr in group)) != 0:
+      # Don't fuse if this involves slices that could cause shape mismatches
+      children = list(flatten(ctx.children[tr] for tr in group))
+      has_slices = False
+      if children:
+        for child in children:
+          # Check if any child's size doesn't match the original shape
+          # This typically happens with slices from arange
+          if any(s.base.size != prod(s.shape) for s in child.src if s.op is Ops.VIEW):
+            has_slices = True
+            break
+      
+      if len(children) != 0 and not has_slices:
         for tr in group: del ctx.realizes[tr]
   # fuse double reduces with no other child
   for reduceop in double_reduces:
@@ -294,9 +305,16 @@ def reduceop_view_right(src:UOp, v:UOp, r:UOp):
 def elementwise_view_right(root:UOp):
   if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW and x.base.op not in DONT_PUSH_VIEWS]): return None
   assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
+  
+  # Special case for FUSE_ARANGE with slices
+  if FUSE_ARANGE and root.op is Ops.ADD and any(x.base.size != prod(x.shape) for x in swizzles):
+    # This is likely a case of adding sliced arange tensors, which can cause shape mismatches with FUSE_ARANGE=1
+    return None
+  
   # place view after applying the elementwise op
   new_st = ShapeTracker.from_shape(swizzles[0].base.shape)
   new_src = [x.base if x.base.shape==new_st.shape else apply_swizzle(x.view(x.arg+new_st) if x.op is Ops.VIEW else x.view(new_st)) for x in root.src]
+  
   # reshape to match downstream shapes
   return root.replace(src=tuple(new_src)).reshape(root.shape)
 

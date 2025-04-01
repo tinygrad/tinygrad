@@ -182,5 +182,13 @@ class TestIndexing(unittest.TestCase):
   # at least the arange is being fused
   def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1_736_704_000 if CI else 5_898_240_000)
 
+  def test_arange_slices_with_fuse(self):
+    # Test the specific case from issue #9509
+    with Context(FUSE_ARANGE=1):
+      t = Tensor.arange(10)
+      slices_sum = t[:5] + t[5:]
+      assert slices_sum.shape == (5,)
+      np.testing.assert_allclose(slices_sum.numpy(), np.array([5, 7, 9, 11, 13]))
+
 if __name__ == "__main__":
   unittest.main()

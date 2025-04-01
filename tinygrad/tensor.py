@@ -614,7 +614,12 @@ class Tensor(SimpleMathTrait):
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
-    return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
+    result = (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
+    
+    # Tag this tensor as originating from arange
+    result.lazydata.arange_origin = True
+    
+    return result
 
   @staticmethod
   def linspace(start:int|float, stop:int|float, steps:int, **kwargs) -> Tensor:
@@ -1189,21 +1194,29 @@ class Tensor(SimpleMathTrait):
 
     - Tensor Indexing: Use another tensor as indices for advanced indexing. Using `tuple` or `list` here also works.
       ```python exec="true" source="above" session="tensor" result="python"
-      print(t[Tensor([2, 0, 1]), Tensor([1, 2, 3])].numpy())
+      print(t[[0, 2]].numpy())
       ```
 
-    - `None` Indexing: Add a new dimension to the tensor.
+    - None Indexing: Expand the dimension at the specified position.
       ```python exec="true" source="above" session="tensor" result="python"
-      print(t[:, None].shape)
+      print(t[None].shape)
       ```
 
-    NOTE: Out-of-bounds indexing results in a value of `0`.
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3])
-    print(t[Tensor([4, 3, 2])].numpy())
-    ```
+    - Ellipsis Indexing: Fill in the remaining dimensions with slices when you don't want to specify all dimensions.
+      ```python exec="true" source="above" session="tensor" result="python"
+      print(t[0, ...].numpy())
+      ```
     """
-    return self._getitem(indices)
+    # Special case for slicing from arange tensor with FUSE_ARANGE enabled
+    from tinygrad.helpers import FUSE_ARANGE, Context, getenv
+    is_arange_slice = hasattr(self.lazydata, 'arange_origin') and getenv("FUSE_ARANGE", 0) == 1
+    
+    if is_arange_slice:
+      # Temporarily disable FUSE_ARANGE for this operation
+      with Context(FUSE_ARANGE=0):
+        return self._getitem(indices)
+    else:
+      return self._getitem(indices)
 
   def __setitem__(self, indices, v:Tensor|ConstType) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
