@@ -252,6 +252,7 @@ def prefetch_l2(ld:UOp, idx:UOp):
     return ld.replace(src=ld.src+(x1,))
 
 def vectorize_shuffle(vec:UOp):
+  if getenv("DISABLE_VECTORIZED_SHUFFLE", 0): return None
   if not all(s.op in {Ops.GEP, Ops.CONST} for s in vec.src): return None
   gepped = dedup([s.src[0] for s in vec.src if s.op is Ops.GEP])
   if len(gepped) == 0: return None
@@ -320,6 +321,27 @@ def multicore_range(r:UOp):
   end = (core.eq(0)).where(r.src[1]//2, r.src[1])
   return r.replace(src=(start,end))
 
+def store_with_mask(buf, idx, val, mask, cast):
+  if val.dtype.count != 128 or mask.dtype.count != 128 or val.dtype.scalar() != dtypes.uchar:
+    print("DROP MASK", val.dtype.count, mask.dtype.count)
+    # NOTE: we are dropping the mask
+    return buf.index(idx).cast(cast.dtype).store(val)
+
+  const_0 = UOp.const(dtypes.uchar.vec(128), 0)
+  cmask = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(mask,),arg="{0}")
+
+  # unaligned
+  min_128 = (idx&0x7F)
+  cmask_l = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(cmask, const_0, min_128), arg="__builtin_HEXAGON_V6_vlalignb_128B({0}, {1}, {2})")
+  cmask_r = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(const_0, mask, min_128), arg="__builtin_HEXAGON_V6_vlalignb_128B({0}, {1}, {2})")
+  val_l = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(val, const_0, min_128), arg="__builtin_HEXAGON_V6_vlalignb_128B({0}, {1}, {2})")
+  val_r = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(const_0, val, min_128), arg="__builtin_HEXAGON_V6_vlalignb_128B({0}, {1}, {2})")
+  store_l = UOp(Ops.CUSTOM, dtypes.void, src=(cmask_l, buf.index(idx-min_128).cast(cast.dtype), val_l, const_0),
+    arg='__builtin_HEXAGON_V6_vS32b_nqpred_ai_128B(__builtin_HEXAGON_V6_veqb_128B({0}, {3}), {1}, {2});')
+  store_r = UOp(Ops.CUSTOM, dtypes.void, src=(cmask_r, buf.index(idx-min_128+128).cast(cast.dtype), val_r, const_0),
+    arg='__builtin_HEXAGON_V6_vS32b_nqpred_ai_128B(__builtin_HEXAGON_V6_veqb_128B({0}, {3}), {1}, {2});')
+  return UOp(Ops.CUSTOM, src=(store_l,store_r), arg="")
+
 dsp_pm_late = PatternMatcher([
   # prefetch L1
   (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld"), prefetch_l1),
@@ -348,8 +370,8 @@ dsp_pm_late = PatternMatcher([
 
   #(UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"),
   # lambda ld, bc: ld.src[0].src[0].cast(bc.dtype.ptr(ld.src[0].dtype.size)).load(dtype=bc.dtype)),
-  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
-    "__builtin_shufflevector({0}, {1}, "+','.join([f'{y:4d}' for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
+  #(UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src,
+  #  "__builtin_shufflevector({0}, {0}, "+','.join([f'{y:4d}' for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
   (UPat.var("x")+UPat(Ops.VECTORIZE,src=UPat.var("y")),
    lambda x,y: x+UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI or x.arg != "{0}" else None),
   (UPat.var("x")*UPat(Ops.VECTORIZE,src=UPat.var("y")),
@@ -361,6 +383,10 @@ dsp_pm_late = PatternMatcher([
 
   # multicore
   (UPat(Ops.RANGE, name="r", arg=0), multicore_range),
+
+  # store with mask
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat.var("mask"))).cast().named("cast"), UPat.var("val"))),
+   store_with_mask),
 ])
 
 pretty_render = PatternMatcher([
@@ -650,8 +676,9 @@ class MockDSPRenderer(DSPRenderer):
     msrc.append("unsigned int st = inscount();")
     if getenv("MULTICORE", 0) != 0:
       # TODO: get count?
-      msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])}, 0, 0);")
+      # NOTE: we do them in reverse order to reveal bugs
       msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])}, 1, 0);")
+      msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])}, 0, 0);")
     else:
       # huh, why did this change?
       msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])}, 0, 0);")

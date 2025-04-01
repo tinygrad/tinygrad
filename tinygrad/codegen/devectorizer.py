@@ -12,7 +12,7 @@ from tinygrad.renderer import Renderer
 # ***** load/store grouping *****
 
 def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
-  if getenv("UNSAFE_DISABLE_MASK", 0) and buf.arg == 0: mask = None
+  vectorize_mask = getenv("VECTORIZE_MASK", 0) and buf.arg == 0 and mask is not None
 
   # generate the individual indexes
   midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i), mask.gep(i) if mask is not None else None) for i in range(vec.dtype.count)]),
@@ -25,7 +25,7 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
     elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    if len(midx.src[i].src) == 3: root_src = (midx.src[i].src[2], root_src)
+    if len(midx.src[i].src) == 3 and not vectorize_mask: root_src = (midx.src[i].src[2], root_src)
     offsets_rootsrc[root_src].setdefault(arg, []).append(i)
 
   # the buf.dtype is always a pointer
@@ -49,6 +49,13 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
     for grp in grouped_offsets:
       # get the index offset for this element. using [0] is okay, because they are the same
       lidx = midx.src[offsets[grp[0]][0]]
+
+      if vectorize_mask:
+        allgrp = [midx.src[offsets[g][0]] for g in grp]
+        base = [x.src[2].cast(dtypes.uchar) if len(x.src) > 2 else UOp.const(dtypes.uchar, 1) for x in allgrp]
+        vecmask = UOp(Ops.VECTORIZE, dtypes.uchar.vec(len(base)), tuple(base))
+        lidx = lidx.replace(src=lidx.src[0:2]+(vecmask,))
+
       if len(grp) > 1: lidx = lidx.cast(ptrdtype.base.vec(len(grp)).ptr(size=ptrdtype.size, local=ptrdtype.local))
       # set the idxs of the output
       for i,g in enumerate(grp):
@@ -183,7 +190,11 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
       if global_offset+fold_length > sz: continue
       oidx = idx.src[1] + global_offset
       if must_divide and oidx.simplify().divides(fold_length) is None: continue
-      lidx = buf.index(oidx, idx.src[2] if len(idx.src) > 2 else None)
+      if len(idx.src) > 2 and idx.src[2].dtype.count > 1:
+        # vectorized
+        lidx = buf.index(oidx, idx.src[2].gep(tuple(range(global_offset, global_offset+fold_length))))
+      else:
+        lidx = buf.index(oidx, idx.src[2] if len(idx.src) > 2 else None)
       if fold_length > 1: lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
       else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))

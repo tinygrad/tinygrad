@@ -446,12 +446,13 @@ class Kernel:
         k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
         k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
         k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-3, 32))
-        if k.full_shape[len(k.full_shape)-4]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 4))
+        if k.full_shape[len(k.full_shape)-4]%4 == 0:
+          if len(k.full_shape)-4 <= 8: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 0))
+          else: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 4))
         # if this is small, swap it
         # NOTE: this is breaking something (should be fixed w/o padto)
         # kernel 23 is broken with this
-        #if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.SWAP, 0, 1))
-        #if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.UPCAST, 0, 0))
+        if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.SWAP, 0, 1))
       elif k.full_shape[-4:] == (32,3,3,3):
         # 3x3 normal conv
         k.apply_opt(Opt(OptOps.UNROLL, 2, 0))
@@ -475,15 +476,15 @@ class Kernel:
         k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
         if k.full_shape[1]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
         # if the more is small, upcast it (kernel 50 is broken with this)
-        #if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.UPCAST, 0, 0))
+        if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.UPCAST, 0, 0))
       elif len(k.full_shape) == 2 and k.first_reduce == 1:
         # unroll to 4 if we can
         if k.full_shape[k.first_reduce]%4 == 0: k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
         # always pad to 128
         # NOTE: this breaks kernel 66
-        #if k.full_shape[0]%128 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 128))
+        if k.full_shape[0]%128 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 128))
         if k.full_shape[0]%128 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
-      elif len(k.full_shape) == 1 and k.full_shape[0] > 32:
+      elif len(k.full_shape) == 1 and k.full_shape[0] > 1000:
         # pad to 128 and run on 128
         if k.full_shape[0]%128 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 128))
         if k.full_shape[0]%128 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 128))

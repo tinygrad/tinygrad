@@ -53,6 +53,7 @@ if __name__ == "__main__":
           with Context(NOOPT=1):
             lower_schedule_item(ScheduleItem(p.ast, ei.bufs)).run()
             correct = ei.bufs[0].numpy()
+            ei.bufs[0].copyin(memoryview(bytearray(b'\x00'*ei.bufs[0].size)))
             GlobalCounters.kernel_count -= 1
 
         #if knum != 1 and not getenv("NOOPT"): k.hand_coded_optimizations()
@@ -70,6 +71,20 @@ if __name__ == "__main__":
 
         if getenv("VALIDATE"):
           import numpy as np
+          """
+          print("first")
+          print(correct[:150])
+          print(test[:150])
+          print("middle")
+          print(correct[500:600])
+          print(test[500:600])
+          print("last")
+          print(correct[-150:])
+          print(test[-150:])
+          print("skip")
+          print(correct[::32])
+          print(test[::32])
+          """
           np.testing.assert_allclose(correct, test, rtol=1e-3, atol=1e-3)
       knum += 1
 
