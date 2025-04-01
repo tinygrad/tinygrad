@@ -2218,5 +2218,141 @@ class TestKernelOpts(unittest.TestCase):
     ]
     helper_linearizer_opt(r, [x[0] for x in opts_shapes], color_sizes=[x[1] for x in opts_shapes])
 
-if __name__ == '__main__':
+def helper_lds_allclose(opts:list[Opt], expected_bufs, N=16, M=16, K=16):
+  a, b = Tensor.rand(M, K), Tensor.rand(K, N)
+  realized_ast, bufs = helper_realized_ast(a @ b)
+  k = Kernel(realized_ast)
+  for opt in opts:
+    k.apply_opt(opt)
+  prg = k.to_program()
+  CompiledRunner(replace(prg, device=Device.DEFAULT)).exec(bufs)
+  np.testing.assert_allclose(bufs[0].numpy().reshape((M,N)), a.numpy() @ b.numpy(), atol=1e-4, rtol=1e-4)
+  local_buffers = [uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL]
+  assert len(local_buffers) == len(expected_bufs), f"Expected exactly {len(expected_bufs)} local buffers, got {len(local_buffers)}"
+  for i,local_buffer in enumerate(local_buffers):
+    assert local_buffer.arg == expected_bufs[i][0], f"Expected buffer argument index {expected_bufs[i][0]}, got {local_buffer.arg}"
+    expected_dtype = dtypes.float.ptr(expected_bufs[i][1], local=True)
+    assert local_buffer.dtype == expected_dtype, f"Expected buffer dtype {expected_dtype}, got {local_buffer.dtype} for {opts=}"
+    # assert no access other access to local buffer
+
+@unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+class TestLDS(unittest.TestCase):
+  # test no reshape opt after lds
+  # test lds 0 with TC
+  # test lds 0 with TC3
+  # test lds 0 with TC padded
+
+  def test_lds_args(self):
+    realized_ast, _ = helper_realized_ast(Tensor.rand(4, 4) @ Tensor.rand(4, 4))
+    k = Kernel(realized_ast)
+    valid_opts = [Opt(OptOps.LDS, 0, None),
+                  Opt(OptOps.LDS, 1, None),
+                  Opt(OptOps.LDS, 2, None)]
+    for opt in valid_opts:
+      k = Kernel(realized_ast)
+      k.apply_opt(opt)
+
+    invalid_opts = [Opt(OptOps.LDS, -1, None),
+                    Opt(OptOps.LDS, 3, None)]
+    for opt in invalid_opts:
+      k = Kernel(realized_ast)
+      with self.assertRaises(KernelOptError):
+        k.apply_opt(opt)
+
+  @unittest.expectedFailure
+  def test_lds_output_basic(self):
+    helper_lds_allclose(opts=[Opt(OptOps.LDS, 0, None)], expected_bufs=[(0,1)])
+
+  @unittest.expectedFailure
+  def test_lds_input_basic(self):
+    helper_lds_allclose(opts=[Opt(OptOps.LDS, 1, None)], expected_bufs=[(1,16)])
+    helper_lds_allclose(opts=[Opt(OptOps.LDS, 2, None)], expected_bufs=[(2,16)])
+
+  @unittest.expectedFailure
+  def test_lds_multi_basic(self):
+    helper_lds_allclose(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None)], expected_bufs=[(1,1),(1,16)])
+    helper_lds_allclose(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None), Opt(OptOps.LDS, 2, None)], expected_bufs=[(0,16),(1,16),(2,16)])
+
+  @unittest.expectedFailure
+  def test_lds_output_unroll(self):
+    # unroll doesn't change local output buffer size
+    for sz in [0,2,4,8]:
+      helper_lds_allclose(opts=[Opt(OptOps.UNROLL, 0, sz), Opt(OptOps.LDS, 0, None)], expected_bufs=[(0,1)])
+
+  @unittest.expectedFailure
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_lds_output_local(self):
+    # if only locals are applied, local buffer size for output should be prod(locals)
+
+    basic_local_opts = [Opt(OptOps.LOCAL, 0, 2),
+                        Opt(OptOps.LDS, 0, None)]
+    helper_lds_allclose(opts=basic_local_opts, expected_bufs=[(0,2)])
+
+    multi_local_opts = [Opt(OptOps.LOCAL, 0, 2),
+                        Opt(OptOps.LOCAL, 0, 8),
+                        Opt(OptOps.LDS, 0, None)]
+    helper_lds_allclose(opts=multi_local_opts, expected_bufs=[(0,16)])
+
+    multi_axis_local_opts = [Opt(OptOps.LOCAL, 1, 2),
+                             Opt(OptOps.LOCAL, 0, 2),
+                             Opt(OptOps.LDS, 0, None)]
+    helper_lds_allclose(opts=multi_axis_local_opts, expected_bufs=[(0,4)])
+
+    full_local_opts = [Opt(OptOps.LOCAL, 0, 16),
+                       Opt(OptOps.LOCAL, 0, 16),
+                       Opt(OptOps.LDS, 0, None)]
+    helper_lds_allclose(opts=full_local_opts, expected_bufs=[(0,256)])
+
+  @unittest.expectedFailure
+  def test_lds_output_upcast(self):
+    # if only upcasts are applied, local buffer size for output should be prod(locals)
+
+    basic_upcast_opts = [Opt(OptOps.UPCAST, 0, 2),
+                        Opt(OptOps.LDS, 0, None)]
+    helper_lds_allclose(opts=basic_upcast_opts, expected_bufs=[(0,2)])
+
+    multi_upcast_opts = [Opt(OptOps.UPCAST, 0, 2),
+                        Opt(OptOps.UPCAST, 0, 8),
+                        Opt(OptOps.LDS, 0, None)]
+    helper_lds_allclose(opts=multi_upcast_opts, expected_bufs=[(0,16)])
+
+    multi_axis_upcast_opts = [Opt(OptOps.UPCAST, 1, 2),
+                             Opt(OptOps.UPCAST, 0, 2),
+                             Opt(OptOps.LDS, 0, None)]
+    helper_lds_allclose(opts=multi_axis_upcast_opts, expected_bufs=[(0,4)])
+
+    full_upcast_opts = [Opt(OptOps.UPCAST, 1, 16),
+                       Opt(OptOps.UPCAST, 0, 16),
+                       Opt(OptOps.LDS, 0, None)]
+    helper_lds_allclose(opts=full_upcast_opts, expected_bufs=[(0,256)])
+
+  @unittest.expectedFailure
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_lds_output_local_upcast(self):
+    # for locals and upcasts size is no longer product as upcast can be applied to local dimensions
+    # if an upcast is applied to a local dimension, then local output buffer size remains unchanged
+    # local buffer size for output is prod(locals) * prod(upcast for global)
+
+    opts = [Opt(OptOps.LOCAL, 0, 2),
+            Opt(OptOps.UPCAST, 1, 2),
+            Opt(OptOps.LDS, 0, None)]
+    helper_lds_allclose(opts=opts, expected_bufs=[(0,4)])
+
+    opts = [Opt(OptOps.LOCAL, 0, 2),
+            Opt(OptOps.UPCAST, 0, 4),
+            Opt(OptOps.LOCAL, 1, 8),
+            Opt(OptOps.LDS, 0, None)]
+    helper_lds_allclose(opts=opts, expected_bufs=[(0,64)])
+
+    opts = [Opt(OptOps.LOCAL, 0, 16),
+            Opt(OptOps.UPCAST, 1, 2),
+            Opt(OptOps.LDS, 0, None)]
+    helper_lds_allclose(opts=opts, expected_bufs=[(0,16)]) # upcasting local
+
+    opts = [Opt(OptOps.LOCAL, 0, 16),
+            Opt(OptOps.UPCAST, 0, 16),
+            Opt(OptOps.LDS, 0, None)]
+    helper_lds_allclose(opts=opts, expected_bufs=[(0,256)])
+
+if __name__ == "__main__":
   unittest.main()
