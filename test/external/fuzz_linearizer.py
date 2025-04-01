@@ -2,7 +2,7 @@ import random, traceback, ctypes, argparse, os
 from typing import Any
 import numpy as np
 from collections import defaultdict
-import sys 
+import sys
 sys.path.append('../extra')
 from optimization.helpers import load_worlds, ast_str_to_lin, kern_str_to_lin
 
