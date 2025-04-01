@@ -55,7 +55,7 @@ WEBGPU_BACKEND      | [WGPUBackendType_Metal, ...]          | Force select a bac
 
 Variable | Value | Description
 ---|---|---
-DEBUG               | >= 1       | Enables debugging and lists devices being opened or utilized by the process
+DEBUG               | >= 1       | Enables debugging and lists devices being used
 DEBUG               | >= 2       | Provides performance metrics for operations, including timing, memory usage, bandwidth for each kernel execution
 DEBUG               | >= 3       | Outputs buffers used for each kernel (shape, dtype and strides) and the applied optimizations at a kernel level
 DEBUG               | >= 4       | Outputs the generated kernel code
