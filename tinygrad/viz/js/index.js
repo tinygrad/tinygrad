@@ -427,6 +427,6 @@ document.addEventListener("keydown", async function(event) {
   if (event.key == " ") {
     document.getElementById("zoom-to-fit-btn").click();
   }
-})
+});
 
 main()
