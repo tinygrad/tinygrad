@@ -176,6 +176,13 @@ pm_lowerer = PatternMatcher([
 # **** this is the "quantization preprocessor", it makes ONNX quantized models, and probably also others, actually use ints ****
 
 FP = (1 << 16)
+FP_DTYPE = dtypes.int64
+def fixed_point_mul(x, c1, cc, y=None, c2=None):
+  if y is not None:
+    return ((x.cast(FP_DTYPE)*(c1*FP).cast(FP_DTYPE) + y.cast(FP_DTYPE)*(c2*FP).cast(FP_DTYPE) + (cc*FP).cast(FP_DTYPE)) // FP).cast(dtypes.int)
+  else:
+    return ((x.cast(FP_DTYPE)*(c1*FP).cast(FP_DTYPE) + (cc*FP).cast(FP_DTYPE)) // FP).cast(dtypes.int)
+
 pm_quant = symbolic+PatternMatcher([
   # cast after add/mul
   (UPat.var("x").cast(dtypes.float32) + UPat.var("y").cast(dtypes.float32),
@@ -205,12 +212,13 @@ pm_quant = symbolic+PatternMatcher([
     UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v"),)).where(UPat.cvar(), UPat(Ops.CONST, arg=0))).cast(dtypes.float).named("ld"),
       lambda ld,v,c1: ld*c1),
 
-  # fixed point mult, replace (x.float()*c1+c2).int() with an int expression
-  #((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("c2")).cast(dtypes.int),
-  # lambda x,c1,c2: (x * (c1 * FP).cast(dtypes.int) + (c2 * FP).cast(dtypes.int)) // FP),
-  # fixed point mult, replace (x.float()*c1 + y.float()*c2) with an int expression
-  #((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("y").cast(dtypes.float)*UPat.var("c2")),
-  # lambda x,y,c1,c2: ((x * (c1 * FP).cast(dtypes.int) + y * (c2 * FP).cast(dtypes.int)) // FP).cast(dtypes.float)),
+  # const push through add
+  ((UPat.var("x")*UPat.cvar("c1") + UPat.var("y")*UPat.cvar("c2")) * UPat.cvar("c3"), lambda x,y,c1,c2,c3: (x*c1*c3) + (y*c2*c3)),
+
+  # fixed point mult, replace (x.float()*c1 + c2).int() with an int expression
+  # fixed point mult, replace (x.float()*c1 + y.float()*c2 + c3).int() with an int expression
+  ((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("cc")).cast(dtypes.int), fixed_point_mul),
+  ((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("y").cast(dtypes.float)*UPat.var("c2")+UPat.var("cc")).cast(dtypes.int),fixed_point_mul),
 
   # where move
   (UPat.var("valid").where(UPat.var("yes"), UPat(Ops.CONST, arg=0))*UPat.var("mul"), lambda valid, yes, mul:
