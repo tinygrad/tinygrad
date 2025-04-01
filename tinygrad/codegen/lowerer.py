@@ -175,8 +175,8 @@ pm_lowerer = PatternMatcher([
 
 # **** this is the "quantization preprocessor", it makes ONNX quantized models, and probably also others, actually use ints ****
 
-FP = (1 << 16)
-FP_DTYPE = dtypes.int64
+FP = (1 << 15)
+FP_DTYPE = dtypes.int32
 def fixed_point_mul(x, c1, cc, y=None, c2=None):
   if y is not None:
     return ((x.cast(FP_DTYPE)*(c1*FP).cast(FP_DTYPE) + y.cast(FP_DTYPE)*(c2*FP).cast(FP_DTYPE) + (cc*FP).cast(FP_DTYPE)) // FP).cast(dtypes.int)
