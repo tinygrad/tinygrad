@@ -1,3 +1,7 @@
+// **** graph renderers
+
+// ** UOp graph
+
 function intersectRect(r1, r2) {
   const dx = r2.x-r1.x;
   const dy = r2.y-r1.y;
@@ -9,13 +13,8 @@ function intersectRect(r1, r2) {
 }
 
 let [workerUrl, worker, timeout] = [null, null, null];
-window.renderGraph = async function(graph, additions, name, recenter=false) {
-  if (name === "View Memory Graph") {
-    return renderMemoryGraph(graph);
-  }
-  d3.select("#bars").html("");
-
-  // ** start calculating the new layout (non-blocking)
+async function renderDAG(graph, additions, recenter=false) {
+  // start calculating the new layout (non-blocking)
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/lib/worker.js"].map(u => fetch(u)));
     workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
@@ -26,33 +25,26 @@ window.renderGraph = async function(graph, additions, name, recenter=false) {
   }
   if (timeout != null) clearTimeout(timeout);
   const progressMessage = document.querySelector(".progress-message");
-  timeout = setTimeout(() => {
-    progressMessage.style.display = "block";
-  }, 2000);
+  timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   worker.postMessage({graph, additions});
-
   worker.onmessage = (e) => {
     progressMessage.style.display = "none";
     clearTimeout(timeout);
     const g = dagre.graphlib.json.read(e.data);
-    // ** draw nodes
-    const nodeRender = d3.select("#nodes");
-    const nodes = nodeRender.selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
+    // draw nodes
+    const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`);
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style);
-    // +labels
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2;
       return `translate(-${x}, -${y})`;
      }).selectAll("text").data(d => [d.label.split("\n")]).join("text").selectAll("tspan").data(d => d).join("tspan").text(d => d).attr("x", "1")
        .attr("dy", 14).attr("xml:space", "preserve");
-
-    // ** draw edges
+    // draw edges
     const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis);
-    const edgeRender = d3.select("#edges");
-    edgeRender.selectAll("path.edgePath").data(g.edges()).join("path").attr("class", "edgePath").attr("d", (e) => {
+    d3.select("#edges").selectAll("path.edgePath").data(g.edges()).join("path").attr("class", "edgePath").attr("d", (e) => {
       const edge = g.edge(e);
       const points = edge.points.slice(1, edge.points.length-1);
       points.unshift(intersectRect(g.node(e.v), points[0]));
@@ -63,6 +55,7 @@ window.renderGraph = async function(graph, additions, name, recenter=false) {
   };
 }
 
+// ** Memory graph (WIP)
 
 DTYPE_SIZE = {"bool": 1, "char": 1, "uchar": 1, "short": 2, "ushort": 2, "int": 4, "uint": 4,
               "long": 8, "ulong": 8, "half": 2, "bfloat": 2, "float": 4, "double": 8}
@@ -70,6 +63,7 @@ function getBuffer(e) {
   const [_, size, dtype, device, num] = e.label.split("\n");
   return {nbytes:size*DTYPE_SIZE[dtype.split("dtypes.")[1]], dtype, device:device.split(" ")[1], num:parseInt(num.split(" ")[1])};
 }
+
 function pluralize(num, name, alt=null) {
   return num === 1 ? `${num} ${name}` : `${num} ${alt ?? name+'s'}`
 }
@@ -153,7 +147,6 @@ function renderMemoryGraph(graph) {
   const render = d3.select("#bars");
   const yscale = d3.scaleLinear().domain([0, peak]).range([576, 0]);
   const xscale = d3.scaleLinear().domain([0, timestep]).range([0, 1024]);
-  const xaxis = d3.axisBottom(xscale);
   const axesGroup = render.append("g").attr("id", "axes");
   const nbytes_format = (d) => d3.format(".3~s")(d)+"B";
   axesGroup.append("g").call(d3.axisLeft(yscale).tickFormat(nbytes_format));
@@ -190,41 +183,8 @@ function renderMemoryGraph(graph) {
   d3.select("#edges").html("");
 }
 
-// **** hljs extra definitions for UOps and float4
-hljs.registerLanguage("python", (hljs) => ({
-  ...hljs.getLanguage("python"),
-  case_insensitive: false,
-  contains: [
-    { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-]*(\\.[a-zA-Z_][a-zA-Z0-9_-]*)*' + '(?=[.\\s\\n[:,(])', className: "type" },
-    { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-].vec*' + '(?=[.\\s\\n[:,(])', className: "type" },
-    { begin: '[a-zA-Z_][a-zA-Z0-9_-]*\\.[a-zA-Z_][a-zA-Z0-9_-]*' + '(?=[.\\s\\n[:,()])',  className: "operator" },
-    { begin: '[A-Z][a-zA-Z0-9_]*(?=\\()', className: "section", ignoreEnd: true },
-    ...hljs.getLanguage("python").contains,
-  ]
-}));
-hljs.registerLanguage("cpp", (hljs) => ({
-  ...hljs.getLanguage('cpp'),
-  contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
-}));
+// ** zoom and recentering
 
-// **** extra helpers
-const toPath = ([fp, lineno]) => `${fp.replaceAll("\\", "/").split("/").pop()}:${lineno}`;
-function codeBlock(st, language, { loc, wrap }) {
-  const code = document.createElement("code");
-  code.innerHTML = hljs.highlight(st, { language }).value;
-  code.className = "hljs";
-  const ret = document.createElement("pre");
-  if (wrap) ret.className = "wrap";
-  if (loc != null) {
-    const link = ret.appendChild(document.createElement("a"));
-    link.href = "vscode://file"+loc.join(":");
-    link.textContent = `${loc[0].split("/").at(-1)}:${loc[1]}`+"\n\n";
-  }
-  ret.appendChild(code);
-  return ret;
-}
-
-// **** base graph svg
 const zoom = d3.zoom().scaleExtent([0.05, 2]).on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
 d3.select("#graph-svg").call(zoom);
 // zoom to fit into view
@@ -243,7 +203,40 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   svg.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
 });
 
-// **** main loop
+// **** main VIZ interfacae
+
+function codeBlock(st, language, { loc, wrap }) {
+  const code = document.createElement("code");
+  code.innerHTML = hljs.highlight(st, { language }).value;
+  code.className = "hljs";
+  const ret = document.createElement("pre");
+  if (wrap) ret.className = "wrap";
+  if (loc != null) {
+    const link = ret.appendChild(document.createElement("a"));
+    link.href = "vscode://file"+loc.join(":");
+    link.textContent = `${loc[0].split("/").at(-1)}:${loc[1]}`+"\n\n";
+  }
+  ret.appendChild(code);
+  return ret;
+}
+
+// ** hljs extra definitions for UOps and float4
+hljs.registerLanguage("python", (hljs) => ({
+  ...hljs.getLanguage("python"),
+  case_insensitive: false,
+  contains: [
+    { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-]*(\\.[a-zA-Z_][a-zA-Z0-9_-]*)*' + '(?=[.\\s\\n[:,(])', className: "type" },
+    { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-].vec*' + '(?=[.\\s\\n[:,(])', className: "type" },
+    { begin: '[a-zA-Z_][a-zA-Z0-9_-]*\\.[a-zA-Z_][a-zA-Z0-9_-]*' + '(?=[.\\s\\n[:,()])',  className: "operator" },
+    { begin: '[A-Z][a-zA-Z0-9_]*(?=\\()', className: "section", ignoreEnd: true },
+    ...hljs.getLanguage("python").contains,
+  ]
+}));
+hljs.registerLanguage("cpp", (hljs) => ({
+  ...hljs.getLanguage('cpp'),
+  contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
+}));
+
 var ret = [];
 var cache = {};
 var kernels = null;
@@ -254,9 +247,8 @@ function setState(ns) {
   main();
 }
 async function main() {
-  // NOTE: this is readonly now
   const { currentKernel, currentUOp, currentRewrite, expandKernel } = state;
-  // ***** LHS kernels list
+  // ** left sidebar kernel list
   if (kernels == null) {
     kernels = await (await fetch("/kernels")).json();
     setState({ currentKernel:-1 });
@@ -280,7 +272,7 @@ async function main() {
     for (const [j,u] of k[1].entries()) {
       const inner = ul.appendChild(document.createElement("ul"));
       if (i === currentKernel && j === currentUOp) inner.className = "active";
-      inner.innerText = `${u.name ?? toPath(u.loc)} - ${u.match_count}`;
+      inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]} - ${u.match_count}`;
       inner.style.display = i === currentKernel && expandKernel ? "block" : "none";
       inner.onclick = (e) => {
         e.stopPropagation();
@@ -288,7 +280,7 @@ async function main() {
       }
     }
   }
-  // ***** UOp graph
+  // ** center graph
   if (currentKernel == -1) return;
   const kernel = kernels[currentKernel][1][currentUOp];
   const cacheKey = `kernel=${currentKernel}&idx=${currentUOp}`;
@@ -314,49 +306,42 @@ async function main() {
       // if it's the first one render this new rgaph
       if (ret.length === 1) return main();
       // otherwise just enable the graph selector
-      const gUl = document.getElementById(`rewrite-${ret.length-1}`);
-      if (gUl != null) gUl.classList.remove("disabled");
+      const ul = document.getElementById(`rewrite-${ret.length-1}`);
+      if (ul != null) ul.classList.remove("disabled");
     };
   }
   if (ret.length === 0) return;
-  renderGraph(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], kernel.name, recenter=currentRewrite === 0);
-  // ***** RHS metadata
-  const metadata = document.querySelector(".container.metadata");
-  metadata.innerHTML = "";
-  metadata.appendChild(codeBlock(kernel.code_line, "python", { loc:kernel.loc, wrap:true }));
-  appendResizer(metadata, { minWidth: 20, maxWidth: 50 });
+  renderDAG(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
+  // ** right sidebar code blocks
+  const metadata = document.querySelector(".metadata");
   const [code, lang] = kernel.kernel_code != null ? [kernel.kernel_code, "cpp"] : [ret[currentRewrite].uop, "python"];
-  metadata.appendChild(codeBlock(code, lang, { wrap:false }));
-  // ** rewrite list
+  metadata.replaceChildren(codeBlock(kernel.code_line, "python", { loc:kernel.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
+  appendResizer(metadata, { minWidth: 20, maxWidth: 50 });
+  // ** rewrite steps
   if (kernel.match_count >= 1) {
-    const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
-    metadata.appendChild(rewriteList);
+    const rewritesList = metadata.appendChild(document.createElement("div"));
+    rewritesList.className = "rewrite-list";
     for (let i=0; i<=kernel.match_count; i++) {
-      const gUl = Object.assign(document.createElement("ul"), { innerText: i, id: `rewrite-${i}` });
-      rewriteList.appendChild(gUl);
-      if (i > ret.length-1) gUl.classList.add("disabled");
-      if (i === currentRewrite) {
-        gUl.classList.add("active");
-        if (i !== 0) {
-          const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
-          const [loc, code] = ret[i].upat;
-          metadata.appendChild(codeBlock(code, "python", { loc, wrap:true }));
-          metadata.appendChild(div);
-          const diffHtml = ret[i].diff.map((line) => {
-            const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
-            return `<span style="color: ${color};">${line}</span>`;
-          }).join("<br>");
-          metadata.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${diffHtml}</code>`, className: "wrap" }));
-        }
+      const ul = document.createElement("ul");
+      ul.innerText = i;
+      ul.id = `rewrite-${i}`;
+      ul.className = i > ret.length-1 ? "disabled" : i === currentRewrite ? "active" : "";
+      if (i !== 0) {
+        const { upat, diff } = ret[i];
+        metadata.appendChild(codeBlock(upat[0], "python", { loc:upat[1], wrap:true }));
+        const diffHtml = diff.map((line) => {
+          const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
+          return `<span style="color: ${color};">${line}</span>`;
+        }).join("<br>");
+        metadata.appendChild(Object.assign(document.createElement("pre"), { innerHTML:`<code>${diffHtml}</code>`, className:"wrap" }));
       }
-      gUl.addEventListener("click", () => setState({ currentRewrite: i }));
     }
-  } else {
-    metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(kernel.loc)}.` }));
+
   }
 }
 
 // **** collapse/expand
+
 let isCollapsed = false;
 const mainContainer = document.querySelector('.main-container');
 document.querySelector(".collapse-btn").addEventListener("click", (e) => {
@@ -365,7 +350,9 @@ document.querySelector(".collapse-btn").addEventListener("click", (e) => {
   e.currentTarget.blur();
   e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
 });
+
 // **** resizer
+
 function appendResizer(element, { minWidth, maxWidth }, left=false) {
   const handle = Object.assign(document.createElement("div"), { className: "resize-handle", style: left ? "right: 0" : "left: 0; margin-top: 0" });
   element.appendChild(handle);
@@ -389,6 +376,7 @@ function appendResizer(element, { minWidth, maxWidth }, left=false) {
 appendResizer(document.querySelector(".kernel-list-parent"), { minWidth: 15, maxWidth: 50 }, left=true);
 
 // **** keyboard shortcuts
+
 document.addEventListener("keydown", async function(event) {
   const { currentKernel, currentUOp, currentRewrite, expandKernel } = state;
   // up and down change the UOp or kernel from the list
@@ -432,4 +420,5 @@ document.addEventListener("keydown", async function(event) {
     document.getElementById("zoom-to-fit-btn").click();
   }
 })
+
 main()
