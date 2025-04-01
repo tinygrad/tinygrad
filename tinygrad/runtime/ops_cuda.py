@@ -34,7 +34,7 @@ class CUDAProgram:
   def __init__(self, dev:CUDADevice, name:str, lib:bytes, smem:int=0):
     self.dev, self.name, self.lib, self.smem = dev, name, lib, smem
     if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
-    if DEBUG >= 6: cuda_disassemble(lib, dev.arch)
+    if DEBUG >= 7: cuda_disassemble(lib, dev.arch)
 
     check(cuda.cuCtxSetCurrent(self.dev.context))
     self.module = cuda.CUmodule()
