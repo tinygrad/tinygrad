@@ -471,7 +471,7 @@ class Kernel:
         # NOTE: this pad is broken on kernel 50
         if k.full_shape[1]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, 1, 4))
         # weight with more
-        k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+        k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
         k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
         if k.full_shape[1]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
         # if the more is small, upcast it (kernel 50 is broken with this)
