@@ -2219,7 +2219,7 @@ class TestKernelOpts(unittest.TestCase):
     helper_linearizer_opt(r, [x[0] for x in opts_shapes], color_sizes=[x[1] for x in opts_shapes])
 
 def helper_lds_allclose(opts:list[Opt], expected_bufs, N=16, M=16, K=16):
-  a, b = Tensor.rand(M, K), Tensor.rand(K, N)
+  with Context(DEBUG=0): a, b = Tensor.rand(M, K).realize(), Tensor.rand(K, N).realize()
   realized_ast, bufs = helper_realized_ast(a @ b)
   k = Kernel(realized_ast)
   for opt in opts:
@@ -2229,11 +2229,11 @@ def helper_lds_allclose(opts:list[Opt], expected_bufs, N=16, M=16, K=16):
   np.testing.assert_allclose(bufs[0].numpy().reshape((M,N)), a.numpy() @ b.numpy(), atol=1e-4, rtol=1e-4)
   local_buffers = [uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL]
   assert len(local_buffers) == len(expected_bufs), f"Expected exactly {len(expected_bufs)} local buffers, got {len(local_buffers)}"
-  for i,local_buffer in enumerate(local_buffers):
-    assert local_buffer.arg == expected_bufs[i][0], f"Expected buffer argument index {expected_bufs[i][0]}, got {local_buffer.arg}"
-    expected_dtype = dtypes.float.ptr(expected_bufs[i][1], local=True)
-    assert local_buffer.dtype == expected_dtype, f"Expected buffer dtype {expected_dtype}, got {local_buffer.dtype} for {opts=}"
-    # assert no access other access to local buffer
+  for i,(buf, sz) in enumerate(expected_bufs):
+    assert local_buffers[i].arg == buf, f"Expected buffer argument index {buf}, got {local_buffers[i].arg}"
+    expected_dtype = dtypes.float.ptr(sz, local=True)
+    assert local_buffers[i].dtype == expected_dtype, f"Expected buffer dtype {expected_dtype}, got {local_buffers[i].dtype} for {opts=}"
+    # figure out a smart way of checkign all access to the global buffer are proxied through the local buffer
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
 class TestLDS(unittest.TestCase):
@@ -2270,7 +2270,7 @@ class TestLDS(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_lds_multi_basic(self):
-    helper_lds_allclose(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None)], expected_bufs=[(1,1),(1,16)])
+    helper_lds_allclose(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None)], expected_bufs=[(0,1),(1,16)])
     helper_lds_allclose(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None), Opt(OptOps.LDS, 2, None)], expected_bufs=[(0,16),(1,16),(2,16)])
 
   @unittest.expectedFailure
