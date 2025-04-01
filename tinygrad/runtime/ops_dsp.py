@@ -288,7 +288,7 @@ def vectorize_shuffle(vec:UOp):
 def multicore_range(r:UOp):
   if getenv("MULTICORE", 0) != 1: return None
   if any(x.op is Ops.SPECIAL for x in r.toposort): return None
-  core = UOp(Ops.SPECIAL, dtypes.int, arg=("g0", 0, 1))
+  core = UOp(Ops.SPECIAL, dtypes.int, arg=("g0", 2))
   start = (core.eq(0)).where(r.src[0], r.src[1]//2)
   end = (core.eq(0)).where(r.src[1]//2, r.src[1])
   return r.replace(src=(start,end))
@@ -621,7 +621,13 @@ class MockDSPRenderer(DSPRenderer):
       else:
         msrc.append(f"unsigned int val{i}; read(0, &val{i}, 4);")
     msrc.append("unsigned int st = inscount();")
-    msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])});")
+    if getenv("MULTICORE", 0) != 0:
+      # TODO: get count?
+      msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])}, 0, 0);")
+      msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])}, 1, 0);")
+    else:
+      # huh, why did this change?
+      msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])}, 0, 0);")
     msrc.append("unsigned int et = inscount() - st; write(1, &et, sizeof(et));")
     for i,b in enumerate(bufs):
       if isinstance(b[1][0], PtrDType): msrc.append(f"write(1, buf{i}, {b[1][0].size*b[1][0].itemsize});")
