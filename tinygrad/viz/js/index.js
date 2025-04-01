@@ -319,25 +319,23 @@ async function main() {
   appendResizer(metadata, { minWidth: 20, maxWidth: 50 });
   // ** rewrite steps
   if (kernel.match_count >= 1) {
-    const rewritesList = metadata.appendChild(document.createElement("div"));
-    rewritesList.className = "rewrite-list";
-    for (let i=0; i<=kernel.match_count; i++) {
-      const ul = rewritesList.appendChild(document.createElement("ul"));
-      ul.innerText = i;
-      ul.id = `rewrite-${i}`;
-      if (i > ret.length-1) ul.classList.add("disabled");
-      if (i === currentRewrite) {
-        ul.className = i > ret.length-1 ? "disabled" : i === currentRewrite ? "active" : "";
-        ul.onclick = () => setState({ currentRewrite:i });
-        if (i !== 0) {
-          const { upat, diff } = ret[i];
-          metadata.appendChild(codeBlock(upat[0], "python", { loc:upat[1], wrap:true }));
-          const diffHtml = diff.map((line) => {
-            const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
-            return `<span style="color: ${color};">${line}</span>`;
-          }).join("<br>");
-          metadata.appendChild(Object.assign(document.createElement("pre"), { innerHTML:`<code>${diffHtml}</code>`, className:"wrap" }));
-        }
+    const rewriteList = metadata.appendChild(document.createElement("div"));
+    rewriteList.className = "rewrite-list";
+    for (let s=0; s<=kernel.match_count; s++) {
+      const ul = rewriteList.appendChild(document.createElement("ul"));
+      ul.innerText = s;
+      ul.id = `rewrite-${s}`;
+      ul.onclick = () => setState({ currentRewrite:s });
+      ul.className = s > ret.length-1 ? "disabled" : s === currentRewrite ? "active" : "";
+      if (s > 0 && s === currentRewrite) {
+        const { upat, diff } = ret[s];
+        metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
+        const diffCode = metadata.appendChild(document.createElement("pre"));
+        diffCode.innerHTML = `<code>`+diff.map((line) => {
+          const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
+          return `<span style="color: ${color};">${line}</span>`;
+        }).join("<br>")+`</code>`;
+        diffCode.className = "wrap";
       }
     }
   }
