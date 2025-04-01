@@ -163,8 +163,8 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   if Ops.SHR in ops:
     pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None)]
     if is_dtype_supported(dtypes.uint64):
-      pat += [(UPat.var("x", dtypes.int32)//UPat.cvar("d"), lambda x, d: fast_idiv_i32(x, d.arg)),
-              (UPat.var("x", dtypes.int32)%UPat.cvar("d"), lambda x, d: x - d*f if (f:=fast_idiv_i32(x, d.arg)) is not None else None)]
+      pat += [(UPat.var("x", dtypes.int32)//UPat.cvar("d"), lambda x, d: fast_idiv_i32(x, d.arg))]
+              # (UPat.var("x", dtypes.int32)%UPat.cvar("d"), lambda x, d: x - d*f if (f:=fast_idiv_i32(x, d.arg)) is not None else None)]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
