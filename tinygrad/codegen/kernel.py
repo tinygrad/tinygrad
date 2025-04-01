@@ -442,14 +442,16 @@ class Kernel:
       # special path for DSP
       if k.full_shape[-3:] == (32,3,3):
         # 3x3 dwconv
-        if k.full_shape[-4]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
+        #if k.full_shape[-4]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
         k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
         k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
         k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-3, 32))
-        k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 4))
+        if k.full_shape[len(k.full_shape)-4]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 4))
         # if this is small, swap it
-        # NOTE: this is breaking something
-        #if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.SWAP, 0, 1))
+        # NOTE: this is breaking something (should be fixed w/o padto)
+        if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.SWAP, 0, 1))
+        # kernel 23 is broken with this
+        #if k.full_shape[0] <= 6: k.apply_opt(Opt(OptOps.UPCAST, 0, 0))
       elif k.full_shape[-4:] == (32,3,3,3):
         # 3x3 normal conv
         k.apply_opt(Opt(OptOps.UNROLL, 2, 0))
