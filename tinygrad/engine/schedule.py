@@ -166,6 +166,20 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
     if len(st_childs:=dedup(unwrap(x.st) for x in tr_next.src if x.base == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, realizes, reduce_for_op, group, cache)
 
+# Add new pattern matcher for FUSE_ARANGE
+pm_fuse_arange = PatternMatcher([
+  # Pattern to detect sliced arange tensors
+  (UPat(Ops.ADD, src=[
+    UPat(Ops.VIEW, name="slice1"),
+    UPat(Ops.VIEW, name="slice2")
+  ], name="add"),
+  lambda slice1, slice2, add: add if any(
+    x.base.size != prod(x.shape) or  # Check for size mismatch
+    any(v.strides[0] != 1 for v in unwrap(x.st).views)  # Check for non-unit strides
+    for x in [slice1, slice2]
+  ) else None)
+])
+
 def group_realizes(sink:UOp) -> dict[UOp, None]:
   # start by adding uops that always realize
   sink = graph_rewrite(sink, do_realize+create_ctx, ctx:=GrouperContext({}, {}, defaultdict(dict)))
@@ -213,6 +227,11 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
       ctx.realizes[tr] = None
     reduce_for_op.update((tr, r) for tr in group)
     if FUSE_ARANGE and r.arg[0] is Ops.ADD and r.src[0].base.op is Ops.CONST:
+      # Apply rewrite rule before fusing
+      new_root = graph_rewrite(r, pm_fuse_arange)
+      if new_root is not r:
+        # Skip FUSE_ARANGE if rewrite detected sliced tensors
+        continue
       # maybe fuse arange with its children
       # Don't fuse if this involves slices that could cause shape mismatches
       children = list(flatten(ctx.children[tr] for tr in group))

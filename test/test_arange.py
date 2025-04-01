@@ -190,5 +190,23 @@ class TestIndexing(unittest.TestCase):
       assert slices_sum.shape == (5,)
       np.testing.assert_allclose(slices_sum.numpy(), np.array([5, 7, 9, 11, 13]))
 
+  def test_arange_slices_rewrite(self):
+    # Test that our rewrite rule correctly handles sliced arange tensors
+    with Context(FUSE_ARANGE=1):
+      t = Tensor.arange(12)
+      # Test different slice combinations
+      slices = [
+        t[:6] + t[6:],  # Simple split
+        t[::2] + t[1::2],  # Strided slices
+        t[:4] + t[4:8] + t[8:]  # Multiple slices
+      ]
+      expected = [
+        np.arange(12)[:6] + np.arange(12)[6:],  # Simple split
+        np.arange(12)[::2] + np.arange(12)[1::2],  # Strided slices
+        np.arange(12)[:4] + np.arange(12)[4:8] + np.arange(12)[8:]  # Multiple slices
+      ]
+      for s, e in zip(slices, expected):
+        np.testing.assert_allclose(s.numpy(), e)
+
 if __name__ == "__main__":
   unittest.main()
