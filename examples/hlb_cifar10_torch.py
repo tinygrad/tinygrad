@@ -1,5 +1,5 @@
+# pylint: skip-file
 # https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py with optional tiny backend
-
 from tinygrad import getenv
 if getenv("TINY_BACKEND"): import tinygrad.frontend.torch
 
