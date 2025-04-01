@@ -336,7 +336,6 @@ async function main() {
         metadata.appendChild(Object.assign(document.createElement("pre"), { innerHTML:`<code>${diffHtml}</code>`, className:"wrap" }));
       }
     }
-
   }
 }
 
