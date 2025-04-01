@@ -16,7 +16,7 @@ let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDAG(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
   if (worker == null) {
-    const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/lib/worker.js"].map(u => fetch(u)));
+    const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
     workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
     worker = new Worker(workerUrl);
   } else {
@@ -322,18 +322,22 @@ async function main() {
     const rewritesList = metadata.appendChild(document.createElement("div"));
     rewritesList.className = "rewrite-list";
     for (let i=0; i<=kernel.match_count; i++) {
-      const ul = document.createElement("ul");
+      const ul = rewritesList.appendChild(document.createElement("ul"));
       ul.innerText = i;
       ul.id = `rewrite-${i}`;
-      ul.className = i > ret.length-1 ? "disabled" : i === currentRewrite ? "active" : "";
-      if (i !== 0) {
-        const { upat, diff } = ret[i];
-        metadata.appendChild(codeBlock(upat[0], "python", { loc:upat[1], wrap:true }));
-        const diffHtml = diff.map((line) => {
-          const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
-          return `<span style="color: ${color};">${line}</span>`;
-        }).join("<br>");
-        metadata.appendChild(Object.assign(document.createElement("pre"), { innerHTML:`<code>${diffHtml}</code>`, className:"wrap" }));
+      if (i > ret.length-1) ul.classList.add("disabled");
+      if (i === currentRewrite) {
+        ul.className = i > ret.length-1 ? "disabled" : i === currentRewrite ? "active" : "";
+        ul.onclick = () => setState({ currentRewrite:i });
+        if (i !== 0) {
+          const { upat, diff } = ret[i];
+          metadata.appendChild(codeBlock(upat[0], "python", { loc:upat[1], wrap:true }));
+          const diffHtml = diff.map((line) => {
+            const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
+            return `<span style="color: ${color};">${line}</span>`;
+          }).join("<br>");
+          metadata.appendChild(Object.assign(document.createElement("pre"), { innerHTML:`<code>${diffHtml}</code>`, className:"wrap" }));
+        }
       }
     }
   }
