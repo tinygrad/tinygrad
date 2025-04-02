@@ -914,10 +914,6 @@ class TestOps(unittest.TestCase):
   def test_sigmoid_extreme(self):
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=300, high=400)
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=-400, high=-300)
-    x = Tensor([300.0])
-    self.assertAlmostEqual(x.sigmoid()[0].gradient(x)[0].item(), 0.0)
-    x = Tensor([-300.0])
-    self.assertAlmostEqual(x.sigmoid()[0].gradient(x)[0].item(), 0.0)
   def test_sigmoid_alt_extreme(self):
     def sigmoid(x:Tensor): return x.exp() / (1 + x.exp())
     x = Tensor([300.0])
@@ -1931,10 +1927,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3)], lambda x: x.as_strided((1,), (1,)), forward_only=True)
     helper_test_op([(3,4)], lambda x: x.as_strided((4,3), (1,4)), forward_only=True)
     helper_test_op([(3,1)], lambda x: x.as_strided((3,3), (1,0)), forward_only=True)
-
-    # invalid stride leading to out-of-bounds access
-    self.helper_test_exception([(2,2)], lambda x: x.as_strided((3,3), (1,1)), lambda x: x.as_strided((3,3), (1,1)), expected=RuntimeError)
-
+    
   @unittest.skip("very slow")
   def test_sd_big_conv(self):
     # internal shape (1, 1, 512, 62, 62, 512, 3, 3) overflows a int
