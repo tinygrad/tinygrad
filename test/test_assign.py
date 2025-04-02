@@ -194,9 +194,8 @@ class TestAssign(unittest.TestCase):
     a1 = Tensor.full((16, 16), 20).contiguous().realize()
     b0 = Tensor.full((16, ), 1).contiguous().realize()
     b1 = Tensor.full((16, ), 2).contiguous().realize()
-
-    r0 = (a0 - b1.contiguous()).sum(1)
-    r1 = (a1 - b0.contiguous()).sum(1)
+    r0 = (a0 - b1).sum(1).contiguous()
+    r1 = (a1 - b0).sum(1).contiguous()
     b0.assign(r0 * b0)
     b1.assign(r1 * b1)
     Tensor.realize(b0, b1)

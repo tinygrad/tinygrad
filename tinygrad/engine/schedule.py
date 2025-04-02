@@ -117,7 +117,6 @@ DONT_PUSH_VIEWS = {Ops.BUFFER, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.ASSIGN, Ops.
 
 @dataclass(frozen=True)
 class GrouperContext:
-  assigns: dict[UOp, UOp]                     # maps realized buffers to assigns
   realizes: dict[UOp, None]                   # all the simplified tensor uops we realize
   children: defaultdict[UOp, dict[UOp, None]] # children graph of tensor uops
 
@@ -144,7 +143,6 @@ do_realize = PatternMatcher([
 ])
 
 def append_uop(ctx:GrouperContext, u:UOp) -> None:
-  if u.op is Ops.ASSIGN: ctx.assigns[u.buf_uop] = u
   for s in u.src: ctx.children[s.base][u] = None
 create_ctx = PatternMatcher([(UPat(GroupOp.All-{Ops.SINK, Ops.VIEW}, name="u"), append_uop)])
 
@@ -168,7 +166,7 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
 
 def group_realizes(sink:UOp) -> dict[UOp, None]:
   # start by adding uops that always realize
-  sink = graph_rewrite(sink, do_realize+create_ctx, ctx:=GrouperContext({}, {}, defaultdict(dict)))
+  sink = graph_rewrite(sink, do_realize+create_ctx, ctx:=GrouperContext({}, defaultdict(dict)))
   if DONT_GROUP_REDUCES: return ctx.realizes
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
@@ -185,14 +183,6 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
     forced_realize = r in group
     # can only have one output
     if not forced_realize and len(group) > 1: forced_realize = True
-    # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and any(x.op is Ops.ASSIGN for x in group):
-      parents = deque((r, *group))
-      while parents and not forced_realize:
-        p = parents.pop().base
-        if (assign:=ctx.assigns.get(p)) is not None and assign not in group: forced_realize, can_chase = True, False
-        if p in ctx.realizes: continue
-        parents.extend(p.src)
     if forced_realize or not group:
       tr = r
       if can_chase:
