@@ -126,10 +126,9 @@ class OnnxRunner:
 
     self.onnx_ops = onnx_ops
 
-  def _check_value(self, name: str, value: Tensor|None, spec: OnnxValue):
-    if bool(getenv("ONNXFLOAT32", 0)):
-      value = value.cast(dtypes.float32) if isinstance(value, Tensor) else Tensor(value, dtype=dtypes.float32, requires_grad=self.is_training)
-    if value.dtype is not spec.dtype: raise RuntimeError(f"{name} has {value.dtype} dtype, should be {spec.dtype}")
+  def _check_tensor(self, name: str, value: Tensor, spec: OnnxValue):
+    if bool(getenv("ONNXFLOAT32", 0)): value = value.cast(dtypes.float32)
+    elif value.dtype is not spec.dtype: raise RuntimeError(f"{name} has {value.dtype} dtype, should be {spec.dtype}")
     for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, value.shape, strict=True)):
       if isinstance(onnx_dim, str):
         onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, int(user_dim_input))
@@ -138,14 +137,13 @@ class OnnxRunner:
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
-    if value is None: raise RuntimeError(f"{name} is marked as non-optional, but received a None value")
-    if not isinstance(value, Tensor) and value is not None: value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
-    return self._check_value(name, value, spec)
+    if value is None: raise RuntimeError(f"{name} is not marked as optional, but received a None value")
+    if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
+    return self._check_tensor(name, value, spec)
 
   def _parse_output(self, name: str):
     value, spec = self.graph_values[name], self.graph_outputs[name]
-    if value is None: return value
-    return self._check_value(name, value, spec)
+    return self._check_tensor(name, value, spec) if isinstance(value, Tensor) else value
 
   def _dispatch_op(self, op, inps, opts):
     if op in self.onnx_ops:

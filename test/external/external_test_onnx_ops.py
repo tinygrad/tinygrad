@@ -3,17 +3,17 @@
 # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md
 
 from typing import Any
-import unittest, onnx, tempfile, os
+import unittest, onnx, tempfile
 import numpy as np
 from extra.onnx_helpers import validate
 
 class TestOnnxOps(unittest.TestCase):
   DOMAIN = None
   def helper_test_single_op(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:dict[str, np.ndarray], rtol=1e-3, atol=1e-6):
-    onnx_inputs = [onnx.helper.make_tensor_value_info(name, onnx.helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inps.items()]
-    onnx_outputs = [onnx.helper.make_tensor_value_info(name, onnx.helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in outs.items()]
+    inputs = [onnx.helper.make_tensor_value_info(name, onnx.helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inps.items()]
+    outputs = [onnx.helper.make_tensor_value_info(name, onnx.helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in outs.items()]
     nodes = [onnx.helper.make_node(op, list(inps), list(outs), domain=self.DOMAIN, **opts)]
-    graph = onnx.helper.make_graph(nodes, f"test_{op.lower()}", onnx_inputs, onnx_outputs)
+    graph = onnx.helper.make_graph(nodes, f"test_{op.lower()}", inputs, outputs)
     model = onnx.helper.make_model(graph, producer_name=f"test_{op.lower()}")
     with tempfile.NamedTemporaryFile() as tmp:
       onnx.save(model, tmp.name)
