@@ -1,3 +1,5 @@
+print("start")
+
 # pylint: skip-file
 # https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py with optional tiny backend
 from tinygrad import getenv
@@ -85,6 +87,8 @@ hyp = {
     }
 }
 
+print("device is", hyp['misc']['device'])
+
 #############################################
 #                Dataloader                 #
 #############################################
@@ -93,6 +97,8 @@ if not os.path.exists(hyp['misc']['data_location']):
 
         transform = transforms.Compose([
             transforms.ToTensor()])
+
+        print("loading data")
 
         cifar10      = torchvision.datasets.CIFAR10('extra/datasets/', download=True,  train=True,  transform=transform)
         cifar10_eval = torchvision.datasets.CIFAR10('extra/datasets/', download=False, train=False, transform=transform)
@@ -136,11 +142,15 @@ if not os.path.exists(hyp['misc']['data_location']):
 
         torch.save(data, hyp['misc']['data_location'])
 
+        print("saved")
+
 else:
     ## This is effectively instantaneous, and takes us practically straight to where the dataloader-loaded dataset would be. :)
     ## So as long as you run the above loading process once, and keep the file on the disc it's specified by default in the above
     ## hyp dictionary, then we should be good. :)
     data = torch.load(hyp['misc']['data_location'])
+
+    print("loaded")
 
 ## As you'll note above and below, one difference is that we don't count loading the raw data to GPU since it's such a variable operation, and can sort of get in the way
 ## of measuring other things. That said, measuring the preprocessing (outside of the padding) is still important to us.
