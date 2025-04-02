@@ -126,7 +126,7 @@ class OnnxRunner:
 
     self.onnx_ops = onnx_ops
 
-  def _check_shape(self, value: Tensor, spec: OnnxValue):
+  def _valid_shape(self, value: Tensor, spec: OnnxValue):
     for onnx_dim, user_dim_input in zip(spec.shape, value.shape, strict=True):
       if isinstance(onnx_dim, str):
         onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, int(user_dim_input))
@@ -141,7 +141,7 @@ class OnnxRunner:
     else:
       if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
       if value.dtype is not spec.dtype: raise RuntimeError(f"input '{name}' has wrong dtype")
-    if not self._check_shape(value, spec): raise RuntimeError(f"input '{name}' has wrong shape")
+    if not self._valid_shape(value, spec): raise RuntimeError(f"input '{name}' has wrong shape")
     return value
 
   def _parse_output(self, name: str):
@@ -149,7 +149,7 @@ class OnnxRunner:
     if not isinstance(value, Tensor): return value
     if self.float32 and dtypes.is_float(spec.dtype): value = value.cast(spec.dtype)
     if value.dtype is not spec.dtype: raise RuntimeError(f"output '{name}' has wrong dtype")
-    if not self._check_shape(value, spec): raise RuntimeError(f"output '{name}' has wrong shape")
+    if not self._valid_shape(value, spec): raise RuntimeError(f"output '{name}' has wrong shape")
     return value
 
   def _dispatch_op(self, op, inps, opts):
