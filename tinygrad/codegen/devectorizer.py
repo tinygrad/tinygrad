@@ -346,5 +346,5 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None, is_conv=False) ->
   sink = graph_rewrite(sink, pm_reduce, ctx=ReduceContext(), name="remove_reduce")
 
   # final rules for the renderer (without sym)
-  sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+extra_matcher+pm_render)
+  sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
   return sink
