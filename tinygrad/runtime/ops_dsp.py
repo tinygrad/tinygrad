@@ -431,8 +431,8 @@ class DSPRenderer(ClangRenderer):
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]], sync_cnt=0x0) -> str:
     msrc = ['typedef struct all_args {', *[f'int sz_or_val_{i}; int off{i}; void *buf_{i};' for i in range(len(bufs))], 'void* sync; } all_args_t;']
     msrc += ['void threader(all_args_t* args) {']
-    msrc += [f"{function_name}({', '.join([(f'args->buf_{i}' if isinstance(b[1][0], PtrDType) else f'args->sz_or_val_{i}')
-                                           for i,b in enumerate(bufs)])}, 1, args->sync);"]
+    buf_inputs = ', '.join([(f'args->buf_{i}' if isinstance(b[1][0], PtrDType) else f'args->sz_or_val_{i}') for i,b in enumerate(bufs)])
+    msrc += [f"{function_name}({buf_inputs}, 1, args->sync);"]
     msrc += ['qurt_thread_exit(0); }'
             'int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
             'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};',
