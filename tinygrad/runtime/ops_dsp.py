@@ -75,7 +75,9 @@ def multi_add_int32(**aa):
     del aa['acc']
   else:
     acc = None
+  mask = 0x01010101
   if 'd0' not in aa:
+    mask = 0x00010101
     c0 = aa['c0']
     if c0.src[0].op is Ops.GEP and c0.src[0].arg == (2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62,
                                                      66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118, 122, 126):
@@ -95,10 +97,10 @@ def multi_add_int32(**aa):
   swizzle = tuple(swizzle)
   m0 = UOp(Ops.CAT, dtypes.uchar.vec(128), src=tuple(aa[k].src[0] for k in sorted(aa.keys()))).gep(swizzle)
   if acc is not None:
-    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, UOp.const(dtypes.uint, 0x01010101)),
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, UOp.const(dtypes.uint, mask)),
                "__builtin_HEXAGON_V6_vrmpyub_acc_128B({0}, {1}, {2})")
   else:
-    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, UOp.const(dtypes.uint, 0x01010101)), "__builtin_HEXAGON_V6_vrmpyub_128B({0}, {1})")
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, UOp.const(dtypes.uint, mask)), "__builtin_HEXAGON_V6_vrmpyub_128B({0}, {1})")
 
 def multi_add_int2(**aa):
   if 'acc' in aa:
@@ -148,9 +150,8 @@ conv_pm = PatternMatcher([
    UPat(name="c0")*UPat(name="c1"), multi_mul),
 
   # __builtin_HEXAGON_V6_vrmpybus x3
-  # this is wrong
-  #(UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
-  #(UPat(name="acc") + UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
+  (UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
+  (UPat(name="acc") + UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
 ])
 
 dsp_pm = PatternMatcher([
