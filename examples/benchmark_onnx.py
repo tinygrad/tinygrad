@@ -1,4 +1,4 @@
-import sys, onnx, time
+import sys, onnx, time, pickle
 from tinygrad import TinyJit, Device, GlobalCounters, fetch, getenv
 from tinygrad.frontend.onnx import OnnxRunner
 from extra.onnx_helpers import get_example_inputs, validate
@@ -34,3 +34,8 @@ if __name__ == "__main__":
   if getenv("ORT"):
     validate(onnx_file, new_inputs, rtol=1e-3, atol=1e-3)
     print("model validated")
+
+  if (fn:=getenv("SAVE_PKL", "")) != "":
+    with open(fn, "wb") as f:
+      pickle.dump(run_onnx_jit, f)
+    print(f"pkl saved to {fn}")
