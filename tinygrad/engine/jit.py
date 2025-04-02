@@ -149,8 +149,7 @@ class CapturedJit(Generic[ReturnType]):
   expected_st_vars_dtype_device: list[tuple[ShapeTracker, tuple[Variable, ...], DType, str]]
 
   def __reduce__(self):
-    # TODO: free_intermediates here?
-    self.optimize_weights()
+    # TODO: free_intermediates here? optimize_weights here?
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
                             self.expected_names, self.expected_st_vars_dtype_device)
 
@@ -218,12 +217,13 @@ def _prepare_jit_inputs(args, kwargs):
   return input_buffers, var_vals, names, st_vars_dtype_device
 
 class TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Optional[Callable[..., ReturnType]], captured:Optional[CapturedJit]=None, prune=False):
+  def __init__(self, fxn:Optional[Callable[..., ReturnType]], captured:Optional[CapturedJit]=None, prune=False, optimize=False):
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
     self.captured: Optional[CapturedJit] = captured
     self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
+    self.optimize = optimize
 
   def add_buffer(self, b:Buffer) -> Buffer:
     if found:=self._buffer_replace.get(b, None): return found
@@ -314,6 +314,7 @@ class TinyJit(Generic[ReturnType]):
 
       # set this for next run
       self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, st_vars_dtype_device)
+      if self.optimize: self.captured.optimize_weights()
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None
