@@ -494,17 +494,6 @@ class Kernel:
         # pad to 128 and run on 128
         if k.full_shape[0]%128 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 128))
         if k.full_shape[0]%128 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
-
-      # make all non first dimensions local
-      """
-      if getenv("MULTICORE", 0) == 2 and len(k.full_shape) >= 1 and k.full_shape[0] > 1:
-        if k.full_shape[0]%2 == 1: k.apply_opt(Opt(OptOps.PADTO, 0, 2))
-        if k.full_shape[0] > 2: k.apply_opt(Opt(OptOps.LOCAL, 0, k.full_shape[0]//2))
-        for i in range(1, k.first_reduce-1): k.apply_opt(Opt(OptOps.LOCAL, 1, 0))
-      else:
-        for i in range(1, k.first_reduce): k.apply_opt(Opt(OptOps.LOCAL, 1, 0))
-      """
-
       return self
 
     self.required_optimizations()

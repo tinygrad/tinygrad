@@ -14,6 +14,6 @@ if __name__ == "__main__":
     GlobalCounters.reset()
     p = run_onnx_jit(**{input_name:img.to(device)})
     assert p.shape == (1,1000)
-    t = p.argmax().item()
+    t = p.to('cpu').argmax().item()
     hit += y==t
     print(f"target: {y:3d}  pred: {t:3d}  acc: {hit/(i+1)*100:.2f}%")
