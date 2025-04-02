@@ -973,17 +973,29 @@ class Tensor(SimpleMathTrait):
 
   def as_strided(self, size, stride, storage_offset=0) -> Tensor:
     """Creates a view with custom stride/offset"""
+    from tinygrad.helpers import prod
+    from tinygrad.shape.view import View
+    from tinygrad.shape.shapetracker import ShapeTracker
+    
+    # validate requested view
     storage_size = self.numel()*self.dtype.itemsize
     needed = storage_offset + sum((s-1)*st for s,st in zip(size,stride)) if size else 0
     if needed and (needed+1)*self.dtype.itemsize > storage_size:
-      req = (needed+1)*self.dtype.itemsize  # calc required bytes
-      raise RuntimeError(f"setStorage: sizes {size}, strides {stride}, offset {storage_offset} require {req} but got {storage_size}")
-    if any(s < 0 for s in stride):
+      raise RuntimeError(f"setStorage: sizes {size}, strides {stride}, offset {storage_offset} require {(needed+1)*self.dtype.itemsize} but got {storage_size}")
+    if any(s < 0 for s in stride): 
       raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
-    if self.numel() == 1 or prod(size) == 1: return self.flatten()[storage_offset].reshape(size)
-    idx = storage_offset + sum(Tensor.arange(s).reshape([s if i==j else 1 for i in range(len(size))])*st
-                               for j,(s,st) in enumerate(zip(size,stride)))
-    return self.flatten().gather(0, idx.reshape(-1)).reshape(size)
+    
+    # handle special cases
+    if self.numel() == 1 or prod(size) == 1: 
+      return self.flatten()[storage_offset].reshape(size)
+      
+    # create view using shapetracker
+    x = self.contiguous().realize()
+    ret = Tensor(x.lazydata, device=self.device, requires_grad=self.requires_grad)
+    flat_view = ShapeTracker.from_shape(x.shape).reshape((x.numel(),)).views[0]
+    ret.lazydata.st = ShapeTracker((flat_view, View.create(size, stride, storage_offset)))
+    
+    return ret
 
   def flip(self, axis, *args) -> Tensor:
     """
