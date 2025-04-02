@@ -46,6 +46,7 @@ class PythonProgram:
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is Ops.STORE:
+          assert len(inp) == 2, "expected store is ([(memory, offset, gate)], [value])"
           if dtp[1].count > 1:
             for j,val in enumerate(inp[1]):
               for (m,o,g),v in zip(inp[0], val):
