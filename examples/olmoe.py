@@ -43,7 +43,12 @@ def fetch_weights() -> dict[str, Tensor]:
   m3 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00003-of-00003.safetensors").to(Device.DEFAULT)
   return {**nn.state.safe_load(m1), **nn.state.safe_load(m2), **nn.state.safe_load(m3)}
 
+def filter_layers(state, layers):
+  lay = [f"model.layers.{i}." for i in range(layers)]
+  return {k: v for k, v in state.items() if not k.startswith("model.layers.") or any(k.startswith(l) for l in lay)}
+
 if __name__ == "__main__":
+  LAYERS = 2
   if getenv("TORCH"):
     from transformers import OlmoeForCausalLM, AutoTokenizer
     model = OlmoeForCausalLM.from_pretrained("allenai/OLMoE-1B-7B-0924")
@@ -55,13 +60,13 @@ if __name__ == "__main__":
     exit(0)
 
   with Timing("create model: "):
-    model = Transformer(n_layers=16, dim=2048, hidden_dim=1024, n_heads=16, norm_eps=1e-5, qk_norm=1e-5, max_context=1024,
+    model = Transformer(n_layers=LAYERS, dim=2048, hidden_dim=1024, n_heads=16, norm_eps=1e-5, qk_norm=1e-5, max_context=1024,
                         vocab_size=50304, feed_forward=functools.partial(MixtureFeedForward, 64, 8))
     model_state_dict = nn.state.get_state_dict(model)
     del model_state_dict['freqs_cis']
 
   with Timing("load weights to GPU: "):
-    nhf_state = convert_from_huggingface(fetch_weights(), model, 16, 16)
+    nhf_state = convert_from_huggingface(filter_layers(fetch_weights(), LAYERS), model, 16, 16)
     # NOTE: i'm not sure this actually needs float32, it may just change the type of things downstream from it. but doesn't match torch w/o this
     for needs_float32 in ['tok_embeddings.weight']: nhf_state[needs_float32] = nhf_state[needs_float32].float()
   print(f"ram used: {GlobalCounters.mem_used/1e9:.2f} GB")
