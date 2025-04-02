@@ -175,14 +175,6 @@ pm_lowerer = PatternMatcher([
 
 # **** this is the "quantization preprocessor", it makes ONNX quantized models, and probably also others, actually use ints ****
 
-def remove_matching_mask(v1, v2, ld):
-  a1 = v1.arg.to_indexed_uops()[1].simplify()
-  a2 = v2.arg.to_indexed_uops()[1].simplify()
-  #print(a1.render(), a2.render())
-  if a1 == a2: return ld
-  # WRONG!
-  return ld
-
 FP = (1 << 15)
 pm_quant = symbolic+PatternMatcher([
   # cast after add/mul
@@ -245,11 +237,10 @@ pm_quant = symbolic+PatternMatcher([
 
   # MUL by 1/0 on LOAD where the masks match
   (UPat(Ops.WHERE, src=(UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v1"),)), UPat(Ops.CONST, arg=1), UPat(Ops.CONST, arg=0))) * \
-   UPat(Ops.LOAD, src=(UPat(), UPat(Ops.VIEW, name="v2")), name="ld"), remove_matching_mask),
-
-   #lambda ld,v1,v2: ld if v1.arg.to_indexed_uops()[1].simplify() == v2.arg.to_indexed_uops()[1].simplify() else None),
-    # NOTE: this clause is completely false and might break things
-  #  or True else None),
+   UPat(Ops.LOAD, src=(UPat(), UPat(Ops.VIEW, name="v2")), name="ld"),
+    lambda ld,v1,v2: ld if v1.arg.to_indexed_uops()[1].simplify() == v2.arg.to_indexed_uops()[1].simplify()
+      # NOTE: this clause is completely false and might break things
+      or True else None),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:

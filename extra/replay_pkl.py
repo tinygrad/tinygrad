@@ -56,7 +56,6 @@ if __name__ == "__main__":
             ei.bufs[0].copyin(memoryview(bytearray(b'\x00'*ei.bufs[0].nbytes)))
             GlobalCounters.kernel_count -= 1
 
-
         if not getenv("NOOPT"): k.hand_coded_optimizations()
         p2 = k.to_program()
         new_ei = replace(ei, prg=CompiledRunner(p2))
