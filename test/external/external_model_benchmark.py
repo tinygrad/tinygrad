@@ -1,4 +1,5 @@
-import csv, pathlib, time, os, numpy as np
+import csv, pathlib, time, numpy as np
+from os import getenv
 import torch
 torch.set_num_threads(1)
 import onnx
@@ -141,7 +142,7 @@ def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
       np.testing.assert_allclose(tiny_v, onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
 
 if __name__ == "__main__":
-  devices = [Device.DEFAULT] if os.getenv("NOCLANG") else [Device.DEFAULT, "CPU"]
-  if os.getenv("MODEL", "") != "": benchmark_model(os.getenv("MODEL", ""), devices, True)
+  devices = [Device.DEFAULT] if getenv("NOCLANG") else [Device.DEFAULT, "CPU"]
+  if getenv("MODEL", "") != "": benchmark_model(getenv("MODEL", ""), devices, True)
   else:
     for m in MODELS: benchmark_model(m, devices, True)

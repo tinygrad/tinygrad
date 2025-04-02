@@ -22,8 +22,8 @@ def dtype_parse(onnx_dtype: int, float32: bool) -> DType:
   }
   if onnx_dtype in unsupported: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
   dtype = supported[onnx_dtype]
-  if float32 and dtypes.is_float(dtype): dtype = dtypes.float32
-  return dtype if is_dtype_supported(dtype) else dtypes.float32
+  if (float32 and dtypes.is_float(dtype)) or not is_dtype_supported(dtype): dtype = dtypes.float32
+  return dtype
 
 def attribute_parse(onnx_attribute: AttributeProto, float32: bool):
   supported: dict[AttributeProto.AttributeType, Callable[[AttributeProto], Any]] = {
