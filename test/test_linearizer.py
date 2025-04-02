@@ -2281,7 +2281,7 @@ class TestLDS(unittest.TestCase):
   def test_lds_unroll(self):
     # unroll doesn't change local output buffer size
     for sz in [2,4,8]:
-      helper_lds_allclose(opts=[Opt(OptOps.UNROLL, 0, sz)], expected_bufs=[(0,1),(1,sz),(1,sz)])
+      helper_lds_allclose(opts=[Opt(OptOps.UNROLL, 0, sz)], expected_bufs=[(0,1),(1,sz),(2,sz)])
 
   @unittest.expectedFailure
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
