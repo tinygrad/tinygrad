@@ -131,6 +131,15 @@ def realize_before_view(ctx:GrouperContext, view:UOp, tr:UOp) -> None:
   # realize before expand
   if resolve(prod(tr.shape) < prod(st.shape)) and not DONT_REALIZE_EXPAND: return realize(ctx, tr)
 
+def check_assign(ctx:GrouperContext, assign:UOp, x:UOp):
+  if x in ctx.realizes: return
+  parents = deque(x.src)
+  while parents:
+    p = parents.pop().base
+    if p in ctx.realizes: continue
+    if p.op is Ops.BUFFER and p is assign.buf_uop: return ctx.realizes.setdefault(x)
+    parents.extend(p.src)
+
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x, None) for x in s.src if x.op not in DONT_PUSH_VIEWS)),
@@ -140,6 +149,8 @@ do_realize = PatternMatcher([
   (UPat(Ops.VIEW, name="view", src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"),)), realize_before_view),
   # realize before COPY
   (UPat(Ops.COPY, src=(UPat(), UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"))), realize),
+  # realize if assign cannot be fused with its child
+  (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x")), name="assign"), check_assign),
 ])
 
 def append_uop(ctx:GrouperContext, u:UOp) -> None:
