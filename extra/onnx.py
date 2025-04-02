@@ -22,7 +22,7 @@ def dtype_parse(onnx_dtype: int) -> DType:
   }
   if onnx_dtype in unsupported: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
   dtype = supported[onnx_dtype]
-  if onnx_float32 and dtypes.is_float(dtype): dtype = dtypes.float32
+  if bool(getenv("ONNXFLOAT32", 0)) and dtypes.is_float(dtype): dtype = dtypes.float32
   if not is_dtype_supported(dtype): raise RuntimeError(f"{dtype} is not supported on device")
   return dtype
 
@@ -109,7 +109,6 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
 limit = int(getenv("ONNXLIMIT", "-1"))
-onnx_float32 = int(getenv("ONNXFLOAT32", "0"))
 class OnnxRunner:
   def __init__(self, model: ModelProto):
     # parse model protobuf
@@ -128,7 +127,7 @@ class OnnxRunner:
     self.onnx_ops = onnx_ops
 
   def _check_value(self, name: str, value: Any, spec: OnnxValue):
-    if onnx_float32:
+    if bool(getenv("ONNXFLOAT32", 0)):
       value = value.cast(dtypes.float32) if isinstance(value, Tensor) else Tensor(value, dtype=dtypes.float32, requires_grad=self.is_training)
     if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
     if value.dtype is not spec.dtype: raise RuntimeError(f"{name} has {value.dtype} dtype, should be {spec.dtype}")
