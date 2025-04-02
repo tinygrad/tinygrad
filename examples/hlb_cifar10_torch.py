@@ -1,13 +1,14 @@
-print("start")
+import sys
+sys.stdout.reconfigure(line_buffering=True)
+
 # pylint: skip-file
 # https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py with optional tiny backend
 from tinygrad import getenv, dtypes
-if getenv("TINY_BACKEND"):
-    import tinygrad.frontend.torch
-    print("imported torch frontend")
 from tinygrad.nn.datasets import cifar
-print("imported cifar")
+if getenv("TINY_BACKEND"): import tinygrad.frontend.torch
 
+from tinygrad import Device
+print(Device.DEFAULT)
 
 # Note: The one change we need to make if we're in Colab is to uncomment this below block.
 # If we are in an ipython session or a notebook, clear the state to avoid bugs
@@ -28,11 +29,6 @@ import copy
 import torch
 import torch.nn.functional as F
 from torch import nn
-
-print("finished imports")
-
-# import torchvision
-# from torchvision import transforms
 
 ## <-- teaching comments
 # <-- functional comments
@@ -96,8 +92,6 @@ hyp = {
 #                Dataloader                 #
 #############################################
 
-print("start data")
-
 if not os.path.exists(hyp['misc']['data_location']):
 
         train_dataset_gpu = {}
@@ -105,11 +99,9 @@ if not os.path.exists(hyp['misc']['data_location']):
 
         X_train, Y_train, X_test, Y_test = cifar()
         train_dataset_gpu['images'] = torch.tensor(X_train.float().numpy(), device=hyp['misc']['device'])
-        train_dataset_gpu['targets'] = torch.tensor(Y_train.cast(dtypes.int64).numpy(), device=hyp['misc']['device'])
+        train_dataset_gpu['targets'] = torch.tensor(Y_train.cast(dtypes.long).numpy(), device=hyp['misc']['device'])
         eval_dataset_gpu['images'] = torch.tensor(X_test.float().numpy(), device=hyp['misc']['device'])
-        eval_dataset_gpu['targets'] = torch.tensor(Y_test.cast(dtypes.int64).numpy(), device=hyp['misc']['device'])
-
-        print("loaded data")
+        eval_dataset_gpu['targets'] = torch.tensor(Y_test.cast(dtypes.long).numpy(), device=hyp['misc']['device'])
 
         cifar10_std, cifar10_mean = torch.std_mean(train_dataset_gpu['images'], dim=(0, 2, 3)) # dynamically calculate the std and mean from the data. this shortens the code and should help us adapt to new datasets!
 
@@ -136,8 +128,6 @@ if not os.path.exists(hyp['misc']['data_location']):
         data['train']['targets'] = F.one_hot(data['train']['targets']).half()
         data['eval']['targets'] = F.one_hot(data['eval']['targets']).half()
 
-        print("presave")
-
         torch.save(data, hyp['misc']['data_location'])
 
 else:
@@ -145,8 +135,6 @@ else:
     ## So as long as you run the above loading process once, and keep the file on the disc it's specified by default in the above
     ## hyp dictionary, then we should be good. :)
     data = torch.load(hyp['misc']['data_location'])
-
-print("done with data")
 
 ## As you'll note above and below, one difference is that we don't count loading the raw data to GPU since it's such a variable operation, and can sort of get in the way
 ## of measuring other things. That said, measuring the preprocessing (outside of the padding) is still important to us.
@@ -468,8 +456,10 @@ class NetworkEMA(nn.Module):
 # TODO: Could we jit this in the (more distant) future? :)
 @torch.no_grad()
 def get_batches(data_dict, key, batchsize, epoch_fraction=1., cutmix_size=None):
+    print(0)
     num_epoch_examples = len(data_dict[key]['images'])
     shuffled = torch.randperm(num_epoch_examples, device=hyp['misc']['device'])
+    print(1)
     if epoch_fraction < 1:
         shuffled = shuffled[:batchsize * round(epoch_fraction * shuffled.shape[0]/batchsize)] # TODO: Might be slightly inaccurate, let's fix this later... :) :D :confetti: :fireworks:
         num_epoch_examples = shuffled.shape[0]
@@ -477,19 +467,26 @@ def get_batches(data_dict, key, batchsize, epoch_fraction=1., cutmix_size=None):
     ## Here, we prep the dataset by applying all data augmentations in batches ahead of time before each epoch, then we return an iterator below
     ## that iterates in chunks over with a random derangement (i.e. shuffled indices) of the individual examples. So we get perfectly-shuffled
     ## batches (which skip the last batch if it's not a full batch), but everything seems to be (and hopefully is! :D) properly shuffled. :)
+    print(2)
     if key == 'train':
         images = batch_crop(data_dict[key]['images'], crop_size) # TODO: hardcoded image size for now?
-        # breakpoint()
+        print(3)
         images = batch_flip_lr(images)
+        print(4)
         images, targets = batch_cutmix(images, data_dict[key]['targets'], patch_size=cutmix_size)
     else:
         images = data_dict[key]['images']
+        print(5)
         targets = data_dict[key]['targets']
+    print(6)
 
     # Send the images to an (in beta) channels_last to help improve tensor core occupancy (and reduce NCHW <-> NHWC thrash) during training
     images = images.to(memory_format=torch.channels_last)
+    print(7)
     for idx in range(num_epoch_examples // batchsize):
+        print(8)
         if not (idx+1)*batchsize > num_epoch_examples: ## Use the shuffled randperm to assemble individual items into a minibatch
+            print(9)
             yield images.index_select(0, shuffled[idx*batchsize:(idx+1)*batchsize]), \
                   targets.index_select(0, shuffled[idx*batchsize:(idx+1)*batchsize]) ## Each item is only used/accessed by the network once per epoch. :D
 
@@ -595,7 +592,11 @@ def main():
           cutmix_size = hyp['net']['cutmix_size'] if epoch >= hyp['misc']['train_epochs'] - hyp['net']['cutmix_epochs'] else 0
           epoch_fraction = 1 if epoch + 1 < hyp['misc']['train_epochs'] else hyp['misc']['train_epochs'] % 1 # We need to know if we're running a partial epoch or not.
 
+          print("blah")
+
           for epoch_step, (inputs, targets) in enumerate(get_batches(data, key='train', batchsize=batchsize, epoch_fraction=epoch_fraction, cutmix_size=cutmix_size)):
+
+              print("in loop")
               ## Run everything through the network
               outputs = net(inputs)
 
