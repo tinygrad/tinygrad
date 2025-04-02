@@ -339,7 +339,6 @@ class AMDCopyQueue(HWQueue):
   def signal(self, signal:AMDSignal, value:sint=0):
     fence_flags = self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.dev.gfxver >= 10 else 0
     self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(signal.value_addr), value)
-    self.q(self.sdma.SDMA_OP_FENCE, *data64_le(signal.value_addr), value)
 
     if not AMDDevice.driverless and (dev:=signal.timeline_for_device) is not None:
       self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
