@@ -1,6 +1,6 @@
 from typing import List
 import unittest, time, pytest
-from tinygrad import dtypes, Device
+from tinygrad import dtypes, Device, Tensor
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher, track_rewrites
 from tinygrad.renderer import Renderer
@@ -713,6 +713,13 @@ class TestIFUOps(unittest.TestCase):
     for st in sink.src:
       self.assertEqual(len(st.src), 2)
 
+@unittest.skipIf(Device.DEFAULT != "CPU", "only on CPU")
+class TestRangeSplit(unittest.TestCase):
+  def test_range_split(self):
+    out = Tensor.ones(256).contiguous().realize()
+
+    out = out.sum()
+    self.assertEqual(out.item(), 256)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
