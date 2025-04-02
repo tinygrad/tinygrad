@@ -725,7 +725,6 @@ def get_onnx_ops():
       ret = _clamp_cast((x / y_scale + 0.4999999 + y_zero_point).int(), out_dtype)
     else:
       ret = _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype)
-
     # you need both NHWC=1 DONT_GROUP_REDUCES=1 for this to work
     if getenv("NHWC") and len(ret.shape) == 4:
       in_chans = ret.shape[1]
