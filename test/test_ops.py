@@ -1927,7 +1927,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3)], lambda x: x.as_strided((1,), (1,)), forward_only=True)
     helper_test_op([(3,4)], lambda x: x.as_strided((4,3), (1,4)), forward_only=True)
     helper_test_op([(3,1)], lambda x: x.as_strided((3,3), (1,0)), forward_only=True)
-    
+
   @unittest.skip("very slow")
   def test_sd_big_conv(self):
     # internal shape (1, 1, 512, 62, 62, 512, 3, 3) overflows a int
