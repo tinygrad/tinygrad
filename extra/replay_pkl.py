@@ -53,7 +53,7 @@ if __name__ == "__main__":
           with Context(NOOPT=1):
             lower_schedule_item(ScheduleItem(p.ast, ei.bufs)).run()
             correct = ei.bufs[0].numpy()
-            ei.bufs[0].copyin(memoryview(bytearray(b'\x00'*ei.bufs[0].size)))
+            ei.bufs[0].copyin(memoryview(bytearray(b'\x00'*ei.bufs[0].nbytes)))
             GlobalCounters.kernel_count -= 1
 
         #if knum != 1 and not getenv("NOOPT"): k.hand_coded_optimizations()

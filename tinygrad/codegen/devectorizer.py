@@ -15,8 +15,13 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   vectorize_mask = getenv("VECTORIZE_MASK", 0) and buf.arg == 0 and mask is not None
 
   # generate the individual indexes
-  midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i), mask.gep(i) if mask is not None else None) for i in range(vec.dtype.count)]),
-                       symbolic_flat+commutative+load_store_indexing, name=f"index_buf_{buf.arg}")
+  if vectorize_mask:
+    # no load_store_indexing if we are doing vectorized mask
+    midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i), mask.gep(i) if mask is not None else None) for i in range(vec.dtype.count)]),
+                        symbolic_flat+commutative, name=f"index_buf_{buf.arg}")
+  else:
+    midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i), mask.gep(i) if mask is not None else None) for i in range(vec.dtype.count)]),
+                        symbolic_flat+commutative+load_store_indexing, name=f"index_buf_{buf.arg}")
   # extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):

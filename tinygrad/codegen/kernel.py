@@ -443,7 +443,7 @@ class Kernel:
       if k.full_shape[-3:] == (32,3,3):
         # 3x3 dwconv
         # kernel 49 is broken
-        if k.full_shape[-4]%4 != 0 and k.full_shape[-4] != 7: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
+        if k.full_shape[-4]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
         k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
         k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
         k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-3, 32))
