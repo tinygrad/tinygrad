@@ -48,7 +48,8 @@ setup(name='tinygrad',
         'testing_unit': testing_minimal + [
             "tqdm",
             "safetensors",
-            "tabulate"  # for sz.py
+            "z3-solver",
+            "tabulate",  # for sz.py
         ],
         'testing': testing_minimal + [
             "pillow",

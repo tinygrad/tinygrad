@@ -9,7 +9,7 @@ class NullProgram:
     return 1e-4
 
 class NullAllocator(Allocator):
-  def _alloc(self, size, options): return "null"
+  def _alloc(self, size, options): pass
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src): pass
 
