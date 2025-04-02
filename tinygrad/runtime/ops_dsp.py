@@ -236,7 +236,7 @@ def prefetch_l2(ld:UOp, idx:UOp):
     nlen_uop = (nidx.substitute({ranges[-1]: ranges[-1].src[1], **zero_ranges}) -
                 nidx.substitute({ranges[-1]: ranges[-1].src[0], **zero_ranges})).simplify()
     nidx = nidx.substitute({ranges[-1]: ranges[-1].src[0]})
-    buf_lines_total = (idx.src[0].dtype.size+127)//128
+    buf_lines_total = ((idx.src[0].dtype.size*idx.src[0].dtype.itemsize)+127)//128
     if buf_lines_total < 8192//128:
       # if the total buffer size is sub 8k, fetch it all
       x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], UOp.const(dtypes.int, buf_lines_total)),
