@@ -422,7 +422,8 @@ class DSPRenderer(ClangRenderer):
       'typedef struct _qurt_barrier { char padding[64]; } qurt_barrier_t;', 'int qurt_barrier_init(qurt_barrier_t*, unsigned int);',
       'int qurt_barrier_wait(qurt_barrier_t*);',
       'typedef struct _qurt_thread_attr { char name[16]; unsigned char tcb_partition; unsigned char affinity; unsigned short priority;',
-      'unsigned char asid; unsigned char bus_priority; unsigned short timetest_id; unsigned int stack_size; void *stack_addr; char padding[96]; } qurt_thread_attr_t;',
+      'unsigned char asid; unsigned char bus_priority; unsigned short timetest_id; unsigned int stack_size;'
+      'void *stack_addr; char padding[96]; } qurt_thread_attr_t;',
       'int qurt_thread_join(qurt_thread_t tid, int *status);', 'void* malloc(unsigned int);', 'void free(void*);',
       'int qurt_thread_create (qurt_thread_t *thread_id, qurt_thread_attr_t *attr, void (*entrypoint) (void *), void *arg);',
       ] + super()._render_defines(uops)
@@ -430,7 +431,8 @@ class DSPRenderer(ClangRenderer):
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]], sync_cnt=0x0) -> str:
     msrc = ['typedef struct all_args {', *[f'int sz_or_val_{i}; int off{i}; void *buf_{i};' for i in range(len(bufs))], 'void* sync; } all_args_t;']
     msrc += ['void threader(all_args_t* args) {']
-    msrc += [f"{function_name}({', '.join([(f'args->buf_{i}' if isinstance(b[1][0], PtrDType) else f'args->sz_or_val_{i}') for i,b in enumerate(bufs)])}, 1, args->sync);"]
+    msrc += [f"{function_name}({', '.join([(f'args->buf_{i}' if isinstance(b[1][0], PtrDType) else f'args->sz_or_val_{i}')
+                                           for i,b in enumerate(bufs)])}, 1, args->sync);"]
     msrc += ['qurt_thread_exit(0); }'
             'int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
             'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};',
@@ -439,11 +441,12 @@ class DSPRenderer(ClangRenderer):
     if sync_cnt > 0:
       msrc += [f"qurt_barrier_t* sync = malloc({sync_cnt} * sizeof(qurt_barrier_t));"]
       msrc += [f"qurt_barrier_init(&sync[{i}], 2);" for i in range(sync_cnt)]
-    else: msrc += [f"qurt_barrier_t* sync = 0x0;"]
+    else: msrc += ["qurt_barrier_t* sync = 0x0;"]
     msrc += ['all_args_t args = { 0 };']
     msrc += [f'args.sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
     msrc += [f'args.off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
-    msrc += [f'args.buf_{i} = HAP_mmap(0,args.sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+args.off{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'args.buf_{i} = HAP_mmap(0,args.sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+args.off{i};'
+             for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ['args.sync = sync;']
     msrc += ["qurt_thread_attr_t attr = { 0 };"]
     msrc += ["attr.name[0] = 't';", "attr.priority = 255;", "attr.asid = 0;"]
@@ -452,7 +455,8 @@ class DSPRenderer(ClangRenderer):
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
     if getenv("MULTICORE", 0) != 0:
       msrc += ["qurt_thread_t thread_ = 0; qurt_thread_create(&thread_, &attr, (void (*)(void*))threader, (void*)&args);"]
-    msrc += [f"{function_name}({', '.join([(f'args.buf_{i}' if isinstance(b[1][0], PtrDType) else f'args.sz_or_val_{i}') for i,b in enumerate(bufs)])}, 0, args.sync);"]
+    msrc += [f"{function_name}({', '.join([(f'args.buf_{i}' if isinstance(b[1][0], PtrDType) else f'args.sz_or_val_{i}')
+                                           for i,b in enumerate(bufs)])}, 0, args.sync);"]
     if getenv("MULTICORE", 0) != 0:
       msrc += ['int status;', f"qurt_thread_join(thread_, &status);"]
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
@@ -682,11 +686,14 @@ class MockDSPRenderer(DSPRenderer):
     if getenv("MULTICORE", 0) != 0:
       # TODO: get count?
       # NOTE: we do them in reverse order to reveal bugs
-      msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])}, 1, 0);")
-      msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])}, 0, 0);")
+      msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}')
+                                                for i,b in enumerate(bufs)])}, 1, 0);")
+      msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}')
+                                                for i,b in enumerate(bufs)])}, 0, 0);")
     else:
       # huh, why did this change?
-      msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])}, 0, 0);")
+      msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}')
+                                                for i,b in enumerate(bufs)])}, 0, 0);")
     msrc.append("unsigned int et = inscount() - st; write(1, &et, sizeof(et));")
     for i,b in enumerate(bufs):
       if isinstance(b[1][0], PtrDType): msrc.append(f"write(1, buf{i}, {b[1][0].size*b[1][0].itemsize});")
