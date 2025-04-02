@@ -2218,11 +2218,11 @@ class TestKernelOpts(unittest.TestCase):
     ]
     helper_linearizer_opt(r, [x[0] for x in opts_shapes], color_sizes=[x[1] for x in opts_shapes])
 
-def helper_lds_allclose(opts:list[Opt], expected_bufs, N=16, M=16, K=16, dtype_in=dtypes.float, acc_dtype=dtypes.float, append_lds_otps=True):
+def helper_lds_allclose(opts:list[Opt], expected_bufs, N=16, M=16, K=16, dtype_in=dtypes.float, acc_dtype=dtypes.float, append_lds_opts=True):
   with Context(DEBUG=0): a, b = Tensor.rand(M, K, dtype=dtype_in).realize(), Tensor.rand(K, N, dtype=dtype_in).realize()
   realized_ast, bufs = helper_realized_ast(a.matmul(b, dtype=acc_dtype))
   k = Kernel(realized_ast)
-  if append_lds_otps: opts += [Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None), Opt(OptOps.LDS, 2, None)]
+  if append_lds_opts: opts += [Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None), Opt(OptOps.LDS, 2, None)]
   for opt in opts:
     k.apply_opt(opt)
   prg = k.to_program()
@@ -2265,16 +2265,16 @@ class TestLDS(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_lds_output_basic(self):
-    helper_lds_allclose(opts=[Opt(OptOps.LDS, 0, None)], expected_bufs=[(0,1)], append_lds_otps=False)
+    helper_lds_allclose(opts=[Opt(OptOps.LDS, 0, None)], expected_bufs=[(0,1)], append_lds_opts=False)
 
   @unittest.expectedFailure
   def test_lds_input_basic(self):
-    helper_lds_allclose(opts=[Opt(OptOps.LDS, 1, None)], expected_bufs=[(1,1)], append_lds_otps=False)
-    helper_lds_allclose(opts=[Opt(OptOps.LDS, 2, None)], expected_bufs=[(2,1)], append_lds_otps=False)
+    helper_lds_allclose(opts=[Opt(OptOps.LDS, 1, None)], expected_bufs=[(1,1)], append_lds_opts=False)
+    helper_lds_allclose(opts=[Opt(OptOps.LDS, 2, None)], expected_bufs=[(2,1)], append_lds_opts=False)
 
   @unittest.expectedFailure
   def test_lds_multi_basic(self):
-    helper_lds_allclose(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None)], expected_bufs=[(0,1),(1,1)], append_lds_otps=False)
+    helper_lds_allclose(opts=[Opt(OptOps.LDS, 0, None), Opt(OptOps.LDS, 1, None)], expected_bufs=[(0,1),(1,1)], append_lds_opts=False)
     helper_lds_allclose(opts=[], expected_bufs=[(0,1),(1,1),(2,1)])
 
   @unittest.expectedFailure
