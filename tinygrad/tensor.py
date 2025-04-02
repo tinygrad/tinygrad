@@ -973,7 +973,6 @@ class Tensor(SimpleMathTrait):
 
   def as_strided(self, size, stride, storage_offset=0) -> Tensor:
     """Creates a view with custom stride/offset"""
-    from tinygrad.helpers import prod
     from tinygrad.shape.view import View
     from tinygrad.shape.shapetracker import ShapeTracker
 
