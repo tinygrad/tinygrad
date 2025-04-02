@@ -10,7 +10,7 @@ There is a good [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-not
 There's also a [doc describing speed](../developer/speed.md)
 
 ## Tinygrad Architecture
-![Tinygrad Diagram](../tinygrad_diagram.png){: style="max-width: 700px; height: auto;" }
+![Tinygrad Diagram](../tinygrad_arch.png){: style="max-width: 700px; height: auto;" }
 
 ## Frontend
 
