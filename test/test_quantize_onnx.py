@@ -70,7 +70,7 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
       import onnx
     except ImportError:
       raise unittest.SkipTest()
-    from extra.onnx import OnnxRunner
+    from tinygrad.frontend.onnx import OnnxRunner
     out_file = get_quantized_model(sz)
     onnx_model = onnx.load(out_file)
     run_onnx = OnnxRunner(onnx_model)

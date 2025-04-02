@@ -120,7 +120,9 @@ class GraphRunner(Runner):
       if id(rawbuf.base._buf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[id(rawbuf.base._buf)])
       if i in write:
         if id(rawbuf.base._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf.base._buf)))
-        self.w_dependency_map[id(rawbuf.base._buf)] = new_dependency
+
+    for i,rawbuf in enumerate(rawbufs):
+      if i in write: self.w_dependency_map[id(rawbuf.base._buf)] = new_dependency
       else: self.r_dependency_map[id(rawbuf.base._buf)].append(new_dependency)
 
     return list({id(x):x for x in wait_nodes}.values())
@@ -147,7 +149,7 @@ class CapturedJit(Generic[ReturnType]):
   expected_st_vars_dtype_device: list[tuple[ShapeTracker, tuple[Variable, ...], DType, str]]
 
   def __reduce__(self):
-    # TODO: free_intermediates here?
+    # TODO: free_intermediates here? optimize_weights here?
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
                             self.expected_names, self.expected_st_vars_dtype_device)
 
@@ -164,8 +166,18 @@ class CapturedJit(Generic[ReturnType]):
     depends: set[Buffer|None] = set([None])
     update_depends(depends, self.jit_cache)
     for b in depends:
-      if b is not None: b.deallocate()
+      if b is not None:
+        if b.is_allocated(): b.deallocate()
+        if b._base is not None and b._base.allocated_views == 0 and b._base.is_allocated(): b._base.deallocate()
     self.__post_init__()   # reset the graph state
+
+  def optimize_weights(self):
+    blacklist = [t.lazydata.buffer for t in get_parameters(self.ret)]
+    asgn = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
+    self.jit_cache = [ExecItem(item.prg, [asgn.get(b,b) if b is not None else None for b in item.bufs]) for item in self.jit_cache]
+    for old, new in asgn.items():
+      if old.is_allocated(): new.ensure_allocated().copyin(old.as_buffer())
+    self.__post_init__()
 
   # jit exec
   def __call__(self, input_buffers:list[Buffer], var_vals:dict[Variable, int]) -> ReturnType:
@@ -205,12 +217,13 @@ def _prepare_jit_inputs(args, kwargs):
   return input_buffers, var_vals, names, st_vars_dtype_device
 
 class TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Optional[Callable[..., ReturnType]], captured:Optional[CapturedJit]=None, prune=False):
+  def __init__(self, fxn:Optional[Callable[..., ReturnType]], captured:Optional[CapturedJit]=None, prune=False, optimize=False):
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
     self.captured: Optional[CapturedJit] = captured
     self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
+    self.optimize = optimize
 
   def add_buffer(self, b:Buffer) -> Buffer:
     if found:=self._buffer_replace.get(b, None): return found
@@ -301,6 +314,7 @@ class TinyJit(Generic[ReturnType]):
 
       # set this for next run
       self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, st_vars_dtype_device)
+      if self.optimize: self.captured.optimize_weights()
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None

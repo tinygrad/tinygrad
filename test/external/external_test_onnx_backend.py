@@ -10,7 +10,7 @@ from tinygrad.device import is_dtype_supported
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
 
-from extra.onnx import OnnxRunner
+from tinygrad.frontend.onnx import OnnxRunner
 
 class TinygradModel(BackendRep):
   def __init__(self, run_onnx, input_names):
@@ -53,6 +53,9 @@ backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
 # BUG: we don't match ORT here due to some div inaccuracy with floats
 backend_test.exclude('test_dynamicquantizelinear_cpu')
 backend_test.exclude('test_dynamicquantizelinear_expanded_cpu')
+
+# BUG: we match ORT, tested in TestMainOnnxOps.test_maxunpool
+backend_test.exclude('test_maxunpool_export_with_output_shape_cpu')
 
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):
@@ -163,12 +166,14 @@ backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to imple
 backend_test.exclude('test_ai_onnx_ml_tree_ensemble_*') # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/aionnxml/op_tree_ensemble.py#L121
 
 # rest of the failing tests
+backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # tf_crop_and_resize not implemented
+backend_test.exclude('test_resize_tf_crop_and_resize_axes_2_3_cpu') # tf_crop_and_resize not implemented
+backend_test.exclude('test_resize_tf_crop_and_resize_axes_3_2_cpu') # tf_crop_and_resize not implemented
+backend_test.exclude('test_resize_tf_crop_and_resize_extrapolation_value_cpu') # tf_crop_and_resize value not implemented
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
-backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
-backend_test.exclude('test_group_normalization_*') # numerical inaccuracy problem. Current Group Normalization OP fails test
 
 backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
