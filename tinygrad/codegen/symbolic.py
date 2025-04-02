@@ -113,8 +113,6 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
   return functools.reduce(operator.add, ret) if changed else None
 
 def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split_rem: bool=False) -> UOp|None:
-  if x.vmin < -10000000: return None
-
   # simplify x // y or x % y, None means no change
   # simple cancel div/mod case
   if y.vmin != 0 != y.vmax and (q:=x.vmin//y.vmin) == x.vmin//y.vmax == x.vmax//y.vmin == x.vmax//y.vmax:
@@ -170,7 +168,7 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
       quo += q * v
 
   # if numerator is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
-  if x.vmin < 0 and remainders: return None
+  if x.vmin < -10000000 and remainders: return None
   if which is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
   return rem//(c//gcd)+quo
 
