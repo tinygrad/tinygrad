@@ -112,7 +112,7 @@ def benchmark_model(m, devices, validate_outs=False):
 
   if validate_outs:
     for device in devices:
-      rtol, atol = 2e-3, 2e-3
+      rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
       Device.DEFAULT = device
       inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
       tinygrad_model = OnnxRunner(onnx_model)

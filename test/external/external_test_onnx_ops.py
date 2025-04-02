@@ -105,7 +105,7 @@ class TestMainOnnxOps(TestOnnxOps):
           }
           attributes = {'auto_pad': 'NOTSET', 'dilations': (1, 1), 'group': 1, 'kernel_shape': (3, 3), 'pads': (1, 1, 1, 1), 'strides': (2, 2)}
           outputs = {"out": np.empty((1, 32, 112, 112), dtype=dtype)}
-          self.helper_test_single_op("QLinearConv", inputs, attributes, outputs, atol=1)
+          self.helper_test_single_op("QLinearConv", inputs, attributes, outputs, atol=1) # occasionally inaccurate
 
   def test_qlinear_matmul(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
@@ -124,6 +124,7 @@ class TestMainOnnxOps(TestOnnxOps):
         attributes = {}
         outputs = {"Y": np.empty((10, 10), dtype=dtype)}
         self.helper_test_single_op("QLinearMatMul", inputs, attributes, outputs)
+
     for name,val in (("round_half_down_to_even", 1), ("round_half_up_to_even", 3)):
       with self.subTest(test_case=name, val=val):
         inputs = {

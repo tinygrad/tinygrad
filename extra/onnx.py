@@ -23,7 +23,7 @@ def dtype_parse(onnx_dtype: int) -> DType:
   if onnx_dtype in unsupported: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
   dtype = supported[onnx_dtype]
   if bool(getenv("ONNXFLOAT32", 0)) and dtypes.is_float(dtype): dtype = dtypes.float32
-  if not is_dtype_supported(dtype): raise RuntimeError(f"{dtype} is not supported on device")
+  if not is_dtype_supported(dtype): raise RuntimeError(f"{dtype} is not supported on device. If the dtype is float, consider using ONNXFLOAT32=1")
   return dtype
 
 def attribute_parse(onnx_attribute: AttributeProto):
@@ -135,19 +135,19 @@ class OnnxRunner:
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
-    if value is None: raise RuntimeError(f"{name} is not marked as optional, but received a None value")
+    if value is None: raise RuntimeError(f"'{name}' is not marked as optional, but received a None value")
     if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
     if bool(getenv("ONNXFLOAT32", 0)) and dtypes.is_float(value.dtype): value = value.cast(dtypes.float32)
-    elif value.dtype is not spec.dtype: raise RuntimeError(f"input {name} has wrong dtype")
-    if not self._check_shape(value, spec): raise RuntimeError(f"input {name} has wrong shape")
+    if value.dtype is not spec.dtype: raise RuntimeError(f"input '{name}' has wrong dtype")
+    if not self._check_shape(value, spec): raise RuntimeError(f"input '{name}' has wrong shape")
     return value
 
   def _parse_output(self, name: str):
     value, spec = self.graph_values[name], self.graph_outputs[name]
     if not isinstance(value, Tensor): return value
     if bool(getenv("ONNXFLOAT32", 0)) and dtypes.is_float(value.dtype): value = value.cast(spec.dtype)
-    elif value.dtype is not spec.dtype: raise RuntimeError(f"output {name} has wrong dtype")
-    if not self._check_shape(value, spec): raise RuntimeError(f"output {name} has wrong shape")
+    if value.dtype is not spec.dtype: raise RuntimeError(f"output '{name}' has wrong dtype")
+    if not self._check_shape(value, spec): raise RuntimeError(f"output '{name}' has wrong shape")
     return value
 
   def _dispatch_op(self, op, inps, opts):
