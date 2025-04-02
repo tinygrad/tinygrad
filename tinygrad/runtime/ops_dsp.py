@@ -318,6 +318,7 @@ def vectorize_shuffle(vec:UOp):
   return None
 
 def multicore_range(r:UOp):
+  # NOTE: THIS IS BROKEN if this is a reduce range. TODO: check for that
   if getenv("MULTICORE", 0) != 1: return None
   if any(x.op is Ops.SPECIAL for x in r.toposort): return None
   core = UOp(Ops.SPECIAL, dtypes.int, arg=("g0", 2))
