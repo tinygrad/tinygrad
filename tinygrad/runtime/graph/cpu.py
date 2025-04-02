@@ -35,7 +35,7 @@ class CPUGraph(GraphRunner):
     funcs = dedup(device.renderer._render_body(prep[i][0], *prep[i][1:], cast(CompiledRunner, ji.prg).p.uops) for i,ji in enumerate(jit_cache))
 
     defines = dedup(itertools.chain.from_iterable(device.renderer._render_defines(cast(CompiledRunner, ji.prg).p.uops) for ji in jit_cache))
-    entry = device.renderer._render_entry("batched", targs)
+    entry = device.renderer._render_entry("batched", targs, sync_cnt=len(jit_cache))
     code = '\n'.join(defines) + '\n' + '\n'.join([''.join(f) for f in funcs]) + '\n'.join(batched) + '\n' + entry
 
     if DEBUG >= 4: print(code)
