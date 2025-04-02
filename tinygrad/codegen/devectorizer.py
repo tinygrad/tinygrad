@@ -139,8 +139,8 @@ def fast_idiv(x: UOp, d: int) -> UOp|None:
   sign = 1 if d > 0 else -1
   m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
   if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
-  if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype): # assumes next int will be twice as big
-    if m <= dtypes.max(next_dtype): return sign * ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
+  if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype):
+    if m * vmax <= dtypes.max(next_dtype): return sign * ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
   return None
 
 powers_of_two = {2**i:i for i in range(64)}
