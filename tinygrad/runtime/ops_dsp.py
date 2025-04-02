@@ -455,6 +455,7 @@ class DSPRenderer(ClangRenderer):
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
     if getenv("MULTICORE", 0) != 0:
       msrc += ["qurt_thread_t thread_ = 0; qurt_thread_create(&thread_, &attr, (void (*)(void*))threader, (void*)&args);"]
+    buf_inputs = ', '.join([(f'args.buf_{i}' if isinstance(b[1][0], PtrDType) else f'args.sz_or_val_{i}') for i,b in enumerate(bufs)])
     msrc += [f"{function_name}({buf_inputs}, 0, args.sync);"]
     if getenv("MULTICORE", 0) != 0:
       msrc += ['int status;', f"qurt_thread_join(thread_, &status);"]
