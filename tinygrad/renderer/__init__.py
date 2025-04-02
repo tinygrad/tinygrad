@@ -8,7 +8,7 @@ from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp
 from tinygrad.dtype import DType
 
 class OptOps(Enum):
-  TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto(); LDS = auto() # noqa: E702
+  TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
   GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
