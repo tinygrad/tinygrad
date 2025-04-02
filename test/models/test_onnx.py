@@ -25,9 +25,8 @@ np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
   def test_benchmark_openpilot_model(self):
-    os.environ["ONNXFLOAT32"] = "1"
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
-    run_onnx = OnnxRunner(onnx_model)
+    run_onnx = OnnxRunner(onnx_model, float32=True)
     def get_inputs():
       np_inputs = {
         "input_imgs": np.random.randn(*(1, 12, 128, 256)),
@@ -68,12 +67,10 @@ class TestOnnxModel(unittest.TestCase):
       os.system(f"flameprof {temp('net.prof')} > {temp('prof.svg')}")
       ps = stats.sort_stats(pstats.SortKey.TIME)
       ps.print_stats(30)
-    os.environ["ONNXFLOAT32"] = "0"
 
   def test_openpilot_model(self):
-    os.environ["ONNXFLOAT32"] = "1"
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
-    run_onnx = OnnxRunner(onnx_model)
+    run_onnx = OnnxRunner(onnx_model, float32=True)
     print("got run_onnx")
     inputs = {
       "input_imgs": np.random.randn(*(1, 12, 128, 256)),
@@ -102,7 +99,6 @@ class TestOnnxModel(unittest.TestCase):
     print(tinygrad_out, torch_out)
     assert tinygrad_out.dtype == torch_out.dtype
     np.testing.assert_allclose(tinygrad_out, torch_out, atol=1e-4, rtol=1e-2)
-    os.environ["ONNXFLOAT32"] = "0"
 
   @unittest.skip("slow")
   def test_efficientnet(self):

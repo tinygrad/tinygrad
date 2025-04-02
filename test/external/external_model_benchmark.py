@@ -44,7 +44,7 @@ def benchmark(mnm, nm, fxn):
 #BASE = pathlib.Path(__file__).parents[2] / "weights" / "onnx"
 BASE = pathlib.Path("/tmp/onnx")
 def benchmark_model(m, devices, validate_outs=False):
-  os.environ["ONNXFLOAT32"] = "1" if m in {"openpilot", "commavq"} else "0"
+  is_float16_model = m in {"openpilot", "commavq"}
   torch.manual_seed(1)
   global open_csv, CSV
   CSV = {"model": m}
@@ -65,7 +65,7 @@ def benchmark_model(m, devices, validate_outs=False):
     try:
       Device.DEFAULT = device
       inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-      tinygrad_model = OnnxRunner(onnx_model)
+      tinygrad_model = OnnxRunner(onnx_model, float32=is_float16_model)
       benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
 
       from tinygrad.engine.jit import TinyJit
@@ -115,7 +115,7 @@ def benchmark_model(m, devices, validate_outs=False):
       rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
       Device.DEFAULT = device
       inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-      tinygrad_model = OnnxRunner(onnx_model)
+      tinygrad_model = OnnxRunner(onnx_model, float32=is_float16_model)
       tinygrad_out = tinygrad_model(inputs)
 
       ort_sess = ort.InferenceSession(str(fn), ort_options, ["CPUExecutionProvider"])
@@ -135,7 +135,10 @@ def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
   for k in tiny_out.keys():
     tiny_v, onnx_v = tiny_out[k], onnx_out[k]
     if tiny_v is None: assert tiny_v == onnx_v
-    else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
+    else:
+      tiny_v = tiny_v.numpy()
+      assert tiny_v.dtype == onnx_v.dtype, f"tinygrad: {tiny_v.dtype}, ort: {onnx_v.dtype}"
+      np.testing.assert_allclose(tiny_v, onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
 
 if __name__ == "__main__":
   devices = [Device.DEFAULT] if os.getenv("NOCLANG") else [Device.DEFAULT, "CPU"]

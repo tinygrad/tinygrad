@@ -1,7 +1,6 @@
 import os, sys, pickle, time
 import numpy as np
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
-if "ONNXFLOAT32" not in os.environ: os.environ["ONNXFLOAT32"] = "0" if os.environ["FLOAT16"] == "1" else "1"
 if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
 if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
 if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
@@ -20,7 +19,7 @@ OUTPUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/openpilot.pkl"
 
 def compile(onnx_file):
   onnx_model = onnx.load(onnx_file)
-  run_onnx = OnnxRunner(onnx_model)
+  run_onnx = OnnxRunner(onnx_model, True)
   print("loaded model")
 
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}

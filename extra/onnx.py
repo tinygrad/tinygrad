@@ -9,7 +9,7 @@ from tinygrad.device import is_dtype_supported
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, helper
 import numpy as np
 
-def dtype_parse(onnx_dtype: int) -> DType:
+def dtype_parse(onnx_dtype: int, float32: bool) -> DType:
   supported: dict[int, DType] = {
     TensorProto.FLOAT:dtypes.float32, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8,
     TensorProto.UINT16:dtypes.uint16, TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64,
@@ -22,14 +22,13 @@ def dtype_parse(onnx_dtype: int) -> DType:
   }
   if onnx_dtype in unsupported: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
   dtype = supported[onnx_dtype]
-  if bool(getenv("ONNXFLOAT32", 0)) and dtypes.is_float(dtype): dtype = dtypes.float32
-  if not is_dtype_supported(dtype): raise RuntimeError(f"{dtype} is not supported on device. If the dtype is float, consider using ONNXFLOAT32=1")
-  return dtype
+  if float32 and dtypes.is_float(dtype): dtype = dtypes.float32
+  return dtype if is_dtype_supported(dtype) else dtypes.float32
 
-def attribute_parse(onnx_attribute: AttributeProto):
+def attribute_parse(onnx_attribute: AttributeProto, float32: bool):
   supported: dict[AttributeProto.AttributeType, Callable[[AttributeProto], Any]] = {
     AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i),
-    AttributeProto.STRING: lambda a: a.s.decode("utf-8"), AttributeProto.TENSOR: lambda a: buffer_parse(a.t),
+    AttributeProto.STRING: lambda a: a.s.decode("utf-8"), AttributeProto.TENSOR: lambda a: buffer_parse(a.t, float32),
     AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats), AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints),
     AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)
   }
@@ -41,9 +40,9 @@ def attribute_parse(onnx_attribute: AttributeProto):
     raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(onnx_attribute.type)} is not supported")
   return supported[onnx_attribute.type](onnx_attribute)
 
-def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
+def buffer_parse(onnx_tensor: TensorProto, float32: bool) -> Tensor:
   if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
-  dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
+  dtype, shape = dtype_parse(onnx_tensor.data_type, float32), tuple(onnx_tensor.dims)
   if data := list(onnx_tensor.float_data) or list(onnx_tensor.int32_data) or list(onnx_tensor.int64_data) or list(onnx_tensor.double_data) or \
              list(onnx_tensor.uint64_data):
     if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
@@ -61,7 +60,7 @@ def type_parse(onnx_type: TypeProto):
   if is_optional := elem_type.HasField("optional_type"): elem_type = elem_type.optional_type.elem_type
   if elem_type.HasField("tensor_type"):
     shape = tuple(d.dim_param or d.dim_value for d in elem_type.tensor_type.shape.dim)
-    dtype = dtype_parse(elem_type.tensor_type.elem_type)
+    dtype = dtype_parse(elem_type.tensor_type.elem_type, False)  # we want intended dtype for spec
     return OnnxValue(shape, dtype, is_optional)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 
@@ -110,16 +109,17 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
 debug = int(getenv("DEBUGONNX", "0"))
 limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
-  def __init__(self, model: ModelProto):
+  def __init__(self, model: ModelProto, float32: bool = False):
     # parse model protobuf
     self.is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model.graph.node)
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
     Tensor.training = True if self.is_training else False
     Tensor.no_grad = False if self.is_training else True
-    self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
+    self.float32 = float32
+    self.graph_values = {"": None, **{x.name:buffer_parse(x, float32) for x in model.graph.initializer}}
     self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
     self.graph_outputs = {x.name:type_parse(x.type) for x in model.graph.output}
-    self.graph_nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
+    self.graph_nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x, float32) for x in n.attribute})
                        for num,n in enumerate(model.graph.node))
     self.opset_version = model.opset_import[0].version
     self.variable_dims: dict[str, int] = {}
@@ -136,16 +136,16 @@ class OnnxRunner:
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
     if value is None: raise RuntimeError(f"'{name}' is not marked as optional, but received a None value")
+    if self.float32 and dtypes.is_float(spec.dtype) and isinstance(value, Tensor):
+      value = value.cast(dtypes.float32) if isinstance(value, Tensor) else Tensor(value, dtype=dtypes.float32, requires_grad=self.is_training)
     if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
-    if bool(getenv("ONNXFLOAT32", 0)) and dtypes.is_float(value.dtype): value = value.cast(dtypes.float32)
-    if value.dtype is not spec.dtype: raise RuntimeError(f"input '{name}' has wrong dtype")
     if not self._check_shape(value, spec): raise RuntimeError(f"input '{name}' has wrong shape")
     return value
 
   def _parse_output(self, name: str):
     value, spec = self.graph_values[name], self.graph_outputs[name]
     if not isinstance(value, Tensor): return value
-    if bool(getenv("ONNXFLOAT32", 0)) and dtypes.is_float(value.dtype): value = value.cast(spec.dtype)
+    if self.float32 and dtypes.is_float(spec.dtype): value = value.cast(spec.dtype)
     if value.dtype is not spec.dtype: raise RuntimeError(f"output '{name}' has wrong dtype")
     if not self._check_shape(value, spec): raise RuntimeError(f"output '{name}' has wrong shape")
     return value
@@ -275,7 +275,7 @@ def get_onnx_ops():
     raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
   def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
-    ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_parse(dtype) if dtype is not None else x.dtype)
+    ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_parse(dtype, False) if dtype is not None else x.dtype)
     return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.shape[0]-k) for d in x.shape))
 
   def OptionalHasElement(x:Tensor|None=None): return Tensor(x is not None and x.numel() > 0)
@@ -334,7 +334,7 @@ def get_onnx_ops():
 
   # ***** Casting Ops *****
   # TODO: saturate
-  def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_parse(to))
+  def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_parse(to, False))
   def CastLike(x:Tensor, target_type:Tensor, saturate:int=1): return x.cast(target_type.dtype)
 
   # ***** Reduce Ops *****
@@ -728,7 +728,7 @@ def get_onnx_ops():
 
   # ***** Quantization Ops *****
   def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
-    out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
+    out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype, False) if output_dtype else dtypes.uint8
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
     if out_dtype == dtypes.uchar:
       # this appears to work in practice, at least for uchar out_dtype. it folds with the quantize stuff
