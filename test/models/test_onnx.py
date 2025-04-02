@@ -68,7 +68,7 @@ class TestOnnxModel(unittest.TestCase):
       os.system(f"flameprof {temp('net.prof')} > {temp('prof.svg')}")
       ps = stats.sort_stats(pstats.SortKey.TIME)
       ps.print_stats(30)
-    del os.environ["ONNXFLOAT32"]
+    os.environ["ONNXFLOAT32"] = "0"
 
   def test_openpilot_model(self):
     os.environ["ONNXFLOAT32"] = "1"
@@ -100,8 +100,9 @@ class TestOnnxModel(unittest.TestCase):
     torch_out = run_onnx_torch(onnx_model, inputs).numpy()
     Tensor.no_grad = False
     print(tinygrad_out, torch_out)
+    assert tinygrad_out.dtype == torch_out.dtype
     np.testing.assert_allclose(tinygrad_out, torch_out, atol=1e-4, rtol=1e-2)
-    del os.environ["ONNXFLOAT32"]
+    os.environ["ONNXFLOAT32"] = "0"
 
   @unittest.skip("slow")
   def test_efficientnet(self):
