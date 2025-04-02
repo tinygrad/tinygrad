@@ -1,12 +1,12 @@
 import sys, onnx, time, pickle
-from tinygrad import TinyJit, Device, GlobalCounters, fetch, getenv
+from tinygrad import TinyJit, GlobalCounters, fetch, getenv
 from tinygrad.frontend.onnx import OnnxRunner
 from extra.onnx_helpers import get_example_inputs, validate
 
 def load_onnx_model(onnx_file):
   onnx_model = onnx.load(onnx_file)
   run_onnx = OnnxRunner(onnx_model)
-  run_onnx_jit = TinyJit(lambda **kwargs: next(iter(run_onnx({k:v.to(Device.DEFAULT) for k,v in kwargs.items()}).values())), prune=True)
+  run_onnx_jit = TinyJit(lambda **kwargs: next(iter(run_onnx({k:v.to(None) for k,v in kwargs.items()}).values())), prune=True, optimize=True)
   return run_onnx_jit, run_onnx.graph_inputs
 
 if __name__ == "__main__":
@@ -34,8 +34,3 @@ if __name__ == "__main__":
   if getenv("ORT"):
     validate(onnx_file, new_inputs, rtol=1e-3, atol=1e-3)
     print("model validated")
-
-  if (fn:=getenv("SAVE_PKL", "")) != "":
-    with open(fn, "wb") as f:
-      pickle.dump(run_onnx_jit, f)
-    print(f"pkl saved to {fn}")
