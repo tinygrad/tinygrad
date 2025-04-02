@@ -3,7 +3,7 @@ from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, ge
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
-from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
+from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, _METADATA, flatten
 from tinygrad.helpers import PICKLE_BUFFERS, dedup, cdiv, cmod
 if TYPE_CHECKING:
@@ -387,7 +387,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if self.op is Ops.VCONST: return UOp.const(self.dtype.scalar(), self.arg[i])
       if self.op is Ops.CONST: return UOp.const(self.dtype.scalar(), self.arg)
       i = (i,)
-    if (self.dtype.vcount == len(i) and i == tuple(range(len(i)))) or self.dtype == dtypes.void: return self
+    if (self.dtype.count == len(i) and not isinstance(self.dtype, PtrDType) and i == tuple(range(len(i)))) or self.dtype == dtypes.void: return self
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
