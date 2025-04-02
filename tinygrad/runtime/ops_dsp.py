@@ -3,14 +3,12 @@ import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, context
 assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
-from tinygrad.ops import Ops, UOp
+from tinygrad.ops import Ops, UOp, PatternMatcher, UPat
 from tinygrad.codegen.symbolic import gep_pushing
 from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG, dedup, all_same
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
-
-from tinygrad.ops import PatternMatcher, UPat
 
 def multi_mul(a0, a1, b0, b1, c0, c1, d0=None, d1=None, acc=None):
   swizzle = []
@@ -114,32 +112,11 @@ def multi_add_int2(**aa):
   r0 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(eles[0:4]+eles[8:12]))
   r1 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(eles[4:8]+eles[12:16]))
 
-  """
-  unsigned long long precast0 = __builtin_HEXAGON_A2_vraddub((*((unsigned long long*)&val1)), (*((unsigned long long*)&val2)));
-  acc4 = (acc4+(*((int2*)&precast0)));
-
-  int2 cast2 = __builtin_convertvector((unsigned_char2){val1[0],val2[0]}, int2);
-  int2 cast4 = __builtin_convertvector((unsigned_char2){val1[1],val2[1]}, int2);
-  int2 cast6 = __builtin_convertvector((unsigned_char2){val1[2],val2[2]}, int2);
-  int2 cast8 = __builtin_convertvector((unsigned_char2){val1[3],val2[3]}, int2);
-  int2 cast10 = __builtin_convertvector((unsigned_char2){val1[4],val2[4]}, int2);
-  int2 cast12 = __builtin_convertvector((unsigned_char2){val1[5],val2[5]}, int2);
-  int2 cast14 = __builtin_convertvector((unsigned_char2){val1[6],val2[6]}, int2);
-  int2 cast16 = __builtin_convertvector((unsigned_char2){val1[7],val2[7]}, int2);
-  acc4 = (acc4+cast2+cast4+cast6+cast8+cast10+cast12+cast14+cast16);
-  """
-
-  #r0 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(x.src[0].gep(0) for x in aa.values()))
-  #r1 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(x.src[0].gep(1) for x in aa.values()))
+  # TODO: types aren't right here
   if acc is not None:
-    #return UOp(Ops.CUSTOMI, dtypes.uint64, (acc.bitcast(dtypes.uint64), r0.bitcast(dtypes.uint64), r1.bitcast(dtypes.uint64)),
-    #           arg="__builtin_HEXAGON_A2_vraddub_acc({0}, {1}, {2})").bitcast(dtypes.int.vec(2))
-
     return UOp(Ops.CUSTOMI, dtypes.int.vec(2), (acc, r0.bitcast(dtypes.int64), r1.bitcast(dtypes.int64)),
       arg="__builtin_HEXAGON_A2_vraddub_acc({0}, {1}, {2})")
   else:
-    #return UOp(Ops.CUSTOMI, dtypes.uint64,
-    #           (r0.bitcast(dtypes.uint64), r1.bitcast(dtypes.uint64)), arg="__builtin_HEXAGON_A2_vraddub({0}, {1})").bitcast(dtypes.int.vec(2))
     return UOp(Ops.CUSTOMI, dtypes.int.vec(2), (r0.bitcast(dtypes.int64), r1.bitcast(dtypes.int64)), arg="__builtin_HEXAGON_A2_vraddub({0}, {1})")
 
 conv_pm = PatternMatcher([
@@ -311,11 +288,6 @@ def vectorize_shuffle(vec:UOp):
   str_arg2 = ','.join([f'{y:4d}' for y in arg2])
   full_arg = "__builtin_shufflevector(__builtin_shufflevector({0}, {1}, "+str_arg+"), {2}, "+str_arg2+")"
   return UOp(Ops.CUSTOM, vec.dtype, tuple(gepped), full_arg)
-
-  #vv = []
-  #for i in range(64):
-  #src = "__builtin_shufflevector({0}, {1})"
-  return None
 
 def multicore_range(r:UOp):
   # NOTE: THIS IS BROKEN if this is a reduce range. TODO: check for that
