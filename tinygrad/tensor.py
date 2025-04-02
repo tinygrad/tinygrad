@@ -973,15 +973,19 @@ class Tensor(SimpleMathTrait):
 
   def as_strided(self, size, stride, storage_offset=0) -> Tensor:
     """Creates a view with custom stride/offset"""
+    from tinygrad.helpers import prod
     from tinygrad.shape.view import View
     from tinygrad.shape.shapetracker import ShapeTracker
-    storage_size = self.numel()*self.dtype.itemsize
-    max_idx = storage_offset + sum((s-1)*st for s,st in zip(size, stride))
 
-    if max_idx*self.dtype.itemsize >= storage_size:
+    storage_size = self.numel()
+    max_idx = storage_offset
+    for s, st in zip(size, stride):
+      if s > 1: max_idx += (s-1) * st
+
+    if max_idx >= storage_size:
       raise RuntimeError(
         f"setStorage: sizes {size}, strides {stride}, offset {storage_offset} "
-        f"require {(max_idx+1)*self.dtype.itemsize} but got {storage_size}")
+        f"require {max_idx+1} elements but tensor has {storage_size}")
     if any(s < 0 for s in stride):
       raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
 
