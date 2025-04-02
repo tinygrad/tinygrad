@@ -1,8 +1,12 @@
+print("start")
 # pylint: skip-file
 # https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py with optional tiny backend
 from tinygrad import getenv, dtypes
+if getenv("TINY_BACKEND"):
+    import tinygrad.frontend.torch
+    print("imported torch frontend")
 from tinygrad.nn.datasets import cifar
-if getenv("TINY_BACKEND"): import tinygrad.frontend.torch
+print("imported cifar")
 
 
 # Note: The one change we need to make if we're in Colab is to uncomment this below block.
@@ -25,8 +29,10 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-import torchvision
-from torchvision import transforms
+print("finished imports")
+
+# import torchvision
+# from torchvision import transforms
 
 ## <-- teaching comments
 # <-- functional comments
@@ -90,6 +96,8 @@ hyp = {
 #                Dataloader                 #
 #############################################
 
+print("start data")
+
 if not os.path.exists(hyp['misc']['data_location']):
 
         train_dataset_gpu = {}
@@ -100,6 +108,8 @@ if not os.path.exists(hyp['misc']['data_location']):
         train_dataset_gpu['targets'] = torch.tensor(Y_train.cast(dtypes.int64).numpy(), device=hyp['misc']['device'])
         eval_dataset_gpu['images'] = torch.tensor(X_test.float().numpy(), device=hyp['misc']['device'])
         eval_dataset_gpu['targets'] = torch.tensor(Y_test.cast(dtypes.int64).numpy(), device=hyp['misc']['device'])
+
+        print("loaded data")
 
         cifar10_std, cifar10_mean = torch.std_mean(train_dataset_gpu['images'], dim=(0, 2, 3)) # dynamically calculate the std and mean from the data. this shortens the code and should help us adapt to new datasets!
 
@@ -125,6 +135,8 @@ if not os.path.exists(hyp['misc']['data_location']):
         # Convert this to one-hot to support the usage of cutmix (or whatever strange label tricks/magic you desire!)
         data['train']['targets'] = F.one_hot(data['train']['targets']).half()
         data['eval']['targets'] = F.one_hot(data['eval']['targets']).half()
+
+        print("presave")
 
         torch.save(data, hyp['misc']['data_location'])
 
