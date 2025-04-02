@@ -162,7 +162,7 @@ pm_lowerer = PatternMatcher([
 
 # **** this is the "quantization preprocessor", it makes ONNX quantized models, and probably also others, actually use ints ****
 
-FP = (1 << 16)
+FP = (1 << 15)
 pm_quant = symbolic+PatternMatcher([
   # cast after add/mul
   (UPat.var("x").cast(dtypes.float32) + UPat.var("y").cast(dtypes.float32),
@@ -192,12 +192,15 @@ pm_quant = symbolic+PatternMatcher([
     UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v"),)).where(UPat.cvar(), UPat(Ops.CONST, arg=0))).cast(dtypes.float).named("ld"),
       lambda ld,v,c1: ld*c1),
 
+  # const push through add
+  ((UPat.var("x")*UPat.cvar("c1") + UPat.var("y")*UPat.cvar("c2")) * UPat.cvar("c3"), lambda x,y,c1,c2,c3: (x*c1*c3) + (y*c2*c3)),
+
   # fixed point mult, replace (x.float()*c1+c2).int() with an int expression
-  ((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("c2")).cast(dtypes.int),
-   lambda x,c1,c2: (x * (c1 * FP).cast(dtypes.int) + (c2 * FP).cast(dtypes.int)) // FP),
-  # fixed point mult, replace (x.float()*c1 + y.float()*c2) with an int expression
-  ((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("y").cast(dtypes.float)*UPat.var("c2")),
-   lambda x,y,c1,c2: ((x * (c1 * FP).cast(dtypes.int) + y * (c2 * FP).cast(dtypes.int)) // FP).cast(dtypes.float)),
+  ((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("cc")).cast(dtypes.int),
+   lambda x,c1,cc: ((x*(c1*FP).cast(x.dtype) + (cc*FP).cast(x.dtype)) // FP).cast(dtypes.int)),
+  # fixed point mult, replace (x.float()*c1 + y.float()*c2)*cc.int() with an int expression
+  ((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("y").cast(dtypes.float)*UPat.var("c2")+UPat.var("cc")).cast(dtypes.int),
+   lambda x,c1,y,c2,cc: ((x*(c1*FP).cast(x.dtype) + y.cast(x.dtype)*(c2*FP).cast(x.dtype) + (cc*FP).cast(x.dtype)) // FP).cast(dtypes.int)),
 
   # where move
   (UPat.var("valid").where(UPat.var("yes"), UPat(Ops.CONST, arg=0))*UPat.var("mul"), lambda valid, yes, mul:
@@ -211,13 +214,13 @@ pm_quant = symbolic+PatternMatcher([
 
   # where on two adds
   (UPat.var("x") + UPat.var("v").where(UPat.var("a0"), UPat.var("a1")) + UPat.var("v").where(UPat.var("b0"), UPat.var("b1")),
-    lambda x,v,a0,a1,b0,b1: x + v.where(a0+a1, b0+b1)),
+    lambda x,v,a0,a1,b0,b1: x + v.where(a0+b0, a1+b1)),
 
-  # split REDUCE into multiple reduces
+  # split REDUCE into multiple reduces (who remembers FOIL?)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.CAST, name="v1")+UPat.var("c1")) * UPat(Ops.CAST, name="v2",), name="r"),
     lambda v1,v2,c1,r: r.replace(src=(v1*v2,)) + r.replace(src=(c1*v2,))),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.CAST, name="v1")+UPat.var("c1")) * (UPat(Ops.CAST, name="v2",)+UPat.var("c2")), name="r"),
-    lambda v1,v2,c1,c2,r: r.replace(src=(v1*v2,)) + r.replace(src=(c2*v1,)) + r.replace(src=(c1*v2,))),
+    lambda v1,v2,c1,c2,r: r.replace(src=(v1*v2,)) + r.replace(src=(c2*v1,)) + r.replace(src=(c1*v2,)) + r.replace(src=(c1*c2,))),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
