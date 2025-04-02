@@ -70,6 +70,8 @@ class Estimates:
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
         mults *= (u.src[1] - u.src[0]).ssimplify()
+        # SPECIAL are already counted in mults
+        mults = mults.substitute({x:x.const_like(0) for x in mults.toposort if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op is Ops.ENDRANGE: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
       elif u.op is Ops.LOAD: lds += u.dtype.itemsize * mults

@@ -322,10 +322,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def full_shape(self) -> tuple[sint, ...]:
     if self.op is Ops.VIEW: return self.shape
+    # TODO: this exists because wmma creates consts without ShapeTracker in the AST, there's probably a way to fix this
+    parent_shapes = [x.full_shape for x in self.src if x.op not in {Ops.DEFINE_GLOBAL,Ops.DEFINE_LOCAL} and not (x.op is Ops.CONST and x.st is None)]
     # TODO: this should check if st is None, it cannot because local reduce has implicit movement ops
-    return tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {Ops.DEFINE_GLOBAL,Ops.DEFINE_LOCAL} \
-        # TODO: this exists because wmma creates consts without ShapeTracker in the AST, there's probably a way to fix this
-        and not (x.op is Ops.CONST and x.st is None)]))
+    return tuple(smax(x) for x in zip(*[x for x in parent_shapes if x != ()]))
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
@@ -349,6 +349,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __int__(self): return self._eval(dtypes.ints, int)
   def __float__(self): return self._eval(dtypes.floats, float)
   def substitute(self, dvars:dict[UOp, UOp]):
+    if len(dvars) == 0: return self
     with Context(TRACK_MATCH_STATS=0):
       return graph_rewrite(self, _substitute, dvars, bottom_up=True)
 
@@ -976,6 +977,8 @@ renderer = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda x: UOp(Ops.NOOP, arg=f"ridx{x.arg}")),
   (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: UOp(Ops.NOOP, arg=str(x.arg))),
   (UPat(Ops.UNROLL, name="x"), lambda x: UOp(Ops.NOOP, arg=f"UNROLL({x.src[0].arg}, {x.arg})")),
+  (UPat(Ops.CAST, name="x"), lambda x: UOp(Ops.NOOP, arg=f"({str(x.dtype)[7:]})({x.src[0].arg})")),
+  (UPat(Ops.LOAD), lambda: UOp(Ops.NOOP, arg="load")),
   (UPat(Ops.BIND, src=UPat(Ops.NOOP), name="x"), lambda x: x.src[0]),
   (UPat(Ops.NEG, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"(-{x.src[0].arg})")),
   (UPat(Ops.MAX, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"max({x.src[0].arg}, {x.src[1].arg})")),
