@@ -853,7 +853,7 @@ def train_bert():
         et = time.time()
         eval_times.append(et - st)
 
-        if BENCHMARK and j == BENCHMARK:
+        if BENCHMARK and (j+1) == min(BENCHMARK, max_eval_steps):
           # assume INITMLPERF has BENCHMARK set
           if MLLOGGER and INITMLPERF:
             MLLOGGER.event(key=mllog_constants.INIT_STOP, value=None)
@@ -899,6 +899,9 @@ def train_bert():
           MLLOGGER.end(key=mllog_constants.RUN_STOP, metadata=dict(status=mllog_constants.SUCCESS))
         # stop once hitting the target
         break
+
+    # should not happen, BENCHMARK not properly terminated
+    if BENCHMARK: assert i < BENCHMARK, i
 
     if getenv("CKPT") and i % save_ckpt_freq == 0:
       if MLLOGGER and RUNMLPERF:

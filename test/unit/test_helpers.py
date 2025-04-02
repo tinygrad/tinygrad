@@ -1,7 +1,7 @@
 import gzip, unittest
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar
-from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str
+from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod
 from tinygrad.tensor import get_shape
 from tinygrad.codegen.lowerer import get_contraction
 import numpy as np
@@ -291,6 +291,32 @@ class TestTimeToStr(unittest.TestCase):
   def test_microseconds(self):      self.assertEqual("  100.00us", time_to_str(0.0001))
   def test_zero(self):              self.assertEqual("    0.00us", time_to_str(0))
   def test_width_formatting(self):  self.assertEqual(" 10.01s ", time_to_str(10.01, w=6))
+
+class TestCStyleDivMod(unittest.TestCase):
+  def test_div_pos(self):
+    self.assertEqual(cdiv(-9, 5), -1)
+    self.assertEqual(cdiv(-4, 5), 0)
+    self.assertEqual(cdiv(0, 5), 0)
+    self.assertEqual(cdiv(4, 5), 0)
+    self.assertEqual(cdiv(9, 5), 1)
+  def test_div_neg(self):
+    self.assertEqual(cdiv(-9, -5), 1)
+    self.assertEqual(cdiv(-4, -5), 0)
+    self.assertEqual(cdiv(0, -5), 0)
+    self.assertEqual(cdiv(4, -5), 0)
+    self.assertEqual(cdiv(9, -5), -1)
+  def test_mod_pos(self):
+    self.assertEqual(cmod(-9, 5), -4)
+    self.assertEqual(cmod(-4, 5), -4)
+    self.assertEqual(cmod(0, 5), 0)
+    self.assertEqual(cmod(4, 5), 4)
+    self.assertEqual(cmod(9, 5), 4)
+  def test_mod_neg(self):
+    self.assertEqual(cmod(-9, -5), -4)
+    self.assertEqual(cmod(-4, -5), -4)
+    self.assertEqual(cmod(0, -5), 0)
+    self.assertEqual(cmod(4, -5), 4)
+    self.assertEqual(cmod(9, -5), 4)
 
 if __name__ == '__main__':
   unittest.main()
