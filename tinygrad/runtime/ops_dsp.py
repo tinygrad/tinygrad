@@ -25,13 +25,8 @@ def multi_mul(a0, a1, b0, b1, c0, c1, d0=None, d1=None, acc=None):
     #print("rejected on a1")
     return None
   if d0 is None:
-    if c0.src[0].op is Ops.GEP and c0.src[0].arg == (2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62,
-                                                     66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118, 122, 126):
-      d0 = c0.src[0].src[0].gep(tuple(i+1 for i in c0.src[0].arg)).cast(dtypes.int.vec(32))
-    else:
-      d0 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
+    d0 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
   if d1 is None:
-    #if c1.src[0].op is Ops.GEP: print("here1", c1.src[0].arg)
     d1 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
   assert a0.op is Ops.CAST
   assert b0.op is Ops.CAST
@@ -59,8 +54,6 @@ def multi_mul(a0, a1, b0, b1, c0, c1, d0=None, d1=None, acc=None):
   else:
     return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, m1), "__builtin_HEXAGON_V6_vrmpyubv_128B({0}, {1})")
 
-# __builtin_HEXAGON_A2_vraddub_acc
-
 def gep_on_reduce(gep, alu):
   if gep.dtype.vcount == 1: return None
   return UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count),
@@ -76,12 +69,7 @@ def multi_add_int32(**aa):
   mask = 0x01010101
   if 'd0' not in aa:
     mask = 0x00010101
-    c0 = aa['c0']
-    if c0.src[0].op is Ops.GEP and c0.src[0].arg == (2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62,
-                                                     66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118, 122, 126):
-      d0 = c0.src[0].src[0].gep(tuple(i+1 for i in c0.src[0].arg)).cast(dtypes.int.vec(32))
-    else:
-      d0 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
+    d0 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
     aa['d0'] = d0
   swizzle = []
   for i in range(32):
