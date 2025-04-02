@@ -108,6 +108,9 @@ class ProgramSpec:
         if u.op is Ops.DEFINE_VAR: self.vars.append(u)
         if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
         if u.op is Ops.STORE: self.outs.extend([x.arg for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL])
+        # DSP masked store
+        if u.op is Ops.CUSTOM and u.arg.startswith("__builtin_HEXAGON_V6_vS32b"):
+          self.outs.extend([x.arg for x in u.src[1].toposort if x.op is Ops.DEFINE_GLOBAL])
         if u.op is Ops.LOAD: self.ins.extend([x.arg for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL])
         if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
