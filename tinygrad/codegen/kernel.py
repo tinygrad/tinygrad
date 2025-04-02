@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
-from tinygrad.ops import PatternMatcher
+from tinygrad.ops import PatternMatcher, UPat
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
@@ -78,6 +78,7 @@ class Kernel:
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     self.use_tensor_cores: int = 0
     self.dont_use_locals: bool = False
+    self.lds: list[bool] = [False] * len(self.bufs)
 
     # group simplifies
     self.simplify_ones()
@@ -94,8 +95,8 @@ class Kernel:
     ret.sts = self.sts[:len(ret.bufs)+len(ret.reduceops)*2] # NOTE: must redo the local buffers with TC in beam
 
     # parameters for optimizations
-    ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
-      self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
+    ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals, ret.lds = \
+      self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals, self.lds
     ret.tensor_core, ret.tensor_core_opts, ret.use_tensor_cores = self.tensor_core, self.tensor_core_opts, self.use_tensor_cores
 
     return ret
@@ -353,7 +354,7 @@ class Kernel:
       return
 
     axis = self.real_axis(opt)
-    check(axis < len(self.full_shape), "invalid axis")
+    if opt.op != OptOps.LDS: check(axis < len(self.full_shape), "invalid axis")
 
     if opt.op is OptOps.SWAP: amt = cast(int, opt.arg)  # arg is an axis in the SWAPs
     elif opt.arg is not None:
@@ -424,6 +425,9 @@ class Kernel:
           self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
           padded = True
       check(padded, "nothing was padded")
+    elif opt.op is OptOps.LDS:
+      check(0 <= axis < len(self.bufs), f"invalid buffer {axis}")
+      self.lds = self.lds[:axis] + [True] + self.lds[axis+1:]
 
     if append_opt: self.applied_opts.append(opt)
     if self.simplify_ones() and self.tensor_core_opts:
@@ -721,6 +725,11 @@ class Kernel:
 
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
+  def apply_lds(self, ast) -> UOp:
+    def transform(ctx:tuple[Kernel, set[UOp]], global_access:UOp): return None
+
+    return graph_rewrite(ast, PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), name="global_access"), transform)]), ctx=(self, set()))
+
   # **** this is the lowerer ****
 
   @track_rewrites()
@@ -729,6 +738,7 @@ class Kernel:
     if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
 
     modified_ast = self.get_optimized_ast(name_override)
+    modified_ast = self.apply_lds(modified_ast)
     if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
 
     if DEBUG >= 3:
@@ -749,7 +759,7 @@ class Kernel:
     is_conv = is_conv or (len(self.full_shape) == 7 and self.full_shape[3:5] == (3,3))
     is_conv = is_conv or self.full_shape[-2:] == (3,3)
     self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts, is_conv))
-    if DEBUG >= 5: print_uops(self.uops)
+    if DEBUG >= 6: print_uops(self.uops)
     return self
 
   def to_program(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> ProgramSpec:
@@ -758,7 +768,12 @@ class Kernel:
     src = self.opts.render(self.uops)
 
     if CAPTURE_PROCESS_REPLAY:
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, ContextVar._cache, src))
+      # NOTE: calling traceback.extract_stack() is very slow, recording backtraces isn't included by default yet
+      if getenv("RECORD_TRACEBACKS"):
+        import traceback
+        stack = "\n".join(traceback.format_list(traceback.extract_stack()[:-1]))
+      else: stack = None
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, stack, ContextVar._cache, src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
