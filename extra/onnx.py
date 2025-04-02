@@ -1,7 +1,7 @@
-from typing import Any, Sequence, cast, Literal, Callable
-import dataclasses, functools, io, math, types, warnings
+from typing import Any, cast, Literal, Callable
+import dataclasses, functools, io, math, types
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
-from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
+from tinygrad.helpers import getenv, DEBUG, prod, flatten, make_tuple, argsort
 from tinygrad.dtype import DType, ConstType, dtypes
 from tinygrad.device import is_dtype_supported
 
@@ -22,7 +22,8 @@ def dtype_parse(onnx_dtype: int) -> DType:
   }
   if onnx_dtype in unsupported: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
   dtype = supported[onnx_dtype]
-  if (bool(getenv("ONNXFLOAT32", 0)) and dtypes.is_float(dtype)) or not is_dtype_supported(dtype): dtype = dtypes.float32
+  if onnx_float32 and dtypes.is_float(dtype): dtype = dtypes.float32
+  if not is_dtype_supported(dtype): raise RuntimeError(f"{dtype} is not supported on device")
   return dtype
 
 def attribute_parse(onnx_attribute: AttributeProto):
@@ -58,11 +59,10 @@ def type_parse(onnx_type: TypeProto):
   if elem_type.HasField("map_type") or elem_type.HasField("sparse_tensor_type") or elem_type.HasField("opaque_type"):
     raise NotImplementedError("parsing for map_type, sparse_tensor_type and opaque_type are not implemented")
   if is_optional := elem_type.HasField("optional_type"): elem_type = elem_type.optional_type.elem_type
-  if is_sequence := elem_type.HasField("sequence_type"): elem_type = elem_type.sequence_type.elem_type
   if elem_type.HasField("tensor_type"):
     shape = tuple(d.dim_param or d.dim_value for d in elem_type.tensor_type.shape.dim)
     dtype = dtype_parse(elem_type.tensor_type.elem_type)
-    return OnnxValue(shape, dtype, is_optional, is_sequence)
+    return OnnxValue(shape, dtype, is_optional)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 
 # ***** onnx spec *****
@@ -71,7 +71,6 @@ class OnnxValue:
   shape: tuple[str|int, ...]
   dtype: DType
   is_optional: bool
-  is_sequence: bool
 
 @dataclasses.dataclass(frozen=True)
 class OnnxNode:
@@ -110,6 +109,7 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
 limit = int(getenv("ONNXLIMIT", "-1"))
+onnx_float32 = int(getenv("ONNXFLOAT32", "0"))
 class OnnxRunner:
   def __init__(self, model: ModelProto):
     # parse model protobuf
@@ -119,7 +119,7 @@ class OnnxRunner:
     Tensor.no_grad = False if self.is_training else True
     self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
     self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
-    self.graph_outputs = tuple(x.name for x in model.graph.output)
+    self.graph_outputs = {x.name:type_parse(x.type) for x in model.graph.output}
     self.graph_nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
                        for num,n in enumerate(model.graph.node))
     self.opset_version = model.opset_import[0].version
@@ -127,22 +127,24 @@ class OnnxRunner:
 
     self.onnx_ops = onnx_ops
 
-  def _parse_input(self, name: str, value: Any, spec: OnnxValue):
-    if spec.is_optional and value is None: return None
-    if spec.is_sequence:
-      if not isinstance(value, Sequence): raise RuntimeError(f"{name} received {value}, expected a sequence type")
-      sequence = [Tensor(v, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(v, Tensor) else v for v in value]
-      if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for {name} sequence must be homogeneous")
-      if not all(t.dtype is spec.dtype for t in sequence):
-        warnings.warn(f"Dtypes for {name} sequence should all be {spec.dtype}", RuntimeWarning)
-      return sequence
-    tensor = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
-    if tensor.dtype is not spec.dtype: warnings.warn(f"{name} has {tensor.dtype} dtype, should be {spec.dtype}", RuntimeWarning)
-    for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):
+  def _check_value(self, name: str, value: Any, spec: OnnxValue):
+    if onnx_float32:
+      value = value.cast(dtypes.float32) if isinstance(value, Tensor) else Tensor(value, dtype=dtypes.float32, requires_grad=self.is_training)
+    if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
+    if value.dtype is not spec.dtype: raise RuntimeError(f"{name} has {value.dtype} dtype, should be {spec.dtype}")
+    for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, value.shape, strict=True)):
       if isinstance(onnx_dim, str):
         onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, int(user_dim_input))
       if user_dim_input != onnx_dim: raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
-    return tensor
+    return value
+
+  def _parse_input(self, name: str, value: Any, spec: OnnxValue):
+    if spec.is_optional and value is None: return None
+    return self._check_value(name, value, spec)
+
+  def _parse_output(self, name: str):
+    value, spec = self.graph_values[name], self.graph_outputs[name]
+    return self._check_value(name, value, spec)
 
   def _dispatch_op(self, op, inps, opts):
     if op in self.onnx_ops:
@@ -180,7 +182,7 @@ class OnnxRunner:
         Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
         return {name:self.graph_values[name] for name in node.outputs}
     Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
-    return {name:self.graph_values[name] for name in self.graph_outputs}
+    return {name:self._parse_output(name) for name in self.graph_outputs}
 
 ####################
 ##### ONNX OPS #####
@@ -285,6 +287,7 @@ def get_onnx_ops():
   # ***** Unary Ops (math) *****
   def Not(x:Tensor): return x.logical_not()
   def Clip(x: Tensor, min:Tensor|None=None, max:Tensor|None=None): return x if min is None and max is None else x.clip(min, max)
+  def IsInf(x:Tensor, detect_negative:int=1, detect_positive:int=1): return x.isinf(bool(detect_positive), bool(detect_negative))
 
   # ***** Unary Ops (activation) *****
   def Softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
@@ -822,7 +825,7 @@ def get_onnx_ops():
   return {
     # Tensor ops
     **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
-    "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
+  "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
     "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Round", "Erf")},
     # Implemented ops
     **{name:obj for name,obj in locals().items() if isinstance(obj, types.FunctionType) and not name.startswith("_") and name[0].isupper()},

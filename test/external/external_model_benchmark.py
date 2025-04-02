@@ -6,7 +6,7 @@ from onnx.helper import tensor_dtype_to_np_dtype
 import onnxruntime as ort
 from onnx2torch import convert
 from tinygrad.frontend.onnx import OnnxRunner
-from tinygrad.helpers import OSX, DEBUG, fetch, getenv
+from tinygrad.helpers import OSX, DEBUG, fetch
 from tinygrad import Tensor, Device
 from tinygrad.device import CompileError
 
@@ -138,7 +138,7 @@ def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
     else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
 
 if __name__ == "__main__":
-  devices = [Device.DEFAULT] if getenv("NOCLANG") else [Device.DEFAULT, "CPU"]
-  if getenv("MODEL", "") != "": benchmark_model(getenv("MODEL", ""), devices, True)
+  devices = [Device.DEFAULT] if os.getenv("NOCLANG") else [Device.DEFAULT, "CPU"]
+  if os.getenv("MODEL", "") != "": benchmark_model(os.getenv("MODEL", ""), devices, True)
   else:
     for m in MODELS: benchmark_model(m, devices, True)
