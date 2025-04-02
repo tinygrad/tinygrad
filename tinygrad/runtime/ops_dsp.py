@@ -3,65 +3,417 @@ import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, context
 assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
-from tinygrad.ops import Ops, UOp
-from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG
+from tinygrad.ops import Ops, UOp, PatternMatcher, UPat
+from tinygrad.codegen.symbolic import gep_pushing
+from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG, dedup, all_same
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
-from tinygrad.ops import PatternMatcher, UPat
+def multi_mul(a0, a1, b0, b1, c0, c1, d0=None, d1=None, acc=None):
+  swizzle = []
+  for i in range(32):
+    swizzle.append(i)
+    swizzle.append(32+i)
+    swizzle.append(64+i)
+    swizzle.append(96+i)
+  swizzle = tuple(swizzle)
+  if a0.op is not Ops.CAST:
+    #print("rejected on a0")
+    return None
+  if a1.op is not Ops.CAST:
+    #print("rejected on a1")
+    return None
+  if d0 is None:
+    d0 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
+  if d1 is None:
+    d1 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
+  assert a0.op is Ops.CAST
+  assert b0.op is Ops.CAST
+  assert c0.op is Ops.CAST
+  assert d0.op is Ops.CAST
+  assert a1.op is Ops.CAST
+  assert b1.op is Ops.CAST
+  assert c1.op is Ops.CAST
+  assert d1.op is Ops.CAST
+  dt1 = a0.src[0].dtype.scalar().vec(128)
+  dt2 = a1.src[0].dtype.scalar().vec(128)
+  m0 = UOp(Ops.CAT, dt1, src=(a0.src[0],b0.src[0],c0.src[0],d0.src[0])).gep(swizzle)
+  m1 = UOp(Ops.CAT, dt2, src=(a1.src[0],b1.src[0],c1.src[0],d1.src[0])).gep(swizzle)
+  simp_m1 = m1.simplify()
+  if simp_m1.op is Ops.GEP and simp_m1.arg == simp_m1.arg[0:4]*32:
+    # Vx32.w+=vrmpy(Vu32.ub,Rt32.b) -> __builtin_HEXAGON_V6_vrmpybus_acc
+    # Vx32.uw+=vrmpy(Vu32.ub,Rt32.ub) -> __builtin_HEXAGON_V6_vrmpyub_acc
+    scalar_m1 = simp_m1.src[0].gep(simp_m1.arg[0:4])
+    if acc is not None:
+      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, scalar_m1.bitcast(dtypes.uint)), "__builtin_HEXAGON_V6_vrmpyub_acc_128B({0}, {1}, {2})")
+    else:
+      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, scalar_m1.bitcast(dtypes.uint)), "__builtin_HEXAGON_V6_vrmpyub_128B({0}, {1})")
+  if acc is not None:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, m1), "__builtin_HEXAGON_V6_vrmpyubv_acc_128B({0}, {1}, {2})")
+  else:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, m1), "__builtin_HEXAGON_V6_vrmpyubv_128B({0}, {1})")
+
+def gep_on_reduce(gep, alu):
+  if gep.dtype.vcount == 1: return None
+  return UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count),
+     tuple(x.gep(gep.arg) if x.op is not Ops.RANGE else x for x in alu.src), alu.arg) if not isinstance(gep.dtype, PtrDType) and \
+      alu.dtype.count >= gep.dtype.count else None
+
+def multi_add_int32(**aa):
+  if 'acc' in aa:
+    acc = aa['acc']
+    del aa['acc']
+  else:
+    acc = None
+  mask = 0x01010101
+  if 'd0' not in aa:
+    mask = 0x00010101
+    d0 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
+    aa['d0'] = d0
+  swizzle = []
+  for i in range(32):
+    swizzle.append(i)
+    swizzle.append(32+i)
+    swizzle.append(64+i)
+    swizzle.append(96+i)
+  for x in aa.values():
+    assert x.src[0].dtype.scalar() is dtypes.uchar
+    assert x.op is Ops.CAST
+  swizzle = tuple(swizzle)
+  m0 = UOp(Ops.CAT, dtypes.uchar.vec(128), src=tuple(aa[k].src[0] for k in sorted(aa.keys()))).gep(swizzle)
+  if acc is not None:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, UOp.const(dtypes.uint, mask)),
+               "__builtin_HEXAGON_V6_vrmpyub_acc_128B({0}, {1}, {2})")
+  else:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, UOp.const(dtypes.uint, mask)), "__builtin_HEXAGON_V6_vrmpyub_128B({0}, {1})")
+
+def multi_add_int2(**aa):
+  if 'acc' in aa:
+    acc = aa['acc']
+    del aa['acc']
+  else:
+    acc = None
+  eles = []
+  for k in sorted(aa.keys()): eles.append(aa[k].src[0].gep(0))
+  for k in sorted(aa.keys()): eles.append(aa[k].src[0].gep(1))
+  r0 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(eles[0:4]+eles[8:12]))
+  r1 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(eles[4:8]+eles[12:16]))
+
+  # TODO: types aren't right here
+  if acc is not None:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(2), (acc, r0.bitcast(dtypes.int64), r1.bitcast(dtypes.int64)),
+      arg="__builtin_HEXAGON_A2_vraddub_acc({0}, {1}, {2})")
+  else:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(2), (r0.bitcast(dtypes.int64), r1.bitcast(dtypes.int64)), arg="__builtin_HEXAGON_A2_vraddub({0}, {1})")
+
+conv_pm = PatternMatcher([
+  # __builtin_HEXAGON_V6_vrmpybus x3
+  (UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1"), multi_mul),
+  (UPat(name="acc") + UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1"), multi_mul),
+
+  # __builtin_HEXAGON_V6_vrmpybus x3
+  (UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
+  (UPat(name="acc") + UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
+])
 
 dsp_pm = PatternMatcher([
+  # convert load char32 to load char128
+  (UPat(Ops.LOAD, (dtypes.uchar.vec(96), dtypes.uchar.vec(64), dtypes.uchar.vec(32)), src=(UPat.var("buf").cast(),), name="load"),
+   lambda load, buf: load.replace(dtype=dtypes.uchar.vec(128),
+     src=(buf.cast(buf.dtype.base.vec(128).ptr(size=buf.dtype.size, local=buf.dtype.local)),)+load.src[1:]).gep(tuple(range(0, load.dtype.count)))),
+  # GEP on REDUCE
+  (UPat(Ops.GEP, src=(UPat(Ops.REDUCE, name='alu'),), name='gep'), gep_on_reduce),
+  # no swizzle down convert
   (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
    lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+32))) for i in range(0, 128, 32)),
      arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
-  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
-    "__builtin_shufflevector({0}, {1}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
-])
+
+  # REDUCE int4 -> 2xint2, int8 -> 4xint2
+  (UPat(Ops.REDUCE, dtype=dtypes.int.vec(4), name="r"),
+   lambda r: UOp(Ops.CAT, r.dtype, (gep_on_reduce(r.gep((0,1)), r), gep_on_reduce(r.gep((2,3)), r)))),
+  (UPat(Ops.REDUCE, dtype=dtypes.int.vec(8), name="r"),
+   lambda r: UOp(Ops.CAT, r.dtype, (gep_on_reduce(r.gep((0,1)), r), gep_on_reduce(r.gep((2,3)), r),
+                                    gep_on_reduce(r.gep((4,5)), r), gep_on_reduce(r.gep((6,7)), r)))),
+
+  # __builtin_HEXAGON_V6_vrmpybus
+  (UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
+  (UPat(name="acc") + UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
+
+  # build __builtin_HEXAGON_V6_vrmpybus_128B
+  (UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0")+UPat(Ops.CAST,name="d0"), multi_add_int32),
+  (UPat(name="acc")+UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+
+   UPat(Ops.CAST,name="c0")+UPat(Ops.CAST,name="d0"), multi_add_int32),
+
+  # build __builtin_HEXAGON_A2_vraddub
+  (UPat(Ops.CAST,dtype=dtypes.int.vec(2),name="a0")+UPat(Ops.CAST,name="a1")+UPat(Ops.CAST,name="a2")+UPat(Ops.CAST,name="a3")+ \
+   UPat(Ops.CAST,dtype=dtypes.int.vec(2),name="a4")+UPat(Ops.CAST,name="a5")+UPat(Ops.CAST,name="a6")+UPat(Ops.CAST,name="a7"), multi_add_int2),
+  (UPat(name="acc")+UPat(Ops.CAST,dtype=dtypes.int.vec(2),name="a0")+UPat(Ops.CAST,name="a1")+UPat(Ops.CAST,name="a2")+UPat(Ops.CAST,name="a3")+ \
+   UPat(Ops.CAST,dtype=dtypes.int.vec(2),name="a4")+UPat(Ops.CAST,name="a5")+UPat(Ops.CAST,name="a6")+UPat(Ops.CAST,name="a7"), multi_add_int2),
+
+  # we upcast 3 as 4
+  (UPat(Ops.REDUCE, name="r", src=(UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") +
+                                   UPat(name="b0")*UPat(name="b1") + UPat(name="c0")*UPat(name="c1"),), allow_any_len=True),
+   lambda r, **kwargs: r.replace(src=(mm,)+r.src[1:]) if (mm:=multi_mul(**kwargs)) else None),
+  (UPat(Ops.REDUCE, name="r", src=(UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0"),
+                                   ), allow_any_len=True),
+   lambda r, **kwargs: r.replace(src=(mm,)+r.src[1:]) if (mm:=multi_add_int32(**kwargs)) else None),
+
+  # mul by const on GEP
+  (UPat(Ops.GEP, src=(UPat.var('x'),), name="gep")*UPat.cvar("c", vec=False),
+   lambda x, gep, c: (x.gep(gep.arg[0])*c.arg).broadcast(c.dtype.count) if all_same(gep.arg) and c.dtype.count > 1 else None),
+])+gep_pushing
+
+def add_to_mul(c:UOp, x:UOp):
+  if c.arg.startswith("__builtin_HEXAGON_V6_vrmpyub_128B"):
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpyub_acc_128B({0}, {1}, {2})")
+  elif c.arg.startswith("__builtin_HEXAGON_V6_vrmpyubv_128B"):
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpyubv_acc_128B({0}, {1}, {2})")
+  elif 'acc' in c.arg and x.op is not Ops.CUSTOM:
+    return c.replace(src=(x+c.src[0], c.src[1], c.src[2]))
+  else:
+    return None
+
+def prefetch_l1(ld:UOp, idx:UOp):
+  if ld.src[-1].op is Ops.CUSTOM: return None
+  ranges = sorted([x for x in ld.src[0].src[0].toposort if x.op is Ops.RANGE], key=lambda x: x.arg)
+  x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], idx.src[1]+UOp.const(dtypes.int, ld.dtype.count*2)),
+           arg="__builtin_HEXAGON_Y2_dcfetch({0}+{1});")
+  x2 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], idx.src[1].substitute({ranges[-1]: ranges[-1].src[0]})),
+           arg="__builtin_HEXAGON_Y2_dcfetch({0}+{1});")
+  return ld.replace(src=ld.src+(x1, x2))
+
+def prefetch_l2(ld:UOp, idx:UOp):
+  if not getenv("PREFETCHL2", 1): return None
+  if ld.src[-1].op is Ops.CUSTOM and 'l2fetch' in ld.src[-1].arg: return None
+  ranges = sorted([x for x in ld.src[0].src[0].toposort if x.op is Ops.RANGE], key=lambda x: x.arg)
+  if len(ranges):
+    nidx = idx.src[1]
+    const = 0
+    if nidx.op is Ops.ADD and nidx.src[1].op is Ops.CONST:
+      # NOTE: this causes access alignment issues
+      #const = nidx.src[1].arg
+      nidx = nidx.src[0]
+    zero_ranges = {r:r.const_like(0) for r in ranges[:-1]}
+    nlen_uop = (nidx.substitute({ranges[-1]: ranges[-1].src[1], **zero_ranges}) -
+                nidx.substitute({ranges[-1]: ranges[-1].src[0], **zero_ranges})).simplify()
+    nidx = nidx.substitute({ranges[-1]: ranges[-1].src[0]})
+    buf_lines_total = ((idx.src[0].dtype.size*idx.src[0].dtype.itemsize)+127)//128
+    if buf_lines_total < 8192//128:
+      # if the total buffer size is sub 8k, fetch it all
+      x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], UOp.const(dtypes.int, buf_lines_total)),
+               arg="__builtin_HEXAGON_Y4_l2fetch({0}, 0x808000|{1});")
+    else:
+      fetch_lines = 8
+      if nlen_uop.op is Ops.CONST and nlen_uop.arg <= 8192: fetch_lines = ((nlen_uop.arg+127)//128)*2+1
+      fetch_lines = max(fetch_lines, 8)
+
+      # fetch up to 8192
+      x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0], nidx+const, UOp.const(dtypes.int, fetch_lines)),
+               arg="__builtin_HEXAGON_Y4_l2fetch({0}+{1}, 0x808000|{2});")
+    return ld.replace(src=ld.src+(x1,))
+
+def vectorize_shuffle(vec:UOp):
+  if getenv("DISABLE_VECTORIZED_SHUFFLE", 0): return None
+  if not all(s.op in {Ops.GEP, Ops.CONST} for s in vec.src): return None
+  gepped = dedup([s.src[0] for s in vec.src if s.op is Ops.GEP])
+  if len(gepped) == 0: return None
+  if len(gepped) == 1:
+    # this pattern is broken in DSP clang
+    if gepped[0].dtype.count == 4: return None
+    #return None
+    arg = []
+    for s in vec.src:
+      if s.op is Ops.GEP:
+        arg.append(s.arg[0])
+      else:
+        arg.append(-1)
+    str_arg = ','.join([f'{y:4d}' for y in arg])
+    full_arg = "__builtin_shufflevector({0}, {0}, "+str_arg+")"
+    return UOp(Ops.CUSTOM, vec.dtype, tuple(gepped), full_arg)
+  if not all(x.dtype.scalar() is dtypes.uchar for x in gepped): return None
+  if not all_same([x.dtype.count for x in gepped]) or gepped[0].dtype.count != vec.dtype.count: return None
+  if len(gepped) == 2:
+    arg = []
+    for s in vec.src:
+      if s.op is Ops.GEP:
+        if s.src[0] is gepped[0]:
+          arg.append(s.arg[0])
+          continue
+        if s.src[0] is gepped[1]:
+          arg.append(gepped[0].dtype.count + s.arg[0])
+          continue
+      arg.append(-1)
+    str_arg = ','.join([f'{y:4d}' for y in arg])
+    full_arg = "__builtin_shufflevector({0}, {1}, "+str_arg+")"
+    return UOp(Ops.CUSTOM, vec.dtype, tuple(gepped), full_arg)
+  if len(gepped) != 3: return None
+  arg = []
+  for s in vec.src:
+    if s.op is Ops.GEP:
+      if s.src[0] is gepped[0]:
+        arg.append(s.arg[0])
+        continue
+      if s.src[0] is gepped[1]:
+        arg.append(gepped[0].dtype.count + s.arg[0])
+        continue
+    arg.append(-1)
+  arg2 = []
+  for i,s in enumerate(vec.src):
+    if s.op is Ops.GEP:
+      if s.src[0] is gepped[2]:
+        arg2.append(vec.dtype.count + s.arg[0])
+        continue
+    if s.op is Ops.CONST:
+      arg2.append(-1)
+      continue
+    arg2.append(i)
+  str_arg = ','.join([f'{y:4d}' for y in arg])
+  str_arg2 = ','.join([f'{y:4d}' for y in arg2])
+  full_arg = "__builtin_shufflevector(__builtin_shufflevector({0}, {1}, "+str_arg+"), {2}, "+str_arg2+")"
+  return UOp(Ops.CUSTOM, vec.dtype, tuple(gepped), full_arg)
+
+def multicore_range(r:UOp):
+  # NOTE: THIS IS BROKEN if this is a reduce range. TODO: check for that
+  if getenv("MULTICORE", 0) != 1: return None
+  if any(x.op is Ops.SPECIAL for x in r.toposort): return None
+  core = UOp(Ops.SPECIAL, dtypes.int, arg=("g0", 2))
+  start = (core.eq(0)).where(r.src[0], r.src[1]//2)
+  end = (core.eq(0)).where(r.src[1]//2, r.src[1])
+  return r.replace(src=(start,end))
+
+def store_with_mask(buf, idx, val, mask, cast):
+  if val.dtype.count != 128 or mask.dtype.count != 128 or val.dtype.scalar() != dtypes.uchar:
+    print("DROP MASK", val.dtype.count, mask.dtype.count)
+    # NOTE: we are dropping the mask
+    return buf.index(idx).cast(cast.dtype).store(val)
+
+  const_0 = UOp.const(dtypes.uchar.vec(128), 0)
+  cmask = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(mask,),arg="{0}")
+
+  # unaligned
+  min_128 = (buf.index(idx).cast(dtypes.uint)&0x7F)
+  cmask_l = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(cmask, const_0, min_128), arg="__builtin_HEXAGON_V6_vlalignb_128B({0}, {1}, {2})")
+  cmask_r = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(const_0, mask, min_128), arg="__builtin_HEXAGON_V6_vlalignb_128B({0}, {1}, {2})")
+  val_l = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(val, const_0, min_128), arg="__builtin_HEXAGON_V6_vlalignb_128B({0}, {1}, {2})")
+  val_r = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(const_0, val, min_128), arg="__builtin_HEXAGON_V6_vlalignb_128B({0}, {1}, {2})")
+  store_l = UOp(Ops.CUSTOM, dtypes.void, src=(cmask_l, buf.index(idx).cast(cast.dtype), val_l, const_0),
+    arg='__builtin_HEXAGON_V6_vS32b_nqpred_ai_128B(__builtin_HEXAGON_V6_veqb_128B({0}, {3}), {1}, {2});')
+  store_r = UOp(Ops.CUSTOM, dtypes.void, src=(cmask_r, buf.index(idx+128).cast(cast.dtype), val_r, const_0),
+    arg='__builtin_HEXAGON_V6_vS32b_nqpred_ai_128B(__builtin_HEXAGON_V6_veqb_128B({0}, {3}), {1}, {2});')
+  return UOp(Ops.CUSTOM, src=(store_l,store_r), arg="")
 
 dsp_pm_late = PatternMatcher([
-  (UPat.var("x")+UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
-  (UPat.var("x")*UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
-  (UPat.var("x")//UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
+  # prefetch L1
+  (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld"), prefetch_l1),
+
+  # prefetch L2
+  (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(8), dtypes.uchar.vec(128), dtypes.int.vec(32)),
+        src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld", allow_any_len=True), prefetch_l2),
+
+  # use __builtin_shufflevector
+  (UPat(Ops.VECTORIZE, dtypes.uchar.vec(128), name="vec"), vectorize_shuffle),
+
+  # __builtin_HEXAGON_V6_vrmpyub_acc_128B
+  (UPat(Ops.CUSTOMI, dtype=dtypes.int.vec(32), name="c")+UPat.var("x"), add_to_mul),
+
+  # add acc to __builtin_HEXAGON_A2_vraddub (must be after the reduce expansion)
+  (UPat(Ops.CUSTOMI, name="cu", arg="__builtin_HEXAGON_A2_vraddub({0}, {1})") + UPat.var("x"),
+   lambda x,cu: cu.replace(dtype=dtypes.int64, src=(x.bitcast(dtypes.int64), cu.src[0], cu.src[1]),
+                           arg="__builtin_HEXAGON_A2_vraddub_acc({0}, {1}, {2})").bitcast(dtypes.int.vec(2))),
+
+  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src,
+    "__builtin_shufflevector({0}, {0}, "+','.join([f'{y:4d}' for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 4 else None),
+  (UPat.var("x")+UPat(Ops.VECTORIZE,src=UPat.var("y")),
+   lambda x,y: x+UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI or x.arg != "{0}" else None),
+  (UPat.var("x")*UPat(Ops.VECTORIZE,src=UPat.var("y")),
+   lambda x,y: x*UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI or x.arg != "{0}" else None),
+  (UPat.var("x")//UPat(Ops.VECTORIZE,src=UPat.var("y")),
+   lambda x,y: x//UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI or x.arg != "{0}" else None),
   (UPat(Ops.DEFINE_ACC, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar.vec(128), name="d", allow_any_len=True),
    lambda d: d.replace(src=(UOp(Ops.CUSTOMI, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:])),
+
+  # multicore
+  (UPat(Ops.RANGE, name="r", arg=0), multicore_range),
+
+  # store with mask
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat.var("mask"))).cast().named("cast"), UPat.var("val"))),
+   store_with_mask),
 ])
 
-# NOTE: this just increases readability of the generated code
-dsp_string = PatternMatcher([
-  (UPat(Ops.CONST, (dtypes.int8, dtypes.uint8), name="x"), lambda ctx,x: str(x.arg)),
+pretty_render = PatternMatcher([
+  # makes rendering nicer
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, dtype=(dtypes.uint8, dtypes.int8)), name="v"),
+   lambda v: UOp(Ops.VECTORIZE, v.dtype, src=tuple(UOp(Ops.CUSTOMI, x.dtype, src=(UOp.const(dtypes.int, x.arg),), arg="{0}") for x in v.src))),
 ])
 
 class DSPRenderer(ClangRenderer):
   device = "DSP"
   supports_float4 = True
+  global_max = (2, 1, 1)
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
   pre_matcher = dsp_pm
-  extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher
-  string_rewrite = dsp_string+ClangRenderer.string_rewrite
+  extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher+pretty_render
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
+  extra_args = ['int global_idx_0', 'void* sync']
+  code_for_workitem = {"g": lambda x: f"global_idx_{x}"}
 
   def _render_defines(self, uops) -> list[str]:
     return ['''/* DSP boilerplate */ struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency;
       _Bool set_dcvs_params; short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3];};''','int HAP_power_set(void*, void*);',
       'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
       'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
-      'unsigned long long HAP_perf_get_time_us(void);'] + super()._render_defines(uops)
+      'unsigned long long HAP_perf_get_time_us(void);', 'typedef unsigned long qurt_thread_t;', 'void qurt_thread_exit(int);',
+      'typedef struct _qurt_barrier { char padding[64]; } qurt_barrier_t;', 'int qurt_barrier_init(qurt_barrier_t*, unsigned int);',
+      'int qurt_barrier_wait(qurt_barrier_t*);',
+      'typedef struct _qurt_thread_attr { char name[16]; unsigned char tcb_partition; unsigned char affinity; unsigned short priority;',
+      'unsigned char asid; unsigned char bus_priority; unsigned short timetest_id; unsigned int stack_size;'
+      'void *stack_addr; char padding[96]; } qurt_thread_attr_t;',
+      'int qurt_thread_join(qurt_thread_t tid, int *status);', 'void* malloc(unsigned int);', 'void free(void*);',
+      'int qurt_thread_create (qurt_thread_t *thread_id, qurt_thread_attr_t *attr, void (*entrypoint) (void *), void *arg);',
+      ] + super()._render_defines(uops)
 
-  def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str:
-    msrc = ['int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
+  def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]], sync_cnt=0x0) -> str:
+    msrc = ['typedef struct all_args {', *[f'int sz_or_val_{i}; int off{i}; void *buf_{i};' for i in range(len(bufs))], 'void* sync; } all_args_t;']
+    msrc += ['void threader(all_args_t* args) {']
+    buf_inputs = ', '.join([(f'args->buf_{i}' if isinstance(b[1][0], PtrDType) else f'args->sz_or_val_{i}') for i,b in enumerate(bufs)])
+    msrc += [f"{function_name}({buf_inputs}, 1, args->sync);"]
+    msrc += ['qurt_thread_exit(0); }'
+            'int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
             'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};',
             'HAP_power_set((void*)handle, (void*)&req);']
     msrc += ['if ((sc>>24) != 2) return 0;']
-    msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
-    msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
-    msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    if sync_cnt > 0:
+      msrc += [f"qurt_barrier_t* sync = malloc({sync_cnt} * sizeof(qurt_barrier_t));"]
+      msrc += [f"qurt_barrier_init(&sync[{i}], 2);" for i in range(sync_cnt)]
+    else: msrc += ["qurt_barrier_t* sync = 0x0;"]
+    msrc += ['all_args_t args = { 0 };']
+    msrc += [f'args.sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
+    msrc += [f'args.off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'args.buf_{i} = HAP_mmap(0,args.sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+args.off{i};'
+             for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += ['args.sync = sync;']
+    msrc += ["qurt_thread_attr_t attr = { 0 };"]
+    msrc += ["attr.name[0] = 't';", "attr.priority = 255;", "attr.asid = 0;"]
+    msrc += ["attr.stack_size = (64 << 10);", "attr.stack_addr = malloc(attr.stack_size);"]
+    msrc += [""]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
-    msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0], PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
+    if getenv("MULTICORE", 0) != 0:
+      msrc += ["qurt_thread_t thread_ = 0; qurt_thread_create(&thread_, &attr, (void (*)(void*))threader, (void*)&args);"]
+    buf_inputs = ', '.join([(f'args.buf_{i}' if isinstance(b[1][0], PtrDType) else f'args.sz_or_val_{i}') for i,b in enumerate(bufs)])
+    msrc += [f"{function_name}({buf_inputs}, 0, args.sync);"]
+    if getenv("MULTICORE", 0) != 0:
+      msrc += ['int status;', "qurt_thread_join(thread_, &status);"]
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
-    msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'HAP_munmap(args.buf_{i}, args.sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += ['free(attr.stack_addr);']
+    if sync_cnt > 0: msrc += ['free(sync);']
     msrc += ["return 0; }"]
     return '\n'.join(msrc)
 
@@ -141,7 +493,7 @@ class DSPDevice(Compiled):
                   'got', 'got.plt', 'dynsym', 'dynstr', 'symtab', 'shstrtab', 'strtab']
       sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
       with tempfile.NamedTemporaryFile(delete=False) as self.link_ld:
-        self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
+        self.link_ld.write(f"SECTIONS {{ . = 0x0;\n{sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
         self.link_ld.flush()
 
       from tinygrad.runtime.graph.cpu import CPUGraph
@@ -283,7 +635,15 @@ class MockDSPRenderer(DSPRenderer):
       else:
         msrc.append(f"unsigned int val{i}; read(0, &val{i}, 4);")
     msrc.append("unsigned int st = inscount();")
-    msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])});")
+    buf_inputs = ', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])
+    if getenv("MULTICORE", 0) != 0:
+      # TODO: get count?
+      # NOTE: we do them in reverse order to reveal bugs
+      msrc.append(f"{function_name}({buf_inputs}, 1, 0);")
+      msrc.append(f"{function_name}({buf_inputs}, 0, 0);")
+    else:
+      # huh, why did this change?
+      msrc.append(f"{function_name}({buf_inputs}, 0, 0);")
     msrc.append("unsigned int et = inscount() - st; write(1, &et, sizeof(et));")
     for i,b in enumerate(bufs):
       if isinstance(b[1][0], PtrDType): msrc.append(f"write(1, buf{i}, {b[1][0].size*b[1][0].itemsize});")

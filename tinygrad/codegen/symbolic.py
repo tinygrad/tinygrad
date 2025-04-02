@@ -168,7 +168,7 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
       quo += q * v
 
   # if numerator is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
-  if x.vmin < 0 and remainders: return None
+  if x.vmin < -10000000 and remainders: return None
   if which is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
   return rem//(c//gcd)+quo
 
@@ -201,7 +201,7 @@ commutative = PatternMatcher([
   (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
-symbolic = symbolic_simple+commutative+PatternMatcher([
+symbolic = symbolic_simple+PatternMatcher([
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **

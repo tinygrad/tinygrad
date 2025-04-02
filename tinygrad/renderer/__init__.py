@@ -78,6 +78,9 @@ class Estimates:
       elif u.op is Ops.STORE: lds += u.src[1].dtype.itemsize * mults
       elif u.op in GroupOp.ALU and u not in dont_count: flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
       elif u.op is Ops.WMMA and u not in dont_count: flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
+      elif u.op in {Ops.CUSTOM, Ops.CUSTOMI} and u not in dont_count:
+        if u.arg.startswith("__builtin_HEXAGON_V6_vrmpy"): flops += 32*mults*(8 if 'acc' in u.arg else 7)
+        if u.arg.startswith("__builtin_HEXAGON_A2_vraddub"): flops += mults*(17 if 'acc' in u.arg else 16)
     return Estimates(flops, lds, lds) # TODO: properly track memory, lds is always a high estimate
 
 @dataclass
@@ -106,6 +109,9 @@ class ProgramSpec:
         if u.op is Ops.DEFINE_VAR: self.vars.append(u)
         if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
         if u.op is Ops.STORE: self.outs.extend([x.arg for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL])
+        # DSP masked store
+        if u.op is Ops.CUSTOM and u.arg.startswith("__builtin_HEXAGON_V6_vS32b"):
+          self.outs.extend([x.arg for x in u.src[1].toposort if x.op is Ops.DEFINE_GLOBAL])
         if u.op is Ops.LOAD: self.ins.extend([x.arg for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL])
         if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
