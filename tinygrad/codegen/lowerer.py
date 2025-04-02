@@ -175,20 +175,6 @@ pm_lowerer = PatternMatcher([
 
 # **** this is the "quantization preprocessor", it makes ONNX quantized models, and probably also others, actually use ints ****
 
-FP = (1 << 15)
-FP_DTYPE = dtypes.int32
-def fixed_point_mul(x, c1, cc, y=None, c2=None):
-  if y is not None:
-    return ((x.cast(FP_DTYPE)*(c1*FP).cast(FP_DTYPE) + y.cast(FP_DTYPE)*(c2*FP).cast(FP_DTYPE) + (cc*FP).cast(FP_DTYPE)) // FP).cast(dtypes.int)
-  else:
-    return ((x.cast(FP_DTYPE)*(c1*FP).cast(FP_DTYPE) + (cc*FP).cast(FP_DTYPE)) // FP).cast(dtypes.int)
-
-def fixed_const_reduce(r, gate, c1):
-  # TODO: this is doable
-  st = gate.src[0].arg
-  print(st, r.arg)
-  #return c1
-
 def remove_matching_mask(v1, v2, ld):
   a1 = v1.arg.to_indexed_uops()[1].simplify()
   a2 = v2.arg.to_indexed_uops()[1].simplify()
@@ -197,6 +183,7 @@ def remove_matching_mask(v1, v2, ld):
   # WRONG!
   return ld
 
+FP = (1 << 15)
 pm_quant = symbolic+PatternMatcher([
   # cast after add/mul
   (UPat.var("x").cast(dtypes.float32) + UPat.var("y").cast(dtypes.float32),
@@ -229,10 +216,12 @@ pm_quant = symbolic+PatternMatcher([
   # const push through add
   ((UPat.var("x")*UPat.cvar("c1") + UPat.var("y")*UPat.cvar("c2")) * UPat.cvar("c3"), lambda x,y,c1,c2,c3: (x*c1*c3) + (y*c2*c3)),
 
-  # fixed point mult, replace (x.float()*c1 + c2).int() with an int expression
-  # fixed point mult, replace (x.float()*c1 + y.float()*c2 + c3).int() with an int expression
-  ((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("cc")).cast(dtypes.int), fixed_point_mul),
-  ((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("y").cast(dtypes.float)*UPat.var("c2")+UPat.var("cc")).cast(dtypes.int),fixed_point_mul),
+  # fixed point mult, replace (x.float()*c1+c2).int() with an int expression
+  ((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("cc")).cast(dtypes.int),
+   lambda x,c1,cc: ((x*(c1*FP).cast(x.dtype) + (cc*FP).cast(x.dtype)) // FP).cast(dtypes.int)),
+  # fixed point mult, replace (x.float()*c1 + y.float()*c2)*cc.int() with an int expression
+  ((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("y").cast(dtypes.float)*UPat.var("c2")+UPat.var("cc")).cast(dtypes.int),
+   lambda x,c1,y,c2,cc: ((x*(c1*FP).cast(x.dtype) + y.cast(x.dtype)*(c2*FP).cast(x.dtype) + (cc*FP).cast(x.dtype)) // FP).cast(dtypes.int)),
 
   # where move
   (UPat.var("valid").where(UPat.var("yes"), UPat(Ops.CONST, arg=0))*UPat.var("mul"), lambda valid, yes, mul:
@@ -253,9 +242,6 @@ pm_quant = symbolic+PatternMatcher([
     lambda v1,v2,c1,r: r.replace(src=(v1*v2,)) + r.replace(src=(c1*v2,))),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.CAST, name="v1")+UPat.var("c1")) * (UPat(Ops.CAST, name="v2",)+UPat.var("c2")), name="r"),
     lambda v1,v2,c1,c2,r: r.replace(src=(v1*v2,)) + r.replace(src=(c2*v1,)) + r.replace(src=(c1*v2,)) + r.replace(src=(c1*c2,))),
-
-  # hack REDUCE (so wrong that it breaks it)
-  #(UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.VALID, name='gate').where(UPat.cvar("c1"), UPat(Ops.CONST, arg=0)),), name="r"), fixed_const_reduce),
 
   # MUL by 1/0 on LOAD where the masks match
   (UPat(Ops.WHERE, src=(UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v1"),)), UPat(Ops.CONST, arg=1), UPat(Ops.CONST, arg=0))) * \

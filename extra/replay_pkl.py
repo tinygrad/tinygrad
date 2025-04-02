@@ -56,13 +56,8 @@ if __name__ == "__main__":
             ei.bufs[0].copyin(memoryview(bytearray(b'\x00'*ei.bufs[0].nbytes)))
             GlobalCounters.kernel_count -= 1
 
-        #if knum != 1 and not getenv("NOOPT"): k.hand_coded_optimizations()
-        if not getenv("NOOPT"): k.hand_coded_optimizations()
-        #if knum == 6:
-        #  k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
-        #  k.apply_opt(Opt(OptOps.UPCAST, 1, 32))
-        #  k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
 
+        if not getenv("NOOPT"): k.hand_coded_optimizations()
         p2 = k.to_program()
         new_ei = replace(ei, prg=CompiledRunner(p2))
         new_ei.run()
@@ -71,20 +66,6 @@ if __name__ == "__main__":
 
         if getenv("VALIDATE"):
           import numpy as np
-          """
-          print("first")
-          print(correct[:150])
-          print(test[:150])
-          print("middle")
-          print(correct[500:600])
-          print(test[500:600])
-          print("last")
-          print(correct[-150:])
-          print(test[-150:])
-          print("skip")
-          print(correct[::32])
-          print(test[::32])
-          """
           np.testing.assert_allclose(correct, test, rtol=1e-3, atol=1e-3)
       knum += 1
 
