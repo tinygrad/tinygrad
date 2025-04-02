@@ -89,6 +89,9 @@ hyp = {
 
 print("device is", hyp['misc']['device'])
 
+from tinygrad.nn.datasets import cifar
+print(cifar())
+
 #############################################
 #                Dataloader                 #
 #############################################
