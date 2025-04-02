@@ -785,7 +785,7 @@ class AMDDevice(HCQCompiled):
     self.target = int(self.dev_iface.props['gfx_target_version'])
     self.gfxver = self.target // 10000
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
-    if self.target < 90402 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
+    if self.target < 90402 or self.target >= 130000: raise RuntimeError(f"Unsupported arch: {self.arch}")
     if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {self.arch}")
 
     self.max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] // self.dev_iface.props.get('num_xcc', 1) - 1
