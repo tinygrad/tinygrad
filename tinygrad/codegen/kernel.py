@@ -660,7 +660,32 @@ class Kernel:
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
   def apply_lds(self, ast) -> UOp:
-    def transform(ctx:tuple[Kernel, set[UOp]], global_access:UOp): return None
+    def transform(ctx:tuple[Kernel, set[UOp]], global_access:UOp):
+      if (buf:=global_access.src[0]).arg in ctx[1] or global_access.src[0].op is not Ops.DEFINE_GLOBAL: return None
+      ctx[1].add(buf.arg)
+      if (k := ctx[0]).lds[buf.arg]:
+        global_st: ShapeTracker = global_access.src[1].arg
+        gd, fr, fu = k.global_dims, k.first_reduce, k.first_upcast
+        shape=[]
+        for i, st in enumerate(global_st.real_strides(True)):
+          if i < gd: shape.append(1)
+          elif st == 0: shape.append(1)
+          elif i < fr: shape.append(cast(int, global_st.shape[i]))
+          elif i < fu: shape.append(1)
+          elif st != 0: shape.append(cast(int, global_st.shape[i]))
+          else: shape.append(1)
+        store_st = load_st = ShapeTracker.from_shape(tuple(shape))
+
+        local_buffer = UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(size=store_st.real_size(), local=True), (), buf.arg)
+        if global_access.op == Ops.LOAD:
+          global_access = global_access.replace(src=(global_access.src[0], global_st.to_uop()))
+          local_store = UOp.store(local_buffer, store_st.to_uop(), global_access)
+          return UOp(Ops.LOAD, global_access.dtype, (local_buffer, load_st.to_uop(), local_store))
+        if global_access.op == Ops.STORE:
+          local_store = UOp.store(local_buffer, store_st.to_uop(), global_access.src[2])
+          local_load = UOp(Ops.LOAD, local_buffer.dtype.base, (local_buffer, load_st.to_uop(), local_store))
+          return global_access.replace(src=(global_access.src[0], global_access.src[1], local_load))
+      return None
 
     return graph_rewrite(ast, PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), name="global_access"), transform)]), ctx=(self, set()))
 
