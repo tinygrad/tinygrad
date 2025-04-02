@@ -334,14 +334,14 @@ def store_with_mask(buf, idx, val, mask, cast):
   cmask = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(mask,),arg="{0}")
 
   # unaligned
-  min_128 = (idx&0x7F)
+  min_128 = (buf.index(idx).cast(dtypes.uint)&0x7F)
   cmask_l = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(cmask, const_0, min_128), arg="__builtin_HEXAGON_V6_vlalignb_128B({0}, {1}, {2})")
   cmask_r = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(const_0, mask, min_128), arg="__builtin_HEXAGON_V6_vlalignb_128B({0}, {1}, {2})")
   val_l = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(val, const_0, min_128), arg="__builtin_HEXAGON_V6_vlalignb_128B({0}, {1}, {2})")
   val_r = UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=(const_0, val, min_128), arg="__builtin_HEXAGON_V6_vlalignb_128B({0}, {1}, {2})")
-  store_l = UOp(Ops.CUSTOM, dtypes.void, src=(cmask_l, buf.index(idx-min_128).cast(cast.dtype), val_l, const_0),
+  store_l = UOp(Ops.CUSTOM, dtypes.void, src=(cmask_l, buf.index(idx).cast(cast.dtype), val_l, const_0),
     arg='__builtin_HEXAGON_V6_vS32b_nqpred_ai_128B(__builtin_HEXAGON_V6_veqb_128B({0}, {3}), {1}, {2});')
-  store_r = UOp(Ops.CUSTOM, dtypes.void, src=(cmask_r, buf.index(idx-min_128+128).cast(cast.dtype), val_r, const_0),
+  store_r = UOp(Ops.CUSTOM, dtypes.void, src=(cmask_r, buf.index(idx+128).cast(cast.dtype), val_r, const_0),
     arg='__builtin_HEXAGON_V6_vS32b_nqpred_ai_128B(__builtin_HEXAGON_V6_veqb_128B({0}, {3}), {1}, {2});')
   return UOp(Ops.CUSTOM, src=(store_l,store_r), arg="")
 
