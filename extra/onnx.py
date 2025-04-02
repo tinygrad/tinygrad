@@ -136,9 +136,11 @@ class OnnxRunner:
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
     if value is None: raise RuntimeError(f"'{name}' is not marked as optional, but received a None value")
-    if self.float32 and dtypes.is_float(spec.dtype) and isinstance(value, Tensor):
+    if self.float32 and dtypes.is_float(spec.dtype):
       value = value.cast(dtypes.float32) if isinstance(value, Tensor) else Tensor(value, dtype=dtypes.float32, requires_grad=self.is_training)
-    if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
+    else:
+      if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
+      if value.dtype is not spec.dtype: raise RuntimeError(f"input '{name}' has wrong dtype")
     if not self._check_shape(value, spec): raise RuntimeError(f"input '{name}' has wrong shape")
     return value
 
