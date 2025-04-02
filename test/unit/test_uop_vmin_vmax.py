@@ -120,10 +120,32 @@ class TestVminVmaxDivMod(unittest.TestCase):
 
   def test_vmin_vmax_division_negative(self):
     # vmin and vmax for division of a variable by a negative constant
+    # always positive
     x = UOp.variable('x', 10, 20)
     uop = x // -2
     self.assertEqual(uop.vmin, -10)
     self.assertEqual(uop.vmax, -5)
+    uop = x // -3
+    self.assertEqual(uop.vmin, -6)
+    self.assertEqual(uop.vmax, -3)
+
+    # always negative
+    x = UOp.variable('x', -20, -10)
+    uop = x // -2
+    self.assertEqual(uop.vmin, 5)
+    self.assertEqual(uop.vmax, 10)
+    uop = x // -3
+    self.assertEqual(uop.vmin, 3)
+    self.assertEqual(uop.vmax, 6)
+
+    # cross 0
+    x = UOp.variable('x', -10, 10)
+    uop = x // -2
+    self.assertEqual(uop.vmin, -5)
+    self.assertEqual(uop.vmax, 5)
+    uop = x // -3
+    self.assertEqual(uop.vmin, -3)
+    self.assertEqual(uop.vmax, 3)
 
   def test_vmin_vmax_mod_positive(self):
     # vmin and vmax for modulo of a variable by a positive constant
@@ -144,7 +166,7 @@ class TestVminVmaxDivMod(unittest.TestCase):
     # vmin and vmax for division of a variable with a range crossing zero
     x = UOp.variable('x', -10, 10)
     uop = x // 3
-    self.assertEqual(uop.vmin, -4)  # -10//3 = -4
+    self.assertEqual(uop.vmin, -3)  # -10//3 = -3 (in C)
     self.assertEqual(uop.vmax, 3)   # 10//3 = 3
 
   def test_vmin_vmax_mod_with_mixed_range(self):
