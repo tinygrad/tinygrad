@@ -9,6 +9,9 @@ There is a good [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-not
 
 There's also a [doc describing speed](../developer/speed.md)
 
+## Tinygrad Architecture
+![Tinygrad Diagram](../tinygrad_diagram.png){: style="max-width: 700px; height: auto;" }
+
 ## Frontend
 
 Everything in [Tensor](../tensor/index.md) is syntactic sugar around constructing a graph of [UOps](../developer/uop.md).
