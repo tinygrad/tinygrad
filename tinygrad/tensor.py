@@ -983,7 +983,7 @@ class Tensor(SimpleMathTrait):
       raise RuntimeError(
         f"setStorage: sizes {size}, strides {stride}, offset {storage_offset} "
         f"require {(needed+1)*self.dtype.itemsize} but got {storage_size}")
-    if any(s < 0 for s in stride): 
+    if any(s < 0 for s in stride):
       raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
 
     if self.numel() == 1 or prod(size) == 1: return self.flatten()[storage_offset].reshape(size)
