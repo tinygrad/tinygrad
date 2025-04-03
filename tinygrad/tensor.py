@@ -157,7 +157,9 @@ class Tensor(SimpleMathTrait):
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
       if data.shape == (): data = _metaop(Ops.CONST, tuple(), dtype or _from_np_dtype(data.dtype), device, data.item())
       else: data = _fromnp(data.astype(npdtype) if dtype is not None and (npdtype:=_to_np_dtype(dtype)) is not None else data)  # type: ignore [name-defined]
-    elif isinstance(data, pathlib.Path): data = UOp.new_buffer(f"DISK:{data.resolve()}", data.stat().st_size // dtype.itemsize, dtype or dtypes.uint8)
+    elif isinstance(data, pathlib.Path):
+      dtype = dtype or dtypes.uint8
+      data = UOp.new_buffer(f"DISK:{data.resolve()}", data.stat().st_size // dtype.itemsize, dtype)
 
     # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
