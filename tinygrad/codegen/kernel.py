@@ -689,12 +689,11 @@ class Kernel:
     src = self.opts.render(self.uops)
 
     if CAPTURE_PROCESS_REPLAY:
-      # NOTE: calling traceback.extract_stack() is very slow, recording backtraces isn't included by default yet
-      if getenv("RECORD_TRACEBACKS"):
-        import traceback
-        stack = "\n".join(traceback.format_list(traceback.extract_stack()[:-1]))
-      else: stack = None
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, stack, ContextVar._cache, src))
+      import sys
+      frm = sys._getframe(1)
+      while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
+      loc = (frm.f_code.co_filename, frm.f_lineno)
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, loc, ContextVar._cache, src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
