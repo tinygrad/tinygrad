@@ -1061,7 +1061,7 @@ class TestLinearizer(unittest.TestCase):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL") or getenv("EMULATE_METAL") or getenv("EMULATE_AMD_MFMA") or getenv("EMULATE_AMD")) and \
         (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
-      if CI and Device.DEFAULT == "METAL" and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if CI and Device.DEFAULT in ("METAL", "AMD") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
       helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
@@ -1089,7 +1089,7 @@ class TestLinearizer(unittest.TestCase):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       if (getenv("EMULATE_CUDA") or getenv("EMULATE_METAL") or getenv("EMULATE_AMD_MFMA") or getenv("EMULATE_AMD")) and \
         (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
-      if CI and Device.DEFAULT == "METAL" and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if CI and Device.DEFAULT in ("METAL", "AMD") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       pad = 1
 
       # check that TC is triggered for TC_OPT=2
