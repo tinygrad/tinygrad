@@ -188,7 +188,7 @@ def truncate_fp16(x):
 
 def truncate_bf16(x):
   max_bf16 = struct.unpack('f', struct.pack('I', 0x7f7f0000))[0]
-  if x > max_bf16 or x < -max_bf16: return math.copysign(math.inf, x)
+  if abs(x) > max_bf16: return math.copysign(math.inf, x)
   f32_int = struct.unpack('I', struct.pack('f', x))[0]
   bf = struct.unpack('f', struct.pack('I', f32_int & 0xFFFF0000))[0]
   return bf
