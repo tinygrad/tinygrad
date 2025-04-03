@@ -437,8 +437,7 @@ class Tensor(SimpleMathTrait):
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
     """
-
-    r = Tensor._metaop(Ops.EMPTY, shape, **kwargs)
+    r = Tensor.empty(*shape, **kwargs)
     r.lazydata.buffer.allocate(external_ptr=ptr)
     return r
 
