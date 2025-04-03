@@ -968,22 +968,8 @@ class Tensor(SimpleMathTrait):
 
   def as_strided(self, size, stride, storage_offset=0) -> Tensor:
     """Creates a view with custom stride/offset"""
-    from tinygrad.shape.shapetracker import ShapeTracker, View
-
-    storage_size, prod_size = self.numel(), prod(size)
-
-    max_idx = storage_offset
-    for s, st in zip(size, stride):
-      if s > 1: max_idx += (s-1) * st
-
-    if max_idx >= storage_size: return self.contiguous().flatten()[storage_offset:].reshape(size)
     if any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
-    if storage_size == 1 or prod_size == 1: return self.flatten()[storage_offset].reshape(size)
-
-    x = self.contiguous()
-    ret = Tensor(x.realize().lazydata, device=self.device, requires_grad=self.requires_grad)
-    ret.lazydata.st = ShapeTracker((getattr(ret.lazydata.st, 'views', ()) + (View.create(size, stride, storage_offset),)))
-    return ret
+    return self._apply_uop(lambda x: x.as_strided(size, stride, storage_offset))
 
   def flip(self, axis, *args) -> Tensor:
     """

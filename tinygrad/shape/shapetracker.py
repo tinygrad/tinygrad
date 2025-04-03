@@ -133,6 +133,9 @@ class ShapeTracker:
   def expand(self, new_shape: tuple[sint, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].expand(new_shape), ))
   def permute(self, axis: tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].permute(axis), ))
   def flip(self, mul: tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].flip(mul), ))
+  def as_strided(self, arg: tuple[tuple[sint, ...], tuple[sint, ...], sint]) -> ShapeTracker:
+    size, stride, storage_offset = arg
+    return ShapeTracker(self.views[0:-1] + (self.views[-1].as_strided(size, stride, storage_offset), ))
 
   def reshape(self, new_shape: tuple[sint, ...]) -> ShapeTracker:
     if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
@@ -141,4 +144,5 @@ class ShapeTracker:
   def mop(self, op, arg): return mops[op](self, arg)
 
 mops: dict[Ops, Callable] = {Ops.RESHAPE: ShapeTracker.reshape, Ops.PERMUTE: ShapeTracker.permute, Ops.EXPAND: ShapeTracker.expand,
-                             Ops.SHRINK: ShapeTracker.shrink, Ops.FLIP: ShapeTracker.flip, Ops.PAD: ShapeTracker.pad}
+                             Ops.SHRINK: ShapeTracker.shrink, Ops.FLIP: ShapeTracker.flip, Ops.PAD: ShapeTracker.pad,
+                             Ops.AS_STRIDED: ShapeTracker.as_strided}
