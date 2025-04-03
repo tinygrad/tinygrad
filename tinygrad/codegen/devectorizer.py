@@ -134,7 +134,9 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.arg, 0)) else None)]
   if Ops.SHR in ops:
-    pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None)]
+    # no reason to check x>=0 for uints
+    pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
+    pat += [(UPat.var("x", dtypes.sints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None)]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
@@ -144,9 +146,14 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
 # *** correct load/store ***
 
 def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
+  # this splits loads and stores into multiple chunks
+
+  # if there's only one element to load/store, no splitting needed
   if (sz:=ls.src[0].dtype.count) == 1: return None
-  lengths = []
   buf = idx.src[0]
+
+  # determine fold lengths
+  lengths = []
   must_divide = True
   if ctx is not None and ctx.device == "DSP":
     lengths = [128,64,32,16,8,4]
@@ -159,22 +166,26 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     # TODO: a better way to get this than ctx
     lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
   lengths.append(1)  # worst case, it's not folded
-  ptrdtype = cast(PtrDType, buf.dtype)
+
+  # split based on the fold lengths
   global_offset = 0
   ret = []
+  ptrdtype = cast(PtrDType, buf.dtype)
   while global_offset < sz:
+    oidx = (idx.src[1] + global_offset).simplify()
+    # with 1 at the end of the lengths list, this will always hit
     for fold_length in lengths:
       if global_offset+fold_length > sz: continue
-      oidx = idx.src[1] + global_offset
-      if must_divide and oidx.simplify().divides(fold_length) is None: continue
+      if must_divide and oidx.divides(fold_length) is None: continue
       lidx = buf.index(oidx, idx.src[2] if len(idx.src) > 2 else None)
       if fold_length > 1: lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
       else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))
       global_offset += fold_length
       break
-  if len(ret) == 1: return None
-  return UOp(Ops.CAT, ls.dtype, tuple(ret))
+
+  # if it wasn't split, we return None. otherwise we CAT them
+  return UOp(Ops.CAT, ls.dtype, tuple(ret)) if len(ret) > 1 else None
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
@@ -199,7 +210,7 @@ def image_fixup(ls:UOp):
 
 correct_load_store = PatternMatcher([
   # split LOAD/STORE
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, name="idx"),)),), name="ls", allow_any_len=True), split_load_store),
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ls", allow_any_len=True), split_load_store),
   # image indexing, including unfoldable images
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), image_fixup),
 ])

@@ -4,17 +4,23 @@
 
 from typing import Any
 import unittest, onnx, tempfile
+from tinygrad import dtypes
+from tinygrad.frontend.onnx import OnnxRunner
 import numpy as np
 from extra.onnx_helpers import validate
 
 class TestOnnxOps(unittest.TestCase):
   DOMAIN = None
-  def helper_test_single_op(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str], rtol=1e-3, atol=1e-6):
+  def helper_build_model(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str]):
     onnx_inputs = [onnx.helper.make_tensor_value_info(name, onnx.helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inps.items()]
     onnx_outputs = [onnx.helper.make_empty_tensor_value_info(name) for name in outs]
     nodes = [onnx.helper.make_node(op, list(inps), list(outs), domain=self.DOMAIN, **opts)]
     graph = onnx.helper.make_graph(nodes, f"test_{op.lower()}", onnx_inputs, onnx_outputs)
     model = onnx.helper.make_model(graph, producer_name=f"test_{op.lower()}")
+    return model
+
+  def helper_test_single_op(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str], rtol=1e-3, atol=1e-6):
+    model = self.helper_build_model(op, inps, opts, outs)
     with tempfile.NamedTemporaryFile() as tmp:
       onnx.save(model, tmp.name)
       validate(tmp.name, inps, rtol, atol)
@@ -57,6 +63,17 @@ class TestMainOnnxOps(TestOnnxOps):
     attributes = {"kernel_shape": [2, 2], "strides": [2, 2]}
     outputs = ["y"]
     self.helper_test_single_op("MaxUnpool", inputs, attributes, outputs)
+
+  def test_isinf(self):
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#isinf
+    # attributes are int but output expects bool
+    x = np.array([-1.2, np.nan, np.inf, 2.8, -np.inf, np.inf], dtype=np.float32)
+    inputs = {"x": x}
+    attributes = {"detect_negative":1, "detect_positive":1}
+    outputs = ["y"]
+    model = self.helper_build_model("IsInf", inputs, attributes, outputs)
+    outputs = OnnxRunner(model)(inputs)
+    assert outputs["y"].dtype is dtypes.bool
 
   def test_quantize_linear(self):
     test_cases = [
