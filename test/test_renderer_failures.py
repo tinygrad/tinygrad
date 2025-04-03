@@ -28,7 +28,7 @@ def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
   return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
 
 class TestRendererFailures(unittest.TestCase):
-  def test_gated_store_with_alu(self):
+  def test_gated_store(self):
     a = Tensor.zeros((2, 4)).contiguous()
     x = Tensor(1)
     y = Tensor(2)
