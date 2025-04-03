@@ -1108,7 +1108,7 @@ class TestLinearizer(unittest.TestCase):
       if not AMX: # AMX tc.dims[2] == 1
         helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[1], tc.dims[2]//4, tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
 
-      if CI and Device.DEFAULT == "AMD": pad = 3 # pad == 1 might be broken for AMD tensor cores due to a compiler bug, see discussion in #9606
+      if Device.DEFAULT == "AMD": pad = 3 # pad == 1 might be broken for AMD tensor cores due to a compiler bug, see discussion in #9606
       # check correctness
       helper_tc_allclose(tc.dims[0]+pad, tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
 
