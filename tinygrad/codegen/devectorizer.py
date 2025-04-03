@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve, graph_rewrite, GroupOp, identity_element
-from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
+from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat, gep_pushing
 from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
@@ -308,7 +308,7 @@ pm_reduce = PatternMatcher([
   # REDUCE -> DEFINE_ACC+ASSIGN
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
   # tensor core built in accumulate
-  (UPat.var("add") + UPat(Ops.WMMA, name="wmma"),
+  (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
 ])
 
@@ -320,7 +320,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
 
   # remove reduce
-  sink = graph_rewrite(sink, pm_reduce, ctx=ReduceContext(), name="remove_reduce")
+  sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")
 
   # devectorize is optional
   if DEVECTORIZE >= 2: sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)
