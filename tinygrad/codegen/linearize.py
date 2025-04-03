@@ -82,14 +82,12 @@ make_basic_blocks = PatternMatcher([
 def block_merge(ctx, x:UOp):
   # ctx is children here
   if x.op is Ops.BLOCKEND:
-    # if it's a BLOCKEND, see if we are done with placement. if all the children of the range are in here
-    in_this_block = set(x.arg.lst)
-    if len([y for y in ctx[x.arg.end] if y not in in_this_block]) == 0:
-      # find the parent block that has the BLOCKSTART in the ctx
-      parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and UOp(Ops.BLOCKSTART, src=(x.arg.end,)) in y.arg.ctx]
-      assert len(parent_blocks) <= 1, "should never have two parent blocks"
-      if len(parent_blocks) == 1:
-        parent_block = parent_blocks[0]
+    # if it's a BLOCKEND, see if we are done with placement... find the parent block that has the BLOCKSTART in the ctx
+    parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and UOp(Ops.BLOCKSTART, src=(x.arg.end,)) in y.arg.ctx]
+    assert len(parent_blocks) <= 1, "should never have two parent blocks"
+    if len(parent_blocks) == 1:
+      parent_block = parent_blocks[0]
+      if set(ctx[x.arg.end]).issubset(set(parent_block.arg.lst) | set(x.arg.lst)):
         # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
         early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
         # NOTE: we have to add a barrier at the start if barrier is used in the range
@@ -187,7 +185,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
       # save children
       children.setdefault(s, []).append(u)
       # compute block ctx
-      if s.op in {Ops.RANGE, Ops.IF}: this_block_ctx.append(s)
+      if s.op in {Ops.RANGE, Ops.IF}: this_block_ctx.extend([s] + temp_block_ctxs[s])
       # don't flow (fully) through assign and store
       elif s.op is Ops.STORE:
         # ugh, deal with non-reduce locals. probably wrong
