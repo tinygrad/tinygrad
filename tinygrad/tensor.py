@@ -142,7 +142,7 @@ class Tensor(SimpleMathTrait):
     if isinstance(data, UOp):
       assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
       if data.op is Ops.BIND: data = _metaop(Ops.BIND, tuple(), dtype or data.dtype, device, data)
-    elif data is None: data = _metaop(Ops.EMPTY, (0,), dtype or dtypes.default_float, device)
+    elif data is None: data = _metaop(Ops.CONST, (0,), dtype or dtypes.default_float, device, arg=0)
     elif isinstance(data, get_args(ConstType)): data = _metaop(Ops.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
     elif isinstance(data, (list, tuple)):
@@ -406,15 +406,7 @@ class Tensor(SimpleMathTrait):
   # ***** creation entrypoint *****
 
   @staticmethod
-  def _metaop(op, shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None, arg=None, **kwargs) -> Tensor:
-    dtype = to_dtype(dtype) if dtype is not None else dtypes.default_float
-    if isinstance(device, tuple):
-      return Tensor(UOp.multi(*[UOp.metaop(op, shape, dtype, Device.canonicalize(d), arg) for d in device], axis=None),
-                    device, dtype, **kwargs)
-    return Tensor(UOp.metaop(op, shape, dtype, Device.canonicalize(device), arg), device, dtype, **kwargs)
-
-  @staticmethod
-  def empty(*shape, **kwargs) -> Tensor:
+  def empty(*shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None, **kwargs) -> Tensor:
     """
     Creates an empty tensor with the given shape.
 
@@ -426,7 +418,12 @@ class Tensor(SimpleMathTrait):
     print(t.shape)
     ```
     """
-    return Tensor._metaop(Ops.EMPTY, argfix(*shape), **kwargs)
+    dtype, shape = to_dtype(dtype) if dtype is not None else dtypes.default_float, argfix(*shape)
+    if not isinstance(size:=prod([x.vmax if isinstance(x, UOp) else x for x in shape]), int): raise ValueError(f"size must be int {size}")
+    if isinstance(device, tuple):
+      return Tensor(UOp.multi(*[UOp.new_buffer(Device.canonicalize(d), size, dtype).reshape(shape) for d in device], axis=None),
+                    device, dtype, **kwargs)
+    return Tensor(UOp.new_buffer(Device.canonicalize(device), size, dtype), device, dtype, **kwargs).reshape(shape)
 
   @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:
