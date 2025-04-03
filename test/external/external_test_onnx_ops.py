@@ -44,6 +44,7 @@ class TestMainOnnxOps(TestOnnxOps):
     self.helper_test_single_op("Conv", inputs, attributes, outputs, atol=1e-4)
 
   def test_gather(self):
+    # test const negative indices
     inputs = {
       "input": np.random.randn(1, 3, 3).astype(np.float32),
       "indices": np.array(-2, dtype=np.int64),
@@ -53,6 +54,7 @@ class TestMainOnnxOps(TestOnnxOps):
     self.helper_test_single_op("Gather", inputs, attributes, outputs)
 
   def test_maxunpool(self):
+    # test_maxunpool_export_with_output_shape_cpu
     xT = np.array([[[[5, 6], [7, 8]]]], dtype=np.float32)
     xI = np.array([[[[5, 7], [13, 15]]]], dtype=np.int64)
     output_shape = np.array((1, 1, 5, 5), dtype=np.int64)
@@ -92,6 +94,7 @@ class TestMainOnnxOps(TestOnnxOps):
       {"name": "round_half_to_even", "x": np.array([0, 0.5, 1.5, 255], dtype=np.float32)},
       {"name": "round_zero_point_half_down_to_even", "x": np.array([-1, 509], dtype=np.float32)},
       {"name": "round_zero_point_half_up_to_even", "x": np.array([-11, 499], dtype=np.float32)},
+      # other tests from https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-45
       {"name": "max_adjusted", "x": np.array([-1.0, -2.1, -1.3, -2.5, -3.34, -4.0], dtype=np.float32)},
       {"name": "min_adjusted", "x": np.array([1, 2.1, 1.3, 2.5, 3.34, 4.0, 1.5, 2.6, 3.9, 4.0, 3.0, 2.345], dtype=np.float32).reshape((3, 4))},
     ]

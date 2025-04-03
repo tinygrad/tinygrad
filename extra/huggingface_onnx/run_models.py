@@ -1,7 +1,6 @@
 import onnx, yaml, tempfile, time, collections, pprint, argparse, json
 from pathlib import Path
 from tinygrad.frontend.onnx import OnnxRunner
-from extra.onnx import get_onnx_ops
 from extra.onnx_helpers import validate, get_example_inputs
 
 def get_config(root_path: Path):
@@ -41,7 +40,7 @@ def retrieve_op_stats(models:dict[str, tuple[Path, Path]]) -> dict:
   ret = {}
   op_counter = collections.Counter()
   unsupported_ops = collections.defaultdict(set)
-  supported_ops = get_onnx_ops()
+  supported_ops = OnnxRunner.onnx_ops
   print(f"** Retrieving stats from {len(model_paths)} models **")
   for model_id, (root_path, relative_path) in models.items():
     print(f"examining {model_id}")
