@@ -135,7 +135,8 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
   assert False
 
 def fast_idiv(x: UOp, d: int) -> UOp|None:
-  if not resolve(x>=0,False) or d == dtypes.min(x.dtype): return None  # for signed ints taking the absolute value can overflow
+  # idiv is truncated division, but arithmatic shift is floored division, so can only do non-negative numbers!
+  if x.vmin<0 or d == dtypes.min(x.dtype): return None  # for signed ints taking the absolute value can overflow
   sign = 1 if d > 0 else -1
   m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
   if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
