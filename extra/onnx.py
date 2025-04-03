@@ -89,7 +89,7 @@ required_input_python_consts: dict[str, tuple[int, ...]] = {
 }
 
 cache_misses = 0
-@functools.lru_cache(None)
+@functools.cache
 def _cached_to_python_const(t:Tensor):
   if t.dtype is dtypes.uint8: return t.data().tobytes()
   if 0 in t.shape: return []
@@ -126,12 +126,12 @@ class OnnxRunner:
 
     self.onnx_ops = onnx_ops
 
-  def _valid_shape(self, value: Tensor, spec: OnnxValue):
-    for onnx_dim, user_dim_input in zip(spec.shape, value.shape, strict=True):
-      if isinstance(onnx_dim, str):
-        onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, int(user_dim_input))
-      if user_dim_input != onnx_dim: return False
-    return True
+  def _validate_shape(self, name: str, value: Tensor, spec: OnnxValue):
+    # update new variable dims
+    self.variable_dims.update({sd:vd for sd,vd in zip(spec.shape, value.shape) if isinstance(sd, str) and sd not in self.variable_dims})
+    # resolve dynamic shape
+    expected_shape = tuple(self.variable_dims[sd] if isinstance(sd, str) else sd for sd in spec.shape)
+    assert value.shape == expected_shape, f"'{name}' has wrong shape"
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
@@ -141,7 +141,7 @@ class OnnxRunner:
     else:
       if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
       if value.dtype is not spec.dtype: raise RuntimeError(f"input '{name}' has wrong dtype")
-    if not self._valid_shape(value, spec): raise RuntimeError(f"input '{name}' has wrong shape")
+    self._validate_shape(name, value, spec)
     return value
 
   def _parse_output(self, name: str):
@@ -149,7 +149,7 @@ class OnnxRunner:
     if not isinstance(value, Tensor): return value
     if self.float32 and dtypes.is_float(spec.dtype): value = value.cast(spec.dtype)
     if value.dtype is not spec.dtype: raise RuntimeError(f"output '{name}' has wrong dtype")
-    if not self._valid_shape(value, spec): raise RuntimeError(f"output '{name}' has wrong shape")
+    self._validate_shape(name, value, spec)
     return value
 
   def _dispatch_op(self, op, inps, opts):
@@ -825,7 +825,7 @@ def get_onnx_ops():
   return {
     # Tensor ops
     **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
-  "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
+    "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
     "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Round", "Erf")},
     # Implemented ops
     **{name:obj for name,obj in locals().items() if isinstance(obj, types.FunctionType) and not name.startswith("_") and name[0].isupper()},

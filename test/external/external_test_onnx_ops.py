@@ -4,17 +4,23 @@
 
 from typing import Any
 import unittest, onnx, tempfile
+from tinygrad import dtypes
+from tinygrad.frontend.onnx import OnnxRunner
 import numpy as np
 from extra.onnx_helpers import validate
 
 class TestOnnxOps(unittest.TestCase):
   DOMAIN = None
-  def helper_test_single_op(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:dict[str, np.ndarray], rtol=1e-3, atol=1e-6):
+  def helper_build_model(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:dict[str, np.ndarray]):
     inputs = [onnx.helper.make_tensor_value_info(name, onnx.helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inps.items()]
     outputs = [onnx.helper.make_tensor_value_info(name, onnx.helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in outs.items()]
     nodes = [onnx.helper.make_node(op, list(inps), list(outs), domain=self.DOMAIN, **opts)]
     graph = onnx.helper.make_graph(nodes, f"test_{op.lower()}", inputs, outputs)
     model = onnx.helper.make_model(graph, producer_name=f"test_{op.lower()}")
+    return model
+
+  def helper_test_single_op(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str], rtol=1e-3, atol=1e-6):
+    model = self.helper_build_model(op, inps, opts, outs)
     with tempfile.NamedTemporaryFile() as tmp:
       onnx.save(model, tmp.name)
       validate(tmp.name, inps, rtol, atol)
@@ -54,6 +60,17 @@ class TestMainOnnxOps(TestOnnxOps):
     attributes = {"kernel_shape": [2, 2], "strides": [2, 2]}
     outputs = {"y": np.empty((1, 1, 5, 5), dtype=np.float32)}
     self.helper_test_single_op("MaxUnpool", inputs, attributes, outputs)
+
+  def test_isinf(self):
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#isinf
+    # attributes are int but output expects bool
+    x = np.array([-1.2, np.nan, np.inf, 2.8, -np.inf, np.inf], dtype=np.float32)
+    inputs = {"x": x}
+    attributes = {"detect_negative":1, "detect_positive":1}
+    outputs = {"y": np.empty((6,), dtype=np.bool_)}
+    model = self.helper_build_model("IsInf", inputs, attributes, outputs)
+    outputs = OnnxRunner(model)(inputs)
+    assert outputs["y"].dtype is dtypes.bool
 
   def test_quantize_linear(self):
     test_cases = [
@@ -187,8 +204,8 @@ class TestContribOnnxOps(TestOnnxOps):
       with self.subTest(f"test_attention_{i}"):
         inps = {**base_inps, **extra_inps}
         opts = {**base_opts, **extra_opts}
-        outputs = {"output": np.empty((batch_size, seq_len, hidden_size), dtype=np.float32)}
         if "qkv_hidden_sizes" in opts: outputs = {"output": np.empty((batch_size, seq_len, 128), dtype=np.float32)}
+        else: outputs = {"output": np.empty((batch_size, seq_len, hidden_size), dtype=np.float32)}
         self.helper_test_single_op("Attention", inps, opts, outputs, atol=1e-4)
 
   def test_skip_layer_normalization(self):
