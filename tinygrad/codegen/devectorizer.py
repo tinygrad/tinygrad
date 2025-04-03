@@ -290,16 +290,19 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   inp, reduce_range = red.src[0], red.src[1:]
   # if this has a horizontal reduction component, do that first
   if inp.dtype != red.dtype:
+    # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
     horizontal_amount = inp.dtype.count//red.dtype.count
-    inp = functools.reduce(lambda x,y: x.alu(red.arg, y),
-                           [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)])
-  assert inp.dtype == red.dtype, f"horizontal reduction mismatch {inp.dtype} != {red.dtype}"
-  # if there's no range, we're done
-  if len(reduce_range) == 0: return inp
-  # create ACC and assign
-  acc = UOp(Ops.DEFINE_ACC, inp.dtype, (inp.const_like(identity_element(red.arg, inp.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
-  ctx.acc_num += 1
-  return acc.assign(acc.alu(red.arg, inp))
+    lst = [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)]
+  else:
+    lst = [inp]
+  assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
+  # if we have a range
+  if len(reduce_range) != 0:
+    acc = UOp(Ops.DEFINE_ACC, red.dtype, (red.const_like(identity_element(red.arg, red.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
+    lst = [acc] + lst  # put acc as the first element
+    ctx.acc_num += 1
+  ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
+  return acc.assign(ret) if len(reduce_range) != 0 else ret
 
 pm_reduce = PatternMatcher([(UPat(Ops.REDUCE, name="red"), reduce_to_acc)])
 
