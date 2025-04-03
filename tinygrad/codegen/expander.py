@@ -15,7 +15,7 @@ def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> 
 def _choices_from_args(args:tuple[tuple[int, int], ...]) -> list[dict[int, int]]:
   return [dict(x) for x in itertools.product(*[zip(itertools.repeat(axis), range(m)) for axis,m in args])]
 
-@functools.lru_cache(None)
+@functools.cache
 def _swizzle_args(cargs:tuple[tuple[int, int], ...], eargs:tuple[tuple[int, int], ...], exclude_args:tuple[int, ...]) -> list[int]:
   return [_expand_arg_to_idx(eargs, {**rpk, **{x:0 for x in exclude_args}} if exclude_args else rpk) for rpk in _choices_from_args(cargs)]
 
@@ -101,7 +101,7 @@ expander = PatternMatcher([
 ])
 
 def create_gate(root:UOp) -> UOp|None:
-  @functools.lru_cache(None)
+  @functools.cache
   def _gate_srcs(u:UOp, gate:UOp) -> UOp:
     if u.op is Ops.BARRIER: return u
     if u.op is Ops.LOAD and u.src[-1].op is Ops.BARRIER:
