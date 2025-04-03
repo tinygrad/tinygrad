@@ -982,7 +982,7 @@ class Tensor(SimpleMathTrait):
 
     x = self.contiguous()
     ret = Tensor(x.realize().lazydata, device=self.device, requires_grad=self.requires_grad)
-    ret.lazydata.st = ShapeTracker((ret.lazydata.st.views + (View.create(size, stride, storage_offset),)))
+    ret.lazydata.st = ShapeTracker((getattr(ret.lazydata.st, 'views', ()) + (View.create(size, stride, storage_offset),)))
     return ret
 
   def flip(self, axis, *args) -> Tensor:
