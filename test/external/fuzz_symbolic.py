@@ -82,7 +82,7 @@ if __name__ == "__main__":
       u1_val, u2_val, u3_val = u1.const_like(n1.as_long()), u2.const_like(n2.as_long()), u3.const_like(n3.as_long())
       num = expr.simplify().substitute({u1:u1_val, u2:u2_val, u3:u3_val}).ssimplify()
       rn = expr.substitute({u1:u1_val, u2:u2_val, u3:u3_val}).ssimplify()
-      print(f"""
+      assert False, f"""
 mismatched {expr.render()} at v1={m[v1]}; v2={m[v2]}; v3={m[v3]} = {num} != {rn}
 Reproduce with:
 v1={u1}
@@ -93,6 +93,6 @@ v1_val, v2_val, v3_val = v1.const_like({n1.as_long()}), v2.const_like({n2.as_lon
 num = expr.simplify().substitute({{v1:v1_val, v2:v2_val, v3:v3_val}}).ssimplify()
 rn = expr.substitute({{v1:v1_val, v2:v2_val, v3:v3_val}}).ssimplify()
 assert num==rn, f"{{num}} != {{rn}}"
-""")
+"""
 
     if DEBUG >= 1: print(f"validated {expr.render()}")
