@@ -339,7 +339,6 @@ class AMDCopyQueue(HWQueue):
   def signal(self, signal:AMDSignal, value:sint=0):
     fence_flags = self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.dev.gfxver >= 10 else 0
     self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(signal.value_addr), value)
-    self.q(self.sdma.SDMA_OP_FENCE, *data64_le(signal.value_addr), value)
 
     if not AMDDevice.driverless and (dev:=signal.timeline_for_device) is not None:
       self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
@@ -785,7 +784,7 @@ class AMDDevice(HCQCompiled):
     self.target = int(self.dev_iface.props['gfx_target_version'])
     self.gfxver = self.target // 10000
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
-    if self.target < 90402 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
+    if self.target < 90402 or self.target >= 130000: raise RuntimeError(f"Unsupported arch: {self.arch}")
     if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {self.arch}")
 
     self.max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] // self.dev_iface.props.get('num_xcc', 1) - 1

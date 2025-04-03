@@ -1,4 +1,5 @@
 from tinygrad.device import Compiled, Compiler, Renderer, Allocator
+from tinygrad.engine.jit import MultiGraphRunner
 
 class NullRenderer(Renderer):
   def render(self, uops:list) -> str: return ""
@@ -13,5 +14,8 @@ class NullAllocator(Allocator):
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src): pass
 
+class NullGraph(MultiGraphRunner):
+  def __call__(self, input_rawbuffers, var_vals, wait=False) -> float|None: return 1e-3
+
 class NullDevice(Compiled):
-  def __init__(self, device:str): super().__init__(device, NullAllocator(), NullRenderer(), Compiler(), NullProgram)
+  def __init__(self, device:str): super().__init__(device, NullAllocator(), NullRenderer(), Compiler(), NullProgram, NullGraph)
