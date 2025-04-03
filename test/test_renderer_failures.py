@@ -39,6 +39,17 @@ class TestRendererFailures(unittest.TestCase):
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
 
+  @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
+  def test_gated_store_with_alu_2d(self):
+    a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
+    gate_alu_0 = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
+    gate_alu_1 = (lidx1:=UOp(Ops.SPECIAL, dtypes.int, (), ('lidx1', 2))).ne(0)
+    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0+lidx1*4, gate_alu_0&gate_alu_1), UOp.const(dtypes.int, 1)))
+    sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
+    uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
+    ret = _test_uop_result([], uops, local_size=[4, 2, 1])[0]
+    np.testing.assert_equal(ret, [0, 0, 0, 0, 0, 1, 1, 1])
+
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "uops are for cstyle")
 class TestCStyleFailures(unittest.TestCase):
   def test_inline_const_alu(self):
