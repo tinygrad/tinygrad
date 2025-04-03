@@ -1,7 +1,7 @@
-from typing import Any, Sequence, cast, Literal, Callable
+from typing import Any, cast, Literal, Callable
 import dataclasses, functools, io, math, types
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
-from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
+from tinygrad.helpers import getenv, DEBUG, prod, flatten, make_tuple, argsort
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported
 
@@ -56,11 +56,10 @@ def type_parse(onnx_type: TypeProto):
   if elem_type.HasField("map_type") or elem_type.HasField("sparse_tensor_type") or elem_type.HasField("opaque_type"):
     raise NotImplementedError("parsing for map_type, sparse_tensor_type and opaque_type are not implemented")
   if is_optional := elem_type.HasField("optional_type"): elem_type = elem_type.optional_type.elem_type
-  if is_sequence := elem_type.HasField("sequence_type"): elem_type = elem_type.sequence_type.elem_type
   if elem_type.HasField("tensor_type"):
     shape = tuple(d.dim_param or d.dim_value for d in elem_type.tensor_type.shape.dim)
     dtype = dtype_parse(elem_type.tensor_type.elem_type)
-    return OnnxValue(shape, dtype, is_optional, is_sequence)
+    return OnnxValue(shape, dtype, is_optional)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 
 # ***** onnx spec *****
@@ -69,7 +68,6 @@ class OnnxValue:
   shape: tuple[str|int, ...]
   dtype: DType
   is_optional: bool
-  is_sequence: bool
 
 @dataclasses.dataclass(frozen=True)
 class OnnxNode:
@@ -125,29 +123,25 @@ class OnnxRunner:
 
     self.onnx_ops = onnx_ops
 
-  def _is_valid(self, value: Tensor | list, spec: OnnxValue):
-    if isinstance(value, list):
-      assert spec.is_sequence
-      if not all_same(tuple(v.shape for v in value)): raise RuntimeError
-      return value
-    for onnx_dim, user_dim_input in zip(spec.shape, value.shape, strict=True):
+  def _valid_shape(self, value: Tensor, spec: OnnxValue):
+    if len(spec.shape) != len(value.shape): return False
+    for onnx_dim, user_dim_input in zip(spec.shape, value.shape):
       if isinstance(onnx_dim, str):
         onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, int(user_dim_input))
-      if user_dim_input != onnx_dim: raise RuntimeError
-    return value
+      if user_dim_input != onnx_dim: return False
+    return True
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
-    elif spec.is_sequence:
-      if not isinstance(value, Sequence): raise RuntimeError(f"input '{name}' received {value}, expected a sequence type")
-      # sequence inputs and outputs are interpreted in OnnxRunner as list type
-      value = [Tensor(v, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(v, Tensor) else v for v in value]
-    elif not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
-    return self._is_valid(value, spec)
+    if value is None: raise RuntimeError(f"'{name}' is not marked as optional, but received a None value")
+    if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
+    if not self._valid_shape(value, spec): raise RuntimeError(f"input '{name}' has wrong shape, got {value.shape}, expected {spec}")
+    return value
 
   def _parse_output(self, name: str):
     value, spec = self.graph_values[name], self.graph_outputs[name]
-    if isinstance(value, (Tensor, list)): return self._is_valid(value, spec)
+    if not isinstance(value, Tensor): return value
+    if not self._valid_shape(value, spec): raise RuntimeError(f"output '{name}' has wrong shape, got {value.shape}, expected {spec}")
     return value
 
   def _dispatch_op(self, op, inps, opts):
