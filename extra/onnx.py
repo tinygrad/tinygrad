@@ -127,7 +127,7 @@ class OnnxRunner:
     # update new variable dims
     self.variable_dims.update({sd:vd for sd,vd in zip(spec.shape, value.shape) if isinstance(sd, str) and sd not in self.variable_dims})
     # resolve dynamic shape
-    expected_shape = tuple(dim if isinstance(dim, int) else self.variable_dims[dim] for dim in spec.shape)
+    expected_shape = tuple(self.variable_dims[sd] if isinstance(sd, str) else sd for sd in spec.shape)
     assert value.shape == expected_shape, f"'{name}' has wrong shape"
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
