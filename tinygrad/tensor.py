@@ -160,6 +160,9 @@ class Tensor(SimpleMathTrait):
       dtype = dtype or dtypes.uint8
       data = UOp.new_buffer(f"DISK:{data.resolve()}", data.stat().st_size // dtype.itemsize, dtype)
 
+    if dtype is not None and dtype not in dtypes.floats and requires_grad:
+      raise TypeError(f"Tensor with non-floating point dtype {dtype} must have requires_grad=False")
+
     # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
