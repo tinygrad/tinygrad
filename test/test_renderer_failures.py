@@ -9,7 +9,6 @@ from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import dedup, flatten, prod
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.ptx import PTXRenderer
-from tinygrad.runtime.ops_python import PythonRenderer
 from tinygrad.ops import UOp, Ops
 from tinygrad.renderer import ProgramSpec
 from tinygrad.tensor import Tensor, _to_np_dtype
@@ -29,26 +28,12 @@ def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
   return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
 
 class TestRendererFailures(unittest.TestCase):
-  @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
   def test_gated_store_with_alu(self):
-    a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
-    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0, gate_alu), UOp.const(dtypes.int, 1)))
-    sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
-    uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
-    ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
-    np.testing.assert_equal(ret, [0, 1, 1, 1])
-
-  @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
-  def test_gated_store_with_alu_2d(self):
-    a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    gate_alu_0 = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
-    gate_alu_1 = (lidx1:=UOp(Ops.SPECIAL, dtypes.int, (), ('lidx1', 2))).ne(0)
-    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0+lidx1*4, gate_alu_0&gate_alu_1), UOp.const(dtypes.int, 1)))
-    sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
-    uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
-    ret = _test_uop_result([], uops, local_size=[4, 2, 1])[0]
-    np.testing.assert_equal(ret, [0, 0, 0, 0, 0, 1, 1, 1])
+    a = Tensor.zeros((2, 4)).contiguous()
+    x = Tensor(1)
+    y = Tensor(2)
+    a[x, y] = 1
+    np.testing.assert_equal(a.numpy(), [[0, 0, 0, 0], [0, 0, 1, 0]])
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "uops are for cstyle")
 class TestCStyleFailures(unittest.TestCase):
