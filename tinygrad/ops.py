@@ -701,9 +701,9 @@ def print_uops(uops:list[UOp]):
 
 def get_location() -> tuple[str, int]:
   frm = sys._getframe(1)
-  # skip over ops.py, there shouldn't be PatternMatchers here
-  while frm is not None and pathlib.Path(frm.f_code.co_filename).name == "ops.py": frm = frm.f_back
-  if frm is None: return "<UNKNOWN>", -1
+  # skip over ops.py (unless there's nothing but ops.py)
+  while pathlib.Path(frm.f_code.co_filename).name == "ops.py" and frm.f_back is not None and not frm.f_back.f_code.co_filename.startswith("<frozen"):
+    frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 
 @functools.lru_cache(None)
