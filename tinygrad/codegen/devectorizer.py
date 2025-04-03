@@ -1,9 +1,9 @@
 from typing import Optional, Any, Callable, cast
 import functools, operator, itertools
 from collections import defaultdict
+from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
-from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
-from tinygrad.ops import graph_rewrite, GroupOp
+from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve, graph_rewrite, GroupOp, identity_element
 from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
 from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
@@ -280,12 +280,38 @@ pm_render = PatternMatcher([
     lambda store,idx: UOp(Ops.STORE, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
 ])
 
+# *** Ops.REDUCE -> Ops.DEFINE_ACC+Ops.ASSIGN ***
+
+@dataclass
+class ReduceContext:
+  acc_num: int = 0
+
+def reduce_to_acc(ctx:ReduceContext, red:UOp):
+  inp, reduce_range = red.src[0], red.src[1:]
+  # if this has a horizontal reduction component, do that first
+  if inp.dtype != red.dtype:
+    horizontal_amount = inp.dtype.count//red.dtype.count
+    inp = functools.reduce(lambda x,y: x.alu(red.arg, y),
+                           [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)])
+  assert inp.dtype == red.dtype, f"horizontal reduction mismatch {inp.dtype} != {red.dtype}"
+  # if there's no range, we're done
+  if len(reduce_range) == 0: return inp
+  # create ACC and assign
+  acc = UOp(Ops.DEFINE_ACC, inp.dtype, (inp.const_like(identity_element(red.arg, inp.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
+  ctx.acc_num += 1
+  return acc.assign(acc.alu(red.arg, inp))
+
+pm_reduce = PatternMatcher([(UPat(Ops.REDUCE, name="red"), reduce_to_acc)])
+
 # *** uop graph ***
 
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
+
+  # remove reduce
+  sink = graph_rewrite(sink, pm_reduce, ctx=ReduceContext(), name="remove_reduce")
 
   # devectorize is optional
   if DEVECTORIZE >= 2: sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)
