@@ -138,11 +138,10 @@ class Tensor(SimpleMathTrait):
     # None (the default) will be updated to True if it's put in an optimizer
     self.requires_grad:bool|None = requires_grad
 
-    # create a LazyBuffer from the different types of inputs
+    # create a UOp from the different types of inputs
     if isinstance(data, UOp):
       assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
-      # NOTE: this is here because LazyBuffer = UOp
-      if isinstance(data, UOp) and data.op is Ops.BIND: data = _metaop(Ops.BIND, tuple(), dtype or data.dtype, device, data)
+      if data.op is Ops.BIND: data = _metaop(Ops.BIND, tuple(), dtype or data.dtype, device, data)
     elif data is None: data = _metaop(Ops.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif isinstance(data, get_args(ConstType)): data = _metaop(Ops.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
@@ -398,7 +397,7 @@ class Tensor(SimpleMathTrait):
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
-    if y.op is Ops.BIND: return Tensor(y, **kwargs, requires_grad=False)   # this is the only UOp allowed in Tensor
+    if y.op is Ops.BIND: return Tensor(y, **kwargs, requires_grad=False)
     if y.op is Ops.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
     if y.op is Ops.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
     if y.op is Ops.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
@@ -438,8 +437,7 @@ class Tensor(SimpleMathTrait):
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
     """
-
-    r = Tensor._metaop(Ops.EMPTY, shape, **kwargs)
+    r = Tensor.empty(*shape, **kwargs)
     r.lazydata.buffer.allocate(external_ptr=ptr)
     return r
 
