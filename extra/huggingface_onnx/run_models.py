@@ -42,18 +42,44 @@ def retrieve_op_stats(models:dict[str, tuple[Path, Path]]) -> dict:
   op_counter = collections.Counter()
   unsupported_ops = collections.defaultdict(set)
   supported_ops = get_onnx_ops()
-  print(f"** Retrieving stats from {len(model_paths)} models **")
+  model_ops = collections.defaultdict(collections.Counter)
+  print(f"** Retrieving stats from {len(models)} models **")
+
+  # First pass: collect op counts and unsupported ops
   for model_id, (root_path, relative_path) in models.items():
     print(f"examining {model_id}")
     model_path = root_path / relative_path
     onnx_runner = OnnxRunner(onnx.load(model_path))
     for node in onnx_runner.graph_nodes:
-      op_counter[node.op] += 1
-      if node.op not in supported_ops:
-        unsupported_ops[node.op].add(model_id)
+      op = node.op
+      model_ops[model_id][op] += 1
+      op_counter[op] += 1
+      if op not in supported_ops:
+        unsupported_ops[op].add(model_id)
     del onnx_runner
+
+  # New approach to find models with maximal unique op coverage
+  model_op_sets = {model: set(ops.keys()) for model, ops in model_ops.items()}
+  covered_ops = set()
+  selected_models = []
+
+  # Greedy algorithm to select models that add most new operations
+  for _ in range(10):
+    best_model = None
+    max_new_ops = 0
+    for model, ops in model_op_sets.items():
+      if model not in selected_models:
+        new_ops = len(ops - covered_ops)
+        if new_ops > max_new_ops:
+          max_new_ops = new_ops
+          best_model = model
+    if best_model:
+      selected_models.append(best_model)
+      covered_ops.update(model_op_sets[best_model])
+
   ret["unsupported_ops"] = {k:list(v) for k, v in unsupported_ops.items()}
   ret["op_counter"] = op_counter.most_common()
+  ret["most_diverse_models"] = {model: list(model_op_sets[model]) for model in selected_models}
   return ret
 
 def debug_run(model_path, truncate, config, rtol, atol):
