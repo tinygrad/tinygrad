@@ -89,7 +89,7 @@ required_input_python_consts: dict[str, tuple[int, ...]] = {
 }
 
 cache_misses = 0
-@functools.lru_cache(None)
+@functools.cache
 def _cached_to_python_const(t:Tensor):
   if t.dtype is dtypes.uint8: return t.data().tobytes()
   if 0 in t.shape: return []

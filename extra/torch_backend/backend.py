@@ -150,7 +150,7 @@ def fill_scalar(x, y):
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
-@functools.lru_cache(None)
+@functools.cache
 def cached_to_movement_ops(shape, st) -> list:
   mops = to_movement_ops(st)
   if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
