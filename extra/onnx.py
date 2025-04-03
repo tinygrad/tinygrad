@@ -124,7 +124,8 @@ class OnnxRunner:
     self.onnx_ops = onnx_ops
 
   def _valid_shape(self, value: Tensor, spec: OnnxValue):
-    for onnx_dim, user_dim_input in zip(spec.shape, value.shape, strict=True):
+    if len(spec.shape) != len(value.shape): return False
+    for onnx_dim, user_dim_input in zip(spec.shape, value.shape):
       if isinstance(onnx_dim, str):
         onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, int(user_dim_input))
       if user_dim_input != onnx_dim: return False
@@ -134,13 +135,13 @@ class OnnxRunner:
     if spec.is_optional and value is None: return None
     if value is None: raise RuntimeError(f"'{name}' is not marked as optional, but received a None value")
     if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
-    if not self._valid_shape(value, spec): raise RuntimeError(f"input '{name}' has wrong shape")
+    if not self._valid_shape(value, spec): raise RuntimeError(f"input '{name}' has wrong shape, got {value.shape}, expected {spec}")
     return value
 
   def _parse_output(self, name: str):
     value, spec = self.graph_values[name], self.graph_outputs[name]
     if not isinstance(value, Tensor): return value
-    if not self._valid_shape(value, spec): raise RuntimeError(f"output '{name}' has wrong shape")
+    if not self._valid_shape(value, spec): raise RuntimeError(f"output '{name}' has wrong shape, got {value.shape}, expected {spec}")
     return value
 
   def _dispatch_op(self, op, inps, opts):
