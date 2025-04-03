@@ -985,8 +985,8 @@ class Tensor(SimpleMathTrait):
     if any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
     if storage_size == 1 or prod_size == 1: return self.flatten()[storage_offset].reshape(size)
 
-    x = self.contiguous().realize()
-    ret = Tensor(x.lazydata, device=self.device, requires_grad=self.requires_grad)
+    x = self.contiguous()
+    ret = Tensor(x.realize().lazydata, device=self.device, requires_grad=self.requires_grad)
     flat_view = ShapeTracker.from_shape(x.shape).reshape((x.numel(),)).views[0]
     ret.lazydata.st = ShapeTracker((flat_view, View.create(size, stride, storage_offset)))
     return ret
