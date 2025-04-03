@@ -577,7 +577,7 @@ class Kernel:
   def get_optimized_ast(self, name_override:Optional[str]=None) -> UOp:
     @functools.cache
     def fixup_ast(op:UOp) -> UOp:
-      ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
+      ret = op.replace(src=tuple(fixup_ast(x) for x in op.src)) # noqa: F821
       if op.op in GroupOp.Buffer and op in self.bufs:
         st_uop = self.sts[self.bufs.index(op)].to_uop()
         # NOTE: if CONST got masked after applying opts, we create a new VALID
