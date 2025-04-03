@@ -4,6 +4,8 @@
 
 from typing import Any
 import unittest, onnx, tempfile
+from tinygrad import dtypes
+from tinygrad.frontend.onnx import OnnxRunner
 import numpy as np
 from tinygrad.frontend.onnx import OnnxRunner
 from extra.onnx_helpers import validate
@@ -121,6 +123,17 @@ class TestMainOnnxOps(TestOnnxOps):
     attributes = {"kernel_shape": [2, 2], "strides": [2, 2]}
     outputs = ["y"]
     self.helper_test_single_op("MaxUnpool", inputs, attributes, outputs)
+
+  def test_isinf(self):
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#isinf
+    # attributes are int but output expects bool
+    x = np.array([-1.2, np.nan, np.inf, 2.8, -np.inf, np.inf], dtype=np.float32)
+    inputs = {"x": x}
+    attributes = {"detect_negative":1, "detect_positive":1}
+    outputs = ["y"]
+    model = self.helper_build_model("IsInf", inputs, attributes, outputs)
+    outputs = OnnxRunner(model)(inputs)
+    assert outputs["y"].dtype is dtypes.bool
 
   def test_quantize_linear(self):
     test_cases = [

@@ -575,9 +575,9 @@ class Kernel:
     return name + colored(num, 'BLACK')
 
   def get_optimized_ast(self, name_override:Optional[str]=None) -> UOp:
-    @functools.lru_cache(None)
+    @functools.cache
     def fixup_ast(op:UOp) -> UOp:
-      ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
+      ret = op.replace(src=tuple(fixup_ast(x) for x in op.src)) # noqa: F821
       if op.op in GroupOp.Buffer and op in self.bufs:
         st_uop = self.sts[self.bufs.index(op)].to_uop()
         # NOTE: if CONST got masked after applying opts, we create a new VALID
@@ -652,8 +652,9 @@ class Kernel:
           return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
 
       return ret
-
-    return graph_rewrite(fixup_ast(self.ast), view_left)
+    fixed_ast = fixup_ast(self.ast)
+    del fixup_ast
+    return graph_rewrite(fixed_ast, view_left)
 
   # **** this is the lowerer ****
 
@@ -679,7 +680,7 @@ class Kernel:
     #if __debug__: type_verify(list(modified_ast.toposort), shape_spec)
 
     self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
-    if DEBUG >= 5: print_uops(self.uops)
+    if DEBUG >= 6: print_uops(self.uops)
     return self
 
   def to_program(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> ProgramSpec:
@@ -688,7 +689,12 @@ class Kernel:
     src = self.opts.render(self.uops)
 
     if CAPTURE_PROCESS_REPLAY:
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, ContextVar._cache, src))
+      # NOTE: calling traceback.extract_stack() is very slow, recording backtraces isn't included by default yet
+      if getenv("RECORD_TRACEBACKS"):
+        import traceback
+        stack = "\n".join(traceback.format_list(traceback.extract_stack()[:-1]))
+      else: stack = None
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, stack, ContextVar._cache, src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.

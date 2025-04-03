@@ -482,10 +482,9 @@ class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
     self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "symbolic.py")
     self.assertEqual(fix_kernel_ops.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "schedule.py")
-    self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "ops.py")
-    with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?
-      test_upat = UPat(Ops.CONST, dtypes.bool)
-      self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])
+    self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "spec.py")
+    test_upat = UPat(Ops.CONST, dtypes.bool)
+    self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])
 
 class TestUopsObject(unittest.TestCase):
   # LOL, running this test breaks all instances of "4"
