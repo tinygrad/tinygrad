@@ -1,5 +1,5 @@
 import random
-from z3 import IntVal, Solver, substitute, unsat, sat, ArithRef, Ints, simplify, If
+from z3 import IntVal, Solver, unsat, sat, ArithRef, Ints, If
 from tinygrad import Variable, dtypes
 from tinygrad.ops import UOp
 from tinygrad.helpers import DEBUG
@@ -83,13 +83,20 @@ if __name__ == "__main__":
       unsimplified_expr = eval(expr.render(simplify=False))
       assert solver.check(unsimplified_expr != z3_expr) == unsat, f"UNSIMPLIFIED MISMATCH!, {expr.render(simplify=False)} != {z3_expr}"
       n1, n2, n3 = m[v1], m[v2], m[v3]
-      # print(f"{u1=}\n{u2=}\n{u3=}\n")
       u1_val, u2_val, u3_val = u1.const_like(n1.as_long()), u2.const_like(n2.as_long()), u3.const_like(n3.as_long())
-      num_tiny = expr.simplify().substitute({u1:u1_val, u2:u2_val, u3:u3_val}).ssimplify()
-      rn_tiny = expr.substitute({u1:u1_val, u2:u2_val, u3:u3_val}).ssimplify()
-
-      # num = simplify(substitute(simplified_expr, (v1, IntVal(n1)), (v2, IntVal(n2)), (v3, IntVal(n3)))) if not isinstance(simplified_expr, int) else simplified_expr
-      # rn = simplify(substitute(unsimplified_expr, (v1, IntVal(n1)), (v2, IntVal(n2)), (v3, IntVal(n3))))
-      assert False, f"mismatched {expr.render()} at v1={m[v1]}; v2={m[v2]}; v3={m[v3]} = {num_tiny} != {rn_tiny}\n{expr.render(simplify=False)}"
+      num = expr.simplify().substitute({u1:u1_val, u2:u2_val, u3:u3_val}).ssimplify()
+      rn = expr.substitute({u1:u1_val, u2:u2_val, u3:u3_val}).ssimplify()
+      print(f"""
+mismatched {expr.render()} at v1={m[v1]}; v2={m[v2]}; v3={m[v3]} = {num} != {rn}
+Reproduce with:
+v1={u1}
+v2={u2}
+v3={u3}
+expr = {expr.render(simplify=False)}
+v1_val, v2_val, v3_val = v1.const_like({n1.as_long()}), v2.const_like({n2.as_long()}), v3.const_like({n3.as_long()})
+num = expr.simplify().substitute({{v1:v1_val, v2:v2_val, v3:v3_val}}).ssimplify()
+rn = expr.substitute({{v1:v1_val, v2:v2_val, v3:v3_val}}).ssimplify()
+assert num==rn, f"{{num}} != {{rn}}"
+""")
 
     if DEBUG >= 1: print(f"validated {expr.render()}")
