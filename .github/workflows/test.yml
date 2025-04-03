@@ -352,7 +352,7 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: fuzzing-minimal
+        key: fuzzing-unit
         deps: testing_unit
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
