@@ -67,7 +67,7 @@ class TestMainOnnxOps(TestOnnxOps):
   def test_isinf(self):
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md#isinf
     # attributes are int but output expects bool
-    x = np.array([-1.2, np.nan, np.inf, 2.8, -np.inf, np.inf], dtype=np.float16)
+    x = np.array([-1.2, np.nan, np.inf, 2.8, -np.inf, np.inf], dtype=np.float32)
     inputs = {"x": x}
     attributes = {"detect_negative":1, "detect_positive":1}
     outputs = ["y"]
