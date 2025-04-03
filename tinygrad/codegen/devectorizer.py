@@ -304,7 +304,12 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   return acc.assign(ret) if len(reduce_range) != 0 else ret
 
-pm_reduce = PatternMatcher([(UPat(Ops.REDUCE, name="red"), reduce_to_acc)])
+pm_reduce = PatternMatcher([
+  (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
+  # tensor core built in accumulate
+  (UPat.var("add") + UPat(Ops.WMMA, name="wmma"),
+    lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
+])
 
 # *** uop graph ***
 
