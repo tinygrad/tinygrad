@@ -498,7 +498,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def permute(self, arg:tuple[sint, ...]): return self._mop(Ops.PERMUTE, arg)
   def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg)
   def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg)
-  def as_strided(self, size:tuple[sint, ...], stride:tuple[sint, ...], storage_offset:sint=0): return self._mop(Ops.AS_STRIDED, (size, stride, storage_offset))
+  def as_strided(self, arg: tuple[tuple[sint, ...], tuple[sint, ...], sint]): return self._mop(Ops.AS_STRIDED, arg)
 
   # *** uop UNIQUE ***
 

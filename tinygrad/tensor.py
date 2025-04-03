@@ -969,7 +969,7 @@ class Tensor(SimpleMathTrait):
   def as_strided(self, size, stride, storage_offset=0) -> Tensor:
     """Creates a view with custom stride/offset"""
     if any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
-    return self._apply_uop(UOp.as_strided, size=size, stride=stride, storage_offset=storage_offset)
+    return self._apply_uop(UOp.as_strided, arg=(size, stride, storage_offset))
 
   def flip(self, axis, *args) -> Tensor:
     """
