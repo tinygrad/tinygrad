@@ -953,8 +953,20 @@ class RewriteContext:
     self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
     return ret
 
-@track_matches
+# cache for graph rewrite (TODO: this could get more fine grained)
+rewrite_cache = {}
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> UOp:
+  if ctx is None and not track_children:
+    key = (sink, pm, bottom_up)
+    if (ret:=rewrite_cache.get(key, None)) is not None: return ret
+    ret = _graph_rewrite(sink, pm, ctx, bottom_up, name, track_children)
+    rewrite_cache[key] = ret
+    return ret
+  # can't be cached
+  return _graph_rewrite(sink, pm, ctx, bottom_up, name, track_children)
+
+@track_matches
+def _graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> UOp:
   rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
   return rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.top_down_rewrite(sink)
 
