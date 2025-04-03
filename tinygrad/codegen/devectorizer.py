@@ -305,6 +305,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   return acc.assign(ret) if len(reduce_range) != 0 else ret
 
 pm_reduce = PatternMatcher([
+  # REDUCE -> DEFINE_ACC+ASSIGN
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
   # tensor core built in accumulate
   (UPat.var("add") + UPat(Ops.WMMA, name="wmma"),
