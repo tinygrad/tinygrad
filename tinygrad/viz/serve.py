@@ -32,7 +32,7 @@ class GraphRewriteMetadata(TypedDict):
   kernel_code: str|None                  # optionally render the final kernel code
   name: str|None                         # optional name of the rewrite
 
-@functools.lru_cache(None)
+@functools.cache
 def render_program(k:Kernel): return k.opts.render(k.uops)
 def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
   return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),

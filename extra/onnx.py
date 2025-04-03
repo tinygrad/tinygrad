@@ -89,7 +89,7 @@ required_input_python_consts: dict[str, tuple[int, ...]] = {
 }
 
 cache_misses = 0
-@functools.lru_cache(None)
+@functools.cache
 def _cached_to_python_const(t:Tensor):
   if t.dtype is dtypes.uint8: return t.data().tobytes()
   if 0 in t.shape: return []
@@ -281,6 +281,7 @@ def get_onnx_ops():
   # ***** Unary Ops (math) *****
   def Not(x:Tensor): return x.logical_not()
   def Clip(x: Tensor, min:Tensor|None=None, max:Tensor|None=None): return x if min is None and max is None else x.clip(min, max)
+  def IsInf(x:Tensor, detect_negative:int=1, detect_positive:int=1): return x.isinf(bool(detect_positive), bool(detect_negative))
 
   # ***** Unary Ops (activation) *****
   def Softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
@@ -724,8 +725,6 @@ def get_onnx_ops():
       ret = _clamp_cast((x / y_scale + 0.4999999 + y_zero_point).int(), out_dtype)
     else:
       ret = _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype)
-    # you need both NHWC=1 DONT_GROUP_REDUCES=1 for this to work
-    if getenv("NHWC") and len(ret.shape) == 4: return ret.permute(0,2,3,1).contiguous().permute(0,3,1,2)
     return ret.contiguous()
 
   def DynamicQuantizeLinear(x: Tensor):
@@ -737,10 +736,6 @@ def get_onnx_ops():
     return y, scale, zero_point
 
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
-    WEIGHT_SHIFT = 4
-    if getenv("NHWC") and len(x.shape) == 4 and x.shape[2:] == (1,1) and x.shape[1]%WEIGHT_SHIFT == 0:
-      # DSP swizzle memory
-      x = x.reshape(x.shape[0], x.shape[1]//WEIGHT_SHIFT, WEIGHT_SHIFT).permute(1,0,2).contiguous().permute(1,0,2).reshape(x.shape)
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
     return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
@@ -818,7 +813,7 @@ def get_onnx_ops():
   return {
     # Tensor ops
     **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
-    "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
+    "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
     "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Round", "Erf")},
     # Implemented ops
     **{name:obj for name,obj in locals().items() if isinstance(obj, types.FunctionType) and not name.startswith("_") and name[0].isupper()},

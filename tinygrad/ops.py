@@ -95,9 +95,6 @@ class Ops(FastEnum):
   # uops that aren't rendered
   NAME = auto(); SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto(); UNIQUE = auto() # noqa: E702
 
-  # TODO: empty continues to exist because of tensor
-  EMPTY = auto()
-
   # MetaOps
   COPY = auto(); BUFFER_VIEW = auto() # noqa: E702
 
@@ -387,7 +384,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if self.op is Ops.VCONST: return UOp.const(self.dtype.scalar(), self.arg[i])
       if self.op is Ops.CONST: return UOp.const(self.dtype.scalar(), self.arg)
       i = (i,)
-    if (self.dtype.vcount == len(i) and i == tuple(range(len(i)))) or self.dtype == dtypes.void: return self
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
@@ -475,12 +471,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),),
                  ShapeTracker.from_shape(())),)).reshape((1,)*len(shape)).expand(shape)
     # Tensor variable binding is BIND(VAR(VIEW(DEVICE)), CONST(VIEW(DEVICE)))
-    if op is Ops.BIND:
-      var, val = arg.unbind()
-      return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
-    # otherwise it's just a RESHAPE(BUFFER)
-    if not isinstance(size:=prod([x.vmax if isinstance(x, UOp) else x for x in shape]), int): raise ValueError(f"size must be int {size}")
-    return UOp.new_buffer(device, size, dtype).reshape(shape)
+    assert op is Ops.BIND, f"unkown op {op}"
+    var, val = arg.unbind()
+    return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
   def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False): return UOp(Ops.COPY, self.dtype, (UOp(Ops.DEVICE, arg=device), self), clone)
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   @property
@@ -702,13 +695,12 @@ def print_uops(uops:list[UOp]):
 
 def get_location() -> tuple[str, int]:
   frm = sys._getframe(1)
-  # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
-  while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "rewriter.py", "schedule.py", "multi.py",
-                                                                                        "symbolic.py", "expander.py", "lowerer.py", "cstyle.py",
-                                                                                        "linearize.py", "devectorizer.py"}:
+  # skip over ops.py (unless there's nothing but ops.py)
+  while pathlib.Path(frm.f_code.co_filename).name == "ops.py" and frm.f_back is not None and not frm.f_back.f_code.co_filename.startswith("<frozen"):
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
-@functools.lru_cache(None)
+
+@functools.cache
 def lines(fn) -> list[str]:
   with open(fn) as f: return f.readlines()
 
@@ -746,10 +738,10 @@ class UPat(MathTrait):
   def or_casted(self, name:str|None=None): return UPat.any(self if name is None else self.named(name), UPat(Ops.CAST, name=name, src=(self,)))
 
   @staticmethod
-  @functools.lru_cache(None)
+  @functools.cache
   def var(name:Optional[str]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None): return UPat(dtype=dtype, name=name)
   @staticmethod
-  @functools.lru_cache(None)
+  @functools.cache
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None, vec=True): return UPat((Ops.CONST,Ops.VCONST) if vec else Ops.CONST, dtype, name=name)
   @staticmethod
   def const(dtype:Optional[Union[DType, tuple[DType, ...]]], b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
@@ -824,7 +816,7 @@ class PatternMatcher:
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
-  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
@@ -909,7 +901,7 @@ if TRACK_MATCH_STATS:
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
         loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
-        if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
+        if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:20s}", k.printable())
         ret = [x+y for x,y in zip(ret, v)]
       print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {(ret[2]+ret[3])*1000.:9.2f} ms -- TOTAL")
 
