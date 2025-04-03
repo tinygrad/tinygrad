@@ -575,7 +575,7 @@ class Kernel:
     return name + colored(num, 'BLACK')
 
   def get_optimized_ast(self, name_override:Optional[str]=None) -> UOp:
-    @functools.lru_cache(None)
+    @functools.cache
     def fixup_ast(op:UOp) -> UOp:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
       if op.op in GroupOp.Buffer and op in self.bufs:

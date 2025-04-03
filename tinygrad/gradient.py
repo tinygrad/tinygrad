@@ -47,7 +47,7 @@ pm_gradient = PatternMatcher([
 
 # copied from tensor.py, get relevant toposort of gradients
 def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
-  @functools.lru_cache(None)
+  @functools.cache
   def is_in_target_path(x:UOp) -> bool: return any(u in targets or is_in_target_path(u) for u in x.src)
   def _walk(node:UOp, visited:set[UOp]) -> Iterator[UOp]:
     visited.add(node)
