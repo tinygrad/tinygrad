@@ -128,8 +128,8 @@ def lower_load_store(ctx: IndexContext, x: UOp):
     barrier = (UOp(Ops.BARRIER, dtypes.void, (x.src[2],)),) if x.src[0].op is Ops.DEFINE_LOCAL else ()
     return UOp(Ops.LOAD, x.dtype, (buf.index(idx, valid),) + barrier)
   # NOTE: only store the local reduceop in the threads that are actually doing the reduce
-  if cast(PtrDType, x.src[0].dtype).local and x.src[2].op is Ops.ASSIGN:
-    reduce_input = x.src[2].src[1].src[1] if x.src[2].src[1].src[1] is not x.src[2].src[0] else x.src[2].src[1].src[0]
+  if cast(PtrDType, x.src[0].dtype).local and x.src[2].op is Ops.REDUCE:
+    reduce_input = x.src[2].src[0]
     store_back = reduce_input.op is Ops.LOAD and cast(PtrDType, reduce_input.src[0].dtype).local
   else: store_back = False
   # NOTE: If we're storing the reduced value back into each thread, need to zero-out the reduced axes
