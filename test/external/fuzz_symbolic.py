@@ -12,10 +12,6 @@ def add_v(expr, rng=None):
   if rng is None: rng = random.randint(0,2)
   return expr + v[rng], rng
 
-def mul_v(expr, rng=None):
-  if rng is None: rng = random.randint(0,2)
-  return expr * v[rng], rng
-
 def div(expr, rng=None):
   if rng is None: rng = random.randint(1,9)
   return expr // rng, rng
