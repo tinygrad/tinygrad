@@ -652,8 +652,9 @@ class Kernel:
           return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
 
       return ret
-
-    return graph_rewrite(fixup_ast(self.ast), view_left)
+    fixed_ast = fixup_ast(self.ast)
+    del fixup_ast
+    return graph_rewrite(fixed_ast, view_left)
 
   # **** this is the lowerer ****
 

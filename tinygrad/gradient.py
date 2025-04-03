@@ -56,7 +56,9 @@ def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
       for i in node.src:
         if i not in visited: yield from _walk(i, visited)
       yield node
-  return list(_walk(root, set()))
+  ret = list(_walk(root, set()))
+  del is_in_target_path, _walk
+  return ret
 
 def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
   grads = {root: root_grad}
