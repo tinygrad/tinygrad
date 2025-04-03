@@ -14,5 +14,15 @@ class TestLinearizerRewrite(unittest.TestCase):
       prg = k.to_program()
       print(prg.src)
 
+  def test_arange(self):
+    out = Tensor.arange(32, device="NULL")
+    with Context(SPLIT_REDUCEOP=0, DEVECTORIZE=0):
+      si = out.schedule()[-1]
+      k = Kernel(si.ast, Device["CPU"].renderer)
+      k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
+      k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+      prg = k.to_program()
+      print(prg.src)
+
 if __name__ == '__main__':
   unittest.main()
