@@ -4197,17 +4197,17 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
 
 def tracemeta_callback(val):
   if val >= 1:
-    if getattr(Tensor ,"unwrapped", None) is not None: return
+    if getattr(Tensor,"unwrapped", None) is not None: return
     unwrapped = {}
     for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
       if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
       unwrapped[name] = fn
       setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
-    if getattr(Tensor ,"unwrapped", None) is None: setattr(Tensor, "unwrapped", unwrapped)
+    if getattr(Tensor,"unwrapped", None) is None: setattr(Tensor, "unwrapped", unwrapped)
   else:
     if unwrapped := getattr(Tensor, "unwrapped"):
       for name, fn in unwrapped.items():
         setattr(Tensor, name, fn)
-      del(Tensor.unwrapped)
+      del (Tensor.unwrapped)
 
 TRACEMETA.add_callback(tracemeta_callback)

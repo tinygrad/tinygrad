@@ -89,12 +89,12 @@ class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
     self.old_context:dict[str, int] = {k:v.value for k,v in ContextVar._cache.items()}
-    for k,v in self.kwargs.items(): 
+    for k,v in self.kwargs.items():
       ContextVar._cache[k].value = v
       if ContextVar._cache[k].callback is not None: ContextVar._cache[k].callback(v)
 
   def __exit__(self, *args):
-    for k,v in self.old_context.items(): 
+    for k,v in self.old_context.items():
       ContextVar._cache[k].value = v
       if ContextVar._cache[k].callback is not None: ContextVar._cache[k].callback(v)
 
