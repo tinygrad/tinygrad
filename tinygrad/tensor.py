@@ -4197,6 +4197,7 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
 
 def tracemeta_callback(val):
   if val >= 1:
+    if getattr(Tensor ,"unwrapped", None) is not None: return
     unwrapped = {}
     for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
       if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
