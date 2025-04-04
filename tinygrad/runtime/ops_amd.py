@@ -794,7 +794,7 @@ class AMDDevice(HCQCompiled):
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
     sgrp_size_per_cu, lds_size_per_cu, hwreg_size_per_cu = 0x4000, 0x10000, 0x1000
     vgpr_size_per_cu = 0x60000 if self.gfx_ver in {(11,0,0), (11,0,1), (12,0,0), (12,0,1)} else \
-                       0x80000 if (self.gfx_ver[:1]) == (9,4) or self.gfx_ver in {(9,0,8), (9,0,10)} else 0x40000
+                       0x80000 if (self.gfx_ver[:2]) == (9,4) or self.gfx_ver in {(9,0,8), (9,0,10)} else 0x40000
     wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * (self.max_cu_id + 1), mmap.PAGESIZE)
     ctl_stack_size = round_up(12 * (self.max_cu_id + 1) * (self.max_wave_id + 1) + 8 + 40, mmap.PAGESIZE) if self.gfx_ver >= (10,1,0) else \
                      round_up((self.max_wave_id + 1) * 8 + 8 + 40, mmap.PAGESIZE)
