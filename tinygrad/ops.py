@@ -916,12 +916,16 @@ def launch_viz(env_str:str, data:str):
 
 # *** simple graph rewrite engine ***
 
+# TODO: this needs an LRU policy
+global_cache: dict[tuple[PatternMatcher, UOp, bool], UOp] = {}
+
 class RewriteContext:
-  def __init__(self, pm, ctx=None, children=None):
+  def __init__(self, pm, ctx=None, children=None, cache_allowed=True):
     self.pm: PatternMatcher = pm
     self.ctx = self if children is not None else ctx
     self.replace: dict[UOp, UOp] = {}
     self.children = children
+    self.global_cache_allowed = cache_allowed and self.ctx is None and self.children is None
   # TODO: is this function always right?
   def update_children(self):
     # add any new children from UOps that were replaced
@@ -936,16 +940,24 @@ class RewriteContext:
       self.children[k] = new_child
   def top_down_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
+    if self.global_cache_allowed:
+      global_key = (self.pm, n, False)
+      if (rn := global_cache.get(global_key)) is not None: return rn
     new_src = tuple([self.top_down_rewrite(x) for x in n.src])
     new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
     self.replace[n] = ret = n if new_n is None else self.top_down_rewrite(new_n)
+    if self.global_cache_allowed: global_cache[global_key] = ret
     return ret
   def bottom_up_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
+    if self.global_cache_allowed:
+      global_key = (self.pm, n, True)
+      if (rn := global_cache.get(global_key)) is not None: return rn
     new_n: UOp|None = n
     while new_n is not None: last_n, new_n = new_n, self.pm.rewrite(new_n, self.ctx)
     new_src = tuple([self.bottom_up_rewrite(x) for x in last_n.src])
     self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
+    if self.global_cache_allowed: global_cache[global_key] = ret
     return ret
 
 @track_matches
@@ -955,7 +967,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 
 @track_matches
 def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> dict[UOp, UOp]:
-  rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
+  rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None, cache_allowed=False)
   return {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
 
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
