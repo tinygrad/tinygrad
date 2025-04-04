@@ -82,7 +82,7 @@ def eval_unet3d():
 def eval_retinanet():
   # RetinaNet with ResNeXt50_32X4D
   from examples.mlperf.dataloader import batch_load_retinanet
-  from extra.datasets.openimages import normalize, download_dataset, iterate, BASEDIR
+  from extra.datasets.openimages import normalize, download_dataset, BASEDIR
   from extra.models.resnet import ResNeXt50_32X4D
   from extra.models.retinanet import RetinaNet
   from pycocotools.coco import COCO
