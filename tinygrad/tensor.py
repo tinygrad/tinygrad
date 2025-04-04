@@ -4205,7 +4205,7 @@ def tracemeta_callback(val):
       setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
     if getattr(Tensor,"unwrapped", None) is None: setattr(Tensor, "unwrapped", unwrapped)
   else:
-    if unwrapped := getattr(Tensor, "unwrapped"):
+    if unwrapped := getattr(Tensor, "unwrapped", None):
       for name, fn in unwrapped.items():
         setattr(Tensor, name, fn)
       del (Tensor.unwrapped)
