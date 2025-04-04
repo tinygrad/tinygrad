@@ -780,7 +780,7 @@ class AMDDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
-    self.gfx_ver:tuple[int, int, int] = self.dev_iface.ip_versions[am.GC_HWIP]
+    self.gfx_ver:tuple[int, ...] = self.dev_iface.ip_versions[am.GC_HWIP]
     self.arch = "gfx%d%x%x" % self.gfx_ver
     if self.gfx_ver < (9,4,2) or self.gfx_ver >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")
     if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.gfx_ver} arch {self.arch}")
