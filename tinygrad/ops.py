@@ -715,6 +715,7 @@ class UPat(MathTrait):
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
     self.src: Any = None
     assert self.name != "ctx", "UPat can't be named ctx"
+    assert dtype is None or isinstance(dtype, DType) or all(isinstance(x, DType) for x in dtype), f"invalid dtype {dtype}"
 
     # try all permutations if it's a list
     if isinstance(src, list): self.src = list(itertools.permutations(src)) if not all_same(src) else [src]
