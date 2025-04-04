@@ -47,16 +47,18 @@ pm_gradient = PatternMatcher([
 
 # copied from tensor.py, get relevant toposort of gradients
 def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
-  @functools.lru_cache(None)
-  def is_in_target_path(x:UOp) -> bool: return any(u in targets or is_in_target_path(u) for u in x.src)
+  @functools.cache
+  def is_in_target_path(x:UOp) -> bool: return any(u in targets or is_in_target_path(u) for u in x.src) # noqa: F821
   def _walk(node:UOp, visited:set[UOp]) -> Iterator[UOp]:
     visited.add(node)
     if node.op is Ops.DETACH: return
-    if is_in_target_path(node):
+    if is_in_target_path(node): # noqa: F821
       for i in node.src:
-        if i not in visited: yield from _walk(i, visited)
+        if i not in visited: yield from _walk(i, visited) # noqa: F821
       yield node
-  return list(_walk(root, set()))
+  ret = list(_walk(root, set()))
+  del is_in_target_path, _walk
+  return ret
 
 def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
   grads = {root: root_grad}

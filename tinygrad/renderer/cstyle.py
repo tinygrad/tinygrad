@@ -62,7 +62,7 @@ base_rewrite = PatternMatcher([
 extra_pm = PatternMatcher([
   # insert a NOOP before BITCAST to force it to be rendered. not needed on all backends?
   (UPat(Ops.BITCAST, name="x"),
-   lambda x: UOp(Ops.BITCAST, x.dtype, (UOp(Ops.NOOP, x.src[0].dtype, x.src),)) if x.src[0].op is not Ops.NOOP else None),
+   lambda x: UOp(Ops.BITCAST, x.dtype, (UOp(Ops.NOOP, x.src[0].dtype, x.src),)) if x.src[0].op not in {Ops.NOOP, Ops.LOAD, Ops.CUSTOM} else None),
   # rewrite MAX to CMPLT + WHERE (max function is annoying on many cstyle backends)
   (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
   # devectorize any bools
@@ -414,7 +414,7 @@ class AMDRenderer(CStyleLanguage):
   # https://gpuopen.com/learn/amd-lab-notes/amd-lab-notes-matrix-cores-readme
   tensor_cores_mfma = [TensorCore(dims=(16,16,16), threads=64, elements_per_thread=(4,4,4), dtype_in=di, dtype_out=do,
     opts=("l0","l0","l0","l0","u1","u1","l1","l1"), swizzle=(((10,11,4,5,8,9),(0,1,2,3,6,7)),((0,1,2,3,8,9),(4,5,10,11,6,7))))
-    for di,do in [(dtypes.half,dtypes.float)]]
+    for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
 
   def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
     self.arch = arch
@@ -476,7 +476,8 @@ class AMDRenderer(CStyleLanguage):
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 1]
 
     for arg in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
-      if self.arch.split(":")[0] == "gfx942": prefix.append(f"#define __{arg[0]} __builtin_amdgcn_mfma_f32_16x16x16f16")
+      if self.arch.split(":")[0] == "gfx942":
+        prefix.append(f"#define __{arg[0]} __builtin_amdgcn_mfma_f32_16x16x16{'f16' if arg[2] == dtypes.half else 'bf16_1k'}")
       elif arg[3] == dtypes.float: prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
       else: prefix.append(f"static inline __attribute__((device)) half8 __{arg[0]}"+"""(half16 a, half16 b, half8 c) {
   half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }

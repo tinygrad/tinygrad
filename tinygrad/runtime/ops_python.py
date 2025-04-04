@@ -18,7 +18,7 @@ def _load(m, i):
 
 def load(inp, j=0):
   if len(inp) == 2: return [_load(m, x+j if x is not None else None) if gate else default for (m,x,gate),default in zip(*inp)]
-  return [_load(m, x+j if x is not None else None) for m,x in inp[0]]
+  return [_load(m, x+j if x is not None else None) for m,x,_ in inp[0]]
 
 def _store(m, i, v):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
@@ -46,13 +46,13 @@ class PythonProgram:
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is Ops.STORE:
-          if len(inp) == 2: inp.append([True] * len(inp[0]))  # set the gate to True
+          assert len(inp) == 2, "expected store is ([(memory, offset, gate)], [value])"
           if dtp[1].count > 1:
             for j,val in enumerate(inp[1]):
-              for (m,o),v,g in zip(inp[0], val, inp[2]):
+              for (m,o,g),v in zip(inp[0], val):
                 if g: _store(m, o+j, v)
           else:
-            for (m,o),v,g in zip(*inp):
+            for (m,o,g),v in zip(*inp):
               if g: _store(m, o, v)
           i += 1
           continue
@@ -87,8 +87,7 @@ class PythonProgram:
               else: ret.append((m, ox*4 + oy*dtp[0].shape[1]*4))
           else:
             for m,o in zip(inp[0], inp[1]): ret.append((m,o))
-          if len(inp) == 3: ret = [(m,o,g) for (m,o),g in zip(ret, inp[2])] # set the gate last
-          ul[i] = ret
+          ul[i] = [(m,o,g) for (m,o),g in zip(ret, inp[2] if len(inp) == 3 else [True]*len(ret))] # set the gate last
         elif uop is Ops.CAST and isinstance(dtype, PtrDType):
           ul[i] = inp[0]
         elif uop is Ops.RANGE:

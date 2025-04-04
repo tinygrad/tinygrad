@@ -4,7 +4,7 @@ import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType
-from tinygrad.helpers import partition, all_same, prod, getenv, DEBUG, flatten
+from tinygrad.helpers import partition, all_same, prod, getenv, DEBUG, flatten, get_single_element
 from tinygrad.codegen.transcendental import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
@@ -157,7 +157,7 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
 
   if gcd != 1: something_changed = True
   if not something_changed:
-    if which is Ops.IDIV and (1 < div < c) and (newx:=div_and_mod_folding(x, UOp.const(dtypes.int, div), Ops.IDIV)) is not None: return newx//(c//div)
+    if which is Ops.IDIV and (1 < div < c) and (newx:=div_and_mod_folding(x, x.const_like(div), Ops.IDIV)) is not None: return newx//(c//div)
     return None
   quo, rem = x.const_like(const//c), x.const_like((const%c)//gcd)
   for q,r,f,v in zip(quotients, remainders, factors, svars):
@@ -167,26 +167,56 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
       rem += r//gcd * v
       quo += q * v
 
+  # if numerator is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
+  if x.vmin < 0 and remainders: return None
   if which is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
   return rem//(c//gcd)+quo
+
+def gep_through_wmma(gep:UOp, wmma:UOp):
+  out_sz = prod(x[1] for x in wmma.arg[6][-1])
+  wmma_idxs = gep.arg[::out_sz]
+  for i in range(out_sz):
+    if tuple(x-i for x in gep.arg[i::out_sz]) != wmma_idxs: return None
+  tsrcs = []
+  for s,sz in zip(wmma.src, wmma.arg[6]):
+    src_args = []
+    ssz = prod(x[1] for x in sz)
+    for w in wmma_idxs: src_args += list(range((w//out_sz)*ssz, (w//out_sz)*ssz + ssz))
+    tsrcs.append(s.gep(tuple(src_args)))
+  return UOp(Ops.WMMA, gep.dtype, tuple(tsrcs), wmma.arg)
 
 gep_pushing = PatternMatcher([
   # GEP/VECTORIZE, GEP/GEP, GEP/CONST, GEP/VCONST
   (UPat(Ops.GEP, src=(UPat(Ops.GEP, name='g2'),), name='g1'),
-   lambda g1, g2: g2.src[0].gep(tuple(g2.arg[g1.arg[i]] for i in range(g1.dtype.count)))),
+   lambda g1, g2: g2.src[0].gep(tuple(g2.arg[g1.arg[i]] for i in range(len(g1.arg))))),
   (UPat(Ops.GEP, src=(UPat(Ops.VECTORIZE, name="vec"),), name="gep"),
    lambda gep, vec: UOp(Ops.VECTORIZE, gep.dtype, tuple(vec.src[i] for i in gep.arg)) if len(gep.arg) > 1 else vec.src[gep.arg[0]]),
   (UPat(Ops.GEP, src=(UPat.cvar("c", vec=False),), name="gep"), lambda gep, c: gep.const_like(c.arg)),
   (UPat(Ops.GEP, src=(UPat(Ops.VCONST, name="c"),), name="gep"), lambda gep, c: gep.const_like(tuple(c.arg[x] for x in gep.arg))),
+  # GEP on void is skipped
+  (UPat(Ops.GEP, src=(UPat(dtype=dtypes.void, name="x"),)), lambda x: x),
+  # GEP in order is removed
+  (UPat(Ops.GEP, name="g"), lambda g: g.src[0] if not isinstance(g.dtype, PtrDType) and g.arg == tuple(range(g.src[0].dtype.count)) else None),
   # push all GEPs through ALUs (fix arange stuff)
   (UPat(Ops.GEP, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name='alu'),), name='gep'),
    lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg) \
      if not isinstance(gep.dtype, PtrDType) else None),
+  # CAT can't be rendered. it's a VECTORIZE on vectors, we expand to a single VECTORIZEs with GEPs (TODO: move this later)
+  (UPat(Ops.CAT, name="x"), lambda x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count))) \
+    if not isinstance(x.dtype, PtrDType) else None),
+  # VECTORIZE on same GEP
+  (UPat(Ops.VECTORIZE, name="v", src=UPat(Ops.GEP, src=(UPat.var("x"),))), lambda v,x: x.gep(tuple(get_single_element(i.arg) for i in v.src))),
+  # push some GEPs through WMMAs
+  (UPat(Ops.GEP, src=(UPat(Ops.WMMA, name="wmma"),), name="gep"), gep_through_wmma),
 ])
 
-symbolic = symbolic_simple+PatternMatcher([
+commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for ints) **
-  (UPat(GroupOp.Commutative, dtype=dtypes.ints, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  # NOTE: this can break merging vector math by only flipping some of them
+  (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+])
+
+symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
@@ -353,9 +383,9 @@ def loop_collapse(compval, multconst, rng:UOp, acc:UOp, extra:UOp, idx2=None,idx
       return UOp(Ops.VECTORIZE, x.dtype.vec(vec.dtype.count), src=(x,)*vec.dtype.count)
     add, mul, loop_start, loop_end = dvec(add), dvec(mul), dvec(loop_start), dvec(loop_end)
   if mul.vmin > 0 and ne is not None:
-    comprange = UOp.minimum(loop_end, UOp.maximum((add-compval)//mul + (loop_end-loop_start), loop_start))
+    comprange = UOp.minimum(loop_end, UOp.maximum((add-compval+(loop_end-loop_start)*mul)//mul, loop_start))
   elif mul.vmax < 0 and ne is None:
-    comprange = UOp.minimum(loop_end, UOp.maximum((add-compval-mul)//mul + (loop_end-loop_start), loop_start))
+    comprange = UOp.minimum(loop_end, UOp.maximum((add-compval-mul+(loop_end-loop_start)*mul)//mul, loop_start))
   else:
     return None
   new_reduce_op = comprange.cast(multconst.dtype) * multconst
@@ -380,19 +410,6 @@ def reduce_collapse(acc:UOp, ret:UOp, alu:UOp):
     for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
-def gep_through_wmma(gep:UOp, wmma:UOp):
-  out_sz = prod(x[1] for x in wmma.arg[6][-1])
-  wmma_idxs = gep.arg[::out_sz]
-  for i in range(out_sz):
-    if tuple(x-i for x in gep.arg[i::out_sz]) != wmma_idxs: return None
-  tsrcs = []
-  for s,sz in zip(wmma.src, wmma.arg[6]):
-    src_args = []
-    ssz = prod(x[1] for x in sz)
-    for w in wmma_idxs: src_args += list(range((w//out_sz)*ssz, (w//out_sz)*ssz + ssz))
-    tsrcs.append(s.gep(tuple(src_args)))
-  return UOp(Ops.WMMA, gep.dtype, tuple(tsrcs), wmma.arg)
-
 acc_pat, rng_pat = UPat(Ops.DEFINE_ACC, name="acc"), UPat(Ops.RANGE, name="rng")
 rng_aug = UPat.any(rng_pat, UPat.var("add")+rng_pat, UPat.var("mul")*rng_pat, UPat.var("add")+UPat.var("mul")*rng_pat)
 
@@ -416,17 +433,9 @@ sym = symbolic_flat+PatternMatcher([
   # VECTORIZE void is SINK
   (UPat(Ops.VECTORIZE, dtype=dtypes.void, src=UPat(Ops.BARRIER, name='b')), lambda b: b),
   (UPat(Ops.VECTORIZE, dtype=dtypes.void, name='x'), lambda x: UOp(Ops.SINK, dtypes.void, x.src)),
-  # push some GEPs through WMMAs
-  (UPat(Ops.GEP, src=(UPat(Ops.WMMA, name="wmma"),), name="gep"), gep_through_wmma),
-  # CAT can't be rendered. it's a VECTORIZE on vectors, we expand to a single VECTORIZEs with GEPs (TODO: move this later)
-  (UPat(Ops.CAT, name="x"), lambda x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count))) \
-    if not isinstance(x.dtype, PtrDType) else None),
   # tensor core with a 0 input is acc
   (UPat(Ops.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc),
   (UPat(Ops.WMMA, src=(UPat.var(), UPat.const(None, 0.0), UPat.var("acc"))), lambda acc: acc),
-  # tensor core cleanups
-  (UPat.var("add") + UPat(Ops.WMMA, name="wmma"),
-    lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry + remove longs
   (UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32),
   (UPat.var('x', dtypes.uint32).cast(dtypes.uint64).cast(dtypes.uint32), lambda x: x),   # cast there and back is noop (TODO: genericize)
@@ -477,4 +486,7 @@ sym = symbolic_flat+PatternMatcher([
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")), lambda x,d: 1-d), # x*/(1+x) -> 1-1/(1+x)
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")*UPat.var("y")), lambda x,y,d: y*(1-d)),
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")+UPat.var("y")), lambda x,y,d: (1-d)+x*y),
+  # move const multiply after REDUCE
+  (UPat(Ops.REDUCE, src=(UPat.var("x")*UPat.cvar("c", vec=False),), arg=Ops.ADD, name="r", allow_any_len=True),
+   lambda x,c,r: r.replace(src=(x,)+r.src[1:])*c.arg),
 ])
