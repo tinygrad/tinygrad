@@ -89,22 +89,31 @@ class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
     self.old_context:dict[str, int] = {k:v.value for k,v in ContextVar._cache.items()}
-    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
+    for k,v in self.kwargs.items(): 
+      ContextVar._cache[k].value = v
+      if ContextVar._cache[k].callback is not None: ContextVar._cache[k].callback(v)
+
   def __exit__(self, *args):
-    for k,v in self.old_context.items(): ContextVar._cache[k].value = v
+    for k,v in self.old_context.items(): 
+      ContextVar._cache[k].value = v
+      if ContextVar._cache[k].callback is not None: ContextVar._cache[k].callback(v)
 
 class ContextVar:
   _cache: ClassVar[dict[str, ContextVar]] = {}
   value: int
   key: str
-  def __init__(self, key, default_value):
+  callback: Optional[Callable]
+  def __init__(self, key, default_value, callback=None):
     if key in ContextVar._cache: raise RuntimeError(f"attempt to recreate ContextVar {key}")
     ContextVar._cache[key] = self
-    self.value, self.key = getenv(key, default_value), key
+    self.value, self.key, self.callback = getenv(key, default_value), key, callback
   def __bool__(self): return bool(self.value)
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
+  def add_callback(self, fn):
+    self.callback = fn
+    self.callback(self.value)
 
 DEBUG, IMAGE, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 JIT = ContextVar("JIT", 2 if platform.system() == 'Darwin' and ('Intel' in platform.processor() or 'i386' in platform.processor()) else 1)

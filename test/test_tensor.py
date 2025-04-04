@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.helpers import getenv, temp, _METADATA, mv_address
+from tinygrad.helpers import getenv, temp, _METADATA, mv_address, Context
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
@@ -828,6 +828,14 @@ class TestTensorMetadata(unittest.TestCase):
     bw = [m for m in si.metadata if m.backward]
     self.assertEqual(len(bw), 1)
     self.assertEqual(bw[0].name, "sigmoid")
+
+  def test_respects_tracemeta_0(self):
+    _METADATA.set(None)
+    with Context(TRACEMETA=0):
+      x = Tensor.rand(3, requires_grad=True)
+      y = Tensor.rand(3, requires_grad=True)
+      out = (x.relu() * y.sigmoid()).sum()
+    assert out.lazydata.metadata is None
 
 class TestIdxUpcast(unittest.TestCase):
   def _find_op(self, ast: UOp, op: Ops):
