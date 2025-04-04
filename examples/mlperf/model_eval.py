@@ -81,53 +81,42 @@ def eval_unet3d():
 
 def eval_retinanet():
   # RetinaNet with ResNeXt50_32X4D
+  from examples.mlperf.dataloader import batch_load_retinanet
   from extra.datasets.openimages import normalize, download_dataset, iterate, BASEDIR
   from extra.models.resnet import ResNeXt50_32X4D
   from extra.models.retinanet import RetinaNet
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
   from contextlib import redirect_stdout
+  tlog("imports")
 
-  class RetinaNetRunner:
-    def __init__(self, bs, device=None):
-      self.bs, self.device = bs, device
-      self.mdl = RetinaNet(ResNeXt50_32X4D())
-      self.mdlrun = TinyJit(lambda x: self.mdl(normalize(x, device=device)).realize())
-      for x in get_parameters(self.mdl) if device else []: x.to_(device)
-      if (fn:=getenv("RETINANET_MODEL", "")): load_state_dict(self.mdl, safe_load(fn))
-      else: self.mdl.load_from_pretrained()
-
-    def __call__(self, x:Tensor) -> Tensor:
-      if x.shape[0] == bs: return self.mdlrun(x)
-      else:
-        self.mdlrun._jit_cache = []
-        return self.mdl(normalize(x, device=self.device))
-
-    def postprocess_detections(self, *args, **kwargs):
-      return self.mdl.postprocess_detections(*args, **kwargs)
-
-  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 6))]
-  for x in GPUS: Device[x]
+  mdl = RetinaNet(ResNeXt50_32X4D())
+  mdl.load_from_pretrained()
+  tlog("loaded models")
 
   coco = COCO(download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), 'validation'))
   coco_eval = COCOeval(coco, iouType="bbox")
   coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
+  tlog("loaded dataset")
 
-  n, bs = 0, getenv("BS", 8)
-  mdl = RetinaNetRunner(bs, device=GPUS)
-
+  iterator = batch_load_retinanet(coco, True, Path(base_dir), getenv("BS", 8), shuffle=False)
+  def data_get():
+    x, img_ids, img_sizes, cookie = next(iterator)
+    return x.realize(), img_ids, img_sizes, cookie
+  n = 0
+  proc = data_get()
+  tlog("loaded initial data")
   st = time.perf_counter()
-  for x, targets in iterate(coco, base_dir, bs):
-    x = Tensor(x.astype(np.float32), device=GPUS)
-    mt = time.perf_counter()
-    outs = mdl(x).numpy()
-    et = time.perf_counter()
-    predictions = mdl.postprocess_detections(outs, input_size=x.shape[1:3], orig_image_sizes=[t["image_size"] for t in targets])
-    ext = time.perf_counter()
-    n += len(targets)
-    print(f"[{n}/{len(coco.imgs)}] == {(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model, {(ext-et)*1000:.2f} ms for postprocessing")
-    img_ids = [t["image_id"] for t in targets]
-    coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box.tolist(), "score": score}
+  while proc is not None:
+    GlobalCounters.reset()
+    proc = (mdl(normalize(proc[0])), proc[1], proc[2], proc[3])
+    run = time.perf_counter()
+    # load the next data here
+    try: next_proc = data_get()
+    except StopIteration: next_proc = None
+    nd = time.perf_counter()
+    predictions, img_ids = mdl.postprocess_detections(proc[0].numpy(), orig_image_sizes=proc[2]), proc[1]
+    coco_results  = [{"image_id": i, "category_id": label, "bbox": box.tolist(), "score": score}
       for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
     with redirect_stdout(None):
       coco_eval.cocoDt = coco.loadRes(coco_results)
@@ -135,13 +124,18 @@ def eval_retinanet():
       coco_eval.evaluate()
     evaluated_imgs.extend(img_ids)
     coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
-    st = time.perf_counter()
+    n += len(proc[0])
+    et = time.perf_counter()
+    tlog(f"****** {(run-st)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize ({(nd-run)*1000:7.2f} ms fetching). {(len(proc))/(et-st):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-st):5.2f} TFLOPS")
+    st = et
+    proc, next_proc = next_proc, None
 
   coco_eval.params.imgIds = evaluated_imgs
   coco_eval._paramsEval.imgIds = evaluated_imgs
   coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
   coco_eval.accumulate()
   coco_eval.summarize()
+  tlog("done")
 
 def eval_rnnt():
   # RNN-T
