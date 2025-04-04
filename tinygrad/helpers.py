@@ -75,18 +75,6 @@ def get_child(obj, key):
 def word_wrap(x, wrap=80): return x if len(x) <= wrap or '\n' in x[0:wrap] else (x[0:wrap] + "\n" + word_wrap(x[wrap:], wrap))
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
-def get_test_method() -> str|None:
-  import unittest
-  frm = sys._getframe(1)
-  while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
-  all_locals = frm.f_locals
-  s = all_locals.get("self")
-  if s is not None and isinstance(s, unittest.TestCase): ret = f"{frm.f_code.co_filename}_{type(s).__name__}.{s._testMethodName}"
-  else: ret = None
-  del all_locals
-  del s
-  return ret
-
 # for length N coefficients `p`, returns p[0] * x**(N-1) + p[1] * x**(N-2) + ... + p[-2] * x + p[-1]
 def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
 
