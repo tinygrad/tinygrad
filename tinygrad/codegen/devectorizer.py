@@ -167,17 +167,18 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
   lengths.append(1)  # worst case, it's not folded
 
+  # filter fold lengths that don't divide
+  if must_divide: lengths = [x for x in lengths if idx.src[1].divides(x) is not None]
+
   # split based on the fold lengths
   global_offset = 0
   ret = []
   ptrdtype = cast(PtrDType, buf.dtype)
   while global_offset < sz:
-    oidx = (idx.src[1] + global_offset).simplify()
     # with 1 at the end of the lengths list, this will always hit
     for fold_length in lengths:
       if global_offset+fold_length > sz: continue
-      if must_divide and oidx.divides(fold_length) is None: continue
-      lidx = buf.index(oidx, idx.src[2] if len(idx.src) > 2 else None)
+      lidx = buf.index(idx.src[1] + global_offset, idx.src[2] if len(idx.src) > 2 else None)
       if fold_length > 1: lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
       else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))
