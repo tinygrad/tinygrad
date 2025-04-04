@@ -805,6 +805,7 @@ def deconstruct_function(fxn:Callable) -> tuple:
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
+"""
 class PatternMatcher:
   def __init__(self, patterns:list[tuple[UPat, Callable]]):
     self.patterns = patterns
@@ -829,6 +830,7 @@ class PatternMatcher:
       for match in p.match(uop, {}):
         if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: return ret
     return None
+"""
 
 # *** fast pattern matcher ***
 
@@ -836,16 +838,20 @@ class FastPatternMatcher:
   def __init__(self, patterns:list[tuple[UPat, Callable]]):
     # we want to build a decision tree from these patterns
     self.patterns = patterns
-    self.has_ctx = {fxn:('ctx' in inspect.signature(fxn).parameters) for _,fxn in patterns}
+    self.processed_patterns = [(p,types.FunctionType(*(fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)))) for p,fxn in patterns]
+    self.has_ctx = {fxn:('ctx' in inspect.signature(fxn).parameters) for _,fxn in self.processed_patterns}
+
+  def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:FastPatternMatcher): return FastPatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
-    for p,fxn in self.patterns:
+    for p,fxn in self.processed_patterns:
       for match in p.match(uop, {}):
         if (ret:=(fxn(ctx=ctx, **match) if self.has_ctx[fxn] else fxn(**match))) is not None:
           return ret
+    return None
 
 PatternMatcher = FastPatternMatcher
 
