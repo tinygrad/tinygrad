@@ -711,9 +711,10 @@ class PCIIface:
     pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
     self.cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=pci.PCI_COMMAND)
 
+    gfxver = int(f"{self.adev.ip_ver[am.GC_HWIP][0]:02d}{self.adev.ip_ver[am.GC_HWIP][1]:02d}{self.adev.ip_ver[am.GC_HWIP][2]:02d}")
     array_count = self.adev.gc_info.gc_num_sa_per_se * self.adev.gc_info.gc_num_se
     simd_count = 2 * array_count * (self.adev.gc_info.gc_num_wgp0_per_sa + self.adev.gc_info.gc_num_wgp1_per_sa)
-    self.props = {'simd_count': 2 * simd_count, 'simd_per_cu': 2, 'array_count': array_count,
+    self.props = {'simd_count': 2 * simd_count, 'simd_per_cu': 2, 'array_count': array_count, 'gfx_target_version': gfxver,
       'max_slots_scratch_cu': self.adev.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.adev.gc_info.gc_max_waves_per_simd,
       'simd_arrays_per_engine': self.adev.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.adev.gc_info.gc_lds_size}
 
@@ -780,7 +781,7 @@ class AMDDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
-    self.gfx_ver:tuple[int, ...] = self.dev_iface.ip_versions[am.GC_HWIP]
+    self.gfx_ver:tuple[int, ...] = ((trgt:=self.dev_iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.gfx_ver
     if self.gfx_ver < (9,4,2) or self.gfx_ver >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")
     if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.gfx_ver} arch {self.arch}")
