@@ -265,7 +265,6 @@ devectorize = PatternMatcher([
   (UPat(Ops.DEFINE_ACC, name="acc"), no_vectorized_acc),
 ])
 
-
 pm_render = PatternMatcher([
   # for rendering, we use explicit VECTORIZE
   (UPat(Ops.CONST, name='c'),

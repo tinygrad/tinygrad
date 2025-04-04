@@ -771,7 +771,7 @@ class UPat(MathTrait):
     def rep(x):
       form = "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=%s)"
       return form % (None if x.op is None else ('(%s)'%', '.join(map(str, x.op))), x.arg, repr(x.name),
-        set(x.dtype) if x.dtype else None, x.allowed_len == 0, "[%s]" if x.src and len(x.src)>1 else "(%s)")
+        set(x.dtype) if x.dtype else None, not x.strict_length, "[%s]" if x.src and len(x.src)>1 else ("(%s)" if x.src else "%s"))
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
   def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
@@ -838,8 +838,12 @@ class FastPatternMatcher:
   def __init__(self, patterns:list[tuple[UPat, Callable]]):
     # we want to build a decision tree from these patterns
     self.patterns = patterns
+    print(f"built patternmatcher with {len(self.patterns)} rules")
     self.processed_patterns = [(p,types.FunctionType(*(fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)))) for p,fxn in patterns]
     self.has_ctx = {fxn:('ctx' in inspect.signature(fxn).parameters) for _,fxn in self.processed_patterns}
+
+    for p,_ in self.patterns:
+      print(p)
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
