@@ -689,13 +689,9 @@ class Kernel:
     src = self.opts.render(self.uops)
 
     if CAPTURE_PROCESS_REPLAY:
-      import sys, unittest
-      frm = sys._getframe(1)
-      while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
-      loc = frm.f_code.co_filename
-      if (s:=frm.f_locals.get("self")) is not None and isinstance(s, unittest.TestCase): loc += f"{type(s).__name__}.{s._testMethodName}"
-      del s
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, loc, ContextVar._cache, src))
+      from tinygrad.helpers import get_test_method
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, get_test_method(),
+                                                             ContextVar._cache, src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
