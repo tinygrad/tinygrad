@@ -733,6 +733,11 @@ class UPat(MathTrait):
       upat_match = [src] if isinstance(src, UPat) else ([] if src is None else self.src[0])
       self.early_reject = {pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1}
 
+    # build dynamic match function
+    if not hasattr(self, 'match'):
+      self.match = self.compile_match()
+      #self.match = self.interpreted_match
+
   def named(self, name:str): return UPat(self.op, self.dtype, self._in_src, self.arg, name, not self.strict_length, self.custom_early_reject)
 
   @staticmethod
@@ -774,7 +779,7 @@ class UPat(MathTrait):
         set(x.dtype) if x.dtype else None, not x.strict_length, "[%s]" if x.src and len(x.src)>1 else ("(%s)" if x.src else "%s"))
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
-  def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
+  def interpreted_match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
     if (self.op is not None and uop.op not in self.op) or \
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.dtype is not None and uop.dtype not in self.dtype and uop.dtype.scalar() not in self.dtype) or \
@@ -791,6 +796,61 @@ class UPat(MathTrait):
       res.extend(stores)
     return res
 
+  def compile_match(self):
+    #print("**** COMPILE", self)
+    or_clause = []
+    dyn_lookup: dict[str, Any] = {}
+    if self.op is not None:
+      if len(self.op) > 1:
+        dyn_lookup['tuple_ops'] = self.op
+        or_clause.append("uop.op not in tuple_ops")
+      else:
+        dyn_lookup['single_op'] = self.op[0]
+        or_clause.append("uop.op is not single_op")
+    if self.name is not None: or_clause.append(f"store.setdefault('{self.name}', uop) is not uop")
+    if self.dtype is not None:
+      if len(self.dtype) > 1:
+        dyn_lookup['tuple_dtypes'] = self.dtype
+        or_clause.append("uop.dtype not in tuple_dtypes and uop.dtype.scalar() not in tuple_dtypes")
+      else:
+        dyn_lookup['single_dtype'] = self.dtype[0]
+        or_clause.append("uop.dtype is not single_dtype and uop.dtype.scalar() is not single_dtype")
+    if self.arg is not None:
+      dyn_lookup['global_arg'] = self.arg
+      or_clause.append("global_arg != uop.arg")
+    if self.strict_length or self.required_len > 0:
+      or_clause.append(f"len(uop.src) != {self.required_len}" if self.strict_length else f"len(uop.src) < {self.required_len}")
+    code_fxn =                         "def match(uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:\n"
+    if len(or_clause):    code_fxn += f"  if {' or '.join(['('+x+')' for x in or_clause])}: return []\n"
+    if self.src is None:  code_fxn +=  "  return [store]"
+    elif len(self.src) == 1:
+      if isinstance(self.src[0], tuple) and len(self.src[0]) == 1:
+        dyn_lookup['single_src'] = self.src[0][0]
+        code_fxn += "  return single_src.match(uop.src[0], store.copy())"
+      else:
+        dyn_lookup['single_srcs'] = self.src[0]
+        code_fxn += """
+  stores, new_stores = [store.copy()], []
+  for uu, vv in zip(uop.src, single_srcs):
+    for s in stores: new_stores.extend(vv.match(uu, s))
+    stores, new_stores = new_stores, []
+  return stores"""
+    else:
+      dyn_lookup['list_srcs'] = self.src
+      code_fxn += """
+  res: list[dict[str, UOp]] = []
+  for vp in list_srcs:
+    stores, new_stores = [store.copy()], []
+    for uu, vv in zip(uop.src, vp):
+      for s in stores: new_stores.extend(vv.match(uu, s))
+      stores, new_stores = new_stores, []
+    res.extend(stores)
+  return res"""
+    namespace: dict = {}
+    #print(code_fxn)
+    exec(code_fxn, dyn_lookup, namespace)
+    return namespace['match']
+
 class UPatAny(UPat):
   def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
     matches = [x.match(uop, store.copy()) for x in self.src[0]]
@@ -805,7 +865,6 @@ def deconstruct_function(fxn:Callable) -> tuple:
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
-"""
 class PatternMatcher:
   def __init__(self, patterns:list[tuple[UPat, Callable]]):
     self.patterns = patterns
@@ -830,11 +889,10 @@ class PatternMatcher:
       for match in p.match(uop, {}):
         if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: return ret
     return None
-"""
 
-# *** fast pattern matcher ***
+# *** simple pattern matcher ***
 
-class FastPatternMatcher:
+class SimplePatternMatcher:
   def __init__(self, patterns:list[tuple[UPat, Callable]]):
     # we want to build a decision tree from these patterns
     self.patterns = patterns
@@ -848,7 +906,7 @@ class FastPatternMatcher:
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
-  def __add__(self, more:FastPatternMatcher): return FastPatternMatcher(self.patterns+more.patterns)
+  def __add__(self, more:SimplePatternMatcher): return SimplePatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
     for p,fxn in self.processed_patterns:
@@ -857,7 +915,7 @@ class FastPatternMatcher:
           return ret
     return None
 
-PatternMatcher = FastPatternMatcher
+#PatternMatcher = SimplePatternMatcher
 
 # *** tracking pattern matcher ***
 
