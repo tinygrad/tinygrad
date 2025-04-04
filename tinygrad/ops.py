@@ -830,6 +830,33 @@ class PatternMatcher:
         if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: return ret
     return None
 
+# *** fast pattern matcher ***
+
+class FastPatternMatcher:
+  def __init__(self, patterns:list[tuple[UPat, Callable]]):
+    # we want to build a decision tree from these patterns
+    self.patterns = patterns
+    self.has_ctx = {fxn:('ctx' in inspect.signature(fxn).parameters) for _,fxn in patterns}
+
+    #print("******")
+    #for p,fxn in patterns:
+    #  print(p)
+
+  @functools.cache  # pylint: disable=method-cache-max-size-none
+  def __add__(self, more:FastPatternMatcher): return FastPatternMatcher(self.patterns+more.patterns)
+
+  def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
+    ler = {u.op for u in uop.src}
+    for p,fxn in self.patterns:
+      should_early_reject = not p.early_reject.issubset(ler)
+      for match in p.match(uop, {}):
+        if should_early_reject:
+          continue
+        if (ret:=(fxn(ctx=ctx, **match) if self.has_ctx[fxn] else fxn(**match))) is not None:
+          return ret
+
+PatternMatcher = FastPatternMatcher
+
 # *** tracking pattern matcher ***
 
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
