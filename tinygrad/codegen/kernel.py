@@ -692,7 +692,7 @@ class Kernel:
       import sys
       frm = sys._getframe(1)
       while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
-      loc = f"{frm.f_code.co_filename} {type(s:=frm.f_locals.get('self')).__name__+'.'+s._testMethodName if 'self' in frm.f_locals else frm.f_lineno}"
+      loc = f"{frm.f_code.co_filename} {type(s:=frm.f_locals['self']).__name__+'.'+s._testMethodName if 'self' in frm.f_locals else frm.f_lineno}"
       diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, loc, ContextVar._cache, src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
