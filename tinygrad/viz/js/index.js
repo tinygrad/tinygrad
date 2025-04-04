@@ -12,6 +12,8 @@ function intersectRect(r1, r2) {
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
 
+const rect = (s) => document.querySelector(s).getBoundingClientRect();
+
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
@@ -36,7 +38,7 @@ async function renderDag(graph, additions, recenter=false) {
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`);
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style);
+      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => "rx:8; ry:8; stroke:#4a4b57; stroke-width:1.4px;"+d.style);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2;
@@ -194,12 +196,12 @@ d3.select("#graph-svg").call(zoom);
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const svg = d3.select("#graph-svg");
   svg.call(zoom.transform, d3.zoomIdentity);
-  const mainRect = document.querySelector(".main-container").getBoundingClientRect();
-  const x0 = document.querySelector(".kernel-list-parent").getBoundingClientRect().right;
-  const x1 = document.querySelector(".metadata").getBoundingClientRect().left;
+  const mainRect = rect(".main-container");
+  const x0 = rect(".kernel-list-parent").right;
+  const x1 = rect(".metadata").left;
   const pad = 16;
   const R = { x: x0+pad, y: mainRect.top+pad, width: (x1>0 ? x1-x0 : mainRect.width)-2*pad, height: mainRect.height-2*pad };
-  const r = document.querySelector("#render").getBoundingClientRect();
+  const r = rect("#render");
   if (r.width === 0) return;
   const scale = Math.min(R.width/r.width, R.height/r.height);
   const [tx, ty] = [R.x+(R.width-r.width*scale)/2, R.y+(R.height-r.height*scale)/2];
@@ -351,10 +353,9 @@ async function main() {
 // **** collapse/expand
 
 let isCollapsed = false;
-const mainContainer = document.querySelector('.main-container');
 document.querySelector(".collapse-btn").addEventListener("click", (e) => {
   isCollapsed = !isCollapsed;
-  mainContainer.classList.toggle("collapsed", isCollapsed);
+  document.querySelector(".main-container").classList.toggle("collapsed", isCollapsed);
   e.currentTarget.blur();
   e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
 });
@@ -372,7 +373,7 @@ function appendResizer(element, { minWidth, maxWidth }, left=false) {
   handle.addEventListener("mousedown", (e) => {
     e.preventDefault();
     element.dataset.startX = e.clientX;
-    element.dataset.containerWidth = mainContainer.getBoundingClientRect().width;
+    element.dataset.containerWidth = rect(".main-container");
     element.dataset.startWidth = element.getBoundingClientRect().width;
     document.documentElement.addEventListener("mousemove", resize, false);
     document.documentElement.addEventListener("mouseup", () => {
