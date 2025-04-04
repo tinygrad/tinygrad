@@ -275,7 +275,6 @@ class View:
     if not all(s >= 0 for s in size): raise ValueError(f"size can't contain negative numbers {size}")
     if all_int(stride) and any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
     if 0 in size: return View.create(size, (0,) * len(size), 0, None)
-    stride = canonicalize_strides(size, stride)
     return View.create(size, stride, self.offset + storage_offset, None)
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
