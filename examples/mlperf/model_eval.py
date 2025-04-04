@@ -102,7 +102,7 @@ def eval_retinanet():
   iterator = batch_load_retinanet(coco, True, Path(base_dir), getenv("BS", 8), shuffle=False)
   def data_get():
     x, img_ids, img_sizes, cookie = next(iterator)
-    return x.realize(), img_ids, img_sizes, cookie
+    return x.to(Device.DEFAULT).realize(), img_ids, img_sizes, cookie
   n = 0
   proc = data_get()
   tlog("loaded initial data")
@@ -116,7 +116,7 @@ def eval_retinanet():
     except StopIteration: next_proc = None
     nd = time.perf_counter()
     predictions, img_ids = mdl.postprocess_detections(proc[0].numpy(), orig_image_sizes=proc[2]), proc[1]
-    coco_results  = [{"image_id": i, "category_id": label, "bbox": box.tolist(), "score": score}
+    coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
       for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
     with redirect_stdout(None):
       coco_eval.cocoDt = coco.loadRes(coco_results)
