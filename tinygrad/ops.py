@@ -733,9 +733,10 @@ class UPat(MathTrait):
       upat_match = [src] if isinstance(src, UPat) else ([] if src is None else self.src[0])
       self.early_reject = {pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1}
 
-    # build dynamic match function
-    #if not hasattr(self, 'match'): self.match = self.interpreted_match if getenv("INTERPRETED_MATCH") else self.compile_match()
+    # build dynamic match function. NOTE: once match isn't recursive, we could move this to the pattern matcher
+    if not hasattr(self, 'match'): self.match = self.interpreted_match if getenv("INTERPRETED_MATCH") else self.compile_match()
 
+  # TODO: global UPat cache
   def __reduce__(self): return UPat,(self.op, self.dtype, self._in_src, self.arg, self.name, not self.strict_length, self.custom_early_reject)
 
   def named(self, name:str): return UPat(self.op, self.dtype, self._in_src, self.arg, name, not self.strict_length, self.custom_early_reject)
@@ -779,9 +780,9 @@ class UPat(MathTrait):
         set(x.dtype) if x.dtype else None, not x.strict_length, "[%s]" if x.src and len(x.src)>1 else ("(%s)" if x.src else "%s"))
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
-  def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
-    self.match = self.compile_match()
-    return self.match(uop, store)
+  #def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
+  #  self.match = self.compile_match()
+  #  return self.match(uop, store)
 
   def interpreted_match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
     if (self.op is not None and uop.op not in self.op) or \
