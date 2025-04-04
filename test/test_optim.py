@@ -3,7 +3,7 @@ import torch
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, getenv
 from tinygrad.device import is_dtype_supported
 
 np.random.seed(1337)
@@ -66,7 +66,7 @@ class TestOptim(unittest.TestCase):
   def test_sgd_wd(self): self._test_sgd(1, {'lr': 0.001, 'weight_decay': 0.1}, 1e-6, 0)
   def test_sgd_high_lr_wd(self): self._test_sgd(1, {'lr': 10, 'weight_decay': 0.1}, 1e-6, 1e-5)
 
-  def test_multistep_sgd(self): self._test_sgd(10, {'lr': 0.001}, 1e-6, 0)
+  def test_multistep_sgd(self): self._test_sgd(getenv("STEPS", 10), {'lr': 0.001}, 1e-6, 0)
   def test_multistep_sgd_high_lr(self): self._test_sgd(10, {'lr': 10}, 1e-6, 3e-4)
   def test_multistep_sgd_wd(self): self._test_sgd(10, {'lr': 0.001, 'weight_decay': 0.1}, 1e-6, 0)
   def test_multistep_sgd_high_lr_wd(self): self._test_sgd(10, {'lr': 9, 'weight_decay': 0.1}, 1e-6, 3e-4)
