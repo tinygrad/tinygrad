@@ -121,7 +121,7 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def memory_barrier(self):
-    pf = 0 if self.nbio.version[:2] != (7, 11) else 1
+    pf = '' if self.nbio.version[0] == 2 else '0' if self.nbio.version[:2] != (7, 11) else '1'
     self.wait_reg_mem(reg_req=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ').addr,
                       reg_done=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr, value=0xffffffff)
     self.acquire_mem()
@@ -252,7 +252,7 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_RESTART_X, 0, 0, 0)
     self.wreg(self.gc.regCOMPUTE_STATIC_THREAD_MGMT_SE0, 0xFFFFFFFF, 0xFFFFFFFF)
     self.wreg(self.gc.regCOMPUTE_STATIC_THREAD_MGMT_SE2, 0xFFFFFFFF, 0xFFFFFFFF)
-    if prg.dev.target >= (10,0,0):
+    if prg.dev.target >= (11,0,0):
       self.wreg(self.gc.regCOMPUTE_STATIC_THREAD_MGMT_SE4, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
     self.wreg(self.gc.regCOMPUTE_USER_DATA_0, *user_regs)
 
@@ -503,6 +503,8 @@ class AMDIP:
   def regs(self): return collect_registers(self.module, cls=functools.partial(AMDReg, ip=self))
   def __getattr__(self, name:str):
     if name in self.regs: return self.regs[name]
+    # NOTE: gfx10 gc registers always start with mm, no reg prefix
+    if (mmname:=name.replace('reg', 'mm')) in self.regs: return self.regs[mmname]
     return getattr(self.module, name)
 
 class KFDIface:
@@ -806,8 +808,11 @@ class AMDDevice(HCQCompiled):
     self.pm4 = importlib.import_module(f"tinygrad.runtime.autogen.am.pm4_{'nv' if self.target[0] >= 10 else 'soc15'}")
     self.sdma = import_module('sdma', min(self.dev_iface.ip_versions[am.SDMA0_HWIP], (6, 0, 0)))
     self.gc = AMDIP('gc', self.dev_iface.ip_versions[am.GC_HWIP], self.dev_iface.ip_offsets[am.GC_HWIP])
-    pad = (0,) if self.target[0] == 9 else ()
-    self.nbio = AMDIP('nbio' if self.target[0]<12 else 'nbif', self.dev_iface.ip_versions[am.NBIF_HWIP], pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
+    nbio_ver = self.dev_iface.ip_versions[am.NBIF_HWIP]
+    if nbio_ver[:2] == (3, 3):
+      nbio_ver = (2, 3, 0)
+    nbio_pad = (0,) if self.target[0] == 9 else ()
+    self.nbio = AMDIP('nbio' if self.target[0]<12 else 'nbif', nbio_ver, nbio_pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
 
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x800000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
