@@ -72,6 +72,8 @@ function pluralize(num, name, alt=null) {
   return num === 1 ? `${num} ${name}` : `${num} ${alt ?? name+'s'}`
 }
 
+const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
+
 function renderMemoryGraph(graph) {
   // ** construct alloc/free traces
   // we can map reads/writes from the kernel graph
@@ -156,7 +158,6 @@ function renderMemoryGraph(graph) {
   axesGroup.append("g").call(d3.axisLeft(yscale).tickFormat(nbytes_format));
   axesGroup.append("g").attr("transform", `translate(0, ${yscale.range()[0]})`).call(d3.axisBottom(xscale).tickFormat(() => ""));
   const polygonGroup = render.append("g").attr("id", "polygons");
-  const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
   const polygons = polygonGroup.selectAll("polygon").data(Object.values(ret)).join("polygon").attr("points", (d) => {
     const xs = d.x.map(t => xscale(t));
     const y1 = d.y.map(t => yscale(t));
@@ -188,9 +189,66 @@ function renderMemoryGraph(graph) {
   document.getElementById("zoom-to-fit-btn").click();
 }
 
+// ** Profiler
+
+const formatTime = (ms) => {
+  if (ms<1e2) return `${Math.round(ms,2)}us`;
+  if (ms<1e6) return `${Math.round(ms*1e-3,2)}ms`;
+  return `${Math.round(ms*1e-6,2)}s`;
+};
+
+const batchColor = "#9D4EDD";
+
+function renderProfiler({ traceEvents }) {
+  // ** data processing
+  const batchCounts = [];
+  for (t of traceEvents) {
+    if (t.name?.startsWith("batch")) batchCounts.push(parseInt(t.name.split(" ")[1]));
+  }
+  const batchScale = d3.scaleLinear(batchCounts, [d3.rgb(batchColor).brighter(2).formatHex(),
+    d3.rgb(batchColor).darker(2).formatHex()]).interpolate(d3.interpolateLab);
+  const data = [];
+  const height = 4; // can this height be meaningful?
+  let st = null;
+  let nextKernel = 0;
+  let offsetY = 0;
+  for (const [i,t] of traceEvents.entries()) {
+    if (t.ph !== "X" || t.tid !== 0) continue;
+    if (st == null) st = t.ts;
+    let color = `#${colors[i%colors.length]}`;
+    if (t.name.startsWith("batch")) color = batchScale(parseInt(t.name.split(" ")[1]));
+    offsetY = (t.ts-st < nextKernel) ? offsetY+1 : 0;
+    data.push({ x:t.ts-st, dur:t.dur, name:t.name, color, offsetY });
+    nextKernel = t.dur+(t.ts-st);
+  }
+  // ** main render
+  const render = d3.select("#timeline");
+  const width = rect(".main-container").width-rect(".kernel-list-parent").width-rect(".metadata").width;
+  // ** time axis
+  const et = data[data.length-1];
+  const x = d3.scaleLinear().domain([data[0].x, et.x+et.dur]).range([0, width]);
+  const gx = render.append("g").call(d3.axisBottom(x).tickFormat(formatTime));
+  // ** rects
+  const rects = render.selectAll("rect").data(data).join("rect").attr("x", d => x(d.x)).attr("y", d => -height-0.5-(d.offsetY*height))
+    .attr("width", d => x(d.dur)).attr("fill", d => d.color).attr("height", height);
+  // ** metadata
+  const metadata = document.querySelector(".metadata");
+  const currBlock = metadata.appendChild(document.createElement("div"))
+  rects.on("mouseover", (e, d) => {
+    const p = document.createElement("p");
+    p.innerText = `Name: ${d.name}\nDuration: ${formatTime(d.dur)}\nStart time: ${formatTime(d.x)}`;
+    currBlock.replaceChildren(p);
+    d3.select(e.currentTarget).attr("fill", d => d3.rgb(d.color).darker(1));
+  }).on("mouseout", (e) => {
+    d3.select(e.currentTarget).attr("fill", d => d.color);
+    currBlock.innerHTML = "";
+  });
+  document.getElementById("zoom-to-fit-btn").click();
+}
+
 // ** zoom and recentering
 
-const zoom = d3.zoom().scaleExtent([0.05, 2]).on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
+const zoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
 d3.select("#graph-svg").call(zoom);
 // zoom to fit into view
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
@@ -245,6 +303,7 @@ hljs.registerLanguage("cpp", (hljs) => ({
 var ret = [];
 var cache = {};
 var kernels = null;
+var profile = null;
 const evtSources = [];
 const state = {currentKernel:-1, currentUOp:0, currentRewrite:0, expandKernel:false};
 function setState(ns) {
@@ -252,6 +311,11 @@ function setState(ns) {
   main();
 }
 async function main() {
+  // ** profiler
+  if (window.location.search === "?profiler") {
+    if (profile == null) profile = await (await fetch("/get_profile")).json();
+    return renderProfiler(profile);
+  }
   const { currentKernel, currentUOp, currentRewrite, expandKernel } = state;
   // ** left sidebar kernel list
   if (kernels == null) {
