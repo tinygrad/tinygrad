@@ -106,10 +106,6 @@ def index_tensor(x, y):
 def index_put(self, indices, values, accumulate=False):
   return aten.index_put(self.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in indices], values.cpu(), accumulate).tiny()
 
-@torch.library.impl("aten::cumprod", "privateuseone")
-# TODO: move to tinygrad
-def cumprod(self, dim, dtype=None): return aten.cumprod(self.cpu(), dim, dtype=dtype).tiny()
-
 @torch.library.impl("aten::cummax", "privateuseone")
 def cummax(self, dim):
   # TODO: support cummax with indices to match torch
