@@ -303,8 +303,8 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(uand([uconst(1), Variable("a", 0, 1)]), 0, 1, "a")
 
   def test_mod_factor_negative(self):
-    self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, 0, 27, "((a+27)%28)")
-    self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, "((a+27)%28)")
+    self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, -27, 27, "(((a+(b*28))+-29)%28)")
+    self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, -27, 27, "(((a+(b*28))+-29)%28)")
 
   def test_sum_combine_num(self):
     self.helper_test_variable(usum([uconst(29), Variable("a", 0, 10), uconst(-23)]), 6, 16, "(a+6)")
@@ -323,8 +323,8 @@ class TestSymbolic(unittest.TestCase):
 
   def test_add_div(self):
     # careful about the lower bounds and upper bounds
-    self.helper_test_variable((Variable("a", 0, 5)-2)//4, -1, 0, "(((a+2)//4)+-1)")
-    self.helper_test_variable((Variable("a", 0, 5)-1)//4, -1, 1, "(((a+3)//4)+-1)")
+    self.helper_test_variable((Variable("a", 0, 5)-2)//4, 0, 0, "0")
+    self.helper_test_variable((Variable("a", 0, 5)-1)//4, 0, 1, "((a+-1)//4)")
     self.helper_test_variable((Variable("a", 0, 5))//4, 0, 1, "(a//4)")
     self.helper_test_variable((Variable("a", 0, 5)+1)//4, 0, 1, "((a+1)//4)")
     self.helper_test_variable((Variable("a", 0, 5)+2)//4, 0, 1, "((a+2)//4)")
@@ -534,6 +534,13 @@ class TestSymbolic(unittest.TestCase):
     # not combining  # TODO: can combine if one is identity element const
     self.helper_test_variable(aa+ab, 0, 6, "((a if (x<2) else b)+(a if (x<2) else 0))")
 
+  def test_negation_in_where(self):
+    cond = Variable("x", 0, 3) < 2
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    w = cond.logical_not().where(a, b)
+    self.helper_test_variable(w, 0, 3, "(b if (x<2) else a)")
+
   def test_where_cast(self):
     s = Variable("s", 0, 3)
     cond = s < 2
@@ -547,6 +554,23 @@ class TestSymbolic(unittest.TestCase):
     rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[-1]
 
     self.assertEqual(rewritten_uop, cond.where(a.cast(dtypes.half), b.cast(dtypes.half)))
+
+  def test_where_merge_branches(self):
+    cond1 = Variable("s", 0, 10) < 6
+    cond2 = Variable("s", 0, 10) > 2
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    expr = cond1.where(cond2.where(a, b), b)
+    self.helper_test_variable(expr, 0, 3, "(a if ((s<6)&(2<s)) else b)")
+
+  def test_where_merge_branches2(self):
+    cond1 = Variable("s", 0, 10) < 5
+    cond2 = Variable("s", 0, 10) < 6
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    expr = cond1.where(cond2.where(a, b), b)
+    # (a if ((s<5)&(s<6)) else b) -> (a if (s<5) else b)
+    self.helper_test_variable(expr, 0, 3, "(a if (s<5) else b)")
 
   def test_symbolic_div(self):
     # from symbolic arange
