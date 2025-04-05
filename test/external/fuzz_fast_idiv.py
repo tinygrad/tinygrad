@@ -1,7 +1,7 @@
 import random
 from z3 import Int, Solver, sat
 from tinygrad import dtypes
-from tinygrad.ops import UOp, Ops, UPat, GroupOp, graph_rewrite, PatternMatcher
+from tinygrad.ops import UOp, Ops, UPat, graph_rewrite, PatternMatcher
 from tinygrad.codegen.devectorizer import fast_idiv
 random.seed(42)
 
@@ -10,7 +10,7 @@ z3_renderer = PatternMatcher([
   (UPat((Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg[0])),
   # Because fast_idiv only works for non-negative integers we can emulate machine arithmetic with modulo operations.
   (UPat(Ops.SHR, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"(({x.src[0].arg}/(2**{x.src[1].arg}))%{dtypes.max(x.dtype)+1})")),
-  (UPat(GroupOp.Binary, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"(({x.src[0].arg}{syms[x.op]}{x.src[1].arg})%{dtypes.max(x.dtype)+1})")),
+  (UPat(Ops.MUL, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"(({x.src[0].arg}*{x.src[1].arg})%{dtypes.max(x.dtype)+1})")),
   (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: UOp(Ops.NOOP, arg=str(x.arg))),
   (UPat(Ops.CAST, src=UPat(Ops.NOOP), name="x"), lambda x:  UOp(Ops.NOOP, arg=f"{x.src[0].arg}")),
 ])
