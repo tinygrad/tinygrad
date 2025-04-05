@@ -586,6 +586,8 @@ class TestJitPrune(unittest.TestCase):
       out = w2_prune(a)
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
 
+    assert len(w2_prune.captured.jit_cache) == 1, "prune should have removed the copy"
+
 class TestJitFree(unittest.TestCase):
   def test_free_intermediates(self):
     ext_tensor = Tensor([1,24,23,45,1])
