@@ -534,6 +534,13 @@ class TestSymbolic(unittest.TestCase):
     # not combining  # TODO: can combine if one is identity element const
     self.helper_test_variable(aa+ab, 0, 6, "((a if (x<2) else b)+(a if (x<2) else 0))")
 
+  def test_negation_in_where(self):
+    cond = Variable("x", 0, 3) < 2
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    w = cond.logical_not().where(a, b)
+    self.helper_test_variable(w, 0, 3, "(b if (x<2) else a)")
+
   def test_where_cast(self):
     s = Variable("s", 0, 3)
     cond = s < 2
