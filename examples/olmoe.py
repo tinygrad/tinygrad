@@ -22,7 +22,7 @@ class MixtureFeedForward:
     g = g.squeeze() # (BS, length, num_experts) -> (num_experts,)
     probs, sel = g.topk(self.activated_experts)
 
-    with Context(SPLIT_REDUCEOP=0, FUSE_ARANGE=1):
+    with Context(FUSE_ARANGE=1):
       selected_gate_projs = self.gate_proj[sel]
       selected_up_projs = self.up_proj[sel]
       selected_down_projs = self.down_proj[sel]
