@@ -132,7 +132,7 @@ class MultiGraphRunner(GraphRunner): pass
 
 def get_out_buffers_for_ei(ei:ExecItem) -> list[Buffer]:
   if isinstance(ei.prg, CompiledRunner): return [cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins]
-  elif isinstance(ei.prg, (BufferCopy, BufferXfer)): return [cast(Buffer, ei.bufs[0])]
+  if isinstance(ei.prg, (BufferCopy, BufferXfer)): return [cast(Buffer, ei.bufs[0])]
   return []
 
 def update_depends(depends:set[Buffer|None], jit_cache:list[ExecItem]):
