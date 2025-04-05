@@ -555,6 +555,23 @@ class TestSymbolic(unittest.TestCase):
 
     self.assertEqual(rewritten_uop, cond.where(a.cast(dtypes.half), b.cast(dtypes.half)))
 
+  def test_where_merge_branches(self):
+    cond1 = Variable("s", 0, 10) < 6
+    cond2 = Variable("s", 0, 10) > 2
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    expr = cond1.where(cond2.where(a, b), b)
+    self.helper_test_variable(expr, 0, 3, "(a if ((s<6)&(2<s)) else b)")
+
+  def test_where_merge_branches2(self):
+    cond1 = Variable("s", 0, 10) < 5
+    cond2 = Variable("s", 0, 10) < 6
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    expr = cond1.where(cond2.where(a, b), b)
+    # (a if ((s<5)&(s<6)) else b) -> (a if (s<5) else b)
+    self.helper_test_variable(expr, 0, 3, "(a if (s<5) else b)")
+
   def test_symbolic_div(self):
     # from symbolic arange
     a = Variable("a", 1, 10)
