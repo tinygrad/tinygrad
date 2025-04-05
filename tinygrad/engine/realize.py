@@ -82,6 +82,8 @@ class BufferCopy(Runner):
     elif src.device.startswith("DISK") and hasattr(dest.allocator, '_as_buffer'):
       # fast(ish) path, uses readinto in diskbuffers
       src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
+    elif src.device.startswith("IB") and hasattr(dest.allocator, 'as_dmabuf'): src.allocator.dma_copyout(dest.allocator.as_dmabuf(dest._buf))
+    elif dest.device.startswith("IB") and hasattr(src.allocator, 'as_dmabuf'): dest.allocator.dma_copyin(src.allocator.as_dmabuf(src._buf))
     else:
       dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False):
