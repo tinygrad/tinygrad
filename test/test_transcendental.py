@@ -7,7 +7,7 @@ from test.test_dtype_alu import ht, dtypes_float
 from tinygrad.device import is_dtype_supported
 import numpy as np
 import math
-from hypothesis import given, settings, strategies as strat, assume
+from hypothesis import given, settings, strategies as strat
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -20,7 +20,7 @@ class TestTranscendentalMath(unittest.TestCase):
     op_tensor, op_np = data.draw(strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]), label="operation")
 
     if op_tensor == Tensor.sin:
-      # TODO: reduction does not work  # 68802437.46861506  # 536870912.125  # 2914593.01171875  # 134217728.03125  # 230581075.65625  # 139216373.71875
+      # TODO: reduction does not work  # 68802437.46861 # 536870912.125  # 2914593.01171875  # 134217728.03125  # 230581075.65625  # 139216373.71875
       x = data.draw(strat.floats(min_value=-50_000_000, max_value=50_000_000, width=64, allow_subnormal=False))
     else:
       x = data.draw(strat.floats(width=64, allow_subnormal=False))
