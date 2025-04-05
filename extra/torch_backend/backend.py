@@ -520,11 +520,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
     self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype))),
   "aten.random_.from": inplace_fn("self")(lambda self, from_, to:
     self.assign(Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype))),
-  "aten.randperm.generator_out": inplace_fn("out")(lambda n, generator, out: (
-    (_ for _ in ()).throw(NotImplementedError("randperm_generator with a generator is not supported yet in tinygrad"))
-    if generator is not None else
-    (out.assign(Tensor.randperm_generator(n)) if out is not None else Tensor.randperm_generator(n))
-)),
+  "aten.randperm": Tensor.randperm_generator,
   "aten.uniform_": inplace_fn("self")(lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high))),
   "aten.normal_": inplace_fn("self")(lambda self, mean=0, std=1: self.assign(Tensor.normal(*self.shape, mean=mean, std=std))),
   # these don't work in out form, they have size 0
