@@ -348,18 +348,40 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.SHL, ops)
     self.assertIn(Ops.MUL, ops)
 
-  def test_bitshift_right(self):
-    g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
-    c1 = UOp(Ops.CONST, dtypes.uint, (), 2)
-    c2 = UOp(Ops.CONST, dtypes.uint, (), 3)
-    l1 = UOp(Ops.LOAD, dtypes.uint, (g1.index(c1),))
-    a1 = UOp(Ops.IDIV, dtypes.uint, (l1, c1))
-    a2 = UOp(Ops.IDIV, dtypes.uint, (l1, c2))
-    uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
+  def test_division_power_of_two(self):
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c = UOp(Ops.CONST, dtypes.uint, (), 2)
+    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
+    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
-    self.assertIn(Ops.IDIV, ops)
+    self.assertNotIn(Ops.IDIV, ops)
+
+  def test_fast_idiv(self):
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c = UOp(Ops.CONST, dtypes.uint, (), 3)
+    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
+    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHR, ops)
+    self.assertNotIn(Ops.IDIV, ops)
+
+  @unittest.expectedFailure
+  def test_fast_idiv_overflow(self):
+    # This will be possible with a slightly different method for fast_idiv
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c = UOp(Ops.CONST, dtypes.uint, (), 7)
+    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
+    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHR, ops)
+    self.assertNotIn(Ops.IDIV, ops)
 
   def test_mulacc_unrolled(self):
     # test that     acc = acc + a0*b0 + a1*b1 + a2*b2 + a3*b3
