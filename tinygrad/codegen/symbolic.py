@@ -231,6 +231,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
@@ -365,7 +366,7 @@ def threefry2x32(x: UOp, key: UOp):
 
 # ******** phase 3 is the complete symbolic, and deals with very complex things like loop rewriting and threefry transform ********
 
-def loop_collapse(compval, multconst, rng:UOp, acc:UOp, extra:UOp, idx2=None,idx3=None,vec=None,ne=None,
+def loop_collapse(compval, multconst, rng:UOp, acc:UOp, extra:UOp, idx2=None,idx3=None,vec=None,
                   add=UOp.const(dtypes.int, 0), mul:UOp=UOp.const(dtypes.int, 1)):
   if getenv("DISABLE_LOOP_COLLAPSE") or rng not in acc.src: return None  # must be the right REDUCE
   if acc not in split_uop(extra, Ops.ADD): return None
@@ -382,10 +383,8 @@ def loop_collapse(compval, multconst, rng:UOp, acc:UOp, extra:UOp, idx2=None,idx
       if x.op is Ops.CONST: return UOp.const(x.dtype.vec(vec.dtype.count), x.arg)
       return UOp(Ops.VECTORIZE, x.dtype.vec(vec.dtype.count), src=(x,)*vec.dtype.count)
     add, mul, loop_start, loop_end = dvec(add), dvec(mul), dvec(loop_start), dvec(loop_end)
-  if mul.vmin > 0 and ne is not None:
+  if mul.vmin > 0:
     comprange = UOp.minimum(loop_end, UOp.maximum((add-compval+(loop_end-loop_start)*mul)//mul, loop_start))
-  elif mul.vmax < 0 and ne is None:
-    comprange = UOp.minimum(loop_end, UOp.maximum((add-compval-mul+(loop_end-loop_start)*mul)//mul, loop_start))
   else:
     return None
   new_reduce_op = comprange.cast(multconst.dtype) * multconst
@@ -416,7 +415,7 @@ rng_aug = UPat.any(rng_pat, UPat.var("add")+rng_pat, UPat.var("mul")*rng_pat, UP
 index_load = UPat.var("buf").index(rng_aug).load(name="ld")
 
 arange_augrng = UPat.any(rng_aug, rng_aug+UPat.var("idx2"), rng_aug+UPat.var("idx2")+UPat.var("idx3"), UPat(Ops.VECTORIZE, name="vec", src=rng_aug))
-arange_m = ((arange_augrng<UPat.cvar("compval"))!=UPat(Ops.CONST, name="ne", arg=True)).where(UPat.cvar("multconst"), UPat.const(None, 0))
+arange_m = (arange_augrng<UPat.cvar("compval")).where(UPat.const(None, 0), UPat.cvar("multconst"))
 
 # this is symbolic 2.0
 sym = symbolic_flat+PatternMatcher([
@@ -451,7 +450,7 @@ sym = symbolic_flat+PatternMatcher([
   (acc_pat.assign(arange_m+UPat.var("extra")), loop_collapse),
   # indexing, with cast or where
   (acc_pat.assign(UPat.var("idx").eq(UPat(Ops.RANGE, name="rng")).cast()*index_load+acc_pat), index_collapse),
-  (acc_pat.assign(UPat.var("idx").eq(UPat(Ops.RANGE, name="rng")).where(index_load, UPat.const(None, 0.0))+acc_pat), index_collapse),
+  (acc_pat.assign((UPat.var("idx")!=UPat(Ops.RANGE, name="rng")).where(UPat.const(None, 0.0), index_load)+acc_pat), index_collapse),
   # parentless reduce  # TODO: add MUL
   (acc_pat.assign(UPat((Ops.ADD, Ops.MAX), src=[acc_pat, UPat.var("ret")], name="alu")), reduce_collapse),
   # ** self folding **
@@ -462,6 +461,8 @@ sym = symbolic_flat+PatternMatcher([
   # ** where **
   # push cast to branches
   (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"), lambda s,a,b,cast: s.where(a.cast(cast.dtype), b.cast(cast.dtype))),
+  # a.where(b.where(c, d), d) -> (a & b).where(c, d)
+  (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
   # ** pow **
   ((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src))),
   # ** load/store folding **
