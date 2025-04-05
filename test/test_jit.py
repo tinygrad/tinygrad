@@ -585,7 +585,19 @@ class TestJitFree(unittest.TestCase):
     savings_after_free = pre_free - GlobalCounters.mem_used
 
     # Different allocator implementations have different savings.
-    self.assertEqual(savings_after_free, 8196 if hasattr(Device[Device.DEFAULT].allocator, '_offset') else 2024)
+    expected_savings = 8196 if hasattr(Device[Device.DEFAULT].allocator, '_offset') else 2024
+
+    self.assertEqual(savings_after_free, expected_savings)
+    out = fxn(Tensor([11,1,2,3,4]))
+    self.assertEqual(out.item(), 13600)
+
+    # Try one more time...
+    pre_free = GlobalCounters.mem_used
+    fxn.captured.free_intermediates()
+    fxn.captured.free_intermediates() # 2nd time to validate
+    savings_after_free = pre_free - GlobalCounters.mem_used
+
+    self.assertEqual(savings_after_free, expected_savings)
     out = fxn(Tensor([11,1,2,3,4]))
     self.assertEqual(out.item(), 13600)
 
@@ -605,8 +617,8 @@ class TestJitFree(unittest.TestCase):
     fxn(Tensor([2]))
     self.assertEqual(x.item(), 8)
 
-  def test_optimize_weights(self):
-    if not hasattr(Device[Device.DEFAULT].allocator, '_offset'): raise unittest.SkipTest("optimize_weights useless")
+  def test_replan_buffers_memory_layout(self):
+    if not hasattr(Device[Device.DEFAULT].allocator, '_offset'): raise unittest.SkipTest("replan_buffers_memory_layout useless")
 
     ext_tensor = Tensor([1,24,23,45,1])
     ext_tensor_2 = Tensor([2,2,2,2,2])
@@ -618,7 +630,7 @@ class TestJitFree(unittest.TestCase):
       out = fxn(Tensor([i,1,2,3,4]))
       self.assertEqual(out.item(), 11400+200*i)
     assert len(set([b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None])) == 4
-    fxn.captured.optimize_weights()
+    fxn.captured.replan_buffers_memory_layout()
     assert len(set([b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None])) == 2
 
     out = fxn(Tensor([11,1,2,3,4]))

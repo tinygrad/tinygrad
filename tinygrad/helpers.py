@@ -43,6 +43,9 @@ def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def ceildiv(num, amt): return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
+# cstyle div and mod
+def cdiv(x:int, y:int) -> int: return abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else 0
+def cmod(x:int, y:int) -> int: return x-cdiv(x,y)*y
 def lo32(x:Any) -> Any: return x & 0xFFFFFFFF # Any is sint
 def hi32(x:Any) -> Any: return x >> 32 # Any is sint
 def data64(data:Any) -> tuple[Any, Any]: return (data >> 32, data & 0xFFFFFFFF) # Any is sint
@@ -75,9 +78,9 @@ def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 # for length N coefficients `p`, returns p[0] * x**(N-1) + p[1] * x**(N-2) + ... + p[-2] * x + p[-1]
 def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str, append_user:bool=False) -> str:
   return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{getpass.getuser()}" if append_user else x)).as_posix()
@@ -292,7 +295,7 @@ def to_mv(ptr:int, sz:int) -> memoryview: return memoryview(ctypes.cast(ptr, cty
 def mv_address(mv): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
 def to_char_p_p(options: list[bytes], to_type=ctypes.c_char):
   return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def init_c_struct_t(fields: tuple[tuple[str, ctypes._SimpleCData], ...]):
   class CStruct(ctypes.Structure):
     _pack_, _fields_ = 1, fields

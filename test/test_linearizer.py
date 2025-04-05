@@ -25,8 +25,8 @@ def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer
   bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
   return s[-1].ast, bufs
 
-def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0):
-  a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
+def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0):
+  a, b = Tensor.rand(M, K, dtype=dtype_in), Tensor.rand(K, N, dtype=dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, dtype=dtype_out)
   sched = r.schedule()
@@ -44,9 +44,9 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
   else: tc_atol, tc_rtol = 5e-3, 1e-4
   np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
-def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
+def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
                                          ensure_triggered:bool=True):
-  a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
+  a, b = Tensor.rand(M, K, dtype=dtype_in), Tensor.rand(K, N, dtype=dtype_in)
   r = a.matmul(b, dtype=dtype_out)
   sched = r.schedule()
   realized_ast = sched[-1].ast
@@ -1059,16 +1059,36 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL") or getenv("EMULATE_METAL")) and \
+      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL") or getenv("EMULATE_METAL") or getenv("EMULATE_AMD_MFMA")) and \
         (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       if CI and Device.DEFAULT == "METAL" and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
       helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_codegen(self):
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
+      n, m, k = tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2]
+      a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
+      r = a.matmul(b, dtype=tc.dtype_out)
+      sched = r.schedule()
+      realized_ast = sched[-1].ast
+      kernel = Kernel(realized_ast)
+      kernel.apply_tensor_cores(1, axis=0, tc_select=-1, tc_opt=2)
+      kernel.linearize()
+      prg = kernel.to_program()
+      if Device.DEFAULT == "LLVM":
+        assert "0x201000" in prg.src
+      elif Device.DEFAULT == "AMD" and getenv("AMD_LLVM", 0):
+        assert "@llvm.amdgcn.wmma" in prg.src
+      else:
+        assert "__WMMA_" in prg.src
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if (getenv("EMULATE_CUDA") or getenv("EMULATE_METAL")) and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if (getenv("EMULATE_CUDA") or getenv("EMULATE_METAL") or getenv("EMULATE_AMD_MFMA")) and \
+        (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       if CI and Device.DEFAULT == "METAL" and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       pad = 1
 
@@ -1805,8 +1825,9 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> list[Kernel]:
   lins: list[Kernel] = []
   outbufs = [real_bufs[x.src[0].arg] for x in realized_ast.src]
+  device = real_bufs[0].device
 
-  def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
+  def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), device=device))
 
   def check_opt(opts, create_k, expected_color_size):
     k = create_k()
