@@ -270,13 +270,18 @@ pm_render = PatternMatcher([
     lambda store,idx: UOp(Ops.STORE, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
 ])
 
-def split_cat(sink, store, loop_store, load1, load2, lt, idx_l1, idx_s, vconst, rng, add_lr_vc, mul, rng2, mul2, loop_read, rng_r, rng2_r, mul_r, mul2_r, vc, l1_vg, vdg, idx_l2, l2_vg, vc2):
+def split_cat(sink, store, loop_store, load1, load2, lt, idx_l1, idx_s, vconst, rng, add_lr_vc, mul, rng2,
+              mul2, loop_read, rng_r, rng2_r, mul_r, mul2_r, vc, l1_vg, vdg, idx_l2, l2_vg, vc2):
   if rng2.arg < rng.arg: return None
   split_rng2 = lt.arg == rng2.src[1].arg//2
-  max = rng2.src[1] if split_rng2 else rng.src[1]
-  if lt.arg != max.arg//2: return None
-  if split_rng2: rng2 = rng2.replace(src=(rng2.src[0], lt)); rng2_r = rng2_r.replace(src=(rng2_r.src[0], lt))
-  else: rng = rng.replace(src=(rng.src[0], lt)); rng_r = rng_r.replace(src=(rng_r.src[0], lt))
+  full = rng2.src[1] if split_rng2 else rng.src[1]
+  if lt.arg != full.arg//2: return None
+  if split_rng2:
+    rng2 = rng2.replace(src=(rng2.src[0], lt))
+    rng2_r = rng2_r.replace(src=(rng2_r.src[0], lt))
+  else:
+    rng = rng.replace(src=(rng.src[0], lt))
+    rng_r = rng_r.replace(src=(rng_r.src[0], lt))
 
   # store1
   loop_store = loop_store.replace(src=tuple(rng*mul+rng2*mul2 for _ in range(loop_store.dtype.count)))
@@ -288,7 +293,7 @@ def split_cat(sink, store, loop_store, load1, load2, lt, idx_l1, idx_s, vconst, 
   store = store.replace(src=(idx_s, load1))
 
   # store2
-  rng_new = UOp.range(dtype=dtypes.int, idx=10001 if split_rng2 else 10000, start=lt.arg, end=max.arg)
+  rng_new = UOp.range(dtype=dtypes.int, idx=10001 if split_rng2 else 10000, start=lt.arg, end=full.arg)
   if split_rng2:
     loop_store2 = loop_store.replace(src=tuple(rng.replace(arg=10000)*mul+rng_new*mul2 for _ in range(loop_store.dtype.count)))
     loop_read2 = loop_read.replace(src=tuple(rng_r.replace(arg=10000)*mul_r+rng_new*mul2_r for _ in range(loop_read.dtype.count)))
