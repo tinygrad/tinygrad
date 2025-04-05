@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
 from tinygrad.ops import sint
 from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
+from tinygrad.runtime.ops_ib import IBDevice, DMABuf
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, all_same, flatten, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
@@ -452,6 +453,10 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
     self.dev.synchronize()
     self.dev.dev_iface.free(opaque)
 
+  def as_dmabuf(self, buf) -> DMABuf:
+    assert isinstance(self.dev.dev_iface, KFDIface)
+    return DMABuf(buf.va_addr, buf.size, (buf._base or buf).va_addr, (buf._base or buf).size, self.dev.dev_iface.as_dmafd(buf))
+
   def map(self, buf:HCQBuffer): self.dev.dev_iface.map(buf._base if buf._base is not None else buf)
 
 MAP_FIXED, MAP_NORESERVE, MAP_LOCKED = 0x10, 0x400, 0 if OSX else 0x2000
@@ -518,6 +523,7 @@ class KFDIface:
 
   def __init__(self, dev, device_id):
     self.dev = dev
+    self.dmafds = {}
 
     kfd_topo_path = "/sys/devices/virtual/kfd/kfd/topology/nodes"
 
@@ -588,12 +594,20 @@ class KFDIface:
     return hcqbuf
 
   def free(self, mem):
+    if mem.meta.handle in self.dmafds:
+      IBDevice.dereg_all(mem.va_addr)
+      os.close(self.dmafds[mem.meta.handle])
+      del self.dmafds[mem.meta.handle]
     if len(gpus:=getattr(mem.meta, "mapped_gpu_ids", [])):
       c_gpus = (ctypes.c_int32 * len(gpus))(*gpus)
       stm = kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(gpus))
       assert stm.n_success == len(gpus)
     if mem.va_addr: HWInterface.munmap(mem.va_addr, mem.size)
     kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
+
+  def as_dmafd(self, mem):
+    self.dmafds[mem.meta.handle] = fd = kfd.AMDKFD_IOC_EXPORT_DMABUF(KFDIface.kfd, handle=mem.meta.handle, flags=0).dmabuf_fd
+    return fd
 
   def map(self, mem):
     if self.gpu_id in getattr(mem.meta, "mapped_gpu_ids", []): return

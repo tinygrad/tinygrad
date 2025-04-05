@@ -225,6 +225,9 @@ class _MallocAllocator(LRUAllocator):
     # TODO: investigate if this is the cause of nondeterminism in speed
     alignment = 0x1000 if size >= 0x1000 else 0x20
     return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else self._alloc_aligned(size, alignment)
+  def _free(self, opaque, options:BufferSpec):
+    from tinygrad.runtime.ops_ib import IBDevice
+    IBDevice.dereg_all(ctypes.addressof(opaque))
   def _alloc_aligned(self, size:int, alignment:int):
     buffer = (ctypes.c_uint8 * (size + alignment))()
     offset = round_up(ctypes.addressof(buffer), alignment) - ctypes.addressof(buffer)
@@ -233,6 +236,9 @@ class _MallocAllocator(LRUAllocator):
   def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
   def _offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
+  def as_dmabuf(self, buf):
+    from tinygrad.runtime.ops_ib import DMABuf
+    return DMABuf(ctypes.addressof(buf), ctypes.sizeof(buf), ctypes.addressof(buf), ctypes.sizeof(buf), None)
 
 MallocAllocator = _MallocAllocator()
 
