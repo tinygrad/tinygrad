@@ -5,7 +5,6 @@ from tinygrad.ops import UOp, Ops, UPat, graph_rewrite, PatternMatcher
 from tinygrad.codegen.devectorizer import fast_idiv
 random.seed(42)
 
-syms = { Ops.MUL: "*"}
 z3_renderer = PatternMatcher([
   (UPat((Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg[0])),
   # Because fast_idiv only works for non-negative integers we can emulate machine arithmetic with modulo operations.
