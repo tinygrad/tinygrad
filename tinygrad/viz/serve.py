@@ -32,7 +32,7 @@ class GraphRewriteMetadata(TypedDict):
   kernel_code: str|None                  # optionally render the final kernel code
   name: str|None                         # optional name of the rewrite
 
-@functools.lru_cache(None)
+@functools.cache
 def render_program(k:Kernel): return k.opts.render(k.uops)
 def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
   return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
@@ -123,7 +123,7 @@ class Handler(BaseHTTPRequestHandler):
       with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
     elif (url:=urlparse(self.path)).path == "/profiler":
       with open(os.path.join(os.path.dirname(__file__), "perfetto.html"), "rb") as f: ret = f.read()
-    elif self.path.startswith(("/assets/", "/lib/")) and '/..' not in self.path:
+    elif self.path.startswith(("/assets/", "/js/")) and '/..' not in self.path:
       try:
         with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
         if url.path.endswith(".js"): content_type = "application/javascript"
