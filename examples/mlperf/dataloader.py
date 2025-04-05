@@ -78,23 +78,23 @@ def loader_process(q_in, q_out, X:Tensor, seed):
       q_out.put(idx)
     q_out.put(None)
 
-def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_first_batch=False):
+def batch_load_resnet(batch_size=64, nodes=1, node=0, val=False, shuffle=True, seed=None, pad_first_batch=False):
   from extra.datasets.imagenet import get_train_files, get_val_files
   files = get_val_files() if val else get_train_files()
   from extra.datasets.imagenet import get_imagenet_categories
   cir = get_imagenet_categories()
 
   if pad_first_batch:
-    FIRST_BATCH_PAD = round_up(len(files), batch_size) - len(files)
+    FIRST_BATCH_PAD = round_up(len(files), batch_size*nodes) - len(files)
   else:
     FIRST_BATCH_PAD = 0
   file_count = FIRST_BATCH_PAD + len(files)
-  BATCH_COUNT = min(32, file_count // batch_size)
+  BATCH_COUNT = min(32, file_count // batch_size // nodes)
 
   def _gen():
     for _ in range(FIRST_BATCH_PAD): yield -1
     yield from shuffled_indices(len(files), seed=seed) if shuffle else iter(range(len(files)))
-  gen = iter(_gen())
+  gen = (x for i,x in enumerate(_gen()) if i%nodes==node)
 
   def enqueue_batch(num):
     for idx in range(num*batch_size, (num+1)*batch_size):
@@ -148,7 +148,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_fir
     for bn in range(BATCH_COUNT): enqueue_batch(bn)
 
     # NOTE: this is batch aligned, last ones are ignored unless pad_first_batch is True
-    for _ in range(0, file_count//batch_size): yield receive_batch()
+    for _ in range(0, file_count//batch_size//nodes): yield receive_batch()
   finally:
     shutdown = True
     # empty queues
