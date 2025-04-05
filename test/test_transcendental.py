@@ -7,7 +7,7 @@ from test.test_dtype_alu import ht, dtypes_float
 from tinygrad.device import is_dtype_supported
 import numpy as np
 import math
-from hypothesis import given, settings, strategies as strat
+from hypothesis import given, settings, strategies as strat, assume
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -19,7 +19,7 @@ class TestTranscendentalMath(unittest.TestCase):
   def test_float64(self, x, op):
     if op[0] == Tensor.sin:
       # TODO: reduction does not work  # 536870912.125  # 2914593.01171875  # 134217728.03125  # 230581075.65625  # 139216373.71875
-      if abs(x) > 100_000_000: return
+      assume(abs(x) <= 100_000_000)
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
       np.testing.assert_allclose(op[0](Tensor([x], dtype=dtypes.float64)).numpy(),
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float64))),

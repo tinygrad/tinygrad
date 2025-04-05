@@ -91,12 +91,12 @@ class Context(contextlib.ContextDecorator):
     self.old_context:dict[str, int] = {k:v.value for k,v in ContextVar._cache.items()}
     for k,v in self.kwargs.items():
       ContextVar._cache[k].value = v
-      if ContextVar._cache[k].callback is not None: ContextVar._cache[k].callback(v)
+      if (fn := ContextVar._cache[k].callback): fn(v)
 
   def __exit__(self, *args):
     for k,v in self.old_context.items():
       ContextVar._cache[k].value = v
-      if ContextVar._cache[k].callback is not None: ContextVar._cache[k].callback(v)
+      if (fn := ContextVar._cache[k].callback): fn(v)
 
 class ContextVar:
   _cache: ClassVar[dict[str, ContextVar]] = {}
@@ -111,7 +111,7 @@ class ContextVar:
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
-  def add_callback(self, fn):
+  def add_callback(self, fn: Callable):
     self.callback = fn
     self.callback(self.value)
 
