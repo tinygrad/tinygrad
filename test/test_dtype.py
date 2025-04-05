@@ -275,7 +275,7 @@ class TestBitCast(unittest.TestCase):
 
     with self.assertRaises(RuntimeError):
       # should fail because backprop through bitcast is undefined
-      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True).bitcast(dtypes.float16)
+      Tensor.empty((4,), dtype=dtypes.float16, requires_grad=True).bitcast(dtypes.int16)
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
