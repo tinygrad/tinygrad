@@ -3,11 +3,12 @@ from pathlib import Path
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW
+from tinygrad.helpers import getenv, unwrap, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
 
 from extra.lr_scheduler import LRSchedulerGroup
+from extra.distributed import DistributedDataParallel
 from examples.mlperf.helpers import get_training_state, load_training_state
 # TODO: fix benchmark logging and use tinygrad tqdm
 from tqdm import tqdm
@@ -73,8 +74,9 @@ def train_resnet():
 
   # ** hyperparameters **
   epochs            = config["epochs"]            = getenv("EPOCHS", 37)
-  BS                = config["BS"]                = getenv("BS", 104 * len(GPUS))  # fp32 GPUS<=6 7900xtx can fit BS=112
-  EVAL_BS           = config["EVAL_BS"]           = getenv("EVAL_BS", BS)
+  NODES             = config["nodes"]             = getenv("NODES", 2)
+  BS                = config["BS"]                = getenv("BS", 104 * len(GPUS) * NODES)  # fp32 GPUS<=6 7900xtx can fit BS=112
+  EVAL_BS           = config["EVAL_BS"]           = getenv("EVAL_BS", BS // NODES)
   base_lr           = config["base_lr"]           = getenv("LR", 7.2 * (BS/1536))
   lr_warmup_epochs  = config["lr_warmup_epochs"]  = getenv("WARMUP_EPOCHS", 2)
   decay             = config["decay"]             = getenv("DECAY", 2e-4)
@@ -96,6 +98,9 @@ def train_resnet():
   config["SYNCBN"]        = getenv("SYNCBN")
 
   # ** Optimizer **
+  ibs = ['IB:0/192.168.200.30', 'IB:0/192.168.200.31']
+  idx = int(unwrap(os.getenv('IDX')))
+  ddp = DistributedDataParallel(model, ibs[1-idx], bool(idx))
   skip_list = [v for k, v in get_state_dict(model).items() if "bn" in k or "bias" in k or "downsample.1" in k]
   parameters = [x for x in parameters if x not in set(skip_list)]
   optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay)
@@ -110,7 +115,7 @@ def train_resnet():
                                              train_steps=epochs * steps_in_train_epoch,
                                              warmup=lr_warmup_epochs * steps_in_train_epoch)
   scheduler_group = LRSchedulerGroup(scheduler, scheduler_skip)
-  print(f"training with batch size {BS} for {epochs} epochs")
+  print(f"training with batch size {BS} ({BS//NODES} per node) for {epochs} epochs")
 
   # log mlperf hparams
   if MLLOGGER:
@@ -164,6 +169,7 @@ def train_resnet():
     top_1 = (out.argmax(-1) == Y).sum()
     (loss * loss_scaler).backward()
     for t in optimizer_group.params: t.grad = t.grad.contiguous() / loss_scaler
+    ddp.sync()
     optimizer_group.step()
     scheduler_group.step()
     return loss.realize(), top_1.realize()
@@ -195,9 +201,9 @@ def train_resnet():
     BEAM.value = TRAIN_BEAM
 
     if INITMLPERF:
-      i, proc = 0, fake_data_get(BS)
+      i, proc = 0, fake_data_get(BS//NODES)
     else:
-      batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e, pad_first_batch=True)
+      batch_loader = batch_load_resnet(batch_size=BS//NODES, nodes=NODES, node=idx, val=False, shuffle=True, seed=seed*epochs + e, pad_first_batch=True)
       it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
       i, proc = 0, data_get(it)
 
