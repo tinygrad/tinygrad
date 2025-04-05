@@ -1,9 +1,9 @@
 # the job of the lowerer is to do indexing
-import functools, itertools, operator, math
+import itertools, operator, math
 from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, least_upper_dtype
-from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop
+from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, sint_to_uop
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten, unwrap, QUANTIZE
 from tinygrad.codegen.expander import expand_rewrite
@@ -116,17 +116,10 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
   alu_op: Ops = x.arg[0]
   ret = x.src[0]
-  # create acc
-  acc = UOp(Ops.DEFINE_ACC, x.dtype, (x.const_like(identity_element(alu_op, x.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
-  ctx.acc_num += 1
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
     ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
-    ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [acc]+[ret.gep(i) for i in range(ret.dtype.count)])
-  else:
-    ret = acc.alu(alu_op, ret)
-  if not len(reduce_range): return ret
-  # create ACC and assign
-  return acc.assign(ret)
+  # REDUCE supports both "horizonal" reduction and range reduction. the horizonal elements are taken in the nearest group
+  return UOp(Ops.REDUCE, x.dtype, (ret,)+tuple(reduce_range), alu_op)
 
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
@@ -135,8 +128,8 @@ def lower_load_store(ctx: IndexContext, x: UOp):
     barrier = (UOp(Ops.BARRIER, dtypes.void, (x.src[2],)),) if x.src[0].op is Ops.DEFINE_LOCAL else ()
     return UOp(Ops.LOAD, x.dtype, (buf.index(idx, valid),) + barrier)
   # NOTE: only store the local reduceop in the threads that are actually doing the reduce
-  if cast(PtrDType, x.src[0].dtype).local and x.src[2].op is Ops.ASSIGN:
-    reduce_input = x.src[2].src[1].src[1] if x.src[2].src[1].src[1] is not x.src[2].src[0] else x.src[2].src[1].src[0]
+  if cast(PtrDType, x.src[0].dtype).local and x.src[2].op is Ops.REDUCE:
+    reduce_input = x.src[2].src[0]
     store_back = reduce_input.op is Ops.LOAD and cast(PtrDType, reduce_input.src[0].dtype).local
   else: store_back = False
   # NOTE: If we're storing the reduced value back into each thread, need to zero-out the reduced axes
