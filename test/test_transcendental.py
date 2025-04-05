@@ -15,40 +15,36 @@ settings.load_profile("my_profile")
 class TestTranscendentalMath(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT), f"no float64 on {Device.DEFAULT}")
   @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}, "crashed")
-  @given(strat.data())
-  def test_float64(self, data):
-    op_tensor, op_np = data.draw(strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]), label="operation")
-
-    if op_tensor == Tensor.sin:
-      # TODO: reduction does not work  # 68802437.46861 # 536870912.125  # 2914593.01171875  # 134217728.03125  # 230581075.65625  # 139216373.71875
-      x = data.draw(strat.floats(min_value=-50_000_000, max_value=50_000_000, width=64, allow_subnormal=False))
-    else:
-      x = data.draw(strat.floats(width=64, allow_subnormal=False))
+  @given(ht.float64, strat.sampled_from([("exp", Tensor.exp, np.exp), ("log", Tensor.log, np.log), ("sin", Tensor.sin, np.sin)]))
+  def test_float64(self, x, op):
+    if op[0] == "sin":
+      # TODO: reduction does not work  # 536870912.125  # 2914593.01171875  # 134217728.03125  # 230581075.65625  # 139216373.71875
+      if abs(x) > 100_000_000: return
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
-      np.testing.assert_allclose(op_tensor(Tensor([x], dtype=dtypes.float64)).numpy(),
-                                 op_np(np.array([x], dtype=_to_np_dtype(dtypes.float64))),
+      np.testing.assert_allclose(op[1](Tensor([x], dtype=dtypes.float64)).numpy(),
+                                 op[2](np.array([x], dtype=_to_np_dtype(dtypes.float64))),
                                  atol=3e-2, rtol=1e-5)  # sin can have bigger atol for very big x
 
   @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}, "crashed")
-  @given(ht.float32, strat.sampled_from([(Tensor.exp, np.exp),(Tensor.log, np.log)] +
-    ([(Tensor.sin, np.sin)] if is_dtype_supported(dtypes.ulong) else [])))
+  @given(ht.float32, strat.sampled_from([("exp", Tensor.exp, np.exp),("log", Tensor.log, np.log)] +
+    ([("sin", Tensor.sin, np.sin)] if is_dtype_supported(dtypes.ulong) else [])))
   def test_float32(self, x, op):
     # wrong nan behavior on Vulkan
-    if (math.isnan(x) or (x < 0 and op[0] == Tensor.log)) and CI and Device.DEFAULT == "WEBGPU" and not OSX: return
+    if (math.isnan(x) or (x < 0 and op[0] == "log")) and CI and Device.DEFAULT == "WEBGPU" and not OSX: return
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
-      np.testing.assert_allclose(op[0](Tensor([x], dtype=dtypes.float32)).numpy(),
-                                 op[1](np.array([x], dtype=_to_np_dtype(dtypes.float32))),
+      np.testing.assert_allclose(op[1](Tensor([x], dtype=dtypes.float32)).numpy(),
+                                 op[2](np.array([x], dtype=_to_np_dtype(dtypes.float32))),
                                  atol=2e-5, rtol=1e-5)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
-  @given(ht.float16, strat.sampled_from([(Tensor.exp, np.exp),(Tensor.log, np.log)] +
-    ([(Tensor.sin, np.sin)] if is_dtype_supported(dtypes.ulong) else [])))
+  @given(ht.float16, strat.sampled_from([("exp", Tensor.exp, np.exp),("log", Tensor.log, np.log)] +
+    ([("sin", Tensor.sin, np.sin)] if is_dtype_supported(dtypes.ulong) else [])))
   def test_float16(self, x, op):
     # wrong nan behavior on Vulkan
-    if (math.isnan(x) or (x < 0 and op[0] == Tensor.log)) and CI and Device.DEFAULT == "WEBGPU" and not OSX: return
+    if (math.isnan(x) or (x < 0 and op[0] == "log")) and CI and Device.DEFAULT == "WEBGPU" and not OSX: return
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
-      np.testing.assert_allclose(op[0](Tensor([x], dtype=dtypes.float16)).numpy(),
-                                 op[1](np.array([x], dtype=_to_np_dtype(dtypes.float16))),
+      np.testing.assert_allclose(op[1](Tensor([x], dtype=dtypes.float16)).numpy(),
+                                 op[2](np.array([x], dtype=_to_np_dtype(dtypes.float16))),
                                  atol=1e-2, rtol=5e-3)  # exp can have bigger rtol
 
   @given(strat.sampled_from([(dtypes.float64, 709.5), (dtypes.float32, 88.7), (dtypes.float16, 11)]))
