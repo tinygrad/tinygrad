@@ -1,18 +1,11 @@
 from typing import Optional, Any, Callable, cast
 import functools, operator, itertools
 from collections import defaultdict
-<<<<<<< HEAD
+from dataclasses import dataclass
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice
-from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
-from tinygrad.ops import graph_rewrite, GroupOp
-from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
-=======
-from dataclasses import dataclass
-from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve, graph_rewrite, GroupOp, identity_element
 from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat, gep_pushing
->>>>>>> master
 from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
