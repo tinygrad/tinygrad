@@ -130,13 +130,14 @@ class GraphRunner(Runner):
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner): pass
 
+def get_out_buffers_for_ei(ei:ExecItem) -> list[Buffer]:
+  if isinstance(ei.prg, CompiledRunner): return [cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins]
+  if isinstance(ei.prg, (BufferCopy, BufferXfer)): return [cast(Buffer, ei.bufs[0])]
+  return []
+
 def update_depends(depends:set[Buffer|None], jit_cache:list[ExecItem]):
   for ei in jit_cache:
-    if any(b in depends for b in ei.bufs):
-      if isinstance(ei.prg, CompiledRunner):
-        depends.update(cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins)
-      if isinstance(ei.prg, (BufferCopy, BufferXfer)):
-        depends.add(cast(Buffer, ei.bufs[0]))
+    if any(b in depends for b in ei.bufs): depends.update(get_out_buffers_for_ei(ei))
 
 ReturnType = TypeVar('ReturnType')
 @dataclass
@@ -294,8 +295,7 @@ class TinyJit(Generic[ReturnType]):
       if self.prune:
         depends = set(input_buffers)
         update_depends(depends, jit_cache)
-        pruned, onetime = partition(jit_cache,
-                                    lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
+        pruned, onetime = partition(jit_cache, lambda ei: any(b in depends for b in get_out_buffers_for_ei(ei)))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
         # run the onetime kernels here
         for ei in onetime:
