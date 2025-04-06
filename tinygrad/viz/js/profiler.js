@@ -80,7 +80,7 @@ async function main() {
   const tbody = createChild("tbody", table);
   replaceRows(tbody, data);
   render.call(d3.brush().extent([[0, 0], [width+PADDING, height+PADDING]]).on("end", (e) => {
-    if (!e.selection) return;
+    if (!e.selection) return replaceRows(tbody, data);
     const [[x0, y0], [x1, y1]] = e.selection;
     const newData = data.filter(d => (d.x+d.width)>=x0 && d.x<=x1 && (d.y+d.height)>=y0 && d.y<=y1);
     replaceRows(tbody, newData);
