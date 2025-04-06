@@ -77,10 +77,10 @@ class TestVectorizedTranscendetalFunctions(unittest.TestCase):
     if isinstance(u, UOp): assert u.dtype.vcount == vcount, f'expected {vcount=} but got {u.dtype.vcount=} for UOp {u=}'
     [self._check_all_uops_vectorized(x, vcount) for x in (u if isinstance(u, tuple) else u.src)]
 
-  def _get_inputs(self) -> tuple[UOp, DType]:
+  def _get_inputs(self, mode:str='floats') -> tuple[UOp, DType]:
     for val in [-2,1.3,194]:
       for vcount in [1,2,4,19]:
-        for _dtype in TRANSCENDENTAL_SUPPORTED_DTYPES:
+        for _dtype in TRANSCENDENTAL_SUPPORTED_DTYPES if mode == 'floats' else (dtypes.int64, dtypes.int32, dtypes.int16):
           dtype: DType = _dtype.vec(vcount)
           d = UOp.const(dtype, val)
           yield d, dtype
