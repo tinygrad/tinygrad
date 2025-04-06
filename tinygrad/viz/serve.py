@@ -119,10 +119,8 @@ class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
 
-    if (url:=urlparse(self.path)).path == "/":
-      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
-    elif (url:=urlparse(self.path)).path == "/profiler":
-      with open(os.path.join(os.path.dirname(__file__), "perfetto.html"), "rb") as f: ret = f.read()
+    if (fn:={"/":"index", "/profiler":"perfetto"}.get((url:=urlparse(self.path)).path)):
+      with open(os.path.join(os.path.dirname(__file__), f"{fn}.html"), "rb") as f: ret = f.read()
     elif self.path.startswith(("/assets/", "/js/")) and '/..' not in self.path:
       try:
         with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
@@ -131,8 +129,7 @@ class Handler(BaseHTTPRequestHandler):
       except FileNotFoundError: status_code = 404
     elif url.path == "/kernels":
       if "kernel" in (query:=parse_qs(url.query)):
-        def getarg(k:str,default=0): return int(query[k][0]) if k in query else default
-        kidx, ridx = getarg("kernel"), getarg("idx")
+        kidx, ridx = int(query["kernel"][0]), int(query["idx"][0])
         try:
           # stream details
           self.send_response(200)
