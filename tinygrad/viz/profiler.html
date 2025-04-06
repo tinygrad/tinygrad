@@ -27,6 +27,28 @@
     overflow: hidden;
     background-color: #08090e;
   }
+  th.sorted-asc::after { content: " ↑"; }
+  th.sorted-desc::after { content: " ↓"; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    height: 100%;
+  }
+  th, td {
+    padding: 4px;
+    text-align: left;
+  }
+  thead, tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  tbody {
+    display: block;
+    height: 100%;
+    overflow-y: auto;
+  }
   </style>
 </head>
 <body>

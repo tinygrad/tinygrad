@@ -23,10 +23,11 @@ async function main() {
   // render
   const HEIGHT = 16; // TODO: make this meaningful
   const PADDING = 20;
+  const PADDING_SM = 4;
   const TICK_SIZE = 6;
-  const root = document.querySelector("body").appendChild(document.createElement("div"));
+  const root = createChild("div", document.querySelector("body"));
   root.style = `display:flex; width:100%; height: 100%; padding: ${PADDING}px;`
-  const list = root.appendChild(document.createElement("div"));
+  const list = createChild("div", root);
   list.style = `margin-top: ${PADDING+TICK_SIZE}px;`
   const data = [];
   const nameColors = {};
@@ -34,42 +35,77 @@ async function main() {
   let minTimestamp = null;
   for (const [pid, threads] of Object.entries(profiles)) {
     if (Object.values(threads).every((t) => t.length === 0)) continue;
-    const proc = list.appendChild(document.createElement("div"));
+    const proc = createChild("div", list);
     const procName = proc.appendChild(document.createElement("p"));
     procName.textContent = procMap[pid].args.name;
-    procName.style = "background: #0f1018; padding: 4px; border-radius: 2px;";
+    procName.style = `background: #0f1018; padding: ${PADDING_SM}px; border-radius: 2px;`;
     for (const [tid, events] of Object.entries(threads)) {
       thread = proc.appendChild(document.createElement("div"));
       thread.textContent = threadMap[pid][tid].args.name;
-      thread.style = "padding: 4px 4px;"
+      thread.style = `padding: ${PADDING_SM}px;`
       const y = rect(thread).y-HEIGHT;
       for (const [i,e] of events.entries()) {
         if (!(e.name in nameColors)) nameColors[e.name] = colors[i%colors.length];
-        data.push({ ts:e.ts, width:e.dur, y, height:HEIGHT, name:e.name, color:`#${nameColors[e.name]}` });
+        data.push({ ...e, y, height:HEIGHT, color:`#${nameColors[e.name]}` });
       }
+      const lastEvent = events[events.length-1];
       minTimestamp = minTimestamp == null ? events[0].ts : Math.min(events[0].ts, minTimestamp);
-      maxTimestamp = maxTimestamp == null ? events[events.length-1].ts : Math.max(events[events.length-1].ts, maxTimestamp);
+      maxTimestamp = maxTimestamp == null ? lastEvent.ts+lastEvent.dur : Math.max(lastEvent.ts+lastEvent.dur, maxTimestamp);
     }
   }
-  for (e of data) {
-    e.x = e.ts-minTimestamp;
-  }
   // graph
-  const svg = d3.select(root).append("svg").attr("width", "100%").attr("height", "100%");
-  const render = svg.append("g");
-  const x = d3.scaleLinear().domain([0, maxTimestamp-minTimestamp]).range([PADDING, rect(root).width-rect(list).width-PADDING]);;
-  const time = render.append("g").call(d3.axisTop(x).tickFormat(formatTime).tickSize(TICK_SIZE))
+  const svg = d3.select(root).append("svg").attr("width", "100%");
+  const render = svg.append("g").attr("id", "render");
+  const timeScale = d3.scaleLinear().domain([0, maxTimestamp-minTimestamp]).range([PADDING, rect(root).width-rect(list).width-PADDING*2-8]);
+  const timeAxis = render.append("g").call(d3.axisTop(timeScale).tickFormat(formatTime).tickSize(TICK_SIZE))
     .attr("transform", `translate(0, ${PADDING+TICK_SIZE})`);
-  render.selectAll("rect").data(data).join("rect").attr("fill", d => d.color).attr("x", d => x(d.x)).attr("y", d => d.y)
-    .attr("width", d => x(d.width)).attr("height", d => d.height);
+  // rescale time-based coordinates
+  for (e of data) {
+    e.rts = e.ts-minTimestamp;
+    e.x = timeScale(e.rts);
+    e.width = timeScale(e.dur);
+  }
+  render.selectAll("rect").data(data).join("rect").attr("fill", d => d.color).attr("x", d => d.x).attr("y", d => d.y)
+    .attr("width", d => d.width).attr("height", d => d.height);
+  // info
+  const info = createChild("div", root);
+  const { width, height } = rect(render.node());
+  const INFO_HEIGHT = rect(root).height-height-PADDING*2;
+  info.style = `position: absolute; width: 100%; height: ${INFO_HEIGHT}px; background: #0f1018; bottom: 0; left: 0; padding: ${PADDING}px;`;
+  const table = createChild("table", info);
+  const headRow = createChild("tr", createChild("thead", table));
+  for (const h of ["Name", "Start Time", "Duration"]) {
+    const th = createChild("th", headRow);
+    th.textContent = h;
+  }
+  const tbody = createChild("tbody", table);
+  replaceRows(tbody, data);
+  render.call(d3.brush().extent([[0, 0], [width+PADDING, height+PADDING]]).on("end", (e) => {
+    if (!e.selection) return;
+    const [[x0, y0], [x1, y1]] = e.selection;
+    const newData = data.filter(d => (d.x+d.width)>=x0 && d.x<=x1 && (d.y+d.height)>=y0 && d.y<=y1);
+    replaceRows(tbody, newData);
+  }));
 }
-
-const rect = (e) => e.getBoundingClientRect();
 
 const formatTime = (ms) => {
   if (ms<1e2) return `${Math.round(ms,2)}us`;
   if (ms<1e6) return `${Math.round(ms*1e-3,2)}ms`;
   return `${Math.round(ms*1e-6,2)}s`;
+}
+
+const rect = (e) => e.getBoundingClientRect();
+
+const createChild = (es, p) => p.appendChild(document.createElement(es));
+
+const replaceRows = (tbody, data) => {
+  tbody.innerHTML = "";
+  for (const d of data) {
+    const tr = createChild("tr", tbody);
+    createChild("td", tr).innerText = d.name;
+    createChild("td", tr).innerText = d.rts;
+    createChild("td", tr).innerText = formatTime(d.dur);
+  }
 }
 
 main();
