@@ -88,6 +88,7 @@ async function main() {
         currSort = key;
         sortAsc = true;
       }
+      e.currentTarget.className = sortAsc ? "sorted-asc" : "sorted-desc";
       const newData = data.sort((a, b) => sortAsc ? a[key]-b[key] : b[key]-a[key]);
       replaceRows(tbody, newData);
     };
