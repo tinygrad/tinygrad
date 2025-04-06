@@ -1,10 +1,9 @@
 let profiles = null;
+let [procMap, threadMap] = [{}, {}];
 const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
 async function main() {
   // fetch
   if (profiles == null) {
-    procMap = {};
-    threadMap = {};
     profiles = {};
     const { traceEvents } = await (await fetch("/get_profile")).json();
     for (const t of traceEvents) {
@@ -74,7 +73,7 @@ async function main() {
   info.style = `position: absolute; width: 100%; height: ${INFO_HEIGHT}px; background: #0f1018; bottom: 0; left: 0; padding: ${PADDING}px;`;
   const table = createChild("table", info);
   const headRow = createChild("tr", createChild("thead", table));
-  for (const h of ["Name", "Start Time", "Duration"]) {
+  for (const h of ["Name", "Start Time", "Duration", "Process"]) {
     const th = createChild("th", headRow);
     th.textContent = h;
   }
@@ -105,6 +104,7 @@ const replaceRows = (tbody, data) => {
     createChild("td", tr).innerText = d.name;
     createChild("td", tr).innerText = d.rts;
     createChild("td", tr).innerText = formatTime(d.dur);
+    createChild("td", tr).innerText = procMap[d.pid].args.name;
   }
 }
 
