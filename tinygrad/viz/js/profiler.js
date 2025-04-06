@@ -69,7 +69,6 @@ const createChild = (es, p) => {
 const columnNames = {"name":"Name", "st":"Start Time", "dur":"Duration", "proc":"Process"};
 const tableState = {data:null, sortBy:null, asc:true};
 function renderTable(newState) {
-  console.log("render_table");
   const { data, sortBy, asc } = Object.assign(tableState, newState);
   const root = document.getElementById("table-root");
   root.innerHTML = "";
