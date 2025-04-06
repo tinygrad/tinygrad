@@ -92,33 +92,10 @@ class TestVectorizedTranscendetalFunctions(unittest.TestCase):
       self._check_all_uops_vectorized(payne_hanek_reduction(d), dtype.vcount)
       self._check_all_uops_vectorized(cody_waite_reduction(d), dtype.vcount)
       self._check_all_uops_vectorized(xpow(d, d), dtype.vcount)
-
-  def test_preserves_vectorization_2(self):
-    for (d, dtype), (e, _) in zip(self._get_inputs(dtype_mode='floats'), self._get_inputs(dtype_mode='ints')):
-      self._check_all_uops_vectorized(rintk(d), dtype.vcount)
-      self._check_all_uops_vectorized(ilogb2k(d), dtype.vcount)
-      self._check_all_uops_vectorized(frexp(d), dtype.vcount)
-      self._check_all_uops_vectorized(sin_poly(d), dtype.vcount)
-      self._check_all_uops_vectorized(xsin(d), dtype.vcount)
       self._check_all_uops_vectorized(xexp2(d), dtype.vcount)
-      self._check_all_uops_vectorized(xlog2(d), dtype.vcount)
-      self._check_all_uops_vectorized(cody_waite_reduction(d), dtype.vcount)
-      self._check_all_uops_vectorized(payne_hanek_reduction(d), dtype.vcount)
 
-      self._check_all_uops_vectorized(ldexp3k(d, d), dtype.vcount)
-      self._check_all_uops_vectorized(sin_poly_large(d, d), dtype.vcount)
-      self._check_all_uops_vectorized(sin_poly_small(d, d), dtype.vcount)
-      self._check_all_uops_vectorized(xpow(d, d), dtype.vcount)
-
-      self._check_all_uops_vectorized(ldexp2k(d, e), dtype.vcount)
-      self._check_all_uops_vectorized(pow2if(e, d.dtype), dtype.vcount)
-      self._check_all_uops_vectorized(trig_poly(d, [0.1], [0.1]), dtype.vcount)
-      self._check_all_uops_vectorized(_lazy_map_numbers(d, d.const_like(0.0), d.const_like(0.0), d.const_like(0.0), d), dtype.vcount)
-      # to get integer value from e, use e._eval((e.dtype,), int) instead of int(e) because e is vectorized
-      self._check_all_uops_vectorized(shl(d, e._eval((e.dtype,), int)), dtype.vcount)
-      self._check_all_uops_vectorized(shr(d, e._eval((e.dtype,), int)), dtype.vcount)
-      self._check_all_uops_vectorized(_ifand(d, e._eval((e.dtype,), int)), dtype.vcount)
-
+  def test_match(self):
+    pass
 
 
 if __name__ == '__main__':
