@@ -133,7 +133,8 @@ class OnnxRunner:
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
     if value is None: raise RuntimeError(f"'{name}' is not marked as optional, but received a None value")
-    if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
+    requires_grad = self.is_training if spec.dtype in dtypes.floats else False
+    if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=requires_grad)
     self._validate_shape(name, value, spec)
     return value
 
