@@ -96,7 +96,7 @@ const createChild = (es, p) => p.appendChild(document.createElement(es));
 const columns = {"Name":"name", "Start Time":"rts", "Duration":"dur", "Process":"pid"};
 let selectedData = null;
 function renderTable(newData) {
-  selectedData = newData.sort((a, b) => b.dur-a.dur);
+  selectedData = newData;
   const root = document.getElementById("table-root");
   root.innerHTML = "";
   createChild("p", root).innerText = `${Intl.NumberFormat('en-US').format(selectedData.length)} traces`
