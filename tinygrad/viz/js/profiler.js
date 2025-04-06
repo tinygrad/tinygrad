@@ -84,9 +84,9 @@ async function main() {
 }
 
 const formatTime = (ms) => {
-  if (ms<=1e3) return `${Math.round(ms,2)}us`;
+  if (ms<=1e3) return `${ms}us`;
   if (ms<=1e6) return `${(ms*1e-3).toFixed(2)}ms`;
-  return `${(ms*1e-6,2).toFixed(2)}s`;
+  return `${(ms*1e-6).toFixed(2)}s`;
 }
 
 const rect = (e) => e.getBoundingClientRect();
@@ -95,22 +95,33 @@ const createChild = (es, p) => p.appendChild(document.createElement(es));
 
 const columns = {"Name":"name", "Start Time":"rts", "Duration":"dur", "Process":"pid"};
 let selectedData = null;
+let [sortKey, sortAsc] = [columns["Start Time"], true];
 function renderTable(newData) {
-  selectedData = newData;
+  selectedData = newData.sort((a, b) => sortAsc ? a[sortKey]-b[sortKey] : b[sortKey]-a[sortKey]);
   const root = document.getElementById("table-root");
   root.innerHTML = "";
-  createChild("p", root).innerText = `${Intl.NumberFormat('en-US').format(selectedData.length)} traces`
+  createChild("p", root).innerText = `${Intl.NumberFormat('en-US').format(selectedData.length)} traces in selection.`
   const table = createChild("table", root);
   const thead = createChild("tr", createChild("thead", table));
   const tbody = createChild("tbody", table);
-  for (const k of Object.keys(columns)) {
+  for (const [k,v] of Object.entries(columns)) {
     const th = createChild("th", thead);
     th.innerText = k;
+    if (v === sortKey) th.className = sortAsc ? "sorted-asc" : "sorted-desc";
+    th.onclick = (e) => {
+      const key = columns[e.currentTarget.innerText];
+      if (sortKey === key) sortAsc = !sortAsc
+      else {
+        sortKey = key;
+        sortAsc = true;
+      }
+      renderTable(data);
+    };
   }
   for (const d of selectedData) {
     const tr = createChild("tr", tbody);
     createChild("td", tr).innerText = d.name;
-    createChild("td", tr).innerText = d.rts;
+    createChild("td", tr).innerText = formatTime(d.rts);
     createChild("td", tr).innerText = formatTime(d.dur);
     createChild("td", tr).innerText = procMap[d.pid].args.name;
   }

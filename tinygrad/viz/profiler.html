@@ -33,6 +33,8 @@
     width: 100%;
     height: 100%;
   }
+  th.sorted-asc::after { content: " ↑"; }
+  th.sorted-desc::after { content: " 	↓"; }
   th, td {
     padding: 4px;
     text-align: left;
@@ -47,6 +49,7 @@
     height: 100%;
     overflow-y: auto;
   }
+  th { cursor: pointer; }
   </style>
 </head>
 <body>
