@@ -78,14 +78,15 @@ class TestVectorizedTranscendetalFunctions(unittest.TestCase):
     [self._check_all_uops_vectorized(x, vcount) for x in (u if isinstance(u, tuple) else u.src)]
 
   def _get_inputs(self) -> tuple[UOp, DType]:
-    for vcount in [1,2,16,19]:
-      for val in [1.3, -2, 194]:
+    for val in [-2,1.3,194]:
+      for vcount in [1,2,4,19]:
         for _dtype in TRANSCENDENTAL_SUPPORTED_DTYPES:
           dtype: DType = _dtype.vec(vcount)
           d = UOp.const(dtype, val)
           yield d, dtype
 
   def test_preserves_vectorization(self):
+    # verify that when given a vectorized (or scalar) input, the function returns a vectorized (or scalar) output
     for d, dtype in self._get_inputs():
       self._check_all_uops_vectorized(payne_hanek_reduction(d), dtype.vcount)
       self._check_all_uops_vectorized(cody_waite_reduction(d), dtype.vcount)
