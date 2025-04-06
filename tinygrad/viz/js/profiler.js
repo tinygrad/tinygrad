@@ -83,9 +83,9 @@ async function main() {
 }
 
 const formatTime = (ms) => {
-  if (ms<1e2) return `${Math.round(ms,2)}us`;
-  if (ms<1e6) return `${Math.round(ms*1e-3,2)}ms`;
-  return `${Math.round(ms*1e-6,2)}s`;
+  if (ms<=1e3) return `${Math.round(ms,2)}us`;
+  if (ms<=1e6) return `${(ms*1e-3).toFixed(2)}ms`;
+  return `${(ms*1e-6,2).toFixed(2)}s`;
 }
 
 const rect = (e) => e.getBoundingClientRect();
