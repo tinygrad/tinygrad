@@ -48,32 +48,27 @@
     background: #0f1018;
     bottom: 0;
     left: 0;
-    padding: 20px;
+    overflow: auto;
   }
   table {
     border-collapse: collapse;
     width: 100%;
-    height: 100%;
+  }
+  table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1
+  }
+  th {
+    background: #1D1F2A;
+    cursor: pointer;
+  }
+  th, td {
+    padding: 8px 16px;
+    text-align: left;
   }
   th.sorted-asc::after { content: " ↑"; }
   th.sorted-desc::after { content: " 	↓"; }
-  th, td {
-    padding: 4px;
-    text-align: left;
-  }
-  th {
-    cursor: pointer;
-  }
-  thead, tbody tr {
-    display: table;
-    width: 100%;
-    table-layout: fixed;
-  }
-  tbody {
-    display: block;
-    height: 100%;
-    overflow-y: auto;
-  }
   </style>
 </head>
 <body>

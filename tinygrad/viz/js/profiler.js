@@ -72,7 +72,6 @@ function renderTable(newState) {
   const { data, sortBy, asc } = Object.assign(tableState, newState);
   const root = document.getElementById("table-root");
   root.innerHTML = "";
-  createChild("p", root).innerText = `${Intl.NumberFormat('en-US').format(data.length)} traces in selection.`
   const table = createChild("table", root);
   const thead = createChild("tr", createChild("thead", table));
   for (const [k,v] of Object.entries(columnNames)) {
