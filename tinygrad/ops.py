@@ -471,7 +471,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),),
                  ShapeTracker.from_shape(())),)).reshape((1,)*len(shape)).expand(shape)
     # Tensor variable binding is BIND(VAR(VIEW(DEVICE)), CONST(VIEW(DEVICE)))
-    assert op is Ops.BIND, f"unkown op {op}"
+    assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
     return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
   def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False): return UOp(Ops.COPY, self.dtype, (UOp(Ops.DEVICE, arg=device), self), clone)
