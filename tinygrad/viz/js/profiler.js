@@ -1,7 +1,7 @@
 let profiles = null;
 let [procMap, threadMap] = [{}, {}];
 const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
-const columns = {"Name":"name", "Start Time":"rts", "Duration":"dur", "Process":"pid"};
+const data = [];
 
 async function main() {
   // ** fetch + processing
@@ -31,7 +31,6 @@ async function main() {
   // PID/threads list
   const list = createChild("div", root);
   list.style = `margin-top: ${PADDING+TICK_SIZE}px;`
-  const data = [];
   const nameColors = {};
   let maxTimestamp = null;
   let minTimestamp = null;
@@ -71,22 +70,15 @@ async function main() {
     .attr("width", d => d.width).attr("height", d => d.height);
   // info table
   const info = createChild("div", root);
+  info.id = "table-root";
   const { width, height } = rect(render.node());
   const INFO_HEIGHT = rect(root).height-height-PADDING*2;
   info.style = `position: absolute; width: 100%; height: ${INFO_HEIGHT}px; background: #0f1018; bottom: 0; left: 0; padding: ${PADDING}px;`;
-  const table = createChild("table", info);
-  const thead = createChild("tr", createChild("thead", table));
-  const tbody = createChild("tbody", table);
-  replaceRows(tbody, data);
-  for (const k of Object.keys(columns)) {
-    const th = createChild("th", thead);
-    th.innerText = k;
-  }
+  renderTable(data);
   render.call(d3.brush().extent([[0, 0], [width+PADDING, height+PADDING]]).on("end", (e) => {
-    if (!e.selection) return replaceRows(tbody, data);
+    if (!e.selection) renderTable(data);
     const [[x0, y0], [x1, y1]] = e.selection;
-    const newData = data.filter(d => (d.x+d.width)>=x0 && d.x<=x1 && (d.y+d.height)>=y0 && d.y<=y1);
-    replaceRows(tbody, newData);
+    renderTable(data.filter(d => (d.x+d.width)>=x0 && d.x<=x1 && (d.y+d.height)>=y0 && d.y<=y1))
   }));
 }
 
@@ -100,10 +92,21 @@ const rect = (e) => e.getBoundingClientRect();
 
 const createChild = (es, p) => p.appendChild(document.createElement(es));
 
-const replaceRows = (tbody, data) => {
-  tbody.innerHTML = "";
-  data = data.sort((a, b) => b.dur-a.dur);
-  for (const d of data) {
+const columns = {"Name":"name", "Start Time":"rts", "Duration":"dur", "Process":"pid"};
+let selectedData = null;
+function renderTable(newData) {
+  selectedData = newData.sort((a, b) => b.dur-a.dur);
+  const root = document.getElementById("table-root");
+  root.innerHTML = "";
+  createChild("p", root).innerText = `${Intl.NumberFormat('en-US').format(selectedData.length)} traces`
+  const table = createChild("table", root);
+  const thead = createChild("tr", createChild("thead", table));
+  const tbody = createChild("tbody", table);
+  for (const k of Object.keys(columns)) {
+    const th = createChild("th", thead);
+    th.innerText = k;
+  }
+  for (const d of selectedData) {
     const tr = createChild("tr", tbody);
     createChild("td", tr).innerText = d.name;
     createChild("td", tr).innerText = d.rts;
