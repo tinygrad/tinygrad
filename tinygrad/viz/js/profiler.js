@@ -41,6 +41,7 @@ async function main() {
     procName.textContent = procMap[pid].args.name;
     procName.style = `background: #0f1018; padding: ${PADDING_SM}px; border-radius: 2px;`;
     for (const [tid, events] of Object.entries(threads)) {
+      if (events.length === 0) continue;
       thread = proc.appendChild(document.createElement("div"));
       thread.textContent = threadMap[pid][tid].args.name;
       thread.style = `padding: ${PADDING_SM}px;`
