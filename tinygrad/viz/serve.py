@@ -35,7 +35,7 @@ class GraphRewriteMetadata(TypedDict):
 @functools.cache
 def render_program(k:Kernel): return k.opts.render(k.uops)
 def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
-  return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
+  return {"loc":v.loc, "match_count":len(v.matches), "code_line":"",
           "kernel_code":pcall(render_program, k) if isinstance(k, Kernel) else None, "name":v.name}
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
   return [(k.name if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]
@@ -119,10 +119,8 @@ class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
 
-    if (url:=urlparse(self.path)).path == "/":
-      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
-    elif (url:=urlparse(self.path)).path == "/profiler":
-      with open(os.path.join(os.path.dirname(__file__), "perfetto.html"), "rb") as f: ret = f.read()
+    if (fn:={"/":"index", "/profiler":"perfetto", "/prof":"profiler"}.get((url:=urlparse(self.path)).path)):
+      with open(os.path.join(os.path.dirname(__file__), f"{fn}.html"), "rb") as f: ret = f.read()
     elif self.path.startswith(("/assets/", "/js/")) and '/..' not in self.path:
       try:
         with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
