@@ -101,6 +101,18 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
     assert isinstance(g, int), "needs to be int to upcast/unroll"
     idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(g), tuple(range(g))),), ((i,g),)))
 
+  # range splitting
+  if ki.range_split_axis:
+    axis, masks = ki.range_split_axis
+    rng, n = idxs[axis], len(masks)
+    src = tuple(rng.replace(src=(UOp.const(dtypes.int, s), UOp.const(dtypes.int, e)), arg=i+axis) for i,(s,e) in enumerate(masks))
+    idxs[axis] = UOp(Ops.UNROLL, rng.dtype, (UOp(Ops.VECTORIZE, rng.dtype.vec(n), src),), ((axis, n),),)
+    # duplicate inner loops otherwise linearizer can't merge blocks
+    # TODO: this should enumerate and do i+n*iii but can't actually get this to break
+    for ii in range(axis+1, first_upcasted):
+      rng = idxs[ii]
+      idxs[ii] = UOp(Ops.UNROLL, rng.dtype, (UOp(Ops.VECTORIZE, rng.dtype.vec(n), tuple(rng.replace(arg=i+n) for i in range(n))),), ((axis, n),),)
+
   # late indexes (group for reduce)
   ridxs = idxs[:]
   for a in range(first_reduce, first_reduce+group_for_reduces):
