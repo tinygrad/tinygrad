@@ -51,10 +51,10 @@ def _metaop(op, shape:tuple[sint,...], dtype:DType, device:str|tuple[str, ...], 
   return UOp.multi(*[UOp.metaop(op, shape, dtype, d, arg) for d in device], axis=None)
 
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
-  ret = UOp.metaop(Ops.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
+  ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
   # fake realize
   ret.buffer.allocate(x)
-  return ret
+  return ret.reshape(x.shape)
 
 def get_shape(x) -> tuple[int, ...]:
   # NOTE: str is special because __getitem__ on a str is still a str
@@ -63,9 +63,9 @@ def get_shape(x) -> tuple[int, ...]:
   return (len(subs),) + (subs[0] if subs else ())
 
 def _frompy(x:list|tuple|bytes, dtype:DType) -> UOp:
-  if isinstance(x, bytes): ret, data = UOp.metaop(Ops.EMPTY, (len(x)//dtype.itemsize,), dtype, "PYTHON"), x
+  if isinstance(x, bytes): ret, data = UOp.new_buffer("PYTHON", len(x)//dtype.itemsize, dtype), x
   else:
-    ret = UOp.metaop(Ops.EMPTY, get_shape(x), dtype, "PYTHON")
+    ret = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), dtype).reshape(shape)
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
     data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
@@ -138,12 +138,11 @@ class Tensor(SimpleMathTrait):
     # None (the default) will be updated to True if it's put in an optimizer
     self.requires_grad:bool|None = requires_grad
 
-    # create a LazyBuffer from the different types of inputs
+    # create a UOp from the different types of inputs
     if isinstance(data, UOp):
       assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
-      # NOTE: this is here because LazyBuffer = UOp
-      if isinstance(data, UOp) and data.op is Ops.BIND: data = _metaop(Ops.BIND, tuple(), dtype or data.dtype, device, data)
-    elif data is None: data = _metaop(Ops.EMPTY, (0,), dtype or dtypes.default_float, device)
+      if data.op is Ops.BIND: data = _metaop(Ops.BIND, tuple(), dtype or data.dtype, device, data)
+    elif data is None: data = _metaop(Ops.CONST, (0,), dtype or dtypes.default_float, device, arg=0)
     elif isinstance(data, get_args(ConstType)): data = _metaop(Ops.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
     elif isinstance(data, (list, tuple)):
@@ -159,7 +158,7 @@ class Tensor(SimpleMathTrait):
       else: data = _fromnp(data.astype(npdtype) if dtype is not None and (npdtype:=_to_np_dtype(dtype)) is not None else data)  # type: ignore [name-defined]
     elif isinstance(data, pathlib.Path):
       dtype = dtype or dtypes.uint8
-      data = _metaop(Ops.EMPTY, (data.stat().st_size // dtype.itemsize,), dtype, f"DISK:{data.resolve()}")
+      data = UOp.new_buffer(f"DISK:{data.resolve()}", data.stat().st_size // dtype.itemsize, dtype)
 
     # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
@@ -398,7 +397,7 @@ class Tensor(SimpleMathTrait):
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
-    if y.op is Ops.BIND: return Tensor(y, **kwargs, requires_grad=False)   # this is the only UOp allowed in Tensor
+    if y.op is Ops.BIND: return Tensor(y, **kwargs, requires_grad=False)
     if y.op is Ops.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
     if y.op is Ops.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
     if y.op is Ops.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
@@ -407,15 +406,7 @@ class Tensor(SimpleMathTrait):
   # ***** creation entrypoint *****
 
   @staticmethod
-  def _metaop(op, shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None, arg=None, **kwargs) -> Tensor:
-    dtype = to_dtype(dtype) if dtype is not None else dtypes.default_float
-    if isinstance(device, tuple):
-      return Tensor(UOp.multi(*[UOp.metaop(op, shape, dtype, Device.canonicalize(d), arg) for d in device], axis=None),
-                    device, dtype, **kwargs)
-    return Tensor(UOp.metaop(op, shape, dtype, Device.canonicalize(device), arg), device, dtype, **kwargs)
-
-  @staticmethod
-  def empty(*shape, **kwargs) -> Tensor:
+  def empty(*shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None, **kwargs) -> Tensor:
     """
     Creates an empty tensor with the given shape.
 
@@ -427,7 +418,12 @@ class Tensor(SimpleMathTrait):
     print(t.shape)
     ```
     """
-    return Tensor._metaop(Ops.EMPTY, argfix(*shape), **kwargs)
+    dtype, shape = to_dtype(dtype) if dtype is not None else dtypes.default_float, argfix(*shape)
+    if not isinstance(size:=prod([x.vmax if isinstance(x, UOp) else x for x in shape]), int): raise ValueError(f"size must be int {size}")
+    if isinstance(device, tuple):
+      return Tensor(UOp.multi(*[UOp.new_buffer(Device.canonicalize(d), size, dtype).reshape(shape) for d in device], axis=None),
+                    device, dtype, **kwargs)
+    return Tensor(UOp.new_buffer(Device.canonicalize(device), size, dtype), device, dtype, **kwargs).reshape(shape)
 
   @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:
@@ -438,8 +434,7 @@ class Tensor(SimpleMathTrait):
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
     """
-
-    r = Tensor._metaop(Ops.EMPTY, shape, **kwargs)
+    r = Tensor.empty(*shape, **kwargs)
     r.lazydata.buffer.allocate(external_ptr=ptr)
     return r
 
@@ -2383,10 +2378,10 @@ class Tensor(SimpleMathTrait):
     return x.dot(self, dtype=dtype) if reverse else self.dot(x, dtype=dtype)
 
   def _cumalu(self, axis:int, op:Ops, _include_initial=False) -> Tensor:
-    assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX)
+    assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
     pl_sz = self.shape[axis] - int(not _include_initial)
     pooled = self.transpose(axis,-1).pad((pl_sz, -int(_include_initial)), value=identity_element(op, self.dtype))._pool((self.shape[axis],))
-    return (pooled.sum(-1) if op is Ops.ADD else pooled.max(-1)).transpose(axis,-1)
+    return {Ops.ADD: pooled.sum(-1), Ops.MAX: pooled.max(-1), Ops.MUL: pooled.prod(-1)}[op].transpose(axis, -1)
 
   def _split_cumalu(self, axis:int, op:Ops) -> Tensor:
     axis = self._resolve_dim(axis)
@@ -2399,7 +2394,7 @@ class Tensor(SimpleMathTrait):
     base = ret[..., -1]._cumalu(-1, op, _include_initial=True)
     base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
     def fix(x: Tensor) -> Tensor: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    return fix(ret) + fix(base) if op is Ops.ADD else fix(ret).maximum(fix(base))
+    return {Ops.ADD: Tensor.__add__, Ops.MAX: Tensor.maximum, Ops.MUL: Tensor.__mul__}[op](fix(ret), fix(base))
 
   def cumsum(self, axis:int=0) -> Tensor:
     """
@@ -2414,6 +2409,20 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self._split_cumalu(axis, Ops.ADD)
+
+  def cumprod(self, axis:int) -> Tensor:
+    """
+    Computes the cumulative product of the elements of the tensor along the specified `axis`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(1, 7).reshape(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.cumprod(axis=0).numpy())
+    ```
+    """
+    return self._split_cumalu(axis, Ops.MUL)
 
   def cummax(self, axis:int=0) -> Tensor:
     """

@@ -12,7 +12,7 @@ from tinygrad.dtype import dtypes
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_ACC: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#e0ffc0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
-               Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55",
+               Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55", Ops.IGNORE: "#00C000",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80", Ops.BUFFER_VIEW: "#E5EAFF",
                Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.NAME:"#808080"}
 
@@ -21,7 +21,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 # NOTE: if any extra rendering in VIZ fails, we don't crash
 def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
   try: return fxn(*args, **kwargs)
-  except Exception as e: return f"ERROR: {e}"
+  except Exception as e: return f"ERROR in {fxn.__name__}: {e}"
 
 # ** Metadata for a track_rewrites scope
 
@@ -32,11 +32,11 @@ class GraphRewriteMetadata(TypedDict):
   kernel_code: str|None                  # optionally render the final kernel code
   name: str|None                         # optional name of the rewrite
 
-@functools.lru_cache(None)
-def _prg(k:Kernel): return k.to_program().src
+@functools.cache
+def render_program(k:Kernel): return k.opts.render(k.uops)
 def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
   return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
-          "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None, "name":v.name}
+          "kernel_code":pcall(render_program, k) if isinstance(k, Kernel) else None, "name":v.name}
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
   return [(k.name if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]
 
@@ -119,11 +119,9 @@ class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
 
-    if (url:=urlparse(self.path)).path == "/":
-      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
-    elif (url:=urlparse(self.path)).path == "/profiler":
-      with open(os.path.join(os.path.dirname(__file__), "perfetto.html"), "rb") as f: ret = f.read()
-    elif self.path.startswith(("/assets/", "/lib/")) and '/..' not in self.path:
+    if (fn:={"/":"index", "/profiler":"perfetto", "/prof":"profiler"}.get((url:=urlparse(self.path)).path)):
+      with open(os.path.join(os.path.dirname(__file__), f"{fn}.html"), "rb") as f: ret = f.read()
+    elif self.path.startswith(("/assets/", "/js/")) and '/..' not in self.path:
       try:
         with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
         if url.path.endswith(".js"): content_type = "application/javascript"
@@ -131,8 +129,7 @@ class Handler(BaseHTTPRequestHandler):
       except FileNotFoundError: status_code = 404
     elif url.path == "/kernels":
       if "kernel" in (query:=parse_qs(url.query)):
-        def getarg(k:str,default=0): return int(query[k][0]) if k in query else default
-        kidx, ridx = getarg("kernel"), getarg("idx")
+        kidx, ridx = int(query["kernel"][0]), int(query["idx"][0])
         try:
           # stream details
           self.send_response(200)

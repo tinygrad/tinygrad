@@ -32,7 +32,7 @@ def lcast(input_type:DType, output_type:DType):
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
 # https://github.com/corsix/amx
-def render_wmma(ctx, wmma: UOp) -> str:
+def render_wmma_amx(ctx, wmma: UOp) -> str:
   def AMX(op, gpr): return f'call void asm sideeffect ".word (0x201000+($0<<5)+0$1-((0$1>>4)*6))", "i,r,~{{memory}}"(i32 {op}, i64 {gpr}) #0; AMX'
 
   return "\n".join([
@@ -43,6 +43,14 @@ def render_wmma(ctx, wmma: UOp) -> str:
     *[f'  {ctx[wmma]}_st{i} = add i64 {ctx[wmma]}_ptr_amx2, {i*4<<56 | i*64}\n  {AMX(5,f"{ctx[wmma]}_st{i}")} stz' for i in range(16)], # stz
       f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 1})", "~{{memory}}"() #0; AMX clr',             # clr
       f'  {ctx[wmma]} = load {ldt(wmma.dtype)}, ptr {ctx[wmma]}_amx2, align {wmma.dtype.itemsize}'])
+
+def render_wmma_amd(ctx, wmma: UOp) -> str:
+  dt_map = {dtypes.half: "f16", dtypes.float: "f32"}
+  # https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AMDGPU/GlobalISel/llvm.amdgcn.wmma_32.ll
+  # example: %wmma0 = call <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.f16(<16 x half> %v99,<16 x half> %v100,<8 x float> %v101)
+  return f"  {ctx[wmma]} = call {ldt(wmma.dtype)} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype.scalar()]}.16x16x16." + \
+    f"{dt_map[wmma.src[0].dtype.scalar()]}(" + ", ".join([f"{ldt(w.dtype)} {ctx[w]}" for w in wmma.src]) + (", i1 false)" \
+      if wmma.dtype.scalar() != dtypes.float else ")")
 
 # llvm ops, lop[<dtype>][<op>]
 unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
@@ -99,9 +107,6 @@ base_rewrite = PatternMatcher([
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
-
-  # wmma
-  (UPat(Ops.WMMA, name="wmma"), render_wmma),
 ])
 
 def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
@@ -115,7 +120,7 @@ class LLVMRenderer(Renderer):
   has_local = False
   has_shared = False
   global_max: tuple[int, ...] | None = None
-  string_rewrite = base_rewrite
+  string_rewrite = base_rewrite + PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
   if AMX: tensor_cores = ClangRenderer.amx_tc
 
   extra_matcher = PatternMatcher([
@@ -150,7 +155,7 @@ class LLVMRenderer(Renderer):
         r[u] = r[u.src[1]] = f"%assign{vc}"
         assert u.src[0] not in acc_to_assign, "can't assign to DEFINE_ACC twice"
         acc_to_assign[u.src[0]] = u.src[1]
-      if u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
+      if AMX and u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
         vc += 1
         r[u] = f"%wmma{vc}"
         for i, dtype in enumerate(u.arg[2].vec(sz) for sz in [prod(size for _, size in upcast) for upcast in u.arg[6]]):
@@ -213,8 +218,18 @@ class AMDLLVMRenderer(LLVMRenderer):
   has_shared = True
   shared_max = AMDRenderer.shared_max
   global_max = AMDRenderer.global_max
+  tensor_cores = AMDRenderer.tensor_cores
   abi = "amdgpu_kernel"
-  string_rewrite = base_rewrite + PatternMatcher([
+  string_rewrite = PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
-  ])
+    (UPat(Ops.CAST, name="x", dtype=dtypes.half.vec(16), src=UPat.var("y", dtypes.half.vec(8))), lambda ctx, x, y: f"  {ctx[x]} = shufflevector "\
+      f"<8 x half> {ctx[y]}, <8 x half> zeroinitializer, <16 x i32> <{', '.join([f'i32 {i}, i32 {j}' for i, j in zip(range(0, 8), range(8, 16))])}>"),
+    (UPat(Ops.CAST, name="x", dtype=dtypes.half.vec(8), src=UPat.var("y", dtypes.half.vec(16))), lambda ctx, x, y:
+      f"  {ctx[x]}= shufflevector <16 x half> {ctx[y]}, <16 x half> undef, <8 x i32> <{', '.join([f'i32 {x}' for x in range(0, 16, 2)])}>"),
+    (UPat(Ops.WMMA, name="wmma"), render_wmma_amd),
+  ]) + base_rewrite
+  extra_matcher = PatternMatcher([
+    (UPat(Ops.WMMA, name="x", dtype=dtypes.half.vec(8)),
+     lambda x: UOp(Ops.WMMA, dtypes.half.vec(16), (x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), (*x.arg,)).cast(dtypes.half.vec(8)))
+  ]) + LLVMRenderer.extra_matcher
