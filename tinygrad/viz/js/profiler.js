@@ -1,8 +1,10 @@
 let profiles = null;
 let [procMap, threadMap] = [{}, {}];
 const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
+const columns = {"Name":"name", "Start Time":"rts", "Duration":"dur", "Process":"pid"};
+let [currSort, sortAsc] = [columns["Duration"], true];
 async function main() {
-  // fetch
+  // ** fetch + processing
   if (profiles == null) {
     profiles = {};
     const { traceEvents } = await (await fetch("/get_profile")).json();
@@ -19,13 +21,14 @@ async function main() {
       }
     }
   }
-  // render
-  const HEIGHT = 16; // TODO: make this meaningful
+  // ** render
   const PADDING = 20;
   const PADDING_SM = 4;
   const TICK_SIZE = 6;
+  const HEIGHT = 16; // TODO: make this meaningful
   const root = createChild("div", document.querySelector("body"));
   root.style = `display:flex; width:100%; height: 100%; padding: ${PADDING}px;`
+  // PID/threads list
   const list = createChild("div", root);
   list.style = `margin-top: ${PADDING+TICK_SIZE}px;`
   const data = [];
@@ -52,7 +55,7 @@ async function main() {
       maxTimestamp = maxTimestamp == null ? lastEvent.ts+lastEvent.dur : Math.max(lastEvent.ts+lastEvent.dur, maxTimestamp);
     }
   }
-  // graph
+  // timeline graph
   const svg = d3.select(root).append("svg").attr("width", "100%");
   const render = svg.append("g").attr("id", "render");
   const timeScale = d3.scaleLinear().domain([0, maxTimestamp-minTimestamp]).range([PADDING, rect(root).width-rect(list).width-PADDING*2-8]);
@@ -66,19 +69,29 @@ async function main() {
   }
   render.selectAll("rect").data(data).join("rect").attr("fill", d => d.color).attr("x", d => d.x).attr("y", d => d.y)
     .attr("width", d => d.width).attr("height", d => d.height);
-  // info
+  // info table
   const info = createChild("div", root);
   const { width, height } = rect(render.node());
   const INFO_HEIGHT = rect(root).height-height-PADDING*2;
   info.style = `position: absolute; width: 100%; height: ${INFO_HEIGHT}px; background: #0f1018; bottom: 0; left: 0; padding: ${PADDING}px;`;
   const table = createChild("table", info);
-  const headRow = createChild("tr", createChild("thead", table));
-  for (const h of ["Name", "Start Time", "Duration", "Process"]) {
-    const th = createChild("th", headRow);
-    th.textContent = h;
-  }
+  const thead = createChild("tr", createChild("thead", table));
   const tbody = createChild("tbody", table);
   replaceRows(tbody, data);
+  for (const k of Object.keys(columns)) {
+    const th = createChild("th", thead);
+    th.innerText = k;
+    th.onclick = (e) => {
+      const key = columns[e.currentTarget.innerText];
+      if (currSort === key) sortAsc = !sortAsc
+      else {
+        currSort = key;
+        sortAsc = true;
+      }
+      const newData = data.sort((a, b) => sortAsc ? a[key]-b[key] : b[key]-a[key]);
+      replaceRows(tbody, newData);
+    };
+  }
   render.call(d3.brush().extent([[0, 0], [width+PADDING, height+PADDING]]).on("end", (e) => {
     if (!e.selection) return replaceRows(tbody, data);
     const [[x0, y0], [x1, y1]] = e.selection;
