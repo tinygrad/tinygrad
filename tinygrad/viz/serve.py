@@ -32,7 +32,7 @@ class GraphRewriteMetadata(TypedDict):
   kernel_code: str|None                  # optionally render the final kernel code
   name: str|None                         # optional name of the rewrite
 
-@functools.lru_cache(None)
+@functools.cache
 def render_program(k:Kernel): return k.opts.render(k.uops)
 def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
   return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
@@ -119,10 +119,8 @@ class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
 
-    if (url:=urlparse(self.path)).path == "/":
-      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
-    elif (url:=urlparse(self.path)).path == "/profiler":
-      with open(os.path.join(os.path.dirname(__file__), "perfetto.html"), "rb") as f: ret = f.read()
+    if (fn:={"/":"index", "/profiler":"perfetto", "/prof":"profiler"}.get((url:=urlparse(self.path)).path)):
+      with open(os.path.join(os.path.dirname(__file__), f"{fn}.html"), "rb") as f: ret = f.read()
     elif self.path.startswith(("/assets/", "/js/")) and '/..' not in self.path:
       try:
         with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
@@ -131,8 +129,7 @@ class Handler(BaseHTTPRequestHandler):
       except FileNotFoundError: status_code = 404
     elif url.path == "/kernels":
       if "kernel" in (query:=parse_qs(url.query)):
-        def getarg(k:str,default=0): return int(query[k][0]) if k in query else default
-        kidx, ridx = getarg("kernel"), getarg("idx")
+        kidx, ridx = int(query["kernel"][0]), int(query["idx"][0])
         try:
           # stream details
           self.send_response(200)

@@ -1825,8 +1825,9 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> list[Kernel]:
   lins: list[Kernel] = []
   outbufs = [real_bufs[x.src[0].arg] for x in realized_ast.src]
+  device = real_bufs[0].device
 
-  def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
+  def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), device=device))
 
   def check_opt(opts, create_k, expected_color_size):
     k = create_k()

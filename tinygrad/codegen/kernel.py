@@ -582,9 +582,9 @@ class Kernel:
     return name + colored(num, 'BLACK')
 
   def get_optimized_ast(self, name_override:Optional[str]=None) -> UOp:
-    @functools.lru_cache(None)
+    @functools.cache
     def fixup_ast(op:UOp) -> UOp:
-      ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
+      ret = op.replace(src=tuple(fixup_ast(x) for x in op.src)) # noqa: F821
       if op.op in GroupOp.Buffer and op in self.bufs:
         st_uop = self.sts[self.bufs.index(op)].to_uop()
         # NOTE: if CONST got masked after applying opts, we create a new VALID
@@ -659,8 +659,9 @@ class Kernel:
           return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
 
       return ret
-
-    return graph_rewrite(fixup_ast(self.ast), view_left)
+    fixed_ast = fixup_ast(self.ast)
+    del fixup_ast
+    return graph_rewrite(fixed_ast, view_left)
 
   # **** this is the lowerer ****
 
@@ -695,12 +696,11 @@ class Kernel:
     src = self.opts.render(self.uops)
 
     if CAPTURE_PROCESS_REPLAY:
-      # NOTE: calling traceback.extract_stack() is very slow, recording backtraces isn't included by default yet
-      if getenv("RECORD_TRACEBACKS"):
-        import traceback
-        stack = "\n".join(traceback.format_list(traceback.extract_stack()[:-1]))
-      else: stack = None
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, stack, ContextVar._cache, src))
+      import sys
+      frm = sys._getframe(1)
+      while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
+      loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, loc, ContextVar._cache, src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
