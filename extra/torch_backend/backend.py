@@ -3,7 +3,7 @@
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import getenv, flatten
+from tinygrad.helpers import getenv, flatten, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools, inspect, itertools, collections, sys, weakref
