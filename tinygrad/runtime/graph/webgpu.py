@@ -36,7 +36,7 @@ def render_idx(idx:Variable|int): return idx.simplify().render() if isinstance(i
 def render_js(cj: CapturedJit, in_bufs:dict[Buffer, int], in_vars:dict[Variable, int], weight_names:dict[Buffer, str],
               model_name="model", save_weights=True) -> str:
   weight_bufs, empty_bufs = cj.sort_bufs(exclude=in_bufs)
-  names:dict[Buffer|Variable:str] = merge_dicts([weight_bufs, empty_bufs,
+  names:dict[Buffer|Variable,str] = merge_dicts([weight_bufs, empty_bufs,
                                                  {b:f"in_buf_{i}" for b,i in in_bufs.items()}, {v:f"sym_{i}" for v,i in in_vars.items()}])
   assert isinstance(cj.ret, list) and all(isinstance(t, Tensor) and t.lazydata.base.is_realized for t in cj.ret)
   out_bufs = cast(dict[Buffer, int], {t.lazydata.base.realized: i for i, t in enumerate(cj.ret)})
