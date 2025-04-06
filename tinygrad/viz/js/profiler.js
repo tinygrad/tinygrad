@@ -2,7 +2,7 @@ let profiles = null;
 let [procMap, threadMap] = [{}, {}];
 const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
 const columns = {"Name":"name", "Start Time":"rts", "Duration":"dur", "Process":"pid"};
-let [currSort, sortAsc] = [columns["Duration"], true];
+
 async function main() {
   // ** fetch + processing
   if (profiles == null) {
@@ -81,18 +81,6 @@ async function main() {
   for (const k of Object.keys(columns)) {
     const th = createChild("th", thead);
     th.innerText = k;
-    th.onclick = (e) => {
-      const key = columns[e.currentTarget.innerText];
-      if (currSort === key) sortAsc = !sortAsc
-      else {
-        currSort = key;
-        sortAsc = true;
-      }
-      for (const c of thead.children) c.className = "";
-      e.currentTarget.className = sortAsc ? "sorted-asc" : "sorted-desc";
-      const newData = data.sort((a, b) => sortAsc ? a[key]-b[key] : b[key]-a[key]);
-      replaceRows(tbody, newData);
-    };
   }
   render.call(d3.brush().extent([[0, 0], [width+PADDING, height+PADDING]]).on("end", (e) => {
     if (!e.selection) return replaceRows(tbody, data);
@@ -114,6 +102,7 @@ const createChild = (es, p) => p.appendChild(document.createElement(es));
 
 const replaceRows = (tbody, data) => {
   tbody.innerHTML = "";
+  data = data.sort((a, b) => b.dur-a.dur);
   for (const d of data) {
     const tr = createChild("tr", tbody);
     createChild("td", tr).innerText = d.name;
