@@ -373,7 +373,7 @@ function appendResizer(element, { minWidth, maxWidth }, left=false) {
   handle.addEventListener("mousedown", (e) => {
     e.preventDefault();
     element.dataset.startX = e.clientX;
-    element.dataset.containerWidth = rect(".main-container");
+    element.dataset.containerWidth = rect(".main-container").width;
     element.dataset.startWidth = element.getBoundingClientRect().width;
     document.documentElement.addEventListener("mousemove", resize, false);
     document.documentElement.addEventListener("mouseup", () => {
