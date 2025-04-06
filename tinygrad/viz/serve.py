@@ -35,7 +35,7 @@ class GraphRewriteMetadata(TypedDict):
 @functools.cache
 def render_program(k:Kernel): return k.opts.render(k.uops)
 def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
-  return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
+  return {"loc":v.loc, "match_count":len(v.matches), "code_line":"",
           "kernel_code":pcall(render_program, k) if isinstance(k, Kernel) else None, "name":v.name}
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
   return [(k.name if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]

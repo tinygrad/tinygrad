@@ -1,87 +1,4 @@
-let profiles = null;
-let [procMap, threadMap] = [{}, {}];
 const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
-const data = [];
-
-async function main() {
-  // ** fetch + processing
-  if (profiles == null) {
-    profiles = {};
-    const { traceEvents } = await (await fetch("/get_profile")).json();
-    for (const t of traceEvents) {
-      if (t.ph === "M" && t.name === "process_name") {
-        procMap[t.pid] = t;
-        threadMap[t.pid] = {};
-        profiles[t.pid] = {};
-      } else if (t.ph === "M" && t.name === "thread_name") {
-        threadMap[t.pid][t.tid] = t;
-        profiles[t.pid][t.tid] = [];
-      } else if (t.ph === "X") {
-        profiles[t.pid][t.tid].push(t);
-      }
-    }
-  }
-  // ** render
-  const PADDING = 20;
-  const PADDING_SM = 4;
-  const TICK_SIZE = 6;
-  const HEIGHT = 16; // TODO: make this meaningful
-  const root = createChild("div", document.querySelector("body"));
-  root.style = `display:flex; width:100%; height: 100%; padding: ${PADDING}px;`
-  // PID/threads list
-  const list = createChild("div", root);
-  list.style = `margin-top: ${PADDING+TICK_SIZE}px;`
-  const nameColors = {};
-  let maxTimestamp = null;
-  let minTimestamp = null;
-  for (const [pid, threads] of Object.entries(profiles)) {
-    if (Object.values(threads).every((t) => t.length === 0)) continue;
-    const proc = createChild("div", list);
-    const procName = proc.appendChild(document.createElement("p"));
-    procName.textContent = procMap[pid].args.name;
-    procName.style = `background: #0f1018; padding: ${PADDING_SM}px; border-radius: 2px;`;
-    for (const [tid, events] of Object.entries(threads)) {
-      if (events.length === 0) continue;
-      thread = proc.appendChild(document.createElement("div"));
-      thread.textContent = threadMap[pid][tid].args.name;
-      thread.style = `padding: ${PADDING_SM}px;`
-      const y = rect(thread).y-HEIGHT;
-      for (const [i,e] of events.entries()) {
-        if (!(e.name in nameColors)) nameColors[e.name] = colors[i%colors.length];
-        data.push({ ...e, y, height:HEIGHT, color:`#${nameColors[e.name]}` });
-      }
-      const lastEvent = events[events.length-1];
-      minTimestamp = minTimestamp == null ? events[0].ts : Math.min(events[0].ts, minTimestamp);
-      maxTimestamp = maxTimestamp == null ? lastEvent.ts+lastEvent.dur : Math.max(lastEvent.ts+lastEvent.dur, maxTimestamp);
-    }
-  }
-  // timeline graph
-  const svg = d3.select(root).append("svg").attr("width", "100%");
-  const render = svg.append("g").attr("id", "render");
-  const timeScale = d3.scaleLinear().domain([0, maxTimestamp-minTimestamp]).range([PADDING, rect(root).width-rect(list).width-PADDING*2-8]);
-  const timeAxis = render.append("g").call(d3.axisTop(timeScale).tickFormat(formatTime).tickSize(TICK_SIZE))
-    .attr("transform", `translate(0, ${PADDING+TICK_SIZE})`);
-  // rescale time-based coordinates
-  for (e of data) {
-    e.rts = e.ts-minTimestamp;
-    e.x = timeScale(e.rts);
-    e.width = timeScale(e.dur);
-  }
-  render.selectAll("rect").data(data).join("rect").attr("fill", d => d.color).attr("x", d => d.x).attr("y", d => d.y)
-    .attr("width", d => d.width).attr("height", d => d.height);
-  // info table
-  const info = createChild("div", root);
-  info.id = "table-root";
-  const { width, height } = rect(render.node());
-  const INFO_HEIGHT = rect(root).height-height-PADDING*2;
-  info.style = `position: absolute; width: 100%; height: ${INFO_HEIGHT}px; background: #0f1018; bottom: 0; left: 0; padding: ${PADDING}px;`;
-  renderTable(data);
-  render.call(d3.brush().extent([[0, 0], [width+PADDING, height+PADDING]]).on("end", (e) => {
-    if (!e.selection) renderTable(data);
-    const [[x0, y0], [x1, y1]] = e.selection;
-    renderTable(data.filter(d => (d.x+d.width)>=x0 && d.x<=x1 && (d.y+d.height)>=y0 && d.y<=y1))
-  }));
-}
 
 const formatTime = (ms) => {
   if (ms<=1e3) return `${ms}us`;
@@ -89,42 +6,93 @@ const formatTime = (ms) => {
   return `${(ms*1e-6).toFixed(2)}s`;
 }
 
+async function main() {
+  const { traceEvents } = await (await fetch("/get_profile")).json();
+  const root = createChild("div.root", document.querySelector("body"));
+  const list = createChild("div.list", root);
+  const data = [];
+  const nameColors = {}; // event names get a unique color
+  const procNames = {};
+  for (const e of traceEvents) {
+    if (e.name === "process_name") {
+      const proc = createChild(`div.proc-${e.pid}`, list);
+      createChild("p.process-name", proc).textContent = e.args.name;
+      procNames[e.pid] = e.args.name;
+    }
+    else if (e.name === "thread_name") {
+      const thread = createChild(`div.thread-${e.pid}-${e.tid}`, `proc-${e.pid}`);
+      createChild("p.thread-name", thread).textContent = e.args.name;
+    }
+    else if (e.ph === "X") {
+      const thread = document.getElementById(`thread-${e.pid}-${e.tid}`);
+      if (!(e.name in nameColors)) nameColors[e.name] = colors[data.length%(colors.length-1)];
+      data.push({ ...e, y:rect(thread).y, color:`#${nameColors[e.name]}`, proc:procNames[e.pid] });
+    }
+  }
+  // render graph
+  const svg = d3.select(root).append("svg").attr("width", "100%");
+  const { y, width } = rect(svg.node()); // global coordinates
+  const render = svg.append("g").attr("transform", `translate(0, ${y})`);
+  const timestamps = data.map(t => t.ts);
+  const st = Math.min(...timestamps);
+  const timeScale = d3.scaleLinear().domain([0, Math.max(...timestamps)-st]).range([y, width]);
+  const timeAxis = render.append("g").call(d3.axisTop(timeScale).tickFormat(formatTime));
+  list.style = `margin-top: ${rect(timeAxis.node()).bottom}px;`;
+  // rescale time based coordinates to fit screen
+  for (e of data) {
+    e.st = e.ts-st;
+    e.x = timeScale(e.st);
+    e.width = timeScale(e.dur);
+  }
+  render.selectAll("rect").data(data).join("rect").attr("fill", d => d.color).attr("x", d => d.x).attr("y", d => d.y).attr("width", d => d.width)
+    .attr("height", 20);
+  render.call(d3.brush().on("end", (e) => {
+    if (!e.selection) return renderTable({ data });
+    const [[x0, y0], [x1, y1]] = e.selection;
+    const newData = data.filter(d => d.x>=x0 && d.x<=x1 && d.y>=y0 && d.y<=y1);
+    renderTable({ data: newData });
+  }));
+  createChild("div.table-root", root);
+  renderTable({ data });
+}
+
 const rect = (e) => e.getBoundingClientRect();
 
-const createChild = (es, p) => p.appendChild(document.createElement(es));
+const createChild = (es, p) => {
+  const parts = es.split(".", 2);
+  if (typeof p === "string") p = document.getElementById(p);
+  const ret = p.appendChild(document.createElement(parts[0]));
+  if (parts.length !== 1) ret.id = parts[1];
+  return ret;
+}
 
-const columns = {"Name":"name", "Start Time":"rts", "Duration":"dur", "Process":"pid"};
-let selectedData = null;
-let [sortKey, sortAsc] = [columns["Start Time"], true];
-function renderTable(newData) {
-  selectedData = newData.sort((a, b) => sortAsc ? a[sortKey]-b[sortKey] : b[sortKey]-a[sortKey]);
+const columnNames = {"name":"Name", "st":"Start Time", "dur":"Duration", "proc":"Process"};
+const tableState = {data:null, sortBy:null, asc:true};
+function renderTable(newState) {
+  console.log("render_table");
+  const { data, sortBy, asc } = Object.assign(tableState, newState);
   const root = document.getElementById("table-root");
   root.innerHTML = "";
-  createChild("p", root).innerText = `${Intl.NumberFormat('en-US').format(selectedData.length)} traces in selection.`
+  createChild("p", root).innerText = `${Intl.NumberFormat('en-US').format(data.length)} traces in selection.`
   const table = createChild("table", root);
   const thead = createChild("tr", createChild("thead", table));
-  const tbody = createChild("tbody", table);
-  for (const [k,v] of Object.entries(columns)) {
-    const th = createChild("th", thead);
-    th.innerText = k;
-    if (v === sortKey) th.className = sortAsc ? "sorted-asc" : "sorted-desc";
-    th.onclick = (e) => {
-      const key = columns[e.currentTarget.innerText];
-      if (sortKey === key) sortAsc = !sortAsc
-      else {
-        sortKey = key;
-        sortAsc = true;
-      }
-      renderTable(data);
-    };
+  for (const [k,v] of Object.entries(columnNames)) {
+    const th = createChild(`th.${k}`, thead);
+    th.innerText = v;
+    th.onclick = (e) => renderTable(k === sortBy ? { asc:!asc } : { sortBy:k, asc:true });
   }
-  for (const d of selectedData) {
-    const tr = createChild("tr", tbody);
-    createChild("td", tr).innerText = d.name;
-    createChild("td", tr).innerText = formatTime(d.rts);
-    createChild("td", tr).innerText = formatTime(d.dur);
-    createChild("td", tr).innerText = procMap[d.pid].args.name;
+  if (sortBy != null) {
+    data.sort((a, b) => asc ? a[sortBy]-b[sortBy] : b[sortBy]-a[sortBy]); // inplace sort
+    document.getElementById(sortBy).className = asc ? "sorted-asc" : "sorted-desc";
+  }
+  const tbody = createChild("tbody", table);
+  for (const d of data) {
+    const row = createChild("tr", tbody);
+    for (const k of Object.keys(columnNames)) {
+      let formatted = typeof d[k] === "string" ? d[k] : formatTime(d[k]);
+      createChild("td", row).innerText = formatted;
+    }
   }
 }
 
-main();
+main()
