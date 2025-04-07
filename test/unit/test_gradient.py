@@ -133,5 +133,10 @@ class TestTensorRequiresGrad(unittest.TestCase):
     with self.assertRaises(TypeError):
       Tensor([1, 2, 3], requires_grad=True)
 
+  def test_requires_grad_method(self):
+    x = Tensor([1, 2, 3]) 
+    with self.assertRaises(TypeError):
+      x.requires_grad_(True)
+
 if __name__ == '__main__':
   unittest.main()
