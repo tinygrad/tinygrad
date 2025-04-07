@@ -400,7 +400,7 @@ class ScheduleItem:
   metadata: tuple[Metadata, ...] = ()
 
 @track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
-def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
+def get_becomes_map(big_sink:UOp) -> tuple[dict[Variable, int], dict[UOp, UOp]]:
   # merge_views + sym + reorder_view + replace_contiguous
   tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous, ctx={})
   sink = tensor_map[big_sink]
@@ -451,6 +451,12 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # unbind var_vals and fix kernel ast
   var_vals: dict[Variable, int] = {}
   sched_sink = graph_rewrite(sched_sink, create_ast, ctx=var_vals, bottom_up=True)
+  becomes_map[big_sink] = sched_sink
+  return becomes_map, var_vals
+
+def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
+  becomes_map, var_vals = get_becomes_map(big_sink)
+  sched_sink = becomes_map.pop(big_sink)
 
   # final toposort (bfs)
   children: dict[UOp, list[UOp]] = {}
