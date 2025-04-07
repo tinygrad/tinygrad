@@ -1,14 +1,15 @@
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
+dtypes.default_float = dtypes.float16
 
 if __name__ == "__main__":
   # matmuls in bert layers
-  BS=96
-  shapes = [
-    ((BS//6, 16, 512, 512), (BS//6, 16, 512, 64)),  # x48. 27 TFLOPS on 4090 with BEAM=4
-    ((BS//6, 16, 512, 64), (BS//6, 16, 64, 512)),   # x48. 47 TFLOPS on 4090 with BEAM=4
+  BS = 96//6
+  tensors = [
+    (Tensor.empty(BS, 512, 1024), Tensor.empty(1024, 1024).T),                                          # linear to get qkv
+    (Tensor.empty(BS, 512, 16, 64).permute(0,2,1,3), Tensor.empty(BS, 512, 16, 64).permute(0,2,3,1)),   # q@k
+    (Tensor.empty(BS, 16, 512, 512), Tensor.empty(BS, 512, 16, 64).permute(0,2,1,3)),                   # qk@v
   ]
-  for s0, s1 in shapes:
-    t0 = Tensor.empty(s0, dtype="half")
-    t1 = Tensor.empty(s1, dtype="half")
+  for t0, t1 in tensors:
+    print(f"{t0.shape=}, {t0.lazydata.st.real_strides()=}, {t1.shape=}, {t1.lazydata.st.real_strides()=}")
     for _ in range(5):
-      t0.matmul(t1, dtype="half").realize()
+      t0.dot(t1, dtype="half").realize()

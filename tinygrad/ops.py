@@ -736,9 +736,7 @@ class UPat(MathTrait):
     # build dynamic match function. NOTE: once match isn't recursive, we could move this to the pattern matcher
     if not hasattr(self, 'match'): self.match = self.interpreted_match if getenv("INTERPRETED_MATCH") else self.compile_match()
 
-  # TODO: global UPat cache
   def __reduce__(self): return UPat,(self.op, self.dtype, self._in_src, self.arg, self.name, not self.strict_length, self.custom_early_reject)
-
   def named(self, name:str): return UPat(self.op, self.dtype, self._in_src, self.arg, name, not self.strict_length, self.custom_early_reject)
 
   @staticmethod
