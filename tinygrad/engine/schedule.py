@@ -385,20 +385,6 @@ def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 
-PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
-if CAPTURE_PROCESS_REPLAY:
-  @atexit.register
-  def save_process_replay():
-    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
-
-# **** schedule creation and toposort
-
-@dataclass(frozen=True)
-class ScheduleItem:
-  ast: UOp
-  bufs: tuple[Buffer, ...]
-  metadata: tuple[Metadata, ...] = ()
-
 @track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
 def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   # merge_views + sym + reorder_view + replace_contiguous
@@ -454,6 +440,20 @@ def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   becomes_map[big_sink] = sched_sink
   return becomes_map, var_vals
 
+# **** schedule linearizer
+
+@dataclass(frozen=True)
+class ScheduleItem:
+  ast: UOp
+  bufs: tuple[Buffer, ...]
+  metadata: tuple[Metadata, ...] = ()
+
+PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
+if CAPTURE_PROCESS_REPLAY:
+  @atexit.register
+  def save_process_replay():
+    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
+
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   becomes_map, var_vals = get_becomes_map(big_sink)
   sched_sink = becomes_map.pop(big_sink)
@@ -484,7 +484,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # confirm everything was scheduled correctly
   if len(schedule) != (kc:=len(in_degree)): raise RuntimeError(f"cycle detected in graph, created {kc} kernels but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
+
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(big_sink.key)] = pickle.dumps((big_sink, ContextVar._cache, [x.ast for x in schedule]))
+
   return schedule, var_vals, becomes_map
