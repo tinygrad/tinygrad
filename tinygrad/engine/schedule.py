@@ -385,22 +385,8 @@ def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 
-PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
-if CAPTURE_PROCESS_REPLAY:
-  @atexit.register
-  def save_process_replay():
-    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
-
-# **** schedule creation and toposort
-
-@dataclass(frozen=True)
-class ScheduleItem:
-  ast: UOp
-  bufs: tuple[Buffer, ...]
-  metadata: tuple[Metadata, ...] = ()
-
 @track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
-def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
+def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   # merge_views + sym + reorder_view + replace_contiguous
   tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous, ctx={})
   sink = tensor_map[big_sink]
@@ -451,8 +437,28 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # unbind var_vals and fix kernel ast
   var_vals: dict[Variable, int] = {}
   sched_sink = graph_rewrite(sched_sink, create_ast, ctx=var_vals, bottom_up=True)
+  becomes_map[big_sink] = sched_sink
+  return becomes_map, var_vals
 
-  # final toposort (bfs)
+# **** schedule linearizer
+
+@dataclass(frozen=True)
+class ScheduleItem:
+  ast: UOp
+  bufs: tuple[Buffer, ...]
+  metadata: tuple[Metadata, ...] = ()
+
+PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
+if CAPTURE_PROCESS_REPLAY:
+  @atexit.register
+  def save_process_replay():
+    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
+
+def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
+  becomes_map, var_vals = get_becomes_map(big_sink)
+  sched_sink = becomes_map.pop(big_sink)
+
+  # bfs toposort
   children: dict[UOp, list[UOp]] = {}
   in_degree: dict[UOp, int] = {}
   for u in sched_sink.toposort:
@@ -476,9 +482,11 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
       if in_degree[x] == 0: queue.append(x)
 
   # confirm everything was scheduled correctly
-  if len(schedule) != (kc:=len(in_degree)): raise RuntimeError(f"cycle detected in graph, created {kc} kernels but only scheduled {len(schedule)}")
+  if len(schedule) != len(in_degree): raise RuntimeError(f"created {len(in_degree)} kernels but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
+
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(big_sink.key)] = pickle.dumps((big_sink, ContextVar._cache, [x.ast for x in schedule]))
+
   return schedule, var_vals, becomes_map
