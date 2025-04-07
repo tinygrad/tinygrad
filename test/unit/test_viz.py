@@ -1,6 +1,6 @@
 import unittest, decimal, json
 from tinygrad.dtype import dtypes
-from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher, UOp, graph_rewrite, track_rewrites
+from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher, UOp, graph_rewrite, track_rewrites, UPat
 from tinygrad.codegen.symbolic import symbolic
 from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys, _name_cnt, _substitute
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
@@ -9,6 +9,10 @@ from tinygrad.viz.serve import get_metadata, uop_to_json, to_perfetto
 # NOTE: VIZ tests always use the tracked PatternMatcher instance
 symbolic = TrackedPatternMatcher(symbolic.patterns)
 substitute = TrackedPatternMatcher(_substitute.patterns)
+
+inner_rewrite = TrackedPatternMatcher([
+  (UPat.cvar("x"), lambda x: None if x.dtype == dtypes.float32 else UOp.const(dtypes.float32, x.arg)),
+])
 
 class TestViz(unittest.TestCase):
   def setUp(self):
@@ -99,6 +103,13 @@ class TestViz(unittest.TestCase):
     key = get_metadata(keys, contexts)[1][0]
     self.assertEqual(key, "output_(a+b) n2")
 
+  @unittest.expectedFailure
+  def test_name_in_positional_arg(self):
+    @track_rewrites(named=True)
+    def test(sink): return graph_rewrite(sink, symbolic, None, False, "name")
+    test(UOp.variable("a", 0, 1))
+    self.assertEqual(contexts[0].pop().name, "name")
+
   # NOTE: CONST UOps do not get nodes in the graph
   def test_dont_create_const_nodes(self):
     a = UOp.variable("a", 0, 10)
@@ -144,6 +155,24 @@ class TestViz(unittest.TestCase):
     fp, lineno = contexts[0][0].loc
     self.assertEqual(lineno, inner_rewrite.__code__.co_firstlineno)
     self.assertEqual(fp, inner_rewrite.__code__.co_filename)
+
+  def test_nested_rewrite(self):
+    def make_float(x:UOp, y:UOp):
+      if x.dtype == dtypes.float: return None
+      x2 = graph_rewrite(x, inner_rewrite, name="inner_x")
+      y2 = graph_rewrite(y, inner_rewrite, name="inner_y")
+      return None if (x2 is x and y2 is y) else x2+y2
+    outer_rewrite = TrackedPatternMatcher([(UPat.cvar("x")+UPat.cvar("y"), make_float),])
+    @track_rewrites(named=True)
+    def rewrite(u:UOp): return graph_rewrite(u, outer_rewrite, name="outer")
+    a = UOp.const(dtypes.int, 1)+UOp.const(dtypes.int, 2)
+    rewrite(a)
+    self.assertEqual(len(contexts), 1)
+    tracked = contexts[0]
+    self.assertEqual(len(tracked), 3)
+    # NOTE: this is sorted by the time called, maybe it should be by depth
+    self.assertEqual([x.name for x in tracked], ["outer", "inner_x", "inner_y"])
+    self.assertEqual([len(x.matches) for x in tracked], [1, 1, 1])
 
 class TextVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):

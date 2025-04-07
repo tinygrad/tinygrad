@@ -1,4 +1,4 @@
-import unittest, operator, subprocess, struct, math
+import unittest, operator, subprocess, math
 import numpy as np
 import torch
 from typing import Any, List
@@ -442,10 +442,14 @@ class TestHelpers(unittest.TestCase):
   def test_truncate_bf16(self):
     self.assertEqual(truncate_bf16(1), 1)
     self.assertAlmostEqual(truncate_bf16(1.1), 1.09375, places=7)
-    max_bf16 = struct.unpack('f', struct.pack('I', 0x7f7f0000))[0]
+    for a in [1234, 23456, -777.777]:
+      self.assertEqual(truncate_bf16(a), torch.tensor([a], dtype=torch.bfloat16).item())
+    # TODO: torch bfloat 1.1 gives 1.1015625 instead of 1.09375
+    max_bf16 = torch.finfo(torch.bfloat16).max
     self.assertEqual(truncate_bf16(max_bf16), max_bf16)
     self.assertEqual(truncate_bf16(min_bf16:=-max_bf16), min_bf16)
-    self.assertEqual(truncate_bf16(max_bf16 * 1.001), math.inf)
+    self.assertEqual(truncate_bf16(max_bf16 * 1.00001), math.inf)
+    self.assertEqual(truncate_bf16(min_bf16 * 1.00001), -math.inf)
 
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):
@@ -820,6 +824,7 @@ class TestAutoCastType(unittest.TestCase):
     np.testing.assert_allclose(t.grad.numpy(), [1, 0])
 
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "very slow")
+  @unittest.skipIf(CI and Device.DEFAULT == "AMD", "very slow")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Binding size is larger than the maximum storage buffer binding size")
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_mean_half_precision_underflow(self):

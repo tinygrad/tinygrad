@@ -46,6 +46,8 @@ class TestArange(unittest.TestCase):
     def test_complexity_w_group_top(self): return self.test_complexity([Opt(OptOps.GROUPTOP, 0, 16)], limit=106496)
 
     def test_complexity_w_local(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16)], limit=0)
+    @unittest.skip("doesn't work yet. TODO: this absolutely should work")
+    def test_complexity_w_local_unroll4(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.UNROLL, 0, 4)], limit=0)
     @unittest.skip("doesn't work yet")
     def test_complexity_w_local_and_padto(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.PADTO, axis=1, arg=32)])
 
@@ -158,7 +160,7 @@ class TestIndexing(unittest.TestCase):
   @unittest.skip("not ready")
   def test_index_mnist_opt(self): self.test_index_mnist(0)
 
-  @unittest.skipIf(getenv("PTX") or Device.DEFAULT == "WEBGPU", "broken on ptx and WebGPU for some reason")
+  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_llama_embedding(self, noopt=1, op_limit=65536):
     # llama3 is 128256
     vocab_size, embed_size = (10, 3) if CI else (32000, 4096)

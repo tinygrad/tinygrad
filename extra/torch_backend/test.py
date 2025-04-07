@@ -55,6 +55,12 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_equal(a[:3].cpu().numpy(), [1,2,3])
     np.testing.assert_equal(a[1:].cpu().numpy(), [2,3,4])
 
+  def test_as_strided(self):
+    a = torch.arange(70, device=device).reshape(1,1,10,7)
+    a = a.as_strided((1,1,10,5), (0,0,7,1), storage_offset=0)
+    a = a.as_strided((1,1,5,5), (50,50,7,1), storage_offset=21)
+    np.testing.assert_equal(a.cpu().numpy().sum(-1), [[[115,150,185,220,255]]])
+
   def test_plus_inplace(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
@@ -97,6 +103,15 @@ class TestTorchBackend(unittest.TestCase):
     out = torch.topk(a, k=2)
     np.testing.assert_equal(out.values.cpu().numpy(), [4, 3])
     np.testing.assert_equal(out.indices.cpu().numpy(), [3, 1])
+
+  def test_masked_select(self):
+    a = torch.tensor([4, 3, 2, 1], device=device)
+    mask = torch.tensor([True, False, True, False], device=device)
+    out = torch.masked_select(a, mask)
+    np.testing.assert_equal(out.cpu().numpy(), [4, 2])
+    mask = torch.tensor(True, device=device)
+    out = torch.masked_select(a, mask)
+    np.testing.assert_equal(out.cpu().numpy(), [4, 3, 2, 1])
 
   @unittest.skip("meh")
   def test_str(self):
