@@ -458,7 +458,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   becomes_map, var_vals = get_becomes_map(big_sink)
   sched_sink = becomes_map.pop(big_sink)
 
-  # final toposort (bfs)
+  # bfs toposort
   children: dict[UOp, list[UOp]] = {}
   in_degree: dict[UOp, int] = {}
   for u in sched_sink.toposort:
@@ -482,7 +482,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
       if in_degree[x] == 0: queue.append(x)
 
   # confirm everything was scheduled correctly
-  if len(schedule) != (kc:=len(in_degree)): raise RuntimeError(f"cycle detected in graph, created {kc} kernels but only scheduled {len(schedule)}")
+  if len(schedule) != len(in_degree): raise RuntimeError(f"created {len(in_degree)} kernels but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
   # capture process replay
