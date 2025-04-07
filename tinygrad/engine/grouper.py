@@ -1,8 +1,7 @@
-import sys
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites
-from tinygrad.ops import can_pad, identity_element, resolve, view_left, merge_views
+from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, view_left, merge_views
+from tinygrad.ops import can_pad, identity_element, resolve
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv, pluralize
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
@@ -12,6 +11,7 @@ from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.spec import type_verify, kernel_spec
 
 # creation can recurse a lot
+import sys
 sys.setrecursionlimit(10000)
 
 # **** schedule simplifier
@@ -94,6 +94,8 @@ replace_contiguous = PatternMatcher([
 
 # reorder view
 
+DONT_PUSH_VIEWS = {Ops.BUFFER, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.ASSIGN, Ops.SINK, Ops.CONTIGUOUS, Ops.COPY}
+
 reorder_view = PatternMatcher([
   # put CAST to smaller dtype before EXPAND
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm"),)), lambda cast,vm: vm.base.cast(cast.dtype).view(vm.st)
@@ -111,8 +113,6 @@ reorder_view = PatternMatcher([
 ])
 
 # **** UOp realization
-
-DONT_PUSH_VIEWS = {Ops.BUFFER, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.ASSIGN, Ops.SINK, Ops.CONTIGUOUS, Ops.COPY}
 
 @dataclass(frozen=True)
 class GrouperContext:
@@ -149,7 +149,6 @@ create_ctx = PatternMatcher([(UPat(GroupOp.All-{Ops.SINK, Ops.VIEW}, name="u"), 
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
                     reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]) -> None:
-  """recursively search the uop for groupable children, realize the UOp if a child can't group"""
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
   rsize = unwrap(r.st).size
@@ -382,6 +381,7 @@ def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
   ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, ctx=(ctx, bufs:=tuple(s.buf_uop for s in k.src)), bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
+
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 
 @track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
