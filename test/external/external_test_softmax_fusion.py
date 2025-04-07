@@ -1,6 +1,9 @@
 import unittest
-from tinygrad import Tensor, GlobalCounters, Context
+from tinygrad import Tensor, GlobalCounters, Context, Device
+from tinygrad.helpers import dedup
 from tinygrad.ops import Ops, UOp, graph_rewrite, PatternMatcher, track_rewrites, UPat
+from tinygrad.codegen.kernel import Kernel
+from tinygrad.engine.schedule import merge_views, add_buffer_ops, fix_kernel_ops
 
 from tinygrad.dtype import dtypes  # noqa: F401  # pylint: disable=unused-import
 from tinygrad.shape.shapetracker import ShapeTracker, View  # noqa: F401  # pylint: disable=unused-import
@@ -35,13 +38,19 @@ softmax_ast = eval("""UOp(Ops.SINK, dtypes.void, arg=None, src=(
 pm_expand_view = PatternMatcher([
   (UPat(Ops.VIEW, name="view"),
    lambda view: UOp(Ops.EXPAND_AXIS, view.dtype, view.src,
-                    tuple(i for i,x in enumerate(view.arg.views[-1].strides) if x == 0)) if view.arg.views[-1].strides[-1] == 0 else None),
+                    tuple(i for i,x in enumerate(view.arg.views[-1].strides) if x == 0)) if view.arg.views[-1].strides == (1, 0) else None),
 ])
 
 @track_rewrites()
 def rewrite_softmax(ast):
   sink = graph_rewrite(ast, pm_expand_view)
-  print(sink)
+  buffers = (UOp(Ops.BUFFER, dtypes.float, arg=320, src=(
+    UOp(Ops.DEVICE, dtypes.void, arg='METAL', src=()),
+    UOp(Ops.UNIQUE, dtypes.void, arg=1, src=()),)), UOp(Ops.BUFFER, dtypes.float, arg=320, src=(
+    UOp(Ops.DEVICE, dtypes.void, arg='METAL', src=()),
+    UOp(Ops.UNIQUE, dtypes.void, arg=0, src=()),)))
+  sink = graph_rewrite(sink, merge_views+add_buffer_ops+fix_kernel_ops, ctx=({}, buffers), bottom_up=True)
+  return sink
 
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
@@ -59,7 +68,10 @@ class TestSoftmaxFusion(unittest.TestCase):
       out.realize()
 
   def test_softmax_fuse(self):
-    rewrite_softmax(softmax_ast)
+    sink = rewrite_softmax(softmax_ast)
+    k = Kernel(sink, Device.default.renderer)
+    prg = k.to_program()
+    print(prg.src)
 
 if __name__ == '__main__':
   unittest.main()

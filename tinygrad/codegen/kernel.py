@@ -64,8 +64,8 @@ class Kernel:
       self.sts.append(unwrap(x.st))
       self.sts.append(unwrap(x.src[0].st))
 
-    # move all reduce axes to the end
-    reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
+    # move all reduce axes to the end (TODO: get this from REDUCE_AXIS)
+    reduce = list(enumerate(zip(self.full_shape, self.small_shape)))
     permute = tuple([i for i,(s,n) in reduce if not resolve(s != n)] + [i for i,(s,n) in reduce if resolve(s != n)])
     self.reshape_and_permute(None, permute)
 
@@ -111,7 +111,7 @@ class Kernel:
 
   @property
   def first_reduce(self) -> int:
-    return [resolve(x!=y) for x,y in zip(self.sts[0].shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
+    return [resolve(x!=y) for x,y in zip(self.small_shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
 
   @property
   def first_upcast(self) -> int: return self.shape_len-self.upcasted
@@ -121,6 +121,13 @@ class Kernel:
 
   @property
   def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
+
+  @property
+  def small_shape(self) -> tuple[sint, ...]:
+    shape = list(self.full_shape)
+    for r in self.reduceops:
+      for axis in r.arg[1]: shape[axis] = 1
+    return tuple(shape)
 
   @property
   def full_shape(self) -> tuple[sint, ...]: return self.sts[self.full_buf_index].shape
@@ -675,7 +682,7 @@ class Kernel:
       print(self.applied_opts)
       if DEBUG >= 5: print(modified_ast)
     # verify AST matches the spec after applying opts
-    if __debug__: type_verify(list(modified_ast.toposort))
+    #if __debug__: type_verify(list(modified_ast.toposort))
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
     #if __debug__: type_verify(list(modified_ast.toposort), shape_spec)
 

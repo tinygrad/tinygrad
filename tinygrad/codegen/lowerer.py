@@ -66,6 +66,7 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
 class IndexContext:
   idxs: list[UOp]
   ridxs: list[UOp]
+  oidxs: list[UOp]
   acc_num: int = 0
 
 def get_index(ast:UOp, opts:Renderer) -> IndexContext:
@@ -74,7 +75,9 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   full_shape = ast.full_shape
   first_upcasted = len(full_shape)-ki.upcasted
   # if there's no reduce, this is first_upcasted. assumes reduces are at the end
-  first_reduce = min([first_upcasted]+flatten(x.axis_arg for x in ast.toposort if x.op is Ops.REDUCE_AXIS))
+  first_reduce = min(set([first_upcasted]+flatten(x.axis_arg for x in ast.toposort if x.op is Ops.REDUCE_AXIS)) -
+                     set(flatten(x.axis_arg for x in ast.toposort if x.op is Ops.EXPAND_AXIS)))
+  first_real_reduce = min(set([first_upcasted]+flatten(x.axis_arg for x in ast.toposort if x.op is Ops.REDUCE_AXIS)))
   local_loads = [x for x in ast.toposort if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL]
   # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
   group_for_reduces = sum([any(l.st_arg.shape[i]!=ast.src[0].st_arg.shape[i] for l in local_loads) for i in range(first_reduce,first_upcasted)])
@@ -106,13 +109,18 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   for a in range(first_reduce, first_reduce+group_for_reduces):
     ridxs[a] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(full_shape[a])), 1000+a)
 
-  return IndexContext(idxs, ridxs)
+  oidxs = ridxs[:]
+  for a in range(first_real_reduce, first_reduce):
+    oidxs[a] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(full_shape[a])), 2000+a)
+
+  return IndexContext(idxs, ridxs, oidxs)
 
 # ***** lowering (given index) *****
 
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
+  x = x.substitute({ctx.ridxs[i]:ctx.oidxs[i] for i in x.axis_arg if ctx.ridxs[i] is not ctx.oidxs[i]})
   # NOTE: always using ridxs is fine here
-  reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
+  reduce_range, reduce_expand = partition([ctx.oidxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
   assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
   alu_op: Ops = x.arg[0]
   ret = x.src[0]
@@ -145,6 +153,7 @@ def lower_const(x:UOp):
 
 pm_lowerer = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
+  (UPat(Ops.EXPAND_AXIS, name="x"), lambda x: x.src[0]),  # wrong if there's upcast
   (UPat((Ops.CONST, Ops.DEFINE_VAR), src=(UPat(Ops.VIEW),), name="x"), lower_const),
   (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
   # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed

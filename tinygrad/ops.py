@@ -316,6 +316,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
     # only reduce ops are allowed to change shape, everything else derives shape from sources
     elif self.op in {Ops.REDUCE_AXIS, Ops.WMMA}: shape = src_sts[0].reduce(self.axis_arg)
+    elif self.op is Ops.EXPAND_AXIS:
+      # you really want "nearest parent" here
+      nearest_reduce = [x for x in self.toposort if x.op is Ops.REDUCE_AXIS][-1]
+      assert nearest_reduce.arg[1] == self.arg, "EXPAND must counter reduce. TODO: support partial"
+      return nearest_reduce.src[0].st
     else: shape = src_sts[0].shape
     return ShapeTracker.from_shape(shape)
 
@@ -361,8 +366,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return unwrap(self.st)
   @property
   def axis_arg(self) -> tuple[int, ...]:
-    assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
-    ret = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
+    assert self.op in {Ops.REDUCE_AXIS, Ops.EXPAND_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
+    ret = self.arg[1] if self.op is Ops.REDUCE_AXIS else (self.arg[7] if self.op is Ops.WMMA else self.arg)
     assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
     return ret
   def sink(self, *srcs:UOp, **kwargs): return UOp(Ops.SINK, dtypes.void, (self,)+srcs, **kwargs)
