@@ -4165,7 +4165,7 @@ P = ParamSpec("P")
 T = TypeVar("T")
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-    if _METADATA.get() is not None: return fn(*args, **kwargs)
+    if (_METADATA.get() is not None) or (TRACEMETA == 0): return fn(*args, **kwargs)
 
     if TRACEMETA >= 2:
       caller_frame = sys._getframe(frame := 1)
@@ -4197,17 +4197,8 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
 
 def tracemeta_callback(val):
   if val >= 1:
-    if getattr(Tensor,"_unwrapped", None) is not None: return
-    unwrapped = {}
     for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
       if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
-      unwrapped[name] = fn
       setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
-    if getattr(Tensor,"_unwrapped", None) is None: setattr(Tensor, "_unwrapped", unwrapped)
-  else:
-    unwrapped_attr = getattr(Tensor, "_unwrapped", None)
-    if isinstance(unwrapped_attr, dict):
-      for name, fn in unwrapped_attr.items(): setattr(Tensor, name, fn)
-      delattr(Tensor,"_unwrapped")
 
 TRACEMETA.add_callback(tracemeta_callback)
