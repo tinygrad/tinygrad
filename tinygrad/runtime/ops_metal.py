@@ -35,7 +35,7 @@ libobjc.sel_registerName.restype = objc_id
 libmetal.MTLCreateSystemDefaultDevice.restype = objc_instance
 libdispatch.dispatch_data_create.restype = objc_instance
 
-@functools.lru_cache(None)
+@functools.cache
 def msg(selector: str, restype: type[T] = objc_id):  # type: ignore [assignment]
   resname = libobjc.sel_registerName(selector.encode())
   sender = libobjc["objc_msgSend"] # Using attribute access returns a new reference so setting restype is safe
@@ -43,7 +43,7 @@ def msg(selector: str, restype: type[T] = objc_id):  # type: ignore [assignment]
   def _msg(ptr: objc_id, *args: Any) -> T: return sender(ptr, resname, *args)
   return _msg
 
-@functools.lru_cache(None)
+@functools.cache
 def to_ns_str(s: str): return msg("stringWithUTF8String:", objc_instance)(libobjc.objc_getClass(b"NSString"), s.encode())
 def from_ns_str(s): return bytes(msg("UTF8String", ctypes.c_char_p)(s)).decode()
 
