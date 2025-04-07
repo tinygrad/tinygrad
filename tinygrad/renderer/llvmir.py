@@ -54,7 +54,7 @@ def render_wmma_amd(ctx, wmma: UOp) -> str:
       if wmma.dtype.scalar() != dtypes.float else ")")
 
 # llvm ops, lop[<dtype>][<op>]
-unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
+unsigned_lop = { Ops.ADD: "add nsw", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor", }
 signed_lop = {**unsigned_lop, Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv", Ops.MOD: "srem"}
 flags = " nsz arcp contract afn"
@@ -142,6 +142,7 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
   ])
   def __getitem__(self, key): return self.r[key]  # hacky helper
+  def get_attributes(self, uops:list[UOp]) -> str: return 'attributes #0 = { nounwind "no-builtins" "no-trapping-math"="true" }'
   def render(self, uops: list[UOp]) -> str:
     r: dict[UOp, str] = {}
     self.r = r
@@ -208,8 +209,7 @@ define{(' '+self.abi) if self.abi is not None else ''} void @{name}({','.join(ar
   ret void
 }}
 {chr(10).join(end_lines.keys())}
-attributes #0 = {{ nounwind "no-builtins" "no-trapping-math"="true" }}
-'''
+''' + self.get_attributes(uops)
     return prg if len(local_args) == 0 else "\n".join(local_args)+f"\n{prg}"
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
@@ -248,3 +248,10 @@ class AMDLLVMRenderer(LLVMRenderer):
     (UPat(Ops.WMMA, name="x", dtype=dtypes.half.vec(8)),
      lambda x: UOp(Ops.WMMA, dtypes.half.vec(16), (x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), (*x.arg,)).cast(dtypes.half.vec(8)))
   ]) + LLVMRenderer.extra_matcher
+
+  def get_attributes(self, uops:list[UOp]) -> str:
+    requiredMaxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == "l")
+    return 'attributes #0 = { convergent mustprogress norecurse nounwind "no-trapping-math"="true" "stack-protector-buffer-size"="8" ' + \
+      f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}" "uniform-work-group-size"="true"' + \
+      '"target-features"="+cumode,+16-bit-insts,+atomic-fadd-rtn-insts,+ci-insts,+dl-insts,+dot10-insts,+dot12-insts,+dot5-insts,+dot7-insts,' + \
+      '+dot8-insts,+dot9-insts,+dpp,+gfx10-3-insts,+gfx10-insts,+gfx11-insts,+gfx8-insts,+gfx9-insts,+wavefrontsize32" }'
