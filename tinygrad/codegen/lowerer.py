@@ -118,7 +118,11 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
 # ***** lowering (given index) *****
 
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
-  x = x.substitute({ctx.ridxs[i]:ctx.oidxs[i] for i in x.axis_arg if ctx.ridxs[i] is not ctx.oidxs[i]})
+  subs = {}
+  for i in x.axis_arg:
+    if ctx.ridxs[i] is not ctx.oidxs[i]:
+      subs[ctx.ridxs[i]] = ctx.oidxs[i] = ctx.oidxs[i].replace(arg=ctx.oidxs[i].arg+1)
+  x = x.substitute(subs)
   # NOTE: always using ridxs is fine here
   reduce_range, reduce_expand = partition([ctx.oidxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
   assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
