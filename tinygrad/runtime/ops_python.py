@@ -67,10 +67,10 @@ class PythonProgram:
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
         if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}:
-          assert dtype.fmt is not None and isinstance(dtype, PtrDType)
-          if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
+          assert dtype.scalar().fmt is not None and isinstance(dtype, PtrDType)
+          if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.scalar().fmt != "e"
           buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
-          ul[i] = [buf.cast(dtype.fmt)] * warp_size
+          ul[i] = [buf.cast(dtype.scalar().fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
@@ -101,8 +101,8 @@ class PythonProgram:
               continue
         elif uop is Ops.VECTORIZE: ul[i] = inp
         elif uop in {Ops.CAST, Ops.BITCAST}:
-          assert dtp[0].fmt and dtype.fmt
-          pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
+          assert dtp[0].scalar().fmt and dtype.scalar().fmt
+          pack_format, unpack_format = str(warp_size) + dtp[0].scalar().fmt, str(warp_size) + dtype.scalar().fmt
           if uop is Ops.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
           else: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
         elif uop is Ops.LOAD:
