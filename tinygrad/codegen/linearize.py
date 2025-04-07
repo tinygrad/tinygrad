@@ -218,7 +218,15 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
     forks = {}
     for u,child_count in block_parent_count.items():
       if u.op not in DONT_PLACE_IN_BLOCK and child_count > 1 and u not in non_block_parents:
-        new_block = UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(block_ctxs[u], (u,)))
+        new_block = x = UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(block_ctxs[u], (u,)))
+        rng = block_ctxs[u]
+        lrng = list(rng)
+        for r in rng[::-1]:
+          # TODO: True is wrong here. check the children's ctxs
+          if True:
+            lrng.remove(r)
+            new_block = UOp(Ops.BLOCKEND, src=(new_block,),
+                            arg=BasicBlock(tuple(lrng), (UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,)),), r))
         # TODO: a BLOCKEND might have to go here
         forks[u] = UOp(Ops.BLOCKFORK, src=(new_block,), arg=child_count)
 

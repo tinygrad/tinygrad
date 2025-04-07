@@ -114,6 +114,10 @@ class Kernel:
     return [resolve(x!=y) for x,y in zip(self.small_shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
 
   @property
+  def first_real_reduce(self) -> int:
+    return [resolve(x!=y) for x,y in zip(self.output_shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
+
+  @property
   def first_upcast(self) -> int: return self.shape_len-self.upcasted
 
   @property
@@ -157,8 +161,10 @@ class Kernel:
     colors += ["cyan"] * self.local_dims
     # between first_reduce and first_reduce + group_for_reduces, they are late upcasted (green)
     colors += ["green"] * self.group_for_reduces
+    # between first_real_reduce and first_reduce
+    colors += ["GREEN"] * (self.first_real_reduce - self.first_reduce)
     # between first_reduce + group_for_reduces and upcasted, they are reduce (red)
-    colors += ["red"] * (self.first_upcast - (self.first_reduce + self.group_for_reduces))
+    colors += ["red"] * (self.first_upcast - (self.first_real_reduce + self.group_for_reduces))
     # upcasted dimensions are reduce (magenta) or normal (yellow)
     colors += ["magenta" if self.full_shape[i] != self.sts[0].shape[i] else "yellow" for i in range(self.first_upcast, self.shape_len)]
     assert len(colors) == self.shape_len, "colors size mismatch"
