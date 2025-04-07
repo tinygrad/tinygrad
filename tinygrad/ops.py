@@ -801,38 +801,48 @@ class UPat(MathTrait):
       res.extend(stores)
     return res
 
-  def compile_match(self):
+  def _get_or_clause(self, nm, wrap):
     # build the or_clause for rejection
     or_clause = []
-    dyn_lookup: dict[str, Any] = {}
     if self.op is not None:
       if len(self.op) > 1:
-        dyn_lookup['tuple_ops'] = self.op
-        or_clause.append("uop.op not in tuple_ops")
+        or_clause.append(f"{nm}.op not in {wrap(self.op)}")
       else:
-        dyn_lookup['single_op'] = self.op[0]
-        or_clause.append("uop.op is not single_op")
+        or_clause.append(f"{nm}.op is not {wrap(self.op[0])}")
     if self.arg is not None:
-      dyn_lookup['global_arg'] = self.arg
-      or_clause.append("global_arg != uop.arg")
+      or_clause.append(f"{nm}.arg != {wrap(self.arg)}")
     if self.strict_length or self.required_len > 0:
-      or_clause.append(f"len(uop.src) != {self.required_len}" if self.strict_length else f"len(uop.src) < {self.required_len}")
+      or_clause.append(f"len({nm}.src) != {self.required_len}" if self.strict_length else f"len({nm}.src) < {self.required_len}")
     if self.name is not None:
-      or_clause.append(f"store.setdefault('{self.name}', uop) is not uop")
+      or_clause.append(f"store.setdefault('{self.name}', {nm}) is not {nm}")
     if self.dtype is not None:
       if len(self.dtype) > 1:
-        dyn_lookup['tuple_dtypes'] = self.dtype
-        or_clause.append("uop.dtype not in tuple_dtypes and uop.dtype._scalar not in tuple_dtypes")
+        wrapped_dtype = wrap(self.dtype)
+        or_clause.append(f"{nm}.dtype not in {wrapped_dtype} and {nm}.dtype._scalar not in {wrapped_dtype}")
       else:
-        dyn_lookup['single_dtype'] = self.dtype[0]
-        or_clause.append("uop.dtype != single_dtype and uop.dtype._scalar != single_dtype")
+        wrapped_dtype = wrap(self.dtype[0])
+        or_clause.append(f"{nm}.dtype != {wrapped_dtype} and {nm}.dtype._scalar != {wrapped_dtype}")
+    return or_clause
+
+  def compile_match(self):
+    dyn_lookup: dict[str, Any] = {}
+    def wrap(x):
+      dyn_lookup[ret:=f"a{len(dyn_lookup)}"] = x
+      return ret
+    or_clause = self._get_or_clause("uop", wrap)
+
+    srcs_handled = self.src is None
+    if self.src is not None and len(self.src) == 1 and isinstance(self.src[0], tuple) and all(s.src is None for s in self.src[0]):
+      for i,s in enumerate(self.src[0]):
+        or_clause += s._get_or_clause(f"uop.src[{i}]", wrap)
+      srcs_handled = True
 
     # build the function
     code_fxn =                              "def match(uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:\n"
     if len(or_clause):         code_fxn += f"  if {' or '.join(['('+x+')' for x in or_clause])}: return []\n"
 
     # handle child srcs
-    if self.src is None:       code_fxn +=  "  return [store]"
+    if srcs_handled:       code_fxn +=  "  return [store]"
     elif len(self.src) == 1:
       if isinstance(self.src[0], tuple) and len(self.src[0]) == 1:
         dyn_lookup['single_src'] = self.src[0][0]
@@ -858,13 +868,11 @@ class UPat(MathTrait):
   return res"""
     namespace: dict = {}
     exec(code_fxn, dyn_lookup, namespace)
-    """
     print("\n\n**** COMPILE", self)
     print(code_fxn)
-    if self.src is None or len(self.src) == 1:
-      import dis
-      dis.dis(namespace['match'])
-    """
+    #if self.src is None or len(self.src) == 1:
+    #  import dis
+    #  dis.dis(namespace['match'])
     return namespace['match']
 
 class UPatAny(UPat):
