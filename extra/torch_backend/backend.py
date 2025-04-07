@@ -666,26 +666,45 @@ def _torch_patched_gather(tensors, dim, dest_index):
   return wrap(Tensor.cat(*(unwrap(x).to(_from_torch_device(torch.device("tiny", dest_index))) for x in tensors), dim=dim))
 torch.nn.parallel.comm.gather = _torch_patched_gather
 
-class TinyDistributedBackend:
-  rank = 0
-  size = 1
-  # TODO: move these off CPU
+class TinyDistributedWork(torch.distributed.Work):
+  def __init__(self, result): 
+    super().__init__()
+    self.result = result
+    self.future = torch.futures.Future()
+    self.future.set_result(self.result)
+  def wait(self, timeout=None): return True
+  def get_future(self): return self.future
+# TODO: move this off CPU
+class ProcessGroupTiny(torch.distributed.ProcessGroup):
+  def __init__(self, store, rank, size):
+    super().__init__(store, rank, size)
+    self.gloo = None
+    self._pending_work = [] # TODO: when can we clean this up?
+  def _ensure_gloo(self):
+    if self.gloo is None:
+      self.gloo = torch.distributed.new_group(backend="gloo")
   def allreduce(self, tensors, opts):
+    self._ensure_gloo()
     tensors_cpu = [x.cpu() for x in tensors]
-    for a,b in zip(tensors, tensors_cpu):
-      assert a.device.index == self.rank
-      torch.distributed.all_reduce(b, op=opts.reduceOp)
-      a.copy_(b)
+    self.gloo.allreduce(tensors_cpu, opts).wait()
+    for a,b in zip(tensors, tensors_cpu): a.copy_(b)
+    self._pending_work.append(TinyDistributedWork(tensors))
+    return self._pending_work[-1]
   def broadcast(self, tensors, opts):
+    self._ensure_gloo()
     tensors_cpu = [x.cpu() for x in tensors]
-    for a,b in zip(tensors, tensors_cpu):
-      assert a.device.index == self.rank
-      torch.distributed.broadcast(b, src=opts.rootRank)
-      a.copy_(b)
-  def allgather(self, outputs, inputs, opts):
+    self.gloo.broadcast(tensors_cpu, opts).wait()
+    for a,b in zip(tensors, tensors_cpu): a.copy_(b)
+    self._pending_work.append(TinyDistributedWork(tensors))
+    return self._pending_work[-1]
+  def allgather(self, outputs, inputs, opts=None):
+    self._ensure_gloo()
     inputs_cpu = [x.cpu() for x in inputs]
-    outputs_cpu = [[torch.empty_like(x) for _ in range(self.size)] for x in inputs_cpu]
-    for a,b in zip(outputs_cpu,inputs_cpu): torch.distributed.all_gather(a,b)
+    outputs_cpu = [[torch.empty_like(x) for _ in range(self.size())] for x in inputs_cpu]
+    self.gloo.allgather(outputs_cpu, inputs_cpu, opts=opts).wait()
     for a,b in zip(flatten(outputs),flatten(outputs_cpu)): a.copy_(b)
+    self._pending_work.append(TinyDistributedWork(outputs))
+    return self._pending_work[-1]
 
-mod.register_dist_backend(TinyDistributedBackend)
+def create_pg_tiny(store, rank, size, timeout): return ProcessGroupTiny(store, rank, size)
+torch.distributed.Backend.register_backend("tiny", create_pg_tiny, devices="tiny")
