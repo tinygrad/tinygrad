@@ -4196,9 +4196,10 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
   return _wrapper
 
 def tracemeta_callback(val):
-  if val >= 1:
+  if (val >= 1) and (getattr(Tensor, "wrapped", False) is False):
     for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
       if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
       setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
+    setattr(Tensor, "wrapped", True)
 
 TRACEMETA.add_callback(tracemeta_callback)
