@@ -47,9 +47,9 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 # ***** uop type spec *****
 
 def z3_cdiv(a,b): return z3.If(a<0, (a+(b-1))/b, a/b)  # IDIV is truncated division but z3 does floored division
-def z3_and(a,b): return a % (b+1) if isinstance(b, int) else a & b  # mod by power of two uses Ops.AND
+def z3_and(a,b): return a % (b+1) if isinstance(b, z3.IntNumRef) else a & b  # mod by power of two uses Ops.AND
 z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.AND: z3_and,
-                                            Ops.SHR: lambda a,b: a/(2**b), Ops.SHL: lambda a,b: a*(2**b)}
+                                            Ops.SHR: lambda a,b: a/(2**b.as_long()), Ops.SHL: lambda a,b: a*(2**b.as_long())}
 def z3_eval(expr: UOp, ctx: dict[UOp, 'int|z3.ArithRef']) -> 'z3.ArithRef|int':
   return ctx[expr] if expr in ctx else z3_alu[expr.op](*(z3_eval(src, ctx) for src in expr.src))
 
@@ -65,14 +65,19 @@ def validate_index(idx:UOp, mask:UOp|None=None):
   all_uops= (idx.toposort | mask.toposort) if mask is not None else idx.toposort
   specials = {var:z3.Int(var.arg[0], ctx=z3ctx) for var in filter(lambda x: x.op is Ops.SPECIAL, all_uops.keys())}
   ranges = {var:z3.Int(f"ridx{var.arg}", ctx=z3ctx) for var in filter(lambda x: x.op is Ops.RANGE, all_uops.keys())}
-  consts = {var:var.arg for var in filter(lambda x: x.op is Ops.CONST, all_uops)}
+  consts = {var:z3.IntVal(var.arg, ctx=z3ctx) for var in filter(lambda x: x.op is Ops.CONST, all_uops)}
   for var, z3var in specials.items(): solver.add(0<=z3var, z3var<var.arg[1])
   for var, z3var in ranges.items(): solver.add(var.src[0].arg<=z3var, z3var<var.src[1].arg)
 
   if mask is not None: solver.add(z3_eval(mask, specials|ranges|consts))
   z3_idx = z3_eval(idx.src[1], specials|ranges|consts)
-  if solver.check(z3_idx<0, sz<=z3_idx) == z3.sat:
-    print(f"OUT OF BOUNDS ACCESS in INDEX not in 0 - {sz}. {idx.src[1].render()=}")
+  if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
+    for key, val in (ranges|specials).items(): print(f"{val}={key}")
+    print(f"idx={idx.src[1].render(simplify=False)}")
+    print(solver)
+    print(z3_idx)
+    if mask is not None: print(f"mask={mask.render(simplify=False)}")
+    print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz} \n")
     return False
   return True
 
