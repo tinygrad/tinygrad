@@ -234,10 +234,10 @@ class Kernel:
 @dataclass(frozen=True)
 class KernelContext:
   realizes: dict[UOp, None]
-  ops_metadata: dict[UOp, Metadata]
+  metadata: dict[UOp, Metadata]
 
 def create_kernel(ctx:KernelContext, x:UOp, b:UOp):
-  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), (m,) if (m:=ctx.ops_metadata.get(x)) else ()))
+  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), (m,) if (m:=ctx.metadata.get(x)) else ()))
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return UOp(Ops.ASSIGN, x.dtype, (buffer, kernel)).reshape(x.shape)
 
@@ -250,7 +250,7 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
     if s.op in DONT_PLACE_IN_KERNEL or s in ctx.realizes: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
-      if (m:=ctx.ops_metadata.get(s)) is not None: metadata[m] = None
+      if (m:=ctx.metadata.get(s)) is not None: metadata[m] = None
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
 
 create_kernels = PatternMatcher([
@@ -404,17 +404,15 @@ class ScheduleItem:
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   # merge_views + sym + reorder_view + replace_contiguous
   tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous, ctx={})
+  sink = tensor_map[big_sink]
+  metadata = {v:k.metadata for k,v in tensor_map.items() if k.base.op not in {Ops.CONST, Ops.DEVICE} and isinstance(k.metadata, Metadata)}
 
   # display the cleaned up tensor graph
-  if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
+  if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Tensor Graph")
 
-  # get realizes
-  sink = tensor_map[big_sink]
+  # group into kernels
   realize_map = group_realizes(sink)
-  # map tensor metadata to simplified ops
-  ops_metadata = {v:k.metadata for k,v in tensor_map.items() if k.base.op not in {Ops.CONST, Ops.DEVICE} and isinstance(k.metadata, Metadata)}
-  # merge_views + create_kernels
-  kernel_map = graph_rewrite_map(sink, merge_views+create_kernels, ctx=KernelContext(realize_map, ops_metadata), bottom_up=True)
+  kernel_map = graph_rewrite_map(sink, merge_views+create_kernels, ctx=KernelContext(realize_map, metadata), bottom_up=True)
   sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
