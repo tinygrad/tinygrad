@@ -17,7 +17,7 @@ DATETIME=$(date "+%m%d%H%M")
 LOGFILE="bert_green_${DATETIME}_${SEED}.log"
 
 # init
-BENCHMARK=10 INITMLPERF=1 BEAM_LOG_SURPASS_MAX=1 python3 examples/mlperf/model_train.py | tee $LOGFILE
+BENCHMARK=10 INITMLPERF=1 BERT_LAYERS=2 python3 examples/mlperf/model_train.py | tee $LOGFILE
 
 # run
 PARALLEL=0 RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a $LOGFILE
