@@ -242,9 +242,9 @@ class AMDLLVMRenderer(LLVMRenderer):
   ]) + base_rewrite
   extra_matcher = PatternMatcher([
     # double intrinsics missing for sqrt/exp2/log2
-    ((UPat(Ops.SQRT, dtype=dtypes.double, name="x"), lambda x: xpow(x.src[0], x.src[0].const_like(0.5)))),
-    ((UPat(Ops.EXP2, dtype=dtypes.double, name="x"), lambda x: xexp2(x.src[0]))),
-    ((UPat(Ops.LOG2, dtype=dtypes.double, name="x"), lambda x: xlog2(x.src[0]))),
+    (UPat(Ops.SQRT, dtype=dtypes.double, name="x"), lambda x: xpow(x.src[0], x.src[0].const_like(0.5))),
+    (UPat(Ops.EXP2, dtype=dtypes.double, name="x"), lambda x: xexp2(x.src[0])),
+    (UPat(Ops.LOG2, dtype=dtypes.double, name="x"), lambda x: xlog2(x.src[0])),
     (UPat(Ops.WMMA, name="x", dtype=dtypes.half.vec(8)),
      lambda x: UOp(Ops.WMMA, dtypes.half.vec(16), (x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), (*x.arg,)).cast(dtypes.half.vec(8)))
   ]) + LLVMRenderer.extra_matcher
