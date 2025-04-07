@@ -10,7 +10,7 @@ from tinygrad.device import Buffer, Device
 from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
 from tinygrad.spec import spec
 from tinygrad.renderer import ProgramSpec
-from tinygrad.engine.schedule import fix_kernel_ops
+from tinygrad.engine.grouper import fix_kernel_ops
 from tinygrad.engine.realize import CompiledRunner, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.devectorizer import full_graph_rewrite
@@ -348,18 +348,40 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.SHL, ops)
     self.assertIn(Ops.MUL, ops)
 
-  def test_bitshift_right(self):
-    g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
-    c1 = UOp(Ops.CONST, dtypes.uint, (), 2)
-    c2 = UOp(Ops.CONST, dtypes.uint, (), 3)
-    l1 = UOp(Ops.LOAD, dtypes.uint, (g1.index(c1),))
-    a1 = UOp(Ops.IDIV, dtypes.uint, (l1, c1))
-    a2 = UOp(Ops.IDIV, dtypes.uint, (l1, c2))
-    uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
+  def test_division_power_of_two(self):
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c = UOp(Ops.CONST, dtypes.uint, (), 2)
+    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
+    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
-    self.assertIn(Ops.IDIV, ops)
+    self.assertNotIn(Ops.IDIV, ops)
+
+  def test_fast_idiv(self):
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c = UOp(Ops.CONST, dtypes.uint, (), 3)
+    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
+    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHR, ops)
+    self.assertNotIn(Ops.IDIV, ops)
+
+  @unittest.expectedFailure
+  def test_fast_idiv_overflow(self):
+    # This will be possible with a slightly different method for fast_idiv
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c = UOp(Ops.CONST, dtypes.uint, (), 7)
+    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
+    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHR, ops)
+    self.assertNotIn(Ops.IDIV, ops)
 
   def test_mulacc_unrolled(self):
     # test that     acc = acc + a0*b0 + a1*b1 + a2*b2 + a3*b3
@@ -481,10 +503,13 @@ class TestIndexingOrdering(unittest.TestCase):
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
     self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "symbolic.py")
-    self.assertEqual(fix_kernel_ops.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "schedule.py")
+    self.assertEqual(fix_kernel_ops.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "grouper.py")
     self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "spec.py")
     test_upat = UPat(Ops.CONST, dtypes.bool)
     self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])
+    test_upat_named = test_upat.named("test_name")
+    self.assertEqual(test_upat.location[0], test_upat_named.location[0])
+    self.assertNotEqual(test_upat.location[1], test_upat_named.location[1])
 
 class TestUopsObject(unittest.TestCase):
   # LOL, running this test breaks all instances of "4"
