@@ -3,6 +3,7 @@ from typing import Final, Optional, ClassVar, Union, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
+from device import is_dtype_supported
 
 ConstType = Union[float, int, bool]
 
@@ -165,10 +166,12 @@ def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType)
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support weak type and complex type
 promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
-  dtypes.int64: [dtypes.fp8e5m2, dtypes.fp8e4m3], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
-  dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.float16, dtypes.bfloat16],
+  dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32], dtypes.uint32: [dtypes.int64, dtypes.uint64],
   dtypes.fp8e5m2: [dtypes.float16, dtypes.bfloat16], dtypes.fp8e4m3: [dtypes.float16, dtypes.bfloat16],
   dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
+if is_dtype_supported(dtypes.fp8e5m2) and is_dtype_supported(dtypes.fp8e4m3):
+      promo_lattice.update({dtypes.int64: [dtypes.fp8e5m2, dtypes.fp8e4m3], dtypes.uint64: [dtypes.fp8e5m2, dtypes.fp8e4m3]})
+else: promo_lattice.update({dtypes.int64: [dtypes.float16, dtypes.bfloat16], dtypes.uint64: [dtypes.float16, dtypes.bfloat16]})
 
 @functools.cache
 def _get_recursive_parents(dtype:DType) -> set[DType]:
