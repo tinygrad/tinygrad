@@ -80,8 +80,8 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule_with_vars
 
 # allocate some values + load in values
-a = UOp.metaop(Ops.EMPTY, (1,), dtypes.int32, DEVICE)
-b = UOp.metaop(Ops.EMPTY, (1,), dtypes.int32, DEVICE)
+a = UOp.new_buffer(DEVICE, 1, dtypes.int32)
+b = UOp.new_buffer(DEVICE, 1, dtypes.int32)
 a.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
 b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
 

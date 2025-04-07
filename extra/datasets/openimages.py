@@ -205,6 +205,12 @@ def resize(img:Image, tgt:dict[str, np.ndarray|tuple]|None=None, size:tuple[int,
 
   return img, img_size
 
+def normalize(img:Tensor, device:list[str]|None = None):
+  mean = Tensor([0.485, 0.456, 0.406], device=device, dtype=dtypes.float32).reshape(1, -1, 1, 1)
+  std = Tensor([0.229, 0.224, 0.225], device=device, dtype=dtypes.float32).reshape(1, -1, 1, 1)
+  img = ((img.permute([0, 3, 1, 2]) / 255.0) - mean) / std
+  return img.cast(dtypes.default_float)
+
 if __name__ == "__main__":
   download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), "train")
   download_dataset(base_dir, "validation")
