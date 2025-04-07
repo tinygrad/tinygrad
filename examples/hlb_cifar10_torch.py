@@ -10,7 +10,7 @@ import torch
 import numpy as np
 from torch import nn, optim
 from torch.optim.lr_scheduler import OneCycleLR
-from tinygrad import getenv, Device, dtypes, GlobalCounters
+from tinygrad import getenv, Device, dtypes, GlobalCounters, Tensor
 from tinygrad.helpers import prod, colored
 from tinygrad.nn.datasets import cifar
 import torch.nn.functional as F
@@ -187,7 +187,6 @@ def train_cifar():
 
   def set_seed(seed):
     torch.manual_seed(seed)
-    from tinygrad import Tensor
     Tensor.manual_seed(seed)
     random.seed(seed)
 
