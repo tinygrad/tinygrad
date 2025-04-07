@@ -3,7 +3,7 @@ from typing import Final, Optional, ClassVar, Union, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
-from device import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 ConstType = Union[float, int, bool]
 
