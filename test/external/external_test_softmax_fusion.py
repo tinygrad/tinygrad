@@ -1,12 +1,65 @@
+import unittest
 from tinygrad import Tensor, GlobalCounters, Context
+from tinygrad.ops import Ops, UOp, graph_rewrite, PatternMatcher, track_rewrites, UPat
 
-if __name__ == "__main__":
-  with Context(TRACK_MATCH_STATS=0): test = Tensor.ones(32, 10).contiguous().realize()
-  GlobalCounters.reset()
+from tinygrad.dtype import dtypes  # noqa: F401  # pylint: disable=unused-import
+from tinygrad.shape.shapetracker import ShapeTracker, View  # noqa: F401  # pylint: disable=unused-import
 
-  # this is the softmax from scaled_dot_product_attention
-  # it becomes 3 kernels
-  print("*** softmax ***")
-  with Context(NOOPT=1):
-    out = test.softmax(-1)
-    out.realize()
+# softmax kernel
+softmax_ast = eval("""UOp(Ops.SINK, dtypes.void, arg=None, src=(
+  UOp(Ops.MUL, dtypes.float, arg=None, src=(
+    x1:=UOp(Ops.EXP2, dtypes.float, arg=None, src=(
+      UOp(Ops.MUL, dtypes.float, arg=None, src=(
+        UOp(Ops.ADD, dtypes.float, arg=None, src=(
+          x4:=UOp(Ops.VIEW, dtypes.float,
+                   arg=ShapeTracker(views=(View(shape=(32, 10), strides=(10, 1), offset=0, mask=None, contiguous=True),)), src=(
+            UOp(Ops.BUFFER, dtypes.float, arg=320, src=(
+              x6:=UOp(Ops.DEVICE, dtypes.void, arg='METAL', src=()),
+              UOp(Ops.UNIQUE, dtypes.void, arg=0, src=()),)),)),
+          UOp(Ops.MUL, dtypes.float, arg=None, src=(
+            UOp(Ops.VIEW, dtypes.float,
+                   arg=ShapeTracker(views=(View(shape=(32, 10), strides=(1, 0), offset=0, mask=None, contiguous=False),)), src=(
+              UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.MAX, (1,)), src=(
+                 x4,)),)),
+            UOp(Ops.CONST, dtypes.float, arg=-1.0, src=(
+              x12:=UOp(Ops.VIEW, dtypes.void,
+                   arg=ShapeTracker(views=(View(shape=(32, 10), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=(
+                 x6,)),)),)),)),
+        UOp(Ops.CONST, dtypes.float, arg=1.4426950408889634, src=(
+           x12,)),)),)),
+    UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(32, 10), strides=(1, 0), offset=0, mask=None, contiguous=False),)), src=(
+      UOp(Ops.RECIP, dtypes.float, arg=None, src=(
+        UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (1,)), src=(
+           x1,)),)),)),)),))""")
+
+pm_expand_view = PatternMatcher([
+  (UPat(Ops.VIEW, name="view"),
+   lambda view: UOp(Ops.EXPAND_AXIS, view.dtype, view.src,
+                    tuple(i for i,x in enumerate(view.arg.views[-1].strides) if x == 0)) if view.arg.views[-1].strides[-1] == 0 else None),
+])
+
+@track_rewrites()
+def rewrite_softmax(ast):
+  sink = graph_rewrite(ast, pm_expand_view)
+  print(sink)
+
+class TestSoftmaxFusion(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    with Context(TRACK_MATCH_STATS=0): cls.test = Tensor.ones(32, 10).contiguous().realize()
+
+  def test_softmax(self):
+    GlobalCounters.reset()
+
+    # this is the softmax from scaled_dot_product_attention
+    # it becomes 3 kernels
+    print("*** softmax ***")
+    with Context(NOOPT=1, DEBUG=2):
+      out = self.test.softmax(-1)
+      out.realize()
+
+  def test_softmax_fuse(self):
+    rewrite_softmax(softmax_ast)
+
+if __name__ == '__main__':
+  unittest.main()

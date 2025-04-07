@@ -113,6 +113,9 @@ class Ops(FastEnum):
   # reduce
   REDUCE_AXIS = auto(); REDUCE = auto() # noqa: E702
 
+  # expand axis
+  EXPAND_AXIS = auto()
+
   # helper ops
   GEP = auto(); VECTORIZE = auto(); CAT = auto(); PTRCAT = auto() # noqa: E702
 
