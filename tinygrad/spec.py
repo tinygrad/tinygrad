@@ -46,8 +46,8 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 
 # ***** uop type spec *****
 
-def z3_cdiv(a,b): return z3.If(a<0, (a+(b-1))/b, a/b)
-def z3_and(a,b): return a % (b+1) if isinstance(b, int) else a & b  # mod by power of two is rendered as and
+def z3_cdiv(a,b): return z3.If(a<0, (a+(b-1))/b, a/b)  # IDIV is truncated division but z3 does floored division
+def z3_and(a,b): return a % (b+1) if isinstance(b, int) else a & b  # mod by power of two uses Ops.AND
 z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.AND: z3_and,
                                             Ops.SHR: lambda a,b: a/(2**b), Ops.SHL: lambda a,b: a*(2**b)}
 def z3_eval(expr: UOp, ctx: dict[UOp, 'int|z3.ArithRef']) -> 'z3.ArithRef|int':
