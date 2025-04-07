@@ -46,7 +46,7 @@ class TestHelpers(unittest.TestCase):
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid):
     load = full_graph_rewrite(load.sink()).src[0]
-    idx, valid = load.src[0].src[1], load.src[2]
+    idx, valid = load.src[0].src[1], load.src[0].src[2]
     self.assertEqual(idx.render(simplify=False), sidx)
     self.assertEqual(valid.render(simplify=False), svalid)
 
@@ -124,6 +124,47 @@ class TestValidIdxSimplification(unittest.TestCase):
       "(((ridx0*2)+(ridx3*-1))+1)",
       "(ridx2<1)")
 
+  def test_valid_becomes_const1(self):
+    # from DSP mobilenetv2
+    ridx0 = Range(0, 30)
+    ridx1 = Range(1, 7)
+    ridx2 = Range(2, 2)
+    alu11 = (ridx1+ridx2)
+    alu15 = ((alu11+1)//7)
+    idx = (alu15*-31)+(((((alu11+218)//224)+ridx0)%30)*1568)
+    valid = (ridx2<1)&(ridx1<6)
+    load = get_gated_load_uop(valid, idx)
+    self.check(load,
+      "(ridx0*1568)",
+      "((ridx2<1)&(ridx1<6))")
+
+  def test_valid_becomes_const1_z3(self):
+    from z3 import Ints, Solver, And, If, Not, unsat
+    ridx0, ridx1, ridx2, alu11, alu15 = Ints('ridx0 ridx1 ridx2 alu11 alu15')
+    alu11 = (ridx1+ridx2)
+    alu15 = ((alu11+1)/7)
+    idx = (alu15*-31)+(((((alu11+218)/224)+ridx0)%30)*1568)
+    valid = (ridx2<1)&(ridx1<6)
+    load = If(valid, idx, 0)
+
+    # correct simplification
+    s = Solver()
+    s.add(And(0<=ridx0, ridx0<30, 0<=ridx1, ridx1<7, 0<=ridx2, ridx2<2))
+    simplifed_idx = (ridx0*1568)
+    simplifed_load = If(valid, simplifed_idx, 0)
+    s.add(Not(load == simplifed_load))  # Check if they are NOT equivalent
+    assert s.check() == unsat, f"The expressions are not equivalent. {s.model()=}"
+
+    # new solver for a wrong simplified expression
+    s = Solver()
+    s.add(And(0<=ridx0, ridx0<30, 0<=ridx1, ridx1<7, 0<=ridx2, ridx2<2))
+    wrong_simplifed_idx = (ridx0*1567)+ridx1
+    wrong_simplifed_load = If(valid, wrong_simplifed_idx, 0)
+    s.add(Not(load == wrong_simplifed_load))  # Check if they are NOT equivalent
+    assert s.check() != unsat, "The expressions are equivalent??"
+    print("The expressions are not equivalent.")
+    print(s.model())
+
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
     load = full_graph_rewrite(load.sink()).src[0]
@@ -133,7 +174,7 @@ class TestImageSimplification(unittest.TestCase):
     idx0, idx1 = idx.src[0], idx.src[1]
     self.assertEqual(idx0.render(simplify=False), sidx0)
     self.assertEqual(idx1.render(simplify=False), sidx1)
-    if svalid is not None: self.assertEqual(load.src[2].render(simplify=False), svalid)
+    if svalid is not None: self.assertEqual(load.src[0].src[2].render(simplify=False), svalid)
 
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid

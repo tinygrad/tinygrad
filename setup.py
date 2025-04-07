@@ -13,6 +13,7 @@ testing_minimal = [
   "pytest",
   "pytest-xdist",
   "hypothesis",
+  "z3-solver"
 ]
 
 setup(name='tinygrad',
@@ -48,11 +49,12 @@ setup(name='tinygrad',
         'testing_unit': testing_minimal + [
             "tqdm",
             "safetensors",
-            "tabulate"  # for sz.py
+            "z3-solver",
+            "tabulate",  # for sz.py
         ],
         'testing': testing_minimal + [
             "pillow",
-            "onnx==1.16.0",
+            "onnx==1.17.0",
             "onnx2torch",
             "onnxruntime",
             "opencv-python",
@@ -68,7 +70,10 @@ setup(name='tinygrad',
             "nibabel",
             "bottle",
             "ggml-python",
-            "capstone"
+            "capstone",
+            "pycocotools",
+            "boto3",
+            "pandas"
         ],
         'docs': [
             "mkdocs",

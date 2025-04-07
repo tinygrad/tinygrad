@@ -7,7 +7,7 @@ try:
   import onnx
 except ModuleNotFoundError:
   raise unittest.SkipTest("onnx not installed, skipping onnx test")
-from extra.onnx import OnnxRunner
+from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI, fetch, temp
 

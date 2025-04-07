@@ -22,6 +22,7 @@ Elementwise ops operate on a per element basis. They don't change the shape of t
 ::: tinygrad.Tensor.round
 ::: tinygrad.Tensor.isinf
 ::: tinygrad.Tensor.isnan
+::: tinygrad.Tensor.isfinite
 ::: tinygrad.Tensor.lerp
 ::: tinygrad.Tensor.square
 ::: tinygrad.Tensor.clamp
@@ -68,12 +69,14 @@ Elementwise ops operate on a per element basis. They don't change the shape of t
 ::: tinygrad.Tensor.bitwise_xor
 ::: tinygrad.Tensor.bitwise_and
 ::: tinygrad.Tensor.bitwise_or
+::: tinygrad.Tensor.bitwise_not
 ::: tinygrad.Tensor.lshift
 ::: tinygrad.Tensor.rshift
 ::: tinygrad.Tensor.pow
 ::: tinygrad.Tensor.maximum
 ::: tinygrad.Tensor.minimum
 ::: tinygrad.Tensor.where
+::: tinygrad.Tensor.copysign
 
 ## Casting Ops
 
