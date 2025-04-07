@@ -4165,7 +4165,7 @@ P = ParamSpec("P")
 T = TypeVar("T")
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-    if (_METADATA.get() is not None) or (TRACEMETA == 0): return fn(*args, **kwargs)
+    if (_METADATA.get() is not None) or (TRACEMETA < 1): return fn(*args, **kwargs)
 
     if TRACEMETA >= 2:
       caller_frame = sys._getframe(frame := 1)
