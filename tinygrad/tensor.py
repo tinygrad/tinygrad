@@ -160,11 +160,9 @@ class Tensor(SimpleMathTrait):
       dtype = dtype or dtypes.uint8
       data = UOp.new_buffer(f"DISK:{data.resolve()}", data.stat().st_size // dtype.itemsize, dtype)
 
-    if dtype is not None and dtype not in dtypes.floats and requires_grad:
-      raise TypeError(f"Tensor with non-floating point dtype {dtype} must have requires_grad=False")
-
     # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
+    self._check_grad(data.dtype, requires_grad)
 
     # data might be on a different device
     if isinstance(device, str): self.lazydata:UOp = data if data.device == device else data.copy_to_device(device)
@@ -188,8 +186,13 @@ class Tensor(SimpleMathTrait):
     return lhs._apply_uop(fxn, rhs)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
+    self._check_grad(self.dtype, requires_grad)
     self.requires_grad = requires_grad
     return self
+
+  def _check_grad(self, dtype:DType|None, requires_grad:bool|None) -> None:
+    if dtype is not None and dtype not in dtypes.floats and requires_grad:
+      raise TypeError(f"Tensor with non-floating point dtype '{dtype}' must have requires_grad=False")
 
   class train(ContextDecorator):
     def __init__(self, mode:bool = True): self.mode = mode
