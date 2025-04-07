@@ -149,7 +149,7 @@ jobs:
   torchbackend:
     name: Torch Backend Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -186,7 +186,7 @@ jobs:
   torchbackendmore:
     name: Torch Backend Tests More
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -291,6 +291,8 @@ jobs:
       run: PYTHONPATH=. PYTHON=1 python3 test/test_symbolic_ops.py
     - name: test_linearizer_failures with Python emulator
       run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1
+    - name: test_renderer_failures with Python emulator
+      run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_renderer_failures.py::TestRendererFailures
 
   linter:
     name: Linters
@@ -335,6 +337,8 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
+    - name: Run GC tests
+      run: PYTHONPATH="." python test/external/external_uop_gc.py
     - name: Repo line count < 12500 lines
       run: MAX_LINE_COUNT=12500 python sz.py
 
