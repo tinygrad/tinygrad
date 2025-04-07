@@ -467,6 +467,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   schedule: list[ScheduleItem] = []
   while queue:
     u = queue.popleft()
+    # map the BUFFER UOp to a subbuffer if it's a BUFFER_VIEW
     if (k:=u.src[1]).arg.ast.op is Ops.BUFFER_VIEW:
       buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, k.arg.ast.dtype, k.arg.ast.arg[1]*base.dtype.itemsize)
     schedule.append(ScheduleItem(k.arg.ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
