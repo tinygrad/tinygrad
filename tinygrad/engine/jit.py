@@ -42,7 +42,7 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
     if isinstance(ji.prg, ViewOp): continue
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
     if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.dev
-    elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"CUDA", "NV", "AMD"}:
+    elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"CUDA", "NV", "AMD", "NULL"}:
       ji_graph_dev = Device[ji.bufs[0].device]
 
     graph_class = (ji_graph_dev.graph.func if isinstance(ji_graph_dev.graph, functools.partial) else ji_graph_dev.graph) if ji_graph_dev else None
@@ -130,13 +130,14 @@ class GraphRunner(Runner):
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner): pass
 
+def get_out_buffers_for_ei(ei:ExecItem) -> list[Buffer]:
+  if isinstance(ei.prg, CompiledRunner): return [cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins]
+  if isinstance(ei.prg, (BufferCopy, BufferXfer)): return [cast(Buffer, ei.bufs[0])]
+  return []
+
 def update_depends(depends:set[Buffer|None], jit_cache:list[ExecItem]):
   for ei in jit_cache:
-    if any(b in depends for b in ei.bufs):
-      if isinstance(ei.prg, CompiledRunner):
-        depends.update(cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins)
-      if isinstance(ei.prg, (BufferCopy, BufferXfer)):
-        depends.add(cast(Buffer, ei.bufs[0]))
+    if any(b in depends for b in ei.bufs): depends.update(get_out_buffers_for_ei(ei))
 
 ReturnType = TypeVar('ReturnType')
 @dataclass
@@ -149,8 +150,7 @@ class CapturedJit(Generic[ReturnType]):
   expected_st_vars_dtype_device: list[tuple[ShapeTracker, tuple[Variable, ...], DType, str]]
 
   def __reduce__(self):
-    # TODO: free_intermediates here?
-    self.optimize_weights()
+    # TODO: free_intermediates here? replan_buffers_memory_layout here?
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
                             self.expected_names, self.expected_st_vars_dtype_device)
 
@@ -168,11 +168,11 @@ class CapturedJit(Generic[ReturnType]):
     update_depends(depends, self.jit_cache)
     for b in depends:
       if b is not None:
-        b.deallocate()
-        if b._base is not None and b._base.allocated_views == 0: b._base.deallocate()
+        if b.is_allocated(): b.deallocate()
+        if b._base is not None and b._base.allocated_views == 0 and b._base.is_allocated(): b._base.deallocate()
     self.__post_init__()   # reset the graph state
 
-  def optimize_weights(self):
+  def replan_buffers_memory_layout(self):
     blacklist = [t.lazydata.buffer for t in get_parameters(self.ret)]
     asgn = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
     self.jit_cache = [ExecItem(item.prg, [asgn.get(b,b) if b is not None else None for b in item.bufs]) for item in self.jit_cache]
@@ -218,12 +218,13 @@ def _prepare_jit_inputs(args, kwargs):
   return input_buffers, var_vals, names, st_vars_dtype_device
 
 class TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Optional[Callable[..., ReturnType]], captured:Optional[CapturedJit]=None, prune=False):
+  def __init__(self, fxn:Optional[Callable[..., ReturnType]], captured:Optional[CapturedJit]=None, prune=False, optimize=False):
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
     self.captured: Optional[CapturedJit] = captured
     self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
+    self.optimize = optimize
 
   def add_buffer(self, b:Buffer) -> Buffer:
     if found:=self._buffer_replace.get(b, None): return found
@@ -294,8 +295,7 @@ class TinyJit(Generic[ReturnType]):
       if self.prune:
         depends = set(input_buffers)
         update_depends(depends, jit_cache)
-        pruned, onetime = partition(jit_cache,
-                                    lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
+        pruned, onetime = partition(jit_cache, lambda ei: any(b in depends for b in get_out_buffers_for_ei(ei)))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
         # run the onetime kernels here
         for ei in onetime:
@@ -314,6 +314,7 @@ class TinyJit(Generic[ReturnType]):
 
       # set this for next run
       self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, st_vars_dtype_device)
+      if self.optimize: self.captured.replan_buffers_memory_layout()
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None

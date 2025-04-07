@@ -41,8 +41,14 @@ class AMDComputeQueue(HWQueue):
 
   def pkt3(self, cmd, *vals): self.q(self.pm4.PACKET3(cmd, len(vals) - 1), *vals)
 
-  def gfxreg(self, reg:AMDReg): return reg.addr - self.pm4.PACKET3_SET_SH_REG_START
-  def ucfgreg(self, reg:AMDReg): return reg.addr - self.pm4.PACKET3_SET_UCONFIG_REG_START
+  def wreg(self, reg:AMDReg, *args:sint, **kwargs:int):
+    if bool(args) == bool(kwargs): raise RuntimeError('One (and only one) of *args or **kwargs must be specified')
+    if self.pm4.PACKET3_SET_SH_REG_START <= reg.addr < self.pm4.PACKET3_SET_SH_REG_END:
+      set_packet, set_packet_start = self.pm4.PACKET3_SET_SH_REG, self.pm4.PACKET3_SET_SH_REG_START
+    elif self.pm4.PACKET3_SET_UCONFIG_REG_START <= reg.addr < self.pm4.PACKET3_SET_UCONFIG_REG_START + 2**16-1:
+      set_packet, set_packet_start = self.pm4.PACKET3_SET_UCONFIG_REG, self.pm4.PACKET3_SET_UCONFIG_REG_START
+    else: raise RuntimeError(f'Cannot set {reg.name} ({reg.addr}) via pm4 packet')
+    self.pkt3(set_packet, reg.addr - set_packet_start, *(args or (reg.encode(**kwargs),)))
 
   @contextlib.contextmanager
   def pred_exec(self, xcc_mask:int):
@@ -56,7 +62,7 @@ class AMDComputeQueue(HWQueue):
   def sqtt_userdata(self, data, *extra_dwords):
     data_ints = [x[0] for x in struct.iter_unpack('<I', bytes(data))] + list(extra_dwords)
     for i in range(0, len(data_ints), 2):
-      self.pkt3(self.pm4.PACKET3_SET_UCONFIG_REG, self.ucfgreg(self.gc.regSQ_THREAD_TRACE_USERDATA_2), *data_ints[i:i+2])
+      self.wreg(self.gc.regSQ_THREAD_TRACE_USERDATA_2, *data_ints[i:i+2])
 
   def wait_reg_mem(self, value, mask=0xffffffff, mem=None, reg_req=None, reg_done=None):
     wrm_info_dw = self.pm4.WAIT_REG_MEM_MEM_SPACE(int(mem is not None)) | self.pm4.WAIT_REG_MEM_OPERATION(int(mem is None)) \
@@ -65,7 +71,7 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, wrm_info_dw, *(data64_le(mem) if mem is not None else (reg_req, reg_done)), value, mask, 4)
 
   def acquire_mem(self, addr=0x0, sz=(1 << 64)-1, gli=1, glm=1, glk=1, glv=1, gl1=1, gl2=1):
-    if self.dev.gfxver >= 10:
+    if self.dev.target >= (10,0,0):
       cache_flags_dw = self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLI_INV(gli) \
                      | self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_INV(glm) | self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_WB(glm) \
                      | self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(glk) | self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_WB(glk) \
@@ -82,7 +88,7 @@ class AMDComputeQueue(HWQueue):
       self.pkt3(self.pm4.PACKET3_ACQUIRE_MEM, cp_coher_cntl, *data64_le(sz), *data64_le(addr), 0x0000000A)
 
   def release_mem(self, address=0x0, value=0, data_sel=0, int_sel=2, ctxid=0, cache_flush=False):
-    if self.dev.gfxver >= 10:
+    if self.dev.target >= (10,0,0):
       cache_flags_dw = 0 if not cache_flush else (self.pm4.PACKET3_RELEASE_MEM_GCR_GLV_INV | self.pm4.PACKET3_RELEASE_MEM_GCR_GL1_INV \
                      | self.pm4.PACKET3_RELEASE_MEM_GCR_GL2_INV | self.pm4.PACKET3_RELEASE_MEM_GCR_GLM_WB \
                      | self.pm4.PACKET3_RELEASE_MEM_GCR_GLM_INV | self.pm4.PACKET3_RELEASE_MEM_GCR_GL2_WB | self.pm4.PACKET3_RELEASE_MEM_GCR_SEQ)
@@ -115,32 +121,26 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def memory_barrier(self):
-    pf = 0 if self.nbio.version[:2] != (7, 11) else 1
+    pf = '' if self.nbio.version[0] == 2 else '0' if self.nbio.version[:2] != (7, 11) else '1'
     self.wait_reg_mem(reg_req=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ').addr,
                       reg_done=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr, value=0xffffffff)
     self.acquire_mem()
     return self
 
   def xcc_config(self):
-    self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_TG_CHUNK_SIZE), 1)
+    self.wreg(self.gc.regCOMPUTE_TG_CHUNK_SIZE, 1)
     for xcc_id in range(self.dev.xccs):
       with self.pred_exec(xcc_mask=1 << xcc_id):
-        self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_CURRENT_LOGIC_XCC_ID), xcc_id)
+        self.wreg(self.gc.regCOMPUTE_CURRENT_LOGIC_XCC_ID, xcc_id)
     return self
 
   def spi_config(self, tracing:bool):
-    spi_config_cntl = self.gc.regSPI_CONFIG_CNTL.encode(ps_pkr_priority_cntl=3, exp_priority_order=3, gpr_write_priority=0x2c688,
-                                                        enable_sqg_bop_events=int(tracing), enable_sqg_top_events=int(tracing))
-    self.pkt3(self.pm4.PACKET3_SET_UCONFIG_REG, self.ucfgreg(self.gc.regSPI_CONFIG_CNTL), spi_config_cntl)
+    self.wreg(self.gc.regSPI_CONFIG_CNTL, ps_pkr_priority_cntl=3, exp_priority_order=3, gpr_write_priority=0x2c688,
+              enable_sqg_bop_events=int(tracing), enable_sqg_top_events=int(tracing))
 
   def sqtt_config(self, tracing:bool):
-    sq_thread_trace_ctrl = self.gc.regSQ_THREAD_TRACE_CTRL.encode(draw_event_en=1, spi_stall_en=1, sq_stall_en=1, reg_at_hwm=2, hiwater=1,
-                                                                  rt_freq=self.soc.SQ_TT_RT_FREQ_4096_CLK,
-                                                                  util_timer=self.soc.SQ_TT_UTIL_TIMER_250_CLK, mode=int(tracing))
-    self.pkt3(self.pm4.PACKET3_SET_UCONFIG_REG, self.ucfgreg(self.gc.regSQ_THREAD_TRACE_CTRL), sq_thread_trace_ctrl)
-
-  def grbm_gfx_index(self, **kwargs):
-    self.pkt3(self.pm4.PACKET3_SET_UCONFIG_REG, self.ucfgreg(self.gc.regGRBM_GFX_INDEX), self.gc.regGRBM_GFX_INDEX.encode(**kwargs))
+    self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, draw_event_en=1, spi_stall_en=1, sq_stall_en=1, reg_at_hwm=2, hiwater=1,
+              rt_freq=self.soc.SQ_TT_RT_FREQ_4096_CLK, util_timer=self.soc.SQ_TT_UTIL_TIMER_250_CLK, mode=int(tracing))
 
   # Magic values from mesa/src/amd/vulkan/radv_sqtt.c:radv_emit_spi_config_cntl and src/amd/common/ac_sqtt.c:ac_sqtt_emit_start
   def start_trace(self, buf0s:list[HCQBuffer], se_mask:int):
@@ -148,19 +148,17 @@ class AMDComputeQueue(HWQueue):
     self.spi_config(tracing=True)
     # One buffer for one SE, mesa does it with a single buffer and ac_sqtt_get_data_offset, but this is simpler and should work just as well
     for se in range(len(buf0s)):
-      self.grbm_gfx_index(se_index=se, instance_broadcast_writes=1) # select se, broadcast to all instances in that se
+      self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, instance_broadcast_writes=1)
       buf0_lo, buf0_hi = data64_le(buf0s[se].va_addr>>12)
-      self.pkt3(self.pm4.PACKET3_SET_UCONFIG_REG, self.ucfgreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE),
-                self.gc.regSQ_THREAD_TRACE_BUF0_SIZE.encode(base_hi=buf0_hi, size=buf0s[se].size>>12))
-      self.pkt3(self.pm4.PACKET3_SET_UCONFIG_REG, self.ucfgreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE), buf0_lo)
+      self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, base_hi=buf0_hi, size=buf0s[se].size>>12)
+      self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE, base_lo=buf0_lo)
       # NOTE: SQTT can only trace instructions on one simd per se, this selects first simd in first wgp in first sa.
       # For RGP to display instruction trace it has to see it on first SE. Howerver ACE/MEC/whatever does the dispatching starting with second se,
       # and on amdgpu/non-AM it also does weird things with dispatch order inside se: around 7 times out of 10 it starts from the last cu, but
       # sometimes not, especially if the kernel has more than one wavefront which means that kernels with small global size might get unlucky and
       # be dispatched on something else and not be seen in instruction tracing tab. You can force the wavefronts of a kernel to be dispatched on the
       # CUs you want to by disabling other CUs via bits in regCOMPUTE_STATIC_THREAD_MGMT_SE<x> and trace even kernels that only have one wavefront.
-      self.pkt3(self.pm4.PACKET3_SET_UCONFIG_REG, self.ucfgreg(self.gc.regSQ_THREAD_TRACE_MASK),
-                self.gc.regSQ_THREAD_TRACE_MASK.encode(wtype_include=self.soc.SQ_TT_WTYPE_INCLUDE_CS_BIT, simd_sel=0, wgp_sel=0, sa_sel=0))
+      self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, wtype_include=self.soc.SQ_TT_WTYPE_INCLUDE_CS_BIT, simd_sel=0, wgp_sel=0, sa_sel=0)
       REG_INCLUDE = self.soc.SQ_TT_TOKEN_MASK_SQDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_SHDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_GFXUDEC_BIT | \
                     self.soc.SQ_TT_TOKEN_MASK_COMP_BIT | self.soc.SQ_TT_TOKEN_MASK_CONTEXT_BIT | self.soc.SQ_TT_TOKEN_MASK_CONTEXT_BIT
       TOKEN_EXCLUDE = 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT
@@ -168,13 +166,12 @@ class AMDComputeQueue(HWQueue):
         TOKEN_EXCLUDE |= 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT | \
                          1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT | \
                          1 << self.soc.SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
-      self.pkt3(self.pm4.PACKET3_SET_UCONFIG_REG, self.ucfgreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK),
-                self.gc.regSQ_THREAD_TRACE_TOKEN_MASK.encode(reg_include=REG_INCLUDE, token_exclude=TOKEN_EXCLUDE, bop_events_token_include=1))
+      self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_include=REG_INCLUDE, token_exclude=TOKEN_EXCLUDE, bop_events_token_include=1)
       # Enable SQTT
       self.sqtt_config(tracing=True)
     # Restore global broadcasting
-    self.grbm_gfx_index(se_broadcast_writes=1, sa_broadcast_writes=1, instance_broadcast_writes=1)
-    self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_THREAD_TRACE_ENABLE), 1)
+    self.wreg(self.gc.regGRBM_GFX_INDEX, se_broadcast_writes=1, sa_broadcast_writes=1, instance_broadcast_writes=1)
+    self.wreg(self.gc.regCOMPUTE_THREAD_TRACE_ENABLE, 1)
     self.memory_barrier()
     return self
 
@@ -182,11 +179,11 @@ class AMDComputeQueue(HWQueue):
   def stop_trace(self, ses: int, wptrs: HCQBuffer):
     self.memory_barrier()
     # Start shutting everything down
-    self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_THREAD_TRACE_ENABLE), 0)
+    self.wreg(self.gc.regCOMPUTE_THREAD_TRACE_ENABLE, 0)
     self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_FINISH) | self.pm4.EVENT_INDEX(0))
     # For each SE wait for finish to complete and copy regSQ_THREAD_TRACE_WPTR to know where in the buffer trace data ends
     for se in range(ses):
-      self.grbm_gfx_index(se_index=se, instance_broadcast_writes=1) # select se, broadcast to all instances in that se
+      self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, instance_broadcast_writes=1)
       # Wait for FINISH_PENDING==0
       self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
                 self.gc.regSQ_THREAD_TRACE_STATUS.addr, 0, 0, self.gc.SQ_THREAD_TRACE_STATUS__FINISH_PENDING_MASK, 4)
@@ -201,7 +198,7 @@ class AMDComputeQueue(HWQueue):
       # Copy WPTR to memory (src_sel = perf, dst_sel = tc_l2, wr_confirm = True)
       self.pkt3(self.pm4.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, self.gc.regSQ_THREAD_TRACE_WPTR.addr, 0, *data64_le(wptrs.va_addr+(se*4)))
     # Restore global broadcasting
-    self.grbm_gfx_index(se_broadcast_writes=1, sa_broadcast_writes=1, instance_broadcast_writes=1)
+    self.wreg(self.gc.regGRBM_GFX_INDEX, se_broadcast_writes=1, sa_broadcast_writes=1, instance_broadcast_writes=1)
     self.spi_config(tracing=False)
     self.memory_barrier()
     return self
@@ -242,27 +239,27 @@ class AMDComputeQueue(HWQueue):
       ), *global_size)
       prg.dev.cmd_id += 1
 
-    self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8))
-    self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_PGM_RSRC1), prg.rsrc1, prg.rsrc2)
-    self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_PGM_RSRC3), prg.rsrc3)
-    self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_TMPRING_SIZE), prg.dev.tmpring_size)
+    self.wreg(self.gc.regCOMPUTE_PGM_LO, *data64_le(prg.prog_addr >> 8))
+    self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, prg.rsrc1, prg.rsrc2)
+    self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, prg.rsrc3)
+    self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, prg.dev.tmpring_size)
     if prg.dev.has_scratch_base_registers:
       for xcc_id in range(self.dev.xccs):
         with self.pred_exec(xcc_mask=1<<xcc_id):
           scratch_base = prg.dev.scratch.va_addr + (prg.dev.scratch.size // self.dev.xccs * xcc_id)
-          self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO), *data64_le(scratch_base >> 8))
-    if 100000 <= prg.dev.target < 110000: self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.mmCP_COHER_START_DELAY), 0x20)
-    self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_RESTART_X), 0, 0, 0)
-    self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_STATIC_THREAD_MGMT_SE0), 0xFFFFFFFF, 0xFFFFFFFF)
-    self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_STATIC_THREAD_MGMT_SE2), 0xFFFFFFFF, 0xFFFFFFFF)
-    if prg.dev.target >= 100000:
-      self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_STATIC_THREAD_MGMT_SE4), 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
-    self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_USER_DATA_0), *user_regs)
+          self.wreg(self.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, *data64_le(scratch_base >> 8))
+    if (10,0,0) <= prg.dev.target < (11,0,0): self.wreg(self.gc.mmCP_COHER_START_DELAY, 0x20)
+    self.wreg(self.gc.regCOMPUTE_RESTART_X, 0, 0, 0)
+    self.wreg(self.gc.regCOMPUTE_STATIC_THREAD_MGMT_SE0, 0xFFFFFFFF, 0xFFFFFFFF)
+    self.wreg(self.gc.regCOMPUTE_STATIC_THREAD_MGMT_SE2, 0xFFFFFFFF, 0xFFFFFFFF)
+    if prg.dev.target >= (11,0,0):
+      self.wreg(self.gc.regCOMPUTE_STATIC_THREAD_MGMT_SE4, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
+    self.wreg(self.gc.regCOMPUTE_USER_DATA_0, *user_regs)
 
-    self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_START_X), 0, 0, 0, *local_size, 0, 0)
-    self.pkt3(self.pm4.PACKET3_SET_SH_REG, self.gfxreg(self.gc.regCOMPUTE_RESOURCE_LIMITS), 0)
+    self.wreg(self.gc.regCOMPUTE_START_X, 0, 0, 0, *local_size, 0, 0)
+    self.wreg(self.gc.regCOMPUTE_RESOURCE_LIMITS, 0)
 
-    gfx10p = {'cs_w32_en': int(prg.wave32)} if prg.dev.target >= 100000 else {}
+    gfx10p = {'cs_w32_en': int(prg.wave32)} if prg.dev.target >= (10,0,0) else {}
     DISPATCH_INITIATOR = self.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(**gfx10p, force_start_at_000=1, compute_shader_en=1)
     self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *global_size, DISPATCH_INITIATOR)
     if prg.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
@@ -340,9 +337,8 @@ class AMDCopyQueue(HWQueue):
     return self
 
   def signal(self, signal:AMDSignal, value:sint=0):
-    fence_flags = self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.dev.gfxver >= 10 else 0
+    fence_flags = self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.dev.target >= (10,0,0) else 0
     self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(signal.value_addr), value)
-    self.q(self.sdma.SDMA_OP_FENCE, *data64_le(signal.value_addr), value)
 
     if not AMDDevice.driverless and (dev:=signal.timeline_for_device) is not None:
       self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
@@ -429,7 +425,7 @@ class AMDProgram(HCQProgram):
     self.wave32: bool = code.kernel_code_properties & 0x400 == 0x400
 
     # Set rsrc1.priv=1 on gfx11 to workaround cwsr.
-    self.rsrc1: int = code.compute_pgm_rsrc1 | ((1 << 20) if 110000 <= self.dev.target < 120000 else 0)
+    self.rsrc1: int = code.compute_pgm_rsrc1 | ((1 << 20) if (11,0,0) <= self.dev.target < (12,0,0) else 0)
     self.rsrc2: int = code.compute_pgm_rsrc2 | (lds_size << 15)
     self.rsrc3: int = image[rodata_entry+44:rodata_entry+48].cast("I")[0] # NOTE: kernel descriptor, not in amd_kernel_code_t struct
     self.prog_addr: int = self.lib_gpu.va_addr + rodata_entry + code.kernel_code_entry_byte_offset
@@ -507,6 +503,8 @@ class AMDIP:
   def regs(self): return collect_registers(self.module, cls=functools.partial(AMDReg, ip=self))
   def __getattr__(self, name:str):
     if name in self.regs: return self.regs[name]
+    # NOTE: gfx10 gc registers always start with mm, no reg prefix
+    if (mmname:=name.replace('reg', 'mm')) in self.regs: return self.regs[mmname]
     return getattr(self.module, name)
 
 class KFDIface:
@@ -785,34 +783,36 @@ class AMDDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
-    self.target = int(self.dev_iface.props['gfx_target_version'])
-    self.gfxver = self.target // 10000
-    self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
-    if self.target < 90402 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
+    self.target:tuple[int, ...] = ((trgt:=self.dev_iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
+    self.arch = "gfx%d%x%x" % self.target
+    if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")
     if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {self.arch}")
 
     self.max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] // self.dev_iface.props.get('num_xcc', 1) - 1
-    self.max_wave_id = (self.dev_iface.props['max_waves_per_simd'] * self.dev_iface.props['simd_per_cu'] - 1) if self.target >= 100100 else \
+    self.max_wave_id = (self.dev_iface.props['max_waves_per_simd'] * self.dev_iface.props['simd_per_cu'] - 1) if self.target >= (10,1,0) else \
                        (min((self.max_cu_id+1)*40, self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine'] * 512) - 1)
     self.xccs = self.dev_iface.props.get('num_xcc', 1) if getenv("XCCS", 1) else 1
-    self.has_scratch_base_registers = self.target >= 110000 or self.target == 90402 # this is what llvm refers to as "architected flat scratch"
+    self.has_scratch_base_registers = self.target >= (11,0,0) or self.target == (9,4,2) # this is what llvm refers to as "architected flat scratch"
 
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
     sgrp_size_per_cu, lds_size_per_cu, hwreg_size_per_cu = 0x4000, 0x10000, 0x1000
-    vgpr_size_per_cu = 0x60000 if self.target in {110000, 110001, 120000, 120001} else \
-                       0x80000 if (self.target//100)*100 == 90400 or self.target in {90008, 90010} else 0x40000
+    vgpr_size_per_cu = 0x60000 if self.target in {(11,0,0), (11,0,1), (12,0,0), (12,0,1)} else \
+                       0x80000 if (self.target[:2]) == (9,4) or self.target in {(9,0,8), (9,0,10)} else 0x40000
     wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * (self.max_cu_id + 1), mmap.PAGESIZE)
-    ctl_stack_size = round_up(12 * (self.max_cu_id + 1) * (self.max_wave_id + 1) + 8 + 40, mmap.PAGESIZE) if self.target >= 100100 else \
+    ctl_stack_size = round_up(12 * (self.max_cu_id + 1) * (self.max_wave_id + 1) + 8 + 40, mmap.PAGESIZE) if self.target >= (10,1,0) else \
                      round_up((self.max_wave_id + 1) * 8 + 8 + 40, mmap.PAGESIZE)
-    debug_memory_size = round_up((self.max_cu_id + 1 if self.target >= 100100 else 1) * (self.max_wave_id + 1) * 32, 64)
-    if self.gfxver == 10: ctl_stack_size = min(ctl_stack_size, 0x7000)
+    debug_memory_size = round_up((self.max_cu_id + 1 if self.target >= (10,1,0) else 1) * (self.max_wave_id + 1) * 32, 64)
+    if self.target[0] == 10: ctl_stack_size = min(ctl_stack_size, 0x7000)
 
-    self.soc = importlib.import_module(f"tinygrad.runtime.autogen.am.{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[self.gfxver])}")
-    self.pm4 = importlib.import_module(f"tinygrad.runtime.autogen.am.pm4_{'nv' if self.gfxver >= 10 else 'soc15'}")
+    self.soc = importlib.import_module(f"tinygrad.runtime.autogen.am.{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[self.target[0]])}")
+    self.pm4 = importlib.import_module(f"tinygrad.runtime.autogen.am.pm4_{'nv' if self.target[0] >= 10 else 'soc15'}")
     self.sdma = import_module('sdma', min(self.dev_iface.ip_versions[am.SDMA0_HWIP], (6, 0, 0)))
     self.gc = AMDIP('gc', self.dev_iface.ip_versions[am.GC_HWIP], self.dev_iface.ip_offsets[am.GC_HWIP])
-    pad = (0,) if self.gfxver == 9 else () # ?!?!?!?!??!?!?!
-    self.nbio = AMDIP('nbio' if self.gfxver < 12 else 'nbif', self.dev_iface.ip_versions[am.NBIF_HWIP], pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
+    nbio_ver = self.dev_iface.ip_versions[am.NBIF_HWIP]
+    if nbio_ver[:2] == (3, 3):
+      nbio_ver = (2, 3, 0)
+    nbio_pad = (0,) if self.target[0] == 9 else ()
+    self.nbio = AMDIP('nbio' if self.target[0]<12 else 'nbif', nbio_ver, nbio_pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
 
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x800000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
@@ -861,15 +861,15 @@ class AMDDevice(HCQCompiled):
     if self.max_private_segment_size >= required: return
 
     # <gfx103 requires alignment of 1024, >=gfx11 requires 256
-    wave_scratch_len = round_up(((self.max_wave_id + 1) * required), 256 if self.target >= 110000 else 1024)
+    wave_scratch_len = round_up(((self.max_wave_id + 1) * required), 256 if self.target >= (11,0,0) else 1024)
 
     scratch_size = (self.max_cu_id+1)*self.dev_iface.props['max_slots_scratch_cu']*wave_scratch_len # per xcc
     self.scratch, ok = self._realloc(getattr(self, 'scratch', None), scratch_size*self.xccs)
     if ok:
       engines = self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine']
-      waves = wave_scratch_len // (256 if self.target >= 110000 else 1024)
+      waves = wave_scratch_len // (256 if self.target >= (11,0,0) else 1024)
       # >=gfx11 wavesize is per SE
-      wavesize = scratch_size // ((wave_scratch_len * engines) if self.target >= 110000 else wave_scratch_len)
+      wavesize = scratch_size // ((wave_scratch_len * engines) if self.target >= (11,0,0) else wave_scratch_len)
       self.tmpring_size = waves << 12 | wavesize
       self.max_private_segment_size = required
 

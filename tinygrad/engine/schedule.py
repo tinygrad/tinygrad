@@ -234,10 +234,10 @@ class Kernel:
 @dataclass(frozen=True)
 class KernelContext:
   realizes: dict[UOp, None]
-  ops_metadata: dict[UOp, Metadata]
+  metadata: dict[UOp, Metadata]
 
 def create_kernel(ctx:KernelContext, x:UOp, b:UOp):
-  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), (m,) if (m:=ctx.ops_metadata.get(x)) else ()))
+  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), (m,) if (m:=ctx.metadata.get(x)) else ()))
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return UOp(Ops.ASSIGN, x.dtype, (buffer, kernel)).reshape(x.shape)
 
@@ -250,7 +250,7 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
     if s.op in DONT_PLACE_IN_KERNEL or s in ctx.realizes: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
-      if (m:=ctx.ops_metadata.get(s)) is not None: metadata[m] = None
+      if (m:=ctx.metadata.get(s)) is not None: metadata[m] = None
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
 
 create_kernels = PatternMatcher([
@@ -369,8 +369,8 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
-def fix_kernel_ast(k:UOp, var_vals:dict[Variable, int]) -> UOp:
-  assert k.op is Ops.KERNEL, f"kernel isn't kernel, it's {k}"
+def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
+  if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
   # substitute kernel sources for the target buffer + apply reshapes
   parents_rep: dict[UOp, UOp] = {}
   for s in k.src:
@@ -380,11 +380,10 @@ def fix_kernel_ast(k:UOp, var_vals:dict[Variable, int]) -> UOp:
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left), view_right)
   # add buffer ops + fix_kernel_ops
-  ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, ctx=(var_vals, bufs:=tuple(s.buf_uop for s in k.src)), bottom_up=True)
+  ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, ctx=(ctx, bufs:=tuple(s.buf_uop for s in k.src)), bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
-  # create subbuffer (TODO: this does not belong here)
-  if ast.op is Ops.BUFFER_VIEW: buffers[bufs[0]] = (base:=bufs[1].buffer).view(ast.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
   return k.replace(arg=Kernel(ast, k.arg.metadata))
+create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
@@ -398,23 +397,21 @@ if CAPTURE_PROCESS_REPLAY:
 class ScheduleItem:
   ast: UOp
   bufs: tuple[Buffer, ...]
-  metadata: tuple[Metadata, ...]
+  metadata: tuple[Metadata, ...] = ()
 
 @track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   # merge_views + sym + reorder_view + replace_contiguous
   tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous, ctx={})
+  sink = tensor_map[big_sink]
+  metadata = {v:k.metadata for k,v in tensor_map.items() if k.base.op not in {Ops.CONST, Ops.DEVICE} and isinstance(k.metadata, Metadata)}
 
   # display the cleaned up tensor graph
-  if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
+  if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Tensor Graph")
 
-  # get realizes
-  sink = tensor_map[big_sink]
+  # group into kernels
   realize_map = group_realizes(sink)
-  # map tensor metadata to simplified ops
-  ops_metadata = {v:k.metadata for k,v in tensor_map.items() if k.base.op not in {Ops.CONST, Ops.DEVICE} and isinstance(k.metadata, Metadata)}
-  # merge_views + create_kernels
-  kernel_map = graph_rewrite_map(sink, merge_views+create_kernels, ctx=KernelContext(realize_map, ops_metadata), bottom_up=True)
+  kernel_map = graph_rewrite_map(sink, merge_views+create_kernels, ctx=KernelContext(realize_map, metadata), bottom_up=True)
   sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
@@ -451,6 +448,10 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
 
+  # unbind var_vals and fix kernel ast
+  var_vals: dict[Variable, int] = {}
+  sched_sink = graph_rewrite(sched_sink, create_ast, ctx=var_vals, bottom_up=True)
+
   # final toposort (bfs)
   children: dict[UOp, list[UOp]] = {}
   in_degree: dict[UOp, int] = {}
@@ -464,11 +465,11 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   queue = deque(k for k,v in in_degree.items() if v == 0)
   schedule: list[ScheduleItem] = []
-  var_vals: dict[Variable, int] = {}
   while queue:
     u = queue.popleft()
-    # TODO: move this to create_kernels
-    k = fix_kernel_ast(u.src[1], var_vals)
+    # map the BUFFER UOp to a subbuffer if it's a BUFFER_VIEW
+    if (k:=u.src[1]).arg.ast.op is Ops.BUFFER_VIEW:
+      buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, k.arg.ast.dtype, k.arg.ast.arg[1]*base.dtype.itemsize)
     schedule.append(ScheduleItem(k.arg.ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
     for x in children.get(u, []):
       in_degree[x] -= 1
