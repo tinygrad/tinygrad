@@ -1,4 +1,5 @@
 import unittest, math
+from typing import Optional
 import numpy as np
 from tinygrad import dtypes
 from tinygrad.dtype import DType
@@ -6,6 +7,23 @@ from tinygrad.ops import UOp, Ops
 from tinygrad.codegen.transcendental import TRANSCENDENTAL_SUPPORTED_DTYPES, payne_hanek_reduction, cody_waite_reduction, frexp, rintk, pow2if, xpow
 from tinygrad.codegen.transcendental import _ifand, shl, shr, ilogb2k, sin_poly, xsin, xexp2, xlog2, ldexp3k, sin_poly_large, sin_poly_small, ldexp2k, trig_poly, _lazy_map_numbers
 from test.helpers import eval_uop
+from tinygrad.helpers import iterable
+from icecream import ic
+
+def uops_equal(u1:UOp|tuple, u2:Optional[UOp|tuple]=None, cmp_op:bool=False, cmp_scalar_dtype:bool|DType=False, cmp_vcount:bool|int=False, cmp_eval:bool=True, cmp_eq:bool=False):
+  # compare u1 to expected op, scalar_dtype, or vcount
+  if u2 == None:
+    return uops_equal(u1, u1, cmp_op=cmp_op, cmp_scalar_dtype=cmp_scalar_dtype, cmp_vcount=cmp_vcount, cmp_eval=cmp_eval, cmp_eq=cmp_eq)
+  # compare u1, u2
+  if isinstance(u1, UOp) and isinstance(u2, UOp):
+    if cmp_op: assert u1.op == u2.op == cmp_op, f'ops must match:\n{u1.op=}\n{u2.op=}\n{cmp_op=}'
+    if cmp_scalar_dtype: assert u1.dtype.scalar() == u2.dtype.scalar() == cmp_scalar_dtype, f'dtype must match:\n{u1.dtype.scalar()=}\n{u2.dtype.scalar()=}\n{cmp_scalar_dtype=}'
+    if cmp_vcount: assert u1.dtype.vcount == u2.dtype.vcount == cmp_vcount, f'vcount must match:\n{u1.dtype.vcount=}\n{u2.dtype.vcount=}\n{cmp_vcount=}'
+    if cmp_eval: assert eval_uop(u1) == eval_uop(u2), f'eval must match:\n{eval_uop(u1)=}\n{eval_uop(u2)=}'
+    if cmp_eq: assert u1 == u2, f'equality must match:\n{u1=}\n{u2=}'
+  # recursive call
+  for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src)):
+    uops_equal(x1, x2, cmp_op=cmp_op, cmp_scalar_dtype=cmp_scalar_dtype, cmp_vcount=cmp_vcount, cmp_eval=cmp_eval, cmp_eq=cmp_eq)
 
 class TestTranscendentalFunctions(unittest.TestCase):
   def test_payne_hanek_reduction(self):
@@ -89,13 +107,31 @@ class TestVectorizedTranscendetalFunctions(unittest.TestCase):
   def test_preserves_vectorization(self):
     # verify that when given a vectorized (or scalar) input, the function returns a vectorized (or scalar) output
     for d, dtype in self._get_inputs():
-      self._check_all_uops_vectorized(payne_hanek_reduction(d), dtype.vcount)
-      self._check_all_uops_vectorized(cody_waite_reduction(d), dtype.vcount)
-      self._check_all_uops_vectorized(xpow(d, d), dtype.vcount)
-      self._check_all_uops_vectorized(xexp2(d), dtype.vcount)
+      uops_equal(payne_hanek_reduction(d), cmp_eval=False, cmp_vcount=dtype.vcount)
+      uops_equal(cody_waite_reduction(d), cmp_eval=False, cmp_vcount=dtype.vcount)
+      uops_equal(xpow(d, d), cmp_eval=False, cmp_vcount=dtype.vcount)
+      uops_equal(xexp2(d), cmp_eval=False, cmp_vcount=dtype.vcount)
 
   def test_match(self):
-    pass
+
+    def check_scalar_vec_equality(fxn, dtype, *args, vec_size=2, val=0.1, **kwargs):
+      in_scalar, in_vec = UOp.const(dtype, val), UOp.const(dtype.vec(vec_size), val)
+      out_scalar, out_vec = fxn(in_scalar, *args, **kwargs), fxn(in_vec, *args, **kwargs)
+      # fxn outputs must match exactly except for vectorization stuff (vcount, __eq__)
+      uops_equal(out_scalar, out_vec, cmp_op=True, cmp_scalar_dtype=True, cmp_eval=True)
+
+    # test functions on vec and scalar versions of the same input
+    check_scalar_vec_equality(trig_poly, dtypes.float32, [0.1], [0.2])
+    check_scalar_vec_equality(trig_poly, dtypes.float64, [0.1], [0.2])
+    check_scalar_vec_equality(cody_waite_reduction, dtypes.float32)
+    check_scalar_vec_equality(cody_waite_reduction, dtypes.float64)
+
+    # coeff32, coeff64 = [0.1], [0.2]
+    # in_64_scalar, in_64_vec = UOp.const(dtypes.float64, 0.1), UOp.const(dtypes.float64.vec(2), 0.1)
+    # assert eval_uop(trig_poly(in_64_scalar, coeff32, coeff64)) == eval_uop(trig_poly(in_64_vec, coeff32, coeff64))
+
+    # assert eval_uop(cody_waite_reduction)
+
 
 
 if __name__ == '__main__':
