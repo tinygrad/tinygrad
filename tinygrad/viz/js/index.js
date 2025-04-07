@@ -190,7 +190,7 @@ function renderMemoryGraph(graph) {
 
 // ** zoom and recentering
 
-const zoom = d3.zoom().scaleExtent([0.05, 2]).on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
+const zoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
 d3.select("#graph-svg").call(zoom);
 // zoom to fit into view
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
@@ -426,6 +426,7 @@ document.addEventListener("keydown", async function(event) {
     return setState({ currentRewrite:Math.min(totalRewrites, currentRewrite+1) });
   }
   if (event.key == " ") {
+    event.preventDefault()
     document.getElementById("zoom-to-fit-btn").click();
   }
 });
