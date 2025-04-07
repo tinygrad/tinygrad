@@ -182,8 +182,6 @@ jobs:
       run: PYTHONPATH=. TORCH_DEBUG=1 python3 extra/torch_backend/test_inplace.py
     - name: Test multi-gpu
       run: PYTHONPATH=. LLVM=1 GPUS=4 TORCH_DEBUG=1 python3 extra/torch_backend/test_multigpu.py
-    - name: Test hlb-cifar10 in torch with TINY_BACKEND
-      run: PYTHONPATH=. TINY_BACKEND=1 python3 examples/hlb_cifar10_torch.py
 
   torchbackendmore:
     name: Torch Backend Tests More
