@@ -570,6 +570,24 @@ class TestJitPrune(unittest.TestCase):
       out = w2_prune(a)
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
 
+  def test_prune_w_independent_copy_correct(self):
+    weights = Tensor.rand(16, device="CPU").realize()
+    def w2(x) -> Tensor: return (weights*2).contiguous().to(Device.DEFAULT) + x
+    w2_noprune = TinyJit(w2)
+    w2_prune = TinyJit(w2, prune=True)
+
+    for _ in range(3):
+      a = Tensor.rand(16).realize()
+      out = w2_noprune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+
+    for _ in range(3):
+      a = Tensor.rand(16).realize()
+      out = w2_prune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+
+    assert len(w2_prune.captured.jit_cache) == 1, "prune should have removed the copy"
+
 class TestJitFree(unittest.TestCase):
   def test_free_intermediates(self):
     ext_tensor = Tensor([1,24,23,45,1])
@@ -617,8 +635,8 @@ class TestJitFree(unittest.TestCase):
     fxn(Tensor([2]))
     self.assertEqual(x.item(), 8)
 
-  def test_optimize_weights(self):
-    if not hasattr(Device[Device.DEFAULT].allocator, '_offset'): raise unittest.SkipTest("optimize_weights useless")
+  def test_replan_buffers_memory_layout(self):
+    if not hasattr(Device[Device.DEFAULT].allocator, '_offset'): raise unittest.SkipTest("replan_buffers_memory_layout useless")
 
     ext_tensor = Tensor([1,24,23,45,1])
     ext_tensor_2 = Tensor([2,2,2,2,2])
@@ -630,7 +648,7 @@ class TestJitFree(unittest.TestCase):
       out = fxn(Tensor([i,1,2,3,4]))
       self.assertEqual(out.item(), 11400+200*i)
     assert len(set([b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None])) == 4
-    fxn.captured.optimize_weights()
+    fxn.captured.replan_buffers_memory_layout()
     assert len(set([b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None])) == 2
 
     out = fxn(Tensor([11,1,2,3,4]))
