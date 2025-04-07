@@ -1,7 +1,8 @@
-from typing import cast
-from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops
+from typing import cast, Callable
+from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
 from tinygrad.helpers import all_same, dedup, prod, getenv
+if getenv("CHECK_OOB"): import z3
 
 buffer_spec = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
@@ -45,17 +46,34 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 
 # ***** uop type spec *****
 
+def z3_cdiv(a,b): return z3.If(a<0, (a+(b-1))/b, a/b)
+def z3_and(a,b): return a % (b+1) if isinstance(b, int) else a & b  # mod by power of two is rendered as and
+z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.AND: z3_and,
+                                            Ops.SHR: lambda a,b: a/(2**b), Ops.SHL: lambda a,b: a*(2**b)}
+def z3_eval(expr: UOp, ctx: dict[UOp, 'int|z3.ArithRef']) -> 'z3.ArithRef|int':
+  return ctx[expr] if expr in ctx else z3_alu[expr.op](*(z3_eval(src, ctx) for src in expr.src))
+
 def validate_index(idx:UOp, mask:UOp|None=None):
-  if getenv("IGNORE_OOB"): return True
-  # this checks for out of bounds access. it is not complete but should catch some issues
-  if mask is None and not isinstance(idx.dtype, ImageDType):
-    # WEBGPU has a BITCAST in the index. TODO: fix
-    if any(x.op in {Ops.DEFINE_VAR, Ops.BITCAST} or (x.op is Ops.SPECIAL and any(not isinstance(y, int) for y in x.arg[1:])) for x in idx.toposort):
-      return True
-    vmin, vmax, sz = idx.src[1].vmin, idx.src[1].vmax, cast(PtrDType, idx.src[0].dtype).size
-    if sz != -1 and (vmin < 0 or vmax >= sz):
-      print(f"OUT OF BOUNDS ACCESS in INDEX {vmin} - {vmax} not in 0 - {sz}. {idx.src[1].render()=}")
-      return False
+  if not getenv("CHECK_OOB"): return True
+  if isinstance(idx.dtype, ImageDType): return True
+  if (sz := cast(PtrDType, idx.src[0].dtype).size) == -1: return True
+  # WEBGPU has a BITCAST in the index. TODO: fix
+  if any(x.op in {Ops.DEFINE_VAR, Ops.BITCAST} or (x.op is Ops.SPECIAL and any(not isinstance(y, int) for y in x.arg[1:])) for x in idx.toposort):
+    return True
+
+  solver = z3.Solver(ctx=(z3ctx:=z3.Context()))
+  all_uops= (idx.toposort | mask.toposort) if mask is not None else idx.toposort
+  specials = {var:z3.Int(var.arg[0], ctx=z3ctx) for var in filter(lambda x: x.op is Ops.SPECIAL, all_uops.keys())}
+  ranges = {var:z3.Int(f"ridx{var.arg}", ctx=z3ctx) for var in filter(lambda x: x.op is Ops.RANGE, all_uops.keys())}
+  consts = {var:var.arg for var in filter(lambda x: x.op is Ops.CONST, all_uops)}
+  for var, z3var in specials.items(): solver.add(0<=z3var, z3var<var.arg[1])
+  for var, z3var in ranges.items(): solver.add(var.src[0].arg<=z3var, z3var<var.src[1].arg)
+
+  if mask is not None: solver.add(z3_eval(mask, specials|ranges|consts))
+  z3_idx = z3_eval(idx.src[1], specials|ranges|consts)
+  if solver.check(z3_idx<0, sz<=z3_idx) == z3.sat:
+    print(f"OUT OF BOUNDS ACCESS in INDEX not in 0 - {sz}. {idx.src[1].render()=}")
+    return False
   return True
 
 # this is the matcher for the final rendered UOps
