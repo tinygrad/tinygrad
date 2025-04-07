@@ -136,7 +136,7 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
 
 def fast_idiv(x: UOp, d: int) -> UOp|None:
   # idiv is truncated division, but arithmatic shift is floored division, so can only do non-negative numbers!
-  if x.vmin<0 or getenv("DISABLE_FAST_IDIV"): return None
+  if x.vmin<0: return None
   sign = 1 if d > 0 else -1
   m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
   if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
@@ -159,9 +159,10 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
     # no reason to check x>=0 for uints
     pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
     pat += [(UPat.var("x", dtypes.sints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None)]
-    pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda x, d: fast_idiv(x, d.arg))]
-    # TODO: This breaks validate_index because of the way _min_max is calucalted on uops
-    # pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("d"), lambda x, d: x - d*f if (f:=fast_idiv(x, d.arg)) is not None else None)]
+    if not getenv("DISABLE_FAST_IDIV"):
+      pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda x, d: fast_idiv(x, d.arg))]
+      # TODO: This breaks validate_index because of the way _min_max is calucalted on uops
+      # pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("d"), lambda x, d: x - d*f if (f:=fast_idiv(x, d.arg)) is not None else None)]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
