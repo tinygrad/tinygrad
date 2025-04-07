@@ -91,12 +91,8 @@ class TestTranscendentalFunctions(unittest.TestCase):
     np.testing.assert_allclose(eval_uop(pow2if(UOp.const(dtypes.int, -63), dtypes.float)), 2**-63)
 
 class TestVectorizedTranscendetalFunctions(unittest.TestCase):
-  def _check_all_uops_vectorized(self, u:tuple|UOp, vcount:int):
-    # check all UOps in u are vectorized with vcount
-    if isinstance(u, UOp): assert u.dtype.vcount == vcount, f'expected {vcount=} but got {u.dtype.vcount=} for UOp {u=}'
-    [self._check_all_uops_vectorized(x, vcount) for x in (u if isinstance(u, tuple) else u.src)]
 
-  def _get_inputs(self, mode:str='floats') -> tuple[UOp, DType]:
+  def get_inputs(self, mode:str='floats') -> tuple[UOp, DType]:
     for val in [-2,1.3,194]:
       for vcount in [1,2,4,19]:
         for _dtype in TRANSCENDENTAL_SUPPORTED_DTYPES if mode == 'floats' else (dtypes.int64, dtypes.int32, dtypes.int16):
@@ -104,21 +100,41 @@ class TestVectorizedTranscendetalFunctions(unittest.TestCase):
           d = UOp.const(dtype, val)
           yield d, dtype
 
-  def test_preserves_vectorization(self):
-    # verify that when given a vectorized (or scalar) input, the function returns a vectorized (or scalar) output
-    for d, dtype in self._get_inputs():
+  def check_scalar_vec_equality(self, fxn, dtype, *args, vcount=2, val=0.1, **kwargs):
+    # check fxn outputs on scalar and vec inputs must match exactly except for vectorization stuff (vcount, __eq__)
+    in_scalar, in_vec = UOp.const(dtype, val), UOp.const(dtype.vec(vcount), val)
+    out_scalar, out_vec = fxn(in_scalar, *args, **kwargs), fxn(in_vec, *args, **kwargs)
+    uops_equal(out_scalar, out_vec, cmp_op=True, cmp_scalar_dtype=True, cmp_eval=True)
+
+  def check_vectorization_preserved(self, fxn, dtype, *args, vcount=2, val=0.1, **kwargs):
+    in_vec = UOp.const(dtype.vec(vcount), val)
+    out_vec = fxn(in_vec, *args, **kwargs)
+    uops_equal(out_vec, cmp_vcount=vcount)
+
+  def test_vectorization_preserved(self):
+    # check that when given a vectorized input, fxn returns a vectorized output
+    for dtype in TRANSCENDENTAL_SUPPORTED_DTYPES:
+      for val in [-2,1.3,194]:
+        for vcount in [1,2,4,19]:
+          self.check_vectorization_preserved(payne_hanek_reduction, dtype, vcount=vcount, val=val)
+          self.check_vectorization_preserved(cody_waite_reduction, dtype, vcount=vcount, val=val)
+          self.check_vectorization_preserved(xpow, dtype, vcount=vcount, val=val)
+          self.check_vectorization_preserved(xexp2, dtype, vcount=vcount, val=val)
+
       uops_equal(payne_hanek_reduction(d), cmp_eval=False, cmp_vcount=dtype.vcount)
       uops_equal(cody_waite_reduction(d), cmp_eval=False, cmp_vcount=dtype.vcount)
       uops_equal(xpow(d, d), cmp_eval=False, cmp_vcount=dtype.vcount)
       uops_equal(xexp2(d), cmp_eval=False, cmp_vcount=dtype.vcount)
 
-  def test_match(self):
+  # def test_preserves_vectorization(self):
+  #   # verify that when given a vectorized (or scalar) input, the function returns a vectorized (or scalar) output
+  #   for d, dtype in self.get_inputs():
+  #     uops_equal(payne_hanek_reduction(d), cmp_eval=False, cmp_vcount=dtype.vcount)
+  #     uops_equal(cody_waite_reduction(d), cmp_eval=False, cmp_vcount=dtype.vcount)
+  #     uops_equal(xpow(d, d), cmp_eval=False, cmp_vcount=dtype.vcount)
+  #     uops_equal(xexp2(d), cmp_eval=False, cmp_vcount=dtype.vcount)
 
-    def check_scalar_vec_equality(fxn, dtype, *args, vec_size=2, val=0.1, **kwargs):
-      in_scalar, in_vec = UOp.const(dtype, val), UOp.const(dtype.vec(vec_size), val)
-      out_scalar, out_vec = fxn(in_scalar, *args, **kwargs), fxn(in_vec, *args, **kwargs)
-      # fxn outputs must match exactly except for vectorization stuff (vcount, __eq__)
-      uops_equal(out_scalar, out_vec, cmp_op=True, cmp_scalar_dtype=True, cmp_eval=True)
+  def test_match(self):
 
     # test functions on vec and scalar versions of the same input
     check_scalar_vec_equality(trig_poly, dtypes.float32, [0.1], [0.2])
