@@ -71,7 +71,7 @@ class TestTranscendentalFunctions(unittest.TestCase):
     np.testing.assert_allclose(eval_uop(pow2if(UOp.const(dtypes.int, -10), dtypes.float)), 2**-10)
     np.testing.assert_allclose(eval_uop(pow2if(UOp.const(dtypes.int, -63), dtypes.float)), 2**-63)
 
-class TestTranscendentalVectorized(unittest.TestCase):
+class TestTranscendentalVectorizedFunctions(unittest.TestCase):
   # given a scalar and vectorized input, check that the fxn outputs have the same
   # scalar_dtypes, args, ops, and vcount (only for vectorized input)
 
