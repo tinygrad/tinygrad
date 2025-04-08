@@ -9,7 +9,7 @@ if getenv("CHECK_OOB"):
   def z3_and(a,b): return a % (b+1) if isinstance(b, z3.IntNumRef) else a & b  # mod by power of two uses Ops.AND
   z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.AND: z3_and,
                                               Ops.SHR: lambda a,b: a/(2**b.as_long()), Ops.SHL: lambda a,b: a*(2**b.as_long())}
-  def z3_eval(expr: UOp, ctx: dict[UOp, 'int|z3.ArithRef']) -> 'z3.ArithRef|int':
+  def z3_eval(expr: UOp, ctx: dict[UOp, 'z3.ArithRef']) -> 'z3.ArithRef':
     return ctx[expr] if expr in ctx else z3_alu[expr.op](*(z3_eval(src, ctx) for src in expr.src))
 
 buffer_spec = PatternMatcher([
@@ -55,9 +55,7 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 # ***** uop type spec *****
 
 def validate_index(idx:UOp, mask:UOp|None=None):
-  if not getenv("CHECK_OOB"): return True
-  if isinstance(idx.dtype, ImageDType): return True
-  if (sz := cast(PtrDType, idx.src[0].dtype).size) == -1: return True
+  if not getenv("CHECK_OOB") or (sz := cast(PtrDType, idx.src[0].dtype).size) == -1 or isinstance(idx.dtype, ImageDType): return True
   # WEBGPU has a BITCAST in the index. TODO: fix
   if any(x.op in {Ops.DEFINE_VAR, Ops.BITCAST} or (x.op is Ops.SPECIAL and any(not isinstance(y, int) for y in x.arg[1:])) for x in idx.toposort):
     return True
