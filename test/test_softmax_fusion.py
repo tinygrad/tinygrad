@@ -1,7 +1,6 @@
 import unittest
-from tinygrad import Tensor, GlobalCounters, Context, Device
+from tinygrad import Tensor, GlobalCounters, Context
 from tinygrad.helpers import DEBUG
-from tinygrad.codegen.kernel import Kernel
 
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
