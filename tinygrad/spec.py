@@ -69,7 +69,7 @@ def validate_index(idx:UOp, mask:UOp|None=None):
 
   solver = z3.Solver(ctx=(z3ctx:=z3.Context()))
   # make dicts from UOp to z3_variable, these are the leaves of indexing computation
-  load_ctx = {}
+  load_ctx: dict[UOp, int] = {}
   loads = {v:z3.Int(f"load{load_ctx.setdefault(v, len(load_ctx))}", ctx=z3ctx) for v in filter(lambda x: x.op is Ops.LOAD, all_uops)}
   define_vars = {v:z3.Int(v.arg[0], ctx=z3ctx) for v in filter(lambda x: x.op is Ops.DEFINE_VAR, all_uops)}
   specials = {v:z3.Int(v.arg[0], ctx=z3ctx) for v in filter(lambda x: x.op is Ops.SPECIAL, all_uops)}
