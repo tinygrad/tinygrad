@@ -232,7 +232,7 @@ class Kernel:
 @dataclass(frozen=True)
 class KernelContext:
   realizes: dict[UOp, None]
-  metadata: dict[UOp, Metadata]
+  metadata: dict[UOp, Metadata|None]
 
 def create_kernel(ctx:KernelContext, x:UOp, b:UOp):
   kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), (m,) if (m:=ctx.metadata.get(x)) else ()))
@@ -248,10 +248,10 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
     if s.op in DONT_PLACE_IN_KERNEL or s in ctx.realizes: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
-      if (m:=ctx.metadata.get(s)) is not None: metadata[m] = None
+      if s.base.op not in {Ops.CONST, Ops.DEVICE} and (m:=ctx.metadata.get(s)): metadata[m] = None
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
 
-create_kernels = PatternMatcher([
+create_kernels = merge_views+PatternMatcher([
   # always give assign/contiguous a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
   (UPat(Ops.CONTIGUOUS, name="x"), lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype))),
@@ -395,17 +395,16 @@ create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 
 @track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
 def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
-  # merge_views + sym + reorder_view + replace_contiguous
+  # merge_views + simplify the tensor graph
   tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous, ctx={})
-  sink = tensor_map[big_sink]
-  metadata = {v:k.metadata for k,v in tensor_map.items() if k.base.op not in {Ops.CONST, Ops.DEVICE} and isinstance(k.metadata, Metadata)}
 
   # display the cleaned up tensor graph
-  if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Tensor Graph")
+  if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
   # group into kernels
+  sink = tensor_map[big_sink]
   realize_map = group_realizes(sink)
-  kernel_map = graph_rewrite_map(sink, merge_views+create_kernels, ctx=KernelContext(realize_map, metadata), bottom_up=True)
+  kernel_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True)
   sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
