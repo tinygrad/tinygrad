@@ -91,49 +91,41 @@ class TestTranscendentalFunctions(unittest.TestCase):
 
 class TestVectorizedTranscendetalFunctions(unittest.TestCase):
 
-  def _check_scalar_vec_equality(self, fxn, dtype, vcount, val, *args, two_args=False, **kwargs):
-    try:
-      # given scalar and vec inputs the fxn outputs match exactly except for vectorization stuff (vcount, __eq__)
-      in_scalar, in_vec = UOp.const(dtype, val), UOp.const(dtype.vec(vcount), val)
-      if two_args:
-        in_scalar2, in_vec2 = UOp.const(dtype, val), UOp.const(dtype.vec(vcount), val)
-        out_scalar, out_vec = fxn(in_scalar, in_scalar2, *args, **kwargs), fxn(in_vec, in_vec2, *args, **kwargs)
-      else:
-        out_scalar, out_vec = fxn(in_scalar, *args, **kwargs), fxn(in_vec, *args, **kwargs)
-      uops_equal(out_scalar, out_vec, cmp_op=True, cmp_scalar_dtype=True, cmp_eval=True)
-    except Exception as e:
-      print(f'FAILURE:\n{fxn.__name__=}, {dtype=} failed\n{e}\n')
+  def _check_scalar_vec_equality(self, fxn, in_scalar, in_vec, *args, **kwargs):
+    out_scalar, out_vec = fxn(in_scalar, *args, **kwargs), fxn(in_vec, *args, **kwargs)
+    uops_equal(out_scalar, out_vec, cmp_op=True, cmp_scalar_dtype=True, cmp_eval=True)
 
-  def _check_vectorization_preserved(self, fxn, dtype, vcount, val, *args, two_args=False, **kwargs):
-    in_vec = UOp.const(dtype.vec(vcount), val)
-    if two_args:
-      in_vec2 =  UOp.const(dtype.vec(vcount), val)
-      out_vec = fxn(in_vec, in_vec2, *args, **kwargs)
-    else:
-      out_vec = fxn(in_vec, *args, **kwargs)
+  def _check_vectorization_preserved(self, fxn, in_vec, vcount, *args, two_args=False, **kwargs):
+    out_vec = fxn(in_vec, *args, **kwargs)
     uops_equal(out_vec, cmp_vcount=vcount, cmp_eval=False)
 
   def test_vectorization_preserved(self):
     # given a vectorized input, check that the fxn returns a vectorized output with correct vcount
-    for dtype in [dtypes.float32, dtypes.float64]:
+    for dtype in TRANSCENDENTAL_SUPPORTED_DTYPES:
       for val in [-2,1.3,194]:
-        for vcount in [1,2,4,19]:
-          self._check_vectorization_preserved(payne_hanek_reduction, dtype, vcount, val)
-          self._check_vectorization_preserved(xpow, dtype, vcount, val, two_args=True)
-          self._check_vectorization_preserved(xexp2, dtype, vcount, val)
-          self._check_vectorization_preserved(cody_waite_reduction, dtype, vcount, val)
+        for vcount in [1,4,19]:
+          if dtype == dtypes.float16:
+            continue
+          in_vec = UOp.const(dtype.vec(vcount), val)
+          self._check_vectorization_preserved(payne_hanek_reduction, in_vec, vcount)
+          self._check_vectorization_preserved(lambda x: xpow(x, x), in_vec, vcount)
+          self._check_vectorization_preserved(xexp2, in_vec, vcount)
+          self._check_vectorization_preserved(cody_waite_reduction, in_vec, vcount)
 
   def test_scalar_vec_equality(self):
-    # given scalar and vectorized inputs, check the fxn returns the same outputs except for vectorization stuff (vcount, __eq__)
-    for dtype in [dtypes.float32, dtypes.float64]:
+    # given scalar and vectorized inputs, check the fxn returns the same output except for vectorization stuff (vcount, __eq__)
+    for dtype in TRANSCENDENTAL_SUPPORTED_DTYPES:
       for val in [-2,1.3,194]:
-        for vcount in [1,2,4,19]:
-          self._check_scalar_vec_equality(xpow, dtype, vcount, val, two_args=True)
-          self._check_scalar_vec_equality(xexp2, dtype, vcount, val)
-          self._check_scalar_vec_equality(xlog2, dtype, vcount, val)
-          self._check_scalar_vec_equality(payne_hanek_reduction, dtype, vcount, val)
-          self._check_scalar_vec_equality(cody_waite_reduction, dtype, vcount, val)
-          self._check_scalar_vec_equality(trig_poly, dtype, vcount, val, [0.1], [0.2])
+        for vcount in [1,4,19]:
+          if dtype == dtypes.float16:
+            continue
+          in_scalar, in_vec = UOp.const(dtype, val), UOp.const(dtype.vec(vcount), val)
+          self._check_scalar_vec_equality(lambda x: xpow(x, x), in_scalar, in_vec)
+          self._check_scalar_vec_equality(xexp2, in_scalar, in_vec)
+          self._check_scalar_vec_equality(xlog2, in_scalar, in_vec)
+          self._check_scalar_vec_equality(payne_hanek_reduction, in_scalar, in_vec)
+          self._check_scalar_vec_equality(cody_waite_reduction, in_scalar, in_vec)
+          self._check_scalar_vec_equality(trig_poly, in_scalar, in_vec, [0.1], [0.2])
 
 if __name__ == '__main__':
   unittest.main()
