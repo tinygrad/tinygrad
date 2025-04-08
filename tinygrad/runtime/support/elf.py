@@ -19,13 +19,20 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> tuple[memoryview, list[
   symtab = [_to_carray(sh, libc.Elf64_Sym) for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB][0]
   progbits = [sh for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS]
 
-  # Prealloc image for all fixed addresses.
-  image = bytearray(max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0] + [0]))
+  # Prealloc image for all fixed addresses, but start with .text.last if present
+  image = bytearray()
+  text_last = next((sh for sh in progbits if sh.name == '.text.last'), None)
+  if text_last:
+    image.extend(text_last.content)
+    text_last.header.sh_addr = 0
+  fixed_size = max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0] + [0])
+  if len(image) < fixed_size: image.extend(b'\0' * (fixed_size - len(image)))
   for sh in progbits:
-    if sh.header.sh_addr != 0: image[sh.header.sh_addr:sh.header.sh_addr+sh.header.sh_size] = sh.content
-    else:
-      image += b'\0' * (((align:=max(sh.header.sh_addralign, force_section_align)) - len(image) % align) % align) + sh.content
-      sh.header.sh_addr = len(image) - len(sh.content)
+    if sh.name != '.text.last':  # Skip .text.last since it's already placed
+      if sh.header.sh_addr != 0: image[sh.header.sh_addr:sh.header.sh_addr+sh.header.sh_size] = sh.content
+      else:
+        image += b'\0' * (((align:=max(sh.header.sh_addralign, force_section_align)) - len(image) % align) % align) + sh.content
+        sh.header.sh_addr = len(image) - len(sh.content)
 
   # Relocations
   relocs = []
