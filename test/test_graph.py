@@ -13,6 +13,8 @@ Tensor.manual_seed(1337)
 BUF_SIZE = 4096 if CI else 4096 * 128
 RUN_CNT = 4 if CI else 32
 
+Device.DEFAULT = "CPU"
+
 cached_prgs = {}
 def helper_exec_op(device, outbuf, inbufs):
   if (device, len(inbufs)) not in cached_prgs:
@@ -239,6 +241,7 @@ class TestGraph(unittest.TestCase):
 
     helper_test_graphs(Device[d0].graph, graphs)
 
+  @unittest.skipUnless(Device.DEFAULT in {"CUDA", "NV", "AMD"}, "mutidevice graph required")
   def test_graph_offset_bufs(self):
     if not issubclass(Device[Device.DEFAULT].graph, MultiGraphRunner): self.skipTest("graph does not supported (not MultiGraphRunner)")
 
