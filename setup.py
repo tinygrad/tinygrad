@@ -13,7 +13,7 @@ testing_minimal = [
   "pytest",
   "pytest-xdist",
   "hypothesis",
-  "z3-solver"
+  "z3-solver",
 ]
 
 setup(name='tinygrad',
@@ -49,7 +49,6 @@ setup(name='tinygrad',
         'testing_unit': testing_minimal + [
             "tqdm",
             "safetensors",
-            "z3-solver",
             "tabulate",  # for sz.py
         ],
         'testing': testing_minimal + [
