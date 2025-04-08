@@ -101,8 +101,8 @@ class PythonProgram:
               continue
         elif uop is Ops.VECTORIZE: ul[i] = inp
         elif uop in {Ops.CAST, Ops.BITCAST}:
-          assert dtp[0].scalar().fmt and dtype.fmt
-          pack_format, unpack_format = str(warp_size) + dtp[0].scalar().fmt, str(warp_size) + dtype.fmt
+          assert dtp[0].fmt and dtype.fmt
+          pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
           if uop is Ops.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
           else: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
         elif uop is Ops.LOAD:
