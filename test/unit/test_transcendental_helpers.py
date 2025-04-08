@@ -99,15 +99,10 @@ class TestTranscendentalVectorized(unittest.TestCase):
           self._check_uop_vcount(out_vec, vcount)
 
   def test_xpow(self): return self._test_vectorized(lambda x: xpow(x, x))
-  @unittest.expectedFailure
   def test_xexp2(self): return self._test_vectorized(xexp2)
-  @unittest.expectedFailure
   def test_xlog2(self): return self._test_vectorized(xlog2)
-  @unittest.expectedFailure
   def test_payne_hanek_reduction(self): return self._test_vectorized(payne_hanek_reduction)
-  @unittest.expectedFailure
   def test_cody_waite_reduction(self): return self._test_vectorized(cody_waite_reduction)
-  @unittest.expectedFailure
   def test_trig_poly(self): return self._test_vectorized(lambda x: trig_poly(x, [0.0], [1.0]))
 
 if __name__ == '__main__':
