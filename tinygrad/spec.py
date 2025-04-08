@@ -1,8 +1,8 @@
 from typing import cast, Callable, Any
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
-from tinygrad.helpers import all_same, dedup, flatten, prod, getenv
-if getenv("CHECK_OOB"):
+from tinygrad.helpers import all_same, dedup, flatten, prod, CHECK_OOB
+if CHECK_OOB:
   import z3
 
   def z3_cdiv(a,b): return z3.If(a<0, (a+(b-1))/b, a/b)  # IDIV is truncated division but z3 does floored division
@@ -55,7 +55,7 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 # ***** uop type spec *****
 
 def validate_index(idx:UOp, mask:UOp|None=None):
-  if not getenv("CHECK_OOB") or isinstance(idx.dtype, ImageDType) or (sz := cast(PtrDType, idx.src[0].dtype).size) == -1: return True
+  if not CHECK_OOB or isinstance(idx.dtype, ImageDType) or (sz := cast(PtrDType, idx.src[0].dtype).size) == -1: return True
 
   all_uops = list((idx.toposort | mask.toposort).keys() if mask is not None else idx.toposort.keys())
   all_uops += flatten(map(lambda x: x.arg[1].toposort.keys(), filter(lambda x: x.op is Ops.SPECIAL and isinstance(x.arg[1], UOp), all_uops)))

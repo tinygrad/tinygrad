@@ -1,7 +1,7 @@
 from typing import List
 import unittest, time, pytest
 from tinygrad import dtypes, Device
-from tinygrad.helpers import DEBUG, getenv
+from tinygrad.helpers import Context, DEBUG
 from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher, track_rewrites
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
@@ -442,7 +442,7 @@ class TestUOpGraph(unittest.TestCase):
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST]), 0, f"dtype = {dt}")
 
-  @unittest.skipUnless(getenv("CHECK_OOB"), "Check is not enabled without the envvar")
+  @Context(CHECK_OOB=1)
   def test_out_of_bounds_access(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
     ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 42)),))
