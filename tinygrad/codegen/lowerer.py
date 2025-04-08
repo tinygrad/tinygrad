@@ -104,13 +104,12 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   # range splitting
   if ki.range_split_axis:
     axis, masks = ki.range_split_axis
-    rng, n = idxs[axis], len(masks)
-    src = tuple(rng.replace(src=(UOp.const(dtypes.int, s), UOp.const(dtypes.int, e)), arg=i+axis) for i,(s,e) in enumerate(masks))
-    idxs[axis] = UOp(Ops.UNROLL, rng.dtype, (UOp(Ops.VECTORIZE, rng.dtype.vec(n), src),), ((axis, n),),)
-    # duplicate inner loops otherwise linearizer can't merge blocks
-    for ii,a in enumerate(range(axis+1, first_upcasted), 1):
-      rng = idxs[a]
-      idxs[a] = UOp(Ops.UNROLL, rng.dtype, (UOp(Ops.VECTORIZE, rng.dtype.vec(n), tuple(rng.replace(arg=i+axis+n*ii) for i in range(n))),), ((axis, n),),)
+    for ii,a in enumerate(range(axis, first_upcasted)):
+      rng, n = idxs[a], len(masks)
+      # duplicate inner loops otherwise linearizer can't merge blocks
+      if a == axis: src = tuple(rng.replace(src=(UOp.const(dtypes.int, s), UOp.const(dtypes.int, e)), arg=i+axis) for i,(s,e) in enumerate(masks))
+      else: src = tuple(rng.replace(arg=i+axis+n*ii) for i in range(n))
+      idxs[a] = UOp(Ops.UNROLL, rng.dtype, (UOp(Ops.VECTORIZE, rng.dtype.vec(n), src),), ((axis, n),),)
 
   # late indexes (group for reduce)
   ridxs = idxs[:]
