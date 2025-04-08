@@ -65,7 +65,7 @@ def validate_index(idx:UOp, mask:UOp|None=None):
   if 0<=idx.src[1].vmin and idx.src[1].vmax<sz: return True
 
   # WEBGPU has a BITCAST in the index. TODO: fix
-  if any(x.op is Ops.BITCAST for x in all_uops): return True
+  if any(x.op in (Ops.BITCAST, Ops.DEFINE_VAR) for x in all_uops): return True
 
   solver = z3.Solver(ctx=(z3ctx:=z3.Context()))
   # make dicts from UOp to z3_variable, these are the leaves of indexing computation
