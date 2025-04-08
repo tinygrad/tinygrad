@@ -539,9 +539,10 @@ class Kernel:
         self.apply_opt(Opt(OptOps.UPCAST, len(self.full_unupcasted_shape)-1, splits))
 
     # range splitting, shouldn't be here though
-    if not self.opts.has_local:
+    if not self.opts.has_local and self.first_reduce == self.first_upcast:
+      # TODO: make split work with reduces
       for axis in range(len(self.full_unupcasted_shape)):
-        smasks = tuple(sorted({st.views[-1].mask[axis] for st in self.sts if st.views[-1].mask and st.views[-1].strides[axis] != 0}, key=lambda x: x[0]))  # noqa: E501
+        smasks = tuple(sorted({st.views[-1].mask[axis] for st in self.sts if st.views[-1].mask}, key=lambda x: x[0]))  # noqa: E501
         if len(smasks) > 1 and smasks[0][0] == 0 and smasks[-1][-1] == self.full_unupcasted_shape[axis]: self.range_split_axis = (axis, smasks)
 
     # **** local groups ****

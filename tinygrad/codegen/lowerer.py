@@ -108,10 +108,9 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
     src = tuple(rng.replace(src=(UOp.const(dtypes.int, s), UOp.const(dtypes.int, e)), arg=i+axis) for i,(s,e) in enumerate(masks))
     idxs[axis] = UOp(Ops.UNROLL, rng.dtype, (UOp(Ops.VECTORIZE, rng.dtype.vec(n), src),), ((axis, n),),)
     # duplicate inner loops otherwise linearizer can't merge blocks
-    # TODO: this should enumerate and do i+n*iii but can't actually get this to break
-    for a in range(axis+1, first_upcasted):
+    for ii,a in enumerate(range(axis+1, first_upcasted), 1):
       rng = idxs[a]
-      idxs[a] = UOp(Ops.UNROLL, rng.dtype, (UOp(Ops.VECTORIZE, rng.dtype.vec(n), tuple(rng.replace(arg=i+n) for i in range(n))),), ((axis, n),),)
+      idxs[a] = UOp(Ops.UNROLL, rng.dtype, (UOp(Ops.VECTORIZE, rng.dtype.vec(n), tuple(rng.replace(arg=i+axis+n*ii) for i in range(n))),), ((axis, n),),)
 
   # late indexes (group for reduce)
   ridxs = idxs[:]
