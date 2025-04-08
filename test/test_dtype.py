@@ -225,6 +225,13 @@ class TestFp8sDType(unittest.TestCase):
           [10000000.0, -1.0, 402.0, -300.0, -10000000.0, 20.0, 1.4123, 0.0, math.inf, math.nan],
           [57344.0, -1, 384, -320, -57344.0, 20, 1.5, 0.0, 57344.0, math.nan])
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3) and is_dtype_supported(dtypes.fp8e5m2), "fp8s not supported")
+  def test_fp8e4m3_plus_fp8e5m2_output_dtype(self):
+    a = Tensor([1.0, 2.0, 3.0], dtype=dtypes.fp8e4m3)
+    b = Tensor([1.0, 2.0, 3.0], dtype=dtypes.fp8e5m2)
+    result = a + b
+    self.assertEqual(result.dtype, dtypes.half)
+
 class TestHalfDType(TestDType): DTYPE = dtypes.half
 
 class TestFloatDType(TestDType):
