@@ -4,8 +4,6 @@ from tinygrad import dtypes
 from tinygrad.ops import UOp, Ops
 from tinygrad.codegen.transcendental import TRANSCENDENTAL_SUPPORTED_DTYPES, payne_hanek_reduction, cody_waite_reduction, frexp, rintk, xpow, xexp2, xlog2, trig_poly, pow2if
 from test.helpers import eval_uop
-from icecream import ic, install
-install()
 
 class TestTranscendentalFunctions(unittest.TestCase):
   def test_payne_hanek_reduction(self):
