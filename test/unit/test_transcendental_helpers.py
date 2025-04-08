@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad import dtypes
 from tinygrad.dtype import DType
 from tinygrad.ops import UOp, Ops
-from tinygrad.codegen.transcendental import TRANSCENDENTAL_SUPPORTED_DTYPES, payne_hanek_reduction, cody_waite_reduction, frexp, rintk, pow2if, xpow, xexp2, xlog2, trig_poly
+from tinygrad.codegen.transcendental import TRANSCENDENTAL_SUPPORTED_DTYPES, payne_hanek_reduction, cody_waite_reduction, frexp, rintk, xpow, xexp2, xlog2, trig_poly, pow2if
 from test.helpers import eval_uop
 
 class TestTranscendentalFunctions(unittest.TestCase):
@@ -87,7 +87,6 @@ class TestTranscendentalVectorizationPreserved(unittest.TestCase):
           in_vec = UOp.const(scalar_dtype.vec(vcount), val)
           out_vec = fxn(in_vec)
           self._check_uop_vcount(out_vec, vcount)
-          # uops_equal(out_vec, cmp_vcount=vcount)
 
   def test_xpow(self): return self._test_vectorization_preserved(lambda x: xpow(x, x))
   def test_xexp2(self): return self._test_vectorization_preserved(xexp2)
@@ -104,7 +103,7 @@ class TestTranscendentalScalarVectorInputs(unittest.TestCase):
     [self._check_uop_ops(x1, x2) for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src))]
 
   def _check_uop_scalar_dtypes(self, u1:tuple|UOp, u2:tuple|UOp):
-    # check all UOps in u have the same ops and scalar_dtype
+    # check all UOps in u have the same scalar_dtype
     if isinstance(u1, UOp) and isinstance(u2, UOp): assert u1.dtype.scalar() == u2.dtype.scalar()
     [self._check_uop_scalar_dtypes(x1, x2) for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src))]
 
