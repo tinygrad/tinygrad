@@ -7,19 +7,6 @@ from tinygrad.ops import UOp, Ops
 from tinygrad.codegen.transcendental import TRANSCENDENTAL_SUPPORTED_DTYPES, payne_hanek_reduction, cody_waite_reduction, frexp, rintk, pow2if, xpow, xexp2, xlog2, trig_poly
 from test.helpers import eval_uop
 
-def uops_equal(u1:UOp|tuple, u2:Optional[UOp|tuple]=None, cmp_op:bool=False, cmp_scalar_dtype:bool|DType=False, cmp_vcount:bool|int=False):
-  # instead of comparing u1 to u2, compare u1 to expected op, scalar_dtype, or vcount
-  if u2 == None:
-    return uops_equal(u1, u1, cmp_op=cmp_op, cmp_scalar_dtype=cmp_scalar_dtype, cmp_vcount=cmp_vcount)
-  # compare u1 to u2
-  if isinstance(u1, UOp) and isinstance(u2, UOp):
-    if cmp_op: assert u1.op == u2.op if isinstance(cmp_op, bool) else u1.op == u2.op == cmp_op, f'ops must match:\n{u1=}\n{u2=}\n{u1.op=}\n{u2.op=}\n{cmp_op=}'
-    if cmp_scalar_dtype: assert u1.dtype.scalar() == u2.dtype.scalar() if isinstance(cmp_scalar_dtype, bool) else u1.dtype.scalar() == u2.dtype.scalar() == cmp_scalar_dtype, f'dtype must match:\n{u1=}\n{u2=}\n{u1.dtype.scalar()=}\n{u2.dtype.scalar()=}\n{cmp_scalar_dtype=}'
-    if cmp_vcount: assert u1.dtype.vcount == u2.dtype.vcount if isinstance(cmp_vcount, bool) else u1.dtype.vcount == u2.dtype.vcount == cmp_vcount, f'vcount must match:\n{u1=}\n{u2=}\n{u1.dtype.vcount=}\n{u2.dtype.vcount=}\n{cmp_vcount=}'
-  # recursive call
-  for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src)):
-    uops_equal(x1, x2, cmp_op=cmp_op, cmp_scalar_dtype=cmp_scalar_dtype, cmp_vcount=cmp_vcount)
-
 class TestTranscendentalFunctions(unittest.TestCase):
   def test_payne_hanek_reduction(self):
     # TODO: Test constant input when constant folding is fixed (or maybe test both variants)
@@ -88,13 +75,19 @@ class TestTranscendentalFunctions(unittest.TestCase):
 class TestTranscendentalVectorizationPreserved(unittest.TestCase):
   # given a vectorized input, check that the fxn output is vectorized with the same vcount
 
+  def _check_uop_vcount(self, u:tuple|UOp, vcount:int):
+    # check all UOps in u are vectorized with vcount
+    if isinstance(u, UOp): assert u.dtype.vcount == vcount, f'expected {vcount=} but got {u.dtype.vcount=} for UOp {u=}'
+    [self._check_uop_vcount(x, vcount) for x in (u if isinstance(u, tuple) else u.src)]
+
   def _test_vectorization_preserved(self, fxn, scalar_dtypes=TRANSCENDENTAL_SUPPORTED_DTYPES, vals=[-2,1.3,194], vcounts=[1,4,19]):
     for scalar_dtype in scalar_dtypes:
       for val in vals:
         for vcount in vcounts:
           in_vec = UOp.const(scalar_dtype.vec(vcount), val)
           out_vec = fxn(in_vec)
-          uops_equal(out_vec, cmp_vcount=vcount)
+          self._check_uop_vcount(out_vec, vcount)
+          # uops_equal(out_vec, cmp_vcount=vcount)
 
   def test_xpow(self): return self._test_vectorization_preserved(lambda x: xpow(x, x))
   def test_xexp2(self): return self._test_vectorization_preserved(xexp2)
@@ -105,13 +98,24 @@ class TestTranscendentalScalarVectorInputs(unittest.TestCase):
   # given a scalar and vectorized input, check that the fxn outputs have the same ops, scalar_dtypes, and evaluate to the same value
   # the vectorization stuff (vcount, __eq__) can differ
 
+  def _check_uop_ops(self, u1:tuple|UOp, u2:tuple|UOp):
+    # check all UOps in u have the same op
+    if isinstance(u1, UOp) and isinstance(u2, UOp): assert u1.op == u2.op
+    [self._check_uop_ops(x1, x2) for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src))]
+
+  def _check_uop_scalar_dtypes(self, u1:tuple|UOp, u2:tuple|UOp):
+    # check all UOps in u have the same ops and scalar_dtype
+    if isinstance(u1, UOp) and isinstance(u2, UOp): assert u1.dtype.scalar() == u2.dtype.scalar()
+    [self._check_uop_scalar_dtypes(x1, x2) for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src))]
+
   def _test_scalar_vec_equality(self, fxn, scalar_dtypes=TRANSCENDENTAL_SUPPORTED_DTYPES, vals=[-2,1.3,194], vcounts=[1,4,19]):
     for scalar_dtype in scalar_dtypes:
       for val in vals:
         for vcount in vcounts:
           in_scalar, in_vec = UOp.const(scalar_dtype, val), UOp.const(scalar_dtype.vec(vcount), val)
           out_scalar, out_vec = fxn(in_scalar), fxn(in_vec)
-          uops_equal(out_scalar, out_vec, cmp_op=True, cmp_scalar_dtype=True)
+          self._check_uop_ops(out_scalar, out_vec)
+          self._check_uop_scalar_dtypes(out_scalar, out_vec)
 
   def test_xpow(self): return self._test_scalar_vec_equality(lambda x: xpow(x, x))
   def test_xexp2(self): return self._test_scalar_vec_equality(xexp2)
