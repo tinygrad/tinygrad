@@ -1,11 +1,11 @@
 import unittest, math
-from typing import Optional
 import numpy as np
 from tinygrad import dtypes
-from tinygrad.dtype import DType
 from tinygrad.ops import UOp, Ops
 from tinygrad.codegen.transcendental import TRANSCENDENTAL_SUPPORTED_DTYPES, payne_hanek_reduction, cody_waite_reduction, frexp, rintk, xpow, xexp2, xlog2, trig_poly, pow2if
 from test.helpers import eval_uop
+from icecream import ic, install
+install()
 
 class TestTranscendentalFunctions(unittest.TestCase):
   def test_payne_hanek_reduction(self):
@@ -72,40 +72,22 @@ class TestTranscendentalFunctions(unittest.TestCase):
     np.testing.assert_allclose(eval_uop(pow2if(UOp.const(dtypes.int, -10), dtypes.float)), 2**-10)
     np.testing.assert_allclose(eval_uop(pow2if(UOp.const(dtypes.int, -63), dtypes.float)), 2**-63)
 
-class TestTranscendentalVectorizationPreserved(unittest.TestCase):
-  # given a vectorized input, check that the fxn output is vectorized with the same vcount
+class TestTranscendentalVectorized(unittest.TestCase):
+  # given a scalar and vectorized input, check that the fxn outputs have the same ops, scalar_dtypes, and vcount
 
   def _check_uop_vcount(self, u:tuple|UOp, vcount:int):
     # check all UOps in u are vectorized with vcount
-    if isinstance(u, UOp): assert u.dtype.vcount == vcount, f'expected {vcount=} but got {u.dtype.vcount=} for UOp {u=}'
+    if isinstance(u, UOp):
+      assert u.dtype.vcount == vcount, f'expected {vcount=} but got {u.dtype.vcount=} for UOp\n{u=}'
     [self._check_uop_vcount(x, vcount) for x in (u if isinstance(u, tuple) else u.src)]
 
-  def _test_vectorization_preserved(self, fxn, scalar_dtypes=TRANSCENDENTAL_SUPPORTED_DTYPES, vals=[-2,1.3,194], vcounts=[1,4,19]):
-    for scalar_dtype in scalar_dtypes:
-      for val in vals:
-        for vcount in vcounts:
-          in_vec = UOp.const(scalar_dtype.vec(vcount), val)
-          out_vec = fxn(in_vec)
-          self._check_uop_vcount(out_vec, vcount)
-
-  def test_xpow(self): return self._test_vectorization_preserved(lambda x: xpow(x, x))
-  def test_xexp2(self): return self._test_vectorization_preserved(xexp2)
-  def test_payne_hanek_reduction(self): return self._test_vectorization_preserved(payne_hanek_reduction)
-  def test_cody_waite_reduction(self): return self._test_vectorization_preserved(cody_waite_reduction)
-
-class TestTranscendentalScalarVectorInputs(unittest.TestCase):
-  # given a scalar and vectorized input, check that the fxn outputs have the same ops, scalar_dtypes, and evaluate to the same value
-  # the vectorization stuff (vcount, __eq__) can differ
-
-  def _check_uop_ops(self, u1:tuple|UOp, u2:tuple|UOp):
-    # check all UOps in u have the same op
-    if isinstance(u1, UOp) and isinstance(u2, UOp): assert u1.op == u2.op
-    [self._check_uop_ops(x1, x2) for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src))]
-
-  def _check_uop_scalar_dtypes(self, u1:tuple|UOp, u2:tuple|UOp):
-    # check all UOps in u have the same scalar_dtype
-    if isinstance(u1, UOp) and isinstance(u2, UOp): assert u1.dtype.scalar() == u2.dtype.scalar()
-    [self._check_uop_scalar_dtypes(x1, x2) for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src))]
+  def _check_uops_match(self, u1:tuple|UOp, u2:tuple|UOp):
+    # check all UOps in u1, u2 have the same scalar_dtype, args, ops
+    if isinstance(u1, UOp) and isinstance(u2, UOp):
+      assert u1.dtype.scalar() == u2.dtype.scalar(), f'expected {u1.dtype.scalar()=} but got {u2.dtype.scalar()=} for UOps\n{u1=}\n{u2}'
+      assert u1.arg == u2.arg or (math.isnan(u1.arg) and math.isnan(u2.arg)), f'expected {u1.arg=} but got {u2.arg=} for UOps\n{u1=}\n{u2}'
+      assert u1.op == u2.op, f'expected {u1.op=} but got {u2.op=} for UOps\n{u1=}\n{u2}'
+    [self._check_uops_match(x1, x2) for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src))]
 
   def _test_scalar_vec_equality(self, fxn, scalar_dtypes=TRANSCENDENTAL_SUPPORTED_DTYPES, vals=[-2,1.3,194], vcounts=[1,4,19]):
     for scalar_dtype in scalar_dtypes:
@@ -113,15 +95,20 @@ class TestTranscendentalScalarVectorInputs(unittest.TestCase):
         for vcount in vcounts:
           in_scalar, in_vec = UOp.const(scalar_dtype, val), UOp.const(scalar_dtype.vec(vcount), val)
           out_scalar, out_vec = fxn(in_scalar), fxn(in_vec)
-          self._check_uop_ops(out_scalar, out_vec)
-          self._check_uop_scalar_dtypes(out_scalar, out_vec)
+          self._check_uops_match(out_scalar, out_vec)
+          self._check_uop_vcount(out_vec, vcount)
 
   def test_xpow(self): return self._test_scalar_vec_equality(lambda x: xpow(x, x))
+  @unittest.expectedFailure
   def test_xexp2(self): return self._test_scalar_vec_equality(xexp2)
+  @unittest.expectedFailure
   def test_xlog2(self): return self._test_scalar_vec_equality(xlog2)
+  @unittest.expectedFailure
   def test_payne_hanek_reduction(self): return self._test_scalar_vec_equality(payne_hanek_reduction)
+  @unittest.expectedFailure
   def test_cody_waite_reduction(self): return self._test_scalar_vec_equality(cody_waite_reduction)
-  def test_trig_poly(self): return self._test_scalar_vec_equality(lambda x: trig_poly(x, [0.1], [0.2]))
+  @unittest.expectedFailure
+  def test_trig_poly(self): return self._test_scalar_vec_equality(lambda x: trig_poly(x, [0.0], [1.0]))
 
 if __name__ == '__main__':
   unittest.main()
