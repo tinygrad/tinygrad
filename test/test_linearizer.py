@@ -41,7 +41,7 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   np_c = np_a @ np_b
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
-  elif dtype_in in [dtypes.fp8e4m3, dtypes.fp8e5m2]: tc_atol, tc_rtol = 1e-1, 1e-2
+  elif dtype_in in dtypes.fp8s: tc_atol, tc_rtol = 1e-1, 1e-2
   else: tc_atol, tc_rtol = 5e-3, 1e-4
   np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
@@ -1128,7 +1128,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_multi_reduce(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if tc.dtype_in in [dtypes.bfloat16, dtypes.fp8e4m3, dtypes.fp8e5m2] or tc.dtype_out in [dtypes.bfloat16, dtypes.fp8e4m3, dtypes.fp8e5m2]:
+      if tc.dtype_in in [dtypes.bfloat16, *dtypes.fp8s] or tc.dtype_out in [dtypes.bfloat16, *dtypes.fp8s]:
         continue
       # this will be a M=G16, N=G32, M=G16, M=G16, K=R16, K=R16, K=R16 with 9 choices of TC MNK axes
       golden_result = None

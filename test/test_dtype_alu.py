@@ -79,7 +79,7 @@ def universal_test_unary(a, dtype, op):
   run_schedule(sched)
   tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
-  if dtype in (dtypes.fp8e4m3, dtypes.fp8e5m2): np.testing.assert_allclose(tensor_value, numpy_value, atol=2, rtol=1e-2)
+  if dtype in dtypes.fp8s: np.testing.assert_allclose(tensor_value, numpy_value, atol=2, rtol=1e-2)
   elif dtype in (*dtypes_float, dtypes.bfloat16):
     np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)

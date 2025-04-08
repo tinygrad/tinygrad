@@ -57,7 +57,7 @@ def _test_cast(a:Tensor, target_dtype:DType):
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(_to_np_dtype(target_dtype))))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
-  if target_dtype in [dtypes.fp8e4m3, dtypes.fp8e5m2]: raise unittest.SkipTest("no test for fp8s bitcast yet")
+  if target_dtype in dtypes.fp8s: raise unittest.SkipTest("no test for fp8s bitcast yet")
   if getenv("PTX") and a.dtype == dtypes.int8 and target_dtype.itemsize != a.dtype.itemsize:
     raise unittest.SkipTest("shape changing bitcast of int8 broken on PTX")
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(_to_np_dtype(target_dtype)).tolist())
@@ -284,7 +284,7 @@ class TestBitCast(unittest.TestCase):
   def test_shape_change_bitcast(self, dt1, dt2):
     # NOTE: this has to be assume to prevent hypothesis from skipping all samples
     assume(dt2 != dtypes.bfloat16 and dt1 != dtypes.bfloat16) # no test for bf16 bitcast yet
-    assume(dt1 not in [dtypes.fp8e4m3, dtypes.fp8e5m2] and dt2 not in [dtypes.fp8e4m3, dtypes.fp8e5m2]) # no test for fp8 bitcast yet
+    assume(dt1 not in dtypes.fp8s and dt2 not in dtypes.fp8s) # no test for fp8 bitcast yet
     assume(not (getenv("PTX") and dt1 == dtypes.int8)) # TODO: bitcasting int8 fails in PTX
     data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
     _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2, data.view(_to_np_dtype(dt2)).tolist())
@@ -487,7 +487,7 @@ class TestTypeSpec(unittest.TestCase):
       dtypes.default_int = default_int
       assert dtypes.default_int == default_int
 
-    for default_float in [dtypes.fp8e4m3, dtypes.fp8e5m2, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+    for default_float in [*dtypes.fp8s, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
       dtypes.default_float = default_float
       assert dtypes.default_float == default_float
 
@@ -832,10 +832,10 @@ class TestAutoCastType(unittest.TestCase):
   def test_gradient_dtype(self):
     old_default_float = dtypes.default_float
 
-    for default_dtype in [dtypes.fp8e4m3, dtypes.fp8e5m2, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+    for default_dtype in [*dtypes.fp8s, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
       if not is_dtype_supported(default_dtype): continue
       dtypes.default_float = default_dtype
-      for dtype in [dtypes.fp8e4m3, dtypes.fp8e5m2, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+      for dtype in [*dtypes.fp8s, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
         if not is_dtype_supported(dtype): continue
         if DEBUG >= 2:
           print(f"testing {default_dtype=}, {dtype=}")
