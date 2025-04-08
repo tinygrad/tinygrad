@@ -5,6 +5,7 @@ from tinygrad.dtype import DTypeLike
 from tinygrad.helpers import DEBUG, get_single_element
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.renderer import Opt, OptOps
+from tinygrad.engine.realize import lower_schedule_item
 
 def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
   # only support axis =-1
@@ -114,15 +115,17 @@ class TestSoftmaxFusion(unittest.TestCase):
     # 5 kernels!
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
       sout = query.scaled_dot_product_attention(key, value)
-      ref = sout.numpy()
+      sout.realize()
 
     print("*** single kernel attention ***")
     GlobalCounters.reset()
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1, PUSH_ALL_VIEWS_LEFT=1):
       out = query.scaled_dot_product_attention(key, value)
-      sdpa = out.numpy()
+      si = get_single_element(out.schedule())
+      ei = lower_schedule_item(si)
+      ei.run()
 
-    np.testing.assert_allclose(ref, sdpa)
+    np.testing.assert_allclose(sout.numpy(), ei.bufs[0].numpy().reshape(sout.shape), atol=1e-7)
 
 if __name__ == '__main__':
   unittest.main()

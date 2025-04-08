@@ -114,11 +114,14 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
   # NOTE: always using ridxs is fine here
   reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
+
+  # hack to make flash attention compile
   if len(reduce_range) == 1 and reduce_range[0].arg == 6:
     new_range = reduce_range[0].replace(arg=ctx.range_rewrite)
     x = x.substitute({reduce_range[0]:new_range})
     reduce_range = [new_range]
     ctx.range_rewrite += 1
+
   assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
   alu_op: Ops = x.arg[0]
   ret = x.src[0]
