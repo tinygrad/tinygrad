@@ -6,7 +6,7 @@ Helper scripts to scrape and validate models tagged as `ONNX` in HuggingFace
 
 1. Retrieve current Top N model's metadata (`collect_metadata.py`)
 2. Download the ONNX models and OP coverage of the models specified by the metadata (`download_models.py`)
-3. Independantly validate model correctness (`run.py`)
+3. independently validate model correctness (`run.py`)
 
 ### Collect Metadata
 run `python extra/huggingface_onnx/collect_metadata.py --limit 100`  
@@ -83,5 +83,5 @@ You can optionally allow more `diverse_models` by using `--diversity 5` to contr
 run `PYTHONPATH=. python extra/huggingface_onnx/run.py FacebookAI/xlm-roberta-large/onnx/model.onnx sentence-transformers/all-mpnet-base-v2/onnx/model_O2.onnx`    
 This runs and validates both `FacebookAI/xlm-roberta-large/onnx/model.onnx` and `sentence-transformers/all-mpnet-base-v2/onnx/model_O2.onnx`  
 
-This also independantly downloads the onnx model if you haven't done so before.  
+This also independently downloads the onnx model if you haven't done so before.  
 You may also pass in only the `model_id` like `pszemraj/long-t5-tglobal-base-sci-simplify` to test all the models in a repo.  
