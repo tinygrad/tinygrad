@@ -1958,12 +1958,21 @@ class TestSwizzle(unittest.TestCase):
 def store_val(si:ScheduleItem): return si.ast.src[0].src[2]
 zero_pm = UPat(Ops.CONST, arg=0)
 class TestView(unittest.TestCase):
+  # movement ops create a new ShapeTracker and apply it on the base Tensor UOp
   def test_movement_ops(self):
     a = Tensor.arange(4).realize()
     b = a.reshape(2, 2, 1).permute(2, 1, 0)
     self.assertEqual(b.tolist(), [[[0, 2], [1, 3]]])
     c = b.permute(2, 1, 0).reshape(4)
     self.assertEqual(c.tolist(), [0, 1, 2, 3])
+
+  # intermediate views merge with views in the edges
+  def test_view_spec(self):
+    a = Tensor.arange(4).realize()
+    b = a.reshape(2, 2, 1).permute(2, 1, 0)
+    c = Tensor([6])
+    out = c.expand((1, 2))+b.sum(axis=(1,))
+    self.assertEqual(out.tolist(), [[7, 11]])
 
   def test_all_masked_out(self):
     # start with non CONST Ops
