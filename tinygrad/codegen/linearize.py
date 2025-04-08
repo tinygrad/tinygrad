@@ -215,9 +215,19 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
     # add BLOCKFORK (slow!)
     block_parent_count = collections.Counter(flatten([x.src for x in sink.toposort if x.op is Ops.BLOCK]))
     non_block_parents = set(flatten([x.src for x in sink.toposort if x.op is not Ops.BLOCK]))
-    forks = {u:UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(block_ctxs[u], (u,))),), arg=child_count)
-      for u,child_count in block_parent_count.items() if u.op not in DONT_PLACE_IN_BLOCK and child_count > 1 and u not in non_block_parents}
-
+    forks = {}
+    for u,child_count in block_parent_count.items():
+      if u.op not in DONT_PLACE_IN_BLOCK and child_count > 1 and u not in non_block_parents:
+        new_block = UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(block_ctxs[u], (u,)))
+        rng = block_ctxs[u]
+        lrng = list(rng)
+        for r in rng[::-1]:
+          # TODO: True is wrong here. check the children's ctxs
+          if True:
+            lrng.remove(r)
+            new_block = UOp(Ops.BLOCKEND, src=(new_block,),
+                            arg=BasicBlock(tuple(lrng), (UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,)),), r))
+        forks[u] = UOp(Ops.BLOCKFORK, src=(new_block,), arg=child_count)
     if not len(forks): break
     sink = sink.substitute(forks)
 
