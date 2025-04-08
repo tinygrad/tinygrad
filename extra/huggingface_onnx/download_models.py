@@ -34,7 +34,7 @@ def download_models(yaml_file: str, download_dir: str, sel: int) -> dict:
   diverse_models = [first_model]
   for _ in range(sel):
     nm,ops = max(model_op_sets.items(), key=lambda item: len(item[1].difference(seen_ops)))
-    if nm in diverse_models: break
+    if ops.issubset(seen_ops): break
     diverse_models.append(nm)
     seen_ops.update(ops)
 
@@ -51,7 +51,7 @@ def download_models(yaml_file: str, download_dir: str, sel: int) -> dict:
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Download models from Huggingface Hub based on a YAML configuration file.")
   parser.add_argument("input", type=str, help="Path to the input YAML configuration file containing model information.")
-  parser.add_argument("diversity", type=int, default=10, help="Number of diverse_models to select")
+  parser.add_argument("--diversity", type=int, default=10, help="Number of diverse_models to select")
   args = parser.parse_args()
 
   models_folder = Path(__file__).parent / "models"
