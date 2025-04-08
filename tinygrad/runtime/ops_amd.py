@@ -114,10 +114,10 @@ class AMDComputeQueue(HWQueue):
     assert self.dev.xccs == 8, 'only 8 XCCs supported'
     a, b = self.dev.xcc_sync
     mem_eq = self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ) | self.pm4.WAIT_REG_MEM_MEM_SPACE(1)
-    self.pkt3(self.pm4.PACKET3_ATOMIC_MEM, self.soc.TC_OP_ATOMIC_ADD_RTN_32, *data64_le(a.value_addr), *data64_le(1), *data64_le(0), 50) # a += 1
-    self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, mem_eq, *data64_le(a.value_addr), 0, 0b111, 100) # a == 0 (mod 8) via bitmask
-    self.pkt3(self.pm4.PACKET3_ATOMIC_MEM, self.soc.TC_OP_ATOMIC_ADD_RTN_32, *data64_le(b.value_addr), *data64_le(1), *data64_le(0), 50) # b += 1
-    self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, mem_eq, *data64_le(b.value_addr), 0, 0b111, 100) # b == 0 (mod 8) via bitmask
+    self.pkt3(self.pm4.PACKET3_ATOMIC_MEM, self.soc.TC_OP_ATOMIC_ADD_RTN_32, *data64_le(a.value_addr), *data64_le(1), *data64_le(0), 0x10) # a += 1
+    self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, mem_eq, *data64_le(a.value_addr), 0, 0b111, 0x100) # a == 0 (mod 8) via bitmask
+    self.pkt3(self.pm4.PACKET3_ATOMIC_MEM, self.soc.TC_OP_ATOMIC_ADD_RTN_32, *data64_le(b.value_addr), *data64_le(1), *data64_le(0), 0x10) # b += 1
+    self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, mem_eq, *data64_le(b.value_addr), 0, 0b111, 0x100) # b == 0 (mod 8) via bitmask
     return self
 
   def memory_barrier(self):
@@ -831,9 +831,7 @@ class AMDDevice(HCQCompiled):
     # XCC setup
     self.xcc_sync: tuple[AMDSignal, AMDSignal]|None = None
     if self.xccs > 1:
-      self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True))
-
-      # + 256 for the second signal is to move it to another cacheline. This allows an atomic op on b, while others ack the wait on a.
+      self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, uncached=True)) # keep it uncached, can we make it cached?
       self.xcc_sync = (AMDSignal(base_addr=self.xcc_sync_area.va_addr), AMDSignal(base_addr=self.xcc_sync_area.va_addr + 256))
       AMDComputeQueue(self).xcc_config().submit(self)
 
