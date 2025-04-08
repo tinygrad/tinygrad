@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
-from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
+from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, print_uops
 from tinygrad.ops import PatternMatcher
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
@@ -17,6 +17,7 @@ from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
+from tinygrad.engine.grouper import view_left
 
 class KernelOptError(Exception): pass
 
@@ -51,7 +52,8 @@ class Kernel:
     self.bufs: list[UOp] = [x for x in self.ast.toposort if x.op in GroupOp.Buffer][::-1]
 
     # get earlybufs, before any reduceops
-    earlybufs: list[UOp] = [x for reduceop in self.reduceops for x in reduceop.src[0].toposort if x.op in GroupOp.Buffer]
+    earlybufs: list[UOp] = sorted([x for reduceop in self.reduceops for x in reduceop.src[0].toposort if x.op in GroupOp.Buffer],
+                                  key=lambda x: -prod(x.shape))
     self.full_buf_index: int = self.bufs.index(earlybufs[0]) if earlybufs else 0
     # NOTE: full_shape can be wrong if there's a tree of reduces
 

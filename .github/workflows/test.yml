@@ -356,6 +356,8 @@ jobs:
         deps: testing_minimal
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
+    - name: Fuzz Test fast idiv
+      run: python test/external/fuzz_fast_idiv.py
     - name: Fuzz Test shapetracker
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py

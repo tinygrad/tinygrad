@@ -71,6 +71,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       if x in excluded:
         if x.op is Ops.CONST and dtypes.is_float(u.dtype): label += f"\nCONST{idx} {x.arg:g}"
         else: label += f"\n{x.op.name}{idx} {x.arg}"
+    if u.op not in {Ops.VIEW, Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, *GroupOp.Buffer} and u.st is not None: label += f"\n{repr(u.shape)}"
     graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff")}
   return graph
 
