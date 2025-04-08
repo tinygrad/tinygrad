@@ -9,21 +9,6 @@ from tinygrad.codegen.transcendental import _ifand, shl, shr, ilogb2k, sin_poly,
 from test.helpers import eval_uop
 from icecream import ic
 
-def uops_equal(u1:UOp|tuple, u2:Optional[UOp|tuple]=None, cmp_op:bool=False, cmp_scalar_dtype:bool|DType=False, cmp_vcount:bool|int=False, cmp_eval:bool=True, cmp_eq:bool=False):
-  # compare u1 to expected op, scalar_dtype, or vcount
-  if u2 == None:
-    return uops_equal(u1, u1, cmp_op=cmp_op, cmp_scalar_dtype=cmp_scalar_dtype, cmp_vcount=cmp_vcount, cmp_eval=cmp_eval, cmp_eq=cmp_eq)
-  # compare u1, u2
-  if isinstance(u1, UOp) and isinstance(u2, UOp):
-    if cmp_op: assert u1.op == u2.op if isinstance(cmp_op, bool) else u1.op == u2.op == cmp_op, f'ops must match:\n{u1.op=}\n{u2.op=}\n{cmp_op=}'
-    if cmp_scalar_dtype: assert u1.dtype.scalar() == u2.dtype.scalar() if isinstance(cmp_scalar_dtype, bool) else u1.dtype.scalar() == u2.dtype.scalar() == cmp_scalar_dtype, f'dtype must match:\n{u1.dtype.scalar()=}\n{u2.dtype.scalar()=}\n{cmp_scalar_dtype=}'
-    if cmp_vcount: assert u1.dtype.vcount == u2.dtype.vcount if isinstance(cmp_vcount, bool) else u1.dtype.vcount == u2.dtype.vcount == cmp_vcount, f'vcount must match:\n{u1.dtype.vcount=}\n{u2.dtype.vcount=}\n{cmp_vcount=}'
-    if cmp_eval: assert eval_uop(u1) == eval_uop(u2), f'eval must match:\n{eval_uop(u1)=}\n{eval_uop(u2)=}'
-    if cmp_eq: assert u1 == u2, f'equality must match:\n{u1=}\n{u2=}'
-  # recursive call
-  for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src)):
-    uops_equal(x1, x2, cmp_op=cmp_op, cmp_scalar_dtype=cmp_scalar_dtype, cmp_vcount=cmp_vcount, cmp_eval=cmp_eval, cmp_eq=cmp_eq)
-
 class TestTranscendentalFunctions(unittest.TestCase):
   def test_payne_hanek_reduction(self):
     # TODO: Test constant input when constant folding is fixed (or maybe test both variants)
@@ -91,35 +76,52 @@ class TestTranscendentalFunctions(unittest.TestCase):
 
 class TestVectorizedTranscendetalFunctions(unittest.TestCase):
 
+  def uops_equal(self, u1:UOp|tuple, u2:Optional[UOp|tuple]=None, cmp_op:bool=False, cmp_scalar_dtype:bool|DType=False, cmp_vcount:bool|int=False, cmp_eval:bool=True, cmp_eq:bool=False):
+    # compare u1 to expected op, scalar_dtype, or vcount
+    if u2 == None:
+      return self.uops_equal(u1, u1, cmp_op=cmp_op, cmp_scalar_dtype=cmp_scalar_dtype, cmp_vcount=cmp_vcount, cmp_eval=cmp_eval, cmp_eq=cmp_eq)
+    # compare u1, u2
+    if isinstance(u1, UOp) and isinstance(u2, UOp):
+      if cmp_op: assert u1.op == u2.op if isinstance(cmp_op, bool) else u1.op == u2.op == cmp_op, f'ops must match:\n{u1.op=}\n{u2.op=}\n{cmp_op=}'
+      if cmp_scalar_dtype: assert u1.dtype.scalar() == u2.dtype.scalar() if isinstance(cmp_scalar_dtype, bool) else u1.dtype.scalar() == u2.dtype.scalar() == cmp_scalar_dtype, f'dtype must match:\n{u1.dtype.scalar()=}\n{u2.dtype.scalar()=}\n{cmp_scalar_dtype=}'
+      if cmp_vcount: assert u1.dtype.vcount == u2.dtype.vcount if isinstance(cmp_vcount, bool) else u1.dtype.vcount == u2.dtype.vcount == cmp_vcount, f'vcount must match:\n{u1.dtype.vcount=}\n{u2.dtype.vcount=}\n{cmp_vcount=}'
+      if cmp_eval: assert eval_uop(u1) == eval_uop(u2), f'eval must match:\n{eval_uop(u1)=}\n{eval_uop(u2)=}'
+      if cmp_eq: assert u1 == u2, f'equality must match:\n{u1=}\n{u2=}'
+    # recursive call
+    for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src)):
+      self.uops_equal(x1, x2, cmp_op=cmp_op, cmp_scalar_dtype=cmp_scalar_dtype, cmp_vcount=cmp_vcount, cmp_eval=cmp_eval, cmp_eq=cmp_eq)
+
   def _check_vectorization_preserved(self, fxn, in_vec, vcount):
     out_vec = fxn(in_vec)
-    uops_equal(out_vec, cmp_vcount=vcount, cmp_eval=False)
+    self.uops_equal(out_vec, cmp_vcount=vcount, cmp_eval=False)
 
   def _check_scalar_vec_equality(self, fxn, in_scalar, in_vec):
+    # given a scalar and vectorized input, check that the fxn outputs have the same ops, scalar_dtypes, and evaluate to the same value
     out_scalar, out_vec = fxn(in_scalar), fxn(in_vec)
-    uops_equal(out_scalar, out_vec, cmp_op=True, cmp_scalar_dtype=True, cmp_eval=True)
+    self.uops_equal(out_scalar, out_vec, cmp_op=True, cmp_scalar_dtype=True, cmp_eval=True)
 
   def test_vectorization_preserved(self):
-    # given a vectorized input, check that the fxn returns a vectorized output with correct vcount
-    for dtype in TRANSCENDENTAL_SUPPORTED_DTYPES:
+    # given a vectorized input, check that the fxn output is vectorized with the same vcount
+    for dtype_scalar in TRANSCENDENTAL_SUPPORTED_DTYPES:
       for val in [-2,1.3,194]:
         for vcount in [1,4,19]:
-          if dtype == dtypes.float16:
+          if dtype_scalar == dtypes.float16:
             continue
-          in_vec = UOp.const(dtype.vec(vcount), val)
+          in_vec = UOp.const(dtype_scalar.vec(vcount), val)
           self._check_vectorization_preserved(payne_hanek_reduction, in_vec, vcount)
           self._check_vectorization_preserved(lambda x: xpow(x, x), in_vec, vcount)
           self._check_vectorization_preserved(xexp2, in_vec, vcount)
           self._check_vectorization_preserved(cody_waite_reduction, in_vec, vcount)
 
   def test_scalar_vec_equality(self):
-    # given scalar and vectorized inputs, check the fxn returns the same output except for vectorization stuff (vcount, __eq__)
-    for dtype in TRANSCENDENTAL_SUPPORTED_DTYPES:
+    # given a scalar and vectorized input, check that the fxn outputs have the same ops, scalar_dtypes, and evaluate to the same value
+    # but the vectorization stuff (vcount, __eq__) can differ
+    for dtype_scalar in TRANSCENDENTAL_SUPPORTED_DTYPES:
       for val in [-2,1.3,194]:
         for vcount in [1,4,19]:
-          if dtype == dtypes.float16:
+          if dtype_scalar == dtypes.float16:
             continue
-          in_scalar, in_vec = UOp.const(dtype, val), UOp.const(dtype.vec(vcount), val)
+          in_scalar, in_vec = UOp.const(dtype_scalar, val), UOp.const(dtype_scalar.vec(vcount), val)
           self._check_scalar_vec_equality(lambda x: xpow(x, x), in_scalar, in_vec)
           self._check_scalar_vec_equality(xexp2, in_scalar, in_vec)
           self._check_scalar_vec_equality(xlog2, in_scalar, in_vec)
