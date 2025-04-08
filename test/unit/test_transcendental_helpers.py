@@ -91,13 +91,13 @@ class TestTranscendentalFunctions(unittest.TestCase):
 
 class TestVectorizedTranscendetalFunctions(unittest.TestCase):
 
-  def _check_scalar_vec_equality(self, fxn, in_scalar, in_vec, *args, **kwargs):
-    out_scalar, out_vec = fxn(in_scalar, *args, **kwargs), fxn(in_vec, *args, **kwargs)
-    uops_equal(out_scalar, out_vec, cmp_op=True, cmp_scalar_dtype=True, cmp_eval=True)
-
-  def _check_vectorization_preserved(self, fxn, in_vec, vcount, *args, two_args=False, **kwargs):
-    out_vec = fxn(in_vec, *args, **kwargs)
+  def _check_vectorization_preserved(self, fxn, in_vec, vcount):
+    out_vec = fxn(in_vec)
     uops_equal(out_vec, cmp_vcount=vcount, cmp_eval=False)
+
+  def _check_scalar_vec_equality(self, fxn, in_scalar, in_vec):
+    out_scalar, out_vec = fxn(in_scalar), fxn(in_vec)
+    uops_equal(out_scalar, out_vec, cmp_op=True, cmp_scalar_dtype=True, cmp_eval=True)
 
   def test_vectorization_preserved(self):
     # given a vectorized input, check that the fxn returns a vectorized output with correct vcount
@@ -125,7 +125,7 @@ class TestVectorizedTranscendetalFunctions(unittest.TestCase):
           self._check_scalar_vec_equality(xlog2, in_scalar, in_vec)
           self._check_scalar_vec_equality(payne_hanek_reduction, in_scalar, in_vec)
           self._check_scalar_vec_equality(cody_waite_reduction, in_scalar, in_vec)
-          self._check_scalar_vec_equality(trig_poly, in_scalar, in_vec, [0.1], [0.2])
+          self._check_scalar_vec_equality(lambda x: trig_poly(x, [0.1], [0.2]), in_scalar, in_vec)
 
 if __name__ == '__main__':
   unittest.main()
