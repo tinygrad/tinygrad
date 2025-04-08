@@ -28,7 +28,7 @@ def write_buffer(device:WGPUDevPtr, buf:WGPUBufPtr, offset:int, src:memoryview|b
   src = bytearray(src)
   webgpu.wgpuQueueWriteBuffer(webgpu.wgpuDeviceGetQueue(device), buf, offset, (ctypes.c_uint8 * len(src)).from_buffer(src), len(src))
 
-def _run(async_fun, cb_info_type, cb_type, status_enum, res_idx, msg_idx, *params):
+def _run(async_fun, cb_info_type, cb_type, status_enum, res_idx:int|None, msg_idx:int|None, *params):
   result: List[Any] = []
 
   def cb(*params):
@@ -194,7 +194,7 @@ class WebGpuAllocator(Allocator):
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
-    # Request an adapter
+    # Requesting an adapter
     adapter_res = _run(webgpu.wgpuInstanceRequestAdapterF, webgpu.WGPURequestAdapterCallbackInfo, webgpu.WGPURequestAdapterCallback,
     webgpu.WGPURequestAdapterStatus__enumvalues, 1, 2, instance,
 
