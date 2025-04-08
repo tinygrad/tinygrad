@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
+from tinygrad.dtype import dtypes
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
 from tinygrad.ops import PatternMatcher
 from tinygrad.spec import type_verify, shape_spec
@@ -384,6 +385,9 @@ class Kernel:
       check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
+      # Disable GROUP/GROUPTOP if reduction dtype is a byte type
+      if self.reduceop is not None and self.reduceop.dtype in {dtypes.uint8, dtypes.uchar}:
+        raise KernelOptError(f"GROUP/GROUPTOP disabled for unsafe byte reductions (dtype={self.reduceop.dtype})")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
