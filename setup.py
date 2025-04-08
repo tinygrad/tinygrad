@@ -44,7 +44,7 @@ setup(name='tinygrad',
             "ruff",
             "types-tqdm",
         ],
-        #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@4.1.0-rc3"],
+        #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@5.0.0-rc1"],
         'testing_minimal': testing_minimal,
         'testing_unit': testing_minimal + [
             "tqdm",
