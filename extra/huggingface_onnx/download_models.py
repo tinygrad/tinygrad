@@ -1,10 +1,15 @@
-import yaml, argparse
+import yaml, argparse, collections, onnx
 from pathlib import Path
 from huggingface_hub import snapshot_download
+from tinygrad.frontend.onnx import OnnxRunner
+from extra.onnx import get_onnx_ops
 
-def download_models(yaml_file: str, download_dir: str) -> None:
+def download_models(yaml_file: str, download_dir: str, sel: int = 3) -> dict:
   with open(yaml_file, 'r') as f: metadata = yaml.safe_load(f)
+
   n = len(metadata["repositories"])
+  model_ops = collections.defaultdict(collections.Counter)
+  supported_ops = get_onnx_ops()
 
   for i, (model_id, model_data) in enumerate(metadata["repositories"].items()):
     print(f"Downloading {i+1}/{n}: {model_id}...")
@@ -13,11 +18,35 @@ def download_models(yaml_file: str, download_dir: str) -> None:
     # download configs too (the sizes are small)
     snapshot_download(repo_id=model_id, allow_patterns=["*config.json"], cache_dir=download_dir)
     print(f"Downloaded model files to: {root_path}")
-    model_data["download_path"] = str(root_path)
 
-  # Save the updated metadata back to the YAML file
-  with open(yaml_file, 'w') as f: yaml.dump(metadata, f, sort_keys=False)
-  print("Download completed according to YAML file.")
+    for onnx_model in root_path.rglob("*.onnx"):
+      try:
+        onnx_runner = OnnxRunner(onnx.load(onnx_model))
+        for node in onnx_runner.graph_nodes: model_ops[str(model_id / onnx_model.relative_to(root_path))][node.op] += 1
+        del onnx_runner
+      except NotImplementedError:
+        pass
+
+  model_op_sets = {model: set(ops.keys()) for model, ops in model_ops.items()}
+  first_model = next(iter(model_ops.keys()))
+  seen_ops = {*list(model_ops[first_model])}
+
+  diverse_models = [first_model]
+  for _ in range(sel):
+    nm,ops = max(model_op_sets.items(), key=lambda item: len(item[1].difference(seen_ops)))
+    if nm in diverse_models: break
+    diverse_models.append(nm)
+    seen_ops.update(ops)
+
+  op_counter = sum(model_ops.values(), collections.Counter())
+  metadata["stats"] = {
+    "model_ops": {key: dict(value) for key, value in model_ops.items()},
+    "total_op_counter": dict(op_counter),
+    "unsupported_ops": list(set(op_counter).difference(set(supported_ops))),
+    "diverse_models": diverse_models
+  }
+
+  return metadata
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Download models from Huggingface Hub based on a YAML configuration file.")
@@ -26,4 +55,8 @@ if __name__ == "__main__":
 
   models_folder = Path(__file__).parent / "models"
   models_folder.mkdir(parents=True, exist_ok=True)
-  download_models(args.input, str(models_folder))
+  metadata = download_models(args.input, str(models_folder))
+
+  # Save the updated metadata back to the YAML file
+  with open(args.input, 'w') as f: yaml.dump(metadata, f, sort_keys=False)
+  print("Download completed according to YAML file.")
