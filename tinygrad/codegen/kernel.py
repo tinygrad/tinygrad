@@ -125,7 +125,8 @@ class Kernel:
   def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
 
   @property
-  def full_shape(self) -> tuple[sint, ...]: return self.sts[self.full_buf_index].shape
+  def full_shape(self) -> tuple[sint, ...]:
+    return tuple([max(x) for x in zip(*([x.shape for x in self.sts]))])
 
   @property
   def full_unupcasted_shape(self) -> tuple[sint, ...]: return self.full_shape[:self.first_upcast]

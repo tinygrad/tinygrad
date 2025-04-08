@@ -6,86 +6,6 @@ from tinygrad.helpers import DEBUG, get_single_element
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.renderer import Opt, OptOps
 
-from tinygrad.ops import UOp, Ops, dtypes
-from tinygrad.shape.shapetracker import ShapeTracker, View
-
-fa_ast = eval("""
-UOp(Ops.SINK, dtypes.void, arg=None, src=(
-  UOp(Ops.STORE, dtypes.void, arg=None, src=(
-    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(2097152), arg=0, src=()),
-    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 1, 1, 1, 1, 1, 1), strides=(524288, 32768, 64, 1, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
-    UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (4,)), src=(
-      UOp(Ops.MUL, dtypes.float, arg=None, src=(
-        UOp(Ops.MUL, dtypes.float, arg=None, src=(
-          UOp(Ops.EXP2, dtypes.float, arg=None, src=(
-            UOp(Ops.MUL, dtypes.float, arg=None, src=(
-              UOp(Ops.ADD, dtypes.float, arg=None, src=(
-                UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (8,)), src=(
-                    UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                      UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                        x13:=UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(2097152), arg=1, src=()),
-                        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 512, 1, 1, 1, 64, 1), strides=(524288, 32768, 64, 0, 0, 0, 0, 0, 1, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
-                      UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                        x16:=UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(2097152), arg=2, src=()),
-                        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 512, 1, 1, 1, 64, 1), strides=(524288, 32768, 0, 0, 64, 0, 0, 0, 1, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
-                  UOp(Ops.CONST, dtypes.float, arg=0.125, src=(
-                    x19:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 512, 1, 1, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
-                UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.MAX, (6,)), src=(
-                    UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                      UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (7,)), src=(
-                        UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                          UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                             x13,
-                            UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 512, 1, 512, 64, 1, 1), strides=(524288, 32768, 64, 0, 0, 0, 0, 1, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
-                          UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                             x16,
-                            UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 512, 1, 512, 64, 1, 1), strides=(524288, 32768, 0, 0, 0, 0, 64, 1, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
-                      UOp(Ops.CONST, dtypes.float, arg=0.125, src=(
-                        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 512, 1, 512, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
-                  UOp(Ops.CONST, dtypes.float, arg=-1.0, src=(
-                     x19,)),)),)),
-              UOp(Ops.CONST, dtypes.float, arg=1.4426950408889634, src=(
-                 x19,)),)),)),
-          UOp(Ops.RECIP, dtypes.float, arg=None, src=(
-            UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (5,)), src=(
-              UOp(Ops.EXP2, dtypes.float, arg=None, src=(
-                UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                  UOp(Ops.ADD, dtypes.float, arg=None, src=(
-                    UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                      UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (9,)), src=(
-                        UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                          UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                             x13,
-                            UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 512, 512, 1, 1, 1, 64), strides=(524288, 32768, 64, 0, 0, 0, 0, 0, 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),
-                          UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                             x16,
-                            UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 512, 512, 1, 1, 1, 64), strides=(524288, 32768, 0, 0, 0, 64, 0, 0, 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
-                      UOp(Ops.CONST, dtypes.float, arg=0.125, src=(
-                        x46:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 512, 512, 1, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
-                    UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                      UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.MAX, (6,)), src=(
-                        UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (7,)), src=(
-                            UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                              UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                                 x13,
-                                UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 512, 512, 512, 64, 1, 1), strides=(524288, 32768, 64, 0, 0, 0, 0, 1, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
-                              UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                                 x16,
-                                UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 512, 512, 512, 64, 1, 1), strides=(524288, 32768, 0, 0, 0, 0, 64, 1, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
-                          UOp(Ops.CONST, dtypes.float, arg=0.125, src=(
-                            UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 512, 512, 512, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
-                      UOp(Ops.CONST, dtypes.float, arg=-1.0, src=(
-                         x46,)),)),)),
-                  UOp(Ops.CONST, dtypes.float, arg=1.4426950408889634, src=(
-                     x46,)),)),)),)),)),)),
-        UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(2097152), arg=3, src=()),
-          UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 16, 512, 64, 512, 1, 1, 1, 1, 1), strides=(524288, 32768, 0, 1, 64, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),))
-""")
-
 def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
   # only support axis =-1
   x = x_in.reshape(-1, x_in.shape[-1])
@@ -191,34 +111,18 @@ class TestSoftmaxFusion(unittest.TestCase):
     value = Tensor.empty(BS, 16, 512, 64)
 
     print("*** attention ***")
-    """
     # 5 kernels!
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
       sout = query.scaled_dot_product_attention(key, value)
-      sout.realize()
-    """
+      ref = sout.numpy()
 
     print("*** single kernel attention ***")
     GlobalCounters.reset()
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1, PUSH_ALL_VIEWS_LEFT=1):
-      #out = query.scaled_dot_product_attention(key, value)
-      #sk_ast = get_single_element(out.schedule()).ast
-      #print(sk_ast)
-      sk_ast = fa_ast
+      out = query.scaled_dot_product_attention(key, value)
+      sdpa = out.numpy()
 
-      for x in sk_ast.toposort:
-        if x.op is not Ops.VIEW: continue
-        print(len(x.arg.shape), x.arg.shape)
-
-      k = Kernel(sk_ast, Device.default.renderer)
-      #k.apply_opt(Opt(OptOps.SWAP, 3, 5))
-      prg = k.to_program()
-      print(prg.src)
-      lib = Device.default.compiler.compile(prg.src)
-
-      #out.realize()
-
-    #np.testing.assert_allclose(sout.numpy(), out.numpy())
+    np.testing.assert_allclose(ref, sdpa)
 
 if __name__ == '__main__':
   unittest.main()
