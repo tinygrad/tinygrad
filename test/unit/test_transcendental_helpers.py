@@ -90,7 +90,7 @@ class TestTranscendentalVectorized(unittest.TestCase):
       assert u1.op == u2.op, f'expected {u1.op=} but got {u2.op=} for UOps\n{u1=}\n{u2}'
     [self._check_uops_match(x1, x2) for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src))]
 
-  def _test_scalar_vec_equality(self, fxn, scalar_dtypes=TRANSCENDENTAL_SUPPORTED_DTYPES, vals=[-2,1.3,194], vcounts=[1,4,19]):
+  def _test_vectorized(self, fxn, scalar_dtypes=TRANSCENDENTAL_SUPPORTED_DTYPES, vals=[-2,1.3,194], vcounts=[1,4,19]):
     for scalar_dtype in scalar_dtypes:
       for val in vals:
         for vcount in vcounts:
@@ -99,17 +99,17 @@ class TestTranscendentalVectorized(unittest.TestCase):
           self._check_uops_match(out_scalar, out_vec)
           self._check_uop_vcount(out_vec, vcount)
 
-  def test_xpow(self): return self._test_scalar_vec_equality(lambda x: xpow(x, x))
+  def test_xpow(self): return self._test_vectorized(lambda x: xpow(x, x))
   @unittest.expectedFailure
-  def test_xexp2(self): return self._test_scalar_vec_equality(xexp2)
+  def test_xexp2(self): return self._test_vectorized(xexp2)
   @unittest.expectedFailure
-  def test_xlog2(self): return self._test_scalar_vec_equality(xlog2)
+  def test_xlog2(self): return self._test_vectorized(xlog2)
   @unittest.expectedFailure
-  def test_payne_hanek_reduction(self): return self._test_scalar_vec_equality(payne_hanek_reduction)
+  def test_payne_hanek_reduction(self): return self._test_vectorized(payne_hanek_reduction)
   @unittest.expectedFailure
-  def test_cody_waite_reduction(self): return self._test_scalar_vec_equality(cody_waite_reduction)
+  def test_cody_waite_reduction(self): return self._test_vectorized(cody_waite_reduction)
   @unittest.expectedFailure
-  def test_trig_poly(self): return self._test_scalar_vec_equality(lambda x: trig_poly(x, [0.0], [1.0]))
+  def test_trig_poly(self): return self._test_vectorized(lambda x: trig_poly(x, [0.0], [1.0]))
 
 if __name__ == '__main__':
   unittest.main()
