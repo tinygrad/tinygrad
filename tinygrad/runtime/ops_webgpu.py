@@ -194,7 +194,7 @@ class WebGpuAllocator(Allocator):
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
-    # Requesting an adapter
+    # Request an adapter
     adapter_res = _run(webgpu.wgpuInstanceRequestAdapterF, webgpu.WGPURequestAdapterCallbackInfo, webgpu.WGPURequestAdapterCallback,
     webgpu.WGPURequestAdapterStatus__enumvalues, 1, 2, instance,
 
