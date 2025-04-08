@@ -1,4 +1,4 @@
-from typing import cast, Callable, Any
+from typing import cast, Callable
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
 from tinygrad.helpers import all_same, dedup, flatten, prod, CHECK_OOB
@@ -9,8 +9,8 @@ if CHECK_OOB:
   def z3_and(a,b): return a % (b+1) if isinstance(b, z3.IntNumRef) else a & b  # mod by power of two uses Ops.AND
   z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.AND: z3_and,
                                               Ops.SHR: lambda a,b: a/(2**b.as_long()), Ops.SHL: lambda a,b: a*(2**b.as_long())}
-  def z3_eval(expr: UOp, ctx: dict[UOp, tuple['z3.ArithRef', Any, Any]]) -> 'z3.ArithRef':
-    return ctx[expr][0] if expr in ctx else z3_alu[expr.op](*(z3_eval(src, ctx) for src in expr.src))
+  def z3_eval(expr: UOp|int, ctx: dict[UOp, 'z3.ArithRef']) -> 'z3.ArithRef':
+    return expr if isinstance(expr, int) else (ctx[expr] if expr in ctx else z3_alu[expr.op](*(z3_eval(src, ctx) for src in expr.src)))
 
 buffer_spec = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
@@ -67,18 +67,20 @@ def validate_index(idx:UOp, mask:UOp|None=None):
 
   solver = z3.Solver(ctx=(z3ctx:=z3.Context()))
   # make dicts from UOp to (z3_variable, lower bound, upper bound)
-  define_vars = {v:(z3.Int(v.arg[0], ctx=z3ctx), v.arg[1], v.arg[2]) for v in filter(lambda x: x.op is Ops.DEFINE_VAR, all_uops)}
-  consts = {v:(z3.IntVal(v.arg, ctx=z3ctx),None,None) for v in filter(lambda x: x.op is Ops.CONST, all_uops)}
-  # Ops.SPECIAL can have a variable upper bound, so we need to evaluate it
-  specials = {v:(z3.Int(v.arg[0], ctx=z3ctx), 0, v.arg[1] if isinstance(v.arg[1], int) else z3_eval(v.arg[1], consts|define_vars))
-    for v in filter(lambda x: x.op is Ops.SPECIAL, all_uops)}
-  ranges = {v:(z3.Int(f"ridx{v.arg}", ctx=z3ctx), v.src[0].arg, v.src[1].arg) for v in filter(lambda x: x.op is Ops.RANGE, all_uops)}
-  for _, (z3var, lb, ub) in (specials|ranges|define_vars).items(): solver.add(lb<=z3var, z3var<define_vars.get(ub, [ub])[0])
+  define_vars = {v:z3.Int(v.arg[0], ctx=z3ctx) for v in filter(lambda x: x.op is Ops.DEFINE_VAR, all_uops)}
+  specials = {v:z3.Int(v.arg[0], ctx=z3ctx) for v in filter(lambda x: x.op is Ops.SPECIAL, all_uops)}
+  consts = {v:z3.IntVal(v.arg, ctx=z3ctx) for v in filter(lambda x: x.op is Ops.CONST, all_uops)}
+  ranges = {v:z3.Int(f"ridx{v.arg}", ctx=z3ctx) for v in filter(lambda x: x.op is Ops.RANGE, all_uops)}
+  ctx = consts | define_vars | specials | ranges
+  # special/ranges can have a variable upper bound, so we need to turn it into a z3 variable
+  for uop, z3var in define_vars.items(): solver.add(uop.arg[1]<=z3var, z3var<uop.arg[2])
+  for uop, z3var in specials.items(): solver.add(0<=z3var, z3var<z3_eval(uop.arg[1], ctx))
+  for uop, z3var in ranges.items(): solver.add(z3_eval(uop.src[0], ctx)<=z3var, z3var<z3_eval(uop.src[1], ctx))
 
-  if mask is not None: solver.add(z3_eval(mask, define_vars|specials|ranges|consts))
-  z3_idx = z3_eval(idx.src[1], define_vars|specials|ranges|consts)
+  if mask is not None: solver.add(z3_eval(mask, ctx=ctx))
+  z3_idx = z3_eval(idx.src[1], ctx)
   if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
-    for key, val in (ranges|specials|define_vars).items(): print(f"{val[0]}={key}")
+    for key, val in (ranges|specials|define_vars).items(): print(f"{val}={key}")
     print(f"idx={idx.src[1].render(simplify=False)}")
     if mask is not None: print(f"mask={mask.render(simplify=False)}")
     print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz}\nconstraints = {solver}")
