@@ -73,7 +73,7 @@ def validate_index(idx:UOp, mask:UOp|None=None):
   specials = {v:(z3.Int(v.arg[0], ctx=z3ctx), 0, v.arg[1] if isinstance(v.arg[1], int) else z3_eval(v.arg[1], consts|define_vars))
     for v in filter(lambda x: x.op is Ops.SPECIAL, all_uops)}
   ranges = {v:(z3.Int(f"ridx{v.arg}", ctx=z3ctx), v.src[0].arg, v.src[1].arg) for v in filter(lambda x: x.op is Ops.RANGE, all_uops)}
-  for var, (z3var, lb, ub) in (specials|ranges|define_vars).items(): solver.add(lb<=z3var, z3var<define_vars.get(ub, [ub])[0])
+  for _, (z3var, lb, ub) in (specials|ranges|define_vars).items(): solver.add(lb<=z3var, z3var<define_vars.get(ub, [ub])[0])
 
   if mask is not None: solver.add(z3_eval(mask, define_vars|specials|ranges|consts))
   z3_idx = z3_eval(idx.src[1], define_vars|specials|ranges|consts)
