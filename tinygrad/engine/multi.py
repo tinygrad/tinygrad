@@ -159,14 +159,13 @@ multi_pm = PatternMatcher([
 
 _copy_expand_memo = set()
 def copy_before_expand(uop:UOp, device:str) -> UOp|None:
-  if uop.op in (Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.CONST, Ops.ASSIGN): return None
   mops = []
   while uop is not uop.base:
     mops.append(uop)
     if uop.op == Ops.EXPAND:
       return functools.reduce(lambda r, m: r._mop(m.op, m.arg), reversed(mops), uop.src[0].copy_to_device(device))
     uop = uop.src[0]
-  if uop.key in _copy_expand_memo: return None
+  if uop.op in (Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.CONST, Ops.ASSIGN) or uop.key in _copy_expand_memo: return None
   _copy_expand_memo.add(uop.key)
   src_match = [copy_before_expand(src, device) for src in uop.src]
   if all(m is None for m in src_match): return None
