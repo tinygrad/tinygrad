@@ -71,8 +71,8 @@ def get_metadata(repos:list[str]) -> dict:
       'total_op_counter': None,
       'unsupported_ops': None,
       'diverse_models': None,
+      'total_size': f"{total_size/1e9:.2f}GB"
     },
-    "benchmark_target": None,
   }
 
   return repos_metadata

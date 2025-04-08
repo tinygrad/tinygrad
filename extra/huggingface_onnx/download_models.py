@@ -4,7 +4,7 @@ from huggingface_hub import snapshot_download
 from tinygrad.frontend.onnx import OnnxRunner
 from extra.onnx import get_onnx_ops
 
-def download_models(yaml_file: str, download_dir: str, sel: int = 3) -> dict:
+def download_models(yaml_file: str, download_dir: str, sel: int) -> dict:
   with open(yaml_file, 'r') as f: metadata = yaml.safe_load(f)
 
   n = len(metadata["repositories"])
@@ -40,8 +40,8 @@ def download_models(yaml_file: str, download_dir: str, sel: int = 3) -> dict:
 
   op_counter = sum(model_ops.values(), collections.Counter())
   metadata["stats"] = {
-    "model_ops": {key: dict(value) for key, value in model_ops.items()},
-    "total_op_counter": dict(op_counter),
+    "model_ops": {key: dict(value.most_common()) for key, value in model_ops.items()},
+    "total_op_counter": dict(op_counter.most_common()),
     "unsupported_ops": list(set(op_counter).difference(set(supported_ops))),
     "diverse_models": diverse_models
   }
@@ -51,11 +51,12 @@ def download_models(yaml_file: str, download_dir: str, sel: int = 3) -> dict:
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Download models from Huggingface Hub based on a YAML configuration file.")
   parser.add_argument("input", type=str, help="Path to the input YAML configuration file containing model information.")
+  parser.add_argument("diversity", type=int, default=10, help="Number of diverse_models to select")
   args = parser.parse_args()
 
   models_folder = Path(__file__).parent / "models"
   models_folder.mkdir(parents=True, exist_ok=True)
-  metadata = download_models(args.input, str(models_folder))
+  metadata = download_models(args.input, str(models_folder), args.diversity)
 
   # Save the updated metadata back to the YAML file
   with open(args.input, 'w') as f: yaml.dump(metadata, f, sort_keys=False)

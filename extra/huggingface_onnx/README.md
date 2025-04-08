@@ -1,18 +1,17 @@
 # HuggingFace ONNX
 
-Helper scripts to scrape and validate HuggingFace for models tagged as `ONNX`
+Helper scripts to scrape and validate models tagged as `ONNX` in HuggingFace
 
-## Steps
+## Files
 
 1. Retrieve current Top N model's metadata (`collect_metadata.py`)
-2. Download the ONNX models specified by the metadata (`download_models.py`)
-3. Validate the ONNX models using the metadata (`run_models.py`)
+2. Download the ONNX models and OP coverage of the models specified by the metadata (`download_models.py`)
+3. Independantly validate model correctness (`run.py`)
 
 ### Collect Metadata
 run `python extra/huggingface_onnx/collect_metadata.py --limit 100`  
-This retrieves the metadata for the top 100 HuggingFace repos and produces a yaml file at `extra/huggingface_onnx/huggingface_repos.yaml` 
+This retrieves the metadata for the top 100 HuggingFace repos and produces a yaml file at `extra/huggingface_onnx/huggingface.yaml` 
 Optionally use `--output` to specify a new file name
-The output yaml file will have `download_path` set as `null` as the model is not downloaded
 
 Example:
 `python extra/huggingface_onnx/collect_metadata.py --limit 5 --output test.yaml`  
@@ -21,23 +20,27 @@ Output:
 repositories:
   FacebookAI/xlm-roberta-large:
     url: https://huggingface.co/FacebookAI/xlm-roberta-large
-    download_path: null
     files:
     - file: onnx/model.onnx
       size: 0.55MB
     - file: onnx/model.onnx_data
       size: 2235.36MB
   ...
-total_size: 6.18GB
-created_at: '2025-04-03T08:10:57Z'
+stats:
+  model_ops: null
+  total_op_counter: null
+  unsupported_ops: null
+  diverse_models: null
+  total_size: 6.18GB
 ```
 
 ### Download Models
-run `python extra/huggingface_onnx/download_models.py extra/huggingface_onnx/huggingface_repos.yaml`  
-This downloads the models specified in `huggingface_repos.yaml` to `extra/huggingface_onnx/models/`.
+run `python extra/huggingface_onnx/download_models.py extra/huggingface_onnx/huggingface.yaml`  
+This downloads the models specified in `huggingface.yaml` to `extra/huggingface_onnx/models/`
+This also updates the `null` values in the stats of the previous yaml
 
 Example (using the `test.yaml` from Collect Metadata):  
-`python extra/huggingface_onnx/download_models.py extra/huggingface_onnx/test.yaml`  
+`PYTHONPATH=. python extra/huggingface_onnx/download_models.py extra/huggingface_onnx/test.yaml`  
 Output:
 ```yaml
 repositories:
@@ -50,17 +53,35 @@ repositories:
     - file: onnx/model.onnx_data
       size: 2235.36MB
   ...
-total_size: 6.18GB
-created_at: '2025-04-03T08:10:57Z'
+stats:
+  model_ops:
+    FacebookAI/xlm-roberta-large/onnx/model.onnx:
+      Constant: 567
+      Add: 341
+      ...
+    sentence-transformers/all-MiniLM-L6-v2/onnx/model_O2.onnx:
+      MatMul: 48
+      Add: 26
+      ...
+    ...
+  total_op_counter:
+    Constant: 1944
+    Add: 1591
+    MatMul: 1060
+    ...
+  unsupported_ops: []
+  diverse_models:
+  - FacebookAI/xlm-roberta-large/onnx/model.onnx
+  - sentence-transformers/all-mpnet-base-v2/onnx/model_O2.onnx
+  - sentence-transformers/all-MiniLM-L6-v2/onnx/model_O3.onnx
 ```
 Total size of the download is `6.18GB`
+`diverse_models` is selected by trying to maximize the op coverage.  
+You can optionally allow more `diverse_models` by using `--diversity 5` to control. If the rest of the models whose ops are a subset of the currently covered ops, `diverse_models` may have less than your specified amount.
 
-### Run Models
-run `PYTHONPATH=. python extra/huggingface_onnx/run_models.py extra/huggingface_onnx/huggingface_repos.yaml --validate`  
-This does a correctness run through all the models. Make sure to have ran `download_models.py` on the yaml before this step.  
-Optionally use  
-`PYTHONPATH=. python extra/huggingface_onnx/run_models.py extra/huggingface_onnx/huggingface_repos.yaml --check_ops`  
-to check the op distribution of the models and  
-`PYTHONPATH=. python extra/huggingface_onnx/run_models.py extra/huggingface_onnx/huggingface_repos.yaml --debug FacebookAI/xlm-roberta-large/onnx/model.onnx`   
-to debug run validation on a single model.  
-When using `--debug` you may also use `--truncate` to test intermediate node outputs of a model.
+### Run
+run `PYTHONPATH=. python extra/huggingface_onnx/run.py FacebookAI/xlm-roberta-large/onnx/model.onnx sentence-transformers/all-mpnet-base-v2/onnx/model_O2.onnx`    
+This runs and validates both `FacebookAI/xlm-roberta-large/onnx/model.onnx` and `sentence-transformers/all-mpnet-base-v2/onnx/model_O2.onnx`  
+
+This also independantly downloads the onnx model if you haven't done so before.  
+You may also pass in only the `model_id` like `pszemraj/long-t5-tglobal-base-sci-simplify` to test all the models in a repo.  
