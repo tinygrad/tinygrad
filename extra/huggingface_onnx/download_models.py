@@ -23,7 +23,6 @@ def download_models(yaml_file: str, download_dir: str, sel: int) -> dict:
       try:
         onnx_runner = OnnxRunner(onnx.load(onnx_model))
         for node in onnx_runner.graph_nodes: model_ops[str(model_id / onnx_model.relative_to(root_path))][node.op] += 1
-        del onnx_runner
       except NotImplementedError:
         pass
 

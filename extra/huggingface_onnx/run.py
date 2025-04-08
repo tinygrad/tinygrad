@@ -24,9 +24,6 @@ def get_tolerances(file_name): # -> rtol, atol
   if any(q in file_name for q in ["int8", "uint8", "quantized"]): return 4, 4
   return 4e-3, 3e-2
 
-def debug_run(model_path, config, rtol, atol):
-  run_huggingface_validate(model_path, config, rtol, atol)
-
 def validate_repos(models:list[str]):
   download_dir = Path(__file__).parent / "models"
   for model in models:
@@ -42,6 +39,7 @@ def validate_repos(models:list[str]):
         rtol, atol = get_tolerances(onnx_model.name)
         print(f"validating {onnx_model.relative_to(root_path)} with {rtol=}, {atol=}")
         run_huggingface_validate(onnx_model, config, rtol, atol)
+        print("passed!")
     else:
       # model id
       # only validate the specified onnx model
