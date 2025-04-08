@@ -1,8 +1,10 @@
-import unittest
+import unittest, math
 import numpy as np
-from tinygrad import Tensor, GlobalCounters, Context
+from tinygrad import Tensor, GlobalCounters, Context, Device
 from tinygrad.dtype import DTypeLike
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, get_single_element
+from tinygrad.codegen.kernel import Kernel
+from tinygrad.renderer import Opt, OptOps
 
 def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
   # only support axis =-1
@@ -28,7 +30,7 @@ def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Te
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    with Context(TRACK_MATCH_STATS=0): cls.test = Tensor.rand(32, 10).contiguous().realize()
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0): cls.test = Tensor.rand(32, 10).contiguous().realize()
 
   def setUp(self):
     GlobalCounters.reset()
@@ -61,6 +63,45 @@ class TestSoftmaxFusion(unittest.TestCase):
     # NOTE: DONT_GROUP_REDUCES is required here
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1):
       out = single_kernel_softmax(self.test)
+      out.realize()
+
+    np.testing.assert_allclose(sout.numpy(), out.numpy())
+
+  def test_auto_softmax(self):
+    print("*** softmax ***")
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1, PUSH_ALL_VIEWS_LEFT=1):
+      sout = self.test.softmax(-1)
+      sout.realize()
+
+  def test_opt_softmax(self):
+    inp = Tensor.empty(1024, 32)
+    with Context(DONT_GROUP_REDUCES=1):
+      out = single_kernel_softmax(inp)
+      sk_ast = get_single_element(out.schedule()).ast
+    k = Kernel(sk_ast, Device.default.renderer)
+    # TODO: use simdgroup primitives here to remove the loops
+    k.apply_opt(Opt(OptOps.LOCAL, 1, 32))
+    prg = k.to_program()
+    print(prg.src)
+
+  def test_flash_attention(self):
+    # these are the BERT dimensions
+    print("*** attention ***")
+    BS = 4
+    query = Tensor.empty(BS, 16, 512, 64)
+    key = Tensor.empty(BS, 16, 512, 64)
+    value = Tensor.empty(BS, 16, 512, 64)
+    # 5 kernels!
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
+      sout = query.scaled_dot_product_attention(key, value)
+      sout.realize()
+
+    print("*** single kernel attention ***")
+    GlobalCounters.reset()
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1):
+      qk = query.matmul(key.transpose(-2,-1)) / math.sqrt(query.shape[-1])
+      sm = single_kernel_softmax(qk)
+      out = sm @ value
       out.realize()
 
     np.testing.assert_allclose(sout.numpy(), out.numpy())
