@@ -11,7 +11,7 @@ from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, merge_views, GroupOp, view_left
+from tinygrad.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites, merge_views, view_left
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
@@ -19,7 +19,6 @@ from tinygrad.engine.grouper import view_right, sym
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
-remove_movement_ops = merge_views
 
 def verify_ast(sink:UOp): return type_verify(list(sink.toposort), shape_spec)
 class KernelCountException(Exception): pass
@@ -69,7 +68,7 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
     np.testing.assert_allclose(w.grad.numpy(), ref_w.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
 
 @track_rewrites(named=True)
-def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, remove_movement_ops+sym, {})
+def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, merge_views+sym, {})
 
 class TestSchedule(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
@@ -1485,6 +1484,7 @@ class TestSchedule(unittest.TestCase):
   @unittest.expectedFailure
   def test_buf_cnt_over_limit_alt(self): self._test_buf_cnt(63, allowed=3)
 
+  @unittest.skipIf(getenv("VIZ"), "TODO: VIZ blocks gc")
   def test_schedule_mem_used(self):
     base = GlobalCounters.mem_used
     Tensor.ones(256).contiguous().realize()
@@ -2028,7 +2028,7 @@ class TestView(unittest.TestCase):
     run_schedule(s)
     self.assertEqual(other_child.tolist(), [2, 3, 4])
 
-def tensor_rewrite(t) -> UOp: return graph_rewrite(t.lazydata.base, remove_movement_ops+symbolic_simple)
+def tensor_rewrite(t) -> UOp: return graph_rewrite(t.lazydata.base, merge_views+symbolic_simple)
 class TestSimplifier(unittest.TestCase):
   def test_sink_childless_const(self):
     x = Tensor(0)
@@ -2270,13 +2270,13 @@ class TestTensorUOpSpec(unittest.TestCase):
     unsafe_push_views = PatternMatcher([
       (UPat.cvar("root").view(name="view"), lambda root,view: root.replace(src=tuple(x.view(view.st) for x in root.src))),
     ])
-    a.lazydata = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views+unsafe_push_views)
+    a.lazydata = graph_rewrite(a.lazydata.sink(), merge_views+merge_views+unsafe_push_views)
     with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
       a.schedule()
 
   def test_expanded_const_ok(self):
     a = Tensor.ones((4, 4))
-    t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views)
+    t = graph_rewrite(a.lazydata.sink(), merge_views+merge_views)
     create_schedule_with_vars(t)
 
   # NOTE: changing symbolic CONST VIEWs is not allowed
@@ -2284,7 +2284,7 @@ class TestTensorUOpSpec(unittest.TestCase):
   def test_symbolic_shape_ok(self):
     a = Tensor.ones(4)
     vi = UOp.variable("i", 1, 10).bind(4)
-    a.lazydata = graph_rewrite(a.reshape(vi).sum().lazydata, remove_movement_ops+merge_views)
+    a.lazydata = graph_rewrite(a.reshape(vi).sum().lazydata, merge_views+merge_views)
     a.schedule()
 
 class TestBufferUOp(unittest.TestCase):
@@ -2316,7 +2316,7 @@ class TestBufferUOp(unittest.TestCase):
 
   def test_buffer_view_not_allowed(self):
     permuted_view = Tensor.empty(1, 2, 3).permute(0, 2, 1)
-    merged = graph_rewrite(permuted_view.lazydata, remove_movement_ops)
+    merged = graph_rewrite(permuted_view.lazydata, merge_views)
     with self.assertRaisesRegex(AssertionError, "VIEW only works here if it's contiguous"):
       merged.buffer # cannot access Buffer of a non contiguous VIEW
 
