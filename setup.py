@@ -13,6 +13,7 @@ testing_minimal = [
   "pytest",
   "pytest-xdist",
   "hypothesis",
+  "z3-solver"
 ]
 
 setup(name='tinygrad',

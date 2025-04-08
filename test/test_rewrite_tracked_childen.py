@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.ops import PatternMatcher, Ops, UPat, graph_rewrite, RewriteContext, UOp, merge_views
-from tinygrad.engine.schedule import sym
+from tinygrad.engine.grouper import sym
 
 class TestRewriteTrackedChildren(unittest.TestCase):
   def test_children_in_context(self):
