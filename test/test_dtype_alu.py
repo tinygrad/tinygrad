@@ -3,7 +3,7 @@ import unittest
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
-from hypothesis import given, strategies as strat, settings, HealthCheck
+from hypothesis import given, strategies as strat, settings, HealthCheck, assume
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.realize import run_schedule
@@ -30,8 +30,6 @@ integer_binary_operations = binary_operations + [(Tensor.bitwise_xor, np.bitwise
                                                  (Tensor.bitwise_or, np.bitwise_or)]
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin),
                     (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
-# log and reciprocal not supported for fp8s
-fp8s_unary_operations = [(Tensor.exp, np.exp), (Tensor.sin, np.sin), (Tensor.sqrt, np.sqrt)]
 
 # TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
@@ -68,7 +66,7 @@ def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)), np.array([b]).astype(_to_np_dtype(dtype)))
-  if dtype in (dtypes.fp8e4m3, dtypes.fp8e5m2): np.testing.assert_allclose(tensor_value, numpy_value, atol=0.5, rtol=1e-2)
+  if dtype in dtypes.fp8s: np.testing.assert_allclose(tensor_value, numpy_value, atol=0.5, rtol=1e-2)
   elif dtype is dtypes.bfloat16: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   elif dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
   else: np.testing.assert_equal(tensor_value, numpy_value)
@@ -129,12 +127,16 @@ class TestDTypeALU(unittest.TestCase):
   def test_fp8e5m2(self, a, b, op): universal_test(a, b, dtypes.fp8e5m2, op)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3, Device.DEFAULT), f"no fp8e4m3 on {Device.DEFAULT}")
-  @given(ht.fp8e4m3, strat.sampled_from(fp8s_unary_operations))
-  def test_fp8e4m3_unary(self, a, op): universal_test_unary(a, dtypes.fp8e4m3, op)
+  @given(ht.fp8e4m3, strat.sampled_from(unary_operations))
+  def test_fp8e4m3_unary(self, a, op):
+    if (op[1] == np.reciprocal or op[1] == np.log): assume(a != 0.0) # reciprocal(0) and log(0) are undefined
+    universal_test_unary(a, dtypes.fp8e4m3, op)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2, Device.DEFAULT), f"no fp8e5m2 on {Device.DEFAULT}")
-  @given(ht.fp8e5m2, strat.sampled_from(fp8s_unary_operations))
-  def test_fp8e5m2_unary(self, a, op): universal_test_unary(a, dtypes.fp8e5m2, op)
+  @given(ht.fp8e5m2, strat.sampled_from(unary_operations))
+  def test_fp8e5m2_unary(self, a, op):
+    if (op[1] == np.reciprocal or op[1] == np.log): assume(a != 0.0) # reciprocal(0) and log(0) are undefined
+    universal_test_unary(a, dtypes.fp8e5m2, op)
 
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
