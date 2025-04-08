@@ -180,6 +180,16 @@ class CapturedJit(Generic[ReturnType]):
       if old.is_allocated(): new.ensure_allocated().copyin(old.as_buffer())
     self.__post_init__()
 
+  # For model export
+  def sort_bufs(self, exclude:Union[set[Buffer], dict[Buffer, Any]]=set()) -> tuple[dict[Buffer, str], dict[Buffer, str]]:
+    weight_bufs, empty_bufs, ignore_bufs, ctr = {}, {}, set([None] + [t.lazydata.base.realized for t in get_parameters(self.ret)]), 0
+    for i, buf in flatten([enumerate(ei.bufs) for ei in self.jit_cache]):
+      if all(buf not in bufs for bufs in (empty_bufs, weight_bufs, ignore_bufs, exclude)):
+        # TODO: is this always correct for distinguishing weight_bufs?
+        (empty_bufs if i == 0 else weight_bufs)[buf] = f"buf_{ctr}"
+        ctr += 1
+    return weight_bufs, empty_bufs
+
   # jit exec
   def __call__(self, input_buffers:list[Buffer], var_vals:dict[Variable, int]) -> ReturnType:
     # assign inputs
