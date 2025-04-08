@@ -67,6 +67,25 @@ class TestSoftmaxFusion(unittest.TestCase):
 
     np.testing.assert_allclose(sout.numpy(), out.numpy())
 
+  def test_softmax_bw(self):
+    print("*** softmax bw ***")
+    self.test.requires_grad_()
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
+      self.test.softmax(-1).sum().backward()
+      sg = self.test.grad.realize()
+
+    self.test.grad = None
+
+    print("*** single kernel softmax bw ***")
+    # NOTE: DONT_GROUP_REDUCES is required here
+    # TODO: fix RecursionError with DONT_GROUP_REDUCES
+    with self.assertRaises(RecursionError):
+      with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1):
+        single_kernel_softmax(self.test).sum().backward()
+        g = self.test.grad.realize()
+
+      np.testing.assert_allclose(sg.numpy(), g.numpy(), atol=1e-7)
+
   def test_auto_softmax(self):
     print("*** softmax ***")
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1, PUSH_ALL_VIEWS_LEFT=1):
