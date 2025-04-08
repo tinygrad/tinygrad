@@ -117,11 +117,13 @@ class TestSoftmaxFusion(unittest.TestCase):
 
     print("*** single kernel attention ***")
     GlobalCounters.reset()
-    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1):
-      qk = query.matmul(key.transpose(-2,-1)) / math.sqrt(query.shape[-1])
-      sm = single_kernel_softmax(qk)
-      out = sm @ value
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1, PUSH_ALL_VIEWS_LEFT=1):
+      out = query.scaled_dot_product_attention(key, value)
       out.realize()
+      #qk = query.matmul(key.transpose(-2,-1)) / math.sqrt(query.shape[-1])
+      #sm = single_kernel_softmax(qk)
+      #out = sm @ value
+      #out.realize()
 
     np.testing.assert_allclose(sout.numpy(), out.numpy())
 

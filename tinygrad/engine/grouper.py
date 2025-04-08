@@ -412,10 +412,40 @@ def reduce_push_add_ones(src, r, view):
   if not (st:=unwrap(view.st)).contiguous: return None
   # must be larger
   if len(r.shape) >= len(view.shape): return None
+  # must have one reduce axis
+  if len(r.arg[1]) != 1: return None
+  reduce_axis = r.arg[1][0]
+
+  #print(src.shape, r.shape, view.shape, new_shape)
+  ones_to_add = len(view.shape) - len(r.shape)
+  if view.shape == (4, 16, 512, 64, 512, 1, 512, 1):
+    new_shape = src.shape[:reduce_axis-1]+(1,)*ones_to_add+src.shape[reduce_axis-1:]
+  else:
+    new_shape = src.shape[:reduce_axis]+(1,)*ones_to_add+src.shape[reduce_axis:]
+
+  new_src = src.reshape(new_shape)
+  ret = r.replace(src=(new_src,), arg=(r.arg[0], (reduce_axis+ones_to_add,)))
+  assert ret.shape == view.shape, f"wrong shape {ret.shape} != {view.shape} (from {new_src.shape} reduced by {reduce_axis})"
+  return ret
+
+
+
+  print(reduce_axis, src.shape, r.shape, view.shape)
+
+  return None
+
   if view.shape[0:len(r.shape)] != r.shape: return None
+
   if not all(x==1 for x in view.shape[len(r.shape):]): return None
+
+  ones_to_add = len(view.shape) - len(r.shape)
+  new_src = src.reshape(src.shape[:reduce_axis]+(1,)*ones_to_add+src.shape[reduce_axis:])
+  return r.replace(src=(new_src,), arg=(r.arg[0], (reduce_axis+ones_to_add,)))
+  #print(ones_to_add, r.arg[1])
+  #print(src.shape, r.shape, view.shape, r.arg[1])
+
   # ones at the end
-  return r.replace(src=(src.reshape(src.shape + view.shape[len(r.shape):]),))
+  #return r.replace(src=(src.reshape(src.shape + view.shape[len(r.shape):]),))
 
 view_right_simple = PatternMatcher([
   # apply view after reduceops
@@ -430,6 +460,10 @@ view_right_simple = PatternMatcher([
   # push contiguous larger shapes
   (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
 
+  # view before (some) elementwise ops
+  (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST}, name="e"),), name="view"),
+   lambda e,view: e.replace(src=tuple(s.view(s.st+view.st) if s.op is Ops.VIEW else s.view(view.st) for s in e.src))
+    if len(view.shape) > len(e.shape) else None),
   # movement ops apply a new view on the base
   (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
 ])
