@@ -417,6 +417,17 @@ index_load = UPat.var("buf").index(rng_aug).load(name="ld")
 arange_augrng = UPat.any(rng_aug, rng_aug+UPat.var("idx2"), rng_aug+UPat.var("idx2")+UPat.var("idx3"), UPat(Ops.VECTORIZE, name="vec", src=rng_aug))
 arange_m = (arange_augrng<UPat.cvar("compval")).where(UPat.const(None, 0), UPat.cvar("multconst"))
 
+def reduce_mul_chain(r:UOp):
+  ranges = r.src[1:]
+  inside = []
+  outside = []
+  for m in split_uop(r.src[0], Ops.MUL):
+    m_parents = m.toposort
+    if all(r not in m_parents for r in ranges): outside.append(m)
+    else: inside.append(m)
+  if len(outside) == 0: return None
+  return r.replace(src=(prod(inside),)+r.src[1:])*prod(outside)
+
 # this is symbolic 2.0
 sym = symbolic_flat+PatternMatcher([
   # self ASSIGN is just self
@@ -490,7 +501,8 @@ sym = symbolic_flat+PatternMatcher([
   # move const multiply after REDUCE (both add and max work, but max only if c.arg > 0)
   (UPat(Ops.REDUCE, src=(UPat.var("x")*UPat.cvar("c", vec=False),), arg=Ops.ADD, name="r", allow_any_len=True),
    lambda x,c,r: r.replace(src=(x,)+r.src[1:])*c.arg),
-  # TODO: enable this
-  #(UPat(Ops.REDUCE, src=(UPat.var("x")*UPat.cvar("c", vec=False),), arg=Ops.MAX, name="r", allow_any_len=True),
-  # lambda x,c,r: (r.replace(src=(x,)+r.src[1:])*c.arg) if c.arg > 0 else None),
+  (UPat(Ops.REDUCE, src=(UPat.var("x")*UPat.cvar("c", vec=False),), arg=Ops.MAX, name="r", allow_any_len=True),
+   lambda x,c,r: (r.replace(src=(x,)+r.src[1:])*c.arg) if c.arg > 0 else None),
+  # reduce mul chain
+  (UPat(Ops.REDUCE, src=(UPat(Ops.MUL),), arg=Ops.ADD, name="r", allow_any_len=True), reduce_mul_chain),
 ])
