@@ -7,8 +7,8 @@ if CHECK_OOB:
 
   def z3_cdiv(a,b): return z3.If(a<0, (a+(b-1))/b, a/b)  # IDIV is truncated division but z3 does floored division
   def z3_and(a,b): return a % (b+1) if isinstance(b, z3.IntNumRef) else a & b  # mod by power of two uses Ops.AND
-  z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.AND: z3_and,
-                                              Ops.SHR: lambda a,b: a/(2**b.as_long()), Ops.SHL: lambda a,b: a*(2**b.as_long())}
+  z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.AND: z3_and, Ops.CAST: lambda x:x,
+                                              Ops.SHR: lambda a,b: a/(2**b.as_long()), Ops.SHL: lambda a,b: a*(2**b.as_long()),}
   def z3_eval(expr: UOp|int, ctx: dict[UOp, 'z3.ArithRef']) -> 'z3.ArithRef':
     return expr if isinstance(expr, int) else (ctx[expr] if expr in ctx else z3_alu[expr.op](*(z3_eval(src, ctx) for src in expr.src)))
 
@@ -58,21 +58,26 @@ def validate_index(idx:UOp, mask:UOp|None=None):
   if not CHECK_OOB or isinstance(idx.dtype, ImageDType) or (sz := cast(PtrDType, idx.src[0].dtype).size) == -1: return True
 
   all_uops = list((idx.toposort | mask.toposort).keys() if mask is not None else idx.toposort.keys())
+  # Ops.SPECIAL can have symbolic arg but it wont be in the toposort, we need to add it manually
   all_uops += flatten(map(lambda x: x.arg[1].toposort.keys(), filter(lambda x: x.op is Ops.SPECIAL and isinstance(x.arg[1], UOp), all_uops)))
-  # WEBGPU has a BITCAST in the index. TODO: fix
-  if any(x.op is Ops.BITCAST for x in all_uops): return True
 
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
   if 0<=idx.src[1].vmin and idx.src[1].vmax<sz: return True
 
+  # WEBGPU has a BITCAST in the index. TODO: fix
+  if any(x.op is Ops.BITCAST for x in all_uops): return True
+
   solver = z3.Solver(ctx=(z3ctx:=z3.Context()))
-  # make dicts from UOp to (z3_variable, lower bound, upper bound)
+  # make dicts from UOp to z3_variable, these are the leaves of indexing computation
+  load_ctx = {}
+  loads = {v:z3.Int(f"load{load_ctx.setdefault(v, len(load_ctx))}", ctx=z3ctx) for v in filter(lambda x: x.op is Ops.LOAD, all_uops)}
   define_vars = {v:z3.Int(v.arg[0], ctx=z3ctx) for v in filter(lambda x: x.op is Ops.DEFINE_VAR, all_uops)}
   specials = {v:z3.Int(v.arg[0], ctx=z3ctx) for v in filter(lambda x: x.op is Ops.SPECIAL, all_uops)}
   consts = {v:z3.IntVal(v.arg, ctx=z3ctx) for v in filter(lambda x: x.op is Ops.CONST, all_uops)}
   ranges = {v:z3.Int(f"ridx{v.arg}", ctx=z3ctx) for v in filter(lambda x: x.op is Ops.RANGE, all_uops)}
-  ctx = consts | define_vars | specials | ranges
+  ctx = consts | loads | define_vars | specials | ranges
   # special/ranges can have a variable upper bound, so we need to turn it into a z3 variable
+  for uop, z3var in loads.items(): solver.add(dtypes.min(uop.dtype)<=z3var, z3var<=dtypes.min(uop.dtype))
   for uop, z3var in define_vars.items(): solver.add(uop.arg[1]<=z3var, z3var<uop.arg[2])
   for uop, z3var in specials.items(): solver.add(0<=z3var, z3var<z3_eval(uop.arg[1], ctx))
   for uop, z3var in ranges.items(): solver.add(z3_eval(uop.src[0], ctx)<=z3var, z3var<z3_eval(uop.src[1], ctx))
