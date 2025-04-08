@@ -48,7 +48,7 @@ def validate_repos(models:list[str], truncate:int = -1):
       # repo id
       # validates all onnx models inside repo
       repo_id = "/".join(path)
-      root_path = Path(snapshot_download(repo_id=repo_id, allow_patterns=["*.onnx", ".onnx_data"], cache_dir=download_dir))
+      root_path = Path(snapshot_download(repo_id=repo_id, allow_patterns=["*.onnx", "*.onnx_data"], cache_dir=download_dir))
       snapshot_download(repo_id=repo_id, allow_patterns=["*config.json"], cache_dir=download_dir)
       config = get_config(root_path)
       for onnx_model in root_path.rglob("*.onnx"):
@@ -61,7 +61,7 @@ def validate_repos(models:list[str], truncate:int = -1):
       onnx_model = path[-1]
       assert path[-1].endswith(".onnx")
       repo_id, relative_path = "/".join(path[:2]), "/".join(path[2:])
-      root_path = Path(snapshot_download(repo_id=repo_id, allow_patterns=[relative_path], cache_dir=download_dir))
+      root_path = Path(snapshot_download(repo_id=repo_id, allow_patterns=["*"+path[-1], "*.onnx_data"], cache_dir=download_dir))
       snapshot_download(repo_id=repo_id, allow_patterns=["*config.json"], cache_dir=download_dir)
       config = get_config(root_path)
       rtol, atol = get_tolerances(onnx_model)
