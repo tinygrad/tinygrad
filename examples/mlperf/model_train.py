@@ -404,12 +404,12 @@ def train_retinanet():
 
   # ** hyperparameters **
   config["seed"] = SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
-  config["bs"] = BS = getenv("BS", 12 * len(GPUS) if dtypes.default_float == dtypes.float16 else 12 * len(GPUS)) # TODO: update float16 to use larger BS
+  config["bs"] = BS = getenv("BS", 16 * len(GPUS) if dtypes.default_float == dtypes.float16 else 12 * len(GPUS))
   config["eval_bs"] = EVAL_BS = getenv("EVAL_BS", BS)
   config["epochs"] = EPOCHS = getenv("EPOCHS", 4)
   config["train_beam"] = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   config["eval_beam"] = EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
-  config["lr"] = lr = getenv("LR", 0.0001 * (BS / 256))
+  config["lr"] = lr = getenv("LR", 8.5e-5 * (BS / 96))
   config["loss_scaler"] = loss_scaler = getenv("LOSS_SCALER", 2**11 if dtypes.default_float == dtypes.float16 else 1.0)
   config["default_float"] = dtypes.default_float.name
 
