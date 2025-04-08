@@ -173,7 +173,7 @@ def copy_before_expand(uop:UOp, device:str) -> UOp|None:
                 uop.replace(src=tuple(m if m is not None else src.copy_to_device(device) for m, src in zip(src_match, uop.src))))
 
 reorder_copies = PatternMatcher([
-  (UPat(Ops.COPY, src=(UPat(), UPat((*GroupOp.Movement, *GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.DETACH), name="copyin")), name='copy'),
+  (UPat(Ops.COPY, src=(UPat(), UPat(name="copyin")), name='copy'),
      lambda copy, copyin: copy_before_expand(copyin, copy.device)),
 ])
 
