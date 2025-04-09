@@ -51,6 +51,9 @@ def relocate(instr: int, ploc: int, tgt: int, r_type: int):
     case libc.R_X86_64_PC32: return i2u(32, tgt-ploc)
     # https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst for definitions of relocations
     # https://www.scs.stanford.edu/~zyedidia/arm64/index.html for instruction encodings
+    case libc.R_AARCH64_ADR_PREL_LO21:  # Type 4: PC-relative address calculation
+      offset = tgt - ploc
+      return instr | (getbits(offset, 0, 20) << 5) | (getbits(offset, 20, 21) << 29)
     case libc.R_AARCH64_ADR_PREL_PG_HI21:
       rel_pg = (tgt & ~0xFFF) - (ploc & ~0xFFF)
       return instr | (getbits(rel_pg, 12, 13) << 29) | (getbits(rel_pg, 14, 32) << 5)
@@ -59,7 +62,6 @@ def relocate(instr: int, ploc: int, tgt: int, r_type: int):
     case libc.R_AARCH64_LDST32_ABS_LO12_NC: return instr | (getbits(tgt, 2, 11) << 10)
     case libc.R_AARCH64_LDST64_ABS_LO12_NC: return instr | (getbits(tgt, 3, 11) << 10)
     case libc.R_AARCH64_LDST128_ABS_LO12_NC: return instr | (getbits(tgt, 4, 11) << 10)
-    case libc.R_AARCH64_COPY: return instr  # For COPY relocation, we just return the instruction as is
     case libc.R_AARCH64_CALL26:  # For CALL26 relocation, calculate the PC-relative offset
       offset = (tgt - ploc) >> 2  # Divide by 4 since instructions are 4 bytes aligned
       return instr | (getbits(offset, 0, 25) << 0)  # Encode the 26-bit offset
