@@ -276,8 +276,9 @@ def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
     for i,pairs in enumerate(unwrap(get_contraction(view.shape, r.shape))):
       new_shape_chunk = [view.shape[p] for p in pairs]
       if i in r.arg[1]:
-        # if this is a reduce axis, we have to do something
-        assert len(new_shape_chunk) > 0, "nowhere to put reduce"
+        # if there's nowhere to fit the reduce, we return None (might be missing solvable cases)
+        if len(new_shape_chunk) == 0: return None
+        # we left justify the reduce in a group of ones
         assert all(x == 1 for x in new_shape_chunk), "not all ones in reduce?"
         new_reduce_axis.append(len(new_shape))
         new_shape.append(src.shape[i])
