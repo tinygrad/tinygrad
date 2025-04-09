@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, Context
 from tinygrad.dtype import DTypeLike
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, get_single_element
 from tinygrad.engine.realize import lower_schedule_item
 
 def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
@@ -25,6 +25,29 @@ def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Te
 
   out = e.div(ss).reshape(x_in.shape)
   return out
+
+def run_one_schedule_item(out): lower_schedule_item(get_single_element(out.schedule())).run()
+
+class TestKernelize(unittest.TestCase):
+  def _test_kernelize(self, val, fxn):
+    GlobalCounters.reset()
+    out_single = fxn(val).kernelize()
+    run_one_schedule_item(out_single)
+    np_single = out_single.numpy()
+    GlobalCounters.reset()
+    np_multi = fxn(val).numpy()
+    np.testing.assert_allclose(np_single, np_multi, atol=1e-7)
+
+  def test_kernelize_norm(self):
+    a = Tensor.rand(50,50).realize()
+    self._test_kernelize(a, lambda a: a / a.mean(axis=1))
+
+  def test_kernelize_argmax(self):
+    a = Tensor.rand(50,50).realize()
+    self._test_kernelize(a, lambda a: a.argmax(axis=-1))
+
+  def test_kernelize_arange_eye(self):
+    self._test_kernelize(None, lambda _: Tensor.arange(10).reshape(10,1).expand(10,10) == Tensor.arange(10).reshape(1,10).expand(10,10))
 
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
@@ -75,9 +98,7 @@ class TestSoftmaxFusion(unittest.TestCase):
     print("*** auto single kernel softmax ***")
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
       out = self.test.contiguous().softmax(-1).kernelize()
-      si = out.schedule()
-      self.assertEqual(len(si), 1)
-      lower_schedule_item(si[0]).run()
+      run_one_schedule_item(out)
 
     np.testing.assert_allclose(sout.numpy(), out.numpy())
 
