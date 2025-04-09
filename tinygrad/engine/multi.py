@@ -158,4 +158,5 @@ multi_pm = PatternMatcher([
 ])
 
 @track_rewrites(named=True)
-def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]: return {k:v for k,v in graph_rewrite_map(big_sink, multi_pm).items() if k is not v}
+def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]: 
+  return {k:v for k,v in graph_rewrite_map(big_sink, multi_pm, keep_metadata=True).items() if k is not v}
