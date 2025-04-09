@@ -205,7 +205,7 @@ class AMDComputeQueue(HWQueue):
     self.memory_barrier()
     return self
 
-  def sqtt_prg_marker(self, prg:AMDProgram):
+  def sqtt_prg_marker(self, prg:AMDProgram, global_size:tuple[sint, ...]):
     BIND_POINT_COMPUTE = 1
 
     self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_pipeline_bind(
@@ -242,7 +242,7 @@ class AMDComputeQueue(HWQueue):
 
     user_regs += [*data64_le(args_state.ptr)]
 
-    if prg.dev.sqtt_enabled: self.sqtt_prg_marker(prg)
+    if prg.dev.sqtt_enabled: self.sqtt_prg_marker(prg, global_size)
 
     self.wreg(self.gc.regCOMPUTE_PGM_LO, *data64_le(prg.prog_addr >> 8))
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, prg.rsrc1, prg.rsrc2)
