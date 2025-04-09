@@ -304,7 +304,7 @@ view_left = merge_views+PatternMatcher([
 
 def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub View Left")
 
-def swizzle_reduceop(r:UOp, src:UOp, view:UOp, kernelize=False):
+def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   if (st:=unwrap(view.st)).contiguous: return None
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
@@ -316,7 +316,7 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp, kernelize=False):
   new_input_st = tmp + ShapeTracker(tuple(nv))
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
   swizzled_src = apply_swizzle(src.view(src.arg+new_input_st if src.op is Ops.VIEW else new_input_st))
-  if kernelize: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src.fuse(),), (r.arg[0], new_axis, True))
+  if fuse: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src.fuse(),), (r.arg[0], new_axis, True))
   else: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src,), (r.arg[0], new_axis))
   return red.view(ShapeTracker.from_shape(st.shape))
 
@@ -425,7 +425,7 @@ pm_fuse = PatternMatcher([
 
   # FUSE triggers swizzle on reduceop
   (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view").fuse(),
-   lambda r,src,view: swizzle_reduceop(r, src, view, True)),
+   lambda r,src,view: swizzle_reduceop(r, src, view, fuse=True)),
 
   # FUSE elementwise. TODO: check for PAD
   (UPat(Ops.VIEW, src=(UPat(GroupOp.ALU, name="alu"),), name="view").fuse(),
