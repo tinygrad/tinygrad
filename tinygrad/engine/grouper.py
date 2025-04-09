@@ -1,9 +1,9 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, view_left, merge_views
-from tinygrad.ops import can_pad, identity_element, resolve
+from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, merge_views
+from tinygrad.ops import can_pad
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv, pluralize
+from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -77,9 +77,6 @@ sym = symbolic_simple+PatternMatcher([
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat.var("x"),), name="t"),
    lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (t.size, x.st.views[0].offset)).reshape(t.shape) if x.device.startswith("DISK") else None),
-  # remove CONST/BIND/VIEW from SINK
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=new_src)
-    if (new_src:=tuple(dedup(s.base for s in x.src if s.op not in {Ops.CONST, Ops.BIND}))) != x.src else None),
 ])
 
 # support for using a contiguous permuted view instead of the parent view if one exists
@@ -133,7 +130,7 @@ def realize_before_view(ctx:GrouperContext, view:UOp, tr:UOp) -> None:
 
 do_realize = PatternMatcher([
   # always realize SINK parents
-  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x, None) for x in s.src if x.op not in DONT_PUSH_VIEWS)),
+  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x.base, None) for x in s.src if x.base.op not in DONT_PUSH_VIEWS)),
   # always realize ASSIGN/CONTIGUOUS/GroupOp.Meta
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}, name="tr"), realize),
   # realize before expand or unsafe pad ops
@@ -232,7 +229,7 @@ class Kernel:
 @dataclass(frozen=True)
 class KernelContext:
   realizes: dict[UOp, None]
-  metadata: dict[UOp, Metadata]
+  metadata: dict[UOp, Metadata|None]
 
 def create_kernel(ctx:KernelContext, x:UOp, b:UOp):
   kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), (m,) if (m:=ctx.metadata.get(x)) else ()))
@@ -248,10 +245,10 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
     if s.op in DONT_PLACE_IN_KERNEL or s in ctx.realizes: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
-      if (m:=ctx.metadata.get(s)) is not None: metadata[m] = None
+      if s.base.op not in {Ops.CONST, Ops.DEVICE} and (m:=ctx.metadata.get(s)): metadata[m] = None
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
 
-create_kernels = PatternMatcher([
+create_kernels = merge_views+PatternMatcher([
   # always give assign/contiguous a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
   (UPat(Ops.CONTIGUOUS, name="x"), lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype))),
@@ -262,11 +259,21 @@ create_kernels = PatternMatcher([
    lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype)) if x in ctx.realizes else None),
   # walk back the local graph until we reach a buffer/assign parent
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
-  # remove downstream reshapes from SINK
-  (UPat(Ops.SINK, name="x"), lambda x:x.replace(src=tuple(s.base for s in x.src)) if any(s.op is Ops.VIEW for s in x.src) else None),
+  # remove CONST/BIND/VIEW from SINK
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=new_src)
+    if (new_src:=tuple(dedup(s.base for s in x.src if s.op not in {Ops.CONST, Ops.BIND}))) != x.src else None),
 ])
 
 # **** swizzler
+
+view_left = merge_views+PatternMatcher([
+  # do not push masked view before unsafe pad ops
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="e"),), name="view"),
+   lambda e,view: e.contiguous().view(view.st) if any(v.mask is not None for v in view.st.views) else None),
+  # view before elementwise ops
+  (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST}, name="e"),), name="view"),
+   lambda e,view: e.replace(src=tuple(s.view(s.st+view.st) if s.op is Ops.VIEW else s.view(view.st) for s in e.src))),
+])
 
 def apply_swizzle(u:UOp) -> UOp:
   with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
@@ -384,35 +391,34 @@ def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 
-@track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
 def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
-  # merge_views + sym + reorder_view + replace_contiguous
+  # merge_views + simplify
   tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous, ctx={})
-  sink = tensor_map[big_sink]
-  metadata = {v:k.metadata for k,v in tensor_map.items() if k.base.op not in {Ops.CONST, Ops.DEVICE} and isinstance(k.metadata, Metadata)}
 
   # display the cleaned up tensor graph
-  if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Tensor Graph")
+  if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
   # group into kernels
+  sink = tensor_map[big_sink]
   realize_map = group_realizes(sink)
-  kernel_map = graph_rewrite_map(sink, merge_views+create_kernels, ctx=KernelContext(realize_map, metadata), bottom_up=True)
+  kernel_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True)
   sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
   # map tensors to buffer/const, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
-    # ASSIGN always becomes the target buffer
-    if v.op is Ops.ASSIGN: becomes_map[k] = v.src[0]
-    # if we created a new buffer for this tensor, map it to the assigned buffer
-    elif (a:=kernel_map.get(v.base)) is not None and (a:=a.base).op is Ops.ASSIGN:
-      becomes_map[k] = a.src[0] if a.src[0].st == v.st else a.src[0].view(unwrap(v.st))
-    # tensors can also simplify to an existing buffer/const
-    else:
-      if k is v: continue
-      if v.base.op is Ops.BUFFER: becomes_map[k] = v
-      if v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
+    if (kernel:=kernel_map.get(v.base)) is not None and kernel.base.op is Ops.ASSIGN: v = kernel.view(unwrap(v.st))
+    if k is v: continue
+    if k.op is Ops.ASSIGN:
+      becomes_map[k] = k.src[0]
+      continue
+    op = v.base.op
+    if op is Ops.BUFFER: becomes_map[k] = v
+    if op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
+    if op is Ops.ASSIGN:
+      new_buf = v.base.src[0]
+      becomes_map[k] = new_buf if new_buf.st == v.st else new_buf.view(unwrap(v.st))
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}

@@ -991,7 +991,7 @@ Variable = UOp
 
 ConstLike = Union[ConstType, Variable, tuple[ConstType, ...]]
 
-# *** UOp merge views and swizzling ***
+# *** UOp merge views ***
 
 merge_views = PatternMatcher([
   # merge adjacent views
@@ -1009,13 +1009,4 @@ merge_views = PatternMatcher([
    lambda v: v.const_like(0) if (mask:=v.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
   # movement ops apply a new view on the base
   (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
-])
-
-view_left = merge_views+PatternMatcher([
-  # do not push masked view before unsafe pad ops
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="e"),), name="view"),
-   lambda e,view: e.contiguous().view(view.st) if any(v.mask is not None for v in view.st.views) else None),
-  # view before elementwise ops
-  (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST}, name="e"),), name="view"),
-   lambda e,view: e.replace(src=tuple(s.view(s.st+view.st) if s.op is Ops.VIEW else s.view(view.st) for s in e.src))),
 ])
