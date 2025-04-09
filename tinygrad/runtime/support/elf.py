@@ -49,11 +49,9 @@ def relocate(instr: int, ploc: int, tgt: int, r_type: int):
   match r_type:
     # https://refspecs.linuxfoundation.org/elf/x86_64-abi-0.95.pdf
     case libc.R_X86_64_PC32: return i2u(32, tgt-ploc)
+    case libc.R_X86_64_PLT32: return i2u(32, tgt-ploc)  # PC-relative offset to PLT entry
     # https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst for definitions of relocations
     # https://www.scs.stanford.edu/~zyedidia/arm64/index.html for instruction encodings
-    case libc.R_AARCH64_ADR_PREL_LO21:  # Type 4: PC-relative address calculation
-      offset = tgt - ploc
-      return instr | (getbits(offset, 0, 20) << 5) | (getbits(offset, 20, 21) << 29)
     case libc.R_AARCH64_ADR_PREL_PG_HI21:
       rel_pg = (tgt & ~0xFFF) - (ploc & ~0xFFF)
       return instr | (getbits(rel_pg, 12, 13) << 29) | (getbits(rel_pg, 14, 32) << 5)
