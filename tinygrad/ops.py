@@ -781,8 +781,7 @@ class UPat(MathTrait):
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
   def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
-    if (self.op is not None and uop.op not in self.op) or \
-       (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
+    if (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.dtype is not None and uop.dtype not in self.dtype and uop.dtype.scalar() not in self.dtype) or \
        (self.arg is not None and self.arg != uop.arg) or \
        (len(uop.src) < self.required_len) or \
@@ -792,14 +791,15 @@ class UPat(MathTrait):
     for vp in self.src:
       stores, new_stores = [store.copy()], []
       for uu, vv in zip(uop.src, vp):
-        for s in stores: new_stores.extend(vv.match(uu, s))
+        for s in stores:
+          if vv.op is None or uu.op in vv.op: new_stores.extend(vv.match(uu, s))
         stores, new_stores = new_stores, []
       res.extend(stores)
     return res
 
 class UPatAny(UPat):
   def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
-    matches = [x.match(uop, store.copy()) for x in self.src[0]]
+    matches = [x.match(uop, store.copy()) for x in self.src[0] if x.op is None or uop.op in x.op]
     return flatten([x for x in matches if x is not None])
 
 def deconstruct_function(fxn:Callable) -> tuple:
