@@ -102,12 +102,12 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
     idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(g), tuple(range(g))),), ((i,g),)))
 
   # range splitting
-  if ki.range_split_axis:
-    axis, masks = ki.range_split_axis
+  if ki.split_range:
+    axis, masks = ki.split_range
     for ii,a in enumerate(range(axis, first_upcasted)):
       rng, n = idxs[a], len(masks)
-      # duplicate inner loops otherwise linearizer can't merge blocks
       if a == axis: src = tuple(rng.replace(src=(UOp.const(dtypes.int, s), UOp.const(dtypes.int, e)), arg=i+axis) for i,(s,e) in enumerate(masks))
+      # duplicate inner loops otherwise linearizer can't merge blocks
       else: src = tuple(rng.replace(arg=i+axis+n*ii) for i in range(n))
       idxs[a] = UOp(Ops.UNROLL, rng.dtype, (UOp(Ops.VECTORIZE, rng.dtype.vec(n), src),), ((axis, n),),)
 
