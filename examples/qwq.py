@@ -6,7 +6,7 @@ from transformers import AutoTokenizer
 from pathlib import Path
 from typing import Dict, Union
 
-from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
+from extra.models.llama import Transformer, convert_from_huggingface 
 from examples.llama3 import load
 from tinygrad import nn, Tensor
 from tinygrad.helpers import fetch, colored, GlobalCounters, Timing, DEBUG
@@ -44,8 +44,8 @@ def load_model(model_path:Path, model_params:Dict[str, Union[int, float]]) -> Tr
   model.layers = updated_layers
 
   # load weights
-  weights = fix_bf16(convert_from_huggingface(load(str(model_path / "model.safetensors.index.json")), model, model_params["n_heads"], model_params["n_kv_heads"], permute_layers=False))
-
+  weights = {k: v.to("CLANG") for k, v in convert_from_huggingface(load(str(model_path / "model.safetensors.index.json")), model, model_params["n_heads"], model_params["n_kv_heads"], permute_layers=False).items()}
+  
   # replace weights in model
   load_state_dict(model, weights, strict=False, consume=True)
   return model

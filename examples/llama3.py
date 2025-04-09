@@ -3,7 +3,7 @@ from typing import List
 import json, argparse, random, time, os
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
-from extra.models.llama import Transformer, convert_from_huggingface, convert_from_gguf, fix_bf16
+from extra.models.llama import Transformer, convert_from_huggingface, convert_from_gguf
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters, gguf_load
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
 from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm
@@ -176,7 +176,8 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dt
     weights = convert_from_huggingface(weights, model, MODEL_PARAMS[model_size]["args"]["n_heads"], MODEL_PARAMS[model_size]["args"]["n_kv_heads"])
   elif "token_embd.weight" in weights:
     weights = convert_from_gguf(weights, model)
-  weights = fix_bf16(weights)
+
+  weights = {k: v.to("CLANG") for k, v in weights.items()} 
 
   with Context(BEAM=0):
     # quantize

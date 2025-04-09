@@ -9,7 +9,7 @@ import argparse, json
 from tinygrad import Tensor, Device, GlobalCounters, nn
 from tinygrad.helpers import Context, Timing, Profiling, DEBUG, JIT, getenv, colored
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
-from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
+from extra.models.llama import Transformer, convert_from_huggingface 
 from sentencepiece import SentencePieceProcessor
 import tiktoken, sys
 from tiktoken.load import load_tiktoken_bpe
@@ -213,7 +213,7 @@ class LLaMa:
     if "model.embed_tokens.weight" in weights:
       weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
 
-    weights = fix_bf16(weights)
+    weights = weights.to("CLANG")
 
     with Context(BEAM=0):
       # quantize
