@@ -6,8 +6,14 @@ from tinygrad.ops import Ops
 class TestRingAllReduce(unittest.TestCase):
   def test_schedule_ring(self):
     with Context(RING=2):
-      N = 6
-      ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
+      MAX_N = 8
+      ds = []
+      for i in range(MAX_N):
+             # Throws if the device is not available.
+        try: Device[s:=f"{Device.DEFAULT}:{i}"] and ds.append(s)
+        except Exception: break
+
+      if N:=len(ds) < 2: self.skipTest("You are too GPU poor to run this test")
       t = Tensor.empty(N, N*100).shard(ds, axis=0).realize()
       schedules = t.sum(0).schedule_with_vars()[0]
       copies = [si for si in schedules if si.ast.op is Ops.COPY]
