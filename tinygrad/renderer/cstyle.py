@@ -338,14 +338,15 @@ class CUDARenderer(CStyleLanguage):
   tc_8168_tf32 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=dtypes.float, dtype_out=dtypes.float, opts=cuda_tc_opts,
     swizzle=(((5,6,2,3,4),(0,1,8,9,7)), ((5,6,8,0,1),(2,3,4,9,7))))]
 
-  tc_sm89 = tc_81616 + tc_8168_f16 + tc_81632_f8
-  tc_sm80 = tc_81616 + tc_8168_f16
-  if getenv("ALLOW_TF32", 0): tc_sm80 += tc_8168_tf32
   tc_sm75 = tc_8168_f16
+  tc_sm80 = tc_81616 + tc_8168_f16
+  if getenv("ALLOW_TF32"): tc_sm80 += tc_8168_tf32
+  tc_sm89 = tc_sm80 + tc_81632_f8
+
   def __init__(self, arch: str):
     self.arch = arch
-    tensor_cores_map = {89: CUDARenderer.tc_sm89, 80: CUDARenderer.tc_sm80, 75: CUDARenderer.tc_sm75}
-    self.tensor_cores = next((tc for version, tc in sorted(tensor_cores_map.items(), reverse=True) if int(arch[3:]) >= version), [])
+    tensor_cores_versions = [(89, CUDARenderer.tc_sm89), (80, CUDARenderer.tc_sm80), (75, CUDARenderer.tc_sm75)]
+    self.tensor_cores = next((tc for version, tc in tensor_cores_versions if int(arch[3:]) >= version), [])
   def __reduce__(self): return self.__class__, (self.arch,)
 
   # language options
