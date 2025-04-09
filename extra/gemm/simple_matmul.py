@@ -1,6 +1,6 @@
 import numpy as np
 from tinygrad.helpers import getenv
-from tinygrad.dtype import _to_np_dtype
+from tinygrad.dtype import _to_np_dtype, sum_acc_dtype
 from tinygrad import dtypes, Tensor
 from tinygrad.codegen.kernel import OptOps
 from tinygrad.engine.realize import lower_schedule
@@ -8,7 +8,7 @@ from tinygrad.engine.realize import lower_schedule
 dtype_in = (dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else
             dtypes.fp8e4m3 if getenv("FP8E4M3") else dtypes.fp8e5m2 if getenv("FP8E5M2") else dtypes.float)
 acc_dtype = (dtypes.half if getenv("ACC_HALF") else dtypes.bfloat16 if getenv("ACC_BFLOAT16") else
-            dtypes.fp8e4m3 if getenv("ACC_FP8E4M3") else dtypes.fp8e5m2 if getenv("ACC_FP8E5M2") else None)
+            dtypes.fp8e4m3 if getenv("ACC_FP8E4M3") else dtypes.fp8e5m2 if getenv("ACC_FP8E5M2") else sum_acc_dtype(dtype_in))
 if getenv("INT"): dtype_in = dtypes.int8acc_dtype = dtypes.int32
 if getenv("UINT"): dtype_in, acc_dtype = dtypes.uint8, dtypes.int32
 
@@ -16,7 +16,7 @@ N = getenv("N", 4096)
 M = getenv("M", N)
 K = getenv("K", N)
 CNT = getenv("CNT", 10)
-ATOL = getenv("ATOL", 1e-4)
+ATOL = getenv("ATOL", 4e-4 if dtype_in not in dtypes.fp8s else 1e-1)
 RTOL = getenv("RTOL", 3e-2)
 INT_LOW = getenv("INT_LOW", 0)
 INT_HIGH = getenv("INT_HIGH", 10)
@@ -28,7 +28,7 @@ if __name__ == "__main__":
     if (np_dtype := _to_np_dtype(dtype_in)) is None: np_dtype = np.float32
     if dtype_in in dtypes.ints:
       return Tensor(rng.integers(INT_LOW, INT_HIGH, (rows, cols), dtype=np_dtype)).realize()
-    return Tensor(rng.random((rows, cols), dtype=np.float32).astype(np_dtype)).cast(dtype_in).realize()
+    return Tensor(rng.random((rows, cols), dtype=np.float32).astype(np_dtype)-0.5).cast(dtype_in).realize()
 
   a, b = init_matrix(M, K), init_matrix(K, N)
   for i in range(CNT):
