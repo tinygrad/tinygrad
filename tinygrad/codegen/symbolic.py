@@ -426,8 +426,7 @@ def reduce_mul_chain(r:UOp):
     if all(r not in m_parents for r in r.src[1:]) and (r.arg != Ops.MAX or m.vmin >= 0): outside.append(m)
     else: inside.append(m)
   if len(outside) == 0: return None
-  if len(inside) == 0: return prod(outside)
-  return r.replace(src=(prod(inside),)+r.src[1:])*prod(outside)
+  return r.replace(src=(prod(inside) if len(inside) else r.src[0].const_like(1),)+r.src[1:])*prod(outside)
 
 # this is symbolic 2.0
 sym = symbolic_flat+PatternMatcher([
