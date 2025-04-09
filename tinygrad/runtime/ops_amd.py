@@ -266,7 +266,7 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
     if self.dev.xccs > 1:
       self.release_mem(cache_flush=True)
-      self.acquire_mem()
+      self.acquire_mem(gli=0)
       self.xcc_barrier()
     return self
 
