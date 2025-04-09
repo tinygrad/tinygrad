@@ -2,14 +2,10 @@ import numpy as np
 from tinygrad.helpers import getenv
 from tinygrad.dtype import _to_np_dtype
 from tinygrad import dtypes, Tensor
-from tinygrad.codegen.kernel import OptOps
-from tinygrad.engine.realize import lower_schedule
 
-dtype_in = (dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else
-            dtypes.fp8e4m3 if getenv("FP8E4M3") else dtypes.fp8e5m2 if getenv("FP8E5M2") else dtypes.float)
-acc_dtype = (dtypes.half if getenv("ACC_HALF") else dtypes.bfloat16 if getenv("ACC_BFLOAT16") else
-            dtypes.fp8e4m3 if getenv("ACC_FP8E4M3") else dtypes.fp8e5m2 if getenv("ACC_FP8E5M2") else None)
-if getenv("INT"): dtype_in = dtypes.int8acc_dtype = dtypes.int32
+dtype_in = dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else dtypes.float
+acc_dtype = dtypes.half if getenv("ACC_HALF") else dtypes.bfloat16 if getenv("ACC_BFLOAT16") else None
+if getenv("INT"):  dtype_in, acc_dtype = dtypes.int8, dtypes.int32
 if getenv("UINT"): dtype_in, acc_dtype = dtypes.uint8, dtypes.int32
 
 N = getenv("N", 4096)
@@ -35,12 +31,6 @@ if __name__ == "__main__":
     if i > 0 and getenv("RAND", 0) != 0:
       a, b = init_matrix(M, K), init_matrix(K, N)
     c = a.matmul(b, dtype=acc_dtype).realize()
-  if getenv("SHOULD_USE_TC"):
-    sched = a.matmul(b, dtype=acc_dtype).schedule()
-    lowered = list(lower_schedule(sched))
-    assert len(lowered) == 1
-    ei = lowered[0][1]
-    assert any(opt.op is OptOps.TC for opt in ei.prg.p.applied_opts), f"TC not triggered, {ei.prg.p.applied_opts}"
 
   ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
   res = c.numpy()
