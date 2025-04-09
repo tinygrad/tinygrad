@@ -1867,8 +1867,8 @@ class Tensor(SimpleMathTrait):
     print(t.softmax(axis=0).numpy())
     ```
     """
-    _, e, ss = self._softmax(axis, dtype)
-    return e.div(ss)
+    _, e, ss = self.contiguous()._softmax(axis, dtype)
+    return e.div(ss).kernelize()
 
   def log_softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
     """
@@ -2718,6 +2718,12 @@ class Tensor(SimpleMathTrait):
     Returns a contiguous tensor.
     """
     return self._apply_uop(UOp.contiguous)
+
+  def kernelize(self) -> Tensor:
+    """
+    Make a single kernel back to contiguous.
+    """
+    return self._apply_uop(UOp.kernelize)
 
   def contiguous_backward(self) -> Tensor:
     """

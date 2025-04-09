@@ -278,7 +278,7 @@ view_left = merge_views+PatternMatcher([
 def apply_swizzle(u:UOp) -> UOp:
   with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
 
-def swizzle_reduceop(r:UOp, src:UOp, view:UOp):
+def swizzle_reduceop(r:UOp, src:UOp, view:UOp, kernelize=False):
   if (st:=unwrap(view.st)).contiguous: return None
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
@@ -289,8 +289,9 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp):
   # create a new reduceop for the swizzled input
   new_input_st = tmp + ShapeTracker(tuple(nv))
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
-  return UOp(Ops.REDUCE_AXIS, r.dtype, (apply_swizzle(src.view(src.arg+new_input_st if src.op is Ops.VIEW else new_input_st)),),
-             (r.arg[0], new_axis)).view(ShapeTracker.from_shape(st.shape))
+  swizzled_src = apply_swizzle(src.view(src.arg+new_input_st if src.op is Ops.VIEW else new_input_st))
+  if kernelize: swizzled_src = swizzled_src.kernelize()
+  return UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src,), (r.arg[0], new_axis)).view(ShapeTracker.from_shape(st.shape))
 
 def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   assert unwrap(v.st).contiguous and v.size == src.size, f"can't compute new axis for {src.shape} -> {r.shape}"
@@ -303,7 +304,30 @@ def elementwise_view_right(root:UOp):
   new_st = ShapeTracker.from_shape(swizzles[0].base.shape)
   new_src = [x.base if x.base.shape==new_st.shape else apply_swizzle(x.view(x.arg+new_st) if x.op is Ops.VIEW else x.view(new_st)) for x in root.src]
   # reshape to match downstream shapes
-  return root.replace(src=tuple(new_src)).reshape(root.shape)
+  ret = root.replace(src=tuple(new_src))
+  if len(ret.shape) < len(root.shape): return None
+  return ret.reshape(root.shape)
+
+def reduce_push_add_ones(src, r, view):
+  # must be contiguous
+  if not unwrap(view.st).contiguous: return None
+  # must be larger
+  if len(r.shape) >= len(view.shape): return None
+  # must have one reduce axis
+  if len(r.arg[1]) != 1: return None
+  reduce_axis = r.arg[1][0]
+  # must have all ones after the reduce axis
+  if not all(x == 1 for x in r.shape[reduce_axis:]): return None
+  keep_cnt = len(r.shape) - reduce_axis
+
+  ones_to_add = len(view.shape) - len(r.shape)
+  new_shape = list(view.shape)
+  new_shape[-keep_cnt:] = src.shape[-keep_cnt:]
+
+  new_src = src.reshape(tuple(new_shape))
+  ret = r.replace(src=(new_src,), arg=(r.arg[0], (reduce_axis+ones_to_add,)))
+  assert ret.shape == view.shape, f"wrong shape {ret.shape} != {view.shape} (from {new_src.shape} reduced by {reduce_axis})"
+  return ret
 
 # push VIEW to children
 view_right = merge_views+PatternMatcher([
@@ -316,6 +340,8 @@ view_right = merge_views+PatternMatcher([
   # merge axes for double reduce (invert of SPLIT_REDUCEOP=1)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="r1"),), name="r2"),
    lambda r1,r2: r1.replace(arg=(r1.arg[0], r2.arg[1]+r1.arg[1])) if r1.arg[0] == r2.arg[0] else None),
+  # if there's ones added after reduce, put this before the reduce
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
 ])
 
 # **** unbind variables
@@ -391,15 +417,32 @@ def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 
+pm_kernelize = PatternMatcher([
+  # KERNELIZE on CONTIGUOUS removes KERNELIZE
+  (UPat(Ops.CONTIGUOUS, name="c").kernelize(), lambda c: c),
+
+  # KERNELIZE triggers swizzle on reduceop
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view").kernelize(),
+   lambda r,src,view: swizzle_reduceop(r, src, view, True)),
+
+  # KERNELIZE elementwise. TODO: check for PAD
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.ALU, name="alu"),), name="view").kernelize(),
+   lambda alu, view: alu.replace(src=tuple(x.view(view.arg).kernelize() for x in alu.src))),
+
+  # push KERNELIZE through to srcs
+  (UPat(Ops.KERNELIZE, name="x"), lambda x: x.src[0].replace(src=tuple(y.kernelize() for y in x.src[0].src))),
+])
+
 def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   # merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous, ctx={})
+  tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous+pm_kernelize, ctx={})
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
   # group into kernels
   sink = tensor_map[big_sink]
+
   realize_map = group_realizes(sink)
   kernel_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True)
   sched_sink = kernel_map[sink]

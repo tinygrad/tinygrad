@@ -3,6 +3,7 @@ import numpy as np
 from tinygrad import Tensor, GlobalCounters, Context
 from tinygrad.dtype import DTypeLike
 from tinygrad.helpers import DEBUG
+from tinygrad.engine.realize import lower_schedule_item
 
 def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
   # only support axis =-1
@@ -62,6 +63,21 @@ class TestSoftmaxFusion(unittest.TestCase):
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1):
       out = single_kernel_softmax(self.test)
       out.realize()
+
+    np.testing.assert_allclose(sout.numpy(), out.numpy())
+
+  def test_auto_softmax(self):
+    print("*** softmax ***")
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
+      sout = self.test.softmax(-1)
+      sout.realize()
+
+    print("*** auto single kernel softmax ***")
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1):
+      out = self.test.contiguous().softmax(-1).kernelize()
+      si = out.schedule()
+      self.assertEqual(len(si), 1)
+      lower_schedule_item(si[0]).run()
 
     np.testing.assert_allclose(sout.numpy(), out.numpy())
 
