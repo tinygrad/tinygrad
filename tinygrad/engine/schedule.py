@@ -63,6 +63,6 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
       # if the UOp was already an assign Tensor UOp we just map it to the existing buffer
       if k.op is Ops.ASSIGN: becomes_map[k] = k.src[0]
       # otherwise we map it to the new buffer, ignoring NOOP ShapeTrackers
-      else: becomes_map[k] = new_buf if (new_buf:=v.base.src[0]).st == v.st else new_buf.view(v.st)
+      else: becomes_map[k] = new_buf if (new_buf:=v.base.src[0]).st == v.st else new_buf.view(unwrap(v.st))
 
   return schedule, var_vals, becomes_map
