@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, merge_views
 from tinygrad.ops import can_pad
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
+from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv, pluralize
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, PUSH_ALL_VIEWS_LEFT
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -391,15 +391,77 @@ def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 
+view_left_reduce = PatternMatcher([
+  # push a non contiguous ShapeTracker through reduceop
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), swizzle_reduceop),
+])
+
+def elementwise_view_right_mod(root:UOp):
+  if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW and x.base.op not in DONT_PUSH_VIEWS]): return None
+  assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
+  # place view after applying the elementwise op
+  new_st = ShapeTracker.from_shape(swizzles[0].base.shape)
+  new_src = [x.base if x.base.shape==new_st.shape else apply_swizzle(x.view(x.arg+new_st) if x.op is Ops.VIEW else x.view(new_st)) for x in root.src]
+  # reshape to match downstream shapes
+  ret = root.replace(src=tuple(new_src))
+  if len(ret.shape) < len(root.shape): return None
+  return ret.reshape(root.shape)
+
+def reduce_push_add_ones(src, r, view):
+  # must be contiguous
+  if not (st:=unwrap(view.st)).contiguous: return None
+  # must be larger
+  if len(r.shape) >= len(view.shape): return None
+  # must have one reduce axis
+  if len(r.arg[1]) != 1: return None
+  reduce_axis = r.arg[1][0]
+  # must have all ones after the reduce axis
+  if not all(x == 1 for x in r.shape[reduce_axis:]): return None
+  keep_cnt = len(r.shape) - reduce_axis
+
+  ones_to_add = len(view.shape) - len(r.shape)
+  new_shape = list(view.shape)
+  new_shape[-keep_cnt:] = src.shape[-keep_cnt:]
+
+  new_src = src.reshape(tuple(new_shape))
+  ret = r.replace(src=(new_src,), arg=(r.arg[0], (reduce_axis+ones_to_add,)))
+  assert ret.shape == view.shape, f"wrong shape {ret.shape} != {view.shape} (from {new_src.shape} reduced by {reduce_axis})"
+  return ret
+
+view_right_simple = PatternMatcher([
+  # apply view after reduceops
+  #(UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="src"),), name="v"),), name="r"), reduceop_view_right),
+  # apply view after elementwise ops
+  (UPat(GroupOp.All-DONT_PUSH_VIEWS, name="root"), elementwise_view_right_mod),
+  # add fixup
+  #(UPat(Ops.RESHAPE, name="r") + UPat(Ops.VIEW, name="v"), lambda r,v: (r.src[0] + v.reshape(r.src[0].shape)).reshape(r.shape)),
+  # reshape on view
+  #(UPat(Ops.RESHAPE, src=(UPat(Ops.VIEW, name="v")), name="r"), lambda v,r: v.replace(arg=v.arg.reshape(r.shape))),
+
+  # push contiguous larger shapes
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
+
+  # view before (some) elementwise ops
+  (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST}, name="e"),), name="view"),
+   lambda e,view: e.replace(src=tuple(s.view(s.st+view.st) if s.op is Ops.VIEW else s.view(view.st) for s in e.src))
+    if len(view.shape) > len(e.shape) else None),
+  # movement ops apply a new view on the base
+  (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
+])
+
 def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   # merge_views + simplify
   tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous, ctx={})
+  sink = tensor_map[big_sink]
+
+  if PUSH_ALL_VIEWS_LEFT:
+    sink = graph_rewrite(sink, view_left+view_left_reduce, name="Push All Views Left")
+    sink = graph_rewrite(sink, view_right_simple, name="View Right")
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
   # group into kernels
-  sink = tensor_map[big_sink]
   realize_map = group_realizes(sink)
   tensor_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True,
                                  input_map=tensor_map)

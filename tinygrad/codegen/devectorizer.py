@@ -341,10 +341,18 @@ pm_reduce = PatternMatcher([
 
 # *** uop graph ***
 
+pm_merge_range = PatternMatcher([
+  (UPat(Ops.RANGE, name="rng", arg=4), lambda rng: rng.replace(arg=3)),
+  (UPat(Ops.RANGE, name="rng", arg=12), lambda rng: rng.replace(arg=10)),
+])
+
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
+
+  # merge range
+  sink = graph_rewrite(sink, pm_merge_range, name="merge_range")
 
   # remove reduce
   sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")

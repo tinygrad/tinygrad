@@ -1,8 +1,11 @@
-import unittest
+import unittest, math
 import numpy as np
-from tinygrad import Tensor, GlobalCounters, Context
+from tinygrad import Tensor, GlobalCounters, Context, Device
 from tinygrad.dtype import DTypeLike
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, get_single_element
+from tinygrad.codegen.kernel import Kernel
+from tinygrad.renderer import Opt, OptOps
+from tinygrad.engine.realize import lower_schedule_item
 
 def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
   # only support axis =-1
@@ -28,7 +31,7 @@ def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Te
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    with Context(TRACK_MATCH_STATS=0): cls.test = Tensor.rand(32, 10).contiguous().realize()
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0): cls.test = Tensor.rand(32, 10).contiguous().realize()
 
   def setUp(self):
     GlobalCounters.reset()
@@ -83,6 +86,54 @@ class TestSoftmaxFusion(unittest.TestCase):
         g = self.test.grad.realize()
 
       np.testing.assert_allclose(sg.numpy(), g.numpy(), atol=1e-7)
+
+  def test_auto_softmax(self):
+    print("*** softmax ***")
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1, PUSH_ALL_VIEWS_LEFT=1):
+      sout = self.test.softmax(-1)
+      sout.realize()
+
+  def test_opt_softmax(self):
+    inp = Tensor.empty(1024, 32)
+    with Context(DONT_GROUP_REDUCES=1):
+      out = single_kernel_softmax(inp)
+      sk_ast = get_single_element(out.schedule()).ast
+    k = Kernel(sk_ast, Device.default.renderer)
+    # TODO: use simdgroup primitives here to remove the loops
+    k.apply_opt(Opt(OptOps.LOCAL, 1, 32))
+    prg = k.to_program()
+    print(prg.src)
+
+  def test_flash_attention(self):
+    # these are the BERT dimensions
+    BS = 4
+    MATDIM = 256
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+      query = Tensor.rand(BS, 16, MATDIM, 64).realize()
+      key = Tensor.rand(BS, 16, MATDIM, 64).realize()
+      value = Tensor.rand(BS, 16, MATDIM, 64).realize()
+
+    print("*** attention ***")
+    # 5 kernels!
+    GlobalCounters.reset()
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
+      sout = query.scaled_dot_product_attention(key, value)
+      sout.realize()
+
+    print("*** single kernel attention ***")
+    GlobalCounters.reset()
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1, PUSH_ALL_VIEWS_LEFT=1):
+      out = query.scaled_dot_product_attention(key, value)
+      si = get_single_element(out.schedule())
+      ei = lower_schedule_item(si)
+
+    #k = Kernel(si.ast, Device.default.renderer)
+    #k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
+    #prg = k.to_program()
+    #print(prg.src)
+
+    ei.run()
+    np.testing.assert_allclose(sout.numpy(), ei.bufs[0].numpy().reshape(sout.shape), atol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()

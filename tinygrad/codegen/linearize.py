@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from tinygrad.ops import UOp, Ops, PatternMatcher, UPat, graph_rewrite, GroupOp
 from tinygrad.spec import type_verify
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.helpers import dedup, flatten, partition
+from tinygrad.helpers import dedup, flatten, partition, get_single_element
 
 DONT_PLACE_IN_BLOCK = {Ops.NAME, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST, *GroupOp.Block}
 
@@ -119,7 +119,56 @@ def block_merge(ctx, x:UOp):
   return UOp(x.op, dtypes.void, tuple(new_srcs),
              BasicBlock(tuple(dedup(sorted(new_ctx, key=lambda x: x.tuplize))), tuple(to_append)+x.arg.lst, x.arg.end))
 
-pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
+def blockfork_remove(ctx, x:UOp):
+  seenbfs = collections.defaultdict(int)
+  for y in x.src:
+    if y.op is Ops.BLOCKFORK:
+      seenbfs[y] += 1
+
+  removebfs = []
+  for k,v in seenbfs.items():
+    if k.arg == v:
+      removebfs.append(k)
+  if len(removebfs) == 0: return None
+
+  new_srcs = [y for y in x.src if y not in removebfs]
+  new_srcs += [y.src[0] for y in removebfs]
+  return x.replace(src=tuple(new_srcs))
+
+def blockfork_reparent(ctx, x:UOp):
+  blockforks = [y for y in x.src if y.op == Ops.BLOCKFORK]
+  if len(blockforks) == 0: return None
+
+  # reparent
+  for bf in dedup(blockforks):
+    cnt = len([x for x in blockforks if x is bf])
+    assert cnt >= 1
+
+    # if blockfork exists in parents (doesn't have to be direct. reparent it there)
+    replaced = False
+    new_srcs = []
+    for y in x.src:
+      #print("    ", y.op)
+      if y is bf:
+        pass
+      elif y.op in {Ops.BLOCKEND, Ops.BLOCK} and not replaced and bf in y.toposort:
+        new_srcs.append(y.replace(src=y.src+(bf,)*cnt))
+        replaced = True
+      else:
+        new_srcs.append(y)
+    if replaced:
+      return x.replace(src=tuple(new_srcs))
+
+
+# should be universally correct
+pm_blockfork_reparent = PatternMatcher([
+  (UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), blockfork_remove),
+  (UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), blockfork_reparent),
+])
+
+pm_block_merge = PatternMatcher([
+  (UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),
+])+pm_blockfork_reparent
 
 def block_finalize(block:UOp):
   if len(block.src) == 0: return None
@@ -210,7 +259,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
 
   # TODO: there's probably a clever way to remove this while loop
   while 1:
-    sink = graph_rewrite(sink, make_basic_blocks, ctx=(block_ctxs, children))
+    sink = graph_rewrite(sink, make_basic_blocks+pm_blockfork_reparent, ctx=(block_ctxs, children))
 
     # add BLOCKFORK (slow!)
     block_parent_count = collections.Counter(flatten([x.src for x in sink.toposort if x.op is Ops.BLOCK]))
@@ -244,6 +293,9 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
                                         arg=BasicBlock(tuple(dedup(flatten([y.arg.ctx for y in v]))), v[0].arg.lst, k)),), arg=len(v))
       for u in v: new_forks[u] = out
   sink = sink.substitute(new_forks)
+
+  # blockfork reparent
+  sink = graph_rewrite(sink, pm_blockfork_reparent, ctx=(block_ctxs, children), name="reparent")
 
   # reorder ops in block for speed
   sink = sink.substitute({u:newu for u in sink.toposort if u.op is Ops.BLOCK and (newu:=block_reorder(u)) is not u})
