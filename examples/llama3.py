@@ -177,7 +177,7 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dt
   elif "token_embd.weight" in weights:
     weights = convert_from_gguf(weights, model)
 
-  weights = {k: v.to("CLANG") for k, v in weights.items()}
+  weights = {k: v.to("CPU") for k, v in weights.items()}
 
   with Context(BEAM=0):
     # quantize

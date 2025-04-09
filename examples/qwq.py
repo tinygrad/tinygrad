@@ -44,7 +44,7 @@ def load_model(model_path:Path, model_params:Dict[str, Union[int, float]]) -> Tr
   model.layers = updated_layers
 
   # load weights
-  weights = {k: v.to("CLANG") for k, v in convert_from_huggingface(load(str(model_path / "model.safetensors.index.json")), model, model_params["n_heads"], model_params["n_kv_heads"], permute_layers=False).items()}
+  weights = {k: v.to("CPU") for k, v in convert_from_huggingface(load(str(model_path / "model.safetensors.index.json")), model, model_params["n_heads"], model_params["n_kv_heads"], permute_layers=False).items()}
 
   # replace weights in model
   load_state_dict(model, weights, strict=False, consume=True)

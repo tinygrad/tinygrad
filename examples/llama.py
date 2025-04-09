@@ -213,7 +213,7 @@ class LLaMa:
     if "model.embed_tokens.weight" in weights:
       weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
 
-    weights = weights.to("CLANG")
+    weights = {k: v.to("CPU") for k, v in weights.items()}
 
     with Context(BEAM=0):
       # quantize
