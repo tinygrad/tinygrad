@@ -306,11 +306,10 @@ def elementwise_view_right(root:UOp):
   new_st = ShapeTracker.from_shape(swizzles[0].base.shape)
   new_src = [x.base if x.base.shape==new_st.shape else apply_swizzle(x.view(x.arg+new_st) if x.op is Ops.VIEW else x.view(new_st)) for x in root.src]
   # reshape to match downstream shapes
-  ret = root.replace(src=tuple(new_src))
-  #if len(ret.shape) < len(root.shape): return None
-  return ret.reshape(root.shape)
+  return root.replace(src=tuple(new_src)).reshape(root.shape)
 
-def reduce_push_add_ones(src, r, view):
+def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
+  # TODO: this can be made a lot more generic
   # must be contiguous
   if not unwrap(view.st).contiguous: return None
   # must be larger
@@ -318,16 +317,18 @@ def reduce_push_add_ones(src, r, view):
   # must have one reduce axis
   if len(r.arg[1]) != 1: return None
   reduce_axis = r.arg[1][0]
-  # must have all ones after the reduce axis
-  if not all(x == 1 for x in r.shape[reduce_axis:]): return None
   keep_cnt = len(r.shape) - reduce_axis
+  # must have all ones after the reduce axis
+  if not all(x == 1 for x in r.shape[-keep_cnt:]): return None
+  # must have all ones after the reduce axis in the view
+  if not all(x == 1 for x in view.shape[-keep_cnt:]): return None
 
   ones_to_add = len(view.shape) - len(r.shape)
   new_shape = list(view.shape)
   new_shape[-keep_cnt:] = src.shape[-keep_cnt:]
 
   new_src = src.reshape(tuple(new_shape))
-  ret = r.replace(src=(new_src,), arg=(r.arg[0], (reduce_axis+ones_to_add,)))
+  ret = r.replace(src=(new_src,), arg=(r.arg[0], (reduce_axis+ones_to_add,))+r.arg[2:])
   assert ret.shape == view.shape, f"wrong shape {ret.shape} != {view.shape} (from {new_src.shape} reduced by {reduce_axis})"
   return ret
 
@@ -343,7 +344,7 @@ view_right = merge_views+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="r1"),), name="r2"),
    lambda r1,r2: r1.replace(arg=(r1.arg[0], r2.arg[1]+r1.arg[1])) if r1.arg[0] == r2.arg[0] else None),
   # if there's ones added after reduce, put this before the reduce
-  #(UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
 ])
 
 # **** unbind variables
