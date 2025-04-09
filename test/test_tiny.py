@@ -101,7 +101,7 @@ class TestTiny(unittest.TestCase):
     for p in nn.state.get_parameters(layers): p.replace(Tensor.ones_like(p).contiguous()).realize()
 
     # run model inference
-    probs = Tensor.rand(1, 1, 28, 28).sequential(layers).fuse().tolist()
+    probs = Tensor.rand(1, 1, 28, 28).sequential(layers).tolist()
     self.assertEqual(len(probs[0]), 10)
 
   # *** image ***
