@@ -70,6 +70,7 @@ setup(name='tinygrad',
             "bottle",
             "ggml-python",
             "capstone",
+            "ml_dtypes",
             "pycocotools",
             "boto3",
             "pandas"
