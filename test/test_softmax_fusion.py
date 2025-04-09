@@ -130,8 +130,8 @@ class TestSoftmaxFusion(unittest.TestCase):
     #prg = k.to_program()
     #print(prg.src)
 
-    #ei.run()
-    #np.testing.assert_allclose(sout.numpy(), ei.bufs[0].numpy().reshape(sout.shape), atol=1e-5)
+    ei.run()
+    np.testing.assert_allclose(sout.numpy(), ei.bufs[0].numpy().reshape(sout.shape), atol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()
