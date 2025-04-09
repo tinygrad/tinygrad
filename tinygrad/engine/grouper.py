@@ -291,7 +291,7 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp, kernelize=False):
   new_input_st = tmp + ShapeTracker(tuple(nv))
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
   swizzled_src = apply_swizzle(src.view(src.arg+new_input_st if src.op is Ops.VIEW else new_input_st))
-  if kernelize: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src.kernelize(),), (r.arg[0], new_axis, True))
+  if kernelize: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src.fuse(),), (r.arg[0], new_axis, True))
   else: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src,), (r.arg[0], new_axis))
   return red.view(ShapeTracker.from_shape(st.shape))
 
@@ -420,25 +420,25 @@ def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 
-pm_kernelize = PatternMatcher([
-  # KERNELIZE on CONTIGUOUS removes KERNELIZE
-  (UPat(Ops.CONTIGUOUS, name="c").kernelize(), lambda c: c),
+pm_fuse = PatternMatcher([
+  # FUSE on CONTIGUOUS removes FUSE
+  (UPat(Ops.CONTIGUOUS, name="c").fuse(), lambda c: c),
 
-  # KERNELIZE triggers swizzle on reduceop
-  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view").kernelize(),
+  # FUSE triggers swizzle on reduceop
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view").fuse(),
    lambda r,src,view: swizzle_reduceop(r, src, view, True)),
 
-  # KERNELIZE elementwise. TODO: check for PAD
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.ALU, name="alu"),), name="view").kernelize(),
-   lambda alu, view: alu.replace(src=tuple(x.view(view.arg).kernelize() for x in alu.src))),
+  # FUSE elementwise. TODO: check for PAD
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.ALU, name="alu"),), name="view").fuse(),
+   lambda alu, view: alu.replace(src=tuple(x.view(view.arg).fuse() for x in alu.src))),
 
-  # push KERNELIZE through to srcs
-  (UPat(Ops.KERNELIZE, name="x"), lambda x: x.src[0].replace(src=tuple(y.kernelize() for y in x.src[0].src))),
+  # push FUSE through to srcs
+  (UPat(Ops.FUSE, name="x"), lambda x: x.src[0].replace(src=tuple(y.fuse() for y in x.src[0].src))),
 ])
 
 def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   # merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous+pm_kernelize, ctx={})
+  tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous+pm_fuse, ctx={})
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")

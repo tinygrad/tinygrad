@@ -2719,12 +2719,12 @@ class Tensor(SimpleMathTrait):
     """
     return self._apply_uop(UOp.contiguous)
 
-  def kernelize(self) -> Tensor:
+  def fuse(self) -> Tensor:
     """
     Make this a single kernel back to explicit contiguous on the inputs.
     Useful for single kernel softmax and flash attention.
     """
-    return self._apply_uop(UOp.kernelize).contiguous()
+    return self._apply_uop(UOp.fuse).contiguous()
 
   def contiguous_backward(self) -> Tensor:
     """

@@ -28,26 +28,26 @@ def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Te
 
 def run_one_schedule_item(out): lower_schedule_item(get_single_element(out.schedule())).run()
 
-class TestKernelize(unittest.TestCase):
-  def _test_kernelize(self, val, fxn):
+class TestFuse(unittest.TestCase):
+  def _test_fuse(self, val, fxn):
     GlobalCounters.reset()
-    out_single = fxn(val).kernelize()
+    out_single = fxn(val).fuse()
     run_one_schedule_item(out_single)
     np_single = out_single.numpy()
     GlobalCounters.reset()
     np_multi = fxn(val).numpy()
     np.testing.assert_allclose(np_single, np_multi, atol=1e-7)
 
-  def test_kernelize_norm(self):
+  def test_fuse_norm(self):
     a = Tensor.rand(50,50).realize()
-    self._test_kernelize(a, lambda a: a / a.mean(axis=1))
+    self._test_fuse(a, lambda a: a / a.mean(axis=1))
 
-  def test_kernelize_argmax(self):
+  def test_fuse_argmax(self):
     a = Tensor.rand(50,50).realize()
-    self._test_kernelize(a, lambda a: a.argmax(axis=-1))
+    self._test_fuse(a, lambda a: a.argmax(axis=-1))
 
-  def test_kernelize_arange_eye(self):
-    self._test_kernelize(None, lambda _: Tensor.arange(10).reshape(10,1).expand(10,10) == Tensor.arange(10).reshape(1,10).expand(10,10))
+  def test_fuse_arange_eye(self):
+    self._test_fuse(None, lambda _: Tensor.arange(10).reshape(10,1).expand(10,10) == Tensor.arange(10).reshape(1,10).expand(10,10))
 
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
@@ -97,7 +97,7 @@ class TestSoftmaxFusion(unittest.TestCase):
 
     print("*** auto single kernel softmax ***")
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
-      out = self.test.contiguous().softmax(-1).kernelize()
+      out = self.test.contiguous().softmax(-1).fuse()
       run_one_schedule_item(out)
 
     np.testing.assert_allclose(sout.numpy(), out.numpy())

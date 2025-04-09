@@ -32,7 +32,7 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.KERNELIZE), name="root", src=(UPat.var("x"),), arg=None),
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="root", src=(UPat.var("x"),), arg=None),
    lambda root,x: root.dtype == x.dtype),
 
   # COPY
