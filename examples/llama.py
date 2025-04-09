@@ -9,7 +9,7 @@ import argparse, json
 from tinygrad import Tensor, Device, GlobalCounters, nn
 from tinygrad.helpers import Context, Timing, Profiling, DEBUG, JIT, getenv, colored
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
-from extra.models.llama import Transformer, convert_from_huggingface 
+from extra.models.llama import Transformer, convert_from_huggingface
 from sentencepiece import SentencePieceProcessor
 import tiktoken, sys
 from tiktoken.load import load_tiktoken_bpe

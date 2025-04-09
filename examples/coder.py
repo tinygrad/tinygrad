@@ -6,7 +6,7 @@ from io import StringIO
 from contextlib import redirect_stdout
 from tinygrad import Tensor, nn, Device, dtypes
 from tinygrad.helpers import Timing, colored, getenv, fetch
-from extra.models.llama import Transformer, convert_from_huggingface 
+from extra.models.llama import Transformer, convert_from_huggingface
 from sentencepiece import SentencePieceProcessor
 
 def create_fixed_tokenizer(output_file):
