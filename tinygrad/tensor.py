@@ -2723,7 +2723,7 @@ class Tensor(SimpleMathTrait):
     """
     Make a single kernel back to contiguous.
     """
-    return self._apply_uop(UOp.kernelize)
+    return self._apply_uop(UOp.kernelize).contiguous()
 
   def contiguous_backward(self) -> Tensor:
     """

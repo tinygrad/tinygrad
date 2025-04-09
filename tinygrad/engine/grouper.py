@@ -170,6 +170,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   double_reduces: list[UOp] = []
   for r in sink.toposort:
     if r.op is not Ops.REDUCE_AXIS: continue
+    if r.op is Ops.REDUCE_AXIS and len(r.arg) == 3 and r.arg[2] is True: continue
     if FUSE_CONV_BW and r.src[0].base.op is Ops.REDUCE_AXIS and r.src[0] is not r.src[0].base: double_reduces.append(r)
     if r in ctx.realizes: continue
     group: dict[UOp, None] = {}
@@ -291,7 +292,7 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp, kernelize=False):
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
   swizzled_src = apply_swizzle(src.view(src.arg+new_input_st if src.op is Ops.VIEW else new_input_st))
   if kernelize: swizzled_src = swizzled_src.kernelize()
-  return UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src,), (r.arg[0], new_axis)).view(ShapeTracker.from_shape(st.shape))
+  return UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src,), (r.arg[0], new_axis, kernelize)).view(ShapeTracker.from_shape(st.shape))
 
 def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   assert unwrap(v.st).contiguous and v.size == src.size, f"can't compute new axis for {src.shape} -> {r.shape}"
