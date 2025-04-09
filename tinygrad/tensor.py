@@ -1867,8 +1867,8 @@ class Tensor(SimpleMathTrait):
     print(t.softmax(axis=0).numpy())
     ```
     """
-    _, e, ss = self.contiguous()._softmax(axis, dtype)
-    return e.div(ss).kernelize()
+    _, e, ss = self._softmax(axis, dtype)
+    return e.div(ss)
 
   def log_softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
     """
@@ -2721,7 +2721,8 @@ class Tensor(SimpleMathTrait):
 
   def kernelize(self) -> Tensor:
     """
-    Make a single kernel back to contiguous.
+    Make this a single kernel back to explicit contiguous on the inputs.
+    Useful for single kernel softmax and flash attention.
     """
     return self._apply_uop(UOp.kernelize).contiguous()
 

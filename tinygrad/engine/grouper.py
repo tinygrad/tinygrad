@@ -291,8 +291,9 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp, kernelize=False):
   new_input_st = tmp + ShapeTracker(tuple(nv))
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
   swizzled_src = apply_swizzle(src.view(src.arg+new_input_st if src.op is Ops.VIEW else new_input_st))
-  if kernelize: swizzled_src = swizzled_src.kernelize()
-  return UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src,), (r.arg[0], new_axis, kernelize)).view(ShapeTracker.from_shape(st.shape))
+  if kernelize: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src.kernelize(),), (r.arg[0], new_axis, True))
+  else: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src,), (r.arg[0], new_axis))
+  return red.view(ShapeTracker.from_shape(st.shape))
 
 def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   assert unwrap(v.st).contiguous and v.size == src.size, f"can't compute new axis for {src.shape} -> {r.shape}"
@@ -306,7 +307,7 @@ def elementwise_view_right(root:UOp):
   new_src = [x.base if x.base.shape==new_st.shape else apply_swizzle(x.view(x.arg+new_st) if x.op is Ops.VIEW else x.view(new_st)) for x in root.src]
   # reshape to match downstream shapes
   ret = root.replace(src=tuple(new_src))
-  if len(ret.shape) < len(root.shape): return None
+  #if len(ret.shape) < len(root.shape): return None
   return ret.reshape(root.shape)
 
 def reduce_push_add_ones(src, r, view):
@@ -342,7 +343,7 @@ view_right = merge_views+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="r1"),), name="r2"),
    lambda r1,r2: r1.replace(arg=(r1.arg[0], r2.arg[1]+r1.arg[1])) if r1.arg[0] == r2.arg[0] else None),
   # if there's ones added after reduce, put this before the reduce
-  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
+  #(UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
 ])
 
 # **** unbind variables
@@ -443,7 +444,6 @@ def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
 
   # group into kernels
   sink = tensor_map[big_sink]
-
   realize_map = group_realizes(sink)
   tensor_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True,
                                  input_map=tensor_map)

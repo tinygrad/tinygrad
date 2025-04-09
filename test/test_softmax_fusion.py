@@ -73,7 +73,7 @@ class TestSoftmaxFusion(unittest.TestCase):
       sout.realize()
 
     print("*** auto single kernel softmax ***")
-    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1):
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
       out = self.test.contiguous().softmax(-1).kernelize()
       si = out.schedule()
       self.assertEqual(len(si), 1)
