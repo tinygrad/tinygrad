@@ -274,13 +274,19 @@ def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
     new_shape: list[sint] = []
     new_reduce_axis = []
     for i,pairs in enumerate(unwrap(get_contraction(view.shape, r.shape))):
-      if len(pairs) == 0: continue  # should be only if everything is ones
-      # if this is a reduce axis, append the new shape length
-      if i in r.arg[1]: new_reduce_axis.append(len(new_shape))
-      new_shape.append(src.shape[i])
-      if len(pairs) > 1: new_shape += [1]*(len(pairs)-1)
+      new_shape_chunk = [view.shape[p] for p in pairs]
+      if i in r.arg[1]:
+        # if this is a reduce axis, we have to do something
+        assert len(new_shape_chunk) > 0, "nowhere to put reduce"
+        assert all(x == 1 for x in new_shape_chunk), "not all ones in reduce?"
+        new_reduce_axis.append(len(new_shape))
+        new_shape.append(src.shape[i])
+        if len(pairs) > 1: new_shape += [1]*(len(pairs)-1)
+      else:
+        # otherwise, pass through the new_shape_chunk
+        new_shape += new_shape_chunk
     ret = r.replace(src=(src.reshape(tuple(new_shape)),), arg=(r.arg[0], tuple(new_reduce_axis))+r.arg[2:])
-    assert ret.shape == view.shape, "shape mismatch on reduce_push_add_ones"
+    assert ret.shape == view.shape, f"shape mismatch on reduce_push_add_ones, {ret.shape} != {view.shape}"
     return ret
   return None
 

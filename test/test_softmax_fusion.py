@@ -29,29 +29,38 @@ def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Te
 def run_one_schedule_item(out): lower_schedule_item(get_single_element(out.schedule())).run()
 
 class TestFuse(unittest.TestCase):
-  def _test_fuse(self, val, fxn):
+  def _test_fuse(self, fxn, *args, **kwargs):
     GlobalCounters.reset()
-    out_single = fxn(val).fuse()
+    out_single = fxn(*args, **kwargs).fuse()
     run_one_schedule_item(out_single)
     np_single = out_single.numpy()
     GlobalCounters.reset()
-    np_multi = fxn(val).numpy()
+    np_multi = fxn(*args, **kwargs).numpy()
     np.testing.assert_allclose(np_single, np_multi, atol=1e-7)
 
   def test_fuse_norm(self):
     a = Tensor.rand(50,50).realize()
-    self._test_fuse(a, lambda a: a / a.mean(axis=1))
+    self._test_fuse(lambda a: a / a.mean(axis=1), a)
 
   def test_fuse_argmax(self):
     a = Tensor.rand(50,50).realize()
-    self._test_fuse(a, lambda a: a.argmax(axis=-1))
+    self._test_fuse(lambda a: a.argmax(axis=-1), a)
 
   def test_fuse_softmax(self):
     a = Tensor.rand(50,50).realize()
-    self._test_fuse(a, lambda a: a.softmax(axis=-1))
+    self._test_fuse(lambda a: a.softmax(axis=-1), a)
 
   def test_fuse_arange_eye(self):
-    self._test_fuse(None, lambda _: Tensor.arange(10).reshape(10,1).expand(10,10) == Tensor.arange(10).reshape(1,10).expand(10,10))
+    self._test_fuse(lambda: Tensor.arange(10).reshape(10,1).expand(10,10) == Tensor.arange(10).reshape(1,10).expand(10,10))
+
+  @unittest.skip("failing with group")
+  def test_double_gemm(self):
+    N = 32
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+      a = Tensor.rand(N,N).realize()
+      b = Tensor.rand(N,N).realize()
+      c = Tensor.rand(N,N).realize()
+    self._test_fuse(lambda a,b,c: a@b@c, a, b, c)
 
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
