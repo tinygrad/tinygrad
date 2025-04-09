@@ -114,10 +114,10 @@ class AMDComputeQueue(HWQueue):
     assert self.dev.xccs == 8, 'only 8 XCCs supported'
     a, b = self.dev.xcc_sync
     mem_eq = self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ) | self.pm4.WAIT_REG_MEM_MEM_SPACE(1)
-    self.pkt3(self.pm4.PACKET3_ATOMIC_MEM, self.soc.TC_OP_ATOMIC_ADD_RTN_32, *data64_le(a.value_addr), *data64_le(1), *data64_le(0), 10) # a += 1
-    self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, mem_eq, *data64_le(a.value_addr), 0, 0b111, 10) # a == 0 (mod 8) via bitmask
-    self.pkt3(self.pm4.PACKET3_ATOMIC_MEM, self.soc.TC_OP_ATOMIC_ADD_RTN_32, *data64_le(b.value_addr), *data64_le(1), *data64_le(0), 10) # b += 1
-    self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, mem_eq, *data64_le(b.value_addr), 0, 0b111, 10) # b == 0 (mod 8) via bitmask
+    self.pkt3(self.pm4.PACKET3_ATOMIC_MEM, self.soc.TC_OP_ATOMIC_ADD_RTN_32, *data64_le(a.value_addr), *data64_le(1), *data64_le(0), 0x10) # a += 1
+    self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, mem_eq, *data64_le(a.value_addr), 0, 0b111, 0x80) # a == 0 (mod 8) via bitmask
+    self.pkt3(self.pm4.PACKET3_ATOMIC_MEM, self.soc.TC_OP_ATOMIC_ADD_RTN_32, *data64_le(b.value_addr), *data64_le(1), *data64_le(0), 0x10) # b += 1
+    self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, mem_eq, *data64_le(b.value_addr), 0, 0b111, 0x80) # b == 0 (mod 8) via bitmask
     return self
 
   def memory_barrier(self):
@@ -264,13 +264,15 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *global_size, DISPATCH_INITIATOR)
     if prg.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
     self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
-    if self.dev.xccs > 1: self.release_mem(cache_flush=True)
-    self.xcc_barrier()
+    if self.dev.xccs > 1:
+      self.release_mem(cache_flush=True)
+      self.acquire_mem(gli=0)
+      self.xcc_barrier()
     return self
 
   def wait(self, signal:AMDSignal, value:sint=0):
     self.wait_reg_mem(mem=signal.value_addr, value=value, mask=0xffffffff)
-    self.xcc_barrier()
+    if self.dev.xccs > 1: self.xcc_barrier()
     return self
 
   def timestamp(self, signal:AMDSignal):
@@ -829,8 +831,11 @@ class AMDDevice(HCQCompiled):
     self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
 
     # XCC setup
-    self.xcc_sync: tuple[AMDSignal, AMDSignal]|None = (AMDSignal(), AMDSignal()) if self.xccs > 1 else None
-    if self.xccs > 1: AMDComputeQueue(self).xcc_config().submit(self)
+    self.xcc_sync: tuple[AMDSignal, AMDSignal]|None = None
+    if self.xccs > 1:
+      self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True))
+      self.xcc_sync = (AMDSignal(base_addr=self.xcc_sync_area.va_addr), AMDSignal(base_addr=self.xcc_sync_area.va_addr + 256))
+      AMDComputeQueue(self).xcc_config().submit(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.sqtt_enabled = PROFILE and bool(getenv("SQTT", 0))
