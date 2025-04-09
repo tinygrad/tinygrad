@@ -1,9 +1,9 @@
 import atexit, pickle
 from dataclasses import dataclass
 from collections import deque
-from tinygrad.ops import UOp, Variable, Ops, buffers
+from tinygrad.ops import UOp, Variable, Ops, buffers, track_rewrites
 from tinygrad.device import Buffer
-from tinygrad.helpers import Metadata, CAPTURE_PROCESS_REPLAY, DEBUG, Context, ContextVar, diskcache_put
+from tinygrad.helpers import Metadata, CAPTURE_PROCESS_REPLAY, DEBUG, Context, ContextVar, diskcache_put, pluralize
 from tinygrad.engine.grouper import get_becomes_map
 
 # **** ScheduleItem return type
@@ -22,6 +22,8 @@ if CAPTURE_PROCESS_REPLAY:
 
 # **** schedule linearizer
 
+
+@track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   becomes_map, var_vals = get_becomes_map(big_sink)
   sched_sink = becomes_map.pop(big_sink)
