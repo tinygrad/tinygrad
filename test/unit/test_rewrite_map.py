@@ -40,7 +40,7 @@ class TestRewriteMap(unittest.TestCase):
     self.assertIs(sub_map1[(a+b)*c], c*c)
     # stage 2: c*c -> d
     sub2 = {c*c:d}
-    sub_map2 = graph_rewrite_map(sub_map1[start], _substitute, sub2, merge_map=sub_map1, bottom_up=True)
+    sub_map2 = graph_rewrite_map(sub_map1[start], _substitute, sub2, input_map=sub_map1, bottom_up=True)
     # (a+b)*c -> c*c -> d
     self.assertIs(sub_map2[(a+b)*c], d)
 
