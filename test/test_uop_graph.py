@@ -448,6 +448,34 @@ class TestUOpGraph(unittest.TestCase):
     ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 42)),))
     with self.assertRaises(RuntimeError): to_uops_list([ld0])
 
+  @Context(CHECK_OOB=1)
+  def test_out_of_bounds_off_by_one_access(self):
+    glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 16)),))
+    with self.assertRaises(RuntimeError): to_uops_list([ld0])
+
+  @Context(CHECK_OOB=1)
+  def test_in_bounds_access(self):
+    glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 0)),))
+    to_uops_list([ld0])
+    ld1 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 15)),))
+    to_uops_list([ld1])
+
+  @Context(CHECK_OOB=1)
+  def test_in_bounds_access_with_mask(self):
+    glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+    gidx0 = UOp(Ops.SPECIAL, dtype=dtypes.int, arg=("gidx0", 42))
+    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, gidx0<16),))
+    to_uops_list([ld0])
+
+  @Context(CHECK_OOB=1)
+  def test_out_of_bounds_access_with_mask(self):
+    glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+    gidx0 = UOp(Ops.SPECIAL, dtype=dtypes.int, arg=("gidx0", 42))
+    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, gidx0<17),))
+    with self.assertRaises(RuntimeError): to_uops_list([ld0])
+
   def test_fold_gated_load(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
