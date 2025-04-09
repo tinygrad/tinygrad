@@ -411,11 +411,14 @@ def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   for k,v in tensor_map.items():
     if (kernel:=kernel_map.get(v.base)) is not None and kernel.base.op is Ops.ASSIGN: v = kernel.view(unwrap(v.st))
     if k is v: continue
+    if k.op is Ops.ASSIGN:
+      becomes_map[k] = k.src[0]
+      continue
     op = v.base.op
     if op is Ops.BUFFER: becomes_map[k] = v
     if op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
     if op is Ops.ASSIGN:
-      new_buf = k.src[0] if k.op is Ops.ASSIGN else v.base.src[0]
+      new_buf = v.base.src[0]
       becomes_map[k] = new_buf if new_buf.st == v.st else new_buf.view(unwrap(v.st))
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
