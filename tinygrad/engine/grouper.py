@@ -4,7 +4,7 @@ from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, grap
 from tinygrad.ops import can_pad, sint
 from tinygrad.codegen.lowerer import get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -268,6 +268,22 @@ create_kernels = merge_views+PatternMatcher([
 
 # **** swizzler
 
+def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
+  # contiguous, expand, and the same with ones removed
+  if unwrap(view.st).contiguous and len(r.shape) < len(view.shape) and tuple(x for x in r.shape if x != 1) == tuple(x for x in view.shape if x != 1):
+    new_shape: list[sint] = []
+    new_reduce_axis = []
+    for i,pairs in enumerate(unwrap(get_contraction(view.shape, r.shape))):
+      if len(pairs) == 0: continue  # should be only if everything is ones
+      # if this is a reduce axis, append the new shape length
+      if i in r.arg[1]: new_reduce_axis.append(len(new_shape))
+      new_shape.append(src.shape[i])
+      if len(pairs) > 1: new_shape += [1]*(len(pairs)-1)
+    ret = r.replace(src=(src.reshape(tuple(new_shape)),), arg=(r.arg[0], tuple(new_reduce_axis))+r.arg[2:])
+    assert ret.shape == view.shape, "shape mismatch on reduce_push_add_ones"
+    return ret
+  return None
+
 view_left = merge_views+PatternMatcher([
   # do not push masked view before unsafe pad ops
   (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="e"),), name="view"),
@@ -275,10 +291,11 @@ view_left = merge_views+PatternMatcher([
   # view before elementwise ops
   (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST}, name="e"),), name="view"),
    lambda e,view: e.replace(src=tuple(s.view(s.st+view.st) if s.op is Ops.VIEW else s.view(view.st) for s in e.src))),
+  # if there's ones added after reduce, put this before the reduce
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
 ])
 
-def apply_swizzle(u:UOp) -> UOp:
-  with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
+def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub View Left")
 
 def swizzle_reduceop(r:UOp, src:UOp, view:UOp, kernelize=False):
   if (st:=unwrap(view.st)).contiguous: return None
@@ -309,19 +326,6 @@ def elementwise_view_right(root:UOp):
   # reshape to match downstream shapes
   return root.replace(src=tuple(new_src)).reshape(root.shape)
 
-def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
-  # contiguous, expand, and the same with ones removed
-  if unwrap(view.st).contiguous and len(r.shape) < len(view.shape) and tuple(x for x in r.shape if x != 1) == tuple(x for x in view.shape if x != 1):
-    new_shape: list[sint] = []
-    new_reduce_axis = []
-    for i,pairs in enumerate(unwrap(get_contraction(view.shape, r.shape))):
-      # if this is a reduce axis, append the new shape length
-      if i in r.arg[1]: new_reduce_axis.append(len(new_shape))
-      new_shape.append(src.shape[i])
-      if len(pairs) > 1: new_shape += [1]*(len(pairs)-1)
-    return r.replace(src=(src.reshape(tuple(new_shape)),), arg=(r.arg[0], tuple(new_reduce_axis))+r.arg[2:])
-  return None
-
 # push VIEW to children
 view_right = merge_views+PatternMatcher([
   # push a non contiguous ShapeTracker through reduceop
@@ -333,8 +337,6 @@ view_right = merge_views+PatternMatcher([
   # merge axes for double reduce (invert of SPLIT_REDUCEOP=1)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="r1"),), name="r2"),
    lambda r1,r2: r1.replace(arg=(r1.arg[0], r2.arg[1]+r1.arg[1])) if r1.arg[0] == r2.arg[0] else None),
-  # if there's ones added after reduce, put this before the reduce
-  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
 ])
 
 # **** unbind variables
@@ -402,7 +404,7 @@ def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
       for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
   ast = k.arg.ast.substitute(parents_rep)
   # push views to edges
-  ast = graph_rewrite(graph_rewrite(ast, view_left), view_right)
+  ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # add buffer ops + fix_kernel_ops
   ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, ctx=(ctx, bufs:=tuple(s.buf_uop for s in k.src)), bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
