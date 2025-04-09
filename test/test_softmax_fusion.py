@@ -61,6 +61,18 @@ class TestFuse(unittest.TestCase):
       c = (Tensor.rand(N,N)-0.5).realize()
     self._test_fuse(lambda a,b,c: a@b@c, a, b, c, atol=1e-5)
 
+  @unittest.skip("infinite looping")
+  def test_flash_attention(self):
+    BS = 4
+    HEADS = 2
+    MATDIM = 16
+    EMB = 8
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+      q = Tensor.randn(BS, HEADS, MATDIM, EMB).realize()
+      k = Tensor.randn(BS, HEADS, MATDIM, EMB).realize()
+      v = Tensor.randn(BS, HEADS, MATDIM, EMB).realize()
+    self._test_fuse(Tensor.scaled_dot_product_attention, q, k, v)
+
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
