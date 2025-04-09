@@ -962,7 +962,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
   return rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.top_down_rewrite(sink)
 
 @track_matches
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False, input_map=None, keep_metadata=False) -> dict[UOp, UOp]:
+def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False, input_map=None, keep_metadata=False) -> dict[UOp, UOp]:# noqa: E501
   rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
   if keep_metadata:
     new_map={}
