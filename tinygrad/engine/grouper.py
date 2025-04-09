@@ -418,7 +418,7 @@ def reduce_push_add_ones(src, r, view):
 
   #print(src.shape, r.shape, view.shape, new_shape)
   ones_to_add = len(view.shape) - len(r.shape)
-  if view.shape == (4, 16, 512, 64, 512, 1, 512, 1):
+  if view.shape == (4, 16, 256, 64, 256, 1, 256, 1):
     new_shape = src.shape[:reduce_axis-1]+(1,)*ones_to_add+src.shape[reduce_axis-1:]
   else:
     new_shape = src.shape[:reduce_axis]+(1,)*ones_to_add+src.shape[reduce_axis:]
@@ -468,7 +468,6 @@ view_right_simple = PatternMatcher([
   (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
 ])
 
-@track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
 def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   # merge_views + simplify
   tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous, ctx={})

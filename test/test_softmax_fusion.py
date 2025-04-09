@@ -107,13 +107,15 @@ class TestSoftmaxFusion(unittest.TestCase):
   def test_flash_attention(self):
     # these are the BERT dimensions
     BS = 4
+    MATDIM = 256
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
-      query = Tensor.rand(BS, 16, 512, 64).realize()
-      key = Tensor.rand(BS, 16, 512, 64).realize()
-      value = Tensor.rand(BS, 16, 512, 64).realize()
+      query = Tensor.rand(BS, 16, MATDIM, 64).realize()
+      key = Tensor.rand(BS, 16, MATDIM, 64).realize()
+      value = Tensor.rand(BS, 16, MATDIM, 64).realize()
 
     print("*** attention ***")
     # 5 kernels!
+    GlobalCounters.reset()
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
       sout = query.scaled_dot_product_attention(key, value)
       sout.realize()
