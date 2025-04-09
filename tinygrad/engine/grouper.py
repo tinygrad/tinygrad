@@ -1,9 +1,10 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, merge_views
-from tinygrad.ops import can_pad
+from tinygrad.ops import can_pad, sint
+from tinygrad.codegen.lowerer import get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -170,6 +171,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   double_reduces: list[UOp] = []
   for r in sink.toposort:
     if r.op is not Ops.REDUCE_AXIS: continue
+    if r.op is Ops.REDUCE_AXIS and len(r.arg) == 3 and r.arg[2] is True: continue
     if FUSE_CONV_BW and r.src[0].base.op is Ops.REDUCE_AXIS and r.src[0] is not r.src[0].base: double_reduces.append(r)
     if r in ctx.realizes: continue
     group: dict[UOp, None] = {}
@@ -266,6 +268,29 @@ create_kernels = merge_views+PatternMatcher([
 
 # **** swizzler
 
+def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
+  # contiguous, expand, and the same with ones removed
+  if unwrap(view.st).contiguous and len(r.shape) < len(view.shape) and tuple(x for x in r.shape if x != 1) == tuple(x for x in view.shape if x != 1):
+    new_shape: list[sint] = []
+    new_reduce_axis = []
+    for i,pairs in enumerate(unwrap(get_contraction(view.shape, r.shape))):
+      new_shape_chunk = [view.shape[p] for p in pairs]
+      if i in r.arg[1]:
+        # if there's nowhere to fit the reduce, we return None (might be missing solvable cases)
+        if len(new_shape_chunk) == 0: return None
+        # we left justify the reduce in a group of ones
+        assert all(x == 1 for x in new_shape_chunk), "not all ones in reduce?"
+        new_reduce_axis.append(len(new_shape))
+        new_shape.append(src.shape[i])
+        if len(pairs) > 1: new_shape += [1]*(len(pairs)-1)
+      else:
+        # otherwise, pass through the new_shape_chunk
+        new_shape += new_shape_chunk
+    ret = r.replace(src=(src.reshape(tuple(new_shape)),), arg=(r.arg[0], tuple(new_reduce_axis))+r.arg[2:])
+    assert ret.shape == view.shape, f"shape mismatch on reduce_push_add_ones, {ret.shape} != {view.shape}"
+    return ret
+  return None
+
 view_left = merge_views+PatternMatcher([
   # do not push masked view before unsafe pad ops
   (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="e"),), name="view"),
@@ -273,12 +298,13 @@ view_left = merge_views+PatternMatcher([
   # view before elementwise ops
   (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST}, name="e"),), name="view"),
    lambda e,view: e.replace(src=tuple(s.view(s.st+view.st) if s.op is Ops.VIEW else s.view(view.st) for s in e.src))),
+  # if there's ones added after reduce, put this before the reduce
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
 ])
 
-def apply_swizzle(u:UOp) -> UOp:
-  with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
+def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub View Left")
 
-def swizzle_reduceop(r:UOp, src:UOp, view:UOp):
+def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   if (st:=unwrap(view.st)).contiguous: return None
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
@@ -289,8 +315,10 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp):
   # create a new reduceop for the swizzled input
   new_input_st = tmp + ShapeTracker(tuple(nv))
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
-  return UOp(Ops.REDUCE_AXIS, r.dtype, (apply_swizzle(src.view(src.arg+new_input_st if src.op is Ops.VIEW else new_input_st)),),
-             (r.arg[0], new_axis)).view(ShapeTracker.from_shape(st.shape))
+  swizzled_src = apply_swizzle(src.view(src.arg+new_input_st if src.op is Ops.VIEW else new_input_st))
+  if fuse: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src.fuse(),), (r.arg[0], new_axis, True))
+  else: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src,), (r.arg[0], new_axis))
+  return red.view(ShapeTracker.from_shape(st.shape))
 
 def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   assert unwrap(v.st).contiguous and v.size == src.size, f"can't compute new axis for {src.shape} -> {r.shape}"
@@ -383,7 +411,7 @@ def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
       for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
   ast = k.arg.ast.substitute(parents_rep)
   # push views to edges
-  ast = graph_rewrite(graph_rewrite(ast, view_left), view_right)
+  ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # add buffer ops + fix_kernel_ops
   ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, ctx=(ctx, bufs:=tuple(s.buf_uop for s in k.src)), bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
@@ -391,9 +419,25 @@ def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 
+pm_fuse = PatternMatcher([
+  # FUSE on CONTIGUOUS removes FUSE
+  (UPat(Ops.CONTIGUOUS, name="c").fuse(), lambda c: c),
+
+  # FUSE triggers swizzle on reduceop
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view").fuse(),
+   lambda r,src,view: swizzle_reduceop(r, src, view, fuse=True)),
+
+  # FUSE elementwise. TODO: check for PAD
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.ALU, name="alu"),), name="view").fuse(),
+   lambda alu, view: alu.replace(src=tuple(x.view(view.arg).fuse() for x in alu.src))),
+
+  # push FUSE through to srcs
+  (UPat(Ops.FUSE, name="x"), lambda x: x.src[0].replace(src=tuple(y.fuse() for y in x.src[0].src))),
+])
+
 def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   # merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous, ctx={})
+  tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous+pm_fuse, ctx={})
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
