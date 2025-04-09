@@ -41,7 +41,6 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   np_c = np_a @ np_b
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
-  elif dtype_in in dtypes.fp8s: tc_atol, tc_rtol = 1e-1, 1e-2
   else: tc_atol, tc_rtol = 5e-3, 1e-4
   np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
@@ -62,13 +61,6 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
   else:
     assert wmmas == 0, "tensor core is incorrectly triggered"
     assert tcs == 0, "tensor core opt is incorrectly included"
-
-def is_emulated(tc) -> bool:
-  return (getenv("EMULATE_CUDA_SM89") or getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL") or getenv("EMULATE_METAL")
-          or getenv("EMULATE_AMD_MFMA") or getenv("EMULATE_AMD")) and \
-          ((tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16) or \
-          (tc.dtype_in == dtypes.fp8e4m3 or tc.dtype_out == dtypes.fp8e4m3) or \
-          (tc.dtype_in == dtypes.fp8e5m2 or tc.dtype_out == dtypes.fp8e5m2))
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -1032,8 +1024,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_sum_acc_dtype(self):
     for tensor_dtype, acc_dtype in (
-      (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float),
-      (dtypes.fp8e4m3, dtypes.float), (dtypes.fp8e5m2, dtypes.float)):
+      (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
       if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype):
         a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
         k = Kernel(a.schedule()[-1].ast)
@@ -1055,10 +1046,6 @@ class TestLinearizer(unittest.TestCase):
       (dtypes.float16, dtypes.float16, dtypes.float16),
       (dtypes.bfloat16, dtypes.bfloat16, dtypes.bfloat16),
       (dtypes.float, dtypes.float16, dtypes.float16),
-      (dtypes.fp8e5m2, dtypes.fp8e5m2, dtypes.fp8e5m2),
-      (dtypes.fp8e4m3, dtypes.fp8e4m3, dtypes.fp8e4m3),
-      (dtypes.fp8e4m3, None, dtypes.float),
-      (dtypes.fp8e5m2, None, dtypes.float),
     )
     for tensor_dtype, acc_dtype, expected_dtype in tests:
       if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype) and is_dtype_supported(expected_dtype):
@@ -1073,7 +1060,8 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if is_emulated(tc): continue
+      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL") or getenv("EMULATE_METAL") or getenv("EMULATE_AMD_MFMA") or getenv("EMULATE_AMD")) and \
+        (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       if CI and Device.DEFAULT in ("METAL", "AMD") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
       helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
@@ -1101,7 +1089,8 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if is_emulated(tc): continue
+      if (getenv("EMULATE_CUDA") or getenv("EMULATE_METAL") or getenv("EMULATE_AMD_MFMA") or getenv("EMULATE_AMD")) and \
+        (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       if CI and Device.DEFAULT in ("METAL", "AMD") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       pad = 1
 
@@ -1128,8 +1117,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_multi_reduce(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if tc.dtype_in in [dtypes.bfloat16, *dtypes.fp8s] or tc.dtype_out in [dtypes.bfloat16, *dtypes.fp8s]:
-        continue
+      if tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16: continue
       # this will be a M=G16, N=G32, M=G16, M=G16, K=R16, K=R16, K=R16 with 9 choices of TC MNK axes
       golden_result = None
       for axis in range(9):

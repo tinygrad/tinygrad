@@ -3003,17 +3003,6 @@ class TestOpsUint8(unittest.TestCase):
       lambda x: x.type(torch.uint8).min(),
       lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
 
-@unittest.skipUnless("CUDA" in Device.get_available_devices() and Device.DEFAULT == "PYTHON" and getenv("EMULATE_CUDA_SM89"),
-                     "only for emulated CUDA")
-class TestOpsFp8s(unittest.TestCase):
-  def _compare_to_cuda(self, shp_a, shp_b, op, dtype):
-    a = Tensor.rand(shp_a, dtype=dtype)
-    b = Tensor.rand(shp_b, dtype=dtype)
-    np.testing.assert_equal(op(a, b).numpy(), op(a.to("CUDA"), b.to("CUDA")).numpy())
-
-  def test_gemm_fp8e4m3(self): self._compare_to_cuda((64, 64), (64, 64), lambda x, y: x.matmul(y), dtypes.fp8e4m3)
-  def test_gemm_fp8e5m2(self): self._compare_to_cuda((64, 64), (64, 64), lambda x, y: x.matmul(y), dtypes.fp8e5m2)
-
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)

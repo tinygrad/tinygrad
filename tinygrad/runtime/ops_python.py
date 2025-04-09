@@ -10,10 +10,6 @@ from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.ops import exec_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
-if getenv("EMULATE_CUDA_SM89"):
-  import numpy as np
-  from ml_dtypes import float8_e4m3, float8_e5m2
-  truncate.update({dtypes.fp8e4m3: float8_e4m3, dtypes.fp8e5m2: float8_e5m2, float8_e5m2.dtype: np.float32, float8_e4m3.dtype: np.float32})
 
 def _load(m, i):
   if i is None: return 0.0
@@ -71,13 +67,10 @@ class PythonProgram:
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
         if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}:
-          assert isinstance(dtype, PtrDType)
+          assert dtype.fmt is not None and isinstance(dtype, PtrDType)
           if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
           buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
-          if dtype.base in dtypes.fp8s: ul[i] = [np.frombuffer(buf, dtype=dtype.name)] * warp_size
-          else:
-            assert dtype.fmt is not None
-            ul[i] = [buf.cast(dtype.fmt)] * warp_size
+          ul[i] = [buf.cast(dtype.fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
@@ -107,13 +100,11 @@ class PythonProgram:
               i = loop_ends[i] + 1
               continue
         elif uop is Ops.VECTORIZE: ul[i] = inp
-        elif uop is Ops.BITCAST:
-          assert (dtp[0].fmt and dtype.fmt) or (dtp[0] in dtypes.fp8s and dtype) or (dtype in dtypes.fp8s and dtp[0])
-          if dtp[0] in dtypes.fp8s: packed = b''.join([truncate.get(dtp[0], lambda dt: dt)(z).tobytes() for z in inp[0]])
-          else: packed = struct.pack(str(warp_size) + str(dtp[0].fmt), *inp[0])
-          if dtype in dtypes.fp8s: ul[i] = np.frombuffer(packed,dtype=truncate.get(dtype, lambda x: x)).tolist()
-          else: ul[i] = list(struct.unpack(str(warp_size) + str(dtype.fmt), packed))
-        elif uop is Ops.CAST: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
+        elif uop in {Ops.CAST, Ops.BITCAST}:
+          assert dtp[0].fmt and dtype.fmt
+          pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
+          if uop is Ops.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
+          else: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
         elif uop is Ops.LOAD:
           if dtype.count > 1:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
@@ -135,8 +126,7 @@ class PythonProgram:
               for lane_id in range(WARP_THREADS):
                 for elem_idx in range(NUM_C): # calculate new muls and add to acc
                   (c_i, c_j) = c_map(lane_id, elem_idx)
-                  def cast_fn(x): return truncate.get(x.dtype, lambda x: x)(x) if dtp[0].scalar() in dtypes.fp8s else x
-                  out[elem_idx][goff+lane_id] += sum(cast_fn(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff)) for _k in range(K))
+                  out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
             return out
 
           # TODO: refactor these to a shared TensorCoreLayout in kernel.py
@@ -179,11 +169,6 @@ class PythonProgram:
               def b_elem(x, col, k, goff): return x[k//4][goff + k%4 + col*4]
               ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
 
-            elif arg[1] == (8,16,32):
-              def a_elem(x, k, row, goff): return x[k%4 + (k//16)*8 + (row//8)*4][goff + (k//4)%4 + (row%8)*4]
-              def b_elem(x, col, k, goff): return x[k%4 + (k//16)*4][goff + (k//4)%4  + col*4]
-              ul[i] = wmma_helper(32, 32, 16, 8, 4, a_elem, b_elem, c_map)
-
             else: raise NotImplementedError(f"unimplemented tensor core {arg}")
           elif arg[4] == "INTEL":
             # A (16 elements on 8 threads)
@@ -214,7 +199,6 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_AMD_MFMA"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores_mfma
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm80
     if getenv("EMULATE_CUDA_SM75"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm75
-    if getenv("EMULATE_CUDA_SM89"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm89
     if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
     if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CPU", ClangRenderer.tensor_cores
 
