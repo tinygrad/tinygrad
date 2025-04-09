@@ -1,7 +1,8 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, merge_views
-from tinygrad.ops import can_pad
+from tinygrad.ops import can_pad, sint
+from tinygrad.codegen.lowerer import get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
@@ -309,28 +310,17 @@ def elementwise_view_right(root:UOp):
   return root.replace(src=tuple(new_src)).reshape(root.shape)
 
 def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
-  # TODO: this can be made a lot more generic
-  # must be contiguous
-  if not unwrap(view.st).contiguous: return None
-  # must be larger
-  if len(r.shape) >= len(view.shape): return None
-  # must have one reduce axis
-  if len(r.arg[1]) != 1: return None
-  reduce_axis = r.arg[1][0]
-  keep_cnt = len(r.shape) - reduce_axis
-  # must have all ones after the reduce axis
-  if not all(x == 1 for x in r.shape[-keep_cnt:]): return None
-  # must have all ones after the reduce axis in the view
-  if not all(x == 1 for x in view.shape[-keep_cnt:]): return None
-
-  ones_to_add = len(view.shape) - len(r.shape)
-  new_shape = list(view.shape)
-  new_shape[-keep_cnt:] = src.shape[-keep_cnt:]
-
-  new_src = src.reshape(tuple(new_shape))
-  ret = r.replace(src=(new_src,), arg=(r.arg[0], (reduce_axis+ones_to_add,))+r.arg[2:])
-  assert ret.shape == view.shape, f"wrong shape {ret.shape} != {view.shape} (from {new_src.shape} reduced by {reduce_axis})"
-  return ret
+  # contiguous, expand, and the same with ones removed
+  if unwrap(view.st).contiguous and len(r.shape) < len(view.shape) and tuple(x for x in r.shape if x != 1) == tuple(x for x in view.shape if x != 1):
+    new_shape: list[sint] = []
+    new_reduce_axis = []
+    for i,pairs in enumerate(unwrap(get_contraction(view.shape, r.shape))):
+      # if this is a reduce axis, append the new shape length
+      if i in r.arg[1]: new_reduce_axis.append(len(new_shape))
+      new_shape.append(src.shape[i])
+      if len(pairs) > 1: new_shape += [1]*(len(pairs)-1)
+    return r.replace(src=(src.reshape(tuple(new_shape)),), arg=(r.arg[0], tuple(new_reduce_axis))+r.arg[2:])
+  return None
 
 # push VIEW to children
 view_right = merge_views+PatternMatcher([

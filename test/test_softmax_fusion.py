@@ -46,6 +46,10 @@ class TestFuse(unittest.TestCase):
     a = Tensor.rand(50,50).realize()
     self._test_fuse(a, lambda a: a.argmax(axis=-1))
 
+  def test_fuse_softmax(self):
+    a = Tensor.rand(50,50).realize()
+    self._test_fuse(a, lambda a: a.softmax(axis=-1))
+
   def test_fuse_arange_eye(self):
     self._test_fuse(None, lambda _: Tensor.arange(10).reshape(10,1).expand(10,10) == Tensor.arange(10).reshape(1,10).expand(10,10))
 
