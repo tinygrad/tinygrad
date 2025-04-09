@@ -436,7 +436,7 @@ pm_fuse = PatternMatcher([
 ])
 
 def get_name(ret:tuple[dict[UOp, UOp], dict[Variable, int]]) -> str:
-  kcount = len({u for u in ret[0].values() if u.op is Ops.KERNEL})
+  kcount = len({u.src[1] for u in ret[0].values() if u.op is Ops.ASSIGN})
   return f"Schedule {pluralize('Kernel', kcount)}"+(f" (with_{pluralize('Var', len(ret[1]))})" if ret[1] else "")
 
 @track_rewrites(name_fxn=get_name)
