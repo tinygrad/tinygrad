@@ -59,6 +59,13 @@ def relocate(instr: int, ploc: int, tgt: int, r_type: int):
     case libc.R_AARCH64_LDST32_ABS_LO12_NC: return instr | (getbits(tgt, 2, 11) << 10)
     case libc.R_AARCH64_LDST64_ABS_LO12_NC: return instr | (getbits(tgt, 3, 11) << 10)
     case libc.R_AARCH64_LDST128_ABS_LO12_NC: return instr | (getbits(tgt, 4, 11) << 10)
+    case libc.R_AARCH64_COPY: return instr  # For COPY relocation, we just return the instruction as is
+    case libc.R_AARCH64_CALL26:  # For CALL26 relocation, calculate the PC-relative offset
+      offset = (tgt - ploc) >> 2  # Divide by 4 since instructions are 4 bytes aligned
+      return instr | (getbits(offset, 0, 25) << 0)  # Encode the 26-bit offset
+    case libc.R_AARCH64_JUMP26:  # For JUMP26 relocation, same as CALL26 but for unconditional jumps
+      offset = (tgt - ploc) >> 2  # Divide by 4 since instructions are 4 bytes aligned
+      return instr | (getbits(offset, 0, 25) << 0)  # Encode the 26-bit offset
   raise NotImplementedError(f"Encountered unknown relocation type {r_type}")
 
 def jit_loader(obj: bytes) -> bytes:

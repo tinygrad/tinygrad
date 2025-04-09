@@ -13,8 +13,6 @@ Tensor.manual_seed(1337)
 BUF_SIZE = 4096 if CI else 4096 * 128
 RUN_CNT = 4 if CI else 32
 
-Device.DEFAULT = "CPU"
-
 cached_prgs = {}
 def helper_exec_op(device, outbuf, inbufs):
   if (device, len(inbufs)) not in cached_prgs:
