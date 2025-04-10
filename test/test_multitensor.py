@@ -791,15 +791,18 @@ class TestMultiTensor(unittest.TestCase):
     (d*c).realize()
     assert not d.lazydata.is_realized
 
+  def test_data_parallel_resnet_metadata(self):
+    from extra.models.resnet import ResNet18
 
-  def test_metadata(self):
-    X = Tensor.ones(256).contiguous().realize()
-    X.to_(devices_2)
-    for lb in X.lazydata.src:
-        assert lb.shape == (256,)
-    add = (X + X)
-    si_list = add.schedule_with_vars()[0]
-    assert "__add__" in {md.name for si in si_list for md in si.metadata}
+    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
+    fake_image_sharded = fake_image.shard(devices_2, axis=0)
+    m = ResNet18()
+    m.load_from_pretrained()
+    for p in get_parameters(m): p.shard_(devices_2).realize()
+    GlobalCounters.reset()
+    shard_output_schedule = m(fake_image_sharded).log_softmax().schedule_with_vars()[0]
+    assert {"batchnorm", "log_softmax", "add", "max_pool2d", "conv2d"}.issubset({md.name for si in shard_output_schedule for md in si.metadata})
+
 
 @unittest.skipIf(not_support_multi_device(), "no multi")
 class TestHandleData(unittest.TestCase):
