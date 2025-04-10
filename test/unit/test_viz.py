@@ -192,7 +192,7 @@ class TestViz(unittest.TestCase):
     ])
     @track_rewrites(named=True)
     def func(u): return graph_rewrite(u, inf)
-    with self.assertRaises(RecursionError): ret = func(UOp.const(dtypes.int, 0))
+    with self.assertRaises(RecursionError): func(UOp.const(dtypes.int, 0))
     _ = list(get_details(keys[0], contexts[0][0]))
 
 class TextVizProfiler(unittest.TestCase):
