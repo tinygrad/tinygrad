@@ -194,6 +194,9 @@ class TestGetContraction(unittest.TestCase):
     r = get_contraction_with_reduce((16, 1, 1, 1, 1), (16, 1, 1, 1), (1,))
     self.assertEqual(r, [[0], [1, 2], [3], [4]])
 
+    r = get_contraction_with_reduce((2, 512, 1, 1), (2, 1, 512), (1,))
+    self.assertIsNone(r)
+
   def test_contraction(self):
     r = get_contraction((1,2,3,4), (2,3,4))
     self.assertEqual(r, [[0, 1], [2], [3]])

@@ -27,7 +27,7 @@ def get_contraction_with_reduce(old_shape:tuple[sint, ...], new_shape:tuple[sint
       while take_from < len(contraction) and len(contraction[take_from]) == 0:
         assert new_shape[take_from] == 1
         take_from += 1
-      if take_from == len(contraction): return None # nothing to take
+      if take_from == len(contraction) or new_shape[take_from] != 1: return None # nothing to take
       for j in range(take_from, i, -1):
         assert len(contraction[j]) > 0
         contraction[j-1] = contraction[j][:-1]
