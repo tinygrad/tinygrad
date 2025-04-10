@@ -345,7 +345,7 @@ def train_resnet():
 def train_retinanet():
   from contextlib import redirect_stdout
   from examples.mlperf.dataloader import batch_load_retinanet
-  from examples.mlperf.initializers import FrozenBatchNorm2d, Conv2dNormal, Conv2dKaimingUniform, Conv2dHeNormal, Linear, Conv2d
+  from examples.mlperf.initializers import FrozenBatchNorm2dRetinaNet, Conv2dNormalRetinaNet, Conv2dKaimingUniformRetinaNet, Linear, Conv2dRetinaNet
   from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize
   from extra.models import resnet
   from pycocotools.coco import COCO
@@ -416,13 +416,13 @@ def train_retinanet():
   if SEED: Tensor.manual_seed(SEED)
 
   # ** model initializers **
-  resnet.BatchNorm = FrozenBatchNorm2d
+  resnet.BatchNorm = FrozenBatchNorm2dRetinaNet
   resnet.Linear = Linear
-  resnet.Conv2d = Conv2d
+  resnet.Conv2d = Conv2dRetinaNet
 
-  retinanet.ConvHead = Conv2dNormal
-  retinanet.ConvClassificationHeadLogits = functools.partial(Conv2dNormal, prior_prob=0.01)
-  retinanet.ConvFPN = Conv2dKaimingUniform
+  retinanet.ConvHead = Conv2dNormalRetinaNet
+  retinanet.ConvClassificationHeadLogits = functools.partial(Conv2dNormalRetinaNet, prior_prob=0.01)
+  retinanet.ConvFPN = Conv2dKaimingUniformRetinaNet
 
   # ** model setup **
   backbone = resnet.ResNeXt50_32X4D(num_classes=None)

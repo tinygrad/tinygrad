@@ -67,7 +67,7 @@ class LayerNormBert:
     if not self.elementwise_affine: return xn
     return (xn * self.weight.cast(dtypes.default_float) + self.bias.cast(dtypes.default_float))
 
-class FrozenBatchNorm2d(nn.BatchNorm2d):
+class FrozenBatchNorm2dRetinaNet(nn.BatchNorm2d):
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
@@ -85,7 +85,7 @@ class FrozenBatchNorm2d(nn.BatchNorm2d):
       self.num_batches_tracked += 1
     return x.cast(dtypes.float32).batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt()).cast(x.dtype)
 
-class Conv2dNormal(nn.Conv2d):
+class Conv2dNormalRetinaNet(nn.Conv2d):
   def __init__(self, in_channels:int, out_channels:int, kernel_size:int|tuple[int, ...],
                stride:int=1, padding:int|tuple[int, ...]|str=0, dilation:int=1, groups:int=1,
                bias:bool=True, prior_prob:float|None=None):
@@ -101,7 +101,7 @@ class Conv2dNormal(nn.Conv2d):
     return x.conv2d(self.weight.cast(dtypes.default_float), self.bias.cast(dtypes.default_float) if self.bias is not None else None,
                     groups=self.groups, stride=self.stride, padding=self.padding)
 
-class Conv2dKaimingUniform(nn.Conv2d):
+class Conv2dKaimingUniformRetinaNet(nn.Conv2d):
   def __init__(self, in_channels:int, out_channels:int, kernel_size:int|tuple[int, ...],
                stride:int=1, padding:int|tuple[int, ...]|str=0, dilation:int=1, groups:int=1,
                bias:bool=True):
@@ -113,7 +113,7 @@ class Conv2dKaimingUniform(nn.Conv2d):
     return x.conv2d(self.weight.cast(dtypes.default_float), self.bias.cast(dtypes.default_float) if self.bias is not None else None,
                     groups=self.groups, stride=self.stride, padding=self.padding)
 
-class Conv2d(nn.Conv2d):
+class Conv2dRetinaNet(nn.Conv2d):
   def __init__(self, in_channels:int, out_channels:int, kernel_size:int|tuple[int, ...],
                stride:int=1, padding:int|tuple[int, ...]|str=0, dilation:int=1, groups:int=1,
                bias:bool=True):
