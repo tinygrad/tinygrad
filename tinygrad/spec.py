@@ -47,6 +47,7 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 # ***** uop type spec *****
 
 def validate_index(idx:UOp, mask:UOp|None=None):
+  if getenv("IGNORE_OOB"): return True
   # this checks for out of bounds access. it is not complete but should catch some issues
   if mask is None and not isinstance(idx.dtype, ImageDType):
     # WEBGPU has a BITCAST in the index. TODO: fix
@@ -54,9 +55,8 @@ def validate_index(idx:UOp, mask:UOp|None=None):
       return True
     vmin, vmax, sz = idx.src[1].vmin, idx.src[1].vmax, cast(PtrDType, idx.src[0].dtype).size
     if sz != -1 and (vmin < 0 or vmax >= sz):
-      if not (ignore_oob:=bool(getenv("IGNORE_OOB", 1))) or DEBUG >= 1:
-        print(f"OUT OF BOUNDS ACCESS in INDEX {vmin} - {vmax} not in 0 - {sz}. {idx.src[1].render()=}")
-      return bool(ignore_oob)
+      if DEBUG >= 1: print(f"OUT OF BOUNDS ACCESS in INDEX {vmin} - {vmax} not in 0 - {sz}. {idx.src[1].render()=}")
+      return False
   return True
 
 # this is the matcher for the final rendered UOps
@@ -168,5 +168,5 @@ def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
   for i,u in enumerate(uops):
     spec_ret = [cast(bool|None, s.rewrite(u)) for s in specs]
     if any(ret is False for ret in spec_ret) or all(ret is None for ret in spec_ret):
-      print_uops(uops)
+      if DEBUG >= 3: print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
