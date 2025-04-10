@@ -1867,6 +1867,9 @@ class Tensor(SimpleMathTrait):
     print(t.softmax(axis=0).numpy())
     ```
     """
+    if getenv("SINGLE_KERNEL_SOFTMAX"):
+      _, e, ss = self.contiguous()._softmax(axis, dtype)
+      return e.div(ss).fuse()
     _, e, ss = self._softmax(axis, dtype)
     return e.div(ss)
 
