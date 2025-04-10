@@ -10,9 +10,7 @@ from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.device import Device
 
 class CPUGraph(GraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
-    device = Device[Device.DEFAULT]
-
+  def __init__(self, device, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     if not issubclass(type(device.renderer), ClangRenderer) and not isinstance(device.renderer, ClangRenderer): raise GraphException
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 
