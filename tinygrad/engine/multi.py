@@ -157,20 +157,12 @@ multi_pm = PatternMatcher([
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])
 
-_copy_expand_memo = set()
 def copy_before_expand(uop:UOp, device:str) -> UOp|None:
-  mops = []
-  while uop is not uop.base:
-    mops.append(uop)
-    if uop.op == Ops.EXPAND:
-      return functools.reduce(lambda r, m: r._mop(m.op, m.arg), reversed(mops), uop.src[0].copy_to_device(device))
-    uop = uop.src[0]
-  if uop.op in (Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.CONST, Ops.ASSIGN) or uop.key in _copy_expand_memo: return None
-  _copy_expand_memo.add(uop.key)
-  src_match = [copy_before_expand(src, device) for src in uop.src]
-  if all(m is None for m in src_match): return None
-  return functools.reduce(lambda r, m: r._mop(m.op, m.arg), reversed(mops),
-                uop.replace(src=tuple(m if m is not None else src.copy_to_device(device) for m, src in zip(src_match, uop.src))))
+  def _expanded(uop:UOp) -> bool:
+    if uop.op == Ops.EXPAND: return True
+    if uop.op in (Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.CONST, Ops.ASSIGN, Ops.REDUCE_AXIS): return False
+    return any(_expanded(src) for src in uop.src)
+  return uop.replace(src=tuple(src.copy_to_device(device) for src in uop.src)) if _expanded(uop) else None
 
 reorder_copies = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(), UPat(name="copyin")), name='copy'),
