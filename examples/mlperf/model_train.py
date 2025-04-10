@@ -389,7 +389,7 @@ def train_retinanet():
       loss = sum([l for l in losses.values()])
 
       (loss * loss_scaler).backward()
-      for t in optim.params: t.grad = t.grad.contiguous() / loss_scaler
+      for t in optim.params: t.grad = t.grad / loss_scaler
 
       optim.step()
 
