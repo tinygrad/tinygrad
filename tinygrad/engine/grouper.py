@@ -2,7 +2,6 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, merge_views
 from tinygrad.ops import can_pad, sint
-from tinygrad.codegen.lowerer import get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
@@ -273,19 +272,21 @@ def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
   if unwrap(view.st).contiguous and len(r.shape) < len(view.shape) and tuple(x for x in r.shape if x != 1) == tuple(x for x in view.shape if x != 1):
     new_shape: list[sint] = []
     new_reduce_axis = []
-    for i,pairs in enumerate(unwrap(get_contraction(view.shape, r.shape))):
-      new_shape_chunk = [view.shape[p] for p in pairs]
+    view_ptr = 0
+    for i in range(len(r.shape)):
       if i in r.arg[1]:
-        # if there's nowhere to fit the reduce, we return None (might be missing solvable cases)
-        if len(new_shape_chunk) == 0: return None
-        # we left justify the reduce in a group of ones
-        assert all(x == 1 for x in new_shape_chunk), "not all ones in reduce?"
+        # if this is a reduce axis, we need a 1 in the view here to put it
+        if view.shape[view_ptr] != 1: return None
+        view_ptr += 1
         new_reduce_axis.append(len(new_shape))
         new_shape.append(src.shape[i])
-        if len(pairs) > 1: new_shape += [1]*(len(pairs)-1)
       else:
-        # otherwise, pass through the new_shape_chunk
-        new_shape += new_shape_chunk
+        # otherwise, add from the view until the product matches
+        while prod(new_shape) < prod(r.shape[i:]):
+          new_shape.append(view.shape[view_ptr])
+          view_ptr += 1
+    # add any remaining ones to the end
+    new_shape += [1]*(len(view.shape)-len(new_shape))
     ret = r.replace(src=(src.reshape(tuple(new_shape)),), arg=(r.arg[0], tuple(new_reduce_axis))+r.arg[2:])
     assert ret.shape == view.shape, f"shape mismatch on reduce_push_add_ones, {ret.shape} != {view.shape}"
     return ret
