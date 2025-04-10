@@ -1,9 +1,8 @@
-import atexit, pickle
 from dataclasses import dataclass
 from collections import deque
 from tinygrad.ops import UOp, Variable, Ops, buffers
 from tinygrad.device import Buffer
-from tinygrad.helpers import Metadata, CAPTURE_PROCESS_REPLAY, DEBUG, Context, ContextVar, diskcache_put, unwrap
+from tinygrad.helpers import Metadata, DEBUG, unwrap
 from tinygrad.engine.grouper import get_becomes_map
 
 # **** ScheduleItem return type
@@ -13,12 +12,6 @@ class ScheduleItem:
   ast: UOp
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...] = ()
-
-PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
-if CAPTURE_PROCESS_REPLAY:
-  @atexit.register
-  def save_process_replay():
-    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
 
 # **** schedule linearizer
 
@@ -52,10 +45,6 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # confirm everything was scheduled correctly
   if len(schedule) != len(in_degree): raise RuntimeError(f"created {len(in_degree)} kernels but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
-
-  # capture process replay
-  if CAPTURE_PROCESS_REPLAY:
-    with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(big_sink.key)] = pickle.dumps((big_sink, ContextVar._cache, [x.ast for x in schedule]))
 
   # map ASSIGN to BUFFER after ScheduleItems are constructed
   for k,v in becomes_map.items():
