@@ -155,18 +155,6 @@ def prepare_target(annotations, img_id, img_size):
   classes = classes[keep]
   return {"boxes": boxes, "labels": classes, "image_id": img_id, "image_size": img_size}
 
-def iterate(coco, base_dir, bs=8):
-  image_ids = sorted(coco.imgs.keys())
-  for i in range(0, len(image_ids), bs):
-    X, targets  = [], []
-    for img_id in image_ids[i:i+bs]:
-      img_dict = coco.loadImgs(img_id)[0]
-      x, original_size = resize(image_load(base_dir, img_dict['subset'], img_dict["file_name"]))
-      X.append(x)
-      annotations = coco.loadAnns(coco.getAnnIds(img_id))
-      targets.append(prepare_target(annotations, img_id, original_size))
-    yield np.array(X), targets
-
 def download_dataset(base_dir:Path, subset:str) -> Path:
   if (ann_file:=base_dir / f"{subset}/labels/openimages-mlperf.json").is_file(): print(f"{subset} dataset is already available")
   else:
