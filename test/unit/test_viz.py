@@ -4,7 +4,7 @@ from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher, UOp, graph_re
 from tinygrad.codegen.symbolic import symbolic
 from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys, _name_cnt, _substitute
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
-from tinygrad.viz.serve import get_metadata, uop_to_json, to_perfetto
+from tinygrad.viz.serve import get_metadata, get_details, uop_to_json, to_perfetto
 
 # NOTE: VIZ tests always use the tracked PatternMatcher instance
 symbolic = TrackedPatternMatcher(symbolic.patterns)
@@ -173,6 +173,27 @@ class TestViz(unittest.TestCase):
     # NOTE: this is sorted by the time called, maybe it should be by depth
     self.assertEqual([x.name for x in tracked], ["outer", "inner_x", "inner_y"])
     self.assertEqual([len(x.matches) for x in tracked], [1, 1, 1])
+
+  def test_shape_label(self):
+    a = UOp.new_buffer("CPU", 1, dtypes.uint8).expand((4,))
+    b = UOp.new_buffer("CPU", 1, dtypes.uint8).expand((8,))
+    n = a+b
+    ser = uop_to_json(n)
+    self.assertIn("(4,)", ser[id(a)]["label"])
+    self.assertIn("(8,)", ser[id(b)]["label"])
+    with self.assertRaises(AssertionError): n.st
+    _  = ser[id(n)]["label"] # VIZ should not crash
+
+  @unittest.skip("TODO: doesn't work")
+  def test_recursion_err(self):
+    inf = TrackedPatternMatcher([
+      (UPat.const(dtypes.int, 0).named("a"), lambda a: a.const_like(1)),
+      (UPat.const(dtypes.int, 1).named("b"), lambda b: b.const_like(0)),
+    ])
+    @track_rewrites(named=True)
+    def func(u): return graph_rewrite(u, inf)
+    with self.assertRaises(RecursionError): func(UOp.const(dtypes.int, 0))
+    _ = list(get_details(keys[0], contexts[0][0]))
 
 class TextVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
