@@ -942,7 +942,7 @@ class RewriteContext:
     if (rn := self.replace.get(n)) is not None: return rn
     new_src = tuple([self.top_down_rewrite(x, keep_metadata) for x in n.src])
     if keep_metadata:
-      assert isinstance(n.metadata, Metadata), "Cannot keep_metadata when metadata is a tuple."
+      assert isinstance(n.metadata, Metadata) or (n.metadata is None), "Cannot keep_metadata when metadata is a tuple."
       token = _METADATA.set(n.metadata)
     new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
     self.replace[n] = ret = n if new_n is None else self.top_down_rewrite(new_n, keep_metadata)
