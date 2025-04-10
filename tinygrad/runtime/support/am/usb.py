@@ -1,9 +1,79 @@
-import ctypes, struct, time, os, time
+import ctypes, struct, time, os
 from tinygrad.runtime.autogen import libc, libusb
 from tinygrad.helpers import DEBUG
 from hexdump import hexdump
 
 class USBConnector:
+  def reset(self):
+    if libusb.libusb_kernel_driver_active(self.handle, 0) == 1:
+      ret = libusb.libusb_detach_kernel_driver(self.handle, 0)
+      print("detach kernel driver")
+      if ret != 0: raise Exception(f"Failed to detach kernel driver: {ret}")
+      libusb.libusb_reset_device(self.handle)
+
+    ret = libusb.libusb_set_configuration(self.handle, 1)
+    if ret != 0: raise Exception(f"Failed to set configuration: {ret}")
+
+    # Claim interface (gives -3 if we reset)
+    ret = libusb.libusb_claim_interface(self.handle, 0)
+    if ret != 0: raise Exception(f"Failed to claim interface: {ret}")
+
+    # # Set alternate setting to 1 (this is crucial!)
+    ret = libusb.libusb_set_interface_alt_setting(self.handle, 0, 1)
+    if ret != 0: raise Exception(f"Failed to set alternate setting: {ret}")
+
+    usb_cmd = [
+      0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0xe4, 0x24, 0x00, 0xb2, 0x1a, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    ]
+    self.read_cmd = (ctypes.c_uint8 * len(usb_cmd))(*bytes(usb_cmd))
+    self.read_status = (ctypes.c_uint8 * 64)()
+    self.read_data = (ctypes.c_uint8 * 256)()
+
+    print("USB device initialized successfully")
+
+    libusb.libusb_clear_halt(self.handle, 0x81)
+    libusb.libusb_clear_halt(self.handle, 0x83)
+    libusb.libusb_clear_halt(self.handle, 0x04)
+    libusb.libusb_clear_halt(self.handle, 0x02)
+
+    self.max_parallel = 16
+    endpoints = [0x02, 0x81, 0x83]
+    streams = (ctypes.c_uint8*len(endpoints))(*endpoints)
+    # print(hex(streams[0]))
+    x = libusb.libusb_alloc_streams(self.handle, len(endpoints) * (self.max_parallel + 1), streams, len(endpoints))
+    assert x >= 0, f"got {x}"
+    # print("hm", x)
+
+    # required to be set, but not a trigger
+    # self.write(0xB213, bytes([0x01]))
+    # self.write(0xB214, bytes([0, 0]))
+    # self.write(0xB216, bytes([0x20]))
+    self.res_transfer = libusb.libusb_alloc_transfer(0)
+    self.stat_transfer = libusb.libusb_alloc_transfer(0)
+    self.cmd_transfer = libusb.libusb_alloc_transfer(0)
+    self.in_transfer = libusb.libusb_alloc_transfer(0)
+
+    self.res_transfers = {}
+    self.stat_transfers = {}
+    self.cmd_transfers = {}
+    self.in_transfers = {}
+    self.read_cmds = {}
+    self.read_statuses = {}
+    self.read_datas = {}
+    for i in range(self.max_parallel):
+      self.res_transfers[i] = libusb.libusb_alloc_transfer(0)
+      self.stat_transfers[i] = libusb.libusb_alloc_transfer(0)
+      self.cmd_transfers[i] = libusb.libusb_alloc_transfer(0)
+      self.in_transfers[i] = libusb.libusb_alloc_transfer(0)
+      self.read_cmds[i] = (ctypes.c_uint8 * len(usb_cmd))(*bytes(usb_cmd))
+      self.read_statuses[i] = (ctypes.c_uint8 * 64)()
+      self.read_datas[i] = (ctypes.c_uint8 * 256)()
+
+    self.cached = {}
+
   def __init__(self, name):
     self.usb_ctx = ctypes.POINTER(libusb.struct_libusb_context)()
     ret = libusb.libusb_init(ctypes.byref(self.usb_ctx))
@@ -103,27 +173,34 @@ class USBConnector:
     transfer.contents.num_iso_packets = 0
     if stream_id is not None: libusb.libusb_transfer_set_stream_id(transfer, stream_id)
   
-  def _send_ops_and_wait(self, *cmds):
+  def _send_ops_and_wait(self, *cmds, wait=True, ignore_ep=None):
     # st = time.perf_counter()
     for x in cmds: libusb.libusb_submit_transfer(x)
+    if not wait: return True
 
     while True:
       libusb.libusb_handle_events(self.usb_ctx)
 
       all_complete = True
       for transfer in cmds:
+        # print(ignore_ep, transfer.contents.endpoint, transfer.contents.status)
+        if ignore_ep == transfer.contents.endpoint: continue
+
         if transfer.contents.status == libusb.LIBUSB_TRANSFER_COMPLETED:
           continue
         elif transfer.contents.status != libusb.LIBUSB_TRANSFER_COMPLETED:
           if transfer.contents.status != 0xff: return False
           all_complete = False
       if all_complete:
+        if ignore_ep is not None:
+          for transfer in cmds:
+            if transfer.contents.endpoint == ignore_ep:
+              transfer.contents.status = libusb.LIBUSB_TRANSFER_COMPLETED
+              libusb.libusb_cancel_transfer(transfer)
+              print("canceled", transfer.contents.endpoint)
         # en = time.perf_counter()
         # print("run in s: ", (en - st), "s", "kb/s", 0xff / (en - st) / 1024)
         return True
-
-  # def _send_with_stream(self, cdb, ret_len=0):
-  #   pass
 
   def post_write_request(self, in_data):
     in_transfer = libusb.libusb_alloc_transfer(0)
@@ -154,7 +231,7 @@ class USBConnector:
         self._send_ops_and_wait(*ops_sub)
         ops_sub = []
 
-  def _send(self, cdb, ret_len=0, in_data=None):
+  def _send(self, cdb, ret_len=0, in_data=None, do_not_send_ack=False, wait=True, ignore_ep=None):
     def __send():
       actual_length = ctypes.c_int(0)
       for i in range(3):
@@ -169,9 +246,11 @@ class USBConnector:
 
         transfers = []
         if ret_len > 0: transfers.append(self.res_transfer)
-        transfers += [self.stat_transfer, self.cmd_transfer]
+        if not do_not_send_ack: transfers += [self.stat_transfer]
+        transfers += [self.cmd_transfer]
         if in_data is not None: transfers.append(self.in_transfer)
-        self._send_ops_and_wait(*transfers)
+        self._send_ops_and_wait(*transfers, wait=wait, ignore_ep=ignore_ep)
+        if not wait: return transfers
         # print("stat is ", [x for x in self.read_status])
         return bytes(self.read_data[:])
       return None
@@ -246,15 +325,35 @@ class USBConnector:
         # self._send(cdb)
     self._send_batch(cdbs, [0] * len(cdbs))
 
-  def scsi_write(self, buf):
+  def scsi_write(self, lba, buf):
     # scsi write 0x28 packet
-    cdb = struct.pack('>BBIHB', 0x2a, 0, 0, len(buf) // 512, 0)
-    return self._send(cdb, in_data=buf)
+    assert len(buf) % 512 == 0, "buf length must be multiple of 512"
 
-  def scsi_read(self, ret_len):
+    # scsi write 0x8a packet
+    cdb = struct.pack('>BBQIBB',
+      0x8A,             # WRITE(16) opcode
+      0,                # flags
+      lba,              # 64-bit LBA
+      len(buf) // 512,  # number of blocks
+      0,                # group number
+      0                 # control
+    )
+    ops = self._send(cdb, in_data=buf, wait=True)
+    # time.sleep(1)
+    # for o in ops:
+    #   print(libusb.libusb_cancel_transfer(o))
+
+  def scsi_read(self, lba, num_blocks):
     # scsi read 0x8a packet
-    cdb = struct.pack('>BBIHB', 0x8a, 0, 0, ret_len // 512, 0)
-    return self._send(cdb, ret_len=ret_len)
+    cdb = struct.pack('>BBQIBB',
+      0x88,            # READ(16) opcode
+      0,               # flags (RDPROTECT, DPO, FUA, etc. all zero here)
+      lba,             # 64-bit logical block address
+      num_blocks,      # 32-bit transfer length in blocks
+      0,               # group number
+      0                # control
+    )
+    return self._send(cdb, ret_len=num_blocks * 512)
 
   def pcie_write_request_fw(self, address, value):
     cdb = struct.pack('>BII', 0x03, address, value)
