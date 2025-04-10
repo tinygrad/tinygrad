@@ -2,7 +2,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, merge_views
 from tinygrad.ops import can_pad, sint, track_rewrites
-from tinygrad.codegen.lowerer import get_contraction
+from tinygrad.codegen.lowerer import get_contraction_with_reduce
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv, pluralize, ContextVar, Context, diskcache_put
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY
@@ -273,16 +273,14 @@ def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
   if unwrap(view.st).contiguous and len(r.shape) < len(view.shape) and tuple(x for x in r.shape if x != 1) == tuple(x for x in view.shape if x != 1):
     new_shape: list[sint] = []
     new_reduce_axis = []
-    for i,pairs in enumerate(unwrap(get_contraction(view.shape, r.shape))):
+    if (contraction:=get_contraction_with_reduce(view.shape, r.shape, r.arg[1])) is None: return None
+    for i,pairs in enumerate(contraction):
       new_shape_chunk = [view.shape[p] for p in pairs]
       if i in r.arg[1]:
-        # if there's nowhere to fit the reduce, we return None (might be missing solvable cases)
-        if len(new_shape_chunk) == 0: return None
-        # we left justify the reduce in a group of ones
-        assert all(x == 1 for x in new_shape_chunk), "not all ones in reduce?"
-        new_reduce_axis.append(len(new_shape))
-        new_shape.append(src.shape[i])
-        if len(pairs) > 1: new_shape += [1]*(len(pairs)-1)
+        # if this is a reduce axis, we need a 1 in the view here to put it
+        assert len(new_shape_chunk) > 0
+        new_shape += [1]*(len(pairs)-1) + [src.shape[i]]
+        new_reduce_axis.append(len(new_shape)-1)
       else:
         # otherwise, pass through the new_shape_chunk
         new_shape += new_shape_chunk
