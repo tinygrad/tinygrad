@@ -61,7 +61,6 @@ class TestFuse(unittest.TestCase):
       c = (Tensor.rand(N,N)-0.5).realize()
     self._test_fuse(lambda a,b,c: a@b@c, a, b, c, atol=1e-5)
 
-  @unittest.skip("TODO: fix linearization")
   def test_flash_attention(self):
     BS = 4
     HEADS = 2
