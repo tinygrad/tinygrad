@@ -1,9 +1,8 @@
-import atexit, pickle
 from dataclasses import dataclass
 from collections import deque
-from tinygrad.ops import UOp, Variable, Ops, buffers, track_rewrites
+from tinygrad.ops import UOp, Variable, Ops, buffers
 from tinygrad.device import Buffer
-from tinygrad.helpers import Metadata, CAPTURE_PROCESS_REPLAY, DEBUG, Context, ContextVar, diskcache_put, pluralize
+from tinygrad.helpers import Metadata, DEBUG, unwrap
 from tinygrad.engine.grouper import get_becomes_map
 
 # **** ScheduleItem return type
@@ -14,16 +13,8 @@ class ScheduleItem:
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...] = ()
 
-PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
-if CAPTURE_PROCESS_REPLAY:
-  @atexit.register
-  def save_process_replay():
-    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
-
 # **** schedule linearizer
 
-
-@track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   becomes_map, var_vals = get_becomes_map(big_sink)
   sched_sink = becomes_map.pop(big_sink)
@@ -55,8 +46,12 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if len(schedule) != len(in_degree): raise RuntimeError(f"created {len(in_degree)} kernels but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
-  # capture process replay
-  if CAPTURE_PROCESS_REPLAY:
-    with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(big_sink.key)] = pickle.dumps((big_sink, ContextVar._cache, [x.ast for x in schedule]))
+  # map ASSIGN to BUFFER after ScheduleItems are constructed
+  for k,v in becomes_map.items():
+    if v.base.op is Ops.ASSIGN:
+      # if the UOp was already an assign Tensor UOp we just map it to the existing buffer
+      if k.op is Ops.ASSIGN: becomes_map[k] = k.src[0]
+      # otherwise we map it to the new buffer, ignoring NOOP ShapeTrackers
+      else: becomes_map[k] = new_buf if (new_buf:=v.base.src[0]).st == v.st else new_buf.view(unwrap(v.st))
 
   return schedule, var_vals, becomes_map

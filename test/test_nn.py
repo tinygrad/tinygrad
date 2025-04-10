@@ -9,6 +9,7 @@ from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
 from tinygrad.engine.realize import run_schedule
+from test.helpers import not_support_multi_device
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestNN(unittest.TestCase):
@@ -551,7 +552,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_load_state_dict_sharded_model(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
@@ -572,7 +573,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  @unittest.skipIf(not_support_multi_device, "no multi")
   def test_load_state_dict_sharded_dict(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
@@ -589,7 +590,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_load_state_dict_sharded_model_dict_same_axis(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
@@ -610,7 +611,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  @unittest.skipIf(not_support_multi_device, "no multi")
   def test_load_state_dict_sharded_model_dict_different_axis(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
     devices5 = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3", f"{Device.DEFAULT}:4", f"{Device.DEFAULT}:5")
