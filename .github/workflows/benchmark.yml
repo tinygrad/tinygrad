@@ -181,6 +181,8 @@ jobs:
         CUDA=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
         CUDA=1 SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
         CUDA=1 SHOULD_USE_TC=1 ALLOW_TF32=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee matmul_tf32.txt
+        CUDA=1 SHOULD_USE_TC=1 FP8E4M3=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_fp8e4m3.txt
+        CUDA=1 SHOULD_USE_TC=1 FP8E5M2=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_fp8e5m2.txt
     - name: Run Tensor Core GEMM (PTX)
       run: NV=1 PTX=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_ptx.txt
     - name: Run Tensor Core GEMM (NV)
@@ -230,6 +232,8 @@ jobs:
           matmul.txt
           matmul_bfloat16.txt
           matmul_tf32.txt
+          matmul_fp8e5m2.txt
+          matmul_fp8e4m3.txt
           matmul_ptx.txt
           matmul_nv.txt
           sd.txt

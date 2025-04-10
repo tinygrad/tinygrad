@@ -3004,15 +3004,19 @@ class TestOpsUint8(unittest.TestCase):
       lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
 
 class TestOpsFp8s(unittest.TestCase):
-  def _compare_to_cuda(self, shp_a, shp_b, op, dtype):
-    if not ("CUDA" in Device.get_available_devices() and Device.DEFAULT == "PYTHON" and getenv("EMULATE_CUDA_SM89")):
-      self.skipTest("only for emulated CUDA")
-    a = Tensor.rand(shp_a, dtype=dtype)
-    b = Tensor.rand(shp_b, dtype=dtype)
-    np.testing.assert_equal(op(a, b).numpy(), op(a.to("CUDA"), b.to("CUDA")).numpy())
+  def _compare_to_numpy_gemm(self, shp_a, shp_b, dtype_in):
+    rng = np.random.default_rng(0)
+    np_dtype = _to_np_dtype(dtype_in)
+    np_a = rng.random(shp_a, dtype=np.float32).astype(np_dtype)-0.5
+    np_b = rng.random(shp_b, dtype=np.float32).astype(np_dtype)-0.5
+    a = Tensor(np_a).cast(dtype_in).realize()
+    b = Tensor(np_b).cast(dtype_in).realize()
+    np.testing.assert_allclose(np.matmul(np_a, np_b), a.matmul(b).numpy(), atol=8e-1, rtol=1e-3)
 
-  def test_gemm_fp8e4m3(self): self._compare_to_cuda((64, 64), (64, 64), lambda x, y: x.matmul(y), dtypes.fp8e4m3)
-  def test_gemm_fp8e5m2(self): self._compare_to_cuda((64, 64), (64, 64), lambda x, y: x.matmul(y), dtypes.fp8e5m2)
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3, Device.DEFAULT), f"no fp8e4m3 on {Device.DEFAULT}")
+  def test_gemm_fp8e4m3(self): self._compare_to_numpy_gemm((64, 64), (64, 64), dtypes.fp8e4m3)
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2, Device.DEFAULT), f"no fp8e5m2 on {Device.DEFAULT}")
+  def test_gemm_fp8e5m2(self): self._compare_to_numpy_gemm((64, 64), (64, 64), dtypes.fp8e5m2)
 
 if __name__ == '__main__':
   np.random.seed(1337)
