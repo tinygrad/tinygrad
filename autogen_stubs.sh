@@ -78,11 +78,11 @@ generate_kfd() {
   clang2py /usr/include/linux/kfd_ioctl.h -o $BASE/kfd.py -k cdefstum
 
   fixup $BASE/kfd.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/kfd.py
-  sed -i "s\import fcntl, functools\import functools" $BASE/kfd.py
-  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import HWInterface\g" $BASE/kfd.py
-  sed -i "s\def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, **kwargs):\def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:HWInterface, **kwargs):\g" $BASE/kfd.py
-  sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\__fd.ioctl((__idir<<30)\g" $BASE/kfd.py
+  sed -i "s/import ctypes/import ctypes, os/g" $BASE/kfd.py
+  sed -i "s/import fcntl, functools/import functools/g" $BASE/kfd.py
+  sed -i "/import functools/a from tinygrad.runtime.support.hcq import HWInterface" $BASE/kfd.py
+  sed -i "s/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, \*\*kwargs):/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:HWInterface, \*\*kwargs):/g" $BASE/kfd.py
+  sed -i "s/fcntl.ioctl(__fd, (__idir<<30)/__fd.ioctl((__idir<<30)/g" $BASE/kfd.py
   python3 -c "import tinygrad.runtime.autogen.kfd"
 }
 
