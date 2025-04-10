@@ -7,7 +7,6 @@ from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.ops import Variable
 from tinygrad.dtype import dtypes
 from tinygrad.renderer.cstyle import ClangRenderer
-from tinygrad.device import Device
 
 class CPUGraph(GraphRunner):
   def __init__(self, device, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
