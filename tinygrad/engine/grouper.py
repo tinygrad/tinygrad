@@ -1,10 +1,10 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, merge_views
-from tinygrad.ops import can_pad, sint
+from tinygrad.ops import can_pad, sint, track_rewrites
 from tinygrad.codegen.lowerer import get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv, pluralize
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -435,6 +435,11 @@ pm_fuse = PatternMatcher([
   (UPat(Ops.FUSE, name="x"), lambda x: x.src[0].replace(src=tuple(y.fuse() for y in x.src[0].src))),
 ])
 
+def get_name(ret:tuple[dict[UOp, UOp], dict[Variable, int]]) -> str:
+  kcount = len({u.src[1] for u in ret[0].values() if u.op is Ops.ASSIGN})
+  return f"Schedule {pluralize('Kernel', kcount)}"+(f" (with_{pluralize('Var', len(ret[1]))})" if ret[1] else "")
+
+@track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   # merge_views + simplify
   tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous+pm_fuse, ctx={})
@@ -455,15 +460,9 @@ def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   for k,v in tensor_map.items():
     if (kernel:=tensor_map.get(v.base)) is not None and kernel.base.op is Ops.ASSIGN: v = kernel.view(unwrap(v.st))
     if k is v: continue
-    if k.op is Ops.ASSIGN:
-      becomes_map[k] = k.src[0]
-      continue
     op = v.base.op
-    if op is Ops.BUFFER: becomes_map[k] = v
+    if op in {Ops.BUFFER, Ops.ASSIGN}: becomes_map[k] = v
     if op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
-    if op is Ops.ASSIGN:
-      new_buf = v.base.src[0]
-      becomes_map[k] = new_buf if new_buf.st == v.st else new_buf.view(unwrap(v.st))
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
