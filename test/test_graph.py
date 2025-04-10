@@ -108,7 +108,7 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   def test_order_copy_writed(self):
-    if not issubclass(getattr(Device[Device.DEFAULT].graph, 'func', Device[Device.DEFAULT].graph), MultiGraphRunner): 
+    if not issubclass(getattr(Device[Device.DEFAULT].graph, 'func', Device[Device.DEFAULT].graph), MultiGraphRunner):
       self.skipTest("graph does not supported (not MultiGraphRunner)")
 
     d0 = Device.DEFAULT
@@ -121,7 +121,7 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   def test_order_copy_then_read(self):
-    if not issubclass(getattr(Device[Device.DEFAULT].graph, 'func', Device[Device.DEFAULT].graph), MultiGraphRunner): 
+    if not issubclass(getattr(Device[Device.DEFAULT].graph, 'func', Device[Device.DEFAULT].graph), MultiGraphRunner):
       self.skipTest("graph does not supported (not MultiGraphRunner)")
 
     d0 = Device.DEFAULT
@@ -153,7 +153,7 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   def test_copies_2_devs(self):
-    if not issubclass(getattr(Device[Device.DEFAULT].graph, 'func', Device[Device.DEFAULT].graph), MultiGraphRunner): 
+    if not issubclass(getattr(Device[Device.DEFAULT].graph, 'func', Device[Device.DEFAULT].graph), MultiGraphRunner):
       self.skipTest("graph does not supported (not MultiGraphRunner)")
 
     d0, d1 = Device.DEFAULT, f"{Device.DEFAULT}:1"
@@ -167,7 +167,7 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   def test_copies_after_graph_global(self):
-    if not issubclass(getattr(Device[Device.DEFAULT].graph, 'func', Device[Device.DEFAULT].graph), MultiGraphRunner): 
+    if not issubclass(getattr(Device[Device.DEFAULT].graph, 'func', Device[Device.DEFAULT].graph), MultiGraphRunner):
       self.skipTest("graph does not supported (not MultiGraphRunner)")
 
     d0, d1, d2, d3 = Device.DEFAULT, f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3"
@@ -216,7 +216,7 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   def test_graph_after_copies_devs(self):
-    if not issubclass(getattr(Device[Device.DEFAULT].graph, 'func', Device[Device.DEFAULT].graph), MultiGraphRunner): 
+    if not issubclass(getattr(Device[Device.DEFAULT].graph, 'func', Device[Device.DEFAULT].graph), MultiGraphRunner):
       self.skipTest("graph does not supported (not MultiGraphRunner)")
 
     d0, d1, d2, d3 = Device.DEFAULT, f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3"
@@ -246,7 +246,7 @@ class TestGraph(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT in {"CUDA", "NV", "AMD"}, "mutidevice graph required")
   def test_graph_offset_bufs(self):
-    if not issubclass(getattr(Device[Device.DEFAULT].graph, 'func', Device[Device.DEFAULT].graph), MultiGraphRunner): 
+    if not issubclass(getattr(Device[Device.DEFAULT].graph, 'func', Device[Device.DEFAULT].graph), MultiGraphRunner):
       self.skipTest("graph does not supported (not MultiGraphRunner)")
 
     d0 = Device.DEFAULT
