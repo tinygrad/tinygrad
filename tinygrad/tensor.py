@@ -2719,6 +2719,15 @@ class Tensor(SimpleMathTrait):
     """
     return self._apply_uop(UOp.contiguous)
 
+  def fuse(self) -> Tensor:
+    """
+    Make this a single kernel back to Ops.CONTIGUOUS on the inputs.
+
+    Useful for single kernel softmax and flash attention.
+    Careful, this can break codegen or make kernels really slow.
+    """
+    return self._apply_uop(UOp.fuse).contiguous()
+
   def contiguous_backward(self) -> Tensor:
     """
     Inserts a contiguous operation in the backward pass.

@@ -827,8 +827,8 @@ def train_bert():
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK) or i == train_steps:
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*BS, "step_num": i})
-      if getenv("RESET_STEP", 0): train_step_bert.reset()
-      elif train_step_bert.captured is not None: train_step_bert.captured.free_intermediates()
+      if getenv("RESET_STEP"): train_step_bert.reset()
+      elif getenv("FREE_INTERMEDIATE", 1) and train_step_bert.captured is not None: train_step_bert.captured.free_intermediates()
       eval_lm_losses = []
       eval_clsf_losses = []
       eval_lm_accs = []
@@ -861,8 +861,9 @@ def train_bert():
             MLLOGGER.event(key=mllog_constants.INIT_STOP, value=None)
           return
 
-      if getenv("RESET_STEP", 0): eval_step_bert.reset()
-      elif eval_step_bert.captured is not None: eval_step_bert.captured.free_intermediates()
+      if getenv("RESET_STEP"): eval_step_bert.reset()
+      elif getenv("FREE_INTERMEDIATE", 1) and eval_step_bert.captured is not None: eval_step_bert.captured.free_intermediates()
+
       del eval_data
       avg_lm_loss = sum(eval_lm_losses) / len(eval_lm_losses)
       avg_clsf_loss = sum(eval_clsf_losses) / len(eval_clsf_losses)
