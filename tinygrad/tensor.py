@@ -1867,6 +1867,9 @@ class Tensor(SimpleMathTrait):
     print(t.softmax(axis=0).numpy())
     ```
     """
+    if getenv("SINGLE_KERNEL_SOFTMAX"):
+      _, e, ss = self.contiguous()._softmax(axis, dtype)
+      return e.div(ss).fuse()
     _, e, ss = self._softmax(axis, dtype)
     return e.div(ss)
 
@@ -2718,6 +2721,15 @@ class Tensor(SimpleMathTrait):
     Returns a contiguous tensor.
     """
     return self._apply_uop(UOp.contiguous)
+
+  def fuse(self) -> Tensor:
+    """
+    Make this a single kernel back to Ops.CONTIGUOUS on the inputs.
+
+    Useful for single kernel softmax and flash attention.
+    Careful, this can break codegen or make kernels really slow.
+    """
+    return self._apply_uop(UOp.fuse).contiguous()
 
   def contiguous_backward(self) -> Tensor:
     """

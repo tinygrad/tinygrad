@@ -1,10 +1,11 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, merge_views
-from tinygrad.ops import can_pad, identity_element, resolve
+from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, merge_views
+from tinygrad.ops import can_pad, sint, track_rewrites
+from tinygrad.codegen.lowerer import get_contraction_with_reduce
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv, pluralize
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv, pluralize, ContextVar, Context, diskcache_put
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -170,6 +171,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   double_reduces: list[UOp] = []
   for r in sink.toposort:
     if r.op is not Ops.REDUCE_AXIS: continue
+    if r.op is Ops.REDUCE_AXIS and len(r.arg) == 3 and r.arg[2] is True: continue
     if FUSE_CONV_BW and r.src[0].base.op is Ops.REDUCE_AXIS and r.src[0] is not r.src[0].base: double_reduces.append(r)
     if r in ctx.realizes: continue
     group: dict[UOp, None] = {}
@@ -266,6 +268,27 @@ create_kernels = merge_views+PatternMatcher([
 
 # **** swizzler
 
+def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
+  # contiguous, expand, and the same with ones removed
+  if unwrap(view.st).contiguous and len(r.shape) < len(view.shape) and tuple(x for x in r.shape if x != 1) == tuple(x for x in view.shape if x != 1):
+    new_shape: list[sint] = []
+    new_reduce_axis = []
+    if (contraction:=get_contraction_with_reduce(view.shape, r.shape, r.arg[1])) is None: return None
+    for i,pairs in enumerate(contraction):
+      new_shape_chunk = [view.shape[p] for p in pairs]
+      if i in r.arg[1]:
+        # if this is a reduce axis, we need a 1 in the view here to put it
+        assert len(new_shape_chunk) > 0
+        new_shape += [1]*(len(pairs)-1) + [src.shape[i]]
+        new_reduce_axis.append(len(new_shape)-1)
+      else:
+        # otherwise, pass through the new_shape_chunk
+        new_shape += new_shape_chunk
+    ret = r.replace(src=(src.reshape(tuple(new_shape)),), arg=(r.arg[0], tuple(new_reduce_axis))+r.arg[2:])
+    assert ret.shape == view.shape, f"shape mismatch on reduce_push_add_ones, {ret.shape} != {view.shape}"
+    return ret
+  return None
+
 view_left = merge_views+PatternMatcher([
   # do not push masked view before unsafe pad ops
   (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="e"),), name="view"),
@@ -273,12 +296,13 @@ view_left = merge_views+PatternMatcher([
   # view before elementwise ops
   (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST}, name="e"),), name="view"),
    lambda e,view: e.replace(src=tuple(s.view(s.st+view.st) if s.op is Ops.VIEW else s.view(view.st) for s in e.src))),
+  # if there's ones added after reduce, put this before the reduce
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
 ])
 
-def apply_swizzle(u:UOp) -> UOp:
-  with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
+def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub View Left")
 
-def swizzle_reduceop(r:UOp, src:UOp, view:UOp):
+def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   if (st:=unwrap(view.st)).contiguous: return None
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
@@ -289,8 +313,10 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp):
   # create a new reduceop for the swizzled input
   new_input_st = tmp + ShapeTracker(tuple(nv))
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
-  return UOp(Ops.REDUCE_AXIS, r.dtype, (apply_swizzle(src.view(src.arg+new_input_st if src.op is Ops.VIEW else new_input_st)),),
-             (r.arg[0], new_axis)).view(ShapeTracker.from_shape(st.shape))
+  swizzled_src = apply_swizzle(src.view(src.arg+new_input_st if src.op is Ops.VIEW else new_input_st))
+  if fuse: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src.fuse(),), (r.arg[0], new_axis, True))
+  else: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src,), (r.arg[0], new_axis))
+  return red.view(ShapeTracker.from_shape(st.shape))
 
 def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   assert unwrap(v.st).contiguous and v.size == src.size, f"can't compute new axis for {src.shape} -> {r.shape}"
@@ -383,7 +409,7 @@ def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
       for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
   ast = k.arg.ast.substitute(parents_rep)
   # push views to edges
-  ast = graph_rewrite(graph_rewrite(ast, view_left), view_right)
+  ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # add buffer ops + fix_kernel_ops
   ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, ctx=(ctx, bufs:=tuple(s.buf_uop for s in k.src)), bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
@@ -391,10 +417,37 @@ def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 
-@track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
+pm_fuse = PatternMatcher([
+  # FUSE on CONTIGUOUS removes FUSE
+  (UPat(Ops.CONTIGUOUS, name="c").fuse(), lambda c: c),
+
+  # FUSE triggers swizzle on reduceop
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view").fuse(),
+   lambda r,src,view: swizzle_reduceop(r, src, view, fuse=True)),
+
+  # FUSE elementwise. TODO: check for PAD
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.ALU, name="alu"),), name="view").fuse(),
+   lambda alu, view: alu.replace(src=tuple(x.view(view.arg).fuse() for x in alu.src))),
+
+  # push FUSE through to srcs
+  (UPat(Ops.FUSE, name="x"), lambda x: x.src[0].replace(src=tuple(y.fuse() for y in x.src[0].src))),
+])
+
+def get_name(ret:tuple[dict[UOp, UOp], dict[Variable, int]]) -> str:
+  kcount = len({u.base.src[1] for u in ret[0].values() if u.base.op is Ops.ASSIGN})
+  return f"Schedule {pluralize('Kernel', kcount)}"+(f" (with_{pluralize('Var', len(ret[1]))})" if ret[1] else "")
+
+PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
+if CAPTURE_PROCESS_REPLAY:
+  import atexit
+  @atexit.register
+  def save_process_replay():
+    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
+
+@track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   # merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous, ctx={})
+  tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous+pm_fuse, ctx={})
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
@@ -402,23 +455,19 @@ def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   # group into kernels
   sink = tensor_map[big_sink]
   realize_map = group_realizes(sink)
-  kernel_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True)
-  sched_sink = kernel_map[sink]
+  tensor_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True,
+                                 input_map=tensor_map)
+  sched_sink = tensor_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
   # map tensors to buffer/const, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
-    # ASSIGN always becomes the target buffer
-    if v.op is Ops.ASSIGN: becomes_map[k] = v.src[0]
-    # if we created a new buffer for this tensor, map it to the assigned buffer
-    elif (a:=kernel_map.get(v.base)) is not None and (a:=a.base).op is Ops.ASSIGN:
-      becomes_map[k] = a.src[0] if a.src[0].st == v.st else a.src[0].view(unwrap(v.st))
-    # tensors can also simplify to an existing buffer/const
-    else:
-      if k is v: continue
-      if v.base.op is Ops.BUFFER: becomes_map[k] = v
-      if v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
+    if (kernel:=tensor_map.get(v.base)) is not None and kernel.base.op is Ops.ASSIGN: v = kernel.view(unwrap(v.st))
+    if k is v: continue
+    op = v.base.op
+    if op in {Ops.BUFFER, Ops.ASSIGN}: becomes_map[k] = v
+    if op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
@@ -443,4 +492,12 @@ def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   var_vals: dict[Variable, int] = {}
   sched_sink = graph_rewrite(sched_sink, create_ast, ctx=var_vals, bottom_up=True)
   becomes_map[big_sink] = sched_sink
+
+  # capture process replay
+  if CAPTURE_PROCESS_REPLAY:
+    with Context(PICKLE_BUFFERS=0):
+      import pickle
+      asts = dedup(u.arg.ast for u in sched_sink.toposort if u.op is Ops.KERNEL)
+      PROCESS_REPLAY_CAPTURE[str(big_sink.key)] = pickle.dumps((big_sink, ContextVar._cache, asts))
+
   return becomes_map, var_vals
