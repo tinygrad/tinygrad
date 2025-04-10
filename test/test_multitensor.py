@@ -1,7 +1,7 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
-from tinygrad.ops import Ops, UOp
+from tinygrad.ops import Ops, UOp, all_metadata
 from tinygrad.helpers import CI, getenv, prod, Context, OSX
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
@@ -792,6 +792,8 @@ class TestMultiTensor(unittest.TestCase):
     assert not d.lazydata.is_realized
 
   def test_data_parallel_resnet_metadata(self):
+    all_metadata.clear()
+
     from extra.models.resnet import ResNet18
 
     fake_image = Tensor.rand((2, 3, 224//8, 224//8))
@@ -1124,7 +1126,7 @@ def helper_test_shard_op(shps, fxn, atol=1e-6, rtol=1e-3):
     except Exception as e:
       raise Exception(f"Failed shape {single_out.shape}: {e}")
 
-@unittest.skipIf(not_support_multi_device, "no multi")
+@unittest.skipIf(not_support_multi_device(), "no multi")
 class TestTensorOps(unittest.TestCase):
   def test_interpolate(self):
     helper_test_shard_op([(4,16,16),(4,24,24)], lambda x: Tensor.interpolate(x, (19,19)))
