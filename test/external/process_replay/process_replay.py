@@ -3,7 +3,7 @@
 import os, multiprocessing, logging, pickle, sqlite3, difflib, functools, warnings
 from typing import Callable, cast
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
-from tinygrad.engine.grouper import get_becomes_map
+from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.codegen.kernel import Kernel, Opt
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp
@@ -33,9 +33,9 @@ class ProcessReplayWarning(Warning): pass
 
 # *** recreators
 
-def recreate_sched(big_sink:UOp) -> dict[UOp, UOp]:
-  becomes_map, _ = get_becomes_map(big_sink)
-  return becomes_map
+def recreate_sched(big_sink:UOp) -> list[UOp]:
+  sched, _, __ = create_schedule_with_vars(big_sink)
+  return [x.ast for x in sched]
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str, _) -> str:
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)
