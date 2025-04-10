@@ -16,6 +16,24 @@ def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> l
   except ValueError: return None
   return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
 
+def get_contraction_with_reduce(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...], reduce_axis:tuple[int, ...]) -> list[list[int]]|None:
+  if (contraction:=get_contraction(old_shape, new_shape)) is None: return None
+  # contraction returns the 1s as right justified as possible
+  # normally this contraction is good, but sometimes the reduce dim is empty. borrow from the next one, leaving one
+  # this ensures there's always ones available in the reduce dimension. this is also a valid contraction
+  for i in range(len(contraction)):
+    if i in reduce_axis and len(contraction[i]) == 0:
+      take_from = i+1
+      while len(contraction[take_from]) == 0:
+        assert new_shape[take_from] == 1
+        take_from += 1
+        if len(contraction) == take_from: return None # nothing to take
+      for j in range(take_from, i, -1):
+        assert len(contraction[j]) > 0
+        contraction[j-1] = contraction[j][:-1]
+        contraction[j] = contraction[j][-1:]
+  return contraction
+
 # ***** indexing *****
 def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
   # TODO: symbolic shape

@@ -61,7 +61,7 @@ class TestFuse(unittest.TestCase):
       c = (Tensor.rand(N,N)-0.5).realize()
     self._test_fuse(lambda a,b,c: a@b@c, a, b, c, atol=1e-5)
 
-  @unittest.skip("infinite looping")
+  @unittest.skip("still broken")
   def test_flash_attention(self):
     BS = 4
     HEADS = 2
@@ -71,7 +71,9 @@ class TestFuse(unittest.TestCase):
       q = Tensor.randn(BS, HEADS, MATDIM, EMB).realize()
       k = Tensor.randn(BS, HEADS, MATDIM, EMB).realize()
       v = Tensor.randn(BS, HEADS, MATDIM, EMB).realize()
-    self._test_fuse(Tensor.scaled_dot_product_attention, q, k, v)
+    # TODO: OPT is breaking things. NOOPT isn't linearizing
+    with Context(NOOPT=1):
+      self._test_fuse(Tensor.scaled_dot_product_attention, q, k, v)
 
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
