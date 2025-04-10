@@ -13,7 +13,7 @@ testing_minimal = [
   "pytest",
   "pytest-xdist",
   "hypothesis",
-  "z3-solver"
+  "z3-solver",
 ]
 
 setup(name='tinygrad',
@@ -42,14 +42,13 @@ setup(name='tinygrad',
             "typing-extensions",
             "pre-commit",
             "ruff",
-            "types-tqdm",
+            "numpy",
         ],
-        #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@4.1.0-rc3"],
+        #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@5.0.0-rc1"],
         'testing_minimal': testing_minimal,
         'testing_unit': testing_minimal + [
             "tqdm",
             "safetensors",
-            "z3-solver",
             "tabulate",  # for sz.py
         ],
         'testing': testing_minimal + [

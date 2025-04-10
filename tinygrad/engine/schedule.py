@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from collections import deque
 from tinygrad.ops import UOp, Variable, Ops, buffers
 from tinygrad.device import Buffer
-from tinygrad.helpers import Metadata, CAPTURE_PROCESS_REPLAY, DEBUG, Context, ContextVar, diskcache_put
+from tinygrad.helpers import Metadata, CAPTURE_PROCESS_REPLAY, DEBUG, Context, ContextVar, diskcache_put, unwrap
 from tinygrad.engine.grouper import get_becomes_map
 
 # **** ScheduleItem return type
@@ -56,5 +56,13 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(big_sink.key)] = pickle.dumps((big_sink, ContextVar._cache, [x.ast for x in schedule]))
+
+  # map ASSIGN to BUFFER after ScheduleItems are constructed
+  for k,v in becomes_map.items():
+    if v.base.op is Ops.ASSIGN:
+      # if the UOp was already an assign Tensor UOp we just map it to the existing buffer
+      if k.op is Ops.ASSIGN: becomes_map[k] = k.src[0]
+      # otherwise we map it to the new buffer, ignoring NOOP ShapeTrackers
+      else: becomes_map[k] = new_buf if (new_buf:=v.base.src[0]).st == v.st else new_buf.view(unwrap(v.st))
 
   return schedule, var_vals, becomes_map
