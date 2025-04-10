@@ -4,7 +4,6 @@ from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.graph.cpu import CPUGraph
-import functools
 
 class ClangJITCompiler(Compiler):
   def __init__(self, cachekey="compile_clang_jit"): super().__init__(cachekey)
