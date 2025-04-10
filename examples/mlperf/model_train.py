@@ -351,7 +351,6 @@ def train_retinanet():
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
   from tinygrad.helpers import colored, Context
-  from tinygrad.nn.optim import Optimizer
   from typing import Iterator
   import extra.models.retinanet as retinanet
   
@@ -449,23 +448,10 @@ def train_retinanet():
   config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(len(val_dataset.imgs.keys()), BS) // BS)
   start_iter = start_epoch * steps_in_train_epoch
 
-  # ** resume from checkpointing **
-  if (ckpt:=getenv("RESUME", "")):
-    # TODO: Address resuming from checkpoint
-    # load_training_state(model, optim, lr_scheduler, safe_load(ckpt))
-    # start_epoch = int(lr_scheduler.epoch_counter.item() / steps_in_train_epoch)
-    print(f"resuming from {ckpt} at epoch {start_epoch}")
-
   # ** initialize wandb **
   if (WANDB:=getenv("WANDB")):
     import wandb
-
-    wandb_args = {"project": "MLPerf-RetinaNet"}
-    if (wandb_id:=getenv("WANDB_RESUME", "")):
-      wandb_args["id"] = wandb_id
-      wandb_args["resume"] = "must"
-
-    wandb.init(config=config, **wandb_args)
+    wandb.init(config=config, project="MLPerf-RetinaNet")
 
   print(f"training with batch size {BS} for {EPOCHS} epochs")
 
@@ -591,20 +577,8 @@ def train_retinanet():
       if WANDB:
         wandb.log({"eval/forward_time": total_fw_time, "eval/metric": val_metric, "epoch": e + 1})
 
-      if getenv("CKPT", 1):
-        if not os.path.exists(ckpt_dir := Path(getenv("CKPT_DIR", "./ckpts"))): os.mkdir(ckpt_dir)
-        if WANDB and wandb.run is not None:
-          fn = ckpt_dir / Path(f"{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}_seed{SEED}.safe")
-        else:
-          fn = ckpt_dir / Path(f"{time.strftime('%Y%m%d_%H%M%S')}_e{e}_seed{SEED}.safe")
-
-        print(f"saving ckpt to {fn}")
-        # TODO: Address model checkpointing without lr_scheduler
-        # safe_save(get_training_state(model, optim), fn)
-
       if val_metric >= target_metric:
         print(colored(f"target metric reached: {val_metric:.2f}/{target_metric:.2f}", color="green"))
-        if getenv("CKPT", 1): safe_save(get_state_dict(model), fn)
         break
 
 def train_unet3d():
