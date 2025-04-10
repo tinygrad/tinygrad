@@ -24,10 +24,10 @@ def get_contraction_with_reduce(old_shape:tuple[sint, ...], new_shape:tuple[sint
   for i in range(len(contraction)):
     if i in reduce_axis and len(contraction[i]) == 0:
       take_from = i+1
-      while len(contraction[take_from]) == 0:
+      while take_from < len(contraction) and len(contraction[take_from]) == 0:
         assert new_shape[take_from] == 1
         take_from += 1
-        if len(contraction) == take_from: return None # nothing to take
+      if take_from == len(contraction): return None # nothing to take
       for j in range(take_from, i, -1):
         assert len(contraction[j]) > 0
         contraction[j-1] = contraction[j][:-1]
