@@ -957,18 +957,12 @@ class RewriteContext:
 @track_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> UOp:
   rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
-  try: return rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.top_down_rewrite(sink)
-  except RecursionError:
-    sys.tracebacklimit = 0
-    raise
+  return rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.top_down_rewrite(sink)
 
 @track_matches
 def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False, input_map=None) -> dict[UOp, UOp]:
   rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
-  try: new_map = {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
-  except RecursionError:
-    sys.tracebacklimit = 0
-    raise
+  new_map = {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
   if input_map is not None:
     for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
   return new_map
