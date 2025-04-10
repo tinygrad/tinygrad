@@ -970,7 +970,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 @track_matches
 def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False, input_map=None, keep_metadata=False) -> dict[UOp, UOp]:# noqa: E501
   rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
-  try: new_map = {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
+  try: new_map = {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k, keep_metadata=keep_metadata)) for k in list(sink.toposort)[::-1]}# noqa: E501
   except RecursionError:
     sys.tracebacklimit = 0
     raise
