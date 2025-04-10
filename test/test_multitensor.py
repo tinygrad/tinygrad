@@ -790,6 +790,15 @@ class TestMultiTensor(unittest.TestCase):
     (d*c).realize()
     assert not d.lazydata.is_realized
 
+  def test_metadata(self):
+    X = Tensor.ones(256).contiguous().realize()
+    X.to_(devices_2)
+    for lb in X.lazydata.src:
+        assert lb.shape == (256,)
+    add = (X + X)
+    si_list = add.schedule_with_vars()[0]
+    assert "__add__" in {md.name for si in si_list for md in si.metadata}
+
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestHandleData(unittest.TestCase):
   def test_copied_to_device(self):
