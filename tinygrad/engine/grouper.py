@@ -1,6 +1,6 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, merge_views
+from tinygrad.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, merge_views
 from tinygrad.ops import can_pad, sint, track_rewrites
 from tinygrad.codegen.lowerer import get_contraction_with_reduce
 from tinygrad.codegen.symbolic import symbolic_simple
@@ -348,7 +348,7 @@ view_right = merge_views+PatternMatcher([
 
 add_buffer_ops = PatternMatcher([
   # LOAD
-  (UPat(Ops.BUFFER, name="x"), lambda ctx,x:UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx[1].index(x)), x.st.to_uop(), dtype=x.dtype)),
+  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), x.st.to_uop(), dtype=x.dtype)),
   # STORE (except for meta ops)
   (UPat(Ops.SINK, src=(UPat(GroupOp.Meta, name="x"),)), lambda x:x),
   # partial assign can store to a non-contiguous ShapeTracker
@@ -384,9 +384,9 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
-def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
+def fix_kernel_ast(k:UOp) -> UOp|None:
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
-  # substitute kernel sources for the target buffer + apply reshapes
+  # replace assign sources with a view of the target buffer
   parents_rep: dict[UOp, UOp] = {}
   for s in k.src:
     if s.op is Ops.ASSIGN:
@@ -394,8 +394,8 @@ def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
   ast = k.arg.ast.substitute(parents_rep)
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
-  # add buffer ops + fix_kernel_ops
-  ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, ctx=(ctx, bufs:=tuple(s.buf_uop for s in k.src)), bottom_up=True)
+  # replace buffer with define_global + add load/store last
+  ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs:=tuple(s.buf_uop for s in k.src), bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
@@ -439,15 +439,12 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # group into kernels
   sink = tensor_map[big_sink]
   realize_map = group_realizes(sink)
-  tensor_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True,
-                                 input_map=tensor_map)
-
-  # unbind var_vals and fix kernel ast
-  var_vals: dict[Variable, int] = {}
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, ctx=var_vals, bottom_up=True, input_map=tensor_map)
+  tensor_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}),
+                                 bottom_up=True, input_map=tensor_map)
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map)
 
   # verify Kernels match the spec
-  sched_sink = tensor_map[sink]
+  sched_sink = tensor_map[big_sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
   # map tensors to buffer/const, optionally apply a VIEW on top
