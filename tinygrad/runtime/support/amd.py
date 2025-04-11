@@ -1,7 +1,6 @@
 import functools, importlib
 from collections import defaultdict
 from dataclasses import dataclass
-from math import log2
 from tinygrad.helpers import getbits
 
 @dataclass(frozen=True)
@@ -21,7 +20,7 @@ def collect_registers(module, cls=AMDRegBase) -> dict[str, AMDRegBase]:
   for field_name,field_mask in module.__dict__.items():
     if not ('__' in field_name and field_name.endswith('_MASK')): continue
     reg_name, reg_field_name = field_name[:-len('_MASK')].split('__')
-    fields[reg_name][reg_field_name.lower()] = (int(log2(field_mask & -field_mask)), int(log2(field_mask)))
+    fields[reg_name][reg_field_name.lower()] = ((field_mask & -field_mask).bit_length()-1, field_mask.bit_length()-1)
   # NOTE: Some registers like regGFX_IMU_FUSESTRAP in gc_11_0_0 are missing base idx, just skip them
   return {reg:cls(name=reg, offset=off, segment=bases[reg], fields=fields[_split_name(reg)[1]]) for reg,off in offsets.items() if reg in bases}
 
