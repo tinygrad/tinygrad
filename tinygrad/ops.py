@@ -943,7 +943,7 @@ class RewriteContext:
   def top_down_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_src = tuple([self.top_down_rewrite(x) for x in n.src])
-    new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg, metadata=n.metadata)
+    new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg, metadata=n.metadata) # type: ignore [call-arg] # pylint: disable=unexpected-keyword-arg
     self.replace[n] = ret = n if new_n is None else self.top_down_rewrite(new_n)
     return ret
   def bottom_up_rewrite(self, n:UOp) -> UOp:
