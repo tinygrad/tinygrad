@@ -30,7 +30,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.MUL, name="ret"), lambda ctx, ret: (ret.src[1]*ctx, ret.src[0]*ctx)),
   (UPat(Ops.WHERE, name="ret"), lambda ctx, ret: (None, ret.src[0].where(ctx, ctx.const_like(0)), ret.src[0].where(ctx.const_like(0), ctx))),
   (UPat(Ops.REDUCE_AXIS, name="ret"), reduce_gradient),
-  (UPat(Ops.CONTIGUOUS), lambda ctx: (ctx,)),
+  (UPat((Ops.CONTIGUOUS, Ops.FUSE)), lambda ctx: (ctx,)),
   (UPat(Ops.CONTIGUOUS_BACKWARD), lambda ctx: (ctx.contiguous(),)),
   (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape),)),
   (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.arg)),)),
@@ -47,16 +47,18 @@ pm_gradient = PatternMatcher([
 
 # copied from tensor.py, get relevant toposort of gradients
 def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
-  @functools.lru_cache(None)
-  def is_in_target_path(x:UOp) -> bool: return any(u in targets or is_in_target_path(u) for u in x.src)
+  @functools.cache
+  def is_in_target_path(x:UOp) -> bool: return any(u in targets or is_in_target_path(u) for u in x.src) # noqa: F821
   def _walk(node:UOp, visited:set[UOp]) -> Iterator[UOp]:
     visited.add(node)
     if node.op is Ops.DETACH: return
-    if is_in_target_path(node):
+    if is_in_target_path(node): # noqa: F821
       for i in node.src:
-        if i not in visited: yield from _walk(i, visited)
+        if i not in visited: yield from _walk(i, visited) # noqa: F821
       yield node
-  return list(_walk(root, set()))
+  ret = list(_walk(root, set()))
+  del is_in_target_path, _walk
+  return ret
 
 def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
   grads = {root: root_grad}

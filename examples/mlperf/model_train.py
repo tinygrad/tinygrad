@@ -273,7 +273,7 @@ def train_resnet():
       else:
         it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
         i, proc = 0, data_get(it)
-        
+
       prev_cookies = []
       while proc is not None:
         GlobalCounters.reset()
@@ -446,7 +446,7 @@ def train_unet3d():
     loss.backward()
     optim.step()
     return loss.realize()
-  
+
   @Tensor.train(mode=False)
   @Tensor.test()
   def eval_step(model, x, y):
@@ -455,7 +455,7 @@ def train_unet3d():
     loss = dice_ce_loss(y_hat, y)
     score = dice_score(y_hat, y)
     return loss.realize(), score.realize()
-  
+
   if WANDB: wandb.init(config=config, project=PROJ_NAME)
 
   step_times, start_epoch = [], 1
@@ -464,7 +464,7 @@ def train_unet3d():
   next_eval_at = start_eval_at
 
   print(f"Training on {GPUS}")
-  
+
   if BENCHMARK: print("Benchmarking UNet3D")
   else: print(f"Start evaluation at epoch {start_eval_at} and every {evaluate_every} epoch(s) afterwards")
 
@@ -575,7 +575,8 @@ def train_rnnt():
 def train_step_bert(model, optimizer, scheduler, loss_scaler:float, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor,
                     masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor, GPUS):
   for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
-    t.shard_(GPUS, axis=0)
+    if len(GPUS) > 1: t.shard_(GPUS, axis=0)
+    else: t.to_(GPUS[0])
   optimizer.zero_grad()
 
   lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
@@ -583,7 +584,7 @@ def train_step_bert(model, optimizer, scheduler, loss_scaler:float, input_ids:Te
   (loss * loss_scaler).backward()
 
   global_norm = Tensor([0.0], dtype=dtypes.float32, device=optimizer[0].device).realize()
-  for p in optimizer.params: 
+  for p in optimizer.params:
     p.grad = p.grad / loss_scaler
     global_norm += p.grad.float().square().sum()
   global_norm = global_norm.sqrt()
@@ -591,17 +592,23 @@ def train_step_bert(model, optimizer, scheduler, loss_scaler:float, input_ids:Te
 
   optimizer.step()
   scheduler.step()
-  return loss.realize(), global_norm.realize()
+  # TODO: no to("CPU") here because it blocks and messes the python time
+  Tensor.realize(loss, global_norm, optimizer.optimizers[0].lr)
+  return loss, global_norm, optimizer.optimizers[0].lr
 
 @TinyJit
 def eval_step_bert(model, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor,
                    masked_lm_weights:Tensor, next_sentence_labels:Tensor, GPUS):
   for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
-    t.shard_(GPUS, axis=0)
+    if len(GPUS) > 1: t.shard_(GPUS, axis=0)
+    else: t.to_(GPUS[0])
   lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
   masked_lm_accuracy, seq_relationship_accuracy, masked_lm_loss, next_sentence_loss = \
     model.accuracy(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
-  return masked_lm_accuracy.realize(), seq_relationship_accuracy.realize(), masked_lm_loss.realize(), next_sentence_loss.realize()
+  for t in [masked_lm_accuracy, seq_relationship_accuracy, masked_lm_loss, next_sentence_loss]:
+    t.to_("CPU")
+  Tensor.realize(masked_lm_accuracy, seq_relationship_accuracy, masked_lm_loss, next_sentence_loss)
+  return masked_lm_accuracy, seq_relationship_accuracy, masked_lm_loss, next_sentence_loss
 
 def train_bert():
   # NOTE: pip install tensorflow, wandb required
@@ -651,9 +658,11 @@ def train_bert():
   # ** hyperparameters **
   BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 11 * len(GPUS) if dtypes.default_float in (dtypes.float16, dtypes.bfloat16) else 8 * len(GPUS))
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
-  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.00011 * math.sqrt(BS/66))
+  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.000175 * math.sqrt(BS/96))
+  opt_lamb_beta_1    = config["OPT_LAMB_BETA_1"]        = getenv("OPT_LAMB_BETA_1", 0.9)
+  opt_lamb_beta_2    = config["OPT_LAMB_BETA_2"]        = getenv("OPT_LAMB_BETA_2", 0.999)
 
-  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3630000 // BS)
+  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3300000 // BS)
   warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", 1)
   max_eval_steps     = config["MAX_EVAL_STEPS"]         = getenv("MAX_EVAL_STEPS", (10000 + EVAL_BS - 1) // EVAL_BS) # EVAL_BS * MAX_EVAL_STEPS >= 10000
   eval_step_freq     = config["EVAL_STEP_FREQ"]         = getenv("EVAL_STEP_FREQ", int((math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS)) # Round down
@@ -662,7 +671,7 @@ def train_bert():
   save_ckpt_dir      = config["SAVE_CKPT_DIR"]          = getenv("SAVE_CKPT_DIR", "./ckpts")
   init_ckpt          = config["INIT_CKPT_DIR"]          = getenv("INIT_CKPT_DIR", BASEDIR)
 
-  loss_scaler        = config["LOSS_SCALER"]            = getenv("LOSS_SCALER", 2.0**10 if dtypes.default_float == dtypes.float16 else 1.0)
+  loss_scaler        = config["LOSS_SCALER"]            = getenv("LOSS_SCALER", 2.0**11 if dtypes.default_float == dtypes.float16 else 1.0)
   decay              = config["DECAY"]                  = getenv("DECAY", 0.01)
   epsilon            = config["EPSILON"]                = getenv("EPSILON", 1e-6)
   poly_power         = config["POLY_POWER"]             = getenv("POLY_POWER", 1.0)
@@ -696,8 +705,9 @@ def train_bert():
       p = p.assign(Tensor.zeros_like(p).contiguous()).realize()
 
   parameters = get_parameters(model)
-  for p in parameters:
-    p.to_(GPUS)
+  if len(GPUS) > 1:
+    for p in parameters:
+      p.to_(GPUS)
 
   # ** Log run config **
   for key, value in config.items(): print(f'HParam: "{key}": {value}')
@@ -705,8 +715,8 @@ def train_bert():
   # ** Optimizer **
   parameters_no_wd = [v for k, v in get_state_dict(model).items() if "bias" in k or "LayerNorm" in k]
   parameters = [x for x in parameters if x not in set(parameters_no_wd)]
-  optimizer_wd = LAMB(parameters, lr=max_lr, eps=epsilon, weight_decay=decay, adam=False)
-  optimizer_no_wd = LAMB(parameters_no_wd, lr=max_lr, eps=epsilon, weight_decay=0.0, adam=False)
+  optimizer_wd = LAMB(parameters, lr=max_lr, b1=opt_lamb_beta_1, b2=opt_lamb_beta_2, eps=epsilon, weight_decay=decay, adam=False)
+  optimizer_no_wd = LAMB(parameters_no_wd, lr=max_lr, b1=opt_lamb_beta_1, b2=opt_lamb_beta_2, eps=epsilon, weight_decay=0.0, adam=False)
   optimizer_group = OptimizerGroup(optimizer_wd, optimizer_no_wd)
 
   # ** LR scheduler **
@@ -725,8 +735,8 @@ def train_bert():
       MLLOGGER.event(key=mllog_constants.OPT_NAME, value="LAMB")
       MLLOGGER.event(key=mllog_constants.OPT_BASE_LR, value=config["OPT_BASE_LEARNING_RATE"])
       MLLOGGER.event(key=mllog_constants.OPT_LAMB_WEIGHT_DECAY, value=config["DECAY"])
-      MLLOGGER.event(key=mllog_constants.OPT_LAMB_BETA_1, value=optimizer_wd.b1)
-      MLLOGGER.event(key=mllog_constants.OPT_LAMB_BETA_2, value=optimizer_wd.b2)
+      MLLOGGER.event(key=mllog_constants.OPT_LAMB_BETA_1, value=config["OPT_LAMB_BETA_1"])
+      MLLOGGER.event(key=mllog_constants.OPT_LAMB_BETA_2, value=config["OPT_LAMB_BETA_2"])
       MLLOGGER.event(key=mllog_constants.OPT_LAMB_LR_DECAY_POLY_POWER, value=config["POLY_POWER"])
       MLLOGGER.event(key=mllog_constants.OPT_LAMB_EPSILON, value=config["EPSILON"])
 
@@ -769,54 +779,57 @@ def train_bert():
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=i*BS, metadata={"epoch_num": i*BS})
 
   while train_data is not None and i < train_steps and not achieved:
-    Tensor.training = True
-    BEAM.value = TRAIN_BEAM
-    st = time.perf_counter()
-    GlobalCounters.reset()
-    loss, global_norm = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler,
-      train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
-      train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"], GPUS)
+    if getenv("TRAIN", 1):
+      Tensor.training = True
+      BEAM.value = TRAIN_BEAM
+      st = time.perf_counter()
+      GlobalCounters.reset()
+      loss, global_norm, lr = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler,
+        train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
+        train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"], GPUS)
 
-    pt = time.perf_counter()
+      pt = time.perf_counter()
 
-    try:
-      next_data = next(train_it)
-    except StopIteration:
-      next_data = None
+      try:
+        next_data = next(train_it)
+      except StopIteration:
+        next_data = None
 
-    dt = time.perf_counter()
+      dt = time.perf_counter()
 
-    device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-    loss = loss.item()
+      device_str = parameters[0].device if isinstance(parameters[0].device, str) else f"{parameters[0].device[0]} * {len(parameters[0].device)}"
+      loss = loss.item()
+      assert not math.isnan(loss)
+      lr = lr.item()
 
-    cl = time.perf_counter()
-    if BENCHMARK: step_times.append(cl - st)
+      cl = time.perf_counter()
+      if BENCHMARK: step_times.append(cl - st)
 
-    tqdm.write(
-      f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
-      f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optimizer_wd.lr.numpy()[0]:.6f} LR, "
-      f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
-    if WANDB:
-      wandb.log({"lr": optimizer_wd.lr.numpy(), "train/loss": loss, "train/global_norm": global_norm.item(), "train/step_time": cl - st,
-                  "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
-                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": (i+1)*BS})
+      tqdm.write(
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {lr:.6f} LR, "
+        f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+      if WANDB:
+        wandb.log({"lr": lr, "train/loss": loss, "train/global_norm": global_norm.item(), "train/step_time": cl - st,
+                    "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
+                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": (i+1)*BS})
 
-    train_data, next_data = next_data, None
-    i += 1
+      train_data, next_data = next_data, None
+      i += 1
 
-    if i == BENCHMARK:
-      median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
-      estimated_total_minutes = int(median_step_time * train_steps / 60)
-      print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
-      print(f"epoch global_ops: {train_steps * GlobalCounters.global_ops:_}, "
-            f"epoch global_mem: {train_steps * GlobalCounters.global_mem:_}")
+      if i == BENCHMARK:
+        median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
+        estimated_total_minutes = int(median_step_time * train_steps / 60)
+        print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
+        print(f"epoch global_ops: {train_steps * GlobalCounters.global_ops:_}, "
+              f"epoch global_mem: {train_steps * GlobalCounters.global_mem:_}")
 
     # ** eval loop **
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK) or i == train_steps:
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*BS, "step_num": i})
-      if getenv("RESET_STEP", 0) or INITMLPERF: train_step_bert.reset()
-      else: train_step_bert.captured.free_intermediates()
+      if getenv("RESET_STEP"): train_step_bert.reset()
+      elif getenv("FREE_INTERMEDIATE", 1) and train_step_bert.captured is not None: train_step_bert.captured.free_intermediates()
       eval_lm_losses = []
       eval_clsf_losses = []
       eval_lm_accs = []
@@ -843,14 +856,15 @@ def train_bert():
         et = time.time()
         eval_times.append(et - st)
 
-        if BENCHMARK and j == BENCHMARK:
+        if BENCHMARK and (j+1) == min(BENCHMARK, max_eval_steps):
           # assume INITMLPERF has BENCHMARK set
           if MLLOGGER and INITMLPERF:
             MLLOGGER.event(key=mllog_constants.INIT_STOP, value=None)
           return
 
-      if getenv("RESET_STEP", 0): eval_step_bert.reset()
-      else: eval_step_bert.captured.free_intermediates()
+      if getenv("RESET_STEP"): eval_step_bert.reset()
+      elif getenv("FREE_INTERMEDIATE", 1) and eval_step_bert.captured is not None: eval_step_bert.captured.free_intermediates()
+
       del eval_data
       avg_lm_loss = sum(eval_lm_losses) / len(eval_lm_losses)
       avg_clsf_loss = sum(eval_clsf_losses) / len(eval_clsf_losses)
@@ -863,7 +877,7 @@ def train_bert():
 
       if WANDB:
         wandb.log({"eval/lm_loss": avg_lm_loss, "eval/clsf_loss": avg_clsf_loss, "eval/lm_accuracy": avg_lm_acc, \
-                    "eval/clsf_accuracy": avg_clsf_acc, "eval/forward_time": avg_fw_time})
+                    "eval/clsf_accuracy": avg_clsf_acc, "eval/forward_time": avg_fw_time, "epoch": (i+1)*BS})
 
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.end(key=mllog_constants.EVAL_STOP, value=i*BS, metadata={"epoch_count": i*BS, "step_num": i, "samples_count": config["EVAL_BS"] * config["MAX_EVAL_STEPS"]})
@@ -889,6 +903,9 @@ def train_bert():
           MLLOGGER.end(key=mllog_constants.RUN_STOP, metadata=dict(status=mllog_constants.SUCCESS))
         # stop once hitting the target
         break
+
+    # should not happen, BENCHMARK not properly terminated
+    if BENCHMARK: assert i < BENCHMARK, i
 
     if getenv("CKPT") and i % save_ckpt_freq == 0:
       if MLLOGGER and RUNMLPERF:

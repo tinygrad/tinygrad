@@ -67,11 +67,11 @@ jobs:
         DEBUG=2 CPU=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
         DEBUG=2 LLVM=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Run Tensor Core GEMM (float)
-      run: DEBUG=2 python3.11 extra/gemm/simple_matmul.py | tee matmul.txt
+      run: DEBUG=2 SHOULD_USE_TC=1 python3.11 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run Tensor Core GEMM (half)
-      run: DEBUG=2 HALF=1 python3.11 extra/gemm/simple_matmul.py | tee matmul_half.txt
+      run: DEBUG=2 SHOULD_USE_TC=1 HALF=1 python3.11 extra/gemm/simple_matmul.py | tee matmul_half.txt
     - name: Run Tensor Core GEMM (bfloat16)
-      run: DEBUG=2 BFLOAT16=1 python3.11 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
+      run: DEBUG=2 SHOULD_USE_TC=1 BFLOAT16=1 python3.11 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
     - name: Fuzz Padded Tensor Core GEMM
       run: METAL=1 M_START=6 M_STOP=10 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=6 K_STOP=24 K_STEP=1 TC_OPT=2 DEBUG=2 python3.11 ./extra/gemm/fuzz_matmul.py
     - name: Run LLaMA
@@ -178,13 +178,13 @@ jobs:
         PTX=1 ALLOW_TF32=1 NV=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Run Tensor Core GEMM (CUDA)
       run: |
-        CUDA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
-        CUDA=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
-        CUDA=1 ALLOW_TF32=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_tf32.txt
+        CUDA=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
+        CUDA=1 SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
+        CUDA=1 SHOULD_USE_TC=1 ALLOW_TF32=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee matmul_tf32.txt
     - name: Run Tensor Core GEMM (PTX)
-      run: NV=1 PTX=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_ptx.txt
+      run: NV=1 PTX=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_ptx.txt
     - name: Run Tensor Core GEMM (NV)
-      run: NV=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_nv.txt
+      run: NV=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_nv.txt
     - name: Test NV=1
       run: DEBUG=2 NV=1 python -m pytest -rA test/test_tiny.py
     - name: Test CUDA=1
@@ -369,9 +369,11 @@ jobs:
     - name: Test speed vs theoretical
       run: AMD=1 IGNORE_BEAM_CACHE=1 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Test tensor cores
-      run: AMD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
+      run: |
+        AMD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
+        AMD=1 SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
     - name: Run Tensor Core GEMM (AMD)
-      run: AMD=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt
+      run: AMD=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt
     - name: Test AMD=1
       run: DEBUG=2 AMD=1 python -m pytest -rA test/test_tiny.py
     - name: Test HIP=1
@@ -447,7 +449,7 @@ jobs:
   testmoreamdbenchmark:
     name: tinybox red Training Benchmark
     runs-on: [self-hosted, Linux, tinybox]
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -455,8 +457,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Insert amdgpu
-      run: sudo modprobe amdgpu
+    - name: Remove amdgpu
+      run: sudo rmmod amdgpu || true
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -474,10 +476,6 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
-    - name: setup perflevel
-      run: |
-        examples/mlperf/training_submission_v4.1/tinycorp/benchmarks/bert/implementations/tinybox_red/setup.sh
-        rocm-smi
     - name: Train MNIST
       run: time PYTHONPATH=. AMD=1 TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps

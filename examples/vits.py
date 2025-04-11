@@ -193,10 +193,10 @@ class Generator:
     x = self.conv_pre(x)
     if g is not None:  x = x + self.cond(g)
     for i in range(self.num_upsamples):
-      x = self.ups[i](x.leakyrelu(LRELU_SLOPE))
+      x = self.ups[i](x.leaky_relu(LRELU_SLOPE))
       xs = sum(self.resblocks[i * self.num_kernels + j].forward(x) for j in range(self.num_kernels))
       x = (xs / self.num_kernels).realize()
-    res = self.conv_post(x.leakyrelu()).tanh().realize()
+    res = self.conv_post(x.leaky_relu()).tanh().realize()
     return res
 
 class LayerNorm(nn.LayerNorm):
@@ -238,8 +238,8 @@ class ResBlock1:
     self.convs2 = [nn.Conv1d(channels, channels, kernel_size, 1, dilation=1, padding=get_padding(kernel_size, 1)) for _ in range(3)]
   def forward(self, x: Tensor, x_mask=None):
     for c1, c2 in zip(self.convs1, self.convs2):
-      xt = x.leakyrelu(LRELU_SLOPE)
-      xt = c1(xt if x_mask is None else xt * x_mask).leakyrelu(LRELU_SLOPE)
+      xt = x.leaky_relu(LRELU_SLOPE)
+      xt = c1(xt if x_mask is None else xt * x_mask).leaky_relu(LRELU_SLOPE)
       x = c2(xt if x_mask is None else xt * x_mask) + x
     return x if x_mask is None else x * x_mask
 

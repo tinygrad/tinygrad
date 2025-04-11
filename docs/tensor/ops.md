@@ -9,6 +9,7 @@
 ::: tinygrad.Tensor.isclose
 ::: tinygrad.Tensor.mean
 ::: tinygrad.Tensor.var
+::: tinygrad.Tensor.var_mean
 ::: tinygrad.Tensor.std
 ::: tinygrad.Tensor.std_mean
 ::: tinygrad.Tensor.softmax
@@ -22,6 +23,7 @@
 
 ::: tinygrad.Tensor.avg_pool2d
 ::: tinygrad.Tensor.max_pool2d
+::: tinygrad.Tensor.max_unpool2d
 ::: tinygrad.Tensor.conv2d
 ::: tinygrad.Tensor.conv_transpose2d
 ::: tinygrad.Tensor.dot
@@ -34,6 +36,9 @@
 ::: tinygrad.Tensor.interpolate
 ::: tinygrad.Tensor.scatter
 ::: tinygrad.Tensor.scatter_reduce
+::: tinygrad.Tensor.masked_select
+::: tinygrad.Tensor.sort
+::: tinygrad.Tensor.topk
 
 ## Neural Network (functional)
 
