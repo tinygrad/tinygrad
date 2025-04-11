@@ -488,7 +488,7 @@ class TestTinygrad(unittest.TestCase):
       _a = Tensor([3]) in [Tensor([3]), Tensor([4]), Tensor([5])]
 
   def test_repr_with_grad(self):
-    a = Tensor([1], requires_grad=True)
+    a = Tensor([1.0], requires_grad=True)
     b = Tensor([1])
     c = (a + b).sum().backward()
     print(a)
@@ -896,6 +896,28 @@ class TestIdxUpcast(unittest.TestCase):
     # Modified example from issue 3271
     a = Tensor.empty(2**11, 2**11, 1, dtype=dtypes.int8).permute((2, 0, 1)).expand((2**9+10, -1, -1)).contiguous()
     a.realize()
+
+class TestRequiresGrad(unittest.TestCase):
+  def test_init_non_float(self):
+    with self.assertRaises(RuntimeError):
+      Tensor([1, 2, 3], dtype=dtypes.int32, requires_grad=True)
+
+    # these should not raise errors
+    Tensor([1.0, 2.0, 3.0], dtype=dtypes.float32, requires_grad=True)
+    Tensor([1, 2, 3], dtype=dtypes.int32, requires_grad=False)
+
+  def test_method_non_float(self):
+    t = Tensor([1, 2, 3], dtype=dtypes.int32)
+    with self.assertRaises(RuntimeError):
+      t.requires_grad_(True)
+    with self.assertRaises(RuntimeError):
+      Tensor([True, False], dtype=dtypes.bool, requires_grad=True)
+    with self.assertRaises(RuntimeError):
+      Tensor.zeros(10, dtype=dtypes.int32, requires_grad=True)
+
+    # these should not raise errors
+    Tensor([1.0, 2.0, 3.0], dtype=dtypes.float32).requires_grad_(True)
+    Tensor([1, 2, 3], dtype=dtypes.int32).requires_grad_(False)
 
 if __name__ == '__main__':
   unittest.main()

@@ -163,6 +163,10 @@ class Tensor(SimpleMathTrait):
     # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
+    # check that requires_grad is only set for floats
+    if requires_grad and not dtypes.is_float(data.dtype):
+      raise RuntimeError(f"Only Tensors of floating point dtype can require gradients, got {data.dtype}")
+
     # data might be on a different device
     if isinstance(device, str): self.lazydata:UOp = data if data.device == device else data.copy_to_device(device)
     # if device is a tuple, we should have/construct a MultiLazyBuffer
@@ -178,13 +182,15 @@ class Tensor(SimpleMathTrait):
   def _apply_uop(self, fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
     new_uop: UOp = fxn(*[t.lazydata for t in (self,)+x], **kwargs)
     needs_input_grad = [t.requires_grad for t in (self,)+x]
-    return Tensor(new_uop, device=new_uop.device, requires_grad=True if any(needs_input_grad) else None if None in needs_input_grad else False)
+    return Tensor(new_uop, device=new_uop.device, requires_grad=(True if any(needs_input_grad) else None if None in needs_input_grad else False) if dtypes.is_float(new_uop.dtype) else False) # noqa: E501
 
   def _apply_broadcasted_uop(self, fxn:Callable, x:Tensor|ConstType, reverse=False) -> Tensor:
     lhs,rhs = self._broadcasted(x, reverse)
     return lhs._apply_uop(fxn, rhs)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
+    if requires_grad and not dtypes.is_float(self.dtype):
+      raise RuntimeError(f"Only Tensors of floating point dtype can require gradients, got {self.dtype}")
     self.requires_grad = requires_grad
     return self
 
