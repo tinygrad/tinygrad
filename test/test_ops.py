@@ -1928,6 +1928,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3)], lambda x: x.as_strided((2,2), (1,2)))
     helper_test_op([(3,3)], lambda x: x.as_strided((2,2), (1,2), 1))
     helper_test_op([(4,3)], lambda x: x.as_strided((2,2,3), (6,3,1)))
+    helper_test_op([(1,)], lambda x: x.as_strided((), ()))
     helper_test_op([(3,3)], lambda x: x.as_strided((1,), (1,)))
     helper_test_op([(3,4)], lambda x: x.as_strided((4,3), (1,4)))
     helper_test_op([(3,1)], lambda x: x.as_strided((3,3), (1,0)))
