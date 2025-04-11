@@ -2278,7 +2278,7 @@ class TestTensorUOpSpec(unittest.TestCase):
   def test_expanded_const_ok(self):
     a = Tensor.ones((4, 4))
     t = graph_rewrite(a.lazydata.sink(), merge_views+merge_views)
-    create_schedule_with_vars(t)
+    create_schedule_with_vars(t, {})
 
   # NOTE: changing symbolic CONST VIEWs is not allowed
   @unittest.expectedFailure
