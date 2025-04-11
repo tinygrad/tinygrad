@@ -19,7 +19,6 @@ if __name__ == "__main__":
     def new_lin(): return ast_str_to_lin(ast, opts=dev.renderer)
 
     k = new_lin()
-    # k.required_optimizations()
 
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k = hand_coded_optimizations(k)
 
@@ -30,7 +29,6 @@ if __name__ == "__main__":
       lins.append(("hc", new_lin()))
       lins[-1][1] = hand_coded_optimizations(lins[-1][1])
     kb = new_lin()
-    # kb.required_optimizations()
     test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
     lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
     timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])

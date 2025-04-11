@@ -6,7 +6,7 @@ from tinygrad.ops import Ops, resolve
 
 def hand_coded_optimizations(k:Kernel) -> Kernel:
   # make a copy so it does not mutate the input
-  k = k.copy().required_optimizations()
+  k = k.copy()
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)

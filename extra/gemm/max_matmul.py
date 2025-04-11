@@ -54,7 +54,6 @@ def randoms():
 
 def ast_to_cuda_prog(compiler, ast, opts):
   k = Kernel(ast)
-  k.required_optimizations()
   for opt in opts:
     k.apply_opt(opt)
   p = k.to_program()
