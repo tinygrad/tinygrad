@@ -1,10 +1,24 @@
 import unittest
 from tinygrad import Variable
 from tinygrad.tensor import Tensor
+from tinygrad.engine.realize import lower_schedule, CompiledRunner
 from examples.gpt2 import Attention
 import numpy as np
 
 class TestSymbolicOps(unittest.TestCase):
+  def test_method_cache(self):
+    kernels = set()
+    def f(a): return (a+1)
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      a = Tensor.empty(3, i)
+      sched, var_vals = f(a.reshape(3, vi)).reshape(3, i).schedule_with_vars()
+      exec_items = [e[1] if isinstance(e, tuple) else e for e in list(lower_schedule(sched))]
+      compiled_runners = [e for e in exec_items if isinstance(e.prg, CompiledRunner)]
+      assert len(compiled_runners) == 1, "a+1 must be one kernel"
+      kernels.add(compiled_runners[0].prg)
+    self.assertEqual(len(kernels), 4)
+
   def test_plus1(self):
     def f(a): return (a+1).realize()
     for i in range(1, 5):
