@@ -440,8 +440,8 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   sink = tensor_map[big_sink]
   realize_map = group_realizes(sink)
   tensor_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}),
-                                 bottom_up=True, input_map=tensor_map)
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map)
+                                 bottom_up=True, input_map=tensor_map, name="create_kernels")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map, name="create_ast")
 
   # verify Kernels match the spec
   sched_sink = tensor_map[big_sink]
@@ -459,7 +459,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
         raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on ASSIGN or BUFFER")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep:
-    tensor_map = graph_rewrite_map(sched_sink, _substitute, assign_rep, bottom_up=True, input_map=tensor_map)
+    tensor_map = graph_rewrite_map(sched_sink, _substitute, assign_rep, bottom_up=True, input_map=tensor_map, name="assign_fixup")
     sched_sink = tensor_map[sched_sink]
     type_verify(list(sched_sink.toposort), kernel_spec)
 
