@@ -7,6 +7,7 @@ from tinygrad.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.codegen.kernel import Kernel
+from tinygrad.codegen.heuristic import hand_coded_optimizations
 from tinygrad.engine.schedule import ScheduleItem
 
 # **************** Program Creation ****************
@@ -15,7 +16,7 @@ logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS
 def get_kernel(renderer:Renderer, ast:UOp) -> Kernel:
   k = Kernel(ast, opts=renderer).required_optimizations()
   if not NOOPT:
-    if not k.apply_tensor_cores(getenv("TC", 1)): k.hand_coded_optimizations()
+    if not k.apply_tensor_cores(getenv("TC", 1)): k = hand_coded_optimizations(k)
     if BEAM >= 1:
       from tinygrad.engine.search import beam_search, bufs_from_lin
       kb = Kernel(ast, opts=renderer).required_optimizations()

@@ -1,11 +1,12 @@
 import random
 from tinygrad.helpers import getenv
 from tinygrad.engine.search import beam_search, bufs_from_lin
+from tinygrad.codegen.heuristic import hand_coded_optimizations
 from extra.optimization.helpers import load_worlds, ast_str_to_lin, time_linearizer
 
 def optimize_kernel(k):
   # TODO: update this
-  return k.hand_coded_optimizations()
+  return hand_coded_optimizations(k)
 
 if __name__ == '__main__':
   hcopt_wins = beam_wins = tie = 0

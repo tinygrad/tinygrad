@@ -1,9 +1,10 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, GlobalCounters, Context
-from tinygrad.dtype import DTypeLike
+from tinygrad import Tensor, GlobalCounters, Context, Device
+from tinygrad.dtype import DTypeLike, dtypes
 from tinygrad.helpers import DEBUG, get_single_element
 from tinygrad.engine.realize import lower_schedule_item
+from tinygrad.device import is_dtype_supported
 
 def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
   # only support axis =-1
@@ -49,6 +50,11 @@ class TestFuse(unittest.TestCase):
   def test_fuse_softmax(self):
     a = Tensor.rand(50,50).realize()
     self._test_fuse(lambda a: a.softmax(axis=-1), a)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
+  def test_fuse_softmax_dtype(self):
+    a = Tensor.rand(50,50).realize()
+    self._test_fuse(lambda a: a.softmax(axis=-1, dtype='half'), a, atol=3e-4)
 
   def test_fuse_arange_eye(self):
     self._test_fuse(lambda: Tensor.arange(10).reshape(10,1).expand(10,10) == Tensor.arange(10).reshape(1,10).expand(10,10))

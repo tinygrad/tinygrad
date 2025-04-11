@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from collections import deque
-from tinygrad.ops import UOp, UPat, PatternMatcher, Variable, Ops, buffers, graph_rewrite
+from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
 from tinygrad.device import Buffer
 from tinygrad.helpers import Metadata, DEBUG, unwrap
 from tinygrad.engine.grouper import get_becomes_map
@@ -13,22 +13,23 @@ class ScheduleItem:
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...] = ()
 
-# **** unbind variables
+# **** unbind Variables
 
-def unbind_shapetracker(ctx:dict[Variable, int], x:UOp):
+def unbind_view(ctx:dict[Variable, int], x:UOp):
   st = unwrap(x.st).simplify()
   if any(x.op is Ops.BIND for x in st.vars()):
     st, var_vals = st.unbind()
     ctx.update(var_vals)
   return x.replace(arg=st) if st != x.st else None
 
-def unbind_variable(ctx:dict[Variable, int], var:UOp, val:UOp):
-  ctx[var.replace(src=())] = val.arg
+def unbind_bind(ctx:dict[Variable, int], x:UOp):
+  var, val = x.unbind()
+  ctx[var.replace(src=())] = val
   return var
 
 pm_unbind = PatternMatcher([
-  (UPat(Ops.VIEW, name="x"), unbind_shapetracker),
-  (UPat(Ops.BIND, src=(UPat.var("var"), UPat.cvar("val"))), unbind_variable),
+  (UPat(Ops.VIEW, name="x"), unbind_view),
+  (UPat(Ops.BIND, name="x"), unbind_bind),
 ])
 
 # **** schedule linearizer

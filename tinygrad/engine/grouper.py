@@ -348,7 +348,7 @@ view_right = merge_views+PatternMatcher([
 
 add_buffer_ops = PatternMatcher([
   # LOAD
-  (UPat(Ops.BUFFER, name="x"), lambda ctx,x:UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), x.st.to_uop(), dtype=x.dtype)),
+  (UPat(Ops.BUFFER, name="x"), lambda ctx,x:UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx[1].index(x)), x.st.to_uop(), dtype=x.dtype)),
   # STORE (except for meta ops)
   (UPat(Ops.SINK, src=(UPat(GroupOp.Meta, name="x"),)), lambda x:x),
   # partial assign can store to a non-contiguous ShapeTracker
@@ -384,7 +384,7 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
-def fix_kernel_ast(k:UOp) -> UOp|None:
+def fix_kernel_ast(ctx:dict[Variable, int], k:UOp) -> UOp|None:
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
   # substitute kernel sources for the target buffer + apply reshapes
   parents_rep: dict[UOp, UOp] = {}
@@ -395,7 +395,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # add buffer ops + fix_kernel_ops
-  ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs:=tuple(s.buf_uop for s in k.src), bottom_up=True)
+  ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, ctx=(ctx, bufs:=tuple(s.buf_uop for s in k.src)), bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
@@ -406,8 +406,12 @@ pm_fuse = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="c").fuse(), lambda c: c),
 
   # FUSE triggers swizzle on reduceop
-  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view").fuse(),
-   lambda r,src,view: swizzle_reduceop(r, src, view, fuse=True)),
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").or_casted(),), name="view").fuse(),
+   lambda r,src,view: ret.cast(view.dtype) if (ret:=swizzle_reduceop(r, src, view, fuse=True)) is not None else None),
+
+  # FUSE on reduce (without view) adds fuse marker to grouper
+  (UPat(Ops.REDUCE_AXIS, name="r").fuse(),
+   lambda r: r.replace(src=(r.src[0].fuse(),), arg=r.arg+(True,)) if len(r.arg) == 2 else None),
 
   # FUSE elementwise. TODO: check for PAD
   (UPat(Ops.VIEW, src=(UPat(GroupOp.ALU, name="alu"),), name="view").fuse(),
@@ -438,8 +442,9 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True,
                                  input_map=tensor_map)
 
-  # fix kernel ast
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map)
+  # unbind var_vals and fix kernel ast
+  var_vals: dict[Variable, int] = {}
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, ctx=var_vals, bottom_up=True, input_map=tensor_map)
 
   # verify Kernels match the spec
   sched_sink = tensor_map[sink]

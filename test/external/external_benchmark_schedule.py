@@ -4,6 +4,7 @@ from tinygrad import Tensor, Device, nn
 from tinygrad.helpers import Profiling, Timing, getenv, BEAM, NOOPT, DEBUG, Context, ansilen
 from tinygrad.ops import Ops
 from tinygrad.codegen.kernel import Kernel
+from tinygrad.codegen.heuristic import hand_coded_optimizations
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.devectorizer import full_graph_rewrite
@@ -37,7 +38,7 @@ if __name__ == "__main__":
               if BEAM:
                 with Context(DEBUG=max(2, DEBUG.value)): k = beam_search(k, bufs_from_lin(k), BEAM.value)
               elif NOOPT: pass
-              else: k.hand_coded_optimizations()
+              else: k = hand_coded_optimizations(k)
               kernels.append(k)
 
         with Timing("***** model lower in     "): uops = [rewrite_shapetracker_with_index(k.get_optimized_ast(), k.opts) for k in kernels]
