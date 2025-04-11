@@ -457,6 +457,12 @@ def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   realize_map = group_realizes(sink)
   tensor_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True,
                                  input_map=tensor_map)
+
+  # unbind var_vals and fix kernel ast
+  var_vals: dict[Variable, int] = {}
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, ctx=var_vals, bottom_up=True, input_map=tensor_map)
+
+  # verify Kernels match the spec
   sched_sink = tensor_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
@@ -483,15 +489,11 @@ def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   if assign_rep:
     sched_sink = sched_sink.substitute(assign_rep)
     type_verify(list(sched_sink.toposort), kernel_spec)
+  becomes_map[big_sink] = sched_sink
 
   # display the final graph
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
-
-  # unbind var_vals and fix kernel ast
-  var_vals: dict[Variable, int] = {}
-  sched_sink = graph_rewrite(sched_sink, create_ast, ctx=var_vals, bottom_up=True)
-  becomes_map[big_sink] = sched_sink
 
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
