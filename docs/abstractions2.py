@@ -78,6 +78,7 @@ print("******** third, the LazyBuffer ***********")
 
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule_with_vars
+from tinygrad.engine.grouper import get_becomes_map
 
 # allocate some values + load in values
 a = UOp.new_buffer(DEVICE, 1, dtypes.int32)
@@ -88,8 +89,13 @@ b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
 # describe the computation
 out = a.alu(Ops.ADD, b)
 
-# schedule the computation as a list of kernels
+# group the computation into a set of kernels
+becomes_map = get_becomes_map(out.sink())
+out = becomes_map[out]
+
+# schedule the kernels in a list
 sched, _, becomes_map = create_schedule_with_vars(out.sink())
+
 for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CPU
 # NOTE: UOps are no longer mutable, the scheduler gives you a map to lookup which BUFFER the result was written to
 out = becomes_map[out]
