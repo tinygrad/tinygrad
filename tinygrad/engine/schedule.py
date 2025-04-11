@@ -34,11 +34,7 @@ pm_unbind = PatternMatcher([
 
 # **** schedule linearizer
 
-def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  becomes_map = get_becomes_map(big_sink)
-  sched_sink = becomes_map.pop(big_sink)
-
-  # bfs toposort
+def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   children: dict[UOp, list[UOp]] = {}
   in_degree: dict[UOp, int] = {}
   for u in sched_sink.toposort:
@@ -67,7 +63,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
   # map ASSIGN to BUFFER after ScheduleItems are constructed
-  #becomes_map: dict[UOp, UOp] = {}
+  becomes_map: dict[UOp, UOp] = {}
   for u in sched_sink.toposort:
     if u.op is Ops.ASSIGN: becomes_map[u] = u.src[0]
 

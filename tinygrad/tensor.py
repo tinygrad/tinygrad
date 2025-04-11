@@ -8,6 +8,7 @@ from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.engine.multi import get_multi_map
+from tinygrad.engine.grouper import get_becomes_map
 from tinygrad.gradient import compute_gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
 from tinygrad.spec import tensor_uop_spec, type_verify
@@ -223,11 +224,13 @@ class Tensor(SimpleMathTrait):
 
   # ***** data handlers ****
 
-  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[Variable, int]]:
+  def kernelize(self, *lst:Tensor) -> None:
     """
-    Creates the schedule needed to realize these Tensor(s), with Variables.
+    Group Tensor UOps into Kernels.
 
-    NOTE: A Tensor can only be scheduled once.
+    After this step, all output Tensors evaluate to a new Buffer, existing Buffer or a constant
+
+    Other Tensors can fuse or kernelize depending on the graph.
     """
     big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
 
@@ -240,6 +243,19 @@ class Tensor(SimpleMathTrait):
     # verify Tensors match the spec
     if __debug__: type_verify(list(big_sink.toposort), tensor_uop_spec)
 
+    becomes_map = get_becomes_map(big_sink)
+    _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
+
+  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[Variable, int]]:
+    """
+    Creates the schedule needed to realize these Tensor(s), with Variables.
+
+    NOTE: A Tensor can only be scheduled once.
+    """
+    # override the Tensor graph with the new kernels
+    self.kernelize(*lst)
+    big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
+    # toposort kernels + unbind Variables
     schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return memory_planner(schedule), var_vals
