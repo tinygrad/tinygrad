@@ -1860,8 +1860,8 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
 
   # Check correctness of handcoded optimiztions.
   k = Kernel(realized_ast)
-  lins.append(k)
   k = hand_coded_optimizations(k)
+  lins.append(k)
   prg = get_prg(k)
   reset_bufs(outbufs)
   prg.exec(real_bufs)
