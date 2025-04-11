@@ -1,11 +1,11 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, merge_views
-from tinygrad.ops import can_pad, sint
-from tinygrad.codegen.lowerer import get_contraction
+from tinygrad.ops import can_pad, sint, track_rewrites
+from tinygrad.codegen.lowerer import get_contraction_with_reduce
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv, pluralize, ContextVar, Context, diskcache_put
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -273,16 +273,14 @@ def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
   if unwrap(view.st).contiguous and len(r.shape) < len(view.shape) and tuple(x for x in r.shape if x != 1) == tuple(x for x in view.shape if x != 1):
     new_shape: list[sint] = []
     new_reduce_axis = []
-    for i,pairs in enumerate(unwrap(get_contraction(view.shape, r.shape))):
+    if (contraction:=get_contraction_with_reduce(view.shape, r.shape, r.arg[1])) is None: return None
+    for i,pairs in enumerate(contraction):
       new_shape_chunk = [view.shape[p] for p in pairs]
       if i in r.arg[1]:
-        # if there's nowhere to fit the reduce, we return None (might be missing solvable cases)
-        if len(new_shape_chunk) == 0: return None
-        # we left justify the reduce in a group of ones
-        assert all(x == 1 for x in new_shape_chunk), "not all ones in reduce?"
-        new_reduce_axis.append(len(new_shape))
-        new_shape.append(src.shape[i])
-        if len(pairs) > 1: new_shape += [1]*(len(pairs)-1)
+        # if this is a reduce axis, we need a 1 in the view here to put it
+        assert len(new_shape_chunk) > 0
+        new_shape += [1]*(len(pairs)-1) + [src.shape[i]]
+        new_reduce_axis.append(len(new_shape)-1)
       else:
         # otherwise, pass through the new_shape_chunk
         new_shape += new_shape_chunk
@@ -424,8 +422,12 @@ pm_fuse = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="c").fuse(), lambda c: c),
 
   # FUSE triggers swizzle on reduceop
-  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view").fuse(),
-   lambda r,src,view: swizzle_reduceop(r, src, view, fuse=True)),
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").or_casted(),), name="view").fuse(),
+   lambda r,src,view: ret.cast(view.dtype) if (ret:=swizzle_reduceop(r, src, view, fuse=True)) is not None else None),
+
+  # FUSE on reduce (without view) adds fuse marker to grouper
+  (UPat(Ops.REDUCE_AXIS, name="r").fuse(),
+   lambda r: r.replace(src=(r.src[0].fuse(),), arg=r.arg+(True,)) if len(r.arg) == 2 else None),
 
   # FUSE elementwise. TODO: check for PAD
   (UPat(Ops.VIEW, src=(UPat(GroupOp.ALU, name="alu"),), name="view").fuse(),
@@ -435,6 +437,18 @@ pm_fuse = PatternMatcher([
   (UPat(Ops.FUSE, name="x"), lambda x: x.src[0].replace(src=tuple(y.fuse() for y in x.src[0].src))),
 ])
 
+def get_name(ret:tuple[dict[UOp, UOp], dict[Variable, int]]) -> str:
+  kcount = len({u.base.src[1] for u in ret[0].values() if u.base.op is Ops.ASSIGN})
+  return f"Schedule {pluralize('Kernel', kcount)}"+(f" (with_{pluralize('Var', len(ret[1]))})" if ret[1] else "")
+
+PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
+if CAPTURE_PROCESS_REPLAY:
+  import atexit
+  @atexit.register
+  def save_process_replay():
+    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
+
+@track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   # merge_views + simplify
   tensor_map = graph_rewrite_map(big_sink, merge_views+sym+reorder_view+replace_contiguous+pm_fuse, ctx={})
@@ -447,6 +461,12 @@ def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   realize_map = group_realizes(sink)
   tensor_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True,
                                  input_map=tensor_map)
+
+  # unbind var_vals and fix kernel ast
+  var_vals: dict[Variable, int] = {}
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, ctx=var_vals, bottom_up=True, input_map=tensor_map)
+
+  # verify Kernels match the spec
   sched_sink = tensor_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
@@ -455,15 +475,9 @@ def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   for k,v in tensor_map.items():
     if (kernel:=tensor_map.get(v.base)) is not None and kernel.base.op is Ops.ASSIGN: v = kernel.view(unwrap(v.st))
     if k is v: continue
-    if k.op is Ops.ASSIGN:
-      becomes_map[k] = k.src[0]
-      continue
     op = v.base.op
-    if op is Ops.BUFFER: becomes_map[k] = v
+    if op in {Ops.BUFFER, Ops.ASSIGN}: becomes_map[k] = v
     if op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
-    if op is Ops.ASSIGN:
-      new_buf = v.base.src[0]
-      becomes_map[k] = new_buf if new_buf.st == v.st else new_buf.view(unwrap(v.st))
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
@@ -479,13 +493,17 @@ def get_becomes_map(big_sink:UOp) -> tuple[dict[UOp, UOp], dict[Variable, int]]:
   if assign_rep:
     sched_sink = sched_sink.substitute(assign_rep)
     type_verify(list(sched_sink.toposort), kernel_spec)
+  becomes_map[big_sink] = sched_sink
 
   # display the final graph
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
 
-  # unbind var_vals and fix kernel ast
-  var_vals: dict[Variable, int] = {}
-  sched_sink = graph_rewrite(sched_sink, create_ast, ctx=var_vals, bottom_up=True)
-  becomes_map[big_sink] = sched_sink
+  # capture process replay
+  if CAPTURE_PROCESS_REPLAY:
+    with Context(PICKLE_BUFFERS=0):
+      import pickle
+      asts = dedup(u.arg.ast for u in sched_sink.toposort if u.op is Ops.KERNEL)
+      PROCESS_REPLAY_CAPTURE[str(big_sink.key)] = pickle.dumps((big_sink, ContextVar._cache, asts))
+
   return becomes_map, var_vals

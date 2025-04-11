@@ -34,9 +34,11 @@ class GraphRewriteMetadata(TypedDict):
 
 @functools.cache
 def render_program(k:Kernel): return k.opts.render(k.uops)
+
 def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
   return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
           "kernel_code":pcall(render_program, k) if isinstance(k, Kernel) else None, "name":v.name}
+
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
   return [(k.name if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]
 
@@ -45,7 +47,7 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
 class GraphRewriteDetails(TypedDict):
   graph: dict                            # JSON serialized UOp for this rewrite step
   uop: str                               # strigified UOp for this rewrite step
-  diff: list[str]|None                   # string diff of the single UOp that changed
+  diff: list[str]|None                   # diff of the single UOp that changed
   changed_nodes: list[int]|None          # the changed UOp id + all its parents ids
   upat: tuple[tuple[str, int], str]|None # [loc, source_code] of the matched UPat
 

@@ -40,7 +40,6 @@ sched = C.schedule()
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import CompilerOptions
 lin = Kernel(sched[-1].ast, CompilerOptions(has_local=False, supports_float4=False))
-#lin.hand_coded_optimizations()
 lin.linearize()
 from tinygrad.runtime.ops_cpu import renderer
 src = renderer("mmult", lin.uops)
