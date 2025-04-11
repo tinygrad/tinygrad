@@ -75,7 +75,7 @@ generate_comgr() {
 }
 
 generate_kfd() {
-  clang2py /usr/include/linux/kfd_ioctl.h -o $BASE/kfd.py -k cdefstum
+  clang2py /usr/src/linux-headers-6.8.0-57-generic/include/uapi/linux/kfd_ioctl.h -o $BASE/kfd.py -k cdefstum
 
   fixup $BASE/kfd.py
   sed -i "s/import ctypes/import ctypes, os/g" $BASE/kfd.py
@@ -83,6 +83,7 @@ generate_kfd() {
   sed -i "/import functools/a from tinygrad.runtime.support.hcq import HWInterface" $BASE/kfd.py
   sed -i "s/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, \*\*kwargs):/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:HWInterface, \*\*kwargs):/g" $BASE/kfd.py
   sed -i "s/fcntl.ioctl(__fd, (__idir<<30)/__fd.ioctl((__idir<<30)/g" $BASE/kfd.py
+  sed -i "s/!!/not /g" $BASE/kfd.py
   python3 -c "import tinygrad.runtime.autogen.kfd"
 }
 
@@ -206,6 +207,21 @@ generate_io_uring() {
 
   sed -r '/^#define __NR_io_uring/ s/^#define __(NR_io_uring[^ ]+) (.*)$/\1 = \2/; t; d' /usr/include/asm-generic/unistd.h >> $BASE/io_uring.py # io_uring syscalls numbers
   fixup $BASE/io_uring.py
+}
+
+generate_ib() {
+  clang2py -k cdefstum \
+    /usr/include/infiniband/verbs.h \
+    /usr/include/infiniband/verbs_api.h \
+    /usr/include/infiniband/ib_user_ioctl_verbs.h \
+    /usr/include/rdma/ib_user_verbs.h \
+    -o $BASE/ib.py
+
+  sed -i "s\import ctypes\import ctypes\g" "$BASE/ib.py"
+  sed -i "s\FIXME_STUB\libibverbs\g" "$BASE/ib.py"
+  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(ctypes.util.find_library('ibverbs'), use_errno=True)\g" "$BASE/ib.py"
+
+  fixup $BASE/ib.py
 }
 
 generate_libc() {
@@ -536,6 +552,7 @@ elif [ "$1" == "am" ]; then generate_am
 elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "io_uring" ]; then generate_io_uring
+elif [ "$1" == "ib" ]; then generate_ib
 elif [ "$1" == "libc" ]; then generate_libc
 elif [ "$1" == "llvm" ]; then generate_llvm
 elif [ "$1" == "kgsl" ]; then generate_kgsl
