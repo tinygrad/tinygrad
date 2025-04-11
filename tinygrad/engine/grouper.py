@@ -470,7 +470,6 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   if assign_rep:
     sched_sink = sched_sink.substitute(assign_rep)
     type_verify(list(sched_sink.toposort), kernel_spec)
-  becomes_map[big_sink] = sched_sink
 
   # display the final graph
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
