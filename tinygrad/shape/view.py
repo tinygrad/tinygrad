@@ -270,14 +270,6 @@ class View:
     return View.create(self.shape, tuple(-z if f else z for z,f in zip(self.strides, arg)), self.offset+offset, mask)
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
-  def as_strided(self, size: tuple[sint, ...], stride: tuple[sint, ...], storage_offset: sint = 0) -> View:
-    if len(size) != len(stride): raise ValueError(f"size {size} and stride {stride} must have the same length")
-    if not all(s >= 0 for s in size): raise ValueError(f"size can't contain negative numbers {size}")
-    if all_int(stride) and any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
-    if 0 in size: return View.create(size, (0,) * len(size), 0, None)
-    return View.create(size, stride, self.offset + storage_offset, None)
-
-  @functools.cache  # pylint: disable=method-cache-max-size-none
   def reshape(self, new_shape: tuple[sint, ...]) -> Optional[View]:
     if self.shape == new_shape: return self
 

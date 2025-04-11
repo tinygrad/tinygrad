@@ -102,7 +102,7 @@ class Ops(FastEnum):
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto() # noqa: E702
 
   # movement ops!
-  RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto(); AS_STRIDED = auto() # noqa: E702
+  RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto() # noqa: E702
 
   # misc ops
   UNROLL = auto(); CONTRACT = auto() # noqa: E702
@@ -161,7 +161,7 @@ class GroupOp:
   ALU = set.union(Unary, Binary, Ternary)
 
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
-  Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP, Ops.AS_STRIDED}
+  Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
   Buffer = {Ops.LOAD, Ops.STORE, Ops.VALID, Ops.CONST, Ops.DEFINE_VAR}
   Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKSTART}
@@ -501,7 +501,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def permute(self, arg:tuple[sint, ...]): return self._mop(Ops.PERMUTE, arg)
   def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg)
   def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg)
-  def as_strided(self, arg: tuple[tuple[sint, ...], tuple[sint, ...], sint]): return self._mop(Ops.AS_STRIDED, arg)
 
   # *** uop UNIQUE ***
 

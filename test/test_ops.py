@@ -1925,12 +1925,12 @@ class TestOps(unittest.TestCase):
     with self.assertRaises((ValueError, RuntimeError)): Tensor.ones(4,3,2,6).expand(4,3,0,6)
 
   def test_as_strided(self):
-    helper_test_op([(3,3)], lambda x: x.as_strided((2,2), (1,2)), forward_only=True)
-    helper_test_op([(3,3)], lambda x: x.as_strided((2,2), (1,2), 1), forward_only=True)
-    helper_test_op([(4,3)], lambda x: x.as_strided((2,2,3), (6,3,1)), forward_only=True)
-    helper_test_op([(3,3)], lambda x: x.as_strided((1,), (1,)), forward_only=True)
-    helper_test_op([(3,4)], lambda x: x.as_strided((4,3), (1,4)), forward_only=True)
-    helper_test_op([(3,1)], lambda x: x.as_strided((3,3), (1,0)), forward_only=True)
+    helper_test_op([(3,3)], lambda x: x.as_strided((2,2), (1,2)))
+    helper_test_op([(3,3)], lambda x: x.as_strided((2,2), (1,2), 1))
+    helper_test_op([(4,3)], lambda x: x.as_strided((2,2,3), (6,3,1)))
+    helper_test_op([(3,3)], lambda x: x.as_strided((1,), (1,)))
+    helper_test_op([(3,4)], lambda x: x.as_strided((4,3), (1,4)))
+    helper_test_op([(3,1)], lambda x: x.as_strided((3,3), (1,0)))
 
   @unittest.skip("very slow")
   def test_sd_big_conv(self):

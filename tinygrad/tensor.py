@@ -967,9 +967,18 @@ class Tensor(SimpleMathTrait):
     return self._apply_uop(UOp.permute, arg=order_arg)
 
   def as_strided(self, size, stride, storage_offset=0) -> Tensor:
-    """Creates a view with custom stride/offset"""
+    """
+    Returns a tensor with the specified shape, strides, and offset.
+    """
     if any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
-    return self._apply_uop(UOp.as_strided, arg=(size, stride, storage_offset))
+    if len(size) == len(self.shape) and all(a == b for a, b in zip(stride, range(len(stride)-1, -1, -1))) and storage_offset == 0 \
+      and prod(size) == prod(self.shape): return self.reshape(size)
+    if len(size) == 2 and len(self.shape) == 2 and size == self.shape[::-1] and stride == (1, self.shape[1]) and storage_offset == 0:
+      return self.permute(1, 0)
+
+    idx = [storage_offset + sum(i * s for i, s in zip(c, stride)) for c in itertools.product(*(range(s) for s in size))]
+    if any(i < 0 or i >= self.numel() for i in idx): raise IndexError(f"as_strided generated out-of-bounds index")
+    return self.reshape(-1).gather(0, Tensor(idx, device=self.device)).reshape(size)
 
   def flip(self, axis, *args) -> Tensor:
     """
