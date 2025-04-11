@@ -92,7 +92,7 @@ out = a.alu(Ops.ADD, b)
 # group the computation into a set of kernels
 becomes_map = get_becomes_map(out.sink())
 
-# schedule the kernels as a list of kernels
+# schedule the kernels in a list
 sched, _, becomes_map = create_schedule_with_vars(becomes_map[out.sink()], becomes_map)
 
 for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CPU
