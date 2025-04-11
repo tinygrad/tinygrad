@@ -523,11 +523,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
-    if self.op is Ops.BUFFER_VIEW:
-      ret = self.src[0].shrink(((self.arg[1], self.arg[0]),))
-      return ret
     assert self.op is Ops.ASSIGN, f"must be ASSIGN {self.op}"
-    return self.src[0].base.buf_uop
+    return self.src[0].base
   @property
   def buffer(self) -> Buffer:
     if self is not self.base:
