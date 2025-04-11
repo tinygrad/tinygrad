@@ -224,14 +224,7 @@ class Tensor(SimpleMathTrait):
 
   # ***** data handlers ****
 
-  def kernelize(self, *lst:Tensor) -> None:
-    """
-    Group Tensor UOps into Kernels.
-
-    After this step, all output Tensors evaluate to a new Buffer, existing Buffer or a constant
-
-    Other Tensors can fuse or kernelize depending on the graph.
-    """
+  def kernelize(self, *lst:Tensor) -> tuple[UOp, dict[UOp, UOp]]: # TODO: should return None
     big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
 
     # TODO: move this to scheduler tensor_map pass
@@ -244,7 +237,7 @@ class Tensor(SimpleMathTrait):
     if __debug__: type_verify(list(big_sink.toposort), tensor_uop_spec)
 
     becomes_map = get_becomes_map(big_sink)
-    _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
+    return becomes_map.pop(big_sink), becomes_map
 
   def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[Variable, int]]:
     """
@@ -252,11 +245,8 @@ class Tensor(SimpleMathTrait):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    # override the Tensor graph with the new kernels
-    self.kernelize(*lst)
-    big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
-    # toposort kernels + unbind Variables
-    schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
+    sched_sink, becomes_map = self.kernelize(*lst)
+    schedule, var_vals, becomes_map = create_schedule_with_vars(sched_sink, becomes_map)
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return memory_planner(schedule), var_vals
 
