@@ -423,7 +423,7 @@ pm_fuse = PatternMatcher([
 
   # FUSE triggers swizzle on reduceop
   (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").or_casted(),), name="view").fuse(),
-   lambda r,src,view: swizzle_reduceop(r, src, view, fuse=True).cast(view.dtype)),
+   lambda r,src,view: ret.cast(view.dtype) if (ret:=swizzle_reduceop(r, src, view, fuse=True)) is not None else None),
 
   # FUSE on reduce (without view) adds fuse marker to grouper
   (UPat(Ops.REDUCE_AXIS, name="r").fuse(),
