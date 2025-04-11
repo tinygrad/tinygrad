@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, Device
+from tinygrad import Tensor
 from tinygrad.helpers import Context
 from tinygrad.ops import Ops
 
