@@ -10,9 +10,11 @@ class NullProgram:
     return 1e-4
 
 class NullAllocator(Allocator):
+  dev = None
   def _alloc(self, size, options): pass
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src): pass
+  def _transfer(self, dest, src, sz:int, src_dev, dest_dev): pass
 
 class NullGraph(MultiGraphRunner):
   def __call__(self, input_rawbuffers, var_vals, wait=False) -> float|None: return 1e-3

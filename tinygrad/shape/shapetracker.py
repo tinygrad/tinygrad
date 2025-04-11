@@ -13,7 +13,7 @@ def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.
 
 # If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
 # or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
-def upcast(u: UOp):
+def upcast(u: UOp) -> UOp:
   srcs = tuple(upcast(_src) for _src in u.src)
   if u.dtype.scalar() is dtypes.int:
     dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
@@ -25,7 +25,8 @@ def upcast(u: UOp):
   return u.replace(src=tuple(srcs))
 
 # pooling op may overflow before folding causing unnecessary upcast
-def folded_upcast(u: UOp):
+@functools.cache
+def folded_upcast(u: UOp) -> UOp:
   with Context(TRACK_MATCH_STATS=0):
     return upcast(graph_rewrite(u, sym, {}))
 
