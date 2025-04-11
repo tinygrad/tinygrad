@@ -224,7 +224,7 @@ class Tensor(SimpleMathTrait):
 
   # ***** data handlers ****
 
-  def kernelize(self, *lst:Tensor) -> tuple[UOp, dict[UOp, UOp]]: # TODO: should return None
+  def kernelize(self, *lst:Tensor) -> Tensor:
     big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
 
     # TODO: move this to scheduler tensor_map pass
@@ -237,7 +237,8 @@ class Tensor(SimpleMathTrait):
     if __debug__: type_verify(list(big_sink.toposort), tensor_uop_spec)
 
     becomes_map = get_becomes_map(big_sink)
-    return becomes_map.pop(big_sink), becomes_map
+    _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
+    return self
 
   def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[Variable, int]]:
     """
