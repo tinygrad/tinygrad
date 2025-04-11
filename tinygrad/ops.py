@@ -345,10 +345,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
   def __float__(self): return self._eval(dtypes.floats, float)
-  def substitute(self, dvars:dict[UOp, UOp]):
+  def substitute(self, dvars:dict[UOp, UOp], name:str|None=None):
     if len(dvars) == 0: return self
-    with Context(TRACK_MATCH_STATS=0):
-      return graph_rewrite(self, _substitute, dvars, bottom_up=True)
+    with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
+      return graph_rewrite(self, _substitute, dvars, bottom_up=True, name=name)
 
   # *** uop syntactic sugar ***
 
