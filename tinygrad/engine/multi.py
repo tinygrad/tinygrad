@@ -40,7 +40,7 @@ def to_sharded(lbs:list[UOp], axis:int, bounds: tuple[tuple[int, int], ...]) -> 
 
 # ***** multi functions *****
 
-from tinygrad.ops import PatternMatcher, UPat, GroupOp, graph_rewrite_map, track_rewrites
+from tinygrad.ops import PatternMatcher, UPat, GroupOp, graph_rewrite_map, track_rewrites, _METADATA
 
 def alu_multi(root:UOp):
   msrcs = root.src
@@ -157,6 +157,18 @@ multi_pm = PatternMatcher([
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])
 
+def metadata_preservation_wrapper(fn):
+  def _wrapper(*args, **kwargs):
+    token = _METADATA.set(kwargs[set(kwargs.keys()).difference(["multi"]).pop()].metadata)
+    ret = fn(*args, **kwargs)
+    _METADATA.reset(token)
+    return ret
+
+  return _wrapper
+
+for op, lst in multi_pm.pdict.items():
+  multi_pm.pdict[op] = [(pat,functools.wraps(fn)(metadata_preservation_wrapper(fn)), er, has_ctx) for (pat, fn, er, has_ctx) in lst]
+
 @track_rewrites(named=True)
 def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]:
-  return {k:v for k,v in graph_rewrite_map(big_sink, multi_pm, keep_metadata=True).items() if k is not v}
+  return {k:v for k,v in graph_rewrite_map(big_sink, multi_pm).items() if k is not v}
