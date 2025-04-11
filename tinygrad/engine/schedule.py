@@ -34,7 +34,6 @@ pm_unbind = PatternMatcher([
 # **** schedule linearizer
 
 def create_schedule_with_vars(sched_sink:UOp, becomes_map:dict[UOp, UOp]) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  # bfs toposort
   children: dict[UOp, list[UOp]] = {}
   in_degree: dict[UOp, int] = {}
   for u in sched_sink.toposort:
