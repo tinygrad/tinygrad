@@ -649,7 +649,7 @@ class KFDIface:
 class AMAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:AMMapping # noqa: E702
 
 class PCIIface:
-  supported_devs:list[int] = [0x744c, 0x7480]
+  supported_devs:list[int] = [0x744c, 0x7480, 0x7550]
   vfio:bool = getenv("VFIO", 1) and HWInterface.exists("/dev/vfio/vfio")
   vfio_fd:HWInterface
   gpus:list[Any] = []
@@ -662,6 +662,7 @@ class PCIIface:
         vendor = int(HWInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16)
         device = int(HWInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
         if vendor == 0x1002 and device in PCIIface.supported_devs: PCIIface.gpus.append(pcibus)
+      PCIIface.gpus = sorted(PCIIface.gpus)
 
       # TODO: visible_devices should be handled layer above this?
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
