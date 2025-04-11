@@ -62,8 +62,6 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
   # map ASSIGN to BUFFER after ScheduleItems are constructed
-  becomes_map: dict[UOp, UOp] = {}
-  for u in sched_sink.toposort:
-    if u.op is Ops.ASSIGN: becomes_map[u] = u.src[0]
+  becomes_map = {u:u.buf_uop for u in sched_sink.toposort if u.op is Ops.ASSIGN}
 
   return schedule, var_vals, becomes_map
