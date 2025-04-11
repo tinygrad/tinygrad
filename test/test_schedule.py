@@ -29,8 +29,8 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
   elif isinstance(t, List) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
-    becomes_map = get_becomes_map(t.sink())
-    sched, _, __ = create_schedule_with_vars(becomes_map[t.sink()], becomes_map)
+    becomes_map = get_becomes_map(sink:=t.sink())
+    sched, _, __ = create_schedule_with_vars(becomes_map[sink])
   # test lowering all the ScheduleItems to ExecItems
   lowered = [x[1] for x in lower_schedule(sched.copy())]
   if filter_sink: sched = [s for s,ei in zip(sched, lowered) if isinstance(ei.prg, CompiledRunner)]

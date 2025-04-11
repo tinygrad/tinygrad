@@ -246,8 +246,9 @@ class Tensor(SimpleMathTrait):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    sched_sink, becomes_map = self.kernelize(*lst)
-    schedule, var_vals, becomes_map = create_schedule_with_vars(sched_sink, becomes_map)
+    self.kernelize(*lst)
+    big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
+    schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return memory_planner(schedule), var_vals
 

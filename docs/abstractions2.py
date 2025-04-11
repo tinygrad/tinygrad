@@ -88,12 +88,14 @@ b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
 
 # describe the computation
 out = a.alu(Ops.ADD, b)
+sink = out.sink()
 
 # group the computation into a set of kernels
-becomes_map = get_becomes_map(out.sink())
+becomes_map = get_becomes_map(sink)
+out = becomes_map[out]
 
 # schedule the kernels in a list
-sched, _, becomes_map = create_schedule_with_vars(becomes_map[out.sink()], becomes_map)
+sched, _, becomes_map = create_schedule_with_vars(becomes_map[sink])
 
 for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CPU
 # NOTE: UOps are no longer mutable, the scheduler gives you a map to lookup which BUFFER the result was written to
