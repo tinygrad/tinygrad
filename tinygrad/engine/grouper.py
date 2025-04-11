@@ -1,7 +1,7 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from tinygrad.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, merge_views
-from tinygrad.ops import can_pad, sint, track_rewrites
+from tinygrad.ops import can_pad, sint, track_rewrites, _substitute
 from tinygrad.codegen.lowerer import get_contraction_with_reduce
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv, pluralize, ContextVar, Context, diskcache_put
@@ -440,21 +440,12 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   sink = tensor_map[big_sink]
   realize_map = group_realizes(sink)
   tensor_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}),
-                                 bottom_up=True, input_map=tensor_map)
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map)
+                                 bottom_up=True, input_map=tensor_map, name="create_kernels")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map, name="create_ast")
 
   # verify Kernels match the spec
   sched_sink = tensor_map[big_sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
-
-  # map tensors to buffer/const, optionally apply a VIEW on top
-  becomes_map: dict[UOp, UOp] = {}
-  for k,v in tensor_map.items():
-    if (kernel:=tensor_map.get(v.base)) is not None and kernel.base.op is Ops.ASSIGN: v = kernel.view(unwrap(v.st))
-    if k is v: continue
-    op = v.base.op
-    if op in {Ops.BUFFER, Ops.ASSIGN}: becomes_map[k] = v
-    if op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
@@ -468,13 +459,22 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
         raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on ASSIGN or BUFFER")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep:
-    sched_sink = sched_sink.substitute(assign_rep)
+    tensor_map = graph_rewrite_map(sched_sink, _substitute, assign_rep, bottom_up=True, input_map=tensor_map, name="assign_fixup")
+    sched_sink = tensor_map[sched_sink]
     type_verify(list(sched_sink.toposort), kernel_spec)
-  becomes_map[big_sink] = sched_sink
 
   # display the final graph
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
+
+  # map tensor to assign/buffer/const
+  becomes_map: dict[UOp, UOp] = {}
+  for k,v in tensor_map.items():
+    if (kernel:=tensor_map.get(v.base)) is not None and kernel.base.op is Ops.ASSIGN: v = kernel.view(unwrap(v.st))
+    if k is v: continue
+    op = v.base.op
+    if op in {Ops.BUFFER, Ops.ASSIGN}: becomes_map[k] = v
+    if op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
