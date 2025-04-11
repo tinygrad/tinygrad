@@ -124,5 +124,19 @@ class TestRealizeMeansRealize(unittest.TestCase):
     y = x * 2
     y.sum().gradient(x)[0].realize()
 
+class TestTensorRequiresGrad(unittest.TestCase):
+  def test_requires_grad_float_data(self):
+    x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+    self.assertTrue(x.requires_grad)
+
+  def test_requires_grad_non_float_data(self):
+    with self.assertRaises(TypeError):
+      Tensor([1, 2, 3], requires_grad=True)
+
+  def test_requires_grad_method(self):
+    x = Tensor([1, 2, 3]) 
+    with self.assertRaises(TypeError):
+      x.requires_grad_(True)
+
 if __name__ == '__main__':
   unittest.main()
