@@ -782,7 +782,6 @@ class TestMultiTensor(unittest.TestCase):
     run_schedule(sched)
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
-  @unittest.expectedFailure
   def test_dont_realize_intermediate_expand(self):
     a = Tensor.empty(16, 1).shard_(devices_2, axis=0)
     b = Tensor.empty(16, 16).to_(devices_2)
