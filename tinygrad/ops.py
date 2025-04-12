@@ -725,7 +725,9 @@ class UPat(MathTrait):
     # only one if it's a tuple
     elif isinstance(src, tuple): self.src = [src]
     # repeat if it's a UPat
-    elif isinstance(src, UPat): self.src = [itertools.repeat(src)]
+    elif isinstance(src, UPat):
+      self.src = [itertools.repeat(src)]
+      assert not allow_any_len, "allow_any_len not supported with repeat"
 
     self.strict_length = not (allow_any_len or isinstance(src, UPat) or src is None)
     self.required_len: int = 0 if isinstance(src, UPat) or src is None else len(src)
@@ -737,7 +739,7 @@ class UPat(MathTrait):
       self.early_reject = {pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1}
 
     # build dynamic match function. NOTE: once match isn't recursive, we could move this to the pattern matcher
-    if not hasattr(self, 'match'): self.match = self.interpreted_match if getenv("INTERPRETED_MATCH") else self.compile_match()
+    #if not hasattr(self, 'match'): self.match = self.interpreted_match if getenv("INTERPRETED_MATCH") else self.compile_match()
 
   def __reduce__(self):
     return UPat, (self.op, self.dtype, self._in_src, self.arg, self.name, not self.strict_length, self.custom_early_reject, self.location)
@@ -783,9 +785,8 @@ class UPat(MathTrait):
         set(x.dtype) if x.dtype else None, not x.strict_length, "[%s]" if x.src and len(x.src)>1 else ("(%s)" if x.src else "%s"))
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
-  #def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
-  #  self.match = self.compile_match()
-  #  return self.match(uop, store)
+  def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
+    return self.interpreted_match(uop, store)
 
   def interpreted_match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
     if (self.op is not None and uop.op not in self.op) or \
@@ -799,39 +800,114 @@ class UPat(MathTrait):
     for vp in self.src:
       stores, new_stores = [store.copy()], []
       for uu, vv in zip(uop.src, vp):
-        for s in stores: new_stores.extend(vv.match(uu, s))
+        for s in stores: new_stores.extend(vv.interpreted_match(uu, s))
         stores, new_stores = new_stores, []
       res.extend(stores)
     return res
 
-  def _get_or_clause(self, nm, wrap):
-    # build the or_clause for rejection
-    or_clause = []
+  def _get_clause(self, base:UOp) -> UOp|None:
+    # build the and_clause for acceptance
+    and_clause = []
     if self.op is not None:
       if len(self.op) > 1:
-        or_clause.append(f"{nm}.op not in {wrap(self.op)}")
+        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.CUSTOMI, arg=self.op)), arg="{0}.op in {1}"))
       else:
-        or_clause.append(f"{nm}.op is not {wrap(self.op[0])}")
+        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.CUSTOMI, arg=self.op[0])), arg="{0}.op is {1}"))
     if self.arg is not None:
-      or_clause.append(f"{nm}.arg != {wrap(self.arg)}")
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.CUSTOMI, arg=self.arg)), arg="{0}.arg == {1}"))
     if self.strict_length or self.required_len > 0:
-      or_clause.append(f"len({nm}.src) != {self.required_len}" if self.strict_length else f"len({nm}.src) < {self.required_len}")
+      and_clause.append(UOp(Ops.CUSTOM, src=(base,),
+                            arg=("len({0}.src) == " if self.strict_length else "len({0}.src) >= ")+str(self.required_len)))
     if self.name is not None:
-      or_clause.append(f"store.setdefault('{self.name}', {nm}) is not {nm}")
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.DEFINE_VAR, arg=self.name)), arg="store.setdefault({1}, {0}) is {0}"))
     if self.dtype is not None:
       if len(self.dtype) > 1:
-        wrapped_dtype = wrap(self.dtype)
-        or_clause.append(f"{nm}.dtype not in {wrapped_dtype} and {nm}.dtype._scalar not in {wrapped_dtype}")
+        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.CUSTOMI, arg=self.dtype)),
+          arg="({0}.dtype in {1} or {0}.dtype._scalar in {1})"))
       else:
-        wrapped_dtype = wrap(self.dtype[0])
-        or_clause.append(f"{nm}.dtype != {wrapped_dtype} and {nm}.dtype._scalar != {wrapped_dtype}")
-    return or_clause
+        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.CUSTOMI, arg=self.dtype[0])),
+          arg="({0}.dtype == {1} or {0}.dtype._scalar == {1})"))
+    and_uop = UOp(Ops.AND, src=tuple(and_clause))
+    if self.src is None: return and_uop
+    return None
+    if len(self.src) == 1 and isinstance(self.src[0], tuple):
+      more_cond = [s._get_clause(base.gep(i)) for i,s in enumerate(self.src[0])]
+      if any(x is None for x in more_cond): return None
+      return UOp(Ops.AND, src=tuple([and_uop]+more_cond))
+
+    """
+    if len(self.src) == 1 and isinstance(self.src[0], tuple):
+      more_cond = [s._get_clause(f"{nm}.src[{i}]", wrap) for i,s in enumerate(self.src[0])]
+      return UOp(Ops.AND, src=tuple([and_uop]+more_cond))
+    #elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
+    return None
+      #uu = s._get_clause(f"{nm}.src[i]", wrap)
+      #UOp(Ops.)
+    """
+
+  """
+  def _render_match(self, nm, wrap, depth=1) -> list[str]:
+    ret =  [f"{'  '*depth}tstore = store.copy()"]
+    ret += [f"{'  '*depth}if not ({' or '.join(['('+x+')' for x in self._get_or_clause(nm, wrap)])}):"]
+    if self.src is None: return ret + [f"{'  '*(depth+1)}ret.append(tstore)"]
+    elif len(self.src) == 1 and isinstance(self.src[0], tuple):
+      for i,s in enumerate(self.src[0]):
+        ret += s._render_match(f"{nm}.src[{i}]", wrap, depth=depth+1)
+      return ret
+    elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
+    else:
+      raise Exception(f"not supported {len(self.src)} type {type(self.src[0])}")
+  """
 
   def compile_match(self):
-    dyn_lookup: dict[str, Any] = {}
-    def wrap(x):
-      dyn_lookup[ret:=f"a{len(dyn_lookup)}"] = x
-      return ret
+    print("\n\n**** COMPILE", self.location, self)
+    def wrap(ctx, x):
+      ctx[ret:=f"a{len(ctx)}"] = x.arg
+      return UOp(Ops.NOOP, arg=ret)
+
+    pm = PatternMatcher([
+      (UPat(Ops.CUSTOMI, name="x"), wrap),
+      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.NOOP, arg=f'"{x.arg}"')),
+      (UPat(Ops.AND, src=()), lambda: UOp(Ops.NOOP, arg="True")),
+      (UPat(Ops.AND, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg="(" + ' and '.join(y.arg for y in x.src) + ")")),
+      (UPat(Ops.CUSTOM, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg.format(*[y.arg for y in x.src]))),
+      (UPat(Ops.GEP, src=UPat(Ops.NOOP, name="x"), name="g"), lambda x,g: x.replace(arg=x.arg+f".src[{g.arg[0]}]"))
+    ], compiled=False)
+
+    ret = self._get_clause(UOp(Ops.NOOP, arg="uop"))
+    if ret is None: return None
+
+    #print(ret)
+    out = graph_rewrite(ret, pm, ctx=(dyn_lookup:={}))
+    assert len(out.src) == 0 and out.op is Ops.NOOP, f"didn't collapse {out}"
+
+
+    # build the function, try 2
+    code = ["def match(uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:"]
+    code += [f"  if {out.arg}: return [store]"]
+    code += ["  return []"]
+    code_fxn = '\n'.join(code)
+    self.match_code = code_fxn
+    namespace: dict = {}
+    exec(code_fxn, dyn_lookup, namespace)
+    #print(dyn_lookup)
+    #print(code_fxn, namespace['match'])
+
+    self.match = namespace['match']
+
+    #if not hasattr(self, 'match'): self.match = self.interpreted_match if getenv("INTERPRETED_MATCH") else self.compile_match()
+
+    return None
+
+    namespace: dict = {}
+    exec(code_fxn, dyn_lookup, namespace)
+    print(code_fxn)
+    #if self.src is None or len(self.src) == 1:
+    #  import dis
+    #  dis.dis(namespace['match'])
+    return namespace['match']
+
+
     or_clause = self._get_or_clause("uop", wrap)
 
     srcs_handled = self.src is None
@@ -893,7 +969,7 @@ def deconstruct_function(fxn:Callable) -> tuple:
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
 class PatternMatcher:
-  def __init__(self, patterns:list[tuple[UPat, Callable]]):
+  def __init__(self, patterns:list[tuple[UPat, Callable]], compiled=True):
     self.patterns = patterns
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
     self.pdict: dict[Ops, list[tuple[UPat, Callable, set, bool]]] = {}
@@ -903,6 +979,7 @@ class PatternMatcher:
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
       real_fxn = types.FunctionType(*tuple_fxn)
       for uop in p.op: self.pdict.setdefault(uop, []).append((p, real_fxn, p.early_reject, 'ctx' in inspect.signature(real_fxn).parameters))
+      if compiled: p.compile_match()
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -913,6 +990,7 @@ class PatternMatcher:
     ler = {u.op for u in uop.src}
     for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
+      #if hasattr(p, 'match_code'): print(p.match_code)
       for match in p.match(uop, {}):
         if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: return ret
     return None
