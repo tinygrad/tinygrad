@@ -806,16 +806,16 @@ class UPat(MathTrait):
       res.extend(stores)
     return res
 
-  def _get_clause(self, base:UOp) -> UOp|None:
+  def _get_clause(self, base:UOp, depth=0) -> UOp|None:
     # build the and_clause for acceptance
     and_clause = []
     if self.op is not None:
       if len(self.op) > 1:
-        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.CUSTOMI, arg=self.op)), arg="{0}.op in {1}"))
+        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.op)), arg="{0}.op in {1}"))
       else:
-        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.CUSTOMI, arg=self.op[0])), arg="{0}.op is {1}"))
+        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.op[0])), arg="{0}.op is {1}"))
     if self.arg is not None:
-      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.CUSTOMI, arg=self.arg)), arg="{0}.arg == {1}"))
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.arg)), arg="{0}.arg == {1}"))
     if self.strict_length or self.required_len > 0:
       and_clause.append(UOp(Ops.CUSTOM, src=(base,),
                             arg=("len({0}.src) == " if self.strict_length else "len({0}.src) >= ")+str(self.required_len)))
@@ -823,17 +823,31 @@ class UPat(MathTrait):
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.DEFINE_VAR, arg=self.name)), arg="store.setdefault({1}, {0}) is {0}"))
     if self.dtype is not None:
       if len(self.dtype) > 1:
-        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.CUSTOMI, arg=self.dtype)),
+        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.dtype)),
           arg="({0}.dtype in {1} or {0}.dtype._scalar in {1})"))
       else:
-        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.CUSTOMI, arg=self.dtype[0])),
+        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.dtype[0])),
           arg="({0}.dtype == {1} or {0}.dtype._scalar == {1})"))
     and_uop = UOp(Ops.AND, src=tuple(and_clause))
     if self.src is None: return and_uop
     if len(self.src) == 1 and isinstance(self.src[0], tuple):
-      more_cond = [s._get_clause(base.gep(i)) for i,s in enumerate(self.src[0])]
+      more_cond = [s._get_clause(base.gep(i), depth) for i,s in enumerate(self.src[0])]
       if any(x is None for x in more_cond): return None
       return UOp(Ops.AND, src=tuple([and_uop]+more_cond))
+    elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
+      it = UOp(Ops.NOOP, arg=f"ituop{depth}")
+      match = next(self.src[0])._get_clause(it, depth+1)
+      if match is None: return None
+      rep = UOp(Ops.RANGE, src=(match, it, base), arg="all({0} for {1} in {2}.src)")
+      return UOp(Ops.AND, src=(and_uop, rep))
+    elif len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
+      fork_cond = []
+      for ss in self.src:
+        more_cond = [s._get_clause(base.gep(i), depth) for i,s in enumerate(ss)]
+        if any(x is None for x in more_cond): return None
+        fork_cond.append(UOp(Ops.AND, src=tuple(more_cond)))
+      rep = UOp(Ops.OR, src=tuple(fork_cond))
+      return UOp(Ops.AND, src=(and_uop, rep))
     return None
 
     """
@@ -860,20 +874,49 @@ class UPat(MathTrait):
       raise Exception(f"not supported {len(self.src)} type {type(self.src[0])}")
   """
 
-  def compile_match(self):
+  def compile(self):
     if self.tried_compile: return
     self.tried_compile = True
 
-    #print("\n\n**** COMPILE", self.location, self)
     def wrap(ctx, x):
       ctx[ret:=f"a{len(ctx)}"] = x.arg
       return UOp(Ops.NOOP, arg=ret)
 
+    def do_catand(a):
+      new_src = []
+      found = False
+      or_clause = []
+      for x in a.src:
+        if x.op is Ops.AND:
+          new_src.extend(x.src)
+          found = True
+        elif x.op is Ops.OR:
+          or_clause.append(x)
+        else: new_src.append(x)
+      if len(or_clause) > 1:
+        found = True
+        # need the product of the or clauses
+        new_or = []
+        for x in itertools.product(*[x.src for x in or_clause]):
+          new_or.append(UOp(Ops.AND, src=x))
+        or_clause = [UOp(Ops.OR, src=tuple(new_or))]
+      return UOp(Ops.AND, src=tuple(new_src+or_clause)) if found else None
+
+    #pm_catand = PatternMatcher([
+    #  (UPat(Ops.AND, name="a"), do_catand),
+    #], compiled=False)
+
     pm = PatternMatcher([
-      (UPat(Ops.CUSTOMI, name="x"), wrap),
+      (UPat(Ops.BIND, name="x"), wrap),
       (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.NOOP, arg=f'"{x.arg}"')),
-      (UPat(Ops.AND, src=()), lambda: UOp(Ops.NOOP, arg="True")),
-      (UPat(Ops.AND, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg="(" + ' and '.join(y.arg for y in x.src) + ")")),
+      (UPat(Ops.AND, name="a"), do_catand),
+
+      # RANGE can't have OR inside it
+      (UPat(Ops.RANGE, src=(UPat(Ops.AND, src=UPat(Ops.NOOP), name="x"), UPat(), UPat()), name="r"),
+       lambda r,x: r.replace(op=Ops.CUSTOM, src=(UOp(Ops.NOOP, arg="(" + ' and '.join(y.arg for y in x.src) + ")"),)+r.src[1:])),
+
+      #(UPat(Ops.AND, src=()), lambda: UOp(Ops.NOOP, arg="True")),
+      #(UPat(Ops.AND, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg="(" + ' and '.join(y.arg for y in x.src) + ")")),
       (UPat(Ops.CUSTOM, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg.format(*[y.arg for y in x.src]))),
       (UPat(Ops.GEP, src=UPat(Ops.NOOP, name="x"), name="g"), lambda x,g: x.replace(arg=x.arg+f".src[{g.arg[0]}]"))
     ], compiled=False)
@@ -882,17 +925,43 @@ class UPat(MathTrait):
     if ret is None: return None
 
     #print(ret)
+    #ret = graph_rewrite(ret, pm_catand)
     out = graph_rewrite(ret, pm, ctx=(dyn_lookup:={}), name="compile UPat")
-    assert len(out.src) == 0 and out.op is Ops.NOOP, f"didn't collapse {out}"
-
+    #if out.src != 0 or out.op is not Ops.NOOP: return None
 
     # build the function, try 2
-    code = ["def match(uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:"]
-    code += [f"  if {out.arg}: return [store]"]
-    code += ["  return []"]
+    # renderer
+    def render(x:UOp, depth=1) -> list[str]|None:
+      assert x.op is Ops.AND
+      ret = [f"{'  '*depth}if {' and '.join([s.arg for s in x.src if s.op is Ops.NOOP])}:"]
+      has_or = False
+      for s in x.src:
+        if s.op is Ops.OR:
+          assert has_or is False
+          for ss in s.src:
+            ret.append(f"{'  '*(depth+1)}bak{depth}, store = store, store.copy()")
+            ret.extend(render(ss, depth+1))
+            ret.append(f"{'  '*(depth+1)}store = bak{depth}")
+          has_or = True
+        elif s.op is not Ops.NOOP:
+          raise NotImplementedError("can't compiel this")
+      if not has_or: ret.append(f"{'  '*(depth+1)}ret.append(store)")
+      return ret
+
+    try:
+      rendered = render(out)
+    except NotImplementedError:
+      return None
+
+    code = ["def match(uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:", "  ret = []"]
+    code += [f"  # match for {self.location}"]
+    #code += [f"  # {dyn_lookup}"]
+    code += rendered
+    code += ["  return ret"]
     code_fxn = '\n'.join(code)
     self.match_code = code_fxn
     namespace: dict = {}
+    #print("\n\n**** COMPILE", self.location, self)
     #print(code_fxn, dyn_lookup)
     exec(code_fxn, dyn_lookup, namespace)
 
@@ -983,7 +1052,7 @@ class PatternMatcher:
       real_fxn = types.FunctionType(*tuple_fxn)
       for uop in p.op: self.pdict.setdefault(uop, []).append((p, real_fxn, p.early_reject, 'ctx' in inspect.signature(real_fxn).parameters))
 
-    if compiled: do_pattern_compile(self)
+    if compiled and getenv("COMPILE"): do_pattern_compile(self)
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -1055,7 +1124,7 @@ def track_rewrites(named=False, name_fxn:Callable|None=None):
 
 #@track_rewrites()
 def do_pattern_compile(self):
-  for p,_ in self.patterns: p.compile_match()
+  for p,_ in self.patterns: p.compile()
 
 active_rewrites:list[TrackedGraphRewrite] = []
 def track_matches(func):
