@@ -727,7 +727,7 @@ class UPat(MathTrait):
     # repeat if it's a UPat
     elif isinstance(src, UPat):
       self.src = [itertools.repeat(src)]
-      assert not allow_any_len, "allow_any_len not supported with repeat"
+      #assert not allow_any_len, "allow_any_len not supported with repeat"
 
     self.strict_length = not (allow_any_len or isinstance(src, UPat) or src is None)
     self.required_len: int = 0 if isinstance(src, UPat) or src is None else len(src)
@@ -740,6 +740,7 @@ class UPat(MathTrait):
 
     # build dynamic match function. NOTE: once match isn't recursive, we could move this to the pattern matcher
     #if not hasattr(self, 'match'): self.match = self.interpreted_match if getenv("INTERPRETED_MATCH") else self.compile_match()
+    self.tried_compile = False
 
   def __reduce__(self):
     return UPat, (self.op, self.dtype, self._in_src, self.arg, self.name, not self.strict_length, self.custom_early_reject, self.location)
@@ -829,11 +830,11 @@ class UPat(MathTrait):
           arg="({0}.dtype == {1} or {0}.dtype._scalar == {1})"))
     and_uop = UOp(Ops.AND, src=tuple(and_clause))
     if self.src is None: return and_uop
-    return None
     if len(self.src) == 1 and isinstance(self.src[0], tuple):
       more_cond = [s._get_clause(base.gep(i)) for i,s in enumerate(self.src[0])]
       if any(x is None for x in more_cond): return None
       return UOp(Ops.AND, src=tuple([and_uop]+more_cond))
+    return None
 
     """
     if len(self.src) == 1 and isinstance(self.src[0], tuple):
@@ -860,7 +861,10 @@ class UPat(MathTrait):
   """
 
   def compile_match(self):
-    print("\n\n**** COMPILE", self.location, self)
+    if self.tried_compile: return
+    self.tried_compile = True
+
+    #print("\n\n**** COMPILE", self.location, self)
     def wrap(ctx, x):
       ctx[ret:=f"a{len(ctx)}"] = x.arg
       return UOp(Ops.NOOP, arg=ret)
@@ -878,7 +882,7 @@ class UPat(MathTrait):
     if ret is None: return None
 
     #print(ret)
-    out = graph_rewrite(ret, pm, ctx=(dyn_lookup:={}))
+    out = graph_rewrite(ret, pm, ctx=(dyn_lookup:={}), name="compile UPat")
     assert len(out.src) == 0 and out.op is Ops.NOOP, f"didn't collapse {out}"
 
 
@@ -889,9 +893,8 @@ class UPat(MathTrait):
     code_fxn = '\n'.join(code)
     self.match_code = code_fxn
     namespace: dict = {}
+    #print(code_fxn, dyn_lookup)
     exec(code_fxn, dyn_lookup, namespace)
-    #print(dyn_lookup)
-    #print(code_fxn, namespace['match'])
 
     self.match = namespace['match']
 
@@ -979,7 +982,8 @@ class PatternMatcher:
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
       real_fxn = types.FunctionType(*tuple_fxn)
       for uop in p.op: self.pdict.setdefault(uop, []).append((p, real_fxn, p.early_reject, 'ctx' in inspect.signature(real_fxn).parameters))
-      if compiled: p.compile_match()
+
+    if compiled: do_pattern_compile(self)
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -1048,6 +1052,10 @@ def track_rewrites(named=False, name_fxn:Callable|None=None):
       return ret
     return __wrapper
   return _decorator
+
+#@track_rewrites()
+def do_pattern_compile(self):
+  for p,_ in self.patterns: p.compile_match()
 
 active_rewrites:list[TrackedGraphRewrite] = []
 def track_matches(func):
