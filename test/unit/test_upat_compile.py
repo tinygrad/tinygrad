@@ -1,6 +1,6 @@
 import unittest
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UPat, track_rewrites
+from tinygrad.ops import UPat, track_rewrites, GroupOp, Ops
 
 @track_rewrites()
 def do_compile(up):
@@ -31,6 +31,10 @@ class TestUPatCompile(unittest.TestCase):
 
   def test_single_c(self):
     up = (UPat.var("x") + UPat.var("y")) * UPat.var("c")
+    do_compile(up)
+
+  def test_const_folding(self):
+    up = UPat(GroupOp.ALU, name="a", src=UPat((Ops.VCONST, Ops.CONST)))
     do_compile(up)
 
 if __name__ == "__main__":
