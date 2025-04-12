@@ -204,9 +204,7 @@ class SMICtx:
       temps_table_compact = ["Temps (°C):" + '/'.join([f"{color_temp(val)} {name}" for name, val in temps_data_compact.items()])]
 
       fan_rpm, fan_pwm = self.get_fan_rpm_pwm(dev, metrics)
-      power_table = ["=== Power ==="] \
-                  + [f"Fan Speed: {fan_rpm} RPM"] \
-                  + [f"Fan Power: {fan_pwm}%"]
+      power_table = ["=== Power ==="] + [f"Fan Speed: {fan_rpm} RPM"] + [f"Fan Power: {fan_pwm}%"]
 
       total_power, max_power = self.get_power(dev, metrics)
       power_line = [f"Power: {total_power:>3}W " + draw_bar(total_power / max_power, 16)]
@@ -219,10 +217,7 @@ class SMICtx:
       mclk_freq = self.get_mem_freq(dev, metrics)
       fclk_freq = self.get_fckl_freq(dev, metrics)
 
-      frequency_table = ["=== Frequencies ===",
-        f"GFXCLK: {gfx_freq:>4} MHz",
-        f"FCLK  : {fclk_freq:>4} MHz",
-        f"MCLK  : {mclk_freq:>4} MHz"]
+      frequency_table = ["=== Frequencies ===", f"GFXCLK: {gfx_freq:>4} MHz", f"FCLK  : {fclk_freq:>4} MHz", f"MCLK  : {mclk_freq:>4} MHz"]
 
       if self.prev_terminal_width >= 231:
         power_table += power_line + [""] + voltage_table
