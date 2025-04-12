@@ -345,10 +345,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
   def __float__(self): return self._eval(dtypes.floats, float)
-  def substitute(self, dvars:dict[UOp, UOp]):
+  def substitute(self, dvars:dict[UOp, UOp], name:str|None=None):
     if len(dvars) == 0: return self
-    with Context(TRACK_MATCH_STATS=0):
-      return graph_rewrite(self, _substitute, dvars, bottom_up=True)
+    with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
+      return graph_rewrite(self, _substitute, dvars, bottom_up=True, name=name)
 
   # *** uop syntactic sugar ***
 
@@ -374,7 +374,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.dtype.count == 1
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
-  def cast(self, dtype:DType): return UOp(Ops.CAST, dtype, (self,))
+  def cast(self, dtype:DType):
+    if self.dtype == dtype: return self
+    return UOp(Ops.CAST, dtype, (self,))
   def cast_vec(self, dtype:DType): return UOp(Ops.CAST, dtype.vec(self.dtype.count), (self,))
   def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:Union[tuple[int, ...], int]):

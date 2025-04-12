@@ -10,6 +10,6 @@ export IGNORE_JIT_FIRST_BEAM=1
 # export BASEDIR="/raid/datasets/wiki"
 
 export RESET_STEP=1
-export BENCHMARK=10 DEBUG=2
+export BENCHMARK=10 BERT_LAYERS=2 DEBUG=2
 
 python3 examples/mlperf/model_train.py
