@@ -465,14 +465,13 @@ class Kernel:
       if op.op is Ops.SINK:
         # range splitting, shouldn't be here though
         split_range = None
-        # need to devectorize to fully split ranges
         if not self.opts.has_local and self.first_reduce == self.first_upcast:
           # TODO: make split work with reduces
           # TODO: support multiple split axes
-          for axis in range(len(self.full_unupcasted_shape)):
+          for axis,sh in enumerate(self.full_unupcasted_shape):
             smasks = tuple(sorted({st.views[-1].mask[axis] for st in self.sts if st.views[-1].mask}, key=lambda x: x[0]))
-            if len(smasks) > 1 and smasks[0][0] == 0 and smasks[-1][-1] == self.full_unupcasted_shape[axis] \
-                and all(x[1] == y[0] for x,y in zip(smasks, smasks[1:])): split_range = (axis, smasks)
+            if len(smasks) > 1 and smasks[0][0] == 0 and smasks[-1][-1] == sh and all(x[1] == y[0] for x,y in zip(smasks, smasks[1:])):
+              split_range = (axis, smasks)
 
         return ret.replace(arg = KernelInfo(to_function_name(self.name) if name_override is None else name_override,
                                             self.local_dims, self.upcasted, self.dont_use_locals, split_range))
