@@ -128,37 +128,6 @@ else:
 
 
 __SMU_V14_0_0_PMFW_H__ = True # macro
-SMU14_DRIVER_IF_V14_0_0_H = True # macro
-NUM_WM_RANGES = 4 # macro
-WM_PSTATE_CHG = 0 # macro
-WM_RETRAINING = 1 # macro
-NUM_DCFCLK_DPM_LEVELS = 8 # macro
-NUM_DISPCLK_DPM_LEVELS = 8 # macro
-NUM_DPPCLK_DPM_LEVELS = 8 # macro
-NUM_SOCCLK_DPM_LEVELS = 8 # macro
-NUM_VCN_DPM_LEVELS = 8 # macro
-NUM_SOC_VOLTAGE_LEVELS = 8 # macro
-NUM_VPE_DPM_LEVELS = 8 # macro
-NUM_FCLK_DPM_LEVELS = 8 # macro
-NUM_MEM_PSTATE_LEVELS = 4 # macro
-def ISP_TILE_SEL(tile):  # macro
-   return (1<<tile)
-ISP_TILE_SEL_ALL = 0x7FF # macro
-WORKLOAD_PPLIB_FULL_SCREEN_3D_BIT = 1 # macro
-WORKLOAD_PPLIB_VIDEO_BIT = 3 # macro
-WORKLOAD_PPLIB_VR_BIT = 4 # macro
-WORKLOAD_PPLIB_COMPUTE_BIT = 5 # macro
-WORKLOAD_PPLIB_CUSTOM_BIT = 6 # macro
-WORKLOAD_PPLIB_COUNT = 10 # macro
-TABLE_BIOS_IF = 0 # macro
-TABLE_WATERMARKS = 2 # macro
-TABLE_CUSTOM_DPM = 2 # macro
-TABLE_BIOS_GPIO_CONFIG = 3 # macro
-TABLE_DPMCLOCKS = 4 # macro
-TABLE_MOMENTARY_PM = 5 # macro
-TABLE_MODERN_STDBY = 6 # macro
-TABLE_SMU_METRICS = 5 # macro
-TABLE_COUNT = 13 # macro
 ENABLE_DEBUG_FEATURES = True # macro
 FEATURE_CCLK_DPM_BIT = 0 # macro
 FEATURE_FAN_CONTROLLER_BIT = 1 # macro
@@ -224,283 +193,6 @@ FEATURE_VPE_DPM_BIT = 60 # macro
 FEATURE_SMART_L3_RINSER_BIT = 61 # macro
 FEATURE_PCC_BIT = 62 # macro
 NUM_FEATURES = 64 # macro
-class struct_c__SA_FloatInIntFormat_t(Structure):
-    pass
-
-struct_c__SA_FloatInIntFormat_t._pack_ = 1 # source:False
-struct_c__SA_FloatInIntFormat_t._fields_ = [
-    ('value', ctypes.c_int32),
-    ('numFractionalBits', ctypes.c_uint32),
-]
-
-FloatInIntFormat_t = struct_c__SA_FloatInIntFormat_t
-
-# values for enumeration 'c__EA_DSPCLK_e'
-c__EA_DSPCLK_e__enumvalues = {
-    0: 'DSPCLK_DCFCLK',
-    1: 'DSPCLK_DISPCLK',
-    2: 'DSPCLK_PIXCLK',
-    3: 'DSPCLK_PHYCLK',
-    4: 'DSPCLK_COUNT',
-}
-DSPCLK_DCFCLK = 0
-DSPCLK_DISPCLK = 1
-DSPCLK_PIXCLK = 2
-DSPCLK_PHYCLK = 3
-DSPCLK_COUNT = 4
-c__EA_DSPCLK_e = ctypes.c_uint32 # enum
-DSPCLK_e = c__EA_DSPCLK_e
-DSPCLK_e__enumvalues = c__EA_DSPCLK_e__enumvalues
-class struct_c__SA_DisplayClockTable_t(Structure):
-    pass
-
-struct_c__SA_DisplayClockTable_t._pack_ = 1 # source:False
-struct_c__SA_DisplayClockTable_t._fields_ = [
-    ('Freq', ctypes.c_uint16),
-    ('Vid', ctypes.c_uint16),
-]
-
-DisplayClockTable_t = struct_c__SA_DisplayClockTable_t
-class struct_c__SA_WatermarkRowGeneric_t(Structure):
-    pass
-
-struct_c__SA_WatermarkRowGeneric_t._pack_ = 1 # source:False
-struct_c__SA_WatermarkRowGeneric_t._fields_ = [
-    ('MinClock', ctypes.c_uint16),
-    ('MaxClock', ctypes.c_uint16),
-    ('MinMclk', ctypes.c_uint16),
-    ('MaxMclk', ctypes.c_uint16),
-    ('WmSetting', ctypes.c_ubyte),
-    ('WmType', ctypes.c_ubyte),
-    ('Padding', ctypes.c_ubyte * 2),
-]
-
-WatermarkRowGeneric_t = struct_c__SA_WatermarkRowGeneric_t
-
-# values for enumeration 'c__EA_WM_CLOCK_e'
-c__EA_WM_CLOCK_e__enumvalues = {
-    0: 'WM_SOCCLK',
-    1: 'WM_DCFCLK',
-    2: 'WM_COUNT',
-}
-WM_SOCCLK = 0
-WM_DCFCLK = 1
-WM_COUNT = 2
-c__EA_WM_CLOCK_e = ctypes.c_uint32 # enum
-WM_CLOCK_e = c__EA_WM_CLOCK_e
-WM_CLOCK_e__enumvalues = c__EA_WM_CLOCK_e__enumvalues
-class struct_c__SA_Watermarks_t(Structure):
-    pass
-
-struct_c__SA_Watermarks_t._pack_ = 1 # source:False
-struct_c__SA_Watermarks_t._fields_ = [
-    ('WatermarkRow', struct_c__SA_WatermarkRowGeneric_t * 4 * 2),
-    ('MmHubPadding', ctypes.c_uint32 * 7),
-]
-
-Watermarks_t = struct_c__SA_Watermarks_t
-
-# values for enumeration 'c__EA_CUSTOM_DPM_SETTING_e'
-c__EA_CUSTOM_DPM_SETTING_e__enumvalues = {
-    0: 'CUSTOM_DPM_SETTING_GFXCLK',
-    1: 'CUSTOM_DPM_SETTING_CCLK',
-    2: 'CUSTOM_DPM_SETTING_FCLK_CCX',
-    3: 'CUSTOM_DPM_SETTING_FCLK_GFX',
-    4: 'CUSTOM_DPM_SETTING_FCLK_STALLS',
-    5: 'CUSTOM_DPM_SETTING_LCLK',
-    6: 'CUSTOM_DPM_SETTING_COUNT',
-}
-CUSTOM_DPM_SETTING_GFXCLK = 0
-CUSTOM_DPM_SETTING_CCLK = 1
-CUSTOM_DPM_SETTING_FCLK_CCX = 2
-CUSTOM_DPM_SETTING_FCLK_GFX = 3
-CUSTOM_DPM_SETTING_FCLK_STALLS = 4
-CUSTOM_DPM_SETTING_LCLK = 5
-CUSTOM_DPM_SETTING_COUNT = 6
-c__EA_CUSTOM_DPM_SETTING_e = ctypes.c_uint32 # enum
-CUSTOM_DPM_SETTING_e = c__EA_CUSTOM_DPM_SETTING_e
-CUSTOM_DPM_SETTING_e__enumvalues = c__EA_CUSTOM_DPM_SETTING_e__enumvalues
-class struct_c__SA_DpmActivityMonitorCoeffExt_t(Structure):
-    pass
-
-struct_c__SA_DpmActivityMonitorCoeffExt_t._pack_ = 1 # source:False
-struct_c__SA_DpmActivityMonitorCoeffExt_t._fields_ = [
-    ('ActiveHystLimit', ctypes.c_ubyte),
-    ('IdleHystLimit', ctypes.c_ubyte),
-    ('FPS', ctypes.c_ubyte),
-    ('MinActiveFreqType', ctypes.c_ubyte),
-    ('MinActiveFreq', FloatInIntFormat_t),
-    ('PD_Data_limit', FloatInIntFormat_t),
-    ('PD_Data_time_constant', FloatInIntFormat_t),
-    ('PD_Data_error_coeff', FloatInIntFormat_t),
-    ('PD_Data_error_rate_coeff', FloatInIntFormat_t),
-]
-
-DpmActivityMonitorCoeffExt_t = struct_c__SA_DpmActivityMonitorCoeffExt_t
-class struct_c__SA_CustomDpmSettings_t(Structure):
-    _pack_ = 1 # source:False
-    _fields_ = [
-    ('DpmActivityMonitorCoeff', struct_c__SA_DpmActivityMonitorCoeffExt_t * 6),
-     ]
-
-CustomDpmSettings_t = struct_c__SA_CustomDpmSettings_t
-class struct_c__SA_MemPstateTable_t(Structure):
-    pass
-
-struct_c__SA_MemPstateTable_t._pack_ = 1 # source:False
-struct_c__SA_MemPstateTable_t._fields_ = [
-    ('UClk', ctypes.c_uint32),
-    ('MemClk', ctypes.c_uint32),
-    ('Voltage', ctypes.c_uint32),
-    ('WckRatio', ctypes.c_ubyte),
-    ('Spare', ctypes.c_ubyte * 3),
-]
-
-MemPstateTable_t = struct_c__SA_MemPstateTable_t
-class struct_c__SA_DpmClocks_t(Structure):
-    pass
-
-struct_c__SA_DpmClocks_t._pack_ = 1 # source:False
-struct_c__SA_DpmClocks_t._fields_ = [
-    ('DcfClocks', ctypes.c_uint32 * 8),
-    ('DispClocks', ctypes.c_uint32 * 8),
-    ('DppClocks', ctypes.c_uint32 * 8),
-    ('SocClocks', ctypes.c_uint32 * 8),
-    ('VClocks', ctypes.c_uint32 * 8),
-    ('DClocks', ctypes.c_uint32 * 8),
-    ('VPEClocks', ctypes.c_uint32 * 8),
-    ('FclkClocks_Freq', ctypes.c_uint32 * 8),
-    ('FclkClocks_Voltage', ctypes.c_uint32 * 8),
-    ('SocVoltage', ctypes.c_uint32 * 8),
-    ('MemPstateTable', struct_c__SA_MemPstateTable_t * 4),
-    ('NumDcfClkLevelsEnabled', ctypes.c_ubyte),
-    ('NumDispClkLevelsEnabled', ctypes.c_ubyte),
-    ('NumSocClkLevelsEnabled', ctypes.c_ubyte),
-    ('VcnClkLevelsEnabled', ctypes.c_ubyte),
-    ('VpeClkLevelsEnabled', ctypes.c_ubyte),
-    ('NumMemPstatesEnabled', ctypes.c_ubyte),
-    ('NumFclkLevelsEnabled', ctypes.c_ubyte),
-    ('spare', ctypes.c_ubyte * 2),
-    ('PADDING_0', ctypes.c_ubyte * 3),
-    ('MinGfxClk', ctypes.c_uint32),
-    ('MaxGfxClk', ctypes.c_uint32),
-]
-
-DpmClocks_t = struct_c__SA_DpmClocks_t
-class struct_c__SA_DpmClocks_t_v14_0_1(Structure):
-    pass
-
-struct_c__SA_DpmClocks_t_v14_0_1._pack_ = 1 # source:False
-struct_c__SA_DpmClocks_t_v14_0_1._fields_ = [
-    ('DcfClocks', ctypes.c_uint32 * 8),
-    ('DispClocks', ctypes.c_uint32 * 8),
-    ('DppClocks', ctypes.c_uint32 * 8),
-    ('SocClocks', ctypes.c_uint32 * 8),
-    ('VClocks0', ctypes.c_uint32 * 8),
-    ('VClocks1', ctypes.c_uint32 * 8),
-    ('DClocks0', ctypes.c_uint32 * 8),
-    ('DClocks1', ctypes.c_uint32 * 8),
-    ('VPEClocks', ctypes.c_uint32 * 8),
-    ('FclkClocks_Freq', ctypes.c_uint32 * 8),
-    ('FclkClocks_Voltage', ctypes.c_uint32 * 8),
-    ('SocVoltage', ctypes.c_uint32 * 8),
-    ('MemPstateTable', struct_c__SA_MemPstateTable_t * 4),
-    ('NumDcfClkLevelsEnabled', ctypes.c_ubyte),
-    ('NumDispClkLevelsEnabled', ctypes.c_ubyte),
-    ('NumSocClkLevelsEnabled', ctypes.c_ubyte),
-    ('Vcn0ClkLevelsEnabled', ctypes.c_ubyte),
-    ('Vcn1ClkLevelsEnabled', ctypes.c_ubyte),
-    ('VpeClkLevelsEnabled', ctypes.c_ubyte),
-    ('NumMemPstatesEnabled', ctypes.c_ubyte),
-    ('NumFclkLevelsEnabled', ctypes.c_ubyte),
-    ('MinGfxClk', ctypes.c_uint32),
-    ('MaxGfxClk', ctypes.c_uint32),
-]
-
-DpmClocks_t_v14_0_1 = struct_c__SA_DpmClocks_t_v14_0_1
-class struct_c__SA_SmuMetrics_t(Structure):
-    pass
-
-struct_c__SA_SmuMetrics_t._pack_ = 1 # source:False
-struct_c__SA_SmuMetrics_t._fields_ = [
-    ('CoreFrequency', ctypes.c_uint16 * 16),
-    ('CorePower', ctypes.c_uint16 * 16),
-    ('CoreTemperature', ctypes.c_uint16 * 16),
-    ('GfxTemperature', ctypes.c_uint16),
-    ('SocTemperature', ctypes.c_uint16),
-    ('StapmOpnLimit', ctypes.c_uint16),
-    ('StapmCurrentLimit', ctypes.c_uint16),
-    ('InfrastructureCpuMaxFreq', ctypes.c_uint16),
-    ('InfrastructureGfxMaxFreq', ctypes.c_uint16),
-    ('SkinTemp', ctypes.c_uint16),
-    ('GfxclkFrequency', ctypes.c_uint16),
-    ('FclkFrequency', ctypes.c_uint16),
-    ('GfxActivity', ctypes.c_uint16),
-    ('SocclkFrequency', ctypes.c_uint16),
-    ('VclkFrequency', ctypes.c_uint16),
-    ('VcnActivity', ctypes.c_uint16),
-    ('VpeclkFrequency', ctypes.c_uint16),
-    ('IpuclkFrequency', ctypes.c_uint16),
-    ('IpuBusy', ctypes.c_uint16 * 8),
-    ('DRAMReads', ctypes.c_uint16),
-    ('DRAMWrites', ctypes.c_uint16),
-    ('CoreC0Residency', ctypes.c_uint16 * 16),
-    ('IpuPower', ctypes.c_uint16),
-    ('ApuPower', ctypes.c_uint32),
-    ('GfxPower', ctypes.c_uint32),
-    ('dGpuPower', ctypes.c_uint32),
-    ('SocketPower', ctypes.c_uint32),
-    ('AllCorePower', ctypes.c_uint32),
-    ('FilterAlphaValue', ctypes.c_uint32),
-    ('MetricsCounter', ctypes.c_uint32),
-    ('MemclkFrequency', ctypes.c_uint16),
-    ('MpipuclkFrequency', ctypes.c_uint16),
-    ('IpuReads', ctypes.c_uint16),
-    ('IpuWrites', ctypes.c_uint16),
-    ('ThrottleResidency_PROCHOT', ctypes.c_uint32),
-    ('ThrottleResidency_SPL', ctypes.c_uint32),
-    ('ThrottleResidency_FPPT', ctypes.c_uint32),
-    ('ThrottleResidency_SPPT', ctypes.c_uint32),
-    ('ThrottleResidency_THM_CORE', ctypes.c_uint32),
-    ('ThrottleResidency_THM_GFX', ctypes.c_uint32),
-    ('ThrottleResidency_THM_SOC', ctypes.c_uint32),
-    ('Psys', ctypes.c_uint16),
-    ('spare1', ctypes.c_uint16),
-    ('spare', ctypes.c_uint32 * 6),
-]
-
-SmuMetrics_t = struct_c__SA_SmuMetrics_t
-
-# values for enumeration 'c__EA_TILE_NUM_e'
-c__EA_TILE_NUM_e__enumvalues = {
-    0: 'TILE_XTILE',
-    1: 'TILE_MTILE',
-    2: 'TILE_PDP',
-    3: 'TILE_CSTAT',
-    4: 'TILE_LME',
-    5: 'TILE_BYRP',
-    6: 'TILE_GRBP',
-    7: 'TILE_MCFP',
-    8: 'TILE_YUVP',
-    9: 'TILE_MCSC',
-    10: 'TILE_GDC',
-    11: 'TILE_MAX',
-}
-TILE_XTILE = 0
-TILE_MTILE = 1
-TILE_PDP = 2
-TILE_CSTAT = 3
-TILE_LME = 4
-TILE_BYRP = 5
-TILE_GRBP = 6
-TILE_MCFP = 7
-TILE_YUVP = 8
-TILE_MCSC = 9
-TILE_GDC = 10
-TILE_MAX = 11
-c__EA_TILE_NUM_e = ctypes.c_uint32 # enum
-TILE_NUM_e = c__EA_TILE_NUM_e
-TILE_NUM_e__enumvalues = c__EA_TILE_NUM_e__enumvalues
 class struct_SMU14_Firmware_Footer(Structure):
     pass
 
@@ -691,13 +383,18 @@ PPSMC_Message_Count = 0x59 # macro
 SMU14_DRIVER_IF_V14_0_H = True # macro
 PPTABLE_VERSION = 0x1B # macro
 NUM_GFXCLK_DPM_LEVELS = 16 # macro
+NUM_SOCCLK_DPM_LEVELS = 8 # macro
 NUM_MP0CLK_DPM_LEVELS = 2 # macro
 NUM_DCLK_DPM_LEVELS = 8 # macro
 NUM_VCLK_DPM_LEVELS = 8 # macro
+NUM_DISPCLK_DPM_LEVELS = 8 # macro
+NUM_DPPCLK_DPM_LEVELS = 8 # macro
 NUM_DPREFCLK_DPM_LEVELS = 8 # macro
+NUM_DCFCLK_DPM_LEVELS = 8 # macro
 NUM_DTBCLK_DPM_LEVELS = 8 # macro
 NUM_UCLK_DPM_LEVELS = 6 # macro
 NUM_LINK_LEVELS = 3 # macro
+NUM_FCLK_DPM_LEVELS = 8 # macro
 NUM_OD_FAN_MAX_POINTS = 6 # macro
 FEATURE_FW_DATA_READ_BIT = 0 # macro
 FEATURE_DPM_GFXCLK_BIT = 1 # macro
@@ -869,11 +566,18 @@ PP_OD_FEATURE_TEMPERATURE_BIT = 12 # macro
 PP_OD_FEATURE_EDC_BIT = 13 # macro
 PP_OD_FEATURE_COUNT = 14 # macro
 INVALID_BOARD_GPIO = 0xFF # macro
+NUM_WM_RANGES = 4 # macro
 WORKLOAD_PPLIB_DEFAULT_BIT = 0 # macro
+WORKLOAD_PPLIB_FULL_SCREEN_3D_BIT = 1 # macro
 WORKLOAD_PPLIB_POWER_SAVING_BIT = 2 # macro
+WORKLOAD_PPLIB_VIDEO_BIT = 3 # macro
+WORKLOAD_PPLIB_VR_BIT = 4 # macro
+WORKLOAD_PPLIB_COMPUTE_BIT = 5 # macro
+WORKLOAD_PPLIB_CUSTOM_BIT = 6 # macro
 WORKLOAD_PPLIB_WINDOW_3D_BIT = 7 # macro
 WORKLOAD_PPLIB_DIRECT_ML_BIT = 8 # macro
 WORKLOAD_PPLIB_CGVDI_BIT = 9 # macro
+WORKLOAD_PPLIB_COUNT = 10 # macro
 TABLE_TRANSFER_OK = 0x0 # macro
 TABLE_TRANSFER_FAILED = 0xFF # macro
 TABLE_TRANSFER_PENDING = 0xAB # macro
@@ -889,8 +593,10 @@ TABLE_ACOUSTIC_LIMIT_RPM_FAILED = 0x10000 # macro
 TABLE_MGPU_ACOUSTIC_TARGET_RPM_FAILED = 0x20000 # macro
 TABLE_PPTABLE = 0 # macro
 TABLE_COMBO_PPTABLE = 1 # macro
+TABLE_WATERMARKS = 2 # macro
 TABLE_AVFS_PSM_DEBUG = 3 # macro
 TABLE_PMSTATUSLOG = 4 # macro
+TABLE_SMU_METRICS = 5 # macro
 TABLE_DRIVER_SMU_CONFIG = 6 # macro
 TABLE_ACTIVITY_MONITOR_COEFF = 7 # macro
 TABLE_OVERDRIVE = 8 # macro
@@ -898,6 +604,7 @@ TABLE_I2C_COMMANDS = 9 # macro
 TABLE_DRIVER_INFO = 10 # macro
 TABLE_ECCINFO = 11 # macro
 TABLE_CUSTOM_SKUTABLE = 12 # macro
+TABLE_COUNT = 13 # macro
 IH_INTERRUPT_ID_TO_DRIVER = 0xFE # macro
 IH_INTERRUPT_CONTEXT_ID_BACO = 0x2 # macro
 IH_INTERRUPT_CONTEXT_ID_AC = 0x3 # macro
@@ -2645,6 +2352,74 @@ struct_c__SA_DriverInfoTable_t._fields_ = [
 ]
 
 DriverInfoTable_t = struct_c__SA_DriverInfoTable_t
+class struct_c__SA_SmuMetrics_t(Structure):
+    pass
+
+struct_c__SA_SmuMetrics_t._pack_ = 1 # source:False
+struct_c__SA_SmuMetrics_t._fields_ = [
+    ('CurrClock', ctypes.c_uint32 * 11),
+    ('AverageGfxclkFrequencyTarget', ctypes.c_uint16),
+    ('AverageGfxclkFrequencyPreDs', ctypes.c_uint16),
+    ('AverageGfxclkFrequencyPostDs', ctypes.c_uint16),
+    ('AverageFclkFrequencyPreDs', ctypes.c_uint16),
+    ('AverageFclkFrequencyPostDs', ctypes.c_uint16),
+    ('AverageMemclkFrequencyPreDs', ctypes.c_uint16),
+    ('AverageMemclkFrequencyPostDs', ctypes.c_uint16),
+    ('AverageVclk0Frequency', ctypes.c_uint16),
+    ('AverageDclk0Frequency', ctypes.c_uint16),
+    ('AverageVclk1Frequency', ctypes.c_uint16),
+    ('AverageDclk1Frequency', ctypes.c_uint16),
+    ('AveragePCIeBusy', ctypes.c_uint16),
+    ('dGPU_W_MAX', ctypes.c_uint16),
+    ('padding', ctypes.c_uint16),
+    ('MovingAverageGfxclkFrequencyTarget', ctypes.c_uint16),
+    ('MovingAverageGfxclkFrequencyPreDs', ctypes.c_uint16),
+    ('MovingAverageGfxclkFrequencyPostDs', ctypes.c_uint16),
+    ('MovingAverageFclkFrequencyPreDs', ctypes.c_uint16),
+    ('MovingAverageFclkFrequencyPostDs', ctypes.c_uint16),
+    ('MovingAverageMemclkFrequencyPreDs', ctypes.c_uint16),
+    ('MovingAverageMemclkFrequencyPostDs', ctypes.c_uint16),
+    ('MovingAverageVclk0Frequency', ctypes.c_uint16),
+    ('MovingAverageDclk0Frequency', ctypes.c_uint16),
+    ('MovingAverageGfxActivity', ctypes.c_uint16),
+    ('MovingAverageUclkActivity', ctypes.c_uint16),
+    ('MovingAverageVcn0ActivityPercentage', ctypes.c_uint16),
+    ('MovingAveragePCIeBusy', ctypes.c_uint16),
+    ('MovingAverageUclkActivity_MAX', ctypes.c_uint16),
+    ('MovingAverageSocketPower', ctypes.c_uint16),
+    ('MovingAveragePadding', ctypes.c_uint16),
+    ('MetricsCounter', ctypes.c_uint32),
+    ('AvgVoltage', ctypes.c_uint16 * 4),
+    ('AvgCurrent', ctypes.c_uint16 * 4),
+    ('AverageGfxActivity', ctypes.c_uint16),
+    ('AverageUclkActivity', ctypes.c_uint16),
+    ('AverageVcn0ActivityPercentage', ctypes.c_uint16),
+    ('Vcn1ActivityPercentage', ctypes.c_uint16),
+    ('EnergyAccumulator', ctypes.c_uint32),
+    ('AverageSocketPower', ctypes.c_uint16),
+    ('AverageTotalBoardPower', ctypes.c_uint16),
+    ('AvgTemperature', ctypes.c_uint16 * 12),
+    ('AvgTemperatureFanIntake', ctypes.c_uint16),
+    ('PcieRate', ctypes.c_ubyte),
+    ('PcieWidth', ctypes.c_ubyte),
+    ('AvgFanPwm', ctypes.c_ubyte),
+    ('Padding', ctypes.c_ubyte * 1),
+    ('AvgFanRpm', ctypes.c_uint16),
+    ('ThrottlingPercentage', ctypes.c_ubyte * 21),
+    ('VmaxThrottlingPercentage', ctypes.c_ubyte),
+    ('padding1', ctypes.c_ubyte * 2),
+    ('D3HotEntryCountPerMode', ctypes.c_uint32 * 4),
+    ('D3HotExitCountPerMode', ctypes.c_uint32 * 4),
+    ('ArmMsgReceivedCountPerMode', ctypes.c_uint32 * 4),
+    ('ApuSTAPMSmartShiftLimit', ctypes.c_uint16),
+    ('ApuSTAPMLimit', ctypes.c_uint16),
+    ('AvgApuSocketPower', ctypes.c_uint16),
+    ('AverageUclkActivity_MAX', ctypes.c_uint16),
+    ('PublicSerialNumberLower', ctypes.c_uint32),
+    ('PublicSerialNumberUpper', ctypes.c_uint32),
+]
+
+SmuMetrics_t = struct_c__SA_SmuMetrics_t
 class struct_c__SA_SmuMetricsExternal_t(Structure):
     pass
 
@@ -2656,6 +2431,17 @@ struct_c__SA_SmuMetricsExternal_t._fields_ = [
 ]
 
 SmuMetricsExternal_t = struct_c__SA_SmuMetricsExternal_t
+class struct_c__SA_WatermarkRowGeneric_t(Structure):
+    pass
+
+struct_c__SA_WatermarkRowGeneric_t._pack_ = 1 # source:False
+struct_c__SA_WatermarkRowGeneric_t._fields_ = [
+    ('WmSetting', ctypes.c_ubyte),
+    ('Flags', ctypes.c_ubyte),
+    ('Padding', ctypes.c_ubyte * 2),
+]
+
+WatermarkRowGeneric_t = struct_c__SA_WatermarkRowGeneric_t
 
 # values for enumeration 'c__EA_WATERMARKS_FLAGS_e'
 c__EA_WATERMARKS_FLAGS_e__enumvalues = {
@@ -2671,6 +2457,13 @@ WATERMARKS_COUNT = 3
 c__EA_WATERMARKS_FLAGS_e = ctypes.c_uint32 # enum
 WATERMARKS_FLAGS_e = c__EA_WATERMARKS_FLAGS_e
 WATERMARKS_FLAGS_e__enumvalues = c__EA_WATERMARKS_FLAGS_e__enumvalues
+class struct_c__SA_Watermarks_t(Structure):
+    _pack_ = 1 # source:False
+    _fields_ = [
+    ('WatermarkRow', struct_c__SA_WatermarkRowGeneric_t * 4),
+     ]
+
+Watermarks_t = struct_c__SA_Watermarks_t
 class struct_c__SA_WatermarksExternal_t(Structure):
     pass
 
@@ -3271,15 +3064,10 @@ __all__ = \
     'CMDCONFIG_STOP_BIT', 'CMDCONFIG_STOP_MASK',
     'CUSTOMER_VARIANT_COUNT', 'CUSTOMER_VARIANT_FALCON',
     'CUSTOMER_VARIANT_ROW', 'CUSTOMER_VARIANT_e',
-    'CUSTOMER_VARIANT_e__enumvalues', 'CUSTOM_DPM_SETTING_CCLK',
-    'CUSTOM_DPM_SETTING_COUNT', 'CUSTOM_DPM_SETTING_FCLK_CCX',
-    'CUSTOM_DPM_SETTING_FCLK_GFX', 'CUSTOM_DPM_SETTING_FCLK_STALLS',
-    'CUSTOM_DPM_SETTING_GFXCLK', 'CUSTOM_DPM_SETTING_LCLK',
-    'CUSTOM_DPM_SETTING_e', 'CUSTOM_DPM_SETTING_e__enumvalues',
-    'CustomDpmSettings_t', 'CustomSkuTable_t', 'D3HOTSequence_e',
-    'D3HOTSequence_e__enumvalues', 'D3HOT_SEQUENCE_COUNT',
-    'DCS_ARCH_ASYNC', 'DCS_ARCH_DISABLED', 'DCS_ARCH_FADCS',
-    'DCS_ARCH_e', 'DCS_ARCH_e__enumvalues',
+    'CUSTOMER_VARIANT_e__enumvalues', 'CustomSkuTable_t',
+    'D3HOTSequence_e', 'D3HOTSequence_e__enumvalues',
+    'D3HOT_SEQUENCE_COUNT', 'DCS_ARCH_ASYNC', 'DCS_ARCH_DISABLED',
+    'DCS_ARCH_FADCS', 'DCS_ARCH_e', 'DCS_ARCH_e__enumvalues',
     'DEBUG_OVERRIDE_DFLL_BTC_FCW_LOG',
     'DEBUG_OVERRIDE_DFLL_MASTER_MODE',
     'DEBUG_OVERRIDE_DISABLE_D0i2_REENTRY_HSR_TIMER_CHECK',
@@ -3300,22 +3088,18 @@ __all__ = \
     'DRAM_BIT_WIDTH_DISABLED', 'DRAM_BIT_WIDTH_TYPE_e',
     'DRAM_BIT_WIDTH_TYPE_e__enumvalues', 'DRAM_BIT_WIDTH_X_128',
     'DRAM_BIT_WIDTH_X_16', 'DRAM_BIT_WIDTH_X_32',
-    'DRAM_BIT_WIDTH_X_64', 'DRAM_BIT_WIDTH_X_8', 'DSPCLK_COUNT',
-    'DSPCLK_DCFCLK', 'DSPCLK_DISPCLK', 'DSPCLK_PHYCLK',
-    'DSPCLK_PIXCLK', 'DSPCLK_e', 'DSPCLK_e__enumvalues',
-    'DisplayClockTable_t', 'DpmActivityMonitorCoeffExt_t',
+    'DRAM_BIT_WIDTH_X_64', 'DRAM_BIT_WIDTH_X_8',
     'DpmActivityMonitorCoeffIntExternal_t',
-    'DpmActivityMonitorCoeffInt_t', 'DpmClocks_t',
-    'DpmClocks_t_v14_0_1', 'DpmDescriptor_t', 'DriverInfoTable_t',
-    'DriverReportedClocks_t', 'DriverSmuConfigExternal_t',
-    'DriverSmuConfig_t', 'DroopInt_t', 'ENABLE_DEBUG_FEATURES',
-    'EPCS_HIGH_POWER', 'EPCS_HIGH_POWER_LIMIT', 'EPCS_LOW_POWER',
-    'EPCS_LOW_POWER_LIMIT', 'EPCS_NORMAL_POWER',
-    'EPCS_NORMAL_POWER_LIMIT', 'EPCS_NOT_CONFIGURED',
-    'EPCS_NO_BOOTUP', 'EPCS_SHORTED_LIMIT', 'EPCS_SHORTED_POWER',
-    'EPCS_STATUS_COUNT', 'EPCS_STATUS_e', 'EPCS_STATUS_e__enumvalues',
-    'EccInfoTable_t', 'EccInfo_t', 'FAN_MODE_AUTO',
-    'FAN_MODE_MANUAL_LINEAR', 'FEATURE_ACDC_BIT',
+    'DpmActivityMonitorCoeffInt_t', 'DpmDescriptor_t',
+    'DriverInfoTable_t', 'DriverReportedClocks_t',
+    'DriverSmuConfigExternal_t', 'DriverSmuConfig_t', 'DroopInt_t',
+    'ENABLE_DEBUG_FEATURES', 'EPCS_HIGH_POWER',
+    'EPCS_HIGH_POWER_LIMIT', 'EPCS_LOW_POWER', 'EPCS_LOW_POWER_LIMIT',
+    'EPCS_NORMAL_POWER', 'EPCS_NORMAL_POWER_LIMIT',
+    'EPCS_NOT_CONFIGURED', 'EPCS_NO_BOOTUP', 'EPCS_SHORTED_LIMIT',
+    'EPCS_SHORTED_POWER', 'EPCS_STATUS_COUNT', 'EPCS_STATUS_e',
+    'EPCS_STATUS_e__enumvalues', 'EccInfoTable_t', 'EccInfo_t',
+    'FAN_MODE_AUTO', 'FAN_MODE_MANUAL_LINEAR', 'FEATURE_ACDC_BIT',
     'FEATURE_APT_ALL_ENABLE_BIT', 'FEATURE_APT_PF_DCS_BIT',
     'FEATURE_APT_SQ_THROTTLE_BIT', 'FEATURE_ATHUB_MMHUB_PG_BIT',
     'FEATURE_ATHUB_PG_BIT', 'FEATURE_BACO_BIT', 'FEATURE_BACO_CG_BIT',
@@ -3391,7 +3175,7 @@ __all__ = \
     'FW_DSTATE_SMN_DS_BIT', 'FW_DSTATE_SOC_LIV_MIN_BIT',
     'FW_DSTATE_SOC_PLL_PWRDN_BIT', 'FW_DSTATE_SOC_PSI_BIT',
     'FW_DSTATE_SOC_ULV_BIT', 'FanMode_e', 'FanMode_e__enumvalues',
-    'FloatInIntFormat_t', 'FwStatus_t', 'FwStatus_t_v14_0_1',
+    'FwStatus_t', 'FwStatus_t_v14_0_1',
     'GPIO_INT_POLARITY_ACTIVE_HIGH', 'GPIO_INT_POLARITY_ACTIVE_LOW',
     'GpioIntPolarity_e', 'GpioIntPolarity_e__enumvalues',
     'I2C_CMD_COUNT', 'I2C_CMD_READ', 'I2C_CMD_WRITE',
@@ -3437,10 +3221,10 @@ __all__ = \
     'IH_INTERRUPT_CONTEXT_ID_FAN_RECOVERY',
     'IH_INTERRUPT_CONTEXT_ID_THERMAL_THROTTLING',
     'IH_INTERRUPT_ID_TO_DRIVER', 'INVALID_BOARD_GPIO',
-    'ISP_TILE_SEL_ALL', 'LED_DISPLAY_ERROR_BIT',
-    'LED_DISPLAY_GFX_DPM_BIT', 'LED_DISPLAY_PCIE_BIT', 'LinearInt_t',
-    'MAX_BOARD_DC_GPIO_NUM', 'MAX_BOARD_GPIO_SMUIO_NUM',
-    'MAX_SW_I2C_COMMANDS', 'MEM_TEMP_READ_IN_BAND_DUMMY_PSTATE_BIT',
+    'LED_DISPLAY_ERROR_BIT', 'LED_DISPLAY_GFX_DPM_BIT',
+    'LED_DISPLAY_PCIE_BIT', 'LinearInt_t', 'MAX_BOARD_DC_GPIO_NUM',
+    'MAX_BOARD_GPIO_SMUIO_NUM', 'MAX_SW_I2C_COMMANDS',
+    'MEM_TEMP_READ_IN_BAND_DUMMY_PSTATE_BIT',
     'MEM_TEMP_READ_IN_BAND_REFRESH_BIT',
     'MEM_TEMP_READ_OUT_OF_BAND_BIT', 'MEM_VENDOR_COUNT',
     'MEM_VENDOR_ELPIDA', 'MEM_VENDOR_ESMT', 'MEM_VENDOR_ETRON',
@@ -3450,25 +3234,22 @@ __all__ = \
     'MEM_VENDOR_PLACEHOLDER3', 'MEM_VENDOR_PLACEHOLDER4',
     'MEM_VENDOR_PLACEHOLDER5', 'MEM_VENDOR_SAMSUNG',
     'MEM_VENDOR_WINBOND', 'MEM_VENDOR_e', 'MEM_VENDOR_e__enumvalues',
-    'MSR_SEQUENCE', 'MemPstateTable_t', 'MsgLimits_t',
-    'NUM_DCFCLK_DPM_LEVELS', 'NUM_DCLK_DPM_LEVELS',
-    'NUM_DISPCLK_DPM_LEVELS', 'NUM_DPPCLK_DPM_LEVELS',
-    'NUM_DPREFCLK_DPM_LEVELS', 'NUM_DTBCLK_DPM_LEVELS',
-    'NUM_FCLK_DPM_LEVELS', 'NUM_FEATURES', 'NUM_GFXCLK_DPM_LEVELS',
-    'NUM_I2C_CONTROLLERS', 'NUM_LINK_LEVELS', 'NUM_MEM_PSTATE_LEVELS',
+    'MSR_SEQUENCE', 'MsgLimits_t', 'NUM_DCFCLK_DPM_LEVELS',
+    'NUM_DCLK_DPM_LEVELS', 'NUM_DISPCLK_DPM_LEVELS',
+    'NUM_DPPCLK_DPM_LEVELS', 'NUM_DPREFCLK_DPM_LEVELS',
+    'NUM_DTBCLK_DPM_LEVELS', 'NUM_FCLK_DPM_LEVELS', 'NUM_FEATURES',
+    'NUM_GFXCLK_DPM_LEVELS', 'NUM_I2C_CONTROLLERS', 'NUM_LINK_LEVELS',
     'NUM_MP0CLK_DPM_LEVELS', 'NUM_OD_FAN_MAX_POINTS',
-    'NUM_SOCCLK_DPM_LEVELS', 'NUM_SOC_VOLTAGE_LEVELS',
-    'NUM_UCLK_DPM_LEVELS', 'NUM_VCLK_DPM_LEVELS',
-    'NUM_VCN_DPM_LEVELS', 'NUM_VPE_DPM_LEVELS', 'NUM_WM_RANGES',
-    'OD_FAIL_e', 'OD_FAIL_e__enumvalues',
-    'OD_FAN_ACOUSTIC_LIMIT_ERROR', 'OD_FAN_ACOUSTIC_TARGET_ERROR',
-    'OD_FAN_CURVE_PWM_ERROR', 'OD_FAN_CURVE_TEMP_ERROR',
-    'OD_FAN_MIN_PWM_ERROR', 'OD_FAN_TARGET_TEMP_ERROR',
-    'OD_FAN_ZERO_RPM_STOP_TEMP_ERROR', 'OD_FCLK_ERROR',
-    'OD_FULL_CTRL_FCLK_ERROR', 'OD_FULL_CTRL_GFXCLK_ERROR',
-    'OD_FULL_CTRL_UCLK_ERROR', 'OD_FULL_CTRL_VDD_GFX_ERROR',
-    'OD_FULL_CTRL_VDD_SOC_ERROR', 'OD_GFXCLK_ERROR',
-    'OD_GFXCLK_VF_CURVE_OFFSET_ERROR',
+    'NUM_SOCCLK_DPM_LEVELS', 'NUM_UCLK_DPM_LEVELS',
+    'NUM_VCLK_DPM_LEVELS', 'NUM_WM_RANGES', 'OD_FAIL_e',
+    'OD_FAIL_e__enumvalues', 'OD_FAN_ACOUSTIC_LIMIT_ERROR',
+    'OD_FAN_ACOUSTIC_TARGET_ERROR', 'OD_FAN_CURVE_PWM_ERROR',
+    'OD_FAN_CURVE_TEMP_ERROR', 'OD_FAN_MIN_PWM_ERROR',
+    'OD_FAN_TARGET_TEMP_ERROR', 'OD_FAN_ZERO_RPM_STOP_TEMP_ERROR',
+    'OD_FCLK_ERROR', 'OD_FULL_CTRL_FCLK_ERROR',
+    'OD_FULL_CTRL_GFXCLK_ERROR', 'OD_FULL_CTRL_UCLK_ERROR',
+    'OD_FULL_CTRL_VDD_GFX_ERROR', 'OD_FULL_CTRL_VDD_SOC_ERROR',
+    'OD_GFXCLK_ERROR', 'OD_GFXCLK_VF_CURVE_OFFSET_ERROR',
     'OD_INVALID_FEATURE_COMBO_ERROR', 'OD_NO_ERROR',
     'OD_OP_GFX_EDC_ERROR', 'OD_OP_GFX_PCC_ERROR', 'OD_OP_TEMP_ERROR',
     'OD_POWER_FEATURE_CTRL_ERROR', 'OD_PPT_ERROR',
@@ -3633,24 +3414,23 @@ __all__ = \
     'PwrConfig_e__enumvalues', 'QuadraticInt_t',
     'SMARTSHIFT_VERSION_1', 'SMARTSHIFT_VERSION_2',
     'SMARTSHIFT_VERSION_3', 'SMARTSHIFT_VERSION_e',
-    'SMARTSHIFT_VERSION_e__enumvalues', 'SMU14_DRIVER_IF_V14_0_0_H',
-    'SMU14_DRIVER_IF_V14_0_H', 'SMU14_Firmware_Footer',
-    'SMU_CLK_COUNT', 'SMU_CUSTOM_FAN_SPEED_PWM',
-    'SMU_CUSTOM_FAN_SPEED_RPM', 'SMU_DCEFCLK', 'SMU_DCLK',
-    'SMU_DCLK1', 'SMU_DEFAULT_PPT_LIMIT', 'SMU_DISPCLK',
-    'SMU_DPM_USER_PROFILE_RESTORE', 'SMU_ECLK', 'SMU_FAST_PPT_LIMIT',
-    'SMU_FCLK', 'SMU_FW_NAME_LEN', 'SMU_Firmware_Header',
-    'SMU_GFXCLK', 'SMU_LCLK', 'SMU_MCLK', 'SMU_MEMORY_POOL_SIZE_1_GB',
-    'SMU_MEMORY_POOL_SIZE_256_MB', 'SMU_MEMORY_POOL_SIZE_2_GB',
-    'SMU_MEMORY_POOL_SIZE_512_MB', 'SMU_MEMORY_POOL_SIZE_ZERO',
-    'SMU_OD_ACOUSTIC_LIMIT', 'SMU_OD_ACOUSTIC_TARGET', 'SMU_OD_CCLK',
-    'SMU_OD_FAN_CURVE', 'SMU_OD_FAN_MINIMUM_PWM',
-    'SMU_OD_FAN_TARGET_TEMPERATURE', 'SMU_OD_MCLK', 'SMU_OD_RANGE',
-    'SMU_OD_SCLK', 'SMU_OD_VDDC_CURVE', 'SMU_OD_VDDGFX_OFFSET',
-    'SMU_PCIE', 'SMU_PHYCLK', 'SMU_PIXCLK', 'SMU_POWER_SOURCE_AC',
-    'SMU_POWER_SOURCE_COUNT', 'SMU_POWER_SOURCE_DC',
-    'SMU_PPT_LIMIT_CURRENT', 'SMU_PPT_LIMIT_DEFAULT',
-    'SMU_PPT_LIMIT_MAX', 'SMU_PPT_LIMIT_MIN',
+    'SMARTSHIFT_VERSION_e__enumvalues', 'SMU14_DRIVER_IF_V14_0_H',
+    'SMU14_Firmware_Footer', 'SMU_CLK_COUNT',
+    'SMU_CUSTOM_FAN_SPEED_PWM', 'SMU_CUSTOM_FAN_SPEED_RPM',
+    'SMU_DCEFCLK', 'SMU_DCLK', 'SMU_DCLK1', 'SMU_DEFAULT_PPT_LIMIT',
+    'SMU_DISPCLK', 'SMU_DPM_USER_PROFILE_RESTORE', 'SMU_ECLK',
+    'SMU_FAST_PPT_LIMIT', 'SMU_FCLK', 'SMU_FW_NAME_LEN',
+    'SMU_Firmware_Header', 'SMU_GFXCLK', 'SMU_LCLK', 'SMU_MCLK',
+    'SMU_MEMORY_POOL_SIZE_1_GB', 'SMU_MEMORY_POOL_SIZE_256_MB',
+    'SMU_MEMORY_POOL_SIZE_2_GB', 'SMU_MEMORY_POOL_SIZE_512_MB',
+    'SMU_MEMORY_POOL_SIZE_ZERO', 'SMU_OD_ACOUSTIC_LIMIT',
+    'SMU_OD_ACOUSTIC_TARGET', 'SMU_OD_CCLK', 'SMU_OD_FAN_CURVE',
+    'SMU_OD_FAN_MINIMUM_PWM', 'SMU_OD_FAN_TARGET_TEMPERATURE',
+    'SMU_OD_MCLK', 'SMU_OD_RANGE', 'SMU_OD_SCLK', 'SMU_OD_VDDC_CURVE',
+    'SMU_OD_VDDGFX_OFFSET', 'SMU_PCIE', 'SMU_PHYCLK', 'SMU_PIXCLK',
+    'SMU_POWER_SOURCE_AC', 'SMU_POWER_SOURCE_COUNT',
+    'SMU_POWER_SOURCE_DC', 'SMU_PPT_LIMIT_CURRENT',
+    'SMU_PPT_LIMIT_DEFAULT', 'SMU_PPT_LIMIT_MAX', 'SMU_PPT_LIMIT_MIN',
     'SMU_REFRESHRATE_SOURCE_EDID', 'SMU_REFRESHRATE_SOURCE_EXPLICIT',
     'SMU_SCLK', 'SMU_SOCCLK',
     'SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE',
@@ -3717,17 +3497,15 @@ __all__ = \
     'SwI2cRequest_t', 'TABLE_ACOUSTIC_LIMIT_RPM_FAILED',
     'TABLE_ACOUSTIC_TARGET_RPM_FAILED',
     'TABLE_ACTIVITY_MONITOR_COEFF', 'TABLE_AVFS_PSM_DEBUG',
-    'TABLE_BIOS_GPIO_CONFIG', 'TABLE_BIOS_IF', 'TABLE_COMBO_PPTABLE',
-    'TABLE_COUNT', 'TABLE_CUSTOM_DPM', 'TABLE_CUSTOM_SKUTABLE',
-    'TABLE_DPMCLOCKS', 'TABLE_DRIVER_INFO', 'TABLE_DRIVER_SMU_CONFIG',
-    'TABLE_ECCINFO', 'TABLE_FAN_PWM_MIN_FAILED',
-    'TABLE_FAN_START_TEMP_FAILED', 'TABLE_FAN_STOP_TEMP_FAILED',
-    'TABLE_FAN_TARGET_TEMP_FAILED', 'TABLE_I2C_COMMANDS',
-    'TABLE_MGPU_ACOUSTIC_TARGET_RPM_FAILED', 'TABLE_MODERN_STDBY',
-    'TABLE_MOMENTARY_PM', 'TABLE_OVERDRIVE', 'TABLE_PMSTATUSLOG',
-    'TABLE_PPTABLE', 'TABLE_PPT_FAILED', 'TABLE_SMU_METRICS',
-    'TABLE_TDC_FAILED', 'TABLE_TEMP_FAILED', 'TABLE_TRANSFER_FAILED',
-    'TABLE_TRANSFER_OK', 'TABLE_TRANSFER_PENDING', 'TABLE_WATERMARKS',
+    'TABLE_COMBO_PPTABLE', 'TABLE_COUNT', 'TABLE_CUSTOM_SKUTABLE',
+    'TABLE_DRIVER_INFO', 'TABLE_DRIVER_SMU_CONFIG', 'TABLE_ECCINFO',
+    'TABLE_FAN_PWM_MIN_FAILED', 'TABLE_FAN_START_TEMP_FAILED',
+    'TABLE_FAN_STOP_TEMP_FAILED', 'TABLE_FAN_TARGET_TEMP_FAILED',
+    'TABLE_I2C_COMMANDS', 'TABLE_MGPU_ACOUSTIC_TARGET_RPM_FAILED',
+    'TABLE_OVERDRIVE', 'TABLE_PMSTATUSLOG', 'TABLE_PPTABLE',
+    'TABLE_PPT_FAILED', 'TABLE_SMU_METRICS', 'TABLE_TDC_FAILED',
+    'TABLE_TEMP_FAILED', 'TABLE_TRANSFER_FAILED', 'TABLE_TRANSFER_OK',
+    'TABLE_TRANSFER_PENDING', 'TABLE_WATERMARKS',
     'TDC_THROTTLER_COUNT', 'TDC_THROTTLER_GFX', 'TDC_THROTTLER_SOC',
     'TDC_THROTTLER_e', 'TDC_THROTTLER_e__enumvalues', 'TEMP_COUNT',
     'TEMP_EDGE', 'TEMP_HOTSPOT', 'TEMP_HOTSPOT_GFX',
@@ -3744,11 +3522,8 @@ __all__ = \
     'THROTTLER_TEMP_LIQUID1_BIT', 'THROTTLER_TEMP_MEM_BIT',
     'THROTTLER_TEMP_PLX_BIT', 'THROTTLER_TEMP_VR_GFX_BIT',
     'THROTTLER_TEMP_VR_MEM0_BIT', 'THROTTLER_TEMP_VR_MEM1_BIT',
-    'THROTTLER_TEMP_VR_SOC_BIT', 'TILE_BYRP', 'TILE_CSTAT',
-    'TILE_GDC', 'TILE_GRBP', 'TILE_LME', 'TILE_MAX', 'TILE_MCFP',
-    'TILE_MCSC', 'TILE_MTILE', 'TILE_NUM_e', 'TILE_NUM_e__enumvalues',
-    'TILE_PDP', 'TILE_XTILE', 'TILE_YUVP', 'UCLK_DIV_BY_1',
-    'UCLK_DIV_BY_2', 'UCLK_DIV_BY_4', 'UCLK_DIV_BY_8', 'UCLK_DIV_e',
+    'THROTTLER_TEMP_VR_SOC_BIT', 'UCLK_DIV_BY_1', 'UCLK_DIV_BY_2',
+    'UCLK_DIV_BY_4', 'UCLK_DIV_BY_8', 'UCLK_DIV_e',
     'UCLK_DIV_e__enumvalues', 'ULPS_SEQUENCE', 'VOLTAGE_MODE_COUNT',
     'VOLTAGE_MODE_FUSES', 'VOLTAGE_MODE_PPTABLE', 'VOLTAGE_MODE_e',
     'VOLTAGE_MODE_e__enumvalues', 'VR_MAPPING_PLANE_SELECT_MASK',
@@ -3756,9 +3531,7 @@ __all__ = \
     'VR_MAPPING_VR_SELECT_SHIFT', 'WATERMARKS_CLOCK_RANGE',
     'WATERMARKS_COUNT', 'WATERMARKS_DUMMY_PSTATE',
     'WATERMARKS_FLAGS_e', 'WATERMARKS_FLAGS_e__enumvalues',
-    'WATERMARKS_MALL', 'WM_CLOCK_e', 'WM_CLOCK_e__enumvalues',
-    'WM_COUNT', 'WM_DCFCLK', 'WM_PSTATE_CHG', 'WM_RETRAINING',
-    'WM_SOCCLK', 'WORKLOAD_PPLIB_CGVDI_BIT',
+    'WATERMARKS_MALL', 'WORKLOAD_PPLIB_CGVDI_BIT',
     'WORKLOAD_PPLIB_COMPUTE_BIT', 'WORKLOAD_PPLIB_COUNT',
     'WORKLOAD_PPLIB_CUSTOM_BIT', 'WORKLOAD_PPLIB_DEFAULT_BIT',
     'WORKLOAD_PPLIB_DIRECT_ML_BIT',
@@ -3769,9 +3542,8 @@ __all__ = \
     '__AMDGPU_SMU_H__', '__SMU_V14_0_0_PMFW_H__', 'bool',
     'c__EA_AVFS_D_e', 'c__EA_AVFS_TEMP_e',
     'c__EA_AVFS_VOLTAGE_TYPE_e', 'c__EA_BOARD_GPIO_TYPE_e',
-    'c__EA_CUSTOMER_VARIANT_e', 'c__EA_CUSTOM_DPM_SETTING_e',
-    'c__EA_D3HOTSequence_e', 'c__EA_DCS_ARCH_e',
-    'c__EA_DRAM_BIT_WIDTH_TYPE_e', 'c__EA_DSPCLK_e',
+    'c__EA_CUSTOMER_VARIANT_e', 'c__EA_D3HOTSequence_e',
+    'c__EA_DCS_ARCH_e', 'c__EA_DRAM_BIT_WIDTH_TYPE_e',
     'c__EA_EPCS_STATUS_e', 'c__EA_FEATURE_BTC_e',
     'c__EA_FEATURE_PWR_DOMAIN_e', 'c__EA_FOPT_CALC_e',
     'c__EA_FanMode_e', 'c__EA_GpioIntPolarity_e',
@@ -3787,9 +3559,9 @@ __all__ = \
     'c__EA_PowerGatingSettings_e', 'c__EA_PwrConfig_e',
     'c__EA_SMARTSHIFT_VERSION_e', 'c__EA_SVI_PLANE_e',
     'c__EA_SVI_PSI_e', 'c__EA_TDC_THROTTLER_e', 'c__EA_TEMP_e',
-    'c__EA_TILE_NUM_e', 'c__EA_UCLK_DIV_e', 'c__EA_VOLTAGE_MODE_e',
-    'c__EA_WATERMARKS_FLAGS_e', 'c__EA_WM_CLOCK_e', 'int16_t',
-    'int32_t', 'int8_t', 'smu_clk_type', 'smu_memory_pool_size',
+    'c__EA_UCLK_DIV_e', 'c__EA_VOLTAGE_MODE_e',
+    'c__EA_WATERMARKS_FLAGS_e', 'int16_t', 'int32_t', 'int8_t',
+    'smu_clk_type', 'smu_memory_pool_size',
     'smu_perf_level_designation', 'smu_power_src_type',
     'smu_ppt_limit_level', 'smu_ppt_limit_type',
     'smu_refreshrate_source', 'smu_state_classification_flag',
@@ -3799,23 +3571,17 @@ __all__ = \
     'struct_c__SA_AvfsDebugTableExternal_t',
     'struct_c__SA_AvfsDebugTable_t',
     'struct_c__SA_AvfsFuseOverride_t', 'struct_c__SA_BoardTable_t',
-    'struct_c__SA_BootValues_t', 'struct_c__SA_CustomDpmSettings_t',
-    'struct_c__SA_CustomSkuTable_t',
-    'struct_c__SA_DisplayClockTable_t',
-    'struct_c__SA_DpmActivityMonitorCoeffExt_t',
+    'struct_c__SA_BootValues_t', 'struct_c__SA_CustomSkuTable_t',
     'struct_c__SA_DpmActivityMonitorCoeffIntExternal_t',
     'struct_c__SA_DpmActivityMonitorCoeffInt_t',
-    'struct_c__SA_DpmClocks_t', 'struct_c__SA_DpmClocks_t_v14_0_1',
     'struct_c__SA_DpmDescriptor_t', 'struct_c__SA_DriverInfoTable_t',
     'struct_c__SA_DriverReportedClocks_t',
     'struct_c__SA_DriverSmuConfigExternal_t',
     'struct_c__SA_DriverSmuConfig_t', 'struct_c__SA_DroopInt_t',
     'struct_c__SA_EccInfoTable_t', 'struct_c__SA_EccInfo_t',
-    'struct_c__SA_FloatInIntFormat_t', 'struct_c__SA_FwStatus_t',
-    'struct_c__SA_FwStatus_t_v14_0_1',
+    'struct_c__SA_FwStatus_t', 'struct_c__SA_FwStatus_t_v14_0_1',
     'struct_c__SA_I2cControllerConfig_t', 'struct_c__SA_LinearInt_t',
-    'struct_c__SA_MemPstateTable_t', 'struct_c__SA_MsgLimits_t',
-    'struct_c__SA_OverDriveLimits_t',
+    'struct_c__SA_MsgLimits_t', 'struct_c__SA_OverDriveLimits_t',
     'struct_c__SA_OverDriveTableExternal_t',
     'struct_c__SA_OverDriveTable_t', 'struct_c__SA_PFE_Settings_t',
     'struct_c__SA_PPTable_t', 'struct_c__SA_QuadraticInt_t',
