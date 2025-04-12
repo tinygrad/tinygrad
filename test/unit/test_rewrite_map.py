@@ -28,6 +28,22 @@ class TestRewriteMap(unittest.TestCase):
     self.assertIs(sub_map[a+b], e)
     self.assertIs(sub_map[(a+b)*c], f)
 
+  def test_multistage_substitute(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    c = UOp.variable('c', 0, 10)
+    d = UOp.variable('d', 0, 10)
+    sub1 = {a+b:c}
+    start = (a+b)*c
+    # stage 1: (a+b)*c -> c*c
+    sub_map1 = graph_rewrite_map(start, _substitute, sub1, bottom_up=True)
+    self.assertIs(sub_map1[(a+b)*c], c*c)
+    # stage 2: c*c -> d
+    sub2 = {c*c:d}
+    sub_map2 = graph_rewrite_map(sub_map1[start], _substitute, sub2, input_map=sub_map1, bottom_up=True)
+    # (a+b)*c -> c*c -> d
+    self.assertIs(sub_map2[(a+b)*c], d)
+
   def test_add_zero(self):
     # Build a small graph: add(0, add(const=0, const=5))
     zero_node = UOp.const(dtypes.int, 0)
