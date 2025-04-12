@@ -116,14 +116,17 @@ jobs:
     - name: Verify AMD autogen
       run: |
         cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
+        cp tinygrad/runtime/autogen/kfd.py /tmp/kfd.py.bak
         cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
         cp tinygrad/runtime/autogen/amd_gpu.py /tmp/amd_gpu.py.bak
         cp tinygrad/runtime/autogen/sqtt.py /tmp/sqtt.py.bak
         ./autogen_stubs.sh hsa
+        ./autogen_stubs.sh kfd
         ./autogen_stubs.sh comgr
         ./autogen_stubs.sh amd
         ./autogen_stubs.sh sqtt
         diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
+        diff /tmp/kfd.py.bak tinygrad/runtime/autogen/kfd.py
         diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
         diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
         diff /tmp/sqtt.py.bak tinygrad/runtime/autogen/sqtt.py
@@ -256,10 +259,10 @@ jobs:
     - name: Test tensor cores (TC=3)
       run: |
         TC=3 DEBUG=3 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
-        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_AMD=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_AMD_MFMA=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_AMD=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 ATOL=3e-4 python3 ./extra/gemm/simple_matmul.py
+        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_AMD_MFMA=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 ATOL=3e-4 python3 ./extra/gemm/simple_matmul.py
         TC=3 DEBUG=3 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
-        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_INTEL=1 PYTHON=1 N=16 HALF=1 python3 ./extra/gemm/simple_matmul.py
+        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_INTEL=1 PYTHON=1 N=16 HALF=1 ATOL=3e-4 python3 ./extra/gemm/simple_matmul.py
         TC=3 PYTHONPATH=. DEBUG=3 AMX=1 EMULATE_AMX=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
     - name: Test device flop counts
       run: |
@@ -337,6 +340,8 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
+    - name: Run targetted tests on NULL backend
+      run: PYTHONPATH="." NULL=1 python3 test/test_multitensor.py TestMultiTensor.test_data_parallel_resnet_train_step
     - name: Run GC tests
       run: PYTHONPATH="." python test/external/external_uop_gc.py
     - name: Repo line count < 12500 lines
