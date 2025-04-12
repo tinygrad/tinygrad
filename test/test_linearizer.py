@@ -1288,6 +1288,23 @@ class TestLinearizer(unittest.TestCase):
     #lin = Kernel(sched[0].ast)
     #assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
 
+  @unittest.skipIf(Device[Device.DEFAULT].renderer.has_local, "don't split range with locals")
+  def test_split_range(self):
+    # test split in dim 0
+    t = Tensor.empty(256, 256).cat(Tensor.empty(256, 256))
+    sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]
+    assert len(sched) == 1
+    uops = Kernel(sched[0].ast).linearize().uops
+    assert len([u for u in uops if u.op is Ops.RANGE]) == 4
+    # test split in dim 1
+    t = Tensor.empty(256, 256).cat(Tensor.empty(256, 256), dim=1)
+    sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]
+    assert len(sched) == 1
+    uops = Kernel(sched[0].ast).linearize().uops
+    assert len([u for u in uops if u.op is Ops.RANGE]) == 3
+    # test multiple splits
+    # test split with reduce axis
+
   def test_assign_fold(self):
     a = Tensor.ones(4, 4).contiguous().realize()
     m = Tensor.ones(4, 4).shrink(((1, 2), None)).pad(((1, 2), None))

@@ -80,7 +80,6 @@ class Kernel:
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     self.use_tensor_cores: int = 0
     self.dont_use_locals: bool = False
-    self.split_range: tuple[int, tuple[tuple[int, int], ...]] = ()
 
     # group simplifies
     self.simplify_ones()
@@ -540,14 +539,6 @@ class Kernel:
       if self.upcasted == 0 and self.full_unupcasted_shape and self.full_unupcasted_shape[-1] % splits == 0:
         self.apply_opt(Opt(OptOps.UPCAST, len(self.full_unupcasted_shape)-1, splits))
 
-    # range splitting, shouldn't be here though
-    if not self.opts.has_local and self.first_reduce == self.first_upcast:
-      # TODO: make split work with reduces
-      # TODO: support multiple split axes
-      for axis in range(len(self.full_unupcasted_shape)):
-        smasks = tuple(sorted({st.views[-1].mask[axis] for st in self.sts if st.views[-1].mask}, key=lambda x: x[0]))
-        if len(smasks) > 1 and smasks[0][0] == 0 and smasks[-1][-1] == self.full_unupcasted_shape[axis]: self.split_range = (axis, smasks)
-
     # **** local groups ****
 
     if self.opts.has_local:
@@ -596,8 +587,17 @@ class Kernel:
         # otherwise we just replace the VIEW source
         return ret.replace(src=(st_uop,)) if len(op.src) == 1 else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
       if op.op is Ops.SINK:
+        # range splitting, shouldn't be here though
+        split_range = None
+        if not self.opts.has_local and self.first_reduce == self.first_upcast:
+          # TODO: make split work with reduces
+          # TODO: support multiple split axes
+          for axis in range(len(self.full_unupcasted_shape)):
+            smasks = tuple(sorted({st.views[-1].mask[axis] for st in self.sts if st.views[-1].mask}, key=lambda x: x[0]))
+            if len(smasks) > 1 and smasks[0][0] == 0 and smasks[-1][-1] == self.full_unupcasted_shape[axis]: split_range = (axis, smasks)
+
         return ret.replace(arg = KernelInfo(to_function_name(self.name) if name_override is None else name_override,
-                                            self.local_dims, self.upcasted, self.dont_use_locals, self.split_range))
+                                            self.local_dims, self.upcasted, self.dont_use_locals, split_range))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
 
