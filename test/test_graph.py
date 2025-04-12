@@ -110,7 +110,7 @@ class TestGraph(unittest.TestCase):
   def test_order_copy_writed(self):
     default_graph = Device[Device.DEFAULT].graph
     graph_runner = getattr(default_graph, 'func', default_graph)
-  
+
     if not issubclass(graph_runner, MultiGraphRunner):
       self.skipTest("graph does not supported (not MultiGraphRunner)")
 
@@ -126,7 +126,7 @@ class TestGraph(unittest.TestCase):
   def test_order_copy_then_read(self):
     default_graph = Device[Device.DEFAULT].graph
     graph_runner = getattr(default_graph, 'func', default_graph)
-  
+
     if not issubclass(graph_runner, MultiGraphRunner):
       self.skipTest("graph does not supported (not MultiGraphRunner)")
 
@@ -161,7 +161,7 @@ class TestGraph(unittest.TestCase):
   def test_copies_2_devs(self):
     default_graph = Device[Device.DEFAULT].graph
     graph_runner = getattr(default_graph, 'func', default_graph)
-  
+
     if not issubclass(graph_runner, MultiGraphRunner):
       self.skipTest("graph does not supported (not MultiGraphRunner)")
 
@@ -178,7 +178,7 @@ class TestGraph(unittest.TestCase):
   def test_copies_after_graph_global(self):
     default_graph = Device[Device.DEFAULT].graph
     graph_runner = getattr(default_graph, 'func', default_graph)
-  
+
     if not issubclass(graph_runner, MultiGraphRunner):
       self.skipTest("graph does not supported (not MultiGraphRunner)")
 
@@ -230,7 +230,7 @@ class TestGraph(unittest.TestCase):
   def test_graph_after_copies_devs(self):
     default_graph = Device[Device.DEFAULT].graph
     graph_runner = getattr(default_graph, 'func', default_graph)
-  
+
     if not issubclass(graph_runner, MultiGraphRunner):
       self.skipTest("graph does not supported (not MultiGraphRunner)")
 
@@ -263,7 +263,7 @@ class TestGraph(unittest.TestCase):
   def test_graph_offset_bufs(self):
     default_graph = Device[Device.DEFAULT].graph
     graph_runner = getattr(default_graph, 'func', default_graph)
-  
+
     if not issubclass(graph_runner, MultiGraphRunner):
       self.skipTest("graph does not supported (not MultiGraphRunner)")
 
