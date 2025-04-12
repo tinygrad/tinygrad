@@ -786,7 +786,8 @@ class UPat(MathTrait):
         set(x.dtype) if x.dtype else None, not x.strict_length, "[%s]" if x.src and len(x.src)>1 else ("(%s)" if x.src else "%s"))
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
-  def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
+  def match(self:UPat, uop:UOp, store:dict[str, UOp]|None=None) -> list[dict[str, UOp]]:
+    if store is None: store = {}
     if (self.op is not None and uop.op not in self.op) or \
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.dtype is not None and uop.dtype not in self.dtype and uop.dtype.scalar() not in self.dtype) or \
@@ -1000,6 +1001,7 @@ class UPat(MathTrait):
           raise NotImplementedError(f"can't compile this {s}")
       if not has_or:
         ret[-1] += " ret.append({"+','.join(assign_dict)+"})"
+        ret[-1] = ret[-1].replace("if True: ", "")
       return ret
 
     try:
@@ -1008,7 +1010,7 @@ class UPat(MathTrait):
       #print("FAIL2", self, self.location)
       return None
 
-    code = ["def match(uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:", "  ret = []"]
+    code = ["def match(uop:UOp) -> list[dict[str, UOp]]:", "  ret = []"]
     code += [f"  # match for {self.location}"]
     #code += [f"  # {dyn_lookup}"]
     code += rendered
@@ -1061,36 +1063,9 @@ class PatternMatcher:
     for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
       #if hasattr(p, 'match_code'): print(p.match_code)
-      for match in p.match(uop, {}):
+      for match in p.match(uop):
         if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: return ret
     return None
-
-# *** simple pattern matcher ***
-
-class SimplePatternMatcher:
-  def __init__(self, patterns:list[tuple[UPat, Callable]]):
-    # we want to build a decision tree from these patterns
-    self.patterns = patterns
-    print(f"built patternmatcher with {len(self.patterns)} rules")
-    self.processed_patterns = [(p,types.FunctionType(*(fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)))) for p,fxn in patterns]
-    self.has_ctx = {fxn:('ctx' in inspect.signature(fxn).parameters) for _,fxn in self.processed_patterns}
-
-    for p,_ in self.patterns:
-      print(p)
-
-  def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
-
-  @functools.cache  # pylint: disable=method-cache-max-size-none
-  def __add__(self, more:SimplePatternMatcher): return SimplePatternMatcher(self.patterns+more.patterns)
-
-  def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
-    for p,fxn in self.processed_patterns:
-      for match in p.match(uop, {}):
-        if (ret:=(fxn(ctx=ctx, **match) if self.has_ctx[fxn] else fxn(**match))) is not None:
-          return ret
-    return None
-
-#PatternMatcher = SimplePatternMatcher
 
 # *** tracking pattern matcher ***
 
@@ -1146,7 +1121,7 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
-      for match in p.match(uop, {}):
+      for match in p.match(uop):
         if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None:
           match_stats[p][0] += 1
           match_stats[p][3] += (et:=time.perf_counter()-st)
