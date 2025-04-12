@@ -882,12 +882,26 @@ class UPat(MathTrait):
         or_clause = [UOp(Ops.OR, src=tuple(new_or))]
       return UOp(Ops.AND, src=tuple(new_src+or_clause)) if found else None
 
+    def do_pullfromor(a):
+      in_all = []
+      for x in a.src[0].src:
+        if all(x in s.src for s in a.src[1:]):
+          in_all.append(x)
+      if len(in_all):
+        new_ands = []
+        for x in a.src:
+          new_ands.append(UOp(Ops.AND, src=tuple(y for y in x.src if y not in in_all)))
+        return UOp(Ops.AND, src=tuple(in_all)+(UOp(Ops.OR, src=tuple(new_ands)),))
+
     pm = PatternMatcher([
       (UPat(Ops.BIND, name="x"), wrap),
       (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.NOOP, arg=f'"{x.arg}"')),
 
       # clean up ANDs
       (UPat(Ops.AND, name="a"), do_catand),
+
+      # pull dups from or
+      (UPat(Ops.OR, name="a"), do_pullfromor),
 
       # RANGE can't have OR inside it
       (UPat(Ops.RANGE, src=(UPat(Ops.AND, src=UPat(Ops.NOOP), name="x"), UPat(), UPat()), name="r"),
@@ -911,7 +925,8 @@ class UPat(MathTrait):
     # renderer
     def render(x:UOp, depth=1) -> list[str]|None:
       assert x.op is Ops.AND
-      ret = [f"{'  '*depth}if {' and '.join([s.arg for s in x.src if s.op is Ops.NOOP])}:"]
+      and_clause = ' and '.join([s.arg for s in x.src if s.op is Ops.NOOP])
+      ret = [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"]
       has_or = False
       for s in x.src:
         if s.op is Ops.OR:

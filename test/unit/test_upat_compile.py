@@ -1,4 +1,5 @@
 import unittest
+from tinygrad.dtype import dtypes
 from tinygrad.ops import UPat, track_rewrites
 
 @track_rewrites()
@@ -22,6 +23,10 @@ class TestUPatCompile(unittest.TestCase):
 
   def test_xp0(self):
     up = UPat.var("x") + 0
+    do_compile(up)
+
+  def test_bool(self):
+    up = UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool)
     do_compile(up)
 
   def test_single_c(self):
