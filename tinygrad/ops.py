@@ -721,7 +721,7 @@ class UPat(MathTrait):
     assert dtype is None or isinstance(dtype, DType) or all(isinstance(x, DType) for x in dtype), f"invalid dtype {dtype}"
 
     # try all permutations if it's a list
-    if isinstance(src, list): self.src = list(itertools.permutations(src)) if not all_same(src) else [src]
+    if isinstance(src, list): self.src = list(itertools.permutations(src)) if not all_same(src) else [tuple(src)]
     # only one if it's a tuple
     elif isinstance(src, tuple): self.src = [src]
     # repeat if it's a UPat
@@ -787,9 +787,6 @@ class UPat(MathTrait):
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
   def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
-    return self.interpreted_match(uop, store)
-
-  def interpreted_match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
     if (self.op is not None and uop.op not in self.op) or \
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.dtype is not None and uop.dtype not in self.dtype and uop.dtype.scalar() not in self.dtype) or \
@@ -801,12 +798,15 @@ class UPat(MathTrait):
     for vp in self.src:
       stores, new_stores = [store.copy()], []
       for uu, vv in zip(uop.src, vp):
-        for s in stores: new_stores.extend(vv.interpreted_match(uu, s))
+        for s in stores: new_stores.extend(vv.match(uu, s))
         stores, new_stores = new_stores, []
       res.extend(stores)
     return res
 
   def _get_clause(self, base:UOp, depth=0) -> UOp|None:
+    if isinstance(self, UPatAny):
+      assert len(self.src) == 1
+      return UOp(Ops.AND, src=(UOp(Ops.OR, src=tuple(s._get_clause(base, depth) for s in self.src[0])),))
     # build the and_clause for acceptance
     and_clause = []
     if self.op is not None:
@@ -815,6 +815,10 @@ class UPat(MathTrait):
       else:
         and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.op[0])), arg="{0}.op is {1}"))
     if self.arg is not None:
+      # NOTE: breaks for arg
+      #if isinstance(self.arg, int):
+      #  and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.arg == "+str(self.arg)))
+      #else:
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.arg)), arg="{0}.arg == {1}"))
     if self.strict_length or self.required_len > 0:
       and_clause.append(UOp(Ops.CUSTOM, src=(base,),
@@ -850,30 +854,6 @@ class UPat(MathTrait):
       return UOp(Ops.AND, src=(and_uop, rep))
     return None
 
-    """
-    if len(self.src) == 1 and isinstance(self.src[0], tuple):
-      more_cond = [s._get_clause(f"{nm}.src[{i}]", wrap) for i,s in enumerate(self.src[0])]
-      return UOp(Ops.AND, src=tuple([and_uop]+more_cond))
-    #elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
-    return None
-      #uu = s._get_clause(f"{nm}.src[i]", wrap)
-      #UOp(Ops.)
-    """
-
-  """
-  def _render_match(self, nm, wrap, depth=1) -> list[str]:
-    ret =  [f"{'  '*depth}tstore = store.copy()"]
-    ret += [f"{'  '*depth}if not ({' or '.join(['('+x+')' for x in self._get_or_clause(nm, wrap)])}):"]
-    if self.src is None: return ret + [f"{'  '*(depth+1)}ret.append(tstore)"]
-    elif len(self.src) == 1 and isinstance(self.src[0], tuple):
-      for i,s in enumerate(self.src[0]):
-        ret += s._render_match(f"{nm}.src[{i}]", wrap, depth=depth+1)
-      return ret
-    elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
-    else:
-      raise Exception(f"not supported {len(self.src)} type {type(self.src[0])}")
-  """
-
   def compile(self):
     if self.tried_compile: return
     self.tried_compile = True
@@ -902,13 +882,11 @@ class UPat(MathTrait):
         or_clause = [UOp(Ops.OR, src=tuple(new_or))]
       return UOp(Ops.AND, src=tuple(new_src+or_clause)) if found else None
 
-    #pm_catand = PatternMatcher([
-    #  (UPat(Ops.AND, name="a"), do_catand),
-    #], compiled=False)
-
     pm = PatternMatcher([
       (UPat(Ops.BIND, name="x"), wrap),
       (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.NOOP, arg=f'"{x.arg}"')),
+
+      # clean up ANDs
       (UPat(Ops.AND, name="a"), do_catand),
 
       # RANGE can't have OR inside it
@@ -922,10 +900,10 @@ class UPat(MathTrait):
     ], compiled=False)
 
     ret = self._get_clause(UOp(Ops.NOOP, arg="uop"))
-    if ret is None: return None
+    if ret is None:
+      #print("FAIL")
+      return None
 
-    #print(ret)
-    #ret = graph_rewrite(ret, pm_catand)
     out = graph_rewrite(ret, pm, ctx=(dyn_lookup:={}), name="compile UPat")
     #if out.src != 0 or out.op is not Ops.NOOP: return None
 
@@ -938,19 +916,22 @@ class UPat(MathTrait):
       for s in x.src:
         if s.op is Ops.OR:
           assert has_or is False
+          assert len(s.src) >= 1
+          ret.append(f"{'  '*(depth+1)}bak{depth} = store")
           for ss in s.src:
-            ret.append(f"{'  '*(depth+1)}bak{depth}, store = store, store.copy()")
+            ret.append(f"{'  '*(depth+1)}store = bak{depth}.copy()")
             ret.extend(render(ss, depth+1))
-            ret.append(f"{'  '*(depth+1)}store = bak{depth}")
+          ret.append(f"{'  '*(depth+1)}store = bak{depth}")
           has_or = True
         elif s.op is not Ops.NOOP:
-          raise NotImplementedError("can't compiel this")
-      if not has_or: ret.append(f"{'  '*(depth+1)}ret.append(store)")
+          raise NotImplementedError(f"can't compile this {s}")
+      if not has_or: ret[-1] += " ret.append(store)"
       return ret
 
     try:
       rendered = render(out)
     except NotImplementedError:
+      #print("FAIL2", self, self.location)
       return None
 
     code = ["def match(uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:", "  ret = []"]
@@ -966,65 +947,7 @@ class UPat(MathTrait):
     exec(code_fxn, dyn_lookup, namespace)
 
     self.match = namespace['match']
-
-    #if not hasattr(self, 'match'): self.match = self.interpreted_match if getenv("INTERPRETED_MATCH") else self.compile_match()
-
     return None
-
-    namespace: dict = {}
-    exec(code_fxn, dyn_lookup, namespace)
-    print(code_fxn)
-    #if self.src is None or len(self.src) == 1:
-    #  import dis
-    #  dis.dis(namespace['match'])
-    return namespace['match']
-
-
-    or_clause = self._get_or_clause("uop", wrap)
-
-    srcs_handled = self.src is None
-    if self.src is not None and len(self.src) == 1 and isinstance(self.src[0], tuple) and all(s.src is None for s in self.src[0]):
-      for i,s in enumerate(self.src[0]):
-        or_clause += s._get_or_clause(f"uop.src[{i}]", wrap)
-      srcs_handled = True
-
-    # build the function
-    code_fxn =                              "def match(uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:\n"
-    if len(or_clause):         code_fxn += f"  if {' or '.join(['('+x+')' for x in or_clause])}: return []\n"
-
-    # handle child srcs
-    if srcs_handled:       code_fxn +=  "  return [store]"
-    elif len(self.src) == 1:
-      if isinstance(self.src[0], tuple) and len(self.src[0]) == 1:
-        dyn_lookup['single_src'] = self.src[0][0]
-        code_fxn += "  return single_src.match(uop.src[0], store.copy())"
-      else:
-        dyn_lookup['single_srcs'] = self.src[0]
-        code_fxn += """
-  stores, new_stores = [store.copy()], []
-  for uu, vv in zip(uop.src, single_srcs):
-    for s in stores: new_stores.extend(vv.match(uu, s))
-    stores, new_stores = new_stores, []
-  return stores"""
-    else:
-      dyn_lookup['list_srcs'] = self.src
-      code_fxn += """
-  res: list[dict[str, UOp]] = []
-  for vp in list_srcs:
-    stores, new_stores = [store.copy()], []
-    for uu, vv in zip(uop.src, vp):
-      for s in stores: new_stores.extend(vv.match(uu, s))
-      stores, new_stores = new_stores, []
-    res.extend(stores)
-  return res"""
-    namespace: dict = {}
-    exec(code_fxn, dyn_lookup, namespace)
-    print("\n\n**** COMPILE", self)
-    print(code_fxn)
-    #if self.src is None or len(self.src) == 1:
-    #  import dis
-    #  dis.dis(namespace['match'])
-    return namespace['match']
 
 class UPatAny(UPat):
   def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
