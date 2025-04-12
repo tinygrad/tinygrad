@@ -12,6 +12,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
+from tinygrad.codegen.heuristic import hand_coded_optimizations
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
 from tinygrad.dtype import DType, dtypes
 
@@ -1008,7 +1009,7 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
     k = Kernel(r.schedule()[-1].ast)
-    k.hand_coded_optimizations()
+    k = hand_coded_optimizations(k)
     k.linearize()
 
     stores = [u for u in k.uops if u.op is Ops.STORE]
@@ -1317,7 +1318,7 @@ class TestLinearizer(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
     lin = Kernel(sched_copy[-1].ast)
-    lin.hand_coded_optimizations()
+    lin = hand_coded_optimizations(lin)
     lin.linearize()
     assert not any(u.op == Ops.WHERE for u in lin.uops), "found where where where should be folded"
 
@@ -1475,7 +1476,7 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.hand_coded_optimizations()
+    k = hand_coded_optimizations(k)
     k.linearize()
 
     assert TestFloat4.count_float4(k) == (2, 1)
@@ -1530,7 +1531,7 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.hand_coded_optimizations()  # implicit trigger float4 dim
+    k = hand_coded_optimizations(k)  # implicit trigger float4 dim
     k.linearize()
 
     assert TestFloat4.count_float4(k) == (0, 1)
@@ -1743,7 +1744,7 @@ class TestHandCodedOpts(unittest.TestCase):
 
     s = layer_2.schedule()[-1]
     k = Kernel(s.ast)
-    k.hand_coded_optimizations()
+    k = hand_coded_optimizations(k)
     assert len(k.bufs) == 6  # make sure all ops are done in one kernel
     # masked upcast should upcast masked axis of size 7
     # masked upcast should not upcast large (20) last axis
@@ -1756,7 +1757,7 @@ class TestHandCodedOpts(unittest.TestCase):
 
     s = monster.schedule()[-1]
     k = Kernel(s.ast)
-    k.hand_coded_optimizations()
+    k = hand_coded_optimizations(k)
     assert len(k.bufs) == 37  # make sure all ops are done in one kernel
     # should upcast the two Tensor.stacks
     assert k.upcasted >= 2 and k.full_shape[k.shape_len-k.upcasted:k.shape_len].count(6) == 2
@@ -1772,7 +1773,7 @@ class TestHandCodedOpts(unittest.TestCase):
       # collect upcasts of tile transform kernels
       for i, si in enumerate(wino_schedule):
         k = Kernel(si.ast)
-        k.hand_coded_optimizations()
+        k = hand_coded_optimizations(k)
         if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel)
         if len(k.bufs) < 22: continue  # not a tile transform kernel (there's a permute kernel at the end)
         upcasts.append(tuple(k.full_shape[k.shape_len - k.upcasted:k.shape_len]))
@@ -1784,7 +1785,7 @@ class TestHandCodedOpts(unittest.TestCase):
       backward_schedule = Tensor.schedule(x.grad, w.grad)
       for si in backward_schedule:
         k = Kernel(si.ast)
-        k.hand_coded_optimizations()
+        k = hand_coded_optimizations(k)
         k.linearize()
         if len(k.bufs) < 20: continue  # not a tile transform kernel
         # heuristic number to make sure that at least some upcasts but not too many upcasts are being done
@@ -1871,8 +1872,8 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
 
   # Check correctness of handcoded optimiztions.
   k = Kernel(realized_ast)
+  k = hand_coded_optimizations(k)
   lins.append(k)
-  k.hand_coded_optimizations()
   prg = get_prg(k)
   reset_bufs(outbufs)
   prg.exec(real_bufs)

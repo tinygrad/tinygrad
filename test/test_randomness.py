@@ -8,6 +8,7 @@ from tinygrad.helpers import getenv, CI
 from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import lower_schedule, CompiledRunner
 from hypothesis import given, settings, strategies as strat
+from test.helpers import not_support_multi_device
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -139,7 +140,7 @@ class TestRandomness(unittest.TestCase):
     with self.assertRaises(AssertionError):
       np.testing.assert_allclose(r, jr, atol=1e-5, rtol=1e-5)
 
-  @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL", "NV"), "no GPU CI")
+  @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_threefry_tensors_cnt(self):
     Tensor.manual_seed(1337)
 
@@ -158,7 +159,7 @@ class TestRandomness(unittest.TestCase):
     assert len(Tensor._device_rng_counters) == 0
     assert len(Tensor._device_seeds) == 0
 
-  @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL", "NV"), "no GPU CI")
+  @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_threefry_same_kernels(self):
     Tensor.manual_seed(0)
 
