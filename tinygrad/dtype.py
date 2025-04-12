@@ -213,9 +213,6 @@ truncate: dict[DType, Callable] = {dtypes.bool: bool,
 
 def _to_np_dtype(dtype:DType) -> Optional[type]:
   import numpy as np
-  if dtype in dtypes.fp8s:
-    import ml_dtypes
-    return ml_dtypes.float8_e4m3 if dtype.name == "float8_e4m3" else ml_dtypes.float8_e5m2 if dtype.name == "float8_e5m2" else None
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
   import numpy as np

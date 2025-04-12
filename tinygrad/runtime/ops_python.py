@@ -4,7 +4,7 @@
 # this is the (living) definition of uops
 from typing import Optional, Any, TYPE_CHECKING
 import pickle, base64, itertools, time, struct, sys
-from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, _to_np_dtype
+from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.ops import exec_alu, Ops, UOp, GroupOp
@@ -14,8 +14,9 @@ if getenv("EMULATE_CUDA_SM89"):
   # fp8s rely on numpy, as native python doesn't support ALUs on them
   import numpy as np
   from ml_dtypes import float8_e4m3, float8_e5m2
-  numpy_fp8_acc: dict[np.dtype, np.dtype] = {float8_e5m2.dtype: np.float32, float8_e4m3.dtype: np.float32}
-  truncate.update({dtypes.fp8e4m3: float8_e4m3, dtypes.fp8e5m2: float8_e5m2})
+  numpy_fp8_acc = np.float32
+  tinygrad_numpy_fp8s_map = {dtypes.fp8e4m3: float8_e4m3, dtypes.fp8e5m2: float8_e5m2}
+  truncate.update(tinygrad_numpy_fp8s_map)
 
 def _load(m, i):
   if i is None: return 0.0
@@ -114,7 +115,7 @@ class PythonProgram:
           assert not (dtp[0] in dtypes.fp8s or dtype in dtypes.fp8s) or getenv("EMULATE_CUDA_SM89"), "fp8s works only on emulated CUDA SM89"
           if dtp[0] in dtypes.fp8s: packed = b''.join([truncate.get(dtp[0], lambda dt: dt)(z).tobytes() for z in inp[0]])
           else: packed = struct.pack(str(warp_size) + str(dtp[0].fmt), *inp[0])
-          if dtype in dtypes.fp8s: ul[i] = np.frombuffer(packed, dtype=_to_np_dtype(dtype)).tolist()
+          if dtype in dtypes.fp8s: ul[i] = np.frombuffer(packed, dtype=tinygrad_numpy_fp8s_map[dtype]).tolist()
           else: ul[i] = list(struct.unpack(str(warp_size) + str(dtype.fmt), packed))
         elif uop is Ops.CAST: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
         elif uop is Ops.LOAD:
@@ -127,7 +128,7 @@ class PythonProgram:
           ul[i] = inp[0]
         elif uop is Ops.GEP: ul[i] = inp[0][get_single_element(arg)]
         elif uop is Ops.WMMA:
-          assert all(d.scalar() for d in dtp[:2]) not in dtypes.fp8s or getenv("EMULATE_CUDA_SM89"), "fp8s works only on emulated CUDA SM89"
+          assert all(d.scalar() not in dtypes.fp8s for d in dtp[:2]) or getenv("EMULATE_CUDA_SM89"), "fp8s works only on emulated CUDA SM89"
           # here are the models for the WMMA instruction on the different hardware
           def wmma_helper(WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_elem, b_elem, c_map):
             for cc, tinp, num in zip(("A", "B", "C"), inp, (NUM_A, NUM_B, NUM_C)):
@@ -139,7 +140,7 @@ class PythonProgram:
               for lane_id in range(WARP_THREADS):
                 for elem_idx in range(NUM_C): # calculate new muls and add to acc
                   (c_i, c_j) = c_map(lane_id, elem_idx)
-                  def acc_cast(x): return numpy_fp8_acc.get(x.dtype, lambda x: x)(x) if all(d.scalar() for d in dtp[:2]) in dtypes.fp8s else x
+                  def acc_cast(x): return numpy_fp8_acc(x) if all(d.scalar() in dtypes.fp8s for d in dtp[:2]) else x
                   out[elem_idx][goff+lane_id] += sum(acc_cast(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff)) for _k in range(K))
             return out
 
