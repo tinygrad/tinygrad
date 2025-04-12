@@ -19,20 +19,13 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> tuple[memoryview, list[
   symtab = [_to_carray(sh, libc.Elf64_Sym) for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB][0]
   progbits = [sh for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS]
 
-  # Prealloc image for all fixed addresses, but start with .text.last if present
-  image = bytearray()
-  text_last = next((sh for sh in progbits if sh.name == '.text.last'), None)
-  if text_last:
-    image.extend(text_last.content)
-    text_last.header.sh_addr = 0
-  fixed_size = max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0] + [0])
-  if len(image) < fixed_size: image.extend(b'\0' * (fixed_size - len(image)))
+  # Prealloc image for all fixed addresses.
+  image = bytearray(max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0] + [0]))
   for sh in progbits:
-    if sh.name != '.text.last':  # Skip .text.last since it's already placed
-      if sh.header.sh_addr != 0: image[sh.header.sh_addr:sh.header.sh_addr+sh.header.sh_size] = sh.content
-      else:
-        image += b'\0' * (((align:=max(sh.header.sh_addralign, force_section_align)) - len(image) % align) % align) + sh.content
-        sh.header.sh_addr = len(image) - len(sh.content)
+    if sh.header.sh_addr != 0: image[sh.header.sh_addr:sh.header.sh_addr+sh.header.sh_size] = sh.content
+    else:
+      image += b'\0' * (((align:=max(sh.header.sh_addralign, force_section_align)) - len(image) % align) % align) + sh.content
+      sh.header.sh_addr = len(image) - len(sh.content)
 
   # Relocations
   relocs = []
@@ -49,7 +42,6 @@ def relocate(instr: int, ploc: int, tgt: int, r_type: int):
   match r_type:
     # https://refspecs.linuxfoundation.org/elf/x86_64-abi-0.95.pdf
     case libc.R_X86_64_PC32: return i2u(32, tgt-ploc)
-    case libc.R_X86_64_PLT32: return i2u(32, tgt-ploc)  # PC-relative offset to PLT entry
     # https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst for definitions of relocations
     # https://www.scs.stanford.edu/~zyedidia/arm64/index.html for instruction encodings
     case libc.R_AARCH64_ADR_PREL_PG_HI21:
@@ -60,12 +52,6 @@ def relocate(instr: int, ploc: int, tgt: int, r_type: int):
     case libc.R_AARCH64_LDST32_ABS_LO12_NC: return instr | (getbits(tgt, 2, 11) << 10)
     case libc.R_AARCH64_LDST64_ABS_LO12_NC: return instr | (getbits(tgt, 3, 11) << 10)
     case libc.R_AARCH64_LDST128_ABS_LO12_NC: return instr | (getbits(tgt, 4, 11) << 10)
-    case libc.R_AARCH64_CALL26:  # For CALL26 relocation, calculate the PC-relative offset
-      offset = (tgt - ploc) >> 2  # Divide by 4 since instructions are 4 bytes aligned
-      return instr | (getbits(offset, 0, 25) << 0)  # Encode the 26-bit offset
-    case libc.R_AARCH64_JUMP26:  # For JUMP26 relocation, same as CALL26 but for unconditional jumps
-      offset = (tgt - ploc) >> 2  # Divide by 4 since instructions are 4 bytes aligned
-      return instr | (getbits(offset, 0, 25) << 0)  # Encode the 26-bit offset
   raise NotImplementedError(f"Encountered unknown relocation type {r_type}")
 
 def jit_loader(obj: bytes) -> bytes:
