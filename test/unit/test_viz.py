@@ -5,6 +5,7 @@ from tinygrad.codegen.symbolic import symbolic
 from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys, _name_cnt, _substitute
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_metadata, get_details, uop_to_json, to_perfetto
+from tinygrad.helpers import GlobalCounters
 
 # NOTE: VIZ tests always use the tracked PatternMatcher instance
 symbolic = TrackedPatternMatcher(symbolic.patterns)
@@ -13,6 +14,15 @@ substitute = TrackedPatternMatcher(_substitute.patterns)
 inner_rewrite = TrackedPatternMatcher([
   (UPat.cvar("x"), lambda x: None if x.dtype == dtypes.float32 else UOp.const(dtypes.float32, x.arg)),
 ])
+
+def get_buf_from_before_tracked_uop_rewrite():
+  buf_uop = UOp.new_buffer("CPU", 1, dtypes.uint8)
+  sub = UOp.const(dtypes.uint8, 123)
+  buf = buf_uop.buffer.allocate()
+  @track_rewrites(named=True)
+  def fxn(sink): return graph_rewrite(sink, substitute, ctx={buf_uop:sub}, bottom_up=True)
+  fxn(buf_uop)
+  return buf
 
 class TestViz(unittest.TestCase):
   def setUp(self):
@@ -183,6 +193,16 @@ class TestViz(unittest.TestCase):
     self.assertIn("(8,)", ser[id(b)]["label"])
     with self.assertRaises(AssertionError): n.st
     _  = ser[id(n)]["label"] # VIZ should not crash
+
+  def test_allows_buffer_uop_gc(self):
+    buf = get_buf_from_before_tracked_uop_rewrite()
+    self.assertEqual(buf.lb_refcount, 0)
+
+  def test_allows_buffer_gc(self):
+    base = GlobalCounters.mem_used
+    buf = get_buf_from_before_tracked_uop_rewrite()
+    del buf
+    self.assertEqual(GlobalCounters.mem_used-base, 0)
 
   @unittest.skip("TODO: doesn't work")
   def test_recursion_err(self):

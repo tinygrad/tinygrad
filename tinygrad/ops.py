@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, get_args
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, _METADATA, flatten
 from tinygrad.helpers import PICKLE_BUFFERS, dedup, cdiv, cmod
@@ -863,17 +863,12 @@ def track_rewrites(named=False, name_fxn:Callable|None=None):
     return __wrapper
   return _decorator
 
-# For UOps tracked with VIZ, release refs to buffer UOps during program execution (so memory planning works), restore the refs at end of program
-deref_bufs = PatternMatcher([(UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE)), name="x"), lambda x: x.replace(src=x.src+(UOp(Ops.NAME),)))])
-restore_bufs = PatternMatcher([(UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE), UPat(Ops.NAME)), name="x"), lambda x: x.replace(src=x.src[0:2]))])
-
 active_rewrites:list[TrackedGraphRewrite] = []
 def track_matches(func):
   def _track_func(*args, **kwargs):
     if tracking:=(TRACK_MATCH_STATS >= 2 and tracked_ctxs):
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
-      with Context(TRACK_MATCH_STATS=0):
-        tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, graph_rewrite(args[0], deref_bufs), kwargs.get("bottom_up", False), [], kwargs.get("name", None)))
+      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0], kwargs.get("bottom_up", False), [], kwargs.get("name", None)))
       active_rewrites.append(ctx)
     ret = func(*args, **kwargs)
     if tracking: active_rewrites.pop()
@@ -896,8 +891,7 @@ class TrackedPatternMatcher(PatternMatcher):
           match_stats[p][0] += 1
           match_stats[p][3] += (et:=time.perf_counter()-st)
           if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
-            with Context(TRACK_MATCH_STATS=0): active_rewrites[-1].matches.append((graph_rewrite(uop, deref_bufs), graph_rewrite(ret, deref_bufs), p))
+          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((uop, ret, p))
           return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -908,12 +902,6 @@ if TRACK_MATCH_STATS:
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
-      for ctx in tracked_ctxs:
-        for i, rw in enumerate(ctx):
-          with Context(TRACK_MATCH_STATS=0): rw2 = replace(rw, sink=graph_rewrite(rw.sink, restore_bufs))
-          ctx[i] = rw2
-          for j, m in enumerate(rw2.matches):
-            with Context(TRACK_MATCH_STATS=0): rw2.matches[j] = (graph_rewrite(m[0], restore_bufs), graph_rewrite(m[1], restore_bufs), m[2])
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
