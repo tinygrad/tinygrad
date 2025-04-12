@@ -275,13 +275,39 @@ class BertSelfAttention:
     key_layer = self.transpose_for_scores(mixed_key_layer)
     value_layer = self.transpose_for_scores(mixed_value_layer)
 
-    context_layer = Tensor.scaled_dot_product_attention(query_layer, key_layer, value_layer, attention_mask, self.dropout)
+    # Flash Attention implementation
+    context_layer = self.flash_attention(query_layer, key_layer, value_layer, attention_mask)
 
     context_layer = context_layer.transpose(1, 2)
     context_layer = context_layer.reshape(context_layer.shape[0], context_layer.shape[1], self.all_head_size)
 
     return context_layer
 
+  def transpose_for_scores(self, x):
+    x = x.reshape(x.shape[0], x.shape[1], self.num_attention_heads, self.attention_head_size)
+    return x.transpose(1, 2)
+
+  def flash_attention(self, query, key, value, attention_mask):
+    """
+    Flash Attention implementation.
+    """
+    # Scale query
+    scale = 1.0 / (self.attention_head_size ** 0.5)
+    query = query * scale
+
+    # Compute attention scores with masking
+    attention_scores = query @ key.transpose(-1, -2)
+    attention_scores += attention_mask
+
+    # Apply softmax in a numerically stable way
+    attention_probs = attention_scores.softmax()
+
+    # Apply dropout
+    attention_probs = attention_probs.dropout(self.dropout)
+
+    # Compute the context
+    context = attention_probs @ value
+    return context
   def transpose_for_scores(self, x):
     x = x.reshape(x.shape[0], x.shape[1], self.num_attention_heads, self.attention_head_size)
     return x.transpose(1, 2)
