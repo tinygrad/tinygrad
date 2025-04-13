@@ -120,7 +120,9 @@ class Whisper:
   def __init__(self, dims, batch_size=1):
     self.encoder = AudioEncoder(**dims)
     self.decoder = TextDecoder(**dims)
-    self.is_multilingual = dims["n_vocab"] == 51865
+    self.is_multilingual = dims["n_vocab"] >= 51865
+    self.is_v3 = dims["n_vocab"] == 51866
+    self.n_mels = dims["n_mels"]
     self.batch_size = batch_size
 
 
@@ -132,7 +134,7 @@ HOP_LENGTH = 160
 N_MELS = 80
 FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
 
-def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
+def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, n_mels=N_MELS) -> np.ndarray:
   """
   :param waveforms: A list of possibly variable length 16000Hz audio samples
   :param batch_size: The batch_size associated with the Whisper model being used to transcribe the audio.
@@ -159,7 +161,7 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
 
   stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
   magnitudes = np.absolute(stft[..., :-1]) ** 2
-  mel_spec = librosa.filters.mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
+  mel_spec = librosa.filters.mel(sr=RATE, n_fft=N_FFT, n_mels=n_mels) @ magnitudes
 
   log_spec = np.log10(np.clip(mel_spec, 1e-10, None))
   log_spec = np.maximum(log_spec, log_spec.max((1,2), keepdims=True) - 8.0)
@@ -180,14 +182,17 @@ LANGUAGES = {
   "as": "assamese", "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa", "ba": "bashkir", "jw": "javanese", "su": "sundanese",
 }
 
-def get_encoding(encoding_name):
+LANGUAGES_v3 = LANGUAGES | {"yue": "cantonise"}
+
+def get_encoding(encoding_name, is_v3):
   with fetch(f"https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/{encoding_name}.tiktoken").open() as f:
     ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in f if line)}
+  langs = LANGUAGES_v3 if is_v3 else LANGUAGES
   n_vocab = len(ranks)
   specials = [
     "<|endoftext|>",
     "<|startoftranscript|>",
-    *[f"<|{lang}|>" for lang in LANGUAGES.keys()],
+    *[f"<|{lang}|>" for lang in langs.keys()],
     "<|translate|>",
     "<|transcribe|>",
     "<|startoflm|>",
@@ -217,7 +222,10 @@ MODEL_URLS = {
   "medium": "https://openaipublic.azureedge.net/main/whisper/models/345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1/medium.pt",
   "large-v1": "https://openaipublic.azureedge.net/main/whisper/models/e4b87e7e0bf463eb8e6956e646f1e277e901512310def2c24bf0e11bd3c28e9a/large-v1.pt",
   "large-v2": "https://openaipublic.azureedge.net/main/whisper/models/81f7c96c852ee8fc832187b0132e569d6c3065a3252ed18e56effd0b6a73e524/large-v2.pt",
-  "large": "https://openaipublic.azureedge.net/main/whisper/models/81f7c96c852ee8fc832187b0132e569d6c3065a3252ed18e56effd0b6a73e524/large-v2.pt",
+  "large-v3": "https://openaipublic.azureedge.net/main/whisper/models/e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb/large-v3.pt",
+  "large": "https://openaipublic.azureedge.net/main/whisper/models/e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb/large-v3.pt",
+  "large-v3-turbo": "https://openaipublic.azureedge.net/main/whisper/models/aff26ae408abcba5fbf8813c21e62b0941638c5f6eebfb145be0c9839262a19a/large-v3-turbo.pt",
+  "turbo": "https://openaipublic.azureedge.net/main/whisper/models/aff26ae408abcba5fbf8813c21e62b0941638c5f6eebfb145be0c9839262a19a/large-v3-turbo.pt",
 }
 def init_whisper(model_name="tiny.en", batch_size=1):
   assert MODEL_URLS[model_name] is not None
@@ -226,7 +234,7 @@ def init_whisper(model_name="tiny.en", batch_size=1):
   state = torch_load(filename)
   model = Whisper(state['dims'], batch_size)
   load_state_dict(model, state['model_state_dict'], strict=False)
-  enc = get_encoding("multilingual" if model.is_multilingual else "gpt2")
+  enc = get_encoding("multilingual" if model.is_multilingual else "gpt2", model.is_v3)
   return model, enc
 
 def load_file_waveform(filename):
@@ -242,7 +250,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
   Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
   """
 
-  log_spec = prep_audio(waveforms, model.batch_size, truncate)
+  log_spec = prep_audio(waveforms, model.batch_size, truncate, model.n_mels)
   nsample = model.decoder.max_tokens_to_sample
 
   def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
@@ -259,7 +267,8 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
   start_tokens = [enc._special_tokens["<|startoftranscript|>"]]
   if model.is_multilingual:
     # TODO detect language
-    language_token = enc._special_tokens["<|startoftranscript|>"] + 1 + tuple(LANGUAGES.keys()).index("en")
+    langs = LANGUAGES_v3 if model.is_v3 else LANGUAGES
+    language_token = enc._special_tokens["<|startoftranscript|>"] + 1 + tuple(langs.keys()).index("en")
     start_tokens.append(language_token)
     start_tokens.append(enc._special_tokens["<|transcribe|>"])
   start_tokens.append(enc._special_tokens["<|notimestamps|>"])
@@ -318,7 +327,7 @@ if __name__ == "__main__":
         else: total = np.concatenate([total, waveform])
         did_read = True
       if did_read:
-        log_spec = prep_audio(total.reshape(1, -1), model.batch_size, truncate=True)
+        log_spec = prep_audio(total.reshape(1, -1), model.batch_size, truncate=True, n_mels=model.n_mels)
         encoded_audio = model.encoder.encode(Tensor(log_spec))
       # pass the previously inferred tokens as 'prefix' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
       out = model.decoder(Tensor([lst]), 0, encoded_audio, streaming=True).realize()
