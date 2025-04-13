@@ -304,6 +304,8 @@ class TinyJit(Generic[ReturnType]):
         jit_cache = pruned
 
       # memory planning (optional)
+      # Enable mem planning for bufs that were previously not added to JIT as new buffers, due to lb_refcount > 0 during JIT capture
+      [b.deallocate() for ji in jit_cache for b in ji.bufs if b is not None and b.is_allocated() and b.lb_refcount == 0]
       # Exclude buffers involved in transfer ops to preserve parallelism.
       noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
       assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
