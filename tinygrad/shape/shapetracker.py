@@ -135,7 +135,9 @@ class ShapeTracker:
   def permute(self, axis: tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].permute(axis), ))
   def flip(self, mul: tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].flip(mul), ))
   def stride(self, arg: tuple[tuple[sint, ...], tuple[sint, ...], sint]) -> ShapeTracker:
-    return ShapeTracker(self.views + (self.views[-1].stride(size=arg[0], strides=arg[1], offset=arg[2]), ))
+    if (new_view := self.views[-1].stride(size=arg[0], strides=arg[1], offset=arg[2])) is not None:
+      return ShapeTracker(self.views[0:-1] + (new_view,))
+    return ShapeTracker(self.views + (View.create(arg[0], arg[1], arg[2]), ))
 
   def reshape(self, new_shape: tuple[sint, ...]) -> ShapeTracker:
     if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
