@@ -112,12 +112,15 @@ setup_bus(2, gpu_bus=2)
 # time.sleep(1)
 
 usb.scsi_write(0xeaeb, xxx)
+# usb.write(0x548, b'\x01\x02\x01 ')
+# usb.write(0x5a8, b'\x02\x01\x01\x01')
+# usb.write(0x5f8, b'\x04\x01\x01\x02')
 
 # print("ok?")
 
 usb.reset()
 # borig = usb.read(0xb000, 0x200)
-usb.write(0xb000, borig[:0x200])
+# usb.write(0xb000, borig[:0x200])
 usb.write(0x548, b'\x01\x02\x01 ')
 usb.write(0x5a8, b'\x02\x01\x01\x01')
 usb.write(0x5f8, b'\x04\x01\x01\x02')

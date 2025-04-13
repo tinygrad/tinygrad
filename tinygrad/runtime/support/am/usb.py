@@ -338,10 +338,8 @@ class USBConnector:
       0,                # group number
       0                 # control
     )
-    ops = self._send(cdb, in_data=buf, wait=True)
-    # time.sleep(1)
-    # for o in ops:
-    #   print(libusb.libusb_cancel_transfer(o))
+    ops = self._send(cdb, in_data=buf, wait=False)
+    for o in ops: print(libusb.libusb_cancel_transfer(o))
 
   def scsi_read(self, lba, num_blocks):
     # scsi read 0x8a packet

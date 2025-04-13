@@ -102,6 +102,8 @@ for i in range(4096): xxx[i] = 0x39
 a = usb.read(0x0, 0xf000)
 usb.scsi_write(0xeaeb, xxx)
 b = usb.read(0x0, 0xf000)
+hexdump(b)
+
 import pickle
 pickle.dump(b, open("jpro.bin", "wb"))
 
