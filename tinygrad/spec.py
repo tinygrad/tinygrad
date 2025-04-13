@@ -150,7 +150,7 @@ kernel_spec = buffer_spec+PatternMatcher([
   (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN)), name="k"), validate_kernel),
   # assign has a buffer and kernel source, it can optionally depend on other assigns
   (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
-  (UPat(GroupOp.All-{Ops.SINK}), lambda: False),
+  (UPat(GroupOp.All-{Ops.SINK, Ops.CONST, Ops.BIND, Ops.VIEW}), lambda: False),
 ])
 
 # *** this is the UOp shape spec ***

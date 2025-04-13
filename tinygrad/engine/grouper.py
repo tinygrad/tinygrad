@@ -262,9 +262,6 @@ create_kernels = merge_views+PatternMatcher([
    lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype)) if x in ctx.realizes else None),
   # walk back the local graph until we reach a buffer/assign parent
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
-  # remove CONST/BIND/VIEW from SINK
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=new_src)
-    if (new_src:=tuple(dedup(s.base for s in x.src if s.op not in {Ops.CONST, Ops.BIND}))) != x.src else None),
 ])
 
 # **** swizzler
@@ -449,13 +446,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   type_verify(list(sched_sink.toposort), kernel_spec)
 
   # map tensors to buffer/const, optionally apply a VIEW on top
-  becomes_map: dict[UOp, UOp] = {}
-  for k,v in tensor_map.items():
-    if (kernel:=tensor_map.get(v.base)) is not None and kernel.base.op is Ops.ASSIGN: v = kernel.view(unwrap(v.st))
-    if k is v: continue
-    op = v.base.op
-    if op in {Ops.BUFFER, Ops.ASSIGN}: becomes_map[k] = v
-    if op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
+  becomes_map = {k:v for k,v in tensor_map.items() if k is not v}
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
