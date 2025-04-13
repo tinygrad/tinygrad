@@ -363,6 +363,8 @@ class TestMultiTensor(unittest.TestCase):
     shard_output_np = shard_output.numpy()
     np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
 
+# This test is slow and flaky on some CI devices (LLVM, CPU, CUDA, NV).
+# Keep it skipped in CI to avoid false negatives.
   @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_data_parallel_resnet_train_step(self):
@@ -391,6 +393,21 @@ class TestMultiTensor(unittest.TestCase):
     shard_grad = m.conv1.weight.grad.numpy()
     # sometimes there is zeros in these grads... why?
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
+
+  def test_data_parallel_resnet_forward_only(self):
+    from extra.models.resnet import ResNet18
+
+    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
+    fake_image_sharded = fake_image.shard(devices_2, axis=0)
+    labels = Tensor.randint(2, low=0, high=1000).shard(devices_2, axis=0)
+
+    m = ResNet18()
+    for p in get_parameters(m): p.shard_(devices_2).realize()
+
+    out = m(fake_image_sharded).sparse_categorical_crossentropy(labels, label_smoothing=0.1)
+    assert out.shape == (), f"expected scalar loss, got shape {out.shape}"
+    out.numpy()  # Just to make sure it realizes
+
 
   def test_assign_kv_cache_multi(self):
     bsz, max_context = 2, 8
