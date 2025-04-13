@@ -786,8 +786,7 @@ class UPat(MathTrait):
         set(x.dtype) if x.dtype else None, not x.strict_length, "[%s]" if x.src and len(x.src)>1 else ("(%s)" if x.src else "%s"))
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
-  def match(self:UPat, uop:UOp, store:dict[str, UOp]|None=None) -> list[dict[str, UOp]]:
-    if store is None: store = {}
+  def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
     if (self.op is not None and uop.op not in self.op) or \
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.dtype is not None and uop.dtype not in self.dtype and uop.dtype.scalar() not in self.dtype) or \
@@ -812,7 +811,7 @@ class UPat(MathTrait):
     and_clause = []
     if self.op is not None:
       if len(self.op) > 1:
-        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.op)), arg="{0}.op in {1}"))
+        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(int(x) for x in self.op))), arg="{0}.op in {1}"))
       else:
         and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.op == "+str(self.op[0].value)))
         #and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.op[0])), arg="{0}.op is {1}"))
@@ -820,7 +819,7 @@ class UPat(MathTrait):
       if isinstance(self.arg, int):
         and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.arg == "+str(int(self.arg))))
       else:
-       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.arg)), arg="{0}.arg == {1}"))
+        and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.arg)), arg="{0}.arg == {1}"))
     if self.strict_length or self.required_len > 0:
       and_clause.append(UOp(Ops.CUSTOM, src=(base,),
                             arg=("len({0}.src) == " if self.strict_length else "len({0}.src) >= ")+str(self.required_len)))
@@ -840,13 +839,13 @@ class UPat(MathTrait):
       more_cond = [s._get_clause(base.gep(i), depth) for i,s in enumerate(self.src[0])]
       if any(x is None for x in more_cond): return None
       return UOp(Ops.AND, src=tuple([and_uop]+more_cond))
-    elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
+    if len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
       it = UOp(Ops.NOOP, arg=f"ituop{depth}")
       match = next(self.src[0])._get_clause(it, depth+1)
       if match is None: return None
       rep = UOp(Ops.RANGE, src=(match, it, base), arg="all({0} for {1} in {2}.src)")
       return UOp(Ops.AND, src=(and_uop, rep))
-    elif len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
+    if len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
       fork_cond = []
       for ss in self.src:
         more_cond = [s._get_clause(base.gep(i), depth) for i,s in enumerate(ss)]
@@ -901,7 +900,7 @@ class UPat(MathTrait):
 
     def do_fixassigns(a:UOp):
       assigns, new_src = partition(a.src, lambda x: x.op is Ops.ASSIGN)
-      dict_assigns = {}
+      dict_assigns: dict[UOp, UOp] = {}
       found = False
       for a in assigns:
         if a.src[0] in dict_assigns:
@@ -943,6 +942,9 @@ class UPat(MathTrait):
 
       # collapse or maybe
       (UPat(Ops.OR, name="a"), do_collapseor),
+
+      # dedup all (needed?)
+      (UPat((Ops.AND, Ops.OR), name="a"), lambda a: a.replace(src=s) if len(s:=dedup(a.src)) != len(a.src) else None),
     ], compiled=False)
 
     # renderer
@@ -972,12 +974,13 @@ class UPat(MathTrait):
     #with Context(TRACK_MATCH_STATS=0):
     ret = graph_rewrite(ret, pm_proc)
 
-    out = graph_rewrite(ret, pm, ctx=(dyn_lookup:={}), name="compile UPat")
+    dyn_lookup: dict[str, Any] = {}
+    out = graph_rewrite(ret, pm, ctx=dyn_lookup, name="compile UPat")
     #if out.src != 0 or out.op is not Ops.NOOP: return None
 
     # build the function, try 2
     # renderer
-    def render(x:UOp, depth=1) -> list[str]|None:
+    def render(x:UOp, depth=1) -> list[str]:
       assert x.op is Ops.AND
       and_clause = ' and '.join([s.arg for s in x.src if s.op is Ops.NOOP])
       ret = [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"]
@@ -1001,6 +1004,7 @@ class UPat(MathTrait):
           raise NotImplementedError(f"can't compile this {s}")
       if not has_or:
         ret[-1] += " ret.append({"+','.join(assign_dict)+"})"
+        #ret[-1] += " yield {"+','.join(assign_dict)+"}"
         ret[-1] = ret[-1].replace("if True: ", "")
       return ret
 
@@ -1010,9 +1014,9 @@ class UPat(MathTrait):
       #print("FAIL2", self, self.location)
       return None
 
-    code = ["def match(uop:UOp) -> list[dict[str, UOp]]:", "  ret = []"]
+    code = ["def match(uop:UOp, _) -> list[dict[str, UOp]]:"]
     code += [f"  # match for {self.location}"]
-    #code += [f"  # {dyn_lookup}"]
+    code += [ "  ret = []"]
     code += rendered
     code += ["  return ret"]
     code_fxn = '\n'.join(code)
@@ -1020,9 +1024,8 @@ class UPat(MathTrait):
     namespace: dict = {}
     #print("\n\n**** COMPILE", self.location, self)
     #print(code_fxn, dyn_lookup)
-    exec(code_fxn, dyn_lookup, namespace)
-
-    self.match = namespace['match']
+    exec(code_fxn, dyn_lookup, namespace)  # pylint: disable=W0122
+    object.__setattr__(self, "match", namespace["match"])
     return None
 
 class UPatAny(UPat):
@@ -1063,7 +1066,7 @@ class PatternMatcher:
     for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
       #if hasattr(p, 'match_code'): print(p.match_code)
-      for match in p.match(uop):
+      for match in p.match(uop, {}):
         if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: return ret
     return None
 
@@ -1121,7 +1124,7 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
-      for match in p.match(uop):
+      for match in p.match(uop, {}):
         if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None:
           match_stats[p][0] += 1
           match_stats[p][3] += (et:=time.perf_counter()-st)
