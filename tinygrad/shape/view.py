@@ -312,3 +312,10 @@ class View:
       return View.create(new_shape, new_strides, self.offset + extra_offset, new_mask)
 
     return None
+
+  @functools.cache  # pylint: disable=method-cache-max-size-none
+  def stride(self, size: tuple[sint, ...], strides: tuple[sint, ...], offset: sint=0) -> Optional[View]:
+    if any(s < 0 for s in strides): raise RuntimeError(f"stride: negative strides not supported, got {strides}")
+    max_idx = offset + sum((s-1) * st for s, st in zip(size, strides) if s > 0)
+    if max_idx >= prod(self.shape): raise IndexError("stride generated out-of-bounds index")
+    return View.create(size, strides, self.offset + offset)

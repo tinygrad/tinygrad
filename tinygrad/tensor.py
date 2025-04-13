@@ -971,9 +971,9 @@ class Tensor(SimpleMathTrait):
     Returns a tensor with the specified shape, strides, and offset.
     """
     if any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
-    idx = [storage_offset + sum(i * s for i, s in zip(c, stride)) for c in itertools.product(*(range(s) for s in size))]
-    if any(i < 0 or i >= self.numel() for i in idx): raise IndexError("as_strided generated out-of-bounds index")
-    return self.reshape(-1).gather(0, Tensor(idx, device=self.device)).reshape(size)
+    max_idx = storage_offset + sum((s-1) * st for s, st in zip(size, stride) if s > 0)
+    if max_idx >= self.numel(): raise IndexError("as_strided generated out-of-bounds index")
+    return self._apply_uop(UOp.stride, arg=(size, stride, storage_offset))
 
   def flip(self, axis, *args) -> Tensor:
     """
