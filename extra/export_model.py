@@ -9,6 +9,8 @@ from tinygrad.dtype import dtypes
 from tinygrad.ops import Ops
 import json
 from collections import OrderedDict
+from tinygrad.engine.memory import _internal_memory_planner
+from tinygrad.engine.realize import ExecItem
 
 EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CPU", "CUDA", "GPU"]
 
@@ -51,6 +53,25 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
     realized_input = args[idx].lazydata.base.realized
     run.jit_cache[j].bufs[i] = realized_input
     special_names[id(realized_input)] = f'input{idx}'
+
+  def print_jit_memory(run: TinyJit):
+    num_bufs = len(set(buf for ji in run.jit_cache for buf in ji.bufs if buf is not None and buf._base is None)) + \
+      len(set(buf._base for ji in run.jit_cache for buf in ji.bufs if buf is not None and buf._base is not None)) 
+    print(f"  -- {num_bufs} buffers are used by jit")
+
+    jit_mem = sum(buf.nbytes for buf in set(b for ji in run.jit_cache for b in ji.bufs if b is not None and b._base is None)) + \
+      sum(buf.nbytes for buf in set(b._base for ji in run.jit_cache for b in ji.bufs if b is not None and b._base is not None))
+    print(f"  -- {jit_mem} bytes are used by jit buffers\n")
+
+  print("BEFORE new memory planning in JIT")
+  print_jit_memory(run)
+
+  [b.deallocate() for ji in run.jit_cache for b in ji.bufs if b is not None and b.is_allocated() and b.lb_refcount == 0]
+  assigned = _internal_memory_planner([item.bufs for item in run.jit_cache]) 
+  run.captured._jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in run.jit_cache]
+
+  print("AFTER new memory planning in JIT")
+  print_jit_memory(run)
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
   for i, output in enumerate(the_output):
