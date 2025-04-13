@@ -5,15 +5,19 @@
 # it should be a secure (example: no use of pickle) boundary. HTTP is used for RPC
 
 from __future__ import annotations
-from typing import Optional, Any
+from typing import Callable, Optional, Any, cast
 from collections import defaultdict
 from dataclasses import dataclass, field
 import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct, ast, contextlib
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from tinygrad.renderer import Renderer
-from tinygrad.dtype import dtypes
+from tinygrad.renderer import Renderer, ProgramSpec
+from tinygrad.dtype import DTYPES_DICT, dtypes
+from tinygrad.ops import UOp, Ops, Variable, sint
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
+from tinygrad.engine.jit import GraphRunner, ExecItem, graph_class
+from tinygrad.engine.realize import CompiledRunner
 from tinygrad.device import Compiled, Buffer, Allocator, Compiler, Device, BufferSpec
+from tinygrad.runtime.graph.cpu import CPUGraph
 
 # ***** API *****
 
@@ -42,11 +46,44 @@ class ProgramExec(RemoteRequest):
   name: str; datahash: str; bufs: tuple[int, ...]; vals: tuple[int, ...] # noqa: E702
   global_size: Optional[tuple[int, ...]]; local_size: Optional[tuple[int, ...]]; wait: bool # noqa: E702
 
+@dataclass(frozen=True)
+class GraphComputeItem:
+  name: str
+  datahash: str
+  bufs: tuple[int, ...]
+  vars: tuple[Variable, ...]
+  global_size: tuple[sint, ...]|None
+  local_size: tuple[sint, ...]|None
+
+@dataclass(frozen=True)
+class GraphAlloc(RemoteRequest):
+  graph_num: int
+  jit_cache: tuple[GraphComputeItem, ...]
+  bufs: tuple[int, ...]
+  var_vals: dict[Variable, int]
+
+@dataclass(frozen=True)
+class GraphFree(RemoteRequest):
+  graph_num: int
+
+@dataclass(frozen=True)
+class GraphExec(RemoteRequest):
+  graph_num: int
+  bufs: tuple[int, ...]
+  var_vals: dict[Variable, int]
+  wait: bool
+
 # for safe deserialization
-whitelist = {x.__name__:x for x in [BufferAlloc, BufferFree, CopyIn, CopyOut, ProgramAlloc, ProgramFree, ProgramExec, BufferSpec]}
+eval_globals = {x.__name__:x for x in [BufferAlloc, BufferFree, CopyIn, CopyOut, ProgramAlloc, ProgramFree, ProgramExec, GraphComputeItem,
+                                       GraphAlloc, GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes]}
+attribute_whitelist: dict[Any, set[str]] = {dtypes: {*DTYPES_DICT.keys(), 'imagef', 'imageh'}, Ops: {x.name for x in Ops}}
 eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
+  ast.Dict: lambda x: {safe_eval(k):safe_eval(v) for k,v in zip(x.keys, x.values)},
   ast.Call: lambda x: safe_eval(x.func)(*[safe_eval(arg) for arg in x.args], **{kwarg.arg: safe_eval(kwarg.value) for kwarg in x.keywords}),
-  ast.Name: lambda x: whitelist[x.id], ast.Attribute: lambda x: {"imagef": dtypes.imagef, "imageh": dtypes.imageh}[x.attr]}
+  ast.Name: lambda x: eval_globals[x.id], ast.Attribute: lambda x: safe_getattr(safe_eval(x.value), x.attr)}
+def safe_getattr(value, attr):
+  assert attr in attribute_whitelist.get(value, set()), f'getattr({value}, {repr(attr)}) is not whitelisted'
+  return getattr(value, attr)
 def safe_eval(node): return eval_fxns[node.__class__](node)
 
 class BatchRequest:
@@ -75,6 +112,7 @@ class BatchRequest:
 @dataclass
 class RemoteSession:
   programs: dict[tuple[str, str], Any] = field(default_factory=dict)
+  graphs: dict[int, GraphRunner] = field(default_factory=dict)
   buffers: dict[int, Buffer] = field(default_factory=dict)
 
 class RemoteHandler(BaseHTTPRequestHandler):
@@ -111,9 +149,25 @@ class RemoteHandler(BaseHTTPRequestHandler):
             extra_args = {k:v for k,v in [("global_size", c.global_size), ("local_size", c.local_size)] if v is not None}
             r = session.programs[(c.name, c.datahash)](*bufs, vals=c.vals, wait=c.wait, **extra_args)
             if r is not None: ret = str(r).encode()
+          case GraphAlloc():
+            graph_fn: Callable = unwrap(Device[RemoteHandler.device].graph)
+            def _parse_ji(gi: GraphComputeItem):
+              prg = session.programs[(gi.name, gi.datahash)]
+              ps = ProgramSpec(gi.name, '', RemoteHandler.device, UOp(Ops.NOOP), vars=list(gi.vars),
+                               global_size=list(cast(tuple[int], gi.global_size)) if gi.global_size is not None else None,
+                               local_size=list(cast(tuple[int], gi.local_size)) if gi.local_size is not None else None)
+              return ExecItem(CompiledRunner(ps, precompiled=b'', prg=prg), [session.buffers[buf] for buf in gi.bufs])
+            assert c.graph_num not in session.graphs, f"graph {c.graph_num} already allocated"
+            session.graphs[c.graph_num] = graph_fn(list(map(_parse_ji, c.jit_cache)), [session.buffers[buf] for buf in c.bufs], c.var_vals)
+          case GraphFree(): del session.graphs[c.graph_num]
+          case GraphExec():
+            r = session.graphs[c.graph_num]([session.buffers[buf] for buf in c.bufs], c.var_vals, wait=c.wait)
+            if r is not None: ret = str(r).encode()
     elif self.path == "/properties" and method == "GET":
       cls, args = Device[RemoteHandler.device].renderer.__reduce__()
-      ret = json.dumps({'remotedev': RemoteHandler.device, 'renderer': (cls.__module__, cls.__name__, args)}).encode()
+      # CPUGraph re-renders kernel from uops specified in CompiledRunner, this is not supported
+      graph_cls = gt if (gt:=graph_class(Device[RemoteHandler.device])) is not CPUGraph else None
+      ret = json.dumps({'remotedev': RemoteHandler.device, 'renderer': (cls.__module__, cls.__name__, args), 'graph': graph_cls is not None}).encode()
     else: status_code = 404
     self.send_response(status_code)
     self.send_header('Content-Length', str(len(ret)))
@@ -170,7 +224,7 @@ class RemoteDevice(Compiled):
 
     # state for the connection
     self.session = binascii.hexlify(os.urandom(0x10)).decode()
-    self.buffer_num = 0
+    self.buffer_num, self.graph_num = 0, 0
     self.req: BatchRequest = BatchRequest()
 
     if DEBUG >= 1: print(f"remote with host {self.host}")
@@ -188,7 +242,8 @@ class RemoteDevice(Compiled):
     if not renderer[0].startswith("tinygrad.renderer.") or not renderer[1].endswith("Renderer"): raise RuntimeError(f"bad renderer {renderer}")
     renderer_class = fromimport(renderer[0], renderer[1])  # TODO: is this secure?
     if not issubclass(renderer_class, Renderer): raise RuntimeError(f"renderer isn't a Renderer {renderer}")
-    super().__init__(device, RemoteAllocator(self), renderer_class(*renderer[2]), Compiler(), functools.partial(RemoteProgram, self))
+    graph = fromimport('tinygrad.runtime.graph.remote', 'RemoteGraph') if self.properties['graph'] else None
+    super().__init__(device, RemoteAllocator(self), renderer_class(*renderer[2]), Compiler(), functools.partial(RemoteProgram, self), graph)
 
   def __del__(self):
     # TODO: this is never being called
