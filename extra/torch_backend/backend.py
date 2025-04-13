@@ -667,7 +667,7 @@ def _torch_patched_gather(tensors, dim, dest_index):
 torch.nn.parallel.comm.gather = _torch_patched_gather
 
 class TinyDistributedWork(torch.distributed.Work):
-  def __init__(self, result): 
+  def __init__(self, result):
     super().__init__()
     self.result = result
     self.future = torch.futures.Future()
@@ -699,9 +699,10 @@ class ProcessGroupTiny(torch.distributed.ProcessGroup):
     return self._pending_work[-1]
   def allgather(self, outputs, inputs, opts=None):
     self._ensure_gloo()
+    opts = opts or torch.distributed.distributed_c10d.AllgatherOptions()
     inputs_cpu = [x.cpu() for x in inputs]
     outputs_cpu = [[torch.empty_like(x) for _ in range(self.size())] for x in inputs_cpu]
-    self.gloo.allgather(outputs_cpu, inputs_cpu, opts=opts).wait()
+    self.gloo.allgather(outputs_cpu, inputs_cpu, opts).wait()
     for a,b in zip(flatten(outputs),flatten(outputs_cpu)): a.copy_(b)
     self._pending_work.append(TinyDistributedWork(outputs))
     return self._pending_work[-1]
