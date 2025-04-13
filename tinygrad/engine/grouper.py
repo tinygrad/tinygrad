@@ -226,7 +226,8 @@ class Kernel:
   ast: UOp
   metadata: tuple[Metadata, ...] = ()
   def __repr__(self):
-    return f"<Kernel {len(list(self.ast.toposort))} {[s.op for s in self.ast.src] if self.ast.op is Ops.SINK else self.ast.op} {self.metadata}>"
+    ast_rep = f"SINK{tuple(s.op for s in self.ast.src)}" if self.ast.op is Ops.SINK else repr(self.ast.op)
+    return f"<Kernel {len(list(self.ast.toposort))} {ast_rep} {self.metadata}>"
 
 @dataclass(frozen=True)
 class KernelContext:
