@@ -732,6 +732,7 @@ class UPat(MathTrait):
     self.strict_length = not (allow_any_len or isinstance(src, UPat) or src is None)
     self.required_len: int = 0 if isinstance(src, UPat) or src is None else len(src)
     self.location = location or get_location()
+    self.compiled = {}
 
     if custom_early_reject is not None: self.early_reject = custom_early_reject
     else:
@@ -855,9 +856,17 @@ class UPat(MathTrait):
       return UOp(Ops.AND, src=(and_uop, rep))
     return None
 
-  def compile(self):
-    if self.tried_compile: return
-    self.tried_compile = True
+  def compile(self, fxn=None):
+    if fxn in self.compiled:
+      return self.compiled[fxn]
+    self.compiled[fxn] = None
+
+    if fxn is None: fxn = lambda **kwargs: None
+
+
+    tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
+    real_fxn = types.FunctionType(*tuple_fxn)
+    has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
 
     def wrap(ctx, x):
       ctx[ret:=f"a{len(ctx)}"] = x.arg
@@ -968,13 +977,15 @@ class UPat(MathTrait):
 
     ret = self._get_clause(UOp(Ops.NOOP, arg="uop"))
     if ret is None:
+      print("HERE")
       #print("FAIL")
       return None
 
     #with Context(TRACK_MATCH_STATS=0):
     ret = graph_rewrite(ret, pm_proc)
 
-    dyn_lookup: dict[str, Any] = {}
+    dyn_lookup: dict[str, Any] = {"_fxn": real_fxn}
+
     out = graph_rewrite(ret, pm, ctx=dyn_lookup, name="compile UPat")
     #if out.src != 0 or out.op is not Ops.NOOP: return None
 
@@ -985,7 +996,7 @@ class UPat(MathTrait):
       and_clause = ' and '.join([s.arg for s in x.src if s.op is Ops.NOOP])
       ret = [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"]
       has_or = False
-      assign_dict = []
+      assign_dict = ["ctx=ctx"] if has_ctx else []
       for s in x.src:
         if s.op is Ops.OR:
           assert has_or is False
@@ -999,11 +1010,14 @@ class UPat(MathTrait):
         elif s.op is Ops.ASSIGN:
           assert s.src[0].op is Ops.DEFINE_VAR
           assert s.src[1].op is Ops.NOOP
-          assign_dict.append(f"'{s.src[0].arg}':{s.src[1].arg}")
+          assign_dict.append(f"{s.src[0].arg}={s.src[1].arg}")
         elif s.op is not Ops.NOOP:
           raise NotImplementedError(f"can't compile this {s}")
       if not has_or:
-        ret[-1] += " ret.append({"+','.join(assign_dict)+"})"
+        and_clause = ' and '.join([s.arg for s in x.src if s.op is Ops.NOOP] + ["(_ret:=_fxn("+', '.join(assign_dict)+")) is not None"])
+        ret = [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"]
+        ret[-1] += " return _ret"
+        #ret[-1] += " ret.append({"+','.join(assign_dict)+"})"
         #ret[-1] += " yield {"+','.join(assign_dict)+"}"
         ret[-1] = ret[-1].replace("if True: ", "")
       return ret
@@ -1011,22 +1025,26 @@ class UPat(MathTrait):
     try:
       rendered = render(out)
     except NotImplementedError:
+      #print("HERE2")
       #print("FAIL2", self, self.location)
       return None
 
-    code = ["def match(uop:UOp, _) -> list[dict[str, UOp]]:"]
+    code = ["def match(uop:UOp, ctx) -> list[dict[str, UOp]]:"]
     code += [f"  # match for {self.location}"]
-    code += [ "  ret = []"]
+    #code += [ "  ret = []"]
     code += rendered
-    code += ["  return ret"]
+    #code += ["  return ret"]
     code_fxn = '\n'.join(code)
     self.match_code = code_fxn
     namespace: dict = {}
     #print("\n\n**** COMPILE", self.location, self)
     #print(code_fxn, dyn_lookup)
     exec(code_fxn, dyn_lookup, namespace)  # pylint: disable=W0122
-    object.__setattr__(self, "match", namespace["match"])
-    return None
+    assert 'match' in namespace
+    self.compiled[fxn] = namespace["match"]
+    return namespace["match"]
+    #object.__setattr__(self, "match", namespace["match"])
+    #return None
 
 class UPatAny(UPat):
   def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
@@ -1042,19 +1060,41 @@ def deconstruct_function(fxn:Callable) -> tuple:
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
+def universal_match(p, fxn, has_ctx, uop, ctx):
+  for match in p.match(uop, {}):
+    if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: return ret
+  return None
+
 class PatternMatcher:
   def __init__(self, patterns:list[tuple[UPat, Callable]], compiled=True):
     self.patterns = patterns
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
     self.pdict: dict[Ops, list[tuple[UPat, Callable, set, bool]]] = {}
+    """
+    if compiled and getenv("COMPILE"):
+      self.compiled = True
+      for p,fxn in self.patterns:
+        assert p.op is not None
+        tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
+        real_fxn = types.FunctionType(*tuple_fxn)
+        match = p.compile(real_fxn)
+        for uop in p.op: self.pdict.setdefault(uop, []).append([p, match, p.early_reject])
+    """
+
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
-      real_fxn = types.FunctionType(*tuple_fxn)
-      for uop in p.op: self.pdict.setdefault(uop, []).append((p, real_fxn, p.early_reject, 'ctx' in inspect.signature(real_fxn).parameters))
+      if compiled and getenv("COMPILE") and (match:=p.compile(fxn)) is not None:
+        pass
+      else:
+        tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
+        real_fxn = types.FunctionType(*tuple_fxn)
+        has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
+        #if compiled and getenv("COMPILE"): print("FAIL", match)
+        match = functools.partial(universal_match, p, real_fxn, has_ctx)
+      for uop in p.op: self.pdict.setdefault(uop, []).append([p, match, p.early_reject])
 
-    if compiled and getenv("COMPILE"): do_pattern_compile(self)
+        #for uop in p.op: self.pdict.setdefault(uop, []).append((p, real_fxn, p.early_reject, 'ctx' in inspect.signature(real_fxn).parameters))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -1063,13 +1103,10 @@ class PatternMatcher:
 
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
     ler = {u.op for u in uop.src}
-    ret = None
-    for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
+    #ret = None
+    for _,match,early_reject in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
-      #if hasattr(p, 'match_code'): print(p.match_code)
-      for match in p.match(uop, {}):
-        if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: break
-      if ret is not None: return ret
+      if (ret:=match(uop, ctx)) is not None: return ret
     return None
 
 # *** tracking pattern matcher ***
@@ -1099,10 +1136,6 @@ def track_rewrites(named=False, name_fxn:Callable|None=None):
     return __wrapper
   return _decorator
 
-#@track_rewrites()
-def do_pattern_compile(self):
-  for p,_ in self.patterns: p.compile()
-
 active_rewrites:list[TrackedGraphRewrite] = []
 def track_matches(func):
   def _track_func(*args, **kwargs):
@@ -1119,16 +1152,18 @@ class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
     ret = None
     ler = {u.op for u in uop.src}
-    for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
+    #for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
+    for p,match,early_reject in self.pdict.get(uop.op, []):
       if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
       st = time.perf_counter()
       if not early_reject.issubset(ler):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
-      for match in p.match(uop, {}):
+      #for match in p.match(uop, {}):
         # NOTE: if it returns None, we keep trying to match
-        if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: break
+      #  if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: break
+      ret = match(uop, ctx)
       if ret is not None:
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)

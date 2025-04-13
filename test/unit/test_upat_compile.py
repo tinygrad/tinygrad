@@ -7,9 +7,9 @@ import dis
 @track_rewrites()
 def do_compile(up):
   print("\n***** COMPILE", up)
-  up.compile()
+  match = up.compile()
   print(up.match_code)
-  if DEBUG >= 2: dis.dis(up.match)
+  if DEBUG >= 2: dis.dis(match)
 
 class TestUPatCompile(unittest.TestCase):
   def test_double(self):
