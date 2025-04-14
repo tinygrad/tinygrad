@@ -811,25 +811,18 @@ def deconstruct_function(fxn:Callable) -> tuple:
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
-# global cache for this, including the fixed point
-pm_functions: dict[Callable, Callable] = {}
-def fixup_function(fxn:Callable) -> Callable:
-  if (ret:=pm_functions.get(fxn)): return ret
-  pm_functions[fxn] = ret = types.FunctionType(*deconstruct_function(fxn))
-  pm_functions[ret] = ret  # once a function is fixed, it's a fixed point
-  return ret
-
 @functools.cache
 def upat_interpret(p:UPat, fxn:Callable) -> Callable:
-  if 'ctx' in inspect.signature(fxn).parameters:
+  real_fxn = types.FunctionType(*deconstruct_function(fxn))
+  if 'ctx' in inspect.signature(real_fxn).parameters:
     def universal_match(uop, ctx):
       for match in p.match(uop, {}):
-        if (ret:=fxn(ctx=ctx, **match)) is not None: return ret
+        if (ret:=real_fxn(ctx=ctx, **match)) is not None: return ret  # pylint: disable=not-callable
       return None
   else:
-    def universal_match(uop, ctx):
+    def universal_match(uop, _):
       for match in p.match(uop, {}):
-        if (ret:=fxn(**match)) is not None: return ret
+        if (ret:=real_fxn(**match)) is not None: return ret  # pylint: disable=not-callable
       return None
   return universal_match
 
@@ -842,7 +835,7 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      match = upat_interpret(p, fixup_function(fxn))
+      match = upat_interpret(p, fxn)
       for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, p.early_reject))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
