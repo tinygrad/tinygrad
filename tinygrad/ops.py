@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, get_args
+from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, get_args, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -811,27 +811,31 @@ def deconstruct_function(fxn:Callable) -> tuple:
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
-def get_universal_match(p:UPat, fxn:Callable):
-  if 'ctx' in inspect.signature(fxn).parameters:
+@functools.cache
+def upat_interpret(p:UPat, fxn:Callable) -> Callable:
+  real_fxn = types.FunctionType(*deconstruct_function(fxn))
+  if 'ctx' in inspect.signature(real_fxn).parameters:
     def universal_match(uop, ctx):
       for match in p.match(uop, {}):
-        if (ret:=fxn(ctx=ctx, **match)) is not None: return ret
+        if (ret:=real_fxn(ctx=ctx, **match)) is not None: return ret  # pylint: disable=not-callable
+      return None
   else:
-    def universal_match(uop, ctx):
+    def universal_match(uop, _):
       for match in p.match(uop, {}):
-        if (ret:=fxn(**match)) is not None: return ret
+        if (ret:=real_fxn(**match)) is not None: return ret  # pylint: disable=not-callable
+      return None
   return universal_match
 
 class PatternMatcher:
-  def __init__(self, patterns:list[tuple[UPat, Callable]]):
-    self.patterns = patterns
+  def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]]):
+    # if this comes from a pickle, we reconstruct the lambda functions here
+    self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
     self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
-      match = get_universal_match(p, types.FunctionType(*tuple_fxn))
+      match = upat_interpret(p, fxn)
       for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, p.early_reject))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
