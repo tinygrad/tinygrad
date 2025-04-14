@@ -1,11 +1,11 @@
-from typing import Any
+from typing import Any, Callable
 import itertools, inspect, functools
 from tinygrad.helpers import partition, flatten, dedup
 from tinygrad.ops import UPat, UPatAny, UOp, Ops, PatternMatcher, graph_rewrite, fixup_function
 
 # **** UPat compiled ****
 
-def _get_clause(self:UPat, base:UOp, depth=0) -> UOp|None:
+def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   if isinstance(self, UPatAny):
     assert len(self.src) == 1
     return UOp(Ops.AND, src=(UOp(Ops.OR, src=tuple(_get_clause(s, base, depth) for s in self.src[0])),))
@@ -30,7 +30,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp|None:
     and_clause.append(UOp(Ops.ASSIGN, src=(UOp(Ops.DEFINE_VAR, arg=self.name), base)))
   if self.dtype is not None:
     if len(self.dtype) > 1:
-      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.dtype)),
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(self.dtype))),
         arg="({0}.dtype in {1} or {0}.dtype._scalar in {1})"))
     else:
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.dtype[0])),
@@ -39,23 +39,20 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp|None:
   if self.src is None: return and_uop
   if len(self.src) == 1 and isinstance(self.src[0], tuple):
     more_cond = [_get_clause(s, base.gep(i), depth) for i,s in enumerate(self.src[0])]
-    if any(x is None for x in more_cond): return None
     return UOp(Ops.AND, src=tuple([and_uop]+more_cond))
   if len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
     it = UOp(Ops.NOOP, arg=f"ituop{depth}")
     match = _get_clause(next(self.src[0]), it, depth+1)
-    if match is None: return None
     rep = UOp(Ops.RANGE, src=(match, it, base), arg="all({0} for {1} in {2}.src)")
     return UOp(Ops.AND, src=(and_uop, rep))
   if len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
     fork_cond = []
     for ss in self.src:
       more_cond = [_get_clause(s, base.gep(i), depth) for i,s in enumerate(ss)]
-      if any(x is None for x in more_cond): return None
       fork_cond.append(UOp(Ops.AND, src=tuple(more_cond)))
     rep = UOp(Ops.OR, src=tuple(fork_cond))
     return UOp(Ops.AND, src=(and_uop, rep))
-  return None
+  raise RuntimeError("broken")
 
 # *** pattern matcher ***
 
@@ -164,10 +161,6 @@ pm_renderer = PatternMatcher([
 
 def _get_code(self:UPat, has_ctx:bool):
   ret = _get_clause(self, UOp(Ops.NOOP, arg="uop"))
-  if ret is None:
-    print("HERE")
-    return None
-
   ret = graph_rewrite(ret, pm_proc)
 
   dyn_lookup: dict[str, Any] = {}
@@ -213,7 +206,7 @@ def _get_code(self:UPat, has_ctx:bool):
   return '\n'.join(code), dyn_lookup
 
 @functools.cache
-def upat_compile(self:UPat, fxn):
+def upat_compile(self:UPat, fxn) -> Callable|None:
   real_fxn = fixup_function(fxn)
   has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
   code = _get_code(self, has_ctx)
@@ -225,4 +218,3 @@ def upat_compile(self:UPat, fxn):
   #print(code_str)
   exec(code_str, globs, namespace)  # pylint: disable=W0122
   return namespace["match"]
-

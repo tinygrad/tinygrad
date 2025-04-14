@@ -2,7 +2,7 @@ import unittest
 from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UPat, track_rewrites, GroupOp, Ops
-from tinygrad.upatjit import _get_code, upat_compile
+from tinygrad.upat import _get_code, upat_compile
 import dis
 
 @track_rewrites()

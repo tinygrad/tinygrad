@@ -810,20 +810,20 @@ def deconstruct_function(fxn:Callable) -> tuple:
   assert fxn.__closure__ is None, "closures are not supported in pattern matchers"
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
-def fixup_function(fxn): return types.FunctionType(*(fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)))
+def fixup_function(fxn) -> Callable: return types.FunctionType(*(fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)))
 
 @functools.cache
-def upat_interpret(p:UPat, fxn:Callable):
+def upat_interpret(p:UPat, fxn) -> Callable:
   real_fxn = fixup_function(fxn)
   if 'ctx' in inspect.signature(real_fxn).parameters:
     def universal_match(uop, ctx):
       for match in p.match(uop, {}):
-        if (ret:=real_fxn(ctx=ctx, **match)) is not None: return ret
+        if (ret:=real_fxn(ctx=ctx, **match)) is not None: return ret # pylint: disable=E1102
       return None
   else:
-    def universal_match(uop, ctx):
+    def universal_match(uop, _):
       for match in p.match(uop, {}):
-        if (ret:=real_fxn(**match)) is not None: return ret
+        if (ret:=real_fxn(**match)) is not None: return ret # pylint: disable=E1102
       return None
   return universal_match
 
@@ -832,13 +832,13 @@ class PatternMatcher:
     if compiled: from tinygrad.upat import upat_compile
     self.patterns = patterns
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: dict[Ops, list[tuple[UPat, Callable, set, bool]]] = {}
+    self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      if compiled and (match:=upat_compile(p, fxn)) is not None: pass
+      if compiled and (match:=upat_compile(p, fxn)) is not None: pass # pylint: disable=E0606
       else: match = upat_interpret(p, fxn)
-      for uop in p.op: self.pdict.setdefault(uop, []).append([p, match, p.early_reject])
+      for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, p.early_reject))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
