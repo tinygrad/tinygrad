@@ -12,6 +12,7 @@ def do_compile(up):
   match = upat_compile(up, lambda **kwargs: None)
   print(match_code[0])
   if DEBUG >= 2: dis.dis(match)
+  return match_code[0]
 
 class TestUPatCompile(unittest.TestCase):
   def test_double(self):
