@@ -829,7 +829,7 @@ def upat_interpret(p:UPat, fxn:Callable):
 
 class PatternMatcher:
   def __init__(self, patterns:list[tuple[UPat, Callable]], compiled=bool(getenv("UPAT_COMPILE", 1))):
-    from tinygrad.upatjit import upat_compile
+    if compiled: from tinygrad.upat import upat_compile
     self.patterns = patterns
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
     self.pdict: dict[Ops, list[tuple[UPat, Callable, set, bool]]] = {}

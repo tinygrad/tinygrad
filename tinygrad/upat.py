@@ -57,127 +57,121 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp|None:
     return UOp(Ops.AND, src=(and_uop, rep))
   return None
 
-def _get_code(self:UPat, has_ctx:bool):
-  def wrap(ctx, x):
-    ctx[ret:=f"a{len(ctx)}"] = x.arg
-    return UOp(Ops.NOOP, arg=ret)
+# *** pattern matcher ***
 
-  def do_catand(a):
-    found = False
-    new_src = []
-    or_clause = []
+def wrap(ctx, x):
+  ctx[ret:=f"a{len(ctx)}"] = x.arg
+  return UOp(Ops.NOOP, arg=ret)
+
+def do_catand(a):
+  found = False
+  new_src = []
+  or_clause = []
+  for x in a.src:
+    if x.op is Ops.AND:
+      new_src.extend(x.src)
+      found = True
+    elif x.op is Ops.OR:
+      or_clause.append(x)
+    else: new_src.append(x)
+
+  # one or clause max
+  if len(or_clause) > 1:
+    found = True
+    # need the product of the or clauses
+    new_or = []
+    for x in itertools.product(*[x.src for x in or_clause]):
+      new_or.append(UOp(Ops.AND, src=x))
+    or_clause = [UOp(Ops.OR, src=tuple(new_or))]
+
+  # push assigns to the top
+  if any(x.op is Ops.ASSIGN for x in new_src) and len(or_clause):
+    assert len(or_clause) == 1
+    assigns, new_src = partition(new_src, lambda x: x.op is Ops.ASSIGN)
+    assert len(assigns) >= 1
+    new_or_srcs = []
+    for x in or_clause[0].src:
+      assert x.op is Ops.AND
+      new_or_srcs.append(x.replace(src=x.src+tuple(assigns)))
+    or_clause = [UOp(Ops.OR, src=tuple(new_or_srcs))]
+    found = True
+
+  return UOp(Ops.AND, src=tuple(new_src+or_clause)) if found else None
+
+def do_fixassigns(a:UOp):
+  assigns, new_src = partition(a.src, lambda x: x.op is Ops.ASSIGN)
+  dict_assigns: dict[UOp, UOp] = {}
+  found = False
+  for a in assigns:
+    if a.src[0] in dict_assigns:
+      new_src.append(UOp(Ops.CMPNE, src=(dict_assigns[a.src[0]], a.src[1])))
+      found = True
+    else:
+      dict_assigns[a.src[0]] = a.src[1]
+  if found:
+    for k,v in dict_assigns.items():
+      new_src.append(UOp(Ops.ASSIGN, src=(k,v)))
+    return UOp(Ops.AND, src=tuple(new_src))
+
+def do_pullfromor(a):
+  in_all = []
+  for x in a.src[0].src:
+    if x.op is not Ops.ASSIGN and all(x in s.src for s in a.src[1:]):
+      in_all.append(x)
+  if len(in_all):
+    new_ands = []
     for x in a.src:
-      if x.op is Ops.AND:
-        new_src.extend(x.src)
-        found = True
-      elif x.op is Ops.OR:
-        or_clause.append(x)
-      else: new_src.append(x)
+      new_ands.append(UOp(Ops.AND, src=tuple(y for y in x.src if y not in in_all)))
+    return UOp(Ops.AND, src=tuple(in_all)+(UOp(Ops.OR, src=tuple(new_ands)),))
 
-    # one or clause max
-    if len(or_clause) > 1:
-      found = True
-      # need the product of the or clauses
-      new_or = []
-      for x in itertools.product(*[x.src for x in or_clause]):
-        new_or.append(UOp(Ops.AND, src=x))
-      or_clause = [UOp(Ops.OR, src=tuple(new_or))]
+def do_collapseor(a:UOp):
+  if all(x.op is Ops.AND and len(x.src) == 1 and x.src[0].op is Ops.OR for x in a.src):
+    all_srcs = flatten([x.src[0].src for x in a.src])
+    return UOp(Ops.OR, src=tuple(all_srcs))
 
-    # push assigns to the top
-    if any(x.op is Ops.ASSIGN for x in new_src) and len(or_clause):
-      assert len(or_clause) == 1
-      assigns, new_src = partition(new_src, lambda x: x.op is Ops.ASSIGN)
-      assert len(assigns) >= 1
-      new_or_srcs = []
-      for x in or_clause[0].src:
-        assert x.op is Ops.AND
-        new_or_srcs.append(x.replace(src=x.src+tuple(assigns)))
-      or_clause = [UOp(Ops.OR, src=tuple(new_or_srcs))]
-      found = True
+# processor
+pm_proc = PatternMatcher([
+  # clean up ANDs
+  (UPat(Ops.AND, name="a"), do_catand),
 
-    return UOp(Ops.AND, src=tuple(new_src+or_clause)) if found else None
+  # do_fixassigns
+  (UPat(Ops.AND, name="a"), do_fixassigns),
 
-  def do_fixassigns(a:UOp):
-    assigns, new_src = partition(a.src, lambda x: x.op is Ops.ASSIGN)
-    dict_assigns: dict[UOp, UOp] = {}
-    found = False
-    for a in assigns:
-      if a.src[0] in dict_assigns:
-        new_src.append(UOp(Ops.CMPNE, src=(dict_assigns[a.src[0]], a.src[1])))
-        found = True
-      else:
-        dict_assigns[a.src[0]] = a.src[1]
-    if found:
-      for k,v in dict_assigns.items():
-        new_src.append(UOp(Ops.ASSIGN, src=(k,v)))
-      return UOp(Ops.AND, src=tuple(new_src))
+  # pull dups from or
+  (UPat(Ops.OR, name="a"), do_pullfromor),
 
-  def do_pullfromor(a):
-    in_all = []
-    for x in a.src[0].src:
-      if x.op is not Ops.ASSIGN and all(x in s.src for s in a.src[1:]):
-        in_all.append(x)
-    if len(in_all):
-      new_ands = []
-      for x in a.src:
-        new_ands.append(UOp(Ops.AND, src=tuple(y for y in x.src if y not in in_all)))
-      return UOp(Ops.AND, src=tuple(in_all)+(UOp(Ops.OR, src=tuple(new_ands)),))
+  # collapse or maybe
+  (UPat(Ops.OR, name="a"), do_collapseor),
 
-  def do_collapseor(a:UOp):
-    if all(x.op is Ops.AND and len(x.src) == 1 and x.src[0].op is Ops.OR for x in a.src):
-      all_srcs = flatten([x.src[0].src for x in a.src])
-      return UOp(Ops.OR, src=tuple(all_srcs))
+  # dedup all (needed?)
+  (UPat((Ops.AND, Ops.OR), name="a"), lambda a: a.replace(src=s) if len(s:=dedup(a.src)) != len(a.src) else None),
+], compiled=False)
 
-  # processor
-  pm_proc = PatternMatcher([
-    # clean up ANDs
-    (UPat(Ops.AND, name="a"), do_catand),
+# renderer
+pm_renderer = PatternMatcher([
+  (UPat(Ops.BIND, name="x"), wrap),
 
-    # do_fixassigns
-    (UPat(Ops.AND, name="a"), do_fixassigns),
+  # CMPNE is actually equal
+  (UPat(Ops.CMPNE, name="x"), lambda x: UOp(Ops.CUSTOM, src=x.src, arg="{0} is {1}")),
 
-    # pull dups from or
-    (UPat(Ops.OR, name="a"), do_pullfromor),
+  # RANGE can't have OR inside it
+  (UPat(Ops.RANGE, src=(UPat(Ops.AND, src=UPat(Ops.NOOP), name="x"), UPat(), UPat()), name="r"),
+    lambda r,x: r.replace(op=Ops.CUSTOM, src=(UOp(Ops.NOOP, arg="(" + ' and '.join(y.arg for y in x.src) + ")"),)+r.src[1:])),
 
-    # collapse or maybe
-    (UPat(Ops.OR, name="a"), do_collapseor),
+  (UPat(Ops.CUSTOM, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg.format(*[y.arg for y in x.src]))),
+  (UPat(Ops.GEP, src=UPat(Ops.NOOP, name="x"), name="g"), lambda x,g: x.replace(arg=x.arg+f".src[{g.arg[0]}]"))
+], compiled=False)
 
-    # dedup all (needed?)
-    (UPat((Ops.AND, Ops.OR), name="a"), lambda a: a.replace(src=s) if len(s:=dedup(a.src)) != len(a.src) else None),
-  ], compiled=False)
-
-  # renderer
-  pm = PatternMatcher([
-    (UPat(Ops.BIND, name="x"), wrap),
-
-    # CMPNE is actually equal
-    (UPat(Ops.CMPNE, name="x"), lambda x: UOp(Ops.CUSTOM, src=x.src, arg="{0} is {1}")),
-
-    # ASSIGN
-    #(UPat(Ops.ASSIGN, src=(UPat(Ops.DEFINE_VAR, name="dv"), UPat(Ops.NOOP, name="x"))),
-    # lambda dv,x: UOp(Ops.NOOP, arg=f"store.setdefault('{dv.arg}', {x.arg}) is {x.arg}")),
-
-    # RANGE can't have OR inside it
-    (UPat(Ops.RANGE, src=(UPat(Ops.AND, src=UPat(Ops.NOOP), name="x"), UPat(), UPat()), name="r"),
-      lambda r,x: r.replace(op=Ops.CUSTOM, src=(UOp(Ops.NOOP, arg="(" + ' and '.join(y.arg for y in x.src) + ")"),)+r.src[1:])),
-
-    (UPat(Ops.CUSTOM, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg.format(*[y.arg for y in x.src]))),
-    (UPat(Ops.GEP, src=UPat(Ops.NOOP, name="x"), name="g"), lambda x,g: x.replace(arg=x.arg+f".src[{g.arg[0]}]"))
-  ], compiled=False)
-
+def _get_code(self:UPat, has_ctx:bool):
   ret = _get_clause(self, UOp(Ops.NOOP, arg="uop"))
   if ret is None:
     print("HERE")
-    #print("FAIL")
     return None
 
-  #with Context(TRACK_MATCH_STATS=0):
   ret = graph_rewrite(ret, pm_proc)
 
   dyn_lookup: dict[str, Any] = {}
-
-  out = graph_rewrite(ret, pm, ctx=dyn_lookup, name="compile UPat")
-  #if out.src != 0 or out.op is not Ops.NOOP: return None
+  out = graph_rewrite(ret, pm_renderer, ctx=dyn_lookup, name="compile UPat")
 
   # build the function, try 2
   # renderer
@@ -191,11 +185,7 @@ def _get_code(self:UPat, has_ctx:bool):
       if s.op is Ops.OR:
         assert has_or is False
         assert len(s.src) >= 1
-        #ret.append(f"{'  '*(depth+1)}bak{depth} = store")
-        for ss in s.src:
-          #ret.append(f"{'  '*(depth+1)}store = bak{depth}.copy()")
-          ret.extend(render(ss, depth+1))
-        #ret.append(f"{'  '*(depth+1)}store = bak{depth}")
+        for ss in s.src: ret.extend(render(ss, depth+1))
         has_or = True
       elif s.op is Ops.ASSIGN:
         assert s.src[0].op is Ops.DEFINE_VAR
@@ -207,8 +197,6 @@ def _get_code(self:UPat, has_ctx:bool):
       and_clause = ' and '.join([s.arg for s in x.src if s.op is Ops.NOOP] + ["(_ret:=_fxn("+', '.join(assign_dict)+")) is not None"])
       ret = [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"]
       ret[-1] += " return _ret"
-      #ret[-1] += " ret.append({"+','.join(assign_dict)+"})"
-      #ret[-1] += " yield {"+','.join(assign_dict)+"}"
       ret[-1] = ret[-1].replace("if True: ", "")
     return ret
 
