@@ -105,7 +105,6 @@ def do_process_and(a:UOp) -> UOp|None:
 pm_proc = PatternMatcher([(UPat(Ops.AND, name="a"), do_process_and)], compiled=False)
 
 # renderer
-
 def wrap(ctx, x) -> UOp:
   ctx[ret:=f"a{len(ctx)}"] = x.arg
   return UOp(Ops.NOOP, arg=ret)
@@ -126,32 +125,30 @@ pm_renderer = PatternMatcher([
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
   assert x.op is Ops.AND
-  and_clause = ' and '.join([s.arg for s in x.src if s.op is Ops.NOOP])
-  ret = [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"]
-  has_or = False
-  assign_dict = ["ctx=ctx"] if has_ctx else []
+  and_pieces, assign_pieces = [], []
+  or_pieces: list[str] = []
   for s in x.src:
     if s.op is Ops.OR:
-      assert has_or is False
-      assert len(s.src) >= 1
-      for ss in s.src: ret.extend(_final_render(ss, has_ctx, depth+1))
-      has_or = True
+      assert len(or_pieces) == 0 and len(s.src) >= 1
+      for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1))
     elif s.op is Ops.ASSIGN:
-      assert s.src[0].op is Ops.DEFINE_VAR
-      assert s.src[1].op is Ops.NOOP
-      assign_dict.append(f"{s.src[0].arg}={s.src[1].arg}")
-    elif s.op is not Ops.NOOP:
-      raise UPatCompileError(f"can't compile this {s}")
-  if not has_or:
-    and_clause = ' and '.join([s.arg for s in x.src if s.op is Ops.NOOP] + ["(_ret:=_fxn("+', '.join(assign_dict)+")) is not None"])
-    ret = [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"]
-    ret[-1] += " return _ret"
-    ret[-1] = ret[-1].replace("if True: ", "")
-  return ret
+      assert s.src[0].op is Ops.DEFINE_VAR and s.src[1].op is Ops.NOOP
+      assign_pieces.append(f"{s.src[0].arg}={s.src[1].arg}")
+    elif s.op is Ops.NOOP: and_pieces.append(s.arg)
+    else: raise UPatCompileError(f"can't compile this {s}")
+  # if we have an or, render it
+  if len(or_pieces):
+    assert len(assign_pieces) == 0
+    and_clause = ' and '.join(and_pieces)
+    return [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"] + or_pieces
+  # if we don't, this is a final return
+  assign_clause = ', '.join((["ctx=ctx"] if has_ctx else [])+assign_pieces)
+  and_clause = ' and '.join(and_pieces + [f"(_ret:=_fxn({assign_clause})) is not None"])
+  return [f"{'  '*depth}if {and_clause}: return _ret"]
 
+@functools.cache
 def _get_code(self:UPat, has_ctx:bool):
   ret = _get_clause(self, UOp(Ops.NOOP, arg="uop"))
-
   try:
     ret = graph_rewrite(ret, pm_proc)
     dyn_lookup: dict[str, Any] = {}
@@ -160,19 +157,16 @@ def _get_code(self:UPat, has_ctx:bool):
   except UPatCompileError:
     #print("FAILED", self, self.location)
     return None
-
-  return '\n'.join([f"# match for {self.location}", "def match(uop, ctx):"] + rendered + ["  return None"]), dyn_lookup
+  return '\n'.join([f"# match for {self.location}", "def compiled_match(uop, ctx):"] + rendered + ["  return None"]), dyn_lookup
 
 @functools.cache
 def upat_compile(self:UPat, fxn) -> Callable|None:
   real_fxn = types.FunctionType(*deconstruct_function(fxn))
-  has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
-  code = _get_code(self, has_ctx)
+  code = _get_code(self, 'ctx' in inspect.signature(real_fxn).parameters)
   if code is None: return None
   code_str, dyn_lookup = code
   globs = dyn_lookup.copy()
   globs["_fxn"] = real_fxn
   namespace: dict = {}
-  #print(code_str)
   exec(code_str, globs, namespace)  # pylint: disable=W0122
-  return namespace["match"]
+  return namespace["compiled_match"]
