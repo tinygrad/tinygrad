@@ -3,7 +3,7 @@ import unittest, math
 import torch
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, Ops
+from tinygrad.ops import UOp
 from tinygrad.gradient import compute_gradient
 
 class TestGradient(unittest.TestCase):
@@ -107,7 +107,7 @@ class TestTensorGradient(unittest.TestCase):
 class TestRealizeMeansRealize(unittest.TestCase):
   def test_randn_realizes(self):
     x = Tensor.randn(2, 3, 64, 64, requires_grad=True).realize()
-    self.assertEqual(x.lazydata.op, Ops.RESHAPE)
+    assert x.lazydata is not x.lazydata.base
     assert x.lazydata.is_realized
 
   #@unittest.expectedFailure
@@ -115,7 +115,7 @@ class TestRealizeMeansRealize(unittest.TestCase):
   def test_uniform_realizes(self):
     x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
     print(x.lazydata)
-    self.assertEqual(x.lazydata.op, Ops.RESHAPE)
+    assert x.lazydata is not x.lazydata.base
     assert x.lazydata.is_realized
 
   # NOTE: even though it doesn't realize, this seems fine

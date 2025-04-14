@@ -343,6 +343,11 @@ class TestDiskTensor(unittest.TestCase):
       on_dev = t.to(Device.DEFAULT).realize()
       np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
+  @unittest.skipUnless(OSX, "seems to only be an issue on macOS with file size >2 GiB")
+  def test_copy_to_cpu_not_truncated(self):
+    with open((fn:=temp("dt_copy_to_cpu_not_truncated")), "wb") as f: f.write(b'\x01' * (size := int(2 * 1024**3)) + (test := b"test"))
+    x = Tensor.empty(size + len(test), dtype=dtypes.uint8, device=f"disk:{fn}").to("CPU").realize()
+    assert x[size:].data().tobytes() == test
 
 class TestPathTensor(unittest.TestCase):
   def setUp(self):

@@ -34,7 +34,7 @@ class CUDAProgram:
   def __init__(self, dev:CUDADevice, name:str, lib:bytes, smem:int=0):
     self.dev, self.name, self.lib, self.smem = dev, name, lib, smem
     if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
-    if DEBUG >= 6: cuda_disassemble(lib, dev.arch)
+    if DEBUG >= 7: cuda_disassemble(lib, dev.arch)
 
     check(cuda.cuCtxSetCurrent(self.dev.context))
     self.module = cuda.CUmodule()
@@ -68,6 +68,7 @@ class CUDAAllocator(LRUAllocator):
     super().__init__()
   def _alloc(self, size, options:BufferSpec):
     check(cuda.cuCtxSetCurrent(self.dev.context))
+    if options.external_ptr: return cuda.CUdeviceptr_v2(options.external_ptr)
     if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0x01)))
     return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
   def _free(self, opaque, options:BufferSpec):

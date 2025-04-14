@@ -2,7 +2,7 @@ import unittest, pickle, types
 import numpy as np
 from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.helpers import GlobalCounters, ContextVar, Context
-from tinygrad.ops import PatternMatcher, UPat, UOp
+from tinygrad.ops import PatternMatcher, UPat, UOp, Ops
 
 class TestPickle(unittest.TestCase):
   def test_pickle_code_object(self):
@@ -21,7 +21,9 @@ class TestPickle(unittest.TestCase):
 
   def test_pickle_main_pattern_matcher(self):
     from tinygrad.codegen.devectorizer import sym
-    pickle.dumps(sym)
+    ssym = pickle.dumps(sym)
+    dsym = pickle.loads(ssym)
+    self.assertEqual(dsym.patterns[0][0].location, sym.patterns[0][0].location)
 
   def test_pickle_realized_tensor(self):
     print("** init")
@@ -67,7 +69,8 @@ class TestPickle(unittest.TestCase):
   # NOTE: currently Buffer exists on the uop, not tensor
   def test_pickle_buffer_uop(self):
     t = Tensor.arange(4).realize()
-    a = t.lazydata.buf_uop
+    a = t.lazydata
+    assert a.op is Ops.BUFFER
     self.assertIsNotNone(buffer:=a.realized)
     s = pickle.dumps(a)
     # free buffers

@@ -152,6 +152,27 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5, rtol=1e-6)
 
+  @unittest.expectedFailure
+  def test_const_backward_pass(self):
+    init = 3.5
+
+    def test_pytorch():
+      w1 = torch.tensor(init, requires_grad=True)
+      w2 = torch.tensor(init, requires_grad=True)
+      out = w1.add(w2)
+      out.backward()
+      return w1.grad, w2.grad
+
+    def test_tinygrad():
+      w1 = Tensor(init, requires_grad=True)
+      w2 = Tensor(init, requires_grad=True)
+      out = w1.add(w2)
+      out.backward()
+      return w1.grad.numpy(), w2.grad.numpy()
+
+    for x, y in zip(test_tinygrad(), test_pytorch()):
+      np.testing.assert_allclose(x, y, atol=1e-5)
+
   def test_nograd(self):
     x = Tensor(x_init, requires_grad=False)
     m = Tensor(m_init, requires_grad=False)
@@ -414,7 +435,7 @@ class TestTinygrad(unittest.TestCase):
 
   def test_tensor_dtype_errors(self):
     with self.assertRaises(AttributeError): Tensor([3], dtype="typo")
-    with self.assertRaises(TypeError): Tensor([3], dtype=(dtypes.int,))
+    with self.assertRaises(AttributeError): Tensor([3], dtype=(dtypes.int,))
 
   def test_tensor_bytes(self):
     data = b"abc123"
@@ -746,6 +767,23 @@ class TestInferenceMode(unittest.TestCase):
 
 class TestTensorMetadata(unittest.TestCase):
   def setUp(self) -> None: _METADATA.set(None)
+
+  # NOOPs are not included in kernel metadata
+  def test_exclude_noop_metadata(self):
+    a = Tensor.rand(4, 4)*1
+    self.assertEqual(a.lazydata.metadata.name, "__mul__")
+    k = a.schedule()[-1]
+    self.assertEqual([m.name for m in k.metadata], ["rand"])
+
+  # we exclude const from kernel metadata because tensor methods can share the same CONST UOp
+  @unittest.skip("TODO: flaky")
+  def test_exclude_const_metadata(self):
+    a = Tensor.arange(4)
+    b = Tensor.full((4,), -1, dtype=dtypes.int).contiguous()
+    sched = Tensor.schedule(a, b)
+    self.assertEqual([m.name for m in sched[0].metadata], ["arange"])
+    self.assertEqual([m.name for m in sched[1].metadata], ["contiguous"])
+
   def test_matmul(self):
     x = Tensor.rand(3, requires_grad=True)
     W = Tensor.rand(3, 3, requires_grad=True)

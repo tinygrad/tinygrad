@@ -19,9 +19,8 @@ class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
     a = Tensor([1,2,3,4]).realize()
     si = (a+1).schedule()[0]
-    out = Buffer(Device.DEFAULT, si.outputs[0].size, si.outputs[0].dtype).allocate()
-    memops = {x.src[0].arg:x.src[-1].arg.real_size() for x in si.ast.toposort if x.op is Ops.LOAD}
-    rawbufs = [out] + [Buffer(Device.DEFAULT, memops[i], x.dtype).allocate() for i,x in enumerate(si.inputs, start=len(si.outputs))]
+    # create fresh empty buffers
+    rawbufs = [Buffer(b.device, b.size, b.dtype).allocate() for b in si.bufs]
     tm = time_linearizer(Kernel(si.ast), rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
     assert tm > 0 and tm != float('inf')
 
@@ -117,7 +116,7 @@ class TestBEAM(unittest.TestCase):
     for (dtype_in, dtype_out) in multi_shape_dtype_pairs:
       a = Tensor.rand(16, 16, dtype=dtype_in)
       b = Tensor.rand(16, 16, dtype=dtype_in)
-      realized_ast, _ = helper_realized_ast(a.matmul(b, acc_dtype=dtype_out))
+      realized_ast, _ = helper_realized_ast(a.matmul(b, dtype=dtype_out))
 
       lins = get_kernel_actions(Kernel(realized_ast)).values()
       assert len(set(lin.tensor_core.dims for lin in lins if lin.tensor_core is not None)) > 1
