@@ -3665,7 +3665,7 @@ class Tensor(SimpleMathTrait):
 
   # ***** functional nn ops *****
 
-  def linear(self, weight:Tensor, bias:Tensor|None=None) -> Tensor:
+  def linear(self, weight:Tensor, bias:Tensor|None=None, dtype:DTypeLike|None=None) -> Tensor:
     """
     Applies a linear transformation to `self` using `weight` and `bias`.
 
@@ -3678,6 +3678,7 @@ class Tensor(SimpleMathTrait):
     print(t.linear(weight, bias).numpy())
     ```
     """
+    if dtype is not None: return self.cast(dtype).linear(weight.cast(dtype), bias.cast(dtype) if bias is not None else bias)
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
     return x.add(bias) if bias is not None else x
 
