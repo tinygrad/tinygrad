@@ -12,7 +12,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
     assert len(self.src) == 1
     return UOp(Ops.AND, src=(UOp(Ops.OR, src=tuple(_get_clause(s, base, depth) for s in self.src[0])),))
   # build the and_clause for acceptance
-  and_clause = []
+  and_clause:list[UOp] = []
   if self.op is not None:
     if len(self.op) > 1: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(int(x) for x in self.op))), arg="{0}.op in {1}"))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.op == "+str(self.op[0].value)))
@@ -20,33 +20,27 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
     if isinstance(self.arg, int): and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.arg == "+str(int(self.arg))))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.arg)), arg="{0}.arg == {1}"))
   if self.strict_length or self.required_len > 0:
-    and_clause.append(UOp(Ops.CUSTOM, src=(base,),
-                          arg=("len({0}.src) == " if self.strict_length else "len({0}.src) >= ")+str(self.required_len)))
-  if self.name is not None:
-    and_clause.append(UOp(Ops.ASSIGN, src=(UOp(Ops.DEFINE_VAR, arg=self.name), base)))
+    and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg=("len({0}.src)"+(" == " if self.strict_length else " >= ")+str(self.required_len))))
+  if self.name is not None: and_clause.append(UOp(Ops.ASSIGN, src=(UOp(Ops.DEFINE_VAR, arg=self.name), base)))
   if self.dtype is not None:
     if len(self.dtype) > 1:
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(self.dtype))), arg="({0}.dtype in {1} or {0}.dtype._scalar in {1})"))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.dtype[0])), arg="({0}.dtype == {1} or {0}.dtype._scalar == {1})"))
-  and_uop = UOp(Ops.AND, src=tuple(and_clause))
-  if self.src is None: return and_uop
-  if len(self.src) == 1 and isinstance(self.src[0], tuple):
-    more_cond = [_get_clause(s, base.gep(i), depth) for i,s in enumerate(self.src[0])]
-    return UOp(Ops.AND, src=tuple([and_uop]+more_cond))
-  if len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
-    it = UOp(Ops.NOOP, arg=f"ituop{depth}")
-    match = _get_clause(next(self.src[0]), it, depth+1)
-    # NOTE: use of a generator here is slow
-    rep = UOp(Ops.RANGE, src=(match, it, base), arg="all([{0} for {1} in {2}.src])")
-    return UOp(Ops.AND, src=(and_uop, rep))
-  if len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
-    fork_cond = []
-    for ss in self.src:
-      more_cond = [_get_clause(s, base.gep(i), depth) for i,s in enumerate(ss)]
-      fork_cond.append(UOp(Ops.AND, src=tuple(more_cond)))
-    rep = UOp(Ops.OR, src=tuple(fork_cond))
-    return UOp(Ops.AND, src=(and_uop, rep))
-  raise RuntimeError("broken")
+  if self.src is not None:
+    # single match
+    if len(self.src) == 1 and isinstance(self.src[0], tuple):
+      and_clause += [_get_clause(s, base.gep(i), depth) for i,s in enumerate(self.src[0])]
+    # repeat match
+    elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
+      it = UOp(Ops.NOOP, arg=f"ituop{depth}")
+      match = _get_clause(next(self.src[0]), it, depth+1)
+      and_clause.append(UOp(Ops.RANGE, src=(match, it, base), arg="all([{0} for {1} in {2}.src])"))
+    # multi match (fork)
+    elif len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
+      fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.gep(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
+      and_clause.append(UOp(Ops.OR, src=tuple(fork_cond)))
+    else: raise RuntimeError("broken")
+  return UOp(Ops.AND, src=tuple(and_clause))
 
 # *** pattern matcher ***
 
@@ -68,28 +62,24 @@ def do_process_and(a:UOp) -> UOp|None:
 
   # one or clause max
   if len(or_clause) > 1:
-    found = True
     # need the product of the or clauses
-    new_or = [UOp(Ops.AND, src=x) for x in itertools.product(*[x.src for x in or_clause])]
-    or_clause = [UOp(Ops.OR, src=tuple(new_or))]
+    or_clause = [UOp(Ops.OR, src=tuple([UOp(Ops.AND, src=x) for x in itertools.product(*[x.src for x in or_clause])]))]
+    found = True
 
   # handle assigns
   assigns, new_src = partition(new_src, lambda x: x.op is Ops.ASSIGN)
   if len(assigns):
     if len(or_clause):
       # push assigns to the top if we have an or_clause
-      assert len(or_clause) == 1
-      new_or_srcs = []
-      for x in or_clause[0].src:
-        assert x.op is Ops.AND
-        new_or_srcs.append(x.replace(src=x.src+tuple(assigns)))
-      or_clause = [UOp(Ops.OR, src=tuple(new_or_srcs))]
+      assert len(or_clause) == 1 and all(x.op is Ops.AND for x in or_clause[0].src)
+      or_clause = [UOp(Ops.OR, src=tuple([x.replace(src=x.src+tuple(assigns)) for x in or_clause[0].src]))]
       found = True
     else:
       # check for duplicate assigns
       dict_assigns: dict[UOp, UOp] = {}
       for a in assigns:
         if a.src[0] in dict_assigns:
+          # duplicate assign is a compare
           new_src.append(UOp(Ops.CMPNE, src=(dict_assigns[a.src[0]], a.src[1])))
           found = True
         else:
@@ -97,7 +87,7 @@ def do_process_and(a:UOp) -> UOp|None:
       # put the assigns back
       for k,v in dict_assigns.items(): new_src.append(UOp(Ops.ASSIGN, src=(k,v)))
 
-  # reassemble
+  # reassemble, if there's any deduping to do, do it
   if len(dretand:=dedup(new_src+or_clause)) != len(new_src)+len(or_clause): found = True
   return UOp(Ops.AND, src=tuple(dretand)) if found else None
 
