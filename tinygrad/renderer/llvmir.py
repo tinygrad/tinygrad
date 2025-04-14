@@ -234,4 +234,4 @@ class AMDLLVMRenderer(LLVMRenderer):
      lambda x: UOp(Ops.WMMA, dtypes.half.vec(16), (x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), (*x.arg,)).cast(dtypes.half.vec(8)))
   ]) + LLVMRenderer.extra_matcher
   def __init__(self, arch:str): self.arch = arch
-  def __reduce__(self): return (AMDLLVMRenderer, (self.arch,))
+  def __reduce__(self): return self.__class__, (self.arch,)
