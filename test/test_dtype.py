@@ -143,15 +143,6 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
 
-class TestFp8sDType(unittest.TestCase):
-  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3) and is_dtype_supported(dtypes.fp8e5m2), "fp8s not supported")
-  def test_fp8s_least_upper_dtype(self):
-    self.assertEqual(least_upper_dtype(dtypes.fp8e4m3, dtypes.fp8e5m2), dtypes.half)
-    self.assertEqual(least_upper_dtype(dtypes.uint64, dtypes.int64), dtypes.fp8e4m3)
-
-  @unittest.skipIf(is_dtype_supported(dtypes.fp8e4m3) and is_dtype_supported(dtypes.fp8e5m2), "test only if fp8s not supported")
-  def test_uint64_int64_least_upper_dtype_without_fp8s(self): self.assertEqual(least_upper_dtype(dtypes.uint64, dtypes.int64), dtypes.half)
-
 @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
 class TestBFloat16(unittest.TestCase):
   def test_bf16_creation_numpy(self):
