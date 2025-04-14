@@ -1,7 +1,7 @@
 from typing import cast, Callable
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
-from tinygrad.helpers import all_same, dedup, flatten, prod, CHECK_OOB
+from tinygrad.helpers import all_same, dedup, flatten, prod, getenv, DEBUG, CHECK_OOB
 if CHECK_OOB:
   import z3
 
@@ -174,8 +174,13 @@ spec = PatternMatcher([
 
 # *** this is the spec of a Kernel in UOp ***
 
+def validate_kernel(k:UOp):
+  assert k.arg.ast.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.SINK}, f"must end with SINK/COPY/BUFFER_VIEW {k.arg}"
+  if k.arg.ast.op is Ops.SINK: assert all(s.op is Ops.STORE for s in k.arg.ast.src), f"SINK must end with STORE {k.arg.ast}"
+  return True
+
 kernel_spec = buffer_spec+PatternMatcher([
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN))), lambda: True),
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN)), name="k"), validate_kernel),
   # assign has a buffer and kernel source, it can optionally depend on other assigns
   (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
   (UPat(GroupOp.All-{Ops.SINK}), lambda: False),
@@ -189,7 +194,7 @@ def verify_sink_dims(sink:UOp):
 
 shape_spec = PatternMatcher([
   # shapes must have either 1 or n in each dimension
-  (UPat(Ops.SINK, src=UPat(Ops.STORE), allow_any_len=True, name="sink"), verify_sink_dims),
+  (UPat(Ops.SINK, src=UPat(Ops.STORE), name="sink"), verify_sink_dims),
   # all parent UOps must have the same shape
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: all_same([x.shape for x in root.src if x.st is not None])),
 ])
@@ -201,5 +206,5 @@ def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
   for i,u in enumerate(uops):
     spec_ret = [cast(bool|None, s.rewrite(u)) for s in specs]
     if any(ret is False for ret in spec_ret) or all(ret is None for ret in spec_ret):
-      print_uops(uops)
+      if DEBUG >= 3: print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
