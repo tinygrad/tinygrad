@@ -5,6 +5,7 @@ from tinygrad.renderer.cstyle import ClangRenderer, AMDRenderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 from tinygrad.helpers import prod, AMX
+from tinygrad.codegen.transcendental import xpow, xexp2, xlog2
 
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
@@ -53,7 +54,7 @@ def render_wmma_amd(ctx, wmma: UOp) -> str:
       if wmma.dtype.scalar() != dtypes.float else ")")
 
 # llvm ops, lop[<dtype>][<op>]
-unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
+unsigned_lop = { Ops.ADD: "add nsw", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor", }
 signed_lop = {**unsigned_lop, Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv", Ops.MOD: "srem"}
 flags = " nsz arcp contract afn"
@@ -126,6 +127,7 @@ class LLVMRenderer(Renderer):
   extra_matcher = PatternMatcher([
     # rewrite RECIP with FDIV
     (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
+    (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, x.dtype, (x.const_like(0), x.src[0]))),
     # rewrite cast to bool to CMPNE 0
     (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
     # rewrite MAX to CMPLT + WHERE
@@ -139,9 +141,11 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
     (UPat(Ops.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
   ])
-
+  def __getitem__(self, key): return self.r[key]  # hacky helper
+  def get_attributes(self, uops:list[UOp]) -> str: return 'attributes #0 = { nounwind "no-builtins" "no-trapping-math"="true" }'
   def render(self, uops: list[UOp]) -> str:
     r: dict[UOp, str] = {}
+    self.r = r
     args: list[str] = []
     kernel: list[str] = []
     end_lines: dict[str, None] = {}
@@ -186,7 +190,7 @@ class LLVMRenderer(Renderer):
           r[u] = f"%v{vc}"
 
         # do the rendering of the llvm ir code
-        if (l:=self.string_rewrite.rewrite(u, ctx=r)) is None:
+        if (l:=self.string_rewrite.rewrite(u, ctx=self)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
 
@@ -205,13 +209,13 @@ define{(' '+self.abi) if self.abi is not None else ''} void @{name}({','.join(ar
   ret void
 }}
 {chr(10).join(end_lines.keys())}
-attributes #0 = {{ nounwind "no-builtins" "no-trapping-math"="true" }}
-'''
+''' + self.get_attributes(uops)
     return prg if len(local_args) == 0 else "\n".join(local_args)+f"\n{prg}"
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
                      "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
+tp_map, sz_map = { dtypes.half: 'half', dtypes.float: 'float' }, { dtypes.half: 'f16', dtypes.float: 'f32' }
 class AMDLLVMRenderer(LLVMRenderer):
   device = "AMD"
   has_local = True
@@ -219,8 +223,15 @@ class AMDLLVMRenderer(LLVMRenderer):
   shared_max = AMDRenderer.shared_max
   global_max = AMDRenderer.global_max
   tensor_cores = AMDRenderer.tensor_cores
+  code_for_op = {
+    # llvm.amdgcn.sin failed TestOps::test_sin
+    Ops.LOG2: lambda x, dtype: f"  {tp_map[dtype]} @llvm.amdgcn.log.{sz_map[dtype]}({tp_map[dtype]} {x});",
+    Ops.EXP2: lambda x, dtype: f"  {tp_map[dtype]} @llvm.amdgcn.exp2.{sz_map[dtype]}({tp_map[dtype]} {x});",
+    Ops.SQRT: lambda x, dtype: f"  {tp_map[dtype]} @llvm.amdgcn.sqrt.{sz_map[dtype]}({tp_map[dtype]} {x});",
+  }
   abi = "amdgpu_kernel"
   string_rewrite = PatternMatcher([
+    (UPat(GroupOp.Unary, name="x"), lambda ctx, x: f"  {ctx[x]} = call " + ctx.code_for_op[x.op](*([ctx[v] for v in x.src]), x.dtype)),
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
     (UPat(Ops.CAST, name="x", dtype=dtypes.half.vec(16), src=UPat.var("y", dtypes.half.vec(8))), lambda ctx, x, y: f"  {ctx[x]} = shufflevector "\
@@ -230,6 +241,17 @@ class AMDLLVMRenderer(LLVMRenderer):
     (UPat(Ops.WMMA, name="wmma"), render_wmma_amd),
   ]) + base_rewrite
   extra_matcher = PatternMatcher([
+    # double intrinsics missing for sqrt/exp2/log2
+    (UPat(Ops.SQRT, dtype=dtypes.double, name="x"), lambda x: xpow(x.src[0], x.src[0].const_like(0.5))),
+    (UPat(Ops.EXP2, dtype=dtypes.double, name="x"), lambda x: xexp2(x.src[0])),
+    (UPat(Ops.LOG2, dtype=dtypes.double, name="x"), lambda x: xlog2(x.src[0])),
     (UPat(Ops.WMMA, name="x", dtype=dtypes.half.vec(8)),
      lambda x: UOp(Ops.WMMA, dtypes.half.vec(16), (x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), (*x.arg,)).cast(dtypes.half.vec(8)))
   ]) + LLVMRenderer.extra_matcher
+
+  def get_attributes(self, uops:list[UOp]) -> str:
+    requiredMaxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == "l")
+    return 'attributes #0 = { convergent mustprogress norecurse nounwind "no-trapping-math"="true" "stack-protector-buffer-size"="8" ' + \
+      f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}" "uniform-work-group-size"="true"' + \
+      '"target-features"="+cumode,+16-bit-insts,+atomic-fadd-rtn-insts,+ci-insts,+dl-insts,+dot10-insts,+dot12-insts,+dot5-insts,+dot7-insts,' + \
+      '+dot8-insts,+dot9-insts,+dpp,+gfx10-3-insts,+gfx10-insts,+gfx11-insts,+gfx8-insts,+gfx9-insts,+wavefrontsize32" }'
