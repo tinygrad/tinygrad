@@ -3,6 +3,8 @@ import itertools, inspect, functools, types
 from tinygrad.helpers import partition, dedup
 from tinygrad.ops import UPat, UPatAny, UOp, Ops, PatternMatcher, graph_rewrite, deconstruct_function
 
+class UPatCompileError(Exception): pass
+
 # **** UPat compiled ****
 
 def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
@@ -62,7 +64,7 @@ def do_process_and(a:UOp) -> UOp|None:
     else: new_src.append(x)
 
   # too big to compile
-  if len(or_clause) >= 4: raise NotImplementedError("too big to compile")
+  if len(or_clause) >= 4: raise UPatCompileError("too big to compile")
 
   # one or clause max
   if len(or_clause) > 1:
@@ -139,7 +141,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
       assert s.src[1].op is Ops.NOOP
       assign_dict.append(f"{s.src[0].arg}={s.src[1].arg}")
     elif s.op is not Ops.NOOP:
-      raise NotImplementedError(f"can't compile this {s}")
+      raise UPatCompileError(f"can't compile this {s}")
   if not has_or:
     and_clause = ' and '.join([s.arg for s in x.src if s.op is Ops.NOOP] + ["(_ret:=_fxn("+', '.join(assign_dict)+")) is not None"])
     ret = [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"]
@@ -155,8 +157,8 @@ def _get_code(self:UPat, has_ctx:bool):
     dyn_lookup: dict[str, Any] = {}
     out = graph_rewrite(ret, pm_renderer, ctx=dyn_lookup, name="compile UPat")
     rendered = _final_render(out, has_ctx)
-  except NotImplementedError:
-    #print("FAIL2", self, self.location)
+  except UPatCompileError:
+    #print("FAILED", self, self.location)
     return None
 
   return '\n'.join([f"# match for {self.location}", "def match(uop, ctx):"] + rendered + ["  return None"]), dyn_lookup
