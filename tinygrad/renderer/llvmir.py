@@ -218,7 +218,6 @@ class AMDLLVMRenderer(LLVMRenderer):
   has_shared = True
   shared_max = AMDRenderer.shared_max
   global_max = AMDRenderer.global_max
-  tensor_cores = AMDRenderer.tensor_cores
   abi = "amdgpu_kernel"
   string_rewrite = PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
@@ -233,3 +232,4 @@ class AMDLLVMRenderer(LLVMRenderer):
     (UPat(Ops.WMMA, name="x", dtype=dtypes.half.vec(8)),
      lambda x: UOp(Ops.WMMA, dtypes.half.vec(16), (x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), (*x.arg,)).cast(dtypes.half.vec(8)))
   ]) + LLVMRenderer.extra_matcher
+  def __init__(self, arch:str): self.tensor_cores = AMDRenderer.get_tensor_cores(arch)
