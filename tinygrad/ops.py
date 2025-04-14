@@ -811,15 +811,17 @@ def deconstruct_function(fxn:Callable) -> tuple:
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
-def get_universal_match(p:UPat, fxn:Callable):
+def upat_interpret(p:UPat, fxn:Callable) -> Callable:
   if 'ctx' in inspect.signature(fxn).parameters:
     def universal_match(uop, ctx):
       for match in p.match(uop, {}):
         if (ret:=fxn(ctx=ctx, **match)) is not None: return ret
+      return None
   else:
     def universal_match(uop, ctx):
       for match in p.match(uop, {}):
         if (ret:=fxn(**match)) is not None: return ret
+      return None
   return universal_match
 
 class PatternMatcher:
@@ -831,7 +833,7 @@ class PatternMatcher:
     for p,fxn in self.patterns:
       assert p.op is not None
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
-      match = get_universal_match(p, types.FunctionType(*tuple_fxn))
+      match = upat_interpret(p, types.FunctionType(*tuple_fxn))
       for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, p.early_reject))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
