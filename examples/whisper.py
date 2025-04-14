@@ -306,7 +306,10 @@ def listener(q):
   print("done listening")
 
 if __name__ == "__main__":
-  model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=1)
+  # Set WHISPER_MODEL to change the inference model.
+  # SMALL is for compat with tinygrad<=0.10.2.
+  model_name = getenv("WHISPER_MODEL", default="small.en" if getenv("SMALL") else "tiny.en")
+  model, enc = init_whisper(model_name, batch_size=1)
 
   if len(sys.argv) > 1:
     print(transcribe_file(model, enc, sys.argv[1]))
