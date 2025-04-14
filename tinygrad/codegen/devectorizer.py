@@ -307,63 +307,61 @@ pm_render = PatternMatcher([
     lambda store,idx: UOp(Ops.STORE, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
 ])
 
-def split_cat(sink, store, loop_store, load1, load2, lt, idx_l1, idx_s, vconst, rng, add_lr_vc, mul, rng2,
-              mul2, loop_read, rng_r, rng2_r, mul_r, mul2_r, vc, l1_vg, vdg, idx_l2, l2_vg, vc2):
-  if rng2.arg < rng.arg: return None
-  split_rng2 = lt.arg == rng2.src[1].arg//2
-  full = rng2.src[1] if split_rng2 else rng.src[1]
+def split_cat(sink, store, loop_store, load1, load2, lt, idx_l1, idx_s, vc_s, rng_s, add_lr_vc, mul_s, rng2_s,
+              mul2_s, loop_read, rng_l1, rng2_l1, mul_r, mul2_r, vc, globals_l1, globals_s, idx_l2, l2_vg, vc2):
+  print("hit")
+  if rng2_s.arg < rng_s.arg: return None
+  split_rng2 = lt.arg == rng2_s.src[1].arg//2
+  full = rng2_s.src[1] if split_rng2 else rng_s.src[1]
   if lt.arg != full.arg//2: return None
   if split_rng2:
-    rng2 = rng2.replace(src=(rng2.src[0], lt))
-    rng2_r = rng2_r.replace(src=(rng2_r.src[0], lt))
+    rng2_s = rng2_s.replace(src=(rng2_s.src[0], lt))
+    rng2_l1 = rng2_l1.replace(src=(rng2_l1.src[0], lt))
   else:
-    rng = rng.replace(src=(rng.src[0], lt))
-    rng_r = rng_r.replace(src=(rng_r.src[0], lt))
+    rng_s = rng_s.replace(src=(rng_s.src[0], lt))
+    rng_l1 = rng_l1.replace(src=(rng_l1.src[0], lt))
 
   # store1
-  loop_store = loop_store.replace(src=tuple(rng*mul+rng2*mul2 for _ in range(loop_store.dtype.count)))
-  loop_read = loop_read.replace(src=tuple(rng_r*mul_r+rng2_r*mul2_r for _ in range(loop_read.dtype.count)))
+  loop_store = loop_store.replace(src=tuple(rng_s*mul_s+rng2_s*mul2_s for _ in range(loop_store.dtype.count)))
+  loop_read = loop_read.replace(src=tuple(rng_l1*mul_r+rng2_l1*mul2_r for _ in range(loop_read.dtype.count)))
   add_lr_vc = add_lr_vc.replace(src=(loop_read, vc))
-  idx_l1 = idx_l1.replace(src=(l1_vg, add_lr_vc))
+  idx_l1 = idx_l1.replace(src=(globals_l1, add_lr_vc))
   load1 = load1.replace(src=(idx_l1,))
-  idx_s = idx_s.replace(src=(vdg, loop_store+vconst))
+  idx_s = idx_s.replace(src=(globals_s, loop_store+vc_s))
   store = store.replace(src=(idx_s, load1))
 
   # store2
   rng_new = UOp.range(dtype=dtypes.int, idx=10001 if split_rng2 else 10000, start=lt.arg, end=full.arg)
   if split_rng2:
-    loop_store2 = loop_store.replace(src=tuple(rng.replace(arg=10000)*mul+rng_new*mul2 for _ in range(loop_store.dtype.count)))
-    loop_read2 = loop_read.replace(src=tuple(rng_r.replace(arg=10000)*mul_r+rng_new*mul2_r for _ in range(loop_read.dtype.count)))
+    loop_store2 = loop_store.replace(src=tuple(rng_s.replace(arg=10000)*mul_s+rng_new*mul2_s for _ in range(loop_store.dtype.count)))
+    loop_read2 = loop_read.replace(src=tuple(rng_l1.replace(arg=10000)*mul_r+rng_new*mul2_r for _ in range(loop_read.dtype.count)))
   else:
-    loop_store2 = loop_store.replace(src=tuple(rng_new*mul+rng2.replace(arg=10001)*mul2 for _ in range(loop_read.dtype.count)))
+    loop_store2 = loop_store.replace(src=tuple(rng_new*mul_s+rng2_s.replace(arg=10001)*mul2_s for _ in range(loop_read.dtype.count)))
     loop_read2 = loop_store2
   add_lr_vc2 = add_lr_vc.replace(src=(loop_read2, vc2))
   idx_l2 = idx_l2.replace(src=(l2_vg, add_lr_vc2))
   load2 = load2.replace(src=(idx_l2,))
-  idx_s2 = idx_s.replace(src=(vdg, loop_store2+vconst))
+  idx_s2 = idx_s.replace(src=(globals_s, loop_store2+vc_s))
   store2 = store.replace(src=(idx_s2, load2))
   ret = sink.replace(src=(store, store2,))
   return ret
 
+def loop(id:str):
+  return UPat.any(UPat(Ops.ADD, src=(UPat(Ops.VECTORIZE, src=((UPat(Ops.RANGE, name="rng_"+id)*UPat.var("mul_"+id)+UPat(Ops.RANGE, name="rng2_"+id)*UPat.var("mul2_"+id)))), UPat(Ops.VCONST, name="vc_"+id))),
+    UPat(Ops.RANGE, name="rng_"+id)*UPat.var("mul_"+id)+UPat(Ops.RANGE, name="rng2_"+id)*UPat.var("mul2_"+id))
+
 pm_split = PatternMatcher([
   (UPat(Ops.SINK, name="sink", src=(
     UPat(Ops.STORE, name="store", src=(
-      UPat(Ops.INDEX, name="idx_s", src=(
-        UPat(Ops.VECTORIZE, name="vdg"),
-        UPat(Ops.ADD, src=(
-          UPat(Ops.VECTORIZE, name="loop_store", src=(
-            UPat(Ops.RANGE, name="rng")*UPat.var("mul")+UPat(Ops.RANGE, name="rng2")*UPat.var("mul2"))),
-          UPat(Ops.VCONST, name="vconst"))))),
+      UPat(Ops.INDEX, name="idx_s", src=(UPat(name="globals_s"), loop("s"))),
       UPat(Ops.ADD, src=(
         UPat(Ops.LOAD, name="load1", src=(
-          UPat(Ops.INDEX, name="idx_l1", src=(UPat(Ops.VECTORIZE, name="l1_vg"), UPat(Ops.ADD, name="add_lr_vc", src=(
-              UPat(Ops.VECTORIZE, name="loop_read", src=(
-                UPat(Ops.RANGE, name="rng_r")*UPat.var("mul_r")+UPat(Ops.RANGE, name="rng2_r")*UPat.var("mul2_r"))),
-              UPat(Ops.VCONST, name="vc"))),
-              UPat(Ops.VECTORIZE, src=UPat(Ops.CMPLT, src=(UPat(), UPat.cvar("lt")))))))),
+          UPat(Ops.INDEX, name="idx_l1", src=(
+            UPat(name="globals_l1"),
+            loop("l1"),
+            UPat.any(UPat(Ops.VECTORIZE, src=UPat(Ops.CMPLT, src=(UPat(), UPat.cvar("lt")))), UPat(Ops.CMPLT, src=(UPat(), UPat.cvar("lt")))))))),
         UPat(Ops.LOAD, name="load2", src=(
-          UPat(Ops.INDEX, name="idx_l2", src=(UPat(Ops.VECTORIZE, name="l2_vg"), UPat(Ops.ADD, src=(
-            UPat(), UPat(Ops.VCONST, name="vc2"))), UPat())))))))))), split_cat)
+          UPat(Ops.INDEX, name="idx_l2", src=(UPat(name="globals_l2"), UPat(Ops.ADD, src=(UPat(), UPat(Ops.VCONST, name="vc_l2"))), UPat())))))))))), split_cat)
 ])
 
 
@@ -407,7 +405,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
 
   # cat loop split
-  sink = graph_rewrite(sink, pm_split)
+  # sink = graph_rewrite(sink, pm_split)
   # remove reduce
   sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")
 
