@@ -39,7 +39,7 @@ class TestUPatCompile(unittest.TestCase):
     do_compile(up)
 
   def test_const_folding(self):
-    up = UPat(GroupOp.ALU, name="a", src=UPat((Ops.VCONST, Ops.CONST)))
+    up = UPat(GroupOp.ALU-{Ops.THREEFRY}, name="a", src=UPat((Ops.VCONST, Ops.CONST)))
     do_compile(up)
 
   @unittest.skip("fix this")

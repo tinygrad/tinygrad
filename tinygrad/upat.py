@@ -41,7 +41,8 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   if len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
     it = UOp(Ops.NOOP, arg=f"ituop{depth}")
     match = _get_clause(next(self.src[0]), it, depth+1)
-    rep = UOp(Ops.RANGE, src=(match, it, base), arg="all({0} for {1} in {2}.src)")
+    # NOTE: use of a generator here is slow
+    rep = UOp(Ops.RANGE, src=(match, it, base), arg="all([{0} for {1} in {2}.src])")
     return UOp(Ops.AND, src=(and_uop, rep))
   if len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
     fork_cond = []
