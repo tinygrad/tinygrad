@@ -15,7 +15,7 @@ if __name__ == "__main__":
   for p in nn.state.get_parameters(mdl): p.replace(Tensor.empty(p.shape))
   img = Tensor.empty(64, 3, 224, 224)
 
-  PROFILE = getenv("PROFILE", 0)
+  PROFILE = getenv("PYPROFILE", 0)
   FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
   SCHEDULE_ONLY = getenv("SCHEDULE_ONLY", 0)
 
