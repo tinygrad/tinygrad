@@ -1060,41 +1060,32 @@ def deconstruct_function(fxn:Callable) -> tuple:
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
-def universal_match(p, fxn, has_ctx, uop, ctx):
-  for match in p.match(uop, {}):
-    if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: return ret
-  return None
+def get_universal_match(p:UPat, fxn:Callable):
+  if 'ctx' in inspect.signature(fxn).parameters:
+    def universal_match(uop, ctx):
+      for match in p.match(uop, {}):
+        if (ret:=fxn(ctx=ctx, **match)) is not None: return ret
+  else:
+    def universal_match(uop, ctx):
+      for match in p.match(uop, {}):
+        if (ret:=fxn(**match)) is not None: return ret
+  return universal_match
 
 class PatternMatcher:
   def __init__(self, patterns:list[tuple[UPat, Callable]], compiled=True):
     self.patterns = patterns
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
     self.pdict: dict[Ops, list[tuple[UPat, Callable, set, bool]]] = {}
-    """
-    if compiled and getenv("COMPILE"):
-      self.compiled = True
-      for p,fxn in self.patterns:
-        assert p.op is not None
-        tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
-        real_fxn = types.FunctionType(*tuple_fxn)
-        match = p.compile(real_fxn)
-        for uop in p.op: self.pdict.setdefault(uop, []).append([p, match, p.early_reject])
-    """
-
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      if compiled and getenv("COMPILE") and (match:=p.compile(fxn)) is not None:
+      tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
+      real_fxn = types.FunctionType(*tuple_fxn)
+      if compiled and getenv("COMPILE") and (match:=p.compile(real_fxn)) is not None:
         pass
       else:
-        tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
-        real_fxn = types.FunctionType(*tuple_fxn)
-        has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
-        #if compiled and getenv("COMPILE"): print("FAIL", match)
-        match = functools.partial(universal_match, p, real_fxn, has_ctx)
+        match = get_universal_match(p, types.FunctionType(*tuple_fxn))
       for uop in p.op: self.pdict.setdefault(uop, []).append([p, match, p.early_reject])
-
-        #for uop in p.op: self.pdict.setdefault(uop, []).append((p, real_fxn, p.early_reject, 'ctx' in inspect.signature(real_fxn).parameters))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -1103,7 +1094,6 @@ class PatternMatcher:
 
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
     ler = {u.op for u in uop.src}
-    #ret = None
     for _,match,early_reject in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
       if (ret:=match(uop, ctx)) is not None: return ret
@@ -1152,7 +1142,6 @@ class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
     ret = None
     ler = {u.op for u in uop.src}
-    #for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
     for p,match,early_reject in self.pdict.get(uop.op, []):
       if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
       st = time.perf_counter()
@@ -1160,17 +1149,12 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
-      #for match in p.match(uop, {}):
-        # NOTE: if it returns None, we keep trying to match
-      #  if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: break
-      ret = match(uop, ctx)
-      if ret is not None:
+      if (ret:=match(uop, ctx)) is not None:
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
         if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((uop, ret, p))
         return ret
-      # miss count
       match_stats[p][2] += time.perf_counter()-st
     return None
 
