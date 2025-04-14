@@ -811,33 +811,25 @@ def deconstruct_function(fxn:Callable) -> tuple:
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
-# global cache for this. functools.cache doesn't work for some reason
-pm_functions: dict[Callable, Callable] = {}
-def fixup_function(fxn) -> Callable:
-  if (ret:=pm_functions.get(fxn)): return ret
-  pm_functions[fxn] = ret = types.FunctionType(*deconstruct_function(fxn))
-  pm_functions[ret] = ret  # once a function is fixed, it's a fixed point
-  return ret
-
 @functools.cache
-def upat_interpret(p:UPat, fxn) -> Callable:
-  if 'ctx' in inspect.signature(fxn).parameters:
+def upat_interpret(p:UPat, fxn:Callable) -> Callable:
+  real_fxn = types.FunctionType(*deconstruct_function(fxn))
+  if 'ctx' in inspect.signature(real_fxn).parameters:
     def universal_match(uop, ctx):
       for match in p.match(uop, {}):
-        if (ret:=fxn(ctx=ctx, **match)) is not None: return ret # pylint: disable=E1102
+        if (ret:=real_fxn(ctx=ctx, **match)) is not None: return ret  # pylint: disable=not-callable
       return None
   else:
     def universal_match(uop, _):
       for match in p.match(uop, {}):
-        if (ret:=fxn(**match)) is not None: return ret # pylint: disable=E1102
+        if (ret:=real_fxn(**match)) is not None: return ret  # pylint: disable=not-callable
       return None
   return universal_match
 
 class PatternMatcher:
-  def __init__(self, patterns:Sequence[tuple[UPat, tuple|Callable]], compiled=bool(getenv("UPAT_COMPILE", 1))):
-    if compiled: from tinygrad.upat import upat_compile
-    # fixup functions
-    self.patterns = [(p, fixup_function(types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn)) for p,fxn in patterns]
+  def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
+    # if this comes from a pickle, we reconstruct the lambda functions here
+    self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
     self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
     # uop is required, arg is optional
