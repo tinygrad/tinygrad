@@ -175,11 +175,11 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
     # can only have one output
     if not forced_realize and len(group) > 1: forced_realize = True
     # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and any(x.op is Ops.ASSIGN for x in group):
+    if not forced_realize and (assign_targets:={x.buf_uop for x in group if x.op is Ops.ASSIGN}):
       parents = deque((r, *group))
       while parents and not forced_realize:
         p = parents.pop().base
-        if p.op is Ops.BUFFER and not any(tr.buf_uop is p for tr in group): forced_realize, can_chase = True, False
+        if p.op is Ops.BUFFER and p in ctx.assigns and p not in assign_targets: forced_realize, can_chase = True, False
         if p in ctx.realizes: continue
         parents.extend(p.src)
     if forced_realize or not group:
