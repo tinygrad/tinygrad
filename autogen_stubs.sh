@@ -484,7 +484,6 @@ generate_am() {
   clang2py -k cdefstum \
     $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu_v14_0_0_pmfw.h \
     $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu_v14_0_2_ppsmc.h \
-    $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu14_driver_if_v14_0_0.h \
     $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu14_driver_if_v14_0.h \
     extra/amdpci/headers/amdgpu_smu.h \
     --clang-args="-include stdint.h" \
