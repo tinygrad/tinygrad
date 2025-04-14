@@ -749,7 +749,7 @@ class USBIface(PCIIface):
     is_24 = True # if self.usb.is_24 else 3
     gpu_bus = 4 if is_24 else 3
 
-    perf_mem_base = 0x10000000
+    perf_mem_base = 0xd00000
     mem_base = 0x40000000
 
     try: is_cfg_ok = self.usb.pcie_cfg_req(pci.PCI_VENDOR_ID, bus=gpu_bus, dev=0, fn=0, size=2) == 0x1002
@@ -786,6 +786,7 @@ class USBIface(PCIIface):
         self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=0x0, size=1)
 
         self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
+      print("full reset done")
 
     bar_next_addr, bar_off, self.bars = [mem_base, perf_mem_base], 0, {}
     for bar_id in range(4):
@@ -804,6 +805,13 @@ class USBIface(PCIIface):
         self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=0x0, size=4)
       bar_off += 8 if bar_cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64 else 4
 
+    import pickle
+    pck_x = pickle.load(open("jl.bin", "rb"))
+    self.usb.write(0x0, pck_x[:0x9000])
+    self.usb.write(0xc000, pck_x[0xc000:0xf000])
+    # self.usb.write(0xb000, pck_x[0xb000:0xc000])
+    # self.usb.write(0xc000, pck_x[0xc000:0xf000])
+
     # pm_state = self.usb.pcie_cfg_req(caps[0x1]+4, bus=gpu_bus, dev=0, fn=0, value=None, size=1)
     # self.usb.pcie_cfg_req(caps[0x1]+4, bus=gpu_bus, dev=0, fn=0, value=0x0, size=1)
     # print("PM cap now", pm_state)
@@ -814,6 +822,68 @@ class USBIface(PCIIface):
     vram_bar = AMUSBBar(self.bars[0], self.usb)
     doorbell_bar = AMUSBBar(self.bars[2], self.usb)
     mmio_bar = AMUSBBar(self.bars[5], self.usb)
+
+    print(hex(self.bars[0][0]))
+
+    self.usb.write(0x54b, b'\x20')
+    self.usb.write(0x5a8, b'\x02')
+    self.usb.write(0x5f8, b'\x04')
+    self.usb.write(0x7ef, bytes([0])) # checked in FUN_CODE_3f4a
+    self.usb.write(0xc422, b'\x02') 
+    self.usb.write(0x648, bytes([1])) # c
+
+    print(self.usb.read(0xb236, 1))
+    print(self.usb.read(0xb23e, 1))
+    print(self.usb.read(0xb242, 1))
+    print(self.usb.read(0xb246, 1))
+    print(self.usb.read(0xb24a, 1))
+    print(self.usb.read(0xb24e, 1))
+
+    self.usb.pcie_mem_req(0xd00000 + 0x1008, value=0x2, size=4)
+    self.usb.pcie_mem_req(0xd00000 + 0x100c, value=0x2, size=4)
+    print(hex(self.usb.pcie_mem_req(0xd00000 + 0x1000, value=None, size=4)))
+    print(hex(self.usb.pcie_mem_req(0xd00000 + 0x1004, value=None, size=4)))
+    # self.usb.write(0xb200 + 0x51, bytes([2]))
+    # self.usb.write(0xb200 + 0x52, bytes([2]))
+
+    print(self.usb.read(0xf000, 0x10))
+
+    xxx = (ctypes.c_uint8 * 4096)()
+    for i in range(4096): xxx[i] = 0x34
+    
+    import threading
+    def write_thread(): self.usb.scsi_write(0xeaeb, xxx)
+    thread = threading.Thread(target=write_thread)
+    thread.start()
+    time.sleep(0.04)
+    self.usb.reset()
+    # self.usb.write(0x548, b'\x01\x02\x01 ')
+    # self.usb.write(0x5a8, b'\x02\x01\x01\x01')
+    # self.usb.write(0x5f8, b'\x04\x01\x01\x02')
+
+    # self.usb.write(0x0, pck_x[:0x9000])
+    self.usb.write(0xc000, pck_x[0xc000:0xf000])
+
+    print(self.usb.read(0xf000, 0x10))
+    print("pci works?", self.usb.pcie_mem_req(0xd00000 + 0x100c, value=None, size=4))
+
+    xxx = (ctypes.c_uint8 * 4096)()
+    for i in range(4096): xxx[i] = 0x38
+
+    import threading
+    def write_thread(): self.usb.scsi_write(0xeaeb, xxx)
+    thread = threading.Thread(target=write_thread)
+    thread.start()
+    time.sleep(0.04)
+    self.usb.reset()
+
+    print(self.usb.read(0xf000, 0x10))
+    print("pci works?", self.usb.pcie_mem_req(0xd00000 + 0x100c, value=None, size=4))
+
+    print(self.usb.read(0xb200 + 0x51, 1))
+    print(self.usb.read(0xb200 + 0x52, 1))
+
+    exit(0)
 
     self.adev = AMDev("usb:0", vram_bar, doorbell_bar, mmio_bar)
     self.props = {'simd_count': 64, 'simd_per_cu': 2, 'array_count': 4, 'gfx_target_version': 110002, 'max_slots_scratch_cu': 32,

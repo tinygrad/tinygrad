@@ -185,6 +185,7 @@ class USBConnector:
       for transfer in cmds:
         # print(ignore_ep, transfer.contents.endpoint, transfer.contents.status)
         if ignore_ep == transfer.contents.endpoint: continue
+        # print("ack", transfer.contents.endpoint, transfer.contents.status)
 
         if transfer.contents.status == libusb.LIBUSB_TRANSFER_COMPLETED:
           continue
@@ -297,16 +298,21 @@ class USBConnector:
 
     cdbs = []
     for offset, value in enumerate(data):
+      if value == 0x18 and not(0xb000 <= start_addr + offset < 0xd000):
+        print(hex(start_addr + offset), "is 0x18")
+        value = 0x17
+
       current_addr = start_addr + offset
       assert current_addr >> 17 == 0
       current_addr &= 0x01ffff
       current_addr |= 0x500000
       if not ignore_cache and self.cached.get(current_addr, None) == value: continue
-      cdbs.append(struct.pack('>BBBHB', 0xe5, value, current_addr >> 16, current_addr & 0xffff, 0x00))
+      cdbs.append(cdb:=struct.pack('>BBBHB', 0xe5, value, current_addr >> 16, current_addr & 0xffff, 0x00))
 
       self.cached[current_addr] = value
-      # self._send(cdb)
-    self._send_batch(cdbs, [0] * len(cdbs))
+      # print("dal", offset)
+      self._send(cdb)
+    # self._send_batch(cdbs, [0] * len(cdbs))
 
   def write_batch(self, start_addrs, datas, ignores):
     if DEBUG >= 4: print("write", hex(start_addr))
@@ -338,8 +344,8 @@ class USBConnector:
       0,                # group number
       0                 # control
     )
-    ops = self._send(cdb, in_data=buf, wait=False)
-    for o in ops: print(libusb.libusb_cancel_transfer(o))
+    ops = self._send(cdb, in_data=buf, wait=True)
+    # for o in ops: print(libusb.libusb_cancel_transfer(o))
 
   def scsi_read(self, lba, num_blocks):
     # scsi read 0x8a packet
