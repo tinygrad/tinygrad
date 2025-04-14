@@ -854,11 +854,6 @@ class PatternMatcher:
 
 # *** tracking pattern matcher ***
 
-# Don't hold refs to original buffer UOps in TrackedGraphRewrite, to allow GC. Rewrite UOps when captured, revert rewrites at end of program
-unlink_bufs = PatternMatcher([(UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE)), name="x"),lambda x: x.replace(src=x.src+(UOp(Ops.NAME),)))])
-revert_unlink_bufs = PatternMatcher([(UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE), UPat(Ops.NAME)), name="x"),
-                                lambda x: x.replace(src=x.src[0:2]))])
-
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:dict[UPat, list[Union[int, float]]] = dict()
 @dataclass(frozen=True)
@@ -999,6 +994,11 @@ def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, na
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
+
+# Don't hold refs to original buffer UOps in TrackedGraphRewrite, to allow GC. Rewrite UOps when captured, revert rewrites at end of program
+unlink_bufs = PatternMatcher([(UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE)), name="x"),lambda x: x.replace(src=x.src+(UOp(Ops.NAME),)))])
+revert_unlink_bufs = PatternMatcher([(UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE), UPat(Ops.NAME)), name="x"),
+                                      lambda x: x.replace(src=x.src[0:2]))])
 
 # for debug
 syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.IDIV: "//", Ops.MOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
