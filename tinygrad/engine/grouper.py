@@ -155,10 +155,11 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   sink = graph_rewrite(sink, do_realize, ctx=realizes)
   if DONT_GROUP_REDUCES: return realizes
 
-  # construct children graph
+  # construct children graph (only for bases)
   children: defaultdict[UOp, dict[UOp, None]] = defaultdict(dict)
   assigns: dict[UOp, None] = {}
   for u in (toposort:=sink.toposort):
+    if u.op is Ops.VIEW: continue
     if u.op is Ops.ASSIGN: assigns[u.buf_uop] = None
     for s in u.src: children[s.base][u] = None
 
@@ -167,7 +168,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   double_reduces: list[UOp] = []
   # late context, TODO: remove this
   ctx = GrouperContext(assigns, realizes, children)
-  for r in sink.toposort:
+  for r in toposort:
     if r.op is not Ops.REDUCE_AXIS: continue
     if len(r.arg) == 3 and r.arg[2] is True: continue
     if FUSE_CONV_BW and r.src[0].base.op is Ops.REDUCE_AXIS and r.src[0] is not r.src[0].base: double_reduces.append(r)
