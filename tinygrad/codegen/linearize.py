@@ -122,7 +122,7 @@ def block_merge(ctx, x:UOp):
 pm_block_merge = PatternMatcher([
   (UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),
   # double BLOCKFORK multiplies the forking (like if there's 3 forks into 2 forks, that's 6 total forks)
-  (UPat(Ops.BLOCKFORK, name="f", src=(UPat(Ops.BLOCKFORK, name="f2"))), lambda f,f2: f.replace(src=f2.src, arg=f.arg*f2.arg)),
+  (UPat(Ops.BLOCKFORK, name="f", src=(UPat(Ops.BLOCKFORK, name="f2"),)), lambda f,f2: f.replace(src=f2.src, arg=f.arg*f2.arg)),
 ])
 
 def block_finalize(block:UOp):
