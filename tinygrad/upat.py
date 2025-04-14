@@ -16,7 +16,6 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(int(x) for x in self.op))), arg="{0}.op in {1}"))
     else:
       and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.op == "+str(self.op[0].value)))
-      #and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.op[0])), arg="{0}.op is {1}"))
   if self.arg is not None:
     if isinstance(self.arg, int):
       and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.arg == "+str(int(self.arg))))
@@ -26,7 +25,6 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
     and_clause.append(UOp(Ops.CUSTOM, src=(base,),
                           arg=("len({0}.src) == " if self.strict_length else "len({0}.src) >= ")+str(self.required_len)))
   if self.name is not None:
-    #and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.DEFINE_VAR, arg=self.name)), arg="store.setdefault({1}, {0}) is {0}"))
     and_clause.append(UOp(Ops.ASSIGN, src=(UOp(Ops.DEFINE_VAR, arg=self.name), base)))
   if self.dtype is not None:
     if len(self.dtype) > 1:
@@ -196,7 +194,6 @@ def _get_code(self:UPat, has_ctx:bool):
   try:
     rendered = render(out)
   except NotImplementedError:
-    #print("HERE2")
     #print("FAIL2", self, self.location)
     return None
 

@@ -42,5 +42,11 @@ class TestUPatCompile(unittest.TestCase):
     up = UPat(GroupOp.ALU, name="a", src=UPat((Ops.VCONST, Ops.CONST)))
     do_compile(up)
 
+  @unittest.skip("fix this")
+  def test_range_named(self):
+    # this should be one src, but this should also still work
+    up = UPat(Ops.CAST, dtypes.float, UPat.var("x", dtypes.bfloat16))
+    do_compile(up)
+
 if __name__ == "__main__":
   unittest.main()
