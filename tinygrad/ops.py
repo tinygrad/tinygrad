@@ -811,12 +811,6 @@ def deconstruct_function(fxn:Callable) -> tuple:
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
-reconstruct_cache:dict[Any, Callable] = {}
-def reconstruct_function(fxn:tuple) -> Callable:
-  if (ret:=reconstruct_cache.get(fxn[0])) is not None: return ret
-  ret = reconstruct_cache[fxn[0]] = types.FunctionType(*fxn)
-  return ret
-
 @functools.cache
 def upat_interpret(p:UPat, fxn:Callable) -> Callable:
   real_fxn = types.FunctionType(*deconstruct_function(fxn))
@@ -836,7 +830,7 @@ class PatternMatcher:
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     if compiled: from tinygrad.upat import upat_compile
     # if this comes from a pickle, we reconstruct the lambda functions here
-    self.patterns:list[tuple[UPat, Callable]] = [(p,reconstruct_function(fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
+    self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
     self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
     # uop is required, arg is optional
