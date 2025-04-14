@@ -146,7 +146,6 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
   and_clause = ' and '.join(and_pieces + [f"(_ret:=_fxn({assign_clause})) is not None"])
   return [f"{'  '*depth}if {and_clause}: return _ret"]
 
-@functools.cache
 def _get_code(self:UPat, has_ctx:bool):
   ret = _get_clause(self, UOp(Ops.NOOP, arg="uop"))
   try:
