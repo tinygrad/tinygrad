@@ -84,6 +84,12 @@ class Kernel:
     self.simplify_ones()
     self.simplify_merge_adjacent()
 
+    # old IMAGE required_optimizations
+    if isinstance(self.membufs[0].dtype, ImageDType):
+      unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
+      assert unit_stride_axes_mul_4, f"needs a unit stride axis in {self.bufs[0]}"
+      if all(x < self.first_upcast for x in unit_stride_axes_mul_4): self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4), False)
+
   def copy(self):
     ret = type(self).__new__(type(self))
 
@@ -429,13 +435,6 @@ class Kernel:
     if append_opt: self.applied_opts.append(opt)
     if self.simplify_ones() and self.tensor_core_opts:
       self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
-
-  def required_optimizations(self) -> Kernel:
-    if isinstance(self.membufs[0].dtype, ImageDType):
-      unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
-      assert unit_stride_axes_mul_4, f"needs a unit stride axis in {self.bufs[0]}"
-      if all(x < self.first_upcast for x in unit_stride_axes_mul_4): self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
-    return self
 
   # **** kernel outputs ****
 
