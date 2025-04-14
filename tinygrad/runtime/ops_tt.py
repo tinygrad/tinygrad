@@ -123,7 +123,6 @@ void kernel_main() {
 
     compute = """
 #define SFPU_OP_EXP_INCLUDE 1
-#define SFPU_OP_CHAIN_0 
 
 #include <cstdint>
 #include "compute_kernel_api/common.h"
@@ -146,9 +145,10 @@ void MAIN {
             cb_wait_front(tt::CBIndex::c_0, 1);
             copy_tile(tt::CBIndex::c_0, 0, 0);
 
-#ifdef SFPU_OP_CHAIN_0
-            SFPU_OP_CHAIN_0
-#endif
+            // Computation
+            exp_tile_init();
+            exp_tile(0);
+
             tile_regs_commit();
             tile_regs_wait();
             pack_tile(0, tt::CBIndex::c_16);
@@ -172,18 +172,18 @@ class TTProgram:
     self.prog = tt_metal.CreateProgram()
     self.core = tt.umd.xy_pair(0, 0)
 
-    self.single_tile_size = 2 * 1024
+    self.single_tile_size = 4 * 1024
     self.num_tiles = 64
 
     src0_cb_index = tt.CBIndex.c_0
     num_input_tiles = 2
-    cb_src0_config = tt_metal.CircularBufferConfig(num_input_tiles * self.single_tile_size, {src0_cb_index: tt.DataFormat.Float16_b}) \
+    cb_src0_config = tt_metal.CircularBufferConfig(num_input_tiles * self.single_tile_size, {src0_cb_index: tt.DataFormat.Float32}) \
         .set_page_size(src0_cb_index, self.single_tile_size)
     cb_src0 = tt_metal.CreateCircularBuffer(self.prog, self.core, cb_src0_config)
 
     output_cb_index = tt.CBIndex.c_16
     num_output_tiles = 2
-    cb_output_config = tt_metal.CircularBufferConfig(num_output_tiles * self.single_tile_size, {output_cb_index: tt.DataFormat.Float16_b}) \
+    cb_output_config = tt_metal.CircularBufferConfig(num_output_tiles * self.single_tile_size, {output_cb_index: tt.DataFormat.Float32}) \
         .set_page_size(output_cb_index, self.single_tile_size)
     cb_output = tt_metal.CreateCircularBuffer(self.prog, self.core, cb_output_config)
 
@@ -191,34 +191,18 @@ class TTProgram:
     data_movement_config_R1 = tt_metal.DataMovementConfig()
     data_movement_config_R1.processor = tt_metal.DataMovementProcessor.RISCV_1
     data_movement_config_R1.noc = tt_metal.NOC.RISCV_1_default
-    self.unary_reader_kernel_id = tt_metal.CreateKernelFromString(
-        self.prog,
-        reader_src,
-        self.core,
-        data_movement_config_R1
-    )
-
+    self.unary_reader_kernel_id = tt_metal.CreateKernelFromString(self.prog, reader_src, self.core, data_movement_config_R1)
 
     data_movement_config_R0 = tt_metal.DataMovementConfig()
     data_movement_config_R0.processor = tt_metal.DataMovementProcessor.RISCV_0
     data_movement_config_R0.noc = tt_metal.NOC.RISCV_0_default
-    self.unary_writer_kernel_id = tt_metal.CreateKernelFromString(
-        self.prog,
-        writer_src,
-        self.core,
-        data_movement_config_R0
-    )
+    self.unary_writer_kernel_id = tt_metal.CreateKernelFromString(self.prog, writer_src, self.core, data_movement_config_R0)
 
 
     compute_config = tt_metal.ComputeConfig()
     compute_config.math_approx_mode = False
     compute_config.compile_args = [self.num_tiles, 1]
-    self.eltwise_sfpu_kernel_id = tt_metal.CreateKernelFromString(
-        self.prog,
-        compute_src,
-        self.core,
-        compute_config
-    )
+    self.eltwise_sfpu_kernel_id = tt_metal.CreateKernelFromString(self.prog, compute_src, self.core, compute_config)
 
 
   def __del__(self):
@@ -227,11 +211,11 @@ class TTProgram:
   def __call__(self, *bufs, vals=(), wait=False):
     args = list(bufs) + list(vals)
 
-    src0_bank_id = 0
-    dst_bank_id = 0
+    src0_bank_id, dst_bank_id = 0, 0
+    src0_address, dest_address = args[1].address(), args[0].address()
 
-    tt_metal.SetRuntimeArgs(self.prog, self.unary_reader_kernel_id, self.core, [args[0].address(), src0_bank_id, self.num_tiles])
-    tt_metal.SetRuntimeArgs(self.prog, self.unary_writer_kernel_id, self.core, [args[1].address(), dst_bank_id, self.num_tiles])
+    tt_metal.SetRuntimeArgs(self.prog, self.unary_reader_kernel_id, self.core, [src0_address, src0_bank_id, self.num_tiles])
+    tt_metal.SetRuntimeArgs(self.prog, self.unary_writer_kernel_id, self.core, [dest_address, dst_bank_id, self.num_tiles])
 
     return tt_time_execution(lambda: tt_metal.EnqueueProgram(self.dev.cq, self.prog, False), enable=wait)
 
@@ -250,8 +234,9 @@ class TTAllocator(Allocator):
   def _copyin(self, dest, src:memoryview): 
     tt_metal.EnqueueWriteBuffer(self.dev.cq, dest, self._memview_ptr(src), False)
   def _copyout(self, dest:memoryview, src):
-    sync = False # TODO: Does this needs to be sync?
-    tt_metal.EnqueueReadBuffer(self.dev.cq, src, self._memview_ptr(dest), sync)
+    tt_metal.EnqueueReadBuffer(self.dev.cq, src, self._memview_ptr(dest), False)
+    # TODO: Why do we need sync here?
+    self.dev.synchronize()
   def _memview_ptr(self, mem:memoryview): return cppyy.ll.reinterpret_cast["void*"](mv_address(mem))
 
 
@@ -265,4 +250,5 @@ class TTDevice(Compiled):
   def synchronize(self):
     tt_metal.Finish(self.cq)
 
-  # tt_metal.CloseDevice(device)
+  def finalize(self):
+    tt_metal.CloseDevice(self.dev)
