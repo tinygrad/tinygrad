@@ -166,8 +166,11 @@ def metadata_preservation_wrapper(fn):
 
   return _wrapper
 
-for op, lst in multi_pm.pdict.items():
-  multi_pm.pdict[op] = [(pat,functools.wraps(fn)(metadata_preservation_wrapper(fn)), er, has_ctx) for (pat, fn, er, has_ctx) in lst]
+# for op, lst in multi_pm.pdict.items():
+#   multi_pm.pdict[op] = [(pat,functools.wraps(fn)(metadata_preservation_wrapper(fn)), er, has_ctx) for (pat, fn, er, has_ctx) in lst]
 
 @track_rewrites(named=True)
-def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]:return {k:v for k,v in graph_rewrite_map(big_sink, multi_pm).items() if k is not v}
+def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]:
+  items = graph_rewrite_map(big_sink, multi_pm).items()
+  mmap = {k:v for k,v in items if k is not v}
+  return mmap
