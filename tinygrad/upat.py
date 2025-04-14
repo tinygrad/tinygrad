@@ -1,7 +1,7 @@
 from typing import Any, Callable
 import itertools, inspect, functools
 from tinygrad.helpers import partition, flatten, dedup
-from tinygrad.ops import UPat, UPatAny, UOp, Ops, PatternMatcher, graph_rewrite, fixup_function
+from tinygrad.ops import UPat, UPatAny, UOp, Ops, PatternMatcher, graph_rewrite
 
 # **** UPat compiled ****
 
@@ -205,13 +205,12 @@ def _get_code(self:UPat, has_ctx:bool):
 
 @functools.cache
 def upat_compile(self:UPat, fxn) -> Callable|None:
-  real_fxn = fixup_function(fxn)
-  has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
+  has_ctx = 'ctx' in inspect.signature(fxn).parameters
   code = _get_code(self, has_ctx)
   if code is None: return None
   code_str, dyn_lookup = code
   globs = dyn_lookup.copy()
-  globs["_fxn"] = real_fxn
+  globs["_fxn"] = fxn
   namespace: dict = {}
   #print(code_str)
   exec(code_str, globs, namespace)  # pylint: disable=W0122

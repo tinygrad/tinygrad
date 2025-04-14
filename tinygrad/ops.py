@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, get_args
+from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, get_args, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -810,27 +810,34 @@ def deconstruct_function(fxn:Callable) -> tuple:
   assert fxn.__closure__ is None, "closures are not supported in pattern matchers"
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
-def fixup_function(fxn) -> Callable: return types.FunctionType(*(fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)))
+
+# global cache for this. functools.cache doesn't work for some reason
+pm_functions: dict[Callable, Callable] = {}
+def fixup_function(fxn) -> Callable:
+  if (ret:=pm_functions.get(fxn)): return ret
+  pm_functions[fxn] = ret = types.FunctionType(*deconstruct_function(fxn))
+  pm_functions[ret] = ret  # once a function is fixed, it's a fixed point
+  return ret
 
 @functools.cache
 def upat_interpret(p:UPat, fxn) -> Callable:
-  real_fxn = fixup_function(fxn)
-  if 'ctx' in inspect.signature(real_fxn).parameters:
+  if 'ctx' in inspect.signature(fxn).parameters:
     def universal_match(uop, ctx):
       for match in p.match(uop, {}):
-        if (ret:=real_fxn(ctx=ctx, **match)) is not None: return ret # pylint: disable=E1102
+        if (ret:=fxn(ctx=ctx, **match)) is not None: return ret # pylint: disable=E1102
       return None
   else:
     def universal_match(uop, _):
       for match in p.match(uop, {}):
-        if (ret:=real_fxn(**match)) is not None: return ret # pylint: disable=E1102
+        if (ret:=fxn(**match)) is not None: return ret # pylint: disable=E1102
       return None
   return universal_match
 
 class PatternMatcher:
-  def __init__(self, patterns:list[tuple[UPat, Callable]], compiled=bool(getenv("UPAT_COMPILE", 1))):
+  def __init__(self, patterns:Sequence[tuple[UPat, tuple|Callable]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     if compiled: from tinygrad.upat import upat_compile
-    self.patterns = patterns
+    # fixup functions
+    self.patterns = [(p, fixup_function(types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn)) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
     self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
     # uop is required, arg is optional
