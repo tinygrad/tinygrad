@@ -526,7 +526,8 @@ class Kernel:
         if self.first_reduce < self.first_upcast and s <= 3 and isinstance(s2:=self.full_unupcasted_shape[-1], int) and s2 <= 3:
           self.apply_opt(Opt(OptOps.UNROLL, len(self.full_unupcasted_shape)-1-self.first_reduce, 0))
       else:
-        for splits in [4]:
+        # for r_30522n1 (NUM=269)
+        for splits in [6, 4]:
           if self.full_unupcasted_shape[-1]%splits == 0:
             self.apply_opt(Opt(OptOps.UNROLL, len(self.full_unupcasted_shape)-1-self.first_reduce, splits))
             break
