@@ -56,6 +56,7 @@ def _test_cast(a:Tensor, target_dtype:DType):
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(_to_np_dtype(target_dtype))))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
+  if target_dtype in dtypes.fp8s: raise unittest.SkipTest("no test for fp8s bitcast yet")
   if getenv("PTX") and a.dtype == dtypes.int8 and target_dtype.itemsize != a.dtype.itemsize:
     raise unittest.SkipTest("shape changing bitcast of int8 broken on PTX")
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(_to_np_dtype(target_dtype)).tolist())
@@ -109,7 +110,7 @@ class TestDType(unittest.TestCase):
     fields = dtypes.fields()
     self.assertIn("float", fields)
     self.assertIn("float32", fields)
-    self.assertEqual(len(fields), 24)
+    self.assertEqual(len(fields), 26)
     self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
     self.assertTrue(all(issubclass(_to_np_dtype(value), np.generic) for value in fields.values() if _to_np_dtype(value) is not None))
 
@@ -141,6 +142,16 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)*Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [1,4,9,16])
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
+
+class TestFp8sDType(unittest.TestCase):
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3) and is_dtype_supported(dtypes.fp8e5m2), "fp8s not supported")
+  def test_fp8s_least_upper_dtype(self):
+    self.assertEqual(least_upper_dtype(dtypes.fp8e4m3, dtypes.fp8e5m2), dtypes.half)
+    self.assertEqual(least_upper_dtype(dtypes.uint64, dtypes.int64), dtypes.fp8e4m3)
+
+  @unittest.skipUnless(not (is_dtype_supported(dtypes.fp8e4m3) and is_dtype_supported(dtypes.fp8e5m2)), "test only if fp8s not supported")
+  def test_uint64_int64_least_upper_dtype_without_fp8s(self):
+    self.assertEqual(least_upper_dtype(dtypes.uint64, dtypes.int64), dtypes.half)
 
 @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
 class TestBFloat16(unittest.TestCase):
@@ -264,6 +275,7 @@ class TestBitCast(unittest.TestCase):
   def test_shape_change_bitcast(self, dt1, dt2):
     # NOTE: this has to be assume to prevent hypothesis from skipping all samples
     assume(dt2 != dtypes.bfloat16 and dt1 != dtypes.bfloat16) # no test for bf16 bitcast yet
+    assume(dt1 not in dtypes.fp8s and dt2 not in dtypes.fp8s) # no test for fp8 bitcast yet
     assume(not (getenv("PTX") and dt1 == dtypes.int8)) # TODO: bitcasting int8 fails in PTX
     data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
     _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2, data.view(_to_np_dtype(dt2)).tolist())
@@ -399,6 +411,10 @@ class TestHelpers(unittest.TestCase):
   def test_bf16_is_float(self):
     assert dtypes.is_float(dtypes.bfloat16)
 
+  def test_fp8s_are_float(self):
+    assert dtypes.is_float(dtypes.fp8e4m3)
+    assert dtypes.is_float(dtypes.fp8e5m2)
+
   @given(strat.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_float(d) or dtypes.is_int(d)]), strat.integers(min_value=2, max_value=8))
   def test_scalar(self, dtype, amt):
     assert dtype.vec(amt).scalar() == dtype
@@ -462,7 +478,7 @@ class TestTypeSpec(unittest.TestCase):
       dtypes.default_int = default_int
       assert dtypes.default_int == default_int
 
-    for default_float in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+    for default_float in [*dtypes.fp8s, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
       dtypes.default_float = default_float
       assert dtypes.default_float == default_float
 
