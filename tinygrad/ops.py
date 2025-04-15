@@ -229,7 +229,7 @@ class UOpMetaClass(type):
     UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
     for s in src: s.children.add(ref)
     # NOTE: this will soon be set by Tensor once we remove function.py
-    if metadata:=_METADATA.get() is not None: all_metadata[created] = metadata
+    if (metadata:=_METADATA.get()) is not None: all_metadata[created] = metadata
     # NOTE: this value is set by pickle when pickling a realized tensor
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
@@ -960,7 +960,7 @@ class RewriteContext:
   def top_down_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_src = tuple([self.top_down_rewrite(x) for x in n.src])
-    new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
+    new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else metadata_preserving_replace(n, src=new_src)
     self.replace[n] = ret = n if new_n is None else self.top_down_rewrite(new_n)
     return ret
   def bottom_up_rewrite(self, n:UOp) -> UOp:
@@ -988,6 +988,8 @@ def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, 
 
 def metadata_preserving_replace(obj: UOp, **changes) -> UOp:
   ret = obj.replace(**changes)
+  all_metadata[ret] = obj.metadata
+  return ret
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 
