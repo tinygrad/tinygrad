@@ -828,8 +828,8 @@ def upat_interpret(p:UPat, fxn:Callable, on_match_wrapper: Optional[Callable] = 
   return universal_match
 
 class PatternMatcher:
-  def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1)), on_match_wrapper: Optional[Callable] = None):
-    assert not (compiled and (on_match_wrapper is not None)), "on_match_wrapper is not supported in `compiled` mode."
+  def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1)), match_wrap: Optional[Callable] = None):
+    assert not (compiled and (match_wrap is not None)), "on_match_wrapper is not supported in `compiled` mode."
     if compiled: from tinygrad.upat import upat_compile
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
@@ -839,7 +839,7 @@ class PatternMatcher:
     for p,fxn in self.patterns:
       assert p.op is not None
       if compiled and (match:=upat_compile(p, fxn)) is not None: pass # pylint: disable=E0606
-      else: match = upat_interpret(p, fxn, on_match_wrapper)
+      else: match = upat_interpret(p, fxn, match_wrap)
       for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, p.early_reject))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)

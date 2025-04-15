@@ -163,7 +163,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="device"), UPat(Ops.MULTI, name="multi"), )), copy_multi),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
-], compiled=False, on_match_wrapper=metadata_preservation_wrapper)
+], compiled=False, match_wrap=metadata_preservation_wrapper)
 
 @track_rewrites(named=True)
 def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]:
