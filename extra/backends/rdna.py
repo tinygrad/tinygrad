@@ -39,7 +39,7 @@ asm_for_op: Dict[Tuple[Ops, ...], Callable] = {
   (Ops.SHL,): lambda ctx, d, a, b, dt, name: f"v_lshlrev_b32 {d}, {b}, {a}",
   (Ops.SHR,): lambda ctx, d, a, b, dt, name: f"v_lshrrev_b32 {d}, {b}, {a}",
   (Ops.ADD,): lambda ctx, d, a, b, dt, name: f"v_add_{name} {d}, {a}, {b}",
-  (Ops.MUL,): lambda ctx, d, a, b, dt, name: f"v_mul_{name} {d}, {a}, {b}",
+  (Ops.MUL,): lambda ctx, d, a, b, dt, name: f"v_mul_{name} {d}, {a}, {b}" if dtypes.is_float(dt) else f"v_mul_lo_{name} {d}, {a}, {b}",
   (Ops.XOR,): lambda ctx, d, a, b, dt, name: f"v_xor_b32 {d}, {a}, {b}",
   (Ops.AND,): lambda ctx, d, a, b, dt, name: f"v_and_b32 {d}, {a}, {b}",
   (Ops.OR,):  lambda ctx, d, a, b, dt, name: f"v_or_b32 {d}, {a}, {b}",
@@ -104,17 +104,23 @@ def render_addr_calc(ctx, ptr, offset) -> Tuple[List[str], str, str]:
   return instructions, addr_lo_v, addr_hi_v
 
 def render_load(ctx, x, ptr, offset) -> List[str]:
-  load_bits = 32 * x.dtype.count
-
+  load_bits = ctx.types[x.dtype][1:] * x.dtype.count
   addr_setup_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, offset)
-
-  load_ins = f"flat_load_b{load_bits} {ctx.r[x]}, {render_reg_range('v', [addr_lo_v, addr_hi_v])} offset:0"
+  if any(_x.op is Ops.DEFINE_LOCAL for _x in x.src[0].toposort):
+    # shared mem
+    load_ins = f"ds_load_b{load_bits} {ctx.r[x]}, {render_reg_range('v', [addr_lo_v, addr_hi_v])}"
+  else:
+    load_ins = f"flat_load_b{load_bits} {ctx.r[x]}, {render_reg_range('v', [addr_lo_v, addr_hi_v])} offset:0"
   return addr_setup_ins + [load_ins]
 
 def render_store(ctx, x, ptr, offset, val) -> List[str]:
-  store_bits = 32 * x.dtype.count
+  store_bits = ctx.types[x.dtype][1:] * x.dtype.count
   addr_setup_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, offset)
-  store_ins = f"flat_store_b{store_bits} {render_reg_range('v', [addr_lo_v, addr_hi_v])}, {ctx.r[val]} offset:0"
+  if any(_x.op is Ops.DEFINE_LOCAL for _x in x.src[0].toposort):
+    # shared mem
+    store_ins = f"ds_store_b{store_bits} {render_reg_range('v', [addr_lo_v, addr_hi_v])}, {ctx.r[val]}"
+  else:
+    store_ins = f"flat_store_b{store_bits} {render_reg_range('v', [addr_lo_v, addr_hi_v])}, {ctx.r[val]} offset:0"
   return addr_setup_ins + [store_ins]
 
 supports_half: List[Ops] = [Ops.EXP2, Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPLT, Ops.WHERE]
@@ -148,8 +154,27 @@ rdna3_rewrite = PatternMatcher([
     render_load(ctx, x, ptr, offset)
   ),
 
-  (UPat(Ops.STORE, name="x", src=(UPat.var("ptr"), UPat.var("offset"), UPat.var("val"))), 
-   lambda ctx, x, ptr, offset, val: render_store(ctx, x, ptr, offset, val))
+  (UPat(Ops.STORE, name="x", src=(UPat.var("ptr"), UPat.var("offset"), UPat.var("val"))),
+   lambda ctx, x, ptr, offset, val: render_store(ctx, x, ptr, offset, val)),
+
+  (UPat(Ops.ASSIGN, name="x"), 
+   lambda ctx, x: f"v_mov_b{ctx.types[x.dtype][1:] * x.dtype.count} {ctx.r[x.src[0]]}, {ctx.r[x.src[1]]}"),
+
+  (UPat(Ops.RANGE, name="x"),
+   lambda ctx, x: [f"v_mov_b32 {ctx.r[x]}, {ctx.r[x.src[0]]}", f"LABEL_LOOP_{ctx.r[x][1:]}:"]),
+
+  (UPat(Ops.ENDRANGE, name="x", src=(UPat.var("src0"),)), 
+   lambda ctx, x, src0: [
+       asm_for_op[(Ops.ADD,)](ctx, ctx.r[src0], ctx.r[src0], "1", dtypes.int, ctx.types[dtypes.int]),
+       asm_for_op[(Ops.CMPLT,)](ctx, ctx.r[src0], ctx.r[src0], ctx.l[src0], dtypes.int, ctx.types[dtypes.int]),
+       f"s_cbranch_vccnz LABEL_LOOP_{ctx.r[src0][1:]}"
+   ]),
+
+  (UPat(Ops.DEFINE_ACC, name="x", src=(UPat.cvar("pred", dtype=dtypes.bool),), allow_any_len=True),
+   lambda ctx, x, pred: [
+       f"v_cmp_neq_{ctx.types[x.src[0].dtype]} {str(pred.arg)}, 0",
+       f"v_cndmask_b32 {ctx.r[x]}, 0.0, 0.0"
+   ])
 ])
 
 # vop2 only for now (how can this be expanded easily?)
@@ -157,6 +182,7 @@ dual_combs: List[Tuple[Ops, Ops]] = [
   (Ops.ADD, Ops.MUL),
   (Ops.MUL, Ops.ADD),
 ]
+
 
 # fused_ops = PatternMatcher([
 #   (UPat(Ops.ADD, name="x",
@@ -166,9 +192,7 @@ dual_combs: List[Tuple[Ops, Ops]] = [
 
 class RDNA3Renderer(Renderer):
   device = "ROCm"
-  suffix = "s"
   # tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
-  code_for_op = asm_for_op
   extra_matcher = None
 
   def __init__(self, arch:str, device="ROCm"):
@@ -203,8 +227,12 @@ class RDNA3Renderer(Renderer):
     self.r: Dict[UOp, str] = {}
     ins: List[str] = []
     args: List[dict] = []
+    self.l: Dict[UOp, int] = {}
 
     for u in uops:
+      if any(src.op is Ops.LOAD for src in u.src):
+        ins.append("  s_waitcnt vmcnt(0)")
+
       if u.op in {Ops.CMPLT, Ops.CMPNE}:
         # HACK: this will not be valid if we do another comparison in the way.
         # saving vcc state isn't fun. this might be invalid because we also do
@@ -212,7 +240,7 @@ class RDNA3Renderer(Renderer):
         self.r[u] = "vcc"
       elif u.op == Ops.MULACC:
         self.r[u] = self.r[u.src[0]]
-      elif u.op in GroupOp.ALU or u.op == Ops.CONST or u.op == Ops.LOAD: 
+      elif u.op in GroupOp.ALU or u.op == Ops.CONST or u.op == Ops.LOAD or u.op == Ops.RANGE:
         self.r[u] = f"v{self.v_cnt}"
         self.v_cnt += 1
       elif u.op == Ops.SPECIAL:
@@ -231,11 +259,17 @@ class RDNA3Renderer(Renderer):
         self.s_cnt += self.s_cnt%2
         self.r[u] = f"s[{self.s_cnt}:{self.s_cnt+1}]"
         self.s_cnt += 2
+      if u.op == Ops.RANGE:
+        # TODO: what is the arg?
+        self.l[u] = self.r[u.src[1]]
 
       if (l:=cast(Union[str, List[str]], rdna3_rewrite.rewrite(u, ctx=self))) is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
-      ins.extend([l] if isinstance(l, str) else l)
+      l = [l] if isinstance(l, str) else l
+      l = [f"  {u}" if u[-1] != ':' else u for u in l]
+      ins.extend(l)
 
+    ins.append("  s_waitcnt vmcnt(0)")
     metadata = {
       'amdhsa.kernels': [{'.args': args,
         '.group_segment_fixed_size': 0, '.kernarg_segment_align': 8, '.kernarg_segment_size': args[-1][".offset"] + args[-1][".size"],
@@ -276,59 +310,106 @@ class RDNA3Renderer(Renderer):
 {name}:
 """
 
-    ins += ['s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', 's_endpgm', 's_code_end']
+    ins += ['  s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', '  s_endpgm', '  s_code_end']
     return ".amdgpu_metadata\n" + yaml.dump(metadata) + ".end_amdgpu_metadata" + \
            boilerplate_start + "\n" + '\n'.join("%s %d" % x for x in kernel_desc.items()) + "\n" + code_start + \
-           '  ' + '\n  '.join(ins) + f"\n.size {name}, .-{name}"
+           '\n'.join(ins) + f"\n.size {name}, .-{name}"
+
+# def create_rdna3_matmul_uops(K=4, N=128):
+#     uops = []
+#     
+#     ## Global Buffers
+#     gA = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 0)  # Input A (MxK)
+#     gB = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 1)  # Input B (KxN)
+#     gC = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 2)  # Output C (MxN)
+#     uops += [gA, gB, gC]
+#
+#     ## Constants
+#     cK = UOp(Ops.CONST, dtypes.int32, (), K)
+#     cN = UOp(Ops.CONST, dtypes.int32, (), N)
+#     c0_f = UOp(Ops.CONST, dtypes.float32, (), 0.0)
+#     uops += [cK, cN, c0_f]
+#
+#     ## Thread Coordinates
+#     i = UOp(Ops.SPECIAL, dtypes.int32, (), (0, "lidx0"))  # Row index
+#     j = UOp(Ops.SPECIAL, dtypes.int32, (), (1, "lidx1"))  # Column index
+#     uops += [i, j]
+#
+#     acc = c0_f
+#     uops.append(acc)
+#
+#     for k in range(K):
+#         a_offset = UOp(Ops.MUL, dtypes.int32, (i, cK))
+#         c = UOp(Ops.CONST, dtypes.int32, (), k)
+#         a_idx = UOp(Ops.ADD, dtypes.int32, (a_offset, c))
+#         a_val = UOp(Ops.LOAD, dtypes.float32, (gA, a_idx))
+#
+#         b_offset = UOp(Ops.MUL, dtypes.int32, (c, cN))
+#         b_idx = UOp(Ops.ADD, dtypes.int32, (b_offset, j))
+#         b_val = UOp(Ops.LOAD, dtypes.float32, (gB, b_idx))
+#         
+#         ac = UOp(Ops.MULACC, dtypes.float32, (a_val, b_val, acc))
+#         
+#         uops += [c, a_offset, a_idx, a_val, b_offset, b_idx, b_val, ac]
+#
+#     m = UOp(Ops.MUL, dtypes.int32, (i, cN))
+#     output_idx = UOp(Ops.ADD, dtypes.int32, (m, j))
+#     store = UOp(Ops.STORE, dtypes.float32, (gC, output_idx, acc))
+#     uops += [m, output_idx, store]
+#
+#     return uops
+def create_rdna3_matmul_uops(K=4, N=128):
+    uops = []
+
+    ## Global Buffers
+    gA = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 0)  # Input A (MxK)
+    gB = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 1)  # Input B (KxN)
+    gC = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 2)  # Output C (MxN)
+    uops += [gA, gB, gC]
+
+    ## Constants
+    cK = UOp(Ops.CONST, dtypes.uint32, (), K)  # Loop bound K
+    cN = UOp(Ops.CONST, dtypes.uint32, (), N)  # Matrix width N
+    acc = UOp(Ops.CONST, dtypes.float32, (), 0.0)  # Zero for accumulator
+    c0 = UOp(Ops.CONST, dtypes.uint32, (), 0)  # Loop start
+    uops += [cK, cN, acc, c0]
+
+    ## Thread Coordinates
+    i = UOp(Ops.SPECIAL, dtypes.uint32, (), (0, "lidx0"))  # Row index
+    j = UOp(Ops.SPECIAL, dtypes.uint32, (), (1, "lidx1"))  # Column index
+    uops += [i, j]
+
+    ## Loop Variable
+    k = UOp(Ops.RANGE, dtypes.uint32, (c0, cK))  # k ranges from 0 to K
+    uops.append(k)
+
+    ## Loop Body
+    # A[i][k]
+    a_offset = UOp(Ops.MUL, dtypes.uint32, (i, cK))  # i * K
+    a_idx = UOp(Ops.ADD, dtypes.uint32, (a_offset, k))  # i * K + k
+    a_val = UOp(Ops.LOAD, dtypes.float32, (gA, a_idx))  # A[i][k]
+
+    # B[k][j]
+    b_offset = UOp(Ops.MUL, dtypes.uint32, (k, cN))  # k * N
+    b_idx = UOp(Ops.ADD, dtypes.uint32, (b_offset, j))  # k * N + j
+    b_val = UOp(Ops.LOAD, dtypes.float32, (gB, b_idx))  # B[k][j]
+
+    # Accumulate: acc += A[i][k] * B[k][j]
+    ac = UOp(Ops.MULACC, dtypes.float32, (a_val, b_val, acc))
+    uops += [a_offset, a_idx, a_val, b_offset, b_idx, b_val, ac]
+
+    ## End Loop
+    end_k = UOp(Ops.ENDRANGE, dtypes.bool, (k,))  # Loop k until k < K
+    uops.append(end_k)
+
+    ## Store Result
+    m = UOp(Ops.MUL, dtypes.uint32, (i, cN))  # i * N
+    output_idx = UOp(Ops.ADD, dtypes.uint32, (m, j))  # i * N + j
+    store = UOp(Ops.STORE, dtypes.float32, (gC, output_idx, acc))
+    uops += [m, output_idx, store]
+
+    return uops
 
 if __name__ == '__main__':
-  g0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 0)
-  g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 1)
-
-  # Constants
-  c2 = UOp(Ops.CONST, dtypes.float32, (), 2.0)
-  c3 = UOp(Ops.CONST, dtypes.float32, (), 3.0)
-  c1 = UOp(Ops.CONST, dtypes.int32, (), 1)
-  c0_5 = UOp(Ops.CONST, dtypes.float32, (), 0.5)
-
-  # Memory operations
-  s0 = UOp(Ops.SPECIAL, dtypes.int32, (), (0, "gidx0"))
-  load_idx = UOp(Ops.ADD, dtypes.int32, (s0, c1))
-  input_val = UOp(Ops.LOAD, dtypes.float32, (g0, load_idx))
-
-  # Arithmetic operations
-  mul_res = UOp(Ops.MUL, dtypes.float32, (input_val, c3))
-  add_res = UOp(Ops.ADD, dtypes.float32, (mul_res, c2))
-  exp_res = UOp(Ops.EXP2, dtypes.float32, (add_res,))
-
-  # Conditional operation
-  cmp = UOp(Ops.CMPLT, dtypes.bool, (exp_res, c0_5))
-  sel = UOp(Ops.WHERE, dtypes.float32, (cmp, c2, add_res))
-
-  mad_res = UOp(Ops.MULACC, dtypes.float32, (sel, c3, input_val))
-
-  mod_res = UOp(Ops.MOD, dtypes.float32, (mad_res, c3))
-
-  # Store result
-  store_idx = UOp(Ops.SPECIAL, dtypes.int32, (), (0, "gidx0"))
-  store = UOp(Ops.STORE, dtypes.float32, (g1, store_idx, mod_res))
-
-  uops = [
-    g0, g1,
-    c2, c3, c1, c0_5,
-    s0,
-    load_idx,
-    input_val,
-    mul_res,
-    add_res,
-    exp_res,
-    cmp,
-    sel,
-    mad_res,
-    mod_res,
-    store_idx,
-    store,
-  ]
-
   renderer = RDNA3Renderer("motherfucker")
-  print(renderer.render("bitch", uops))
+  print(renderer.render("bitch", create_rdna3_matmul_uops()))
