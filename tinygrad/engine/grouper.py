@@ -159,7 +159,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   children: defaultdict[UOp, dict[UOp, None]] = defaultdict(dict)
   assigns: dict[UOp, None] = {}
   for u in (toposort:=sink.toposort):
-    if u.op is Ops.VIEW: continue
+    if u.op in {Ops.VIEW, Ops.SINK}: continue
     if u.op is Ops.ASSIGN: assigns[u.buf_uop] = None
     for s in u.src: children[s.base][u] = None
 
