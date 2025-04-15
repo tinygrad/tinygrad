@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Final, Optional, ClassVar, Union, Callable, Literal
+from typing import Final, Optional, ClassVar, Union, Callable, Literal,TYPE_CHECKING
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
@@ -7,6 +7,13 @@ from tinygrad.helpers import getenv, prod
 ConstType = Union[float, int, bool]
 
 FmtStr = Literal['?', 'b', 'B', 'h', 'H', 'i', 'I', 'q', 'Q', 'e', 'f', 'd']
+if TYPE_CHECKING:
+  import numpy.typing as npt
+  npArrayType = npt.NDArray
+  npDTypeLike = npt.DTypeLike
+else:
+  npArrayType = "np.ndarray"
+  npDTypeLike = "np.dtype"
 
 # all DTypes should only be created once
 class DTypeMetaClass(type):
@@ -206,7 +213,7 @@ truncate: dict[DType, Callable] = {dtypes.bool: bool,
 def _to_np_dtype(dtype:DType) -> Optional[type]:
   import numpy as np
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
-def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
+def _from_np_dtype(npdtype:npDTypeLike) -> DType: # type: ignore [name-defined] # noqa: F821
   import numpy as np
   return dtypes.fields()[np.dtype(npdtype).name]
 
