@@ -150,7 +150,8 @@ def _get_code(self:UPat, has_ctx:bool):
 
 @functools.cache
 def upat_compile(self:UPat, fxn) -> Callable|None:
-  real_fxn = types.FunctionType(*deconstruct_function(fxn))
+  #real_fxn = types.FunctionType(*deconstruct_function(fxn))
+  real_fxn = fxn
   code = _get_code(self, 'ctx' in inspect.signature(real_fxn).parameters)
   if code is None: return None
   code_str, dyn_lookup = code
