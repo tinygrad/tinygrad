@@ -3,7 +3,7 @@ import unittest
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
-from hypothesis import given, strategies as strat, settings, HealthCheck
+from hypothesis import given, strategies as strat, settings, HealthCheck, assume
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.realize import run_schedule
@@ -48,6 +48,8 @@ class ht:
   float32 = strat.floats(width=32, allow_subnormal=False)
   float16 = strat.floats(width=16, allow_subnormal=False)
   bfloat16 = strat.floats(width=16, allow_subnormal=False)
+  fp8e4m3 = strat.sampled_from([0.0, 0.1, 0.5, 1.0, -0.1, -0.5, -1.0])
+  fp8e5m2 = strat.sampled_from([0.0, 0.1, 0.5, 1.0, -0.1, -0.5, -1.0])
   uint8 = strat.integers(0, 255)
   uint16 = strat.integers(0, 65535)
   uint32 = strat.integers(0, 2**32-1)
@@ -64,7 +66,8 @@ def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)), np.array([b]).astype(_to_np_dtype(dtype)))
-  if dtype is dtypes.bfloat16: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
+  if dtype in dtypes.fp8s: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-1, rtol=1e-2)
+  elif dtype is dtypes.bfloat16: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   elif dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
@@ -76,7 +79,8 @@ def universal_test_unary(a, dtype, op):
   run_schedule(sched)
   tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
-  if dtype in (*dtypes_float, dtypes.bfloat16):
+  if dtype in dtypes.fp8s: np.testing.assert_allclose(tensor_value, numpy_value, atol=5e-1, rtol=1e-2)
+  elif dtype in (*dtypes_float, dtypes.bfloat16):
     np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
@@ -113,6 +117,26 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16, Device.DEFAULT), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
   def test_bfloat16(self, a, b, op): universal_test(a, b, dtypes.bfloat16, op)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3, Device.DEFAULT), f"no fp8e4m3 on {Device.DEFAULT}")
+  @given(ht.fp8e4m3, ht.fp8e4m3, strat.sampled_from(binary_operations))
+  def test_fp8e4m3(self, a, b, op): universal_test(a, b, dtypes.fp8e4m3, op)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2, Device.DEFAULT), f"no fp8e5m2 on {Device.DEFAULT}")
+  @given(ht.fp8e5m2, ht.fp8e5m2, strat.sampled_from(binary_operations))
+  def test_fp8e5m2(self, a, b, op): universal_test(a, b, dtypes.fp8e5m2, op)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3, Device.DEFAULT), f"no fp8e4m3 on {Device.DEFAULT}")
+  @given(ht.fp8e4m3, strat.sampled_from(unary_operations))
+  def test_fp8e4m3_unary(self, a, op):
+    if op[1] in (np.reciprocal, np.log): assume(a != 0.0) # reciprocal(0) and log(0) are undefined and cause an error in fp8s
+    universal_test_unary(a, dtypes.fp8e4m3, op)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2, Device.DEFAULT), f"no fp8e5m2 on {Device.DEFAULT}")
+  @given(ht.fp8e5m2, strat.sampled_from(unary_operations))
+  def test_fp8e5m2_unary(self, a, op):
+    if op[1] in (np.reciprocal, np.log): assume(a != 0.0) # reciprocal(0) and log(0) are undefined and cause an error in fp8s
+    universal_test_unary(a, dtypes.fp8e5m2, op)
 
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
