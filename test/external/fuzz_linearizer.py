@@ -53,8 +53,6 @@ if getenv("VALIDATE_HCQ"):
 def tuplize_uops(uops:list[UOp]) -> tuple:
   return tuple([(x.op, x.dtype, tuple(uops.index(x) for x in x.src), x.arg) for x in uops])
 
-device = Device[Device.DEFAULT]
-
 def get_fuzz_rawbufs(lin):
   rawbufs = bufs_from_lin(lin)
 
