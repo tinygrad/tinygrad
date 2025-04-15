@@ -145,6 +145,7 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
 
 class TestFp8s(unittest.TestCase):
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), "fp8e4m3 not supported")
   def test_fp8e4m3_creation_numpy(self):
     data = [-1, 1, 2]
     t = Tensor(data, dtype=dtypes.fp8e4m3)
@@ -153,6 +154,7 @@ class TestFp8s(unittest.TestCase):
     assert tnp.dtype == np.float32
     np.testing.assert_allclose(tnp, np.array(data))
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), "fp8e5m2 not supported")
   def test_fp8e5m2_creation_numpy(self):
     data = [-1, 1, 2]
     t = Tensor(data, dtype=dtypes.fp8e5m2)
