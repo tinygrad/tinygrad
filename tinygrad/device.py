@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Optional, Any, Iterator, Generator
+from typing import Optional, Any, Iterator, Generator, Optional
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
                              cpu_time_execution, colored, Context, round_up
@@ -327,7 +327,7 @@ class Compiled:
     # override this in your device implementation
 
 # TODO: move this to each Device
-def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
+def is_dtype_supported(dtype:Optional[DType], device:Optional[str]=None) -> bool:
   if device is None: device = Device.DEFAULT
   if dtype == dtypes.bfloat16:
     # NOTE: this requires bf16 buffer support
