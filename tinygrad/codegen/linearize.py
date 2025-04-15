@@ -19,9 +19,10 @@ class BasicBlock:
   ctx: tuple[UOp, ...]
   lst: tuple[UOp, ...]
   end: UOp|None = None
+  cnt: int = 0
   def __lt__(self, o:BasicBlock): return tuple(x.tuplize for x in self.ctx+self.lst) < tuple(x.tuplize for x in o.ctx+o.lst)
   def __repr__(self):
-    return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+\
+    return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+f'f{self.cnt} '+\
            f"{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
 def append_to_block(ctx:tuple[dict[UOp, tuple[UOp, ...]], dict[UOp, list[UOp]]], x:UOp):
