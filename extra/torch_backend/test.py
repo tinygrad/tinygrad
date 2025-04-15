@@ -108,6 +108,7 @@ class TestTorchBackend(unittest.TestCase):
 
   def test_index(self):
     def compute_index(device):
+      # compute index tensor operation
       target_tensor = torch.tensor([[12,6,4],[89,7,812]], device=device)
       indice_x = torch.tensor([0,1], device=device)
       indice_y = torch.tensor([2,1], device=device)
