@@ -49,7 +49,7 @@ def make_block(ctx, x:UOp):
   for x in unmergable_blocks:
     um_ctx = tuple(_start_strip(x.arg.ctx))
     if um_ctx != tuple_ctx:
-      ends_to_add = [y for y in um_ctx if y not in tuple_ctx]
+      ends_to_add = [y for y in um_ctx if y not in tuple_ctx][::-1]
       while len(ends_to_add):
         r = ends_to_add[0]
         end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
@@ -57,18 +57,15 @@ def make_block(ctx, x:UOp):
         ends_to_add = ends_to_add[1:]
     final_unmergable_blocks.append(x)
 
+  # count the number of times this is referenced in srcs, a little different from children
+  cnt = len(ctx.children[fixed_x])
+  #child_srcs = flatten([y.src for y in ctx.children[fixed_x]])
+  #cnt = len([y for y in child_srcs if y is fixed_x])
+
   # create the block (TODO: we don't actually need to track that list)
-  arg = BasicBlock(tuple_ctx, tuple(flatten([y.arg.lst for y in mergable_blocks])+[fixed_x]), cnt=len(ctx.children[fixed_x]))
+  arg = BasicBlock(tuple_ctx, tuple(flatten([y.arg.lst for y in mergable_blocks])+[fixed_x]), cnt=cnt)
   new_srcs = flatten([y.src for y in mergable_blocks])+final_unmergable_blocks
   return UOp(Ops.BLOCK, src=tuple(new_srcs), arg=arg)
-
-# this will wrap every UOp in a BLOCK, top down
-blocks_in_context = PatternMatcher([
-  # make blocks from non block and const
-  (UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, src=(), name="x"), lambda ctx,x: UOp(Ops.BLOCK, arg=BasicBlock((), (x,), cnt=len(ctx.children[x])))),
-  # NOTE: this pattern doesn't match 0 due to the early reject
-  (UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, src=UPat((Ops.BLOCK, Ops.BLOCKEND)), name="x"), make_block),
-])
 
 """
 def merge_block(ctx, x:UOp):
@@ -83,13 +80,19 @@ def merge_block(ctx, x:UOp):
 
 def merge_blockend(x:UOp):
   unmergable_blocks, mergable_blocks = [], []
-  real_ctx = tuple(sorted(dedup(x.arg.ctx+(x.arg.end,)), key=lambda x: x.tuplize))
+  #real_ctx = tuple(sorted(dedup(x.arg.ctx+(x.arg.end,)), key=lambda x: x.tuplize))
   for y in x.src:
-    if y.op is Ops.BLOCK and x.src.count(y) == y.arg.cnt and real_ctx == y.arg.ctx:
+    if y.op is Ops.BLOCK and x.src.count(y) == y.arg.cnt and x.arg.end in y.arg.ctx:
       if y not in mergable_blocks: mergable_blocks.append(y)
     else:
+      #print(y.op is Ops.BLOCK, x.src.count(y) == y.arg.cnt, real_ctx == y.arg.ctx)
+      #print([z.arg for z in real_ctx], [z.arg for z in y.arg.ctx])
       unmergable_blocks.append(y)
-  if len(mergable_blocks) == 0: return None
+
+  if len(mergable_blocks) == 0:
+    #print("FAIL TO MERGE", x.arg.end, len(real_ctx))
+    return None
+  #print("MERGING", x.arg.end)
 
   # create the block (TODO: we don't actually need to track that list)
   new_lst = tuple(flatten([y.arg.lst for y in mergable_blocks]))+x.arg.lst
@@ -112,11 +115,12 @@ def remove_blockend(x:UOp):
     if x.op is Ops.BLOCKEND and any(y.op is Ops.BARRIER for y in late_ops) and late_ops[-1].op is Ops.ENDRANGE:
       late_ops = [UOp(Ops.BARRIER)] + late_ops
     return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src,
-      arg=BasicBlock(tuple(y for y in x.arg.ctx if y is not x.arg.end),
+      arg=BasicBlock(tuple(sorted([y for y in x.arg.ctx if y is not x.arg.end], key=lambda x: x.tuplize)),
                      tuple(early_ops)+parent_block.arg.lst+tuple(late_ops), cnt=x.arg.cnt))
 
 def merge_block(x:UOp):
   unmergable_blocks, mergable_blocks = [], []
+  #print("merge block", len(x.src))
   for y in x.src:
     # if ctxs match and count is correct, we merge in this block
     if y.op is Ops.BLOCK and x.src.count(y) == y.arg.cnt and x.arg.ctx == y.arg.ctx:
@@ -136,6 +140,18 @@ block_merge = PatternMatcher([
   (UPat(Ops.BLOCKEND, name="x"), merge_blockend),
   (UPat(Ops.BLOCKEND, name="x"), remove_blockend),
 ])
+
+# this will wrap every UOp in a BLOCK, top down
+blocks_in_context = PatternMatcher([
+  # make blocks from non block and const
+  (UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, src=(), name="x"), lambda ctx,x: UOp(Ops.BLOCK, arg=BasicBlock((), (x,), cnt=len(ctx.children[x])))),
+  # NOTE: this pattern doesn't match 0 due to the early reject
+  (UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, src=UPat((Ops.BLOCK, Ops.BLOCKEND)), name="x"), make_block),
+
+  # merge block
+  #(UPat(Ops.BLOCK, name="x"), merge_block),
+])
+
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
