@@ -235,4 +235,4 @@ class AMDLLVMRenderer(LLVMRenderer):
   def __init__(self, arch:str):
     self.arch = arch
     self.tensor_cores = AMDRenderer.get_tensor_cores(arch)
-  def __reduce__(self): return (AMDLLVMRenderer, (self.arch,))
+  def __reduce__(self): return self.__class__, (self.arch,)
