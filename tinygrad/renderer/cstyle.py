@@ -415,12 +415,12 @@ class AMDRenderer(CStyleLanguage):
   tensor_cores_mfma = [TensorCore(dims=(16,16,16), threads=64, elements_per_thread=(4,4,4), dtype_in=di, dtype_out=do,
     opts=("l0","l0","l0","l0","u1","u1","l1","l1"), swizzle=(((10,11,4,5,8,9),(0,1,2,3,6,7)),((0,1,2,3,8,9),(4,5,10,11,6,7))))
     for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
-
+  @staticmethod
+  def get_tensor_cores(arch): return {"gfx942": AMDRenderer.tensor_cores_mfma, "gfx1201": []}.get(arch.split(":")[0], AMDRenderer.tensor_cores)
   def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
     self.arch = arch
     # TODO: fix tensor cores for gfx1201
-    self.tensor_cores = \
-      AMDRenderer.tensor_cores_mfma if arch.split(":")[0] == "gfx942" else AMDRenderer.tensor_cores if arch.split(":")[0] != "gfx1201" else []
+    self.tensor_cores = self.get_tensor_cores(self.arch)
     if self.arch.split(":")[0] == "gfx942":
       self.string_rewrite = PatternMatcher([
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, 0, 0, 0)")]) + base_rewrite
