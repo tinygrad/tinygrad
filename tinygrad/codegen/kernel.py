@@ -8,14 +8,12 @@ from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variab
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
-from tinygrad.dtype import ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap, ContextVar
 from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, USE_TC, AMX, CAPTURE_PROCESS_REPLAY
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.devectorizer import full_graph_rewrite
-from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
+from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.engine.grouper import view_left
 
 class KernelOptError(Exception): pass
@@ -204,19 +202,6 @@ class Kernel:
   def simplify_merge_adjacent(self):
     if self.shape_len == 0: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
-
-    # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
-    if isinstance(self.membufs[0].dtype, ImageDType):
-      base_shape = self.membufs[0].dtype.shape
-      if shape_idx_groups := get_contraction(self.output_shape, base_shape):
-        special_strides: tuple[sint, ...] = tuple()
-        for i,g in enumerate(shape_idx_groups):
-          shape_piece = tuple(self.output_shape[x] for x in g)
-          assert prod(shape_piece) == base_shape[i], f"get_contraction was wrong? {shape_piece} != {base_shape[i]}"
-          special_strides += strides_for_shape(shape_piece)
-        # adding the fake image shape
-        shapes.append(self.output_shape)
-        strides.append(special_strides)
 
     # merge dimensions if we can, multi _merge_dims
     # NOTE: this does not always preserve the reduce dimension
