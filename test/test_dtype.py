@@ -142,6 +142,10 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
 
+class TestFp8s(unittest.TestCase):
+  def test_fp8e4m3_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e4m3).dtype == dtypes.fp8e4m3
+  def test_fp8e5m2_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e5m2).dtype == dtypes.fp8e5m2
+
 @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
 class TestBFloat16(unittest.TestCase):
   def test_bf16_creation_numpy(self):
