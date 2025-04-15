@@ -145,23 +145,15 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
 
 class TestFp8s(unittest.TestCase):
-  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), "fp8e4m3 not supported")
-  def test_fp8e4m3_creation_numpy(self):
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3) and is_dtype_supported(dtypes.fp8e5m2), "fp8s not supported")
+  def test_fp8s_creation_numpy(self):
     data = [-1, 1, 2]
-    t = Tensor(data, dtype=dtypes.fp8e4m3)
-    assert t.dtype == dtypes.fp8e4m3
-    tnp = t.numpy()
-    assert tnp.dtype == np.float32
-    np.testing.assert_allclose(tnp, np.array(data))
-
-  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), "fp8e5m2 not supported")
-  def test_fp8e5m2_creation_numpy(self):
-    data = [-1, 1, 2]
-    t = Tensor(data, dtype=dtypes.fp8e5m2)
-    assert t.dtype == dtypes.fp8e5m2
-    tnp = t.numpy()
-    assert tnp.dtype == np.float32
-    np.testing.assert_allclose(tnp, np.array(data))
+    for fp8 in dtypes.fp8s:
+      t = Tensor(data, dtype=fp8)
+      assert t.dtype == fp8
+      tnp = t.numpy()
+      assert tnp.dtype == np.float32
+      np.testing.assert_allclose(tnp, np.array(data))
 
 class TestFp8sDType(unittest.TestCase):
   def _float_to_fp8_conversion_test(self, dtype, input_values, expected_values):
@@ -747,8 +739,8 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.uint64)).sum().dtype == dtypes.uint64
     assert (Tensor([0, 1], dtype=dtypes.float16)).sum().dtype == dtypes.float16
     #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).sum().dtype == dtypes.bfloat16
-    if (is_dtype_supported(dtypes.fp8e4m3)): assert (Tensor([0, 1], dtype=dtypes.fp8e4m3)).sum().dtype == dtypes.fp8e4m3
-    if (is_dtype_supported(dtypes.fp8e5m2)): assert (Tensor([0, 1], dtype=dtypes.fp8e5m2)).sum().dtype == dtypes.fp8e5m2
+    assert (Tensor([0, 1], dtype=dtypes.fp8e4m3)).sum().dtype == dtypes.fp8e4m3
+    assert (Tensor([0, 1], dtype=dtypes.fp8e5m2)).sum().dtype == dtypes.fp8e5m2
     assert (Tensor([0, 1], dtype=dtypes.float32)).sum().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).sum().dtype == dtypes.float64
 
@@ -781,8 +773,8 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.uint64)).mean().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float16)).mean().dtype == dtypes.float16
     #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).mean().dtype == dtypes.bfloat16
-    if (is_dtype_supported(dtypes.fp8e4m3)): assert (Tensor([0, 1], dtype=dtypes.fp8e4m3)).mean().dtype == dtypes.fp8e4m3
-    if (is_dtype_supported(dtypes.fp8e5m2)): assert (Tensor([0, 1], dtype=dtypes.fp8e5m2)).mean().dtype == dtypes.fp8e5m2
+    assert (Tensor([0, 1], dtype=dtypes.fp8e4m3)).mean().dtype == dtypes.fp8e4m3
+    assert (Tensor([0, 1], dtype=dtypes.fp8e5m2)).mean().dtype == dtypes.fp8e5m2
     assert (Tensor([0, 1], dtype=dtypes.float32)).mean().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).mean().dtype == dtypes.float64
 
@@ -798,8 +790,8 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.uint64)).cumsum(0).dtype == dtypes.uint64
     assert (Tensor([0, 1], dtype=dtypes.float16)).cumsum(0).dtype == dtypes.float16
     #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).cumsum(0).dtype == dtypes.bfloat16
-    if (is_dtype_supported(dtypes.fp8e4m3)): assert (Tensor([0, 1], dtype=dtypes.fp8e4m3)).cumsum(0).dtype == dtypes.fp8e4m3
-    if (is_dtype_supported(dtypes.fp8e5m2)): assert (Tensor([0, 1], dtype=dtypes.fp8e5m2)).cumsum(0).dtype == dtypes.fp8e5m2
+    assert (Tensor([0, 1], dtype=dtypes.fp8e4m3)).cumsum(0).dtype == dtypes.fp8e4m3
+    assert (Tensor([0, 1], dtype=dtypes.fp8e5m2)).cumsum(0).dtype == dtypes.fp8e5m2
     assert (Tensor([0, 1], dtype=dtypes.float32)).cumsum(0).dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
 
