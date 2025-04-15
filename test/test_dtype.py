@@ -642,6 +642,7 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.bool, dtypes.float64) == dtypes.float64
     assert least_upper_dtype(dtypes.float16, dtypes.int64) == dtypes.float16
     assert least_upper_dtype(dtypes.float16, dtypes.uint64) == dtypes.float16
+    assert least_upper_dtype(dtypes.fp8e4m3, dtypes.fp8e5m2) == dtypes.half
 
 class TestAutoCastType(unittest.TestCase):
   def setUp(self):
