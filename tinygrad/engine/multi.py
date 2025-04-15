@@ -166,7 +166,4 @@ multi_pm = PatternMatcher([
 ], compiled=False, match_wrap=metadata_preservation_wrapper)
 
 @track_rewrites(named=True)
-def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]:
-  items = graph_rewrite_map(big_sink, multi_pm).items()
-  mmap = {k:v for k,v in items if k is not v}
-  return mmap
+def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]: return {k:v for k,v in graph_rewrite_map(big_sink, multi_pm).items() if k is not v}
