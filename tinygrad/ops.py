@@ -812,7 +812,7 @@ def deconstruct_function(fxn:Callable) -> tuple:
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
 @functools.cache
-def upat_interpret(p:UPat, fxn:Callable, on_match_wrapper: Callable = None) -> Callable:
+def upat_interpret(p:UPat, fxn:Callable, on_match_wrapper: Optional[Callable] = None) -> Callable:
   real_fxn = types.FunctionType(*deconstruct_function(fxn))
   if on_match_wrapper is not None: real_fxn = on_match_wrapper(real_fxn)
   if 'ctx' in inspect.signature(real_fxn).parameters:
@@ -828,7 +828,8 @@ def upat_interpret(p:UPat, fxn:Callable, on_match_wrapper: Callable = None) -> C
   return universal_match
 
 class PatternMatcher:
-  def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1)), on_match_wrapper: Callable = None):
+  def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1)), on_match_wrapper: Optional[Callable] = None):
+    assert not (compiled and (on_match_wrapper is not None)), "on_match_wrapper is not supported in `compiled` mode."
     if compiled: from tinygrad.upat import upat_compile
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
@@ -989,7 +990,7 @@ def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, 
 
 def metadata_preserving_replace(obj: UOp, **changes) -> UOp:
   ret = obj.replace(**changes)
-  all_metadata[ret] = obj.metadata
+  if isinstance(obj.metadata, Metadata): all_metadata[ret] = obj.metadata
   return ret
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
