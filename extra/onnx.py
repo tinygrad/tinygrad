@@ -66,7 +66,7 @@ def type_parse(onnx_type: TypeProto):
 # ***** onnx spec *****
 @dataclasses.dataclass(frozen=True)
 class OnnxValue:
-  shape: tuple[str|int, ...]
+  shape: tuple[str|int|None, ...]
   dtype: DType
   is_optional: bool
   is_sequence: bool
@@ -121,24 +121,21 @@ class OnnxRunner:
     self.graph_nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
                        for num,n in enumerate(model.graph.node))
     self.opset_version = model.opset_import[0].version
-    self.variable_dims: dict[str, int] = {}
 
     self.onnx_ops = onnx_ops
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
-    # TODO: need true float16 for dtype checking
     if spec.is_sequence:
-      if not isinstance(value, Sequence): raise RuntimeError(f"{name} received {value}, expected a sequence type")
+      if not isinstance(value, Sequence): raise RuntimeError(f"Input '{name}' received {value}, expected a sequence type")
       sequence = [Tensor(v, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(v, Tensor) else v for v in value]
-      if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for {name} sequence must be homogeneous")
+      if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for input '{name}' sequence must be homogeneous")
       return sequence
-    tensor = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
-    for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):
-      if isinstance(onnx_dim, str):
-        onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, int(user_dim_input))
-      if user_dim_input != onnx_dim: raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
-    return tensor
+    if not isinstance(value, Tensor): value = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training)
+    # we don't do explicit shape validation for symbolic dims (str) and dims that are of unknown size (None, 0, or negative)
+    expected_shape = tuple(ssh if isinstance(ssh, int) and ssh > 0 else vsh for ssh, vsh in zip(spec.shape, value.shape))
+    if value.shape != expected_shape: raise RuntimeError(f"Input '{name}' has wrong shape, received {value.shape}, expected {spec.shape}")
+    return value
 
   def _dispatch_op(self, op, inps, opts):
     if op in self.onnx_ops:
@@ -153,7 +150,7 @@ class OnnxRunner:
 
   def __call__(self, inputs:dict[str, Any], debug=debug):
     for name, input_spec in self.graph_inputs.items():
-      if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
+      if name not in inputs: raise RuntimeError(f"Please provide input data for '{name}'")
       self.graph_values[name] = self._parse_input(name, inputs[name], input_spec)
 
     for node in self.graph_nodes:
