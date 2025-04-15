@@ -24,6 +24,11 @@ class BasicBlock:
   def __repr__(self):
     return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+f'f{self.cnt} '+\
            f"{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
+  def replace(self, **kwargs) -> BasicBlock:
+    new_args = (kwargs.pop("ctx", self.ctx), kwargs.pop("lst", self.lst), kwargs.pop("end", self.end), kwargs.pop("cnt", self.cnt))
+    assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
+    if (self.ctx, self.lst, self.end, self.cnt) == new_args: return self
+    return BasicBlock(*new_args)
 
 def append_to_block(ctx:tuple[dict[UOp, tuple[UOp, ...]], dict[UOp, list[UOp]]], x:UOp):
   block_ctxs, children = ctx

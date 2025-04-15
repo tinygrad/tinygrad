@@ -3,7 +3,8 @@ from tinygrad.dtype import PtrDType
 from tinygrad.helpers import dedup, partition, all_same, flatten
 from tinygrad.codegen.linearize import BasicBlock
 
-def _start_strip(y:UOp): return [z.src[0] if z.op is Ops.BLOCKSTART else z for z in y]
+def _strip_start(y:UOp): return [z.src[0] if z.op is Ops.BLOCKSTART else z for z in y]
+def _sort_ctx(inp): return tuple(sorted(dedup(inp), key=lambda x: x.tuplize))
 
 def make_block(ctx, x:UOp):
   # NOTE: we don't update the children
@@ -16,8 +17,9 @@ def make_block(ctx, x:UOp):
   # if this is a RANGE or an IF, we add it to this block context
   _new_ctx = [UOp(Ops.BLOCKSTART, src=(fixed_x,))] if fixed_x.op in {Ops.RANGE, Ops.IF} else []
   _old_ctxs = []
+
   for y in x.src:
-    _old_ctx = _start_strip(y.arg.ctx)
+    _old_ctx = _strip_start(y.arg.ctx)
     uop: UOp = y.arg.lst[-1]
 
     # if it's an ASSIGN, remove any RANGEs used
@@ -35,19 +37,17 @@ def make_block(ctx, x:UOp):
         _old_ctx = []
     _old_ctxs.append(_old_ctx)
 
-  new_ctx = sorted(dedup(_new_ctx+flatten(_old_ctxs)), key=lambda x: x.tuplize)
-
-  # use a tuple
-  tuple_ctx = tuple(new_ctx)
+  # get new ctx
+  tuple_ctx = _sort_ctx(_new_ctx+flatten(_old_ctxs))
 
   # a block is unmergable if it has children or it has a different context
-  unmergable_blocks, mergable_blocks = partition(x.src,
+  unmergable_blocks, mergable_blocks = partition(dedup(x.src),
     lambda y: len(ctx.children[y.arg.lst[-1]]) > 1 or y.arg.ctx != tuple_ctx or y.op is Ops.BLOCKEND)
 
   # for all unmergable blocks, if they aren't mergable because of ctx changes, we have to insert BLOCKENDs
   final_unmergable_blocks = []
   for x in unmergable_blocks:
-    um_ctx = tuple(_start_strip(x.arg.ctx))
+    um_ctx = tuple(_strip_start(x.arg.ctx))
     if um_ctx != tuple_ctx:
       ends_to_add = [y for y in um_ctx if y not in tuple_ctx][::-1]
       while len(ends_to_add):
@@ -67,20 +67,8 @@ def make_block(ctx, x:UOp):
   new_srcs = flatten([y.src for y in mergable_blocks])+final_unmergable_blocks
   return UOp(Ops.BLOCK, src=tuple(new_srcs), arg=arg)
 
-"""
-def merge_block(ctx, x:UOp):
-  sole_child_blocks, multi_child_blocks = partition(dedup(x.src), lambda y: len(ctx.children[y]) == 1)
-  if len(sole_child_blocks) == 0: return None
-  print("MERGE")
-  assert all_same([y.arg.ctx for y in sole_child_blocks])
-  arg = BasicBlock(sole_child_blocks[0].arg.ctx, tuple(flatten([y.arg.lst for y in sole_child_blocks]))+x.arg.lst)
-  new_srcs = flatten([y.src for y in sole_child_blocks])+multi_child_blocks
-  return UOp(Ops.BLOCK, src=tuple(new_srcs), arg=arg)
-"""
-
 def merge_blockend(x:UOp):
   unmergable_blocks, mergable_blocks = [], []
-  #real_ctx = tuple(sorted(dedup(x.arg.ctx+(x.arg.end,)), key=lambda x: x.tuplize))
   for y in x.src:
     if y.op is Ops.BLOCK and x.src.count(y) == y.arg.cnt and x.arg.end in y.arg.ctx:
       if y not in mergable_blocks: mergable_blocks.append(y)
@@ -92,13 +80,11 @@ def merge_blockend(x:UOp):
   if len(mergable_blocks) == 0:
     #print("FAIL TO MERGE", x.arg.end, len(real_ctx))
     return None
-  #print("MERGING", x.arg.end)
 
   # create the block (TODO: we don't actually need to track that list)
-  new_lst = tuple(flatten([y.arg.lst for y in mergable_blocks]))+x.arg.lst
-  arg = BasicBlock(x.arg.ctx, new_lst, end=x.arg.end, cnt=x.arg.cnt)
+  parent_lst = tuple(flatten([y.arg.lst for y in mergable_blocks]))
   new_srcs = flatten([y.src for y in mergable_blocks])+unmergable_blocks
-  return UOp(Ops.BLOCKEND, src=tuple(new_srcs), arg=arg)
+  return UOp(Ops.BLOCKEND, src=tuple(new_srcs), arg=x.arg.replace(lst=parent_lst+x.arg.lst))
 
 def remove_blockend(x:UOp):
   # if there's any
@@ -115,7 +101,7 @@ def remove_blockend(x:UOp):
     if x.op is Ops.BLOCKEND and any(y.op is Ops.BARRIER for y in late_ops) and late_ops[-1].op is Ops.ENDRANGE:
       late_ops = [UOp(Ops.BARRIER)] + late_ops
     return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src,
-      arg=BasicBlock(tuple(sorted([y for y in x.arg.ctx if y is not x.arg.end], key=lambda x: x.tuplize)),
+      arg=BasicBlock(_sort_ctx([y for y in x.arg.ctx if y is not x.arg.end]),
                      tuple(early_ops)+parent_block.arg.lst+tuple(late_ops), cnt=x.arg.cnt))
 
 def merge_block(x:UOp):
@@ -130,10 +116,9 @@ def merge_block(x:UOp):
   if len(mergable_blocks) == 0: return None
 
   # create the block (TODO: we don't actually need to track that list)
-  new_lst = tuple(flatten([y.arg.lst for y in mergable_blocks]))+x.arg.lst
-  arg = BasicBlock(x.arg.ctx, new_lst, cnt=x.arg.cnt)
+  parent_lst = tuple(flatten([y.arg.lst for y in mergable_blocks]))
   new_srcs = flatten([y.src for y in mergable_blocks])+unmergable_blocks
-  return UOp(Ops.BLOCK, src=tuple(new_srcs), arg=arg)
+  return UOp(Ops.BLOCK, src=tuple(new_srcs), arg=x.arg.replace(lst=parent_lst+x.arg.lst))
 
 block_merge = PatternMatcher([
   (UPat(Ops.BLOCK, name="x"), merge_block),
