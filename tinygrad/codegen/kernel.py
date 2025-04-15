@@ -13,7 +13,7 @@ from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, ro
 from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, USE_TC, AMX, CAPTURE_PROCESS_REPLAY
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
-from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.linearize2 import linearize_uop
 from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
 from tinygrad.engine.grouper import view_left
@@ -563,7 +563,7 @@ class Kernel:
 
   def to_program(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> ProgramSpec:
     self.linearize(name_override, ast_transform)
-    assert self.uops[0].op is Ops.NAME, "first uop must be name"
+    #assert self.uops[0].op is Ops.NAME, "first uop must be name"
     src = self.opts.render(self.uops)
 
     if CAPTURE_PROCESS_REPLAY:
