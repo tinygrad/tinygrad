@@ -2,8 +2,6 @@
 import unittest
 import torch
 import numpy as np
-import sys
-sys.path.append("/home/cci-work/tinygrad")
 from tinygrad.helpers import getenv
 if getenv("TINY_BACKEND2"):
   import extra.torch_backend.backend2
