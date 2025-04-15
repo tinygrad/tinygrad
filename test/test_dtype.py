@@ -109,7 +109,7 @@ class TestDType(unittest.TestCase):
     fields = dtypes.fields()
     self.assertIn("float", fields)
     self.assertIn("float32", fields)
-    self.assertEqual(len(fields), 24)
+    self.assertEqual(len(fields), 26)
     self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
     self.assertTrue(all(issubclass(_to_np_dtype(value), np.generic) for value in fields.values() if _to_np_dtype(value) is not None))
 
@@ -141,6 +141,10 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)*Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [1,4,9,16])
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
+
+class TestFp8s(unittest.TestCase):
+  def test_fp8e4m3_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e4m3).dtype == dtypes.fp8e4m3
+  def test_fp8e5m2_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e5m2).dtype == dtypes.fp8e5m2
 
 @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
 class TestBFloat16(unittest.TestCase):
@@ -399,6 +403,10 @@ class TestHelpers(unittest.TestCase):
   def test_bf16_is_float(self):
     assert dtypes.is_float(dtypes.bfloat16)
 
+  def test_fp8s_are_float(self):
+    assert dtypes.is_float(dtypes.fp8e4m3)
+    assert dtypes.is_float(dtypes.fp8e5m2)
+
   @given(strat.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_float(d) or dtypes.is_int(d)]), strat.integers(min_value=2, max_value=8))
   def test_scalar(self, dtype, amt):
     assert dtype.vec(amt).scalar() == dtype
@@ -462,7 +470,7 @@ class TestTypeSpec(unittest.TestCase):
       dtypes.default_int = default_int
       assert dtypes.default_int == default_int
 
-    for default_float in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+    for default_float in [*dtypes.fp8s, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
       dtypes.default_float = default_float
       assert dtypes.default_float == default_float
 
@@ -636,6 +644,7 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.bool, dtypes.float64) == dtypes.float64
     assert least_upper_dtype(dtypes.float16, dtypes.int64) == dtypes.float16
     assert least_upper_dtype(dtypes.float16, dtypes.uint64) == dtypes.float16
+    assert least_upper_dtype(dtypes.fp8e4m3, dtypes.fp8e5m2) == dtypes.half
 
 class TestAutoCastType(unittest.TestCase):
   def setUp(self):
