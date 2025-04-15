@@ -141,7 +141,15 @@ def assign_multi(dest:UOp, src:UOp):
 
 def passthrough_multi(root:UOp, multi:UOp): return UOp.multi(*[root.replace(src=(m,)) for m in multi.src], axis=multi.axis, real=multi.real)
 
-# NOTE: this is the same pattern as Ops.UNROLL
+def metadata_preservation_wrapper(fn):
+  def _wrapper(*args, **kwargs):
+    token = _METADATA.set(kwargs[set(kwargs.keys()).difference(["multi"]).pop()].metadata)
+    ret = fn(*args, **kwargs)
+    _METADATA.reset(token)
+    return ret
+
+  return _wrapper
+
 multi_pm = PatternMatcher([
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reduce_multi),
@@ -155,19 +163,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="device"), UPat(Ops.MULTI, name="multi"), )), copy_multi),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
-])
-
-def metadata_preservation_wrapper(fn):
-  def _wrapper(*args, **kwargs):
-    token = _METADATA.set(kwargs[set(kwargs.keys()).difference(["multi"]).pop()].metadata)
-    ret = fn(*args, **kwargs)
-    _METADATA.reset(token)
-    return ret
-
-  return _wrapper
-
-# for op, lst in multi_pm.pdict.items():
-#   multi_pm.pdict[op] = [(pat,functools.wraps(fn)(metadata_preservation_wrapper(fn)), er, has_ctx) for (pat, fn, er, has_ctx) in lst]
+], compiled=False, on_match_wrapper=metadata_preservation_wrapper)
 
 @track_rewrites(named=True)
 def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]:

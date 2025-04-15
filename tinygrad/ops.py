@@ -812,8 +812,9 @@ def deconstruct_function(fxn:Callable) -> tuple:
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
 @functools.cache
-def upat_interpret(p:UPat, fxn:Callable) -> Callable:
+def upat_interpret(p:UPat, fxn:Callable, on_match_wrapper: Callable = None) -> Callable:
   real_fxn = types.FunctionType(*deconstruct_function(fxn))
+  if on_match_wrapper is not None: real_fxn = on_match_wrapper(real_fxn)
   if 'ctx' in inspect.signature(real_fxn).parameters:
     def universal_match(uop, ctx):
       for match in p.match(uop, {}):
@@ -827,7 +828,7 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
   return universal_match
 
 class PatternMatcher:
-  def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
+  def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1)), on_match_wrapper: Callable = None):
     if compiled: from tinygrad.upat import upat_compile
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
@@ -837,7 +838,7 @@ class PatternMatcher:
     for p,fxn in self.patterns:
       assert p.op is not None
       if compiled and (match:=upat_compile(p, fxn)) is not None: pass # pylint: disable=E0606
-      else: match = upat_interpret(p, fxn)
+      else: match = upat_interpret(p, fxn, on_match_wrapper)
       for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, p.early_reject))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
