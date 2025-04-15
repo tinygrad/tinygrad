@@ -99,8 +99,10 @@ def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   return wrap(unwrap(self).assign(unwrap(ret)))
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
-def index_tensor(x, y):
-  return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).to(x.device)
+def index_tensor(target_tensor, indices):
+  @wrap_view_op
+  def _index_tensor(target_tensor,*indices): return target_tensor[*indices]
+  return _index_tensor(target_tensor,*indices)
 
 @torch.library.impl("aten::index_put", "privateuseone")
 def index_put(self, indices, values, accumulate=False):

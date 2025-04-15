@@ -2,6 +2,8 @@
 import unittest
 import torch
 import numpy as np
+import sys
+sys.path.append("/home/cci-work/tinygrad")
 from tinygrad.helpers import getenv
 if getenv("TINY_BACKEND2"):
   import extra.torch_backend.backend2
@@ -103,6 +105,14 @@ class TestTorchBackend(unittest.TestCase):
     out = torch.topk(a, k=2)
     np.testing.assert_equal(out.values.cpu().numpy(), [4, 3])
     np.testing.assert_equal(out.indices.cpu().numpy(), [3, 1])
+
+  def test_index(self):
+    def compute_index(device):
+      target_tensor = torch.tensor([[12,6,4],[89,7,812]], device=device)
+      indice_x = torch.tensor([0,1], device=device)
+      indice_y = torch.tensor([2,1], device=device)
+      return target_tensor[indice_x, indice_y]
+    np.testing.assert_equal(compute_index(device).cpu().numpy(), compute_index("cpu"))
 
   def test_masked_select(self):
     a = torch.tensor([4, 3, 2, 1], device=device)
