@@ -104,12 +104,6 @@ replace_contiguous = PatternMatcher([
 
 DONT_PUSH_VIEWS = {Ops.BUFFER, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.ASSIGN, Ops.SINK, Ops.CONTIGUOUS, Ops.COPY}
 
-@dataclass(frozen=True)
-class GrouperContext:
-  assigns: dict[UOp, None]                    # all the buffers that are assigned to
-  realizes: dict[UOp, None]                   # all the tensor uops we realize
-  children: defaultdict[UOp, dict[UOp, None]] # children graph of tensor uops
-
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
 def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
@@ -166,15 +160,13 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
   double_reduces: list[UOp] = []
-  # late context, TODO: remove this
-  ctx = GrouperContext(assigns, realizes, children)
   for r in toposort:
     if r.op is not Ops.REDUCE_AXIS: continue
     if len(r.arg) == 3 and r.arg[2] is True: continue
     if FUSE_CONV_BW and r.src[0].base.op is Ops.REDUCE_AXIS and r.src[0] is not r.src[0].base: double_reduces.append(r)
-    if r in ctx.realizes: continue
+    if r in realizes: continue
     group: dict[UOp, None] = {}
-    recursive_group(r, unwrap(r.st), r, ctx.children, ctx.realizes, reduce_for_op, group, cache={})
+    recursive_group(r, unwrap(r.st), r, children, realizes, reduce_for_op, group, cache={})
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
@@ -186,16 +178,16 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
       parents = deque((r, *group))
       while parents and not forced_realize:
         p = parents.pop().base
-        if p.op is Ops.BUFFER and p in ctx.assigns and p not in assign_targets: forced_realize, can_chase = True, False
-        if p in ctx.realizes: continue
+        if p.op is Ops.BUFFER and p in assigns and p not in assign_targets: forced_realize, can_chase = True, False
+        if p in realizes: continue
         parents.extend(p.src)
     if forced_realize or not group:
       tr = r
       if can_chase:
         # can chase this down to contiguous children
         st = unwrap(tr.st)
-        while len(ctx.children[tr]) == 1:
-          tr_next = next(iter(ctx.children[tr]))
+        while len(children[tr]) == 1:
+          tr_next = next(iter(children[tr]))
           st_childs = dedup(unwrap(s.st) for s in tr_next.src if s.base is tr)
           if len(st_childs) > 1: break
           if st.size != st_childs[0].size: break
@@ -206,17 +198,17 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
         if tr.op is Ops.CAST and tr.dtype.itemsize > tr.src[0].dtype.itemsize:
           tr = tr.src[0].base
       group = {tr: None}
-      ctx.realizes[tr] = None
+      realizes[tr] = None
     reduce_for_op.update((tr, r) for tr in group)
     if FUSE_ARANGE and r.arg[0] is Ops.ADD and r.src[0].base.op is Ops.CONST:
       # maybe fuse arange with its children
-      if len(flatten(ctx.children[tr] for tr in group)) != 0:
-        for tr in group: del ctx.realizes[tr]
+      if len(flatten(children[tr] for tr in group)) != 0:
+        for tr in group: del realizes[tr]
   # fuse double reduces with no other child
   for reduceop in double_reduces:
     top_reduce = reduceop.src[0].base
-    if len(ctx.children[top_reduce]) == 1: del ctx.realizes[top_reduce]
-  return ctx.realizes
+    if len(children[top_reduce]) == 1: del realizes[top_reduce]
+  return realizes
 
 # **** create kernels
 
