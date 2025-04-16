@@ -29,9 +29,7 @@ Next, modify the `main.py` file within the cloned repository to enable the `tiny
 
 -device = 'cuda' if torch.cuda.is_available() else 'cpu'
 +if getenv("TINY_BACKEND"):
-+    # Import the tinygrad frontend for torch
 +    import tinygrad.frontend.torch
-+    # Set the device to "tiny" to use the tinygrad backend
 +    device = torch.device("tiny")
 +else:
 +    device = 'cuda' if torch.cuda.is_available() else 'cpu'
