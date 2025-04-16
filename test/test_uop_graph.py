@@ -1,7 +1,7 @@
 from typing import List
 import unittest, time, pytest
 from tinygrad import dtypes, Device
-from tinygrad.helpers import Context, DEBUG
+from tinygrad.helpers import DEBUG, CHECK_OOB
 from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher, track_rewrites
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
@@ -442,7 +442,7 @@ class TestUOpGraph(unittest.TestCase):
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST]), 0, f"dtype = {dt}")
 
-  @Context(CHECK_OOB=1)
+  @unittest.skipUnless(CHECK_OOB, "Index validation is only performed with CHECK_OOB")
   def test_in_out_of_bounds_access(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
     ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 0)),))
@@ -455,13 +455,13 @@ class TestUOpGraph(unittest.TestCase):
     ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 42)),))
     with self.assertRaises(RuntimeError): to_uops_list([ld0])
 
-  @Context(CHECK_OOB=1)
+  @unittest.skipUnless(CHECK_OOB, "Index validation is only performed with CHECK_OOB")
   def test_out_of_bounds_off_by_one_access(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
     ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 16)),))
     with self.assertRaises(RuntimeError): to_uops_list([ld0])
 
-  @Context(CHECK_OOB=1)
+  @unittest.skipUnless(CHECK_OOB, "Index validation is only performed with CHECK_OOB")
   def test_in_out_bounds_access_with_mask(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
     gidx0 = UOp(Ops.SPECIAL, dtype=dtypes.int, arg=("gidx0", 42))
@@ -472,7 +472,7 @@ class TestUOpGraph(unittest.TestCase):
     ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, gidx0<17),))
     with self.assertRaises(RuntimeError): to_uops_list([ld0])
 
-  @Context(CHECK_OOB=1)
+  @unittest.skipUnless(CHECK_OOB, "Index validation is only performed with CHECK_OOB")
   def test_in_out_of_bounds_access_index_load(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
     glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(64), (), 0)
