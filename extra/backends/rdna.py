@@ -110,7 +110,7 @@ def render_load(ctx, x, ptr, offset) -> List[str]:
     # shared mem
     load_ins = f"ds_load_b{load_bits} {ctx.r[x]}, {addr_reg}"
   else:
-    load_ins = f"flat_load_b{load_bits} {ctx.r[x]}, {addr_reg} offset:0"
+    load_ins = f"global_load_b{load_bits} {ctx.r[x]}, {addr_reg} offset:0"
   return addr_setup_ins + [load_ins]
 
 def render_store(ctx, x, ptr, offset, val) -> List[str]:
@@ -126,7 +126,7 @@ def render_store(ctx, x, ptr, offset, val) -> List[str]:
     # shared mem
     store_ins = f"ds_store_b{store_bits} {addr_reg}, {ctx.r[val]}"
   else:
-    store_ins = f"flat_store_b{store_bits} {addr_reg}, {ctx.r[val]} offset:0"
+    store_ins = f"global_store_b{store_bits} {addr_reg}, {ctx.r[val]} off"
   return addr_setup_ins + [store_ins]
 
 def render_const_mod(ctx, d, val, modulus) -> List[str]:
