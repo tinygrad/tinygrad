@@ -61,12 +61,6 @@ examples/mlperf/training_submission_v4.1/tinycorp/benchmarks/bert/implementation
 
 ### tinybox_red
 
-#### One time setup
-
-```
-examples/mlperf/training_submission_v4.1/tinycorp/benchmarks/bert/implementations/tinybox_red/setup.sh
-```
-
 #### Steps to run benchmark
 ```
 examples/mlperf/training_submission_v4.1/tinycorp/benchmarks/bert/implementations/tinybox_red/run_and_time.sh
