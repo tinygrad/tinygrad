@@ -50,7 +50,7 @@ if __name__ == "__main__":
                 rewritten_uops.append(full_graph_rewrite(u, k.opts))
             uops = rewritten_uops
         if getenv("LINEARIZE", 1):
-          with Profiling(PROFILE >= 2):
+          with Profiling(PROFILE >= 2, frac=0.5):
             with Timing("***** model linearize in "): uops = [linearize_uop(u) for u in uops]
           print(sum(len(u) for u in uops))
           if getenv("SRC", 0):

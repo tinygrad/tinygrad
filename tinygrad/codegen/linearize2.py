@@ -11,6 +11,11 @@ def disp(y:UOp) -> str:
   return "<NONE>"
 
 def _sort_ctx(inp): return sorted(dedup(inp), key=lambda x: x.tuplize)
+def _get_ctx(deduped_blocks:list[UOp]):
+  list_ctx = []
+  for y in deduped_blocks:
+    list_ctx.extend(list(y.arg.child_ctx if y.arg.child_ctx is not None else y.arg.ctx))
+  return _sort_ctx(list_ctx)
 
 @dataclass(frozen=True, eq=False)
 class BasicBlock2:
@@ -26,12 +31,11 @@ class BasicBlock2:
            f"{len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
 def make_block(fixed_x:UOp, child_len:dict[UOp, int], blocks:dict[UOp, UOp]):
+  # all input blocks to this one, deduped
+  deduped_blocks = list({blocks[y]:None for y in fixed_x.src})
+
   # compute the new context
-  list_ctx = []
-  for y in fixed_x.src:
-    bb = blocks[y].arg
-    list_ctx.extend(list(bb.child_ctx if bb.child_ctx is not None else bb.ctx))
-  tuple_ctx = _sort_ctx(list_ctx)
+  tuple_ctx = _get_ctx(deduped_blocks)
 
   # does this block modify the ctx?
   # RANGE/IF add to the next ctx
@@ -49,11 +53,13 @@ def make_block(fixed_x:UOp, child_len:dict[UOp, int], blocks:dict[UOp, UOp]):
     child_ctx = [y for y in blocks[fixed_x.src[1]].arg.ctx if y not in fixed_x.src[0].src[1:]]
 
   # a block is unmergable if it has children or it has a different context
-  unmergable_blocks, mergable_blocks = [], []
-  for uy in dedup(fixed_x.src):
-    y = blocks[uy]
+  unmergable_blocks = []
+  lst = []
+  merged_srcs = []
+  for y in deduped_blocks:
     if y.arg.cnt == 1 and y.arg.ctx == tuple_ctx:
-      mergable_blocks.append(y)
+      lst += y.arg.lst
+      merged_srcs += list(y.src)
     else:
       # block is unmergable
       if y.arg.ctx != tuple_ctx:
@@ -67,9 +73,26 @@ def make_block(fixed_x:UOp, child_len:dict[UOp, int], blocks:dict[UOp, UOp]):
       unmergable_blocks.append(y)
 
   # create the block
-  lst = flatten([y.arg.lst for y in mergable_blocks])+[fixed_x]
-  arg = BasicBlock2(lst, tuple_ctx, cnt=child_len[fixed_x], child_ctx=child_ctx)
-  return UOp(Ops.BLOCK, src=tuple(flatten([y.src for y in mergable_blocks])+unmergable_blocks), arg=arg)
+  arg = BasicBlock2(lst+[fixed_x], tuple_ctx, cnt=child_len[fixed_x], child_ctx=child_ctx)
+  return UOp(Ops.BLOCK, src=tuple(merged_srcs+unmergable_blocks), arg=arg)
+
+def merge_block(x:UOp):
+  unmergable_blocks, mergable_blocks = [], []
+  mergable_dict: defaultdict[UOp, int] = defaultdict(int)
+  for y in x.src:
+    if y.op is Ops.BLOCK and x.op is Ops.BLOCK and x.arg.ctx == y.arg.ctx: mergable_dict[y] += 1
+    elif y.op is Ops.BLOCK and x.op is Ops.BLOCKEND and x.arg.end in y.arg.ctx: mergable_dict[y] += 1
+    else: unmergable_blocks.append(y)
+  for k,v in mergable_dict.items():
+    if v == k.arg.cnt: mergable_blocks.append(k)
+    else: unmergable_blocks.extend([k]*v)
+  if len(mergable_blocks) == 0: return None
+  del mergable_dict
+
+  # create the block
+  lst = flatten([y.arg.lst for y in mergable_blocks])+x.arg.lst
+  arg = replace(x.arg, lst=lst)
+  return UOp(x.op, src=tuple(flatten([y.src for y in mergable_blocks])+unmergable_blocks), arg=arg)
 
 def remove_blockend(x:UOp):
   # if there's any
@@ -88,22 +111,6 @@ def remove_blockend(x:UOp):
     lst = early_ops+parent_block.arg.lst+late_ops
     arg = BasicBlock2(lst, [y for y in x.arg.ctx if y is not x.arg.end], cnt=x.arg.cnt)
     return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src, arg=arg)
-
-def merge_block(x:UOp):
-  unmergable_blocks, mergable_blocks = [], []
-  mergable_dict: defaultdict[UOp, int] = defaultdict(int)
-  for y in x.src:
-    if y.op is Ops.BLOCK and x.op is Ops.BLOCK and x.arg.ctx == y.arg.ctx: mergable_dict[y] += 1
-    elif y.op is Ops.BLOCK and x.op is Ops.BLOCKEND and x.arg.end in y.arg.ctx: mergable_dict[y] += 1
-    else: unmergable_blocks.append(y)
-  for k,v in mergable_dict.items():
-    if v == k.arg.cnt: mergable_blocks.append(k)
-    else: unmergable_blocks.extend([k]*v)
-  if len(mergable_blocks) == 0: return None
-
-  # create the block
-  lst = flatten([y.arg.lst for y in mergable_blocks])+x.arg.lst
-  return UOp(x.op, src=tuple(flatten([y.src for y in mergable_blocks])+unmergable_blocks), arg=replace(x.arg, lst=lst))
 
 block_merge = PatternMatcher([
   (UPat((Ops.BLOCK, Ops.BLOCKEND), name="x"), merge_block),
