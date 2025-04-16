@@ -2,8 +2,9 @@ from __future__ import annotations
 import functools
 from tinygrad.helpers import mv_address
 from tinygrad.device import Compiled, Compiler, Allocator, BufferSpec, CPUProgram
-from tinygrad.ops import UOp
+from tinygrad.ops import Ops, UOp
 from tinygrad.renderer import Renderer
+import math
 
 import os
 os.environ["TT_METAL_HOME"] = "/root/tt-metal/"
@@ -46,10 +47,19 @@ gbl = load_tt()
 tt = gbl.tt
 tt_metal = gbl.tt.tt_metal
 
+TILE_SIZE = 32 * 32 # 32x32 Tile
+
 def tt_time_execution(cb, enable=False) -> float|None:
   if not enable: return cb()
   cb()
   return 0 * 1e-3
+
+def find_nodes(ast:UOp, op:Ops, acc: list[UOp]) -> list[UOp]:
+  if ast.op == op:
+    acc.append(ast)
+  for src in ast.src:
+    find_nodes(src, op, acc)
+  return acc
 
 
 class TTRenderer(Renderer):
@@ -58,55 +68,60 @@ class TTRenderer(Renderer):
   has_local = False
   global_max = None
 
-  def render(self, uops: list[UOp]) -> str:
-    reader = """
-#include <stdint.h>
+  def render_ast(self, ast:UOp) -> str:
+    loads = find_nodes(ast, Ops.LOAD, [])
+    stores = find_nodes(ast, Ops.STORE, [])
 
+    def bl(builder): return '\n'.join([builder(i) for i in range(len(loads))])
+
+    # TODO: support different buffer lengths
+    # TODO: what happens on non divisible by TILE_SIZE?
+    num_tiles = math.ceil(loads[0].size / TILE_SIZE)
+
+    reader = f"""
+#include <stdint.h>
 #include "dataflow_api.h"
 
-void kernel_main() {
-    uint32_t src_addr  = get_arg_val<uint32_t>(0);
-    uint32_t bank_id = get_arg_val<uint32_t>(1);
-    uint32_t num_tiles = get_arg_val<uint32_t>(2);
+void kernel_main() {{
+{bl(lambda i: f'''
+constexpr uint32_t cb_id_{i} = {loads[i].src[0].arg};
+uint32_t src_addr_{i}  = get_arg_val<uint32_t>({2*i});
+uint32_t bank_id_{i} = get_arg_val<uint32_t>({2*i+1});
+''')}
 
-    constexpr uint32_t cb_id_in0 = 0;
+constexpr uint32_t ublock_size_tiles = 1; // ublocks size defined in tiles
+{bl(lambda i: f'uint32_t ublock_size_bytes_{i} = get_tile_size(cb_id_{i}) * ublock_size_tiles;')}
 
-    // ublocks size defined in tiles
-    constexpr uint32_t ublock_size_tiles = 1;
-    uint32_t ublock_size_bytes = get_tile_size(cb_id_in0) * ublock_size_tiles;
+// read a ublock of tiles from src to CB, and then push the ublock to unpacker
+// TODO: Dynamic sizes and strides
+for (uint32_t i = 0; i < {num_tiles}; i += ublock_size_tiles) {{
+{bl(lambda i: f'cb_reserve_back(cb_id_{i}, ublock_size_tiles);')}
+{bl(lambda i: f'uint64_t src_noc_addr_{i} = get_noc_addr_from_bank_id<true>(bank_id_{i}, src_addr_{i});')}
 
-    // read a ublock of tiles from src to CB, and then push the ublock to unpacker
-    for (uint32_t i = 0; i < num_tiles; i += ublock_size_tiles) {
-        uint64_t src_noc_addr = get_noc_addr_from_bank_id<true>(bank_id, src_addr);
+{bl(lambda i: f'noc_async_read(src_noc_addr_{i}, get_write_ptr(cb_id_{i}), ublock_size_bytes_{i});')}
 
-        cb_reserve_back(cb_id_in0, ublock_size_tiles);
-        uint32_t l1_write_addr = get_write_ptr(cb_id_in0);
-        noc_async_read(src_noc_addr, l1_write_addr, ublock_size_bytes);
+noc_async_read_barrier();
 
-        noc_async_read_barrier();
-
-        cb_push_back(cb_id_in0, ublock_size_tiles);
-        src_addr += ublock_size_bytes;
-    }
-}
+{bl(lambda i: f'cb_push_back(cb_id_{i}, ublock_size_tiles);')}
+{bl(lambda i: f'src_addr_{i} += ublock_size_bytes_{i};')}
+}}
+}}
 """
 
-    writer = """
+    writer = f"""
 #include "dataflow_api.h"
-#include "debug/dprint.h"
 
-void kernel_main() {
+void kernel_main() {{
     uint32_t dst_addr  = get_arg_val<uint32_t>(0);
     uint32_t bank_id = get_arg_val<uint32_t>(1);
-    uint32_t num_tiles = get_arg_val<uint32_t>(2);
-
-    constexpr uint32_t cb_id_out0 = tt::CBIndex::c_16;
+  
+    constexpr uint32_t cb_id_out0 = 0;
 
     // single-tile ublocks
     uint32_t ublock_size_bytes = get_tile_size(cb_id_out0);
     uint32_t ublock_size_tiles = 1;
 
-    for (uint32_t i = 0; i < num_tiles; i += ublock_size_tiles) {
+    for (uint32_t i = 0; i < {num_tiles}; i += ublock_size_tiles) {{
         uint64_t dst_noc_addr = get_noc_addr_from_bank_id<true>(bank_id, dst_addr);
 
         cb_wait_front(cb_id_out0, ublock_size_tiles);
@@ -117,11 +132,11 @@ void kernel_main() {
 
         cb_pop_front(cb_id_out0, ublock_size_tiles);
         dst_addr += ublock_size_bytes;
-    }
-}
+    }}
+}}
 """
 
-    compute = """
+    compute = f"""
 #define SFPU_OP_EXP_INCLUDE 1
 
 #include <cstdint>
@@ -130,20 +145,20 @@ void kernel_main() {
 #include "compute_kernel_api/eltwise_unary/eltwise_unary.h"
 #include "compute_kernel_api/eltwise_unary/sfpu_split_includes.h"
 
-namespace NAMESPACE {
-void MAIN {
-    uint32_t per_core_block_cnt = get_compile_time_arg_val(0);
-    uint32_t per_core_block_dim = get_compile_time_arg_val(1);
+namespace NAMESPACE {{
+void MAIN {{
+    uint32_t per_core_block_cnt = {num_tiles};
+    uint32_t per_core_block_dim = 1;
 
-    init_sfpu(tt::CBIndex::c_0, tt::CBIndex::c_16);
-    for (uint32_t block_index = 0; block_index < per_core_block_cnt; block_index++) {
-        cb_reserve_back(tt::CBIndex::c_16, per_core_block_dim);
-        for (uint32_t tile_index = 0; tile_index < per_core_block_dim; ++tile_index) {
+    init_sfpu(tt::CBIndex::c_1, tt::CBIndex::c_0);
+    for (uint32_t block_index = 0; block_index < per_core_block_cnt; block_index++) {{
+        cb_reserve_back(tt::CBIndex::c_0, per_core_block_dim);
+        for (uint32_t tile_index = 0; tile_index < per_core_block_dim; ++tile_index) {{
             tile_regs_acquire();
 
             // Pop tile after tile, copy to DST and pack
-            cb_wait_front(tt::CBIndex::c_0, 1);
-            copy_tile(tt::CBIndex::c_0, 0, 0);
+            cb_wait_front(tt::CBIndex::c_1, 1);
+            copy_tile(tt::CBIndex::c_1, 0, 0);
 
             // Computation
             exp_tile_init();
@@ -151,42 +166,42 @@ void MAIN {
 
             tile_regs_commit();
             tile_regs_wait();
-            pack_tile(0, tt::CBIndex::c_16);
+            pack_tile(0, tt::CBIndex::c_0);
 
-            cb_pop_front(tt::CBIndex::c_0, 1);
+            cb_pop_front(tt::CBIndex::c_1, 1);
             tile_regs_release();
-        }
-        cb_push_back(tt::CBIndex::c_16, per_core_block_dim);
-    }
-}
-}  // namespace NAMESPACE
+        }}
+        cb_push_back(tt::CBIndex::c_0, per_core_block_dim);
+    }}
+}}
+}}
 """
-    return "[SEP]".join([reader, writer, compute])
+
+    cbs_read = [f"{op.op}:{op.src[0].arg}:{op.dtype.name}:{op.dtype.itemsize}" for op in loads]
+    cbs_write = [f"{op.op}:{op.src[0].arg}:{op.src[2].dtype.name}:{op.src[2].dtype.itemsize}" for op in stores]
+    cbs = ",".join(cbs_write + cbs_read)
+
+    return "[SEP]".join([reader, writer, compute, cbs])
 
 class TTProgram:
   def __init__(self, dev:TTDevice, name:str, lib:bytes):
     self.dev, self.name, self.lib = dev, name, lib
 
-    reader_src, writer_src, compute_src = lib.decode("utf-8").split("[SEP]")
+    reader_src, writer_src, compute_src, cbs = lib.decode("utf-8").split("[SEP]")
 
     self.prog = tt_metal.CreateProgram()
     self.core = tt.umd.xy_pair(0, 0)
 
-    self.single_tile_size = 4 * 1024
-    self.num_tiles = 64
+    buffer_tile_count = 2 # 2 Amount of tiles the buffer can hold, with more tiles compute and data movement can work more independently
+    cb_dtype_map = {"float": tt.DataFormat.Float32}
+    self.cbs = cbs.split(",")
+    for cb in self.cbs:
+      op_type, cb_id, cb_dtype, cb_itemsize = cb.split(":")
 
-    src0_cb_index = tt.CBIndex.c_0
-    num_input_tiles = 2
-    cb_src0_config = tt_metal.CircularBufferConfig(num_input_tiles * self.single_tile_size, {src0_cb_index: tt.DataFormat.Float32}) \
-        .set_page_size(src0_cb_index, self.single_tile_size)
-    cb_src0 = tt_metal.CreateCircularBuffer(self.prog, self.core, cb_src0_config)
-
-    output_cb_index = tt.CBIndex.c_16
-    num_output_tiles = 2
-    cb_output_config = tt_metal.CircularBufferConfig(num_output_tiles * self.single_tile_size, {output_cb_index: tt.DataFormat.Float32}) \
-        .set_page_size(output_cb_index, self.single_tile_size)
-    cb_output = tt_metal.CreateCircularBuffer(self.prog, self.core, cb_output_config)
-
+      tile_size = TILE_SIZE * int(cb_itemsize)
+      cb_config = tt_metal.CircularBufferConfig(buffer_tile_count * tile_size, {int(cb_id): cb_dtype_map[cb_dtype]}) \
+          .set_page_size(int(cb_id), tile_size)
+      cb_src = tt_metal.CreateCircularBuffer(self.prog, self.core, cb_config)
 
     data_movement_config_R1 = tt_metal.DataMovementConfig()
     data_movement_config_R1.processor = tt_metal.DataMovementProcessor.RISCV_1
@@ -200,8 +215,6 @@ class TTProgram:
 
 
     compute_config = tt_metal.ComputeConfig()
-    compute_config.math_approx_mode = False
-    compute_config.compile_args = [self.num_tiles, 1]
     self.eltwise_sfpu_kernel_id = tt_metal.CreateKernelFromString(self.prog, compute_src, self.core, compute_config)
 
 
@@ -209,13 +222,13 @@ class TTProgram:
     pass
 
   def __call__(self, *bufs, vals=(), wait=False):
-    args = list(bufs) + list(vals)
+    # args = list(bufs) + list(vals)
+    src_bank_id, dst_bank_id = 0, 0
 
-    src0_bank_id, dst_bank_id = 0, 0
-    src0_address, dest_address = args[1].address(), args[0].address()
-
-    tt_metal.SetRuntimeArgs(self.prog, self.unary_reader_kernel_id, self.core, [src0_address, src0_bank_id, self.num_tiles])
-    tt_metal.SetRuntimeArgs(self.prog, self.unary_writer_kernel_id, self.core, [dest_address, dst_bank_id, self.num_tiles])
+    reader_args = []
+    for i in range(1, len(bufs)): reader_args.extend([bufs[i].address(), src_bank_id])
+    tt_metal.SetRuntimeArgs(self.prog, self.unary_reader_kernel_id, self.core, reader_args)
+    tt_metal.SetRuntimeArgs(self.prog, self.unary_writer_kernel_id, self.core, [bufs[0].address(), dst_bank_id])
 
     return tt_time_execution(lambda: tt_metal.EnqueueProgram(self.dev.cq, self.prog, False), enable=wait)
 

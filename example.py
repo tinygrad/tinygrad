@@ -1,19 +1,20 @@
 # pip install cppyy
 
 import os
-os.environ["DEBUG"] = "4"
+os.environ["DEBUG"] = "6"
 os.environ["OPT"] = "0"
+os.environ["NOOPT"] = "1"
+# os.environ["VIZ"] = "1"
 
 from tinygrad import Tensor, dtypes
 
-x_cpu = Tensor(list(range(64 * 1024)), dtype=dtypes.float32)
+x_cpu = Tensor(list(range(1024)), dtype=dtypes.float32, device="cpu")
 z_ref = x_cpu.exp().tolist()
 
-os.environ["DEBUG"] = "6"
-
 x = x_cpu.to("tt")
-z = -x
+z = -x # any unary op uses the exp kernel
 
+print(z_ref[0:10])
 print(z.tolist()[0:10])
 print(z_ref[0:10])
 

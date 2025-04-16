@@ -564,7 +564,7 @@ class Kernel:
   def to_program(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> ProgramSpec:
     self.linearize(name_override, ast_transform)
     assert self.uops[0].op is Ops.NAME, "first uop must be name"
-    src = self.opts.render(self.uops)
+    src = self.opts.render(self.uops) if not hasattr(self.opts, "render_ast") else self.opts.render_ast(self.ast)
 
     if CAPTURE_PROCESS_REPLAY:
       import sys
