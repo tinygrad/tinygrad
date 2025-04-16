@@ -22,16 +22,20 @@ class MixtureFeedForward:
     g = g.squeeze() # (BS, length, num_experts) -> (num_experts,)
     probs, sel = g.topk(self.activated_experts)
 
+    # print(f"11111 mem_used: {GlobalCounters.global_mem/1e9:.2f} GB")
     with Context(FUSE_ARANGE=1):
       selected_gate_projs = self.gate_proj[sel]
       selected_up_projs = self.up_proj[sel]
       selected_down_projs = self.down_proj[sel]
       selected_gate_projs.realize(selected_up_projs, selected_down_projs)
+    # print(f"222222 mem_used: {GlobalCounters.global_mem/1e9:.2f} GB")
 
     # run MoE
     x_up_gate = x.dot(selected_gate_projs.permute(0,2,1)).silu() * x.dot(selected_up_projs.permute(0,2,1))
     x_down = x_up_gate.dot(selected_down_projs.permute(0,2,1))
-    return (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
+    ret = (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
+    # print(f"333333 mem_used: {GlobalCounters.global_mem/1e9:.2f} GB")
+    return ret
 
 # model is bf16, 1.3B active, 6.9B total
 # M3 Max is 400 GB/s, so 400/2.6 = ~154 tok/s
@@ -94,8 +98,16 @@ if __name__ == "__main__":
     timings.append(time.perf_counter()-st)
     toks.append(tok)
     start_pos += 1
+    # print("AAAAAAAAAAAA")
+    # print("AAAAAAAAAAAA")
+    # print("AAAAAAAAAAAA")
+    # print("AAAAAAAAAAAA")
     print(toks)
     print(tokenizer.decode(toks))
+    # print(f"global_mem: {GlobalCounters.global_mem/1e9:.2f} GB")
+    # print(f"global_ops: {GlobalCounters.global_ops:,} ops")
+    # print(f"mem_used: {GlobalCounters.mem_used/1e9:.2f} GB")
+    # print(f"kernel_count: {GlobalCounters.kernel_count:,} kernels")
   print(f"fastest token {min(timings)*1e3:.2f} ms, {1/min(timings):.1f} tok/s")
 
   # if temperature == 0:
