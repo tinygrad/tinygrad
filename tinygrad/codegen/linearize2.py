@@ -1,8 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
-from tinygrad.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat, GroupOp
+from tinygrad.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.dtype import PtrDType
-from tinygrad.helpers import dedup, partition, all_same, flatten
+from tinygrad.helpers import dedup, partition, all_same, flatten, Profiling, Timing
 from line_profiler import profile
 from collections import defaultdict
 
@@ -28,10 +28,6 @@ class BasicBlock2:
 
 #@profile
 def make_block(fixed_x:UOp, child_len:dict[UOp, int], blocks:dict[UOp, UOp]):
-  # this is key to making this algorithm work. we recover the old x by replacing the srcs
-  #fixed_x = x.replace(src=tuple([y.arg.lst[-1] for y in x.src]))
-  #assert x.op not in {Ops.BLOCK, Ops.BLOCKEND} and fixed_x in child_len
-
   # compute the new context
   list_ctx = []
   for y in fixed_x.src:
@@ -113,12 +109,6 @@ def merge_block(x:UOp):
   new_srcs = flatten([y.src for y in mergable_blocks])+unmergable_blocks
   return UOp(x.op, src=tuple(new_srcs), arg=replace(x.arg, lst=parent_lst+x.arg.lst))
 
-# this will wrap every UOp in a BLOCK, top down
-#blocks_in_context = PatternMatcher([
-  #(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), make_block), # all will become block
-  #(UPat(Ops.BLOCK, name="x"), merge_block),
-#])
-
 block_merge = PatternMatcher([
   (UPat((Ops.BLOCK, Ops.BLOCKEND), name="x"), merge_block),
   (UPat(Ops.BLOCKEND, name="x"), remove_blockend),
@@ -127,13 +117,22 @@ block_merge = PatternMatcher([
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
-  child_len = {k:len(v) for k,v in sink.get_children_map().items()}
-  blocks = {}
-  for x in sink.toposort: blocks[x] = make_block(x, child_len, blocks)
-  sink = blocks[sink]
+  # do toposort
+  toposink = sink.toposort
 
-  #ctx = MakeBlockContext({k:len(v) for k,v in sink.get_children_map().items()})
-  #sink = graph_rewrite(sink, blocks_in_context, ctx=ctx, name="Linearizer: Create Blocks")
+  # get children
+  children: dict[UOp, dict[UOp, None]] = {sink:{}}
+  for u in toposink:
+    for s in u.src: children.setdefault(s, {})[u] = None
+  child_len = {k:len(v) for k,v in children.items()}
+  del children
+
+  # this will wrap every UOp in a BLOCK, top down
+  with Timing(f"making block {len(toposink):5d}"):
+    blocks = {}
+    for x in toposink: blocks[x] = make_block(x, child_len, blocks)
+    sink = blocks[sink]
+    del toposink, blocks
 
   # combine matching BLOCKENDS, the keys of this dictionary are the RANGE UOps, values are the BLOCKENDs
   blockends_to_arg: dict[UOp, list[UOp]] = {}
