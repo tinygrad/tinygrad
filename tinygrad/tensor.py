@@ -162,7 +162,7 @@ class Tensor(SimpleMathTrait):
 
     # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
-    self._check_grad(data.dtype, requires_grad)
+    self._check_grad(dtype, requires_grad)
 
     # data might be on a different device
     if isinstance(device, str): self.lazydata:UOp = data if data.device == device else data.copy_to_device(device)
