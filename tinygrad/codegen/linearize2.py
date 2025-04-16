@@ -21,7 +21,7 @@ class BasicBlock2:
   def __lt__(self, o:BasicBlock2): return tuple(x.tuplize for x in self.ctx+self.lst) < tuple(x.tuplize for x in o.ctx+o.lst)
   def __repr__(self):
     return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+f'f{self.cnt} '+\
-           f"{[disp(y) for y in self.ctx]} {[disp(y) for y in self.child_ctx] if self.child_ctx else ''} "+\
+           f"{[disp(y) for y in self.ctx]} {[disp(y) for y in self.child_ctx] if self.child_ctx else '-'} "+\
            f"{len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
 def _sort_ctx(inp): return tuple(sorted(dedup(inp), key=lambda x: x.tuplize))
@@ -30,15 +30,14 @@ def make_block(ctx, x:UOp):
   # this is key to making this algorithm work. we recover the old x by replacing the srcs
   fixed_x = x.replace(src=tuple([y.arg.lst[-1] for y in x.src]))
   assert fixed_x in ctx
-  dedup_srcs = set(x.src)
 
-  # compute the new context (copy from ext linearizer code)
-  tuple_ctx = _sort_ctx(flatten([y.arg.child_ctx if y.arg.child_ctx is not None else y.arg.ctx for y in dedup_srcs]))
-  child_ctx = None
+  # compute the new context
+  tuple_ctx = _sort_ctx(flatten([y.arg.child_ctx if y.arg.child_ctx is not None else y.arg.ctx for y in x.src]))
 
   # does this block modify the ctx?
   # RANGE/IF add to the next ctx
   # STORE/ASSIGN subtract from the next ctx
+  child_ctx = None
   if fixed_x.op in {Ops.RANGE, Ops.IF}: child_ctx = (fixed_x,)
   elif fixed_x.op is Ops.STORE:
     # ugh, deal with non-reduce locals. probably wrong
@@ -52,16 +51,15 @@ def make_block(ctx, x:UOp):
 
   # a block is unmergable if it has children or it has a different context
   unmergable_blocks, mergable_blocks = [], []
-  for y in dedup_srcs:
+  for y in dedup(x.src):
     if y.arg.cnt == 1 and y.arg.ctx == tuple_ctx:
       mergable_blocks.append(y)
     else:
       # block is unmergable
       if y.arg.ctx != tuple_ctx:
-        ends_to_add = [z for z in y.arg.ctx if z not in tuple_ctx][::-1]
-        extra_ends = [z for z in y.arg.ctx if z in tuple_ctx]
+        extra_ends, ends_to_add = partition(y.arg.ctx, lambda z: z in tuple_ctx)
         while len(ends_to_add):
-          r = ends_to_add.pop(0)
+          r = ends_to_add.pop(-1)
           end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
           y = UOp(Ops.BLOCKEND, src=(y,), arg=BasicBlock2((end_uop,), _sort_ctx(ends_to_add+extra_ends), r, cnt=1))
       unmergable_blocks.append(y)
