@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from tinygrad.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import dedup, partition, all_same, flatten
-from line_profiler import profile
+#from line_profiler import profile
 
 def disp(y:UOp) -> str:
   if y.op is Ops.IF: return f'IF{id(y)}'
@@ -19,11 +19,18 @@ class BasicBlock2:
   end: UOp|None = None
   cnt: int = 0
   child_ctx: list[UOp]|None = None
-  def __lt__(self, o:BasicBlock2): raise Exception("no comparing basic blocks")
+  def __lt__(self, o:BasicBlock2): raise RuntimeError("no comparing basic blocks")
   def __repr__(self):
     return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+f'f{self.cnt} '+\
            f"{[disp(y) for y in self.ctx]} {[disp(y) for y in self.child_ctx] if self.child_ctx is not None else '-'} "+\
            f"{len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
+
+def _get_child_len(toposink) -> dict[UOp, int]:
+  children: dict[UOp, dict[UOp, None]] = {}
+  for u in toposink:
+    children[u] = {}
+    for s in u.src: children[s][u] = None
+  return {k:len(v) for k,v in children.items()}
 
 def _sort_ctx(inp): return sorted(dedup(inp), key=lambda x: x.tuplize)
 def _get_ctx(deduped_blocks:list[UOp]):
@@ -74,7 +81,32 @@ def _get_child_ctx(fixed_x:UOp, local_blocks:dict[UOp, UOp]):
     child_ctx = [y for y in local_blocks[fixed_x.src[1]].arg.ctx if y not in fixed_x.src[0].src[1:]]
   return child_ctx
 
-#@profile
+# ***** make blocks *****
+
+def make_block_pm(ctx:dict[UOp, int], x:UOp):
+  # recover the original UOp
+  fixed_x = x.replace(src=tuple(y.arg.lst[-1] for y in x.src))
+
+  # compute the new context
+  tuple_ctx = _get_ctx(x.src)
+
+  # add the current uop to the end of the block
+  lst, srcs = _get_new_block(dedup(x.src), tuple_ctx)
+  lst.append(fixed_x)
+
+  # does this block modify the ctx? if so, we need a child_ctx
+  child_ctx = _get_child_ctx(fixed_x, dict(zip(fixed_x.src, x.src)))
+
+  # create the block
+  arg = BasicBlock2(lst, tuple_ctx, cnt=ctx[fixed_x], child_ctx=child_ctx)
+  return UOp(Ops.BLOCK, src=tuple(srcs), arg=arg)
+
+block_create = PatternMatcher([(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), make_block_pm)])
+
+def wrap_in_blocks(sink:UOp):
+  return graph_rewrite(sink, block_create, ctx=_get_child_len(sink.toposort), name="Linearizer: Create Blocks")
+
+"""
 def make_block(fixed_x:UOp, child_len:dict[UOp, int], blocks:dict[UOp, UOp]):
   # all input blocks to this one, deduped
   local_blocks = {y:blocks[y] for y in fixed_x.src}
@@ -93,25 +125,18 @@ def make_block(fixed_x:UOp, child_len:dict[UOp, int], blocks:dict[UOp, UOp]):
   arg = BasicBlock2(lst, tuple_ctx, cnt=child_len[fixed_x], child_ctx=child_ctx)
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=arg)
 
-def _get_child_len(toposink) -> dict[UOp, int]:
-  # get children
-  children: dict[UOp, dict[UOp, None]] = {}
-  for u in toposink:
-    for s in u.src: children.setdefault(s, {})[u] = None
-  return {k:len(v) for k,v in children.items()}
-
 def wrap_in_blocks(sink:UOp):
   # do toposort
   toposink = sink.toposort
 
   # get children lengths
   child_len = _get_child_len(toposink)
-  child_len[sink] = 0
 
   # this will wrap every UOp in a BLOCK, top down
   blocks = {}
   for x in toposink: blocks[x] = make_block(x, child_len, blocks)
   return blocks[sink]
+"""
 
 # ***** block merging ****
 
