@@ -4,18 +4,12 @@ from dataclasses import dataclass, replace
 from tinygrad.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import dedup, partition, all_same, flatten
+from line_profiler import profile
 
 def disp(y:UOp) -> str:
   if y.op is Ops.IF: return f'IF{id(y)}'
   if y.op is Ops.RANGE: return str(y.arg)
   return "<NONE>"
-
-def _sort_ctx(inp): return sorted(dedup(inp), key=lambda x: x.tuplize)
-def _get_ctx(deduped_blocks:list[UOp]):
-  list_ctx = []
-  for y in deduped_blocks:
-    list_ctx.extend(list(y.arg.child_ctx if y.arg.child_ctx is not None else y.arg.ctx))
-  return _sort_ctx(list_ctx)
 
 @dataclass(frozen=True, eq=False)
 class BasicBlock2:
@@ -30,14 +24,40 @@ class BasicBlock2:
            f"{[disp(y) for y in self.ctx]} {[disp(y) for y in self.child_ctx] if self.child_ctx is not None else '-'} "+\
            f"{len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
-def make_block(fixed_x:UOp, child_len:dict[UOp, int], blocks:dict[UOp, UOp]):
-  # all input blocks to this one, deduped
-  deduped_blocks = list({blocks[y]:None for y in fixed_x.src})
+def _sort_ctx(inp): return sorted(dedup(inp), key=lambda x: x.tuplize)
+def _get_ctx(deduped_blocks:list[UOp]):
+  list_ctx = []
+  for y in deduped_blocks: list_ctx += y.arg.child_ctx if y.arg.child_ctx is not None else y.arg.ctx
+  return _sort_ctx(list_ctx)
 
-  # compute the new context
-  tuple_ctx = _get_ctx(deduped_blocks)
+def _get_new_block(deduped_blocks:list[UOp], current_ctx:list[UOp]):
+  # a block is unmergable if it has children or it has a different context
+  lst = []
+  srcs = []
+  for y in deduped_blocks:
+    if y.arg.ctx == current_ctx:
+      # block has same context
+      if y.arg.cnt == 1:
+        # if one child, merge it
+        lst += y.arg.lst
+        srcs += list(y.src)
+      else:
+        # otherwise, keep it
+        srcs.append(y)
+    else:
+      # block has different context
+      ends_to_add = [z for z in y.arg.ctx if z not in current_ctx]
+      new_ctx = y.arg.ctx
+      while len(ends_to_add):
+        r:UOp = ends_to_add.pop(-1)
+        new_ctx = [z for z in new_ctx if z is not r]
+        end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
+        y = UOp(Ops.BLOCKEND, src=(y,), arg=BasicBlock2([end_uop], new_ctx, end=r, cnt=1))
+      # add it to srcs
+      srcs.append(y)
+  return lst, srcs
 
-  # does this block modify the ctx?
+def _get_child_ctx(fixed_x:UOp, blocks:dict[UOp, UOp]):
   # RANGE/IF add to the next ctx
   # STORE/ASSIGN subtract from the next ctx
   child_ctx = None
@@ -51,30 +71,26 @@ def make_block(fixed_x:UOp, child_len:dict[UOp, int], blocks:dict[UOp, UOp]):
   elif fixed_x.op is Ops.ASSIGN:
     assert fixed_x.src[0].op is Ops.DEFINE_ACC
     child_ctx = [y for y in blocks[fixed_x.src[1]].arg.ctx if y not in fixed_x.src[0].src[1:]]
+  return child_ctx
 
-  # a block is unmergable if it has children or it has a different context
-  unmergable_blocks = []
-  lst = []
-  merged_srcs = []
-  for y in deduped_blocks:
-    if y.arg.cnt == 1 and y.arg.ctx == tuple_ctx:
-      lst += y.arg.lst
-      merged_srcs += list(y.src)
-    else:
-      # block is unmergable
-      if y.arg.ctx != tuple_ctx:
-        ends_to_add = [z for z in y.arg.ctx if z not in tuple_ctx]
-        new_ctx = y.arg.ctx
-        while len(ends_to_add):
-          r:UOp = ends_to_add.pop(-1)
-          new_ctx = [z for z in new_ctx if z is not r]
-          end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
-          y = UOp(Ops.BLOCKEND, src=(y,), arg=BasicBlock2([end_uop], new_ctx, end=r, cnt=1))
-      unmergable_blocks.append(y)
+#@profile
+def make_block(fixed_x:UOp, child_len:dict[UOp, int], blocks:dict[UOp, UOp]):
+  # all input blocks to this one, deduped
+  deduped_blocks = list({blocks[y]:None for y in fixed_x.src})
+
+  # compute the new context
+  tuple_ctx = _get_ctx(deduped_blocks)
+
+  # add the current uop to the end of the block
+  lst, srcs = _get_new_block(deduped_blocks, tuple_ctx)
+  lst.append(fixed_x)
+
+  # does this block modify the ctx? if so, we need a child_ctx
+  child_ctx = _get_child_ctx(fixed_x, blocks)
 
   # create the block
-  arg = BasicBlock2(lst+[fixed_x], tuple_ctx, cnt=child_len[fixed_x], child_ctx=child_ctx)
-  return UOp(Ops.BLOCK, src=tuple(merged_srcs+unmergable_blocks), arg=arg)
+  arg = BasicBlock2(lst, tuple_ctx, cnt=child_len[fixed_x], child_ctx=child_ctx)
+  return UOp(Ops.BLOCK, src=tuple(srcs), arg=arg)
 
 def merge_block(x:UOp):
   unmergable_blocks, mergable_blocks = [], []
@@ -95,7 +111,7 @@ def merge_block(x:UOp):
   return UOp(x.op, src=tuple(flatten([y.src for y in mergable_blocks])+unmergable_blocks), arg=arg)
 
 def remove_blockend(x:UOp):
-  # if there's any
+  # if there's any remaining blocks that need to go in this BLOCKEND, we don't remove it
   if any(x.arg.end in y.arg.ctx for y in x.src): return None
 
   parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and y.arg.child_ctx is not None and x.arg.end in y.arg.child_ctx]
@@ -117,18 +133,16 @@ block_merge = PatternMatcher([
   (UPat(Ops.BLOCKEND, name="x"), remove_blockend),
 ])
 
-def get_child_counts(toposink:dict[UOp, None]) -> dict[UOp, int]:
-  children: dict[UOp, dict[UOp, None]] = {}
-  for u in toposink:
-    for s in u.src: children.setdefault(s, {})[u] = None
-  return {k:len(v) for k,v in children.items()}
-
 def wrap_in_blocks(sink:UOp):
   # do toposort
   toposink = sink.toposort
 
   # get children
-  child_len = get_child_counts(toposink)
+  children: dict[UOp, dict[UOp, None]] = {}
+  for u in toposink:
+    for s in u.src: children.setdefault(s, {})[u] = None
+  child_len = {k:len(v) for k,v in children.items()}
+  del children
   child_len[sink] = 0
 
   # this will wrap every UOp in a BLOCK, top down
