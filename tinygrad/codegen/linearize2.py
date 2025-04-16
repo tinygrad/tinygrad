@@ -55,27 +55,27 @@ def disp(y:UOp) -> str:
 
 @dataclass(frozen=True, eq=False)
 class BasicBlock2:
-  lst: list[UOp]
-  ctx: list[UOp]
+  lst: tuple[UOp, ...]
+  ctx: tuple[UOp, ...]
   end: UOp|None = None
   cnt: int = 0
-  child_ctx: list[UOp]|None = None
-  def __lt__(self, o:BasicBlock2): raise RuntimeError("no comparing basic blocks")
+  child_ctx: tuple[UOp, ...]|None = None
+  def __lt__(self, _:BasicBlock2): raise RuntimeError("no comparing basic blocks")
   def __repr__(self):
     return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+f'f{self.cnt} '+\
            f"{[disp(y) for y in self.ctx]} {[disp(y) for y in self.child_ctx] if self.child_ctx is not None else '-'} "+\
            f"{len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
   def last_ctx(self): return self.child_ctx if self.child_ctx is not None else self.ctx
 
-def _sort_ctx(inp): return sorted(dedup(inp), key=lambda x: x.tuplize)
+def _sort_ctx(inp): return tuple(sorted(dedup(inp), key=lambda x: x.tuplize))
 
 # ***** block context *****
 
 @dataclass
 class BlockContext:
   child_count: dict[UOp, int]
-  block_ctxs: dict[UOp, list[UOp]]
-  child_ctxs: dict[UOp, list[UOp]]
+  block_ctxs: dict[UOp, tuple[UOp, ...]]
+  child_ctxs: dict[UOp, tuple[UOp, ...]]
   def last_ctx(self, u): return ret if (ret:=self.child_ctxs.get(u)) is not None else self.block_ctxs[u]
   @staticmethod
   def from_sink(sink:UOp) -> BlockContext:
@@ -96,16 +96,16 @@ class BlockContext:
 
       # RANGE/IF add to the next ctx
       # STORE/ASSIGN subtract from the next ctx
-      if u.op in {Ops.RANGE, Ops.IF}: ctx.child_ctxs[u] = _sort_ctx(ctx.block_ctxs[u] + [u])
+      if u.op in {Ops.RANGE, Ops.IF}: ctx.child_ctxs[u] = _sort_ctx(ctx.block_ctxs[u] + (u,))
       elif u.op is Ops.STORE:
         # ugh, deal with non-reduce locals. probably wrong
         if isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.local:
           idx_context, store_context = ctx.last_ctx(u.src[0]), ctx.last_ctx(u.src[1])
-          ctx.child_ctxs[u] = [y for y in store_context if y not in idx_context and y.op is Ops.RANGE]
-        else: ctx.child_ctxs[u] = []
+          ctx.child_ctxs[u] = tuple([y for y in store_context if y not in idx_context and y.op is Ops.RANGE])
+        else: ctx.child_ctxs[u] = ()
       elif u.op is Ops.ASSIGN:
         assert u.src[0].op is Ops.DEFINE_ACC
-        ctx.child_ctxs[u] = [y for y in ctx.last_ctx(u.src[1]) if y not in u.src[0].src[1:]]
+        ctx.child_ctxs[u] = tuple([y for y in ctx.last_ctx(u.src[1]) if y not in u.src[0].src[1:]])
     return ctx
 
 # ***** make blocks *****
@@ -141,15 +141,14 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
         r:UOp = ends_to_add.pop(-1)
         new_ctx = [z for z in new_ctx if z is not r]
         end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
-        u = UOp(Ops.BLOCKEND, src=(u,), arg=BasicBlock2([end_uop], new_ctx, end=r, cnt=1))
+        u = UOp(Ops.BLOCKEND, src=(u,), arg=BasicBlock2((end_uop,), new_ctx, end=r, cnt=1))
       # add it to unmergable
       unmergable[u] += 1
 
   srcs = []
   for k,v in unmergable.items(): srcs += [k]*v
 
-  lst = block_reorder(lst[::-1])
-  bb = BasicBlock2(lst, ctx=ctx.block_ctxs[x], cnt=ctx.child_count[x], child_ctx=ctx.child_ctxs.get(x, None))
+  bb = BasicBlock2(tuple(block_reorder(lst[::-1])), ctx=ctx.block_ctxs[x], cnt=ctx.child_count[x], child_ctx=ctx.child_ctxs.get(x, None))
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
 block_create = PatternMatcher([(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), make_block_bottom_up)])
@@ -173,8 +172,7 @@ def merge_block(x:UOp):
   del mergable_dict
 
   # create the block
-  lst = flatten([y.arg.lst for y in mergable_blocks])+x.arg.lst
-  arg = replace(x.arg, lst=lst)
+  arg = replace(x.arg, lst=tuple(flatten([y.arg.lst for y in mergable_blocks]))+x.arg.lst)
   return UOp(x.op, src=tuple(flatten([y.src for y in mergable_blocks])+unmergable_blocks), arg=arg)
 
 def remove_blockend(x:UOp):
@@ -191,8 +189,7 @@ def remove_blockend(x:UOp):
     # NOTE: we have to add a barrier at the start if barrier is used in the range
     if x.op is Ops.BLOCKEND and any(y.op is Ops.BARRIER for y in late_ops) and late_ops[-1].op is Ops.ENDRANGE:
       late_ops = [UOp(Ops.BARRIER)] + late_ops
-    lst = early_ops+parent_block.arg.lst+late_ops
-    arg = BasicBlock2(lst, [y for y in x.arg.ctx if y is not x.arg.end], cnt=x.arg.cnt)
+    arg = BasicBlock2(tuple(early_ops)+parent_block.arg.lst+tuple(late_ops), tuple([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt)
     return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src, arg=arg)
 
 block_merge_early = PatternMatcher([
