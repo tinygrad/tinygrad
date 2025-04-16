@@ -31,7 +31,8 @@ class MixtureFeedForward:
     # print(f"222222 mem_used: {GlobalCounters.global_mem/1e9:.2f} GB")
 
     # run MoE
-    x_up_gate = x.dot(selected_gate_projs.permute(0,2,1)).silu() * x.dot(selected_up_projs.permute(0,2,1))
+    # WHY IS THIS FUSE SLOWER?!?!?!?!?!??!?!?!?!??!?!?!?!?!?!?!?!!?!?!?!?!?!? DIFFERENT BEAM?!?!?!?! WTF
+    x_up_gate = (x.dot(selected_gate_projs.permute(0,2,1)).silu() * x.dot(selected_up_projs.permute(0,2,1))).fuse()
     x_down = x_up_gate.dot(selected_down_projs.permute(0,2,1))
     ret = (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
     # print(f"333333 mem_used: {GlobalCounters.global_mem/1e9:.2f} GB")
@@ -98,16 +99,16 @@ if __name__ == "__main__":
     timings.append(time.perf_counter()-st)
     toks.append(tok)
     start_pos += 1
-    # print("AAAAAAAAAAAA")
-    # print("AAAAAAAAAAAA")
-    # print("AAAAAAAAAAAA")
-    # print("AAAAAAAAAAAA")
+    print("AAAAAAAAAAAA")
+    print("AAAAAAAAAAAA")
+    print("AAAAAAAAAAAA")
+    print("AAAAAAAAAAAA")
     print(toks)
     print(tokenizer.decode(toks))
-    # print(f"global_mem: {GlobalCounters.global_mem/1e9:.2f} GB")
-    # print(f"global_ops: {GlobalCounters.global_ops:,} ops")
-    # print(f"mem_used: {GlobalCounters.mem_used/1e9:.2f} GB")
-    # print(f"kernel_count: {GlobalCounters.kernel_count:,} kernels")
+    print(f"global_mem: {GlobalCounters.global_mem/1e9:.2f} GB")
+    print(f"global_ops: {GlobalCounters.global_ops:,} ops")
+    print(f"mem_used: {GlobalCounters.mem_used/1e9:.2f} GB")
+    print(f"kernel_count: {GlobalCounters.kernel_count:,} kernels")
   print(f"fastest token {min(timings)*1e3:.2f} ms, {1/min(timings):.1f} tok/s")
 
   # if temperature == 0:
@@ -115,3 +116,15 @@ if __name__ == "__main__":
   #   assert toks == [12092, 13, 309, 717, 247, 747, 17782, 281, 436, 12209, 285, 309, 717, 2820, 281, 755,
   #                   247, 1805, 4685, 273, 253, 1027, 3510, 273, 941, 326, 476, 320, 7141, 275, 247], "BAD OUTPUT!"
 
+
+# global_mem: 2.80 GB
+# global_ops: 3,663,325,624 ops
+# mem_used: 16.78 GB
+
+# global_mem: 2.80 GB
+# global_ops: 4,810,369,464 ops
+# mem_used: 16.78 GB
+
+# global_mem: 2.80 GB
+# global_ops: 13,624,553,216 ops
+# mem_used: 16.58 GB
