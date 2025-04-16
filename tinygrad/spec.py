@@ -1,18 +1,33 @@
 from typing import cast, Callable
-from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu
+from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, RewriteContext
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
-from tinygrad.helpers import all_same, dedup, flatten, prod, getenv, DEBUG, CHECK_OOB
+from tinygrad.helpers import all_same, dedup, flatten, prod, DEBUG, CHECK_OOB
 if CHECK_OOB:
   import z3
 
   # IDIV is truncated division but z3 does floored division and mod by power of two sometimes uses Ops.AND
   def z3_cdiv(a,b): return z3.If(a<0, (a+(b-1))/b, a/b)
-  z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.CAST: lambda x:x,
+  z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv,
     Ops.SHR: lambda a,b: a/(2**b), Ops.SHL: lambda a,b: a*(2**b), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, (int, z3.ArithRef)) else a&b}
-  def z3_eval(u: UOp|int, ctx: dict[UOp, 'z3.ArithRef']) -> 'int|z3.ArithRef':
-    if isinstance(u, int): return u
-    if u.op is Ops.CONST: return u.arg
-    return ctx[u] if u in ctx else z3_alu[u.op](*(z3_eval(src, ctx) for src in u.src))
+  def create_bounded(name:str, vmin, vmax, solver:z3.Solver) -> z3.ArithRef:
+    s = z3.Int(name, ctx=solver.ctx)
+    solver.add(vmin <= s, s <= vmax)
+    return s
+
+  # ctx is z3.Solver object
+  z3_renderer = PatternMatcher([
+    (UPat(Ops.SPECIAL, src=(), name="x"), lambda x: UOp(Ops.SPECIAL, arg=x.arg[0], src=(x.ufix(x.arg[1]),))),
+    (UPat(Ops.SPECIAL, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg, 0, x.src[0].arg-1, ctx))),
+    (UPat(Ops.DEFINE_VAR, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg[0], x.arg[1], x.arg[2], ctx))),
+    (UPat(Ops.RANGE, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"ridx{x.arg}", x.src[0].arg, x.src[1].arg-1, ctx))),
+    (UPat(Ops.LOAD, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"load{ctx.loads.setdefault(x, len(ctx.loads))}",
+      dtypes.min(x.dtype), dtypes.max(x.dtype), ctx))),
+    (UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=z3.BoolVal(x.arg, ctx=ctx.ctx))),
+    (UPat(Ops.CONST, dtype=dtypes.ints, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=z3.IntVal(x.arg, ctx=ctx.ctx))),
+    (UPat(Ops.CAST, name="x"), lambda x: UOp(Ops.NOOP, arg=x.src[0].arg)),
+    (UPat(Ops.NEG, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=-x.src[0].arg)),
+    (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=z3_alu[x.op](x.src[0].arg, x.src[1].arg))),
+  ])
 
 buffer_spec = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
@@ -57,35 +72,25 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 
 # ***** uop type spec *****
 
+# @track_rewrites
 def validate_index(idx:UOp, mask:UOp|None=None):
   if not CHECK_OOB or isinstance(idx.dtype, ImageDType) or (sz := cast(PtrDType, idx.src[0].dtype).size) == -1: return True
-
-  all_uops = list((idx.toposort | mask.toposort).keys() if mask is not None else idx.toposort.keys())
-  # Ops.SPECIAL can have symbolic arg but it wont be in the toposort, we need to add it manually
-  all_uops += flatten(x.arg[1].toposort.keys() for x in all_uops if x.op is Ops.SPECIAL and isinstance(x.arg[1], UOp))
-
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
   if 0<=idx.src[1].vmin and idx.src[1].vmax<sz: return True
 
+  all_uops = list((idx.toposort | mask.toposort).keys() if mask is not None else idx.toposort.keys())
+  # Ops.SPECIAL can have symbolic arg but it wont be in the toposort beacuse its not a src, we need to add it manually
+  all_uops += flatten(x.arg[1].toposort.keys() for x in all_uops if x.op is Ops.SPECIAL and isinstance(x.arg[1], UOp))
+
   # WEBGPU has a BITCAST in the index. TODO: fix
   if any(x.op in (Ops.BITCAST, Ops.DEFINE_VAR) for x in all_uops): return True
-
-  solver = z3.Solver(ctx=(z3ctx:=z3.Context()))
-  load_ctx: dict[UOp, int] = {}
-  leaves = {v: z3.Int(v.render(simplify=False), ctx=z3ctx) for v in all_uops if v.op in (Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE)} | \
-           {v: z3.Int(f"load{load_ctx.setdefault(v, len(load_ctx))}", ctx=z3ctx) for v in all_uops if v.op is Ops.LOAD}
-
-  bounds_fn = {Ops.DEFINE_VAR: lambda u: (u.arg[1], u.arg[2]), Ops.SPECIAL: lambda u: (0, u.arg[1]-1),
-    Ops.RANGE: lambda u: (u.src[0], u.src[1]-1), Ops.LOAD: lambda u: (dtypes.min(u.dtype), dtypes.max(u.dtype))}
-  for u, z3var in leaves.items():
-    lb, ub = bounds_fn[u.op](u)
-    # special/ranges can have a variable upper bound, so we need to turn it into a z3 variable
-    solver.add(z3_eval(lb, ctx=leaves)<=z3var, z3var<=z3_eval(ub, ctx=leaves))
-
-  if mask is not None: solver.add(z3_eval(mask, ctx=leaves))
-  z3_idx = z3_eval(idx.src[1], leaves)
+  solver = z3.Solver(ctx=z3.Context())
+  solver.loads = {}  # dict to number the loads
+  rewriter = RewriteContext(z3_renderer, ctx=solver)  # Use RewriteContext directly to keep rewrite cache between index and mask
+  z3_idx = rewriter.top_down_rewrite(idx.src[1]).arg
+  if mask is not None: solver.add(rewriter.top_down_rewrite(mask).arg)
   if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
-    for key, val in (leaves).items(): print(f"{val}={key}")
+    [print(u) for u in all_uops if u.op in (Ops.SPECIAL, Ops.RANGE, Ops.DEFINE_VAR, Ops.LOAD)]
     print(f"idx={idx.src[1].render(simplify=False)}")
     if mask is not None: print(f"mask={mask.render(simplify=False)}")
     print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz}\nconstraints = {solver}")
