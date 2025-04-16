@@ -21,7 +21,7 @@ class BasicBlock2:
   def __lt__(self, o:BasicBlock2): return tuple(x.tuplize for x in self.ctx+self.lst) < tuple(x.tuplize for x in o.ctx+o.lst)
   def __repr__(self):
     return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+f'f{self.cnt} '+\
-           f"{[disp(y) for y in self.ctx]} {[disp(y) for y in self.child_ctx] if self.child_ctx else '-'} "+\
+           f"{[disp(y) for y in self.ctx]} {[disp(y) for y in self.child_ctx] if self.child_ctx is not None else '-'} "+\
            f"{len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
 def _sort_ctx(inp): return tuple(sorted(dedup(inp), key=lambda x: x.tuplize))
@@ -47,7 +47,7 @@ def make_block(ctx, x:UOp):
     else: child_ctx = ()
   elif fixed_x.op is Ops.ASSIGN:
     assert fixed_x.src[0].op is Ops.DEFINE_ACC
-    child_ctx = tuple([y for y in x.src[1].arg.ctx if x not in fixed_x.src[0].src[1:]])
+    child_ctx = tuple([y for y in x.src[1].arg.ctx if y not in fixed_x.src[0].src[1:]])
 
   # a block is unmergable if it has children or it has a different context
   unmergable_blocks, mergable_blocks = [], []
