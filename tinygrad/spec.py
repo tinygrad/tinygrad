@@ -22,11 +22,9 @@ if CHECK_OOB:
     (UPat(Ops.RANGE, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"ridx{x.arg}", x.src[0].arg, x.src[1].arg-1, ctx[0]))),
     (UPat(Ops.LOAD, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"load{ctx[1].setdefault(x, len(ctx[1]))}",
       dtypes.min(x.dtype), dtypes.max(x.dtype), ctx[0]))),
-    (UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=z3.BoolVal(x.arg, ctx=ctx[0].ctx))),
-    (UPat(Ops.CONST, dtype=dtypes.ints, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=z3.IntVal(x.arg, ctx=ctx[0].ctx))),
+    (UPat(Ops.CONST, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(z3.BoolVal if dtypes.is_bool(x.dtype) else z3.IntVal)(x.arg, ctx=ctx[0].ctx))),
     (UPat(Ops.CAST, name="x"), lambda x: x.src[0]),
-    (UPat(Ops.NEG, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=-x.src[0].arg)),
-    (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=z3_alu[x.op](x.src[0].arg, x.src[1].arg))),
+    (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=z3_alu[x.op](*(s.arg for s in x.src)))),
   ])
 
 buffer_spec = PatternMatcher([
