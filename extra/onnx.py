@@ -128,7 +128,7 @@ class OnnxRunner:
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
     # TODO: need true float16 for dtype checking
-    requires_grad = self.is_training if spec.dtype in dtypes.floats else False  
+    requires_grad = self.is_training if spec.dtype in dtypes.floats else False
     if spec.is_sequence:
       if not isinstance(value, Sequence): raise RuntimeError(f"{name} received {value}, expected a sequence type")
       sequence = [Tensor(v, dtype=spec.dtype, requires_grad=requires_grad) if not isinstance(v, Tensor) else v for v in value]

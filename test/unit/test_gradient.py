@@ -134,7 +134,7 @@ class TestTensorRequiresGrad(unittest.TestCase):
       Tensor([1, 2, 3], requires_grad=True)
 
   def test_requires_grad_method(self):
-    x = Tensor([1, 2, 3]) 
+    x = Tensor([1, 2, 3])
     with self.assertRaises(TypeError):
       x.requires_grad_(True)
 
