@@ -14,16 +14,16 @@ if CHECK_OOB:
     solver.add(vmin <= s, s <= vmax)
     return s
 
-  # ctx is z3.Solver object
+  # ctx is (solver, load_number_dict)
   z3_renderer = PatternMatcher([
     (UPat(Ops.SPECIAL, src=(), name="x"), lambda x: UOp(Ops.SPECIAL, arg=x.arg[0], src=(x.ufix(x.arg[1]),))),
-    (UPat(Ops.SPECIAL, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg, 0, x.src[0].arg-1, ctx))),
-    (UPat(Ops.DEFINE_VAR, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg[0], x.arg[1], x.arg[2], ctx))),
-    (UPat(Ops.RANGE, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"ridx{x.arg}", x.src[0].arg, x.src[1].arg-1, ctx))),
-    (UPat(Ops.LOAD, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"load{ctx.loads.setdefault(x, len(ctx.loads))}",
-      dtypes.min(x.dtype), dtypes.max(x.dtype), ctx))),
-    (UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=z3.BoolVal(x.arg, ctx=ctx.ctx))),
-    (UPat(Ops.CONST, dtype=dtypes.ints, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=z3.IntVal(x.arg, ctx=ctx.ctx))),
+    (UPat(Ops.SPECIAL, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg, 0, x.src[0].arg-1, ctx[0]))),
+    (UPat(Ops.DEFINE_VAR, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg[0], x.arg[1], x.arg[2], ctx[0]))),
+    (UPat(Ops.RANGE, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"ridx{x.arg}", x.src[0].arg, x.src[1].arg-1, ctx[0]))),
+    (UPat(Ops.LOAD, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"load{ctx[1].setdefault(x, len(ctx[1]))}",
+      dtypes.min(x.dtype), dtypes.max(x.dtype), ctx[0]))),
+    (UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=z3.BoolVal(x.arg, ctx=ctx[0].ctx))),
+    (UPat(Ops.CONST, dtype=dtypes.ints, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=z3.IntVal(x.arg, ctx=ctx[0].ctx))),
     (UPat(Ops.CAST, name="x"), lambda x: x.src[0]),
     (UPat(Ops.NEG, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=-x.src[0].arg)),
     (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=z3_alu[x.op](x.src[0].arg, x.src[1].arg))),
@@ -85,14 +85,13 @@ def validate_index(idx:UOp, mask:UOp|None=None):
   # WEBGPU has a BITCAST in the index. TODO: fix
   if any(x.op in (Ops.BITCAST, Ops.DEFINE_VAR) for x in all_uops): return True
   solver = z3.Solver(ctx=z3.Context())
-  solver.loads = {}  # dict to number the loads
-  rewriter = RewriteContext(z3_renderer, ctx=solver)  # Use RewriteContext directly to keep rewrite cache between index and mask
+  # Use RewriteContext directly to keep rewrite cache between index and mask
+  rewriter = RewriteContext(z3_renderer, ctx=(solver, {}))  # noqa: E0606 # pylint: disable=possibly-used-before-assignment
   z3_idx = rewriter.top_down_rewrite(idx.src[1]).arg
   if mask is not None: solver.add(rewriter.top_down_rewrite(mask).arg)
   if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
     [print(u) for u in all_uops if u.op in (Ops.SPECIAL, Ops.RANGE, Ops.DEFINE_VAR, Ops.LOAD)]
     print(f"idx={idx.src[1].render(simplify=False)}")
-    print(z3_idx)
     if mask is not None: print(f"mask={mask.render(simplify=False)}")
     print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz}\nconstraints = {solver}")
     return False
