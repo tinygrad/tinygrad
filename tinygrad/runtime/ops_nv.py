@@ -387,7 +387,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     classlist = memoryview(bytearray(100 * 4)).cast('I')
     clsinfo = rmctrl.gpu_get_classlist(self.fd_ctl, self.root, self.nvdevice, numClasses=100, classList=mv_address(classlist))
     self.nvclasses = {classlist[i] for i in range(clsinfo.numClasses)}
-    self.compute_class = next(clss for clss in [nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_COMPUTE_B] if clss in self.nvclasses)
+    self.compute_class = next(clss for clss in [nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_COMPUTE_B, nv_gpu.BLACKWELL_COMPUTE_A] if clss in self.nvclasses)
 
   def __init__(self, device:str=""):
     if NVDevice.root is None:
