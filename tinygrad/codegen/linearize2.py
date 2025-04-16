@@ -126,7 +126,8 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
   current_ctx = ctx.block_ctxs[x]
   lst = [x]
 
-  unmergable = []
+  #
+  unmergable = defaultdict(int)
 
   # add the srcs of this to the frontier
   # NOTE: things may be in here multiple times, that's okay
@@ -137,13 +138,14 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
 
     if (new_ctx:=ctx.block_ctxs[u]) == current_ctx:
       # block has same context
-      if ctx.child_count[u] == 1:
-        # if one child, merge it, and put the srcs on the frontier
+      if ctx.child_count[u] == unmergable[u]+1:
+        # if one child, or we have all the chidren, merge it, and put the srcs on the frontier
         lst.append(u)
         frontier_nodes.extend(list(u.src[::-1]))
+        del unmergable[u]
       else:
         # block has children, it's unmergable
-        unmergable.append(u)
+        unmergable[u] += 1
     else:
       # block has different context
       ends_to_add = [z for z in new_ctx if z not in current_ctx]
@@ -153,10 +155,13 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
         end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
         u = UOp(Ops.BLOCKEND, src=(u,), arg=BasicBlock2([end_uop], new_ctx, end=r, cnt=1))
       # add it to unmergable
-      unmergable.append(u)
+      unmergable[u] += 1
+
+  srcs = []
+  for k,v in unmergable.items(): srcs += [k]*v
 
   bb = BasicBlock2(lst[::-1], ctx=ctx.block_ctxs[x], cnt=ctx.child_count[x], child_ctx=ctx.child_ctxs.get(x, None))
-  return UOp(Ops.BLOCK, src=tuple(unmergable), arg=bb)
+  return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
 block_create = PatternMatcher([(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), make_block_bottom_up)])
 
