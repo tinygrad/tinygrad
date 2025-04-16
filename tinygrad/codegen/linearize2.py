@@ -37,7 +37,7 @@ class BlockContext:
   child_ctxs: dict[UOp, list[UOp]]
   def last_ctx(self, u): return ret if (ret:=self.child_ctxs.get(u)) is not None else self.block_ctxs[u]
   @staticmethod
-  def from_sink(sink:UOp) -> BlockContext:
+  def from_sink(sink:UOp, dedup_srcs=True) -> BlockContext:
     # get children and all block contexts
     ctx = BlockContext({}, {}, {})
     for u in sink.toposort:
@@ -45,7 +45,7 @@ class BlockContext:
       ctx.child_count[u] = 0
 
       # get children and accumulate the last_ctx
-      for s in dedup(u.src):
+      for s in (dedup(u.src) if dedup_srcs else u.src):
         ctx.child_count[s] += 1
         this_block_ctx += ctx.last_ctx(s)
 
@@ -68,6 +68,7 @@ class BlockContext:
 
 # ***** make blocks *****
 
+"""
 def _get_new_block(deduped_blocks:list[UOp], current_ctx:list[UOp]):
   # a block is unmergable if it has children or it has a different context
   lst = []
@@ -115,6 +116,52 @@ block_create = PatternMatcher([(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name
 
 def wrap_in_blocks(sink:UOp):
   return graph_rewrite(sink, block_create, ctx=BlockContext.from_sink(sink), name="Linearizer: Create Blocks")
+"""
+
+def make_block_bottom_up(ctx:BlockContext, x:UOp):
+  current_ctx = ctx.block_ctxs[x]
+  lst = [x]
+
+  unmergable = []
+
+  # add the srcs of this to the frontier
+  frontier_nodes = list(x.src[::-1])
+
+  seen = set()
+  while len(frontier_nodes):
+    u = frontier_nodes.pop(0)
+    if u in seen:
+      if u in unmergable: unmergable.append(u)
+      continue
+    seen.add(u)
+
+    if (new_ctx:=ctx.block_ctxs[u]) == current_ctx:
+      # block has same context
+      if ctx.child_count[u] == 1:
+        # if one child, merge it, and put the srcs on the frontier
+        lst.append(u)
+        frontier_nodes.extend(list(u.src[::-1]))
+      else:
+        # block has children, it's unmergable
+        unmergable.append(u)
+    else:
+      # block has different context
+      ends_to_add = [z for z in new_ctx if z not in current_ctx]
+      while len(ends_to_add):
+        r:UOp = ends_to_add.pop(-1)
+        new_ctx = [z for z in new_ctx if z is not r]
+        end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
+        u = UOp(Ops.BLOCKEND, src=(u,), arg=BasicBlock2([end_uop], new_ctx, end=r, cnt=1))
+      # add it to unmergable
+      unmergable.append(u)
+
+  bb = BasicBlock2(lst[::-1], ctx=ctx.block_ctxs[x], cnt=ctx.child_count[x], child_ctx=ctx.child_ctxs.get(x, None))
+  return UOp(Ops.BLOCK, src=tuple(unmergable), arg=bb)
+
+block_create = PatternMatcher([(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), make_block_bottom_up)])
+
+def wrap_in_blocks(sink:UOp):
+  return graph_rewrite(sink, block_create, ctx=BlockContext.from_sink(sink, dedup_srcs=False), name="Linearizer: Create Blocks", bottom_up=True)
 
 # ***** block merging ****
 
