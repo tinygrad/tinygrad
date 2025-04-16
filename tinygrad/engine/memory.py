@@ -10,12 +10,12 @@ from tinygrad.runtime.support.allocator import TLSFAllocator
 # **************** memory planning ****************
 
 def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ignore_checks=False, debug_prefix="",
-                             force_opt_buffers=set()) -> dict[Buffer, Buffer]:
+                             force_opt_buffers=None) -> dict[Buffer, Buffer]:
   if NO_MEMORY_PLANNER: return {}
   first_appearance, last_appearance, buf_to_opt = {}, {}, set()
   for i,u in enumerate(buffers):
     for buf in u:
-      should_skip = buf not in force_opt_buffers and (
+      should_skip = not (force_opt_buffers is not None and buf in force_opt_buffers) and (
         buf.is_allocated() or buf.base.is_allocated() or buf.lb_refcount > 0 or (noopt_buffers is not None and buf.base in noopt_buffers))
       if not ignore_checks and should_skip: continue
       if buf.base not in first_appearance: first_appearance[buf.base] = i
