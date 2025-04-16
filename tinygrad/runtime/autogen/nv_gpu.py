@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 # -*- coding: utf-8 -*-
 #
-# TARGET arch is: ['-include', '/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/common/sdk/nvidia/inc/nvtypes.h', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/common/inc', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/kernel-open/nvidia-uvm', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/kernel-open/common/inc', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/common/sdk/nvidia/inc', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/nvidia/arch/nvalloc/unix/include', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/common/sdk/nvidia/inc/ctrl']
+# TARGET arch is: ['-include', '/tmp/open-gpu-kernel-modules-d5a0858f/src/common/sdk/nvidia/inc/nvtypes.h', '-I/tmp/open-gpu-kernel-modules-d5a0858f/src/common/inc', '-I/tmp/open-gpu-kernel-modules-d5a0858f/kernel-open/nvidia-uvm', '-I/tmp/open-gpu-kernel-modules-d5a0858f/kernel-open/common/inc', '-I/tmp/open-gpu-kernel-modules-d5a0858f/src/common/sdk/nvidia/inc', '-I/tmp/open-gpu-kernel-modules-d5a0858f/src/nvidia/arch/nvalloc/unix/include', '-I/tmp/open-gpu-kernel-modules-d5a0858f/src/common/sdk/nvidia/inc/ctrl']
 # WORD_SIZE is: 8
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
@@ -1061,42 +1061,50 @@ NV2080_NOTIFIERS_INFOROM_RRL_OBJECT_UPDATED = (160) # macro
 NV2080_NOTIFIERS_INFOROM_PBL_OBJECT_UPDATED = (161) # macro
 NV2080_NOTIFIERS_LPWR_DIFR_PREFETCH_REQUEST = (162) # macro
 NV2080_NOTIFIERS_SEC_FAULT_ERROR = (163) # macro
-NV2080_NOTIFIERS_POSSIBLE_ERROR = (164) # macro
+NV2080_NOTIFIERS_UNUSED_1 = (164) # macro
 NV2080_NOTIFIERS_NVLINK_INFO_LINK_UP = (165) # macro
-NV2080_NOTIFIERS_RESERVED166 = (166) # macro
-NV2080_NOTIFIERS_RESERVED167 = (167) # macro
-NV2080_NOTIFIERS_RESERVED168 = (168) # macro
-NV2080_NOTIFIERS_RESERVED169 = (169) # macro
-NV2080_NOTIFIERS_RESERVED170 = (170) # macro
-NV2080_NOTIFIERS_RESERVED171 = (171) # macro
-NV2080_NOTIFIERS_RESERVED172 = (172) # macro
-NV2080_NOTIFIERS_RESERVED173 = (173) # macro
-NV2080_NOTIFIERS_RESERVED174 = (174) # macro
-NV2080_NOTIFIERS_RESERVED175 = (175) # macro
+NV2080_NOTIFIERS_CE10 = (166) # macro
+NV2080_NOTIFIERS_CE11 = (167) # macro
+NV2080_NOTIFIERS_CE12 = (168) # macro
+NV2080_NOTIFIERS_CE13 = (169) # macro
+NV2080_NOTIFIERS_CE14 = (170) # macro
+NV2080_NOTIFIERS_CE15 = (171) # macro
+NV2080_NOTIFIERS_CE16 = (172) # macro
+NV2080_NOTIFIERS_CE17 = (173) # macro
+NV2080_NOTIFIERS_CE18 = (174) # macro
+NV2080_NOTIFIERS_CE19 = (175) # macro
 NV2080_NOTIFIERS_NVLINK_INFO_LINK_DOWN = (176) # macro
 NV2080_NOTIFIERS_NVPCF_EVENTS = (177) # macro
 NV2080_NOTIFIERS_HDMI_FRL_RETRAINING_REQUEST = (178) # macro
 NV2080_NOTIFIERS_VRR_SET_TIMEOUT = (179) # macro
-NV2080_NOTIFIERS_RESERVED180 = (180) # macro
+NV2080_NOTIFIERS_OFA1 = (180) # macro
 NV2080_NOTIFIERS_AUX_POWER_EVENT = (181) # macro
 NV2080_NOTIFIERS_AUX_POWER_STATE_CHANGE = (182) # macro
 NV2080_NOTIFIERS_RESERVED_183 = (183) # macro
 NV2080_NOTIFIERS_GSP_PERF_TRACE = (184) # macro
 NV2080_NOTIFIERS_INBAND_RESPONSE = (185) # macro
 NV2080_NOTIFIERS_RESERVED_186 = (186) # macro
-NV2080_NOTIFIERS_MAXCOUNT = (187) # macro
+NV2080_NOTIFIERS_ECC_SBE_STORM = (187) # macro
+NV2080_NOTIFIERS_DRAM_RETIREMENT_EVENT = (188) # macro
+NV2080_NOTIFIERS_DRAM_RETIREMENT_FAILURE = (189) # macro
+NV2080_NOTIFIERS_NVLINK_UNCONTAINED_ERROR = (190) # macro
+NV2080_NOTIFIERS_GPU_UNAVAILABLE = (191) # macro
+NV2080_NOTIFIERS_GPU_RECOVERY_ACTION = (192) # macro
+NV2080_NOTIFIERS_POWER_SUSPEND = (193) # macro
+NV2080_NOTIFIERS_POWER_RESUME = (194) # macro
+NV2080_NOTIFIERS_MAXCOUNT = (195) # macro
 # def NV2080_NOTIFIERS_GR(x):  # macro
 #    return ((x==0)?((12)):((146)+(x-1)))
 def NV2080_NOTIFIERS_GR_IDX(x):  # macro
    return ((x)-(12))
 def NV2080_NOTIFIER_TYPE_IS_GR(x):  # macro
    return (((x)==(12)) or (((x)>=(146)) and ((x)<=(152))))
-def NV2080_NOTIFIERS_CE(x):  # macro
-   return ((23)+(x))
-def NV2080_NOTIFIERS_CE_IDX(x):  # macro
-   return ((x)-(23))
+# def NV2080_NOTIFIERS_CE(x):  # macro
+#    return (((x)<10)?((23)+(x)):((166)+(x)-10))
+# def NV2080_NOTIFIERS_CE_IDX(x):  # macro
+#    return (((x)<=(32))?((x)-(23)):((x)-(166)+10))
 def NV2080_NOTIFIER_TYPE_IS_CE(x):  # macro
-   return (((x)>=(23)) and ((x)<=(32)))
+   return ((((x)>=(23)) and ((x)<=(32))) or (((x)>=(166)) and ((x)<=(175))))
 def NV2080_NOTIFIERS_NVENC(x):  # macro
    return ((38)+(x))
 def NV2080_NOTIFIERS_NVENC_IDX(x):  # macro
@@ -1116,11 +1124,11 @@ def NV2080_NOTIFIERS_NVJPEG_IDX(x):  # macro
 def NV2080_NOTIFIER_TYPE_IS_NVJPEG(x):  # macro
    return (((x)>=(126)) and ((x)<=(133)))
 # def NV2080_NOTIFIERS_OFAn(x):  # macro
-#    return ((x==0)?((153)):((187)))
+#    return ((x==0)?((153)):((180)))
 # def NV2080_NOTIFIERS_OFA_IDX(x):  # macro
-#    return ((x==(153))?(0):(-1))
+#    return ((x==(153))?((x)-(153)):((x)-(180)+1))
 def NV2080_NOTIFIER_TYPE_IS_OFA(x):  # macro
-   return (((x)==(153)))
+   return (((x)==(153)) or ((x)==(180)))
 def NV2080_NOTIFIERS_GPIO_RISING_INTERRUPT(pin):  # macro
    return ((47)+(pin))
 def NV2080_NOTIFIERS_GPIO_FALLING_INTERRUPT(pin):  # macro
@@ -1188,32 +1196,58 @@ NV2080_ENGINE_TYPE_NVJPEG6 = (0x00000031) # macro
 NV2080_ENGINE_TYPE_NVJPEG7 = (0x00000032) # macro
 NV2080_ENGINE_TYPE_OFA = (0x00000033) # macro
 NV2080_ENGINE_TYPE_OFA0 = (0x00000033) # macro
-NV2080_ENGINE_TYPE_RESERVED34 = (0x00000034) # macro
-NV2080_ENGINE_TYPE_RESERVED35 = (0x00000035) # macro
-NV2080_ENGINE_TYPE_RESERVED36 = (0x00000036) # macro
-NV2080_ENGINE_TYPE_RESERVED37 = (0x00000037) # macro
-NV2080_ENGINE_TYPE_RESERVED38 = (0x00000038) # macro
-NV2080_ENGINE_TYPE_RESERVED39 = (0x00000039) # macro
-NV2080_ENGINE_TYPE_RESERVED3a = (0x0000003a) # macro
-NV2080_ENGINE_TYPE_RESERVED3b = (0x0000003b) # macro
-NV2080_ENGINE_TYPE_RESERVED3c = (0x0000003c) # macro
-NV2080_ENGINE_TYPE_RESERVED3d = (0x0000003d) # macro
-NV2080_ENGINE_TYPE_RESERVED3e = (0x0000003e) # macro
+NV2080_ENGINE_TYPE_COPY10 = (0x00000034) # macro
+NV2080_ENGINE_TYPE_COPY11 = (0x00000035) # macro
+NV2080_ENGINE_TYPE_COPY12 = (0x00000036) # macro
+NV2080_ENGINE_TYPE_COPY13 = (0x00000037) # macro
+NV2080_ENGINE_TYPE_COPY14 = (0x00000038) # macro
+NV2080_ENGINE_TYPE_COPY15 = (0x00000039) # macro
+NV2080_ENGINE_TYPE_COPY16 = (0x0000003a) # macro
+NV2080_ENGINE_TYPE_COPY17 = (0x0000003b) # macro
+NV2080_ENGINE_TYPE_COPY18 = (0x0000003c) # macro
+NV2080_ENGINE_TYPE_COPY19 = (0x0000003d) # macro
+NV2080_ENGINE_TYPE_OFA1 = (0x0000003e) # macro
 NV2080_ENGINE_TYPE_RESERVED3f = (0x0000003f) # macro
-NV2080_ENGINE_TYPE_LAST = (0x00000040) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY0 = (0x00000040) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY1 = (0x00000041) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY2 = (0x00000042) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY3 = (0x00000043) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY4 = (0x00000044) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY5 = (0x00000045) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY6 = (0x00000046) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY7 = (0x00000047) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY8 = (0x00000048) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY9 = (0x00000049) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY10 = (0x0000004a) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY11 = (0x0000004b) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY12 = (0x0000004c) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY13 = (0x0000004d) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY14 = (0x0000004e) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY15 = (0x0000004f) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY16 = (0x00000050) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY17 = (0x00000051) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY18 = (0x00000052) # macro
+NV2080_ENGINE_TYPE_COMP_DECOMP_COPY19 = (0x00000053) # macro
+NV2080_ENGINE_TYPE_LAST = (0x00000054) # macro
 NV2080_ENGINE_TYPE_ALLENGINES = (0xffffffff) # macro
 NV2080_ENGINE_TYPE_COPY_SIZE = 64 # macro
 NV2080_ENGINE_TYPE_NVENC_SIZE = 3 # macro
 NV2080_ENGINE_TYPE_NVJPEG_SIZE = 8 # macro
 NV2080_ENGINE_TYPE_NVDEC_SIZE = 8 # macro
 NV2080_ENGINE_TYPE_GR_SIZE = 8 # macro
-NV2080_ENGINE_TYPE_OFA_SIZE = 1 # macro
-def NV2080_ENGINE_TYPE_COPY(i):  # macro
-   return ((0x00000009)+(i))
+NV2080_ENGINE_TYPE_OFA_SIZE = 2 # macro
+def NV2080_ENGINE_TYPE_COMP_DECOMP_COPY(i):  # macro
+   return ((0x00000040)+(i))
+def NV2080_ENGINE_TYPE_IS_COMP_DECOMP_COPY(i):  # macro
+   return (((i)>=(0x00000040)) and ((i)<=(0x00000053)))
+def NV2080_ENGINE_TYPE_COMP_DECOMP_COPY_IDX(i):  # macro
+   return ((i)-(0x00000040))
+# def NV2080_ENGINE_TYPE_COPY(i):  # macro
+#    return (((i)<10)?((0x00000009)+(i)):((0x00000034)+(i)-10))
 def NV2080_ENGINE_TYPE_IS_COPY(i):  # macro
-   return (((i)>=(0x00000009)) and ((i)<=(0x00000012)))
-def NV2080_ENGINE_TYPE_COPY_IDX(i):  # macro
-   return ((i)-(0x00000009))
+   return ((((i)>=(0x00000009)) and ((i)<=(0x00000012))) or (((i)>=(0x00000034)) and ((i)<=(0x0000003d))))
+# def NV2080_ENGINE_TYPE_COPY_IDX(i):  # macro
+#    return (((i)<=(0x00000012))?((i)-(0x00000009)):((i)-(0x00000034)+10))
 def NV2080_ENGINE_TYPE_NVENC(i):  # macro
    return ((0x0000001b)+(i))
 def NV2080_ENGINE_TYPE_IS_NVENC(i):  # macro
@@ -1239,13 +1273,13 @@ def NV2080_ENGINE_TYPE_IS_GR(i):  # macro
 def NV2080_ENGINE_TYPE_GR_IDX(i):  # macro
    return ((i)-(0x00000001))
 # def NV2080_ENGINE_TYPE_OFAn(i):  # macro
-#    return ((i==0)?((0x00000033)):((0x00000040)))
+#    return ((i==0)?((0x00000033)):((0x0000003e)))
 def NV2080_ENGINE_TYPE_IS_OFA(i):  # macro
-   return (((i)==(0x00000033)))
+   return (((i)==(0x00000033)) or ((i)==(0x0000003e)))
 # def NV2080_ENGINE_TYPE_OFA_IDX(i):  # macro
-#    return ((i==(0x00000033))?(0):(-1))
+#    return ((i==(0x00000033))?((i)-(0x00000033)):((i)-(0x0000003e)+1))
 def NV2080_ENGINE_TYPE_IS_VALID(i):  # macro
-   return (((i)>((0x00000000))) and ((i)<((0x00000040))))
+   return (((i)>((0x00000000))) and ((i)<((0x00000054))))
 NV2080_CLIENT_TYPE_TEX = (0x00000001) # macro
 NV2080_CLIENT_TYPE_COLOR = (0x00000002) # macro
 NV2080_CLIENT_TYPE_DEPTH = (0x00000003) # macro
@@ -1895,6 +1929,7 @@ NV1_EVENT_KERNEL_CALLBACK_EX = (0x0000007e) # macro
 NV01_TIMER = (0x00000004) # macro
 NV1_TIMER = (0x00000004) # macro
 KERNEL_GRAPHICS_CONTEXT = (0x00000090) # macro
+LOCK_STRESS_OBJECT = (0x00000100) # macro
 NV50_CHANNEL_GPFIFO = (0x0000506f) # macro
 GF100_CHANNEL_GPFIFO = (0x0000906f) # macro
 KEPLER_CHANNEL_GPFIFO_A = (0x0000a06f) # macro
@@ -1905,6 +1940,7 @@ PASCAL_CHANNEL_GPFIFO_A = (0x0000c06f) # macro
 VOLTA_CHANNEL_GPFIFO_A = (0x0000c36f) # macro
 TURING_CHANNEL_GPFIFO_A = (0x0000c46f) # macro
 HOPPER_CHANNEL_GPFIFO_A = (0x0000c86f) # macro
+BLACKWELL_CHANNEL_GPFIFO_A = (0x0000c96f) # macro
 NV04_SOFTWARE_TEST = (0x0000007d) # macro
 NV4_SOFTWARE_TEST = (0x0000007d) # macro
 NV30_GSYNC = (0x000030f1) # macro
@@ -1938,6 +1974,7 @@ NVC77D_CORE_CHANNEL_DMA = (0x0000c77d) # macro
 NV9010_VBLANK_CALLBACK = (0x00009010) # macro
 GF100_PROFILER = (0x000090cc) # macro
 MAXWELL_PROFILER = (0x0000b0cc) # macro
+MAXWELL_PROFILER_CONTEXT = (0x0000b1cc) # macro
 MAXWELL_PROFILER_DEVICE = (0x0000b2cc) # macro
 GF100_SUBDEVICE_MASTER = (0x000090e6) # macro
 GF100_SUBDEVICE_INFOROM = (0x000090e7) # macro
@@ -1957,6 +1994,7 @@ NVC4B0_VIDEO_DECODER = (0x0000c4b0) # macro
 NVC6B0_VIDEO_DECODER = (0x0000c6b0) # macro
 NVC7B0_VIDEO_DECODER = (0x0000c7b0) # macro
 NVC9B0_VIDEO_DECODER = (0x0000c9b0) # macro
+NVCDB0_VIDEO_DECODER = (0x0000cdb0) # macro
 NVC4B7_VIDEO_ENCODER = (0x0000c4b7) # macro
 NVB4B7_VIDEO_ENCODER = (0x0000b4b7) # macro
 NVC7B7_VIDEO_ENCODER = (0x0000c7b7) # macro
@@ -1964,10 +2002,12 @@ NVC9B7_VIDEO_ENCODER = (0x0000c9b7) # macro
 NVB8D1_VIDEO_NVJPG = (0x0000b8d1) # macro
 NVC4D1_VIDEO_NVJPG = (0x0000c4d1) # macro
 NVC9D1_VIDEO_NVJPG = (0x0000c9d1) # macro
+NVCDD1_VIDEO_NVJPG = (0x0000cdd1) # macro
 NVB8FA_VIDEO_OFA = (0x0000b8fa) # macro
 NVC6FA_VIDEO_OFA = (0x0000c6fa) # macro
 NVC7FA_VIDEO_OFA = (0x0000c7fa) # macro
 NVC9FA_VIDEO_OFA = (0x0000c9fa) # macro
+NVCDFA_VIDEO_OFA = (0x0000cdfa) # macro
 KEPLER_INLINE_TO_MEMORY_B = (0x0000a140) # macro
 FERMI_CONTEXT_SHARE_A = (0x00009067) # macro
 KEPLER_CHANNEL_GROUP_A = (0x0000a06c) # macro
@@ -1976,6 +2016,7 @@ TURING_DMA_COPY_A = (0x0000c5b5) # macro
 AMPERE_DMA_COPY_A = (0x0000C6B5) # macro
 AMPERE_DMA_COPY_B = (0x0000c7b5) # macro
 HOPPER_DMA_COPY_A = (0x0000c8b5) # macro
+BLACKWELL_DMA_COPY_A = (0x0000c9b5) # macro
 MAXWELL_DMA_COPY_A = (0x0000b0b5) # macro
 ACCESS_COUNTER_NOTIFY_BUFFER = (0x0000c365) # macro
 MMU_FAULT_BUFFER = (0x0000c369) # macro
@@ -1997,6 +2038,7 @@ HOPPER_A = (0x0000cb97) # macro
 HOPPER_COMPUTE_A = (0x0000cbc0) # macro
 BLACKWELL_A = (0x0000cd97) # macro
 BLACKWELL_COMPUTE_A = (0x0000cdc0) # macro
+BLACKWELL_INLINE_TO_MEMORY_A = (0x0000cd40) # macro
 NV40_DEBUG_BUFFER = (0x000000db) # macro
 RM_USER_SHARED_DATA = (0x000000de) # macro
 NV40_I2C = (0x0000402c) # macro
@@ -2931,6 +2973,10 @@ UVM_VALIDATE_VA_RANGE = UVM_IOCTL_BASE ( 72 ) # macro
 UVM_CREATE_EXTERNAL_RANGE = UVM_IOCTL_BASE ( 73 ) # macro
 UVM_MAP_EXTERNAL_SPARSE = UVM_IOCTL_BASE ( 74 ) # macro
 UVM_MM_INITIALIZE = UVM_IOCTL_BASE ( 75 ) # macro
+UVM_TOOLS_INIT_EVENT_TRACKER_V2 = UVM_IOCTL_BASE ( 76 ) # macro
+UVM_TOOLS_GET_PROCESSOR_UUID_TABLE_V2 = UVM_IOCTL_BASE ( 77 ) # macro
+UVM_ALLOC_DEVICE_P2P = UVM_IOCTL_BASE ( 78 ) # macro
+UVM_CLEAR_ALL_ACCESS_COUNTERS = UVM_IOCTL_BASE ( 79 ) # macro
 UVM_IS_8_SUPPORTED = UVM_IOCTL_BASE ( 2047 ) # macro
 class struct_c__SA_UVM_RESERVE_VA_PARAMS(Structure):
     pass
@@ -3584,8 +3630,6 @@ struct_c__SA_UVM_TOOLS_INIT_EVENT_TRACKER_PARAMS._fields_ = [
     ('allProcessors', ctypes.c_uint32),
     ('uvmFd', ctypes.c_uint32),
     ('rmStatus', ctypes.c_uint32),
-    ('requestedVersion', ctypes.c_uint32),
-    ('grantedVersion', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
 ]
 
@@ -3678,9 +3722,7 @@ class struct_c__SA_UVM_TOOLS_GET_PROCESSOR_UUID_TABLE_PARAMS(Structure):
 struct_c__SA_UVM_TOOLS_GET_PROCESSOR_UUID_TABLE_PARAMS._pack_ = 1 # source:False
 struct_c__SA_UVM_TOOLS_GET_PROCESSOR_UUID_TABLE_PARAMS._fields_ = [
     ('tablePtr', ctypes.c_uint64),
-    ('count', ctypes.c_uint32),
     ('rmStatus', ctypes.c_uint32),
-    ('version', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
 ]
 
@@ -3814,6 +3856,33 @@ struct_c__SA_UVM_MM_INITIALIZE_PARAMS._fields_ = [
 ]
 
 UVM_MM_INITIALIZE_PARAMS = struct_c__SA_UVM_MM_INITIALIZE_PARAMS
+UVM_TOOLS_INIT_EVENT_TRACKER_V2_PARAMS = struct_c__SA_UVM_TOOLS_INIT_EVENT_TRACKER_PARAMS
+UVM_TOOLS_GET_PROCESSOR_UUID_TABLE_V2_PARAMS = struct_c__SA_UVM_TOOLS_GET_PROCESSOR_UUID_TABLE_PARAMS
+class struct_c__SA_UVM_ALLOC_DEVICE_P2P_PARAMS(Structure):
+    pass
+
+struct_c__SA_UVM_ALLOC_DEVICE_P2P_PARAMS._pack_ = 1 # source:False
+struct_c__SA_UVM_ALLOC_DEVICE_P2P_PARAMS._fields_ = [
+    ('base', ctypes.c_uint64),
+    ('length', ctypes.c_uint64),
+    ('offset', ctypes.c_uint64),
+    ('gpuUuid', struct_nv_uuid),
+    ('rmCtrlFd', ctypes.c_int32),
+    ('hClient', ctypes.c_uint32),
+    ('hMemory', ctypes.c_uint32),
+    ('rmStatus', ctypes.c_uint32),
+]
+
+UVM_ALLOC_DEVICE_P2P_PARAMS = struct_c__SA_UVM_ALLOC_DEVICE_P2P_PARAMS
+class struct_c__SA_UVM_CLEAR_ALL_ACCESS_COUNTERS_PARAMS(Structure):
+    pass
+
+struct_c__SA_UVM_CLEAR_ALL_ACCESS_COUNTERS_PARAMS._pack_ = 1 # source:False
+struct_c__SA_UVM_CLEAR_ALL_ACCESS_COUNTERS_PARAMS._fields_ = [
+    ('rmStatus', ctypes.c_uint32),
+]
+
+UVM_CLEAR_ALL_ACCESS_COUNTERS_PARAMS = struct_c__SA_UVM_CLEAR_ALL_ACCESS_COUNTERS_PARAMS
 class struct_c__SA_UVM_IS_8_SUPPORTED_PARAMS(Structure):
     pass
 
@@ -4694,7 +4763,6 @@ NVOS02_FLAGS_PHYSICALITY_CONTIGUOUS = (0x00000000) # macro
 NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS = (0x00000001) # macro
 # NVOS02_FLAGS_LOCATION = 11 : 8 # macro
 NVOS02_FLAGS_LOCATION_PCI = (0x00000000) # macro
-NVOS02_FLAGS_LOCATION_AGP = (0x00000001) # macro
 NVOS02_FLAGS_LOCATION_VIDMEM = (0x00000002) # macro
 # NVOS02_FLAGS_COHERENCY = 15 : 12 # macro
 NVOS02_FLAGS_COHERENCY_UNCACHED = (0x00000000) # macro
@@ -4729,6 +4797,9 @@ NVOS02_FLAGS_ALLOC_TYPE_SYNCPOINT_APERTURE = (0x00000001) # macro
 NVOS02_FLAGS_MEMORY_PROTECTION_DEFAULT = (0x00000000) # macro
 NVOS02_FLAGS_MEMORY_PROTECTION_PROTECTED = (0x00000001) # macro
 NVOS02_FLAGS_MEMORY_PROTECTION_UNPROTECTED = (0x00000002) # macro
+# NVOS02_FLAGS_REGISTER_MEMDESC_TO_PHYS_RM = 27 : 27 # macro
+NVOS02_FLAGS_REGISTER_MEMDESC_TO_PHYS_RM_FALSE = (0x00000000) # macro
+NVOS02_FLAGS_REGISTER_MEMDESC_TO_PHYS_RM_TRUE = (0x00000001) # macro
 # NVOS02_FLAGS_MAPPING = 31 : 30 # macro
 NVOS02_FLAGS_MAPPING_DEFAULT = (0x00000000) # macro
 NVOS02_FLAGS_MAPPING_NO_MAP = (0x00000001) # macro
@@ -4936,7 +5007,6 @@ NVOS32_ATTR_PAGE_SIZE_HUGE = 0x00000003 # macro
 # NVOS32_ATTR_LOCATION = 26 : 25 # macro
 NVOS32_ATTR_LOCATION_VIDMEM = 0x00000000 # macro
 NVOS32_ATTR_LOCATION_PCI = 0x00000001 # macro
-NVOS32_ATTR_LOCATION_AGP = 0x00000002 # macro
 NVOS32_ATTR_LOCATION_ANY = 0x00000003 # macro
 # NVOS32_ATTR_PHYSICALITY = 28 : 27 # macro
 NVOS32_ATTR_PHYSICALITY_DEFAULT = 0x00000000 # macro
@@ -4972,10 +5042,13 @@ NVOS32_ATTR2_32BIT_POINTER_ENABLE = 0x00000001 # macro
 # NVOS32_ATTR2_FIXED_NUMA_NODE_ID = 7 : 7 # macro
 NVOS32_ATTR2_FIXED_NUMA_NODE_ID_NO = 0x00000000 # macro
 NVOS32_ATTR2_FIXED_NUMA_NODE_ID_YES = 0x00000001 # macro
-# NVOS32_ATTR2_SMMU_ON_GPU = 10 : 8 # macro
+# NVOS32_ATTR2_SMMU_ON_GPU = 9 : 8 # macro
 NVOS32_ATTR2_SMMU_ON_GPU_DEFAULT = 0x00000000 # macro
 NVOS32_ATTR2_SMMU_ON_GPU_DISABLE = 0x00000001 # macro
 NVOS32_ATTR2_SMMU_ON_GPU_ENABLE = 0x00000002 # macro
+# NVOS32_ATTR2_USE_SCANOUT_CARVEOUT = 10 : 10 # macro
+NVOS32_ATTR2_USE_SCANOUT_CARVEOUT_FALSE = 0x00000000 # macro
+NVOS32_ATTR2_USE_SCANOUT_CARVEOUT_TRUE = 0x00000001 # macro
 # NVOS32_ATTR2_ALLOC_COMPCACHELINE_ALIGN = 11 : 11 # macro
 NVOS32_ATTR2_ALLOC_COMPCACHELINE_ALIGN_OFF = 0x0 # macro
 NVOS32_ATTR2_ALLOC_COMPCACHELINE_ALIGN_ON = 0x1 # macro
@@ -5009,6 +5082,7 @@ NVOS32_ATTR2_PAGE_OFFLINING_OFF = 0x00000001 # macro
 NVOS32_ATTR2_PAGE_SIZE_HUGE_DEFAULT = 0x00000000 # macro
 NVOS32_ATTR2_PAGE_SIZE_HUGE_2MB = 0x00000001 # macro
 NVOS32_ATTR2_PAGE_SIZE_HUGE_512MB = 0x00000002 # macro
+NVOS32_ATTR2_PAGE_SIZE_HUGE_256GB = 0x00000003 # macro
 # NVOS32_ATTR2_PROTECTION_USER = 22 : 22 # macro
 NVOS32_ATTR2_PROTECTION_USER_READ_WRITE = 0x00000000 # macro
 NVOS32_ATTR2_PROTECTION_USER_READ_ONLY = 0x00000001 # macro
@@ -5189,6 +5263,7 @@ NVOS46_FLAGS_PAGE_SIZE_4KB = (0x00000001) # macro
 NVOS46_FLAGS_PAGE_SIZE_BIG = (0x00000002) # macro
 NVOS46_FLAGS_PAGE_SIZE_BOTH = (0x00000003) # macro
 NVOS46_FLAGS_PAGE_SIZE_HUGE = (0x00000004) # macro
+NVOS46_FLAGS_PAGE_SIZE_512M = (0x00000005) # macro
 # NVOS46_FLAGS_SYSTEM_L3_ALLOC = 13 : 13 # macro
 NVOS46_FLAGS_SYSTEM_L3_ALLOC_DEFAULT = (0x00000000) # macro
 NVOS46_FLAGS_SYSTEM_L3_ALLOC_ENABLE_HINT = (0x00000001) # macro
@@ -6209,8 +6284,12 @@ struct_c__SA_NVPOWERSTATE_PARAMETERS._fields_ = [
     ('forceMonitorState', ctypes.c_ubyte),
     ('bForcePerfBiosLevel', ctypes.c_ubyte),
     ('bIsD3HotTransition', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte),
+    ('bForcePowerStateFail', ctypes.c_ubyte),
+    ('errorStatus', ctypes.c_uint32),
     ('fastBootPowerState', ctypes.c_uint32),
+    ('reserved', ctypes.c_ubyte),
+    ('reserved2', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
 ]
 
 NVPOWERSTATE_PARAMETERS = struct_c__SA_NVPOWERSTATE_PARAMETERS
@@ -6227,6 +6306,23 @@ struct_c__SA_NV_GR_ALLOCATION_PARAMETERS._fields_ = [
 ]
 
 NV_GR_ALLOCATION_PARAMETERS = struct_c__SA_NV_GR_ALLOCATION_PARAMETERS
+
+# values for enumeration 'c__EA_ChannelPBSize'
+c__EA_ChannelPBSize__enumvalues = {
+    0: 'PB_SIZE_4KB',
+    1: 'PB_SIZE_8KB',
+    2: 'PB_SIZE_16KB',
+    3: 'PB_SIZE_32KB',
+    4: 'PB_SIZE_64KB',
+}
+PB_SIZE_4KB = 0
+PB_SIZE_8KB = 1
+PB_SIZE_16KB = 2
+PB_SIZE_32KB = 3
+PB_SIZE_64KB = 4
+c__EA_ChannelPBSize = ctypes.c_uint32 # enum
+ChannelPBSize = c__EA_ChannelPBSize
+ChannelPBSize__enumvalues = c__EA_ChannelPBSize__enumvalues
 class struct_c__SA_NV50VAIO_CHANNELDMA_ALLOCATION_PARAMETERS(Structure):
     pass
 
@@ -6238,6 +6334,8 @@ struct_c__SA_NV50VAIO_CHANNELDMA_ALLOCATION_PARAMETERS._fields_ = [
     ('offset', ctypes.c_uint32),
     ('pControl', ctypes.POINTER(None)),
     ('flags', ctypes.c_uint32),
+    ('channelPBSize', ChannelPBSize),
+    ('subDeviceId', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
 ]
 
@@ -6433,45 +6531,6 @@ struct_c__SA_NV_TIMEOUT_CONTROL_PARAMETERS._fields_ = [
 ]
 
 NV_TIMEOUT_CONTROL_PARAMETERS = struct_c__SA_NV_TIMEOUT_CONTROL_PARAMETERS
-class struct_c__SA_NV_GSP_TEST_GET_MSG_BLOCK_PARAMETERS(Structure):
-    pass
-
-struct_c__SA_NV_GSP_TEST_GET_MSG_BLOCK_PARAMETERS._pack_ = 1 # source:False
-struct_c__SA_NV_GSP_TEST_GET_MSG_BLOCK_PARAMETERS._fields_ = [
-    ('blockNum', ctypes.c_uint32),
-    ('bufferSize', ctypes.c_uint32),
-    ('pBuffer', ctypes.POINTER(None)),
-    ('status', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-]
-
-NV_GSP_TEST_GET_MSG_BLOCK_PARAMETERS = struct_c__SA_NV_GSP_TEST_GET_MSG_BLOCK_PARAMETERS
-class struct_c__SA_NV_GSP_TEST_SEND_MSG_RESPONSE_PARAMETERS(Structure):
-    pass
-
-struct_c__SA_NV_GSP_TEST_SEND_MSG_RESPONSE_PARAMETERS._pack_ = 1 # source:False
-struct_c__SA_NV_GSP_TEST_SEND_MSG_RESPONSE_PARAMETERS._fields_ = [
-    ('bufferSize', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('pBuffer', ctypes.POINTER(None)),
-    ('status', ctypes.c_uint32),
-    ('PADDING_1', ctypes.c_ubyte * 4),
-]
-
-NV_GSP_TEST_SEND_MSG_RESPONSE_PARAMETERS = struct_c__SA_NV_GSP_TEST_SEND_MSG_RESPONSE_PARAMETERS
-class struct_c__SA_NV_GSP_TEST_SEND_EVENT_NOTIFICATION_PARAMETERS(Structure):
-    pass
-
-struct_c__SA_NV_GSP_TEST_SEND_EVENT_NOTIFICATION_PARAMETERS._pack_ = 1 # source:False
-struct_c__SA_NV_GSP_TEST_SEND_EVENT_NOTIFICATION_PARAMETERS._fields_ = [
-    ('hParentClient', ctypes.c_uint32),
-    ('hSrcResource', ctypes.c_uint32),
-    ('hClass', ctypes.c_uint32),
-    ('notifyIndex', ctypes.c_uint32),
-    ('status', ctypes.c_uint32),
-]
-
-NV_GSP_TEST_SEND_EVENT_NOTIFICATION_PARAMETERS = struct_c__SA_NV_GSP_TEST_SEND_EVENT_NOTIFICATION_PARAMETERS
 
 # values for enumeration 'c__EA_NV_VIDMEM_ACCESS_BIT_ALLOCATION_PARAMS_ADDR_SPACE'
 c__EA_NV_VIDMEM_ACCESS_BIT_ALLOCATION_PARAMS_ADDR_SPACE__enumvalues = {
@@ -6848,20 +6907,94 @@ struct_NV0000_CTRL_GET_SYSTEM_EVENT_STATUS_PARAMS._fields_ = [
 ]
 
 NV0000_CTRL_GET_SYSTEM_EVENT_STATUS_PARAMS = struct_NV0000_CTRL_GET_SYSTEM_EVENT_STATUS_PARAMS
+NV0000_CTRL_CMD_GPUACCT_SET_ACCOUNTING_STATE = (0xb01) # macro
+NV0000_CTRL_GPU_ACCOUNTING_STATE_ENABLED = (0x00000000) # macro
+NV0000_CTRL_GPU_ACCOUNTING_STATE_DISABLED = (0x00000001) # macro
+NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_MESSAGE_ID = (0x1) # macro
+NV0000_CTRL_CMD_GPUACCT_GET_ACCOUNTING_STATE = (0xb02) # macro
+NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_MESSAGE_ID = (0x2) # macro
+NV0000_CTRL_CMD_GPUACCT_GET_PROC_ACCOUNTING_INFO = (0xb03) # macro
+NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_MESSAGE_ID = (0x3) # macro
+NV0000_CTRL_CMD_GPUACCT_GET_ACCOUNTING_PIDS = (0xb04) # macro
+NV0000_GPUACCT_PID_MAX_COUNT = 4000 # macro
+NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_MESSAGE_ID = (0x4) # macro
+NV0000_CTRL_CMD_GPUACCT_CLEAR_ACCOUNTING_DATA = (0xb05) # macro
+NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_MESSAGE_ID = (0x5) # macro
+class struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS(Structure):
+    pass
+
+struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS._pack_ = 1 # source:False
+struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS._fields_ = [
+    ('gpuId', ctypes.c_uint32),
+    ('pid', ctypes.c_uint32),
+    ('newState', ctypes.c_uint32),
+]
+
+NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS = struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS
+class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS(Structure):
+    pass
+
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS._pack_ = 1 # source:False
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS._fields_ = [
+    ('gpuId', ctypes.c_uint32),
+    ('pid', ctypes.c_uint32),
+    ('state', ctypes.c_uint32),
+]
+
+NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS
+class struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS(Structure):
+    pass
+
+struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS._pack_ = 1 # source:False
+struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS._fields_ = [
+    ('gpuId', ctypes.c_uint32),
+    ('pid', ctypes.c_uint32),
+    ('subPid', ctypes.c_uint32),
+    ('gpuUtil', ctypes.c_uint32),
+    ('fbUtil', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('maxFbUsage', ctypes.c_uint64),
+    ('startTime', ctypes.c_uint64),
+    ('endTime', ctypes.c_uint64),
+]
+
+NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS = struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS
+class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS(Structure):
+    pass
+
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS._pack_ = 1 # source:False
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS._fields_ = [
+    ('gpuId', ctypes.c_uint32),
+    ('pid', ctypes.c_uint32),
+    ('pidTbl', ctypes.c_uint32 * 4000),
+    ('pidCount', ctypes.c_uint32),
+]
+
+NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS
+class struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS(Structure):
+    pass
+
+struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS._pack_ = 1 # source:False
+struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS._fields_ = [
+    ('gpuId', ctypes.c_uint32),
+    ('pid', ctypes.c_uint32),
+]
+
+NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS = struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS
 NV0000_CTRL_CMD_SYSTEM_GET_FEATURES = (0x1f0) # macro
 NV0000_CTRL_SYSTEM_GET_FEATURES_PARAMS_MESSAGE_ID = (0xF0) # macro
 # NV0000_CTRL_SYSTEM_GET_FEATURES_SLI = 0 : 0 # macro
 NV0000_CTRL_SYSTEM_GET_FEATURES_SLI_FALSE = (0x00000000) # macro
 NV0000_CTRL_SYSTEM_GET_FEATURES_SLI_TRUE = (0x00000001) # macro
-# NV0000_CTRL_SYSTEM_GET_FEATURES_UEFI = 1 : 1 # macro
-NV0000_CTRL_SYSTEM_GET_FEATURES_UEFI_FALSE = (0x00000000) # macro
-NV0000_CTRL_SYSTEM_GET_FEATURES_UEFI_TRUE = (0x00000001) # macro
 # NV0000_CTRL_SYSTEM_GET_FEATURES_IS_EFI_INIT = 2 : 2 # macro
 NV0000_CTRL_SYSTEM_GET_FEATURES_IS_EFI_INIT_FALSE = (0x00000000) # macro
 NV0000_CTRL_SYSTEM_GET_FEATURES_IS_EFI_INIT_TRUE = (0x00000001) # macro
 # NV0000_CTRL_SYSTEM_GET_FEATURES_UUID_BASED_MEM_SHARING = 3 : 3 # macro
 NV0000_CTRL_SYSTEM_GET_FEATURES_UUID_BASED_MEM_SHARING_FALSE = (0x00000000) # macro
 NV0000_CTRL_SYSTEM_GET_FEATURES_UUID_BASED_MEM_SHARING_TRUE = (0x00000001) # macro
+# NV0000_CTRL_SYSTEM_GET_FEATURES_RM_TEST_ONLY_CODE_ENABLED = 4 : 4 # macro
+NV0000_CTRL_SYSTEM_GET_FEATURES_RM_TEST_ONLY_CODE_ENABLED_FALSE = (0x00000000) # macro
+NV0000_CTRL_SYSTEM_GET_FEATURES_RM_TEST_ONLY_CODE_ENABLED_TRUE = (0x00000001) # macro
 NV0000_CTRL_CMD_SYSTEM_GET_BUILD_VERSION = (0x101) # macro
 NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_PARAMS_MESSAGE_ID = (0x1) # macro
 NV0000_CTRL_CMD_SYSTEM_GET_CPU_INFO = (0x102) # macro
@@ -6949,6 +7082,8 @@ NV0000_CTRL_SYSTEM_GET_CHIPSET_INFO_PARAMS_MESSAGE_ID = (0x4) # macro
 # NV0000_CTRL_SYSTEM_CHIPSET_FLAG_HAS_RESIZABLE_BAR_ISSUE = 0 : 0 # macro
 NV0000_CTRL_SYSTEM_CHIPSET_FLAG_HAS_RESIZABLE_BAR_ISSUE_NO = (0x00000000) # macro
 NV0000_CTRL_SYSTEM_CHIPSET_FLAG_HAS_RESIZABLE_BAR_ISSUE_YES = (0x00000001) # macro
+NV0000_CTRL_SYSTEM_GET_VRR_COOKIE_PRESENT = (0x107) # macro
+NV0000_CTRL_SYSTEM_GET_VRR_COOKIE_PRESENT_PARAMS_MESSAGE_ID = (0x7) # macro
 NV0000_CTRL_CMD_SYSTEM_GET_LOCK_TIMES = (0x109) # macro
 NV0000_CTRL_SYSTEM_GET_LOCK_TIMES_PARAMS_MESSAGE_ID = (0x9) # macro
 NV0000_CTRL_CMD_SYSTEM_GET_CLASSLIST = (0x108) # macro
@@ -7338,12 +7473,17 @@ NV0000_CTRL_VGPU_SET_VGPU_VERSION_PARAMS_MESSAGE_ID = (0x38) # macro
 NV0000_CTRL_CMD_SYSTEM_GET_RM_INSTANCE_ID = (0x139) # macro
 NV0000_CTRL_SYSTEM_GET_RM_INSTANCE_ID_PARAMS_MESSAGE_ID = (0x39) # macro
 NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO = (0x13b) # macro
+NVPCF_CTRL_SYSPWRLIMIT_TYPE_BASE = 1 # macro
+NV0000_CTRL_SYSTEM_POWER_INFO_INDEX_MAX_SIZE = 32 # macro
+NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT_MESSAGE_ID = (0x48) # macro
 NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS_MESSAGE_ID = (0x3B) # macro
 CONTROLLER_FILTER_TYPE_EMWA = 0 # macro
 CONTROLLER_FILTER_TYPE_MOVING_MAX = 1 # macro
 NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_GET_SUPPORTED_CASE = 2 # macro
 NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_GET_DYNAMIC_CASE = 3 # macro
 NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_GET_STATIC_CASE = 4 # macro
+NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_GET_DC_SYSTEM_POWER_LIMITS_CASE = 5 # macro
+NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_CPU_TDP_LIMIT_CONTROL_CASE = 6 # macro
 NVPCF0100_CTRL_CONFIG_DSM_1X_FUNC_GET_SUPPORTED = (0x00000000) # macro
 NVPCF0100_CTRL_CONFIG_DSM_1X_FUNC_GET_DYNAMIC_PARAMS = (0x00000002) # macro
 # NVPCF0100_CTRL_CONFIG_DSM_FUNC_GET_SUPPORTED_IS_SUPPORTED = 0 : 0 # macro
@@ -7353,6 +7493,8 @@ NVPCF0100_CTRL_CONFIG_DSM_2X_VERSION = (0x00000200) # macro
 NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_GET_SUPPORTED = (0x00000000) # macro
 NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_GET_STATIC_CONFIG_TABLES = (0x00000001) # macro
 NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_GET_DYNAMIC_PARAMS = (0x00000002) # macro
+NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_GET_DC_SYSTEM_POWER_LIMITS_TABLE = (0x00000008) # macro
+NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_CPU_TDP_LIMIT_CONTROL = (0x00000009) # macro
 NVPCF0100_CTRL_CONFIG_2X_BUFF_SIZE_MAX = (255) # macro
 NV0000_CTRL_CMD_SYSTEM_SYNC_EXTERNAL_FABRIC_MGMT = (0x13c) # macro
 NV0000_CTRL_CMD_SYSTEM_SYNC_EXTERNAL_FABRIC_MGMT_PARAMS_MESSAGE_ID = (0x3C) # macro
@@ -7686,11 +7828,17 @@ NV0000_CTRL_GPU_IMAGE_TYPE_GSP = (0x00000001) # macro
 NV0000_CTRL_GPU_IMAGE_TYPE_GSP_LOG = (0x00000002) # macro
 NV0000_CTRL_CMD_PUSH_GSP_UCODE = (0x285) # macro
 NV0000_CTRL_GPU_PUSH_GSP_UCODE_PARAMS_MESSAGE_ID = (0x85) # macro
+# NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SETTING_LEGACY = 2 : 0 # macro
+# NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SETTING_LINK_COUNT = 7 : 3 # macro
 NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_FULL = (0x00) # macro
 NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_OFF = (0x01) # macro
 NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_MIN = (0x02) # macro
 NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_HALF = (0x03) # macro
 NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_3QUARTER = (0x04) # macro
+NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_LINK_COUNT = (0x05) # macro
+NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SCOPE_UNSET = (0x00) # macro
+NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SCOPE_PER_NODE = (0x01) # macro
+NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SCOPE_PER_GPU = (0x02) # macro
 NV0000_CTRL_CMD_GPU_SET_NVLINK_BW_MODE = (0x286) # macro
 NV0000_CTRL_GPU_SET_NVLINK_BW_MODE_PARAMS_MESSAGE_ID = (0x86) # macro
 NV0000_CTRL_CMD_GPU_GET_NVLINK_BW_MODE = (0x287) # macro
@@ -7726,6 +7874,15 @@ struct_NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_PARAMS._fields_ = [
 ]
 
 NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_PARAMS
+
+# values for enumeration 'NV0000_CTRL_SYSTEM_SH_SOC_TYPE'
+NV0000_CTRL_SYSTEM_SH_SOC_TYPE__enumvalues = {
+    0: 'NV0000_CTRL_SYSTEM_SH_SOC_TYPE_NA',
+    1: 'NV0000_CTRL_SYSTEM_SH_SOC_TYPE_NV_GRACE',
+}
+NV0000_CTRL_SYSTEM_SH_SOC_TYPE_NA = 0
+NV0000_CTRL_SYSTEM_SH_SOC_TYPE_NV_GRACE = 1
+NV0000_CTRL_SYSTEM_SH_SOC_TYPE = ctypes.c_uint32 # enum
 class struct_NV0000_CTRL_SYSTEM_GET_CPU_INFO_PARAMS(Structure):
     pass
 
@@ -7747,6 +7904,7 @@ struct_NV0000_CTRL_SYSTEM_GET_CPU_INFO_PARAMS._fields_ = [
     ('coresOnDie', ctypes.c_uint32),
     ('bCCEnabled', ctypes.c_ubyte),
     ('PADDING_1', ctypes.c_ubyte * 3),
+    ('selfHostedSocType', NV0000_CTRL_SYSTEM_SH_SOC_TYPE),
 ]
 
 NV0000_CTRL_SYSTEM_GET_CPU_INFO_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_CPU_INFO_PARAMS
@@ -7772,6 +7930,15 @@ struct_NV0000_CTRL_SYSTEM_GET_CHIPSET_INFO_PARAMS._fields_ = [
 ]
 
 NV0000_CTRL_SYSTEM_GET_CHIPSET_INFO_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_CHIPSET_INFO_PARAMS
+class struct_NV0000_CTRL_SYSTEM_GET_VRR_COOKIE_PRESENT_PARAMS(Structure):
+    pass
+
+struct_NV0000_CTRL_SYSTEM_GET_VRR_COOKIE_PRESENT_PARAMS._pack_ = 1 # source:False
+struct_NV0000_CTRL_SYSTEM_GET_VRR_COOKIE_PRESENT_PARAMS._fields_ = [
+    ('bIsPresent', ctypes.c_ubyte),
+]
+
+NV0000_CTRL_SYSTEM_GET_VRR_COOKIE_PRESENT_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_VRR_COOKIE_PRESENT_PARAMS
 class struct_NV0000_CTRL_SYSTEM_GET_LOCK_TIMES_PARAMS(Structure):
     pass
 
@@ -8112,6 +8279,21 @@ struct_NV0000_CTRL_SYSTEM_GET_RM_INSTANCE_ID_PARAMS._fields_ = [
 ]
 
 NV0000_CTRL_SYSTEM_GET_RM_INSTANCE_ID_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_RM_INSTANCE_ID_PARAMS
+class struct_NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT(Structure):
+    pass
+
+struct_NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT._pack_ = 1 # source:False
+struct_NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT._fields_ = [
+    ('batteryStateOfChargePercent', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('batteryCurrentLimitmA', ctypes.c_uint32),
+    ('restOfSytemReservedPowermW', ctypes.c_uint32),
+    ('minCpuTdpmW', ctypes.c_uint32),
+    ('maxCpuTdpmW', ctypes.c_uint32),
+    ('shortTimescaleBatteryCurrentLimitmA', ctypes.c_uint32),
+]
+
+NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT = struct_NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT
 class struct_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS(Structure):
     pass
 
@@ -8134,21 +8316,37 @@ struct_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS._fields_ = [
     ('targetTppOffsetmW', ctypes.c_int32),
     ('maxOutputOffsetmW', ctypes.c_int32),
     ('minOutputOffsetmW', ctypes.c_int32),
+    ('ctgpBattOffsetmW', ctypes.c_int32),
+    ('targetTppBattOffsetmW', ctypes.c_int32),
+    ('dcRosReserveOverridemW', ctypes.c_uint32),
+    ('dcTspLongTimescaleLimitmA', ctypes.c_uint32),
+    ('dcTspShortTimescaleLimitmA', ctypes.c_uint32),
+    ('bRequireDcSysPowerLimitsTable', ctypes.c_ubyte),
+    ('bAllowDcRestOfSystemReserveOverride', ctypes.c_ubyte),
+    ('bSupportDcTsp', ctypes.c_ubyte),
+    ('bEnableForAC', ctypes.c_ubyte),
+    ('bEnableForDC', ctypes.c_ubyte),
     ('version', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte),
     ('samplingPeriodmS', ctypes.c_uint16),
     ('samplingMulti', ctypes.c_uint16),
     ('filterType', ctypes.c_ubyte),
     ('filterParam', union_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS_filterParam),
     ('filterReserved', ctypes.c_uint16),
     ('bIsBoostController', ctypes.c_ubyte),
-    ('PADDING_1', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte),
     ('incRatio', ctypes.c_uint16),
     ('decRatio', ctypes.c_uint16),
     ('bSupportBatt', ctypes.c_ubyte),
     ('cpuType', ctypes.c_ubyte),
     ('gpuType', ctypes.c_ubyte),
-    ('PADDING_2', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte),
+    ('sysPwrIndex', ctypes.c_uint32),
+    ('sysPwrGetInfo', struct_NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT * 32),
+    ('bIsTspSupported', ctypes.c_ubyte),
+    ('sysPwrLimitsTableVersion', ctypes.c_ubyte),
+    ('PADDING_2', ctypes.c_ubyte * 2),
+    ('type', ctypes.c_uint32),
+    ('cpuTdpmw', ctypes.c_uint32),
 ]
 
 NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS = struct_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS
@@ -8179,6 +8377,7 @@ struct_NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS._pack_ = 1 # source:False
 struct_NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS._fields_ = [
     ('driverVersionBuffer', ctypes.c_char * 256),
     ('versionBuffer', ctypes.c_char * 256),
+    ('driverBranch', ctypes.c_char * 256),
     ('titleBuffer', ctypes.c_char * 256),
     ('changelistNumber', ctypes.c_uint32),
     ('officialChangelistNumber', ctypes.c_uint32),
@@ -8604,6 +8803,7 @@ class struct_NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS(Structure):
 struct_NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS._pack_ = 1 # source:False
 struct_NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS._fields_ = [
     ('mode', ctypes.c_ubyte),
+    ('bwModeScope', ctypes.c_ubyte),
 ]
 
 NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS = struct_NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS
@@ -8646,80 +8846,6 @@ struct_NV0000_CTRL_GPU_WAIT_ATTACH_ID_PARAMS._fields_ = [
 ]
 
 NV0000_CTRL_GPU_WAIT_ATTACH_ID_PARAMS = struct_NV0000_CTRL_GPU_WAIT_ATTACH_ID_PARAMS
-NV0000_CTRL_CMD_GPUACCT_SET_ACCOUNTING_STATE = (0xb01) # macro
-NV0000_CTRL_GPU_ACCOUNTING_STATE_ENABLED = (0x00000000) # macro
-NV0000_CTRL_GPU_ACCOUNTING_STATE_DISABLED = (0x00000001) # macro
-NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_MESSAGE_ID = (0x1) # macro
-NV0000_CTRL_CMD_GPUACCT_GET_ACCOUNTING_STATE = (0xb02) # macro
-NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_MESSAGE_ID = (0x2) # macro
-NV0000_CTRL_CMD_GPUACCT_GET_PROC_ACCOUNTING_INFO = (0xb03) # macro
-NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_MESSAGE_ID = (0x3) # macro
-NV0000_CTRL_CMD_GPUACCT_GET_ACCOUNTING_PIDS = (0xb04) # macro
-NV0000_GPUACCT_PID_MAX_COUNT = 4000 # macro
-NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_MESSAGE_ID = (0x4) # macro
-NV0000_CTRL_CMD_GPUACCT_CLEAR_ACCOUNTING_DATA = (0xb05) # macro
-NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_MESSAGE_ID = (0x5) # macro
-class struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS(Structure):
-    pass
-
-struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS._pack_ = 1 # source:False
-struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS._fields_ = [
-    ('gpuId', ctypes.c_uint32),
-    ('pid', ctypes.c_uint32),
-    ('newState', ctypes.c_uint32),
-]
-
-NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS = struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS
-class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS(Structure):
-    pass
-
-struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS._pack_ = 1 # source:False
-struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS._fields_ = [
-    ('gpuId', ctypes.c_uint32),
-    ('pid', ctypes.c_uint32),
-    ('state', ctypes.c_uint32),
-]
-
-NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS
-class struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS(Structure):
-    pass
-
-struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS._pack_ = 1 # source:False
-struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS._fields_ = [
-    ('gpuId', ctypes.c_uint32),
-    ('pid', ctypes.c_uint32),
-    ('subPid', ctypes.c_uint32),
-    ('gpuUtil', ctypes.c_uint32),
-    ('fbUtil', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('maxFbUsage', ctypes.c_uint64),
-    ('startTime', ctypes.c_uint64),
-    ('endTime', ctypes.c_uint64),
-]
-
-NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS = struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS
-class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS(Structure):
-    pass
-
-struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS._pack_ = 1 # source:False
-struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS._fields_ = [
-    ('gpuId', ctypes.c_uint32),
-    ('pid', ctypes.c_uint32),
-    ('pidTbl', ctypes.c_uint32 * 4000),
-    ('pidCount', ctypes.c_uint32),
-]
-
-NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS
-class struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS(Structure):
-    pass
-
-struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS._pack_ = 1 # source:False
-struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS._fields_ = [
-    ('gpuId', ctypes.c_uint32),
-    ('pid', ctypes.c_uint32),
-]
-
-NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS = struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS
 NV0000_CTRL_CMD_GSYNC_GET_ATTACHED_IDS = (0x301) # macro
 NV0000_CTRL_GSYNC_GET_ATTACHED_IDS_PARAMS_MESSAGE_ID = (0x1) # macro
 NV0000_CTRL_GSYNC_INVALID_ID = (0xffffffff) # macro
@@ -9475,6 +9601,8 @@ NV2080_CTRL_GR_INFO_SM_VERSION_8_07 = (0x00000807) # macro
 NV2080_CTRL_GR_INFO_SM_VERSION_8_08 = (0x00000808) # macro
 NV2080_CTRL_GR_INFO_SM_VERSION_8_09 = (0x00000809) # macro
 NV2080_CTRL_GR_INFO_SM_VERSION_9_00 = (0x00000900) # macro
+NV2080_CTRL_GR_INFO_SM_VERSION_10_00 = (0x00000A00) # macro
+NV2080_CTRL_GR_INFO_SM_VERSION_10_01 = (0x00000A01) # macro
 NV2080_CTRL_GR_INFO_SM_VERSION_5_2 = ((0x00000502)) # macro
 NV2080_CTRL_GR_INFO_SM_VERSION_5_3 = ((0x00000503)) # macro
 NV2080_CTRL_GR_INFO_SM_VERSION_6_1 = ((0x00000601)) # macro
@@ -9489,6 +9617,8 @@ NV2080_CTRL_GR_INFO_SM_VERSION_8_7 = ((0x00000807)) # macro
 NV2080_CTRL_GR_INFO_SM_VERSION_8_8 = ((0x00000808)) # macro
 NV2080_CTRL_GR_INFO_SM_VERSION_8_9 = ((0x00000809)) # macro
 NV2080_CTRL_GR_INFO_SM_VERSION_9_0 = ((0x00000900)) # macro
+NV2080_CTRL_GR_INFO_SM_VERSION_10_0 = ((0x00000A00)) # macro
+NV2080_CTRL_GR_INFO_SM_VERSION_10_1 = ((0x00000A01)) # macro
 # NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_2D = 0 : 0 # macro
 NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_2D_FALSE = 0x0 # macro
 NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_2D_TRUE = 0x1 # macro
@@ -9530,7 +9660,7 @@ NV2080_CTRL_GR_CTXSW_SMPC_MODE_PARAMS_MESSAGE_ID = (0xE) # macro
 NV2080_CTRL_CTXSW_SMPC_MODE_NO_CTXSW = (0x00000000) # macro
 NV2080_CTRL_CTXSW_SMPC_MODE_CTXSW = (0x00000001) # macro
 NV2080_CTRL_CMD_GR_GET_SM_TO_GPC_TPC_MAPPINGS = (0x2080120f) # macro
-NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_MAX_SM_COUNT = 144 # macro
+NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_MAX_SM_COUNT = 240 # macro
 NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS_MESSAGE_ID = (0xF) # macro
 NV2080_CTRL_CMD_GR_SET_CTXSW_PREEMPTION_MODE = (0x20801210) # macro
 NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_MESSAGE_ID = (0x10) # macro
@@ -9675,6 +9805,8 @@ NV2080_CTRL_CMD_GR_FECS_BIND_EVTBUF_FOR_UID_V2 = (0x20801238) # macro
 NV2080_CTRL_GR_FECS_BIND_EVTBUF_FOR_UID_V2_PARAMS_MESSAGE_ID = (0x38) # macro
 NV2080_CTRL_CMD_GR_GET_GFX_GPC_AND_TPC_INFO = (0x20801239) # macro
 NV2080_CTRL_GR_GET_GFX_GPC_AND_TPC_INFO_PARAMS_MESSAGE_ID = (0x39) # macro
+NV2080_CTRL_CMD_GR_SET_LG_SECTOR_PROMOTION = (0x2080123b) # macro
+NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_PARAMS_MESSAGE_ID = (0x3B) # macro
 NV_GRID_LICENSE_INFO_MAX_LENGTH = (128) # macro
 NV_GRID_LICENSE_FEATURE_VPC_EDITION = "GRID-Virtual-PC,2.0;Quadro-Virtual-DWS,5.0;GRID-Virtual-WS,2.0;GRID-Virtual-WS-Ext,2.0" # macro
 NV_GRID_LICENSE_FEATURE_VAPPS_EDITION = "GRID-Virtual-Apps,3.0" # macro
@@ -9686,9 +9818,13 @@ NV_GRID_LICENSED_PRODUCT_GAMING = "NVIDIA Cloud Gaming" # macro
 NV_GRID_LICENSED_PRODUCT_VPC = "NVIDIA Virtual PC" # macro
 NV_GRID_LICENSED_PRODUCT_VAPPS = "NVIDIA Virtual Applications" # macro
 NV_GRID_LICENSED_PRODUCT_COMPUTE = "NVIDIA Virtual Compute Server" # macro
+# NV2080_CTRL_GPU_INFO_INDEX_INDEX = 23 : 0 # macro
+NV2080_CTRL_GPU_INFO_INDEX_ECID_LO32 = (0x00000001) # macro
+NV2080_CTRL_GPU_INFO_INDEX_ECID_HI32 = (0x00000002) # macro
 NV2080_CTRL_GPU_INFO_INDEX_MINOR_REVISION_EXT = (0x00000004) # macro
 NV2080_CTRL_GPU_INFO_INDEX_NETLIST_REV0 = (0x00000012) # macro
 NV2080_CTRL_GPU_INFO_INDEX_NETLIST_REV1 = (0x00000013) # macro
+NV2080_CTRL_GPU_INFO_INDEX_ECID_EXTENDED = (0x0000001b) # macro
 NV2080_CTRL_GPU_INFO_INDEX_SYSMEM_ACCESS = (0x0000001f) # macro
 NV2080_CTRL_GPU_INFO_INDEX_GEMINI_BOARD = (0x00000022) # macro
 NV2080_CTRL_GPU_INFO_INDEX_SURPRISE_REMOVAL_POSSIBLE = (0x00000025) # macro
@@ -9714,6 +9850,8 @@ NV2080_CTRL_GPU_INFO_INDEX_CMP_SKU = (0x0000003c) # macro
 NV2080_CTRL_GPU_INFO_INDEX_DMABUF_CAPABILITY = (0x0000003d) # macro
 NV2080_CTRL_GPU_INFO_INDEX_IS_RESETLESS_MIG_SUPPORTED = (0x0000003f) # macro
 NV2080_CTRL_GPU_INFO_MAX_LIST_SIZE = (0x00000041) # macro
+# NV2080_CTRL_GPU_INFO_INDEX_GROUP_ID = 30 : 24 # macro
+# NV2080_CTRL_GPU_INFO_INDEX_RESERVED = 31 : 31 # macro
 NV2080_CTRL_GPU_INFO_MINOR_REVISION_EXT_NONE = (0x00000000) # macro
 NV2080_CTRL_GPU_INFO_MINOR_REVISION_EXT_P = (0x00000001) # macro
 NV2080_CTRL_GPU_INFO_MINOR_REVISION_EXT_V = (0x00000002) # macro
@@ -9834,7 +9972,7 @@ NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_MESSAGE_ID = (0x22) # macro
 NV2080_CTRL_CMD_GPU_GET_ENGINES = (0x20800123) # macro
 NV2080_CTRL_GPU_GET_ENGINES_PARAMS_MESSAGE_ID = (0x23) # macro
 NV2080_CTRL_CMD_GPU_GET_ENGINES_V2 = (0x20800170) # macro
-NV2080_GPU_MAX_ENGINES_LIST_SIZE = 0x40 # macro
+NV2080_GPU_MAX_ENGINES_LIST_SIZE = 0x54 # macro
 NV2080_CTRL_GPU_GET_ENGINES_V2_PARAMS_MESSAGE_ID = (0x70) # macro
 NV2080_CTRL_CMD_GPU_GET_ENGINE_CLASSLIST = (0x20800124) # macro
 NV2080_CTRL_GPU_GET_ENGINE_CLASSLIST_PARAMS_MESSAGE_ID = (0x24) # macro
@@ -9877,7 +10015,8 @@ NV2080_CTRL_GPU_INITIALIZE_CTX_PRESERVE_CTX_NO = (0x00000000) # macro
 NV2080_CTRL_GPU_INITIALIZE_CTX_PRESERVE_CTX_YES = (0x00000001) # macro
 NV2080_CTRL_CMD_GPU_QUERY_ECC_INTR = (0x2080012e) # macro
 NV2080_CTRL_CMD_GPU_QUERY_ECC_STATUS = (0x2080012f) # macro
-NV2080_CTRL_GPU_ECC_UNIT_COUNT = (0x00000019) # macro
+NV2080_CTRL_GPU_ECC_UNIT_GSP = (0x0000001D) # macro
+NV2080_CTRL_GPU_ECC_UNIT_COUNT = (0x00000024) # macro
 # NV2080_CTRL_GPU_QUERY_ECC_STATUS_FLAGS_TYPE = 0 : 0 # macro
 NV2080_CTRL_GPU_QUERY_ECC_STATUS_FLAGS_TYPE_FILTERED = (0x00000000) # macro
 NV2080_CTRL_GPU_QUERY_ECC_STATUS_FLAGS_TYPE_RAW = (0x00000001) # macro
@@ -10020,8 +10159,10 @@ NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_MINI_HALF = 0x00000002 # macro
 NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_QUARTER = 0x00000003 # macro
 NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_MINI_QUARTER = 0x00000004 # macro
 NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_EIGHTH = 0x00000005 # macro
-NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE__SIZE = 6 # macro
-NV2080_CTRL_GPU_PARTITION_MAX_TYPES = 20 # macro
+NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_RESERVED_INTERNAL_06 = 0x00000006 # macro
+NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_RESERVED_INTERNAL_07 = 0x00000007 # macro
+NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE__SIZE = 8 # macro
+NV2080_CTRL_GPU_PARTITION_MAX_TYPES = 40 # macro
 # NV2080_CTRL_GPU_PARTITION_FLAG_REQ_DEC_JPG_OFA = 30 : 30 # macro
 NV2080_CTRL_GPU_PARTITION_FLAG_REQ_DEC_JPG_OFA_DISABLE = 0 # macro
 NV2080_CTRL_GPU_PARTITION_FLAG_REQ_DEC_JPG_OFA_ENABLE = 1 # macro
@@ -10171,10 +10312,29 @@ NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_INFO_V2 = (0x208001af) # macro
 NV2080_CTRL_GPU_MAX_CONSTRUCTED_FALCONS = 0x40 # macro
 NV2080_CTRL_CMD_GPU_GET_CONSTRUCTED_FALCON_INFO = (0x208001b0) # macro
 NV2080_CTRL_GPU_GET_CONSTRUCTED_FALCON_INFO_PARAMS_MESSAGE_ID = (0xB0) # macro
+NV2080_CTRL_CMD_GPU_GET_VF_CAPS = (0x208001b1) # macro
+NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS_MESSAGE_ID = (0xB1) # macro
+NV2080_CTRL_CMD_GPU_GET_RECOVERY_ACTION = (0x208001b2) # macro
+NV2080_CTRL_GPU_GET_RECOVERY_ACTION_PARAMS_MESSAGE_ID = (0xB2) # macro
 NV2080_CTRL_GPU_GET_FIPS_STATUS_PARAMS_MESSAGE_ID = (0xe4) # macro
 NV2080_CTRL_GPU_GET_FIPS_STATUS = (0x208001e4) # macro
-NV0000_CTRL_CMD_VGPU_GET_START_DATA = (0xc01) # macro
-NV0000_CTRL_VGPU_GET_START_DATA_PARAMS_MESSAGE_ID = (0x1) # macro
+# NV0000_BUSDEVICE_DOMAIN = 31 : 16 # macro
+# NV0000_BUSDEVICE_BUS = 15 : 8 # macro
+# NV0000_BUSDEVICE_DEVICE = 7 : 0 # macro
+# def GPU_32_BIT_ID_DECODE_DOMAIN(gpuId):  # macro
+#    return (NvU16)DRF_VAL(0000,_BUSDEVICE,_DOMAIN,gpuId);
+# def GPU_32_BIT_ID_DECODE_BUS(gpuId):  # macro
+#    return (NvU8)DRF_VAL(0000,_BUSDEVICE,_BUS,gpuId);
+# def GPU_32_BIT_ID_DECODE_DEVICE(gpuId):  # macro
+#    return (NvU8)DRF_VAL(0000,_BUSDEVICE,_DEVICE,gpuId);
+NV0000_CTRL_CMD_VGPU_CREATE_DEVICE = (0xc02) # macro
+NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS_MESSAGE_ID = (0x2) # macro
+NV0000_CTRL_CMD_VGPU_GET_INSTANCES = (0xc03) # macro
+NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS_MESSAGE_ID = (0x3) # macro
+NV0000_CTRL_CMD_VGPU_DELETE_DEVICE = (0xc04) # macro
+NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS_MESSAGE_ID = (0x4) # macro
+NV0000_CTRL_CMD_VGPU_VFIO_NOTIFY_RM_STATUS = (0xc05) # macro
+NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS_MESSAGE_ID = (0x5) # macro
 class struct_NV0080_CTRL_GR_ROUTE_INFO(Structure):
     pass
 
@@ -10399,7 +10559,7 @@ struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS_0._fields_ = [
 
 struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS._fields_ = [
-    ('smId', struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS_0 * 144),
+    ('smId', struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS_0 * 240),
     ('smCount', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
     ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO),
@@ -10430,7 +10590,8 @@ NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS__enumvalues = {
     5: 'NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_CONTEXT_POOL',
     6: 'NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_CONTEXT_POOL_CONTROL',
     7: 'NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_CONTEXT_POOL_CONTROL_CPU',
-    8: 'NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_END',
+    8: 'NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_SETUP',
+    9: 'NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_END',
 }
 NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_MAIN = 0
 NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_SPILL = 1
@@ -10440,7 +10601,8 @@ NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_RTV = 4
 NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_CONTEXT_POOL = 5
 NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_CONTEXT_POOL_CONTROL = 6
 NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_CONTEXT_POOL_CONTROL_CPU = 7
-NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_END = 8
+NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_SETUP = 8
+NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_END = 9
 NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS = ctypes.c_uint32 # enum
 class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS(Structure):
     pass
@@ -10451,7 +10613,7 @@ struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS._fields_ = [
     ('hClient', ctypes.c_uint32),
     ('hChannel', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
-    ('vMemPtrs', ctypes.c_uint64 * 8),
+    ('vMemPtrs', ctypes.c_uint64 * 9),
     ('gfxpPreemptMode', ctypes.c_uint32),
     ('cilpPreemptMode', ctypes.c_uint32),
     ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO),
@@ -10866,6 +11028,24 @@ struct_NV2080_CTRL_GR_GET_GFX_GPC_AND_TPC_INFO_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_GR_GET_GFX_GPC_AND_TPC_INFO_PARAMS = struct_NV2080_CTRL_GR_GET_GFX_GPC_AND_TPC_INFO_PARAMS
+
+# values for enumeration 'NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_TYPE'
+NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_TYPE__enumvalues = {
+    0: 'NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_NONE',
+    1: 'NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_64B',
+    2: 'NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_128B',
+}
+NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_NONE = 0
+NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_64B = 1
+NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_128B = 2
+NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_TYPE = ctypes.c_uint32 # enum
+class struct_NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_PARAMS(Structure):
+    _pack_ = 1 # source:False
+    _fields_ = [
+    ('promoType', NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_TYPE),
+     ]
+
+NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_PARAMS = struct_NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_PARAMS
 NV2080_CTRL_GPU_INFO = struct_NVXXXX_CTRL_XXX_INFO
 class struct_NV2080_CTRL_GPU_GET_INFO_PARAMS(Structure):
     pass
@@ -11005,7 +11185,7 @@ class struct_NV2080_CTRL_GPU_GET_ENGINES_V2_PARAMS(Structure):
 struct_NV2080_CTRL_GPU_GET_ENGINES_V2_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_GPU_GET_ENGINES_V2_PARAMS._fields_ = [
     ('engineCount', ctypes.c_uint32),
-    ('engineList', ctypes.c_uint32 * 64),
+    ('engineList', ctypes.c_uint32 * 84),
 ]
 
 NV2080_CTRL_GPU_GET_ENGINES_V2_PARAMS = struct_NV2080_CTRL_GPU_GET_ENGINES_V2_PARAMS
@@ -11150,7 +11330,7 @@ class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS(Structure):
 
 struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS._fields_ = [
-    ('units', struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS * 25),
+    ('units', struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS * 36),
     ('bFatalPoisonError', ctypes.c_ubyte),
     ('uncorrectableError', ctypes.c_ubyte),
     ('PADDING_0', ctypes.c_ubyte * 2),
@@ -11694,8 +11874,8 @@ class struct_NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_PARAMS(Structure):
 
 struct_NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_PARAMS._fields_ = [
-    ('engineList', ctypes.c_uint32 * 64),
-    ('runlistPriBase', ctypes.c_uint32 * 64),
+    ('engineList', ctypes.c_uint32 * 84),
+    ('runlistPriBase', ctypes.c_uint32 * 84),
 ]
 
 NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_PARAMS = struct_NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_PARAMS
@@ -11704,8 +11884,8 @@ class struct_NV2080_CTRL_GPU_GET_HW_ENGINE_ID_PARAMS(Structure):
 
 struct_NV2080_CTRL_GPU_GET_HW_ENGINE_ID_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_GPU_GET_HW_ENGINE_ID_PARAMS._fields_ = [
-    ('engineList', ctypes.c_uint32 * 64),
-    ('hwEngineID', ctypes.c_uint32 * 64),
+    ('engineList', ctypes.c_uint32 * 84),
+    ('hwEngineID', ctypes.c_uint32 * 84),
 ]
 
 NV2080_CTRL_GPU_GET_HW_ENGINE_ID_PARAMS = struct_NV2080_CTRL_GPU_GET_HW_ENGINE_ID_PARAMS
@@ -11817,7 +11997,7 @@ struct_NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_PARAMS._fields_ = [
     ('descCount', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
-    ('partitionDescs', struct_NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_INFO * 20),
+    ('partitionDescs', struct_NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_INFO * 40),
 ]
 
 NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_PARAMS = struct_NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_PARAMS
@@ -12076,6 +12256,7 @@ struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO._fields_ = [
     ('p2pCapsStatus', ctypes.c_ubyte * 9),
     ('PADDING_0', ctypes.c_ubyte * 3),
     ('busPeerId', ctypes.c_uint32),
+    ('busEgmPeerId', ctypes.c_uint32),
 ]
 
 NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO = struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO
@@ -12112,7 +12293,7 @@ class struct_NV2080_CTRL_GPU_GET_COMPUTE_PROFILES_PARAMS(Structure):
 struct_NV2080_CTRL_GPU_GET_COMPUTE_PROFILES_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_GPU_GET_COMPUTE_PROFILES_PARAMS._fields_ = [
     ('profileCount', ctypes.c_uint32),
-    ('profiles', struct_NV2080_CTRL_GPU_COMPUTE_PROFILE * 6),
+    ('profiles', struct_NV2080_CTRL_GPU_COMPUTE_PROFILE * 8),
 ]
 
 NV2080_CTRL_GPU_GET_COMPUTE_PROFILES_PARAMS = struct_NV2080_CTRL_GPU_GET_COMPUTE_PROFILES_PARAMS
@@ -12223,6 +12404,47 @@ struct_NV2080_CTRL_GPU_GET_CONSTRUCTED_FALCON_INFO_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_GPU_GET_CONSTRUCTED_FALCON_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_CONSTRUCTED_FALCON_INFO_PARAMS
+class struct_NV2080_VF_MSIX_CAPS(Structure):
+    pass
+
+struct_NV2080_VF_MSIX_CAPS._pack_ = 1 # source:False
+struct_NV2080_VF_MSIX_CAPS._fields_ = [
+    ('msix_header', ctypes.c_uint32),
+    ('msix_table', ctypes.c_uint32),
+    ('msix_pba', ctypes.c_uint32),
+]
+
+NV2080_VF_MSIX_CAPS = struct_NV2080_VF_MSIX_CAPS
+class struct_NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS._fields_ = [
+    ('gfid', ctypes.c_uint32),
+    ('vfMsixCap', NV2080_VF_MSIX_CAPS),
+]
+
+NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS = struct_NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS
+
+# values for enumeration 'NV2080_CTRL_GPU_RECOVERY_ACTION'
+NV2080_CTRL_GPU_RECOVERY_ACTION__enumvalues = {
+    0: 'NV2080_CTRL_GPU_RECOVERY_ACTION_NONE',
+    1: 'NV2080_CTRL_GPU_RECOVERY_ACTION_GPU_RESET',
+    2: 'NV2080_CTRL_GPU_RECOVERY_ACTION_NODE_REBOOT',
+    3: 'NV2080_CTRL_GPU_RECOVERY_ACTION_DRAIN_P2P',
+}
+NV2080_CTRL_GPU_RECOVERY_ACTION_NONE = 0
+NV2080_CTRL_GPU_RECOVERY_ACTION_GPU_RESET = 1
+NV2080_CTRL_GPU_RECOVERY_ACTION_NODE_REBOOT = 2
+NV2080_CTRL_GPU_RECOVERY_ACTION_DRAIN_P2P = 3
+NV2080_CTRL_GPU_RECOVERY_ACTION = ctypes.c_uint32 # enum
+class struct_NV2080_CTRL_GPU_GET_RECOVERY_ACTION_PARAMS(Structure):
+    _pack_ = 1 # source:False
+    _fields_ = [
+    ('action', NV2080_CTRL_GPU_RECOVERY_ACTION),
+     ]
+
+NV2080_CTRL_GPU_GET_RECOVERY_ACTION_PARAMS = struct_NV2080_CTRL_GPU_GET_RECOVERY_ACTION_PARAMS
 class struct_NV2080_CTRL_GPU_GET_FIPS_STATUS_PARAMS(Structure):
     pass
 
@@ -12232,21 +12454,53 @@ struct_NV2080_CTRL_GPU_GET_FIPS_STATUS_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_GPU_GET_FIPS_STATUS_PARAMS = struct_NV2080_CTRL_GPU_GET_FIPS_STATUS_PARAMS
-class struct_NV0000_CTRL_VGPU_GET_START_DATA_PARAMS(Structure):
+class struct_NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS(Structure):
     pass
 
-struct_NV0000_CTRL_VGPU_GET_START_DATA_PARAMS._pack_ = 1 # source:False
-struct_NV0000_CTRL_VGPU_GET_START_DATA_PARAMS._fields_ = [
-    ('mdevUuid', ctypes.c_ubyte * 16),
-    ('configParams', ctypes.c_ubyte * 1024),
-    ('qemuPid', ctypes.c_uint32),
+struct_NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS._pack_ = 1 # source:False
+struct_NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS._fields_ = [
+    ('vgpuName', ctypes.c_ubyte * 16),
     ('gpuPciId', ctypes.c_uint32),
+    ('gpuPciBdf', ctypes.c_uint32),
+    ('vgpuTypeId', ctypes.c_uint32),
     ('vgpuId', ctypes.c_uint16),
     ('PADDING_0', ctypes.c_ubyte * 2),
-    ('gpuPciBdf', ctypes.c_uint32),
 ]
 
-NV0000_CTRL_VGPU_GET_START_DATA_PARAMS = struct_NV0000_CTRL_VGPU_GET_START_DATA_PARAMS
+NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS = struct_NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS
+class struct_NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS(Structure):
+    pass
+
+struct_NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS._pack_ = 1 # source:False
+struct_NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS._fields_ = [
+    ('gpuPciId', ctypes.c_uint32),
+    ('gpuPciBdf', ctypes.c_uint32),
+    ('numVgpuTypes', ctypes.c_uint32),
+    ('vgpuTypeIds', ctypes.c_uint32 * 64),
+    ('availableInstances', ctypes.c_uint32 * 64),
+]
+
+NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS = struct_NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS
+class struct_NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS(Structure):
+    pass
+
+struct_NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS._pack_ = 1 # source:False
+struct_NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS._fields_ = [
+    ('vgpuName', ctypes.c_ubyte * 16),
+    ('vgpuId', ctypes.c_uint16),
+]
+
+NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS = struct_NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS
+class struct_NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS(Structure):
+    pass
+
+struct_NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS._pack_ = 1 # source:False
+struct_NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS._fields_ = [
+    ('returnStatus', ctypes.c_uint32),
+    ('gpuId', ctypes.c_uint32),
+]
+
+NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS = struct_NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS
 NV0080_CTRL_CMD_BIF_RESET = (0x800102) # macro
 NV0080_CTRL_BIF_RESET_PARAMS_MESSAGE_ID = (0x2) # macro
 # NV0080_CTRL_BIF_RESET_FLAGS_TYPE = 4 : 0 # macro
@@ -12258,8 +12512,6 @@ NV0080_CTRL_BIF_RESET_FLAGS_TYPE_BOOT_DEVICE = 0x5 # macro
 NV0080_CTRL_BIF_RESET_FLAGS_TYPE_PEX = 0x6 # macro
 NV0080_CTRL_BIF_RESET_FLAGS_TYPE_OOBHUB_TRIGGER = 0x7 # macro
 NV0080_CTRL_BIF_RESET_FLAGS_TYPE_BASE = 0x8 # macro
-NV0080_CTRL_CMD_BIF_GET_DMA_BASE_SYSMEM_ADDR = (0x800103) # macro
-NV0080_CTRL_BIF_GET_DMA_BASE_SYSMEM_ADDR_PARAMS_MESSAGE_ID = (0x3) # macro
 NV0080_CTRL_CMD_BIF_SET_ASPM_FEATURE = (0x800104) # macro
 NV0080_CTRL_BIF_SET_ASPM_FEATURE_PARAMS_MESSAGE_ID = (0x4) # macro
 # NV0080_CTRL_BIF_ASPM_FEATURE_DT_L0S = 0 : 0 # macro
@@ -12281,15 +12533,6 @@ struct_NV0080_CTRL_BIF_RESET_PARAMS._fields_ = [
 ]
 
 NV0080_CTRL_BIF_RESET_PARAMS = struct_NV0080_CTRL_BIF_RESET_PARAMS
-class struct_NV0080_CTRL_BIF_GET_DMA_BASE_SYSMEM_ADDR_PARAMS(Structure):
-    pass
-
-struct_NV0080_CTRL_BIF_GET_DMA_BASE_SYSMEM_ADDR_PARAMS._pack_ = 1 # source:False
-struct_NV0080_CTRL_BIF_GET_DMA_BASE_SYSMEM_ADDR_PARAMS._fields_ = [
-    ('baseDmaSysmemAddr', ctypes.c_uint64),
-]
-
-NV0080_CTRL_BIF_GET_DMA_BASE_SYSMEM_ADDR_PARAMS = struct_NV0080_CTRL_BIF_GET_DMA_BASE_SYSMEM_ADDR_PARAMS
 class struct_NV0080_CTRL_BIF_SET_ASPM_FEATURE_PARAMS(Structure):
     pass
 
@@ -12775,6 +13018,7 @@ NV0080_CTRL_FB_GET_CAPS_PARAMS_MESSAGE_ID = (0x1) # macro
 # NV0080_CTRL_FB_CAPS_VIDMEM_ALLOCS_ARE_CLEARED = 2 : 0x02 # macro
 # NV0080_CTRL_FB_CAPS_DISABLE_PLC_GLOBALLY = 2 : 0x04 # macro
 # NV0080_CTRL_FB_CAPS_PLC_BUG_3046774 = 2 : 0x08 # macro
+# NV0080_CTRL_FB_CAPS_PARTIAL_UNMAP = 2 : 0x10 # macro
 NV0080_CTRL_FB_CAPS_TBL_SIZE = 3 # macro
 NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO = (0x801306) # macro
 NV0080_CTRL_FB_GET_COMPBIT_STORE_INFO_PARAMS_MESSAGE_ID = (0x6) # macro
@@ -12871,15 +13115,6 @@ NV0080_CTRL_FIFO_GET_CAPS_PARAMS_MESSAGE_ID = (0x1) # macro
 # NV0080_CTRL_FIFO_CAPS_MULTI_VAS_PER_CHANGRP = 1 : 0x20 # macro
 # NV0080_CTRL_FIFO_CAPS_SUPPORT_WDDM_INTERLEAVING = 1 : 0x40 # macro
 NV0080_CTRL_FIFO_CAPS_TBL_SIZE = 2 # macro
-NV0080_CTRL_CMD_FIFO_START_SELECTED_CHANNELS = (0x801705) # macro
-NV0080_CTRL_FIFO_START_SELECTED_CHANNELS_PARAMS_MESSAGE_ID = (0x5) # macro
-NV0080_CTRL_FIFO_ENGINE_ID_GRAPHICS = (0x00000000) # macro
-NV0080_CTRL_FIFO_ENGINE_ID_MPEG = (0x00000001) # macro
-NV0080_CTRL_FIFO_ENGINE_ID_MOTION_ESTIMATION = (0x00000002) # macro
-NV0080_CTRL_FIFO_ENGINE_ID_VIDEO = (0x00000003) # macro
-NV0080_CTRL_FIFO_ENGINE_ID_BITSTREAM = (0x00000004) # macro
-NV0080_CTRL_FIFO_ENGINE_ID_ENCRYPTION = (0x00000005) # macro
-NV0080_CTRL_FIFO_ENGINE_ID_FGT = (0x00000006) # macro
 NV0080_CTRL_CMD_FIFO_GET_ENGINE_CONTEXT_PROPERTIES = (0x801707) # macro
 # NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID = 4 : 0 # macro
 NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS = (0x00000000) # macro
@@ -12950,27 +13185,6 @@ struct_NV0080_CTRL_FIFO_GET_CAPS_PARAMS._fields_ = [
 ]
 
 NV0080_CTRL_FIFO_GET_CAPS_PARAMS = struct_NV0080_CTRL_FIFO_GET_CAPS_PARAMS
-class struct_NV0080_CTRL_FIFO_CHANNEL(Structure):
-    pass
-
-struct_NV0080_CTRL_FIFO_CHANNEL._pack_ = 1 # source:False
-struct_NV0080_CTRL_FIFO_CHANNEL._fields_ = [
-    ('hChannel', ctypes.c_uint32),
-]
-
-NV0080_CTRL_FIFO_CHANNEL = struct_NV0080_CTRL_FIFO_CHANNEL
-class struct_NV0080_CTRL_FIFO_START_SELECTED_CHANNELS_PARAMS(Structure):
-    pass
-
-struct_NV0080_CTRL_FIFO_START_SELECTED_CHANNELS_PARAMS._pack_ = 1 # source:False
-struct_NV0080_CTRL_FIFO_START_SELECTED_CHANNELS_PARAMS._fields_ = [
-    ('fifoStartChannelListCount', ctypes.c_uint32),
-    ('channelHandle', ctypes.c_uint32 * 8),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('fifoStartChannelList', ctypes.POINTER(None)),
-]
-
-NV0080_CTRL_FIFO_START_SELECTED_CHANNELS_PARAMS = struct_NV0080_CTRL_FIFO_START_SELECTED_CHANNELS_PARAMS
 class struct_NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_PARAMS(Structure):
     pass
 
@@ -13131,7 +13345,7 @@ NV0080_CTRL_CMD_GPU_GET_VGX_CAPS = (0x80028e) # macro
 NV0080_CTRL_GPU_GET_VGX_CAPS_PARAMS_MESSAGE_ID = (0x8E) # macro
 NV0080_CTRL_CMD_GPU_GET_SRIOV_CAPS = (0x800291) # macro
 NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS_MESSAGE_ID = (0x91) # macro
-NV0080_CTRL_GPU_CLASSLIST_MAX_SIZE = 174 # macro
+NV0080_CTRL_GPU_CLASSLIST_MAX_SIZE = 100 # macro
 NV0080_CTRL_CMD_GPU_GET_CLASSLIST_V2 = (0x800292) # macro
 NV0080_CTRL_GPU_GET_CLASSLIST_V2_PARAMS_MESSAGE_ID = (0x92) # macro
 NV0080_CTRL_CMD_GPU_FIND_SUBDEVICE_HANDLE = (0x800293) # macro
@@ -13244,6 +13458,8 @@ class struct_NV0080_CTRL_GPU_GET_VIRTUALIZATION_MODE_PARAMS(Structure):
 struct_NV0080_CTRL_GPU_GET_VIRTUALIZATION_MODE_PARAMS._pack_ = 1 # source:False
 struct_NV0080_CTRL_GPU_GET_VIRTUALIZATION_MODE_PARAMS._fields_ = [
     ('virtualizationMode', ctypes.c_uint32),
+    ('isGridBuild', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
 ]
 
 NV0080_CTRL_GPU_GET_VIRTUALIZATION_MODE_PARAMS = struct_NV0080_CTRL_GPU_GET_VIRTUALIZATION_MODE_PARAMS
@@ -13310,7 +13526,7 @@ class struct_NV0080_CTRL_GPU_GET_CLASSLIST_V2_PARAMS(Structure):
 struct_NV0080_CTRL_GPU_GET_CLASSLIST_V2_PARAMS._pack_ = 1 # source:False
 struct_NV0080_CTRL_GPU_GET_CLASSLIST_V2_PARAMS._fields_ = [
     ('numClasses', ctypes.c_uint32),
-    ('classList', ctypes.c_uint32 * 174),
+    ('classList', ctypes.c_uint32 * 100),
 ]
 
 NV0080_CTRL_GPU_GET_CLASSLIST_V2_PARAMS = struct_NV0080_CTRL_GPU_GET_CLASSLIST_V2_PARAMS
@@ -13365,25 +13581,8 @@ NV0080_CTRL_CMD_HOST_GET_CAPS = (0x801401) # macro
 NV0080_CTRL_HOST_GET_CAPS_PARAMS_MESSAGE_ID = (0x1) # macro
 # def NV0080_CTRL_HOST_GET_CAP(tbl, c):  # macro
 #    return (((NvU8)tbl[(1?c)])&(0?c))
-# NV0080_CTRL_HOST_CAPS_SEMA_ACQUIRE_BUG_105665 = 0 : 0x01 # macro
-# NV0080_CTRL_HOST_CAPS_DUP_CMPLT_BUG_126020 = 0 : 0x02 # macro
-# NV0080_CTRL_HOST_CAPS_GPU_COHERENT_MAPPING_SUPPORTED = 0 : 0x04 # macro
-# NV0080_CTRL_HOST_CAPS_SYS_SEMA_DEADLOCK_BUG_148216 = 0 : 0x08 # macro
-# NV0080_CTRL_HOST_CAPS_SLOWSLI = 0 : 0x10 # macro
-# NV0080_CTRL_HOST_CAPS_SEMA_READ_ONLY_BUG = 0 : 0x20 # macro
-# NV0080_CTRL_HOST_CAPS_LARGE_NONCOH_UPSTR_WRITE_BUG_114871 = 0 : 0x40 # macro
-# NV0080_CTRL_HOST_CAPS_LARGE_UPSTREAM_WRITE_BUG_115115 = 0 : 0x80 # macro
-# NV0080_CTRL_HOST_CAPS_SEP_VIDMEM_PB_NOTIFIERS_BUG_83923 = 1 : 0x02 # macro
-# NV0080_CTRL_HOST_CAPS_P2P_4_WAY = 1 : 0x08 # macro
-# NV0080_CTRL_HOST_CAPS_P2P_8_WAY = 1 : 0x10 # macro
-# NV0080_CTRL_HOST_CAPS_P2P_DEADLOCK_BUG_203825 = 1 : 0x20 # macro
-# NV0080_CTRL_HOST_CAPS_BUG_254580 = 1 : 0x80 # macro
-# NV0080_CTRL_HOST_CAPS_COMPRESSED_BL_P2P_BUG_257072 = 2 : 0x02 # macro
-# NV0080_CTRL_HOST_CAPS_CROSS_BLITS_BUG_270260 = 2 : 0x04 # macro
-# NV0080_CTRL_HOST_CAPS_MEM2MEM_BUG_365782 = 2 : 0x10 # macro
 # NV0080_CTRL_HOST_CAPS_CPU_WRITE_WAR_BUG_420495 = 2 : 0x20 # macro
 # NV0080_CTRL_HOST_CAPS_EXPLICIT_CACHE_FLUSH_REQD = 2 : 0x40 # macro
-# NV0080_CTRL_HOST_CAPS_BAR1_READ_DEADLOCK_BUG_511418 = 2 : 0x80 # macro
 NV0080_CTRL_HOST_CAPS_TBL_SIZE = 3 # macro
 NV0080_CTRL_CMD_HOST_GET_CAPS_V2 = (0x801402) # macro
 NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x2) # macro
@@ -13968,22 +14167,12 @@ NV2080_CTRL_BUS_SET_PCIE_SPEED_8000MBPS = (0x00000003) # macro
 NV2080_CTRL_BUS_SET_PCIE_SPEED_16000MBPS = (0x00000004) # macro
 NV2080_CTRL_BUS_SET_PCIE_SPEED_32000MBPS = (0x00000005) # macro
 NV2080_CTRL_BUS_SET_PCIE_SPEED_64000MBPS = (0x00000006) # macro
-NV2080_CTRL_CMD_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED = (0x20801806) # macro
-NV2080_CTRL_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS_MESSAGE_ID = (0x6) # macro
-NV2080_CTRL_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED_2500MBPS = (0x00000001) # macro
-NV2080_CTRL_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED_5000MBPS = (0x00000002) # macro
-NV2080_CTRL_CMD_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED = (0x20801807) # macro
-NV2080_CTRL_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS_MESSAGE_ID = (0x7) # macro
-NV2080_CTRL_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED_2500MBPS = (0x00000001) # macro
-NV2080_CTRL_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED_5000MBPS = (0x00000002) # macro
 NV2080_CTRL_CMD_BUS_MAP_BAR2 = (0x20801809) # macro
 NV2080_CTRL_BUS_MAP_BAR2_PARAMS_MESSAGE_ID = (0x9) # macro
 NV2080_CTRL_CMD_BUS_UNMAP_BAR2 = (0x2080180a) # macro
 NV2080_CTRL_BUS_UNMAP_BAR2_PARAMS_MESSAGE_ID = (0xA) # macro
 NV2080_CTRL_CMD_BUS_VERIFY_BAR2 = (0x2080180b) # macro
 NV2080_CTRL_BUS_VERIFY_BAR2_PARAMS_MESSAGE_ID = (0xB) # macro
-NV2080_CTRL_CMD_BUS_HWBC_GET_UPSTREAM_BAR0 = (0x2080180e) # macro
-NV2080_CTRL_BUS_HWBC_GET_UPSTREAM_BAR0_PARAMS_MESSAGE_ID = (0xE) # macro
 NV2080_CTRL_CMD_BUS_SERVICE_GPU_MULTIFUNC_STATE = (0x20801812) # macro
 NV2080_CTRL_BUS_SERVICE_GPU_MULTIFUNC_STATE_PARAMS_MESSAGE_ID = (0x12) # macro
 NV2080_CTRL_BUS_ENABLE_GPU_MULTIFUNC_STATE = (0x00000000) # macro
@@ -14085,6 +14274,9 @@ NV2080_CTRL_BUS_MAX_NUM_LANES = 32 # macro
 NV2080_CTRL_BUS_GET_EOM_STATUS_PARAMS_MESSAGE_ID = (0x28) # macro
 NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS = (0x20801829) # macro
 NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_PARAMS_MESSAGE_ID = (0x29) # macro
+NV2080_CTRL_CMD_BUS_PCIE_ATOMICS_CAPTYPE_SYSMEM = 0x0 # macro
+NV2080_CTRL_CMD_BUS_PCIE_ATOMICS_CAPTYPE_GPU = 0x1 # macro
+NV2080_CTRL_CMD_BUS_PCIE_ATOMICS_CAPTYPE_P2P = 0x2 # macro
 # NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_FETCHADD_32 = 0 : 0 # macro
 NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_FETCHADD_32_YES = (0x00000001) # macro
 NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_FETCHADD_32_NO = (0x00000000) # macro
@@ -14162,6 +14354,29 @@ NV2080_SET_P2P_MAPPING_UUID_LEN = 16 # macro
 NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_MESSAGE_ID = (0x2E) # macro
 NV2080_CTRL_CMD_BUS_UNSET_P2P_MAPPING = (0x2080182f) # macro
 NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_MESSAGE_ID = (0x2F) # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS = (0x20801830) # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS_MESSAGE_ID = (0x30) # macro
+# NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_32 = 0 : 0 # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_32_YES = (0x00000001) # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_32_NO = (0x00000000) # macro
+# NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_64 = 1 : 1 # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_64_YES = (0x00000001) # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_64_NO = (0x00000000) # macro
+# NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_32 = 2 : 2 # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_32_YES = (0x00000001) # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_32_NO = (0x00000000) # macro
+# NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_64 = 3 : 3 # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_64_YES = (0x00000001) # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_64_NO = (0x00000000) # macro
+# NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_32 = 4 : 4 # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_32_YES = (0x00000001) # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_32_NO = (0x00000000) # macro
+# NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_64 = 5 : 5 # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_64_YES = (0x00000001) # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_64_NO = (0x00000000) # macro
+# NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_128 = 6 : 6 # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_128_YES = (0x00000001) # macro
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_128_NO = (0x00000000) # macro
 class struct_NV2080_CTRL_BUS_GET_PCI_INFO_PARAMS(Structure):
     pass
 
@@ -14238,28 +14453,6 @@ struct_NV2080_CTRL_BUS_SET_PCIE_SPEED_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_BUS_SET_PCIE_SPEED_PARAMS = struct_NV2080_CTRL_BUS_SET_PCIE_SPEED_PARAMS
-class struct_NV2080_CTRL_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS._fields_ = [
-    ('busSpeed', ctypes.c_uint32),
-    ('primaryBus', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 3),
-]
-
-NV2080_CTRL_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS = struct_NV2080_CTRL_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS
-class struct_NV2080_CTRL_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS._fields_ = [
-    ('busSpeed', ctypes.c_uint32),
-    ('primaryBus', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 3),
-]
-
-NV2080_CTRL_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS = struct_NV2080_CTRL_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS
 class struct_NV2080_CTRL_BUS_MAP_BAR2_PARAMS(Structure):
     pass
 
@@ -14289,17 +14482,6 @@ struct_NV2080_CTRL_BUS_VERIFY_BAR2_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_BUS_VERIFY_BAR2_PARAMS = struct_NV2080_CTRL_BUS_VERIFY_BAR2_PARAMS
-class struct_NV2080_CTRL_BUS_HWBC_GET_UPSTREAM_BAR0_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_BUS_HWBC_GET_UPSTREAM_BAR0_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_BUS_HWBC_GET_UPSTREAM_BAR0_PARAMS._fields_ = [
-    ('physBAR0', ctypes.c_uint64),
-    ('primaryBus', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 7),
-]
-
-NV2080_CTRL_BUS_HWBC_GET_UPSTREAM_BAR0_PARAMS = struct_NV2080_CTRL_BUS_HWBC_GET_UPSTREAM_BAR0_PARAMS
 class struct_NV2080_CTRL_BUS_SERVICE_GPU_MULTIFUNC_STATE_PARAMS(Structure):
     pass
 
@@ -14504,26 +14686,31 @@ class struct_NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_PARAMS(Structure):
 
 struct_NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_PARAMS._fields_ = [
+    ('capType', ctypes.c_uint32),
+    ('dbdf', ctypes.c_uint32),
     ('atomicsCaps', ctypes.c_uint32),
 ]
 
 NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_PARAMS = struct_NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_PARAMS
-class struct_NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS(Structure):
+class struct_NV2080_CTRL_BUS_PCIE_GPU_ATOMIC_OP_INFO(Structure):
     pass
 
-class struct_NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS_0(Structure):
-    pass
-
-struct_NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS_0._pack_ = 1 # source:False
-struct_NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS_0._fields_ = [
+struct_NV2080_CTRL_BUS_PCIE_GPU_ATOMIC_OP_INFO._pack_ = 1 # source:False
+struct_NV2080_CTRL_BUS_PCIE_GPU_ATOMIC_OP_INFO._fields_ = [
     ('bSupported', ctypes.c_ubyte),
     ('PADDING_0', ctypes.c_ubyte * 3),
     ('attributes', ctypes.c_uint32),
 ]
 
+NV2080_CTRL_BUS_PCIE_GPU_ATOMIC_OP_INFO = struct_NV2080_CTRL_BUS_PCIE_GPU_ATOMIC_OP_INFO
+class struct_NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS(Structure):
+    pass
+
 struct_NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS._fields_ = [
-    ('atomicOp', struct_NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS_0 * 13),
+    ('capType', ctypes.c_uint32),
+    ('dbdf', ctypes.c_uint32),
+    ('atomicOp', struct_NV2080_CTRL_BUS_PCIE_GPU_ATOMIC_OP_INFO * 13),
 ]
 
 NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS = struct_NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS
@@ -14582,6 +14769,15 @@ struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS = struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS
+class struct_NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS._fields_ = [
+    ('atomicsCaps', ctypes.c_uint32),
+]
+
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS = struct_NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS
 NV2080_CTRL_CMD_CE_GET_CAPS = (0x20802a01) # macro
 NV2080_CTRL_CE_CAPS_TBL_SIZE = 2 # macro
 NV2080_CTRL_CE_GET_CAPS_PARAMS_MESSAGE_ID = (0x1) # macro
@@ -14600,6 +14796,7 @@ NV2080_CTRL_CE_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x3) # macro
 # NV2080_CTRL_CE_CAPS_CE_SUPPORTS_NONPIPELINED_BL = 1 : 0x01 # macro
 # NV2080_CTRL_CE_CAPS_CE_SUPPORTS_PIPELINED_BL = 1 : 0x02 # macro
 # NV2080_CTRL_CE_CAPS_CE_CC_SECURE = 1 : 0x04 # macro
+# NV2080_CTRL_CE_CAPS_CE_DECOMP_SUPPORTED = 1 : 0x08 # macro
 NV2080_CTRL_CMD_CE_GET_CE_PCE_MASK = (0x20802a02) # macro
 NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_MESSAGE_ID = (0x2) # macro
 NV2080_CTRL_CMD_CE_SET_PCE_LCE_CONFIG = (0x20802a04) # macro
@@ -14623,6 +14820,18 @@ NV2080_CTRL_MAX_CES = 64 # macro
 NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS_MESSAGE_ID = (0xa) # macro
 NV2080_CTRL_CMD_CE_GET_ALL_PHYSICAL_CAPS = (0x20802a0b) # macro
 NV2080_CTRL_CE_GET_ALL_PHYSICAL_CAPS_PARAMS_MESSAGE_ID = (0xb) # macro
+NV2080_CTRL_CMD_CE_GET_LCE_SHIM_INFO = (0x20802a0c) # macro
+NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS_MESSAGE_ID = (0xc) # macro
+NV2080_CTRL_CMD_CE_UPDATE_PCE_LCE_MAPPINGS_V2 = (0x20802a0d) # macro
+NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS_MESSAGE_ID = (0xd) # macro
+NV2080_CTRL_CMD_CE_GET_HUB_PCE_MASK_V2 = (0x20802a0e) # macro
+NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS_MESSAGE_ID = (0xe) # macro
+NV2080_CTRL_CMD_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE = (0x20802a0f) # macro
+NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS_MESSAGE_ID = (0xf) # macro
+NV2080_CTRL_CMD_CE_GET_DECOMP_LCE_MASK = (0x20802a11) # macro
+NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS_MESSAGE_ID = (0x11) # macro
+NV2080_CTRL_CMD_CE_IS_DECOMP_LCE_ENABLED = (0x20802a12) # macro
+NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS_MESSAGE_ID = (0x12) # macro
 class struct_NV2080_CTRL_CE_GET_CAPS_PARAMS(Structure):
     pass
 
@@ -14719,6 +14928,101 @@ struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS._fields_ = [
 
 NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS
 NV2080_CTRL_CE_GET_ALL_PHYSICAL_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS
+class struct_NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS._fields_ = [
+    ('ceEngineType', ctypes.c_uint32),
+    ('shimInstance', ctypes.c_uint32),
+    ('shimLocalLceIdx', ctypes.c_uint32),
+]
+
+NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS = struct_NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS
+class struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS._fields_ = [
+    ('pceLceMap', ctypes.c_uint32 * 32),
+    ('grceConfig', ctypes.c_uint32 * 4),
+    ('exposeCeMask', ctypes.c_uint32),
+    ('bUpdateNvlinkPceLce', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('shimInstance', ctypes.c_uint32),
+]
+
+NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS = struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS
+class struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS._fields_ = [
+    ('connectingHubPceMasks', ctypes.c_uint32 * 32),
+    ('fbhubPceMask', ctypes.c_uint32),
+    ('shimInstance', ctypes.c_uint32),
+]
+
+NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS = struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS
+
+# values for enumeration 'NV2080_CTRL_CE_LCE_TYPE'
+NV2080_CTRL_CE_LCE_TYPE__enumvalues = {
+    1: 'NV2080_CTRL_CE_LCE_TYPE_PCIE',
+    2: 'NV2080_CTRL_CE_LCE_TYPE_DECOMP',
+    3: 'NV2080_CTRL_CE_LCE_TYPE_SCRUB',
+    4: 'NV2080_CTRL_CE_LCE_TYPE_NVLINK_PEER',
+    5: 'NV2080_CTRL_CE_LCE_TYPE_C2C',
+    6: 'NV2080_CTRL_CE_LCE_TYPE_PCIE_RD',
+    7: 'NV2080_CTRL_CE_LCE_TYPE_PCIE_WR',
+    8: 'NV2080_CTRL_CE_LCE_TYPE_C2C_H2D',
+    9: 'NV2080_CTRL_CE_LCE_TYPE_C2C_D2H',
+}
+NV2080_CTRL_CE_LCE_TYPE_PCIE = 1
+NV2080_CTRL_CE_LCE_TYPE_DECOMP = 2
+NV2080_CTRL_CE_LCE_TYPE_SCRUB = 3
+NV2080_CTRL_CE_LCE_TYPE_NVLINK_PEER = 4
+NV2080_CTRL_CE_LCE_TYPE_C2C = 5
+NV2080_CTRL_CE_LCE_TYPE_PCIE_RD = 6
+NV2080_CTRL_CE_LCE_TYPE_PCIE_WR = 7
+NV2080_CTRL_CE_LCE_TYPE_C2C_H2D = 8
+NV2080_CTRL_CE_LCE_TYPE_C2C_D2H = 9
+NV2080_CTRL_CE_LCE_TYPE = ctypes.c_uint32 # enum
+class struct_NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS._fields_ = [
+    ('lceType', NV2080_CTRL_CE_LCE_TYPE),
+    ('numPces', ctypes.c_uint32),
+    ('numLces', ctypes.c_uint32),
+    ('supportedPceMask', ctypes.c_uint32),
+    ('supportedLceMask', ctypes.c_uint32),
+    ('pcePerHshub', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS = struct_NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS
+class struct_NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS._fields_ = [
+    ('decompLceMask', ctypes.c_uint64),
+    ('shimInstance', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS = struct_NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS
+class struct_NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS._fields_ = [
+    ('lceIndex', ctypes.c_uint32),
+    ('bDecompEnabled', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS = struct_NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS
 NV2080_CTRL_GPUMON_SAMPLE_TYPE_PWR_MONITOR_STATUS = 0x00000001 # macro
 NV2080_CTRL_GPUMON_SAMPLE_TYPE_PERFMON_UTIL = 0x00000002 # macro
 # NV2080_GPUMON_PID_INVALID = ((NvU32)(~0)) # macro
@@ -14745,6 +15049,35 @@ struct_NV2080_CTRL_GPUMON_SAMPLES._fields_ = [
 ]
 
 NV2080_CTRL_GPUMON_SAMPLES = struct_NV2080_CTRL_GPUMON_SAMPLES
+NV2080_CTRL_CMD_DMABUF_EXPORT_OBJECTS_TO_FD = (0x20803a01) # macro
+NV2080_CTRL_DMABUF_MAX_HANDLES = 128 # macro
+NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS_MESSAGE_ID = (0x1) # macro
+class struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO(Structure):
+    pass
+
+struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO._pack_ = 1 # source:False
+struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO._fields_ = [
+    ('hMemory', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('offset', ctypes.c_uint64),
+    ('size', ctypes.c_uint64),
+]
+
+NV2080_CTRL_DMABUF_MEM_HANDLE_INFO = struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO
+class struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS._fields_ = [
+    ('fd', ctypes.c_int32),
+    ('totalObjects', ctypes.c_uint32),
+    ('numObjects', ctypes.c_uint32),
+    ('index', ctypes.c_uint32),
+    ('totalSize', ctypes.c_uint64),
+    ('handles', struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO * 128),
+]
+
+NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS = struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS
 NV2080_CTRL_CMD_DMA_INVALIDATE_TLB = (0x20802502) # macro
 NV2080_CTRL_DMA_INVALIDATE_TLB_PARAMS_MESSAGE_ID = (0x2) # macro
 # NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_GRAPHICS = 0 : 0 # macro
@@ -14823,63 +15156,18 @@ struct_NV2080_CTRL_DMA_UPDATE_COMPTAG_INFO_TILE_INFO._fields_ = [
 ]
 
 NV2080_CTRL_DMA_UPDATE_COMPTAG_INFO_TILE_INFO = struct_NV2080_CTRL_DMA_UPDATE_COMPTAG_INFO_TILE_INFO
-NV2080_CTRL_CMD_DMABUF_EXPORT_OBJECTS_TO_FD = (0x20803a01) # macro
-NV2080_CTRL_DMABUF_MAX_HANDLES = 128 # macro
-NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS_MESSAGE_ID = (0x1) # macro
-class struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO(Structure):
-    pass
-
-struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO._pack_ = 1 # source:False
-struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO._fields_ = [
-    ('hMemory', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('offset', ctypes.c_uint64),
-    ('size', ctypes.c_uint64),
-]
-
-NV2080_CTRL_DMABUF_MEM_HANDLE_INFO = struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO
-class struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS._fields_ = [
-    ('fd', ctypes.c_int32),
-    ('totalObjects', ctypes.c_uint32),
-    ('numObjects', ctypes.c_uint32),
-    ('index', ctypes.c_uint32),
-    ('totalSize', ctypes.c_uint64),
-    ('handles', struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO * 128),
-]
-
-NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS = struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS
 NV2080_CTRL_CMD_ECC_GET_CLIENT_EXPOSED_COUNTERS = (0x20803400) # macro
 NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS_MESSAGE_ID = (0x0) # macro
-NV2080_CTRL_CMD_ECC_GET_ECI_COUNTERS = (0x20803401) # macro
-NV2080_CTRL_ECC_GET_ECI_COUNTERS_PARAMS_MESSAGE_ID = (0x1) # macro
-NV2080_CTRL_CMD_ECC_GET_VOLATILE_COUNTS = (0x20803402) # macro
-NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS_MESSAGE_ID = (0x2) # macro
+NV2080_CTRL_CMD_ECC_GET_VOLATILE_COUNTS = (0x20803401) # macro
+NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS_MESSAGE_ID = (0x1) # macro
 class struct_NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS(Structure):
     pass
 
 struct_NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS._fields_ = [
-    ('sramLastClearedTimestamp', ctypes.c_uint32),
-    ('dramLastClearedTimestamp', ctypes.c_uint32),
-    ('sramCorrectedTotalCounts', ctypes.c_uint64),
-    ('sramUncorrectedTotalCounts', ctypes.c_uint64),
-    ('dramCorrectedTotalCounts', ctypes.c_uint64),
-    ('dramUncorrectedTotalCounts', ctypes.c_uint64),
-]
-
-NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS = struct_NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS
-class struct_NV2080_CTRL_ECC_GET_ECI_COUNTERS_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_ECC_GET_ECI_COUNTERS_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_ECC_GET_ECI_COUNTERS_PARAMS._fields_ = [
     ('sramParityUncorrectedUnique', ctypes.c_uint64),
     ('sramSecDedUncorrectedUnique', ctypes.c_uint64),
-    ('sramCorrectedTotal', ctypes.c_uint64),
+    ('sramCorrectedUnique', ctypes.c_uint64),
     ('dramUncorrectedTotal', ctypes.c_uint64),
     ('dramCorrectedTotal', ctypes.c_uint64),
     ('lastClearedTimestamp', ctypes.c_uint32),
@@ -14893,7 +15181,7 @@ struct_NV2080_CTRL_ECC_GET_ECI_COUNTERS_PARAMS._fields_ = [
     ('PADDING_1', ctypes.c_ubyte * 7),
 ]
 
-NV2080_CTRL_ECC_GET_ECI_COUNTERS_PARAMS = struct_NV2080_CTRL_ECC_GET_ECI_COUNTERS_PARAMS
+NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS = struct_NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS
 class struct_NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS(Structure):
     pass
 
@@ -15119,8 +15407,12 @@ NV2080_CTRL_FB_INFO_INDEX_PROTECTED_MEM_SIZE_TOTAL_KB = (0x00000033) # macro
 NV2080_CTRL_FB_INFO_INDEX_PROTECTED_MEM_SIZE_FREE_KB = (0x00000034) # macro
 NV2080_CTRL_FB_INFO_INDEX_ECC_STATUS_SIZE = (0x00000035) # macro
 NV2080_CTRL_FB_INFO_INDEX_IS_ZERO_FB = (0x00000036) # macro
-NV2080_CTRL_FB_INFO_MAX_LIST_SIZE = (0x00000037) # macro
-NV2080_CTRL_FB_INFO_INDEX_MAX = (0x36) # macro
+NV2080_CTRL_FB_INFO_INDEX_PARTITION_MASK_0 = ((0x00000014)) # macro
+NV2080_CTRL_FB_INFO_INDEX_PARTITION_MASK_1 = (0x00000037) # macro
+NV2080_CTRL_FB_INFO_INDEX_LTC_MASK_0 = ((0x0000002B)) # macro
+NV2080_CTRL_FB_INFO_INDEX_LTC_MASK_1 = (0x00000038) # macro
+NV2080_CTRL_FB_INFO_MAX_LIST_SIZE = (0x00000039) # macro
+NV2080_CTRL_FB_INFO_INDEX_MAX = (0x38) # macro
 NV2080_CTRL_FB_INFO_RAM_TYPE_UNKNOWN = (0x00000000) # macro
 NV2080_CTRL_FB_INFO_RAM_TYPE_SDRAM = (0x00000001) # macro
 NV2080_CTRL_FB_INFO_RAM_TYPE_DDR1 = (0x00000002) # macro
@@ -15165,8 +15457,6 @@ NV2080_CTRL_CMD_FB_GET_INFO_V2 = (0x20801303) # macro
 NV2080_CTRL_FB_GET_INFO_V2_PARAMS_MESSAGE_ID = (0x3) # macro
 NV2080_CTRL_CMD_FB_GET_BAR1_OFFSET = (0x20801310) # macro
 NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS_MESSAGE_ID = (0x10) # macro
-NV2080_CTRL_CMD_FB_GET_CARVEOUT_ADDRESS_INFO = (0x2080130b) # macro
-NV2080_CTRL_FB_GET_SYSTEM_CARVEOUT_ADDRESS_SPACE_INFO_MESSAGE_ID = (0xB) # macro
 NV2080_CTRL_CMD_FB_GET_CALIBRATION_LOCK_FAILED = (0x2080130c) # macro
 NV2080_CTRL_FB_GET_CALIBRATION_LOCK_FAILED_PARAMS_MESSAGE_ID = (0xC) # macro
 NV2080_CTRL_CMD_FB_GET_CAL_FLAG_NONE = (0x00000000) # macro
@@ -15201,33 +15491,6 @@ NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FLUSH_MODE_FULL_CACHE = (0x00000001) # macr
 # NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FB_FLUSH = 5 : 5 # macro
 NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FB_FLUSH_NO = (0x00000000) # macro
 NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FB_FLUSH_YES = (0x00000001) # macro
-# NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_READS = 0 : 0 # macro
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_READS_NO = (0x00000000) # macro
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_READS_YES = (0x00000001) # macro
-# NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_WRITES = 1 : 1 # macro
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_WRITES_NO = (0x00000000) # macro
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_WRITES_YES = (0x00000001) # macro
-NV2080_CTRL_CMD_FB_SET_GPU_CACHE_ALLOC_POLICY = (0x2080130f) # macro
-NV2080_CTRL_FB_SET_GPU_CACHE_ALLOC_POLICY_PARAMS_MESSAGE_ID = (0xF) # macro
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_ENTRY_SIZE = 11 # macro
-# NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_READS = 0 : 0 # macro
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_READS_DISABLE = (0x00000000) # macro
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_READS_ENABLE = (0x00000001) # macro
-# NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_READS_ALLOW = 1 : 1 # macro
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_READS_ALLOW_NO = (0x00000000) # macro
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_READS_ALLOW_YES = (0x00000001) # macro
-# NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_WRITES = 2 : 2 # macro
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_WRITES_DISABLE = (0x00000000) # macro
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_WRITES_ENABLE = (0x00000001) # macro
-# NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_WRITES_ALLOW = 3 : 3 # macro
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_WRITES_ALLOW_NO = (0x00000000) # macro
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_WRITES_ALLOW_YES = (0x00000001) # macro
-NV2080_CTRL_CMD_FB_SET_GPU_CACHE_ALLOC_POLICY_V2 = (0x20801318) # macro
-NV2080_CTRL_FB_SET_GPU_CACHE_ALLOC_POLICY_V2_PARAMS_MESSAGE_ID = (0x18) # macro
-NV2080_CTRL_CMD_FB_GET_GPU_CACHE_ALLOC_POLICY = (0x20801312) # macro
-NV2080_CTRL_FB_GET_GPU_CACHE_ALLOC_POLICY_PARAMS_MESSAGE_ID = (0x12) # macro
-NV2080_CTRL_CMD_FB_GET_GPU_CACHE_ALLOC_POLICY_V2 = (0x20801319) # macro
-NV2080_CTRL_FB_GET_GPU_CACHE_ALLOC_POLICY_V2_PARAMS_MESSAGE_ID = (0x19) # macro
 NV2080_CTRL_CMD_FB_IS_KIND = (0x20801313) # macro
 NV2080_CTRL_FB_IS_KIND_PARAMS_MESSAGE_ID = (0x13) # macro
 NV2080_CTRL_FB_IS_KIND_OPERATION_SUPPORTED = (0x00000000) # macro
@@ -15251,12 +15514,6 @@ NV2080_CTRL_FB_GET_GPU_CACHE_INFO_RCM_STATE_FULL = (0x00000000) # macro
 NV2080_CTRL_FB_GET_GPU_CACHE_INFO_RCM_STATE_TRANSITIONING = (0x00000001) # macro
 NV2080_CTRL_FB_GET_GPU_CACHE_INFO_RCM_STATE_REDUCED = (0x00000002) # macro
 NV2080_CTRL_FB_GET_GPU_CACHE_INFO_RCM_STATE_ZERO_CACHE = (0x00000003) # macro
-NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_NONE = (0x00000000) # macro
-NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_QUARTER = (0x00000001) # macro
-NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_HALF = (0x00000002) # macro
-NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_FULL = (0x00000003) # macro
-NV2080_CTRL_CMD_FB_SET_GPU_CACHE_PROMOTION_POLICY = (0x20801316) # macro
-NV2080_CTRL_CMD_FB_GET_GPU_CACHE_PROMOTION_POLICY = (0x20801317) # macro
 NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO = (0x20801320) # macro
 NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_MEM_TYPES = 17 # macro
 NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_MAX_ENTRIES = 16 # macro
@@ -15364,6 +15621,9 @@ NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK = 0xB # macro
 NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP = 0xC # macro
 NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK = 0xD # macro
 NV2080_CTRL_FB_FS_INFO_PAC_MASK = 0xE # macro
+NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK = 0xF # macro
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK = 0x10 # macro
+NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK = 0x11 # macro
 NV2080_CTRL_FB_FS_INFO_MAX_QUERIES = 120 # macro
 NV2080_CTRL_FB_GET_FS_INFO_PARAMS_MESSAGE_ID = (0x46) # macro
 NV2080_CTRL_CMD_FB_GET_FS_INFO = (0x20801346) # macro
@@ -15400,9 +15660,13 @@ NV2080_CTRL_CMD_FB_GET_SEMAPHORE_SURFACE_LAYOUT = (0x20801352) # macro
 NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_CAPS_MONITORED_FENCE_SUPPORTED = (0x00000001) # macro
 NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_CAPS_64BIT_SEMAPHORES_SUPPORTED = (0x00000002) # macro
 NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS_MESSAGE_ID = (0x52) # macro
+NV2080_CTRL_CMD_GMMU_COMMIT_TLB_INVALIDATE = (0x20801353) # macro
+NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS_MESSAGE_ID = (0x53) # macro
 NV2080_CTRL_CMD_FB_STATS_MAX_OWNER = 200 # macro
 NV2080_CTRL_CMD_FB_STATS_GET = (0x2080132a) # macro
 NV2080_CTRL_CMD_FB_STATS_GET_PARAMS_MESSAGE_ID = (0x2A) # macro
+NV2080_CTRL_CMD_FB_GET_STATIC_BAR1_INFO = (0x20801354) # macro
+NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS_MESSAGE_ID = (0x54) # macro
 NV2080_CTRL_FB_INFO = struct_NVXXXX_CTRL_XXX_INFO
 class struct_NV2080_CTRL_FB_GET_INFO_PARAMS(Structure):
     pass
@@ -15421,7 +15685,7 @@ class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS(Structure):
 struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS._fields_ = [
     ('fbInfoListSize', ctypes.c_uint32),
-    ('fbInfoList', struct_NVXXXX_CTRL_XXX_INFO * 55),
+    ('fbInfoList', struct_NVXXXX_CTRL_XXX_INFO * 57),
 ]
 
 NV2080_CTRL_FB_GET_INFO_V2_PARAMS = struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS
@@ -15435,16 +15699,6 @@ struct_NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS = struct_NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS
-class struct_NV2080_CTRL_FB_GET_SYSTEM_CARVEOUT_ADDRESS_SPACE_INFO(Structure):
-    pass
-
-struct_NV2080_CTRL_FB_GET_SYSTEM_CARVEOUT_ADDRESS_SPACE_INFO._pack_ = 1 # source:False
-struct_NV2080_CTRL_FB_GET_SYSTEM_CARVEOUT_ADDRESS_SPACE_INFO._fields_ = [
-    ('StartAddr', ctypes.c_uint64),
-    ('SpaceSize', ctypes.c_uint64),
-]
-
-NV2080_CTRL_FB_GET_SYSTEM_CARVEOUT_ADDRESS_SPACE_INFO = struct_NV2080_CTRL_FB_GET_SYSTEM_CARVEOUT_ADDRESS_SPACE_INFO
 class struct_NV2080_CTRL_FB_GET_CALIBRATION_LOCK_FAILED_PARAMS(Structure):
     pass
 
@@ -15482,40 +15736,6 @@ struct_NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS = struct_NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS
-class struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_PARAMS._fields_ = [
-    ('engine', ctypes.c_uint32),
-    ('allocPolicy', ctypes.c_uint32),
-]
-
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_PARAMS = struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_PARAMS
-NV2080_CTRL_FB_SET_GPU_CACHE_ALLOC_POLICY_PARAMS = struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_PARAMS
-class struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_ENTRY(Structure):
-    pass
-
-struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_ENTRY._pack_ = 1 # source:False
-struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_ENTRY._fields_ = [
-    ('client', ctypes.c_uint32),
-    ('allocPolicy', ctypes.c_uint32),
-]
-
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_ENTRY = struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_ENTRY
-class struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_PARAMS._fields_ = [
-    ('count', ctypes.c_uint32),
-    ('entry', struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_ENTRY * 11),
-]
-
-NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_PARAMS = struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_PARAMS
-NV2080_CTRL_FB_SET_GPU_CACHE_ALLOC_POLICY_V2_PARAMS = struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_PARAMS
-NV2080_CTRL_FB_GET_GPU_CACHE_ALLOC_POLICY_PARAMS = struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_PARAMS
-NV2080_CTRL_FB_GET_GPU_CACHE_ALLOC_POLICY_V2_PARAMS = struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_PARAMS
 class struct_NV2080_CTRL_FB_IS_KIND_PARAMS(Structure):
     pass
 
@@ -15540,16 +15760,6 @@ struct_NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS
-class struct_NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_PARAMS._fields_ = [
-    ('engine', ctypes.c_uint32),
-    ('promotionPolicy', ctypes.c_uint32),
-]
-
-NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_PARAMS = struct_NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_PARAMS
 NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = ctypes.c_ubyte * 17
 class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO(Structure):
     pass
@@ -16212,6 +16422,17 @@ struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS = struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS
+class struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS._fields_ = [
+    ('sysIdx', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('sysl2LtsEnMask', ctypes.c_uint64),
+]
+
+NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS = struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS
 class struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS(Structure):
     pass
 
@@ -16222,6 +16443,28 @@ struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('logicalLtcEnMask', ctypes.c_uint64),
+]
+
+NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('swizzId', ctypes.c_uint32),
+    ('logicalLtcEnMask', ctypes.c_uint64),
+]
+
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS
 class struct_NV2080_CTRL_FB_FS_INFO_QUERY(Structure):
     pass
 
@@ -16245,7 +16488,10 @@ union_NV2080_CTRL_FB_FS_INFO_QUERY_queryParams._fields_ = [
     ('fbpLogicalMap', NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS),
     ('sysl2Ltc', NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS),
     ('pac', NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS),
-    ('PADDING_0', ctypes.c_ubyte * 16),
+    ('logicalLtc', NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS),
+    ('dmLogicalLtc', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS),
+    ('sysl2Lts', NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS),
+    ('PADDING_0', ctypes.c_ubyte * 8),
 ]
 
 struct_NV2080_CTRL_FB_FS_INFO_QUERY._pack_ = 1 # source:False
@@ -16388,6 +16634,17 @@ struct_NV2080_CTRL_CMD_FB_STATS_ENTRY._fields_ = [
 ]
 
 NV2080_CTRL_CMD_FB_STATS_ENTRY = struct_NV2080_CTRL_CMD_FB_STATS_ENTRY
+class struct_NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS._fields_ = [
+    ('gfid', ctypes.c_uint32),
+    ('invalidateAll', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS = struct_NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS
 class struct_NV2080_CTRL_CMD_FB_STATS_OWNER_INFO(Structure):
     pass
 
@@ -16411,6 +16668,17 @@ struct_NV2080_CTRL_CMD_FB_STATS_GET_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_CMD_FB_STATS_GET_PARAMS = struct_NV2080_CTRL_CMD_FB_STATS_GET_PARAMS
+class struct_NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS._fields_ = [
+    ('bStaticBar1Enabled', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 7),
+    ('staticBar1Size', ctypes.c_uint64),
+]
+
+NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS
 NV2080_CTRL_CMD_SET_GPFIFO = (0x20801102) # macro
 NV2080_CTRL_CMD_SET_GPFIFO_PARAMS_MESSAGE_ID = (0x2) # macro
 NV2080_CTRL_FIFO_BIND_ENGINES_MAX_CHANNELS = (16) # macro
@@ -16506,6 +16774,8 @@ NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS_MESSAGE_ID = (0x19) # macro
 NV2080_CTRL_CMD_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION = (0x2080111a) # macro
 NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_MAX_ENTRIES = (64) # macro
 NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS_MESSAGE_ID = (0x1A) # macro
+NV2080_CTRL_CMD_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2 = (0x2080111b) # macro
+NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS_MESSAGE_ID = (0x1B) # macro
 NV2080_CTRL_CMD_FIFO_OBJSCHED_GET_STATE = (0x20801120) # macro
 NV2080_CTRL_FIFO_OBJSCHED_GET_STATE_PARAMS_MESSAGE_ID = (0x20) # macro
 NV2080_CTRL_CMD_FIFO_OBJSCHED_SET_STATE = (0x20801121) # macro
@@ -16783,6 +17053,18 @@ struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS
+class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS._fields_ = [
+    ('numChannels', ctypes.c_uint32),
+    ('hChannelList', ctypes.c_uint32 * 64),
+    ('bEnableAfterKeyRotation', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS
 class struct_NV2080_CTRL_FIFO_OBJSCHED_GET_STATE_PARAMS(Structure):
     pass
 
@@ -17338,6 +17620,8 @@ class struct_NV2080_CTRL_GSP_GET_RM_HEAP_STATS_PARAMS(Structure):
 
 struct_NV2080_CTRL_GSP_GET_RM_HEAP_STATS_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_GSP_GET_RM_HEAP_STATS_PARAMS._fields_ = [
+    ('gfid', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
     ('managedSize', ctypes.c_uint64),
     ('current', NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT),
     ('peak', NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT),
@@ -17526,18 +17810,12 @@ NV2080_CTRL_INTERNAL_GR_MAX_ENGINES = 8 # macro
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS_MESSAGE_ID = (0x20) # macro
 NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_CAPS = (0x20800a1f) # macro
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_CAPS_PARAMS_MESSAGE_ID = (0x1F) # macro
-NV2080_CTRL_CMD_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_FLAGS = (0x20800a21) # macro
-NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_FLAGS_PARAMS_MESSAGE_ID = (0x21) # macro
 NV2080_CTRL_INTERNAL_GR_MAX_SM = 240 # macro
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_GLOBAL_SM_ORDER_PARAMS_MESSAGE_ID = (0x23) # macro
 NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_GLOBAL_SM_ORDER = (0x20800a22) # macro
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_GLOBAL_SM_ORDER_PARAMS_MESSAGE_ID = (0x22) # macro
-NV2080_CTRL_CMD_INTERNAL_BSP_GET_CAPS = (0x20800a24) # macro
 NV2080_CTRL_CMD_INTERNAL_MAX_BSPS = 8 # macro
-NV2080_CTRL_INTERNAL_BSP_GET_CAPS_PARAMS_MESSAGE_ID = (0x24) # macro
-NV2080_CTRL_CMD_INTERNAL_MSENC_GET_CAPS = (0x20800a25) # macro
 NV2080_CTRL_CMD_INTERNAL_MAX_MSENCS = 8 # macro
-NV2080_CTRL_INTERNAL_MSENC_GET_CAPS_PARAMS_MESSAGE_ID = (0x25) # macro
 NV2080_CTRL_INTERNAL_GR_MAX_GPC = 12 # macro
 NV2080_CTRL_INTERNAL_MAX_TPC_PER_GPC_COUNT = 10 # macro
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_FLOORSWEEPING_MASKS_PARAMS_MESSAGE_ID = (0x27) # macro
@@ -17546,8 +17824,6 @@ NV2080_CTRL_INTERNAL_STATIC_KGR_GET_FLOORSWEEPING_MASKS_PARAMS_MESSAGE_ID = (0x2
 NV2080_CTRL_KGR_MAX_BUFFER_PTES = 128 # macro
 NV2080_CTRL_CMD_KGR_GET_CTX_BUFFER_PTES = (0x20800a28) # macro
 NV2080_CTRL_KGR_GET_CTX_BUFFER_PTES_PARAMS_MESSAGE_ID = (0x28) # macro
-NV2080_CTRL_CMD_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_MEMORY = (0x20800a29) # macro
-NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_MEMORY_PARAMS_MESSAGE_ID = (0x29) # macro
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_INFO_PARAMS_MESSAGE_ID = (0x2B) # macro
 NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_INFO = (0x20800a2a) # macro
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_INFO_PARAMS_MESSAGE_ID = (0x2A) # macro
@@ -17586,7 +17862,7 @@ NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_FECS_RECORD_SIZE_PARAMS_MESSAGE_ID = (0x
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_TRACE_DEFINES_PARAMS_MESSAGE_ID = (0x3E) # macro
 NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_FECS_TRACE_DEFINES = (0x20800a3f) # macro
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_FECS_TRACE_DEFINES_PARAMS_MESSAGE_ID = (0x3F) # macro
-NV2080_CTRL_CMD_INTERNAL_DEVICE_INFO_MAX_ENTRIES = 256 # macro
+NV2080_CTRL_CMD_INTERNAL_DEVICE_INFO_MAX_ENTRIES = 512 # macro
 NV2080_CTRL_CMD_INTERNAL_GET_DEVICE_INFO_TABLE = (0x20800a40) # macro
 NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS_MESSAGE_ID = (0x40) # macro
 NV2080_CTRL_CMD_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP = (0x20800a41) # macro
@@ -17597,6 +17873,9 @@ NV2080_CTRL_INTERNAL_MIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE_PARAMS_MESSAGE_ID = (
 NV2080_CTRL_CMD_INTERNAL_KMIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE = (0x20800a44) # macro
 NV2080_CTRL_INTERNAL_KMIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE_PARAMS_MESSAGE_ID = (0x44) # macro
 NV2080_CTRL_CMD_INTERNAL_MIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE = (0x20800a43) # macro
+NV2080_CTRL_INTERNAL_GR_INIT_BUG4208224_WAR_PARAMS_MESSAGE_ID = (0x45) # macro
+NV2080_CTRL_CMD_INTERNAL_KGR_INIT_BUG4208224_WAR = (0x20800a46) # macro
+NV2080_CTRL_INTERNAL_KGR_INIT_BUG4208224_WAR_PARAMS_MESSAGE_ID = (0x46) # macro
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_PDB_PROPERTIES_PARAMS_MESSAGE_ID = (0x47) # macro
 NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_PDB_PROPERTIES = (0x20800a48) # macro
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_PDB_PROPERTIES_PARAMS_MESSAGE_ID = (0x48) # macro
@@ -17771,6 +18050,7 @@ NV2080_CTRL_INTERNAL_PERF_CF_CONTROLLERS_SET_MAX_VGPU_VM_COUNT_PARAMS_MESSAGE_ID
 NV2080_CTRL_CMD_INTERNAL_MEMSYS_DISABLE_NVLINK_PEERS = (0x20800a6e) # macro
 NV2080_CTRL_CMD_INTERNAL_MEMSYS_PROGRAM_RAW_COMPRESSION_MODE = (0x20800a6f) # macro
 NV2080_CTRL_INTERNAL_MEMSYS_PROGRAM_RAW_COMPRESSION_MODE_PARAMS_MESSAGE_ID = (0x6f) # macro
+NV2080_CTRL_CMD_INTERNAL_CCU_GET_SAMPLE_INFO = (0x20800ab2) # macro
 NV2080_CTRL_CMD_INTERNAL_CCU_MAP = (0x20800ab3) # macro
 NV2080_CTRL_INTERNAL_CCU_DEV_SHRBUF_COUNT_MAX = 1 # macro
 NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS_MESSAGE_ID = (0xB3) # macro
@@ -17810,8 +18090,8 @@ NV2080_CTRL_CMD_INTERNAL_GSYNC_SET_OR_RESTORE_RASTER_SYNC = (0x20800aca) # macro
 NV2080_CTRL_INTERNAL_GSYNC_SET_OR_RESTORE_RASTER_SYNC_PARAMS_MESSAGE_ID = (0xCA) # macro
 NV2080_CTRL_CMD_INTERNAL_FBSR_INIT = (0x20800ac2) # macro
 NV2080_CTRL_INTERNAL_FBSR_INIT_PARAMS_MESSAGE_ID = (0xC2) # macro
-NV2080_CTRL_CMD_INTERNAL_FBSR_SEND_REGION_INFO = (0x20800ac3) # macro
-NV2080_CTRL_INTERNAL_FBSR_SEND_REGION_INFO_PARAMS_MESSAGE_ID = (0xC3) # macro
+NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING = (0x20800ac3) # macro
+NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING_PARAMS_MESSAGE_ID = (0xC3) # macro
 NV2080_CTRL_CMD_INTERNAL_MEMMGR_GET_VGPU_CONFIG_HOST_RESERVED_FB = (0x20800ac5) # macro
 NV2080_CTRL_INTERNAL_MEMMGR_GET_VGPU_CONFIG_HOST_RESERVED_FB_PARAMS_MESSAGE_ID = (0xC5) # macro
 NV2080_CTRL_CMD_INTERNAL_INIT_BRIGHTC_STATE_LOAD = (0x20800ac6) # macro
@@ -17834,8 +18114,6 @@ NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_STATE_LOAD_SYNC = (0x20800acc) # mac
 NV2080_CTRL_INTERNAL_PMGR_PFM_REQ_HNDLR_STATE_LOAD_SYNC_PARAMS_MESSAGE_ID = (0xCC) # macro
 NV2080_CTRL_CMD_INTERNAL_THERM_PFM_REQ_HNDLR_STATE_INIT_SYNC = (0x20800acd) # macro
 NV2080_CTRL_INTERNAL_THERM_PFM_REQ_HNDLR_STATE_INIT_SYNC_PARAMS_MESSAGE_ID = (0xCD) # macro
-NV2080_CTRL_CMD_INTERNAL_GET_COHERENT_FB_APERTURE_SIZE = (0x20800ada) # macro
-NV2080_CTRL_INTERNAL_GET_COHERENT_FB_APERTURE_SIZE_PARAMS_MESSAGE_ID = (0xDA) # macro
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_GET_PM1_FORCED_OFF_STATUS = 0x00 # macro
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_GET_PM1_STATUS = 0x01 # macro
 NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_PM1_STATE = (0x20800ace) # macro
@@ -17889,13 +18167,20 @@ NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS = (0x20800ae1) # macro
 NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SIZE = 3 # macro
 NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_KERNEL = 0 # macro
 NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_USER = 1 # macro
-NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_COUNT = 2 # macro
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_SCRUBBER = 2 # macro
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_COUNT = 3 # macro
 NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_LCE_COUNT = 6 # macro
 NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS_PARAMS_MESSAGE_ID = (0xE1) # macro
 NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS = (0x20800ae2) # macro
 NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS_PARAMS_MESSAGE_ID = (0xE2) # macro
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_ROTATE_KEYS = (0x20800ae5) # macro
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS_MESSAGE_ID = (0xE5) # macro
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION = (0x20800ae6) # macro
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION_PARAMS_MESSAGE_ID = (0xE6) # macro
 NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE = (0x20800ae7) # macro
 NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE_PARAMS_MESSAGE_ID = (0xE7) # macro
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY = (0x20800ae8) # macro
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY_PARAMS_MESSAGE_ID = (0xE8) # macro
 NV2080_CTRL_CMD_INTERNAL_MEMMGR_MEMORY_TRANSFER_WITH_GSP = (0x20800afa) # macro
 CC_AES_256_GCM_AUTH_TAG_SIZE_BYTES = (0x10) # macro
 NV2080_CTRL_INTERNAL_MEMMGR_MEMORY_TRANSFER_WITH_GSP_PARAMS_MESSAGE_ID = (0xFA) # macro
@@ -17909,12 +18194,112 @@ NV2080_CTRL_INTERNAL_INIT_USER_SHARED_DATA_PARAMS_MESSAGE_ID = (0xFE) # macro
 NV2080_CTRL_CMD_INTERNAL_INIT_USER_SHARED_DATA = (0x20800afe) # macro
 NV2080_CTRL_INTERNAL_USER_SHARED_DATA_SET_DATA_POLL_PARAMS_MESSAGE_ID = (0xFF) # macro
 NV2080_CTRL_CMD_INTERNAL_USER_SHARED_DATA_SET_DATA_POLL = (0x20800aff) # macro
-NV2080_CTRL_CMD_INTERNAL_GSP_START_TRACE_INFO_PARAMS_MESSAGE_ID = (0xE3) # macro
-NV2080_CTRL_CMD_INTERNAL_GSP_START_TRACE = (0x208001e3) # macro
+NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_PARAMS_MESSAGE_ID = (0xE3) # macro
+NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_FLAG_START_KEEP_OLDEST = 0x00 # macro
+NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_FLAG_START_KEEP_NEWEST = 0x01 # macro
+NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_FLAG_STOP = 0x02 # macro
+NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE = (0x208001e3) # macro
 NV2080_CTRL_CMD_INTERNAL_GET_ENABLED_SEC2_CLASSES_PARAMS_MESSAGE_ID = (0xAF) # macro
 NV2080_CTRL_CMD_INTERNAL_GET_ENABLED_SEC2_CLASSES = (0x20800aaf) # macro
 NV2080_CTRL_CMD_INTERNAL_GR_CTXSW_SETUP_BIND = (0x20800ae4) # macro
 NV2080_CTRL_INTERNAL_GR_CTXSW_SETUP_BIND_PARAMS_MESSAGE_ID = (0xE4) # macro
+NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER_PARAMS_MESSAGE_ID = (0xE9) # macro
+NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER = (0x20800ae9) # macro
+NV2080_CTRL_CMD_INTERNAL_NVLINK_POST_FATAL_ERROR_RECOVERY = (0x20800aea) # macro
+NV2080_CTRL_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP_PARAMS_MESSAGE_ID = (0xEB) # macro
+NV2080_CTRL_CMD_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP = (0x20800aeb) # macro
+NV2080_CTRL_INTERNAL_GPU_SET_ILLUM_PARAMS_MESSAGE_ID = (0xEC) # macro
+NV2080_CTRL_CMD_INTERNAL_GPU_SET_ILLUM = (0x20800aec) # macro
+NV2080_CTRL_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR_PARAMS_MESSAGE_ID = (0xED) # macro
+NV2080_CTRL_CMD_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR = (0x20800aed) # macro
+NV2080_CTRL_CMD_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM = (0x20800a79) # macro
+NV2080_CTRL_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM_PARAMS_MESSAGE_ID = (0x79) # macro
+NV2080_CTRL_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE_PARAMS_MESSAGE_ID = (0x14) # macro
+NV2080_CTRL_CMD_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE = (0x20800a14) # macro
+NV2080_CTRL_INTERNAL_GPU_GET_PF_BAR1_SPA_PARAMS_MESSAGE_ID = (0xEE) # macro
+NV2080_CTRL_CMD_INTERNAL_GPU_GET_PF_BAR1_SPA = (0x20800aee) # macro
+NV2080_CTRL_CMD_INTERNAL_NVLINK_ENABLE_NVLINK_PEER = (0x20800a21) # macro
+NV2080_CTRL_INTERNAL_NVLINK_ENABLE_NVLINK_PEER_PARAMS_MESSAGE_ID = (0x21) # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_OFF = 0x00 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_HS = 0x01 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SAFE = 0x02 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_FAULT = 0x03 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RECOVERY = 0x04 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_FAIL = 0x05 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DETECT = 0x06 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RESET = 0x07 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ENABLE_PM = 0x08 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_PM = 0x09 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SLEEP = 0x0A # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SAVE_STATE = 0x0B # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RESTORE_STATE = 0x0C # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_PRE_HS = 0x0E # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_ERR_DETECT = 0x0F # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_LANE_DISABLE = 0x10 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_LANE_SHUTDOWN = 0x11 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_TRAFFIC_SETUP = 0x12 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITPHASE1 = 0x13 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITNEGOTIATE = 0x14 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_POST_INITNEGOTIATE = 0x15 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITOPTIMIZE = 0x16 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_POST_INITOPTIMIZE = 0x17 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_HEARTBEAT = 0x18 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_CONTAIN = 0x19 # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITTL = 0x1A # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITPHASE5 = 0x1B # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ALI = 0x1C # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ACTIVE_PENDING = 0x1D # macro
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INVALID = 0xFF # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_HS = 0x00 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_SINGLE_LANE = 0x04 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_LOW_POWER = 0x04 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_TRAIN = 0x05 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_SAFE = 0x06 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_OFF = 0x07 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_COMMON_MODE = 0x08 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_COMMON_MODE_DISABLE = 0x09 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_DATA_READY = 0x0A # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_EQ = 0x0B # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_PRBS_EN = 0x0C # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_POST_HS = 0x0D # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_HS = 0x00 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_SINGLE_LANE = 0x04 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_LOW_POWER = 0x04 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_TRAIN = 0x05 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_SAFE = 0x06 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_OFF = 0x07 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_RXCAL = 0x08 # macro
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_INIT_TERM = 0x09 # macro
+NV2080_CTRL_INTERNAL_NVLINK_MAX_SEED_NUM = 6 # macro
+NV2080_CTRL_INTERNAL_NVLINK_MAX_SEED_BUFFER_SIZE = (0x7) # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_DL_LINK_MODE = 0x00 # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_DL_LINK_MODE = 0x01 # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_TL_LINK_MODE = 0x02 # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_TL_LINK_MODE = 0x03 # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_TX_SUBLINK_MODE = 0x04 # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_TX_SUBLINK_MODE = 0x05 # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_MODE = 0x06 # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_MODE = 0x07 # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_DETECT = 0x08 # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_DETECT = 0x09 # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_WRITE_DISCOVERY_TOKEN = 0x0A # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_READ_DISCOVERY_TOKEN = 0x0B # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_TRAINING_COMPLETE = 0x0C # macro
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_UPHY_LOAD = 0x0D # macro
+NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS_MESSAGE_ID = (0x24) # macro
+NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK = (0x20800a24) # macro
+NV2080_CTRL_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS_MESSAGE_ID = (0x25) # macro
+NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID = (0x20800a25) # macro
+NV2080_CTRL_INTERNAL_NVLINK_GET_ALI_ENABLED_PARAMS_MESSAGE_ID = (0x29) # macro
+NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_ALI_ENABLED = (0x20800a29) # macro
+NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_TYPE_PROGRAM = 0x0 # macro
+NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_TYPE_RESET = 0x1 # macro
+NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_PARAMS_MESSAGE_ID = (0x42) # macro
+NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_HSHUB_MUX = (0x20800a42) # macro
+NV2080_CTRL_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS_MESSAGE_ID = (0x4E) # macro
+NV2080_CTRL_CMD_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER = (0x20800a4e) # macro
+NV2080_CTRL_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS_MESSAGE_ID = (0x50) # macro
+NV2080_CTRL_CMD_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER = (0x20800a50) # macro
 class struct_NV2080_CTRL_INTERNAL_DISPLAY_GET_STATIC_INFO_PARAMS(Structure):
     pass
 
@@ -17925,14 +18310,12 @@ struct_NV2080_CTRL_INTERNAL_DISPLAY_GET_STATIC_INFO_PARAMS._fields_ = [
     ('bFbRemapperEnabled', ctypes.c_ubyte),
     ('PADDING_0', ctypes.c_ubyte * 3),
     ('numHeads', ctypes.c_uint32),
-    ('bPrimaryVga', ctypes.c_ubyte),
-    ('PADDING_1', ctypes.c_ubyte * 3),
     ('i2cPort', ctypes.c_uint32),
     ('internalDispActiveMask', ctypes.c_uint32),
     ('embeddedDisplayPortMask', ctypes.c_uint32),
     ('bExternalMuxSupported', ctypes.c_ubyte),
     ('bInternalMuxSupported', ctypes.c_ubyte),
-    ('PADDING_2', ctypes.c_ubyte * 2),
+    ('PADDING_1', ctypes.c_ubyte * 2),
 ]
 
 NV2080_CTRL_INTERNAL_DISPLAY_GET_STATIC_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_DISPLAY_GET_STATIC_INFO_PARAMS
@@ -17997,15 +18380,6 @@ class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS(Structure):
 
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS
-class struct_NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_FLAGS_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_FLAGS_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_FLAGS_PARAMS._fields_ = [
-    ('flags', ctypes.c_uint32),
-]
-
-NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_FLAGS_PARAMS = struct_NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_FLAGS_PARAMS
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER(Structure):
     pass
 
@@ -18132,18 +18506,6 @@ struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO._fields_ = [
 ]
 
 NV2080_CTRL_INTERNAL_MEMDESC_INFO = struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO
-class struct_NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_MEMORY_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_MEMORY_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_MEMORY_PARAMS._fields_ = [
-    ('memDescInfo', NV2080_CTRL_INTERNAL_MEMDESC_INFO),
-    ('engDesc', ctypes.c_uint32),
-    ('bEngineFound', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 3),
-]
-
-NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_MEMORY_PARAMS = struct_NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_MEMORY_PARAMS
 class struct_NV2080_CTRL_INTERNAL_GR_INFO(Structure):
     pass
 
@@ -18379,6 +18741,9 @@ struct_NV2080_CTRL_INTERNAL_DEVICE_INFO._fields_ = [
     ('rlEngId', ctypes.c_uint32),
     ('runlistPriBase', ctypes.c_uint32),
     ('groupId', ctypes.c_uint32),
+    ('ginTargetId', ctypes.c_uint32),
+    ('deviceBroadcastPriBase', ctypes.c_uint32),
+    ('groupLocalInstanceId', ctypes.c_uint32),
 ]
 
 NV2080_CTRL_INTERNAL_DEVICE_INFO = struct_NV2080_CTRL_INTERNAL_DEVICE_INFO
@@ -18388,7 +18753,7 @@ class struct_NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS(Structure):
 struct_NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS._fields_ = [
     ('numEntries', ctypes.c_uint32),
-    ('deviceInfoTable', struct_NV2080_CTRL_INTERNAL_DEVICE_INFO * 256),
+    ('deviceInfoTable', struct_NV2080_CTRL_INTERNAL_DEVICE_INFO * 512),
 ]
 
 NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS = struct_NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS
@@ -18427,6 +18792,16 @@ struct_NV2080_CTRL_INTERNAL_MIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE_PARAMS._fields
 
 NV2080_CTRL_INTERNAL_MIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE_PARAMS = struct_NV2080_CTRL_INTERNAL_MIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE_PARAMS
 NV2080_CTRL_INTERNAL_KMIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE_PARAMS = struct_NV2080_CTRL_INTERNAL_MIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE_PARAMS
+class struct_NV2080_CTRL_INTERNAL_GR_INIT_BUG4208224_WAR_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_GR_INIT_BUG4208224_WAR_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_GR_INIT_BUG4208224_WAR_PARAMS._fields_ = [
+    ('bTeardown', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_INTERNAL_GR_INIT_BUG4208224_WAR_PARAMS = struct_NV2080_CTRL_INTERNAL_GR_INIT_BUG4208224_WAR_PARAMS
+NV2080_CTRL_INTERNAL_KGR_INIT_BUG4208224_WAR_PARAMS = struct_NV2080_CTRL_INTERNAL_GR_INIT_BUG4208224_WAR_PARAMS
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_PDB_PROPERTIES(Structure):
     pass
 
@@ -18577,7 +18952,6 @@ struct_DRAM_CLK_INSTANCE._fields_ = [
 struct_TEGRA_IMP_IMPORT_DATA._pack_ = 1 # source:False
 struct_TEGRA_IMP_IMPORT_DATA._fields_ = [
     ('max_iso_bw_kbps', ctypes.c_uint32),
-    ('dram_type', ctypes.c_uint32),
     ('num_dram_channels', ctypes.c_uint32),
     ('num_dram_clk_entries', ctypes.c_uint32),
     ('dram_clk_instance', struct_DRAM_CLK_INSTANCE * 24),
@@ -18687,6 +19061,8 @@ struct_NV2080_CTRL_INTERNAL_DISPLAY_CHANNEL_PUSHBUFFER_PARAMS._fields_ = [
     ('valid', ctypes.c_ubyte),
     ('PADDING_1', ctypes.c_ubyte * 3),
     ('pbTargetAperture', ctypes.c_uint32),
+    ('channelPBSize', ctypes.c_uint32),
+    ('subDeviceId', ctypes.c_uint32),
     ('PADDING_2', ctypes.c_ubyte * 4),
 ]
 
@@ -19181,13 +19557,31 @@ struct_NV2080_CTRL_INTERNAL_MEMSYS_PROGRAM_RAW_COMPRESSION_MODE_PARAMS._fields_ 
 ]
 
 NV2080_CTRL_INTERNAL_MEMSYS_PROGRAM_RAW_COMPRESSION_MODE_PARAMS = struct_NV2080_CTRL_INTERNAL_MEMSYS_PROGRAM_RAW_COMPRESSION_MODE_PARAMS
-class struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS(Structure):
+class struct_NV2080_CTRL_INTERNAL_CCU_SAMPLE_INFO_PARAMS(Structure):
     pass
 
-struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS._fields_ = [
-    ('phyAddr', ctypes.c_uint64 * 9),
+struct_NV2080_CTRL_INTERNAL_CCU_SAMPLE_INFO_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_CCU_SAMPLE_INFO_PARAMS._fields_ = [
+    ('ccuSampleSize', ctypes.c_uint32),
 ]
+
+NV2080_CTRL_INTERNAL_CCU_SAMPLE_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_CCU_SAMPLE_INFO_PARAMS
+class struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO._fields_ = [
+    ('phyAddr', ctypes.c_uint64),
+    ('shrBufSize', ctypes.c_uint32),
+    ('cntBlkSize', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_CCU_MAP_INFO = struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO
+class struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS(Structure):
+    _pack_ = 1 # source:False
+    _fields_ = [
+    ('mapInfo', struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO * 9),
+     ]
 
 NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS
 class struct_NV2080_CTRL_INTERNAL_CCU_UNMAP_INFO_PARAMS(Structure):
@@ -19213,6 +19607,7 @@ struct_NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PEER_INFO._fields_ = [
     ('p2pCapsStatus', ctypes.c_ubyte * 9),
     ('PADDING_0', ctypes.c_ubyte * 3),
     ('busPeerId', ctypes.c_uint32),
+    ('busEgmPeerId', ctypes.c_uint32),
 ]
 
 NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PEER_INFO = struct_NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PEER_INFO
@@ -19263,6 +19658,7 @@ struct_NV2080_CTRL_CMD_INTERNAL_DISPLAY_PRE_UNIX_CONSOLE_PARAMS._pack_ = 1 # sou
 struct_NV2080_CTRL_CMD_INTERNAL_DISPLAY_PRE_UNIX_CONSOLE_PARAMS._fields_ = [
     ('bSave', ctypes.c_ubyte),
     ('bUseVbios', ctypes.c_ubyte),
+    ('bReturnEarly', ctypes.c_ubyte),
 ]
 
 NV2080_CTRL_CMD_INTERNAL_DISPLAY_PRE_UNIX_CONSOLE_PARAMS = struct_NV2080_CTRL_CMD_INTERNAL_DISPLAY_PRE_UNIX_CONSOLE_PARAMS
@@ -19298,7 +19694,7 @@ class struct_NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_COMPUTE_PROFILES_PARAMS(Stru
 struct_NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_COMPUTE_PROFILES_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_COMPUTE_PROFILES_PARAMS._fields_ = [
     ('profileCount', ctypes.c_uint32),
-    ('profiles', struct_NV2080_CTRL_INTERNAL_MIGMGR_COMPUTE_PROFILE * 6),
+    ('profiles', struct_NV2080_CTRL_INTERNAL_MIGMGR_COMPUTE_PROFILE * 8),
 ]
 
 NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_COMPUTE_PROFILES_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_COMPUTE_PROFILES_PARAMS
@@ -19418,31 +19814,22 @@ class struct_NV2080_CTRL_INTERNAL_FBSR_INIT_PARAMS(Structure):
 
 struct_NV2080_CTRL_INTERNAL_FBSR_INIT_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_INTERNAL_FBSR_INIT_PARAMS._fields_ = [
-    ('fbsrType', ctypes.c_uint32),
-    ('numRegions', ctypes.c_uint32),
     ('hClient', ctypes.c_uint32),
     ('hSysMem', ctypes.c_uint32),
-    ('gspFbAllocsSysOffset', ctypes.c_uint64),
     ('bEnteringGcoffState', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 7),
+    ('PADDING_0', ctypes.c_ubyte * 3),
 ]
 
 NV2080_CTRL_INTERNAL_FBSR_INIT_PARAMS = struct_NV2080_CTRL_INTERNAL_FBSR_INIT_PARAMS
-class struct_NV2080_CTRL_INTERNAL_FBSR_SEND_REGION_INFO_PARAMS(Structure):
+class struct_NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING_PARAMS(Structure):
     pass
 
-struct_NV2080_CTRL_INTERNAL_FBSR_SEND_REGION_INFO_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_INTERNAL_FBSR_SEND_REGION_INFO_PARAMS._fields_ = [
-    ('fbsrType', ctypes.c_uint32),
-    ('hClient', ctypes.c_uint32),
-    ('hVidMem', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('vidOffset', ctypes.c_uint64),
-    ('sysOffset', ctypes.c_uint64),
-    ('size', ctypes.c_uint64),
+struct_NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING_PARAMS._fields_ = [
+    ('bDisableActiveChannels', ctypes.c_ubyte),
 ]
 
-NV2080_CTRL_INTERNAL_FBSR_SEND_REGION_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_FBSR_SEND_REGION_INFO_PARAMS
+NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING_PARAMS = struct_NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING_PARAMS
 class struct_NV2080_CTRL_INTERNAL_MEMMGR_GET_VGPU_CONFIG_HOST_RESERVED_FB_PARAMS(Structure):
     pass
 
@@ -19534,15 +19921,6 @@ struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS._fields_ = [
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS
 NV2080_CTRL_INTERNAL_PMGR_PFM_REQ_HNDLR_STATE_LOAD_SYNC_PARAMS = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS
 NV2080_CTRL_INTERNAL_THERM_PFM_REQ_HNDLR_STATE_INIT_SYNC_PARAMS = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS
-class struct_NV2080_CTRL_INTERNAL_GET_COHERENT_FB_APERTURE_SIZE_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_INTERNAL_GET_COHERENT_FB_APERTURE_SIZE_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_INTERNAL_GET_COHERENT_FB_APERTURE_SIZE_PARAMS._fields_ = [
-    ('coherentFbApertureSize', ctypes.c_uint64),
-]
-
-NV2080_CTRL_INTERNAL_GET_COHERENT_FB_APERTURE_SIZE_PARAMS = struct_NV2080_CTRL_INTERNAL_GET_COHERENT_FB_APERTURE_SIZE_PARAMS
 class struct_NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_PM1_STATE_PARAMS(Structure):
     pass
 
@@ -19725,6 +20103,7 @@ class struct_NV2080_CTRL_CMD_INTERNAL_START_GPU_FABRIC_PROBE_INFO_PARAMS(Structu
 struct_NV2080_CTRL_CMD_INTERNAL_START_GPU_FABRIC_PROBE_INFO_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_CMD_INTERNAL_START_GPU_FABRIC_PROBE_INFO_PARAMS._fields_ = [
     ('bwMode', ctypes.c_ubyte),
+    ('bLocalEgmEnabled', ctypes.c_ubyte),
 ]
 
 NV2080_CTRL_CMD_INTERNAL_START_GPU_FABRIC_PROBE_INFO_PARAMS = struct_NV2080_CTRL_CMD_INTERNAL_START_GPU_FABRIC_PROBE_INFO_PARAMS
@@ -19762,7 +20141,7 @@ class struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS_PARAMS(Structure)
 struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS_PARAMS._fields_ = [
     ('engineId', ctypes.c_uint32),
-    ('ivMaskSet', struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK * 2),
+    ('ivMaskSet', struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK * 3),
 ]
 
 NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS_PARAMS = struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS_PARAMS
@@ -19776,6 +20155,27 @@ struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS_PARAMS = struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS_PARAMS
+class struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS._fields_ = [
+    ('globalH2DKey', ctypes.c_uint32),
+    ('updatedEncryptIVMask', ctypes.c_uint32 * 3),
+    ('updatedDecryptIVMask', ctypes.c_uint32 * 3),
+]
+
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS = struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS
+class struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION_PARAMS._fields_ = [
+    ('exceptionType', ctypes.c_uint32),
+    ('globalH2DKey', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION_PARAMS = struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION_PARAMS
 class struct_NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE_PARAMS(Structure):
     pass
 
@@ -19785,6 +20185,15 @@ struct_NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE_PARAMS = struct_NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE_PARAMS
+class struct_NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY_PARAMS._fields_ = [
+    ('attackerAdvantage', ctypes.c_uint64),
+]
+
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY_PARAMS = struct_NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY_PARAMS
 
 # values for enumeration 'NV2080_CTRL_MEMMGR_MEMORY_OP'
 NV2080_CTRL_MEMMGR_MEMORY_OP__enumvalues = {
@@ -19881,19 +20290,20 @@ struct_NV2080_CTRL_INTERNAL_USER_SHARED_DATA_SET_DATA_POLL_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_INTERNAL_USER_SHARED_DATA_SET_DATA_POLL_PARAMS = struct_NV2080_CTRL_INTERNAL_USER_SHARED_DATA_SET_DATA_POLL_PARAMS
-class struct_NV2080_CTRL_CMD_INTERNAL_GSP_START_TRACE_INFO_PARAMS(Structure):
+class struct_NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_PARAMS(Structure):
     pass
 
-struct_NV2080_CTRL_CMD_INTERNAL_GSP_START_TRACE_INFO_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_CMD_INTERNAL_GSP_START_TRACE_INFO_PARAMS._fields_ = [
+struct_NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_PARAMS._fields_ = [
     ('tracepointMask', ctypes.c_uint64),
+    ('bufferAddr', ctypes.c_uint64),
     ('bufferSize', ctypes.c_uint32),
     ('bufferWatermark', ctypes.c_uint32),
-    ('bStart', ctypes.c_ubyte),
+    ('flag', ctypes.c_ubyte),
     ('PADDING_0', ctypes.c_ubyte * 7),
 ]
 
-NV2080_CTRL_CMD_INTERNAL_GSP_START_TRACE_INFO_PARAMS = struct_NV2080_CTRL_CMD_INTERNAL_GSP_START_TRACE_INFO_PARAMS
+NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_PARAMS = struct_NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_PARAMS
 class struct_NV2080_CTRL_CMD_INTERNAL_GET_ENABLED_SEC2_CLASSES_PARAMS(Structure):
     pass
 
@@ -19906,6 +20316,365 @@ struct_NV2080_CTRL_CMD_INTERNAL_GET_ENABLED_SEC2_CLASSES_PARAMS._fields_ = [
 
 NV2080_CTRL_CMD_INTERNAL_GET_ENABLED_SEC2_CLASSES_PARAMS = struct_NV2080_CTRL_CMD_INTERNAL_GET_ENABLED_SEC2_CLASSES_PARAMS
 NV2080_CTRL_INTERNAL_GR_CTXSW_SETUP_BIND_PARAMS = struct_NV2080_CTRL_GR_CTXSW_SETUP_BIND_PARAMS
+class struct_NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER_PARAMS._fields_ = [
+    ('bInPMTransition', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('newPMLevel', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER_PARAMS = struct_NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER_PARAMS
+class struct_NV2080_CTRL_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP_PARAMS._fields_ = [
+    ('freeHeapSize', ctypes.c_uint64),
+]
+
+NV2080_CTRL_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP_PARAMS = struct_NV2080_CTRL_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP_PARAMS
+class struct_NV2080_CTRL_INTERNAL_GPU_SET_ILLUM_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_GPU_SET_ILLUM_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_GPU_SET_ILLUM_PARAMS._fields_ = [
+    ('attribute', ctypes.c_uint32),
+    ('value', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_GPU_SET_ILLUM_PARAMS = struct_NV2080_CTRL_INTERNAL_GPU_SET_ILLUM_PARAMS
+class struct_NV2080_CTRL_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR_PARAMS._fields_ = [
+    ('bApplyStereoPinAlwaysHiWar', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR_PARAMS = struct_NV2080_CTRL_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR_PARAMS
+class struct_NV2080_CTRL_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM_PARAMS._fields_ = [
+    ('maxHshubs', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM_PARAMS = struct_NV2080_CTRL_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM_PARAMS
+class struct_NV2080_CTRL_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE_PARAMS._fields_ = [
+    ('rasterSyncDecodeMode', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE_PARAMS = struct_NV2080_CTRL_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE_PARAMS
+class struct_NV2080_CTRL_INTERNAL_GPU_GET_PF_BAR1_SPA_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_GPU_GET_PF_BAR1_SPA_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_GPU_GET_PF_BAR1_SPA_PARAMS._fields_ = [
+    ('spaValue', ctypes.c_uint64),
+]
+
+NV2080_CTRL_INTERNAL_GPU_GET_PF_BAR1_SPA_PARAMS = struct_NV2080_CTRL_INTERNAL_GPU_GET_PF_BAR1_SPA_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_ENABLE_NVLINK_PEER_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_ENABLE_NVLINK_PEER_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_ENABLE_NVLINK_PEER_PARAMS._fields_ = [
+    ('peerMask', ctypes.c_uint32),
+    ('bEnable', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_ENABLE_NVLINK_PEER_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_ENABLE_NVLINK_PEER_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS._fields_ = [
+    ('mode', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS._fields_ = [
+    ('seedData', ctypes.c_uint32 * 7),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS._fields_ = [
+    ('remoteDeviceType', ctypes.c_uint32),
+    ('ipVerDlPl', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS._fields_ = [
+    ('seedData', ctypes.c_uint32 * 7),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_REMOTE_LOCAL_SID_INFO(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_REMOTE_LOCAL_SID_INFO._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_REMOTE_LOCAL_SID_INFO._fields_ = [
+    ('remoteSid', ctypes.c_uint64),
+    ('remoteDeviceType', ctypes.c_uint32),
+    ('remoteLinkId', ctypes.c_uint32),
+    ('localSid', ctypes.c_uint64),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_REMOTE_LOCAL_SID_INFO = struct_NV2080_CTRL_INTERNAL_NVLINK_REMOTE_LOCAL_SID_INFO
+class struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS._fields_ = [
+    ('bInitnegotiateConfigGood', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 7),
+    ('remoteLocalSidInfo', NV2080_CTRL_INTERNAL_NVLINK_REMOTE_LOCAL_SID_INFO),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS._fields_ = [
+    ('bPollDone', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS(Structure):
+    pass
+
+class union_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS_linkModeParams(Union):
+    pass
+
+union_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS_linkModeParams._pack_ = 1 # source:False
+union_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS_linkModeParams._fields_ = [
+    ('linkModeOffParams', NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS),
+    ('linkModePreHsParams', NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS),
+    ('linkModeInitPhase1Params', NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS),
+    ('linkModePostInitNegotiateParams', NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS),
+    ('linkModePostInitOptimizeParams', NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS),
+    ('PADDING_0', ctypes.c_ubyte * 31),
+]
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS._fields_ = [
+    ('mode', ctypes.c_uint64),
+    ('bSync', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('linkMode', ctypes.c_uint32),
+    ('linkModeParams', union_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS_linkModeParams),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS._fields_ = [
+    ('mode', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS._fields_ = [
+    ('mode', ctypes.c_uint64),
+    ('bSync', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 7),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS._fields_ = [
+    ('sublinkMode', ctypes.c_uint32),
+    ('sublinkSubMode', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS._fields_ = [
+    ('mode', ctypes.c_uint64),
+    ('bSync', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 7),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS._fields_ = [
+    ('mode', ctypes.c_uint64),
+    ('bSync', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 7),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS._fields_ = [
+    ('laneRxdetStatusMask', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS._fields_ = [
+    ('bSync', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS._fields_ = [
+    ('ipVerDlPl', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('token', ctypes.c_uint64),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS._fields_ = [
+    ('bUnlocked', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE(Structure):
+    pass
+
+class union_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_callbackParams(Union):
+    pass
+
+union_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_callbackParams._pack_ = 1 # source:False
+union_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_callbackParams._fields_ = [
+    ('getDlLinkMode', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS),
+    ('setDlLinkMode', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS),
+    ('getTlLinkMode', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS),
+    ('setTlLinkMode', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS),
+    ('getTxSublinkMode', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS),
+    ('setTxSublinkMode', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS),
+    ('getRxSublinkMode', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS),
+    ('setRxSublinkMode', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS),
+    ('getRxSublinkDetect', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS),
+    ('setRxSublinkDetect', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS),
+    ('writeDiscoveryToken', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS),
+    ('readDiscoveryToken', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS),
+    ('getUphyLoad', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS),
+    ('PADDING_0', ctypes.c_ubyte * 47),
+]
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE._fields_ = [
+    ('type', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 7),
+    ('callbackParams', union_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_callbackParams),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS._fields_ = [
+    ('linkId', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('callbackType', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS._fields_ = [
+    ('linkId', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('remoteLocalSidInfo', NV2080_CTRL_INTERNAL_NVLINK_REMOTE_LOCAL_SID_INFO),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_GET_ALI_ENABLED_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_GET_ALI_ENABLED_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_GET_ALI_ENABLED_PARAMS._fields_ = [
+    ('bEnableAli', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_GET_ALI_ENABLED_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_GET_ALI_ENABLED_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_PARAMS._fields_ = [
+    ('updateType', ctypes.c_ubyte),
+    ('bSysMem', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('peerMask', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS._fields_ = [
+    ('peerId', ctypes.c_uint32),
+    ('peerLinkMask', ctypes.c_uint32),
+    ('bEgmPeer', ctypes.c_ubyte),
+    ('bNvswitchConn', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS
+class struct_NV2080_CTRL_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS._fields_ = [
+    ('peerMask', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS
 NV2080_CTRL_CMD_LPWR_DIFR_CTRL = (0x20802801) # macro
 NV2080_CTRL_LPWR_DIFR_CTRL_DISABLE = (0x00000001) # macro
 NV2080_CTRL_LPWR_DIFR_CTRL_ENABLE = (0x00000002) # macro
@@ -19942,6 +20711,9 @@ NV2080_CTRL_MC_GET_ARCH_INFO_PARAMS_MESSAGE_ID = (0x1) # macro
 NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_T23X = (0xE0000023) # macro
 NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_TU100 = (0x00000160) # macro
 NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GA100 = (0x00000170) # macro
+NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GH100 = (0x00000180) # macro
+NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_AD100 = (0x00000190) # macro
+NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GB100 = (0x000001A0) # macro
 NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_T234 = (0x00000004) # macro
 NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_T234D = (0x00000005) # macro
 NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU100 = (0x00000000) # macro
@@ -19957,6 +20729,19 @@ NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA104 = (0x00000004) # macro
 NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA106 = (0x00000006) # macro
 NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA107 = (0x00000007) # macro
 NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA10B = (0x0000000B) # macro
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GH100 = (0x00000000) # macro
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GH100_SOC = (0x00000001) # macro
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD100 = (0x00000000) # macro
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD000 = (0x00000001) # macro
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD101 = (0x00000001) # macro
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD102 = (0x00000002) # macro
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD103 = (0x00000003) # macro
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD104 = (0x00000004) # macro
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD106 = (0x00000006) # macro
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD107 = (0x00000007) # macro
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD10B = (0x0000000B) # macro
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB100 = (0x00000000) # macro
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB102 = (0x00000002) # macro
 NV2080_CTRL_MC_ARCH_INFO_SUBREVISION_NO_SUBREVISION = (0x00000000) # macro
 NV2080_CTRL_MC_ARCH_INFO_SUBREVISION_P = (0x00000001) # macro
 NV2080_CTRL_MC_ARCH_INFO_SUBREVISION_Q = (0x00000002) # macro
@@ -19967,10 +20752,6 @@ NV2080_CTRL_MC_ENGINE_ID_ALL = 0xFFFFFFFF # macro
 NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_MESSAGE_ID = (0x2) # macro
 NV2080_CTRL_CMD_MC_GET_MANUFACTURER = (0x20801703) # macro
 NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS_MESSAGE_ID = (0x3) # macro
-NV2080_CTRL_CMD_MC_QUERY_HOSTCLK_SLOWDOWN_STATUS = (0x20801708) # macro
-NV2080_CTRL_MC_QUERY_HOSTCLK_SLOWDOWN_STATUS_PARAMS_MESSAGE_ID = (0x8) # macro
-NV2080_CTRL_CMD_MC_SET_HOSTCLK_SLOWDOWN_STATUS = (0x20801709) # macro
-NV2080_CTRL_MC_SET_HOSTCLK_SLOWDOWN_STATUS_PARAMS_MESSAGE_ID = (0x9) # macro
 NV2080_CTRL_CMD_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP = (0x2080170c) # macro
 NV2080_CTRL_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP_PARAMS_MESSAGE_ID = (0xC) # macro
 NV2080_CTRL_CMD_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS = (0x2080170d) # macro
@@ -20027,24 +20808,6 @@ struct_NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS = struct_NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS
-class struct_NV2080_CTRL_MC_QUERY_HOSTCLK_SLOWDOWN_STATUS_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_MC_QUERY_HOSTCLK_SLOWDOWN_STATUS_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_MC_QUERY_HOSTCLK_SLOWDOWN_STATUS_PARAMS._fields_ = [
-    ('bDisabled', ctypes.c_ubyte),
-]
-
-NV2080_CTRL_MC_QUERY_HOSTCLK_SLOWDOWN_STATUS_PARAMS = struct_NV2080_CTRL_MC_QUERY_HOSTCLK_SLOWDOWN_STATUS_PARAMS
-class struct_NV2080_CTRL_MC_SET_HOSTCLK_SLOWDOWN_STATUS_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_MC_SET_HOSTCLK_SLOWDOWN_STATUS_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_MC_SET_HOSTCLK_SLOWDOWN_STATUS_PARAMS._fields_ = [
-    ('bDisable', ctypes.c_ubyte),
-]
-
-NV2080_CTRL_MC_SET_HOSTCLK_SLOWDOWN_STATUS_PARAMS = struct_NV2080_CTRL_MC_SET_HOSTCLK_SLOWDOWN_STATUS_PARAMS
 class struct_NV2080_CTRL_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP_PARAMS(Structure):
     pass
 
@@ -20118,29 +20881,29 @@ NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_GRANDFATHERED_RECORD_IDX = 1 # macro
 NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_ALLOCATED_IDX = 2 # macro
 NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COLLECTED_IDX = 3 # macro
 NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NOTIFICATIONS_IDX = 4 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_ALLOC_FAILED_IDX = 5 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COLLECT_FAILED_IDX = 6 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COLLECT_LOCKED_OUT_IDX = 7 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_CTRL_INSERT_RECORDS_IDX = 8 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RPC_INSERT_RECORDS_IDX = 9 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_JOURNAL_LOCKED_IDX = 10 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_JOURNAL_LOCK_UPDATED_IDX = 11 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_JOURNAL_UNLOCKED_IDX = 12 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NO_RECORDS_IDX = 13 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BAD_BUFFER_IDX = 14 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_MATCH_FOUND_IDX = 15 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NO_MATCH_IDX = 16 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_CLOSEST_FOUND_IDX = 17 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_REQUESTED_IDX = 18 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_REPORTED_IDX = 19 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_DROPPED_IDX = 20 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATE_REQ_IDX = 21 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATED_IDX = 22 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATE_FAILED_IDX = 23 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BUSY_IDX = 24 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BAD_PARAM_IDX = 25 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BAD_TYPE_IDX = 26 # macro
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES5_IDX = 27 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NOTIFICATION_FAIL_IDX = 5 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_ALLOC_FAILED_IDX = 6 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COLLECT_FAILED_IDX = 7 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COLLECT_LOCKED_OUT_IDX = 8 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_CTRL_INSERT_RECORDS_IDX = 9 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RPC_INSERT_RECORDS_IDX = 10 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_JOURNAL_LOCKED_IDX = 11 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_JOURNAL_LOCK_UPDATED_IDX = 12 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_JOURNAL_UNLOCKED_IDX = 13 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NO_RECORDS_IDX = 14 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BAD_BUFFER_IDX = 15 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_MATCH_FOUND_IDX = 16 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NO_MATCH_IDX = 17 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_CLOSEST_FOUND_IDX = 18 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_REQUESTED_IDX = 19 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_REPORTED_IDX = 20 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_DROPPED_IDX = 21 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATE_REQ_IDX = 22 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATED_IDX = 23 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATE_FAILED_IDX = 24 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BUSY_IDX = 25 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BAD_PARAM_IDX = 26 # macro
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BAD_TYPE_IDX = 27 # macro
 NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES4_IDX = 28 # macro
 NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES3_IDX = 29 # macro
 NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES2_IDX = 30 # macro
@@ -20428,6 +21191,7 @@ NV2080_CTRL_CMD_NVLINK_GET_NVLINK_CAPS_PARAMS_MESSAGE_ID = (0x1) # macro
 # NV2080_CTRL_NVLINK_CAPS_POWER_STATE_L2 = 1 : 0x04 # macro
 # NV2080_CTRL_NVLINK_CAPS_POWER_STATE_L3 = 1 : 0x08 # macro
 # NV2080_CTRL_NVLINK_CAPS_VALID = 1 : 0x10 # macro
+# NV2080_CTRL_NVLINK_CAPS_UNCONTAINED_ERROR_RECOVERY = 1 : 0x20 # macro
 NV2080_CTRL_NVLINK_CAPS_TBL_SIZE = 2 # macro
 NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_INVALID = (0x00000000) # macro
 NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_1_0 = (0x00000001) # macro
@@ -20436,6 +21200,7 @@ NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_2_2 = (0x00000004) # macro
 NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_3_0 = (0x00000005) # macro
 NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_3_1 = (0x00000006) # macro
 NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_4_0 = (0x00000007) # macro
+NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_5_0 = (0x00000008) # macro
 NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_INVALID = (0x00000000) # macro
 NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_1_0 = (0x00000001) # macro
 NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_2_0 = (0x00000002) # macro
@@ -20443,6 +21208,7 @@ NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_2_2 = (0x00000004) # macro
 NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_3_0 = (0x00000005) # macro
 NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_3_1 = (0x00000006) # macro
 NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_4_0 = (0x00000007) # macro
+NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_5_0 = (0x00000008) # macro
 NV2080_CTRL_CMD_NVLINK_GET_NVLINK_CAPS = (0x20803001) # macro
 # NV2080_CTRL_NVLINK_DEVICE_INFO_DEVICE_ID_FLAGS = 31 : 0 # macro
 NV2080_CTRL_NVLINK_DEVICE_INFO_DEVICE_ID_FLAGS_NONE = (0x00000000) # macro
@@ -20492,6 +21258,7 @@ NV2080_CTRL_NVLINK_STATUS_NVLINK_VERSION_2_2 = (0x00000004) # macro
 NV2080_CTRL_NVLINK_STATUS_NVLINK_VERSION_3_0 = (0x00000005) # macro
 NV2080_CTRL_NVLINK_STATUS_NVLINK_VERSION_3_1 = (0x00000006) # macro
 NV2080_CTRL_NVLINK_STATUS_NVLINK_VERSION_4_0 = (0x00000007) # macro
+NV2080_CTRL_NVLINK_STATUS_NVLINK_VERSION_5_0 = (0x00000008) # macro
 NV2080_CTRL_NVLINK_STATUS_NVLINK_VERSION_INVALID = (0x000000FF) # macro
 NV2080_CTRL_NVLINK_STATUS_NCI_VERSION_1_0 = (0x00000001) # macro
 NV2080_CTRL_NVLINK_STATUS_NCI_VERSION_2_0 = (0x00000002) # macro
@@ -20499,6 +21266,7 @@ NV2080_CTRL_NVLINK_STATUS_NCI_VERSION_2_2 = (0x00000004) # macro
 NV2080_CTRL_NVLINK_STATUS_NCI_VERSION_3_0 = (0x00000005) # macro
 NV2080_CTRL_NVLINK_STATUS_NCI_VERSION_3_1 = (0x00000006) # macro
 NV2080_CTRL_NVLINK_STATUS_NCI_VERSION_4_0 = (0x00000007) # macro
+NV2080_CTRL_NVLINK_STATUS_NCI_VERSION_5_0 = (0x00000008) # macro
 NV2080_CTRL_NVLINK_STATUS_NCI_VERSION_INVALID = (0x000000FF) # macro
 NV2080_CTRL_NVLINK_STATUS_NVHS_VERSION_1_0 = (0x00000001) # macro
 NV2080_CTRL_NVLINK_STATUS_NVHS_VERSION_INVALID = (0x000000FF) # macro
@@ -20602,6 +21370,127 @@ NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS_MESSAGE_ID = (0x4) # macro
 NV2080_CTRL_CMD_NVLINK_GET_COUNTERS = (0x20803004) # macro
 NV2080_CTRL_CMD_NVLINK_CLEAR_COUNTERS = (0x20803005) # macro
 NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS_MESSAGE_ID = (0x5) # macro
+NV2080_CTRL_NVLINK_COUNTER_TP_TL_TX0 = 0 # macro
+NV2080_CTRL_NVLINK_COUNTER_TP_TL_TX1 = 1 # macro
+NV2080_CTRL_NVLINK_COUNTER_TP_TL_RX0 = 2 # macro
+NV2080_CTRL_NVLINK_COUNTER_TP_TL_RX1 = 3 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_ECC_LANE_SIZE = 4 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_ECC_LANE_L0 = 4 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_ECC_LANE_L1 = 5 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_ECC_LANE_L2 = 6 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_ECC_LANE_L3 = 7 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_SIZE = 8 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L0 = 8 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L1 = 9 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L2 = 10 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L3 = 11 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L4 = 12 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L5 = 13 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L6 = 14 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L7 = 15 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_TX_ERR_RECOVERY = 16 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_TX_ERR_REPLAY = 17 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_REPLAY = 18 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_MASKED = 19 # macro
+NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_FLIT = 20 # macro
+NV2080_CTRL_NVLINK_COUNTER_LP_DL = 21 # macro
+NV2080_CTRL_NVLINK_COUNTER_V1_MAX_COUNTER = 21 # macro
+NV2080_CTRL_NVLINK_COUNTER_XMIT_PACKETS = 22 # macro
+NV2080_CTRL_NVLINK_COUNTER_XMIT_BYTES = 23 # macro
+NV2080_CTRL_NVLINK_COUNTER_RCV_PACKETS = 24 # macro
+NV2080_CTRL_NVLINK_COUNTER_RCV_BYTES = 25 # macro
+NV2080_CTRL_NVLINK_COUNTER_LINK_ERROR_RECOVERY_COUNTER = 26 # macro
+NV2080_CTRL_NVLINK_COUNTER_LINK_DOWNED_COUNTER = 27 # macro
+NV2080_CTRL_NVLINK_COUNTER_LINK_RECOVERY_SUCCESSFUL_COUNTER = 28 # macro
+NV2080_CTRL_NVLINK_COUNTER_RCV_ERRORS = 29 # macro
+NV2080_CTRL_NVLINK_COUNTER_RCV_REMOTE_ERRORS = 30 # macro
+NV2080_CTRL_NVLINK_COUNTER_RCV_GENERAL_ERRORS = 31 # macro
+NV2080_CTRL_NVLINK_COUNTER_RCV_MALFORMED_PKT_ERROR = 32 # macro
+NV2080_CTRL_NVLINK_COUNTER_RCV_BUFFER_OVERRUN_ERROR = 33 # macro
+NV2080_CTRL_NVLINK_COUNTER_RCV_VL15DROPPED_ERROR = 34 # macro
+NV2080_CTRL_NVLINK_COUNTER_LINK_INTEGRITY_ERRORS = 35 # macro
+NV2080_CTRL_NVLINK_COUNTER_BUFFER_OVERRUN_ERRORS = 36 # macro
+NV2080_CTRL_NVLINK_COUNTER_XMIT_WAIT_TIME = 37 # macro
+NV2080_CTRL_NVLINK_COUNTER_XMIT_ERRORS = 38 # macro
+NV2080_CTRL_NVLINK_COUNTER_SINGLE_ERROR_BLOCKS = 39 # macro
+NV2080_CTRL_NVLINK_COUNTER_CORRECTED_BLOCKS = 40 # macro
+NV2080_CTRL_NVLINK_COUNTER_UNCORRECTED_BLOCKS = 41 # macro
+NV2080_CTRL_NVLINK_COUNTER_CORRECTED_SYMBOLS_LANE_0 = 42 # macro
+NV2080_CTRL_NVLINK_COUNTER_CORRECTED_SYMBOLS_LANE_1 = 43 # macro
+NV2080_CTRL_NVLINK_COUNTER_CORRECTED_SYMBOLS_TOTAL = 44 # macro
+NV2080_CTRL_NVLINK_COUNTER_RAW_ERRORS_LANE_0 = 45 # macro
+NV2080_CTRL_NVLINK_COUNTER_RAW_ERRORS_LANE_1 = 46 # macro
+NV2080_CTRL_NVLINK_COUNTER_CORRECTED_BITS = 47 # macro
+NV2080_CTRL_NVLINK_COUNTER_RAW_BER_LANE_0 = 48 # macro
+NV2080_CTRL_NVLINK_COUNTER_RAW_BER_LANE_1 = 49 # macro
+NV2080_CTRL_NVLINK_COUNTER_RAW_BER_TOTAL = 50 # macro
+NV2080_CTRL_NVLINK_COUNTER_NO_ERROR_BLOCKS = 51 # macro
+NV2080_CTRL_NVLINK_COUNTER_EFFECTIVE_ERRORS = 52 # macro
+NV2080_CTRL_NVLINK_COUNTER_EFFECTIVE_BER = 53 # macro
+NV2080_CTRL_NVLINK_COUNTER_SYMBOL_ERRORS = 54 # macro
+NV2080_CTRL_NVLINK_COUNTER_SYMBOL_BER = 55 # macro
+NV2080_CTRL_NVLINK_COUNTER_RECEIVED_BITS = 56 # macro
+NV2080_CTRL_NVLINK_COUNTER_SYNC_HEADER_ERRORS = 57 # macro
+NV2080_CTRL_NVLINK_COUNTER_TIME_SINCE_LAST_CLEAR = 58 # macro
+NV2080_CTRL_NVLINK_COUNTER_PLR_RCV_BLOCKS = 59 # macro
+NV2080_CTRL_NVLINK_COUNTER_PLR_RCV_BLOCKS_WITH_UNCORRECTABLE_ERRORS = 60 # macro
+NV2080_CTRL_NVLINK_COUNTER_PLR_RCV_BLOCKS_WITH_ERRORS = 61 # macro
+NV2080_CTRL_NVLINK_COUNTER_PLR_XMIT_BLOCKS = 62 # macro
+NV2080_CTRL_NVLINK_COUNTER_PLR_XMIT_RETRY_BLOCKS = 63 # macro
+NV2080_CTRL_NVLINK_COUNTER_PLR_XMIT_RETRY_EVENTS = 64 # macro
+NV2080_CTRL_NVLINK_COUNTER_PLR_BW_LOSS = 65 # macro
+NV2080_CTRL_NVLINK_COUNTER_NVLE_RX_GOOD = 66 # macro
+NV2080_CTRL_NVLINK_COUNTER_NVLE_RX_ERROR = 67 # macro
+NV2080_CTRL_NVLINK_COUNTER_NVLE_RX_AUTH = 68 # macro
+NV2080_CTRL_NVLINK_COUNTER_NVLE_TX_GOOD = 69 # macro
+NV2080_CTRL_NVLINK_COUNTER_NVLE_TX_ERROR = 70 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_0 = 71 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_1 = 72 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_2 = 73 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_3 = 74 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_4 = 75 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_5 = 76 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_6 = 77 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_7 = 78 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_8 = 79 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_9 = 80 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_10 = 81 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_11 = 82 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_12 = 83 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_13 = 84 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_14 = 85 # macro
+NV2080_CTRL_NVLINK_COUNTER_HISTORY_15 = 86 # macro
+NV2080_CTRL_NVLINK_COUNTER_TP_RX_DATA = 87 # macro
+NV2080_CTRL_NVLINK_COUNTER_TP_TX_DATA = 88 # macro
+NV2080_CTRL_NVLINK_COUNTER_TP_RX_RAW = 89 # macro
+NV2080_CTRL_NVLINK_COUNTER_TP_TX_RAW = 90 # macro
+NV2080_CTRL_NVLINK_COUNTER_L1_ENTRY = 91 # macro
+NV2080_CTRL_NVLINK_COUNTER_L1_ENTRY_FORCE = 92 # macro
+NV2080_CTRL_NVLINK_COUNTER_L1_EXIT = 93 # macro
+NV2080_CTRL_NVLINK_COUNTER_L1_EXIT_RECAL = 94 # macro
+NV2080_CTRL_NVLINK_COUNTER_L1_EXIT_REMOTE = 95 # macro
+NV2080_CTRL_NVLINK_COUNTER_L1_LP_STEADY_STATE_TIME = 96 # macro
+NV2080_CTRL_NVLINK_COUNTER_L1_HIGH_SPEED_STEADY_STATE_TIME = 97 # macro
+NV2080_CTRL_NVLINK_COUNTER_L1_OTHER_STATE_TIME = 98 # macro
+NV2080_CTRL_NVLINK_COUNTER_LP_LOCAL_ENTRY_TIME = 99 # macro
+NV2080_CTRL_NVLINK_COUNTER_LP_LOCAL_EXIT_TIME = 100 # macro
+NV2080_CTRL_NVLINK_COUNTER_LP_LOCAL_FULL_BW_ENTRY_TIME = 101 # macro
+NV2080_CTRL_NVLINK_COUNTER_LP_LOCAL_FULL_BW_EXIT_TIME = 102 # macro
+NV2080_CTRL_NVLINK_COUNTER_LP_REMOTE_ENTRY_TIME = 103 # macro
+NV2080_CTRL_NVLINK_COUNTER_LP_REMOTE_EXIT_TIME = 104 # macro
+NV2080_CTRL_NVLINK_COUNTER_LP_REMOTE_FULL_BW_ENTRY_TIME = 105 # macro
+NV2080_CTRL_NVLINK_COUNTER_LP_REMOTE_FULL_BW_EXIT_TIME = 106 # macro
+NV2080_CTRL_NVLINK_COUNTERS_MAX = 107 # macro
+NV2080_CTRL_NVLINK_COUNTER_MAX_GROUPS = 2 # macro
+NV2080_CTRL_NVLINK_COUNTER_MAX_COUNTERS_PER_LINK_IN_REQ = 28 # macro
+def NV2080_CTRL_NVLINK_COUNTER_V2_GROUP(i):  # macro
+   return ((i)/64)
+# def NV2080_CTRL_NVLINK_COUNTER_V2_COUNTER_MASK(i):  # macro
+#    return ((NvU64)1<<((i)%64))
+NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS_MESSAGE_ID = (0x50) # macro
+NV2080_CTRL_CMD_NVLINK_GET_COUNTERS_V2 = (0x20803050) # macro
+NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS_MESSAGE_ID = (0x51) # macro
+NV2080_CTRL_CMD_NVLINK_CLEAR_COUNTERS_V2 = (0x20803051) # macro
 NV2080_CTRL_CMD_NVLINK_INJECT_ERROR = (0x20803006) # macro
 NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS_MESSAGE_ID = (0x6) # macro
 NV2080_CTRL_NVLINK_UNIT_DL = 0x01 # macro
@@ -20612,6 +21501,39 @@ NV2080_CTRL_NVLINK_UNIT_TLC_TX_0 = 0x05 # macro
 NV2080_CTRL_NVLINK_UNIT_MIF_RX_0 = 0x06 # macro
 NV2080_CTRL_NVLINK_UNIT_MIF_TX_0 = 0x07 # macro
 NV2080_CTRL_NVLINK_UNIT_MINION = 0x08 # macro
+# NV2080_CTRL_NVLINK_HW_ERROR_INJECT_TX_ERR_TYPE = 31 : 28 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_TX_ERR_TYPE_NO_ERROR = 0x00000000 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_TX_ERR_TYPE_RAW_BER = 0x00000001 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_TX_ERR_TYPE_EFFECTIVE_BER = 0x00000002 # macro
+# NV2080_CTRL_NVLINK_HW_ERROR_INJECT_TX_ERR_ERR_INJECT_DURATION = 27 : 12 # macro
+# NV2080_CTRL_NVLINK_HW_ERROR_INJECT_TX_ERR_BER_MANTISSA = 11 : 8 # macro
+# NV2080_CTRL_NVLINK_HW_ERROR_INJECT_TX_ERR_BER_EXPONENT = 7 : 0 # macro
+# NV2080_CTRL_NVLINK_HW_ERROR_INJECT_PKT_ERR_INJECT_COUNT = 15 : 0 # macro
+# NV2080_CTRL_NVLINK_HW_ERROR_INJECT_PKT_ERR_STOMP = 16 : 16 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_PKT_ERR_STOMP_DIS = 0x00000000 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_PKT_ERR_STOMP_EN = 0x00000001 # macro
+# NV2080_CTRL_NVLINK_HW_ERROR_INJECT_PKT_ERR_POISON = 17 : 17 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_PKT_ERR_POISON_DIS = 0x00000000 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_PKT_ERR_POISON_EN = 0x00000001 # macro
+# NV2080_CTRL_NVLINK_HW_ERROR_INJECT_PKT_ERR_CLEAR_COUNTERS = 18 : 18 # macro
+# NV2080_CTRL_NVLINK_HW_ERROR_INJECT_AUTH_TAG_ERR_PIPE_INDEX = 3 : 0 # macro
+# NV2080_CTRL_NVLINK_HW_ERROR_INJECT_AUTH_TAG_ERR_AUTH_ERR = 4 : 4 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_AUTH_TAG_ERR_AUTH_ERR_DIS = 0x00000000 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_AUTH_TAG_ERR_AUTH_ERR_EN = 0x00000001 # macro
+# NV2080_CTRL_NVLINK_HW_ERROR_INJECT_LINK_ERR_FORCE_LINK_DOWN = 0 : 0 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_LINK_ERR_FORCE_LINK_DOWN_DIS = 0x00000000 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_LINK_ERR_FORCE_LINK_DOWN_EN = 0x00000001 # macro
+NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS_MESSAGE_ID = (0x81) # macro
+NV2080_CTRL_CMD_NVLINK_SET_HW_ERROR_INJECT = (0x20803081) # macro
+# NV2080_CTRL_NVLINK_HW_ERROR_INJECT_STS_LINK_STATE = 1 : 0 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_STS_LINK_STATE_UP = 0x00000000 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_STS_LINK_STATE_DOWN_BY_REQUEST = 0x00000001 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_STS_LINK_STATE_DOWN_BY_HW_ERR = 0x00000002 # macro
+# NV2080_CTRL_NVLINK_HW_ERROR_INJECT_STS_OPER_STS = 0 : 0 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_STS_OPER_STS_NO_ERR_INJECT = 0x00000000 # macro
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_STS_OPER_STS_PERFORMING_ERR_INJECT = 0x00000001 # macro
+NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS_MESSAGE_ID = (0x82) # macro
+NV2080_CTRL_CMD_NVLINK_GET_HW_ERROR_INJECT = (0x20803082) # macro
 NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES = (0x20803007) # macro
 NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS_MESSAGE_ID = (0x7) # macro
 NV2080_CTRL_CMD_NVLINK_GET_LINK_LAST_ERROR_REMOTE_TYPE = (0x20803008) # macro
@@ -20727,8 +21649,6 @@ NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS_MESSAGE_ID = (0x15) # macro
 NV2080_CTRL_CMD_NVLINK_READ_TP_COUNTERS = (0x20803015) # macro
 NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE = (0x20803016) # macro
 NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS_MESSAGE_ID = (0x16) # macro
-NV2080_CTRL_CMD_NVLINK_ENABLE_NVLINK_PEER = (0x20803017) # macro
-NV2080_CTRL_NVLINK_ENABLE_NVLINK_PEER_PARAMS_MESSAGE_ID = (0x17) # macro
 NV2080_CTRL_NVLINK_GET_LP_COUNTERS_COUNT_TX_NVHS = 0 # macro
 NV2080_CTRL_NVLINK_GET_LP_COUNTERS_COUNT_TX_EIGHTH = 1 # macro
 NV2080_CTRL_NVLINK_GET_LP_COUNTERS_COUNT_TX_OTHER = 2 # macro
@@ -20749,86 +21669,6 @@ NV2080_CTRL_NVLINK_GET_LP_COUNTERS_MAX_COUNTERS = 16 # macro
 NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS_MESSAGE_ID = (0x18) # macro
 NV2080_CTRL_CMD_NVLINK_GET_LP_COUNTERS = (0x20803018) # macro
 NV2080_CTRL_CMD_NVLINK_CLEAR_LP_COUNTERS = (0x20803052) # macro
-NV2080_NVLINK_CORE_LINK_STATE_OFF = 0x00 # macro
-NV2080_NVLINK_CORE_LINK_STATE_HS = 0x01 # macro
-NV2080_NVLINK_CORE_LINK_STATE_SAFE = 0x02 # macro
-NV2080_NVLINK_CORE_LINK_STATE_FAULT = 0x03 # macro
-NV2080_NVLINK_CORE_LINK_STATE_RECOVERY = 0x04 # macro
-NV2080_NVLINK_CORE_LINK_STATE_FAIL = 0x05 # macro
-NV2080_NVLINK_CORE_LINK_STATE_DETECT = 0x06 # macro
-NV2080_NVLINK_CORE_LINK_STATE_RESET = 0x07 # macro
-NV2080_NVLINK_CORE_LINK_STATE_ENABLE_PM = 0x08 # macro
-NV2080_NVLINK_CORE_LINK_STATE_DISABLE_PM = 0x09 # macro
-NV2080_NVLINK_CORE_LINK_STATE_SLEEP = 0x0A # macro
-NV2080_NVLINK_CORE_LINK_STATE_SAVE_STATE = 0x0B # macro
-NV2080_NVLINK_CORE_LINK_STATE_RESTORE_STATE = 0x0C # macro
-NV2080_NVLINK_CORE_LINK_STATE_PRE_HS = 0x0E # macro
-NV2080_NVLINK_CORE_LINK_STATE_DISABLE_ERR_DETECT = 0x0F # macro
-NV2080_NVLINK_CORE_LINK_STATE_LANE_DISABLE = 0x10 # macro
-NV2080_NVLINK_CORE_LINK_STATE_LANE_SHUTDOWN = 0x11 # macro
-NV2080_NVLINK_CORE_LINK_STATE_TRAFFIC_SETUP = 0x12 # macro
-NV2080_NVLINK_CORE_LINK_STATE_INITPHASE1 = 0x13 # macro
-NV2080_NVLINK_CORE_LINK_STATE_INITNEGOTIATE = 0x14 # macro
-NV2080_NVLINK_CORE_LINK_STATE_POST_INITNEGOTIATE = 0x15 # macro
-NV2080_NVLINK_CORE_LINK_STATE_INITOPTIMIZE = 0x16 # macro
-NV2080_NVLINK_CORE_LINK_STATE_POST_INITOPTIMIZE = 0x17 # macro
-NV2080_NVLINK_CORE_LINK_STATE_DISABLE_HEARTBEAT = 0x18 # macro
-NV2080_NVLINK_CORE_LINK_STATE_CONTAIN = 0x19 # macro
-NV2080_NVLINK_CORE_LINK_STATE_INITTL = 0x1A # macro
-NV2080_NVLINK_CORE_LINK_STATE_INITPHASE5 = 0x1B # macro
-NV2080_NVLINK_CORE_LINK_STATE_ALI = 0x1C # macro
-NV2080_NVLINK_CORE_LINK_STATE_ACTIVE_PENDING = 0x1D # macro
-NV2080_NVLINK_CORE_LINK_STATE_INVALID = 0xFF # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_HS = 0x00 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_SINGLE_LANE = 0x04 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_LOW_POWER = 0x04 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_TRAIN = 0x05 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_SAFE = 0x06 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_OFF = 0x07 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_COMMON_MODE = 0x08 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_COMMON_MODE_DISABLE = 0x09 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_DATA_READY = 0x0A # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_EQ = 0x0B # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_PRBS_EN = 0x0C # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_POST_HS = 0x0D # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_HS = 0x00 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_SINGLE_LANE = 0x04 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_LOW_POWER = 0x04 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_TRAIN = 0x05 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_SAFE = 0x06 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_OFF = 0x07 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_RXCAL = 0x08 # macro
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_INIT_TERM = 0x09 # macro
-NV2080_CTRL_NVLINK_MAX_SEED_NUM = 6 # macro
-NV2080_CTRL_NVLINK_MAX_SEED_BUFFER_SIZE = (0x7) # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_DL_LINK_MODE = 0x00 # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_DL_LINK_MODE = 0x01 # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_TL_LINK_MODE = 0x02 # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_TL_LINK_MODE = 0x03 # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_TX_SUBLINK_MODE = 0x04 # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_TX_SUBLINK_MODE = 0x05 # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_MODE = 0x06 # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_MODE = 0x07 # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_DETECT = 0x08 # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_DETECT = 0x09 # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_WRITE_DISCOVERY_TOKEN = 0x0A # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_READ_DISCOVERY_TOKEN = 0x0B # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_TRAINING_COMPLETE = 0x0C # macro
-NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_UPHY_LOAD = 0x0D # macro
-NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS_MESSAGE_ID = (0x19) # macro
-NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK = (0x20803019) # macro
-NV2080_CTRL_NVLINK_GET_ALI_ENABLED_PARAMS_MESSAGE_ID = (0x1a) # macro
-NV2080_CTRL_CMD_NVLINK_GET_ALI_ENABLED = (0x2080301a) # macro
-NV2080_CTRL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS_MESSAGE_ID = (0x1b) # macro
-NV2080_CTRL_CMD_NVLINK_UPDATE_REMOTE_LOCAL_SID = (0x2080301b) # macro
-NV2080_CTRL_NVLINK_UPDATE_HSHUB_MUX_TYPE_PROGRAM = 0x0 # macro
-NV2080_CTRL_NVLINK_UPDATE_HSHUB_MUX_TYPE_RESET = 0x1 # macro
-NV2080_CTRL_NVLINK_UPDATE_HSHUB_MUX_PARAMS_MESSAGE_ID = (0x1c) # macro
-NV2080_CTRL_CMD_NVLINK_UPDATE_HSHUB_MUX = (0x2080301c) # macro
-NV2080_CTRL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS_MESSAGE_ID = (0x1d) # macro
-NV2080_CTRL_CMD_NVLINK_PRE_SETUP_NVLINK_PEER = (0x2080301d) # macro
-NV2080_CTRL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS_MESSAGE_ID = (0x1e) # macro
-NV2080_CTRL_CMD_NVLINK_POST_SETUP_NVLINK_PEER = (0x2080301e) # macro
 NV2080_CTRL_NVLINK_REMOVE_NVLINK_MAPPING_TYPE_SYSMEM = 0x1 # macro
 NV2080_CTRL_NVLINK_REMOVE_NVLINK_MAPPING_TYPE_PEER = 0x2 # macro
 NV2080_CTRL_NVLINK_REMOVE_NVLINK_MAPPING_PARAMS_MESSAGE_ID = (0x1f) # macro
@@ -20846,6 +21686,9 @@ NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_DEFAULT = (0x00000000) # macro
 NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_NEA = (0x00000001) # macro
 NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_NEDR = (0x00000002) # macro
 NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_NEDW = (0x00000003) # macro
+NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PHY_REMOTE = (0x00000004) # macro
+NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PHY_LOCAL = (0x00000005) # macro
+NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_EXT_LOCAL = (0x00000006) # macro
 NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PARAMS_MESSAGE_ID = (0x23) # macro
 NV2080_CTRL_CMD_NVLINK_SET_LOOPBACK_MODE = (0x20803023) # macro
 NV2080_CTRL_NVLINK_UPDATE_PEER_LINK_MASK_PARAMS_MESSAGE_ID = (0x24) # macro
@@ -20905,6 +21748,7 @@ NV2080_CTRL_CMD_NVLINK_EOM_CONTROL = (0x2080303c) # macro
 NV2080_CTRL_NVLINK_INBAND_MAX_DATA_SIZE = 5120 # macro
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_MESSAGE_ID = (0x3d) # macro
 NV2080_CTRL_CMD_READ_NVLINK_INBAND_RESPONSE = (0x2080303d) # macro
+NV2080_CTRL_NVLINK_L1_THRESHOLD_VALUE_DEFAULT = (0xFFFFFFFF) # macro
 NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS_MESSAGE_ID = (0x3e) # macro
 NV2080_CTRL_CMD_NVLINK_SET_L1_THRESHOLD = (0x2080303e) # macro
 NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS_MESSAGE_ID = (0x3f) # macro
@@ -20924,7 +21768,96 @@ NV2080_CTRL_NVLINK_CYCLE_LINK_PARAMS_MESSAGE_ID = (0x45) # macro
 NV2080_CTRL_CMD_NVLINK_CYCLE_LINK = (0x20803045) # macro
 NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS_MESSAGE_ID = (0x46) # macro
 NV2080_CTRL_CMD_NVLINK_IS_REDUCED_CONFIG = (0x20803046) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MAX_LENGTH = 496 # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PAOS = (0x20803047) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS_MESSAGE_ID = (0x47) # macro
 NV2080_CTRL_CMD_NVLINK_FATAL_ERROR_RECOVERY = (0x20803048) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PLTC = (0x20803053) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS_MESSAGE_ID = (0x53) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPLM = (0x20803054) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS_MESSAGE_ID = (0x54) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPSLC = (0x20803055) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS_MESSAGE_ID = (0x55) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MCAM = (0x20803056) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS_MESSAGE_ID = (0x56) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTECR = (0x2080305c) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS_MESSAGE_ID = (0x5c) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTEWE = (0x2080305e) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS_MESSAGE_ID = (0x5e) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTSDE = (0x2080305f) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS_MESSAGE_ID = (0x5f) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTCAP = (0x20803061) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS_MESSAGE_ID = (0x61) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PMTU = (0x20803062) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS_MESSAGE_ID = (0x62) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PMLP = (0x20803064) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS_MESSAGE_ID = (0x64) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_GHPKT = (0x20803065) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS_MESSAGE_ID = (0x65) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PDDR = (0x20803066) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS_MESSAGE_ID = (0x66) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPTT = (0x20803068) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS_MESSAGE_ID = (0x68) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPCNT = (0x20803069) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS_MESSAGE_ID = (0x69) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MGIR = (0x2080306a) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS_MESSAGE_ID = (0x6a) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPAOS = (0x2080306b) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS_MESSAGE_ID = (0x6b) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPHCR = (0x2080306c) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS_MESSAGE_ID = (0x6c) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_SLTP = (0x2080306d) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS_MESSAGE_ID = (0x6d) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PGUID = (0x2080306e) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS_MESSAGE_ID = (0x6e) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPRT = (0x2080306f) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS_MESSAGE_ID = (0x6f) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PTYS = (0x20803070) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS_MESSAGE_ID = (0x70) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_SLRG = (0x20803071) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS_MESSAGE_ID = (0x71) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PMAOS = (0x20803072) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS_MESSAGE_ID = (0x72) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPLR = (0x20803073) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS_MESSAGE_ID = (0x73) # macro
+NV2080_CTRL_CMD_NVLINK_GET_SUPPORTED_COUNTERS = (0x20803074) # macro
+NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS_MESSAGE_ID = (0x74) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MORD = (0x20803075) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS_MESSAGE_ID = (0x75) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTRC_CAP = (0x20803076) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS_MESSAGE_ID = (0x76) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTRC_CONF = (0x20803077) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS_MESSAGE_ID = (0x77) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTRC_CTRL = (0x20803078) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS_MESSAGE_ID = (0x78) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTEIM = (0x20803079) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS_MESSAGE_ID = (0x79) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTIE = (0x2080307a) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS_MESSAGE_ID = (0x7a) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTIM = (0x2080307b) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS_MESSAGE_ID = (0x7b) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MPSCR = (0x2080307c) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS_MESSAGE_ID = (0x7c) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTSR = (0x2080307d) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS_MESSAGE_ID = (0x7d) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPSLS = (0x2080307e) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS_MESSAGE_ID = (0x7e) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MLPC = (0x2080307f) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS_MESSAGE_ID = (0x7f) # macro
+NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PLIB = (0x20803080) # macro
+NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS_MESSAGE_ID = (0x80) # macro
+NV2080_CTRL_CMD_NVLINK_GET_PLATFORM_INFO = (0x20803083) # macro
+NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS_MESSAGE_ID = (0x83) # macro
+NV2080_CTRL_NVLINK_BLACKWELL_MAX_LINKS = 18 # macro
+NV2080_CTRL_CMD_NVLINK_READ_UPHY_CLN = (0x20803084) # macro
+NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS_MESSAGE_ID = (0x84) # macro
+NV2080_CTRL_NVLINK_SUPPORTED_MAX_BW_MODE_COUNT = 23 # macro
+NV2080_CTRL_CMD_NVLINK_GET_SUPPORTED_BW_MODE = (0x20803085) # macro
+NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS_MESSAGE_ID = (0x85) # macro
+NV2080_CTRL_CMD_NVLINK_SET_BW_MODE = (0x20803086) # macro
+NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS_MESSAGE_ID = (0x86) # macro
+NV2080_CTRL_CMD_NVLINK_GET_BW_MODE = (0x20803087) # macro
+NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS_MESSAGE_ID = (0x87) # macro
 class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_CAPS_PARAMS(Structure):
     pass
 
@@ -20993,12 +21926,23 @@ struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO._fields_ = [
     ('remoteLinkSid', ctypes.c_uint64),
     ('localLinkSid', ctypes.c_uint64),
     ('laneRxdetStatusMask', ctypes.c_uint32),
-    ('PADDING_4', ctypes.c_ubyte * 4),
+    ('nvlinkMinL1Threshold', ctypes.c_uint32),
+    ('nvlinkMaxL1Threshold', ctypes.c_uint32),
+    ('nvlinkL1ThresholdUnits', ctypes.c_uint32),
     ('remoteDeviceInfo', NV2080_CTRL_NVLINK_DEVICE_INFO),
     ('localDeviceInfo', NV2080_CTRL_NVLINK_DEVICE_INFO),
 ]
 
 NV2080_CTRL_NVLINK_LINK_STATUS_INFO = struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO
+
+# values for enumeration 'NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT'
+NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT__enumvalues = {
+    0: 'NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_100US',
+    1: 'NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_50US',
+}
+NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_100US = 0
+NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_50US = 1
+NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT = ctypes.c_uint32 # enum
 class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS(Structure):
     pass
 
@@ -21109,6 +22053,38 @@ struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS
+class struct_NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES._fields_ = [
+    ('overFlow', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 7),
+    ('value', ctypes.c_uint64),
+]
+
+NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES = struct_NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES
+class struct_NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS._fields_ = [
+    ('linkMask', ctypes.c_uint64),
+    ('counterMask', ctypes.c_uint64 * 2),
+    ('counter', struct_NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES * 28 * 32),
+]
+
+NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS = struct_NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS
+class struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS._fields_ = [
+    ('linkMask', ctypes.c_uint64),
+    ('counterMask', ctypes.c_uint64 * 2),
+]
+
+NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS = struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS
 class struct_NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS(Structure):
     pass
 
@@ -21120,6 +22096,65 @@ struct_NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS = struct_NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS
+
+# values for enumeration 'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE'
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE__enumvalues = {
+    1: 'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_TX_ERR',
+    2: 'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_PKT_ERR',
+    3: 'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_AUTH_TAG_ERR',
+    4: 'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_LINK_ERR',
+    5: 'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_MAX',
+}
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_TX_ERR = 1
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_PKT_ERR = 2
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_AUTH_TAG_ERR = 3
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_LINK_ERR = 4
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_MAX = 5
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE = ctypes.c_uint32 # enum
+class struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG._fields_ = [
+    ('errType', NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('errSettings', ctypes.c_uint64),
+]
+
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG = struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG
+class struct_NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS._fields_ = [
+    ('linkMask', ctypes.c_uint64),
+    ('errCfg', struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG * 32),
+]
+
+NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS = struct_NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS
+class struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO._fields_ = [
+    ('txErrInfo', ctypes.c_uint32),
+    ('packetErrInfo', ctypes.c_uint32),
+    ('authErrInfo', ctypes.c_uint32),
+    ('linkStatus', ctypes.c_uint32),
+    ('errInjectStatus', ctypes.c_uint32),
+]
+
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO = struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO
+class struct_NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS._fields_ = [
+    ('linkMask', ctypes.c_uint64),
+    ('errInfo', struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO * 32),
+]
+
+NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS = struct_NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS
 class struct_NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS(Structure):
     pass
 
@@ -21369,17 +22404,6 @@ struct_NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS
-class struct_NV2080_CTRL_NVLINK_ENABLE_NVLINK_PEER_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_ENABLE_NVLINK_PEER_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_ENABLE_NVLINK_PEER_PARAMS._fields_ = [
-    ('peerMask', ctypes.c_uint32),
-    ('bEnable', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 3),
-]
-
-NV2080_CTRL_NVLINK_ENABLE_NVLINK_PEER_PARAMS = struct_NV2080_CTRL_NVLINK_ENABLE_NVLINK_PEER_PARAMS
 class struct_NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS(Structure):
     pass
 
@@ -21391,288 +22415,6 @@ struct_NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS
-class struct_NV2080_CTRL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS._fields_ = [
-    ('mode', ctypes.c_uint32),
-]
-
-NV2080_CTRL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS
-class struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS._fields_ = [
-    ('seedData', ctypes.c_uint32 * 7),
-]
-
-NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS = struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS
-class struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS._fields_ = [
-    ('remoteDeviceType', ctypes.c_uint32),
-    ('ipVerDlPl', ctypes.c_uint32),
-]
-
-NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS = struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS
-class struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS._fields_ = [
-    ('seedData', ctypes.c_uint32 * 7),
-]
-
-NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS = struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS
-class struct_NV2080_CTRL_NVLINK_REMOTE_LOCAL_SID_INFO(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_REMOTE_LOCAL_SID_INFO._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_REMOTE_LOCAL_SID_INFO._fields_ = [
-    ('remoteSid', ctypes.c_uint64),
-    ('remoteDeviceType', ctypes.c_uint32),
-    ('remoteLinkId', ctypes.c_uint32),
-    ('localSid', ctypes.c_uint64),
-]
-
-NV2080_CTRL_NVLINK_REMOTE_LOCAL_SID_INFO = struct_NV2080_CTRL_NVLINK_REMOTE_LOCAL_SID_INFO
-class struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS._fields_ = [
-    ('bInitnegotiateConfigGood', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 7),
-    ('remoteLocalSidInfo', NV2080_CTRL_NVLINK_REMOTE_LOCAL_SID_INFO),
-]
-
-NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS = struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS
-class struct_NV2080_CTRLNVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRLNVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRLNVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS._fields_ = [
-    ('bPollDone', ctypes.c_ubyte),
-]
-
-NV2080_CTRLNVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS = struct_NV2080_CTRLNVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS
-class struct_NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS(Structure):
-    pass
-
-class union_NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS_linkModeParams(Union):
-    pass
-
-union_NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS_linkModeParams._pack_ = 1 # source:False
-union_NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS_linkModeParams._fields_ = [
-    ('linkModeOffParams', NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS),
-    ('linkModePreHsParams', NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS),
-    ('linkModeInitPhase1Params', NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS),
-    ('linkModePostInitNegotiateParams', NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS),
-    ('linkModePostInitOptimizeParams', NV2080_CTRLNVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS),
-    ('PADDING_0', ctypes.c_ubyte * 31),
-]
-
-struct_NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS._fields_ = [
-    ('mode', ctypes.c_uint64),
-    ('bSync', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 3),
-    ('linkMode', ctypes.c_uint32),
-    ('linkModeParams', union_NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS_linkModeParams),
-]
-
-NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS
-class struct_NV2080_CTRL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS._fields_ = [
-    ('mode', ctypes.c_uint32),
-]
-
-NV2080_CTRL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS
-class struct_NV2080_CTRL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS._fields_ = [
-    ('mode', ctypes.c_uint64),
-    ('bSync', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 7),
-]
-
-NV2080_CTRL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS
-class struct_NV2080_CTRL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS._fields_ = [
-    ('sublinkMode', ctypes.c_uint32),
-    ('sublinkSubMode', ctypes.c_uint32),
-]
-
-NV2080_CTRL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS
-class struct_NV2080_CTRL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS._fields_ = [
-    ('mode', ctypes.c_uint64),
-    ('bSync', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 7),
-]
-
-NV2080_CTRL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS
-class struct_NV2080_CTRL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS._fields_ = [
-    ('mode', ctypes.c_uint64),
-    ('bSync', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 7),
-]
-
-NV2080_CTRL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS
-class struct_NV2080_CTRL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS._fields_ = [
-    ('laneRxdetStatusMask', ctypes.c_uint32),
-]
-
-NV2080_CTRL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS = struct_NV2080_CTRL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS
-class struct_NV2080_CTRL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS._fields_ = [
-    ('bSync', ctypes.c_ubyte),
-]
-
-NV2080_CTRL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS = struct_NV2080_CTRL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS
-class struct_NV2080_CTRL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS._fields_ = [
-    ('ipVerDlPl', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('token', ctypes.c_uint64),
-]
-
-NV2080_CTRL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS = struct_NV2080_CTRL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS
-class struct_NV2080_CTRL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS._fields_ = [
-    ('bUnlocked', ctypes.c_ubyte),
-]
-
-NV2080_CTRL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS = struct_NV2080_CTRL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS
-class struct_NV2080_CTRL_NVLINK_CALLBACK_TYPE(Structure):
-    pass
-
-class union_NV2080_CTRL_NVLINK_CALLBACK_TYPE_callbackParams(Union):
-    pass
-
-union_NV2080_CTRL_NVLINK_CALLBACK_TYPE_callbackParams._pack_ = 1 # source:False
-union_NV2080_CTRL_NVLINK_CALLBACK_TYPE_callbackParams._fields_ = [
-    ('getDlLinkMode', NV2080_CTRL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS),
-    ('setDlLinkMode', NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS),
-    ('getTlLinkMode', NV2080_CTRL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS),
-    ('setTlLinkMode', NV2080_CTRL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS),
-    ('getTxSublinkMode', NV2080_CTRL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS),
-    ('setTxSublinkMode', NV2080_CTRL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS),
-    ('getRxSublinkMode', NV2080_CTRL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS),
-    ('setRxSublinkMode', NV2080_CTRL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS),
-    ('getRxSublinkDetect', NV2080_CTRL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS),
-    ('setRxSublinkDetect', NV2080_CTRL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS),
-    ('writeDiscoveryToken', NV2080_CTRL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS),
-    ('readDiscoveryToken', NV2080_CTRL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS),
-    ('getUphyLoad', NV2080_CTRL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS),
-    ('PADDING_0', ctypes.c_ubyte * 47),
-]
-
-struct_NV2080_CTRL_NVLINK_CALLBACK_TYPE._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_CALLBACK_TYPE._fields_ = [
-    ('type', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 7),
-    ('callbackParams', union_NV2080_CTRL_NVLINK_CALLBACK_TYPE_callbackParams),
-]
-
-NV2080_CTRL_NVLINK_CALLBACK_TYPE = struct_NV2080_CTRL_NVLINK_CALLBACK_TYPE
-class struct_NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS._fields_ = [
-    ('linkId', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('callbackType', NV2080_CTRL_NVLINK_CALLBACK_TYPE),
-]
-
-NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS = struct_NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_ALI_ENABLED_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_GET_ALI_ENABLED_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_GET_ALI_ENABLED_PARAMS._fields_ = [
-    ('bEnableAli', ctypes.c_ubyte),
-]
-
-NV2080_CTRL_NVLINK_GET_ALI_ENABLED_PARAMS = struct_NV2080_CTRL_NVLINK_GET_ALI_ENABLED_PARAMS
-class struct_NV2080_CTRL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS._fields_ = [
-    ('linkId', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('remoteLocalSidInfo', NV2080_CTRL_NVLINK_REMOTE_LOCAL_SID_INFO),
-]
-
-NV2080_CTRL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS = struct_NV2080_CTRL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS
-class struct_NV2080_CTRL_NVLINK_UPDATE_HSHUB_MUX_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_UPDATE_HSHUB_MUX_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_UPDATE_HSHUB_MUX_PARAMS._fields_ = [
-    ('updateType', ctypes.c_ubyte),
-    ('bSysMem', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('peerMask', ctypes.c_uint32),
-]
-
-NV2080_CTRL_NVLINK_UPDATE_HSHUB_MUX_PARAMS = struct_NV2080_CTRL_NVLINK_UPDATE_HSHUB_MUX_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS._fields_ = [
-    ('peerId', ctypes.c_uint32),
-    ('peerLinkMask', ctypes.c_uint32),
-    ('bEgmPeer', ctypes.c_ubyte),
-    ('bNvswitchConn', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-]
-
-NV2080_CTRL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS = struct_NV2080_CTRL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS
-class struct_NV2080_CTRL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS(Structure):
-    pass
-
-struct_NV2080_CTRL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS._pack_ = 1 # source:False
-struct_NV2080_CTRL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS._fields_ = [
-    ('peerMask', ctypes.c_uint32),
-]
-
-NV2080_CTRL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS = struct_NV2080_CTRL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS
 class struct_NV2080_CTRL_NVLINK_REMOVE_NVLINK_MAPPING_PARAMS(Structure):
     pass
 
@@ -21815,6 +22557,7 @@ class struct_NV2080_CTRL_NVLINK_GET_LINK_MASK_POST_RX_DET_PARAMS(Structure):
 struct_NV2080_CTRL_NVLINK_GET_LINK_MASK_POST_RX_DET_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_NVLINK_GET_LINK_MASK_POST_RX_DET_PARAMS._fields_ = [
     ('postRxDetLinkMask', ctypes.c_uint32),
+    ('laneRxdetStatusMask', ctypes.c_uint32 * 32),
 ]
 
 NV2080_CTRL_NVLINK_GET_LINK_MASK_POST_RX_DET_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LINK_MASK_POST_RX_DET_PARAMS
@@ -21950,6 +22693,9 @@ struct_NV2080_CTRL_NVLINK_GET_LINK_AND_CLOCK_VALUES._fields_ = [
     ('nvlinkRefClkType', ctypes.c_ubyte),
     ('PADDING_1', ctypes.c_ubyte * 3),
     ('nvlinkReqLinkClockMhz', ctypes.c_uint32),
+    ('nvlinkMinL1Threshold', ctypes.c_uint32),
+    ('nvlinkMaxL1Threshold', ctypes.c_uint32),
+    ('nvlinkL1ThresholdUnits', ctypes.c_uint32),
 ]
 
 NV2080_CTRL_NVLINK_GET_LINK_AND_CLOCK_VALUES = struct_NV2080_CTRL_NVLINK_GET_LINK_AND_CLOCK_VALUES
@@ -21993,7 +22739,6 @@ class struct_NV2080_CTRL_NVLINK_SYNC_NVLINK_SHUTDOWN_PROPS_PARAMS(Structure):
 
 struct_NV2080_CTRL_NVLINK_SYNC_NVLINK_SHUTDOWN_PROPS_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_NVLINK_SYNC_NVLINK_SHUTDOWN_PROPS_PARAMS._fields_ = [
-    ('bLaneShutdownEnabled', ctypes.c_ubyte),
     ('bLaneShutdownOnUnload', ctypes.c_ubyte),
 ]
 
@@ -22109,6 +22854,7 @@ class struct_NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS(Structure):
 struct_NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS._fields_ = [
     ('l1Threshold', ctypes.c_uint32),
+    ('l1ExitThreshold', ctypes.c_uint32),
 ]
 
 NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS = struct_NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS
@@ -22118,6 +22864,7 @@ class struct_NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS(Structure):
 struct_NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS._fields_ = [
     ('l1Threshold', ctypes.c_uint32),
+    ('l1ExitThreshold', ctypes.c_uint32),
 ]
 
 NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS = struct_NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS
@@ -22208,6 +22955,697 @@ struct_NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS = struct_NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_DATA(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_DATA._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_DATA._fields_ = [
+    ('data', ctypes.c_ubyte * 496),
+]
+
+NV2080_CTRL_NVLINK_PRM_DATA = struct_NV2080_CTRL_NVLINK_PRM_DATA
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('plane_ind', ctypes.c_ubyte),
+    ('admin_status', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('swid', ctypes.c_ubyte),
+    ('e', ctypes.c_ubyte),
+    ('fd', ctypes.c_ubyte),
+    ('ps_e', ctypes.c_ubyte),
+    ('ls_e', ctypes.c_ubyte),
+    ('ee_ps', ctypes.c_ubyte),
+    ('ee_ls', ctypes.c_ubyte),
+    ('ee', ctypes.c_ubyte),
+    ('ase', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('lane_mask', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('pnat', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('local_tx_precoding_admin', ctypes.c_ubyte),
+    ('local_rx_precoding_admin', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('test_mode', ctypes.c_ubyte),
+    ('plane_ind', ctypes.c_ubyte),
+    ('port_type', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('pnat', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('fec_override_admin_10g_40g', ctypes.c_ubyte),
+    ('fec_override_admin_25g', ctypes.c_ubyte),
+    ('fec_override_admin_50g', ctypes.c_ubyte),
+    ('fec_override_admin_100g', ctypes.c_ubyte),
+    ('fec_override_admin_56g', ctypes.c_ubyte),
+    ('rs_fec_correction_bypass_admin', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('fec_override_admin_200g_4x', ctypes.c_uint16),
+    ('fec_override_admin_400g_8x', ctypes.c_uint16),
+    ('fec_override_admin_50g_1x', ctypes.c_uint16),
+    ('fec_override_admin_100g_2x', ctypes.c_uint16),
+    ('fec_override_admin_400g_4x', ctypes.c_uint16),
+    ('fec_override_admin_800g_8x', ctypes.c_uint16),
+    ('fec_override_admin_100g_1x', ctypes.c_uint16),
+    ('fec_override_admin_200g_2x', ctypes.c_uint16),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('lp_msb', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('l1_req_en', ctypes.c_ubyte),
+    ('l1_fw_req_en', ctypes.c_ubyte),
+    ('l1_cap_adv', ctypes.c_ubyte),
+    ('l1_fw_cap_adv', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('hp_queues_bitmap', ctypes.c_uint32),
+    ('l1_hw_active_time', ctypes.c_uint16),
+    ('l1_hw_inactive_time', ctypes.c_uint16),
+    ('qem', ctypes.c_ubyte * 8),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('access_reg_group', ctypes.c_ubyte),
+    ('feature_group', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('slot_index', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('slot_index', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('slot_index', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('slot_index', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('itre', ctypes.c_ubyte),
+    ('i_e', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('protocol', ctypes.c_ubyte),
+    ('admin_mtu', ctypes.c_uint16),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('width', ctypes.c_ubyte),
+    ('plane_ind', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('m_lane_m', ctypes.c_ubyte),
+    ('rxtx', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('trap_id', ctypes.c_uint16),
+    ('action', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('port_type', ctypes.c_ubyte),
+    ('plane_ind', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('pnat', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('page_select', ctypes.c_ubyte),
+    ('module_info_ext', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('le', ctypes.c_ubyte),
+    ('port_type', ctypes.c_ubyte),
+    ('lane', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('pnat', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('sw', ctypes.c_ubyte),
+    ('dm_ig', ctypes.c_ubyte),
+    ('p', ctypes.c_ubyte),
+    ('e', ctypes.c_ubyte),
+    ('modulation', ctypes.c_ubyte),
+    ('prbs_mode_admin', ctypes.c_ubyte),
+    ('prbs_fec_admin', ctypes.c_ubyte),
+    ('lane_rate_admin', ctypes.c_uint16),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('grp', ctypes.c_ubyte),
+    ('port_type', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('pnat', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('swid', ctypes.c_ubyte),
+    ('prio_tc', ctypes.c_ubyte),
+    ('grp_profile', ctypes.c_ubyte),
+    ('plane_ind', ctypes.c_ubyte),
+    ('counters_cap', ctypes.c_ubyte),
+    ('lp_gl', ctypes.c_ubyte),
+    ('clr', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('port_type', ctypes.c_ubyte),
+    ('phy_test_mode_admin', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('swid', ctypes.c_ubyte),
+    ('plane_ind', ctypes.c_ubyte),
+    ('phy_status_admin', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('plane_ind', ctypes.c_ubyte),
+    ('port_type', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('pnat', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('hist_type', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('c_db', ctypes.c_ubyte),
+    ('port_type', ctypes.c_ubyte),
+    ('lane_speed', ctypes.c_ubyte),
+    ('lane', ctypes.c_ubyte),
+    ('tx_policy', ctypes.c_ubyte),
+    ('pnat', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('plane_ind', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('pnat', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('le', ctypes.c_ubyte),
+    ('port_type', ctypes.c_ubyte),
+    ('lane', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('pnat', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('sw', ctypes.c_ubyte),
+    ('dm_ig', ctypes.c_ubyte),
+    ('p', ctypes.c_ubyte),
+    ('tun_ovr', ctypes.c_ubyte),
+    ('s', ctypes.c_ubyte),
+    ('e', ctypes.c_ubyte),
+    ('modulation', ctypes.c_ubyte),
+    ('prbs_mode_admin', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('lane_rate_oper', ctypes.c_uint16),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('proto_mask', ctypes.c_ubyte),
+    ('transmit_allowed', ctypes.c_ubyte),
+    ('plane_ind', ctypes.c_ubyte),
+    ('port_type', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('tx_ready_e', ctypes.c_ubyte),
+    ('ee_tx_ready', ctypes.c_ubyte),
+    ('an_disable_admin', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('ext_eth_proto_admin', ctypes.c_uint32),
+    ('eth_proto_admin', ctypes.c_uint32),
+    ('ib_proto_admin', ctypes.c_uint16),
+    ('ib_link_width_admin', ctypes.c_uint16),
+    ('xdr_2x_slow_admin', ctypes.c_ubyte),
+    ('force_lt_frames_admin', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte * 2),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('port_type', ctypes.c_ubyte),
+    ('lane', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('pnat', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('admin_status', ctypes.c_ubyte),
+    ('module', ctypes.c_ubyte),
+    ('slot_index', ctypes.c_ubyte),
+    ('rst', ctypes.c_ubyte),
+    ('e', ctypes.c_ubyte),
+    ('ee', ctypes.c_ubyte),
+    ('ase', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('plane_ind', ctypes.c_ubyte),
+    ('port_type', ctypes.c_ubyte),
+    ('op_mod', ctypes.c_ubyte),
+    ('apply_im', ctypes.c_ubyte),
+    ('lp_msb', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('lb_en', ctypes.c_uint16),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS._fields_ = [
+    ('counterMask', ctypes.c_uint64 * 2),
+]
+
+NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('segment_type', ctypes.c_uint16),
+    ('seq_num', ctypes.c_ubyte),
+    ('vhca_id_valid', ctypes.c_ubyte),
+    ('inline_dump', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte),
+    ('vhca_id', ctypes.c_uint16),
+    ('PADDING_2', ctypes.c_ubyte * 2),
+    ('index1', ctypes.c_uint32),
+    ('index2', ctypes.c_uint32),
+    ('num_of_obj2', ctypes.c_uint16),
+    ('num_of_obj1', ctypes.c_uint16),
+    ('device_opaque', ctypes.c_uint64),
+    ('mkey', ctypes.c_uint32),
+    ('PADDING_3', ctypes.c_ubyte * 4),
+    ('address', ctypes.c_uint64),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('trace_owner', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('trace_mode', ctypes.c_ubyte),
+    ('log_trace_buffer_size', ctypes.c_ubyte),
+    ('trace_mkey', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('modify_field_select', ctypes.c_uint16),
+    ('arm_event', ctypes.c_ubyte),
+    ('trace_status', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('enable_all', ctypes.c_ubyte),
+    ('log_delay', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('source_id_bitmask', ctypes.c_uint32 * 8),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('log_level', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('log_bit_mask', ctypes.c_uint32),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('warning_inactive_time', ctypes.c_ubyte),
+    ('warning_active_time', ctypes.c_ubyte),
+    ('critical_inactive_time', ctypes.c_ubyte),
+    ('critical_active_time', ctypes.c_ubyte),
+    ('cc', ctypes.c_ubyte),
+    ('queue_depth_th', ctypes.c_uint16),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('lp_msb', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('lp_msb', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('cnt_64bit', ctypes.c_ubyte),
+    ('stop_at_ff', ctypes.c_ubyte),
+    ('counter_rst', ctypes.c_ubyte),
+    ('counter_en', ctypes.c_ubyte),
+    ('force_count_mask', ctypes.c_ubyte),
+    ('cnt_type', ctypes.c_ubyte * 8),
+    ('cnt_val', ctypes.c_ubyte * 8),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS._fields_ = [
+    ('bWrite', ctypes.c_ubyte),
+    ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('ib_port', ctypes.c_uint16),
+    ('lp_msb', ctypes.c_ubyte),
+    ('local_port', ctypes.c_ubyte),
+    ('split_num', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS._fields_ = [
+    ('ibGuid', ctypes.c_ubyte * 16),
+    ('rackGuid', ctypes.c_ubyte * 16),
+    ('chassisPhysicalSlotNumber', ctypes.c_ubyte),
+    ('computeSlotIndex', ctypes.c_ubyte),
+    ('nodeIndex', ctypes.c_ubyte),
+    ('peerType', ctypes.c_ubyte),
+    ('moduleId', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS = struct_NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS
+class struct_NV2080_CTRL_NVLINK_UPHY_CLN_CMD(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_UPHY_CLN_CMD._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_UPHY_CLN_CMD._fields_ = [
+    ('pllIndex', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('address', ctypes.c_uint16),
+]
+
+NV2080_CTRL_NVLINK_UPHY_CLN_CMD = struct_NV2080_CTRL_NVLINK_UPHY_CLN_CMD
+class struct_NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS._fields_ = [
+    ('linkMask', ctypes.c_uint32),
+    ('uphyCmd', struct_NV2080_CTRL_NVLINK_UPHY_CLN_CMD * 18),
+    ('data', ctypes.c_uint32 * 18),
+]
+
+NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS = struct_NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS._fields_ = [
+    ('rbmModesList', ctypes.c_ubyte * 23),
+    ('rbmTotalModes', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS
+class struct_NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS._fields_ = [
+    ('rbmMode', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS._fields_ = [
+    ('rbmMode', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS
 NV_SUBPROC_NAME_MAX_LENGTH = 100 # macro
 # NV2080_CTRL_PERF_BOOST_FLAGS_CMD = 1 : 0 # macro
 NV2080_CTRL_PERF_BOOST_FLAGS_CMD_CLEAR = (0x00000000) # macro
@@ -22385,6 +23823,25 @@ NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT = 2
 NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LOCK = 3
 NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR = 4
 NV2080_CTRL_PERF_RATED_TDP_ACTION = ctypes.c_uint32 # enum
+
+# values for enumeration 'NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE'
+NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE__enumvalues = {
+    0: 'NV2080_CTRL_PERF_VPSTATE_RATED_TDP',
+    1: 'NV2080_CTRL_PERF_VPSTATE_TURBO_BOOST',
+    2: 'NV2080_CTRL_PERF_VPSTATE_NUM_VPSTATES',
+}
+NV2080_CTRL_PERF_VPSTATE_RATED_TDP = 0
+NV2080_CTRL_PERF_VPSTATE_TURBO_BOOST = 1
+NV2080_CTRL_PERF_VPSTATE_NUM_VPSTATES = 2
+NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE = ctypes.c_uint32 # enum
+class struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST(Structure):
+    _pack_ = 1 # source:False
+    _fields_ = [
+    ('action', NV2080_CTRL_PERF_RATED_TDP_ACTION),
+    ('vPstateType', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE),
+     ]
+
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST = struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST
 class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS(Structure):
     pass
 
@@ -22402,7 +23859,9 @@ struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS._pack_ = 1 # source:False
 struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS._fields_ = [
     ('rm', struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_rm),
     ('output', NV2080_CTRL_PERF_RATED_TDP_ACTION),
+    ('outputVPstate', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE),
     ('inputs', NV2080_CTRL_PERF_RATED_TDP_ACTION * 5),
+    ('vPstateTypes', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE * 5),
 ]
 
 NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS = struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS
@@ -22411,6 +23870,7 @@ class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS(Structure):
     _fields_ = [
     ('client', NV2080_CTRL_PERF_RATED_TDP_CLIENT),
     ('input', NV2080_CTRL_PERF_RATED_TDP_ACTION),
+    ('vPstateType', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE),
      ]
 
 NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS
@@ -22785,17 +24245,25 @@ RM_GSP_SPDM_CMD_ID_CC_DEINIT = (0x2) # macro
 RM_GSP_SPDM_CMD_ID_CC_CTRL = (0x3) # macro
 RM_GSP_SPDM_CMD_ID_CC_INIT_RM_DATA = (0x4) # macro
 RM_GSP_SPDM_CMD_ID_CC_HEARTBEAT_CTRL = (0x5) # macro
+RM_GSP_SPDM_CMD_ID_FIPS_SELFTEST = (0x6) # macro
 RM_GSP_SPDM_CMD_ID_INVALID_COMMAND = (0xFF) # macro
+SPDM_SESSION_ESTABLISHMENT_TRANSCRIPT_BUFFER_SIZE = 0x2400 # macro
 RSVD7_SIZE = 16 # macro
 RSVD8_SIZE = 2 # macro
+CE_FIPS_SELF_TEST_DATA_SIZE = 16 # macro
+CE_FIPS_SELF_TEST_AUTH_TAG_SIZE = 16 # macro
+CE_FIPS_SELF_TEST_IV_SIZE = 12 # macro
 RM_GSP_SPDM_MSG_ID_CC_INIT = (0x1) # macro
 RM_GSP_SPDM_MSG_ID_CC_DEINIT = (0x2) # macro
 RM_GSP_SPDM_MSG_ID_CC_CTRL = (0x3) # macro
 RM_GSP_SPDM_MSG_ID_CC_INIT_RM_DATA = (0x4) # macro
 RM_GSP_SPDM_MSG_ID_CC_HEARTBEAT_CTRL = (0x5) # macro
+RM_GSP_SPDM_MSG_ID_FIPS_SELFTEST = (0x6) # macro
 RM_GSP_SPDM_MSG_ID_INVALID_COMMAND = (0xFF) # macro
 NV2080_CTRL_INTERNAL_SPDM_PARTITION = (0x20800ad9) # macro
 NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS_MESSAGE_ID = (0xD9) # macro
+NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT = (0x20800ada) # macro
+NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS_MESSAGE_ID = (0xDA) # macro
 class struct_RM_GSP_SPDM_CMD_CC_INIT(Structure):
     pass
 
@@ -22858,6 +24326,62 @@ struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL._fields_ = [
 
 RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL = struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL
 PRM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL)
+class struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST(Structure):
+    pass
+
+class struct_CC_KMB(Structure):
+    pass
+
+class struct_CC_AES_CRYPTOBUNDLE(Structure):
+    pass
+
+struct_CC_AES_CRYPTOBUNDLE._pack_ = 1 # source:False
+struct_CC_AES_CRYPTOBUNDLE._fields_ = [
+    ('iv', ctypes.c_uint32 * 3),
+    ('key', ctypes.c_uint32 * 8),
+    ('ivMask', ctypes.c_uint32 * 3),
+]
+
+class union_CC_KMB_0(Union):
+    pass
+
+class struct_CC_HMAC_CRYPTOBUNDLE(Structure):
+    pass
+
+struct_CC_HMAC_CRYPTOBUNDLE._pack_ = 1 # source:False
+struct_CC_HMAC_CRYPTOBUNDLE._fields_ = [
+    ('nonce', ctypes.c_uint32 * 8),
+    ('key', ctypes.c_uint32 * 8),
+]
+
+union_CC_KMB_0._pack_ = 1 # source:False
+union_CC_KMB_0._fields_ = [
+    ('hmacBundle', struct_CC_HMAC_CRYPTOBUNDLE),
+    ('decryptBundle', struct_CC_AES_CRYPTOBUNDLE),
+    ('PADDING_0', ctypes.c_ubyte * 8),
+]
+
+struct_CC_KMB._pack_ = 1 # source:False
+struct_CC_KMB._anonymous_ = ('_0',)
+struct_CC_KMB._fields_ = [
+    ('encryptBundle', struct_CC_AES_CRYPTOBUNDLE),
+    ('_0', union_CC_KMB_0),
+    ('bIsWorkLaunch', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST._pack_ = 1 # source:False
+struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST._fields_ = [
+    ('cmdType', ctypes.c_ubyte),
+    ('isEnc', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('kmb', struct_CC_KMB),
+    ('text', ctypes.c_ubyte * 16),
+    ('authTag', ctypes.c_ubyte * 16),
+]
+
+RM_GSP_SPDM_CMD_FIPS_SELFTEST = struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST
+PRM_GSP_SPDM_CMD_FIPS_SELFTEST = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST)
 class union_RM_GSP_SPDM_CMD(Union):
     pass
 
@@ -22869,7 +24393,7 @@ union_RM_GSP_SPDM_CMD._fields_ = [
     ('ccCtrl', RM_GSP_SPDM_CMD_CC_CTRL),
     ('rmDataInitCmd', RM_GSP_SPDM_CMD_CC_INIT_RM_DATA),
     ('ccHeartbeatCtrl', RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL),
-    ('PADDING_0', ctypes.c_ubyte * 66),
+    ('ccFipsTest', RM_GSP_SPDM_CMD_FIPS_SELFTEST),
 ]
 
 RM_GSP_SPDM_CMD = union_RM_GSP_SPDM_CMD
@@ -22886,8 +24410,7 @@ struct_RM_GSP_SPDM_MSG._fields_ = [
     ('rsvd2', ctypes.c_uint32),
     ('rsvd3', ctypes.c_uint32),
     ('rsvd4', ctypes.c_uint32),
-    ('rsvd5', ctypes.c_ubyte),
-    ('PADDING_1', ctypes.c_ubyte * 3),
+    ('rsvd5', ctypes.c_uint32),
 ]
 
 RM_GSP_SPDM_MSG = struct_RM_GSP_SPDM_MSG
@@ -22904,6 +24427,16 @@ struct_NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS = struct_NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS
+class struct_NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS._fields_ = [
+    ('transcript', ctypes.c_ubyte * 9216),
+    ('transcriptSize', ctypes.c_uint32),
+]
+
+NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS = struct_NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS
 NV2080_CTRL_CMD_TIMER_SCHEDULE = (0x20800401) # macro
 NV2080_CTRL_CMD_TIMER_SCHEDULE_PARAMS_MESSAGE_ID = (0x1) # macro
 # NV2080_CTRL_TIMER_SCHEDULE_FLAGS_TIME = 0 : 0 # macro
@@ -23066,7 +24599,7 @@ struct_NV2080_CTRL_OS_UNIX_UPDATE_TGP_STATUS_PARAMS._fields_ = [
 NV2080_CTRL_OS_UNIX_UPDATE_TGP_STATUS_PARAMS = struct_NV2080_CTRL_OS_UNIX_UPDATE_TGP_STATUS_PARAMS
 NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK = (0x20804001) # macro
 NV2080_CTRL_MAX_VMMU_SEGMENTS = 384 # macro
-NV2080_GPU_MAX_ENGINES = 0x40 # macro
+NV2080_GPU_MAX_ENGINES = 0x54 # macro
 NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS_MESSAGE_ID = (0x1) # macro
 NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK = (0x20804002) # macro
 NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS_MESSAGE_ID = (0x2) # macro
@@ -23092,6 +24625,8 @@ NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG = (0x2080400b) # macro
 NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG_PARAMS_MESSAGE_ID = (0xB) # macro
 NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_FREE_STATES = (0x2080400c) # macro
 NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS_MESSAGE_ID = (0xC) # macro
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_GET_FRAME_RATE_LIMITER_STATUS = (0x2080400d) # macro
+NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS_MESSAGE_ID = (0xD) # macro
 class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS(Structure):
     pass
 
@@ -23104,7 +24639,7 @@ struct_NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS._field
     ('swizzId', ctypes.c_uint32),
     ('numChannels', ctypes.c_uint32),
     ('numPluginChannels', ctypes.c_uint32),
-    ('chidOffset', ctypes.c_uint32 * 64),
+    ('chidOffset', ctypes.c_uint32 * 84),
     ('bDisableDefaultSmcExecPartRestore', ctypes.c_ubyte),
     ('PADDING_0', ctypes.c_ubyte * 3),
     ('numGuestFbSegments', ctypes.c_uint32),
@@ -23118,6 +24653,8 @@ struct_NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS._field
     ('initTaskLogBuffSize', ctypes.c_uint64),
     ('vgpuTaskLogBuffOffset', ctypes.c_uint64),
     ('vgpuTaskLogBuffSize', ctypes.c_uint64),
+    ('kernelLogBuffOffset', ctypes.c_uint64),
+    ('kernelLogBuffSize', ctypes.c_uint64),
     ('migRmHeapMemoryPhysAddr', ctypes.c_uint64),
     ('migRmHeapMemoryLength', ctypes.c_uint64),
     ('bDeviceProfilingEnabled', ctypes.c_ubyte),
@@ -23351,6 +24888,15 @@ struct_NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS._fields_ = [
 ]
 
 NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS(Structure):
+    pass
+
+struct_NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS._pack_ = 1 # source:False
+struct_NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS._fields_ = [
+    ('bFlrDisabled', ctypes.c_ubyte),
+]
+
+NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS = struct_NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS
 # def NV83DE_CTRL_CMD(cat, idx):  # macro
 #    return NVXXXX_CTRL_CMD(0x83DE,NV83DE_CTRL_##cat,idx)
 NV83DE_CTRL_RESERVED = (0x00) # macro
@@ -23440,6 +24986,8 @@ MAX_ACCESS_MEMORY_OPS = 150 # macro
 NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_MAX_ENTRIES = 4 # macro
 NV83DE_CTRL_CMD_DEBUG_READ_MMU_FAULT_INFO = (0x83de0328) # macro
 NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_PARAMS_MESSAGE_ID = (0x28) # macro
+NV83DE_CTRL_CMD_DEBUG_SET_DROP_DEFERRED_RC = (0x83de0329) # macro
+NV83DE_CTRL_DEBUG_SET_DROP_DEFERRED_RC_PARAMS_MESSAGE_ID = (0x29) # macro
 class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS(Structure):
     pass
 
@@ -23796,27 +25344,22 @@ struct_NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_PARAMS._fields_ = [
 ]
 
 NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_PARAMS = struct_NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_PARAMS
+class struct_NV83DE_CTRL_DEBUG_SET_DROP_DEFERRED_RC_PARAMS(Structure):
+    pass
+
+struct_NV83DE_CTRL_DEBUG_SET_DROP_DEFERRED_RC_PARAMS._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_SET_DROP_DEFERRED_RC_PARAMS._fields_ = [
+    ('bDropDeferredRc', ctypes.c_ubyte),
+]
+
+NV83DE_CTRL_DEBUG_SET_DROP_DEFERRED_RC_PARAMS = struct_NV83DE_CTRL_DEBUG_SET_DROP_DEFERRED_RC_PARAMS
 # def NVC36F_CTRL_CMD(cat, idx):  # macro
 #    return NVXXXX_CTRL_CMD(0xC36F,NVC36F_CTRL_##cat,idx)
 NVC36F_CTRL_RESERVED = (0x00) # macro
 NVC36F_CTRL_GPFIFO = (0x01) # macro
 NVC36F_CTRL_EVENT = (0x02) # macro
+NVC36F_CTRL_INTERNAL = (0x03) # macro
 NVC36F_CTRL_CMD_NULL = (0xc36f0000) # macro
-NVC36F_CTRL_GET_CLASS_ENGINEID = (0xc36f0101) # macro
-NVC36F_CTRL_GET_CLASS_ENGINEID_PARAMS_MESSAGE_ID = (0x1) # macro
-NVC36F_CTRL_CMD_RESET_CHANNEL = (0xc36f0102) # macro
-NVC36F_CTRL_CMD_RESET_CHANNEL_PARAMS_MESSAGE_ID = (0x2) # macro
-NVC36F_CTRL_CMD_GPFIFO_SCHEDULE = (0xc36f0103) # macro
-NVC36F_CTRL_GPFIFO_SCHEDULE_PARAMS_MESSAGE_ID = (0x3) # macro
-NVC36F_CTRL_CMD_BIND = (0xc36f0104) # macro
-NVC36F_CTRL_BIND_PARAMS_MESSAGE_ID = (0x4) # macro
-NVC36F_CTRL_CMD_EVENT_SET_NOTIFICATION = (0xc36f0205) # macro
-# NVC36F_CTRL_EVENT_SET_NOTIFICATION_ACTION_DISABLE = NVA06F_CTRL_EVENT_SET_NOTIFICATION_ACTION_DISABLE # macro
-# NVC36F_CTRL_EVENT_SET_NOTIFICATION_ACTION_SINGLE = NVA06F_CTRL_EVENT_SET_NOTIFICATION_ACTION_SINGLE # macro
-# NVC36F_CTRL_EVENT_SET_NOTIFICATION_ACTION_REPEAT = NVA06F_CTRL_EVENT_SET_NOTIFICATION_ACTION_REPEAT # macro
-NVC36F_CTRL_CMD_EVENT_SET_TRIGGER = (0xc36f0206) # macro
-NVC36F_CTRL_CMD_GET_MMU_FAULT_INFO = (0xc36f0107) # macro
-NVC36F_CTRL_GET_MMU_FAULT_INFO_PARAMS_MESSAGE_ID = (0x7) # macro
 NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN = (0xc36f0108) # macro
 NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_MESSAGE_ID = (0x8) # macro
 NVC36F_CTRL_CMD_GPFIFO_FAULT_METHOD_BUFFER_MAX_RUNQUEUES = 0x2 # macro
@@ -23824,74 +25367,10 @@ NVC36F_CTRL_CMD_GPFIFO_UPDATE_FAULT_METHOD_BUFFER = (0xc36f0109) # macro
 NVC36F_CTRL_GPFIFO_UPDATE_FAULT_METHOD_BUFFER_PARAMS_MESSAGE_ID = (0x9) # macro
 NVC36F_CTRL_CMD_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX = (0xc36f010a) # macro
 NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_MESSAGE_ID = (0xA) # macro
-class struct_NV906F_CTRL_GET_CLASS_ENGINEID_PARAMS(Structure):
-    pass
-
-struct_NV906F_CTRL_GET_CLASS_ENGINEID_PARAMS._pack_ = 1 # source:False
-struct_NV906F_CTRL_GET_CLASS_ENGINEID_PARAMS._fields_ = [
-    ('hObject', ctypes.c_uint32),
-    ('classEngineID', ctypes.c_uint32),
-    ('classID', ctypes.c_uint32),
-    ('engineID', ctypes.c_uint32),
-]
-
-NVC36F_CTRL_GET_CLASS_ENGINEID_PARAMS = struct_NV906F_CTRL_GET_CLASS_ENGINEID_PARAMS
-class struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS(Structure):
-    pass
-
-struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS._pack_ = 1 # source:False
-struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS._fields_ = [
-    ('engineID', ctypes.c_uint32),
-    ('subdeviceInstance', ctypes.c_uint32),
-    ('resetReason', ctypes.c_uint32),
-    ('bIsRcPending', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 3),
-]
-
-NVC36F_CTRL_CMD_RESET_CHANNEL_PARAMS = struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS
-class struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS(Structure):
-    pass
-
-struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS._pack_ = 1 # source:False
-struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS._fields_ = [
-    ('bEnable', ctypes.c_ubyte),
-    ('bSkipSubmit', ctypes.c_ubyte),
-]
-
-NVC36F_CTRL_GPFIFO_SCHEDULE_PARAMS = struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS
-class struct_NVA06F_CTRL_BIND_PARAMS(Structure):
-    pass
-
-struct_NVA06F_CTRL_BIND_PARAMS._pack_ = 1 # source:False
-struct_NVA06F_CTRL_BIND_PARAMS._fields_ = [
-    ('engineType', ctypes.c_uint32),
-]
-
-NVC36F_CTRL_BIND_PARAMS = struct_NVA06F_CTRL_BIND_PARAMS
-class struct_NVA06F_CTRL_EVENT_SET_NOTIFICATION_PARAMS(Structure):
-    pass
-
-struct_NVA06F_CTRL_EVENT_SET_NOTIFICATION_PARAMS._pack_ = 1 # source:False
-struct_NVA06F_CTRL_EVENT_SET_NOTIFICATION_PARAMS._fields_ = [
-    ('event', ctypes.c_uint32),
-    ('action', ctypes.c_uint32),
-]
-
-NVC36F_CTRL_EVENT_SET_NOTIFICATION_PARAMS = struct_NVA06F_CTRL_EVENT_SET_NOTIFICATION_PARAMS
-class struct_NV906F_CTRL_GET_MMU_FAULT_INFO_PARAMS(Structure):
-    pass
-
-struct_NV906F_CTRL_GET_MMU_FAULT_INFO_PARAMS._pack_ = 1 # source:False
-struct_NV906F_CTRL_GET_MMU_FAULT_INFO_PARAMS._fields_ = [
-    ('addrHi', ctypes.c_uint32),
-    ('addrLo', ctypes.c_uint32),
-    ('faultType', ctypes.c_uint32),
-    ('faultString', ctypes.c_char * 32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('shaderProgramVA', ctypes.c_uint64 * 7),
-]
-
-NVC36F_CTRL_GET_MMU_FAULT_INFO_PARAMS = struct_NV906F_CTRL_GET_MMU_FAULT_INFO_PARAMS
+NVC36F_CTRL_CMD_EVENT_SET_NOTIFICATION = (0xc36f0205) # macro
+NVC36F_CTRL_CMD_EVENT_SET_TRIGGER = (0xc36f0206) # macro
+NVC36F_CTRL_CMD_INTERNAL_GPFIFO_GET_WORK_SUBMIT_TOKEN = (0xc36f0301) # macro
+NVC36F_CTRL_INTERNAL_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_MESSAGE_ID = (0x1) # macro
 class struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS(Structure):
     pass
 
@@ -23919,6 +25398,7 @@ struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS._fields_ = [
 ]
 
 NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS = struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS
+NVC36F_CTRL_INTERNAL_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS = struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS
 # def NV_CONF_COMPUTE_CTRL_CMD(cat, idx):  # macro
 #    return NVXXXX_CTRL_CMD(0xCB33,NVCB33_CTRL_##cat,idx)
 NVCB33_CTRL_RESERVED = (0x00) # macro
@@ -23928,6 +25408,8 @@ NV_CONF_COMPUTE_CTRL_CMD_SYSTEM_GET_CAPABILITIES = (0xcb330101) # macro
 NV_CONF_COMPUTE_SYSTEM_CPU_CAPABILITY_NONE = 0 # macro
 NV_CONF_COMPUTE_SYSTEM_CPU_CAPABILITY_AMD_SEV = 1 # macro
 NV_CONF_COMPUTE_SYSTEM_CPU_CAPABILITY_INTEL_TDX = 2 # macro
+NV_CONF_COMPUTE_SYSTEM_CPU_CAPABILITY_AMD_SEV_SNP = 3 # macro
+NV_CONF_COMPUTE_SYSTEM_CPU_CAPABILITY_AMD_SNP_VTOM = 4 # macro
 NV_CONF_COMPUTE_SYSTEM_GPUS_CAPABILITY_NONE = 0 # macro
 NV_CONF_COMPUTE_SYSTEM_GPUS_CAPABILITY_APM = 1 # macro
 NV_CONF_COMPUTE_SYSTEM_GPUS_CAPABILITY_HCC = 2 # macro
@@ -23958,6 +25440,12 @@ NV_CONF_COMPUTE_NONCE_SIZE = 0x20 # macro
 NV_CONF_COMPUTE_CTRL_CMD_GET_GPU_ATTESTATION_REPORT_PARAMS_MESSAGE_ID = (0xA) # macro
 NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_NUM_SECURE_CHANNELS = (0xcb33010b) # macro
 NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_NUM_SECURE_CHANNELS_PARAMS_MESSAGE_ID = (0xB) # macro
+NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_KEY_ROTATION_STATE = (0xcb33010c) # macro
+NV_CONF_COMPUTE_CTRL_CMD_GPU_KEY_ROTATION_DISABLED = 0 # macro
+NV_CONF_COMPUTE_CTRL_CMD_GPU_KEY_ROTATION_KERN_ENABLED = 1 # macro
+NV_CONF_COMPUTE_CTRL_CMD_GPU_KEY_ROTATION_USER_ENABLED = 2 # macro
+NV_CONF_COMPUTE_CTRL_CMD_GPU_KEY_ROTATION_BOTH_ENABLED = 3 # macro
+NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_KEY_ROTATION_STATE_PARAMS_MESSAGE_ID = (0xC) # macro
 class struct_NV_CONF_COMPUTE_CTRL_CMD_SYSTEM_GET_CAPABILITIES_PARAMS(Structure):
     pass
 
@@ -24065,6 +25553,16 @@ struct_NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_NUM_SECURE_CHANNELS_PARAMS._fields_ = [
 ]
 
 NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_NUM_SECURE_CHANNELS_PARAMS = struct_NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_NUM_SECURE_CHANNELS_PARAMS
+class struct_NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_KEY_ROTATION_STATE_PARAMS(Structure):
+    pass
+
+struct_NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_KEY_ROTATION_STATE_PARAMS._pack_ = 1 # source:False
+struct_NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_KEY_ROTATION_STATE_PARAMS._fields_ = [
+    ('hSubDevice', ctypes.c_uint32),
+    ('keyRotationState', ctypes.c_uint32),
+]
+
+NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_KEY_ROTATION_STATE_PARAMS = struct_NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_KEY_ROTATION_STATE_PARAMS
 # def NVA06C_CTRL_CMD(cat, idx):  # macro
 #    return NVXXXX_CTRL_CMD(0xA06C,NVA06C_CTRL_##cat,idx)
 NVA06C_CTRL_RESERVED = (0x00) # macro
@@ -24102,7 +25600,24 @@ NVA06C_CTRL_CMD_INTERNAL_GPFIFO_SCHEDULE = (0xa06c0201) # macro
 NVA06C_CTRL_INTERNAL_GPFIFO_SCHEDULE_PARAMS_MESSAGE_ID = (0x1) # macro
 NVA06C_CTRL_CMD_INTERNAL_SET_TIMESLICE = (0xa06c0202) # macro
 NVA06C_CTRL_INTERNAL_SET_TIMESLICE_PARAMS_MESSAGE_ID = (0x2) # macro
+class struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS(Structure):
+    pass
+
+struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS._pack_ = 1 # source:False
+struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS._fields_ = [
+    ('bEnable', ctypes.c_ubyte),
+    ('bSkipSubmit', ctypes.c_ubyte),
+]
+
 NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS = struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS
+class struct_NVA06F_CTRL_BIND_PARAMS(Structure):
+    pass
+
+struct_NVA06F_CTRL_BIND_PARAMS._pack_ = 1 # source:False
+struct_NVA06F_CTRL_BIND_PARAMS._fields_ = [
+    ('engineType', ctypes.c_uint32),
+]
+
 NVA06C_CTRL_BIND_PARAMS = struct_NVA06F_CTRL_BIND_PARAMS
 class struct_NVA06C_CTRL_TIMESLICE_PARAMS(Structure):
     pass
@@ -24204,14 +25719,17 @@ __all__ = \
     'AMPERE_COMPUTE_B', 'AMPERE_DMA_COPY_A', 'AMPERE_DMA_COPY_B',
     'AMPERE_SMC_CONFIG_SESSION', 'AMPERE_SMC_EXEC_PARTITION_REF',
     'AMPERE_SMC_MONITOR_SESSION', 'AMPERE_SMC_PARTITION_REF',
-    'AMPERE_USERMODE_A', 'AmpereAControlGPFifo', 'BindResultFunc',
-    'BLACKWELL_A', 'BLACKWELL_COMPUTE_A',
-    'CC_AES_256_GCM_AUTH_TAG_SIZE_BYTES',
+    'AMPERE_USERMODE_A', 'AmpereAControlGPFifo', 'BLACKWELL_A',
+    'BLACKWELL_CHANNEL_GPFIFO_A', 'BLACKWELL_COMPUTE_A',
+    'BLACKWELL_DMA_COPY_A', 'BLACKWELL_INLINE_TO_MEMORY_A',
+    'BindResultFunc', 'CC_AES_256_GCM_AUTH_TAG_SIZE_BYTES',
     'CC_CHAN_ALLOC_IV_SIZE_DWORD', 'CC_CHAN_ALLOC_NONCE_SIZE_DWORD',
-    'CONTROLLER_FILTER_TYPE_EMWA',
+    'CE_FIPS_SELF_TEST_AUTH_TAG_SIZE', 'CE_FIPS_SELF_TEST_DATA_SIZE',
+    'CE_FIPS_SELF_TEST_IV_SIZE', 'CONTROLLER_FILTER_TYPE_EMWA',
     'CONTROLLER_FILTER_TYPE_MOVING_MAX', 'CTRL_CMD_FB_CBC_OP',
     'CTRL_CMD_FB_CBC_OP_CLEAN', 'CTRL_CMD_FB_CBC_OP_INVALIDATE',
     'Callback1ArgVoidReturn', 'Callback5ArgVoidReturn',
+    'ChannelPBSize', 'ChannelPBSize__enumvalues',
     'FABRIC_MANAGER_SESSION', 'FABRIC_VASPACE_A', 'FALCON_ID_DPU',
     'FALCON_ID_FBFLCN', 'FALCON_ID_PMU', 'FALCON_ID_SEC2',
     'FERMI_CONTEXT_SHARE_A', 'FERMI_TWOD_A', 'FERMI_VASPACE_A',
@@ -24230,8 +25748,9 @@ __all__ = \
     'HOPPER_USERMODE_A', 'IO_VASPACE_A', 'KEPLER_CHANNEL_GPFIFO_A',
     'KEPLER_CHANNEL_GPFIFO_B', 'KEPLER_CHANNEL_GROUP_A',
     'KEPLER_DEVICE_VGPU', 'KEPLER_INLINE_TO_MEMORY_B',
-    'KERNEL_GRAPHICS_CONTEXT', 'MAXWELL_CHANNEL_GPFIFO_A',
-    'MAXWELL_DMA_COPY_A', 'MAXWELL_PROFILER',
+    'KERNEL_GRAPHICS_CONTEXT', 'LOCK_STRESS_OBJECT',
+    'MAXWELL_CHANNEL_GPFIFO_A', 'MAXWELL_DMA_COPY_A',
+    'MAXWELL_PROFILER', 'MAXWELL_PROFILER_CONTEXT',
     'MAXWELL_PROFILER_DEVICE', 'MAX_ACCESS_MEMORY_OPS',
     'MAX_ACCESS_OPS', 'MAX_EDID_SIZE_FROM_SBIOS',
     'MAX_GET_MAPPINGS_OPS', 'MMU_FAULT_BUFFER',
@@ -24314,8 +25833,12 @@ __all__ = \
     'NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_3QUARTER',
     'NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_FULL',
     'NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_HALF',
+    'NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_LINK_COUNT',
     'NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_MIN',
     'NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_OFF',
+    'NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SCOPE_PER_GPU',
+    'NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SCOPE_PER_NODE',
+    'NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SCOPE_UNSET',
     'NV0000_CTRL_CMD_GPU_QUERY_DRAIN_STATE',
     'NV0000_CTRL_CMD_GPU_SET_NVLINK_BW_MODE',
     'NV0000_CTRL_CMD_GPU_WAIT_ATTACH_ID',
@@ -24390,6 +25913,8 @@ __all__ = \
     'NV0000_CTRL_CMD_SYSTEM_GET_PLATFORM_TYPE_PARAMS_MESSAGE_ID',
     'NV0000_CTRL_CMD_SYSTEM_GET_PRIVILEGED_STATUS',
     'NV0000_CTRL_CMD_SYSTEM_GET_RM_INSTANCE_ID',
+    'NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT',
+    'NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT_MESSAGE_ID',
     'NV0000_CTRL_CMD_SYSTEM_GET_VGX_SYSTEM_INFO',
     'NV0000_CTRL_CMD_SYSTEM_GET_VGX_SYSTEM_INFO_BUFFER_SIZE',
     'NV0000_CTRL_CMD_SYSTEM_GPS_BATCH_COMMAND_MAX',
@@ -24603,7 +26128,10 @@ __all__ = \
     'NV0000_CTRL_CMD_SYSTEM_SYNC_EXTERNAL_FABRIC_MGMT',
     'NV0000_CTRL_CMD_SYSTEM_SYNC_EXTERNAL_FABRIC_MGMT_PARAMS',
     'NV0000_CTRL_CMD_SYSTEM_SYNC_EXTERNAL_FABRIC_MGMT_PARAMS_MESSAGE_ID',
-    'NV0000_CTRL_CMD_VGPU_GET_START_DATA', 'NV0000_CTRL_DIAG',
+    'NV0000_CTRL_CMD_VGPU_CREATE_DEVICE',
+    'NV0000_CTRL_CMD_VGPU_DELETE_DEVICE',
+    'NV0000_CTRL_CMD_VGPU_GET_INSTANCES',
+    'NV0000_CTRL_CMD_VGPU_VFIO_NOTIFY_RM_STATUS', 'NV0000_CTRL_DIAG',
     'NV0000_CTRL_DIAG_DUMP_RPC_PARAMS',
     'NV0000_CTRL_DIAG_DUMP_RPC_PARAMS_MESSAGE_ID',
     'NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_MAX',
@@ -25216,10 +26744,10 @@ __all__ = \
     'NV0000_CTRL_SYSTEM_GET_FEATURES_IS_EFI_INIT_TRUE',
     'NV0000_CTRL_SYSTEM_GET_FEATURES_PARAMS',
     'NV0000_CTRL_SYSTEM_GET_FEATURES_PARAMS_MESSAGE_ID',
+    'NV0000_CTRL_SYSTEM_GET_FEATURES_RM_TEST_ONLY_CODE_ENABLED_FALSE',
+    'NV0000_CTRL_SYSTEM_GET_FEATURES_RM_TEST_ONLY_CODE_ENABLED_TRUE',
     'NV0000_CTRL_SYSTEM_GET_FEATURES_SLI_FALSE',
     'NV0000_CTRL_SYSTEM_GET_FEATURES_SLI_TRUE',
-    'NV0000_CTRL_SYSTEM_GET_FEATURES_UEFI_FALSE',
-    'NV0000_CTRL_SYSTEM_GET_FEATURES_UEFI_TRUE',
     'NV0000_CTRL_SYSTEM_GET_FEATURES_UUID_BASED_MEM_SHARING_FALSE',
     'NV0000_CTRL_SYSTEM_GET_FEATURES_UUID_BASED_MEM_SHARING_TRUE',
     'NV0000_CTRL_SYSTEM_GET_GPUS_POWER_STATUS_PARAMS',
@@ -25274,6 +26802,9 @@ __all__ = \
     'NV0000_CTRL_SYSTEM_GET_RM_INSTANCE_ID_PARAMS_MESSAGE_ID',
     'NV0000_CTRL_SYSTEM_GET_VGX_SYSTEM_INFO_PARAMS',
     'NV0000_CTRL_SYSTEM_GET_VGX_SYSTEM_INFO_PARAMS_MESSAGE_ID',
+    'NV0000_CTRL_SYSTEM_GET_VRR_COOKIE_PRESENT',
+    'NV0000_CTRL_SYSTEM_GET_VRR_COOKIE_PRESENT_PARAMS',
+    'NV0000_CTRL_SYSTEM_GET_VRR_COOKIE_PRESENT_PARAMS_MESSAGE_ID',
     'NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS',
     'NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS_MESSAGE_ID',
     'NV0000_CTRL_SYSTEM_GPS_CALL_ACPI_PARAMS',
@@ -25329,6 +26860,7 @@ __all__ = \
     'NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_PERF_SENSOR_COUNTERS_PARAMS',
     'NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_SET_FRM_DATA_PARAMS',
     'NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_SET_FRM_DATA_PARAMS_MESSAGE_ID',
+    'NV0000_CTRL_SYSTEM_POWER_INFO_INDEX_MAX_SIZE',
     'NV0000_CTRL_SYSTEM_RMCTRL_CACHE_MODE_CTRL_CMD_GET',
     'NV0000_CTRL_SYSTEM_RMCTRL_CACHE_MODE_CTRL_CMD_SET',
     'NV0000_CTRL_SYSTEM_RMCTRL_CACHE_MODE_CTRL_MODE_DISABLE',
@@ -25353,15 +26885,24 @@ __all__ = \
     'NV0000_CTRL_SYSTEM_RMTRACE_MODULE_POWER',
     'NV0000_CTRL_SYSTEM_RMTRACE_MODULE_RCJOURNAL',
     'NV0000_CTRL_SYSTEM_RMTRACE_MODULE_RMAPI',
-    'NV0000_CTRL_SYSTEM_RMTRACE_MODULE_THERM', 'NV0000_CTRL_VGPU',
-    'NV0000_CTRL_VGPU_GET_START_DATA_PARAMS',
-    'NV0000_CTRL_VGPU_GET_START_DATA_PARAMS_MESSAGE_ID',
+    'NV0000_CTRL_SYSTEM_RMTRACE_MODULE_THERM',
+    'NV0000_CTRL_SYSTEM_SH_SOC_TYPE',
+    'NV0000_CTRL_SYSTEM_SH_SOC_TYPE_NA',
+    'NV0000_CTRL_SYSTEM_SH_SOC_TYPE_NV_GRACE', 'NV0000_CTRL_VGPU',
+    'NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS',
+    'NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS_MESSAGE_ID',
+    'NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS',
+    'NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS_MESSAGE_ID',
+    'NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS',
+    'NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS_MESSAGE_ID',
     'NV0000_CTRL_VGPU_GET_VGPU_VERSION',
     'NV0000_CTRL_VGPU_GET_VGPU_VERSION_PARAMS',
     'NV0000_CTRL_VGPU_GET_VGPU_VERSION_PARAMS_MESSAGE_ID',
     'NV0000_CTRL_VGPU_SET_VGPU_VERSION',
     'NV0000_CTRL_VGPU_SET_VGPU_VERSION_PARAMS',
     'NV0000_CTRL_VGPU_SET_VGPU_VERSION_PARAMS_MESSAGE_ID',
+    'NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS',
+    'NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS_MESSAGE_ID',
     'NV0000_GPUACCT_PID_MAX_COUNT', 'NV0000_GPU_MAX_GID_LENGTH',
     'NV0000_NVD_CPU_TIME_CLK_ID_DEFAULT',
     'NV0000_NVD_CPU_TIME_CLK_ID_OSTIME',
@@ -25394,8 +26935,6 @@ __all__ = \
     'NV0080_CTRL_BIF_ASPM_FEATURE_DT_L0S_ENABLED',
     'NV0080_CTRL_BIF_ASPM_FEATURE_DT_L1_DISABLED',
     'NV0080_CTRL_BIF_ASPM_FEATURE_DT_L1_ENABLED',
-    'NV0080_CTRL_BIF_GET_DMA_BASE_SYSMEM_ADDR_PARAMS',
-    'NV0080_CTRL_BIF_GET_DMA_BASE_SYSMEM_ADDR_PARAMS_MESSAGE_ID',
     'NV0080_CTRL_BIF_RESET_FLAGS_TYPE_BASE',
     'NV0080_CTRL_BIF_RESET_FLAGS_TYPE_BOOT_DEVICE',
     'NV0080_CTRL_BIF_RESET_FLAGS_TYPE_BOOT_DEVICE_FUSE',
@@ -25415,7 +26954,6 @@ __all__ = \
     'NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2_MESSAGE_ID',
     'NV0080_CTRL_CIPHER', 'NV0080_CTRL_CLK',
     'NV0080_CTRL_CMD_BIF_ASPM_CYA_UPDATE',
-    'NV0080_CTRL_CMD_BIF_GET_DMA_BASE_SYSMEM_ADDR',
     'NV0080_CTRL_CMD_BIF_GET_PCIE_POWER_CONTROL_MASK',
     'NV0080_CTRL_CMD_BIF_GET_PCIE_POWER_CONTROL_MASK_PARAMS',
     'NV0080_CTRL_CMD_BIF_GET_PCIE_POWER_CONTROL_MASK_PARAMS_MESSAGE_ID',
@@ -25456,7 +26994,6 @@ __all__ = \
     'NV0080_CTRL_CMD_FIFO_RUNLIST_GROUP_CHANNELS',
     'NV0080_CTRL_CMD_FIFO_SET_CHANNEL_PROPERTIES',
     'NV0080_CTRL_CMD_FIFO_START_RUNLIST',
-    'NV0080_CTRL_CMD_FIFO_START_SELECTED_CHANNELS',
     'NV0080_CTRL_CMD_FIFO_STOP_RUNLIST',
     'NV0080_CTRL_CMD_GPU_FIND_SUBDEVICE_HANDLE',
     'NV0080_CTRL_CMD_GPU_GET_BRAND_CAPS',
@@ -25636,14 +27173,6 @@ __all__ = \
     'NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS',
     'NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS_MESSAGE_ID',
     'NV0080_CTRL_FIFO', 'NV0080_CTRL_FIFO_CAPS_TBL_SIZE',
-    'NV0080_CTRL_FIFO_CHANNEL',
-    'NV0080_CTRL_FIFO_ENGINE_ID_BITSTREAM',
-    'NV0080_CTRL_FIFO_ENGINE_ID_ENCRYPTION',
-    'NV0080_CTRL_FIFO_ENGINE_ID_FGT',
-    'NV0080_CTRL_FIFO_ENGINE_ID_GRAPHICS',
-    'NV0080_CTRL_FIFO_ENGINE_ID_MOTION_ESTIMATION',
-    'NV0080_CTRL_FIFO_ENGINE_ID_MPEG',
-    'NV0080_CTRL_FIFO_ENGINE_ID_VIDEO',
     'NV0080_CTRL_FIFO_GET_CAPS_PARAMS',
     'NV0080_CTRL_FIFO_GET_CAPS_PARAMS_MESSAGE_ID',
     'NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS',
@@ -25701,8 +27230,6 @@ __all__ = \
     'NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_RESETENGINECONTEXT_NOPREEMPT',
     'NV0080_CTRL_FIFO_START_RUNLIST_PARAMS',
     'NV0080_CTRL_FIFO_START_RUNLIST_PARAMS_MESSAGE_ID',
-    'NV0080_CTRL_FIFO_START_SELECTED_CHANNELS_PARAMS',
-    'NV0080_CTRL_FIFO_START_SELECTED_CHANNELS_PARAMS_MESSAGE_ID',
     'NV0080_CTRL_FIFO_STOP_RUNLIST_PARAMS',
     'NV0080_CTRL_FIFO_STOP_RUNLIST_PARAMS_MESSAGE_ID',
     'NV0080_CTRL_GPU', 'NV0080_CTRL_GPU_CLASSLIST_MAX_SIZE',
@@ -25923,7 +27450,6 @@ __all__ = \
     'NV2080_CLIENT_TYPE_SCC', 'NV2080_CLIENT_TYPE_TEX',
     'NV2080_CLIENT_TYPE_VIC', 'NV2080_CLIENT_TYPE_WID',
     'NV2080_COOLER_DIAG_ZONE_NOTIFICATION_REC',
-    'NV2080_CTRLNVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS',
     'NV2080_CTRL_ACPI_DSM_READ_SIZE', 'NV2080_CTRL_ACR',
     'NV2080_CTRL_ASPM_DISABLE_FLAGS_BIF_ENABLE_ASPM_DT_L1',
     'NV2080_CTRL_ASPM_DISABLE_FLAGS_CL_ASPM_L1_CHIPSET_DISABLED',
@@ -26001,10 +27527,6 @@ __all__ = \
     'NV2080_CTRL_BUS_GET_EOM_STATUS_PARAMS',
     'NV2080_CTRL_BUS_GET_EOM_STATUS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_BUS_GET_GPU_MULTIFUNC_STATE',
-    'NV2080_CTRL_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED_2500MBPS',
-    'NV2080_CTRL_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED_5000MBPS',
-    'NV2080_CTRL_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS',
-    'NV2080_CTRL_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_BUS_GET_INFO_PARAMS',
     'NV2080_CTRL_BUS_GET_INFO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_BUS_GET_INFO_V2_PARAMS',
@@ -26019,8 +27541,6 @@ __all__ = \
     'NV2080_CTRL_BUS_GET_PEX_COUNTERS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_BUS_GET_PEX_UTIL_COUNTERS_PARAMS',
     'NV2080_CTRL_BUS_GET_PEX_UTIL_COUNTERS_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_BUS_HWBC_GET_UPSTREAM_BAR0_PARAMS',
-    'NV2080_CTRL_BUS_HWBC_GET_UPSTREAM_BAR0_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_BUS_INFO',
     'NV2080_CTRL_BUS_INFO_CAPS_CHIP_INTEGRATED',
     'NV2080_CTRL_BUS_INFO_CAPS_NEED_IO_FLUSH',
@@ -26210,7 +27730,9 @@ __all__ = \
     'NV2080_CTRL_BUS_MAP_BAR2_PARAMS',
     'NV2080_CTRL_BUS_MAP_BAR2_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_BUS_MAX_NUM_GPUS', 'NV2080_CTRL_BUS_MAX_NUM_LANES',
-    'NV2080_CTRL_BUS_MAX_PCI_BARS', 'NV2080_CTRL_BUS_PCI_BAR_INFO',
+    'NV2080_CTRL_BUS_MAX_PCI_BARS',
+    'NV2080_CTRL_BUS_PCIE_GPU_ATOMIC_OP_INFO',
+    'NV2080_CTRL_BUS_PCI_BAR_INFO',
     'NV2080_CTRL_BUS_PEX_COUNTER_8B10B_ERRORS_COUNT',
     'NV2080_CTRL_BUS_PEX_COUNTER_ASLM_COUNT',
     'NV2080_CTRL_BUS_PEX_COUNTER_BAD_DLLP_COUNT',
@@ -26262,10 +27784,6 @@ __all__ = \
     'NV2080_CTRL_BUS_PEX_UTIL_COUNTER_TX_L0S',
     'NV2080_CTRL_BUS_SERVICE_GPU_MULTIFUNC_STATE_PARAMS',
     'NV2080_CTRL_BUS_SERVICE_GPU_MULTIFUNC_STATE_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED_2500MBPS',
-    'NV2080_CTRL_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED_5000MBPS',
-    'NV2080_CTRL_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS',
-    'NV2080_CTRL_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS',
     'NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_BUS_SET_PCIE_LINK_WIDTH_ERROR_PCIE_CFG_ACCESS',
@@ -26300,13 +27818,28 @@ __all__ = \
     'NV2080_CTRL_CE_GET_CAPS_V2_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS',
     'NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS',
+    'NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS',
     'NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS',
     'NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS',
+    'NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS',
+    'NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CE_GET_PHYSICAL_CAPS_PARAMS',
     'NV2080_CTRL_CE_GET_PHYSICAL_CAPS_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_CE_MAX_HSHUBS',
+    'NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS',
+    'NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_CE_LCE_TYPE', 'NV2080_CTRL_CE_LCE_TYPE_C2C',
+    'NV2080_CTRL_CE_LCE_TYPE_C2C_D2H',
+    'NV2080_CTRL_CE_LCE_TYPE_C2C_H2D',
+    'NV2080_CTRL_CE_LCE_TYPE_DECOMP',
+    'NV2080_CTRL_CE_LCE_TYPE_NVLINK_PEER',
+    'NV2080_CTRL_CE_LCE_TYPE_PCIE', 'NV2080_CTRL_CE_LCE_TYPE_PCIE_RD',
+    'NV2080_CTRL_CE_LCE_TYPE_PCIE_WR',
+    'NV2080_CTRL_CE_LCE_TYPE_SCRUB', 'NV2080_CTRL_CE_MAX_HSHUBS',
     'NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS',
     'NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CE_UPDATE_CLASS_DB_PARAMS',
@@ -26314,6 +27847,8 @@ __all__ = \
     'NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_INVALID_LCE',
     'NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS',
     'NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS',
+    'NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CIPHER', 'NV2080_CTRL_CLK',
     'NV2080_CTRL_CLK_LEGACY_NON_PRIVILEGED',
     'NV2080_CTRL_CLK_LEGACY_PRIVILEGED',
@@ -26338,9 +27873,25 @@ __all__ = \
     'NV2080_CTRL_CMD_BUS_GET_C2C_INFO_PARAMS',
     'NV2080_CTRL_CMD_BUS_GET_C2C_INFO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CMD_BUS_GET_EOM_STATUS',
-    'NV2080_CTRL_CMD_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED',
     'NV2080_CTRL_CMD_BUS_GET_INFO', 'NV2080_CTRL_CMD_BUS_GET_INFO_V2',
     'NV2080_CTRL_CMD_BUS_GET_NVLINK_PEER_ID_MASK',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_128_NO',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_128_YES',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_32_NO',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_32_YES',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_64_NO',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_64_YES',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_32_NO',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_32_YES',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_64_NO',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_64_YES',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_32_NO',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_32_YES',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_64_NO',
+    'NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_64_YES',
     'NV2080_CTRL_CMD_BUS_GET_PCIE_LTR_LATENCY',
     'NV2080_CTRL_CMD_BUS_GET_PCIE_LTR_LATENCY_PARAMS',
     'NV2080_CTRL_CMD_BUS_GET_PCIE_LTR_LATENCY_PARAMS_MESSAGE_ID',
@@ -26374,13 +27925,14 @@ __all__ = \
     'NV2080_CTRL_CMD_BUS_GET_UPHY_DLN_CFG_SPACE',
     'NV2080_CTRL_CMD_BUS_GET_UPHY_DLN_CFG_SPACE_PARAMS',
     'NV2080_CTRL_CMD_BUS_GET_UPHY_DLN_CFG_SPACE_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_CMD_BUS_HWBC_GET_UPSTREAM_BAR0',
     'NV2080_CTRL_CMD_BUS_MAP_BAR2',
+    'NV2080_CTRL_CMD_BUS_PCIE_ATOMICS_CAPTYPE_GPU',
+    'NV2080_CTRL_CMD_BUS_PCIE_ATOMICS_CAPTYPE_P2P',
+    'NV2080_CTRL_CMD_BUS_PCIE_ATOMICS_CAPTYPE_SYSMEM',
     'NV2080_CTRL_CMD_BUS_SERVICE_GPU_MULTIFUNC_STATE',
     'NV2080_CTRL_CMD_BUS_SET_EOM_PARAMETERS',
     'NV2080_CTRL_CMD_BUS_SET_EOM_PARAMETERS_PARAMS',
     'NV2080_CTRL_CMD_BUS_SET_EOM_PARAMETERS_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_CMD_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED',
     'NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING',
     'NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING_CONNECTION_TYPE_C2C',
     'NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING_CONNECTION_TYPE_INVALID',
@@ -26400,17 +27952,21 @@ __all__ = \
     'NV2080_CTRL_CMD_CE_GET_ALL_PHYSICAL_CAPS',
     'NV2080_CTRL_CMD_CE_GET_CAPS', 'NV2080_CTRL_CMD_CE_GET_CAPS_V2',
     'NV2080_CTRL_CMD_CE_GET_CE_PCE_MASK',
+    'NV2080_CTRL_CMD_CE_GET_DECOMP_LCE_MASK',
     'NV2080_CTRL_CMD_CE_GET_FAULT_METHOD_BUFFER_SIZE',
     'NV2080_CTRL_CMD_CE_GET_HUB_PCE_MASK',
+    'NV2080_CTRL_CMD_CE_GET_HUB_PCE_MASK_V2',
+    'NV2080_CTRL_CMD_CE_GET_LCE_SHIM_INFO',
     'NV2080_CTRL_CMD_CE_GET_PHYSICAL_CAPS',
+    'NV2080_CTRL_CMD_CE_IS_DECOMP_LCE_ENABLED',
     'NV2080_CTRL_CMD_CE_SET_PCE_LCE_CONFIG',
     'NV2080_CTRL_CMD_CE_UPDATE_CLASS_DB',
     'NV2080_CTRL_CMD_CE_UPDATE_PCE_LCE_MAPPINGS',
+    'NV2080_CTRL_CMD_CE_UPDATE_PCE_LCE_MAPPINGS_V2',
     'NV2080_CTRL_CMD_DMABUF_EXPORT_OBJECTS_TO_FD',
     'NV2080_CTRL_CMD_DMA_GET_INFO',
     'NV2080_CTRL_CMD_DMA_INVALIDATE_TLB',
     'NV2080_CTRL_CMD_ECC_GET_CLIENT_EXPOSED_COUNTERS',
-    'NV2080_CTRL_CMD_ECC_GET_ECI_COUNTERS',
     'NV2080_CTRL_CMD_ECC_GET_VOLATILE_COUNTS',
     'NV2080_CTRL_CMD_EVENT_RATS_GSP_TRACE_BIND_EVTBUF',
     'NV2080_CTRL_CMD_EVENT_SET_GUEST_MSI',
@@ -26475,7 +28031,6 @@ __all__ = \
     'NV2080_CTRL_CMD_FB_GET_CALIBRATION_LOCK_FAILED',
     'NV2080_CTRL_CMD_FB_GET_CAL_FLAG_NONE',
     'NV2080_CTRL_CMD_FB_GET_CAL_FLAG_RESET',
-    'NV2080_CTRL_CMD_FB_GET_CARVEOUT_ADDRESS_INFO',
     'NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR',
     'NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR_PARAMS',
     'NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR_PARAMS_MESSAGE_ID',
@@ -26499,10 +28054,7 @@ __all__ = \
     'NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG',
     'NV2080_CTRL_CMD_FB_GET_FS_INFO',
-    'NV2080_CTRL_CMD_FB_GET_GPU_CACHE_ALLOC_POLICY',
-    'NV2080_CTRL_CMD_FB_GET_GPU_CACHE_ALLOC_POLICY_V2',
     'NV2080_CTRL_CMD_FB_GET_GPU_CACHE_INFO',
-    'NV2080_CTRL_CMD_FB_GET_GPU_CACHE_PROMOTION_POLICY',
     'NV2080_CTRL_CMD_FB_GET_INFO', 'NV2080_CTRL_CMD_FB_GET_INFO_V2',
     'NV2080_CTRL_CMD_FB_GET_LTC_INFO_FOR_FBP',
     'NV2080_CTRL_CMD_FB_GET_MEM_ALIGNMENT',
@@ -26511,6 +28063,7 @@ __all__ = \
     'NV2080_CTRL_CMD_FB_GET_REMAPPED_ROWS',
     'NV2080_CTRL_CMD_FB_GET_ROW_REMAPPER_HISTOGRAM',
     'NV2080_CTRL_CMD_FB_GET_SEMAPHORE_SURFACE_LAYOUT',
+    'NV2080_CTRL_CMD_FB_GET_STATIC_BAR1_INFO',
     'NV2080_CTRL_CMD_FB_IS_KIND', 'NV2080_CTRL_CMD_FB_OFFLINE_PAGES',
     'NV2080_CTRL_CMD_FB_PATCH_PBR_FOR_MINING',
     'NV2080_CTRL_CMD_FB_QUERY_ACR_REGION',
@@ -26519,9 +28072,6 @@ __all__ = \
     'NV2080_CTRL_CMD_FB_SETUP_VPR_REGION',
     'NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS',
     'NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_CMD_FB_SET_GPU_CACHE_ALLOC_POLICY',
-    'NV2080_CTRL_CMD_FB_SET_GPU_CACHE_ALLOC_POLICY_V2',
-    'NV2080_CTRL_CMD_FB_SET_GPU_CACHE_PROMOTION_POLICY',
     'NV2080_CTRL_CMD_FB_SET_READ_LIMIT', 'NV2080_CTRL_CMD_FB_SET_RRD',
     'NV2080_CTRL_CMD_FB_SET_VPR',
     'NV2080_CTRL_CMD_FB_SET_WRITE_LIMIT',
@@ -26542,6 +28092,7 @@ __all__ = \
     'NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CMD_FIFO_DISABLE_CHANNELS',
     'NV2080_CTRL_CMD_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION',
+    'NV2080_CTRL_CMD_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2',
     'NV2080_CTRL_CMD_FIFO_DISABLE_USERMODE_CHANNELS',
     'NV2080_CTRL_CMD_FIFO_GET_ALLOCATED_CHANNELS',
     'NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_APERTURE_INVALID',
@@ -26587,6 +28138,7 @@ __all__ = \
     'NV2080_CTRL_CMD_GET_GPU_FABRIC_PROBE_INFO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CMD_GET_P2P_CAPS', 'NV2080_CTRL_CMD_GET_RC_INFO',
     'NV2080_CTRL_CMD_GET_RC_RECOVERY',
+    'NV2080_CTRL_CMD_GMMU_COMMIT_TLB_INVALIDATE',
     'NV2080_CTRL_CMD_GPU_COMPUTE_TIMESLICE_DEFAULT',
     'NV2080_CTRL_CMD_GPU_COMPUTE_TIMESLICE_LONG',
     'NV2080_CTRL_CMD_GPU_COMPUTE_TIMESLICE_MAX',
@@ -26640,10 +28192,12 @@ __all__ = \
     'NV2080_CTRL_CMD_GPU_GET_PHYSICAL_BRIDGE_VERSION_INFO',
     'NV2080_CTRL_CMD_GPU_GET_PIDS',
     'NV2080_CTRL_CMD_GPU_GET_PID_INFO',
+    'NV2080_CTRL_CMD_GPU_GET_RECOVERY_ACTION',
     'NV2080_CTRL_CMD_GPU_GET_RESET_STATUS',
     'NV2080_CTRL_CMD_GPU_GET_SDM',
     'NV2080_CTRL_CMD_GPU_GET_SHORT_NAME_STRING',
     'NV2080_CTRL_CMD_GPU_GET_SIMULATION_INFO',
+    'NV2080_CTRL_CMD_GPU_GET_VF_CAPS',
     'NV2080_CTRL_CMD_GPU_GET_VMMU_SEGMENT_SIZE',
     'NV2080_CTRL_CMD_GPU_GET_VPR_CAPS',
     'NV2080_CTRL_CMD_GPU_GET_VPR_INFO',
@@ -26709,6 +28263,7 @@ __all__ = \
     'NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_MAIN',
     'NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_PAGEPOOL',
     'NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_RTV',
+    'NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_SETUP',
     'NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_SPILL',
     'NV2080_CTRL_CMD_GR_CTXSW_SETUP_BIND',
     'NV2080_CTRL_CMD_GR_CTXSW_SMPC_MODE',
@@ -26749,6 +28304,7 @@ __all__ = \
     'NV2080_CTRL_CMD_GR_PC_SAMPLING_MODE',
     'NV2080_CTRL_CMD_GR_SET_CTXSW_PREEMPTION_MODE',
     'NV2080_CTRL_CMD_GR_SET_GPC_TILE_MAP',
+    'NV2080_CTRL_CMD_GR_SET_LG_SECTOR_PROMOTION',
     'NV2080_CTRL_CMD_GR_SET_TPC_PARTITION_MODE',
     'NV2080_CTRL_CMD_GSP_GET_FEATURES',
     'NV2080_CTRL_CMD_GSP_GET_RM_HEAP_STATS',
@@ -26767,7 +28323,6 @@ __all__ = \
     'NV2080_CTRL_CMD_INTERNAL_BIF_GET_ASPM_L1_FLAGS',
     'NV2080_CTRL_CMD_INTERNAL_BIF_GET_STATIC_INFO',
     'NV2080_CTRL_CMD_INTERNAL_BIF_SET_PCIE_RO',
-    'NV2080_CTRL_CMD_INTERNAL_BSP_GET_CAPS',
     'NV2080_CTRL_CMD_INTERNAL_BUS_CREATE_C2C_PEER_MAPPING',
     'NV2080_CTRL_CMD_INTERNAL_BUS_DESTROY_P2P_MAILBOX',
     'NV2080_CTRL_CMD_INTERNAL_BUS_FLUSH_WITH_SYSMEMBAR',
@@ -26778,15 +28333,28 @@ __all__ = \
     'NV2080_CTRL_CMD_INTERNAL_BUS_SETUP_P2P_MAILBOX_REMOTE',
     'NV2080_CTRL_CMD_INTERNAL_BUS_SETUP_P2P_MAILBOX_REMOTE_PARAMS',
     'NV2080_CTRL_CMD_INTERNAL_BUS_SETUP_P2P_MAILBOX_REMOTE_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_CMD_INTERNAL_CCU_GET_SAMPLE_INFO',
     'NV2080_CTRL_CMD_INTERNAL_CCU_MAP',
     'NV2080_CTRL_CMD_INTERNAL_CCU_SET_STREAM_STATE',
     'NV2080_CTRL_CMD_INTERNAL_CCU_UNMAP',
+    'NV2080_CTRL_CMD_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE',
     'NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS',
     'NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS',
     'NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_GET_STATIC_INFO',
+    'NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION',
+    'NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_ROTATE_KEYS',
     'NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE',
     'NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE_PARAMS',
     'NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY',
+    'NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY_PARAMS',
+    'NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE',
+    'NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_FLAG_START_KEEP_NEWEST',
+    'NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_FLAG_START_KEEP_OLDEST',
+    'NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_FLAG_STOP',
+    'NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_PARAMS',
+    'NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CMD_INTERNAL_DETECT_HS_VIDEO_BRIDGE',
     'NV2080_CTRL_CMD_INTERNAL_DEVICE_INFO_MAX_ENTRIES',
     'NV2080_CTRL_CMD_INTERNAL_DISPLAY_ACPI_SUBSYSTEM_ACTIVATED',
@@ -26808,15 +28376,14 @@ __all__ = \
     'NV2080_CTRL_CMD_INTERNAL_DISP_PINSETS_TO_LOCKPINS',
     'NV2080_CTRL_CMD_INTERNAL_DISP_SET_SLI_LINK_GPIO_SW_CONTROL',
     'NV2080_CTRL_CMD_INTERNAL_FBSR_INIT',
-    'NV2080_CTRL_CMD_INTERNAL_FBSR_SEND_REGION_INFO',
     'NV2080_CTRL_CMD_INTERNAL_FB_GET_HEAP_RESERVATION_SIZE',
     'NV2080_CTRL_CMD_INTERNAL_FIFO_GET_NUM_CHANNELS',
     'NV2080_CTRL_CMD_INTERNAL_FIFO_GET_NUM_SECURE_CHANNELS',
     'NV2080_CTRL_CMD_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS',
-    'NV2080_CTRL_CMD_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_FLAGS',
-    'NV2080_CTRL_CMD_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_MEMORY',
+    'NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING',
+    'NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING_PARAMS',
+    'NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CMD_INTERNAL_GCX_ENTRY_PREREQUISITE',
-    'NV2080_CTRL_CMD_INTERNAL_GET_COHERENT_FB_APERTURE_SIZE',
     'NV2080_CTRL_CMD_INTERNAL_GET_DEVICE_INFO_TABLE',
     'NV2080_CTRL_CMD_INTERNAL_GET_EGPU_BRIDGE_INFO',
     'NV2080_CTRL_CMD_INTERNAL_GET_ENABLED_SEC2_CLASSES',
@@ -26837,10 +28404,13 @@ __all__ = \
     'NV2080_CTRL_CMD_INTERNAL_GPIO_READ_INPUT',
     'NV2080_CTRL_CMD_INTERNAL_GPU_GET_CHIP_INFO',
     'NV2080_CTRL_CMD_INTERNAL_GPU_GET_FABRIC_PROBE_INFO',
+    'NV2080_CTRL_CMD_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP',
+    'NV2080_CTRL_CMD_INTERNAL_GPU_GET_PF_BAR1_SPA',
     'NV2080_CTRL_CMD_INTERNAL_GPU_GET_SMC_MODE',
     'NV2080_CTRL_CMD_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP',
     'NV2080_CTRL_CMD_INTERNAL_GPU_INVALIDATE_FABRIC_PROBE',
     'NV2080_CTRL_CMD_INTERNAL_GPU_RESUME_FABRIC_PROBE',
+    'NV2080_CTRL_CMD_INTERNAL_GPU_SET_ILLUM',
     'NV2080_CTRL_CMD_INTERNAL_GPU_START_FABRIC_PROBE',
     'NV2080_CTRL_CMD_INTERNAL_GPU_STOP_FABRIC_PROBE',
     'NV2080_CTRL_CMD_INTERNAL_GPU_SUSPEND_FABRIC_PROBE',
@@ -26851,11 +28421,10 @@ __all__ = \
     'NV2080_CTRL_CMD_INTERNAL_GR_SET_FECS_TRACE_HW_ENABLE',
     'NV2080_CTRL_CMD_INTERNAL_GR_SET_FECS_TRACE_RD_OFFSET',
     'NV2080_CTRL_CMD_INTERNAL_GR_SET_FECS_TRACE_WR_OFFSET',
-    'NV2080_CTRL_CMD_INTERNAL_GSP_START_TRACE',
-    'NV2080_CTRL_CMD_INTERNAL_GSP_START_TRACE_INFO_PARAMS',
-    'NV2080_CTRL_CMD_INTERNAL_GSP_START_TRACE_INFO_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_CMD_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR',
     'NV2080_CTRL_CMD_INTERNAL_GSYNC_ATTACH_AND_INIT',
     'NV2080_CTRL_CMD_INTERNAL_GSYNC_GET_DISPLAY_IDS',
+    'NV2080_CTRL_CMD_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE',
     'NV2080_CTRL_CMD_INTERNAL_GSYNC_GET_VERTICAL_ACTIVE_LINES',
     'NV2080_CTRL_CMD_INTERNAL_GSYNC_IS_DISPLAYID_VALID',
     'NV2080_CTRL_CMD_INTERNAL_GSYNC_OPTIMIZE_TIMING_PARAMETERS',
@@ -26864,12 +28433,14 @@ __all__ = \
     'NV2080_CTRL_CMD_INTERNAL_HSHUB_EGM_CONFIG',
     'NV2080_CTRL_CMD_INTERNAL_HSHUB_FIRST_LINK_PEER_ID',
     'NV2080_CTRL_CMD_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS',
+    'NV2080_CTRL_CMD_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM',
     'NV2080_CTRL_CMD_INTERNAL_HSHUB_GET_NUM_UNITS',
     'NV2080_CTRL_CMD_INTERNAL_HSHUB_NEXT_HSHUB_ID',
     'NV2080_CTRL_CMD_INTERNAL_HSHUB_PEER_CONN_CONFIG',
     'NV2080_CTRL_CMD_INTERNAL_INIT_BRIGHTC_STATE_LOAD',
     'NV2080_CTRL_CMD_INTERNAL_INIT_USER_SHARED_DATA',
     'NV2080_CTRL_CMD_INTERNAL_INTR_GET_KERNEL_TABLE',
+    'NV2080_CTRL_CMD_INTERNAL_KGR_INIT_BUG4208224_WAR',
     'NV2080_CTRL_CMD_INTERNAL_KMEMSYS_GET_MIG_MEMORY_CONFIG',
     'NV2080_CTRL_CMD_INTERNAL_KMIGMGR_EXPORT_GPU_INSTANCE',
     'NV2080_CTRL_CMD_INTERNAL_KMIGMGR_IMPORT_GPU_INSTANCE',
@@ -26896,9 +28467,16 @@ __all__ = \
     'NV2080_CTRL_CMD_INTERNAL_MIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE',
     'NV2080_CTRL_CMD_INTERNAL_MIGMGR_SET_GPU_INSTANCES',
     'NV2080_CTRL_CMD_INTERNAL_MIGMGR_SET_PARTITIONING_MODE',
-    'NV2080_CTRL_CMD_INTERNAL_MSENC_GET_CAPS',
+    'NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK',
     'NV2080_CTRL_CMD_INTERNAL_NVLINK_ENABLE_COMPUTE_PEER_ADDR',
+    'NV2080_CTRL_CMD_INTERNAL_NVLINK_ENABLE_NVLINK_PEER',
+    'NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_ALI_ENABLED',
     'NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_SET_NVSWITCH_FABRIC_ADDR',
+    'NV2080_CTRL_CMD_INTERNAL_NVLINK_POST_FATAL_ERROR_RECOVERY',
+    'NV2080_CTRL_CMD_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER',
+    'NV2080_CTRL_CMD_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER',
+    'NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_HSHUB_MUX',
+    'NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID',
     'NV2080_CTRL_CMD_INTERNAL_PERF_BOOST_CLEAR_3X',
     'NV2080_CTRL_CMD_INTERNAL_PERF_BOOST_SET_2X',
     'NV2080_CTRL_CMD_INTERNAL_PERF_BOOST_SET_3X',
@@ -26993,10 +28571,8 @@ __all__ = \
     'NV2080_CTRL_CMD_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS',
     'NV2080_CTRL_CMD_MC_GET_MANUFACTURER',
     'NV2080_CTRL_CMD_MC_GET_STATIC_INTR_TABLE',
-    'NV2080_CTRL_CMD_MC_QUERY_HOSTCLK_SLOWDOWN_STATUS',
-    'NV2080_CTRL_CMD_MC_SERVICE_INTERRUPTS',
-    'NV2080_CTRL_CMD_MC_SET_HOSTCLK_SLOWDOWN_STATUS',
-    'NV2080_CTRL_CMD_NULL', 'NV2080_CTRL_CMD_NVD_GET_DUMP',
+    'NV2080_CTRL_CMD_MC_SERVICE_INTERRUPTS', 'NV2080_CTRL_CMD_NULL',
+    'NV2080_CTRL_CMD_NVD_GET_DUMP',
     'NV2080_CTRL_CMD_NVD_GET_DUMP_SIZE',
     'NV2080_CTRL_CMD_NVD_GET_NOCAT_JOURNAL',
     'NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD',
@@ -27005,25 +28581,26 @@ __all__ = \
     'NV2080_CTRL_CMD_NVD_SET_NOCAT_JOURNAL_DATA',
     'NV2080_CTRL_CMD_NVLINK_ARE_LINKS_TRAINED',
     'NV2080_CTRL_CMD_NVLINK_CLEAR_COUNTERS',
+    'NV2080_CTRL_CMD_NVLINK_CLEAR_COUNTERS_V2',
     'NV2080_CTRL_CMD_NVLINK_CLEAR_LP_COUNTERS',
     'NV2080_CTRL_CMD_NVLINK_CLEAR_REFRESH_COUNTERS',
-    'NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK',
     'NV2080_CTRL_CMD_NVLINK_CYCLE_LINK',
     'NV2080_CTRL_CMD_NVLINK_DIRECT_CONNECT_CHECK',
     'NV2080_CTRL_CMD_NVLINK_DISABLE_DL_INTERRUPTS',
     'NV2080_CTRL_CMD_NVLINK_ENABLE_LINKS',
     'NV2080_CTRL_CMD_NVLINK_ENABLE_LINKS_POST_TOPOLOGY',
-    'NV2080_CTRL_CMD_NVLINK_ENABLE_NVLINK_PEER',
     'NV2080_CTRL_CMD_NVLINK_ENABLE_SYSMEM_NVLINK_ATS',
     'NV2080_CTRL_CMD_NVLINK_EOM_CONTROL',
     'NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND',
     'NV2080_CTRL_CMD_NVLINK_FATAL_ERROR_RECOVERY',
-    'NV2080_CTRL_CMD_NVLINK_GET_ALI_ENABLED',
+    'NV2080_CTRL_CMD_NVLINK_GET_BW_MODE',
     'NV2080_CTRL_CMD_NVLINK_GET_COUNTERS',
+    'NV2080_CTRL_CMD_NVLINK_GET_COUNTERS_V2',
     'NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES',
     'NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS',
     'NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CMD_NVLINK_GET_ERR_INFO',
+    'NV2080_CTRL_CMD_NVLINK_GET_HW_ERROR_INJECT',
     'NV2080_CTRL_CMD_NVLINK_GET_IOCTRL_DEVICE_INFO',
     'NV2080_CTRL_CMD_NVLINK_GET_L1_THRESHOLD',
     'NV2080_CTRL_CMD_NVLINK_GET_LINK_AND_CLOCK_INFO',
@@ -27043,10 +28620,13 @@ __all__ = \
     'NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS',
     'NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS',
     'NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_CMD_NVLINK_GET_PLATFORM_INFO',
     'NV2080_CTRL_CMD_NVLINK_GET_PORT_EVENTS',
     'NV2080_CTRL_CMD_NVLINK_GET_POWER_STATE',
     'NV2080_CTRL_CMD_NVLINK_GET_REFRESH_COUNTERS',
     'NV2080_CTRL_CMD_NVLINK_GET_SET_NVSWITCH_FLA_ADDR',
+    'NV2080_CTRL_CMD_NVLINK_GET_SUPPORTED_BW_MODE',
+    'NV2080_CTRL_CMD_NVLINK_GET_SUPPORTED_COUNTERS',
     'NV2080_CTRL_CMD_NVLINK_HSHUB_GET_SYSMEM_NVLINK_MASK',
     'NV2080_CTRL_CMD_NVLINK_INBAND_SEND_DATA',
     'NV2080_CTRL_CMD_NVLINK_INJECT_ERROR',
@@ -27058,14 +28638,50 @@ __all__ = \
     'NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS',
     'NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CMD_NVLINK_POST_FAULT_UP',
-    'NV2080_CTRL_CMD_NVLINK_POST_SETUP_NVLINK_PEER',
     'NV2080_CTRL_CMD_NVLINK_PRE_LINK_TRAIN_ALI',
-    'NV2080_CTRL_CMD_NVLINK_PRE_SETUP_NVLINK_PEER',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_GHPKT',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MCAM',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MGIR',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MLPC',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MORD',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MPSCR',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTCAP',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTECR',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTEIM',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTEWE',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTIE',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTIM',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTRC_CAP',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTRC_CONF',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTRC_CTRL',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTSDE',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_MTSR',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PAOS',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PDDR',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PGUID',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PLIB',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PLTC',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PMAOS',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PMLP',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PMTU',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPAOS',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPCNT',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPHCR',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPLM',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPLR',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPRT',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPSLC',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPSLS',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PPTT',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_PTYS',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_SLRG',
+    'NV2080_CTRL_CMD_NVLINK_PRM_ACCESS_SLTP',
     'NV2080_CTRL_CMD_NVLINK_PROCESS_FORCED_CONFIGS',
     'NV2080_CTRL_CMD_NVLINK_PROCESS_INIT_DISABLED_LINKS',
     'NV2080_CTRL_CMD_NVLINK_PROGRAM_BUFFERREADY',
     'NV2080_CTRL_CMD_NVLINK_PROGRAM_LINK_SPEED',
     'NV2080_CTRL_CMD_NVLINK_READ_TP_COUNTERS',
+    'NV2080_CTRL_CMD_NVLINK_READ_UPHY_CLN',
     'NV2080_CTRL_CMD_NVLINK_READ_UPHY_PAD_LANE_REG',
     'NV2080_CTRL_CMD_NVLINK_REMOVE_NVLINK_MAPPING',
     'NV2080_CTRL_CMD_NVLINK_RESET_LINKS',
@@ -27074,7 +28690,9 @@ __all__ = \
     'NV2080_CTRL_CMD_NVLINK_SETUP_EOM_PARAMS',
     'NV2080_CTRL_CMD_NVLINK_SETUP_EOM_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_CMD_NVLINK_SETUP_NVLINK_SYSMEM',
+    'NV2080_CTRL_CMD_NVLINK_SET_BW_MODE',
     'NV2080_CTRL_CMD_NVLINK_SET_ERROR_INJECTION_MODE',
+    'NV2080_CTRL_CMD_NVLINK_SET_HW_ERROR_INJECT',
     'NV2080_CTRL_CMD_NVLINK_SET_L1_THRESHOLD',
     'NV2080_CTRL_CMD_NVLINK_SET_LOOPBACK_MODE',
     'NV2080_CTRL_CMD_NVLINK_SET_NVLINK_PEER',
@@ -27082,10 +28700,8 @@ __all__ = \
     'NV2080_CTRL_CMD_NVLINK_SYNC_LINK_MASKS_AND_VBIOS_INFO',
     'NV2080_CTRL_CMD_NVLINK_SYNC_NVLINK_SHUTDOWN_PROPS',
     'NV2080_CTRL_CMD_NVLINK_UPDATE_CURRENT_CONFIG',
-    'NV2080_CTRL_CMD_NVLINK_UPDATE_HSHUB_MUX',
     'NV2080_CTRL_CMD_NVLINK_UPDATE_LINK_CONNECTION',
     'NV2080_CTRL_CMD_NVLINK_UPDATE_PEER_LINK_MASK',
-    'NV2080_CTRL_CMD_NVLINK_UPDATE_REMOTE_LOCAL_SID',
     'NV2080_CTRL_CMD_OS_UNIX_ALLOW_DISALLOW_GCOFF',
     'NV2080_CTRL_CMD_OS_UNIX_AUDIO_DYNAMIC_POWER',
     'NV2080_CTRL_CMD_OS_UNIX_FLUSH_SNAPSHOT_BUFFER',
@@ -27159,6 +28775,7 @@ __all__ = \
     'NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO',
     'NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU',
     'NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_FREE_STATES',
+    'NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_GET_FRAME_RATE_LIMITER_STATUS',
     'NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING',
     'NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_GET_PGPU_MIGRATION_SUPPORT',
     'NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE',
@@ -27222,8 +28839,6 @@ __all__ = \
     'NV2080_CTRL_ECC',
     'NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS',
     'NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_ECC_GET_ECI_COUNTERS_PARAMS',
-    'NV2080_CTRL_ECC_GET_ECI_COUNTERS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS',
     'NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_ECC_NON_PRIVILEGED',
@@ -27285,6 +28900,8 @@ __all__ = \
     'NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS',
     'NV2080_CTRL_FB_FS_INFO_INVALID_QUERY',
     'NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS',
+    'NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK',
+    'NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS',
     'NV2080_CTRL_FB_FS_INFO_LTC_MASK',
     'NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS',
     'NV2080_CTRL_FB_FS_INFO_LTS_MASK',
@@ -27297,6 +28914,8 @@ __all__ = \
     'NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS',
     'NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK',
     'NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS',
+    'NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK',
+    'NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS',
     'NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK',
     'NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS',
     'NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK',
@@ -27317,10 +28936,6 @@ __all__ = \
     'NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_FB_GET_FS_INFO_PARAMS',
     'NV2080_CTRL_FB_GET_FS_INFO_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_FB_GET_GPU_CACHE_ALLOC_POLICY_PARAMS',
-    'NV2080_CTRL_FB_GET_GPU_CACHE_ALLOC_POLICY_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_FB_GET_GPU_CACHE_ALLOC_POLICY_V2_PARAMS',
-    'NV2080_CTRL_FB_GET_GPU_CACHE_ALLOC_POLICY_V2_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_FB_GET_GPU_CACHE_INFO_BYPASS_MODE_DISABLED',
     'NV2080_CTRL_FB_GET_GPU_CACHE_INFO_BYPASS_MODE_ENABLED',
     'NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS',
@@ -27362,29 +28977,8 @@ __all__ = \
     'NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_CAPS_MONITORED_FENCE_SUPPORTED',
     'NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS',
     'NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_FB_GET_SYSTEM_CARVEOUT_ADDRESS_SPACE_INFO',
-    'NV2080_CTRL_FB_GET_SYSTEM_CARVEOUT_ADDRESS_SPACE_INFO_MESSAGE_ID',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_PARAMS',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_READS_NO',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_READS_YES',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_ENTRY',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_ENTRY_SIZE',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_PARAMS',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_READS_ALLOW_NO',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_READS_ALLOW_YES',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_READS_DISABLE',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_READS_ENABLE',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_WRITES_ALLOW_NO',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_WRITES_ALLOW_YES',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_WRITES_DISABLE',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_WRITES_ENABLE',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_WRITES_NO',
-    'NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_WRITES_YES',
-    'NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_FULL',
-    'NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_HALF',
-    'NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_NONE',
-    'NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_PARAMS',
-    'NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_QUARTER',
+    'NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS',
+    'NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_FB_HISTOGRAM_IDX_MAX_REMAPPED_ROWS',
     'NV2080_CTRL_FB_HISTOGRAM_IDX_MIXED_REMAPPED_REMAINING_ROWS',
     'NV2080_CTRL_FB_HISTOGRAM_IDX_NO_REMAPPED_ROWS',
@@ -27425,6 +29019,8 @@ __all__ = \
     'NV2080_CTRL_FB_INFO_INDEX_LARGEST_FREE_REGION_SIZE_KB',
     'NV2080_CTRL_FB_INFO_INDEX_LTC_COUNT',
     'NV2080_CTRL_FB_INFO_INDEX_LTC_MASK',
+    'NV2080_CTRL_FB_INFO_INDEX_LTC_MASK_0',
+    'NV2080_CTRL_FB_INFO_INDEX_LTC_MASK_1',
     'NV2080_CTRL_FB_INFO_INDEX_LTS_COUNT',
     'NV2080_CTRL_FB_INFO_INDEX_MAPPABLE_HEAP_SIZE',
     'NV2080_CTRL_FB_INFO_INDEX_MAX',
@@ -27435,6 +29031,8 @@ __all__ = \
     'NV2080_CTRL_FB_INFO_INDEX_P2P_MAILBOX_SIZE',
     'NV2080_CTRL_FB_INFO_INDEX_PARTITION_COUNT',
     'NV2080_CTRL_FB_INFO_INDEX_PARTITION_MASK',
+    'NV2080_CTRL_FB_INFO_INDEX_PARTITION_MASK_0',
+    'NV2080_CTRL_FB_INFO_INDEX_PARTITION_MASK_1',
     'NV2080_CTRL_FB_INFO_INDEX_PROTECTED_MEM_SIZE_FREE_KB',
     'NV2080_CTRL_FB_INFO_INDEX_PROTECTED_MEM_SIZE_TOTAL_KB',
     'NV2080_CTRL_FB_INFO_INDEX_PSEUDO_CHANNEL_MODE',
@@ -27527,10 +29125,6 @@ __all__ = \
     'NV2080_CTRL_FB_REMAP_ENTRY',
     'NV2080_CTRL_FB_REMAP_ENTRY_FLAGS_PENDING_FALSE',
     'NV2080_CTRL_FB_REMAP_ENTRY_FLAGS_PENDING_TRUE',
-    'NV2080_CTRL_FB_SET_GPU_CACHE_ALLOC_POLICY_PARAMS',
-    'NV2080_CTRL_FB_SET_GPU_CACHE_ALLOC_POLICY_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_FB_SET_GPU_CACHE_ALLOC_POLICY_V2_PARAMS',
-    'NV2080_CTRL_FB_SET_GPU_CACHE_ALLOC_POLICY_V2_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_FB_SET_READ_LIMIT_PARAMS',
     'NV2080_CTRL_FB_SET_READ_LIMIT_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_FB_SET_READ_LIMIT_RESET_VALUE',
@@ -27556,6 +29150,8 @@ __all__ = \
     'NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_MAX_ENTRIES',
     'NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS',
     'NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS',
+    'NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_FIFO_DISABLE_CHANNELS_MAX_ENTRIES',
     'NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS',
     'NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_MESSAGE_ID',
@@ -27708,6 +29304,8 @@ __all__ = \
     'NV2080_CTRL_GET_RC_INFO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_GET_RC_RECOVERY_PARAMS',
     'NV2080_CTRL_GET_RC_RECOVERY_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS',
+    'NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_GPIO', 'NV2080_CTRL_GPIO_LEGACY_NON_PRIVILEGED',
     'NV2080_CTRL_GPU', 'NV2080_CTRL_GPUMON_SAMPLE',
     'NV2080_CTRL_GPUMON_SAMPLES',
@@ -27739,7 +29337,7 @@ __all__ = \
     'NV2080_CTRL_GPU_ECC_ERROR_STATUS_AGGREGATE',
     'NV2080_CTRL_GPU_ECC_ERROR_STATUS_NONE',
     'NV2080_CTRL_GPU_ECC_ERROR_STATUS_VOLATILE',
-    'NV2080_CTRL_GPU_ECC_UNIT_COUNT',
+    'NV2080_CTRL_GPU_ECC_UNIT_COUNT', 'NV2080_CTRL_GPU_ECC_UNIT_GSP',
     'NV2080_CTRL_GPU_EVICT_CTX_PARAMS',
     'NV2080_CTRL_GPU_EVICT_CTX_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_GPU_EXEC_REG_OPS_NOPTRS_PARAMS',
@@ -27878,6 +29476,8 @@ __all__ = \
     'NV2080_CTRL_GPU_GET_PID_INFO_MAX_COUNT',
     'NV2080_CTRL_GPU_GET_PID_INFO_PARAMS',
     'NV2080_CTRL_GPU_GET_PID_INFO_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_GPU_GET_RECOVERY_ACTION_PARAMS',
+    'NV2080_CTRL_GPU_GET_RECOVERY_ACTION_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_GPU_GET_RESET_STATUS_PARAMS',
     'NV2080_CTRL_GPU_GET_RESET_STATUS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_GPU_GET_SDM_PARAMS',
@@ -27897,6 +29497,8 @@ __all__ = \
     'NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_NONE',
     'NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_RTL',
     'NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_UNKNOWN',
+    'NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS',
+    'NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_GPU_GET_VMMU_SEGMENT_SIZE_PARAMS',
     'NV2080_CTRL_GPU_GET_VMMU_SEGMENT_SIZE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_GPU_GET_VPR_CAPS_PARAMS',
@@ -27930,6 +29532,9 @@ __all__ = \
     'NV2080_CTRL_GPU_INFO_INDEX_DMABUF_CAPABILITY',
     'NV2080_CTRL_GPU_INFO_INDEX_DMABUF_CAPABILITY_NO',
     'NV2080_CTRL_GPU_INFO_INDEX_DMABUF_CAPABILITY_YES',
+    'NV2080_CTRL_GPU_INFO_INDEX_ECID_EXTENDED',
+    'NV2080_CTRL_GPU_INFO_INDEX_ECID_HI32',
+    'NV2080_CTRL_GPU_INFO_INDEX_ECID_LO32',
     'NV2080_CTRL_GPU_INFO_INDEX_GEMINI_BOARD',
     'NV2080_CTRL_GPU_INFO_INDEX_GEMINI_BOARD_NO',
     'NV2080_CTRL_GPU_INFO_INDEX_GEMINI_BOARD_YES',
@@ -28030,6 +29635,8 @@ __all__ = \
     'NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_MINI_HALF',
     'NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_MINI_QUARTER',
     'NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_QUARTER',
+    'NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_RESERVED_INTERNAL_06',
+    'NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_RESERVED_INTERNAL_07',
     'NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE__SIZE',
     'NV2080_CTRL_GPU_PARTITION_FLAG_MEMORY_SIZE_EIGHTH',
     'NV2080_CTRL_GPU_PARTITION_FLAG_MEMORY_SIZE_FULL',
@@ -28088,7 +29695,12 @@ __all__ = \
     'NV2080_CTRL_GPU_QUERY_SCRUBBER_STATUS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_GPU_QUERY_SCRUBBER_STATUS_SCRUBBER_IDLE',
     'NV2080_CTRL_GPU_QUERY_SCRUBBER_STATUS_SCRUBBER_RUNNING',
-    'NV2080_CTRL_GPU_REG_OP', 'NV2080_CTRL_GPU_REG_OP_READ_08',
+    'NV2080_CTRL_GPU_RECOVERY_ACTION',
+    'NV2080_CTRL_GPU_RECOVERY_ACTION_DRAIN_P2P',
+    'NV2080_CTRL_GPU_RECOVERY_ACTION_GPU_RESET',
+    'NV2080_CTRL_GPU_RECOVERY_ACTION_NODE_REBOOT',
+    'NV2080_CTRL_GPU_RECOVERY_ACTION_NONE', 'NV2080_CTRL_GPU_REG_OP',
+    'NV2080_CTRL_GPU_REG_OP_READ_08',
     'NV2080_CTRL_GPU_REG_OP_READ_32',
     'NV2080_CTRL_GPU_REG_OP_READ_64',
     'NV2080_CTRL_GPU_REG_OP_STATUS_INVALID_MASK',
@@ -28398,6 +30010,10 @@ __all__ = \
     'NV2080_CTRL_GR_INFO_INDEX_VERTEX_CACHE_SIZE',
     'NV2080_CTRL_GR_INFO_INDEX_VPE_COUNT',
     'NV2080_CTRL_GR_INFO_MAX_SIZE',
+    'NV2080_CTRL_GR_INFO_SM_VERSION_10_0',
+    'NV2080_CTRL_GR_INFO_SM_VERSION_10_00',
+    'NV2080_CTRL_GR_INFO_SM_VERSION_10_01',
+    'NV2080_CTRL_GR_INFO_SM_VERSION_10_1',
     'NV2080_CTRL_GR_INFO_SM_VERSION_1_05',
     'NV2080_CTRL_GR_INFO_SM_VERSION_1_1',
     'NV2080_CTRL_GR_INFO_SM_VERSION_1_2',
@@ -28465,6 +30081,12 @@ __all__ = \
     'NV2080_CTRL_GR_SET_GPC_TILE_MAP_MAX_VALUES',
     'NV2080_CTRL_GR_SET_GPC_TILE_MAP_PARAMS',
     'NV2080_CTRL_GR_SET_GPC_TILE_MAP_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_128B',
+    'NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_64B',
+    'NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_NONE',
+    'NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_PARAMS',
+    'NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_TYPE',
     'NV2080_CTRL_GR_SET_TPC_PARTITION_MODE_PARAMS',
     'NV2080_CTRL_GR_SET_TPC_PARTITION_MODE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_GR_VAT_ALARM_DATA',
@@ -28553,7 +30175,6 @@ __all__ = \
     'NV2080_CTRL_INTERNAL_BIF_SET_PCIE_RO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_BSP_CAPS',
     'NV2080_CTRL_INTERNAL_BSP_GET_CAPS_PARAMS',
-    'NV2080_CTRL_INTERNAL_BSP_GET_CAPS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_BUS_CREATE_C2C_PEER_MAPPING_PARAMS',
     'NV2080_CTRL_INTERNAL_BUS_CREATE_C2C_PEER_MAPPING_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_BUS_DESTROY_P2P_MAILBOX_PARAMS',
@@ -28561,12 +30182,16 @@ __all__ = \
     'NV2080_CTRL_INTERNAL_BUS_REMOVE_C2C_PEER_MAPPING_PARAMS',
     'NV2080_CTRL_INTERNAL_BUS_REMOVE_C2C_PEER_MAPPING_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_CCU_DEV_SHRBUF_COUNT_MAX',
+    'NV2080_CTRL_INTERNAL_CCU_MAP_INFO',
     'NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS',
     'NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_CCU_SAMPLE_INFO_PARAMS',
     'NV2080_CTRL_INTERNAL_CCU_STREAM_STATE_PARAMS',
     'NV2080_CTRL_INTERNAL_CCU_STREAM_STATE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_CCU_UNMAP_INFO_PARAMS',
     'NV2080_CTRL_INTERNAL_CCU_UNMAP_INFO_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS',
+    'NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS_PARAMS',
     'NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS_PARAMS',
@@ -28578,7 +30203,12 @@ __all__ = \
     'NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SIZE',
     'NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_COUNT',
     'NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_KERNEL',
+    'NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_SCRUBBER',
     'NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_USER',
+    'NV2080_CTRL_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION_PARAMS',
+    'NV2080_CTRL_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS',
+    'NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_DEVICE_INFO',
     'NV2080_CTRL_INTERNAL_DISPLAY_CHANNEL_PUSHBUFFER_PARAMS',
     'NV2080_CTRL_INTERNAL_DISPLAY_CHANNEL_PUSHBUFFER_PARAMS_MESSAGE_ID',
@@ -28607,8 +30237,6 @@ __all__ = \
     'NV2080_CTRL_INTERNAL_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_COUNT',
     'NV2080_CTRL_INTERNAL_FBSR_INIT_PARAMS',
     'NV2080_CTRL_INTERNAL_FBSR_INIT_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_INTERNAL_FBSR_SEND_REGION_INFO_PARAMS',
-    'NV2080_CTRL_INTERNAL_FBSR_SEND_REGION_INFO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_FB_GET_HEAP_RESERVATION_SIZE_GR',
     'NV2080_CTRL_INTERNAL_FB_GET_HEAP_RESERVATION_SIZE_PARAMS',
     'NV2080_CTRL_INTERNAL_FB_GET_HEAP_RESERVATION_SIZE_PARAMS_MESSAGE_ID',
@@ -28620,15 +30248,9 @@ __all__ = \
     'NV2080_CTRL_INTERNAL_FIFO_MAX_RUNLIST_ID',
     'NV2080_CTRL_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS_PARAMS',
     'NV2080_CTRL_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_FLAGS_PARAMS',
-    'NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_FLAGS_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_MEMORY_PARAMS',
-    'NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_MEMORY_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GCX_ENTRY_PREREQUISITE_PARAMS',
     'NV2080_CTRL_INTERNAL_GCX_ENTRY_PREREQUISITE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GET_CHIP_INFO_REG_BASE_MAX',
-    'NV2080_CTRL_INTERNAL_GET_COHERENT_FB_APERTURE_SIZE_PARAMS',
-    'NV2080_CTRL_INTERNAL_GET_COHERENT_FB_APERTURE_SIZE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS',
     'NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GET_EGPU_BRIDGE_INFO_PARAMS',
@@ -28655,12 +30277,21 @@ __all__ = \
     'NV2080_CTRL_INTERNAL_GPIO_PROGRAM_OUTPUT_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GPIO_READ_INPUT_PARAMS',
     'NV2080_CTRL_INTERNAL_GPIO_READ_INPUT_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER',
+    'NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER_PARAMS',
+    'NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GPU_GET_CHIP_INFO_PARAMS',
     'NV2080_CTRL_INTERNAL_GPU_GET_CHIP_INFO_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP_PARAMS',
+    'NV2080_CTRL_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_GPU_GET_PF_BAR1_SPA_PARAMS',
+    'NV2080_CTRL_INTERNAL_GPU_GET_PF_BAR1_SPA_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GPU_GET_SMC_MODE_PARAMS',
     'NV2080_CTRL_INTERNAL_GPU_GET_SMC_MODE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP_PARAMS',
     'NV2080_CTRL_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_GPU_SET_ILLUM_PARAMS',
+    'NV2080_CTRL_INTERNAL_GPU_SET_ILLUM_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GPU_USER_REGISTER_ACCESS_MAP_MAX_COMPRESSED_SIZE',
     'NV2080_CTRL_INTERNAL_GPU_USER_REGISTER_ACCESS_MAP_MAX_PROFILING_RANGES',
     'NV2080_CTRL_INTERNAL_GRMGR_PARTITION_MAX_TYPES',
@@ -28678,6 +30309,8 @@ __all__ = \
     'NV2080_CTRL_INTERNAL_GR_GET_FECS_TRACE_RD_OFFSET_PARAMS',
     'NV2080_CTRL_INTERNAL_GR_GET_FECS_TRACE_RD_OFFSET_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GR_INFO',
+    'NV2080_CTRL_INTERNAL_GR_INIT_BUG4208224_WAR_PARAMS',
+    'NV2080_CTRL_INTERNAL_GR_INIT_BUG4208224_WAR_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GR_MAX_ENGINES',
     'NV2080_CTRL_INTERNAL_GR_MAX_GPC',
     'NV2080_CTRL_INTERNAL_GR_MAX_SM',
@@ -28687,10 +30320,14 @@ __all__ = \
     'NV2080_CTRL_INTERNAL_GR_SET_FECS_TRACE_RD_OFFSET_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GR_SET_FECS_TRACE_WR_OFFSET_PARAMS',
     'NV2080_CTRL_INTERNAL_GR_SET_FECS_TRACE_WR_OFFSET_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR_PARAMS',
+    'NV2080_CTRL_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GSYNC_ATTACH_AND_INIT_PARAMS',
     'NV2080_CTRL_INTERNAL_GSYNC_ATTACH_AND_INIT_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GSYNC_GET_DISPLAY_IDS_PARAMS',
     'NV2080_CTRL_INTERNAL_GSYNC_GET_DISPLAY_IDS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE_PARAMS',
+    'NV2080_CTRL_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GSYNC_GET_VERTICAL_ACTIVE_LINES_PARAMS',
     'NV2080_CTRL_INTERNAL_GSYNC_GET_VERTICAL_ACTIVE_LINES_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_GSYNC_IS_DISPLAYID_VALID_PARAMS',
@@ -28709,6 +30346,8 @@ __all__ = \
     'NV2080_CTRL_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS_PARAMS',
     'NV2080_CTRL_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS_TABLE_SIZE',
+    'NV2080_CTRL_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM_PARAMS',
+    'NV2080_CTRL_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_HSHUB_GET_NUM_UNITS_PARAMS',
     'NV2080_CTRL_INTERNAL_HSHUB_GET_NUM_UNITS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_HSHUB_NEXT_HSHUB_ID_PARAMS',
@@ -28723,6 +30362,8 @@ __all__ = \
     'NV2080_CTRL_INTERNAL_INTR_GET_KERNEL_TABLE_PARAMS',
     'NV2080_CTRL_INTERNAL_INTR_GET_KERNEL_TABLE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_INTR_MAX_TABLE_SIZE',
+    'NV2080_CTRL_INTERNAL_KGR_INIT_BUG4208224_WAR_PARAMS',
+    'NV2080_CTRL_INTERNAL_KGR_INIT_BUG4208224_WAR_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_KMEMSYS_GET_MIG_MEMORY_CONFIG_PARAMS',
     'NV2080_CTRL_INTERNAL_KMEMSYS_GET_MIG_MEMORY_CONFIG_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_KMIGMGR_EXPORTED_GPU_INSTANCE_INFO',
@@ -28784,7 +30425,38 @@ __all__ = \
     'NV2080_CTRL_INTERNAL_MIGMGR_SET_PARTITIONING_MODE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_MSENC_CAPS',
     'NV2080_CTRL_INTERNAL_MSENC_GET_CAPS_PARAMS',
-    'NV2080_CTRL_INTERNAL_MSENC_GET_CAPS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_DL_LINK_MODE',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_DETECT',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_MODE',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_TL_LINK_MODE',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_TX_SUBLINK_MODE',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_UPHY_LOAD',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_READ_DISCOVERY_TOKEN',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_DL_LINK_MODE',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_DETECT',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_MODE',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_TL_LINK_MODE',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_TX_SUBLINK_MODE',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_TRAINING_COMPLETE',
+    'NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_WRITE_DISCOVERY_TOKEN',
+    'NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_NVLINK_ENABLE_NVLINK_PEER_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_ENABLE_NVLINK_PEER_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_NVLINK_GET_ALI_ENABLED_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_GET_ALI_ENABLED_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_NVLINK_GET_NUM_ACTIVE_LINK_PER_IOCTRL',
     'NV2080_CTRL_INTERNAL_NVLINK_GET_NUM_ACTIVE_LINK_PER_IOCTRL_PARAMS',
     'NV2080_CTRL_INTERNAL_NVLINK_GET_NUM_ACTIVE_LINK_PER_IOCTRL_PARAMS_MESSAGE_ID',
@@ -28793,6 +30465,24 @@ __all__ = \
     'NV2080_CTRL_INTERNAL_NVLINK_GET_TOTAL_NUM_LINK_PER_IOCTRL',
     'NV2080_CTRL_INTERNAL_NVLINK_GET_TOTAL_NUM_LINK_PER_IOCTRL_PARAMS',
     'NV2080_CTRL_INTERNAL_NVLINK_GET_TOTAL_NUM_LINK_PER_IOCTRL_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_NVLINK_MAX_SEED_BUFFER_SIZE',
+    'NV2080_CTRL_INTERNAL_NVLINK_MAX_SEED_NUM',
+    'NV2080_CTRL_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_NVLINK_REMOTE_LOCAL_SID_INFO',
+    'NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_TYPE_PROGRAM',
+    'NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_TYPE_RESET',
+    'NV2080_CTRL_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS',
+    'NV2080_CTRL_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_NV_RANGE',
     'NV2080_CTRL_INTERNAL_PERF_BOOST_CLEAR_PARAMS_3X',
     'NV2080_CTRL_INTERNAL_PERF_BOOST_CLEAR_PARAMS_3X_MESSAGE_ID',
@@ -28842,6 +30532,9 @@ __all__ = \
     'NV2080_CTRL_INTERNAL_SPDM_PARTITION',
     'NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS',
     'NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT',
+    'NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS',
+    'NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_STATIC_GRMGR_GET_SKYLINE_INFO_PARAMS',
     'NV2080_CTRL_INTERNAL_STATIC_GRMGR_GET_SKYLINE_INFO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_INTERNAL_STATIC_GR_CAPS',
@@ -28950,9 +30643,21 @@ __all__ = \
     'NV2080_CTRL_MAX_NVU32_TO_CONVERTED_STR_LEN',
     'NV2080_CTRL_MAX_PCES', 'NV2080_CTRL_MAX_PHYSICAL_BRIDGE',
     'NV2080_CTRL_MAX_VMMU_SEGMENTS', 'NV2080_CTRL_MC',
+    'NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_AD100',
     'NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GA100',
+    'NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GB100',
+    'NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GH100',
     'NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_T23X',
     'NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_TU100',
+    'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD000',
+    'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD100',
+    'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD101',
+    'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD102',
+    'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD103',
+    'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD104',
+    'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD106',
+    'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD107',
+    'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD10B',
     'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA100',
     'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA102',
     'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA103',
@@ -28960,6 +30665,10 @@ __all__ = \
     'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA106',
     'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA107',
     'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA10B',
+    'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB100',
+    'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB102',
+    'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GH100',
+    'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GH100_SOC',
     'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_T234',
     'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_T234D',
     'NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU100',
@@ -28987,12 +30696,8 @@ __all__ = \
     'NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_MAX',
     'NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS',
     'NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_MC_QUERY_HOSTCLK_SLOWDOWN_STATUS_PARAMS',
-    'NV2080_CTRL_MC_QUERY_HOSTCLK_SLOWDOWN_STATUS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS',
     'NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_MC_SET_HOSTCLK_SLOWDOWN_STATUS_PARAMS',
-    'NV2080_CTRL_MC_SET_HOSTCLK_SLOWDOWN_STATUS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_MC_STATIC_INTR_ENTRY',
     'NV2080_CTRL_MEMMGR_MEMORY_OP',
     'NV2080_CTRL_MEMMGR_MEMORY_OP_MEMCPY',
@@ -29039,38 +30744,14 @@ __all__ = \
     'NV2080_CTRL_NVLINK',
     'NV2080_CTRL_NVLINK_ARE_LINKS_TRAINED_PARAMS',
     'NV2080_CTRL_NVLINK_ARE_LINKS_TRAINED_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS',
-    'NV2080_CTRL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS',
-    'NV2080_CTRL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS',
-    'NV2080_CTRL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS',
-    'NV2080_CTRL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS',
-    'NV2080_CTRL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS',
-    'NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS',
-    'NV2080_CTRL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS',
-    'NV2080_CTRL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS',
-    'NV2080_CTRL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS',
-    'NV2080_CTRL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_DL_LINK_MODE',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_DETECT',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_MODE',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_TL_LINK_MODE',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_TX_SUBLINK_MODE',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_UPHY_LOAD',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_READ_DISCOVERY_TOKEN',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_DL_LINK_MODE',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_DETECT',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_MODE',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_TL_LINK_MODE',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_TX_SUBLINK_MODE',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_TRAINING_COMPLETE',
-    'NV2080_CTRL_NVLINK_CALLBACK_TYPE_WRITE_DISCOVERY_TOKEN',
+    'NV2080_CTRL_NVLINK_BLACKWELL_MAX_LINKS',
     'NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_1_0',
     'NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_2_0',
     'NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_2_2',
     'NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_3_0',
     'NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_3_1',
     'NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_4_0',
+    'NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_5_0',
     'NV2080_CTRL_NVLINK_CAPS_NCI_VERSION_INVALID',
     'NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_1_0',
     'NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_2_0',
@@ -29078,15 +30759,24 @@ __all__ = \
     'NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_3_0',
     'NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_3_1',
     'NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_4_0',
+    'NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_5_0',
     'NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_INVALID',
     'NV2080_CTRL_NVLINK_CAPS_TBL_SIZE',
     'NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS',
     'NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS',
+    'NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_CLEAR_REFRESH_COUNTERS_PARAMS',
     'NV2080_CTRL_NVLINK_CLEAR_REFRESH_COUNTERS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_COMMON_ERR_INFO',
-    'NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS',
-    'NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_COUNTERS_MAX',
+    'NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES',
+    'NV2080_CTRL_NVLINK_COUNTER_BUFFER_OVERRUN_ERRORS',
+    'NV2080_CTRL_NVLINK_COUNTER_CORRECTED_BITS',
+    'NV2080_CTRL_NVLINK_COUNTER_CORRECTED_BLOCKS',
+    'NV2080_CTRL_NVLINK_COUNTER_CORRECTED_SYMBOLS_LANE_0',
+    'NV2080_CTRL_NVLINK_COUNTER_CORRECTED_SYMBOLS_LANE_1',
+    'NV2080_CTRL_NVLINK_COUNTER_CORRECTED_SYMBOLS_TOTAL',
     'NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_CRC_FLIT',
     'NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_CRC_LANE_L0',
     'NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_CRC_LANE_L1',
@@ -29106,12 +30796,118 @@ __all__ = \
     'NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_REPLAY',
     'NV2080_CTRL_NVLINK_COUNTER_DL_TX_ERR_RECOVERY',
     'NV2080_CTRL_NVLINK_COUNTER_DL_TX_ERR_REPLAY',
+    'NV2080_CTRL_NVLINK_COUNTER_EFFECTIVE_BER',
+    'NV2080_CTRL_NVLINK_COUNTER_EFFECTIVE_ERRORS',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_FLIT',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L0',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L1',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L2',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L3',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L4',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L5',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L6',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_L7',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_LANE_SIZE',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_CRC_MASKED',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_ECC_LANE_L0',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_ECC_LANE_L1',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_ECC_LANE_L2',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_ECC_LANE_L3',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_ECC_LANE_SIZE',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_RX_ERR_REPLAY',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_TX_ERR_RECOVERY',
+    'NV2080_CTRL_NVLINK_COUNTER_ERR_DL_TX_ERR_REPLAY',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_0',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_1',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_10',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_11',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_12',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_13',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_14',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_15',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_2',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_3',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_4',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_5',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_6',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_7',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_8',
+    'NV2080_CTRL_NVLINK_COUNTER_HISTORY_9',
     'NV2080_CTRL_NVLINK_COUNTER_INVALID',
+    'NV2080_CTRL_NVLINK_COUNTER_L1_ENTRY',
+    'NV2080_CTRL_NVLINK_COUNTER_L1_ENTRY_FORCE',
+    'NV2080_CTRL_NVLINK_COUNTER_L1_EXIT',
+    'NV2080_CTRL_NVLINK_COUNTER_L1_EXIT_RECAL',
+    'NV2080_CTRL_NVLINK_COUNTER_L1_EXIT_REMOTE',
+    'NV2080_CTRL_NVLINK_COUNTER_L1_HIGH_SPEED_STEADY_STATE_TIME',
+    'NV2080_CTRL_NVLINK_COUNTER_L1_LP_STEADY_STATE_TIME',
+    'NV2080_CTRL_NVLINK_COUNTER_L1_OTHER_STATE_TIME',
+    'NV2080_CTRL_NVLINK_COUNTER_LINK_DOWNED_COUNTER',
+    'NV2080_CTRL_NVLINK_COUNTER_LINK_ERROR_RECOVERY_COUNTER',
+    'NV2080_CTRL_NVLINK_COUNTER_LINK_INTEGRITY_ERRORS',
+    'NV2080_CTRL_NVLINK_COUNTER_LINK_RECOVERY_SUCCESSFUL_COUNTER',
+    'NV2080_CTRL_NVLINK_COUNTER_LP_DL',
+    'NV2080_CTRL_NVLINK_COUNTER_LP_LOCAL_ENTRY_TIME',
+    'NV2080_CTRL_NVLINK_COUNTER_LP_LOCAL_EXIT_TIME',
+    'NV2080_CTRL_NVLINK_COUNTER_LP_LOCAL_FULL_BW_ENTRY_TIME',
+    'NV2080_CTRL_NVLINK_COUNTER_LP_LOCAL_FULL_BW_EXIT_TIME',
+    'NV2080_CTRL_NVLINK_COUNTER_LP_REMOTE_ENTRY_TIME',
+    'NV2080_CTRL_NVLINK_COUNTER_LP_REMOTE_EXIT_TIME',
+    'NV2080_CTRL_NVLINK_COUNTER_LP_REMOTE_FULL_BW_ENTRY_TIME',
+    'NV2080_CTRL_NVLINK_COUNTER_LP_REMOTE_FULL_BW_EXIT_TIME',
+    'NV2080_CTRL_NVLINK_COUNTER_MAX_COUNTERS_PER_LINK_IN_REQ',
+    'NV2080_CTRL_NVLINK_COUNTER_MAX_GROUPS',
     'NV2080_CTRL_NVLINK_COUNTER_MAX_TYPES',
+    'NV2080_CTRL_NVLINK_COUNTER_NO_ERROR_BLOCKS',
+    'NV2080_CTRL_NVLINK_COUNTER_NVLE_RX_AUTH',
+    'NV2080_CTRL_NVLINK_COUNTER_NVLE_RX_ERROR',
+    'NV2080_CTRL_NVLINK_COUNTER_NVLE_RX_GOOD',
+    'NV2080_CTRL_NVLINK_COUNTER_NVLE_TX_ERROR',
+    'NV2080_CTRL_NVLINK_COUNTER_NVLE_TX_GOOD',
+    'NV2080_CTRL_NVLINK_COUNTER_PLR_BW_LOSS',
+    'NV2080_CTRL_NVLINK_COUNTER_PLR_RCV_BLOCKS',
+    'NV2080_CTRL_NVLINK_COUNTER_PLR_RCV_BLOCKS_WITH_ERRORS',
+    'NV2080_CTRL_NVLINK_COUNTER_PLR_RCV_BLOCKS_WITH_UNCORRECTABLE_ERRORS',
+    'NV2080_CTRL_NVLINK_COUNTER_PLR_XMIT_BLOCKS',
+    'NV2080_CTRL_NVLINK_COUNTER_PLR_XMIT_RETRY_BLOCKS',
+    'NV2080_CTRL_NVLINK_COUNTER_PLR_XMIT_RETRY_EVENTS',
+    'NV2080_CTRL_NVLINK_COUNTER_RAW_BER_LANE_0',
+    'NV2080_CTRL_NVLINK_COUNTER_RAW_BER_LANE_1',
+    'NV2080_CTRL_NVLINK_COUNTER_RAW_BER_TOTAL',
+    'NV2080_CTRL_NVLINK_COUNTER_RAW_ERRORS_LANE_0',
+    'NV2080_CTRL_NVLINK_COUNTER_RAW_ERRORS_LANE_1',
+    'NV2080_CTRL_NVLINK_COUNTER_RCV_BUFFER_OVERRUN_ERROR',
+    'NV2080_CTRL_NVLINK_COUNTER_RCV_BYTES',
+    'NV2080_CTRL_NVLINK_COUNTER_RCV_ERRORS',
+    'NV2080_CTRL_NVLINK_COUNTER_RCV_GENERAL_ERRORS',
+    'NV2080_CTRL_NVLINK_COUNTER_RCV_MALFORMED_PKT_ERROR',
+    'NV2080_CTRL_NVLINK_COUNTER_RCV_PACKETS',
+    'NV2080_CTRL_NVLINK_COUNTER_RCV_REMOTE_ERRORS',
+    'NV2080_CTRL_NVLINK_COUNTER_RCV_VL15DROPPED_ERROR',
+    'NV2080_CTRL_NVLINK_COUNTER_RECEIVED_BITS',
+    'NV2080_CTRL_NVLINK_COUNTER_SINGLE_ERROR_BLOCKS',
+    'NV2080_CTRL_NVLINK_COUNTER_SYMBOL_BER',
+    'NV2080_CTRL_NVLINK_COUNTER_SYMBOL_ERRORS',
+    'NV2080_CTRL_NVLINK_COUNTER_SYNC_HEADER_ERRORS',
+    'NV2080_CTRL_NVLINK_COUNTER_TIME_SINCE_LAST_CLEAR',
     'NV2080_CTRL_NVLINK_COUNTER_TL_RX0',
     'NV2080_CTRL_NVLINK_COUNTER_TL_RX1',
     'NV2080_CTRL_NVLINK_COUNTER_TL_TX0',
     'NV2080_CTRL_NVLINK_COUNTER_TL_TX1',
+    'NV2080_CTRL_NVLINK_COUNTER_TP_RX_DATA',
+    'NV2080_CTRL_NVLINK_COUNTER_TP_RX_RAW',
+    'NV2080_CTRL_NVLINK_COUNTER_TP_TL_RX0',
+    'NV2080_CTRL_NVLINK_COUNTER_TP_TL_RX1',
+    'NV2080_CTRL_NVLINK_COUNTER_TP_TL_TX0',
+    'NV2080_CTRL_NVLINK_COUNTER_TP_TL_TX1',
+    'NV2080_CTRL_NVLINK_COUNTER_TP_TX_DATA',
+    'NV2080_CTRL_NVLINK_COUNTER_TP_TX_RAW',
+    'NV2080_CTRL_NVLINK_COUNTER_UNCORRECTED_BLOCKS',
+    'NV2080_CTRL_NVLINK_COUNTER_V1_MAX_COUNTER',
+    'NV2080_CTRL_NVLINK_COUNTER_XMIT_BYTES',
+    'NV2080_CTRL_NVLINK_COUNTER_XMIT_ERRORS',
+    'NV2080_CTRL_NVLINK_COUNTER_XMIT_PACKETS',
+    'NV2080_CTRL_NVLINK_COUNTER_XMIT_WAIT_TIME',
     'NV2080_CTRL_NVLINK_CYCLE_LINK_PARAMS',
     'NV2080_CTRL_NVLINK_CYCLE_LINK_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_DEVICE_INFO',
@@ -29133,8 +30929,6 @@ __all__ = \
     'NV2080_CTRL_NVLINK_DISABLE_DL_INTERRUPTS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_ENABLE_LINKS_POST_TOPOLOGY_PARAMS',
     'NV2080_CTRL_NVLINK_ENABLE_LINKS_POST_TOPOLOGY_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_NVLINK_ENABLE_NVLINK_PEER_PARAMS',
-    'NV2080_CTRL_NVLINK_ENABLE_NVLINK_PEER_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_ENABLE_SYSMEM_NVLINK_ATS_PARAMS',
     'NV2080_CTRL_NVLINK_ENABLE_SYSMEM_NVLINK_ATS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS',
@@ -29215,13 +31009,17 @@ __all__ = \
     'NV2080_CTRL_NVLINK_FATAL_ERROR_TYPE_TL_TX_CREDIT',
     'NV2080_CTRL_NVLINK_FATAL_ERROR_TYPE_TL_TX_RAM_DATA_PARITY',
     'NV2080_CTRL_NVLINK_FATAL_ERROR_TYPE_TL_TX_RAM_HDR_PARITY',
-    'NV2080_CTRL_NVLINK_GET_ALI_ENABLED_PARAMS',
-    'NV2080_CTRL_NVLINK_GET_ALI_ENABLED_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS',
+    'NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS',
     'NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS',
+    'NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES',
     'NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS',
     'NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS',
+    'NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_GET_IOCTRL_DEVICE_INFO_PARAMS',
     'NV2080_CTRL_NVLINK_GET_IOCTRL_DEVICE_INFO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS',
@@ -29260,6 +31058,8 @@ __all__ = \
     'NV2080_CTRL_NVLINK_GET_NVLINK_DEVICE_INFO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS',
     'NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS',
+    'NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS',
     'NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_GET_POWER_STATE_PARAMS',
@@ -29268,8 +31068,36 @@ __all__ = \
     'NV2080_CTRL_NVLINK_GET_REFRESH_COUNTERS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_GET_SET_NVSWITCH_FLA_ADDR_PARAMS',
     'NV2080_CTRL_NVLINK_GET_SET_NVSWITCH_FLA_ADDR_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS',
+    'NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS',
+    'NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_HSHUB_GET_SYSMEM_NVLINK_MASK_PARAMS',
     'NV2080_CTRL_NVLINK_HSHUB_GET_SYSMEM_NVLINK_MASK_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_AUTH_TAG_ERR_AUTH_ERR_DIS',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_AUTH_TAG_ERR_AUTH_ERR_EN',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_AUTH_TAG_ERR',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_LINK_ERR',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_MAX',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_PKT_ERR',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_TX_ERR',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_LINK_ERR_FORCE_LINK_DOWN_DIS',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_LINK_ERR_FORCE_LINK_DOWN_EN',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_PKT_ERR_POISON_DIS',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_PKT_ERR_POISON_EN',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_PKT_ERR_STOMP_DIS',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_PKT_ERR_STOMP_EN',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_STS_LINK_STATE_DOWN_BY_HW_ERR',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_STS_LINK_STATE_DOWN_BY_REQUEST',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_STS_LINK_STATE_UP',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_STS_OPER_STS_NO_ERR_INJECT',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_STS_OPER_STS_PERFORMING_ERR_INJECT',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_TX_ERR_TYPE_EFFECTIVE_BER',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_TX_ERR_TYPE_NO_ERROR',
+    'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_TX_ERR_TYPE_RAW_BER',
     'NV2080_CTRL_NVLINK_INBAND_MAX_DATA_SIZE',
     'NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS',
     'NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_MESSAGE_ID',
@@ -29287,6 +31115,7 @@ __all__ = \
     'NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS',
     'NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_L1_THRESHOLD_VALUE_DEFAULT',
     'NV2080_CTRL_NVLINK_LANE_ERROR',
     'NV2080_CTRL_NVLINK_LINK_ECC_ERROR',
     'NV2080_CTRL_NVLINK_LINK_STATUS_INFO',
@@ -29297,8 +31126,6 @@ __all__ = \
     'NV2080_CTRL_NVLINK_MAX_LINKS',
     'NV2080_CTRL_NVLINK_MAX_LINKS_PER_IOCTRL_SW',
     'NV2080_CTRL_NVLINK_MAX_LINK_COUNT',
-    'NV2080_CTRL_NVLINK_MAX_SEED_BUFFER_SIZE',
-    'NV2080_CTRL_NVLINK_MAX_SEED_NUM',
     'NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE',
     'NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE_ENTRIES',
     'NV2080_CTRL_NVLINK_NUM_FATAL_ERROR_TYPES',
@@ -29307,16 +31134,88 @@ __all__ = \
     'NV2080_CTRL_NVLINK_PORT_EVENT_COUNT_SIZE',
     'NV2080_CTRL_NVLINK_POST_FAULT_UP_PARAMS',
     'NV2080_CTRL_NVLINK_POST_FAULT_UP_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS',
-    'NV2080_CTRL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_POWER_STATE_L0',
     'NV2080_CTRL_NVLINK_POWER_STATE_L1',
     'NV2080_CTRL_NVLINK_POWER_STATE_L2',
     'NV2080_CTRL_NVLINK_POWER_STATE_L3',
     'NV2080_CTRL_NVLINK_PRE_LINK_TRAIN_ALI_PARAMS',
     'NV2080_CTRL_NVLINK_PRE_LINK_TRAIN_ALI_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS',
-    'NV2080_CTRL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MAX_LENGTH',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS',
+    'NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_PRM_DATA',
     'NV2080_CTRL_NVLINK_PROCESS_FORCED_CONFIGS_PARAMS',
     'NV2080_CTRL_NVLINK_PROCESS_FORCED_CONFIGS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_PROCESS_INIT_DISABLED_LINKS_PARAMS',
@@ -29336,12 +31235,13 @@ __all__ = \
     'NV2080_CTRL_NVLINK_READ_TP_COUNTERS_TYPE_RAW_RX',
     'NV2080_CTRL_NVLINK_READ_TP_COUNTERS_TYPE_RAW_TX',
     'NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES',
+    'NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS',
+    'NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_READ_UPHY_PAD_LANE_REG_PARAMS',
     'NV2080_CTRL_NVLINK_READ_UPHY_PAD_LANE_REG_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_REFCLK_TYPE_INVALID',
     'NV2080_CTRL_NVLINK_REFCLK_TYPE_NVHS',
     'NV2080_CTRL_NVLINK_REFCLK_TYPE_PEX',
-    'NV2080_CTRL_NVLINK_REMOTE_LOCAL_SID_INFO',
     'NV2080_CTRL_NVLINK_REMOVE_NVLINK_MAPPING_PARAMS',
     'NV2080_CTRL_NVLINK_REMOVE_NVLINK_MAPPING_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_REMOVE_NVLINK_MAPPING_TYPE_PEER',
@@ -29355,20 +31255,23 @@ __all__ = \
     'NV2080_CTRL_NVLINK_SAVE_RESTORE_HSHUB_STATE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_SETUP_NVLINK_SYSMEM_PARAMS',
     'NV2080_CTRL_NVLINK_SETUP_NVLINK_SYSMEM_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS',
-    'NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS',
-    'NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS',
-    'NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS',
+    'NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS',
+    'NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_SET_ERROR_INJECTION_MODE_PARAMS',
     'NV2080_CTRL_NVLINK_SET_ERROR_INJECTION_MODE_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS',
+    'NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS',
     'NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_DEFAULT',
+    'NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_EXT_LOCAL',
     'NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_NEA',
     'NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_NEDR',
     'NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_NEDW',
     'NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PARAMS',
     'NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PHY_LOCAL',
+    'NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PHY_REMOTE',
     'NV2080_CTRL_NVLINK_SET_NVLINK_PEER_PARAMS',
     'NV2080_CTRL_NVLINK_SET_NVLINK_PEER_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_SET_POWER_STATE_PARAMS',
@@ -29387,6 +31290,9 @@ __all__ = \
     'NV2080_CTRL_NVLINK_STATUS_CONNECTED_TRUE',
     'NV2080_CTRL_NVLINK_STATUS_GRS_VERSION_1_0',
     'NV2080_CTRL_NVLINK_STATUS_GRS_VERSION_INVALID',
+    'NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT',
+    'NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_100US',
+    'NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_50US',
     'NV2080_CTRL_NVLINK_STATUS_LINK_STATE_ACTIVE',
     'NV2080_CTRL_NVLINK_STATUS_LINK_STATE_FAULT',
     'NV2080_CTRL_NVLINK_STATUS_LINK_STATE_HWCFG',
@@ -29406,6 +31312,7 @@ __all__ = \
     'NV2080_CTRL_NVLINK_STATUS_NCI_VERSION_3_0',
     'NV2080_CTRL_NVLINK_STATUS_NCI_VERSION_3_1',
     'NV2080_CTRL_NVLINK_STATUS_NCI_VERSION_4_0',
+    'NV2080_CTRL_NVLINK_STATUS_NCI_VERSION_5_0',
     'NV2080_CTRL_NVLINK_STATUS_NCI_VERSION_INVALID',
     'NV2080_CTRL_NVLINK_STATUS_NVHS_VERSION_1_0',
     'NV2080_CTRL_NVLINK_STATUS_NVHS_VERSION_INVALID',
@@ -29415,6 +31322,7 @@ __all__ = \
     'NV2080_CTRL_NVLINK_STATUS_NVLINK_VERSION_3_0',
     'NV2080_CTRL_NVLINK_STATUS_NVLINK_VERSION_3_1',
     'NV2080_CTRL_NVLINK_STATUS_NVLINK_VERSION_4_0',
+    'NV2080_CTRL_NVLINK_STATUS_NVLINK_VERSION_5_0',
     'NV2080_CTRL_NVLINK_STATUS_NVLINK_VERSION_INVALID',
     'NV2080_CTRL_NVLINK_STATUS_PHY_GRS',
     'NV2080_CTRL_NVLINK_STATUS_PHY_INVALID',
@@ -29438,6 +31346,7 @@ __all__ = \
     'NV2080_CTRL_NVLINK_STATUS_SUBLINK_TX_STATE_SINGLE_LANE',
     'NV2080_CTRL_NVLINK_STATUS_SUBLINK_TX_STATE_TEST',
     'NV2080_CTRL_NVLINK_STATUS_SUBLINK_TX_STATE_TRAINING',
+    'NV2080_CTRL_NVLINK_SUPPORTED_MAX_BW_MODE_COUNT',
     'NV2080_CTRL_NVLINK_SYNC_LINK_MASKS_AND_VBIOS_INFO_PARAMS',
     'NV2080_CTRL_NVLINK_SYNC_LINK_MASKS_AND_VBIOS_INFO_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_SYNC_NVLINK_SHUTDOWN_PROPS_PARAMS',
@@ -29482,17 +31391,12 @@ __all__ = \
     'NV2080_CTRL_NVLINK_UNIT_TLC_TX_0',
     'NV2080_CTRL_NVLINK_UPDATE_CURRENT_CONFIG_PARAMS',
     'NV2080_CTRL_NVLINK_UPDATE_CURRENT_CONFIG_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_NVLINK_UPDATE_HSHUB_MUX_PARAMS',
-    'NV2080_CTRL_NVLINK_UPDATE_HSHUB_MUX_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_NVLINK_UPDATE_HSHUB_MUX_TYPE_PROGRAM',
-    'NV2080_CTRL_NVLINK_UPDATE_HSHUB_MUX_TYPE_RESET',
     'NV2080_CTRL_NVLINK_UPDATE_LINK_CONNECTION_PARAMS',
     'NV2080_CTRL_NVLINK_UPDATE_LINK_CONNECTION_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_NVLINK_UPDATE_PEER_LINK_MASK_PARAMS',
     'NV2080_CTRL_NVLINK_UPDATE_PEER_LINK_MASK_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS',
-    'NV2080_CTRL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS_MESSAGE_ID',
-    'NV2080_CTRL_OS_MACOS', 'NV2080_CTRL_OS_UNIX',
+    'NV2080_CTRL_NVLINK_UPHY_CLN_CMD', 'NV2080_CTRL_OS_MACOS',
+    'NV2080_CTRL_OS_UNIX',
     'NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_ALLOW',
     'NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_DISALLOW',
     'NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_PARAMS',
@@ -29623,6 +31527,7 @@ __all__ = \
     'NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS',
     'NV2080_CTRL_PERF_RATED_TDP_CLIENT_OS',
     'NV2080_CTRL_PERF_RATED_TDP_CLIENT_PROFILE',
+    'NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST',
     'NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM',
     'NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342',
     'NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS',
@@ -29632,6 +31537,7 @@ __all__ = \
     'NV2080_CTRL_PERF_RATED_TDP_SET_CONTROL_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS',
     'NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_MESSAGE_ID',
+    'NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE',
     'NV2080_CTRL_PERF_RESERVE_PERFMON_HW_PARAMS',
     'NV2080_CTRL_PERF_RESERVE_PERFMON_HW_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_PERF_SET_AUX_POWER_STATE_PARAMS',
@@ -29650,6 +31556,9 @@ __all__ = \
     'NV2080_CTRL_PERF_VIDEOEVENT_STREAM_SD_STOP',
     'NV2080_CTRL_PERF_VIDEOEVENT_STREAM_START',
     'NV2080_CTRL_PERF_VIDEOEVENT_STREAM_STOP',
+    'NV2080_CTRL_PERF_VPSTATE_NUM_VPSTATES',
+    'NV2080_CTRL_PERF_VPSTATE_RATED_TDP',
+    'NV2080_CTRL_PERF_VPSTATE_TURBO_BOOST',
     'NV2080_CTRL_PEX_MAX_COUNTER_TYPES', 'NV2080_CTRL_PEX_MAX_LANES',
     'NV2080_CTRL_PEX_UTIL_MAX_COUNTER_TYPES', 'NV2080_CTRL_PMGR',
     'NV2080_CTRL_PMGR_LEGACY_NON_PRIVILEGED',
@@ -29687,6 +31596,8 @@ __all__ = \
     'NV2080_CTRL_SMC_SUBSCRIPTION_INFO', 'NV2080_CTRL_SPI',
     'NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK',
     'NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS',
+    'NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK',
+    'NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS',
     'NV2080_CTRL_TDR_SET_TIMEOUT_STATE_CMD_GPU_RESET_BEGIN',
     'NV2080_CTRL_TDR_SET_TIMEOUT_STATE_CMD_GPU_RESET_END',
     'NV2080_CTRL_TDR_SET_TIMEOUT_STATE_PARAMS',
@@ -29707,6 +31618,8 @@ __all__ = \
     'NV2080_CTRL_TIMER_SCHEDULE_FLAGS_TIME_ABS',
     'NV2080_CTRL_TIMER_SCHEDULE_FLAGS_TIME_REL',
     'NV2080_CTRL_UCODE_FUZZER',
+    'NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS',
+    'NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS',
     'NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS_MESSAGE_ID',
     'NV2080_CTRL_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO_PARAMS',
@@ -29735,47 +31648,68 @@ __all__ = \
     'NV2080_CTRL_VOLT_LEGACY_PRIVILEGED',
     'NV2080_CTRL_VPR_INFO_QUERY_TYPE',
     'NV2080_ENGINE_TYPE_ALLENGINES', 'NV2080_ENGINE_TYPE_BSP',
-    'NV2080_ENGINE_TYPE_CIPHER', 'NV2080_ENGINE_TYPE_COPY0',
-    'NV2080_ENGINE_TYPE_COPY1', 'NV2080_ENGINE_TYPE_COPY2',
-    'NV2080_ENGINE_TYPE_COPY3', 'NV2080_ENGINE_TYPE_COPY4',
-    'NV2080_ENGINE_TYPE_COPY5', 'NV2080_ENGINE_TYPE_COPY6',
-    'NV2080_ENGINE_TYPE_COPY7', 'NV2080_ENGINE_TYPE_COPY8',
-    'NV2080_ENGINE_TYPE_COPY9', 'NV2080_ENGINE_TYPE_COPY_SIZE',
-    'NV2080_ENGINE_TYPE_DPU', 'NV2080_ENGINE_TYPE_FBFLCN',
-    'NV2080_ENGINE_TYPE_GR0', 'NV2080_ENGINE_TYPE_GR1',
-    'NV2080_ENGINE_TYPE_GR2', 'NV2080_ENGINE_TYPE_GR3',
-    'NV2080_ENGINE_TYPE_GR4', 'NV2080_ENGINE_TYPE_GR5',
-    'NV2080_ENGINE_TYPE_GR6', 'NV2080_ENGINE_TYPE_GR7',
-    'NV2080_ENGINE_TYPE_GRAPHICS', 'NV2080_ENGINE_TYPE_GR_SIZE',
-    'NV2080_ENGINE_TYPE_HOST', 'NV2080_ENGINE_TYPE_LAST',
-    'NV2080_ENGINE_TYPE_ME', 'NV2080_ENGINE_TYPE_MP',
-    'NV2080_ENGINE_TYPE_MPEG', 'NV2080_ENGINE_TYPE_MSENC',
-    'NV2080_ENGINE_TYPE_NULL', 'NV2080_ENGINE_TYPE_NVDEC0',
-    'NV2080_ENGINE_TYPE_NVDEC1', 'NV2080_ENGINE_TYPE_NVDEC2',
-    'NV2080_ENGINE_TYPE_NVDEC3', 'NV2080_ENGINE_TYPE_NVDEC4',
-    'NV2080_ENGINE_TYPE_NVDEC5', 'NV2080_ENGINE_TYPE_NVDEC6',
-    'NV2080_ENGINE_TYPE_NVDEC7', 'NV2080_ENGINE_TYPE_NVDEC_SIZE',
-    'NV2080_ENGINE_TYPE_NVENC0', 'NV2080_ENGINE_TYPE_NVENC1',
-    'NV2080_ENGINE_TYPE_NVENC2', 'NV2080_ENGINE_TYPE_NVENC_SIZE',
-    'NV2080_ENGINE_TYPE_NVJPEG0', 'NV2080_ENGINE_TYPE_NVJPEG1',
-    'NV2080_ENGINE_TYPE_NVJPEG2', 'NV2080_ENGINE_TYPE_NVJPEG3',
-    'NV2080_ENGINE_TYPE_NVJPEG4', 'NV2080_ENGINE_TYPE_NVJPEG5',
-    'NV2080_ENGINE_TYPE_NVJPEG6', 'NV2080_ENGINE_TYPE_NVJPEG7',
-    'NV2080_ENGINE_TYPE_NVJPEG_SIZE', 'NV2080_ENGINE_TYPE_NVJPG',
-    'NV2080_ENGINE_TYPE_OFA', 'NV2080_ENGINE_TYPE_OFA0',
+    'NV2080_ENGINE_TYPE_CIPHER',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY0',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY1',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY10',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY11',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY12',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY13',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY14',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY15',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY16',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY17',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY18',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY19',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY2',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY3',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY4',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY5',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY6',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY7',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY8',
+    'NV2080_ENGINE_TYPE_COMP_DECOMP_COPY9',
+    'NV2080_ENGINE_TYPE_COPY0', 'NV2080_ENGINE_TYPE_COPY1',
+    'NV2080_ENGINE_TYPE_COPY10', 'NV2080_ENGINE_TYPE_COPY11',
+    'NV2080_ENGINE_TYPE_COPY12', 'NV2080_ENGINE_TYPE_COPY13',
+    'NV2080_ENGINE_TYPE_COPY14', 'NV2080_ENGINE_TYPE_COPY15',
+    'NV2080_ENGINE_TYPE_COPY16', 'NV2080_ENGINE_TYPE_COPY17',
+    'NV2080_ENGINE_TYPE_COPY18', 'NV2080_ENGINE_TYPE_COPY19',
+    'NV2080_ENGINE_TYPE_COPY2', 'NV2080_ENGINE_TYPE_COPY3',
+    'NV2080_ENGINE_TYPE_COPY4', 'NV2080_ENGINE_TYPE_COPY5',
+    'NV2080_ENGINE_TYPE_COPY6', 'NV2080_ENGINE_TYPE_COPY7',
+    'NV2080_ENGINE_TYPE_COPY8', 'NV2080_ENGINE_TYPE_COPY9',
+    'NV2080_ENGINE_TYPE_COPY_SIZE', 'NV2080_ENGINE_TYPE_DPU',
+    'NV2080_ENGINE_TYPE_FBFLCN', 'NV2080_ENGINE_TYPE_GR0',
+    'NV2080_ENGINE_TYPE_GR1', 'NV2080_ENGINE_TYPE_GR2',
+    'NV2080_ENGINE_TYPE_GR3', 'NV2080_ENGINE_TYPE_GR4',
+    'NV2080_ENGINE_TYPE_GR5', 'NV2080_ENGINE_TYPE_GR6',
+    'NV2080_ENGINE_TYPE_GR7', 'NV2080_ENGINE_TYPE_GRAPHICS',
+    'NV2080_ENGINE_TYPE_GR_SIZE', 'NV2080_ENGINE_TYPE_HOST',
+    'NV2080_ENGINE_TYPE_LAST', 'NV2080_ENGINE_TYPE_ME',
+    'NV2080_ENGINE_TYPE_MP', 'NV2080_ENGINE_TYPE_MPEG',
+    'NV2080_ENGINE_TYPE_MSENC', 'NV2080_ENGINE_TYPE_NULL',
+    'NV2080_ENGINE_TYPE_NVDEC0', 'NV2080_ENGINE_TYPE_NVDEC1',
+    'NV2080_ENGINE_TYPE_NVDEC2', 'NV2080_ENGINE_TYPE_NVDEC3',
+    'NV2080_ENGINE_TYPE_NVDEC4', 'NV2080_ENGINE_TYPE_NVDEC5',
+    'NV2080_ENGINE_TYPE_NVDEC6', 'NV2080_ENGINE_TYPE_NVDEC7',
+    'NV2080_ENGINE_TYPE_NVDEC_SIZE', 'NV2080_ENGINE_TYPE_NVENC0',
+    'NV2080_ENGINE_TYPE_NVENC1', 'NV2080_ENGINE_TYPE_NVENC2',
+    'NV2080_ENGINE_TYPE_NVENC_SIZE', 'NV2080_ENGINE_TYPE_NVJPEG0',
+    'NV2080_ENGINE_TYPE_NVJPEG1', 'NV2080_ENGINE_TYPE_NVJPEG2',
+    'NV2080_ENGINE_TYPE_NVJPEG3', 'NV2080_ENGINE_TYPE_NVJPEG4',
+    'NV2080_ENGINE_TYPE_NVJPEG5', 'NV2080_ENGINE_TYPE_NVJPEG6',
+    'NV2080_ENGINE_TYPE_NVJPEG7', 'NV2080_ENGINE_TYPE_NVJPEG_SIZE',
+    'NV2080_ENGINE_TYPE_NVJPG', 'NV2080_ENGINE_TYPE_OFA',
+    'NV2080_ENGINE_TYPE_OFA0', 'NV2080_ENGINE_TYPE_OFA1',
     'NV2080_ENGINE_TYPE_OFA_SIZE', 'NV2080_ENGINE_TYPE_PMU',
-    'NV2080_ENGINE_TYPE_PPP', 'NV2080_ENGINE_TYPE_RESERVED34',
-    'NV2080_ENGINE_TYPE_RESERVED35', 'NV2080_ENGINE_TYPE_RESERVED36',
-    'NV2080_ENGINE_TYPE_RESERVED37', 'NV2080_ENGINE_TYPE_RESERVED38',
-    'NV2080_ENGINE_TYPE_RESERVED39', 'NV2080_ENGINE_TYPE_RESERVED3a',
-    'NV2080_ENGINE_TYPE_RESERVED3b', 'NV2080_ENGINE_TYPE_RESERVED3c',
-    'NV2080_ENGINE_TYPE_RESERVED3d', 'NV2080_ENGINE_TYPE_RESERVED3e',
-    'NV2080_ENGINE_TYPE_RESERVED3f', 'NV2080_ENGINE_TYPE_SEC2',
-    'NV2080_ENGINE_TYPE_SW', 'NV2080_ENGINE_TYPE_TSEC',
-    'NV2080_ENGINE_TYPE_VIC', 'NV2080_ENGINE_TYPE_VP',
-    'NV2080_EVENT_DSTATE_PPC_D0', 'NV2080_EVENT_DSTATE_PPC_D3',
-    'NV2080_EVENT_DSTATE_PPC_INVALID', 'NV2080_EVENT_DSTATE_XUSB_D0',
-    'NV2080_EVENT_DSTATE_XUSB_D3', 'NV2080_EVENT_DSTATE_XUSB_INVALID',
+    'NV2080_ENGINE_TYPE_PPP', 'NV2080_ENGINE_TYPE_RESERVED3f',
+    'NV2080_ENGINE_TYPE_SEC2', 'NV2080_ENGINE_TYPE_SW',
+    'NV2080_ENGINE_TYPE_TSEC', 'NV2080_ENGINE_TYPE_VIC',
+    'NV2080_ENGINE_TYPE_VP', 'NV2080_EVENT_DSTATE_PPC_D0',
+    'NV2080_EVENT_DSTATE_PPC_D3', 'NV2080_EVENT_DSTATE_PPC_INVALID',
+    'NV2080_EVENT_DSTATE_XUSB_D0', 'NV2080_EVENT_DSTATE_XUSB_D3',
+    'NV2080_EVENT_DSTATE_XUSB_INVALID',
     'NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D0',
     'NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D1',
     'NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D2',
@@ -29803,8 +31737,39 @@ __all__ = \
     'NV2080_GPU_MAX_SHA1_BINARY_GID_LENGTH',
     'NV2080_GPU_NVFBC_MAX_SESSION_COUNT',
     'NV2080_GSP_MAX_BUILD_VERSION_LENGTH', 'NV2080_GUEST_VM_INFO',
-    'NV2080_HOST_VGPU_DEVICE', 'NV2080_INTR_CATEGORY',
-    'NV2080_INTR_CATEGORY_DEFAULT', 'NV2080_INTR_CATEGORY_ENUM_COUNT',
+    'NV2080_HOST_VGPU_DEVICE',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ACTIVE_PENDING',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ALI',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_CONTAIN',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DETECT',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_ERR_DETECT',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_HEARTBEAT',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_PM',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ENABLE_PM',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_FAIL',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_FAULT',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_HS',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITNEGOTIATE',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITOPTIMIZE',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITPHASE1',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITPHASE5',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITTL',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INVALID',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_LANE_DISABLE',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_LANE_SHUTDOWN',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_OFF',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_POST_INITNEGOTIATE',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_POST_INITOPTIMIZE',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_PRE_HS',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RECOVERY',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RESET',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RESTORE_STATE',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SAFE',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SAVE_STATE',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SLEEP',
+    'NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_TRAFFIC_SETUP',
+    'NV2080_INTR_CATEGORY', 'NV2080_INTR_CATEGORY_DEFAULT',
+    'NV2080_INTR_CATEGORY_ENUM_COUNT',
     'NV2080_INTR_CATEGORY_ESCHED_DRIVEN_ENGINE',
     'NV2080_INTR_CATEGORY_ESCHED_DRIVEN_ENGINE_NOTIFICATION',
     'NV2080_INTR_CATEGORY_RUNLIST',
@@ -29859,6 +31824,7 @@ __all__ = \
     'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_JOURNAL_UNLOCKED_IDX',
     'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_MATCH_FOUND_IDX',
     'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NOTIFICATIONS_IDX',
+    'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NOTIFICATION_FAIL_IDX',
     'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NO_MATCH_IDX',
     'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NO_RECORDS_IDX',
     'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_REPORTED_IDX',
@@ -29867,7 +31833,6 @@ __all__ = \
     'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES2_IDX',
     'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES3_IDX',
     'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES4_IDX',
-    'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES5_IDX',
     'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RPC_INSERT_RECORDS_IDX',
     'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATED_IDX',
     'NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATE_FAILED_IDX',
@@ -29877,16 +31842,23 @@ __all__ = \
     'NV2080_NOTIFIERS_AUDIO_HDCP_REQUEST',
     'NV2080_NOTIFIERS_AUX_POWER_EVENT',
     'NV2080_NOTIFIERS_AUX_POWER_STATE_CHANGE', 'NV2080_NOTIFIERS_CE0',
-    'NV2080_NOTIFIERS_CE1', 'NV2080_NOTIFIERS_CE2',
+    'NV2080_NOTIFIERS_CE1', 'NV2080_NOTIFIERS_CE10',
+    'NV2080_NOTIFIERS_CE11', 'NV2080_NOTIFIERS_CE12',
+    'NV2080_NOTIFIERS_CE13', 'NV2080_NOTIFIERS_CE14',
+    'NV2080_NOTIFIERS_CE15', 'NV2080_NOTIFIERS_CE16',
+    'NV2080_NOTIFIERS_CE17', 'NV2080_NOTIFIERS_CE18',
+    'NV2080_NOTIFIERS_CE19', 'NV2080_NOTIFIERS_CE2',
     'NV2080_NOTIFIERS_CE3', 'NV2080_NOTIFIERS_CE4',
     'NV2080_NOTIFIERS_CE5', 'NV2080_NOTIFIERS_CE6',
     'NV2080_NOTIFIERS_CE7', 'NV2080_NOTIFIERS_CE8',
     'NV2080_NOTIFIERS_CE9', 'NV2080_NOTIFIERS_CLOCKS_CHANGE',
     'NV2080_NOTIFIERS_COOLER_DIAG_ZONE',
     'NV2080_NOTIFIERS_CTXSW_TIMEOUT', 'NV2080_NOTIFIERS_DP_IRQ',
+    'NV2080_NOTIFIERS_DRAM_RETIREMENT_EVENT',
+    'NV2080_NOTIFIERS_DRAM_RETIREMENT_FAILURE',
     'NV2080_NOTIFIERS_DSTATE_HDA', 'NV2080_NOTIFIERS_DSTATE_XUSB_PPC',
     'NV2080_NOTIFIERS_ECC_DBE', 'NV2080_NOTIFIERS_ECC_SBE',
-    'NV2080_NOTIFIERS_EVENTBUFFER',
+    'NV2080_NOTIFIERS_ECC_SBE_STORM', 'NV2080_NOTIFIERS_EVENTBUFFER',
     'NV2080_NOTIFIERS_FECS_CTX_SWITCH',
     'NV2080_NOTIFIERS_FIFO_EVENT_MTHD',
     'NV2080_NOTIFIERS_FULL_SCREEN_CHANGE',
@@ -29957,11 +31929,13 @@ __all__ = \
     'NV2080_NOTIFIERS_GPIO_8_RISING_INTERRUPT',
     'NV2080_NOTIFIERS_GPIO_9_FALLING_INTERRUPT',
     'NV2080_NOTIFIERS_GPIO_9_RISING_INTERRUPT',
-    'NV2080_NOTIFIERS_GR0', 'NV2080_NOTIFIERS_GR1',
-    'NV2080_NOTIFIERS_GR2', 'NV2080_NOTIFIERS_GR3',
-    'NV2080_NOTIFIERS_GR4', 'NV2080_NOTIFIERS_GR5',
-    'NV2080_NOTIFIERS_GR6', 'NV2080_NOTIFIERS_GR7',
-    'NV2080_NOTIFIERS_GRAPHICS', 'NV2080_NOTIFIERS_GR_DEBUG_INTR',
+    'NV2080_NOTIFIERS_GPU_RECOVERY_ACTION',
+    'NV2080_NOTIFIERS_GPU_UNAVAILABLE', 'NV2080_NOTIFIERS_GR0',
+    'NV2080_NOTIFIERS_GR1', 'NV2080_NOTIFIERS_GR2',
+    'NV2080_NOTIFIERS_GR3', 'NV2080_NOTIFIERS_GR4',
+    'NV2080_NOTIFIERS_GR5', 'NV2080_NOTIFIERS_GR6',
+    'NV2080_NOTIFIERS_GR7', 'NV2080_NOTIFIERS_GRAPHICS',
+    'NV2080_NOTIFIERS_GR_DEBUG_INTR',
     'NV2080_NOTIFIERS_GSP_PERF_TRACE',
     'NV2080_NOTIFIERS_HDCP_STATUS_CHANGE',
     'NV2080_NOTIFIERS_HDMI_FRL_RETRAINING_REQUEST',
@@ -29987,27 +31961,24 @@ __all__ = \
     'NV2080_NOTIFIERS_NVLINK_ERROR_RECOVERY_REQUIRED',
     'NV2080_NOTIFIERS_NVLINK_INFO_LINK_DOWN',
     'NV2080_NOTIFIERS_NVLINK_INFO_LINK_UP',
+    'NV2080_NOTIFIERS_NVLINK_UNCONTAINED_ERROR',
     'NV2080_NOTIFIERS_NVPCF_EVENTS',
     'NV2080_NOTIFIERS_NVTELEMETRY_REPORT_EVENT',
     'NV2080_NOTIFIERS_OFA', 'NV2080_NOTIFIERS_OFA0',
-    'NV2080_NOTIFIERS_PDEC', 'NV2080_NOTIFIERS_PHYSICAL_PAGE_FAULT',
+    'NV2080_NOTIFIERS_OFA1', 'NV2080_NOTIFIERS_PDEC',
+    'NV2080_NOTIFIERS_PHYSICAL_PAGE_FAULT',
     'NV2080_NOTIFIERS_PLATFORM_POWER_MODE_CHANGE',
     'NV2080_NOTIFIERS_PMU_COMMAND', 'NV2080_NOTIFIERS_PMU_EVENT',
     'NV2080_NOTIFIERS_POISON_ERROR_FATAL',
     'NV2080_NOTIFIERS_POISON_ERROR_NON_FATAL',
-    'NV2080_NOTIFIERS_POSSIBLE_ERROR',
     'NV2080_NOTIFIERS_POWER_CONNECTOR',
-    'NV2080_NOTIFIERS_POWER_EVENT', 'NV2080_NOTIFIERS_PPP',
+    'NV2080_NOTIFIERS_POWER_EVENT', 'NV2080_NOTIFIERS_POWER_RESUME',
+    'NV2080_NOTIFIERS_POWER_SUSPEND', 'NV2080_NOTIFIERS_PPP',
     'NV2080_NOTIFIERS_PRIV_REG_ACCESS_FAULT',
     'NV2080_NOTIFIERS_PRIV_RING_HANG',
     'NV2080_NOTIFIERS_PSTATE_CHANGE', 'NV2080_NOTIFIERS_RC_ERROR',
-    'NV2080_NOTIFIERS_RESERVED122', 'NV2080_NOTIFIERS_RESERVED166',
-    'NV2080_NOTIFIERS_RESERVED167', 'NV2080_NOTIFIERS_RESERVED168',
-    'NV2080_NOTIFIERS_RESERVED169', 'NV2080_NOTIFIERS_RESERVED170',
-    'NV2080_NOTIFIERS_RESERVED171', 'NV2080_NOTIFIERS_RESERVED172',
-    'NV2080_NOTIFIERS_RESERVED173', 'NV2080_NOTIFIERS_RESERVED174',
-    'NV2080_NOTIFIERS_RESERVED175', 'NV2080_NOTIFIERS_RESERVED180',
-    'NV2080_NOTIFIERS_RESERVED_183', 'NV2080_NOTIFIERS_RESERVED_186',
+    'NV2080_NOTIFIERS_RESERVED122', 'NV2080_NOTIFIERS_RESERVED_183',
+    'NV2080_NOTIFIERS_RESERVED_186',
     'NV2080_NOTIFIERS_RUNLIST_ACQUIRE',
     'NV2080_NOTIFIERS_RUNLIST_ACQUIRE_AND_ENG_IDLE',
     'NV2080_NOTIFIERS_RUNLIST_AND_ENG_IDLE',
@@ -30020,39 +31991,10 @@ __all__ = \
     'NV2080_NOTIFIERS_THERMAL_HW', 'NV2080_NOTIFIERS_THERMAL_SW',
     'NV2080_NOTIFIERS_TIMER', 'NV2080_NOTIFIERS_TSG_PREEMPT_COMPLETE',
     'NV2080_NOTIFIERS_UCODE_RESET', 'NV2080_NOTIFIERS_UNUSED_0',
-    'NV2080_NOTIFIERS_VLD', 'NV2080_NOTIFIERS_VRR_SET_TIMEOUT',
+    'NV2080_NOTIFIERS_UNUSED_1', 'NV2080_NOTIFIERS_VLD',
+    'NV2080_NOTIFIERS_VRR_SET_TIMEOUT',
     'NV2080_NOTIFIERS_WORKLOAD_MODULATION_CHANGE',
     'NV2080_NOTIFIERS_XUSB_PPC_CONNECTED',
-    'NV2080_NVLINK_CORE_LINK_STATE_ACTIVE_PENDING',
-    'NV2080_NVLINK_CORE_LINK_STATE_ALI',
-    'NV2080_NVLINK_CORE_LINK_STATE_CONTAIN',
-    'NV2080_NVLINK_CORE_LINK_STATE_DETECT',
-    'NV2080_NVLINK_CORE_LINK_STATE_DISABLE_ERR_DETECT',
-    'NV2080_NVLINK_CORE_LINK_STATE_DISABLE_HEARTBEAT',
-    'NV2080_NVLINK_CORE_LINK_STATE_DISABLE_PM',
-    'NV2080_NVLINK_CORE_LINK_STATE_ENABLE_PM',
-    'NV2080_NVLINK_CORE_LINK_STATE_FAIL',
-    'NV2080_NVLINK_CORE_LINK_STATE_FAULT',
-    'NV2080_NVLINK_CORE_LINK_STATE_HS',
-    'NV2080_NVLINK_CORE_LINK_STATE_INITNEGOTIATE',
-    'NV2080_NVLINK_CORE_LINK_STATE_INITOPTIMIZE',
-    'NV2080_NVLINK_CORE_LINK_STATE_INITPHASE1',
-    'NV2080_NVLINK_CORE_LINK_STATE_INITPHASE5',
-    'NV2080_NVLINK_CORE_LINK_STATE_INITTL',
-    'NV2080_NVLINK_CORE_LINK_STATE_INVALID',
-    'NV2080_NVLINK_CORE_LINK_STATE_LANE_DISABLE',
-    'NV2080_NVLINK_CORE_LINK_STATE_LANE_SHUTDOWN',
-    'NV2080_NVLINK_CORE_LINK_STATE_OFF',
-    'NV2080_NVLINK_CORE_LINK_STATE_POST_INITNEGOTIATE',
-    'NV2080_NVLINK_CORE_LINK_STATE_POST_INITOPTIMIZE',
-    'NV2080_NVLINK_CORE_LINK_STATE_PRE_HS',
-    'NV2080_NVLINK_CORE_LINK_STATE_RECOVERY',
-    'NV2080_NVLINK_CORE_LINK_STATE_RESET',
-    'NV2080_NVLINK_CORE_LINK_STATE_RESTORE_STATE',
-    'NV2080_NVLINK_CORE_LINK_STATE_SAFE',
-    'NV2080_NVLINK_CORE_LINK_STATE_SAVE_STATE',
-    'NV2080_NVLINK_CORE_LINK_STATE_SLEEP',
-    'NV2080_NVLINK_CORE_LINK_STATE_TRAFFIC_SETUP',
     'NV2080_NVLINK_CORE_SUBLINK_STATE_RX_HS',
     'NV2080_NVLINK_CORE_SUBLINK_STATE_RX_INIT_TERM',
     'NV2080_NVLINK_CORE_SUBLINK_STATE_RX_LOW_POWER',
@@ -30089,10 +32031,10 @@ __all__ = \
     'NV2080_TIMER_GPU_CPU_TIME_CPU_CLK_ID_PROCESSOR_CPU',
     'NV2080_TIMER_GPU_CPU_TIME_CPU_CLK_ID_PROCESSOR_GSP',
     'NV2080_TIMER_GPU_CPU_TIME_CPU_CLK_ID_TSC', 'NV2080_TYPEDEF',
-    'NV2080_VGPU_FB_USAGE', 'NV2080_VGPU_GUEST', 'NV2081_BINAPI',
-    'NV2082_BINAPI_PRIVILEGED', 'NV20_SUBDEVICE_0',
-    'NV20_SUBDEVICE_DIAG', 'NV30_GSYNC', 'NV40_DEBUG_BUFFER',
-    'NV40_I2C', 'NV4_SOFTWARE_TEST',
+    'NV2080_VF_MSIX_CAPS', 'NV2080_VGPU_FB_USAGE',
+    'NV2080_VGPU_GUEST', 'NV2081_BINAPI', 'NV2082_BINAPI_PRIVILEGED',
+    'NV20_SUBDEVICE_0', 'NV20_SUBDEVICE_DIAG', 'NV30_GSYNC',
+    'NV40_DEBUG_BUFFER', 'NV40_I2C', 'NV4_SOFTWARE_TEST',
     'NV50VAIO_CHANNELDMA_ALLOCATION_FLAGS_CONNECT_PB_AT_GRAB_NO',
     'NV50VAIO_CHANNELDMA_ALLOCATION_FLAGS_CONNECT_PB_AT_GRAB_YES',
     'NV50VAIO_CHANNELDMA_ALLOCATION_PARAMETERS',
@@ -30118,6 +32060,7 @@ __all__ = \
     'NV83DE_CTRL_CMD_DEBUG_READ_SINGLE_SM_ERROR_STATE',
     'NV83DE_CTRL_CMD_DEBUG_RELEASE_MMU_DEBUG_REQUESTS',
     'NV83DE_CTRL_CMD_DEBUG_RESUME_CONTEXT',
+    'NV83DE_CTRL_CMD_DEBUG_SET_DROP_DEFERRED_RC',
     'NV83DE_CTRL_CMD_DEBUG_SET_EXCEPTION_MASK',
     'NV83DE_CTRL_CMD_DEBUG_SET_MODE_ERRBAR_DEBUG',
     'NV83DE_CTRL_CMD_DEBUG_SET_MODE_ERRBAR_DEBUG_DISABLE',
@@ -30174,6 +32117,8 @@ __all__ = \
     'NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_PARAMS_MESSAGE_ID',
     'NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS',
     'NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_MESSAGE_ID',
+    'NV83DE_CTRL_DEBUG_SET_DROP_DEFERRED_RC_PARAMS',
+    'NV83DE_CTRL_DEBUG_SET_DROP_DEFERRED_RC_PARAMS_MESSAGE_ID',
     'NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_ALL',
     'NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_CILP',
     'NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_FATAL',
@@ -30262,32 +32207,23 @@ __all__ = \
     'NVA084_KERNEL_HOST_VGPU_DEVICE', 'NVAL_MAP_DIRECTION_DOWN',
     'NVAL_MAP_DIRECTION_UP', 'NVAL_MAX_BANKS', 'NVB4B7_VIDEO_ENCODER',
     'NVB8B0_VIDEO_DECODER', 'NVB8D1_VIDEO_NVJPG', 'NVB8FA_VIDEO_OFA',
-    'NVC36F_CTRL_BIND_PARAMS', 'NVC36F_CTRL_BIND_PARAMS_MESSAGE_ID',
-    'NVC36F_CTRL_CMD_BIND', 'NVC36F_CTRL_CMD_EVENT_SET_NOTIFICATION',
+    'NVC36F_CTRL_CMD_EVENT_SET_NOTIFICATION',
     'NVC36F_CTRL_CMD_EVENT_SET_TRIGGER',
-    'NVC36F_CTRL_CMD_GET_MMU_FAULT_INFO',
     'NVC36F_CTRL_CMD_GPFIFO_FAULT_METHOD_BUFFER_MAX_RUNQUEUES',
     'NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN',
     'NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS',
     'NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_MESSAGE_ID',
-    'NVC36F_CTRL_CMD_GPFIFO_SCHEDULE',
     'NVC36F_CTRL_CMD_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX',
     'NVC36F_CTRL_CMD_GPFIFO_UPDATE_FAULT_METHOD_BUFFER',
-    'NVC36F_CTRL_CMD_NULL', 'NVC36F_CTRL_CMD_RESET_CHANNEL',
-    'NVC36F_CTRL_CMD_RESET_CHANNEL_PARAMS',
-    'NVC36F_CTRL_CMD_RESET_CHANNEL_PARAMS_MESSAGE_ID',
-    'NVC36F_CTRL_EVENT', 'NVC36F_CTRL_EVENT_SET_NOTIFICATION_PARAMS',
-    'NVC36F_CTRL_GET_CLASS_ENGINEID',
-    'NVC36F_CTRL_GET_CLASS_ENGINEID_PARAMS',
-    'NVC36F_CTRL_GET_CLASS_ENGINEID_PARAMS_MESSAGE_ID',
-    'NVC36F_CTRL_GET_MMU_FAULT_INFO_PARAMS',
-    'NVC36F_CTRL_GET_MMU_FAULT_INFO_PARAMS_MESSAGE_ID',
-    'NVC36F_CTRL_GPFIFO', 'NVC36F_CTRL_GPFIFO_SCHEDULE_PARAMS',
-    'NVC36F_CTRL_GPFIFO_SCHEDULE_PARAMS_MESSAGE_ID',
+    'NVC36F_CTRL_CMD_INTERNAL_GPFIFO_GET_WORK_SUBMIT_TOKEN',
+    'NVC36F_CTRL_CMD_NULL', 'NVC36F_CTRL_EVENT', 'NVC36F_CTRL_GPFIFO',
     'NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS',
     'NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_MESSAGE_ID',
     'NVC36F_CTRL_GPFIFO_UPDATE_FAULT_METHOD_BUFFER_PARAMS',
     'NVC36F_CTRL_GPFIFO_UPDATE_FAULT_METHOD_BUFFER_PARAMS_MESSAGE_ID',
+    'NVC36F_CTRL_INTERNAL',
+    'NVC36F_CTRL_INTERNAL_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS',
+    'NVC36F_CTRL_INTERNAL_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_MESSAGE_ID',
     'NVC36F_CTRL_RESERVED', 'NVC371_DISP_SF_USER',
     'NVC372_DISPLAY_SW', 'NVC4B0_VIDEO_DECODER',
     'NVC4B7_VIDEO_ENCODER', 'NVC4D1_VIDEO_NVJPG',
@@ -31154,6 +33090,7 @@ __all__ = \
     'NVC9B0_VIDEO_DECODER', 'NVC9B7_VIDEO_ENCODER',
     'NVC9D1_VIDEO_NVJPG', 'NVC9FA_VIDEO_OFA',
     'NVCB33_CTRL_CONF_COMPUTE', 'NVCB33_CTRL_RESERVED',
+    'NVCDB0_VIDEO_DECODER', 'NVCDD1_VIDEO_NVJPG', 'NVCDFA_VIDEO_OFA',
     'NVENC_SW_SESSION', 'NVFBC_SW_SESSION',
     'NVLINK_EOM_CONTROL_CONFIG_EOM', 'NVLINK_EOM_CONTROL_END_EOM',
     'NVLINK_EOM_CONTROL_FULL_EOM_SEQUENCE',
@@ -31173,18 +33110,20 @@ __all__ = \
     'NVOS02_FLAGS_COHERENCY_WRITE_THROUGH',
     'NVOS02_FLAGS_GPU_CACHEABLE_NO', 'NVOS02_FLAGS_GPU_CACHEABLE_YES',
     'NVOS02_FLAGS_KERNEL_MAPPING_MAP',
-    'NVOS02_FLAGS_KERNEL_MAPPING_NO_MAP', 'NVOS02_FLAGS_LOCATION_AGP',
-    'NVOS02_FLAGS_LOCATION_PCI', 'NVOS02_FLAGS_LOCATION_VIDMEM',
-    'NVOS02_FLAGS_MAPPING_DEFAULT', 'NVOS02_FLAGS_MAPPING_NEVER_MAP',
-    'NVOS02_FLAGS_MAPPING_NO_MAP',
+    'NVOS02_FLAGS_KERNEL_MAPPING_NO_MAP', 'NVOS02_FLAGS_LOCATION_PCI',
+    'NVOS02_FLAGS_LOCATION_VIDMEM', 'NVOS02_FLAGS_MAPPING_DEFAULT',
+    'NVOS02_FLAGS_MAPPING_NEVER_MAP', 'NVOS02_FLAGS_MAPPING_NO_MAP',
     'NVOS02_FLAGS_MEMORY_PROTECTION_DEFAULT',
     'NVOS02_FLAGS_MEMORY_PROTECTION_PROTECTED',
     'NVOS02_FLAGS_MEMORY_PROTECTION_UNPROTECTED',
     'NVOS02_FLAGS_PEER_MAP_OVERRIDE_DEFAULT',
     'NVOS02_FLAGS_PEER_MAP_OVERRIDE_REQUIRED',
     'NVOS02_FLAGS_PHYSICALITY_CONTIGUOUS',
-    'NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS', 'NVOS02_PARAMETERS',
-    'NVOS03_FLAGS_ACCESS_READ_ONLY', 'NVOS03_FLAGS_ACCESS_READ_WRITE',
+    'NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS',
+    'NVOS02_FLAGS_REGISTER_MEMDESC_TO_PHYS_RM_FALSE',
+    'NVOS02_FLAGS_REGISTER_MEMDESC_TO_PHYS_RM_TRUE',
+    'NVOS02_PARAMETERS', 'NVOS03_FLAGS_ACCESS_READ_ONLY',
+    'NVOS03_FLAGS_ACCESS_READ_WRITE',
     'NVOS03_FLAGS_ACCESS_WRITE_ONLY',
     'NVOS03_FLAGS_CACHE_SNOOP_DISABLE',
     'NVOS03_FLAGS_CACHE_SNOOP_ENABLE',
@@ -31338,6 +33277,7 @@ __all__ = \
     'NVOS32_ATTR2_P2P_GPU_CACHEABLE_YES',
     'NVOS32_ATTR2_PAGE_OFFLINING_OFF',
     'NVOS32_ATTR2_PAGE_OFFLINING_ON',
+    'NVOS32_ATTR2_PAGE_SIZE_HUGE_256GB',
     'NVOS32_ATTR2_PAGE_SIZE_HUGE_2MB',
     'NVOS32_ATTR2_PAGE_SIZE_HUGE_512MB',
     'NVOS32_ATTR2_PAGE_SIZE_HUGE_DEFAULT',
@@ -31353,9 +33293,11 @@ __all__ = \
     'NVOS32_ATTR2_SMMU_ON_GPU_DEFAULT',
     'NVOS32_ATTR2_SMMU_ON_GPU_DISABLE',
     'NVOS32_ATTR2_SMMU_ON_GPU_ENABLE', 'NVOS32_ATTR2_USE_EGM_FALSE',
-    'NVOS32_ATTR2_USE_EGM_TRUE', 'NVOS32_ATTR2_ZBC_DEFAULT',
-    'NVOS32_ATTR2_ZBC_INVALID', 'NVOS32_ATTR2_ZBC_PREFER_NO_ZBC',
-    'NVOS32_ATTR2_ZBC_PREFER_ZBC',
+    'NVOS32_ATTR2_USE_EGM_TRUE',
+    'NVOS32_ATTR2_USE_SCANOUT_CARVEOUT_FALSE',
+    'NVOS32_ATTR2_USE_SCANOUT_CARVEOUT_TRUE',
+    'NVOS32_ATTR2_ZBC_DEFAULT', 'NVOS32_ATTR2_ZBC_INVALID',
+    'NVOS32_ATTR2_ZBC_PREFER_NO_ZBC', 'NVOS32_ATTR2_ZBC_PREFER_ZBC',
     'NVOS32_ATTR2_ZBC_REQUIRE_ONLY_ZBC',
     'NVOS32_ATTR2_ZBC_SKIP_ZBCREFCOUNT_NO',
     'NVOS32_ATTR2_ZBC_SKIP_ZBCREFCOUNT_YES',
@@ -31386,11 +33328,10 @@ __all__ = \
     'NVOS32_ATTR_FORMAT_BLOCK_LINEAR',
     'NVOS32_ATTR_FORMAT_HIGH_FIELD', 'NVOS32_ATTR_FORMAT_LOW_FIELD',
     'NVOS32_ATTR_FORMAT_PITCH', 'NVOS32_ATTR_FORMAT_SWIZZLED',
-    'NVOS32_ATTR_LOCATION_AGP', 'NVOS32_ATTR_LOCATION_ANY',
-    'NVOS32_ATTR_LOCATION_PCI', 'NVOS32_ATTR_LOCATION_VIDMEM',
-    'NVOS32_ATTR_NONE', 'NVOS32_ATTR_PAGE_SIZE_4KB',
-    'NVOS32_ATTR_PAGE_SIZE_BIG', 'NVOS32_ATTR_PAGE_SIZE_DEFAULT',
-    'NVOS32_ATTR_PAGE_SIZE_HUGE',
+    'NVOS32_ATTR_LOCATION_ANY', 'NVOS32_ATTR_LOCATION_PCI',
+    'NVOS32_ATTR_LOCATION_VIDMEM', 'NVOS32_ATTR_NONE',
+    'NVOS32_ATTR_PAGE_SIZE_4KB', 'NVOS32_ATTR_PAGE_SIZE_BIG',
+    'NVOS32_ATTR_PAGE_SIZE_DEFAULT', 'NVOS32_ATTR_PAGE_SIZE_HUGE',
     'NVOS32_ATTR_PHYSICALITY_ALLOW_NONCONTIGUOUS',
     'NVOS32_ATTR_PHYSICALITY_CONTIGUOUS',
     'NVOS32_ATTR_PHYSICALITY_DEFAULT',
@@ -31495,8 +33436,9 @@ __all__ = \
     'NVOS46_FLAGS_P2P_ENABLE_SLI', 'NVOS46_FLAGS_P2P_ENABLE_YES',
     'NVOS46_FLAGS_PAGE_KIND_PHYSICAL',
     'NVOS46_FLAGS_PAGE_KIND_VIRTUAL', 'NVOS46_FLAGS_PAGE_SIZE_4KB',
-    'NVOS46_FLAGS_PAGE_SIZE_BIG', 'NVOS46_FLAGS_PAGE_SIZE_BOTH',
-    'NVOS46_FLAGS_PAGE_SIZE_DEFAULT', 'NVOS46_FLAGS_PAGE_SIZE_HUGE',
+    'NVOS46_FLAGS_PAGE_SIZE_512M', 'NVOS46_FLAGS_PAGE_SIZE_BIG',
+    'NVOS46_FLAGS_PAGE_SIZE_BOTH', 'NVOS46_FLAGS_PAGE_SIZE_DEFAULT',
+    'NVOS46_FLAGS_PAGE_SIZE_HUGE',
     'NVOS46_FLAGS_PTE_COALESCE_LEVEL_CAP_1',
     'NVOS46_FLAGS_PTE_COALESCE_LEVEL_CAP_128',
     'NVOS46_FLAGS_PTE_COALESCE_LEVEL_CAP_16',
@@ -31528,6 +33470,10 @@ __all__ = \
     'NVPCF0100_CTRL_CONFIG_2X_BUFF_SIZE_MAX',
     'NVPCF0100_CTRL_CONFIG_DSM_1X_FUNC_GET_DYNAMIC_PARAMS',
     'NVPCF0100_CTRL_CONFIG_DSM_1X_FUNC_GET_SUPPORTED',
+    'NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_CPU_TDP_LIMIT_CONTROL',
+    'NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_CPU_TDP_LIMIT_CONTROL_CASE',
+    'NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_GET_DC_SYSTEM_POWER_LIMITS_CASE',
+    'NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_GET_DC_SYSTEM_POWER_LIMITS_TABLE',
     'NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_GET_DYNAMIC_CASE',
     'NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_GET_DYNAMIC_PARAMS',
     'NVPCF0100_CTRL_CONFIG_DSM_2X_FUNC_GET_STATIC_CASE',
@@ -31537,8 +33483,8 @@ __all__ = \
     'NVPCF0100_CTRL_CONFIG_DSM_2X_VERSION',
     'NVPCF0100_CTRL_CONFIG_DSM_FUNC_GET_SUPPORTED_IS_SUPPORTED_NO',
     'NVPCF0100_CTRL_CONFIG_DSM_FUNC_GET_SUPPORTED_IS_SUPPORTED_YES',
-    'NVPOWERSTATE_PARAMETERS', 'NVSIM01_BUS_XACT',
-    'NV_BSP_ALLOCATION_PARAMETERS', 'NV_CE_UTILS',
+    'NVPCF_CTRL_SYSPWRLIMIT_TYPE_BASE', 'NVPOWERSTATE_PARAMETERS',
+    'NVSIM01_BUS_XACT', 'NV_BSP_ALLOCATION_PARAMETERS', 'NV_CE_UTILS',
     'NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS',
     'NV_CHANNELGPFIFO_NOTIFICATION_STATUS_IN_PROGRESS_FALSE',
     'NV_CHANNELGPFIFO_NOTIFICATION_STATUS_IN_PROGRESS_TRUE',
@@ -31560,11 +33506,18 @@ __all__ = \
     'NV_CONF_COMPUTE_CTRL_CMD_GET_NUM_SUPPORTED_CC_SECURE_CHANNELS',
     'NV_CONF_COMPUTE_CTRL_CMD_GET_NUM_SUPPORTED_CC_SECURE_CHANNELS_PARAMS',
     'NV_CONF_COMPUTE_CTRL_CMD_GET_NUM_SUPPORTED_CC_SECURE_CHANNELS_PARAMS_MESSAGE_ID',
+    'NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_KEY_ROTATION_STATE',
+    'NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_KEY_ROTATION_STATE_PARAMS',
+    'NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_KEY_ROTATION_STATE_PARAMS_MESSAGE_ID',
     'NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_NUM_SECURE_CHANNELS',
     'NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_NUM_SECURE_CHANNELS_PARAMS',
     'NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_NUM_SECURE_CHANNELS_PARAMS_MESSAGE_ID',
     'NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_VIDMEM_SIZE',
     'NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_VIDMEM_SIZE_PARAMS',
+    'NV_CONF_COMPUTE_CTRL_CMD_GPU_KEY_ROTATION_BOTH_ENABLED',
+    'NV_CONF_COMPUTE_CTRL_CMD_GPU_KEY_ROTATION_DISABLED',
+    'NV_CONF_COMPUTE_CTRL_CMD_GPU_KEY_ROTATION_KERN_ENABLED',
+    'NV_CONF_COMPUTE_CTRL_CMD_GPU_KEY_ROTATION_USER_ENABLED',
     'NV_CONF_COMPUTE_CTRL_CMD_GPU_SET_VIDMEM_SIZE',
     'NV_CONF_COMPUTE_CTRL_CMD_GPU_SET_VIDMEM_SIZE_PARAMS',
     'NV_CONF_COMPUTE_CTRL_CMD_NULL',
@@ -31578,6 +33531,8 @@ __all__ = \
     'NV_CONF_COMPUTE_GPU_CEC_ATTESTATION_REPORT_MAX_SIZE',
     'NV_CONF_COMPUTE_NONCE_SIZE',
     'NV_CONF_COMPUTE_SYSTEM_CPU_CAPABILITY_AMD_SEV',
+    'NV_CONF_COMPUTE_SYSTEM_CPU_CAPABILITY_AMD_SEV_SNP',
+    'NV_CONF_COMPUTE_SYSTEM_CPU_CAPABILITY_AMD_SNP_VTOM',
     'NV_CONF_COMPUTE_SYSTEM_CPU_CAPABILITY_INTEL_TDX',
     'NV_CONF_COMPUTE_SYSTEM_CPU_CAPABILITY_NONE',
     'NV_CONF_COMPUTE_SYSTEM_DEVTOOLS_MODE_DISABLED',
@@ -31652,9 +33607,6 @@ __all__ = \
     'NV_GRID_LICENSE_FEATURE_VIRTUAL_WORKSTATION_EDITION',
     'NV_GRID_LICENSE_FEATURE_VPC_EDITION',
     'NV_GRID_LICENSE_INFO_MAX_LENGTH', 'NV_GR_ALLOCATION_PARAMETERS',
-    'NV_GSP_TEST_GET_MSG_BLOCK_PARAMETERS',
-    'NV_GSP_TEST_SEND_EVENT_NOTIFICATION_PARAMETERS',
-    'NV_GSP_TEST_SEND_MSG_RESPONSE_PARAMETERS',
     'NV_HOPPER_USERMODE_A_PARAMS', 'NV_IMEX_SESSION', 'NV_IOCTL_BASE',
     'NV_IOCTL_FCT_BASE', 'NV_IOCTL_H', 'NV_IOCTL_MAGIC',
     'NV_IOCTL_NUMA_H', 'NV_IOCTL_NUMA_INFO_MAX_OFFLINE_ADDRESSES',
@@ -32008,7 +33960,8 @@ __all__ = \
     'Nv2080WorkloadModulationChangeNotification',
     'Nv2080XusbPpcConnectStateNotification', 'Nv20Subdevice0',
     'NvUnixEvent', 'Nvc56fControl', 'PARTITIONID_INVALID',
-    'PASCAL_CHANNEL_GPFIFO_A', 'PASCAL_DMA_COPY_A',
+    'PASCAL_CHANNEL_GPFIFO_A', 'PASCAL_DMA_COPY_A', 'PB_SIZE_16KB',
+    'PB_SIZE_32KB', 'PB_SIZE_4KB', 'PB_SIZE_64KB', 'PB_SIZE_8KB',
     'PFM_REQ_HNDLR_MAX_ACPI_OUTPUT_BUFFER_SIZE',
     'PFM_REQ_HNDLR_MAX_COUNTERS_PER_BLOCK',
     'PNV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS',
@@ -32020,33 +33973,41 @@ __all__ = \
     'PNVPOWERSTATE_PARAMETERS', 'PRM_GSP_SPDM_CMD',
     'PRM_GSP_SPDM_CMD_CC_CTRL', 'PRM_GSP_SPDM_CMD_CC_DEINIT',
     'PRM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL', 'PRM_GSP_SPDM_CMD_CC_INIT',
-    'PRM_GSP_SPDM_CMD_CC_INIT_RM_DATA', 'PRM_GSP_SPDM_MSG',
+    'PRM_GSP_SPDM_CMD_CC_INIT_RM_DATA',
+    'PRM_GSP_SPDM_CMD_FIPS_SELFTEST', 'PRM_GSP_SPDM_MSG',
     'RM_GSP_SPDM_CMD', 'RM_GSP_SPDM_CMD_CC_CTRL',
     'RM_GSP_SPDM_CMD_CC_DEINIT', 'RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL',
     'RM_GSP_SPDM_CMD_CC_INIT', 'RM_GSP_SPDM_CMD_CC_INIT_RM_DATA',
-    'RM_GSP_SPDM_CMD_ID_CC_CTRL', 'RM_GSP_SPDM_CMD_ID_CC_DEINIT',
+    'RM_GSP_SPDM_CMD_FIPS_SELFTEST', 'RM_GSP_SPDM_CMD_ID_CC_CTRL',
+    'RM_GSP_SPDM_CMD_ID_CC_DEINIT',
     'RM_GSP_SPDM_CMD_ID_CC_HEARTBEAT_CTRL',
     'RM_GSP_SPDM_CMD_ID_CC_INIT',
     'RM_GSP_SPDM_CMD_ID_CC_INIT_RM_DATA',
+    'RM_GSP_SPDM_CMD_ID_FIPS_SELFTEST',
     'RM_GSP_SPDM_CMD_ID_INVALID_COMMAND', 'RM_GSP_SPDM_MSG',
     'RM_GSP_SPDM_MSG_ID_CC_CTRL', 'RM_GSP_SPDM_MSG_ID_CC_DEINIT',
     'RM_GSP_SPDM_MSG_ID_CC_HEARTBEAT_CTRL',
     'RM_GSP_SPDM_MSG_ID_CC_INIT',
     'RM_GSP_SPDM_MSG_ID_CC_INIT_RM_DATA',
+    'RM_GSP_SPDM_MSG_ID_FIPS_SELFTEST',
     'RM_GSP_SPDM_MSG_ID_INVALID_COMMAND', 'RM_USER_SHARED_DATA',
     'RPC_METER_ENTRY', 'RSVD7_SIZE', 'RSVD8_SIZE',
     'RX_LNK_RX_RSP_STATUS_HW_ERR', 'RX_LNK_RX_RSP_STATUS_PRIV_ERR',
-    'RX_LNK_RX_RSP_STATUS_UR_ERR', 'TLC_RX_LNK', 'TLC_TX_SYS',
-    'TURING_A', 'TURING_CHANNEL_GPFIFO_A', 'TURING_COMPUTE_A',
-    'TURING_DMA_COPY_A', 'TURING_USERMODE_A',
+    'RX_LNK_RX_RSP_STATUS_UR_ERR',
+    'SPDM_SESSION_ESTABLISHMENT_TRANSCRIPT_BUFFER_SIZE', 'TLC_RX_LNK',
+    'TLC_TX_SYS', 'TURING_A', 'TURING_CHANNEL_GPFIFO_A',
+    'TURING_COMPUTE_A', 'TURING_DMA_COPY_A', 'TURING_USERMODE_A',
     'TX_SYS_TX_RSP_STATUS_HW_ERR', 'TX_SYS_TX_RSP_STATUS_PRIV_ERR',
     'TX_SYS_TX_RSP_STATUS_UR_ERR', 'UNIFIED_NV_STATUS',
     'UVM_ADD_SESSION', 'UVM_ADD_SESSION_PARAMS',
+    'UVM_ALLOC_DEVICE_P2P', 'UVM_ALLOC_DEVICE_P2P_PARAMS',
     'UVM_ALLOC_SEMAPHORE_POOL', 'UVM_ALLOC_SEMAPHORE_POOL_PARAMS',
     'UVM_ALLOW_MIGRATION_RANGE_GROUPS',
     'UVM_ALLOW_MIGRATION_RANGE_GROUPS_PARAMS', 'UVM_CHANNEL_RETAINER',
     'UVM_CLEAN_UP_ZOMBIE_RESOURCES',
     'UVM_CLEAN_UP_ZOMBIE_RESOURCES_PARAMS',
+    'UVM_CLEAR_ALL_ACCESS_COUNTERS',
+    'UVM_CLEAR_ALL_ACCESS_COUNTERS_PARAMS',
     'UVM_COUNTERS_OFFSET_BASE', 'UVM_CREATE_EVENT_QUEUE',
     'UVM_CREATE_EVENT_QUEUE_PARAMS', 'UVM_CREATE_EXTERNAL_RANGE',
     'UVM_CREATE_EXTERNAL_RANGE_PARAMS', 'UVM_CREATE_RANGE_GROUP',
@@ -32119,8 +34080,12 @@ __all__ = \
     'UVM_TOOLS_FLUSH_EVENTS', 'UVM_TOOLS_FLUSH_EVENTS_PARAMS',
     'UVM_TOOLS_GET_PROCESSOR_UUID_TABLE',
     'UVM_TOOLS_GET_PROCESSOR_UUID_TABLE_PARAMS',
+    'UVM_TOOLS_GET_PROCESSOR_UUID_TABLE_V2',
+    'UVM_TOOLS_GET_PROCESSOR_UUID_TABLE_V2_PARAMS',
     'UVM_TOOLS_INIT_EVENT_TRACKER',
     'UVM_TOOLS_INIT_EVENT_TRACKER_PARAMS',
+    'UVM_TOOLS_INIT_EVENT_TRACKER_V2',
+    'UVM_TOOLS_INIT_EVENT_TRACKER_V2_PARAMS',
     'UVM_TOOLS_READ_PROCESS_MEMORY',
     'UVM_TOOLS_READ_PROCESS_MEMORY_PARAMS',
     'UVM_TOOLS_SET_NOTIFICATION_THRESHOLD',
@@ -32139,6 +34104,7 @@ __all__ = \
     '_UVM_LINUX_IOCTL_H', '__CLC6C0QMD_H__', '__ga100_dev_fault_h__',
     '_cl2080_notification_h_', '_cl_ampere_compute_a_h_',
     '_clc56f_h_', '_clc6b5_h_', 'ampere_dma_copy_aControlPio',
+    'c__EA_ChannelPBSize',
     'c__EA_NV_VIDMEM_ACCESS_BIT_ALLOCATION_PARAMS_ADDR_SPACE',
     'nv_ioctl_alloc_os_event_t', 'nv_ioctl_card_info_t',
     'nv_ioctl_export_to_dma_buf_fd_t', 'nv_ioctl_free_os_event_t',
@@ -32151,7 +34117,9 @@ __all__ = \
     'nv_offline_addresses_t', 'nv_pci_info_t',
     'struct_ACR_FALCON_LS_STATUS', 'struct_ACR_REGION_HANDLE',
     'struct_ACR_REGION_ID_PROP', 'struct_ACR_REQUEST_PARAMS',
-    'struct_ACR_STATUS_PARAMS', 'struct_DRAM_CLK_INSTANCE',
+    'struct_ACR_STATUS_PARAMS', 'struct_CC_AES_CRYPTOBUNDLE',
+    'struct_CC_HMAC_CRYPTOBUNDLE', 'struct_CC_KMB',
+    'struct_DRAM_CLK_INSTANCE',
     'struct_NV0000_CTRL_CLIENT_GET_ACCESS_RIGHTS_PARAMS',
     'struct_NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS',
     'struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS',
@@ -32163,6 +34131,7 @@ __all__ = \
     'struct_NV0000_CTRL_CMD_NVD_GET_RCERR_RPT_PARAMS',
     'struct_NV0000_CTRL_CMD_NVD_RCERR_RPT_REG_ENTRY',
     'struct_NV0000_CTRL_CMD_SYSTEM_GET_PLATFORM_TYPE_PARAMS',
+    'struct_NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT',
     'struct_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS',
     'struct_NV0000_CTRL_CMD_SYSTEM_SYNC_EXTERNAL_FABRIC_MGMT_PARAMS',
     'struct_NV0000_CTRL_DIAG_DUMP_RPC_PARAMS',
@@ -32251,6 +34220,7 @@ __all__ = \
     'struct_NV0000_CTRL_SYSTEM_GET_PRIVILEGED_STATUS_PARAMS',
     'struct_NV0000_CTRL_SYSTEM_GET_RM_INSTANCE_ID_PARAMS',
     'struct_NV0000_CTRL_SYSTEM_GET_VGX_SYSTEM_INFO_PARAMS',
+    'struct_NV0000_CTRL_SYSTEM_GET_VRR_COOKIE_PRESENT_PARAMS',
     'struct_NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS',
     'struct_NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS_0',
     'struct_NV0000_CTRL_SYSTEM_GPS_CALL_ACPI_PARAMS',
@@ -32272,9 +34242,12 @@ __all__ = \
     'struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_PERF_SENSOR_COUNTERS_PARAMS',
     'struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_SET_FRM_DATA_PARAMS',
     'struct_NV0000_CTRL_SYSTEM_RMCTRL_CACHE_MODE_CTRL_PARAMS',
-    'struct_NV0000_CTRL_VGPU_GET_START_DATA_PARAMS',
+    'struct_NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS',
+    'struct_NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS',
+    'struct_NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS',
     'struct_NV0000_CTRL_VGPU_GET_VGPU_VERSION_PARAMS',
     'struct_NV0000_CTRL_VGPU_SET_VGPU_VERSION_PARAMS',
+    'struct_NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS',
     'struct_NV0000_SYNC_GPU_BOOST_GROUP_CONFIG',
     'struct_NV0000_SYNC_GPU_BOOST_GROUP_CREATE_PARAMS',
     'struct_NV0000_SYNC_GPU_BOOST_GROUP_DESTROY_PARAMS',
@@ -32282,7 +34255,6 @@ __all__ = \
     'struct_NV0000_SYNC_GPU_BOOST_INFO_PARAMS',
     'struct_NV0080_ALLOC_PARAMETERS',
     'struct_NV0080_CTRL_BIF_ASPM_CYA_UPDATE_PARAMS',
-    'struct_NV0080_CTRL_BIF_GET_DMA_BASE_SYSMEM_ADDR_PARAMS',
     'struct_NV0080_CTRL_BIF_RESET_PARAMS',
     'struct_NV0080_CTRL_BIF_SET_ASPM_FEATURE_PARAMS',
     'struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS',
@@ -32314,7 +34286,6 @@ __all__ = \
     'struct_NV0080_CTRL_FB_GET_CAPS_V2_PARAMS',
     'struct_NV0080_CTRL_FB_GET_COMPBIT_STORE_INFO_PARAMS',
     'struct_NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS',
-    'struct_NV0080_CTRL_FIFO_CHANNEL',
     'struct_NV0080_CTRL_FIFO_GET_CAPS_PARAMS',
     'struct_NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS',
     'struct_NV0080_CTRL_FIFO_GET_CHANNELLIST_PARAMS',
@@ -32326,7 +34297,6 @@ __all__ = \
     'struct_NV0080_CTRL_FIFO_RUNLIST_GROUP_CHANNELS_PARAM',
     'struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS',
     'struct_NV0080_CTRL_FIFO_START_RUNLIST_PARAMS',
-    'struct_NV0080_CTRL_FIFO_START_SELECTED_CHANNELS_PARAMS',
     'struct_NV0080_CTRL_FIFO_STOP_RUNLIST_PARAMS',
     'struct_NV0080_CTRL_GPU_FIND_SUBDEVICE_HANDLE_PARAM',
     'struct_NV0080_CTRL_GPU_GET_BRAND_CAPS_PARAMS',
@@ -32367,7 +34337,6 @@ __all__ = \
     'struct_NV2080CtrlNocatJournalInsertRecord',
     'struct_NV2080CtrlNocatJournalRclog',
     'struct_NV2080CtrlNocatJournalSetTag',
-    'struct_NV2080_CTRLNVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS',
     'struct_NV2080_CTRL_BIOS_GET_INFO_PARAMS',
     'struct_NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS',
     'struct_NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARAMS',
@@ -32383,7 +34352,6 @@ __all__ = \
     'struct_NV2080_CTRL_BUS_GET_BFD_PARAMS',
     'struct_NV2080_CTRL_BUS_GET_BFD_PARAMSARR',
     'struct_NV2080_CTRL_BUS_GET_EOM_STATUS_PARAMS',
-    'struct_NV2080_CTRL_BUS_GET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS',
     'struct_NV2080_CTRL_BUS_GET_INFO_PARAMS',
     'struct_NV2080_CTRL_BUS_GET_INFO_V2_PARAMS',
     'struct_NV2080_CTRL_BUS_GET_NVLINK_PEER_ID_MASK_PARAMS',
@@ -32391,11 +34359,10 @@ __all__ = \
     'struct_NV2080_CTRL_BUS_GET_PCI_INFO_PARAMS',
     'struct_NV2080_CTRL_BUS_GET_PEX_COUNTERS_PARAMS',
     'struct_NV2080_CTRL_BUS_GET_PEX_UTIL_COUNTERS_PARAMS',
-    'struct_NV2080_CTRL_BUS_HWBC_GET_UPSTREAM_BAR0_PARAMS',
     'struct_NV2080_CTRL_BUS_MAP_BAR2_PARAMS',
+    'struct_NV2080_CTRL_BUS_PCIE_GPU_ATOMIC_OP_INFO',
     'struct_NV2080_CTRL_BUS_PCI_BAR_INFO',
     'struct_NV2080_CTRL_BUS_SERVICE_GPU_MULTIFUNC_STATE_PARAMS',
-    'struct_NV2080_CTRL_BUS_SET_HWBC_UPSTREAM_PCIE_SPEED_PARAMS',
     'struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS',
     'struct_NV2080_CTRL_BUS_SET_PCIE_LINK_WIDTH_PARAMS',
     'struct_NV2080_CTRL_BUS_SET_PCIE_SPEED_PARAMS',
@@ -32407,18 +34374,23 @@ __all__ = \
     'struct_NV2080_CTRL_CE_GET_CAPS_PARAMS',
     'struct_NV2080_CTRL_CE_GET_CAPS_V2_PARAMS',
     'struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS',
+    'struct_NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS',
     'struct_NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS',
     'struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS',
+    'struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS',
+    'struct_NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS',
+    'struct_NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS',
     'struct_NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS',
     'struct_NV2080_CTRL_CE_UPDATE_CLASS_DB_PARAMS',
     'struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS',
+    'struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS',
     'struct_NV2080_CTRL_CMD_BIOS_GET_POST_TIME_PARAMS',
     'struct_NV2080_CTRL_CMD_BUS_CONTROL_PUBLIC_ASPM_BITS_PARAMS',
     'struct_NV2080_CTRL_CMD_BUS_GET_C2C_INFO_PARAMS',
+    'struct_NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS',
     'struct_NV2080_CTRL_CMD_BUS_GET_PCIE_LTR_LATENCY_PARAMS',
     'struct_NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_PARAMS',
     'struct_NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS',
-    'struct_NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS_0',
     'struct_NV2080_CTRL_CMD_BUS_GET_PEX_LANE_COUNTERS_PARAMS',
     'struct_NV2080_CTRL_CMD_BUS_GET_UPHY_DLN_CFG_SPACE_PARAMS',
     'struct_NV2080_CTRL_CMD_BUS_SET_EOM_PARAMETERS_PARAMS',
@@ -32461,11 +34433,13 @@ __all__ = \
     'struct_NV2080_CTRL_CMD_INTERNAL_BUS_SETUP_P2P_MAILBOX_LOCAL_PARAMS',
     'struct_NV2080_CTRL_CMD_INTERNAL_BUS_SETUP_P2P_MAILBOX_REMOTE_PARAMS',
     'struct_NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE_PARAMS',
+    'struct_NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY_PARAMS',
+    'struct_NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_PARAMS',
     'struct_NV2080_CTRL_CMD_INTERNAL_DISPLAY_POST_UNIX_CONSOLE_PARAMS',
     'struct_NV2080_CTRL_CMD_INTERNAL_DISPLAY_PRE_UNIX_CONSOLE_PARAMS',
+    'struct_NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING_PARAMS',
     'struct_NV2080_CTRL_CMD_INTERNAL_GET_ENABLED_SEC2_CLASSES_PARAMS',
     'struct_NV2080_CTRL_CMD_INTERNAL_GET_GPU_FABRIC_PROBE_INFO_PARAMS',
-    'struct_NV2080_CTRL_CMD_INTERNAL_GSP_START_TRACE_INFO_PARAMS',
     'struct_NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_PM1_STATE_PARAMS',
     'struct_NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_VPSTATE_INFO_PARAMS',
     'struct_NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_VPSTATE_MAPPING_PARAMS',
@@ -32500,7 +34474,6 @@ __all__ = \
     'struct_NV2080_CTRL_DMA_INVALIDATE_TLB_PARAMS',
     'struct_NV2080_CTRL_DMA_UPDATE_COMPTAG_INFO_TILE_INFO',
     'struct_NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS',
-    'struct_NV2080_CTRL_ECC_GET_ECI_COUNTERS_PARAMS',
     'struct_NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS',
     'struct_NV2080_CTRL_EVENT_RATS_GSP_TRACE_BIND_EVTBUF_PARAMS',
     'struct_NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS',
@@ -32518,11 +34491,13 @@ __all__ = \
     'struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS',
     'struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS',
     'struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS',
+    'struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS',
     'struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS',
     'struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS',
     'struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS',
     'struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS',
     'struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS',
+    'struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS',
     'struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS',
     'struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS',
     'struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS',
@@ -32544,11 +34519,7 @@ __all__ = \
     'struct_NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS',
     'struct_NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS',
     'struct_NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS',
-    'struct_NV2080_CTRL_FB_GET_SYSTEM_CARVEOUT_ADDRESS_SPACE_INFO',
-    'struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_PARAMS',
-    'struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_ENTRY',
-    'struct_NV2080_CTRL_FB_GPU_CACHE_ALLOC_POLICY_V2_PARAMS',
-    'struct_NV2080_CTRL_FB_GPU_CACHE_PROMOTION_POLICY_PARAMS',
+    'struct_NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS',
     'struct_NV2080_CTRL_FB_IS_KIND_PARAMS',
     'struct_NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO',
     'struct_NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS',
@@ -32563,6 +34534,7 @@ __all__ = \
     'struct_NV2080_CTRL_FIFO_CHANNEL_PREEMPTIVE_REMOVAL_PARAMS',
     'struct_NV2080_CTRL_FIFO_DEVICE_ENTRY',
     'struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS',
+    'struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS',
     'struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS',
     'struct_NV2080_CTRL_FIFO_DISABLE_USERMODE_CHANNELS_PARAMS',
     'struct_NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS',
@@ -32595,6 +34567,7 @@ __all__ = \
     'struct_NV2080_CTRL_GC6_EXIT_PARAMS_params',
     'struct_NV2080_CTRL_GC6_FLAVOR_INFO',
     'struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS',
+    'struct_NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS',
     'struct_NV2080_CTRL_GPUMON_SAMPLE',
     'struct_NV2080_CTRL_GPUMON_SAMPLES',
     'struct_NV2080_CTRL_GPU_BRIDGE_VERSION_PARAMS',
@@ -32655,10 +34628,12 @@ __all__ = \
     'struct_NV2080_CTRL_GPU_GET_PHYSICAL_BRIDGE_VERSION_INFO_PARAMS',
     'struct_NV2080_CTRL_GPU_GET_PIDS_PARAMS',
     'struct_NV2080_CTRL_GPU_GET_PID_INFO_PARAMS',
+    'struct_NV2080_CTRL_GPU_GET_RECOVERY_ACTION_PARAMS',
     'struct_NV2080_CTRL_GPU_GET_RESET_STATUS_PARAMS',
     'struct_NV2080_CTRL_GPU_GET_SDM_PARAMS',
     'struct_NV2080_CTRL_GPU_GET_SHORT_NAME_STRING_PARAMS',
     'struct_NV2080_CTRL_GPU_GET_SIMULATION_INFO_PARAMS',
+    'struct_NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS',
     'struct_NV2080_CTRL_GPU_GET_VMMU_SEGMENT_SIZE_PARAMS',
     'struct_NV2080_CTRL_GPU_GET_VPR_CAPS_PARAMS',
     'struct_NV2080_CTRL_GPU_GET_VPR_INFO_PARAMS',
@@ -32749,6 +34724,7 @@ __all__ = \
     'struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS',
     'struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS',
     'struct_NV2080_CTRL_GR_SET_GPC_TILE_MAP_PARAMS',
+    'struct_NV2080_CTRL_GR_SET_LG_SECTOR_PROMOTION_PARAMS',
     'struct_NV2080_CTRL_GR_VAT_ALARM_DATA',
     'struct_NV2080_CTRL_GR_VAT_ALARM_DATA_PER_GPC',
     'struct_NV2080_CTRL_GR_VAT_ALARM_DATA_PER_TPC',
@@ -32769,13 +34745,18 @@ __all__ = \
     'struct_NV2080_CTRL_INTERNAL_BUS_CREATE_C2C_PEER_MAPPING_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_BUS_DESTROY_P2P_MAILBOX_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_BUS_REMOVE_C2C_PEER_MAPPING_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO',
     'struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_CCU_SAMPLE_INFO_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_CCU_STREAM_STATE_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_CCU_UNMAP_INFO_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_GET_STATIC_INFO_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK',
+    'struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_DEVICE_INFO',
     'struct_NV2080_CTRL_INTERNAL_DISPLAY_CHANNEL_PUSHBUFFER_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_DISPLAY_GET_ACTIVE_DISPLAY_DEVICES_PARAMS',
@@ -32789,15 +34770,11 @@ __all__ = \
     'struct_NV2080_CTRL_INTERNAL_EDID_DATA',
     'struct_NV2080_CTRL_INTERNAL_ENGINE_CONTEXT_BUFFER_INFO',
     'struct_NV2080_CTRL_INTERNAL_FBSR_INIT_PARAMS',
-    'struct_NV2080_CTRL_INTERNAL_FBSR_SEND_REGION_INFO_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_FB_GET_HEAP_RESERVATION_SIZE_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_FIFO_GET_NUM_CHANNELS_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_FIFO_GET_NUM_SECURE_CHANNELS_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS_PARAMS',
-    'struct_NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_FLAGS_PARAMS',
-    'struct_NV2080_CTRL_INTERNAL_FLCN_SET_VIDEO_EVENT_BUFFER_MEMORY_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GCX_ENTRY_PREREQUISITE_PARAMS',
-    'struct_NV2080_CTRL_INTERNAL_GET_COHERENT_FB_APERTURE_SIZE_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GET_EGPU_BRIDGE_INFO_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GET_PCIE_P2P_CAPS_PARAMS',
@@ -32810,15 +34787,22 @@ __all__ = \
     'struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_DIRECTION_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_OUTPUT_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GPIO_READ_INPUT_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GPU_GET_CHIP_INFO_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_GPU_GET_PF_BAR1_SPA_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GPU_GET_SMC_MODE_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_GPU_SET_ILLUM_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GRMGR_SKYLINE_INFO',
     'struct_NV2080_CTRL_INTERNAL_GR_FECS_TRACE_HW_ENABLE_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GR_FECS_TRACE_OFFSET_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GR_INFO',
+    'struct_NV2080_CTRL_INTERNAL_GR_INIT_BUG4208224_WAR_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GSYNC_ATTACH_AND_INIT_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GSYNC_GET_DISPLAY_IDS_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GSYNC_GET_VERTICAL_ACTIVE_LINES_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GSYNC_IS_DISPLAYID_VALID_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_GSYNC_OPTIMIZE_TIMING_PARAMETERS_PARAMS',
@@ -32827,6 +34811,7 @@ __all__ = \
     'struct_NV2080_CTRL_INTERNAL_HSHUB_EGM_CONFIG_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_HSHUB_FIRST_LINK_PEER_ID_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_HSHUB_GET_NUM_UNITS_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_HSHUB_NEXT_HSHUB_ID_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_HSHUB_PEER_CONN_CONFIG_PARAMS',
@@ -32853,9 +34838,34 @@ __all__ = \
     'struct_NV2080_CTRL_INTERNAL_MIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_MSENC_CAPS',
     'struct_NV2080_CTRL_INTERNAL_MSENC_GET_CAPS_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_ENABLE_NVLINK_PEER_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_GET_ALI_ENABLED_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_NVLINK_GET_NUM_ACTIVE_LINK_PER_IOCTRL_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_NVLINK_GET_SET_NVSWITCH_FABRIC_ADDR_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_NVLINK_GET_TOTAL_NUM_LINK_PER_IOCTRL_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_REMOTE_LOCAL_SID_INFO',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_NV_RANGE',
     'struct_NV2080_CTRL_INTERNAL_PERF_BOOST_CLEAR_PARAMS_3X',
     'struct_NV2080_CTRL_INTERNAL_PERF_BOOST_SET_PARAMS_2X',
@@ -32875,6 +34885,7 @@ __all__ = \
     'struct_NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PEER_INFO',
     'struct_NV2080_CTRL_INTERNAL_SMBPBI_PFM_REQ_HNDLR_CAP_UPDATE_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS',
+    'struct_NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_STATIC_GRMGR_GET_SKYLINE_INFO_PARAMS',
     'struct_NV2080_CTRL_INTERNAL_STATIC_GR_CAPS',
     'struct_NV2080_CTRL_INTERNAL_STATIC_GR_CONTEXT_BUFFERS_INFO',
@@ -32917,9 +34928,7 @@ __all__ = \
     'struct_NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS',
     'struct_NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS',
     'struct_NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS',
-    'struct_NV2080_CTRL_MC_QUERY_HOSTCLK_SLOWDOWN_STATUS_PARAMS',
     'struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS',
-    'struct_NV2080_CTRL_MC_SET_HOSTCLK_SLOWDOWN_STATUS_PARAMS',
     'struct_NV2080_CTRL_MC_STATIC_INTR_ENTRY',
     'struct_NV2080_CTRL_NVD_GET_DUMP_PARAMS',
     'struct_NV2080_CTRL_NVD_GET_DUMP_SIZE_PARAMS',
@@ -32928,22 +34937,11 @@ __all__ = \
     'struct_NV2080_CTRL_NVENC_SW_SESSION_INFO',
     'struct_NV2080_CTRL_NVFBC_SW_SESSION_INFO',
     'struct_NV2080_CTRL_NVLINK_ARE_LINKS_TRAINED_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_CALLBACK_GET_SUBLINK_MODE_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_CALLBACK_TYPE',
     'struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS',
     'struct_NV2080_CTRL_NVLINK_CLEAR_REFRESH_COUNTERS_PARAMS',
     'struct_NV2080_CTRL_NVLINK_COMMON_ERR_INFO',
-    'struct_NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES',
     'struct_NV2080_CTRL_NVLINK_CYCLE_LINK_PARAMS',
     'struct_NV2080_CTRL_NVLINK_DEVICE_INFO',
     'struct_NV2080_CTRL_NVLINK_DEVICE_IP_REVISION_VALUES',
@@ -32951,15 +34949,16 @@ __all__ = \
     'struct_NV2080_CTRL_NVLINK_DIRECT_CONNECT_CHECK_PARAMS',
     'struct_NV2080_CTRL_NVLINK_DISABLE_DL_INTERRUPTS_PARAMS',
     'struct_NV2080_CTRL_NVLINK_ENABLE_LINKS_POST_TOPOLOGY_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_ENABLE_NVLINK_PEER_PARAMS',
     'struct_NV2080_CTRL_NVLINK_ENABLE_SYSMEM_NVLINK_ATS_PARAMS',
     'struct_NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS',
     'struct_NV2080_CTRL_NVLINK_EOM_MEASUREMENT',
     'struct_NV2080_CTRL_NVLINK_ERR_INFO',
-    'struct_NV2080_CTRL_NVLINK_GET_ALI_ENABLED_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS',
     'struct_NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS',
     'struct_NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES',
     'struct_NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS',
     'struct_NV2080_CTRL_NVLINK_GET_IOCTRL_DEVICE_INFO_PARAMS',
     'struct_NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS',
     'struct_NV2080_CTRL_NVLINK_GET_LINK_AND_CLOCK_INFO_PARAMS',
@@ -32971,11 +34970,16 @@ __all__ = \
     'struct_NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS',
     'struct_NV2080_CTRL_NVLINK_GET_NVLINK_DEVICE_INFO_PARAMS',
     'struct_NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS',
     'struct_NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS',
     'struct_NV2080_CTRL_NVLINK_GET_POWER_STATE_PARAMS',
     'struct_NV2080_CTRL_NVLINK_GET_REFRESH_COUNTERS_PARAMS',
     'struct_NV2080_CTRL_NVLINK_GET_SET_NVSWITCH_FLA_ADDR_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS',
     'struct_NV2080_CTRL_NVLINK_HSHUB_GET_SYSMEM_NVLINK_MASK_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG',
+    'struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO',
     'struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS',
     'struct_NV2080_CTRL_NVLINK_INBAND_SEND_DATA_PARAMS',
     'struct_NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS',
@@ -32990,26 +34994,60 @@ __all__ = \
     'struct_NV2080_CTRL_NVLINK_PHY_REFRESH_STATUS_INFO',
     'struct_NV2080_CTRL_NVLINK_PORT_EVENT',
     'struct_NV2080_CTRL_NVLINK_POST_FAULT_UP_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS',
     'struct_NV2080_CTRL_NVLINK_PRE_LINK_TRAIN_ALI_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_PRM_DATA',
     'struct_NV2080_CTRL_NVLINK_PROCESS_FORCED_CONFIGS_PARAMS',
     'struct_NV2080_CTRL_NVLINK_PROCESS_INIT_DISABLED_LINKS_PARAMS',
     'struct_NV2080_CTRL_NVLINK_PROGRAM_BUFFERREADY_PARAMS',
     'struct_NV2080_CTRL_NVLINK_PROGRAM_LINK_SPEED_PARAMS',
     'struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS',
     'struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES',
+    'struct_NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS',
     'struct_NV2080_CTRL_NVLINK_READ_UPHY_PAD_LANE_REG_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_REMOTE_LOCAL_SID_INFO',
     'struct_NV2080_CTRL_NVLINK_REMOVE_NVLINK_MAPPING_PARAMS',
     'struct_NV2080_CTRL_NVLINK_RESET_LINKS_PARAMS',
     'struct_NV2080_CTRL_NVLINK_SAVE_RESTORE_HSHUB_STATE_PARAMS',
     'struct_NV2080_CTRL_NVLINK_SETUP_NVLINK_SYSMEM_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS',
     'struct_NV2080_CTRL_NVLINK_SET_ERROR_INJECTION_MODE_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS',
     'struct_NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS',
     'struct_NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PARAMS',
     'struct_NV2080_CTRL_NVLINK_SET_NVLINK_PEER_PARAMS',
@@ -33017,10 +35055,9 @@ __all__ = \
     'struct_NV2080_CTRL_NVLINK_SYNC_LINK_MASKS_AND_VBIOS_INFO_PARAMS',
     'struct_NV2080_CTRL_NVLINK_SYNC_NVLINK_SHUTDOWN_PROPS_PARAMS',
     'struct_NV2080_CTRL_NVLINK_UPDATE_CURRENT_CONFIG_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_UPDATE_HSHUB_MUX_PARAMS',
     'struct_NV2080_CTRL_NVLINK_UPDATE_LINK_CONNECTION_PARAMS',
     'struct_NV2080_CTRL_NVLINK_UPDATE_PEER_LINK_MASK_PARAMS',
-    'struct_NV2080_CTRL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS',
+    'struct_NV2080_CTRL_NVLINK_UPHY_CLN_CMD',
     'struct_NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_PARAMS',
     'struct_NV2080_CTRL_OS_UNIX_AUDIO_DYNAMIC_POWER_PARAMS',
     'struct_NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_PARAMS',
@@ -33041,6 +35078,7 @@ __all__ = \
     'struct_NV2080_CTRL_PERF_GPU_IS_IDLE_PARAMS',
     'struct_NV2080_CTRL_PERF_NOTIFY_VIDEOEVENT_PARAMS',
     'struct_NV2080_CTRL_PERF_POWERSTATE_PARAMS',
+    'struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST',
     'struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS',
     'struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS',
     'struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_rm',
@@ -33054,11 +35092,13 @@ __all__ = \
     'struct_NV2080_CTRL_RC_READ_VIRTUAL_MEM_PARAMS',
     'struct_NV2080_CTRL_SMC_SUBSCRIPTION_INFO',
     'struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS',
+    'struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS',
     'struct_NV2080_CTRL_TDR_SET_TIMEOUT_STATE_PARAMS',
     'struct_NV2080_CTRL_TIMER_GET_GPU_CPU_TIME_CORRELATION_INFO_PARAMS',
     'struct_NV2080_CTRL_TIMER_GET_REGISTER_OFFSET_PARAMS',
     'struct_NV2080_CTRL_TIMER_GET_TIME_PARAMS',
     'struct_NV2080_CTRL_TIMER_GPU_CPU_TIME_SAMPLE',
+    'struct_NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS',
     'struct_NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS',
     'struct_NV2080_CTRL_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO_PARAMS',
     'struct_NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS',
@@ -33078,7 +35118,8 @@ __all__ = \
     'struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_CFG',
     'struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_DETAILS',
     'struct_NV2080_NOCAT_JOURNAL_RECORD',
-    'struct_NV2080_VGPU_FB_USAGE', 'struct_NV2080_VGPU_GUEST',
+    'struct_NV2080_VF_MSIX_CAPS', 'struct_NV2080_VGPU_FB_USAGE',
+    'struct_NV2080_VGPU_GUEST',
     'struct_NV30F1_CTRL_GSYNC_GET_OPTIMIZED_TIMING_PARAMS',
     'struct_NV83DE_ALLOC_PARAMETERS',
     'struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_ALL_CONTEXTS_FOR_CLIENT_PARAMS',
@@ -33100,6 +35141,7 @@ __all__ = \
     'struct_NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_ENTRY',
     'struct_NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_PARAMS',
     'struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS',
+    'struct_NV83DE_CTRL_DEBUG_SET_DROP_DEFERRED_RC_PARAMS',
     'struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS',
     'struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS',
     'struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS',
@@ -33113,9 +35155,6 @@ __all__ = \
     'struct_NV83DE_CTRL_DEBUG_WRITE_MEMORY_PARAMS',
     'struct_NV83DE_MMU_FAULT_INFO',
     'struct_NV83DE_SM_ERROR_STATE_REGISTERS',
-    'struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS',
-    'struct_NV906F_CTRL_GET_CLASS_ENGINEID_PARAMS',
-    'struct_NV906F_CTRL_GET_MMU_FAULT_INFO_PARAMS',
     'struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS',
     'struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0',
     'struct_NVA06C_CTRL_GET_INFO_PARAMS',
@@ -33127,7 +35166,6 @@ __all__ = \
     'struct_NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_PARAMS',
     'struct_NVA06C_CTRL_TIMESLICE_PARAMS',
     'struct_NVA06F_CTRL_BIND_PARAMS',
-    'struct_NVA06F_CTRL_EVENT_SET_NOTIFICATION_PARAMS',
     'struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS',
     'struct_NVA081_CTRL_VGPU_INFO',
     'struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS',
@@ -33137,6 +35175,7 @@ __all__ = \
     'struct_NV_CONF_COMPUTE_CTRL_CMD_GET_GPU_ATTESTATION_REPORT_PARAMS',
     'struct_NV_CONF_COMPUTE_CTRL_CMD_GET_GPU_CERTIFICATE_PARAMS',
     'struct_NV_CONF_COMPUTE_CTRL_CMD_GET_NUM_SUPPORTED_CC_SECURE_CHANNELS_PARAMS',
+    'struct_NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_KEY_ROTATION_STATE_PARAMS',
     'struct_NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_NUM_SECURE_CHANNELS_PARAMS',
     'struct_NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_VIDMEM_SIZE_PARAMS',
     'struct_NV_CONF_COMPUTE_CTRL_CMD_GPU_SET_VIDMEM_SIZE_PARAMS',
@@ -33163,10 +35202,10 @@ __all__ = \
     'struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL',
     'struct_RM_GSP_SPDM_CMD_CC_INIT',
     'struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA',
-    'struct_RM_GSP_SPDM_MSG', 'struct_RPC_METER_ENTRY',
-    'struct_RS_ACCESS_MASK', 'struct_RS_SHARE_POLICY',
-    'struct_TEGRA_IMP_IMPORT_DATA', 'struct_VPR_REQUEST_PARAMS',
-    'struct_VPR_STATUS_PARAMS',
+    'struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST', 'struct_RM_GSP_SPDM_MSG',
+    'struct_RPC_METER_ENTRY', 'struct_RS_ACCESS_MASK',
+    'struct_RS_SHARE_POLICY', 'struct_TEGRA_IMP_IMPORT_DATA',
+    'struct_VPR_REQUEST_PARAMS', 'struct_VPR_STATUS_PARAMS',
     'struct__NV2080_COOLER_DIAG_ZONE_NOTIFICATION_REC',
     'struct__NV2080_PLATFORM_POWER_MODE_CHANGE_STATUS',
     'struct__NV2080_THERM_DIAG_ZONE_NOTIFICATION_REC',
@@ -33221,9 +35260,6 @@ __all__ = \
     'struct_c__SA_NV_CONTEXT_DMA_ALLOCATION_PARAMS',
     'struct_c__SA_NV_CTXSHARE_ALLOCATION_PARAMETERS',
     'struct_c__SA_NV_GR_ALLOCATION_PARAMETERS',
-    'struct_c__SA_NV_GSP_TEST_GET_MSG_BLOCK_PARAMETERS',
-    'struct_c__SA_NV_GSP_TEST_SEND_EVENT_NOTIFICATION_PARAMETERS',
-    'struct_c__SA_NV_GSP_TEST_SEND_MSG_RESPONSE_PARAMETERS',
     'struct_c__SA_NV_HOPPER_USERMODE_A_PARAMS',
     'struct_c__SA_NV_MEMORY_ALLOCATION_PARAMS',
     'struct_c__SA_NV_MEMORY_HW_RESOURCES_ALLOCATION_PARAMS',
@@ -33249,9 +35285,11 @@ __all__ = \
     'struct_c__SA_Nv2080QosIntrNotification',
     'struct_c__SA_Nv2080VrrSetTimeoutNotification',
     'struct_c__SA_NvUnixEvent', 'struct_c__SA_UVM_ADD_SESSION_PARAMS',
+    'struct_c__SA_UVM_ALLOC_DEVICE_P2P_PARAMS',
     'struct_c__SA_UVM_ALLOC_SEMAPHORE_POOL_PARAMS',
     'struct_c__SA_UVM_ALLOW_MIGRATION_RANGE_GROUPS_PARAMS',
     'struct_c__SA_UVM_CLEAN_UP_ZOMBIE_RESOURCES_PARAMS',
+    'struct_c__SA_UVM_CLEAR_ALL_ACCESS_COUNTERS_PARAMS',
     'struct_c__SA_UVM_CREATE_EVENT_QUEUE_PARAMS',
     'struct_c__SA_UVM_CREATE_EXTERNAL_RANGE_PARAMS',
     'struct_c__SA_UVM_CREATE_RANGE_GROUP_PARAMS',
@@ -33331,7 +35369,7 @@ __all__ = \
     'struct_nv_ioctl_set_numa_status', 'struct_nv_ioctl_status_code',
     'struct_nv_ioctl_sys_params',
     'struct_nv_ioctl_wait_open_complete', 'struct_nv_ioctl_xfer',
-    'struct_nv_uuid', 'struct_offline_addresses',
+    'struct_nv_uuid', 'struct_offline_addresses', 'union_CC_KMB_0',
     'union_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS_data',
     'union_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS_filterParam',
     'union_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data',
@@ -33342,10 +35380,10 @@ __all__ = \
     'union_NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS_gpuNameString',
     'union_NV2080_CTRL_GPU_PID_INFO_DATA',
     'union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_queryData',
+    'union_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS_linkModeParams',
+    'union_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_callbackParams',
     'union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_data',
     'union_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS_nocatJournalData',
-    'union_NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS_linkModeParams',
-    'union_NV2080_CTRL_NVLINK_CALLBACK_TYPE_callbackParams',
     'union_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE',
     'union_RM_GSP_SPDM_CMD', 'union_c__SA_NVOS32_PARAMETERS_data']
 nv_status_codes = {}
@@ -33601,6 +35639,14 @@ NV_ERR_ALREADY_SIGNALLED = 0x0000007B
 nv_status_codes[NV_ERR_ALREADY_SIGNALLED] = "Semaphore Surface value already >= requested wait value"
 NV_ERR_QUEUE_TASK_SLOT_NOT_AVAILABLE = 0x0000007C
 nv_status_codes[NV_ERR_QUEUE_TASK_SLOT_NOT_AVAILABLE] = "PMU RPC error due to no queue slot available for this event"
+NV_ERR_KEY_ROTATION_IN_PROGRESS = 0x0000007D
+nv_status_codes[NV_ERR_KEY_ROTATION_IN_PROGRESS] = "Operation not allowed as key rotation is in progress"
+NV_ERR_TEST_ONLY_CODE_NOT_ENABLED = 0x0000007E
+nv_status_codes[NV_ERR_TEST_ONLY_CODE_NOT_ENABLED] = "Test-only code path not enabled"
+NV_ERR_SECURE_BOOT_FAILED = 0x0000007F
+nv_status_codes[NV_ERR_SECURE_BOOT_FAILED] = "GFW secure boot failed"
+NV_ERR_INSUFFICIENT_ZBC_ENTRY = 0x00000080
+nv_status_codes[NV_ERR_INSUFFICIENT_ZBC_ENTRY] = "No more ZBC entry for the client"
 NV_WARN_HOT_SWITCH = 0x00010001
 nv_status_codes[NV_WARN_HOT_SWITCH] = "WARNING Hot switch"
 NV_WARN_INCORRECT_PERFMON_DATA = 0x00010002
