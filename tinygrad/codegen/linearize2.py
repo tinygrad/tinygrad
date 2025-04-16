@@ -26,18 +26,18 @@ class BasicBlock2:
            f"{[disp(y) for y in self.ctx]} {[disp(y) for y in self.child_ctx] if self.child_ctx is not None else '-'} "+\
            f"{len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
-@dataclass
-class MakeBlockContext:
-  child_len: dict[UOp, int]
-
-@profile
-def make_block(ctx:MakeBlockContext, x:UOp):
+#@profile
+def make_block(fixed_x:UOp, child_len:dict[UOp, int], blocks:dict[UOp, UOp]):
   # this is key to making this algorithm work. we recover the old x by replacing the srcs
-  fixed_x = x.replace(src=tuple([y.arg.lst[-1] for y in x.src]))
-  assert fixed_x in ctx.child_len
+  #fixed_x = x.replace(src=tuple([y.arg.lst[-1] for y in x.src]))
+  #assert x.op not in {Ops.BLOCK, Ops.BLOCKEND} and fixed_x in child_len
 
   # compute the new context
-  tuple_ctx = _sort_ctx(flatten([(y.arg.child_ctx if y.arg.child_ctx is not None else y.arg.ctx) for y in x.src]))
+  list_ctx = []
+  for y in fixed_x.src:
+    bb = blocks[y].arg
+    list_ctx.extend(list(bb.child_ctx if bb.child_ctx is not None else bb.ctx))
+  tuple_ctx = _sort_ctx(list_ctx)
 
   # does this block modify the ctx?
   # RANGE/IF add to the next ctx
@@ -47,16 +47,17 @@ def make_block(ctx:MakeBlockContext, x:UOp):
   elif fixed_x.op is Ops.STORE:
     # ugh, deal with non-reduce locals. probably wrong
     if isinstance(fixed_x.src[0].dtype, PtrDType) and fixed_x.src[0].dtype.local:
-      idx_context, store_context = x.src[0].arg.ctx, x.src[1].arg.ctx
+      idx_context, store_context = blocks[fixed_x.src[0]].arg.ctx, blocks[fixed_x.src[1]].arg.ctx
       child_ctx = tuple([y for y in store_context if y not in idx_context and y.op is Ops.RANGE])
     else: child_ctx = ()
   elif fixed_x.op is Ops.ASSIGN:
     assert fixed_x.src[0].op is Ops.DEFINE_ACC
-    child_ctx = tuple([y for y in x.src[1].arg.ctx if y not in fixed_x.src[0].src[1:]])
+    child_ctx = tuple([y for y in blocks[fixed_x.src[1]].arg.ctx if y not in fixed_x.src[0].src[1:]])
 
   # a block is unmergable if it has children or it has a different context
   unmergable_blocks, mergable_blocks = [], []
-  for y in dedup(x.src):
+  for uy in dedup(fixed_x.src):
+    y = blocks[uy]
     if y.arg.cnt == 1 and y.arg.ctx == tuple_ctx:
       mergable_blocks.append(y)
     else:
@@ -65,7 +66,7 @@ def make_block(ctx:MakeBlockContext, x:UOp):
         ends_to_add = [z for z in y.arg.ctx if z not in tuple_ctx]
         new_ctx = y.arg.ctx
         while len(ends_to_add):
-          r = ends_to_add.pop(-1)
+          r:UOp = ends_to_add.pop(-1)
           new_ctx = tuple([z for z in new_ctx if z is not r])
           end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
           y = UOp(Ops.BLOCKEND, src=(y,), arg=BasicBlock2((end_uop,), new_ctx, end=r, cnt=1))
@@ -73,7 +74,7 @@ def make_block(ctx:MakeBlockContext, x:UOp):
 
   # create the block (TODO: we don't actually need to track that list)
   lst = tuple(flatten([y.arg.lst for y in mergable_blocks])+[fixed_x])
-  arg = BasicBlock2(lst, tuple_ctx, cnt=ctx.child_len[fixed_x], child_ctx=child_ctx)
+  arg = BasicBlock2(lst, tuple_ctx, cnt=child_len[fixed_x], child_ctx=child_ctx)
   new_srcs = tuple(flatten([y.src for y in mergable_blocks])+unmergable_blocks)
   return UOp(Ops.BLOCK, src=new_srcs, arg=arg)
 
@@ -92,8 +93,8 @@ def remove_blockend(x:UOp):
     if x.op is Ops.BLOCKEND and any(y.op is Ops.BARRIER for y in late_ops) and late_ops[-1].op is Ops.ENDRANGE:
       late_ops = [UOp(Ops.BARRIER)] + late_ops
     lst = tuple(early_ops)+parent_block.arg.lst+tuple(late_ops)
-    return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src,
-      arg=BasicBlock2(lst, _sort_ctx([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt))
+    arg = BasicBlock2(lst, _sort_ctx([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt)
+    return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src, arg=arg)
 
 def merge_block(x:UOp):
   unmergable_blocks, mergable_blocks = [], []
@@ -113,10 +114,10 @@ def merge_block(x:UOp):
   return UOp(x.op, src=tuple(new_srcs), arg=replace(x.arg, lst=parent_lst+x.arg.lst))
 
 # this will wrap every UOp in a BLOCK, top down
-blocks_in_context = PatternMatcher([
-  (UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), make_block), # all will become block
+#blocks_in_context = PatternMatcher([
+  #(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), make_block), # all will become block
   #(UPat(Ops.BLOCK, name="x"), merge_block),
-])
+#])
 
 block_merge = PatternMatcher([
   (UPat((Ops.BLOCK, Ops.BLOCKEND), name="x"), merge_block),
@@ -126,8 +127,13 @@ block_merge = PatternMatcher([
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
-  ctx = MakeBlockContext({k:len(v) for k,v in sink.get_children_map().items()})
-  sink = graph_rewrite(sink, blocks_in_context, ctx=ctx, name="Linearizer: Create Blocks")
+  child_len = {k:len(v) for k,v in sink.get_children_map().items()}
+  blocks = {}
+  for x in sink.toposort: blocks[x] = make_block(x, child_len, blocks)
+  sink = blocks[sink]
+
+  #ctx = MakeBlockContext({k:len(v) for k,v in sink.get_children_map().items()})
+  #sink = graph_rewrite(sink, blocks_in_context, ctx=ctx, name="Linearizer: Create Blocks")
 
   # combine matching BLOCKENDS, the keys of this dictionary are the RANGE UOps, values are the BLOCKENDs
   blockends_to_arg: dict[UOp, list[UOp]] = {}
