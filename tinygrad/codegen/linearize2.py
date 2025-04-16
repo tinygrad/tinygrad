@@ -115,7 +115,11 @@ def make_block_pm(ctx:BlockContext, x:UOp):
 block_create = PatternMatcher([(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), make_block_pm)])
 
 def wrap_in_blocks(sink:UOp):
-  return graph_rewrite(sink, block_create, ctx=BlockContext.from_sink(sink), name="Linearizer: Create Blocks")
+  sink = graph_rewrite(sink, block_create, ctx=BlockContext.from_sink(sink), name="Linearizer: Create Blocks")
+
+  # early merge (shouldn't be needed with bottom up)
+  sink = graph_rewrite(sink, block_merge_early, name="Linearizer: Merge Early")
+  return sink
 """
 
 def make_block_bottom_up(ctx:BlockContext, x:UOp):
@@ -125,15 +129,11 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
   unmergable = []
 
   # add the srcs of this to the frontier
+  # NOTE: things may be in here multiple times, that's okay
   frontier_nodes = list(x.src[::-1])
 
-  seen = set()
   while len(frontier_nodes):
     u = frontier_nodes.pop(0)
-    if u in seen:
-      if u in unmergable: unmergable.append(u)
-      continue
-    seen.add(u)
 
     if (new_ctx:=ctx.block_ctxs[u]) == current_ctx:
       # block has same context
@@ -255,9 +255,6 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
 
   # wrap all uops in blocks
   sink = wrap_in_blocks(sink)
-
-  # early merge
-  sink = graph_rewrite(sink, block_merge_early, name="Linearizer: Merge Early")
 
   # combine matching BLOCKENDS, the keys of this dictionary are the RANGE UOps, values are the BLOCKENDs
   blockends_to_arg: dict[UOp, list[UOp]] = {}
