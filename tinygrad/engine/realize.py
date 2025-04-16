@@ -105,8 +105,8 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   context = (BEAM.value, NOOPT.value, DEVECTORIZE.value)
   ckey = (device, ast.key, context, False)
   if cret:=method_cache.get(ckey): return cret
-  bkey = (device.split(":")[0], ast.key, context, True)
-  if bret:=method_cache.get(bkey):
+  bkey = ("%s_%s" % (device.split(":")[0], Device[device].compiler.cachekey), ast.key, context, True)
+  if not getenv("DISABLE_COMPILER_CACHE") and (bret:=method_cache.get(bkey)):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
     prg: ProgramSpec = get_kernel(Device[device].renderer, ast).to_program()
