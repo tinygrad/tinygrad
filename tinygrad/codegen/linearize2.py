@@ -78,7 +78,7 @@ class BlockContext:
   child_ctxs: dict[UOp, list[UOp]]
   def last_ctx(self, u): return ret if (ret:=self.child_ctxs.get(u)) is not None else self.block_ctxs[u]
   @staticmethod
-  def from_sink(sink:UOp, dedup_srcs=True) -> BlockContext:
+  def from_sink(sink:UOp) -> BlockContext:
     # get children and all block contexts
     ctx = BlockContext({}, {}, {})
     for u in sink.toposort:
@@ -86,7 +86,8 @@ class BlockContext:
       ctx.child_count[u] = 0
 
       # get children and accumulate the last_ctx
-      for s in (dedup(u.src) if dedup_srcs else u.src):
+      for s in u.src:
+        # NOTE: if a parent appears multiple times in the src, it counts multiple times as a child
         ctx.child_count[s] += 1
         this_block_ctx += ctx.last_ctx(s)
 
@@ -147,14 +148,14 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
   srcs = []
   for k,v in unmergable.items(): srcs += [k]*v
 
-  newlst = block_reorder(lst[::-1])
-  bb = BasicBlock2(newlst, ctx=ctx.block_ctxs[x], cnt=ctx.child_count[x], child_ctx=ctx.child_ctxs.get(x, None))
+  lst = block_reorder(lst[::-1])
+  bb = BasicBlock2(lst, ctx=ctx.block_ctxs[x], cnt=ctx.child_count[x], child_ctx=ctx.child_ctxs.get(x, None))
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
 block_create = PatternMatcher([(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), make_block_bottom_up)])
 
 def wrap_in_blocks(sink:UOp):
-  return graph_rewrite(sink, block_create, ctx=BlockContext.from_sink(sink, dedup_srcs=False), name="Linearizer: Create Blocks", bottom_up=True)
+  return graph_rewrite(sink, block_create, ctx=BlockContext.from_sink(sink), name="Linearizer: Create Blocks", bottom_up=True)
 
 # ***** block merging ****
 
