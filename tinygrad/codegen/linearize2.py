@@ -1,7 +1,8 @@
 from __future__ import annotations
+import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from tinygrad.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
+from tinygrad.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import dedup, partition, all_same, flatten
 from line_profiler import profile
@@ -57,7 +58,7 @@ def _get_new_block(deduped_blocks:list[UOp], current_ctx:list[UOp]):
       srcs.append(y)
   return lst, srcs
 
-def _get_child_ctx(fixed_x:UOp, blocks:dict[UOp, UOp]):
+def _get_child_ctx(fixed_x:UOp, local_blocks:dict[UOp, UOp]):
   # RANGE/IF add to the next ctx
   # STORE/ASSIGN subtract from the next ctx
   child_ctx = None
@@ -65,32 +66,54 @@ def _get_child_ctx(fixed_x:UOp, blocks:dict[UOp, UOp]):
   elif fixed_x.op is Ops.STORE:
     # ugh, deal with non-reduce locals. probably wrong
     if isinstance(fixed_x.src[0].dtype, PtrDType) and fixed_x.src[0].dtype.local:
-      idx_context, store_context = blocks[fixed_x.src[0]].arg.ctx, blocks[fixed_x.src[1]].arg.ctx
+      idx_context, store_context = local_blocks[fixed_x.src[0]].arg.ctx, local_blocks[fixed_x.src[1]].arg.ctx
       child_ctx = [y for y in store_context if y not in idx_context and y.op is Ops.RANGE]
     else: child_ctx = []
   elif fixed_x.op is Ops.ASSIGN:
     assert fixed_x.src[0].op is Ops.DEFINE_ACC
-    child_ctx = [y for y in blocks[fixed_x.src[1]].arg.ctx if y not in fixed_x.src[0].src[1:]]
+    child_ctx = [y for y in local_blocks[fixed_x.src[1]].arg.ctx if y not in fixed_x.src[0].src[1:]]
   return child_ctx
 
 #@profile
 def make_block(fixed_x:UOp, child_len:dict[UOp, int], blocks:dict[UOp, UOp]):
   # all input blocks to this one, deduped
-  deduped_blocks = list({blocks[y]:None for y in fixed_x.src})
+  local_blocks = {y:blocks[y] for y in fixed_x.src}
 
   # compute the new context
-  tuple_ctx = _get_ctx(deduped_blocks)
+  tuple_ctx = _get_ctx(local_blocks.values())
 
   # add the current uop to the end of the block
-  lst, srcs = _get_new_block(deduped_blocks, tuple_ctx)
+  lst, srcs = _get_new_block(local_blocks.values(), tuple_ctx)
   lst.append(fixed_x)
 
   # does this block modify the ctx? if so, we need a child_ctx
-  child_ctx = _get_child_ctx(fixed_x, blocks)
+  child_ctx = _get_child_ctx(fixed_x, local_blocks)
 
   # create the block
   arg = BasicBlock2(lst, tuple_ctx, cnt=child_len[fixed_x], child_ctx=child_ctx)
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=arg)
+
+def _get_child_len(toposink) -> dict[UOp, int]:
+  # get children
+  children: dict[UOp, dict[UOp, None]] = {}
+  for u in toposink:
+    for s in u.src: children.setdefault(s, {})[u] = None
+  return {k:len(v) for k,v in children.items()}
+
+def wrap_in_blocks(sink:UOp):
+  # do toposort
+  toposink = sink.toposort
+
+  # get children lengths
+  child_len = _get_child_len(toposink)
+  child_len[sink] = 0
+
+  # this will wrap every UOp in a BLOCK, top down
+  blocks = {}
+  for x in toposink: blocks[x] = make_block(x, child_len, blocks)
+  return blocks[sink]
+
+# ***** block merging ****
 
 def merge_block(x:UOp):
   unmergable_blocks, mergable_blocks = [], []
@@ -128,33 +151,63 @@ def remove_blockend(x:UOp):
     arg = BasicBlock2(lst, [y for y in x.arg.ctx if y is not x.arg.end], cnt=x.arg.cnt)
     return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src, arg=arg)
 
+block_merge_early = PatternMatcher([
+  (UPat(Ops.BLOCK, name="x"), merge_block),
+])
+
 block_merge = PatternMatcher([
   (UPat((Ops.BLOCK, Ops.BLOCKEND), name="x"), merge_block),
   (UPat(Ops.BLOCKEND, name="x"), remove_blockend),
 ])
 
-def wrap_in_blocks(sink:UOp):
-  # do toposort
-  toposink = sink.toposort
+# ****** reorder and finalize ******
 
-  # get children
-  children: dict[UOp, dict[UOp, None]] = {}
-  for u in toposink:
-    for s in u.src: children.setdefault(s, {})[u] = None
-  child_len = {k:len(v) for k,v in children.items()}
-  del children
-  child_len[sink] = 0
+# NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
+def block_reorder(in_block:UOp):
+  in_this_block = set(in_block.arg.lst)
+  local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
+  in_degree: defaultdict[UOp, int] = defaultdict(int)
+  priorities:dict[UOp, int] = {}
 
-  # this will wrap every UOp in a BLOCK, top down
-  blocks = {}
-  for x in toposink: blocks[x] = make_block(x, child_len, blocks)
-  return blocks[sink]
+  # get local children and assign priorities
+  for u in reversed(in_block.arg.lst):
+    for s in u.src:
+      if s in in_this_block:
+        local_children[s].append(u)
+        in_degree[u] += 1
+    # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
+    priority = [0] + [priorities[x] for x in local_children[u]]
+    if u.op is Ops.LOAD: priority.append(-1000)
+    if u.op is Ops.BARRIER: priority.append(-1500)
+    priorities[u] = min(priority)
+
+  # placement queue
+  queue:list[tuple[int, tuple, UOp]] = []
+  def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
+
+  # place the first ones that don't have deps
+  for u in in_block.arg.lst:
+    if u not in in_degree: push(u)
+
+  newlst = []
+  while queue:
+    _,_,x = heapq.heappop(queue)
+    newlst.append(x)
+    for u in local_children[x]:
+      in_degree[u] -= 1
+      if in_degree[u] == 0: push(u)
+
+  assert len(newlst) == len(in_block.arg.lst), f"len mismatch {len(newlst)} != {len(in_block.arg.lst)}"
+  return in_block.replace(arg=replace(in_block.arg, lst=newlst))
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
   # wrap all uops in blocks
   sink = wrap_in_blocks(sink)
+
+  # early merge
+  sink = graph_rewrite(sink, block_merge_early, name="Linearizer: Merge Early")
 
   # combine matching BLOCKENDS, the keys of this dictionary are the RANGE UOps, values are the BLOCKENDs
   blockends_to_arg: dict[UOp, list[UOp]] = {}
@@ -169,8 +222,10 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
       for u in v: new_forks[u] = out
   sink = sink.substitute(new_forks)
 
-  # merge blocks
-  sink = graph_rewrite(sink, block_merge, name="Linearizer: Merge Blocks")
+  # reorder ops in block for speed
+  sink = sink.substitute({u:newu for u in sink.toposort if u.op is Ops.BLOCK and (newu:=block_reorder(u)) is not u})
 
+  # merge blockends
+  sink = graph_rewrite(sink, block_merge, name="Linearizer: Merge Blocks")
   assert sink.op is Ops.BLOCK and len(sink.src) == 0
-  return list(sink.arg.lst)
+  return sink.arg.lst
