@@ -225,6 +225,7 @@ class TinyJit(Generic[ReturnType]):
     self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
     self.optimize = optimize
+    self.scheduled_real_bufs: set = set()
 
   def add_buffer(self, b:Buffer) -> Buffer:
     if found:=self._buffer_replace.get(b, None): return found
@@ -304,11 +305,12 @@ class TinyJit(Generic[ReturnType]):
         jit_cache = pruned
 
       # memory planning (optional)
-      # Enable mem planning for bufs that were previously not added to JIT as new buffers, due to lb_refcount > 0 during JIT capture
-      [b.deallocate() for ji in jit_cache for b in ji.bufs if b is not None and b.is_allocated() and b.lb_refcount == 0]
       # Exclude buffers involved in transfer ops to preserve parallelism.
       noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
-      assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
+      force_opt_buffers = {b for ji in jit_cache for b in ji.bufs if b not in noopt_buffers and b not in self.scheduled_real_bufs
+                           and b not in set(t.lazydata.base.realized for t in get_parameters(ret))}
+      assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ",
+                                          force_opt_buffers=force_opt_buffers)
       jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
 
       input_replace = get_input_replace(jit_cache, input_buffers)
