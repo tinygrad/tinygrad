@@ -27,6 +27,47 @@ class BasicBlock2:
   def last_ctx(self): return self.child_ctx if self.child_ctx is not None else self.ctx
 
 def _sort_ctx(inp): return sorted(dedup(inp), key=lambda x: x.tuplize)
+
+# ***** block context *****
+
+@dataclass
+class BlockContext:
+  child_count: dict[UOp, int]
+  block_ctxs: dict[UOp, list[UOp]]
+  child_ctxs: dict[UOp, list[UOp]]
+  def last_ctx(self, u): return ret if (ret:=self.child_ctxs.get(u)) is not None else self.block_ctxs[u]
+  @staticmethod
+  def from_sink(sink:UOp) -> BlockContext:
+    # get children and all block contexts
+    ctx = BlockContext({}, {}, {})
+    for u in sink.toposort:
+      this_block_ctx: list[UOp] = []
+      ctx.child_count[u] = 0
+
+      # get children and accumulate the last_ctx
+      for s in dedup(u.src):
+        ctx.child_count[s] += 1
+        this_block_ctx += ctx.last_ctx(s)
+
+      # save the block ctx
+      ctx.block_ctxs[u] = _sort_ctx(this_block_ctx)
+
+      # RANGE/IF add to the next ctx
+      # STORE/ASSIGN subtract from the next ctx
+      if u.op in {Ops.RANGE, Ops.IF}: ctx.child_ctxs[u] = _sort_ctx(ctx.block_ctxs[u] + [u])
+      elif u.op is Ops.STORE:
+        # ugh, deal with non-reduce locals. probably wrong
+        if isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.local:
+          idx_context, store_context = ctx.last_ctx(u.src[0]), ctx.last_ctx(u.src[1])
+          ctx.child_ctxs[u] = [y for y in store_context if y not in idx_context and y.op is Ops.RANGE]
+        else: ctx.child_ctxs[u] = []
+      elif u.op is Ops.ASSIGN:
+        assert u.src[0].op is Ops.DEFINE_ACC
+        ctx.child_ctxs[u] = [y for y in ctx.last_ctx(u.src[1]) if y not in u.src[0].src[1:]]
+    return ctx
+
+# ***** make blocks *****
+
 def _get_new_block(deduped_blocks:list[UOp], current_ctx:list[UOp]):
   # a block is unmergable if it has children or it has a different context
   lst = []
@@ -54,60 +95,26 @@ def _get_new_block(deduped_blocks:list[UOp], current_ctx:list[UOp]):
       srcs.append(y)
   return lst, srcs
 
-# ***** make blocks *****
-
-def make_block_pm(ctx, x:UOp):
-  child_count, block_ctxs, child_ctxs = ctx
-
+def make_block_pm(ctx:BlockContext, x:UOp):
   # recover the original UOp
   fixed_x = x.replace(src=tuple(y.arg.lst[-1] for y in x.src))
 
   # compute the new context
   # does this block modify the ctx? if so, we need a child_ctx
-  tuple_ctx = block_ctxs[fixed_x]
-  child_ctx = child_ctxs.get(fixed_x, None)
+  tuple_ctx = ctx.block_ctxs[fixed_x]
 
   # add the current uop to the end of the block
   lst, srcs = _get_new_block(dedup(x.src), tuple_ctx)
   lst.append(fixed_x)
 
   # create the block
-  arg = BasicBlock2(lst, tuple_ctx, cnt=child_count[fixed_x], child_ctx=child_ctx)
+  arg = BasicBlock2(lst, tuple_ctx, cnt=ctx.child_count[fixed_x], child_ctx=ctx.child_ctxs.get(fixed_x, None))
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=arg)
 
 block_create = PatternMatcher([(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), make_block_pm)])
 
 def wrap_in_blocks(sink:UOp):
-  # get children and all block contexts
-  child_count: dict[UOp, int] = {}
-  block_ctxs: dict[UOp, list[UOp]] = {}
-  child_ctxs: dict[UOp, list[UOp]] = {}
-
-  for u in sink.toposort:
-    this_block_ctx: list[UOp] = []
-    child_count[u] = 0
-
-    for s in dedup(u.src):
-      child_count[s] += 1
-      this_block_ctx += child_ctxs.get(s, block_ctxs[s])
-
-    # save the block ctx
-    block_ctxs[u] = _sort_ctx(this_block_ctx)
-
-    # RANGE/IF add to the next ctx
-    # STORE/ASSIGN subtract from the next ctx
-    if u.op in {Ops.RANGE, Ops.IF}: child_ctxs[u] = _sort_ctx(this_block_ctx + [u])
-    elif u.op is Ops.STORE:
-      # ugh, deal with non-reduce locals. probably wrong
-      if isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.local:
-        idx_context, store_context = child_ctxs.get(u.src[0], block_ctxs[u.src[0]]), child_ctxs.get(u.src[1], block_ctxs[u.src[1]])
-        child_ctxs[u] = [y for y in store_context if y not in idx_context and y.op is Ops.RANGE]
-      else: child_ctxs[u] = []
-    elif u.op is Ops.ASSIGN:
-      assert u.src[0].op is Ops.DEFINE_ACC
-      child_ctxs[u] = [y for y in child_ctxs.get(u.src[1], block_ctxs[u.src[1]]) if y not in u.src[0].src[1:]]
-
-  return graph_rewrite(sink, block_create, ctx=(child_count, block_ctxs, child_ctxs), name="Linearizer: Create Blocks")
+  return graph_rewrite(sink, block_create, ctx=BlockContext.from_sink(sink), name="Linearizer: Create Blocks")
 
 # ***** block merging ****
 
