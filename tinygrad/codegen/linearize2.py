@@ -24,6 +24,7 @@ class BasicBlock2:
     return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+f'f{self.cnt} '+\
            f"{[disp(y) for y in self.ctx]} {[disp(y) for y in self.child_ctx] if self.child_ctx is not None else '-'} "+\
            f"{len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
+  def last_ctx(self): return self.child_ctx if self.child_ctx is not None else self.ctx
 
 def _get_child_len(toposink) -> dict[UOp, int]:
   children: dict[UOp, dict[UOp, None]] = {}
@@ -35,7 +36,7 @@ def _get_child_len(toposink) -> dict[UOp, int]:
 def _sort_ctx(inp): return sorted(dedup(inp), key=lambda x: x.tuplize)
 def _get_ctx(deduped_blocks:list[UOp]):
   list_ctx = []
-  for y in deduped_blocks: list_ctx += y.arg.child_ctx if y.arg.child_ctx is not None else y.arg.ctx
+  for y in deduped_blocks: list_ctx += y.arg.last_ctx()
   return _sort_ctx(list_ctx)
 
 def _get_new_block(deduped_blocks:list[UOp], current_ctx:list[UOp]):
@@ -73,12 +74,12 @@ def _get_child_ctx(fixed_x:UOp, local_blocks:dict[UOp, UOp]):
   elif fixed_x.op is Ops.STORE:
     # ugh, deal with non-reduce locals. probably wrong
     if isinstance(fixed_x.src[0].dtype, PtrDType) and fixed_x.src[0].dtype.local:
-      idx_context, store_context = local_blocks[fixed_x.src[0]].arg.ctx, local_blocks[fixed_x.src[1]].arg.ctx
+      idx_context, store_context = local_blocks[fixed_x.src[0]].arg.last_ctx(), local_blocks[fixed_x.src[1]].arg.last_ctx()
       child_ctx = [y for y in store_context if y not in idx_context and y.op is Ops.RANGE]
     else: child_ctx = []
   elif fixed_x.op is Ops.ASSIGN:
     assert fixed_x.src[0].op is Ops.DEFINE_ACC
-    child_ctx = [y for y in local_blocks[fixed_x.src[1]].arg.ctx if y not in fixed_x.src[0].src[1:]]
+    child_ctx = [y for y in local_blocks[fixed_x.src[1]].arg.last_ctx() if y not in fixed_x.src[0].src[1:]]
   return child_ctx
 
 # ***** make blocks *****
