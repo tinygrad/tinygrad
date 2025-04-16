@@ -6,7 +6,7 @@ from tinygrad.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import dedup, partition, all_same, flatten
 from tinygrad.spec import type_verify
-#from line_profiler import profile
+from line_profiler import profile
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(lst:list[UOp]) -> list[UOp]:
@@ -110,12 +110,14 @@ class BlockContext:
 
 # ***** make blocks *****
 
+@profile
 def make_block_bottom_up(ctx:BlockContext, x:UOp):
   current_ctx = ctx.block_ctxs[x]
   lst = [x]
 
   # count of times we've seen this block
   unmergable: defaultdict[UOp, int] = defaultdict(int)
+  ended: dict[UOp, UOp] = {}
 
   # add the srcs of this to the frontier
   # NOTE: things may be in here multiple times, that's okay
@@ -136,22 +138,26 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
         unmergable[u] += 1
     else:
       # block has different context
-      ends_to_add = [z for z in new_ctx if z not in current_ctx]
-      while len(ends_to_add):
-        r:UOp = ends_to_add.pop(-1)
-        new_ctx = [z for z in new_ctx if z is not r]
-        end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
-        u = UOp(Ops.BLOCKEND, src=(u,), arg=BasicBlock2((end_uop,), new_ctx, end=r, cnt=1))
+      if (newu:=ended.get(u)) is None:
+        ends_to_add = [z for z in new_ctx if z not in current_ctx]
+        newu = u
+        while len(ends_to_add):
+          r:UOp = ends_to_add.pop(-1)
+          new_ctx = [z for z in new_ctx if z is not r]
+          end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
+          newu = UOp(Ops.BLOCKEND, src=(newu,), arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=1))
+        ended[newu] = u
       # add it to unmergable
-      unmergable[u] += 1
+      unmergable[newu] += 1
 
   srcs = []
   for k,v in unmergable.items(): srcs += [k]*v
 
-  bb = BasicBlock2(tuple(block_reorder(lst[::-1])), ctx=ctx.block_ctxs[x], cnt=ctx.child_count[x], child_ctx=ctx.child_ctxs.get(x, None))
+  lst = block_reorder(lst[::-1])
+  bb = BasicBlock2(tuple(lst), ctx=ctx.block_ctxs[x], cnt=ctx.child_count[x], child_ctx=ctx.child_ctxs.get(x, None))
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
-block_create = PatternMatcher([(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), make_block_bottom_up)])
+block_create = PatternMatcher([(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), lambda ctx,x: make_block_bottom_up(ctx,x))])
 
 def wrap_in_blocks(sink:UOp):
   return graph_rewrite(sink, block_create, ctx=BlockContext.from_sink(sink), name="Linearizer: Create Blocks", bottom_up=True)
