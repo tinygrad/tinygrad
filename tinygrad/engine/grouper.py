@@ -110,12 +110,12 @@ class GrouperContext:
   realizes: dict[UOp, None]                   # all the tensor uops we realize
   children: defaultdict[UOp, dict[UOp, None]] # children graph of tensor uops
 
-def realize(ctx:GrouperContext, tr:UOp) -> None: ctx.realizes[tr] = None
+def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
-def realize_before_view(ctx:GrouperContext, view:UOp, tr:UOp) -> None:
+def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
   st = unwrap(view.st)
   # awlays realize unsafe pad ops before masked view
-  if any(v.mask is not None for v in st.views) and not can_pad(tr, ctx.realizes, cache=dict()): return realize(ctx, tr)
+  if any(v.mask is not None for v in st.views) and not can_pad(tr, ctx, cache=dict()): return realize(ctx, tr)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(tr.shape) and resolve(prod(tr.shape) >= prod([y-x for x,y in m])): return
   # realize before expand
@@ -123,7 +123,7 @@ def realize_before_view(ctx:GrouperContext, view:UOp, tr:UOp) -> None:
 
 do_realize = PatternMatcher([
   # always realize SINK parents
-  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x.base, None) for x in s.src if x.base.op not in DONT_PUSH_VIEWS)),
+  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in DONT_PUSH_VIEWS)),
   # always realize ASSIGN/CONTIGUOUS/GroupOp.Meta
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}, name="tr"), realize),
   # realize before expand or unsafe pad ops
@@ -131,11 +131,6 @@ do_realize = PatternMatcher([
   # realize before COPY
   (UPat(Ops.COPY, src=(UPat(), UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"))), realize),
 ])
-
-def append_uop(ctx:GrouperContext, u:UOp) -> None:
-  if u.op is Ops.ASSIGN: ctx.assigns[u.buf_uop] = None
-  for s in u.src: ctx.children[s.base][u] = None
-create_ctx = PatternMatcher([(UPat(GroupOp.All-{Ops.SINK, Ops.VIEW}, name="u"), append_uop)])
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
                     reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]) -> None:
@@ -156,12 +151,24 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
 
 def group_realizes(sink:UOp) -> dict[UOp, None]:
   # start by adding uops that always realize
-  sink = graph_rewrite(sink, do_realize+create_ctx, ctx:=GrouperContext({}, {}, defaultdict(dict)))
-  if DONT_GROUP_REDUCES: return ctx.realizes
+  realizes: dict[UOp, None] = {}
+  sink = graph_rewrite(sink, do_realize, ctx=realizes)
+  if DONT_GROUP_REDUCES: return realizes
+
+  # construct children graph (only for bases)
+  children: defaultdict[UOp, dict[UOp, None]] = defaultdict(dict)
+  assigns: dict[UOp, None] = {}
+  for u in (toposort:=sink.toposort):
+    if u.op in {Ops.VIEW, Ops.SINK}: continue
+    if u.op is Ops.ASSIGN: assigns[u.buf_uop] = None
+    for s in u.src: children[s.base][u] = None
+
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
   double_reduces: list[UOp] = []
-  for r in sink.toposort:
+  # late context, TODO: remove this
+  ctx = GrouperContext(assigns, realizes, children)
+  for r in toposort:
     if r.op is not Ops.REDUCE_AXIS: continue
     if len(r.arg) == 3 and r.arg[2] is True: continue
     if FUSE_CONV_BW and r.src[0].base.op is Ops.REDUCE_AXIS and r.src[0] is not r.src[0].base: double_reduces.append(r)
