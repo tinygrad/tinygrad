@@ -3,7 +3,7 @@ import unittest, functools
 import numpy as np
 
 from hypothesis import given, settings, strategies as strat
-from test.helpers import assert_jit_cache_len
+from test.helpers import assert_jit_cache_len, not_support_multi_device
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.device import Device
@@ -439,7 +439,7 @@ class TestJit(unittest.TestCase):
       ja = jf(a)
       np.testing.assert_allclose(a.numpy(), ja.numpy(), atol=1e-4, rtol=1e-5)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "NV", "AMD"}, "no GPU CI")
+  @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_jitted_transfers(self):
     d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
 
@@ -569,6 +569,24 @@ class TestJitPrune(unittest.TestCase):
       a = Tensor.rand(16, device="CPU").realize()
       out = w2_prune(a)
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+
+  def test_prune_w_independent_copy_correct(self):
+    weights = Tensor.rand(16, device="CPU").realize()
+    def w2(x) -> Tensor: return (weights*2).contiguous().to(Device.DEFAULT) + x
+    w2_noprune = TinyJit(w2)
+    w2_prune = TinyJit(w2, prune=True)
+
+    for _ in range(3):
+      a = Tensor.rand(16).realize()
+      out = w2_noprune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+
+    for _ in range(3):
+      a = Tensor.rand(16).realize()
+      out = w2_prune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+
+    assert len(w2_prune.captured.jit_cache) == 1, "prune should have removed the copy"
 
 class TestJitFree(unittest.TestCase):
   def test_free_intermediates(self):
