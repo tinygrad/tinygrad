@@ -38,12 +38,12 @@ class Runner:
     raise NotImplementedError("override this")
 
 class CompiledRunner(Runner):
-  def __init__(self, p:ProgramSpec, precompiled:Optional[bytes]=None):
+  def __init__(self, p:ProgramSpec, precompiled:Optional[bytes]=None, prg=None):
     if DEBUG >= 4: print(p.src)
     self.p:ProgramSpec = p
     self.lib:bytes = precompiled if precompiled is not None else Device[p.device].compiler.compile_cached(p.src)
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
-    self._prg = Device[p.device].runtime(p.function_name, self.lib)
+    self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)
@@ -83,6 +83,10 @@ class BufferCopy(Runner):
     elif src.device.startswith("DISK") and hasattr(dest.allocator, '_as_buffer'):
       # fast(ish) path, uses readinto in diskbuffers
       src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
+    elif src.device.startswith("IB"):
+      src.allocator.dma_recv(dest.allocator.as_dmabuf(dest._buf))
+    elif dest.device.startswith("IB"):
+      dest.allocator.dma_send(src.allocator.as_dmabuf(src._buf))
     else:
       dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False):
