@@ -7,8 +7,8 @@ if CHECK_OOB:
 
   # IDIV is truncated division but z3 does floored division and mod by power of two sometimes uses Ops.AND
   def z3_cdiv(a,b): return z3.If(a<0, (a+(b-1))/b, a/b)
-  z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv,
-    Ops.SHR: lambda a,b: a/(2**b), Ops.SHL: lambda a,b: a*(2**b), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, (int, z3.ArithRef)) else a&b}
+  z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.SHR: lambda a,b: a/(2**b.as_long()),
+    Ops.SHL: lambda a,b: a*(2**b.as_long()), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, (int, z3.ArithRef)) else a&b}
   def create_bounded(name:str, vmin, vmax, solver:z3.Solver) -> z3.ArithRef:
     s = z3.Int(name, ctx=solver.ctx)
     solver.add(vmin <= s, s <= vmax)
@@ -92,6 +92,7 @@ def validate_index(idx:UOp, mask:UOp|None=None):
   if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
     [print(u) for u in all_uops if u.op in (Ops.SPECIAL, Ops.RANGE, Ops.DEFINE_VAR, Ops.LOAD)]
     print(f"idx={idx.src[1].render(simplify=False)}")
+    print(z3_idx)
     if mask is not None: print(f"mask={mask.render(simplify=False)}")
     print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz}\nconstraints = {solver}")
     return False
