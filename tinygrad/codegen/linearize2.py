@@ -1,11 +1,9 @@
 from __future__ import annotations
-import time, gc
+from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.dtype import PtrDType
-from tinygrad.helpers import dedup, partition, all_same, flatten, Profiling, Timing
-from line_profiler import profile
-from collections import defaultdict
+from tinygrad.helpers import dedup, partition, all_same, flatten
 
 def disp(y:UOp) -> str:
   if y.op is Ops.IF: return f'IF{id(y)}'
@@ -27,7 +25,6 @@ class BasicBlock2:
            f"{[disp(y) for y in self.ctx]} {[disp(y) for y in self.child_ctx] if self.child_ctx is not None else '-'} "+\
            f"{len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
-@profile
 def make_block(fixed_x:UOp, child_len:dict[UOp, int], blocks:dict[UOp, UOp]):
   # compute the new context
   list_ctx = []
@@ -46,7 +43,7 @@ def make_block(fixed_x:UOp, child_len:dict[UOp, int], blocks:dict[UOp, UOp]):
     if isinstance(fixed_x.src[0].dtype, PtrDType) and fixed_x.src[0].dtype.local:
       idx_context, store_context = blocks[fixed_x.src[0]].arg.ctx, blocks[fixed_x.src[1]].arg.ctx
       child_ctx = [y for y in store_context if y not in idx_context and y.op is Ops.RANGE]
-    else: child_ctx = ()
+    else: child_ctx = []
   elif fixed_x.op is Ops.ASSIGN:
     assert fixed_x.src[0].op is Ops.DEFINE_ACC
     child_ctx = [y for y in blocks[fixed_x.src[1]].arg.ctx if y not in fixed_x.src[0].src[1:]]
@@ -89,7 +86,7 @@ def remove_blockend(x:UOp):
     if x.op is Ops.BLOCKEND and any(y.op is Ops.BARRIER for y in late_ops) and late_ops[-1].op is Ops.ENDRANGE:
       late_ops = [UOp(Ops.BARRIER)] + late_ops
     lst = early_ops+parent_block.arg.lst+late_ops
-    arg = BasicBlock2(lst, _sort_ctx([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt)
+    arg = BasicBlock2(lst, [y for y in x.arg.ctx if y is not x.arg.end], cnt=x.arg.cnt)
     return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src, arg=arg)
 
 def merge_block(x:UOp):
@@ -113,30 +110,30 @@ block_merge = PatternMatcher([
   (UPat(Ops.BLOCKEND, name="x"), remove_blockend),
 ])
 
-def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
-  assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
+def get_child_counts(toposink:dict[UOp, None]) -> dict[UOp, int]:
+  children: dict[UOp, dict[UOp, None]] = {}
+  for u in toposink:
+    for s in u.src: children.setdefault(s, {})[u] = None
+  return {k:len(v) for k,v in children.items()}
 
+def wrap_in_blocks(sink:UOp):
   # do toposort
   toposink = sink.toposort
 
   # get children
-  children: dict[UOp, dict[UOp, None]] = {sink:{}}
-  for u in toposink:
-    for s in u.src: children.setdefault(s, {})[u] = None
-  child_len = {k:len(v) for k,v in children.items()}
-  del children
+  child_len = get_child_counts(toposink)
+  child_len[sink] = 0
 
   # this will wrap every UOp in a BLOCK, top down
   blocks = {}
-  #gc.disable()
-  for x in toposink:
-    #st = time.perf_counter()
-    blocks[x] = make_block(x, child_len, blocks)
-    #et = time.perf_counter() - st
-    #if et > 1e-3: print(et, x.op)
-  sink = blocks[sink]
-  del toposink, blocks
-  #gc.enable()
+  for x in toposink: blocks[x] = make_block(x, child_len, blocks)
+  return blocks[sink]
+
+def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
+  assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
+
+  # wrap all uops in blocks
+  sink = wrap_in_blocks(sink)
 
   # combine matching BLOCKENDS, the keys of this dictionary are the RANGE UOps, values are the BLOCKENDs
   blockends_to_arg: dict[UOp, list[UOp]] = {}
