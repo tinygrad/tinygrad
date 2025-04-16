@@ -1,6 +1,6 @@
-from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable, Tuple
+from typing import Dict, List, Union, cast, Callable, Tuple
 from functools import reduce
-from operator import add,mul
+from operator import add
 import struct
 import yaml
 
@@ -19,11 +19,7 @@ def asm_emulated_mod(ctx, d, a, b, dt, name) -> List[str]:
       f"v_sub_{name} {d}, {a}, {t2}" # d = a - floor(a / b) * b
     ]
   else:
-    return [
-      f"v_div_u32 {t0}, {a}, {b}", # t0 = a / b
-      f"v_mul_lo_u32 {t1}, {t0}, {b}", # t1 = (a / b) * b
-      f"v_sub_u32 {d}, {a}, {t1}" # a - (a / b) * b
-    ]
+    raise NotImplementedError
 
 def render_where(ctx, d, a, b, c, dt, name) -> List[str]:
     if a == "vcc":
@@ -46,7 +42,7 @@ asm_for_op: Dict[Tuple[Ops, ...], Callable] = {
   (Ops.IDIV,): lambda ctx, d, a, b, dt, name: f"v_div_fixup_{name} {d}, {a}, {b}, {a}",
   (Ops.MAX,): lambda ctx, d, a, b, dt, name: f"v_max_{name} {d}, {a}, {b}",
   (Ops.MOD,): lambda ctx, d, a, b, dt, name: asm_emulated_mod(ctx, d, a, b, dt, name),
-  (Ops.CMPLT,): lambda ctx, d, a, b, dt, name: f"v_cmp_lt_{name} {a}, {b}",
+  (Ops.CMPLT,): lambda ctx, d, a, b, dt, name: f"v_cmp_lt_{name} {d}, {a}, {b}",
   (Ops.CMPNE,): lambda ctx, d, a, b, dt, name: f"v_cmp_neq_{name} {a}, {b}",
   (Ops.MULACC,): lambda ctx, a, b, c, dt, name: (
     f"v_fmac_{name} {c}, {a}, {b}" if dtypes.is_float(dt) else f"v_mad_{name} {c}, {a}, {b}, {c}"),
@@ -60,9 +56,7 @@ def get_reg_range(reg: str) -> List[int]:
   i = next(i for i, c in enumerate(reg) if c.isdigit())
   return [int(reg[i:])]
 
-def get_regs_contained(reg: str) -> List[int]:
-  if reg == 'vcc':
-    return reg
+def get_regs_contained(reg: str) -> List[str]:
   if '[' in reg:
     a, *b = reg[reg.index('[')+1 : reg.index(']')].split(':')
     return [f"{reg[0]}{a}"] if not b else [f"{reg[0]}{i}" for i in range(int(a), int(b[0]) + 1)]
@@ -104,24 +98,60 @@ def render_addr_calc(ctx, ptr, offset) -> Tuple[List[str], str, str]:
   return instructions, addr_lo_v, addr_hi_v
 
 def render_load(ctx, x, ptr, offset) -> List[str]:
-  load_bits = ctx.types[x.dtype][1:] * x.dtype.count
-  addr_setup_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, offset)
+  load_bits = max(int(ctx.types[x.dtype][1:]) * x.dtype.count, 32)
+  if len(get_reg_range(ctx.r[ptr])) == 2:
+    addr_setup_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, offset)
+    addr_reg = render_reg_range('v', [addr_lo_v, addr_hi_v])
+  else:
+    addr_reg = ctx.tmp_vregs()[0]
+    addr_setup_ins = [f"v_add_u32 {addr_reg}, {ctx.r[ptr]}, {ctx.r[offset]}"]
+
   if any(_x.op is Ops.DEFINE_LOCAL for _x in x.src[0].toposort):
     # shared mem
-    load_ins = f"ds_load_b{load_bits} {ctx.r[x]}, {render_reg_range('v', [addr_lo_v, addr_hi_v])}"
+    load_ins = f"ds_load_b{load_bits} {ctx.r[x]}, {addr_reg}"
   else:
-    load_ins = f"flat_load_b{load_bits} {ctx.r[x]}, {render_reg_range('v', [addr_lo_v, addr_hi_v])} offset:0"
+    load_ins = f"flat_load_b{load_bits} {ctx.r[x]}, {addr_reg} offset:0"
   return addr_setup_ins + [load_ins]
 
 def render_store(ctx, x, ptr, offset, val) -> List[str]:
-  store_bits = ctx.types[x.dtype][1:] * x.dtype.count
-  addr_setup_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, offset)
+  store_bits = max(int(ctx.types[val.dtype.scalar()][1:]) * x.dtype.count, 32)
+  if len(get_reg_range(ctx.r[ptr])) == 2:
+    addr_setup_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, offset)
+    addr_reg = render_reg_range('v', [addr_lo_v, addr_hi_v])
+  else:
+    addr_reg = ctx.tmp_vregs()[0]
+    addr_setup_ins = [f"v_add_u32 {addr_reg}, {ctx.r[ptr]}, {ctx.r[offset]}"]
+
   if any(_x.op is Ops.DEFINE_LOCAL for _x in x.src[0].toposort):
     # shared mem
-    store_ins = f"ds_store_b{store_bits} {render_reg_range('v', [addr_lo_v, addr_hi_v])}, {ctx.r[val]}"
+    store_ins = f"ds_store_b{store_bits} {addr_reg}, {ctx.r[val]}"
   else:
-    store_ins = f"flat_store_b{store_bits} {render_reg_range('v', [addr_lo_v, addr_hi_v])}, {ctx.r[val]} offset:0"
+    store_ins = f"flat_store_b{store_bits} {addr_reg}, {ctx.r[val]} offset:0"
   return addr_setup_ins + [store_ins]
+
+def render_const_mod(ctx, d, val, modulus) -> List[str]:
+  if not dtypes.is_unsigned(val.dtype):
+    raise NotImplementedError
+
+  divisor = modulus.arg
+  assert divisor >= 1 and divisor <= 0xFFFFFFFF
+
+  nbits = 32
+  two_to_n = 1 << nbits  # 2^32
+
+  m, r = two_to_n // divisor, two_to_n % divisor
+  if r >= divisor // 2:
+      m += 1
+
+  t0, t1, t2 = ctx.tmp_vregs()
+  
+
+  return [
+    f"v_mul_hi_u32 {t0}, {ctx.r[val]}, {m}",
+    f"v_lshrrev_b32 {t1}, 32, {t0}",
+    f"v_mul_lo_u32 {t2}, {t1}, {divisor}",
+    f"v_sub_u32 {d}, {ctx.r[val]}, {t2}",
+  ]
 
 supports_half: List[Ops] = [Ops.EXP2, Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPLT, Ops.WHERE]
 doesnt_support_half: Tuple[Ops, ...] = tuple(op for op in asm_for_op.keys() if op not in supports_half)
@@ -145,11 +175,15 @@ rdna3_rewrite = PatternMatcher([
   (UPat(Ops.WHERE, name="x"),
     lambda ctx, x: asm_for_op[(Ops.WHERE,)](ctx, ctx.r[x], ctx.r[x.src[0]], ctx.r[x.src[1]], ctx.r[x.src[2]], x.dtype, ctx.types[x.dtype])),
 
-  (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx, x: [f"s_load_b64 {ctx.r[x]}, s[0:1], {x.arg * 8}", "s_waitcnt lgkmcnt(0)"]),
+  (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx, x: [f"s_load_b64 {ctx.r[x]}, s[0:1], {ctx.args[x][".offset"]}", "s_waitcnt lgkmcnt(0)"]),
+  (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx, x: [f"s_load_b32 {ctx.r[x]}, s[0:1], {ctx.args[x][".offset"]}", "s_waitcnt lgkmcnt(0)"]),
+
+  (UPat(Ops.MOD, name="x", src=(UPat.var("val"), UPat.cvar("modulus"))),
+    lambda ctx, x, val, modulus: render_const_mod(ctx, ctx.r[x], val, modulus)),
 
   (UPat(Ops.MOD, name="x"),
     lambda ctx, x: asm_for_op[(Ops.MOD,)](ctx, ctx.r[x], ctx.r[x.src[0]], ctx.r[x.src[1]], x.dtype, ctx.types[x.dtype])),
-
+  
   (UPat(Ops.LOAD, name="x", src=(UPat.var("ptr"), UPat.var("offset"))), lambda ctx, x, ptr, offset:
     render_load(ctx, x, ptr, offset)
   ),
@@ -162,6 +196,9 @@ rdna3_rewrite = PatternMatcher([
 
   (UPat(Ops.RANGE, name="x"),
    lambda ctx, x: [f"v_mov_b32 {ctx.r[x]}, {ctx.r[x.src[0]]}", f"LABEL_LOOP_{ctx.r[x][1:]}:"]),
+  
+  (UPat(Ops.WMMA, name="x"),
+   lambda ctx, x: f"v_wmma_f16_16x16x16_f16 {ctx.r[x.src[2]]} {ctx.r[x.src[0]]} {ctx.r[x.src[1]]} {ctx.r[x.src[2]]}"),
 
   (UPat(Ops.ENDRANGE, name="x", src=(UPat.var("src0"),)), 
    lambda ctx, x, src0: [
@@ -219,30 +256,34 @@ class RDNA3Renderer(Renderer):
   def tmp_vregs(self):
     return self.tmpv
   
-  def render(self, name:str, uops:List[UOp]) -> str:
+  def render(self, uops:List[UOp]) -> str:
     self.tmpv = [f"v{i}" for i in range(3, 6)]
     self.v_cnt = 6  # v[0:2] is local_xyz, v[3:5] are used for temporaries
     self.s_cnt = 5  # s[0:1] is the address, s[2:4] is global_xyz
 
     self.r: Dict[UOp, str] = {}
     ins: List[str] = []
-    args: List[dict] = []
-    self.l: Dict[UOp, int] = {}
+    self.args: Dict[UOp, dict] = {}
+    self.l: Dict[UOp, str] = {}
+    allocate = 0
+    args_offset = 0
 
     for u in uops:
       if any(src.op is Ops.LOAD for src in u.src):
         ins.append("  s_waitcnt vmcnt(0)")
 
       if u.op in {Ops.CMPLT, Ops.CMPNE}:
-        # HACK: this will not be valid if we do another comparison in the way.
-        # saving vcc state isn't fun. this might be invalid because we also do
-        # operations on these predicate registers so I'm not sure what to do.
-        self.r[u] = "vcc"
+        self.r[u] = f"s{self.s_cnt}"
+        self.s_cnt+= 1
       elif u.op == Ops.MULACC:
         self.r[u] = self.r[u.src[0]]
       elif u.op in GroupOp.ALU or u.op == Ops.CONST or u.op == Ops.LOAD or u.op == Ops.RANGE:
-        self.r[u] = f"v{self.v_cnt}"
-        self.v_cnt += 1
+        cnt = (u.dtype.itemsize * u.dtype.vcount) // 4
+        if cnt <= 4:
+          self.r[u] = f"v{self.v_cnt}"
+        else:
+          self.r[u] = f"v[{self.v_cnt}:{self.v_cnt + cnt - 1}]"
+        self.v_cnt += cnt
       elif u.op == Ops.SPECIAL:
         if u.arg[1].startswith("lidx"):
           self.r[u] = f'v{u.arg[0]}'
@@ -252,13 +293,19 @@ class RDNA3Renderer(Renderer):
           raise NotImplementedError
         continue
       elif u.op == Ops.DEFINE_GLOBAL:
-        size = u.dtype.count * u.dtype.itemsize
-        i = u.arg
-        args.append({'.address_space': 'global', '.name': f'buf_{u.arg}', '.offset': i * 8, '.size': size,
-                     '.type_name': u.dtype.name+"*", '.value_kind': 'by_value'})
+        self.args[u] = {'.address_space': 'global', '.name': f'buf_{u.arg}', '.offset': args_offset, '.size': 8,
+                     '.type_name': u.dtype.name+"*", '.value_kind': 'by_value'}
+        args_offset += 8
         self.s_cnt += self.s_cnt%2
         self.r[u] = f"s[{self.s_cnt}:{self.s_cnt+1}]"
         self.s_cnt += 2
+      elif u.op == Ops.DEFINE_LOCAL:
+        self.args[u] = {'.address_space': 'local', '.name': f'buf_{u.arg}', '.offset': args_offset, '.size': 4,
+                     '.type_name': u.dtype.name+"*", '.value_kind': 'by_value'}
+        args_offset += 4
+        allocate += u.dtype.itemsize * u.dtype.vcount
+        self.r[u] = f"s{self.s_cnt}"
+        self.s_cnt += 1
       if u.op == Ops.RANGE:
         # TODO: what is the arg?
         self.l[u] = self.r[u.src[1]]
@@ -269,25 +316,26 @@ class RDNA3Renderer(Renderer):
       l = [f"  {u}" if u[-1] != ':' else u for u in l]
       ins.extend(l)
 
+    args = list(self.args.values())
     ins.append("  s_waitcnt vmcnt(0)")
     metadata = {
       'amdhsa.kernels': [{'.args': args,
-        '.group_segment_fixed_size': 0, '.kernarg_segment_align': 8, '.kernarg_segment_size': args[-1][".offset"] + args[-1][".size"],
+        '.group_segment_fixed_size': allocate, '.kernarg_segment_align': 8, '.kernarg_segment_size': args[-1][".offset"] + args[-1][".size"],
         '.language': 'OpenCL C', '.language_version': [1, 2], '.max_flat_workgroup_size': 256,
-        '.name': name, '.private_segment_fixed_size': 0, '.sgpr_count': self.s_cnt, '.sgpr_spill_count': 0,
-        '.symbol': f'{name}.kd', '.uses_dynamic_stack': False, '.vgpr_count': self.v_cnt, '.vgpr_spill_count': 0,
+        '.name': 'kernel', '.private_segment_fixed_size': 0, '.sgpr_count': self.s_cnt, '.sgpr_spill_count': 0,
+        '.symbol': f'kernel.kd', '.uses_dynamic_stack': False, '.vgpr_count': self.v_cnt, '.vgpr_spill_count': 0,
         '.wavefront_size': 32}],
       'amdhsa.target': 'amdgcn-amd-amdhsa--gfx1100', 'amdhsa.version': [1, 2]}
 
     boilerplate_start = f"""
 .rodata
-.global {name}.kd
-.type {name}.kd,STT_OBJECT
+.global kernel.kd
+.type kernel.kd,STT_OBJECT
 .align 0x10
-.amdhsa_kernel {name}"""
+.amdhsa_kernel kernel"""
 
     kernel_desc = {
-      '.amdhsa_group_segment_fixed_size': 0, '.amdhsa_private_segment_fixed_size': 0, '.amdhsa_kernarg_size': 0,
+      '.amdhsa_group_segment_fixed_size': allocate, '.amdhsa_private_segment_fixed_size': 0, '.amdhsa_kernarg_size': 0,
       '.amdhsa_next_free_vgpr': self.v_cnt,
       '.amdhsa_reserve_vcc': 0, '.amdhsa_reserve_xnack_mask': 0,
       '.amdhsa_next_free_sgpr': self.s_cnt,
@@ -304,60 +352,17 @@ class RDNA3Renderer(Renderer):
 
     code_start = f""".end_amdhsa_kernel
 .text
-.global {name}
-.type {name},@function
+.global kernel
+.type kernel,@function
 .p2align 8
-{name}:
+kernel:
 """
 
     ins += ['  s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', '  s_endpgm', '  s_code_end']
     return ".amdgpu_metadata\n" + yaml.dump(metadata) + ".end_amdgpu_metadata" + \
            boilerplate_start + "\n" + '\n'.join("%s %d" % x for x in kernel_desc.items()) + "\n" + code_start + \
-           '\n'.join(ins) + f"\n.size {name}, .-{name}"
+           '\n'.join(ins) + f"\n.size kernel, .-kernel"
 
-# def create_rdna3_matmul_uops(K=4, N=128):
-#     uops = []
-#     
-#     ## Global Buffers
-#     gA = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 0)  # Input A (MxK)
-#     gB = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 1)  # Input B (KxN)
-#     gC = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 2)  # Output C (MxN)
-#     uops += [gA, gB, gC]
-#
-#     ## Constants
-#     cK = UOp(Ops.CONST, dtypes.int32, (), K)
-#     cN = UOp(Ops.CONST, dtypes.int32, (), N)
-#     c0_f = UOp(Ops.CONST, dtypes.float32, (), 0.0)
-#     uops += [cK, cN, c0_f]
-#
-#     ## Thread Coordinates
-#     i = UOp(Ops.SPECIAL, dtypes.int32, (), (0, "lidx0"))  # Row index
-#     j = UOp(Ops.SPECIAL, dtypes.int32, (), (1, "lidx1"))  # Column index
-#     uops += [i, j]
-#
-#     acc = c0_f
-#     uops.append(acc)
-#
-#     for k in range(K):
-#         a_offset = UOp(Ops.MUL, dtypes.int32, (i, cK))
-#         c = UOp(Ops.CONST, dtypes.int32, (), k)
-#         a_idx = UOp(Ops.ADD, dtypes.int32, (a_offset, c))
-#         a_val = UOp(Ops.LOAD, dtypes.float32, (gA, a_idx))
-#
-#         b_offset = UOp(Ops.MUL, dtypes.int32, (c, cN))
-#         b_idx = UOp(Ops.ADD, dtypes.int32, (b_offset, j))
-#         b_val = UOp(Ops.LOAD, dtypes.float32, (gB, b_idx))
-#         
-#         ac = UOp(Ops.MULACC, dtypes.float32, (a_val, b_val, acc))
-#         
-#         uops += [c, a_offset, a_idx, a_val, b_offset, b_idx, b_val, ac]
-#
-#     m = UOp(Ops.MUL, dtypes.int32, (i, cN))
-#     output_idx = UOp(Ops.ADD, dtypes.int32, (m, j))
-#     store = UOp(Ops.STORE, dtypes.float32, (gC, output_idx, acc))
-#     uops += [m, output_idx, store]
-#
-#     return uops
 def create_rdna3_matmul_uops(K=4, N=128):
     uops = []
 
@@ -412,4 +417,4 @@ def create_rdna3_matmul_uops(K=4, N=128):
 
 if __name__ == '__main__':
   renderer = RDNA3Renderer("motherfucker")
-  print(renderer.render("bitch", create_rdna3_matmul_uops()))
+  print(renderer.render(create_rdna3_matmul_uops()))
