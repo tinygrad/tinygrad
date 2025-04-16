@@ -8,7 +8,7 @@ if CHECK_OOB:
   # IDIV is truncated division but z3 does floored division and mod by power of two sometimes uses Ops.AND
   def z3_cdiv(a,b): return z3.If(a<0, (a+(b-1))/b, a/b)
   z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.SHR: lambda a,b: a/(2**b.as_long()),
-    Ops.SHL: lambda a,b: a*(2**b.as_long()), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, (int, z3.ArithRef)) else a&b}
+    Ops.SHL: lambda a,b: a*(2**b.as_long()), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b}
   def create_bounded(name:str, vmin, vmax, solver:z3.Solver) -> z3.ArithRef:
     s = z3.Int(name, ctx=solver.ctx)
     solver.add(vmin <= s, s <= vmax)
@@ -24,7 +24,7 @@ if CHECK_OOB:
       dtypes.min(x.dtype), dtypes.max(x.dtype), ctx))),
     (UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=z3.BoolVal(x.arg, ctx=ctx.ctx))),
     (UPat(Ops.CONST, dtype=dtypes.ints, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=z3.IntVal(x.arg, ctx=ctx.ctx))),
-    (UPat(Ops.CAST, name="x"), lambda x: UOp(Ops.NOOP, arg=x.src[0].arg)),
+    (UPat(Ops.CAST, name="x"), lambda x: x.src[0]),
     (UPat(Ops.NEG, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=-x.src[0].arg)),
     (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=z3_alu[x.op](x.src[0].arg, x.src[1].arg))),
   ])
