@@ -366,55 +366,28 @@ kernel:
 def create_rdna3_matmul_uops(K=4, N=128):
     uops = []
 
-    ## Global Buffers
-    gA = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 0)  # Input A (MxK)
-    gB = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 1)  # Input B (KxN)
-    gC = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 2)  # Output C (MxN)
-    uops += [gA, gB, gC]
+    gC = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 0)  # Input A (MxK)
 
-    ## Constants
     cK = UOp(Ops.CONST, dtypes.uint32, (), K)  # Loop bound K
-    cN = UOp(Ops.CONST, dtypes.uint32, (), N)  # Matrix width N
-    acc = UOp(Ops.CONST, dtypes.float32, (), 0.0)  # Zero for accumulator
-    c0 = UOp(Ops.CONST, dtypes.uint32, (), 0)  # Loop start
-    uops += [cK, cN, acc, c0]
+    c0 = UOp(Ops.CONST, dtypes.uint32, (), 0)  # Matrix width N
 
-    ## Thread Coordinates
-    i = UOp(Ops.SPECIAL, dtypes.uint32, (), (0, "lidx0"))  # Row index
-    j = UOp(Ops.SPECIAL, dtypes.uint32, (), (1, "lidx1"))  # Column index
-    uops += [i, j]
-
-    ## Loop Variable
-    k = UOp(Ops.RANGE, dtypes.uint32, (c0, cK))  # k ranges from 0 to K
-    uops.append(k)
-
-    ## Loop Body
-    # A[i][k]
-    a_offset = UOp(Ops.MUL, dtypes.uint32, (i, cK))  # i * K
-    a_idx = UOp(Ops.ADD, dtypes.uint32, (a_offset, k))  # i * K + k
-    a_val = UOp(Ops.LOAD, dtypes.float32, (gA, a_idx))  # A[i][k]
-
-    # B[k][j]
-    b_offset = UOp(Ops.MUL, dtypes.uint32, (k, cN))  # k * N
-    b_idx = UOp(Ops.ADD, dtypes.uint32, (b_offset, j))  # k * N + j
-    b_val = UOp(Ops.LOAD, dtypes.float32, (gB, b_idx))  # B[k][j]
-
-    # Accumulate: acc += A[i][k] * B[k][j]
-    ac = UOp(Ops.MULACC, dtypes.float32, (a_val, b_val, acc))
-    uops += [a_offset, a_idx, a_val, b_offset, b_idx, b_val, ac]
-
-    ## End Loop
-    end_k = UOp(Ops.ENDRANGE, dtypes.bool, (k,))  # Loop k until k < K
-    uops.append(end_k)
-
-    ## Store Result
-    m = UOp(Ops.MUL, dtypes.uint32, (i, cN))  # i * N
-    output_idx = UOp(Ops.ADD, dtypes.uint32, (m, j))  # i * N + j
-    store = UOp(Ops.STORE, dtypes.float32, (gC, output_idx, acc))
-    uops += [m, output_idx, store]
+    store = UOp(Ops.STORE, dtypes.float32, (gC, c0, cK))
+    uops += [gC, cK, c0, store]
 
     return uops
 
 if __name__ == '__main__':
-  renderer = RDNA3Renderer("motherfucker")
-  print(renderer.render(create_rdna3_matmul_uops()))
+  from tinygrad.runtime.ops_amd import AMDAllocator, AMDDevice, AMDProgram
+  from tinygrad.helpers import flat_mv
+  import numpy as np
+  device = AMDDevice()
+  allocator = AMDAllocator(device)
+  prog = AMDProgram(device, "test", open("thing.o", "rb").read())
+  a = allocator.alloc(1*8)
+  # b = allocator.alloc(1*8)
+  prog(a, wait=True)
+  na = np.empty(1, np.uint64)
+  allocator._copyout(flat_mv(na.data), a)
+  print(na)
+  # renderer = RDNA3Renderer("motherfucker")
+  # print(renderer.render(create_rdna3_matmul_uops()))
