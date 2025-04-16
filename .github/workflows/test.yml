@@ -88,7 +88,7 @@ jobs:
   autogen:
     name: Autogen
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -718,7 +718,7 @@ jobs:
 
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4

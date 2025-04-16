@@ -149,7 +149,7 @@ class Tensor(SimpleMathTrait):
       if dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
         else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float  # NOTE: this works because all_int([True, False]) is True
-      if dtype == dtypes.bfloat16: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtypes.bfloat16).lazydata
+      if dtype in [dtypes.bfloat16, *dtypes.fp8s]: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtype).lazydata
       else: data = _frompy(data, dtype)
     elif str(type(data)) == "<class 'numpy.ndarray'>":
       import numpy as np
@@ -3671,7 +3671,7 @@ class Tensor(SimpleMathTrait):
 
   # ***** functional nn ops *****
 
-  def linear(self, weight:Tensor, bias:Tensor|None=None) -> Tensor:
+  def linear(self, weight:Tensor, bias:Tensor|None=None, dtype:DTypeLike|None=None) -> Tensor:
     """
     Applies a linear transformation to `self` using `weight` and `bias`.
 
@@ -3684,6 +3684,7 @@ class Tensor(SimpleMathTrait):
     print(t.linear(weight, bias).numpy())
     ```
     """
+    if dtype is not None: return self.cast(dtype).linear(weight.cast(dtype), bias.cast(dtype) if bias is not None else bias)
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
     return x.add(bias) if bias is not None else x
 
