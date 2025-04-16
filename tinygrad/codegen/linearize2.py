@@ -11,6 +11,8 @@ def disp(y:UOp) -> str:
   if y.op is Ops.RANGE: return str(y.arg)
   return "<NONE>"
 
+def _sort_ctx(inp): return tuple(sorted(dedup(inp), key=lambda x: x.tuplize))
+
 @dataclass(frozen=True)
 class BasicBlock2:
   lst: tuple[UOp, ...]
@@ -24,8 +26,7 @@ class BasicBlock2:
            f"{[disp(y) for y in self.ctx]} {[disp(y) for y in self.child_ctx] if self.child_ctx is not None else '-'} "+\
            f"{len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
-def _sort_ctx(inp): return tuple(sorted(dedup(inp), key=lambda x: x.tuplize))
-
+#@profile
 def make_block(ctx, x:UOp):
   # this is key to making this algorithm work. we recover the old x by replacing the srcs
   fixed_x = x.replace(src=tuple([y.arg.lst[-1] for y in x.src]))
@@ -57,11 +58,13 @@ def make_block(ctx, x:UOp):
     else:
       # block is unmergable
       if y.arg.ctx != tuple_ctx:
-        extra_ends, ends_to_add = partition(y.arg.ctx, lambda z: z in tuple_ctx)
+        ends_to_add = [z for z in y.arg.ctx if z not in tuple_ctx]
+        new_ctx = y.arg.ctx
         while len(ends_to_add):
           r = ends_to_add.pop(-1)
+          new_ctx = tuple([z for z in new_ctx if z is not r])
           end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
-          y = UOp(Ops.BLOCKEND, src=(y,), arg=BasicBlock2((end_uop,), _sort_ctx(ends_to_add+extra_ends), r, cnt=1))
+          y = UOp(Ops.BLOCKEND, src=(y,), arg=BasicBlock2((end_uop,), new_ctx, r, cnt=1))
       unmergable_blocks.append(y)
 
   # create the block (TODO: we don't actually need to track that list)
@@ -130,7 +133,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
     # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
     if len(v) > 1:
       bb = BasicBlock2(v[0].arg.lst, _sort_ctx(flatten([y.arg.ctx for y in v])), k, cnt=len(v))
-      out = UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)), arg=bb)
+      out = UOp(Ops.BLOCKEND, src=tuple(flatten([x.src for x in v])), arg=bb)
       for u in v: new_forks[u] = out
   sink = sink.substitute(new_forks)
 
