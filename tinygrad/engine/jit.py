@@ -12,10 +12,11 @@ from tinygrad.nn.state import get_parameters
 from dataclasses import dataclass
 from weakref import WeakKeyDictionary
 
+def graph_class(dev): return (dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph) if dev else None
+
 class GraphException(Exception): pass
 
 def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], max_batch_size=0) -> list[ExecItem]:
-  def _graph_class(dev): return (dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph) if dev else None
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
   graphed_jit_cache: list[ExecItem] = []
@@ -48,11 +49,11 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
       case BufferXfer():
         ji_graph_dev = Device[unwrap(ji.bufs[0]).device]
         # Whitelist of devices that support graphing BufferXfers
-        can_be_graphed = ji_graph_dev.graph is not None and ji_graph_dev.device.split(":", 1)[0] in {"CUDA", "NV", "AMD", "NULL"}
+        can_be_graphed = ji_graph_dev.graph is not None and issubclass(graph_class(ji_graph_dev), MultiGraphRunner)
       case ViewOp(): continue # ViewOps are just ignored
       case _: can_be_graphed = False # Everything else is not graphed and flushes existing graph if it's being constructed
 
-    is_multigraph = can_be_graphed and issubclass(_graph_class(ji_graph_dev), MultiGraphRunner)
+    is_multigraph = can_be_graphed and issubclass(graph_class(ji_graph_dev), MultiGraphRunner)
     can_share_graph = can_be_graphed and (type(ji_graph_dev) is type(current_device) if is_multigraph else ji_graph_dev == current_device)
     can_extend_graph_batch = can_share_graph and (max_batch_size == 0 or len(current_batch) < max_batch_size)
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
