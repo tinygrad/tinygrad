@@ -129,7 +129,7 @@ for i in [
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y):
-  return wrap(unwrap(x)[[unwrap(_y) if _y is not None else _y for _y in y]])
+  return wrap(unwrap(x)[[unwrap(_y) if _y is not None else slice(None) for _y in y]])
 
 @torch.library.impl("aten::zero_", "privateuseone")
 @inplace_fn("x")
