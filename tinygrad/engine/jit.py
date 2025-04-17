@@ -226,6 +226,7 @@ class TinyJit(Generic[ReturnType]):
     self.prune = prune
     self.optimize = optimize
     self.scheduled_real_bufs: set = set()
+    self.seen_bufs: set = set()
 
   def add_buffer(self, b:Buffer) -> Buffer:
     if found:=self._buffer_replace.get(b, None): return found
