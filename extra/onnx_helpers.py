@@ -40,7 +40,7 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
 
   ret: dict[str, Tensor] = {}
   for name, spec in graph_inputs.items():
-    assert not spec.is_optional, "only allow tensor input for now"
+    assert not spec.is_optional and not spec.is_sequence, "only allow tensor input for now"
     shape = _get_shape(spec.shape)
     value = _get_value(name, shape, spec.dtype)
     ret.update({name:value})
