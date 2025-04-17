@@ -281,6 +281,7 @@ class TinyJit(Generic[ReturnType]):
         finally: capturing.clear()
       jit_cache = self._jit_cache
       del self._buffer_replace, self._jit_cache
+      del self.seen_bufs
       assert len(jit_cache), "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_buffers)} inputs")
 
@@ -311,6 +312,7 @@ class TinyJit(Generic[ReturnType]):
       if self.prune: noopt_buffers.update(b for ji in onetime for b in ji.bufs)
       force_opt_buffers = {b for ji in jit_cache for b in ji.bufs if b not in noopt_buffers and b not in self.scheduled_real_bufs
                            and b not in set(t.lazydata.base.realized for t in get_parameters(ret))}
+      del self.scheduled_real_bufs
       assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ",
                                           force_opt_buffers=force_opt_buffers)
       jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
