@@ -137,41 +137,45 @@ void kernel_main() {{
 """
 
     compute = f"""
-#define SFPU_OP_EXP_INCLUDE 1
-
+#include "compute_kernel_api/eltwise_binary.h"
 #include <cstdint>
-#include "compute_kernel_api/common.h"
-#include "compute_kernel_api/tile_move_copy.h"
-#include "compute_kernel_api/eltwise_unary/eltwise_unary.h"
 #include "compute_kernel_api/eltwise_unary/sfpu_split_includes.h"
+#include "compute_kernel_api/tile_move_copy.h"
 
 namespace NAMESPACE {{
 void MAIN {{
     uint32_t per_core_block_cnt = {num_tiles};
-    uint32_t per_core_block_dim = 1;
+    uint32_t per_core_block_size = 1;
 
-    init_sfpu(tt::CBIndex::c_1, tt::CBIndex::c_0);
-    for (uint32_t block_index = 0; block_index < per_core_block_cnt; block_index++) {{
-        cb_reserve_back(tt::CBIndex::c_0, per_core_block_dim);
-        for (uint32_t tile_index = 0; tile_index < per_core_block_dim; ++tile_index) {{
-            tile_regs_acquire();
+    constexpr auto cb_inp0 = tt::CBIndex::c_1;
+    constexpr auto cb_inp1 = tt::CBIndex::c_2;
+    constexpr auto cb_out0 = tt::CBIndex::c_0;
 
-            // Pop tile after tile, copy to DST and pack
-            cb_wait_front(tt::CBIndex::c_1, 1);
-            copy_tile(tt::CBIndex::c_1, 0, 0);
+    binary_op_init_common(cb_inp0, cb_inp1, cb_out0);
 
-            // Computation
-            exp_tile_init();
-            exp_tile(0);
+    binary_tiles_init<false, EltwiseBinaryType::ELWADD>(cb_inp0, cb_inp1);
 
-            tile_regs_commit();
-            tile_regs_wait();
-            pack_tile(0, tt::CBIndex::c_0);
+    for (uint32_t block = 0; block < per_core_block_cnt; ++block) {{
+        cb_wait_front(cb_inp0, per_core_block_size);
+        cb_wait_front(cb_inp1, per_core_block_size);
+        cb_reserve_back(cb_out0, per_core_block_size);
 
-            cb_pop_front(tt::CBIndex::c_1, 1);
-            tile_regs_release();
+        tile_regs_acquire();
+
+        for (uint32_t i = 0; i < per_core_block_size; ++i) {{
+            add_tiles(cb_inp0, cb_inp1, i, i, i);
         }}
-        cb_push_back(tt::CBIndex::c_0, per_core_block_dim);
+        tile_regs_commit();
+
+        tile_regs_wait();
+        for (uint32_t i = 0; i < per_core_block_size; ++i) {{
+            pack_tile(i, cb_out0);
+        }}
+        tile_regs_release();
+
+        cb_pop_front(cb_inp0, per_core_block_size);
+        cb_pop_front(cb_inp1, per_core_block_size);
+        cb_push_back(cb_out0, per_core_block_size);
     }}
 }}
 }}

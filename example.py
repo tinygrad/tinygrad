@@ -9,10 +9,12 @@ os.environ["NOOPT"] = "1"
 from tinygrad import Tensor, dtypes
 
 x_cpu = Tensor(list(range(1024)), dtype=dtypes.float32, device="cpu")
-z_ref = x_cpu.exp().tolist()
+y_cpu = Tensor(list(range(1024)), dtype=dtypes.float32, device="cpu")
+z_ref = (x_cpu + y_cpu).tolist()
 
 x = x_cpu.to("tt")
-z = -x # any unary op uses the exp kernel
+y = y_cpu.to("tt")
+z = x + y # any unary op uses the exp kernel
 
 print(z_ref[0:10])
 print(z.tolist()[0:10])
