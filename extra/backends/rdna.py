@@ -45,7 +45,7 @@ asm_for_op: Dict[Tuple[Ops, ...], Callable] = {
   (Ops.MAX,): lambda ctx, d, a, b, dt, name: f"v_max_{name} {d}, {a}, {b}",
   (Ops.MOD,): lambda ctx, d, a, b, dt, name: asm_emulated_mod(ctx, d, a, b, dt, name),
   (Ops.CMPLT,): lambda ctx, d, a, b, dt, name: f"v_cmp_lt_{name} {d}, {a}, {b}",
-  (Ops.CMPNE,): lambda ctx, d, a, b, dt, name: f"v_cmp_ne_{name} {a}, {b}",
+  (Ops.CMPNE,): lambda ctx, d, a, b, dt, name: f"v_cmp_ne_{name} {d}, {a}, {b}",
   (Ops.MULACC,): lambda ctx, a, b, c, dt, name: (
     f"v_fmac_{name} {c}, {a}, {b}" if dtypes.is_float(dt) else f"v_mad_{name} {c}, {a}, {b}, {c}"),
   (Ops.WHERE,): lambda ctx, d, a, b, c, dt, name: render_where(ctx, d, a, b, c, dt, name),
@@ -216,7 +216,8 @@ rdna3_rewrite = PatternMatcher([
     f"s_and_saveexec_b64 {ctx.r[x]}, vcc",
     f"LABEL_IF_{ctx.r[x.src[0]][1:]}:",
    ] if ctx.r[x.src[0]][0] == 'v' else [
-    f"s_cbranch_scc0 LABEL_ELSE_{ctx.r[x.src[0]][1:]}:",
+    f"s_cmp_eq_u32 {ctx.r[x.src[0]]}, 0", # may be unnecessary
+    f"s_cbranch_scc0 LABEL_ELSE_{ctx.r[x.src[0]][1:]}",
    ]),
 
   (UPat(Ops.ENDIF, name="x"),
@@ -509,41 +510,43 @@ def test_matrix_transpose():
   expected = np.transpose(mat.reshape(M, N)).flatten()
   assert np.allclose(out, expected)
 
-def test_conditional():
+def test_uniform_conditional():
   device = AMDDevice()
   allocator = AMDAllocator(device)
   compiler = RDNACompiler("gfx1100")
   renderer = RDNA3Renderer("gfx1100")
 
-  uops = []
-  gC = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 0)
-  c0 = UOp(Ops.CONST, dtypes.uint32, (), 0)
 
-  one = UOp(Ops.CONST, dtypes.uint32, (), 0)
-  pred = UOp(Ops.CMPNE, dtypes.bool, (one, one))
-  prednot = UOp(Ops.XOR, dtypes.bool, (pred, one))
+  for val in [0, 1]:
+    uops = []
+    gC = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 0)
+    c0 = UOp(Ops.CONST, dtypes.uint32, (), 0)
 
-  if_op = UOp(Ops.IF, dtypes.void, (prednot,))
-  val_then = UOp(Ops.CONST, dtypes.float32, (), 1.0)
-  store_then = UOp(Ops.STORE, dtypes.float32, (gC, c0, val_then))
-  endif = UOp(Ops.ENDIF, dtypes.void, (if_op,))
-  
-  uops += [gC, c0, one, pred, prednot, if_op, val_then, store_then, endif]
+    lidx0 = UOp(Ops.SPECIAL, dtypes.uint32, (), (0, "lidx0"))
 
-  print(renderer.render(uops))
-  exe = compiler.compile(renderer.render(uops))
-  prog = AMDProgram(device, "test_if_endif", exe)
+    v = UOp(Ops.CONST, dtypes.uint32, (), val)
+    pred = UOp(Ops.CMPNE, dtypes.bool, (lidx0, v))
 
-  c = allocator.alloc(4)
-  prog(c, wait=True)
+    if_op = UOp(Ops.IF, dtypes.void, (pred,))
+    val_then = UOp(Ops.CONST, dtypes.float32, (), 1.0)
+    store_then = UOp(Ops.STORE, dtypes.float32, (gC, c0, val_then))
+    endif = UOp(Ops.ENDIF, dtypes.void, (if_op,))
+    
+    uops += [lidx0, gC, c0, v, pred, if_op, val_then, store_then, endif]
 
-  out = np.empty(1, dtype=np.float32)
-  allocator._copyout(flat_mv(out.data), c)
+    exe = compiler.compile(renderer.render(uops))
+    prog = AMDProgram(device, "test_uniform_conditional", exe)
 
-  assert np.allclose(out, [1.0])
+    c = allocator.alloc(4)
+    prog(c, wait=True)
+
+    out = np.empty(1, dtype=np.float32)
+    allocator._copyout(flat_mv(out.data), c)
+
+    assert np.allclose(out, [float(0 == val)])
 
 if __name__ == "__main__":
   test_simple()
   test_scalar_add()
   test_matrix_transpose()
-  test_conditional()
+  test_uniform_conditional()
