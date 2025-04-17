@@ -13,20 +13,20 @@ else:
 class TestTorchBackend(unittest.TestCase):
   def test_index_put_impl(self):
     # Basic in-place assignment
-    a = torch.zeros(5, device=device)
+    a = torch.zeros(5, device=device, dtype=torch.long)
     indices = [torch.tensor([1, 3], device=device)]
     values = torch.tensor([10, 20], device=device)
     a.index_put_(indices, values)
     np.testing.assert_equal(a.cpu().numpy(), [0, 10, 0, 20, 0])
 
     # Accumulate=True
-    b = torch.zeros(5, device=device)
+    b = torch.zeros(5, device=device, dtype=torch.long)
     b.index_put_(indices, values, accumulate=True)
     b.index_put_(indices, values, accumulate=True)
     np.testing.assert_equal(b.cpu().numpy(), [0, 20, 0, 40, 0])
 
     # Multi-dimensional
-    c = torch.zeros(3, 3, device=device)
+    c = torch.zeros(3, 3, device=device, dtype=torch.long)
     idx = [torch.tensor([0, 1], device=device), torch.tensor([1, 2], device=device)]
     vals = torch.tensor([7, 8], device=device)
     c.index_put_(idx, vals)
@@ -36,7 +36,7 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_equal(c.cpu().numpy(), expected)
 
     # Pythonic indexing assignment (a[indices] = values)
-    d = torch.zeros(5, device=device)
+    d = torch.zeros(5, device=device, dtype=torch.long)
     d[indices] = values
     np.testing.assert_equal(d.cpu().numpy(), [0, 10, 0, 20, 0])
 
