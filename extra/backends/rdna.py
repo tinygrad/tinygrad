@@ -1,15 +1,17 @@
 from typing import Dict, List, Union, cast, Callable, Tuple
+import subprocess
 from functools import reduce
 from operator import add
-import struct
 import yaml
 
+from tinygrad.device import Compiler
+from tinygrad.helpers import temp
 from tinygrad.renderer import Renderer
 from tinygrad.ops import Ops, UOp, PatternMatcher, UPat, DType, GroupOp
 from tinygrad.dtype import dtypes
 
 def asm_emulated_mod(ctx, d, a, b, dt, name) -> List[str]:
-  t0, t1, t2 = ctx.tmp_vregs()
+  t0, t1, t2 = ctx.tmpv[:3]
   if dtypes.is_float(dt):
     return [
       f"v_rcp_{name} {t0}, {b}", # t0 = 1 / b
@@ -50,15 +52,15 @@ asm_for_op: Dict[Tuple[Ops, ...], Callable] = {
 }
 
 def get_reg_range(reg: str) -> List[int]:
-  if '[' in reg:
-    a, *b = reg[reg.index('[')+1 : reg.index(']')].split(':')
+  if "[" in reg:
+    a, *b = reg[reg.index("[")+1 : reg.index("]")].split(":")
     return [int(a)] if not b else list(range(int(a), int(b[0]) + 1))
   i = next(i for i, c in enumerate(reg) if c.isdigit())
   return [int(reg[i:])]
 
 def get_regs_contained(reg: str) -> List[str]:
-  if '[' in reg:
-    a, *b = reg[reg.index('[')+1 : reg.index(']')].split(':')
+  if "[" in reg:
+    a, *b = reg[reg.index("[")+1 : reg.index("]")].split(":")
     return [f"{reg[0]}{a}"] if not b else [f"{reg[0]}{i}" for i in range(int(a), int(b[0]) + 1)]
   return [reg]
 
@@ -66,60 +68,61 @@ def render_reg_range(p: str, regs: List[str]) -> str:
   r = list(sorted(reduce(add, map(get_reg_range, regs))))
   return f"{p}{r[0]}" if len(r) == 1 else f"{p}[{r[0]}:{r[-1]}]"
 
-def render_addr_calc(ctx, ptr, offset) -> Tuple[List[str], str, str]:
+def render_addr_calc(ctx, base_ptr, offset) -> Tuple[List[str], str, str]:
   instructions = []
-  ptr = ctx.r[ptr]
-  offset = ctx.r[offset]
 
-  ptr_lo, ptr_hi = get_regs_contained(ptr)
-  addr_lo_v, addr_hi_v, temp_v = ctx.tmp_vregs()
+  off = ctx.r[offset]
+  base_lo, base_hi = get_regs_contained(ctx.r[base_ptr])
+  addr_lo, addr_hi, tmp = ctx.tmpv[:3]
+  tmp_off = ctx.tmps[:1]
 
+  # Ensure offset is in a VGPR for src1 of VOP2
+  if off[0] == "s":
+    instructions.append(f"s_mul_lo_u32 {tmp_off}, {off}, {offset.dtype.scalar().itemsize}")
+    instructions.append(f"v_mov_b32 {tmp}, {tmp_off}")
+  else:
+    instructions.append(f"v_mul_lo_u32 {tmp}, {off}, {offset.dtype.scalar().itemsize}")
+  off = tmp
+
+  # Reset overflow
   instructions.append("s_mov_b64 vcc, 0")
 
-  if offset[0] == 's':
-    if ptr_lo[0] == 's': # S+S -> need offset in VGPR for S1
-      instructions.append(f"v_mov_b32 {temp_v}, {offset}")
-      instructions.append(f"v_add_co_ci_u32 {addr_lo_v}, {ptr_lo}, {temp_v}") # S0=SGPR, S1=VGPR
-    else: # V+S -> swap operands
-      instructions.append(f"v_add_co_ci_u32 {addr_lo_v}, {offset}, {ptr_lo}")   # S0=SGPR, S1=VGPR
-  else: # offset is VGPR
-    # S+V or V+V -> both OK as is, since offset (S1) is VGPR
-    instructions.append(f"v_add_co_ci_u32 {addr_lo_v}, {ptr_lo}, {offset}") # S0=any, S1=VGPR
+  # Add low 32-bits: addr_lo = base_lo + offset
+  instructions.append(f"v_add_co_ci_u32 {addr_lo}, {base_lo}, {off}")
 
-  # High 32-bit add: addr_hi_v = ptr_hi + 0 + carry
+  # Add high 32-bits: addr_hi = base_hi + carry
+  if base_hi[0] == "s":
+    instructions.append(f"v_mov_b32 {tmp}, {base_hi}")
+    base_hi = tmp
 
-  # S1 must be VGPR. If ptr_hi is SGPR, it needs to be moved.
-  if ptr_hi[0] == 's':
-    instructions.append(f"v_mov_b32 {temp_v}, {ptr_hi}")
-    instructions.append(f"v_add_co_ci_u32 {addr_hi_v}, 0, {temp_v}") # S0=imm, S1=VGPR
-  else: # ptr_hi is VGPR
-    instructions.append(f"v_add_co_ci_u32 {addr_hi_v}, 0, {ptr_hi}") # S0=imm, S1=VGPR
+  instructions.append(f"v_add_co_ci_u32 {addr_hi}, 0, {base_hi}")
 
-  return instructions, addr_lo_v, addr_hi_v
+  return instructions, addr_lo, addr_hi
+
 
 def render_load(ctx, x, ptr, offset) -> List[str]:
   load_bits = max(int(ctx.types[x.dtype][1:]) * x.dtype.count, 32)
   if len(get_reg_range(ctx.r[ptr])) == 2:
     addr_setup_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, offset)
-    addr_reg = render_reg_range('v', [addr_lo_v, addr_hi_v])
+    addr_reg = render_reg_range("v", [addr_lo_v, addr_hi_v])
   else:
-    addr_reg = ctx.tmp_vregs()[0]
+    addr_reg = ctx.tmpv[0]
     addr_setup_ins = [f"v_add_u32 {addr_reg}, {ctx.r[ptr]}, {ctx.r[offset]}"]
 
   if any(_x.op is Ops.DEFINE_LOCAL for _x in x.src[0].toposort):
     # shared mem
     load_ins = f"ds_load_b{load_bits} {ctx.r[x]}, {addr_reg}"
   else:
-    load_ins = f"global_load_b{load_bits} {ctx.r[x]}, {addr_reg} offset:0"
+    load_ins = f"global_load_b{load_bits} {ctx.r[x]}, {addr_reg} off"
   return addr_setup_ins + [load_ins]
 
 def render_store(ctx, x, ptr, offset, val) -> List[str]:
   store_bits = max(int(ctx.types[val.dtype.scalar()][1:]) * x.dtype.count, 32)
   if len(get_reg_range(ctx.r[ptr])) == 2:
     addr_setup_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, offset)
-    addr_reg = render_reg_range('v', [addr_lo_v, addr_hi_v])
+    addr_reg = render_reg_range("v", [addr_lo_v, addr_hi_v])
   else:
-    addr_reg = ctx.tmp_vregs()[0]
+    addr_reg = ctx.tmpv[0]
     addr_setup_ins = [f"v_add_u32 {addr_reg}, {ctx.r[ptr]}, {ctx.r[offset]}"]
 
   if any(_x.op is Ops.DEFINE_LOCAL for _x in x.src[0].toposort):
@@ -143,7 +146,7 @@ def render_const_mod(ctx, d, val, modulus) -> List[str]:
   if r >= divisor // 2:
       m += 1
 
-  t0, t1, t2 = ctx.tmp_vregs()
+  t0, t1, t2 = ctx.tmpv[:3]
   
 
   return [
@@ -171,6 +174,13 @@ rdna3_rewrite = PatternMatcher([
 
   (UPat(Ops.MULACC, name="x"),
     lambda ctx, x: asm_for_op[(Ops.MULACC,)](ctx, ctx.r[x.src[0]], ctx.r[x.src[1]], ctx.r[x.src[2]], x.dtype, ctx.types[x.dtype])),
+  
+  # only local idx
+  (UPat(Ops.SPECIAL, name="x"),
+    lambda ctx, x: [
+     f"v_lshrrev_b32 {ctx.r[x]}, {10 * x.arg[0]}, v0",
+     f"v_and_b32 {ctx.r[x]}, {ctx.r[x]}, 0x3FF",
+   ]),
 
   (UPat(Ops.WHERE, name="x"),
     lambda ctx, x: asm_for_op[(Ops.WHERE,)](ctx, ctx.r[x], ctx.r[x.src[0]], ctx.r[x.src[1]], ctx.r[x.src[2]], x.dtype, ctx.types[x.dtype])),
@@ -224,15 +234,17 @@ dual_combs: List[Tuple[Ops, Ops]] = [
 # fused_ops = PatternMatcher([
 #   (UPat(Ops.ADD, name="x",
 #         dtype=dtypes.float32,
-#         src=(UPat(Ops.MUL, name='a1'), UPat.var("a2"))), lambda: ctx, x, y: ),
+#         src=(UPat(Ops.MUL, name="a1"), UPat.var("a2"))), lambda: ctx, x, y: ),
 # ])
 
 class RDNA3Renderer(Renderer):
   device = "ROCm"
   # tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
   extra_matcher = None
+  tmpv = [f"v{i}" for i in range(3, 6)]
+  tmps = [f"s{i}" for i in range(255, 256)]
 
-  def __init__(self, arch:str, device="ROCm"):
+  def __init__(self, arch:str="gfx1100", device="ROCm"):
     self.device, self.tensor_cores, self.arch = device, [], arch
   def __reduce__(self): return self.__class__, (self.arch, self.device)
 
@@ -253,13 +265,9 @@ class RDNA3Renderer(Renderer):
   mem_types: Dict[DType, str] =  types.copy()
   mem_types.update({dtypes.int8: "i8", dtypes.uint8: "u8", dtypes.bool: "u8", dtypes.float16: "b16"})
 
-  def tmp_vregs(self):
-    return self.tmpv
-  
   def render(self, uops:List[UOp]) -> str:
-    self.tmpv = [f"v{i}" for i in range(3, 6)]
     self.v_cnt = 6  # v[0:2] is local_xyz, v[3:5] are used for temporaries
-    self.s_cnt = 5  # s[0:1] is the address, s[2:4] is global_xyz
+    self.s_cnt = 5  # s[0:1] is the global address, s[2:4] is global_xyz
 
     self.r: Dict[UOp, str] = {}
     ins: List[str] = []
@@ -267,6 +275,26 @@ class RDNA3Renderer(Renderer):
     self.l: Dict[UOp, str] = {}
     allocate = 0
     args_offset = 0
+
+    # put defines first, then specials
+    for u in uops:
+      if u.op == Ops.DEFINE_GLOBAL:
+        self.args[u] = {".address_space": "global", ".name": f"buf_{u.arg}", ".offset": args_offset, ".size": 8,
+                     ".type_name": u.dtype.name+"*", ".value_kind": "global_buffer"}
+        args_offset += 8
+        self.s_cnt += self.s_cnt%2
+        self.r[u] = f"s[{self.s_cnt}:{self.s_cnt+1}]"
+        self.s_cnt += 2
+      elif u.op == Ops.DEFINE_LOCAL:
+        self.args[u] = {".name": f"buf_{u.arg}", ".offset": args_offset, ".size": 4,
+                     ".type_name": u.dtype.name+"*", ".value_kind": "by_value"}
+        args_offset += 4
+        allocate += u.dtype.itemsize * u.dtype.vcount
+        self.r[u] = f"s{self.s_cnt}"
+        self.s_cnt += 1
+
+    # reserve for global_xyz
+    self.s_cnt += 3
 
     for u in uops:
       if any(src.op is Ops.LOAD for src in u.src):
@@ -277,7 +305,7 @@ class RDNA3Renderer(Renderer):
         self.s_cnt+= 1
       elif u.op == Ops.MULACC:
         self.r[u] = self.r[u.src[0]]
-      elif u.op in GroupOp.ALU or u.op == Ops.CONST or u.op == Ops.LOAD or u.op == Ops.RANGE:
+      elif u.op in GroupOp.ALU | {Ops.CONST, Ops.LOAD, Ops.RANGE}:
         cnt = (u.dtype.itemsize * u.dtype.vcount) // 4
         if cnt <= 4:
           self.r[u] = f"v{self.v_cnt}"
@@ -286,26 +314,13 @@ class RDNA3Renderer(Renderer):
         self.v_cnt += cnt
       elif u.op == Ops.SPECIAL:
         if u.arg[1].startswith("lidx"):
-          self.r[u] = f'v{u.arg[0]}'
+          self.r[u] = f"v{self.v_cnt}"
+          self.v_cnt += 1
         elif u.arg[1].startswith("gidx"):
-          self.r[u] = f's{2+u.arg[0]}'
+          self.r[u] = f"s{2 + len(self.args) + u.arg[0]}"
+          continue
         else:
           raise NotImplementedError
-        continue
-      elif u.op == Ops.DEFINE_GLOBAL:
-        self.args[u] = {'.address_space': 'global', '.name': f'buf_{u.arg}', '.offset': args_offset, '.size': 8,
-                     '.type_name': u.dtype.name+"*", '.value_kind': 'by_value'}
-        args_offset += 8
-        self.s_cnt += self.s_cnt%2
-        self.r[u] = f"s[{self.s_cnt}:{self.s_cnt+1}]"
-        self.s_cnt += 2
-      elif u.op == Ops.DEFINE_LOCAL:
-        self.args[u] = {'.address_space': 'local', '.name': f'buf_{u.arg}', '.offset': args_offset, '.size': 4,
-                     '.type_name': u.dtype.name+"*", '.value_kind': 'by_value'}
-        args_offset += 4
-        allocate += u.dtype.itemsize * u.dtype.vcount
-        self.r[u] = f"s{self.s_cnt}"
-        self.s_cnt += 1
       if u.op == Ops.RANGE:
         # TODO: what is the arg?
         self.l[u] = self.r[u.src[1]]
@@ -313,19 +328,19 @@ class RDNA3Renderer(Renderer):
       if (l:=cast(Union[str, List[str]], rdna3_rewrite.rewrite(u, ctx=self))) is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       l = [l] if isinstance(l, str) else l
-      l = [f"  {u}" if u[-1] != ':' else u for u in l]
+      l = [f"  {u}" if u[-1] != ":" else u for u in l]
       ins.extend(l)
 
     args = list(self.args.values())
     ins.append("  s_waitcnt vmcnt(0)")
     metadata = {
-      'amdhsa.kernels': [{'.args': args,
-        '.group_segment_fixed_size': allocate, '.kernarg_segment_align': 8, '.kernarg_segment_size': args[-1][".offset"] + args[-1][".size"],
-        '.language': 'OpenCL C', '.language_version': [1, 2], '.max_flat_workgroup_size': 256,
-        '.name': 'kernel', '.private_segment_fixed_size': 0, '.sgpr_count': self.s_cnt, '.sgpr_spill_count': 0,
-        '.symbol': f'kernel.kd', '.uses_dynamic_stack': False, '.vgpr_count': self.v_cnt, '.vgpr_spill_count': 0,
-        '.wavefront_size': 32}],
-      'amdhsa.target': 'amdgcn-amd-amdhsa--gfx1100', 'amdhsa.version': [1, 2]}
+      "amdhsa.kernels": [{".args": args,
+        ".group_segment_fixed_size": allocate, ".kernarg_segment_align": 8, ".kernarg_segment_size": args[-1][".offset"] + args[-1][".size"],
+        ".language": "OpenCL C", ".language_version": [1, 2], ".max_flat_workgroup_size": 256,
+        ".name": "kernel", ".private_segment_fixed_size": 0, ".sgpr_count": self.s_cnt, ".sgpr_spill_count": 0,
+        ".symbol": f"kernel.kd", ".uses_dynamic_stack": False, ".vgpr_count": self.v_cnt, ".vgpr_spill_count": 0,
+        ".wavefront_size": 32}],
+      "amdhsa.target": "amdgcn-amd-amdhsa--gfx1100", "amdhsa.version": [1, 2], "COMPUTE_PGM_RSRC2.tgid_x_en": 1, "COMPUTE_PGM_RSRC2.tgid_y_en": 1, "COMPUTE_PGM_RSRC2.tgid_z_en": 1}
 
     boilerplate_start = f"""
 .rodata
@@ -335,20 +350,20 @@ class RDNA3Renderer(Renderer):
 .amdhsa_kernel kernel"""
 
     kernel_desc = {
-      '.amdhsa_group_segment_fixed_size': allocate, '.amdhsa_private_segment_fixed_size': 0, '.amdhsa_kernarg_size': 0,
-      '.amdhsa_next_free_vgpr': self.v_cnt,
-      '.amdhsa_reserve_vcc': 0, '.amdhsa_reserve_xnack_mask': 0,
-      '.amdhsa_next_free_sgpr': self.s_cnt,
-      '.amdhsa_float_round_mode_32': 0, '.amdhsa_float_round_mode_16_64': 0, '.amdhsa_float_denorm_mode_32': 3, '.amdhsa_float_denorm_mode_16_64': 3,
-      '.amdhsa_dx10_clamp': 1, '.amdhsa_ieee_mode': 1, '.amdhsa_fp16_overflow': 0,
-      '.amdhsa_workgroup_processor_mode': 1, '.amdhsa_memory_ordered': 1, '.amdhsa_forward_progress': 0, '.amdhsa_enable_private_segment': 0,
-      '.amdhsa_system_sgpr_workgroup_id_x': 1, '.amdhsa_system_sgpr_workgroup_id_y': 1, '.amdhsa_system_sgpr_workgroup_id_z': 1,
-      '.amdhsa_system_sgpr_workgroup_info': 0, '.amdhsa_system_vgpr_workitem_id': 2,
-      '.amdhsa_exception_fp_ieee_invalid_op': 0, '.amdhsa_exception_fp_denorm_src': 0,
-      '.amdhsa_exception_fp_ieee_div_zero': 0, '.amdhsa_exception_fp_ieee_overflow': 0, '.amdhsa_exception_fp_ieee_underflow': 0,
-      '.amdhsa_exception_fp_ieee_inexact': 0, '.amdhsa_exception_int_div_zero': 0,
-      '.amdhsa_user_sgpr_dispatch_ptr': 0, '.amdhsa_user_sgpr_queue_ptr': 0, '.amdhsa_user_sgpr_kernarg_segment_ptr': 1,
-      '.amdhsa_user_sgpr_dispatch_id': 0, '.amdhsa_user_sgpr_private_segment_size': 0, '.amdhsa_wavefront_size32': 1, '.amdhsa_uses_dynamic_stack': 0}
+      ".amdhsa_group_segment_fixed_size": allocate, ".amdhsa_private_segment_fixed_size": 0, ".amdhsa_kernarg_size": 0,
+      ".amdhsa_next_free_vgpr": self.v_cnt,
+      ".amdhsa_reserve_vcc": 0, ".amdhsa_reserve_xnack_mask": 0,
+      ".amdhsa_next_free_sgpr": self.s_cnt,
+      ".amdhsa_float_round_mode_32": 0, ".amdhsa_float_round_mode_16_64": 0, ".amdhsa_float_denorm_mode_32": 3, ".amdhsa_float_denorm_mode_16_64": 3,
+      ".amdhsa_dx10_clamp": 1, ".amdhsa_ieee_mode": 1, ".amdhsa_fp16_overflow": 0,
+      ".amdhsa_workgroup_processor_mode": 1, ".amdhsa_memory_ordered": 1, ".amdhsa_forward_progress": 0, ".amdhsa_enable_private_segment": 0,
+      ".amdhsa_system_sgpr_workgroup_id_x": 1, ".amdhsa_system_sgpr_workgroup_id_y": 1, ".amdhsa_system_sgpr_workgroup_id_z": 1,
+      ".amdhsa_system_sgpr_workgroup_info": 0, ".amdhsa_system_vgpr_workitem_id": 2,
+      ".amdhsa_exception_fp_ieee_invalid_op": 0, ".amdhsa_exception_fp_denorm_src": 0,
+      ".amdhsa_exception_fp_ieee_div_zero": 0, ".amdhsa_exception_fp_ieee_overflow": 0, ".amdhsa_exception_fp_ieee_underflow": 0,
+      ".amdhsa_exception_fp_ieee_inexact": 0, ".amdhsa_exception_int_div_zero": 0,
+      ".amdhsa_user_sgpr_dispatch_ptr": 0, ".amdhsa_user_sgpr_queue_ptr": 0, ".amdhsa_user_sgpr_kernarg_segment_ptr": 1,
+      ".amdhsa_user_sgpr_dispatch_id": 0, ".amdhsa_user_sgpr_private_segment_size": 0, ".amdhsa_wavefront_size32": 1, ".amdhsa_uses_dynamic_stack": 0}
 
     code_start = f""".end_amdhsa_kernel
 .text
@@ -358,36 +373,123 @@ class RDNA3Renderer(Renderer):
 kernel:
 """
 
-    ins += ['  s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', '  s_endpgm', '  s_code_end']
+    ins += ["  s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)", "  s_endpgm", "  s_code_end"]
     return ".amdgpu_metadata\n" + yaml.dump(metadata) + ".end_amdgpu_metadata" + \
-           boilerplate_start + "\n" + '\n'.join("%s %d" % x for x in kernel_desc.items()) + "\n" + code_start + \
-           '\n'.join(ins) + f"\n.size kernel, .-kernel"
+           boilerplate_start + "\n" + "\n".join("%s %d" % x for x in kernel_desc.items()) + "\n" + code_start + \
+           "\n".join(ins) + f"\n.size kernel, .-kernel"
 
-def create_rdna3_matmul_uops(K=4, N=128):
-    uops = []
+class RDNACompiler(Compiler):
+  def __init__(self, arch:str="gfx1100", cache_key="rdna"):
+    self.arch = arch
+    super().__init__(f"compile_{cache_key}_{self.arch}")
 
-    gC = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 0)  # Input A (MxK)
+  def compile(self, src:str) -> bytes:
+    code, obj = temp("code"), temp("obj")
+    with open(code, "w") as f: f.write(src)
+    subprocess.run(["llvm-mc", "--arch=amdgcn", f"--mcpu={self.arch}", "--triple=amdgcn-amd-amdhsa", "-filetype=obj", "-o", obj, code])
+    return open(obj, "rb").read()
 
-    cK = UOp(Ops.CONST, dtypes.uint32, (), K)  # Loop bound K
-    c0 = UOp(Ops.CONST, dtypes.uint32, (), 0)  # Matrix width N
+from tinygrad.runtime.ops_amd import AMDAllocator, AMDDevice, AMDProgram
+from tinygrad.helpers import flat_mv
+import numpy as np
 
-    store = UOp(Ops.STORE, dtypes.float32, (gC, c0, cK))
-    uops += [gC, cK, c0, store]
-
-    return uops
-
-if __name__ == '__main__':
-  from tinygrad.runtime.ops_amd import AMDAllocator, AMDDevice, AMDProgram
-  from tinygrad.helpers import flat_mv
-  import numpy as np
+def test_simple():
   device = AMDDevice()
   allocator = AMDAllocator(device)
-  prog = AMDProgram(device, "test", open("thing.o", "rb").read())
+  compiler = RDNACompiler("gfx1100")
+  renderer = RDNA3Renderer("gfx1100")
+
+  uops = []
+
+  gC = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 0)
+
+  cK = UOp(Ops.CONST, dtypes.uint32, (), 4)
+  c0 = UOp(Ops.CONST, dtypes.uint32, (), 0)
+
+  store = UOp(Ops.STORE, dtypes.float32, (gC, c0, cK))
+  uops += [gC, cK, c0, store]
+
+  exe = compiler.compile(renderer.render(uops))
+  prog = AMDProgram(device, "test", exe)
   a = allocator.alloc(1*8)
-  # b = allocator.alloc(1*8)
   prog(a, wait=True)
   na = np.empty(1, np.uint64)
   allocator._copyout(flat_mv(na.data), a)
-  print(na)
-  # renderer = RDNA3Renderer("motherfucker")
-  # print(renderer.render(create_rdna3_matmul_uops()))
+  assert na == [4]
+
+def test_scalar_add():
+  device = AMDDevice()
+  allocator = AMDAllocator(device)
+  compiler = RDNACompiler("gfx1100")
+  renderer = RDNA3Renderer("gfx1100")
+
+  uops = []
+  gA = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 0)
+  gB = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 1)
+  gC = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 2)
+  c0 = UOp(Ops.CONST, dtypes.uint32, (), 0)
+  a_val = UOp(Ops.LOAD, dtypes.float32, (gA, c0))
+  b_val = UOp(Ops.LOAD, dtypes.float32, (gB, c0))
+  sum_val = UOp(Ops.ADD, dtypes.float32, (a_val, b_val))
+  store = UOp(Ops.STORE, dtypes.float32, (gC, c0, sum_val))
+  uops += [gA, gB, gC, c0, a_val, b_val, sum_val, store]
+
+  exe = compiler.compile(renderer.render(uops))
+  prog = AMDProgram(device, "scalar_add", exe)
+  a = allocator.alloc(4)
+  b = allocator.alloc(4)
+  c = allocator.alloc(4)
+  allocator._copyin(a, memoryview(np.array([3.5], dtype=np.float32)))
+  allocator._copyin(b, memoryview(np.array([2.0], dtype=np.float32)))
+  prog(a, b, c, wait=True)
+  out = np.empty(1, dtype=np.float32)
+  allocator._copyout(flat_mv(out.data), c)
+  assert np.allclose(out, [5.5])
+
+def test_matrix_transpose():
+  device = AMDDevice()
+  allocator = AMDAllocator(device)
+  compiler = RDNACompiler("gfx1100")
+  renderer = RDNA3Renderer("gfx1100")
+
+  M, N = 2, 3
+  uops = []
+  gA = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 0)
+  gT = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 1)
+  uops += [gA, gT]
+
+  cM = UOp(Ops.CONST, dtypes.uint32, (), M)
+  cN = UOp(Ops.CONST, dtypes.uint32, (), N)
+  i = UOp(Ops.SPECIAL, dtypes.uint32, (), (0, "lidx0"))
+  j = UOp(Ops.SPECIAL, dtypes.uint32, (), (1, "lidx1"))
+
+  a_offset = UOp(Ops.MUL, dtypes.uint32, (i, cN))
+  a_idx = UOp(Ops.ADD, dtypes.uint32, (a_offset, j))
+  val = UOp(Ops.LOAD, dtypes.float32, (gA, a_idx))
+
+  t_offset = UOp(Ops.MUL, dtypes.uint32, (j, cM))
+  t_idx = UOp(Ops.ADD, dtypes.uint32, (t_offset, i))
+  store = UOp(Ops.STORE, dtypes.float32, (gT, t_idx, val))
+  uops += [cM, cN, i, j, a_offset, a_idx, val, t_offset, t_idx, store]
+
+  exe = compiler.compile(renderer.render(uops))
+  prog = AMDProgram(device, "transpose", exe)
+
+  a = allocator.alloc(M * N * 4)
+  t = allocator.alloc(M * N * 4)
+
+  mat = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.float32).flatten()
+  allocator._copyin(a, memoryview(mat))
+  prog(a, t, global_size=(1, 1, 1), local_size=(M, N, 1), wait=True)
+
+  out = np.empty(M * N, dtype=np.float32)
+  allocator._copyout(memoryview(out), t)
+
+  expected = np.transpose(mat.reshape(M, N)).flatten()
+  assert np.allclose(out, expected)
+
+
+if __name__ == "__main__":
+  test_simple()
+  test_scalar_add()
+  test_matrix_transpose()
