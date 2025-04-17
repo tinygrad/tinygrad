@@ -318,8 +318,7 @@ class Kernel:
       self.apply_opt(Opt(OptOps.TC, axis, (tc_select, tc_opt)))
 
       if (tc_opts:=self.tensor_core_opts) is not None:
-        if extra_opts is not None:
-          for opt in extra_opts: self.apply_opt(opt)
+        if extra_opts is not None: self.apply_opts(extra_opts)
         else:
           if AMX: return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
           # hand-coded TC opts
@@ -429,6 +428,9 @@ class Kernel:
     if append_opt: self.applied_opts.append(opt)
     if self.simplify_ones() and self.tensor_core_opts:
       self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
+
+  def apply_opts(self, opts:Sequence[Opt]):
+    for opt in opts: self.apply_opt(opt)
 
   def required_optimizations(self) -> Kernel:
     if isinstance(self.membufs[0].dtype, ImageDType):
