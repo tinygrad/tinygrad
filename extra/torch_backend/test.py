@@ -11,6 +11,54 @@ else:
   device = "tiny"
 
 class TestTorchBackend(unittest.TestCase):
+  def test_index_put_impl(self):
+    # Basic in-place assignment
+    a = torch.zeros(5, device=device)
+    indices = [torch.tensor([1, 3], device=device)]
+    values = torch.tensor([10, 20], device=device)
+    a.index_put_(indices, values)
+    np.testing.assert_equal(a.cpu().numpy(), [0, 10, 0, 20, 0])
+
+    # Accumulate=True
+    b = torch.zeros(5, device=device)
+    b.index_put_(indices, values, accumulate=True)
+    b.index_put_(indices, values, accumulate=True)
+    np.testing.assert_equal(b.cpu().numpy(), [0, 20, 0, 40, 0])
+
+    # Multi-dimensional
+    c = torch.zeros(3, 3, device=device)
+    idx = [torch.tensor([0, 1], device=device), torch.tensor([1, 2], device=device)]
+    vals = torch.tensor([7, 8], device=device)
+    c.index_put_(idx, vals)
+    expected = np.zeros((3,3))
+    expected[0,1] = 7
+    expected[1,2] = 8
+    np.testing.assert_equal(c.cpu().numpy(), expected)
+
+    # Pythonic indexing assignment (a[indices] = values)
+    d = torch.zeros(5, device=device)
+    d[indices] = values
+    np.testing.assert_equal(d.cpu().numpy(), [0, 10, 0, 20, 0])
+
+  def test_index_tensor(self):
+    # Test aten::index.Tensor (index_tensor)
+    a = torch.tensor([[10, 20], [30, 40], [50, 60]], device=device)
+    idx0 = torch.tensor([0, 2], device=device)
+    idx1 = torch.tensor([1, 0], device=device)
+    # Should select a[0,1] and a[2,0]
+    result = a[[idx0, idx1]]
+    expected = np.array([20, 50])
+    np.testing.assert_equal(result.cpu().numpy(), expected)
+
+  def test_index_put(self):
+    a = torch.zeros(4, device=device)
+    indices = [torch.tensor([1, 2], device=device)]
+    values = torch.tensor([5, 9], device=device)
+    result = torch.ops.aten.index_put(a, indices, values)
+    np.testing.assert_equal(result.cpu().numpy(), [0, 5, 9, 0])
+    # original a should not be modified
+    np.testing.assert_equal(a.cpu().numpy(), [0, 0, 0, 0])
+
   def test_numpy_ones(self):
     a = torch.ones(4, device=device)
     np.testing.assert_equal(a.cpu().numpy(), [1,1,1,1])
