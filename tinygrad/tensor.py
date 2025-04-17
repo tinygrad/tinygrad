@@ -859,7 +859,7 @@ class Tensor(SimpleMathTrait):
       j = Tensor.randint(1, 1, low=0, high=i, device=t.device)[0,0]
       t[i], t[j] = t[j].clone().realize(), t[i].clone().realize()
     return t.contiguous()
-  
+
   @staticmethod
   def randperm(n: int, generator=None, device=None) -> Tensor:
     t = Tensor.arange(n, device=device, dtype=dtypes.int32)
