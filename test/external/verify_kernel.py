@@ -36,8 +36,7 @@ if __name__ == "__main__":
     with open(args.pkl, 'rb') as file:
       (ast, applied_opts,) = pickle.load(file)
       lin = Kernel(ast)
-      for opt in applied_opts:
-        lin.apply_opt(opt)
+      lin.apply_opts(applied_opts)
       test_lins = [lin]
 
   else:

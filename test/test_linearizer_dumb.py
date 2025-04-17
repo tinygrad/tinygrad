@@ -38,7 +38,7 @@ class TestLinearizerDumb(unittest.TestCase):
     opts = [Opt(op=OptOps.TC, axis=2, arg=(-1, 2)), Opt(op=OptOps.UPCAST, axis=2, arg=0), Opt(op=OptOps.UNROLL, axis=1, arg=0)]
     k = Kernel(ast, opts=Device["METAL"].renderer)
     k.required_optimizations()
-    for opt in opts: k.apply_opt(opt)
+    k.apply_opts(opts)
     prg = k.to_program()
     print(prg.src)
     Device[Device.DEFAULT].compiler.compile_cached(prg.src)
@@ -73,7 +73,7 @@ class TestLinearizerDumb(unittest.TestCase):
     opts = [Opt(op=OptOps.UNROLL, axis=0, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     k.required_optimizations()
-    for opt in opts: k.apply_opt(opt)
+    k.apply_opts(opts)
     prg = k.to_program()
     print(prg.src)
     assert prg.uops is not None and not any(uop.op is Ops.MAX for uop in prg.uops), "leftover MAX"
@@ -91,7 +91,7 @@ class TestLinearizerDumb(unittest.TestCase):
     opts = [Opt(op=OptOps.GROUP, axis=0, arg=0), Opt(op=OptOps.PADTO, axis=0, arg=32), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=0)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     k.required_optimizations()
-    for opt in opts: k.apply_opt(opt)
+    k.apply_opts(opts)
     prg = k.to_program()
     print(prg.src)
     if_uops = [u for u in k.uops if u.op is Ops.IF]
@@ -157,7 +157,7 @@ class TestLinearizerDumb(unittest.TestCase):
               UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),))
     opts = [Opt(op=OptOps.UNROLL, axis=0, arg=0), Opt(op=OptOps.LOCAL, axis=0, arg=3)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-    for opt in opts: k.apply_opt(opt)
+    k.apply_opts(opts)
     prg = k.to_program()
     print(prg.src)
     load_idxs = [x.src[1] for x in k.uops if x.op is Ops.LOAD and x.src[0].arg == 3]
@@ -188,7 +188,7 @@ class TestLinearizerDumb(unittest.TestCase):
               UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),)),))
     opts = [Opt(op=OptOps.UNROLL, axis=0, arg=0)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-    for opt in opts: k.apply_opt(opt)
+    k.apply_opts(opts)
     prg = k.to_program()
     print(prg.src)
     load_idxs = [x.src[1] for x in k.uops if x.op is Ops.LOAD and x.src[0].arg == 2]
@@ -212,7 +212,7 @@ class TestLinearizerDumb(unittest.TestCase):
               UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 5, 13, 1, 1, 1, 4, 1, 4, 3, 3), strides=(260, 13, 1, 0, 0, 0, 65, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),))
     opts = [Opt(op=OptOps.UPCAST, axis=3, arg=0), Opt(op=OptOps.UPCAST, axis=2, arg=0)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-    for opt in opts: k.apply_opt(opt)
+    k.apply_opts(opts)
     prg = k.to_program()
     print(prg.src)
     store_idxs = [x.src[1] for x in k.uops if x.op is Ops.STORE]
