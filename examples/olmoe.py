@@ -7,6 +7,17 @@ from tinygrad import Tensor, nn, Device, GlobalCounters, Context
 from tinygrad.helpers import Timing, getenv
 from extra.models.llama import Transformer, convert_from_huggingface
 
+# def topk(t:Tensor, k:int, dim:int=-1) -> tuple[Tensor, Tensor]:
+#   from tinygrad import dtypes
+#   counter, counter2 = Tensor.arange(t.numel(), device=t.device), Tensor.arange(t.numel() - 1, -1, -1, device=t.device)
+#   output, output_indices = Tensor.zeros(k, device=t.device), Tensor.zeros(k, device=t.device, dtype=dtypes.int32)
+#   for i in range(k):
+#     t_argmax = (t.numel() - ((t == (t_max := t.max())) * counter2).max() - 1).cast(dtypes.default_int)
+#     output = output + t_max.unsqueeze(0).pad(((i, k - i - 1),))
+#     output_indices = output_indices + t_argmax.unsqueeze(0).pad(((i, k - i - 1),))
+#     t = (counter == t_argmax).where(0, t)
+#   return output, output_indices
+
 class MixtureFeedForward:
   def __init__(self, num_experts:int, activated_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
     self.activated_experts = activated_experts
@@ -31,8 +42,7 @@ class MixtureFeedForward:
     # print(f"222222 mem_used: {GlobalCounters.global_mem/1e9:.2f} GB")
 
     # run MoE
-    # WHY IS THIS FUSE SLOWER?!?!?!?!?!??!?!?!?!??!?!?!?!?!?!?!?!!?!?!?!?!?!? DIFFERENT BEAM?!?!?!?! WTF
-    x_up_gate = (x.dot(selected_gate_projs.permute(0,2,1)).silu() * x.dot(selected_up_projs.permute(0,2,1))).fuse()
+    x_up_gate = x.dot(selected_gate_projs.permute(0,2,1)).silu() * x.dot(selected_up_projs.permute(0,2,1))
     x_down = x_up_gate.dot(selected_down_projs.permute(0,2,1))
     ret = (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
     # print(f"333333 mem_used: {GlobalCounters.global_mem/1e9:.2f} GB")
