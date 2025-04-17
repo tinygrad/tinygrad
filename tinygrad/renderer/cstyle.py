@@ -343,7 +343,7 @@ class CUDARenderer(CStyleLanguage):
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
-  smem_prefix = "__shared__ "
+  smem_prefix = "__shared__ __align__(16)"
   smem_prefix_for_cast = False
   barrier = "__syncthreads();"
   float4 = "make_float4"
