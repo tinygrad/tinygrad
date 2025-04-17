@@ -866,8 +866,7 @@ class Tensor(SimpleMathTrait):
     if generator is not None:
       seed = generator.initial_seed()
       Tensor.manual_seed(seed)
-    r = Tensor.shuffle(t)
-    return r
+    return Tensor.shuffle(t)
 
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
     assert 1 <= self.ndim <= 2 and num_samples > 0, f"{self.ndim=} must be 1 or 2 dim, {num_samples=} must be positive"
