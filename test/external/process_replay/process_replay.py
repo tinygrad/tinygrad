@@ -39,7 +39,7 @@ def recreate_sched(big_sink:UOp) -> list[UOp]:
 
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str, _) -> str:
   k = Kernel(ast, opts=opts)
-  k.apply_opts(applied_opts)
+  for opt in applied_opts: k.apply_opt(opt)
   # NOTE: replay with the captured renderer, not the one in master
   return k.opts.render(cast(list,k.to_program(name).uops))
 
