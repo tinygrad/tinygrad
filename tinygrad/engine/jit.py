@@ -308,7 +308,8 @@ class TinyJit(Generic[ReturnType]):
 
       # memory planning (optional)
       # Exclude buffers involved in transfer ops to preserve parallelism.
-      noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
+      #noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
+      noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, BufferCopy) for b in ji.bufs}
       if self.prune: noopt_buffers.update(b for ji in onetime for b in ji.bufs)
       force_opt_buffers = {b for ji in jit_cache for b in ji.bufs if b not in noopt_buffers and b not in self.scheduled_real_bufs
                            and b not in set(t.lazydata.base.realized for t in get_parameters(ret))}
