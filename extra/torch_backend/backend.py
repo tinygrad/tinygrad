@@ -94,18 +94,13 @@ def inplace_fn(outvars: str|list[str]):
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 @inplace_fn("self")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
+  # TODO: move to tinygrad
   ret = aten._index_put_impl_(self.cpu(), [x.cpu() if isinstance(x, torch.Tensor) else None for x in indices], values.cpu(), accumulate, unsafe).to(self.device)
   return wrap(unwrap(self).assign(unwrap(ret)))
-  # self, values = unwrap(self), unwrap(values)
-  # indices = [unwrap(idx) if isinstance(idx, torch.Tensor) else idx for idx in indices]
-  # self[indices] = (self[indices] + values) if accumulate else values
-  # return wrap(self.realize())
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y):
   return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).to(x.device)
-  # x, y = unwrap(x), [unwrap(z) if isinstance(z, torch.Tensor) else z for z in y]
-  # return wrap(x[y].realize())
 
 @torch.library.impl("aten::index_put", "privateuseone")
 def index_put(self, indices, values, accumulate=False):
