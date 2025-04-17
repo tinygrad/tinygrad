@@ -34,7 +34,7 @@ class TestNV(unittest.TestCase):
     opts = [Opt(op=OptOps.GROUP, axis=0, arg=0), Opt(op=OptOps.PADTO, axis=1, arg=32), Opt(op=OptOps.UNROLL, axis=0, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=2), Opt(op=OptOps.LOCAL, axis=0, arg=2)] # noqa: E501
     with self.assertRaises(RuntimeError) as cm:
       lin = Kernel(ast)
-      for opt in opts: lin.apply_opt(opt)
+      lin.apply_opts(opts)
       rawbufs = get_fuzz_rawbufs(lin)
       prg = CompiledRunner(lin.to_program())
       prg(rawbufs, {}, wait=True)
