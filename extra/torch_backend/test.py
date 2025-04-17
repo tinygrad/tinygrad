@@ -59,6 +59,14 @@ class TestTorchBackend(unittest.TestCase):
     # original a should not be modified
     np.testing.assert_equal(a.cpu().numpy(), [0, 0, 0, 0])
 
+  def test_randperm_generator_out(self):
+    n = 10
+    out = torch.empty(n, dtype=torch.long, device=device)
+    torch.ops.aten.randperm(n, generator=None, out=out)
+    np.testing.assert_equal(len(out.cpu().numpy()), n)
+    np.testing.assert_equal(set(out.cpu().numpy()), set(range(n)))
+    print(out.cpu().numpy())
+
   def test_numpy_ones(self):
     a = torch.ones(4, device=device)
     np.testing.assert_equal(a.cpu().numpy(), [1,1,1,1])
