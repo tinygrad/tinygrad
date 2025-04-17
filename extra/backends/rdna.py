@@ -45,7 +45,7 @@ asm_for_op: Dict[Tuple[Ops, ...], Callable] = {
   (Ops.MAX,): lambda ctx, d, a, b, dt, name: f"v_max_{name} {d}, {a}, {b}",
   (Ops.MOD,): lambda ctx, d, a, b, dt, name: asm_emulated_mod(ctx, d, a, b, dt, name),
   (Ops.CMPLT,): lambda ctx, d, a, b, dt, name: f"v_cmp_lt_{name} {d}, {a}, {b}",
-  (Ops.CMPNE,): lambda ctx, d, a, b, dt, name: f"v_cmp_neq_{name} {a}, {b}",
+  (Ops.CMPNE,): lambda ctx, d, a, b, dt, name: f"v_cmp_ne_{name} {a}, {b}",
   (Ops.MULACC,): lambda ctx, a, b, c, dt, name: (
     f"v_fmac_{name} {c}, {a}, {b}" if dtypes.is_float(dt) else f"v_mad_{name} {c}, {a}, {b}, {c}"),
   (Ops.WHERE,): lambda ctx, d, a, b, c, dt, name: render_where(ctx, d, a, b, c, dt, name),
@@ -64,7 +64,8 @@ def get_regs_contained(reg: str) -> List[str]:
     return [f"{reg[0]}{a}"] if not b else [f"{reg[0]}{i}" for i in range(int(a), int(b[0]) + 1)]
   return [reg]
 
-def render_reg_range(p: str, regs: List[str]) -> str:
+def render_reg_range(regs: List[str]) -> str:
+  p = regs[0][0]
   r = list(sorted(reduce(add, map(get_reg_range, regs))))
   return f"{p}{r[0]}" if len(r) == 1 else f"{p}[{r[0]}:{r[-1]}]"
 
@@ -104,7 +105,7 @@ def render_load(ctx, x, ptr, offset) -> List[str]:
   load_bits = max(int(ctx.types[x.dtype][1:]) * x.dtype.count, 32)
   if len(get_reg_range(ctx.r[ptr])) == 2:
     addr_setup_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, offset)
-    addr_reg = render_reg_range("v", [addr_lo_v, addr_hi_v])
+    addr_reg = render_reg_range([addr_lo_v, addr_hi_v])
   else:
     addr_reg = ctx.tmpv[0]
     addr_setup_ins = [f"v_add_u32 {addr_reg}, {ctx.r[ptr]}, {ctx.r[offset]}"]
@@ -120,7 +121,7 @@ def render_store(ctx, x, ptr, offset, val) -> List[str]:
   store_bits = max(int(ctx.types[val.dtype.scalar()][1:]) * x.dtype.count, 32)
   if len(get_reg_range(ctx.r[ptr])) == 2:
     addr_setup_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, offset)
-    addr_reg = render_reg_range("v", [addr_lo_v, addr_hi_v])
+    addr_reg = render_reg_range([addr_lo_v, addr_hi_v])
   else:
     addr_reg = ctx.tmpv[0]
     addr_setup_ins = [f"v_add_u32 {addr_reg}, {ctx.r[ptr]}, {ctx.r[offset]}"]
@@ -206,9 +207,26 @@ rdna3_rewrite = PatternMatcher([
 
   (UPat(Ops.RANGE, name="x"),
    lambda ctx, x: [f"v_mov_b32 {ctx.r[x]}, {ctx.r[x.src[0]]}", f"LABEL_LOOP_{ctx.r[x][1:]}:"]),
-  
+
   (UPat(Ops.WMMA, name="x"),
-   lambda ctx, x: f"v_wmma_f16_16x16x16_f16 {ctx.r[x.src[2]]} {ctx.r[x.src[0]]} {ctx.r[x.src[1]]} {ctx.r[x.src[2]]}"),
+   lambda ctx, x: f"v_wmma_f16_16x16x16_f16 {ctx.r[x.src[2]]} {ctx.r[x.src[0]]} {ctx.r[x.src[1]]} {ctx.r[x.src[2]]}"), # TODO: split into multiple calls if input too large
+
+  (UPat(Ops.IF, name="x"),
+   lambda ctx, x: [
+    f"s_and_saveexec_b64 {ctx.r[x]}, vcc",
+    f"LABEL_IF_{ctx.r[x.src[0]][1:]}:",
+   ] if ctx.r[x.src[0]][0] == 'v' else [
+    f"s_cbranch_scc0 LABEL_ELSE_{ctx.r[x.src[0]][1:]}:",
+   ]),
+
+  (UPat(Ops.ENDIF, name="x"),
+   lambda ctx, x: [
+    f"s_xor_b64 {render_reg_range(ctx.tmps[:2])}, exec, {ctx.r[x.src[0]]}",
+    f"s_and_b64 exec, exec, {render_reg_range(ctx.tmps[:2])}",
+    f"LABEL_ELSE_{ctx.r[x.src[0].src[0]][1:]}:",
+   ] if ctx.r[x.src[0].src[0]][0] == 'v' else [
+    f"LABEL_ELSE_{ctx.r[x.src[0].src[0]][1:]}:",
+   ]),
 
   (UPat(Ops.ENDRANGE, name="x", src=(UPat.var("src0"),)), 
    lambda ctx, x, src0: [
@@ -242,7 +260,7 @@ class RDNA3Renderer(Renderer):
   # tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
   extra_matcher = None
   tmpv = [f"v{i}" for i in range(3, 6)]
-  tmps = [f"s{i}" for i in range(255, 256)]
+  tmps = [f"s{i}" for i in range(60, 63)]
 
   def __init__(self, arch:str="gfx1100", device="ROCm"):
     self.device, self.tensor_cores, self.arch = device, [], arch
@@ -307,11 +325,14 @@ class RDNA3Renderer(Renderer):
         self.r[u] = self.r[u.src[0]]
       elif u.op in GroupOp.ALU | {Ops.CONST, Ops.LOAD, Ops.RANGE}:
         cnt = (u.dtype.itemsize * u.dtype.vcount) // 4
-        if cnt <= 4:
+        if cnt <= 1:
           self.r[u] = f"v{self.v_cnt}"
         else:
           self.r[u] = f"v[{self.v_cnt}:{self.v_cnt + cnt - 1}]"
         self.v_cnt += cnt
+      elif u.op == Ops.IF:
+        self.r[u] = f"s[{self.s_cnt}:{self.s_cnt + 1}]"
+        self.s_cnt += 2
       elif u.op == Ops.SPECIAL:
         if u.arg[1].startswith("lidx"):
           self.r[u] = f"v{self.v_cnt}"
@@ -488,8 +509,41 @@ def test_matrix_transpose():
   expected = np.transpose(mat.reshape(M, N)).flatten()
   assert np.allclose(out, expected)
 
+def test_conditional():
+  device = AMDDevice()
+  allocator = AMDAllocator(device)
+  compiler = RDNACompiler("gfx1100")
+  renderer = RDNA3Renderer("gfx1100")
+
+  uops = []
+  gC = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 0)
+  c0 = UOp(Ops.CONST, dtypes.uint32, (), 0)
+
+  one = UOp(Ops.CONST, dtypes.uint32, (), 0)
+  pred = UOp(Ops.CMPNE, dtypes.bool, (one, one))
+  prednot = UOp(Ops.XOR, dtypes.bool, (pred, one))
+
+  if_op = UOp(Ops.IF, dtypes.void, (prednot,))
+  val_then = UOp(Ops.CONST, dtypes.float32, (), 1.0)
+  store_then = UOp(Ops.STORE, dtypes.float32, (gC, c0, val_then))
+  endif = UOp(Ops.ENDIF, dtypes.void, (if_op,))
+  
+  uops += [gC, c0, one, pred, prednot, if_op, val_then, store_then, endif]
+
+  print(renderer.render(uops))
+  exe = compiler.compile(renderer.render(uops))
+  prog = AMDProgram(device, "test_if_endif", exe)
+
+  c = allocator.alloc(4)
+  prog(c, wait=True)
+
+  out = np.empty(1, dtype=np.float32)
+  allocator._copyout(flat_mv(out.data), c)
+
+  assert np.allclose(out, [1.0])
 
 if __name__ == "__main__":
   test_simple()
   test_scalar_add()
   test_matrix_transpose()
+  test_conditional()
