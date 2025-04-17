@@ -225,8 +225,6 @@ class TinyJit(Generic[ReturnType]):
     self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
     self.optimize = optimize
-    self.scheduled_real_bufs: set = set()
-    self.seen_bufs: set = set()
 
   def add_buffer(self, b:Buffer) -> Buffer:
     if found:=self._buffer_replace.get(b, None): return found
@@ -271,6 +269,8 @@ class TinyJit(Generic[ReturnType]):
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._jit_cache: list[ExecItem] = []
       self._buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
+      self.seen_bufs: set = set()
+      self.scheduled_real_bufs: set = set()
       # TODO: should we always disable the memory planner here? it must be off for prune
       with Context(BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=int(self.prune)):
         capturing.append(self)
