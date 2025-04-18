@@ -93,7 +93,7 @@ class MathTrait(SimpleMathTrait):
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
-  NAME = auto(); SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto(); UNIQUE = auto() # noqa: E702
+  SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto(); UNIQUE = auto() # noqa: E702
 
   # MetaOps
   COPY = auto(); BUFFER_VIEW = auto() # noqa: E702
@@ -285,7 +285,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def get_children_map(self) -> dict[UOp, dict[UOp, None]]:
     ret: dict[UOp, dict[UOp, None]] = {}
     for u in self.toposort:
-      for s in u.src: ret.setdefault(s, {})[u] = None
+      ret[u] = {}
+      for s in u.src: ret[s][u] = None
     return ret
 
   @functools.cached_property
