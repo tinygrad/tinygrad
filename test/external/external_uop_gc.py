@@ -1,6 +1,6 @@
 import gc
 from tinygrad import Tensor, UOp, Device
-from tinygrad.shape.shapetracker import views_to_indexed_uops
+from tinygrad.shape.shapetracker import views_to_indexed_uops, folded_upcast
 from tinygrad.engine.realize import method_cache, get_kernel
 
 def uops_allocated(): return sum([isinstance(x, UOp) for x in gc.get_objects()])
@@ -63,6 +63,7 @@ if __name__ == "__main__":
     # these caches will keep uops alive
     method_cache.clear()
     views_to_indexed_uops.cache_clear()
+    folded_upcast.cache_clear()
 
     new_uops = uops_allocated()
     gc.collect()

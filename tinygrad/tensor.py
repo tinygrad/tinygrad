@@ -20,7 +20,7 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
 all_tensors: set[weakref.ref[Tensor]] = set()
 
-def _apply_map_to_tensors(applied_map:dict[UOp, UOp]) -> None:
+def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> None:
   # get all children of keys in applied_map
   all_uops: set[UOp] = set()
   search_uops = list(applied_map)
@@ -37,7 +37,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp]) -> None:
   if len(fixed_tensors):
     # potentially rewrite all the discovered Tensors
     sink = UOp.sink(*[t.lazydata for t in fixed_tensors])
-    new_sink = sink.substitute(applied_map)
+    new_sink = sink.substitute(applied_map, name=name)
 
     # set the relevant lazydata to the realized UOps
     for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
@@ -149,7 +149,7 @@ class Tensor(SimpleMathTrait):
       if dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
         else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float  # NOTE: this works because all_int([True, False]) is True
-      if dtype == dtypes.bfloat16: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtypes.bfloat16).lazydata
+      if dtype in [dtypes.bfloat16, *dtypes.fp8s]: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtype).lazydata
       else: data = _frompy(data, dtype)
     elif str(type(data)) == "<class 'numpy.ndarray'>":
       import numpy as np
@@ -234,14 +234,14 @@ class Tensor(SimpleMathTrait):
     # TODO: move this to scheduler tensor_map pass
     if any(x.op is Ops.MULTI for x in big_sink.toposort):
       # multi fixup
-      _apply_map_to_tensors(get_multi_map(big_sink))
+      _apply_map_to_tensors(get_multi_map(big_sink), name="Apply Multi Map")
       big_sink = UOp.sink(*flatten([x.lazydata.src if x.lazydata.op is Ops.MULTI else [x.lazydata] for x in (self,)+lst]))
 
     # verify Tensors match the spec
     if __debug__: type_verify(list(big_sink.toposort), tensor_uop_spec)
 
     schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
-    _apply_map_to_tensors(becomes_map)
+    _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return memory_planner(schedule), var_vals
 
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
@@ -955,11 +955,11 @@ class Tensor(SimpleMathTrait):
     `order` can be passed as a tuple or as separate arguments.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(6).reshape(2, 3)
-    print(t.numpy())
+    t = Tensor.empty(2, 3, 5)
+    print(t.shape)
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.permute(1, 0).numpy())
+    print(t.permute(2, 0, 1).shape)
     ```
     """
     order_arg = tuple(self._resolve_dim(x) for x in argfix(order, *args))
@@ -1867,6 +1867,9 @@ class Tensor(SimpleMathTrait):
     print(t.softmax(axis=0).numpy())
     ```
     """
+    if getenv("SINGLE_KERNEL_SOFTMAX"):
+      _, e, ss = self.contiguous()._softmax(axis, dtype)
+      return e.div(ss).fuse()
     _, e, ss = self._softmax(axis, dtype)
     return e.div(ss)
 
@@ -2718,6 +2721,15 @@ class Tensor(SimpleMathTrait):
     Returns a contiguous tensor.
     """
     return self._apply_uop(UOp.contiguous)
+
+  def fuse(self) -> Tensor:
+    """
+    Make this a single kernel back to Ops.CONTIGUOUS on the inputs.
+
+    Useful for single kernel softmax and flash attention.
+    Careful, this can break codegen or make kernels really slow.
+    """
+    return self._apply_uop(UOp.fuse).contiguous()
 
   def contiguous_backward(self) -> Tensor:
     """
@@ -3653,7 +3665,7 @@ class Tensor(SimpleMathTrait):
 
   # ***** functional nn ops *****
 
-  def linear(self, weight:Tensor, bias:Tensor|None=None) -> Tensor:
+  def linear(self, weight:Tensor, bias:Tensor|None=None, dtype:DTypeLike|None=None) -> Tensor:
     """
     Applies a linear transformation to `self` using `weight` and `bias`.
 
@@ -3666,6 +3678,7 @@ class Tensor(SimpleMathTrait):
     print(t.linear(weight, bias).numpy())
     ```
     """
+    if dtype is not None: return self.cast(dtype).linear(weight.cast(dtype), bias.cast(dtype) if bias is not None else bias)
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
     return x.add(bias) if bias is not None else x
 

@@ -24,6 +24,12 @@ class TestDevice(unittest.TestCase):
     with self.assertRaises(ModuleNotFoundError):
       Device["TYPO"]
 
+  def test_lowercase_canonicalizes(self):
+    device = Device.DEFAULT
+    Device.DEFAULT = device.lower()
+    self.assertEqual(Device.canonicalize(None), device)
+    Device.DEFAULT = device
+
 class MockCompiler(Compiler):
   def __init__(self, key): super().__init__(key)
   def compile(self, src) -> bytes: return src.encode()
