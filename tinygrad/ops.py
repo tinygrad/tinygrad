@@ -283,7 +283,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # returns map of UOps to their children in the graph rooted by self
   def get_children_map(self) -> dict[UOp, dict[UOp, None]]:
-    ret: dict[UOp, dict[UOp, None]] = {self:{}}
+    ret: dict[UOp, dict[UOp, None]] = {}
     for u in self.toposort:
       ret[u] = {}
       for s in u.src: ret[s][u] = None
