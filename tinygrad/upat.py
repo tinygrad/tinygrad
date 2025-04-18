@@ -139,7 +139,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
 def _get_code(self:UPat, has_ctx:bool):
   ret = _get_clause(self, UOp(Ops.NOOP, arg="uop"))
   try:
-    ret = graph_rewrite(ret, pm_proc)
+    ret = graph_rewrite(ret, pm_proc, name="process UPat")
     dyn_lookup: dict[str, Any] = {}
     out = graph_rewrite(ret, pm_renderer, ctx=dyn_lookup, name="compile UPat")
     rendered = _final_render(out, has_ctx)

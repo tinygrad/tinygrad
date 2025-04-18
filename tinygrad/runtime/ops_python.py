@@ -40,7 +40,7 @@ class PythonProgram:
       loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.NAME}
+        void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK}
         if uop is Ops.DEFINE_ACC: idp = [idp[0]]
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
@@ -60,7 +60,7 @@ class PythonProgram:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
-        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.NAME):
+        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
