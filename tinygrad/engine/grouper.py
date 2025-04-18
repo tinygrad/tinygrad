@@ -377,7 +377,7 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
   # set the dtype size of the buffer to the maximum symbolic size
   (UPat((Ops.LOAD,Ops.STORE), src=(UPat.var("glbl"), UPat.var("view")), name="x", allow_any_len=True), lambda x,view,glbl: x.replace(src=(
-    glbl.replace(dtype=glbl.dtype.base.ptr(sz)),)+x.src[1:]) if (len(view.st.vars())!=0 and (sz:=view.st.real_size()!=glbl.dtype.size)) else None),
+    glbl.replace(dtype=glbl.dtype.base.ptr(sz)),)+x.src[1:]) if (len(view.st.vars())!=0 and (sz:=view.st.real_size())!=glbl.dtype.size) else None),
 ])
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
