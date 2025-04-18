@@ -426,6 +426,7 @@ if __name__ == '__main__':
   predictions = yolo_infer(pre_processed_image).numpy()
 
   print(f'did inference in {int(round(((time.time() - st) * 1000)))}ms')
+  #v8 and v3 have same 80 class names for Object Detection
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names').read_text().split("\n")
   draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=predictions, class_labels=class_labels)
 
