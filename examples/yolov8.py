@@ -33,7 +33,7 @@ def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, 
   image = cv2.copyMakeBorder(image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
   return Tensor(image)
 
-def preprocess(im, imgsz=640, model_stride=32, model_pt=True):
+def preprocess(im, imgsz, model_stride=32, model_pt=True):
   same_shapes = all(x.shape == im[0].shape for x in im)
   auto = same_shapes and model_pt
   im = [compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im]
@@ -56,55 +56,8 @@ def box_iou(box1, box2):
   iou = inter / (area1 + area2 - inter)
   return iou
 
-def compute_nms(boxes, scores, iou_threshold):
-  order, keep = scores.argsort()[::-1], []
-  while order.size > 0:
-    i = order[0]
-    keep.append(i)
-    if order.size == 1:
-      break
-    iou = box_iou(boxes[i][None, :], boxes[order[1:]])
-    inds = np.where(np.atleast_1d(iou.squeeze()) <= iou_threshold)[0]
-    order = order[inds + 1]
-  return np.array(keep)
-
-def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, agnostic=False, max_det=300, nc=0, max_wh=7680):
-  prediction = prediction[0] if isinstance(prediction, (list, tuple)) else prediction
-  bs, nc = prediction.shape[0], nc or (prediction.shape[1] - 4)
-  xc = np.amax(prediction[:, 4:4 + nc], axis=1) > conf_thres
-  nm = prediction.shape[1] - nc - 4
-  output = [np.zeros((0, 6 + nm))] * bs
-
-  for xi, x in enumerate(prediction):
-    x = x.swapaxes(0, -1)[xc[xi]]
-    if not x.shape[0]: continue
-    box, cls, mask = np.split(x, [4, 4 + nc], axis=1)
-    conf, j = np.max(cls, axis=1, keepdims=True), np.argmax(cls, axis=1, keepdims=True)
-    x = np.concatenate((xywh2xyxy(box), conf, j.astype(np.float32), mask), axis=1)
-    x = x[conf.ravel() > conf_thres]
-    if not x.shape[0]: continue
-    x = x[np.argsort(-x[:, 4])]
-    c = x[:, 5:6] * (0 if agnostic else max_wh)
-    boxes, scores = x[:, :4] + c, x[:, 4]
-    i = compute_nms(boxes, scores, iou_thres)[:max_det]
-    output[xi] = x[i]
-  return output
-
-def postprocess(preds, img, orig_imgs):
-  print('copying to CPU now for post processing')
-  #if you are on CPU, this causes an overflow runtime error. doesn't "seem" to make any difference in the predictions though.
-  # TODO: make non_max_suppression in tinygrad - to make this faster
-  preds = preds.numpy() if isinstance(preds, Tensor) else preds
-  preds = non_max_suppression(prediction=preds, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300)
-  all_preds = []
-  for i, pred in enumerate(preds):
-    orig_img = orig_imgs[i] if isinstance(orig_imgs, list) else orig_imgs
-    if not isinstance(orig_imgs, Tensor):
-      pred[:, :4] = scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
-      all_preds.append(pred)
-  return all_preds
-
-def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictions, class_labels, iou_threshold=0.5):
+def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictions, class_labels, conf_threshold=0.25):
+  all_predictions = [all_predictions]
   color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
   font = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -126,31 +79,19 @@ def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictio
     for pred_np in predictions:
       grouped_preds[int(pred_np[-1])].append(pred_np)
 
-    def draw_box_and_label(pred, color):
-      x1, y1, x2, y2, conf, _ = pred
+    for pred in predictions:
+      x1, y1, x2, y2, conf, class_id = pred
+      if conf < conf_threshold: continue
+      color = color_dict[class_labels[int(class_id)]]
       x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
       cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, box_thickness)
-      label = f"{class_labels[class_id]} {conf:.2f}"
+      label = f"{class_labels[int(class_id)]} {conf:.2f}"
       text_size, _ = cv2.getTextSize(label, font, font_scale, 1)
       label_y, bg_y = (y1 - 4, y1 - text_size[1] - 4) if y1 - text_size[1] - 4 > 0 else (y1 + text_size[1], y1)
       cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
       font_color = (0, 0, 0) if is_bright_color(color) else (255, 255, 255)
       cv2.putText(orig_img, label, (x1, label_y), font, font_scale, font_color, 1, cv2.LINE_AA)
-
-    for class_id, pred_list in grouped_preds.items():
-      pred_list = np.array(pred_list)
-      while len(pred_list) > 0:
-        max_conf_idx = np.argmax(pred_list[:, 4])
-        max_conf_pred = pred_list[max_conf_idx]
-        pred_list = np.delete(pred_list, max_conf_idx, axis=0)
-        color = color_dict[class_labels[class_id]]
-        draw_box_and_label(max_conf_pred, color)
-        object_count[class_labels[class_id]] += 1
-        iou_scores = box_iou(np.array([max_conf_pred[:4]]), pred_list[:, :4])
-        low_iou_indices = np.where(iou_scores[0] < iou_threshold)[0]
-        pred_list = pred_list[low_iou_indices]
-        for low_conf_pred in pred_list:
-          draw_box_and_label(low_conf_pred, color)
+      object_count[class_labels[int(class_id)]] += 1
 
     print(f"Image {img_idx + 1}:")
     print("Objects detected:")
@@ -380,7 +321,8 @@ class YOLOv8:
   def __call__(self, x):
     x = self.net(x)
     x = self.fpn(*x)
-    return self.head(x)
+    x = self.head(x)
+    return postprocess(x)
 
   def return_all_trainable_modules(self):
     backbone_modules = [*range(10)]
@@ -402,6 +344,36 @@ def convert_f16_safetensor_to_f32(input_file: Path, output_file: Path):
     f.write(len(new_metadata_bytes).to_bytes(8, 'little'))
     f.write(new_metadata_bytes)
     float32_values.tofile(f)
+
+def compute_iou_matrix(boxes):
+    x1 = Tensor.maximum(boxes[:, None, 0],boxes[:, None, 0])
+    y1 = Tensor.maximum(boxes[:, None, 1], boxes[None, :, 1])
+    x2 = Tensor.minimum(boxes[:, None, 2], boxes[None, :, 2])
+    y2 = Tensor.minimum(boxes[:, None, 3], boxes[None, :, 3])
+    inter = Tensor.maximum(Tensor(0), x2 - x1) * Tensor.maximum(Tensor(0), y2 - y1)
+    area = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    union = area[:, None] + area[None, :] - inter
+    return inter / union
+
+def postprocess(output):
+    xc, yc, w, h, class_scores = output[0][0], output[0][1], output[0][2], output[0][3], output[0][4:]
+    class_ids = Tensor.argmax(class_scores,axis=0)
+    probs = Tensor.max(class_scores, axis=0)
+    probs = Tensor.where(probs>=0.25,probs,0)
+    x1 = xc - w / 2
+    y1 = yc - h / 2
+    x2 = xc + w / 2
+    y2 = yc + h / 2
+    boxes = Tensor.stack(x1, y1, x2, y2, probs, class_ids, dim=1)
+    order = Tensor.topk(probs,300)[1]
+    boxes = boxes[order]
+    iou = compute_iou_matrix(boxes)
+    iou_mask = (iou > 0.45)
+    suppressed = Tensor.triu(iou_mask,diagonal=1)
+    suppressed = suppressed.any(axis=0).unsqueeze(-1)
+    boxes *= ~suppressed
+    return boxes
+
 
 def get_weights_location(yolo_variant: str) -> Path:
   weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
@@ -434,7 +406,7 @@ if __name__ == '__main__':
   if not isinstance(image[0], np.ndarray):
     print('Error in image loading. Check your image file.')
     sys.exit(1)
-  pre_processed_image = preprocess(image)
+  pre_processed_image = preprocess(image,imgsz=(len(image[0]),len(image[0][0])))
 
   # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/models/v8/yolov8.yaml
   depth, width, ratio = get_variant_multiples(yolo_variant)
@@ -443,15 +415,10 @@ if __name__ == '__main__':
   load_state_dict(yolo_infer, state_dict)
 
   st = time.time()
-  predictions = yolo_infer(pre_processed_image)
+  predictions = yolo_infer(pre_processed_image).numpy()
   print(f'did inference in {int(round(((time.time() - st) * 1000)))}ms')
-
-  post_predictions = postprocess(preds=predictions, img=pre_processed_image, orig_imgs=image)
-
-  #v8 and v3 have same 80 class names for Object Detection
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names').read_text().split("\n")
-
-  draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)
+  draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=predictions, class_labels=class_labels)
 
 # TODO for later:
 #  1. Fix SPPF minor difference due to maxpool
