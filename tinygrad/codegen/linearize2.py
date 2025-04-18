@@ -118,9 +118,8 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
   ended: dict[UOp, UOp] = {}
 
   if x.op is Ops.BLOCKSTART:
-    current_ctx, _, child_ctx = x.arg
+    current_ctx, child_count, child_ctx = x.arg
     lst = list(x.src)
-    child_count = 1
   else:
     current_ctx, child_count, child_ctx = ctx.block_ctxs[x], ctx.child_count[x], ctx.child_ctxs.get(x, None)
     lst = [x]
@@ -162,9 +161,7 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
       blockseeds[(ctx.block_ctxs[u], ctx.child_count[u], ctx.child_ctxs.get(u, None))].append(u)  # this can seed a block
     else:
       srcs += [u]*cnt
-  for k,v in blockseeds.items():
-    if len(v) > 1: srcs.append(UOp(Ops.BLOCKSTART, src=tuple(v), arg=k))
-    else: srcs += v*k[1]
+  for k,v in blockseeds.items(): srcs += ([UOp(Ops.BLOCKSTART, src=tuple(v), arg=k)] if len(v) > 1 else v)*k[1]
 
   lst = block_reorder(lst[::-1])
   bb = BasicBlock2(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
