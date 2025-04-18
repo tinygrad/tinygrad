@@ -18,10 +18,12 @@ def download_models(metadata: dict, download_dir: str, sel: int) -> dict:
     snapshot_download(repo_id=model_id, allow_patterns=["*config.json"], cache_dir=download_dir)
     print(f"Downloaded model files to: {root_path}")
 
-    for onnx_model in root_path.rglob("*.onnx"):
+    for onnx_file in allow_patterns:
+      if not onnx_file.endswith(".onnx"): continue
+      onnx_model = root_path / onnx_file
       try:
         onnx_runner = OnnxRunner(onnx.load(onnx_model))
-        for node in onnx_runner.graph_nodes: model_ops[str(model_id / onnx_model.relative_to(root_path))][node.op] += 1
+        for node in onnx_runner.graph_nodes: model_ops[model_id + "/" + onnx_file][node.op] += 1
       except NotImplementedError:
         pass
 
