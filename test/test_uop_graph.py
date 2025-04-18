@@ -1,6 +1,6 @@
 from typing import List
 import unittest, time, pytest
-from tinygrad import dtypes, Device
+from tinygrad import dtypes, Device, Variable
 from tinygrad.helpers import DEBUG, CHECK_OOB
 from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher, track_rewrites
 from tinygrad.renderer import Renderer
@@ -457,6 +457,17 @@ class TestUOpGraph(unittest.TestCase):
     to_uops_list([ld1])
 
     ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 42)),))
+    with self.assertRaises(RuntimeError): to_uops_list([ld0])
+
+  @unittest.skipUnless(CHECK_OOB, "Index validation is only performed with CHECK_OOB")
+  def test_in_out_of_bounds_access_symbolic(self):
+    glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(Variable("i", 1, 10)),))
+    to_uops_list([ld0])
+    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(Variable("i", 0, 15)),))
+    to_uops_list([ld0])
+
+    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(Variable("i", 0, 20)),))
     with self.assertRaises(RuntimeError): to_uops_list([ld0])
 
   @unittest.skipUnless(CHECK_OOB, "Index validation is only performed with CHECK_OOB")
