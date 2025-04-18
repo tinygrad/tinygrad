@@ -40,10 +40,10 @@ def export_init(model: Callable, inputs: Sequence, state_dict:dict[str,Tensor]={
 
   # TODO: improve automatic handling of JIT_BATCH_SIZE and GRAPH_ONE_KERNEL; tune JIT_BATCH_SIZE?
   for _ in range(3): run(*inputs) # Generate GraphRunner(s) in CapturedJit
-  assert (cj:=run.captured) is not None and not cj._first_run
+  assert run.captured is not None and not run.captured._first_run
   # put input bufs back in ExecItems
   bufs = _prepare_jit_inputs(tuple(inputs), {})[0]
-  for (j,i),idx in cj._input_replace.items(): cj._jit_cache[j].bufs[i] = bufs[idx]
+  for (j,i),idx in (cj:=run.captured)._input_replace.items(): cj._jit_cache[j].bufs[i] = bufs[idx]
   for ji in cj._jit_cache:
     if isinstance(ji.prg, GraphRunner):
       for (j,i),idx in ji.prg.input_replace.items(): ji.prg.jit_cache[j].bufs[i] = bufs[idx]

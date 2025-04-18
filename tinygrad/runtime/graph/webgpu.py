@@ -1,5 +1,5 @@
 from typing import cast
-from tinygrad.helpers import merge_dicts, partition
+from tinygrad.helpers import merge_dicts
 from tinygrad.engine.jit import GraphRunner, GraphException, CapturedJit
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.runtime.ops_webgpu import WebGPUProgram, execute_commands
@@ -156,7 +156,7 @@ const {model_name} = (() => {{
       {j(validation + input_writers, 3)}
       {j(encoders, 3)}
       commandEncoder = device.createCommandEncoder();
-      {j(outbuf_copies + [f"gpuCommands = commandEncoder.finish(); device.queue.submit([gpuCommands]);"] + output_readers, 3)}
+      {j(outbuf_copies + ["gpuCommands = commandEncoder.finish(); device.queue.submit([gpuCommands]);"] + output_readers, 3)}
       return {output_return};
     }}, device]
   }}

@@ -3,7 +3,7 @@ from tinygrad.device import  Compiled, Allocator, Compiler, BufferSpec
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up
 from tinygrad.runtime.autogen import webgpu
-from typing import List, Any, Callable, Optional, ByteString, TypeAlias
+from typing import List, Any, Callable, Optional, TypeAlias
 import ctypes
 import os
 
