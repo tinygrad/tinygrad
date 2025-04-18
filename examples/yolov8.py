@@ -342,16 +342,22 @@ def postprocess(output,max_det=300):
   boxes = boxes[order]
   boxes = boxes.numpy() 
   keep = []
-  while boxes.shape[0] > 0 and len(keep) < max_det:
-      keep.append(boxes[0])
-      if boxes.shape[0] == 1: break
-      ious = compute_iou(boxes[0], boxes[1:])
-      boxes = boxes[1:][ious <= 0.45]
+  x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+  areas = (x2 - x1) * (y2 - y1)
+  xx1 = np.maximum(x1[:, None], x1[None, :])
+  yy1 = np.maximum(y1[:, None], y1[None, :])
+  xx2 = np.minimum(x2[:, None], x2[None, :])
+  yy2 = np.minimum(y2[:, None], y2[None, :])
+  w = np.maximum(0.0, xx2 - xx1)
+  h = np.maximum(0.0, yy2 - yy1)
+  intersection = w * h
+  iou = intersection / (areas[:, None] + areas[None, :] - intersection + 1e-7)
+  iou = np.triu(iou, k=1)
+  pick = np.where((iou > 0.45).sum(axis=0) == 0)[0]
+  keep = boxes[pick]
   return Tensor(keep)
 
 def compute_iou(box, boxes):
-    """Compute IoU between a single box and multiple boxes"""
-    # Box coordinates
     x1 = np.maximum(box[0], boxes[:, 0])
     y1 = np.maximum(box[1], boxes[:, 1])
     x2 = np.minimum(box[2], boxes[:, 2])
