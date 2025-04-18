@@ -74,6 +74,7 @@ stats:
   - FacebookAI/xlm-roberta-large/onnx/model.onnx
   - sentence-transformers/all-mpnet-base-v2/onnx/model_O2.onnx
   - sentence-transformers/all-MiniLM-L6-v2/onnx/model_O3.onnx
+  total_size: 6.50GB
 ```
 Total size of the download is `6.18GB`
 `diverse_models` is selected by trying to maximize the op coverage.  

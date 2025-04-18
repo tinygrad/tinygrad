@@ -4,9 +4,8 @@ from huggingface_hub import snapshot_download
 from tinygrad.frontend.onnx import OnnxRunner
 from extra.onnx import get_onnx_ops
 
-def download_models(yaml_file: str, download_dir: str, sel: int) -> dict:
-  with open(yaml_file, 'r') as f: metadata = yaml.safe_load(f)
-
+def download_models(metadata: dict, download_dir: str, sel: int) -> dict:
+  """ downloads the models and updates the metadata """
   n = len(metadata["repositories"])
   model_ops = collections.defaultdict(collections.Counter)
   supported_ops = get_onnx_ops()
@@ -38,12 +37,12 @@ def download_models(yaml_file: str, download_dir: str, sel: int) -> dict:
     seen_ops.update(ops)
 
   op_counter = sum(model_ops.values(), collections.Counter())
-  metadata["stats"] = {
+  metadata["stats"].update({
     "model_ops": {key: dict(value.most_common()) for key, value in model_ops.items()},
     "total_op_counter": dict(op_counter.most_common()),
     "unsupported_ops": list(set(op_counter).difference(set(supported_ops))),
     "diverse_models": diverse_models
-  }
+  })
 
   return metadata
 
@@ -55,7 +54,9 @@ if __name__ == "__main__":
 
   models_folder = Path(__file__).parent / "models"
   models_folder.mkdir(parents=True, exist_ok=True)
-  metadata = download_models(args.input, str(models_folder), args.diversity)
+  with open(args.input, 'r') as f:
+    metadata = yaml.safe_load(f)
+  metadata = download_models(metadata, str(models_folder), args.diversity)
 
   # Save the updated metadata back to the YAML file
   with open(args.input, 'w') as f: yaml.dump(metadata, f, sort_keys=False)
