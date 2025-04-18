@@ -452,7 +452,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
         raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on ASSIGN or BUFFER")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep:
-    tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, bottom_up=True, input_map=tensor_map, name="fix_assign")
+    tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
     sched_sink = tensor_map[big_sink]
     type_verify(list(sched_sink.toposort), kernel_spec)
 
