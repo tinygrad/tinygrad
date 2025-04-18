@@ -41,8 +41,10 @@ class TestArange(unittest.TestCase):
   def test_complexity_w_upcast_and_unroll(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], limit=0)
 
   if Device.default.renderer.has_local:
-    # TODO: fix limit
+    # NOTE: cannot apply group to const reduce
+    @unittest.expectedFailure
     def test_complexity_w_group(self): return self.test_complexity([Opt(OptOps.GROUP, 0, 16)], limit=81920)
+    @unittest.expectedFailure
     def test_complexity_w_group_top(self): return self.test_complexity([Opt(OptOps.GROUPTOP, 0, 16)], limit=106496)
 
     def test_complexity_w_local(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16)], limit=0)
