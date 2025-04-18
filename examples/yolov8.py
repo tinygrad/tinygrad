@@ -319,14 +319,17 @@ def convert_f16_safetensor_to_f32(input_file: Path, output_file: Path):
     float32_values.tofile(f)
 
 def compute_iou_matrix(boxes):
-  x1 = Tensor.maximum(boxes[:, None, 0],boxes[:, None, 0])
-  y1 = Tensor.maximum(boxes[:, None, 1], boxes[None, :, 1])
-  x2 = Tensor.minimum(boxes[:, None, 2], boxes[None, :, 2])
-  y2 = Tensor.minimum(boxes[:, None, 3], boxes[None, :, 3])
-  inter = Tensor.maximum(Tensor(0), x2 - x1) * Tensor.maximum(Tensor(0), y2 - y1)
-  area = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-  union = area[:, None] + area[None, :] - inter
-  return inter / union
+  x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+  areas = (x2 - x1) * (y2 - y1)
+  x1 = Tensor.maximum(x1[:, None], x1[None, :])
+  y1 = Tensor.maximum(y1[:, None], y1[None, :])
+  x2 = Tensor.minimum(x2[:, None], x2[None, :])
+  y2 = Tensor.minimum(y2[:, None], y2[None, :])
+  w = Tensor.maximum(Tensor(0),x2-x1)
+  h = Tensor.maximum(Tensor(0),y2-y1)
+  intersection = w * h
+  iou = intersection / (areas[:, None] + areas[None, :] - intersection)
+  return iou
 
 def postprocess(output,max_det=300):
   xc, yc, w, h, class_scores = output[0][0], output[0][1], output[0][2], output[0][3], output[0][4:]
@@ -340,33 +343,13 @@ def postprocess(output,max_det=300):
   boxes = Tensor.stack(x1, y1, x2, y2, probs, class_ids, dim=1)
   order = Tensor.topk(probs,max_det)[1]
   boxes = boxes[order]
-  boxes = boxes.numpy() 
-  keep = []
-  x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
-  areas = (x2 - x1) * (y2 - y1)
-  xx1 = np.maximum(x1[:, None], x1[None, :])
-  yy1 = np.maximum(y1[:, None], y1[None, :])
-  xx2 = np.minimum(x2[:, None], x2[None, :])
-  yy2 = np.minimum(y2[:, None], y2[None, :])
-  w = np.maximum(0.0, xx2 - xx1)
-  h = np.maximum(0.0, yy2 - yy1)
-  intersection = w * h
-  iou = intersection / (areas[:, None] + areas[None, :] - intersection + 1e-7)
-  iou = np.triu(iou, k=1)
-  pick = np.where((iou > 0.45).sum(axis=0) == 0)[0]
-  keep = boxes[pick]
-  return Tensor(keep)
-
-def compute_iou(box, boxes):
-    x1 = np.maximum(box[0], boxes[:, 0])
-    y1 = np.maximum(box[1], boxes[:, 1])
-    x2 = np.minimum(box[2], boxes[:, 2])
-    y2 = np.minimum(box[3], boxes[:, 3])
-    intersection = np.maximum(0, x2 - x1) * np.maximum(0, y2 - y1)
-    area_box = (box[2] - box[0]) * (box[3] - box[1])
-    area_boxes = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-    union = area_box + area_boxes - intersection
-    return intersection / union
+  iou = compute_iou_matrix(boxes)
+  iou = Tensor.triu(iou,diagonal=1)
+  high_iou_mask = iou > 0.45
+  overlap_counts = high_iou_mask.sum(axis=0)
+  no_overlap_mask = overlap_counts == 0
+  boxes = boxes * no_overlap_mask.unsqueeze(-1)
+  return boxes
 
 def get_weights_location(yolo_variant: str) -> Path:
   weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
@@ -419,3 +402,4 @@ if __name__ == '__main__':
 #  2. AST exp overflow warning while on cpu
 #  3. Make NMS faster
 #  4. Add video inference and webcam support
+
