@@ -340,13 +340,27 @@ def postprocess(output,max_det=300):
   boxes = Tensor.stack(x1, y1, x2, y2, probs, class_ids, dim=1)
   order = Tensor.topk(probs,max_det)[1]
   boxes = boxes[order]
-  iou = compute_iou_matrix(boxes)
-  iou_mask = (iou > 0.45)
-  suppressed = Tensor.triu(iou_mask,diagonal=1)
-  suppressed = suppressed.any(axis=0).unsqueeze(-1)
-  boxes *= ~suppressed
-  return boxes
+  boxes = boxes.numpy() 
+  keep = []
+  while boxes.shape[0] > 0 and len(keep) < max_det:
+      keep.append(boxes[0])
+      if boxes.shape[0] == 1: break
+      ious = compute_iou(boxes[0], boxes[1:])
+      boxes = boxes[1:][ious <= 0.45]
+  return Tensor(keep)
 
+def compute_iou(box, boxes):
+    """Compute IoU between a single box and multiple boxes"""
+    # Box coordinates
+    x1 = np.maximum(box[0], boxes[:, 0])
+    y1 = np.maximum(box[1], boxes[:, 1])
+    x2 = np.minimum(box[2], boxes[:, 2])
+    y2 = np.minimum(box[3], boxes[:, 3])
+    intersection = np.maximum(0, x2 - x1) * np.maximum(0, y2 - y1)
+    area_box = (box[2] - box[0]) * (box[3] - box[1])
+    area_boxes = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    union = area_box + area_boxes - intersection
+    return intersection / union
 
 def get_weights_location(yolo_variant: str) -> Path:
   weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
