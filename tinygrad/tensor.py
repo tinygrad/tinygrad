@@ -1360,15 +1360,11 @@ class Tensor(MathTrait):
       out_shape.append(size)
       return Tensor.empty(tuple(out_shape), device=self.device, dtype=self.dtype)
 
-    slices = [self.shrink(tuple((0, s) if i != dim else (i*step, i*step+size)
-                                 for i, s in enumerate(self.shape)))
-              for i in range(num_slices)]
+    slices = [self.shrink(tuple((0, s) if i != dim else (i_s*step, i_s*step+size) for i,s in enumerate(self.shape))) for i_s in range(num_slices)]
     stacked = Tensor.stack(*slices, dim=dim)
     ndim = stacked.ndim
     permute_order = tuple(range(dim)) + (dim,) + tuple(range(dim + 2, ndim)) + (dim + 1,)
     return stacked.permute(permute_order)
-    # slices = [self[(slice(None),)*dim + (slice(i*step, i*step+size),)] for i in range(num_slices)]
-    # return Tensor.stack(*slices, dim=dim)
 
   def _resolve_dim(self, dim:int, *, extra:bool=False) -> int:
     total = self.ndim + int(extra)
