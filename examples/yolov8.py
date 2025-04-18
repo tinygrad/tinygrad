@@ -42,19 +42,6 @@ def preprocess(im, imgsz=640, model_stride=32, model_pt=True):
   im = im / 255.0  # 0 - 255 to 0.0 - 1.0
   return im
 
-# Post Processing functions
-def box_area(box):
-  return (box[:, 2] - box[:, 0]) * (box[:, 3] - box[:, 1])
-
-def box_iou(box1, box2):
-  lt = np.maximum(box1[:, None, :2], box2[:, :2])
-  rb = np.minimum(box1[:, None, 2:], box2[:, 2:])
-  wh = np.clip(rb - lt, 0, None)
-  inter = wh[:, :, 0] * wh[:, :, 1]
-  area1 = box_area(box1)[:, None]
-  area2 = box_area(box2)[None, :]
-  iou = inter / (area1 + area2 - inter)
-  return iou
 
 def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictions, class_labels,size=640, conf_threshold=0.25):
   h, w = len(image[0]), len(image[0][0])
@@ -146,29 +133,6 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
   if p is None:
     p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
   return p
-
-def clip_boxes(boxes, shape):
-  boxes[..., [0, 2]] = np.clip(boxes[..., [0, 2]], 0, shape[1])  # x1, x2
-  boxes[..., [1, 3]] = np.clip(boxes[..., [1, 3]], 0, shape[0])  # y1, y2
-  return boxes
-
-def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
-  gain = ratio_pad if ratio_pad else min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])
-  pad = ((img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2)
-  boxes_np = boxes.numpy() if isinstance(boxes, Tensor) else boxes
-  boxes_np[..., [0, 2]] -= pad[0]
-  boxes_np[..., [1, 3]] -= pad[1]
-  boxes_np[..., :4] /= gain
-  boxes_np = clip_boxes(boxes_np, img0_shape)
-  return boxes_np
-
-def xywh2xyxy(x):
-  xy = x[..., :2]  # center x, y
-  wh = x[..., 2:4]  # width, height
-  xy1 = xy - wh / 2  # top left x, y
-  xy2 = xy + wh / 2  # bottom right x, y
-  result = np.concatenate((xy1, xy2), axis=-1)
-  return Tensor(result) if isinstance(x, Tensor) else result
 
 def get_variant_multiples(variant):
   return {'n':(0.33, 0.25, 2.0), 's':(0.33, 0.50, 2.0), 'm':(0.67, 0.75, 1.5), 'l':(1.0, 1.0, 1.0), 'x':(1, 1.25, 1.0) }.get(variant, None)
