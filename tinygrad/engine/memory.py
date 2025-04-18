@@ -14,7 +14,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ign
   first_appearance, last_appearance, buf_to_opt = {}, {}, set()
   for i,u in enumerate(buffers):
     for buf in u:
-      if not ignore_checks and (buf in noopt_buffers or buf.lb_refcount > 0): continue
+      if not ignore_checks and (buf.lb_refcount > 0 or noopt_buffers is not None and buf in noopt_buffers): continue
       if buf.base not in first_appearance: first_appearance[buf.base] = i
       last_appearance[buf.base] = i
       buf_to_opt.add(buf)

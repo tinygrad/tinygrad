@@ -153,7 +153,7 @@ class CapturedJit(Generic[ReturnType]):
   def __reduce__(self):
     # TODO: free_intermediates here? replan_buffers_memory_layout here?
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
-                            self.expected_names, self.expected_st_vars_dtype_device)
+                            self.expected_names, self.expected_st_vars_dtype_device, self.real_at_first_capture_bufs)
 
   def __post_init__(self):
     self._jit_cache: list[ExecItem] = self.jit_cache
