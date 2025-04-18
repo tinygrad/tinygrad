@@ -1950,7 +1950,7 @@ class TestSwizzle(unittest.TestCase):
     y = x*x.sum((1,)).reciprocal()
     t = y.pad(((0,1),None)).contiguous()
     swizzled = swizzle_rewrite(t.lazydata)
-    sched = check_schedule(swizzled.sink(), 3)
+    sched = check_schedule(swizzled, 3)
     output_buffer = sched[-1].bufs[0]
     run_schedule(sched)
     self.assertListEqual(output_buffer.as_buffer().cast("f").tolist(), [0.5, 0.5, 0.5, 0.5, 0., 0.])
