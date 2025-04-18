@@ -418,6 +418,7 @@ class AMDRenderer(CStyleLanguage):
   tensor_cores_mfma = [TensorCore(dims=(16,16,16), threads=64, elements_per_thread=(4,4,4), dtype_in=di, dtype_out=do,
     opts=("l0","l0","l0","l0","u1","u1","l1","l1"), swizzle=(((10,11,4,5,8,9),(0,1,2,3,6,7)),((0,1,2,3,8,9),(4,5,10,11,6,7))))
     for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
+
   @staticmethod
   def get_tensor_cores(arch):
     return {"gfx942": AMDRenderer.tensor_cores_mfma, "gfx1201": AMDRenderer.tensor_cores_rdna4}.get(arch.split(":")[0], AMDRenderer.tensor_cores)

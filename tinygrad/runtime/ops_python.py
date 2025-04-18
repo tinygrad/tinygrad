@@ -141,21 +141,20 @@ class PythonProgram:
             def b_elem(x, col, k, goff): return a_elem(x, k, col, goff) # pylint: disable=arguments-out-of-order
             def c_map(lane, elem): return (lane%16, (lane//16)*4 + elem)
             ul[i] = wmma_helper(64, 16, 4, 4, 4, a_elem, b_elem, c_map)
+          elif arg[4] == "AMD" and len(inp[0]) == 8: # RDNA4
+            def a_elem(x, k, row, goff): return x[k - [0, 4, 4, 8][k//4]][goff + row + [0, 16, 0, 16][k//4]]
+            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)
+            def c_map(lane, elem): return (lane%16, (lane//16)*8 + elem)
+            ul[i] = wmma_helper(32, 16, 8, 8, 8, a_elem, b_elem, c_map)
           elif arg[4] == "AMD":
-            if len(inp[0]) == 8: # RDNA4
-              def a_elem(x, k, row, goff): return x[k - [0, 4, 4, 8][k//4]][goff + row + [0, 16, 0, 16][k//4]]
-              def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)
-              def c_map(lane, elem): return (lane%16, (lane//16)*8 + elem)
-              ul[i] = wmma_helper(32, 16, 8, 8, 8, a_elem, b_elem, c_map)
-            else:
-              # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
-              def a_elem(x, k, row, goff):
-                assert x[k][goff+row] == x[k][goff+row+16], "warp elements not duplicated properly across lanes"
-                return x[k][goff+row]
-              # B (16 elements on 32 threads): row major, lane 16-32 == lane 0-15
-              def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)  # pylint: disable=arguments-out-of-order
-              def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
-              ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
+            # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
+            def a_elem(x, k, row, goff):
+              assert x[k][goff+row] == x[k][goff+row+16], "warp elements not duplicated properly across lanes"
+              return x[k][goff+row]
+            # B (16 elements on 32 threads): row major, lane 16-32 == lane 0-15
+            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)  # pylint: disable=arguments-out-of-order
+            def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
+            ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[4] == "CUDA":
             # (col, row) given (lane, elem) for C & D (4 elements on 32 threads); shared by all tc shapes with M=16 N=8
             def c_map(lane, elem): return (elem%2 + (lane%4)*2, lane//4 + (elem//2)*8)
