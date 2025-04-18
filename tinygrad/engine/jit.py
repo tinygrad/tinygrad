@@ -148,7 +148,7 @@ class CapturedJit(Generic[ReturnType]):
   extra_view_inputs: list[tuple[int, int, str, int, DType]]
   expected_names: list[Union[int, str]]
   expected_st_vars_dtype_device: list[tuple[ShapeTracker, tuple[Variable, ...], DType, str]]
-  real_at_first_capture_bufs: set
+  real_at_first_capture_bufs: set[Buffer]
 
   def __reduce__(self):
     # TODO: free_intermediates here? replan_buffers_memory_layout here?
