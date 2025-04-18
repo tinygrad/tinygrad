@@ -273,7 +273,7 @@ class TinyJit(Generic[ReturnType]):
       self._jit_cache: list[ExecItem] = []
       self._buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
       self._seen_bufs: set[Buffer] = set()
-      self._real_at_first_capture_bufs: set = set()
+      self._real_at_first_capture_bufs: set[Buffer] = set()
       # TODO: should we always disable the memory planner here? it must be off for prune
       with Context(BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=int(self.prune)):
         capturing.append(self)
