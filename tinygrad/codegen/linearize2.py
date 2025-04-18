@@ -6,7 +6,6 @@ from tinygrad.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import dedup, partition, all_same, flatten
 from tinygrad.spec import type_verify
-from line_profiler import profile
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(lst:list[UOp]) -> list[UOp]:
@@ -110,7 +109,8 @@ class BlockContext:
 
 # ***** make blocks *****
 
-@profile
+DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}
+
 def make_block_bottom_up(ctx:BlockContext, x:UOp):
   current_ctx = ctx.block_ctxs[x]
   lst = [x]
@@ -125,8 +125,8 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
 
   while len(frontier_nodes):
     u = frontier_nodes.pop(0)
-
-    if (new_ctx:=ctx.block_ctxs[u]) == current_ctx:
+    if u.op in DONT_PLACE_IN_BLOCK: unmergable[u] += 1
+    elif (new_ctx:=ctx.block_ctxs[u]) == current_ctx:
       # block has same context
       if ctx.child_count[u] == unmergable[u]+1:
         # if one child, or we have all the chidren, merge it, and put the srcs on the frontier
@@ -143,7 +143,7 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
         newu = u
         while len(ends_to_add):
           r:UOp = ends_to_add.pop(-1)
-          new_ctx = [z for z in new_ctx if z is not r]
+          new_ctx = tuple([z for z in new_ctx if z is not r])
           end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
           newu = UOp(Ops.BLOCKEND, src=(newu,), arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=1))
         ended[newu] = u
@@ -157,7 +157,7 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
   bb = BasicBlock2(tuple(lst), ctx=ctx.block_ctxs[x], cnt=ctx.child_count[x], child_ctx=ctx.child_ctxs.get(x, None))
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
-block_create = PatternMatcher([(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), lambda ctx,x: make_block_bottom_up(ctx,x))])
+block_create = PatternMatcher([(UPat(GroupOp.All-DONT_PLACE_IN_BLOCK-GroupOp.Block, name="x"), make_block_bottom_up)])
 
 # ***** block merging ****
 
@@ -180,7 +180,7 @@ def merge_block(x:UOp):
 
 def remove_blockend(x:UOp):
   # if there's any remaining blocks that need to go in this BLOCKEND, we don't remove it
-  if any(x.arg.end in y.arg.ctx for y in x.src): return None
+  if any(x.arg.end in y.arg.ctx for y in x.src if y.op in {Ops.BLOCK, Ops.BLOCKEND}): return None
 
   parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and y.arg.child_ctx is not None and x.arg.end in y.arg.child_ctx]
   assert all_same(parent_blocks), f"should never have two parent blocks (has {len(parent_blocks)})"
@@ -226,9 +226,12 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
 
   # merge blockends
   sink = graph_rewrite(sink, block_merge, name="Linearizer: Merge Blocks")
-  assert sink.op is Ops.BLOCK and len(sink.src) == 0
+  assert sink.op is Ops.BLOCK and all(x.op in DONT_PLACE_IN_BLOCK for x in sink.src)
+
+  # place the early things
+  lst = sorted(dedup(sink.src), key=lambda x: x.tuplize) + list(sink.arg.lst)
 
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-  if not skip_check: type_verify(sink.arg.lst)
+  if not skip_check: type_verify(lst)
 
-  return sink.arg.lst
+  return lst
