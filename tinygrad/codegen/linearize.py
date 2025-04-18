@@ -111,10 +111,16 @@ class BlockContext:
 
 DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}
 
-def make_block_bottom_up(ctx:BlockContext, x:UOp):
-  # count of times we've seen this block
-  unmergable: defaultdict[UOp, int] = defaultdict(int)
+def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp, ...]):
+  ends_to_add = [z for z in new_ctx if z not in current_ctx]
+  while len(ends_to_add):
+    r:UOp = ends_to_add.pop(-1)
+    new_ctx = tuple([z for z in new_ctx if z is not r])
+    end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
+    base_block = UOp(Ops.BLOCKEND, src=(base_block,), arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=1))
+  return base_block
 
+def make_block_bottom_up(ctx:BlockContext, x:UOp):
   if x.op is Ops.BLOCKSTART:
     current_ctx, child_ctx = x.arg
     lst = list(x.src)
@@ -123,9 +129,12 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
     current_ctx, child_count, child_ctx = ctx.block_ctxs[x], ctx.child_count[x], ctx.child_ctxs.get(x, None)
     lst = [x]
 
+  # count of times we've seen this block, or a seed for a new block if we can't merge it
+  unmergable: defaultdict[UOp, int] = defaultdict(int)
+  blockseeds = defaultdict(list)
+
   # add the srcs of this to the frontier
   # NOTE: things may be in here multiple times, that's okay
-  blockseeds = defaultdict(list)
   frontier_nodes = list(flatten(y.src[::-1] for y in lst))
   while len(frontier_nodes):
     u = frontier_nodes.pop(0)
@@ -145,18 +154,12 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
 
   # add unmergables to sources
   srcs = []
-  for u,cnt in unmergable.items(): srcs += [u]*cnt
+  for u,cnt in unmergable.items(): srcs += [add_blockends(u, ctx.block_ctxs[u], current_ctx)]*cnt
 
   # add blockseeds, with blockends as needed
   for (new_ctx, new_child_ctx), v in blockseeds.items():
     base_block = UOp(Ops.BLOCKSTART, src=tuple(v), arg=(new_ctx, new_child_ctx))
-    ends_to_add = [z for z in new_ctx if z not in current_ctx]
-    while len(ends_to_add):
-      r:UOp = ends_to_add.pop(-1)
-      new_ctx = tuple([z for z in new_ctx if z is not r])
-      end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
-      base_block = UOp(Ops.BLOCKEND, src=(base_block,), arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=1))
-    srcs.append(base_block)
+    srcs.append(add_blockends(base_block, new_ctx, current_ctx))
 
   lst = block_reorder(lst[::-1])
   bb = BasicBlock2(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
