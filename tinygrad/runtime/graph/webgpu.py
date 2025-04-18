@@ -26,7 +26,9 @@ class WebGPUGraph(GraphRunner):
         vals = tuple(var_vals[k] for k in prg.p.vars)
         _prg.add_compute_pass(command_encoder, comp_pass_desc, *[b._buf for b in ji.bufs], global_size=prg.p.launch_dims(var_vals)[0], vals=vals)
 
-    return execute_commands(self._dev, callback, wait)
+    time = execute_commands(self._dev, callback, wait)
+    for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None # for CapturedJit.free_intermediates to work
+    return time
 
 def js_type(dtype: DType) -> str:
   return f"{'Uint' if dtype in dtypes.uints else 'Int' if (dtype in dtypes.sints or dtype == dtypes.bool) else 'Float'}{8*dtype.itemsize}Array"
