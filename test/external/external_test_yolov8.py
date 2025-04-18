@@ -28,8 +28,9 @@ class TestYOLOv8(unittest.TestCase):
       img = cv2.imdecode(np.frombuffer(fetch(test_image_urls[i]).read_bytes(), np.uint8), 1)
       test_image = preprocess([img])
       predictions = TinyYolov8(test_image)
-      post_predictions = postprocess(preds=predictions, img=test_image, orig_imgs=[img])
-      labels = label_predictions(post_predictions)
+      #post_predictions = postprocess(preds=predictions, img=test_image, orig_imgs=[img])
+      labels = label_predictions(predictions)
+      print(i,labels)
       assert labels == {5: 1, 0: 4, 11: 1} if i == 0 else labels == {0: 13, 29: 1, 32: 1}
 
   def test_forward_pass_torch_onnx(self):
