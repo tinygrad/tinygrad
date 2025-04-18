@@ -3,7 +3,6 @@ from collections import deque
 from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
 from tinygrad.device import Buffer
 from tinygrad.helpers import Metadata, DEBUG, unwrap
-from tinygrad.engine.grouper import get_becomes_map
 
 # **** ScheduleItem return type
 
@@ -34,10 +33,7 @@ pm_unbind = PatternMatcher([
 
 # **** schedule linearizer
 
-def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  becomes_map = get_becomes_map(big_sink)
-  sched_sink = UOp.sink(*[becomes_map.get(x,x) for x in big_sink.src])
-
+def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   # bfs toposort
   children: dict[UOp, list[UOp]] = {}
   in_degree: dict[UOp, int] = {}
@@ -67,11 +63,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
   # map ASSIGN to BUFFER after ScheduleItems are constructed
-  for k,v in becomes_map.items():
-    if v.base.op is Ops.ASSIGN:
-      # if the UOp was already an assign Tensor UOp we just map it to the existing buffer
-      if k.op is Ops.ASSIGN: becomes_map[k] = k.src[0]
-      # otherwise we map it to the new buffer, ignoring NOOP ShapeTrackers
-      else: becomes_map[k] = new_buf if (new_buf:=v.base.src[0]).st == v.st else new_buf.view(unwrap(v.st))
+  # TODO: this is incomplete
+  becomes_map: dict[UOp, UOp] = {}
+  for u in sched_sink.toposort:
+    if u.op is Ops.ASSIGN: becomes_map[u] = u.src[0]
 
   return schedule, var_vals, becomes_map
