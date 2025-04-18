@@ -33,7 +33,7 @@ def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, 
   image = cv2.copyMakeBorder(image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
   return Tensor(image)
 
-def preprocess(im, imgsz, model_stride=32, model_pt=True):
+def preprocess(im, imgsz=640, model_stride=32, model_pt=True):
   same_shapes = all(x.shape == im[0].shape for x in im)
   auto = same_shapes and model_pt
   im = [compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im]
@@ -56,7 +56,16 @@ def box_iou(box1, box2):
   iou = inter / (area1 + area2 - inter)
   return iou
 
-def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictions, class_labels, conf_threshold=0.25):
+def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictions, class_labels,size=640, conf_threshold=0.25):
+  h, w = len(image[0]), len(image[0][0])
+  for pred in all_predictions: #resize boxes
+      pred[0] *= w / size
+      pred[2] *= w / size
+      pred[1] *= h / size
+      pred[3] *= h / size
+      scale = h / w if h > w else w / h
+      for i in ([0, 2] if h > w else [1, 3]):
+          pred[i] *= scale
   all_predictions = [all_predictions]
   color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
   font = cv2.FONT_HERSHEY_SIMPLEX
@@ -406,8 +415,7 @@ if __name__ == '__main__':
   if not isinstance(image[0], np.ndarray):
     print('Error in image loading. Check your image file.')
     sys.exit(1)
-  pre_processed_image = preprocess(image,imgsz=(len(image[0]),len(image[0][0])))
-
+  pre_processed_image = preprocess(image)
   # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/models/v8/yolov8.yaml
   depth, width, ratio = get_variant_multiples(yolo_variant)
   yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
@@ -416,6 +424,7 @@ if __name__ == '__main__':
 
   st = time.time()
   predictions = yolo_infer(pre_processed_image).numpy()
+
   print(f'did inference in {int(round(((time.time() - st) * 1000)))}ms')
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names').read_text().split("\n")
   draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=predictions, class_labels=class_labels)
