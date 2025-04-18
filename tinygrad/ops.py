@@ -319,9 +319,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def full_shape(self) -> tuple[sint, ...]:
     if self.op is Ops.VIEW: return self.shape
-    # TODO: this exists because wmma creates consts without ShapeTracker in the AST, there's probably a way to fix this
-    parent_shapes = [x.full_shape for x in self.src if x.op not in {Ops.DEFINE_GLOBAL,Ops.DEFINE_LOCAL} and not (x.op is Ops.CONST and x.st is None)]
-    # TODO: this should check if st is None, it cannot because local reduce has implicit movement ops
+    # NOTE: if a parent doesn't have st its full_shape is empty
+    parent_shapes = [x.full_shape for x in self.src]
     return tuple(smax(x) for x in zip(*[x for x in parent_shapes if x != ()]))
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
