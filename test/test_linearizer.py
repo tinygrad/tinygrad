@@ -846,7 +846,8 @@ class TestLinearizer(unittest.TestCase):
     sink = UOp(Ops.SINK, src=(store,))
     load_t = Tensor.full(load.st_arg.shape, 1).contiguous().realize()
     k = helper_linearizer_ast(sink, [load_t], wanna_output=[load_t.numpy().sum()])[1]
-    self.assertEqual(k.uops[-1].op, Ops.ENDIF)
+    self.assertEqual(k.uops[-2].op, Ops.ENDIF)
+    self.assertEqual(k.uops[-1].op, Ops.SINK)
     self.assertLess(k.uops.index([x for x in k.uops if x.op is Ops.STORE][-1]), k.uops.index(k.uops[-1]))
 
   def test_two_nested_range(self):
