@@ -65,7 +65,7 @@ def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictio
     pred[3] *= h / size
     scale = h / w if h > w else w / h
     for i in ([0, 2] if h > w else [1, 3]):
-        pred[i] *= scale
+      pred[i] *= scale
   all_predictions = [all_predictions]
   color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
   font = cv2.FONT_HERSHEY_SIMPLEX
@@ -365,23 +365,23 @@ def compute_iou_matrix(boxes):
   return inter / union
 
 def postprocess(output):
-    xc, yc, w, h, class_scores = output[0][0], output[0][1], output[0][2], output[0][3], output[0][4:]
-    class_ids = Tensor.argmax(class_scores,axis=0)
-    probs = Tensor.max(class_scores, axis=0)
-    probs = Tensor.where(probs>=0.25,probs,0)
-    x1 = xc - w / 2
-    y1 = yc - h / 2
-    x2 = xc + w / 2
-    y2 = yc + h / 2
-    boxes = Tensor.stack(x1, y1, x2, y2, probs, class_ids, dim=1)
-    order = Tensor.topk(probs,300)[1]
-    boxes = boxes[order]
-    iou = compute_iou_matrix(boxes)
-    iou_mask = (iou > 0.45)
-    suppressed = Tensor.triu(iou_mask,diagonal=1)
-    suppressed = suppressed.any(axis=0).unsqueeze(-1)
-    boxes *= ~suppressed
-    return boxes
+  xc, yc, w, h, class_scores = output[0][0], output[0][1], output[0][2], output[0][3], output[0][4:]
+  class_ids = Tensor.argmax(class_scores,axis=0)
+  probs = Tensor.max(class_scores, axis=0)
+  probs = Tensor.where(probs>=0.25,probs,0)
+  x1 = xc - w / 2
+  y1 = yc - h / 2
+  x2 = xc + w / 2
+  y2 = yc + h / 2
+  boxes = Tensor.stack(x1, y1, x2, y2, probs, class_ids, dim=1)
+  order = Tensor.topk(probs,300)[1]
+  boxes = boxes[order]
+  iou = compute_iou_matrix(boxes)
+  iou_mask = (iou > 0.45)
+  suppressed = Tensor.triu(iou_mask,diagonal=1)
+  suppressed = suppressed.any(axis=0).unsqueeze(-1)
+  boxes *= ~suppressed
+  return boxes
 
 
 def get_weights_location(yolo_variant: str) -> Path:
