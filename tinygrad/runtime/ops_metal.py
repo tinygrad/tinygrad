@@ -77,6 +77,7 @@ class MetalDevice(Compiled):
                      functools.partial(MetalProgram, self), MetalGraph)
 
   def synchronize(self):
+    # Wait for all command buffers in flight to complete
     for cbuf in self.mtl_buffers_in_flight:
       wait_check(cbuf)
       st, en = decimal.Decimal(cmdbuf_st_time(cbuf)) * 1000000, decimal.Decimal(cmdbuf_en_time(cbuf)) * 1000000
@@ -178,6 +179,12 @@ class MetalProgram:
     msg("dispatchThreadgroups:threadsPerThreadgroup:")(encoder, to_struct(*global_size), to_struct(*local_size))
     msg("endEncoding")(encoder)
     msg("setLabel:")(command_buffer, to_ns_str(self.name)) # TODO: is this always needed?
+
+    # Signal the timeline after the command completes
+    self.dev.timeline_value += 1
+    current_value = self.dev.timeline_value
+    msg("encodeSignalEvent:value:")(command_buffer, self.dev.timeline_signal, current_value)
+
     msg("commit")(command_buffer)
     self.dev.mtl_buffers_in_flight.append(command_buffer)
     if wait:
