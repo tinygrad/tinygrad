@@ -1,7 +1,7 @@
 from typing import cast, Callable
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, RewriteContext
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
-from tinygrad.helpers import all_same, dedup, flatten, prod, DEBUG, CHECK_OOB
+from tinygrad.helpers import all_same, dedup, prod, DEBUG, CHECK_OOB
 if CHECK_OOB:
   import z3
 
@@ -16,6 +16,7 @@ if CHECK_OOB:
 
   # ctx is (solver, load_number_dict)
   z3_renderer = PatternMatcher([
+    # Ops.SPECIAL can have symbolic arg but it wont be in the toposort beacuse its not a src, we need to add it manually
     (UPat(Ops.SPECIAL, src=(), name="x"), lambda x: UOp(Ops.SPECIAL, arg=x.arg[0], src=(x.ufix(x.arg[1]),))),
     (UPat(Ops.SPECIAL, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg, 0, x.src[0].arg-1, ctx[0]))),
     (UPat(Ops.DEFINE_VAR, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg[0], x.arg[1], x.arg[2], ctx[0]))),
@@ -74,11 +75,8 @@ def validate_index(idx:UOp, mask:UOp|None=None):
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
   if 0<=idx.src[1].vmin and idx.src[1].vmax<sz: return True
 
-  all_uops = list((idx.toposort | mask.toposort).keys() if mask is not None else idx.toposort.keys())
-  # Ops.SPECIAL can have symbolic arg but it wont be in the toposort beacuse its not a src, we need to add it manually
-  all_uops += flatten(x.arg[1].toposort.keys() for x in all_uops if x.op is Ops.SPECIAL and isinstance(x.arg[1], UOp))
   # WEBGPU has a BITCAST in the index. TODO: fix
-  if any(x.op in (Ops.BITCAST, Ops.DEFINE_VAR) for x in all_uops): return True
+  if any(x.op is Ops.BITCAST for x in idx.toposort): return True
 
   solver = z3.Solver(ctx=z3.Context())
   # Use RewriteContext directly to keep rewrite cache between index and mask
