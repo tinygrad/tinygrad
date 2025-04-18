@@ -1,8 +1,8 @@
 from __future__ import annotations
 import functools
-from tinygrad.helpers import mv_address
+from tinygrad.helpers import DEBUG, mv_address
 from tinygrad.device import Compiled, Compiler, Allocator, BufferSpec, CPUProgram
-from tinygrad.ops import Ops, UOp
+from tinygrad.ops import Ops, PatternMatcher, UOp, UPat, graph_rewrite
 from tinygrad.renderer import Renderer
 import math
 
@@ -130,6 +130,10 @@ void kernel_main() {{
 }}
 """
 
+  # extra_matcher = PatternMatcher([
+  #   (UPat(Ops.MUL, name="x", src=(UPat(), UPat(Ops.RECIP),)), lambda x: UOp(Ops.FDIV, x.dtype, (x.src[0], x.src[1].src[0]))),
+  # ])
+
   code_for_op: dict = {
     Ops.SQRT: "sqrt_tile", Ops.RECIP: "recip_tile", Ops.NEG: "negative_tile",
     Ops.EXP2: "", Ops.LOG2: "", Ops.SIN: "",
@@ -139,8 +143,15 @@ void kernel_main() {{
     Ops.SHR: "right_shift_tile", Ops.SHL: "left_shift_tile", Ops.CMPLT: "",
     Ops.WHERE: "" }
 
+  def build_math(self, op:Ops, loads) -> str:
+    if op in self.code_for_op:
+      return f"{self.code_for_op[op]}_init"
+    else:
+      raise NotImplementedError(f"Operation {op} not implemented")
 
   def render_ast(self, ast:UOp) -> str:
+    # ast = graph_rewrite(ast, self.extra_matcher)
+    # if DEBUG >= 5: print(ast)
     loads = find_nodes(ast, Ops.LOAD, [])
     stores = find_nodes(ast, Ops.STORE, [])
 
@@ -151,46 +162,57 @@ void kernel_main() {{
 
     binary_op = stores[0].src[2]
 
-    compute = f"""
-#include "compute_kernel_api/eltwise_binary.h"
-#include <cstdint>
-#include "compute_kernel_api/eltwise_unary/sfpu_split_includes.h"
-#include "compute_kernel_api/tile_move_copy.h"
+    cbs_vars = ["3"]
 
-namespace NAMESPACE {{
-void MAIN {{
-    uint32_t per_core_block_cnt = {num_tiles};
-    uint32_t per_core_block_size = 1;
-
-    constexpr auto cb_inp0 = tt::CBIndex::c_1;
-    constexpr auto cb_inp1 = tt::CBIndex::c_2;
-    constexpr auto cb_out0 = tt::CBIndex::c_0;
-
-    binary_op_init_common(cb_inp0, cb_inp1, cb_out0);
-
-    {self.code_for_op[binary_op.op]}_init(cb_inp0, cb_inp1);
-
-    for (uint32_t block = 0; block < per_core_block_cnt; ++block) {{
-        cb_wait_front(cb_inp0, per_core_block_size);
-        cb_wait_front(cb_inp1, per_core_block_size);
-        cb_reserve_back(cb_out0, per_core_block_size);
+    def build_cb_processor(block: str, cbi: list[str], cbo: str) -> str:
+      return f"""
+        {' '.join([f"cb_wait_front({cb}, onetile);" for cb in cbi])}
+        cb_reserve_back({cbo}, onetile);
 
         tile_regs_acquire();
-
-        for (uint32_t i = 0; i < per_core_block_size; ++i) {{
-            {self.code_for_op[binary_op.op]}(cb_inp0, cb_inp1, i, i, i);
-        }}
+        {block}
         tile_regs_commit();
 
         tile_regs_wait();
-        for (uint32_t i = 0; i < per_core_block_size; ++i) {{
-            pack_tile(i, cb_out0);
-        }}
+        pack_tile(0, {cbo});
         tile_regs_release();
 
-        cb_pop_front(cb_inp0, per_core_block_size);
-        cb_pop_front(cb_inp1, per_core_block_size);
-        cb_push_back(cb_out0, per_core_block_size);
+        {' '.join([f"cb_pop_front({cb}, onetile);" for cb in cbi])}
+        cb_push_back({cbo}, onetile);
+"""
+
+    def build_unary(fn_name: str, cbi: str, cbo: str) -> str:
+      return build_cb_processor(f'''
+            init_sfpu({cbi}, {cbo});
+            copy_tile({cbi}, 0, 0);
+            {fn_name}_init();
+            {fn_name}(0);
+        ''', [cbi], cbo)
+
+    def build_binary(fn_name: str, cbi: list[str], cbo: str) -> str:
+      return build_cb_processor(f'''
+            binary_op_init_common({cbi[0]}, {cbi[1]}, {cbo});
+            {fn_name}_init({cbi[0]}, {cbi[1]});
+            {fn_name}({cbi[0]}, {cbi[1]}, 0, 0, 0);
+        ''', cbi, cbo)
+
+    compute = f"""
+#include <cstdint>
+#include "compute_kernel_api/eltwise_binary.h"
+#include "compute_kernel_api/eltwise_unary/sfpu_split_includes.h"
+#include "compute_kernel_api/tile_move_copy.h"
+#include "compute_kernel_api/eltwise_unary/recip.h"
+#include "compute_kernel_api/eltwise_unary/eltwise_unary.h"
+
+namespace NAMESPACE {{
+constexpr uint32_t onetile = 1;
+void MAIN {{
+    constexpr auto cb_out0 = tt::CBIndex::c_0, cb_inp0 = tt::CBIndex::c_1, cb_inp1 = tt::CBIndex::c_2;
+    constexpr auto cb_tmp = tt::CBIndex::c_3;
+    
+    for (uint32_t block = 0; block < {num_tiles}; ++block) {{
+        {build_unary("recip_tile", "cb_inp1", "cb_tmp")}
+        {build_binary(self.code_for_op[binary_op.op], ["cb_inp0", "cb_tmp"], "cb_out0")}
     }}
 }}
 }}
@@ -201,7 +223,8 @@ void MAIN {{
 
     cbs_read = [f"{op.op}:{op.src[0].arg}:{op.dtype.name}:{op.dtype.itemsize}" for op in loads]
     cbs_write = [f"{op.op}:{op.src[0].arg}:{op.src[2].dtype.name}:{op.src[2].dtype.itemsize}" for op in stores]
-    cbs = ",".join(cbs_write + cbs_read)
+    cbs_vars = [f"VAR:{cb}:float:4" for cb in cbs_vars]
+    cbs = ",".join(cbs_write + cbs_read + cbs_vars)
 
     return "[SEP]".join([reader, writer, compute, cbs])
 

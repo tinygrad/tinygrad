@@ -5,7 +5,7 @@ os.environ["DEBUG"] = "6"
 os.environ["OPT"] = "0"
 os.environ["NOOPT"] = "1"
 # os.environ["VIZ"] = "1"
-
+import numpy as np
 from tinygrad import Tensor, dtypes
 
 x_cpu = Tensor(np.random.normal(0, 1, (1000)), dtype=dtypes.float32, device="cpu")
@@ -18,7 +18,7 @@ z_ref = (x_cpu / y_cpu).tolist()
 
 x = x_cpu.to("tt")
 y = y_cpu.to("tt")
-z = x / y # any unary op uses the exp kernel
+z = x / y
 
 print(z_ref[0:10])
 print(z.tolist()[0:10])
