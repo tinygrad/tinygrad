@@ -12,7 +12,7 @@ testing_minimal = [
   "torch",
   "pytest",
   "pytest-xdist",
-  "hypothesis",
+  "hypothesis==6.131.0",
   "z3-solver",
 ]
 

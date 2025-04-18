@@ -18,13 +18,12 @@ def helper_test_lin(lin: Kernel, opts, failed_platforms, validate_device, rtol=1
   if any(b.dtype.base == dtypes.half for b in lin.membufs) and not is_dtype_supported(dtypes.half): return
   if any(b.dtype.base == dtypes.bfloat16 for b in lin.membufs) and not is_dtype_supported(dtypes.bfloat16): return
 
-  for opt in opts:
-    try:
-      lin.apply_opt(opt)
-    except KernelOptError:
-      # it's considered fixed if we invalidated the opts
-      assert Device.DEFAULT not in failed_platforms, f"unexpected success on {Device.DEFAULT}"
-      return
+  try:
+    lin.apply_opts(opts)
+  except KernelOptError:
+    # it's considered fixed if we invalidated the opts
+    assert Device.DEFAULT not in failed_platforms, f"unexpected success on {Device.DEFAULT}"
+    return
 
   (msg, rawbufs, var_vals, ground_truth, state1) = compare_linearizer(lin, rtol=rtol, atol=atol)
   if msg in ["PASS", "KernelOptError"]:

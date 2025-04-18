@@ -36,7 +36,7 @@ pm_unbind = PatternMatcher([
 
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   becomes_map = get_becomes_map(big_sink)
-  sched_sink = becomes_map.pop(big_sink)
+  sched_sink = UOp.sink(*[becomes_map.get(x,x) for x in big_sink.src])
 
   # bfs toposort
   children: dict[UOp, list[UOp]] = {}
