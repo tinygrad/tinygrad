@@ -1,6 +1,7 @@
-from typing import Callable, Sequence, Optional
-import types
+from typing import Callable, Sequence, Optional, cast
+import types, itertools
 from tinygrad import Tensor, TinyJit, UOp, Device
+from tinygrad.helpers import partition
 from tinygrad.device import Buffer
 from tinygrad.engine.jit import CapturedJit, _prepare_jit_inputs, GraphRunner
 from tinygrad.nn.state import get_state_dict, load_state_dict, safe_save
@@ -15,7 +16,7 @@ Things we do here for model export. TODO: Should TinyJit/CapturedJit do any of t
 """
 # Common logic for any model export
 def export_init(model: Callable, inputs: Sequence, state_dict:dict[str,Tensor]={}, fix_contiguous=True) -> \
-  tuple[CapturedJit, dict[Buffer, int], dict[UOp, int], dict[Buffer, str]]:
+  tuple[CapturedJit, dict[Buffer, int], dict[UOp, int], dict[Buffer, int], dict[Buffer, str], dict[Buffer, dict[str, str]]]:
 
   if isinstance(model, types.MethodType): weights_holder = model.__self__
   elif hasattr(model, "__call__") and not isinstance(model, types.FunctionType): weights_holder = model
@@ -51,11 +52,16 @@ def export_init(model: Callable, inputs: Sequence, state_dict:dict[str,Tensor]={
   # mapping bufs/vars to absolute indices of input args is needed if we want to have the same ordering when calling model from JS
   in_bufs: dict[Buffer, int] = {arg.lazydata.base.realized: i for i, arg in enumerate(reusable_inputs) if isinstance(arg, Tensor)}
   in_vars: dict[UOp, int] = {arg.unbind()[0]: i for i, arg in enumerate(reusable_inputs) if isinstance(arg, UOp)}
+  out_bufs = cast(dict[Buffer, int], {t.lazydata.base.realized: i for i, t in enumerate(cj.ret)})
 
-  weight_names = {v.lazydata.base.realized: k for k,v in state_dict.items()}
-  weight_names.update({buf: weight_names.get(buf, default_name) for buf, default_name in cj.sort_bufs(exclude=in_bufs)[0].items()})
+  buf_to_name = {v.lazydata.base.realized: k for k,v in state_dict.items()}
+  state_bufs, empty_bufs = partition({b:None for ji in cj.jit_cache for b in ji.bufs if b not in in_bufs and b not in out_bufs},
+                                      lambda x: x in cj.real_at_first_capture_bufs)
+  ctr = itertools.count()
+  empty_bufs = {buf: f"buf_{next(ctr)}" for buf in empty_bufs}
+  state_bufs = {buf: {"default_name": (default:=f"buf_{next(ctr)}"), "state_name": buf_to_name.get(buf, default)} for buf in state_bufs}
 
-  return cj, in_bufs, in_vars, weight_names
+  return cj, in_bufs, in_vars, out_bufs, empty_bufs, state_bufs
 
 def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None, state_dict:dict[str,Tensor]={},
                   model_name="model", save_weights=True, fix_contiguous=True) -> tuple[str, dict[str, Tensor]]:
@@ -64,12 +70,12 @@ def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None
   """
   from tinygrad.runtime.graph.webgpu import render_js
 
-  captured_jit, in_bufs, in_vars, weight_names = export_init(model, inputs, state_dict, fix_contiguous)
+  captured_jit, in_bufs, in_vars, out_bufs, empty_bufs, state_bufs = export_init(model, inputs, state_dict, fix_contiguous)
 
-  js_code = render_js(captured_jit, in_bufs, in_vars, weight_names, model_name, save_weights)
+  js_code = render_js(captured_jit, in_bufs, in_vars, out_bufs, empty_bufs, state_bufs, model_name, save_weights)
 
   # ensure a complete state_dict is exported; for example, if no/incomplete state_dict is provided. Random seeds are missing from state_dict
-  full_state_dict = {weight_names[buf]: Tensor(bytes(buf.as_buffer()), dtype=buf.dtype, device=buf.device).realize() for buf in weight_names}
+  full_state_dict = {v["state_name"]: Tensor(bytes(k.as_buffer()), dtype=k.dtype, device=k.device).realize() for k,v in state_bufs.items()}
 
   if js_outfile:
     with open(js_outfile, "w") as f: f.write(js_code)
