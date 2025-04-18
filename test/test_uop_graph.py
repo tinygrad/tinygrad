@@ -488,6 +488,18 @@ class TestUOpGraph(unittest.TestCase):
     with self.assertRaises(RuntimeError): to_uops_list([ld0])
 
   @unittest.skipUnless(CHECK_OOB, "Index validation is only performed with CHECK_OOB")
+  def test_in_out_of_bounds_access_symbolic_mask(self):
+    glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+    i = Variable("i", 1, 80)
+    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, i<10),))
+    to_uops_list([ld0])
+    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, i<15),))
+    to_uops_list([ld0])
+
+    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, i<20),))
+    with self.assertRaises(RuntimeError): to_uops_list([ld0])
+
+  @unittest.skipUnless(CHECK_OOB, "Index validation is only performed with CHECK_OOB")
   def test_in_out_of_bounds_access_index_load(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
     glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(64), (), 0)
