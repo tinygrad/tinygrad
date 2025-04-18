@@ -141,33 +141,36 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
         # block has children, it's unmergable
         unmergable[u] += 1
     else:
-      # block has different context
-      if (newu:=ended.get(u)) is None:
-        ends_to_add = [z for z in new_ctx if z not in current_ctx]
-        newu = u
-        while len(ends_to_add):
-          r:UOp = ends_to_add.pop(-1)
-          new_ctx = tuple([z for z in new_ctx if z is not r])
-          end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
-          newu = UOp(Ops.BLOCKEND, src=(newu,), arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=1))
-        ended[newu] = u
       # add it to unmergable
-      unmergable[newu] += 1
+      unmergable[u] += 1
 
+  # group the unmergables together
   blockseeds = defaultdict(list)
   srcs = []
   for u,cnt in unmergable.items():
-    if u.op not in BLOCK_PLUS_DONT_PLACE_IN_BLOCK and ctx.child_count[u] == cnt:
-      blockseeds[(ctx.block_ctxs[u], ctx.child_count[u], ctx.child_ctxs.get(u, None))].append(u)  # this can seed a block
+    if u.op not in DONT_PLACE_IN_BLOCK and ctx.child_count[u] == cnt:
+      blockseeds[(ctx.block_ctxs[u], ctx.child_ctxs.get(u, None))].append(u)  # this can seed a block
     else:
       srcs += [u]*cnt
-  for k,v in blockseeds.items(): srcs += ([UOp(Ops.BLOCKSTART, src=tuple(v), arg=k)] if len(v) > 1 else v)*k[1]
+
+  # add blockends as needed
+  for (new_ctx, new_child_ctx), v in blockseeds.items():
+    base_block = UOp(Ops.BLOCKSTART, src=tuple(v), arg=(new_ctx, 1, new_child_ctx))
+    ends_to_add = [z for z in new_ctx if z not in current_ctx]
+    while len(ends_to_add):
+      r:UOp = ends_to_add.pop(-1)
+      new_ctx = tuple([z for z in new_ctx if z is not r])
+      end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
+      base_block = UOp(Ops.BLOCKEND, src=(base_block,), arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=1))
+    srcs.append(base_block)
 
   lst = block_reorder(lst[::-1])
   bb = BasicBlock2(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
-block_create = PatternMatcher([(UPat(GroupOp.All-BLOCK_PLUS_DONT_PLACE_IN_BLOCK, name="x"), make_block_bottom_up)])
+block_create = PatternMatcher([(
+  UPat(GroupOp.All-BLOCK_PLUS_DONT_PLACE_IN_BLOCK, name="x"), make_block_bottom_up)
+])
 
 # ***** block merging ****
 
