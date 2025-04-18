@@ -59,13 +59,13 @@ def box_iou(box1, box2):
 def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictions, class_labels,size=640, conf_threshold=0.25):
   h, w = len(image[0]), len(image[0][0])
   for pred in all_predictions: #resize boxes
-      pred[0] *= w / size
-      pred[2] *= w / size
-      pred[1] *= h / size
-      pred[3] *= h / size
-      scale = h / w if h > w else w / h
-      for i in ([0, 2] if h > w else [1, 3]):
-          pred[i] *= scale
+    pred[0] *= w / size
+    pred[2] *= w / size
+    pred[1] *= h / size
+    pred[3] *= h / size
+    scale = h / w if h > w else w / h
+    for i in ([0, 2] if h > w else [1, 3]):
+        pred[i] *= scale
   all_predictions = [all_predictions]
   color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
   font = cv2.FONT_HERSHEY_SIMPLEX
@@ -355,14 +355,14 @@ def convert_f16_safetensor_to_f32(input_file: Path, output_file: Path):
     float32_values.tofile(f)
 
 def compute_iou_matrix(boxes):
-    x1 = Tensor.maximum(boxes[:, None, 0],boxes[:, None, 0])
-    y1 = Tensor.maximum(boxes[:, None, 1], boxes[None, :, 1])
-    x2 = Tensor.minimum(boxes[:, None, 2], boxes[None, :, 2])
-    y2 = Tensor.minimum(boxes[:, None, 3], boxes[None, :, 3])
-    inter = Tensor.maximum(Tensor(0), x2 - x1) * Tensor.maximum(Tensor(0), y2 - y1)
-    area = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-    union = area[:, None] + area[None, :] - inter
-    return inter / union
+  x1 = Tensor.maximum(boxes[:, None, 0],boxes[:, None, 0])
+  y1 = Tensor.maximum(boxes[:, None, 1], boxes[None, :, 1])
+  x2 = Tensor.minimum(boxes[:, None, 2], boxes[None, :, 2])
+  y2 = Tensor.minimum(boxes[:, None, 3], boxes[None, :, 3])
+  inter = Tensor.maximum(Tensor(0), x2 - x1) * Tensor.maximum(Tensor(0), y2 - y1)
+  area = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+  union = area[:, None] + area[None, :] - inter
+  return inter / union
 
 def postprocess(output):
     xc, yc, w, h, class_scores = output[0][0], output[0][1], output[0][2], output[0][3], output[0][4:]
