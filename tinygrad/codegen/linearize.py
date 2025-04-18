@@ -192,8 +192,8 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
       if s.op in {Ops.RANGE, Ops.IF}: this_block_ctx.append(s)
       # don't flow (fully) through assign and store
       elif s.op is Ops.STORE:
-        store_context = temp_block_ctxs[s]
-        this_block_ctx += [x for x in store_context if x.op is Ops.RANGE]
+        idx_context, store_context = temp_block_ctxs[s.src[0]], temp_block_ctxs[s]
+        this_block_ctx += [x for x in store_context if x not in idx_context and x.op is Ops.RANGE]
       elif s.op is Ops.ASSIGN:
         # flow though assign, but remove the ranges used in the assign
         assert s.src[0].op is Ops.DEFINE_ACC
