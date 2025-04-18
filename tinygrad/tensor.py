@@ -858,7 +858,7 @@ class Tensor(SimpleMathTrait):
     for i in reversed(range(1, n)):
       j = Tensor.randint(1, 1, low=0, high=i, device=t.device)[0,0]
       t[i], t[j] = t[j].clone().realize(), t[i].clone().realize()
-    return t.contiguous()
+    return t.realize()
 
   @staticmethod
   def randperm(n: int, generator=None, device=None) -> Tensor:
