@@ -159,9 +159,6 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
 
 block_create = PatternMatcher([(UPat(GroupOp.All-{Ops.BLOCK, Ops.BLOCKEND}, name="x"), lambda ctx,x: make_block_bottom_up(ctx,x))])
 
-def wrap_in_blocks(sink:UOp):
-  return graph_rewrite(sink, block_create, ctx=BlockContext.from_sink(sink), name="Linearizer: Create Blocks", bottom_up=True)
-
 # ***** block merging ****
 
 def merge_block(x:UOp):
@@ -198,10 +195,6 @@ def remove_blockend(x:UOp):
     arg = BasicBlock2(tuple(early_ops)+parent_block.arg.lst+tuple(late_ops), tuple([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt)
     return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src, arg=arg)
 
-block_merge_early = PatternMatcher([
-  (UPat(Ops.BLOCK, name="x"), merge_block),
-])
-
 block_merge = PatternMatcher([
   (UPat((Ops.BLOCK, Ops.BLOCKEND), name="x"), merge_block),
   (UPat(Ops.BLOCKEND, name="x"), remove_blockend),
@@ -212,8 +205,11 @@ block_merge = PatternMatcher([
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
+  # get block context
+  ctx = BlockContext.from_sink(sink)
+
   # wrap all uops in blocks, already reordered
-  sink = wrap_in_blocks(sink)
+  sink = graph_rewrite(sink, block_create, ctx=ctx, name="Linearizer: Create Blocks", bottom_up=True)
 
   # combine matching BLOCKENDS, the keys of this dictionary are the RANGE UOps, values are the BLOCKENDs
   blockends_to_arg: dict[UOp, list[UOp]] = {}
