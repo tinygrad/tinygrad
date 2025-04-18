@@ -165,9 +165,6 @@ def lower_schedule(schedule:list[ScheduleItem]) -> Generator[tuple[ScheduleItem,
 capturing: list = []  # put classes with an add method in here
 
 def run_schedule(schedule:list[ScheduleItem], var_vals:Optional[dict[Variable, int]]=None, do_update_stats=True):
-  if len(capturing) and CAPTURING and hasattr(capturing[0], "scheduled_real_bufs"):
-    capturing[0].scheduled_real_bufs.update(b for si in schedule for b in si.bufs if b not in capturing[0].seen_bufs and b.is_allocated())
-    capturing[0].seen_bufs.update(b for si in schedule for b in si.bufs)
   for si, ei in lower_schedule(schedule):
     if len(capturing) and CAPTURING: capturing[0].add(ei)
     if VALIDATE_WITH_CPU and si.ast.op is Ops.SINK:
