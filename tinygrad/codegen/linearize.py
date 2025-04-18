@@ -110,52 +110,46 @@ class BlockContext:
 # ***** make blocks *****
 
 DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}
-BLOCK_PLUS_DONT_PLACE_IN_BLOCK = DONT_PLACE_IN_BLOCK.union({Ops.BLOCK, Ops.BLOCKEND})
 
 def make_block_bottom_up(ctx:BlockContext, x:UOp):
   # count of times we've seen this block
   unmergable: defaultdict[UOp, int] = defaultdict(int)
-  ended: dict[UOp, UOp] = {}
 
   if x.op is Ops.BLOCKSTART:
-    current_ctx, child_count, child_ctx = x.arg
+    current_ctx, child_ctx = x.arg
     lst = list(x.src)
+    child_count = 1
   else:
     current_ctx, child_count, child_ctx = ctx.block_ctxs[x], ctx.child_count[x], ctx.child_ctxs.get(x, None)
     lst = [x]
 
   # add the srcs of this to the frontier
   # NOTE: things may be in here multiple times, that's okay
+  blockseeds = defaultdict(list)
   frontier_nodes = list(flatten(y.src[::-1] for y in lst))
   while len(frontier_nodes):
     u = frontier_nodes.pop(0)
-    if u.op in DONT_PLACE_IN_BLOCK: unmergable[u] += 1
-    elif (new_ctx:=ctx.block_ctxs[u]) == current_ctx:
-      # block has same context
-      if ctx.child_count[u] == unmergable[u]+1:
-        # if one child, or we have all the chidren, merge it, and put the srcs on the frontier
+    if u.op not in DONT_PLACE_IN_BLOCK and ctx.child_count[u] == unmergable[u]+1:
+      # count is correct
+      if (newctx:=ctx.block_ctxs[u]) == current_ctx:
+        # block has same context, merge it, and put the srcs on the frontier
         lst.append(u)
         frontier_nodes.extend(u.src[::-1])
-        del unmergable[u]
       else:
-        # block has children, it's unmergable
-        unmergable[u] += 1
+        # block has different context, add it to blockseeds
+        blockseeds[(newctx, ctx.child_ctxs.get(u, None))].append(u)
+      del unmergable[u]
     else:
-      # add it to unmergable
+      # count is incorrect (or it's DONT_PLACE_IN_BLOCK), add it to unmergable
       unmergable[u] += 1
 
-  # group the unmergables together
-  blockseeds = defaultdict(list)
+  # add unmergables to sources
   srcs = []
-  for u,cnt in unmergable.items():
-    if u.op not in DONT_PLACE_IN_BLOCK and ctx.child_count[u] == cnt:
-      blockseeds[(ctx.block_ctxs[u], ctx.child_ctxs.get(u, None))].append(u)  # this can seed a block
-    else:
-      srcs += [u]*cnt
+  for u,cnt in unmergable.items(): srcs += [u]*cnt
 
-  # add blockends as needed
+  # add blockseeds, with blockends as needed
   for (new_ctx, new_child_ctx), v in blockseeds.items():
-    base_block = UOp(Ops.BLOCKSTART, src=tuple(v), arg=(new_ctx, 1, new_child_ctx))
+    base_block = UOp(Ops.BLOCKSTART, src=tuple(v), arg=(new_ctx, new_child_ctx))
     ends_to_add = [z for z in new_ctx if z not in current_ctx]
     while len(ends_to_add):
       r:UOp = ends_to_add.pop(-1)
@@ -169,7 +163,7 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
 block_create = PatternMatcher([(
-  UPat(GroupOp.All-BLOCK_PLUS_DONT_PLACE_IN_BLOCK, name="x"), make_block_bottom_up)
+  UPat(GroupOp.All-DONT_PLACE_IN_BLOCK.union({Ops.BLOCK, Ops.BLOCKEND}), name="x"), make_block_bottom_up)
 ])
 
 # ***** block merging ****
