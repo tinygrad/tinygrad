@@ -2,7 +2,8 @@ from typing import Optional, Any, Callable, cast
 import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.dtype import dtypes, ImageDType, PtrDType
+from tinygrad.device import is_dtype_supported
+from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve, graph_rewrite, GroupOp, identity_element
 from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat, gep_pushing
 from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
@@ -139,6 +140,27 @@ load_store_folding = PatternMatcher([
 
 # ***** optional patterns *****
 
+@functools.lru_cache(None)
+def magicgu(vmax:int, d:int) -> tuple[int,int]:
+  # calculate m,s such that x//d == (x*m) >> s for all 0 <= x <= vmax, d>0; adapted from Hacker's Delight, Chapter 10
+  nc = (vmax+1)//(d) * d - 1
+  nbits = vmax.bit_length()
+  for s in range(0, 2*nbits + 1):
+    if 2**s > nc*(d - 1 - (2**s - 1) % d):
+      m = (2**s + d - 1 - (2**s - 1) % d)//d
+      return m, s
+  assert False
+
+def fast_idiv(x: UOp, d: int) -> UOp|None:
+  # idiv is truncated division, but arithmatic shift is floored division, so can only do non-negative numbers!
+  if x.vmin<0: return None
+  sign = 1 if d > 0 else -1
+  m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
+  if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
+  if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype):  # promo_lattice needs to return an unsigned type
+    if m * vmax <= dtypes.max(next_dtype): return sign * ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
+  return None
+
 powers_of_two = {2**i:i for i in range(64)}
 @functools.cache
 def get_late_rewrite_patterns(ops, force_transcendental=False):
@@ -154,6 +176,10 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
     # no reason to check x>=0 for uints
     pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
     pat += [(UPat.var("x", dtypes.sints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None)]
+    if not getenv("DISABLE_FAST_IDIV"):
+      pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda x, d: fast_idiv(x, d.arg))]
+      # TODO: This breaks validate_index because of the way _min_max is calucalted on uops
+      # pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("d"), lambda x, d: x - d*f if (f:=fast_idiv(x, d.arg)) is not None else None)]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]

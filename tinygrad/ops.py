@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, get_args
+from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, get_args, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -93,7 +93,7 @@ class MathTrait(SimpleMathTrait):
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
-  NAME = auto(); SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto(); UNIQUE = auto() # noqa: E702
+  SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto(); UNIQUE = auto() # noqa: E702
 
   # MetaOps
   COPY = auto(); BUFFER_VIEW = auto() # noqa: E702
@@ -151,7 +151,7 @@ class Ops(FastEnum):
 
   # CUSTOMI is inline
   CUSTOM = auto(); CUSTOMI = auto() # noqa: E702
-  IGNORE = auto()
+  IGNORE = auto(); FUSE = auto() # noqa: E702
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
@@ -285,7 +285,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def get_children_map(self) -> dict[UOp, dict[UOp, None]]:
     ret: dict[UOp, dict[UOp, None]] = {}
     for u in self.toposort:
-      for s in u.src: ret.setdefault(s, {})[u] = None
+      ret[u] = {}
+      for s in u.src: ret[s][u] = None
     return ret
 
   @functools.cached_property
@@ -319,9 +320,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def full_shape(self) -> tuple[sint, ...]:
     if self.op is Ops.VIEW: return self.shape
-    # TODO: this exists because wmma creates consts without ShapeTracker in the AST, there's probably a way to fix this
-    parent_shapes = [x.full_shape for x in self.src if x.op not in {Ops.DEFINE_GLOBAL,Ops.DEFINE_LOCAL} and not (x.op is Ops.CONST and x.st is None)]
-    # TODO: this should check if st is None, it cannot because local reduce has implicit movement ops
+    # NOTE: if a parent doesn't have st its full_shape is empty
+    parent_shapes = [x.full_shape for x in self.src]
     return tuple(smax(x) for x in zip(*[x for x in parent_shapes if x != ()]))
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
@@ -345,10 +345,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
   def __float__(self): return self._eval(dtypes.floats, float)
-  def substitute(self, dvars:dict[UOp, UOp]):
+  def substitute(self, dvars:dict[UOp, UOp], name:str|None=None):
     if len(dvars) == 0: return self
-    with Context(TRACK_MATCH_STATS=0):
-      return graph_rewrite(self, _substitute, dvars, bottom_up=True)
+    with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
+      return graph_rewrite(self, _substitute, dvars, bottom_up=True, name=name)
 
   # *** uop syntactic sugar ***
 
@@ -374,7 +374,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.dtype.count == 1
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
-  def cast(self, dtype:DType): return UOp(Ops.CAST, dtype, (self,))
+  def cast(self, dtype:DType):
+    if self.dtype == dtype: return self
+    return UOp(Ops.CAST, dtype, (self,))
   def cast_vec(self, dtype:DType): return UOp(Ops.CAST, dtype.vec(self.dtype.count), (self,))
   def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:Union[tuple[int, ...], int]):
@@ -410,6 +412,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
+  def fuse(self): return self.alu(Ops.FUSE)
 
   # *** from MultiLazyBuffer ***
 
@@ -718,7 +721,7 @@ class UPat(MathTrait):
     assert dtype is None or isinstance(dtype, DType) or all(isinstance(x, DType) for x in dtype), f"invalid dtype {dtype}"
 
     # try all permutations if it's a list
-    if isinstance(src, list): self.src = list(itertools.permutations(src)) if not all_same(src) else [src]
+    if isinstance(src, list): self.src = list(itertools.permutations(src)) if not all_same(src) else [tuple(src)]
     # only one if it's a tuple
     elif isinstance(src, tuple): self.src = [src]
     # repeat if it's a UPat
@@ -759,6 +762,7 @@ class UPat(MathTrait):
   def load(self, *src:UPat, **kwargs): return UPat(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
   def assign(self, x:UPat, **kwargs): return UPat(Ops.ASSIGN, self.dtype, (self,x), **kwargs)
+  def fuse(self): return self.alu(Ops.FUSE)
 
   def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
   def alu(self, op:Ops, *src:UPat):
@@ -807,17 +811,34 @@ def deconstruct_function(fxn:Callable) -> tuple:
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
+@functools.cache
+def upat_interpret(p:UPat, fxn:Callable) -> Callable:
+  real_fxn = types.FunctionType(*deconstruct_function(fxn))
+  if 'ctx' in inspect.signature(real_fxn).parameters:
+    def universal_match(uop, ctx):
+      for match in p.match(uop, {}):
+        if (ret:=real_fxn(ctx=ctx, **match)) is not None: return ret  # pylint: disable=not-callable
+      return None
+  else:
+    def universal_match(uop, _):
+      for match in p.match(uop, {}):
+        if (ret:=real_fxn(**match)) is not None: return ret  # pylint: disable=not-callable
+      return None
+  return universal_match
+
 class PatternMatcher:
-  def __init__(self, patterns:list[tuple[UPat, Callable]]):
-    self.patterns = patterns
+  def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
+    if compiled: from tinygrad.upat import upat_compile
+    # if this comes from a pickle, we reconstruct the lambda functions here
+    self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: dict[Ops, list[tuple[UPat, Callable, set, bool]]] = {}
+    self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
-      real_fxn = types.FunctionType(*tuple_fxn)
-      for uop in p.op: self.pdict.setdefault(uop, []).append((p, real_fxn, p.early_reject, 'ctx' in inspect.signature(real_fxn).parameters))
+      if compiled and (match:=upat_compile(p, fxn)) is not None: pass # pylint: disable=E0606
+      else: match = upat_interpret(p, fxn)
+      for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, p.early_reject))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -826,10 +847,9 @@ class PatternMatcher:
 
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
     ler = {u.op for u in uop.src}
-    for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
+    for _,match,early_reject in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
-      for match in p.match(uop, {}):
-        if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: return ret
+      if (ret:=match(uop, ctx)) is not None: return ret
     return None
 
 # *** tracking pattern matcher ***
@@ -875,20 +895,19 @@ class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
     ret = None
     ler = {u.op for u in uop.src}
-    for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
+    for p,match,early_reject in self.pdict.get(uop.op, []):
       if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
       st = time.perf_counter()
       if not early_reject.issubset(ler):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
-      for match in p.match(uop, {}):
-        if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None:
-          match_stats[p][0] += 1
-          match_stats[p][3] += (et:=time.perf_counter()-st)
-          if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((uop, ret, p))
-          return ret # NOTE: if it returns None, we keep trying to match
+      if (ret:=match(uop, ctx)) is not None:
+        match_stats[p][0] += 1
+        match_stats[p][3] += (et:=time.perf_counter()-st)
+        if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
+        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((uop, ret, p))
+        return ret
       match_stats[p][2] += time.perf_counter()-st
     return None
 
@@ -958,9 +977,12 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
   return rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.top_down_rewrite(sink)
 
 @track_matches
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> dict[UOp, UOp]:
+def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False, input_map=None) -> dict[UOp, UOp]:
   rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
-  return {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
+  new_map = {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
+  if input_map is not None:
+    for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
+  return new_map
 
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
 
@@ -991,7 +1013,7 @@ Variable = UOp
 
 ConstLike = Union[ConstType, Variable, tuple[ConstType, ...]]
 
-# *** UOp merge views and swizzling ***
+# *** UOp merge views ***
 
 merge_views = PatternMatcher([
   # merge adjacent views
@@ -1009,13 +1031,4 @@ merge_views = PatternMatcher([
    lambda v: v.const_like(0) if (mask:=v.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
   # movement ops apply a new view on the base
   (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
-])
-
-view_left = merge_views+PatternMatcher([
-  # do not push masked view before unsafe pad ops
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="e"),), name="view"),
-   lambda e,view: e.contiguous().view(view.st) if any(v.mask is not None for v in view.st.views) else None),
-  # view before elementwise ops
-  (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST}, name="e"),), name="view"),
-   lambda e,view: e.replace(src=tuple(s.view(s.st+view.st) if s.op is Ops.VIEW else s.view(view.st) for s in e.src))),
 ])
