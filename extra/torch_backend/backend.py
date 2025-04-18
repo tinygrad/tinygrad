@@ -104,10 +104,7 @@ def index_tensor(x, y):
 
 @torch.library.impl("aten::index_put", "privateuseone")
 def index_put(self, indices, values, accumulate=False):
-  new_self, values = unwrap(self).clone(), unwrap(values)
-  indices = [unwrap(idx) if isinstance(idx, torch.Tensor) else idx for idx in indices]
-  new_self[indices] = (new_self[indices] + values) if accumulate else values
-  return wrap(new_self.realize())
+  return aten.index_put(self.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in indices], values.cpu(), accumulate).tiny()
 
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None):
