@@ -364,7 +364,7 @@ def compute_iou_matrix(boxes):
   union = area[:, None] + area[None, :] - inter
   return inter / union
 
-def postprocess(output):
+def postprocess(output,max_det=300):
   xc, yc, w, h, class_scores = output[0][0], output[0][1], output[0][2], output[0][3], output[0][4:]
   class_ids = Tensor.argmax(class_scores,axis=0)
   probs = Tensor.max(class_scores, axis=0)
@@ -374,7 +374,7 @@ def postprocess(output):
   x2 = xc + w / 2
   y2 = yc + h / 2
   boxes = Tensor.stack(x1, y1, x2, y2, probs, class_ids, dim=1)
-  order = Tensor.topk(probs,300)[1]
+  order = Tensor.topk(probs,max_det)[1]
   boxes = boxes[order]
   iou = compute_iou_matrix(boxes)
   iou_mask = (iou > 0.45)
