@@ -21,7 +21,9 @@ class TestPickle(unittest.TestCase):
 
   def test_pickle_main_pattern_matcher(self):
     from tinygrad.codegen.devectorizer import sym
-    pickle.dumps(sym)
+    ssym = pickle.dumps(sym)
+    dsym = pickle.loads(ssym)
+    self.assertEqual(dsym.patterns[0][0].location, sym.patterns[0][0].location)
 
   def test_pickle_realized_tensor(self):
     print("** init")

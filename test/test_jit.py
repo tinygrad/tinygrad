@@ -3,7 +3,7 @@ import unittest, functools
 import numpy as np
 
 from hypothesis import given, settings, strategies as strat
-from test.helpers import assert_jit_cache_len
+from test.helpers import assert_jit_cache_len, not_support_multi_device
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.device import Device
@@ -439,7 +439,7 @@ class TestJit(unittest.TestCase):
       ja = jf(a)
       np.testing.assert_allclose(a.numpy(), ja.numpy(), atol=1e-4, rtol=1e-5)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "NV", "AMD"}, "no GPU CI")
+  @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_jitted_transfers(self):
     d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
 
@@ -570,6 +570,24 @@ class TestJitPrune(unittest.TestCase):
       out = w2_prune(a)
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
 
+  def test_prune_w_independent_copy_correct(self):
+    weights = Tensor.rand(16, device="CPU").realize()
+    def w2(x) -> Tensor: return (weights*2).contiguous().to(Device.DEFAULT) + x
+    w2_noprune = TinyJit(w2)
+    w2_prune = TinyJit(w2, prune=True)
+
+    for _ in range(3):
+      a = Tensor.rand(16).realize()
+      out = w2_noprune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+
+    for _ in range(3):
+      a = Tensor.rand(16).realize()
+      out = w2_prune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+
+    assert len(w2_prune.captured.jit_cache) == 1, "prune should have removed the copy"
+
 class TestJitFree(unittest.TestCase):
   def test_free_intermediates(self):
     ext_tensor = Tensor([1,24,23,45,1])
@@ -585,7 +603,19 @@ class TestJitFree(unittest.TestCase):
     savings_after_free = pre_free - GlobalCounters.mem_used
 
     # Different allocator implementations have different savings.
-    self.assertEqual(savings_after_free, 8196 if hasattr(Device[Device.DEFAULT].allocator, '_offset') else 2024)
+    expected_savings = 8196 if hasattr(Device[Device.DEFAULT].allocator, '_offset') else 2024
+
+    self.assertEqual(savings_after_free, expected_savings)
+    out = fxn(Tensor([11,1,2,3,4]))
+    self.assertEqual(out.item(), 13600)
+
+    # Try one more time...
+    pre_free = GlobalCounters.mem_used
+    fxn.captured.free_intermediates()
+    fxn.captured.free_intermediates() # 2nd time to validate
+    savings_after_free = pre_free - GlobalCounters.mem_used
+
+    self.assertEqual(savings_after_free, expected_savings)
     out = fxn(Tensor([11,1,2,3,4]))
     self.assertEqual(out.item(), 13600)
 
@@ -605,8 +635,8 @@ class TestJitFree(unittest.TestCase):
     fxn(Tensor([2]))
     self.assertEqual(x.item(), 8)
 
-  def test_optimize_weights(self):
-    if not hasattr(Device[Device.DEFAULT].allocator, '_offset'): raise unittest.SkipTest("optimize_weights useless")
+  def test_replan_buffers_memory_layout(self):
+    if not hasattr(Device[Device.DEFAULT].allocator, '_offset'): raise unittest.SkipTest("replan_buffers_memory_layout useless")
 
     ext_tensor = Tensor([1,24,23,45,1])
     ext_tensor_2 = Tensor([2,2,2,2,2])
@@ -618,7 +648,7 @@ class TestJitFree(unittest.TestCase):
       out = fxn(Tensor([i,1,2,3,4]))
       self.assertEqual(out.item(), 11400+200*i)
     assert len(set([b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None])) == 4
-    fxn.captured.optimize_weights()
+    fxn.captured.replan_buffers_memory_layout()
     assert len(set([b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None])) == 2
 
     out = fxn(Tensor([11,1,2,3,4]))

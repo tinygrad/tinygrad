@@ -87,7 +87,7 @@ class TestTiny(unittest.TestCase):
 
   # TODO: this is failing because of how swizzling rewrites the ShapeTracker of the final STORE
   @unittest.skipIf(IMAGE>0 or (CI and Device.DEFAULT == "DSP"), "failing because of make things that can't be images not images")
-  def test_mnist_model(self):
+  def test_mnist(self):
     layers = [
       nn.Conv2d(1, 32, 5), Tensor.relu,
       nn.Conv2d(32, 32, 5), Tensor.relu,
