@@ -68,17 +68,10 @@ class TTRenderer(Renderer):
   has_local = False
   global_max = None
 
-  def render_ast(self, ast:UOp) -> str:
-    loads = find_nodes(ast, Ops.LOAD, [])
-    stores = find_nodes(ast, Ops.STORE, [])
 
+  def reader_builder(self, loads, num_tiles) -> str:
     def bl(builder): return '\n'.join([builder(i) for i in range(len(loads))])
-
-    # TODO: support different buffer lengths
-    # TODO: what happens on non divisible by TILE_SIZE?
-    num_tiles = math.ceil(loads[0].size / TILE_SIZE)
-
-    reader = f"""
+    return f"""
 #include <stdint.h>
 #include "dataflow_api.h"
 
@@ -108,7 +101,8 @@ noc_async_read_barrier();
 }}
 """
 
-    writer = f"""
+  def writer_builder(self, num_tiles) -> str:
+    return f"""
 #include "dataflow_api.h"
 
 void kernel_main() {{
@@ -136,6 +130,27 @@ void kernel_main() {{
 }}
 """
 
+  code_for_op: dict = {
+    Ops.SQRT: "sqrt_tile", Ops.RECIP: "recip_tile", Ops.NEG: "negative_tile",
+    Ops.EXP2: "", Ops.LOG2: "", Ops.SIN: "",
+    Ops.AND: "bitwise_and_tile", Ops.XOR: "bitwise_xor_tile", Ops.OR: "bitwise_or_tile",
+    Ops.ADD: "add_tiles", Ops.SUB: "", Ops.MUL: "mul_tiles",
+    Ops.MOD: "", Ops.IDIV: "", Ops.CMPNE: "",
+    Ops.SHR: "right_shift_tile", Ops.SHL: "left_shift_tile", Ops.CMPLT: "",
+    Ops.WHERE: "" }
+
+
+  def render_ast(self, ast:UOp) -> str:
+    loads = find_nodes(ast, Ops.LOAD, [])
+    stores = find_nodes(ast, Ops.STORE, [])
+
+
+    # TODO: support different buffer lengths
+    # TODO: what happens on non divisible by TILE_SIZE?
+    num_tiles = math.ceil(loads[0].size / TILE_SIZE)
+
+    binary_op = stores[0].src[2]
+
     compute = f"""
 #include "compute_kernel_api/eltwise_binary.h"
 #include <cstdint>
@@ -153,7 +168,7 @@ void MAIN {{
 
     binary_op_init_common(cb_inp0, cb_inp1, cb_out0);
 
-    binary_tiles_init<false, EltwiseBinaryType::ELWADD>(cb_inp0, cb_inp1);
+    {self.code_for_op[binary_op.op]}_init(cb_inp0, cb_inp1);
 
     for (uint32_t block = 0; block < per_core_block_cnt; ++block) {{
         cb_wait_front(cb_inp0, per_core_block_size);
@@ -163,7 +178,7 @@ void MAIN {{
         tile_regs_acquire();
 
         for (uint32_t i = 0; i < per_core_block_size; ++i) {{
-            add_tiles(cb_inp0, cb_inp1, i, i, i);
+            {self.code_for_op[binary_op.op]}(cb_inp0, cb_inp1, i, i, i);
         }}
         tile_regs_commit();
 
@@ -180,6 +195,9 @@ void MAIN {{
 }}
 }}
 """
+
+    reader = self.reader_builder(loads, num_tiles)
+    writer = self.writer_builder(num_tiles)
 
     cbs_read = [f"{op.op}:{op.src[0].arg}:{op.dtype.name}:{op.dtype.itemsize}" for op in loads]
     cbs_write = [f"{op.op}:{op.src[0].arg}:{op.src[2].dtype.name}:{op.src[2].dtype.itemsize}" for op in stores]
@@ -219,6 +237,9 @@ class TTProgram:
 
 
     compute_config = tt_metal.ComputeConfig()
+    compute_config.math_approx_mode = False
+    compute_config.fp32_dest_acc_en = True
+    compute_config.math_fidelity = gbl.MathFidelity.HiFi4
     self.eltwise_sfpu_kernel_id = tt_metal.CreateKernelFromString(self.prog, compute_src, self.core, compute_config)
 
 
