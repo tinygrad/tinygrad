@@ -6,9 +6,11 @@ from tinygrad.device import Buffer, Device
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.ops import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
-from tinygrad.engine.jit import MultiGraphRunner, GraphException
+from tinygrad.engine.jit import GraphRunner, GraphException
 
-class CUDAGraph(MultiGraphRunner):
+class CUDAGraph(GraphRunner):
+  supports_multi = True
+
   def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 

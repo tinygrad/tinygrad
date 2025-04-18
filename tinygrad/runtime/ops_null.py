@@ -1,5 +1,5 @@
 from tinygrad.device import Compiled, Compiler, Renderer, Allocator
-from tinygrad.engine.jit import MultiGraphRunner
+from tinygrad.engine.jit import GraphRunner
 
 class NullRenderer(Renderer):
   device = "NULL"
@@ -17,7 +17,9 @@ class NullAllocator(Allocator):
   def _copyout(self, dest:memoryview, src): pass
   def _transfer(self, dest, src, sz:int, src_dev, dest_dev): pass
 
-class NullGraph(MultiGraphRunner):
+class NullGraph(GraphRunner):
+  supports_multi = True
+
   def __call__(self, input_rawbuffers, var_vals, wait=False) -> float|None: return 1e-3
 
 class NullDevice(Compiled):
