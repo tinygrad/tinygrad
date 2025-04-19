@@ -654,5 +654,20 @@ class TestJitFree(unittest.TestCase):
     out = fxn(Tensor([11,1,2,3,4]))
     self.assertEqual(out.item(), 13600)
 
+  def test_recycles_redundant_allocated_bufs(self):
+    @TinyJit
+    def fxn() -> Tensor:
+      acc = Tensor.zeros(5)
+      for _ in range(100): acc = (acc + Tensor.arange(0,5)).realize()
+      return acc
+    for _ in range(3):
+      out = fxn()
+      self.assertEqual(out.tolist(), [0.0, 100.0, 200.0, 300.0, 400.0])
+    num_bufs = len(set(b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None))
+    if hasattr(Device[Device.DEFAULT].allocator, "_offset"):
+      self.assertEqual(num_bufs, 2)
+    else:
+      self.assertEqual(num_bufs, 3)
+
 if __name__ == '__main__':
   unittest.main()
