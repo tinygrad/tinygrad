@@ -323,24 +323,24 @@ def compute_iou_matrix(boxes):
   return iou
 
 def postprocess(output, max_det=300):
-    xc, yc, w, h, class_scores = output[0][0], output[0][1], output[0][2], output[0][3], output[0][4:]
-    class_ids = Tensor.argmax(class_scores, axis=0)
-    probs = Tensor.max(class_scores, axis=0)
-    probs = Tensor.where(probs >= 0.25, probs, 0)
-    x1 = xc - w / 2
-    y1 = yc - h / 2
-    x2 = xc + w / 2
-    y2 = yc + h / 2
-    boxes = Tensor.stack(x1, y1, x2, y2, probs, class_ids, dim=1)
-    order = Tensor.topk(probs, max_det)[1]
-    boxes = boxes[order]
-    iou = compute_iou_matrix(boxes[:, :4])
-    iou = Tensor.triu(iou, diagonal=1)
-    same_class_mask = boxes[:, -1][:, None] == boxes[:, -1][None, :]
-    high_iou_mask = (iou > 0.45) & same_class_mask
-    no_overlap_mask = high_iou_mask.sum(axis=0) == 0
-    boxes = boxes * no_overlap_mask.unsqueeze(-1)
-    return boxes
+  xc, yc, w, h, class_scores = output[0][0], output[0][1], output[0][2], output[0][3], output[0][4:]
+  class_ids = Tensor.argmax(class_scores, axis=0)
+  probs = Tensor.max(class_scores, axis=0)
+  probs = Tensor.where(probs >= 0.25, probs, 0)
+  x1 = xc - w / 2
+  y1 = yc - h / 2
+  x2 = xc + w / 2
+  y2 = yc + h / 2
+  boxes = Tensor.stack(x1, y1, x2, y2, probs, class_ids, dim=1)
+  order = Tensor.topk(probs, max_det)[1]
+  boxes = boxes[order]
+  iou = compute_iou_matrix(boxes[:, :4])
+  iou = Tensor.triu(iou, diagonal=1)
+  same_class_mask = boxes[:, -1][:, None] == boxes[:, -1][None, :]
+  high_iou_mask = (iou > 0.45) & same_class_mask
+  no_overlap_mask = high_iou_mask.sum(axis=0) == 0
+  boxes = boxes * no_overlap_mask.unsqueeze(-1)
+  return boxes
 
 def clip_boxes(boxes, shape):
   boxes[..., [0, 2]] = np.clip(boxes[..., [0, 2]], 0, shape[1])  # x1, x2
@@ -358,14 +358,14 @@ def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
   return boxes_np
 
 def get_scaling_and_padding(img, new_shape=(640, 640), stride=32, auto=False):
-        shape = img.shape[:2]  # [height, width]
-        r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
-        new_unpad = (int(round(shape[1] * r)), int(round(shape[0] * r)))  # (resized_width, resized_height)
-        dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]
-        dw, dh = (np.mod(dw, stride), np.mod(dh, stride)) if auto else (dw, dh)  # Use full padding
-        top = dh / 2
-        left = dw / 2
-        return r, top, left
+  shape = img.shape[:2]  # [height, width]
+  r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+  new_unpad = (int(round(shape[1] * r)), int(round(shape[0] * r)))  # (resized_width, resized_height)
+  dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]
+  dw, dh = (np.mod(dw, stride), np.mod(dh, stride)) if auto else (dw, dh)  # Use full padding
+  top = dh / 2
+  left = dw / 2
+  return r, top, left
 
 def get_weights_location(yolo_variant: str) -> Path:
   weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
