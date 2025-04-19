@@ -14,14 +14,13 @@ class TestTorchBackend(unittest.TestCase):
   def test_randperm_generator_out(self):
     n = 10
     out = torch.empty(n, dtype=torch.long, device=device)
-    res = torch.randperm(n, out=out).cpu().numpy()
+    res = torch.randperm(n, generator=torch.Generator(device='cpu').manual_seed(0), out=out).cpu().numpy()
     np.testing.assert_equal(set(res), set(range(n)))
     np.testing.assert_equal(out.cpu().numpy(), res)
+    np.testing.assert_equal(res, [5, 2, 8, 1, 3, 7, 9, 6, 0, 4])
 
     res2 = torch.randperm(n).cpu().numpy()
     np.testing.assert_equal(set(res2), set(range(n)))
-    np.testing.assert_equal(np.any(res2 != res), True)
-    print(res2)
 
   def test_numpy_ones(self):
     a = torch.ones(4, device=device)
