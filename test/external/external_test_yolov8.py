@@ -28,7 +28,6 @@ class TestYOLOv8(unittest.TestCase):
       img = cv2.imdecode(np.frombuffer(fetch(test_image_urls[i]).read_bytes(), np.uint8), 1)
       test_image = preprocess([img])
       predictions = TinyYolov8(test_image)
-      #post_predictions = postprocess(preds=predictions, img=test_image, orig_imgs=[img])
       labels = label_predictions(predictions)
       print(i,labels)
       assert labels == {5: 1, 0: 4, 11: 1} if i == 0 else labels == {0: 12, 29: 1, 32: 1}
@@ -60,6 +59,7 @@ class TestYOLOv8(unittest.TestCase):
     onnx_output = onnx_session.run([onnx_output_name], {onnx_input_name: input_image.numpy()})
 
     tiny_output = TinyYolov8(input_image,do_postprocess=False)
+    
     # currently rtol is 0.025 because there is a 1-2% difference in our predictions
     # because of the zero padding in SPPF module (line 280) maxpooling layers rather than the -infinity in torch.
     # This difference does not make a difference "visually".
