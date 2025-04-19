@@ -206,6 +206,12 @@ truncate: dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value,
   dtypes.int64: lambda x: ctypes.c_int64(x).value}
 
+try:
+  from extra.fp8_conversions import float_to_fp8, fp8_to_float # noqa: F401 # pylint: disable=unused-import
+  truncate.update({dtypes.fp8e4m3: lambda x: fp8_to_float(float_to_fp8(x, "E4M3"), "E4M3"),
+                   dtypes.fp8e5m2: lambda x: fp8_to_float(float_to_fp8(x, "E5M2"), "E5M2")})
+except ImportError: pass
+
 # numpy and torch dtype interop
 
 def _to_np_dtype(dtype:DType) -> Optional[type]:
