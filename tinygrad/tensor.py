@@ -852,21 +852,13 @@ class Tensor(SimpleMathTrait):
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
   @staticmethod
-  def shuffle(t: Tensor) -> Tensor:
-    n = int(t.shape[0])
-    t = t.contiguous()
-    for i in reversed(range(1, n)):
-      j = Tensor.randint(1, 1, low=0, high=i, device=t.device)[0,0]
-      t[i], t[j] = t[j].clone().realize(), t[i].clone().realize()
-    return t.realize()
-
-  @staticmethod
-  def randperm(n: int, generator=None, device=None) -> Tensor:
-    t = Tensor.arange(n, device=device, dtype=dtypes.int32)
+  def randperm(n: int, *, generator=None, device=None, dtype=dtypes.int32) -> Tensor:
     if generator is not None:
-      seed = generator.initial_seed()
-      Tensor.manual_seed(seed)
-    return Tensor.shuffle(t)
+      Tensor.manual_seed(generator.initial_seed())
+
+    r = Tensor.rand(n, device=device)
+    _, indices = r.sort()
+    return indices.cast(dtype)
 
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
     assert 1 <= self.ndim <= 2 and num_samples > 0, f"{self.ndim=} must be 1 or 2 dim, {num_samples=} must be positive"
