@@ -321,11 +321,11 @@ def compute_iou_matrix(boxes):
   iou = intersection / (areas[:, None] + areas[None, :] - intersection)
   return iou
 
-def postprocess(output, max_det=300):
+def postprocess(output, max_det=300, conf_threshold=0.25):
   xc, yc, w, h, class_scores = output[0][0], output[0][1], output[0][2], output[0][3], output[0][4:]
   class_ids = Tensor.argmax(class_scores, axis=0)
   probs = Tensor.max(class_scores, axis=0)
-  probs = Tensor.where(probs >= 0.25, probs, 0)
+  probs = Tensor.where(probs >= conf_threshold, probs, 0)
   x1 = xc - w / 2
   y1 = yc - h / 2
   x2 = xc + w / 2
