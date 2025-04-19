@@ -54,6 +54,7 @@ struct CustomNoOpDeviceGuardImpl : public c10::impl::DeviceGuardImplInterface
     return Stream(Stream::DEFAULT, Device(D, 0));
   }
   DeviceIndex deviceCount() const noexcept override {
+    // TODO: stub
     return 1;
   }
   // Event-related functions
@@ -97,6 +98,9 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
       : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes) {
     this->sizes_and_strides_.set_strides(strides);
     this->storage_offset_ = storage_offset;
+    // TODO: a hack around is_alias_of checks
+    this->storage_ = c10::Storage(c10::make_intrusive<StorageImpl>(c10::StorageImpl::use_byte_size_t(), 0, at::DataPtr(nullptr, device), nullptr, false));
+    TensorImpl::storage_access_should_throw_ = false; 
   }
 };
 }
@@ -141,4 +145,11 @@ py::object unwrap_tensor(const at::Tensor &tensor) {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("wrap", &wrap_tensor);
   m.def("unwrap", &unwrap_tensor);
+}
+
+// TODO: do we need autograd for these?
+TORCH_LIBRARY_IMPL(c10d, AutogradPrivateUse1, m) {
+  m.impl("allgather_", torch::CppFunction::makeFallthrough());
+  m.impl("broadcast_", torch::CppFunction::makeFallthrough());
+  m.impl("allreduce_", torch::CppFunction::makeFallthrough());
 }

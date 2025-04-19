@@ -38,10 +38,13 @@ def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
     real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
     offset = v.offset + sum(st*(s-1) for s,st in zip(real_shape, v.strides) if st<0)
     real_offset = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
-    real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
-    strides: List[int] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
+    nonzero = [(s, st) for s, st in zip(real_shape, v.strides) if st != 0]
+    real_real_shape = [s for s, st in nonzero]
+    strides: List[int] = [abs(st) for s, st in nonzero]
     buffer_size = sum((s-1)*st for s,st in zip(real_real_shape,strides)) + 1
-    if i: buffer_size = prod(st.views[i-1].shape) - real_offset
+    if i:
+      if nonzero: buffer_size = prod(st.views[i-1].shape) - real_offset
+      else: buffer_size = 1
     def sort_by_strides(shape, strides): return sorted(zip(shape, strides), key=lambda k: (k[1],-k[0]), reverse=True), sorted(range(len(strides)), key=lambda k: (strides[k],-real_real_shape[k]), reverse=True)
     ordered_shape_strides, order = sort_by_strides(real_real_shape, strides)
     to_apply.extend([(MovementOps.RESHAPE, (-1,)), (MovementOps.SHRINK, ((real_offset, real_offset+buffer_size),))])
@@ -61,7 +64,7 @@ def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
           to_apply.append((MovementOps.RESHAPE, (*[s[0] for s in ordered_shape_strides[:i+1]], shape_stride[1])))
       to_apply.extend([(MovementOps.SHRINK, (*[(0, s[0]) for s in ordered_shape_strides], (0,1))), (MovementOps.RESHAPE, tuple(s[0] for s in ordered_shape_strides))])
       if order != list(range(len(order))): to_apply.append((MovementOps.PERMUTE, tuple(order.index(i) for i in range(len(strides)))))
-    to_apply.append((MovementOps.RESHAPE, tuple(s if st else 1 for s,st in zip(real_shape, v.strides))))
+    to_apply.append((MovementOps.RESHAPE, tuple(s if st != 0 else 1 for s, st in zip(real_shape, v.strides))))
     if any(i<0 for i in v.strides): to_apply.append((MovementOps.STRIDE, tuple(-1 if st<0 else 1 for st in v.strides)))
     # then, we apply pre expand pads
     if v.mask is not None:
