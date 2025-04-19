@@ -134,8 +134,7 @@ def label_predictions(all_predictions):
   for pred in predictions_list:
     prob = pred[4]
     class_id = int(pred[5])
-    if prob != 0:
-        class_counts[class_id] += 1
+    if prob != 0: class_counts[class_id] += 1
   return dict(class_counts)
 
 #this is taken from https://github.com/tinygrad/tinygrad/pull/784/files by dc-dc-dc (Now 2 models use upsampling)
