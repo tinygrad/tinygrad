@@ -5,14 +5,14 @@ from extra.fp8_conversions import float_to_fp8, fp8_to_float
 
 class TestFp8sConversions(unittest.TestCase):
     def test_float_to_fp8e4m3(self):
-        test_values = [(0.0, 0),(0.1, 29),(0.2, 37),(0.3, 42),(0.4, 45),(0.5, 48),(1, 56),(2, 64),(5, 74),(math.nan, math.nan)
+        test_values = [(0.0, 0),(0.1, 29),(0.2, 37),(0.3, 42),(0.4, 45),(0.5, 48),(1, 56),(2, 64),(5, 74),(math.nan, math.nan),
                         (5.1, 74),(5.2, 74),(5.3, 75),(448, 126),(100000, 126),(-1, 184),(-2, 192),(-3, 196),(-100000, 254),]
         for value, expected_fp8 in test_values:
             fp8 = float_to_fp8(value, "E4M3")
             np.testing.assert_equal(fp8, expected_fp8)
 
     def test_float_to_fp8e5m2(self):
-        test_values = [(0.0, 0),(0.1, 46),(0.2, 50),(0.3, 53),(0.4, 54),(0.5, 56),(1, 60),(2, 64),(5, 69),(math.nan, math.nan)
+        test_values = [(0.0, 0),(0.1, 46),(0.2, 50),(0.3, 53),(0.4, 54),(0.5, 56),(1, 60),(2, 64),(5, 69),(math.nan, math.nan),
                          (5.1, 69),(5.2, 69),(5.3, 69),(57344, 123),(500000, 123),(-1, 188),(-2, 192),(-3, 194),(-100000, 251),]
         for value, expected_fp8 in test_values:
             fp8 = float_to_fp8(value, "E5M2")
