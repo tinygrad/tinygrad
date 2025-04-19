@@ -25,6 +25,11 @@ class TestSetitem(unittest.TestCase):
       n[slc] = val.numpy() if isinstance(val, Tensor) else val
       np.testing.assert_allclose(t.numpy(), n)
 
+  def test_padded_setitem(self):
+    t = Tensor.arange(10)
+    t[4:1:-2] = 11
+    self.assertListEqual(t.tolist(), [0, 1, 11, 3, 11, 5, 6, 7, 8, 9])
+
   def test_setitem_into_unrealized(self):
     t = Tensor.arange(4).reshape(2, 2)
     t[1] = 5

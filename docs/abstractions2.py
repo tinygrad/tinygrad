@@ -78,6 +78,7 @@ print("******** third, the UOp ***********")
 
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule_with_vars
+from tinygrad.engine.grouper import get_becomes_map
 
 # allocate some values + load in values
 a = UOp.new_buffer(DEVICE, 1, dtypes.int32)
@@ -89,7 +90,19 @@ b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
 out = a + b
 s = UOp(Ops.SINK, dtypes.void, (out,))
 
-# schedule the computation as a list of kernels
+# group the computation into kernels
+becomes_map = get_becomes_map(s)
+
+# the compute maps to an assign
+assign = becomes_map[a+b]
+
+# the first source is the output buffer (data)
+assert assign.src[0].op is Ops.BUFFER
+# the second source is the kernel (compute)
+assert assign.src[1].op is Ops.KERNEL
+
+# schedule the kernel graph in a linear list
+s = UOp(Ops.SINK, dtypes.void, (assign,))
 sched, _, becomes_map = create_schedule_with_vars(s)
 assert len(sched) == 1
 
@@ -98,7 +111,7 @@ print(sched[-1].ast)
 # NOTE: sched[-1].ast is the same as st_0 above
 
 # the output will be stored in a new buffer
-out = becomes_map[a+b]
+out = becomes_map[assign]
 assert out.op is Ops.BUFFER and not out.buffer.is_allocated()
 print(out)
 

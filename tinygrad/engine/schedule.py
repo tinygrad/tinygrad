@@ -3,7 +3,6 @@ from collections import deque
 from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
 from tinygrad.device import Buffer
 from tinygrad.helpers import Metadata, DEBUG, unwrap
-from tinygrad.engine.grouper import get_becomes_map
 
 # **** ScheduleItem return type
 
@@ -34,14 +33,11 @@ pm_unbind = PatternMatcher([
 
 # **** schedule linearizer
 
-def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  becomes_map = get_becomes_map(big_sink)
-  sched_sink = UOp.sink(*[becomes_map.get(x,x) for x in big_sink.src])
-
+def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   # bfs toposort
   children: dict[UOp, list[UOp]] = {}
   in_degree: dict[UOp, int] = {}
-  for u in sched_sink.toposort:
+  for u in (toposort:=sched_sink.toposort):
     if u.op is not Ops.ASSIGN: continue
     in_degree[u] = 0
     for s in u.src[1].src:
@@ -67,11 +63,27 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
   # map ASSIGN to BUFFER after ScheduleItems are constructed
-  for k,v in becomes_map.items():
-    if v.base.op is Ops.ASSIGN:
-      # if the UOp was already an assign Tensor UOp we just map it to the existing buffer
-      if k.op is Ops.ASSIGN: becomes_map[k] = k.src[0]
-      # otherwise we map it to the new buffer, ignoring NOOP ShapeTrackers
-      else: becomes_map[k] = new_buf if (new_buf:=v.base.src[0]).st == v.st else new_buf.view(unwrap(v.st))
+  becomes_map: dict[UOp, UOp] = {}
+  for u in toposort:
+    if u.op is not Ops.ASSIGN: continue
+    target = u.src[0]
+    assert target.op in {Ops.BUFFER, Ops.BUFFER_VIEW}, f"ASSIGN target must be buffer or subbuffer {u}"
+
+    # if it's a BUFFER, we just map the ASSIGN to that BUFFER
+    if target.op is Ops.BUFFER:
+      becomes_map[u] = target
+      continue
+
+    # if it's a subbuffer, the ASSIGN becomes a SHRINK on the underlying BUFFER (with an optional offset and mask)
+    base_buffer = next(s for s in target.toposort if s.op is Ops.BUFFER)
+    # get the start and end positions of the subbuffer
+    if isinstance(offset:=target.arg[1], UOp): offset = target.arg[1].vmax
+    r = UOp.variable("r", offset, offset+target.size)
+    # tolerate padded setitem
+    if r.vmax > base_buffer.size:
+      sub_buffer = base_buffer.shrink(((r.vmin, base_buffer.size),)).pad(((0, r.vmax-base_buffer.size),))
+    else: sub_buffer = base_buffer.shrink((r._min_max,))
+    assert sub_buffer.st.shape == (target.size,) and len(sub_buffer.st.views) == 1, f"size/shape mistmatch {sub_buffer.st.views} {target.size}"
+    becomes_map[u] = sub_buffer
 
   return schedule, var_vals, becomes_map
