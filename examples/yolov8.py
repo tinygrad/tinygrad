@@ -357,16 +357,6 @@ def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
   boxes_np = clip_boxes(boxes_np, img0_shape)
   return boxes_np
 
-def get_scaling_and_padding(img, new_shape=(640, 640), stride=32, auto=False):
-  shape = img.shape[:2]  # [height, width]
-  r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
-  new_unpad = (int(round(shape[1] * r)), int(round(shape[0] * r)))  # (resized_width, resized_height)
-  dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]
-  dw, dh = (np.mod(dw, stride), np.mod(dh, stride)) if auto else (dw, dh)  # Use full padding
-  top = dh / 2
-  left = dw / 2
-  return r, top, left
-
 def get_weights_location(yolo_variant: str) -> Path:
   weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
   fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location)
@@ -419,4 +409,3 @@ if __name__ == '__main__':
 #  2. AST exp overflow warning while on cpu
 #  3. Make NMS faster
 #  4. Add video inference and webcam support
-
