@@ -1,7 +1,7 @@
 # tinygrad is a tensor library, and as a tensor library it has multiple parts
 # 1. a "runtime". this allows buffer management, compilation, and running programs
 # 2. a "Device" that uses the runtime but specifies compute in an abstract way for all
-# 3. a "LazyBuffer" that fuses the compute into kernels, using memory only when needed
+# 3. a "UOp" that fuses the compute into kernels, using memory only when needed
 # 4. a "Tensor" that provides an easy to use frontend with autograd ".backward()"
 
 
@@ -74,7 +74,7 @@ fxn.exec([out, a, b])
 assert out.as_buffer().cast('I')[0] == 5
 
 
-print("******** third, the LazyBuffer ***********")
+print("******** third, the UOp ***********")
 
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule_with_vars
@@ -86,17 +86,21 @@ a.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
 b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
 
 # describe the computation
-out = a.alu(Ops.ADD, b)
+out = a + b
+s = UOp(Ops.SINK, dtypes.void, (out,))
 
 # schedule the computation as a list of kernels
-sched, _, becomes_map = create_schedule_with_vars(out.sink())
-for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CPU
-# NOTE: UOps are no longer mutable, the scheduler gives you a map to lookup which BUFFER the result was written to
-out = becomes_map[out]
+sched, _, becomes_map = create_schedule_with_vars(s)
+assert len(sched) == 1
 
 # DEBUGGING: print the compute ast
 print(sched[-1].ast)
 # NOTE: sched[-1].ast is the same as st_0 above
+
+# the output will be stored in a new buffer
+out = becomes_map[a+b]
+assert out.op is Ops.BUFFER and not out.buffer.is_allocated()
+print(out)
 
 # run that schedule
 run_schedule(sched)
