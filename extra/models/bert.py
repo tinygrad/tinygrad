@@ -275,7 +275,9 @@ class BertSelfAttention:
     key_layer = self.transpose_for_scores(mixed_key_layer)
     value_layer = self.transpose_for_scores(mixed_value_layer)
 
-    context_layer = Tensor.scaled_dot_product_attention(query_layer, key_layer, value_layer, attention_mask, self.dropout)
+    //context_layer = Tensor.scaled_dot_product_attention(query_layer, key_layer, value_layer, attention_mask, self.dropout)
+
+    context_layer = flash_attention(query_layer, key_layer, value_layer, attention_mask, self.dropout)
 
     context_layer = context_layer.transpose(1, 2)
     context_layer = context_layer.reshape(context_layer.shape[0], context_layer.shape[1], self.all_head_size)
@@ -297,3 +299,7 @@ class BertSelfOutput:
     hidden_states = hidden_states.dropout(self.dropout)
     hidden_states = self.LayerNorm(hidden_states + input_tensor)
     return hidden_states
+
+def flash_attention(q: Tensor, k: Tensor, v: Tensor, mask: Tensor = None, dropout: float = 0.0) -> Tensor:
+    # TODO: implement FlashAttention (block-wise, memory-efficient attention)
+    raise NotImplementedError("FlashAttention kernel coming soon")
