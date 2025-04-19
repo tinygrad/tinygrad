@@ -75,7 +75,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     else:
       base = next(s for s in target.toposort if s.op is Ops.BUFFER)
       #raise Exception(base, target.size, target.arg[1])
-      ret = base.shrink(((target.arg[1], target.size,),))
+      ret = base.shrink(((offset:=target.arg[1], offset+target.size,),))
       assert ret.st.shape == (target.size,) and len(ret.st.views) == 1, f"size/shape mistmatch {ret.st.views} {target.size}"
       assert ret.st.views[0].offset == target.arg[1], f"offset mistmatch {ret.st.views[0].offset} {target.arg[1]}"
       becomes_map[u] = ret
