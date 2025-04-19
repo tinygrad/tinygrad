@@ -1,5 +1,6 @@
 import unittest
 from tinygrad.device import CompileError, Device, Compiler
+from tinygrad import Tensor
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
@@ -73,3 +74,32 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
 """)
     with self.assertRaises(RuntimeError):
       MetalProgram(device, "r_5", compiled)
+
+  def test_multi_device_synchronization(self):
+    NUM_DEVICES = 4
+    devices = tuple(f"METAL:{i}" for i in range(NUM_DEVICES))
+
+    tensors = []
+    for device in devices:
+      t = Tensor.randn(100, 100, device=device)
+      tensors.append(t)
+
+    results = []
+    for i, t in enumerate(tensors):
+      result = t.matmul(t)
+      result.realize()
+      results.append(result)
+
+    for i in range(1, NUM_DEVICES):
+      transfer = results[0].to(device=devices[i])
+      transfer.realize()
+
+    for i in range(1, NUM_DEVICES):
+      transfer = results[i].to(device=devices[0])
+      transfer.realize()
+
+    for i in range(NUM_DEVICES):
+      src = i
+      dst = (i + 1) % NUM_DEVICES
+      transfer = results[src].to(device=devices[dst])
+      transfer.realize()
