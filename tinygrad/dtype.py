@@ -3,7 +3,6 @@ from typing import Final, Optional, ClassVar, Union, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
-from extra.fp8_conversions import float_to_fp8, fp8_to_float
 
 ConstType = Union[float, int, bool]
 
@@ -200,13 +199,17 @@ def truncate_bf16(x):
   return bf
 
 truncate: dict[DType, Callable] = {dtypes.bool: bool,
-  dtypes.fp8e4m3: lambda x: fp8_to_float(float_to_fp8(x, "E4M3"), "E4M3"), dtypes.fp8e5m2: lambda x: fp8_to_float(float_to_fp8(x, "E5M2"), "E5M2"),
   dtypes.float16: truncate_fp16, dtypes.bfloat16: truncate_bf16,
   dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value,
   dtypes.int64: lambda x: ctypes.c_int64(x).value}
+
+try:
+  from extra.fp8_conversions import float_to_fp8, fp8_to_float # noqa: F401 # pylint: disable=unused-import
+  truncate.update({dtypes.fp8e4m3: lambda x: fp8_to_float(float_to_fp8(x, "E4M3"), "E4M3"), dtypes.fp8e5m2: lambda x: fp8_to_float(float_to_fp8(x, "E5M2"), "E5M2")})
+except ImportError: pass
 
 # numpy and torch dtype interop
 
