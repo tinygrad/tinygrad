@@ -234,7 +234,7 @@ function sendMessageToWorker(worker, message) {
   });
 }
 
-async function load_state_dict (data, device, progress) {
+async function load_state_dict (data, progress) {
   let state_dict = data.metadata.state_dict;
   let completed = 0;
 
@@ -282,9 +282,10 @@ async function load_state_dict (data, device, progress) {
 
   // instantiates empty weight buffers on WebGPU, attaches buffers to state_dict
   let model;
+  let device;
   if (window.BACKEND === "WebGPU") {
     //model = await transformer().setup(device, state_dict, progress);
-    model = await transformer.setupNet(device, state_dict);
+    [model, device] = await transformer.setupNet(state_dict);
     progress(0.15 * progress.total);
 
   }
@@ -403,11 +404,11 @@ document.addEventListener("alpine:init", () => {
     progress: null,
 
     async init() {
-      var device = null;
+      //var device = null;
       var webgpuErrorMessage = null;
       if (window.BACKEND === "WebGPU") {
         try {
-          device = await getDevice.call(this);
+          const device = await getDevice.call(this);
           console.log("WebGPU device initialized");
         } catch (error) {
           window.BACKEND = "WASM";
@@ -502,7 +503,7 @@ document.addEventListener("alpine:init", () => {
         const loadModelMessage = (webgpuErrorMessage) ? webgpuErrorMessage : `Loading ${window.BACKEND} model:`
         this.progress(0, loadModelMessage);
         await kernelsReady;
-        const model = await load_state_dict(data, device, this.progress);
+        const model = await load_state_dict(data, this.progress);
 
         if (window.BACKEND === "WebGPU") {
           this.nets = {"transformer": model};
@@ -688,7 +689,8 @@ document.addEventListener("alpine:init", () => {
       this.progress(0, this.loadingMessage);
       for (const tok of unprocessedPrefillToks) {
         if (this.cancelGeneration) {this.loadingMessage=""; return;}
-        if (window.BACKEND === "WebGPU") {await this.nets["transformer"](new Int32Array([tok]), new Int32Array([startPos]));}
+        //if (window.BACKEND === "WebGPU") {await this.nets["transformer"](new Int32Array([tok]), new Int32Array([startPos]));}
+        if (window.BACKEND === "WebGPU") {await this.nets["transformer"](new Int32Array([tok]), startPos);}
         else {await this.nets["transformer"](tok, startPos);}
         this.lastSeenToks.push(tok)
         startPos += 1;
@@ -698,7 +700,8 @@ document.addEventListener("alpine:init", () => {
 
       let lastTok = tokens[tokens.length - 1];
       while (true) {
-        if (window.BACKEND === "WebGPU") {var tok = await this.nets["transformer"](new Int32Array([lastTok]), new Int32Array([startPos])); tok = tok[0][0];}
+        //if (window.BACKEND === "WebGPU") {var tok = await this.nets["transformer"](new Int32Array([lastTok]), new Int32Array([startPos])); tok = tok[0][0];}
+        if (window.BACKEND === "WebGPU") {var tok = await this.nets["transformer"](new Int32Array([lastTok]), startPos); tok = tok[0][0];}
         else {var tok = await this.nets["transformer"](lastTok, startPos);}
         this.lastSeenToks.push(lastTok); // lets us skip prefilling with these tokens at the next prompt in this chain
         startPos += 1;
