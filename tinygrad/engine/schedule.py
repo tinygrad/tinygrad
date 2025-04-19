@@ -81,7 +81,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     r = UOp.variable("r", offset, offset+target.size)
     # tolerate padded setitem
     if r.vmax > base_buffer.size:
-      sub_buffer = base_buffer.shrink(((r.vmin, base.size),)).pad(((0, r.vmax-base.size),))
+      sub_buffer = base_buffer.shrink(((r.vmin, base_buffer.size),)).pad(((0, r.vmax-base_buffer.size),))
     else: sub_buffer = base_buffer.shrink((r._min_max,))
     assert sub_buffer.st.shape == (target.size,) and len(sub_buffer.st.views) == 1, f"size/shape mistmatch {sub_buffer.st.views} {target.size}"
     becomes_map[u] = sub_buffer
