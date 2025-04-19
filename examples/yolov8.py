@@ -282,11 +282,11 @@ class YOLOv8:
     self.fpn = Yolov8NECK(w, r, d)
     self.head = DetectionHead(num_classes, filters=(int(256*w), int(512*w), int(512*w*r)))
 
-  def __call__(self, x):
+  def __call__(self, x, do_postprocess=True):
     x = self.net(x)
     x = self.fpn(*x)
     x = self.head(x)
-    return postprocess(x)
+    return postprocess(x) if do_postprocess else x
 
   def return_all_trainable_modules(self):
     backbone_modules = [*range(10)]
