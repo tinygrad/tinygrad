@@ -44,15 +44,6 @@ def preprocess(im, imgsz=640, model_stride=32, model_pt=True):
 
 
 def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictions, class_labels,size=640, conf_threshold=0.25):
-  h, w = len(image[0]), len(image[0][0])
-  for pred in all_predictions: #resize boxes
-    pred[0] *= w / size
-    pred[2] *= w / size
-    pred[1] *= h / size
-    pred[3] *= h / size
-    scale = h / w if h > w else w / h
-    for i in ([0, 2] if h > w else [1, 3]):
-      pred[i] *= scale
   all_predictions = [all_predictions]
   color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
   font = cv2.FONT_HERSHEY_SIMPLEX
@@ -351,6 +342,31 @@ def postprocess(output, max_det=300):
     boxes = boxes * no_overlap_mask.unsqueeze(-1)
     return boxes
 
+def clip_boxes(boxes, shape):
+  boxes[..., [0, 2]] = np.clip(boxes[..., [0, 2]], 0, shape[1])  # x1, x2
+  boxes[..., [1, 3]] = np.clip(boxes[..., [1, 3]], 0, shape[0])  # y1, y2
+  return boxes
+
+def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
+  gain = ratio_pad if ratio_pad else min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])
+  pad = ((img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2)
+  boxes_np = boxes.numpy() if isinstance(boxes, Tensor) else boxes
+  boxes_np[..., [0, 2]] -= pad[0]
+  boxes_np[..., [1, 3]] -= pad[1]
+  boxes_np[..., :4] /= gain
+  boxes_np = clip_boxes(boxes_np, img0_shape)
+  return boxes_np
+
+def get_scaling_and_padding(img, new_shape=(640, 640), stride=32, auto=False):
+        shape = img.shape[:2]  # [height, width]
+        r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+        new_unpad = (int(round(shape[1] * r)), int(round(shape[0] * r)))  # (resized_width, resized_height)
+        dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]
+        dw, dh = (np.mod(dw, stride), np.mod(dh, stride)) if auto else (dw, dh)  # Use full padding
+        top = dh / 2
+        left = dw / 2
+        return r, top, left
+
 def get_weights_location(yolo_variant: str) -> Path:
   weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
   fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location)
@@ -395,6 +411,7 @@ if __name__ == '__main__':
   print(f'did inference in {int(round(((time.time() - st) * 1000)))}ms')
   #v8 and v3 have same 80 class names for Object Detection
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names').read_text().split("\n")
+  for pred in predictions: pred[:4] = scale_boxes(pre_processed_image.shape[2:],pred[:4],image[0].shape)
   draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=predictions, class_labels=class_labels)
 
 # TODO for later:
