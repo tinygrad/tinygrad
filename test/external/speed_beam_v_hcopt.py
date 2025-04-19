@@ -20,14 +20,14 @@ if __name__ == "__main__":
 
     k = new_lin()
 
-    if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k = hand_coded_optimizations(k)
+    if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.apply_opts(hand_coded_optimizations(k))
 
     assert BEAM > 0
 
     lins = [(("tc" if used_tensor_cores else "hc"), k)]
     if used_tensor_cores:
       lins.append(("hc", new_lin()))
-      lins[-1][1] = hand_coded_optimizations(lins[-1][1])
+      lins[-1][1].apply_opts(hand_coded_optimizations(lins[-1][1]))
     kb = new_lin()
     test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
     lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
