@@ -4,7 +4,8 @@ import torch
 from typing import Any, List
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, DEBUG, CI
-from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16, truncate_bf16, truncate, to_dtype
+from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16, truncate_bf16, to_dtype
+from tinygrad.dtype import truncate
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
 from hypothesis import assume, given, settings, strategies as strat
