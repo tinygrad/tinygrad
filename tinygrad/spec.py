@@ -1,4 +1,4 @@
-from typing import cast
+from typing import cast, Union
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
 from tinygrad.helpers import all_same, dedup, prod, getenv, DEBUG
@@ -168,7 +168,7 @@ shape_spec = PatternMatcher([
 
 # ***** uop helpers *****
 
-def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
+def type_verify(uops:Union[list[UOp], tuple[UOp, ...]], *extra_specs:PatternMatcher):
   specs = [spec, *extra_specs]
   for i,u in enumerate(uops):
     spec_ret = [cast(bool|None, s.rewrite(u)) for s in specs]
