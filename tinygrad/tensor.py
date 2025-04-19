@@ -966,6 +966,15 @@ class Tensor(SimpleMathTrait):
     if sorted(order_arg) != list(range(self.ndim)): raise RuntimeError(f"order is not a valid permutation, getting {order_arg}")
     return self._apply_uop(UOp.permute, arg=order_arg)
 
+  def as_strided(self, size, stride, storage_offset=0) -> Tensor:
+    """
+    Returns a tensor with the specified shape, strides, and offset.
+    """
+    if any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
+    max_idx = storage_offset + sum((s-1) * st for s, st in zip(size, stride) if s > 0)
+    if max_idx >= self.numel(): raise IndexError("as_strided generated out-of-bounds index")
+    return self._apply_uop(UOp.stride, arg=(size, stride, storage_offset))
+
   def flip(self, axis, *args) -> Tensor:
     """
     Returns a tensor that reverses the order of the original tensor along given `axis`.
