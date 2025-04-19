@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, get_args, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, _METADATA, flatten
 from tinygrad.helpers import PICKLE_BUFFERS, dedup, cdiv, cmod
@@ -863,6 +863,10 @@ class TrackedGraphRewrite:
   bottom_up: bool
   matches: list[tuple[UOp, UOp, UPat]]                                                       # before+after of all the matches
   name: str|None
+  def restore_original_buf_uops(self) -> TrackedGraphRewrite:
+    with Context(TRACK_MATCH_STATS=0):
+      original_matches = [(graph_rewrite(m[0], revert_unlink_bufs), graph_rewrite(m[1], revert_unlink_bufs), m[2]) for m in self.matches]
+      return replace(self, sink=graph_rewrite(self.sink, revert_unlink_bufs), matches=original_matches)
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, int] = {}
@@ -883,8 +887,9 @@ active_rewrites:list[TrackedGraphRewrite] = []
 def track_matches(func):
   def _track_func(*args, **kwargs):
     if tracking:=(TRACK_MATCH_STATS >= 2 and tracked_ctxs):
+      with Context(TRACK_MATCH_STATS=0): sink = graph_rewrite(args[0], unlink_bufs)
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
-      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0], kwargs.get("bottom_up", False), [], kwargs.get("name", None)))
+      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, sink, kwargs.get("bottom_up", False), [], kwargs.get("name", None)))
       active_rewrites.append(ctx)
     ret = func(*args, **kwargs)
     if tracking: active_rewrites.pop()
@@ -906,7 +911,8 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((uop, ret, p))
+        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
+          with Context(TRACK_MATCH_STATS=0): active_rewrites[-1].matches.append((graph_rewrite(uop, unlink_bufs), graph_rewrite(ret, unlink_bufs), p))
         return ret
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -917,9 +923,10 @@ if TRACK_MATCH_STATS:
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
+      export_ctxs = [[rw.restore_original_buf_uops() for rw in ctx] for ctx in tracked_ctxs]
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
-        print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
-        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
+        print(f"rewrote {len(export_ctxs)} graphs and matched {sum(len(r.matches) for x in export_ctxs for r in x)} times, saved to {fn}")
+        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, export_ctxs), f)
     if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
@@ -987,6 +994,11 @@ def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, na
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
+
+# Don't hold refs to original buffer UOps in TrackedGraphRewrite, to allow GC. Rewrite UOps when captured, revert rewrites at end of program
+unlink_bufs = PatternMatcher([(UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE)), name="x"),lambda x: x.replace(src=x.src+(UOp(Ops.NAME),)))])
+revert_unlink_bufs = PatternMatcher([(UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE), UPat(Ops.NAME)), name="x"),
+                                      lambda x: x.replace(src=x.src[0:2]))])
 
 # for debug
 syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.IDIV: "//", Ops.MOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
