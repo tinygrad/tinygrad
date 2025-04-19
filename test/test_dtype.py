@@ -4,7 +4,7 @@ import torch
 from typing import Any, List
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, DEBUG, CI
-from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16, truncate_bf16, to_dtype
+from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16, truncate_bf16, truncate, to_dtype
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
 from hypothesis import assume, given, settings, strategies as strat
@@ -458,6 +458,36 @@ class TestHelpers(unittest.TestCase):
     self.assertEqual(truncate_bf16(min_bf16:=-max_bf16), min_bf16)
     self.assertEqual(truncate_bf16(max_bf16 * 1.00001), math.inf)
     self.assertEqual(truncate_bf16(min_bf16 * 1.00001), -math.inf)
+
+  def test_truncate_fp8e4m3(self):
+    MAX_FP8E4M3 = 448
+    np.testing.assert_equal(truncate[dtypes.fp8e4m3](1), 1)
+    np.testing.assert_equal(truncate[dtypes.fp8e4m3](-1), -1)
+    np.testing.assert_equal(truncate[dtypes.fp8e4m3](402), 416)
+    np.testing.assert_equal(truncate[dtypes.fp8e4m3](-300), -288)
+    np.testing.assert_equal(truncate[dtypes.fp8e4m3](20), 20)
+    np.testing.assert_equal(truncate[dtypes.fp8e4m3](1.4123), 1.375)
+    np.testing.assert_equal(truncate[dtypes.fp8e4m3](0), 0)
+    np.testing.assert_equal(truncate[dtypes.fp8e4m3](math.inf), MAX_FP8E4M3)
+    np.testing.assert_equal(truncate[dtypes.fp8e4m3](math.nan), math.nan)
+    np.testing.assert_equal(truncate[dtypes.fp8e4m3](MAX_FP8E4M3), MAX_FP8E4M3)
+    np.testing.assert_equal(truncate[dtypes.fp8e4m3](MAX_FP8E4M3 * 1.00001), MAX_FP8E4M3)
+    np.testing.assert_equal(truncate[dtypes.fp8e4m3](-MAX_FP8E4M3), -MAX_FP8E4M3)
+
+  def test_truncate_fp8e5m2(self):
+    MAX_FP8E5M2 = 57344
+    np.testing.assert_equal(truncate[dtypes.fp8e5m2](1), 1)
+    np.testing.assert_equal(truncate[dtypes.fp8e5m2](-1), -1)
+    np.testing.assert_equal(truncate[dtypes.fp8e5m2](402), 384)
+    np.testing.assert_equal(truncate[dtypes.fp8e5m2](-300), -320)
+    np.testing.assert_equal(truncate[dtypes.fp8e5m2](20), 20)
+    np.testing.assert_equal(truncate[dtypes.fp8e5m2](1.4123), 1.5)
+    np.testing.assert_equal(truncate[dtypes.fp8e5m2](0), 0)
+    np.testing.assert_equal(truncate[dtypes.fp8e5m2](math.inf), MAX_FP8E5M2)
+    np.testing.assert_equal(truncate[dtypes.fp8e5m2](math.nan), math.nan)
+    np.testing.assert_equal(truncate[dtypes.fp8e5m2](MAX_FP8E5M2), MAX_FP8E5M2)
+    np.testing.assert_equal(truncate[dtypes.fp8e5m2](MAX_FP8E5M2 * 1.00001), MAX_FP8E5M2)
+    np.testing.assert_equal(truncate[dtypes.fp8e5m2](-MAX_FP8E5M2), -MAX_FP8E5M2)
 
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):
