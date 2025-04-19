@@ -1,7 +1,7 @@
 # basic self-contained tests of the external functionality of tinygrad
 import unittest, random
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
-from tinygrad.helpers import IMAGE, CI
+from tinygrad.helpers import CHECK_OOB, IMAGE, CI
 
 class TestTiny(unittest.TestCase):
 
@@ -71,19 +71,19 @@ class TestTiny(unittest.TestCase):
 
   # *** symbolic (to allow less recompilation) ***
 
-  @unittest.skipIf(Device.DEFAULT == "DSP", "failing because DSP captures shape in kernel")
   def test_symbolic(self):
     i = Variable('i', 1, 10)
-    for s in [2,5]:
-      ret = Tensor.ones(s).contiguous().reshape(i.bind(s)) + 1
-      self.assertListEqual(ret.reshape(s).tolist(), [2.0]*s)
+    with Context(CHECK_OOB=0):
+      for s in [2,5]:
+        ret = Tensor.ones(s).contiguous().reshape(i.bind(s)) + 1
+        self.assertListEqual(ret.reshape(s).tolist(), [2.0]*s)
 
-  @unittest.skipIf(Device.DEFAULT == "DSP", "failing because DSP captures shape in kernel")
   def test_symbolic_reduce(self):
     i = Variable('i', 1, 10)
-    for s in [2,5]:
-      ret = Tensor.ones(s).contiguous().reshape(i.bind(s)).sum()
-      self.assertEqual(ret.item(), s)
+    with Context(CHECK_OOB=0):
+      for s in [2,5]:
+        ret = Tensor.ones(s).contiguous().reshape(i.bind(s)).sum()
+        self.assertEqual(ret.item(), s)
 
   # *** a model ***
 
