@@ -1,5 +1,5 @@
 import numpy as np
-from examples.yolov8 import YOLOv8, get_variant_multiples, preprocess, postprocess, label_predictions
+from examples.yolov8 import YOLOv8, get_variant_multiples, preprocess, label_predictions
 import unittest
 import io, cv2
 import onnxruntime as ort
