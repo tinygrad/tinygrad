@@ -1,5 +1,5 @@
 import numpy as np
-from examples.yolov8 import YOLOv8, get_variant_multiples, preprocess, postprocess, label_predictions
+from examples.yolov8 import YOLOv8, get_variant_multiples, preprocess, label_predictions
 import unittest
 import io, cv2
 import onnxruntime as ort
@@ -28,9 +28,8 @@ class TestYOLOv8(unittest.TestCase):
       img = cv2.imdecode(np.frombuffer(fetch(test_image_urls[i]).read_bytes(), np.uint8), 1)
       test_image = preprocess([img])
       predictions = TinyYolov8(test_image)
-      post_predictions = postprocess(preds=predictions, img=test_image, orig_imgs=[img])
-      labels = label_predictions(post_predictions)
-      assert labels == {5: 1, 0: 4, 11: 1} if i == 0 else labels == {0: 13, 29: 1, 32: 1}
+      labels = label_predictions(predictions)
+      assert labels == {5: 1, 0: 4, 11: 1} if i == 0 else labels == {0: 12, 29: 1, 32: 1}
 
   def test_forward_pass_torch_onnx(self):
     variant = 'n'
@@ -58,7 +57,7 @@ class TestYOLOv8(unittest.TestCase):
     onnx_output_name = onnx_session.get_outputs()[0].name
     onnx_output = onnx_session.run([onnx_output_name], {onnx_input_name: input_image.numpy()})
 
-    tiny_output = TinyYolov8(input_image)
+    tiny_output = TinyYolov8(input_image,do_postprocess=False)
 
     # currently rtol is 0.025 because there is a 1-2% difference in our predictions
     # because of the zero padding in SPPF module (line 280) maxpooling layers rather than the -infinity in torch.
