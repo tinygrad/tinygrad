@@ -66,6 +66,8 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   # TODO: this is incomplete
   becomes_map: dict[UOp, UOp] = {}
   for u in sched_sink.toposort:
-    if u.op is Ops.ASSIGN: becomes_map[u] = u.src[0]
+    if u.op is not Ops.ASSIGN: continue
+    assert u.src[0].op is Ops.BUFFER, f"{u}"
+    becomes_map[u] = u.src[0]
 
   return schedule, var_vals, becomes_map
