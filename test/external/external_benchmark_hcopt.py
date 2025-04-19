@@ -20,7 +20,8 @@ if __name__ == '__main__':
     k = ast_str_to_lin(world)
     rawbufs = bufs_from_lin(k)
 
-    k_hcopt = optimize_kernel(k.copy())
+    k_hcopt = k.copy()
+    k_hcopt.apply_opts(optimize_kernel(k_hcopt))
     k_beam = beam_search(k.copy(), rawbufs, getenv("BEAM", 2))
 
     disable_cache = bool(getenv("NOCACHE", 0))

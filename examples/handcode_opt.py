@@ -84,7 +84,7 @@ if __name__ == "__main__":
 
     # always try hand coded opt
     lin = Kernel(si.ast, opts=device.renderer)
-    lin = hand_coded_optimizations(lin)
+    lin.apply_opts(hand_coded_optimizations(lin))
     lins.append((lin, "HC"))
 
     # maybe try tensor cores
