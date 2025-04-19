@@ -63,7 +63,6 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
   # map ASSIGN to BUFFER after ScheduleItems are constructed
-  # TODO: this is incomplete
   becomes_map: dict[UOp, UOp] = {}
   for u in sched_sink.toposort:
     if u.op is not Ops.ASSIGN: continue
@@ -74,13 +73,14 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     # otherwise it becomes a SHRINK on the source BUFFER, with an offset and (optional mask)
     else:
       base = next(s for s in target.toposort if s.op is Ops.BUFFER)
-      r = UOp.variable("r", target.arg[1], target.arg[1]+target.size)
+      # get the start and end positions of the subbuffer
+      if isinstance(offset:=target.arg[1], UOp): offset = target.arg[1].vmax
+      r = UOp.variable("r", offset, offset+target.size)
       # tolerate padded setitem
       if r.vmax > base.size:
         ret = base.shrink(((r.vmin, base.size),)).pad(((0, r.vmax-base.size),))
       else: ret = base.shrink((r._min_max,))
       assert ret.st.shape == (target.size,) and len(ret.st.views) == 1, f"size/shape mistmatch {ret.st.views} {target.size}"
-      assert ret.st.views[0].offset == target.arg[1], f"offset mistmatch {ret.st.views[0].offset} {target.arg[1]}"
       becomes_map[u] = ret
 
   return schedule, var_vals, becomes_map
