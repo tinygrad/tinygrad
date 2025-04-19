@@ -67,7 +67,17 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   becomes_map: dict[UOp, UOp] = {}
   for u in sched_sink.toposort:
     if u.op is not Ops.ASSIGN: continue
-    assert u.src[0].op in {Ops.BUFFER, Ops.BUFFER_VIEW}, f"ASSIGN must have a buffer or subbuffer target {u}"
-    becomes_map[u] = u.src[0]
+    target = u.src[0]
+    assert target.op in {Ops.BUFFER, Ops.BUFFER_VIEW}, f"ASSIGN target must be buffer or subbuffer {u}"
+    # if it's a BUFFER, we just map the ASSIGN to that BUFFER
+    if target.op is Ops.BUFFER: becomes_map[u] = target
+    # otherwise it becomes a SHRINK on the source BUFFER, with an offset
+    else:
+      base = next(s for s in target.toposort if s.op is Ops.BUFFER)
+      #raise Exception(base, target.size, target.arg[1])
+      ret = base.shrink(((target.arg[1], target.size,),))
+      assert ret.st.shape == (target.size,) and len(ret.st.views) == 1, f"size/shape mistmatch {ret.st.views} {target.size}"
+      assert ret.st.views[0].offset == target.arg[1], f"offset mistmatch {ret.st.views[0].offset} {target.arg[1]}"
+      becomes_map[u] = ret
 
   return schedule, var_vals, becomes_map
