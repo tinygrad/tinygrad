@@ -301,5 +301,5 @@ class BertSelfOutput:
     return hidden_states
 
 def flash_attention(q: Tensor, k: Tensor, v: Tensor, mask: Tensor = None, dropout: float = 0.0) -> Tensor:
-    # TODO: implement FlashAttention (block-wise, memory-efficient attention)
-    raise NotImplementedError("FlashAttention kernel coming soon")
+  # TODO: implement FlashAttention (block-wise, memory-efficient attention)
+  raise NotImplementedError("FlashAttention kernel coming soon")
