@@ -42,7 +42,7 @@ def get_top_repos(n: int, sort: str) -> list[str]: # list["FacebookAI/xlm-robert
 
 def get_metadata(repos:list[str]) -> dict:
   api = HfApi()
-  repos_metadata = {"repositories": {}}
+  repository_data = {}
   total_size = 0
 
   # TODO: speed head requests up with async?
@@ -59,13 +59,22 @@ def get_metadata(repos:list[str]) -> dict:
       files_metadata.append({"file": filename, "size": f"{file_size/1e6:.2f}MB"})
       total_size += file_size
 
-    repos_metadata["repositories"][repo] = {
+    repository_data[repo] = {
       "url": f"{HUGGINGFACE_URL}/{repo}",
-      "download_path": None,
       "files": files_metadata,
     }
-  repos_metadata['total_size'] = f"{total_size/1e9:.2f}GB"
-  repos_metadata['created_at'] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+  repos_metadata = {
+    "repositories": repository_data,
+    "stats": {
+      "model_ops": None,
+      'total_op_counter': None,
+      'unsupported_ops': None,
+      'diverse_models': None,
+      'total_size': f"{total_size/1e9:.2f}GB"
+    },
+  }
+
   return repos_metadata
 
 if __name__ == "__main__":
@@ -74,7 +83,7 @@ if __name__ == "__main__":
 
   parser = argparse.ArgumentParser(description="Produces a YAML file with metadata of top huggingface onnx models")
   parser.add_argument("--limit", type=int, required=True, help="Number of top repositories to process (e.g., 100)")
-  parser.add_argument("--output", type=str, default="huggingface_repos.yaml", help="Output YAML file name to save the report")
+  parser.add_argument("--output", type=str, default="huggingface.yaml", help="Output YAML file name to save the report")
   args = parser.parse_args()
 
   top_repos = get_top_repos(args.limit, sort)
