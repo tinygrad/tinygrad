@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad.helpers import BEAM, CHECK_OOB, Timing, CI, Context
+from tinygrad.helpers import BEAM, Timing, CI, Context
 from tinygrad import Variable, Tensor
 from tinygrad.nn import Conv2d
 
