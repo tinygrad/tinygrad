@@ -73,11 +73,13 @@ sym = symbolic_simple+PatternMatcher([
   # remove contiguous if we can just view the buffer
   (UPat(Ops.CONTIGUOUS, name="root", src=(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),)),
    lambda root,view,buf: view if view.st.contiguous and view.size == buf.size else None),
-  # contiguous/buffer/copy is already contiguous
-  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY)),)), lambda root: root.src[0]),
+  # contiguous/buffer/copy/assign is already contiguous
+  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat.var("x"),), name="t"),
    lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (t.size, x.st.views[0].offset)).reshape(t.shape) if x.device.startswith("DISK") else None),
+  # double ASSIGN to same target is one ASSIGN
+  (UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat()), name="x"))), lambda x,t: x),
   # put CAST to smaller dtype before EXPAND
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm"),)), lambda cast,vm: vm.base.cast(cast.dtype).view(vm.st)
      if (not getenv("CAST_AFTER_EXPAND") or vm.base.op is not Ops.BUFFER) and cast.dtype.itemsize <= vm.dtype.itemsize
@@ -421,7 +423,12 @@ if CAPTURE_PROCESS_REPLAY:
   def save_process_replay():
     for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
 
-@track_rewrites(name_fxn=lambda ret: f"Schedule {pluralize('Kernel', len({u.base.src[1] for u in ret.values() if u.base.op is Ops.ASSIGN}))}")
+
+def get_name(becomes_map:dict[UOp, UOp]) -> str:
+  assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
+  return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
+
+@track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # merge_views + simplify
   tensor_map = graph_rewrite_map(big_sink, merge_views+sym+replace_contiguous+pm_fuse, ctx={})
@@ -463,7 +470,6 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # map tensors to buffer/const/assign, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
-    if (kernel:=tensor_map.get(v.base)) is not None and kernel.base.op is Ops.ASSIGN: v = kernel.view(unwrap(v.st))
     if k is v: continue
     op = v.base.op
     if op in {Ops.BUFFER, Ops.ASSIGN}: becomes_map[k] = v
