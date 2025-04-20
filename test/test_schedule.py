@@ -2512,12 +2512,15 @@ class TestUOpBecome(unittest.TestCase):
     assert b.lazydata is c.lazydata
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).match(c.lazydata, {})
 
-  def test_setitem_becomes_view_of_base(self):
+  def test_setitem_becomes_subbuffer(self):
     a = Tensor.full((4,), 2.).contiguous().realize()
     b = a.shrink(((0, 2),)).assign(Tensor.full((2,), 1.0))
     b.realize()
-    assert b.lazydata.is_realized
-    assert b.lazydata.base.buffer._base is None
+    assert a.lazydata.is_realized
+    assert a.lazydata.buffer._base is None
+    # b is a subbuffer of a
+    assert b.lazydata.op is Ops.BUFFER_VIEW
+    assert b.lazydata.src[0] is a.lazydata
 
   def test_setitem_offset(self):
     a = Tensor.full((16,), 0.).contiguous().realize()
