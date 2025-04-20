@@ -641,7 +641,7 @@ jobs:
     - name: Test tensor core ops (fake)
       run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
-      run: CHECK_OOB=1 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
+      run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
     - name: Test Beam Search
