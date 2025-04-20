@@ -225,6 +225,13 @@ class Tensor(SimpleMathTrait):
   # ***** data handlers ****
 
   def kernelize(self, *lst:Tensor) -> Tensor:
+    """
+    Creates a graph of Kernels and Assigns from the Tensor graph.
+
+    Some Tensors may map to a Buffer, while others get fused.
+
+    NOTE: Kernelize can be called multiple times on a Tensor.
+    """
     big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
 
     # TODO: move this to scheduler tensor_map pass
