@@ -43,7 +43,7 @@ def preprocess(im, imgsz=640, model_stride=32, model_pt=True):
   return im
 
 
-def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, class_labels, size=640, conf_threshold=0.25):
+def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, class_labels):
   color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
   font = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -61,7 +61,7 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
 
   for pred in predictions:
     x1, y1, x2, y2, conf, class_id = pred
-    if conf < conf_threshold: continue
+    if conf == 0: continue
     color = color_dict[class_labels[int(class_id)]]
     x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
     cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, box_thickness)
