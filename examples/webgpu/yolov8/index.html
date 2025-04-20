@@ -178,7 +178,7 @@
             let boxes = await detectObjectsOnFrame(offscreenContext);
             const validBoxes = [];
             for (let i = 0; i < boxes.length; i += 6)
-                if (boxes[i + 4] >= 0.25) validBoxes.push([boxes[i], boxes[i + 1], boxes[i + 2], boxes[i + 3], boxes[i + 5]]);
+                if (boxes[i + 4] > 0) validBoxes.push([boxes[i], boxes[i + 1], boxes[i + 2], boxes[i + 3], boxes[i + 5]]);
             drawBoxes(offscreenCanvas, validBoxes, targetWidth, targetHeight, offsetX, offsetY);
             requestAnimationFrame(processFrame);
         }
