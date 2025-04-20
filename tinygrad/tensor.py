@@ -15,6 +15,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
+from tinygrad.engine.grouper import get_becomes_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -223,12 +224,7 @@ class Tensor(SimpleMathTrait):
 
   # ***** data handlers ****
 
-  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[Variable, int]]:
-    """
-    Creates the schedule needed to realize these Tensor(s), with Variables.
-
-    NOTE: A Tensor can only be scheduled once.
-    """
+  def kernelize(self, *lst:Tensor) -> Tensor:
     big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
 
     # TODO: move this to scheduler tensor_map pass
@@ -240,7 +236,18 @@ class Tensor(SimpleMathTrait):
     # verify Tensors match the spec
     if __debug__: type_verify(list(big_sink.toposort), tensor_uop_spec)
 
-    schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
+    becomes_map = get_becomes_map(big_sink)
+    _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
+    return self
+
+  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[Variable, int]]:
+    """
+    Creates the schedule needed to realize these Tensor(s), with Variables.
+
+    NOTE: A Tensor can only be scheduled once.
+    """
+    self.kernelize(*lst)
+    schedule, var_vals, becomes_map = create_schedule_with_vars(UOp.sink(*[x.lazydata for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return memory_planner(schedule), var_vals
 
@@ -1202,7 +1209,7 @@ class Tensor(SimpleMathTrait):
 
   def __setitem__(self, indices, v:Tensor|ConstType) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
-      self._getitem(indices).assign(v)
+      self.realize()._getitem(indices).assign(v)
       return
     # NOTE: check that setitem target is valid first
     if not unwrap(self.lazydata.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
