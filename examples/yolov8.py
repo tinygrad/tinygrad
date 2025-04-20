@@ -43,8 +43,7 @@ def preprocess(im, imgsz=640, model_stride=32, model_pt=True):
   return im
 
 
-def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictions, class_labels, size=640, conf_threshold=0.25):
-  all_predictions = [all_predictions]
+def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, class_labels, size=640, conf_threshold=0.25):
   color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
   font = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -53,40 +52,33 @@ def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictio
     brightness = (r * 299 + g * 587 + b * 114) / 1000
     return brightness > 127
 
-  for img_idx, (orig_img_path, output_img_path, predictions) in enumerate(zip(orig_img_paths, output_img_paths, all_predictions)):
-    predictions = np.array(predictions)
-    orig_img = cv2.imread(orig_img_path) if not isinstance(orig_img_path, np.ndarray) else cv2.imdecode(orig_img_path, 1)
-    height, width, _ = orig_img.shape
-    box_thickness = int((height + width) / 400)
-    font_scale = (height + width) / 2500
+  orig_img = cv2.imread(orig_img_path) if not isinstance(orig_img_path, np.ndarray) else cv2.imdecode(orig_img_path, 1)
+  height, width, _ = orig_img.shape
+  box_thickness = int((height + width) / 400)
+  font_scale = (height + width) / 2500
 
-    grouped_preds = defaultdict(list)
-    object_count = defaultdict(int)
+  object_count = defaultdict(int)
 
-    for pred_np in predictions:
-      grouped_preds[int(pred_np[-1])].append(pred_np)
+  for pred in predictions:
+    x1, y1, x2, y2, conf, class_id = pred
+    if conf < conf_threshold: continue
+    color = color_dict[class_labels[int(class_id)]]
+    x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
+    cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, box_thickness)
+    label = f"{class_labels[int(class_id)]} {conf:.2f}"
+    text_size, _ = cv2.getTextSize(label, font, font_scale, 1)
+    label_y, bg_y = (y1 - 4, y1 - text_size[1] - 4) if y1 - text_size[1] - 4 > 0 else (y1 + text_size[1], y1)
+    cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
+    font_color = (0, 0, 0) if is_bright_color(color) else (255, 255, 255)
+    cv2.putText(orig_img, label, (x1, label_y), font, font_scale, font_color, 1, cv2.LINE_AA)
+    object_count[class_labels[int(class_id)]] += 1
 
-    for pred in predictions:
-      x1, y1, x2, y2, conf, class_id = pred
-      if conf < conf_threshold: continue
-      color = color_dict[class_labels[int(class_id)]]
-      x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
-      cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, box_thickness)
-      label = f"{class_labels[int(class_id)]} {conf:.2f}"
-      text_size, _ = cv2.getTextSize(label, font, font_scale, 1)
-      label_y, bg_y = (y1 - 4, y1 - text_size[1] - 4) if y1 - text_size[1] - 4 > 0 else (y1 + text_size[1], y1)
-      cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
-      font_color = (0, 0, 0) if is_bright_color(color) else (255, 255, 255)
-      cv2.putText(orig_img, label, (x1, label_y), font, font_scale, font_color, 1, cv2.LINE_AA)
-      object_count[class_labels[int(class_id)]] += 1
+  print("Objects detected:")
+  for obj, count in object_count.items():
+    print(f"- {obj}: {count}")
 
-    print(f"Image {img_idx + 1}:")
-    print("Objects detected:")
-    for obj, count in object_count.items():
-      print(f"- {obj}: {count}")
-
-    cv2.imwrite(output_img_path, orig_img)
-    print(f'saved detections at {output_img_path}')
+  cv2.imwrite(output_img_path, orig_img)
+  print(f'saved detections at {output_img_path}')
 
 # utility functions for forward pass.
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
@@ -380,9 +372,9 @@ if __name__ == '__main__':
   output_folder_path = Path('./outputs_yolov8')
   output_folder_path.mkdir(parents=True, exist_ok=True)
   #absolute image path or URL
-  image_location = [np.frombuffer(fetch(img_path).read_bytes(), np.uint8)]
-  image = [cv2.imdecode(image_location[0], 1)]
-  out_paths = [(output_folder_path / f"{Path(img_path).stem}_output{Path(img_path).suffix or '.png'}").as_posix()]
+  image_location = np.frombuffer(fetch(img_path).read_bytes(), np.uint8)
+  image = [cv2.imdecode(image_location, 1)]
+  out_path = (output_folder_path / f"{Path(img_path).stem}_output{Path(img_path).suffix or '.png'}").as_posix()
   if not isinstance(image[0], np.ndarray):
     print('Error in image loading. Check your image file.')
     sys.exit(1)
@@ -400,7 +392,7 @@ if __name__ == '__main__':
   #v8 and v3 have same 80 class names for Object Detection
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names').read_text().split("\n")
   for pred in predictions: pred[:4] = scale_boxes(pre_processed_image.shape[2:], pred[:4], image[0].shape)
-  draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=predictions, class_labels=class_labels)
+  draw_bounding_boxes_and_save(orig_img_path=image_location, output_img_path=out_path, predictions=predictions, class_labels=class_labels)
 
 # TODO for later:
 #  1. Fix SPPF minor difference due to maxpool
