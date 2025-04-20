@@ -361,6 +361,7 @@ def train_retinanet():
   NUM_CLASSES = len(MLPERF_CLASSES)
   BASE_DIR = getenv("BASE_DIR", BASEDIR)
   BENCHMARK = getenv("BENCHMARK")
+  INITMLPERF = getenv("INITMLPERF")
   config["gpus"] = GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 6))]
 
   for x in GPUS: Device[x]
@@ -379,6 +380,18 @@ def train_retinanet():
 
     x, y_boxes, y_labels, matches, anchors, cookie = next(it)
     return x.shard(GPUS, axis=0).realize(), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), cookie
+  
+  def _fake_data_get(bs:int, val:bool=False):
+    x = Tensor.zeros(bs, 800, 800, 3, dtype=dtypes.uint8).contiguous()
+    if val:
+      img_ids, img_sizes = [0] * bs, [(800, 800)] * bs
+      return x.shard(GPUS, axis=0).realize(), img_ids, img_sizes
+
+    y_boxes = Tensor.zeros(bs, 120087, 4, dtype=dtypes.float32).contiguous()
+    y_labels = Tensor.zeros(bs, 120087, dtype=dtypes.int64).contiguous()
+    matches = Tensor.ones(bs, 120087, dtype=dtypes.int64).contiguous()
+    anchors = Tensor.zeros(bs, 120087, 4, dtype=dtypes.float64).contiguous()
+    return x.shard(GPUS, axis=0).realize(), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), None
 
   @TinyJit
   def _train_step(model, optim, loss_scaler, x, **kwargs):
@@ -440,14 +453,17 @@ def train_retinanet():
   optim = Adam(params, lr=lr)
 
   # ** dataset **
-  train_dataset = COCO(download_dataset(BASE_DIR, "train"))
-  val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
-  coco_val = COCOeval(cocoGt=val_dataset, iouType="bbox")
+  if INITMLPERF:
+    config["steps_in_train_epoch"] = steps_in_train_epoch = BS
+    config["steps_in_val_epoch"] = steps_in_val_epoch = EVAL_BS
+  else:
+    train_dataset = COCO(download_dataset(BASE_DIR, "train"))
+    val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
+    coco_val = COCOeval(cocoGt=val_dataset, iouType="bbox")
 
-  # ** lr scheduler **
-  config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(len(train_dataset.imgs.keys()), BS) // BS
-  config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(len(val_dataset.imgs.keys()), BS) // BS)
-  start_iter = start_epoch * steps_in_train_epoch
+    config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(len(train_dataset.imgs.keys()), BS) // BS
+    config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(len(val_dataset.imgs.keys()), EVAL_BS) // EVAL_BS)
+    start_iter = start_epoch * steps_in_train_epoch
 
   # ** initialize wandb **
   if (WANDB:=getenv("WANDB")):
@@ -458,9 +474,12 @@ def train_retinanet():
 
   for e in range(start_epoch, EPOCHS):
     # ** training loop **
-    train_dataloader = batch_load_retinanet(train_dataset, False, Path(BASE_DIR), batch_size=BS, seed=SEED)
-    it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
-    i, proc = 0, _data_get(it)
+    if INITMLPERF:
+      i, proc = 0, _fake_data_get(BS)
+    else:
+      train_dataloader = batch_load_retinanet(train_dataset, False, Path(BASE_DIR), batch_size=BS, seed=SEED)
+      it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
+      i, proc = 0, _data_get(it)
 
     prev_cookies = []
     st = time.perf_counter()
@@ -475,7 +494,10 @@ def train_retinanet():
 
       if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:
-        next_proc = _data_get(it)
+        if INITMLPERF:
+          next_proc = _fake_data_get(BS)
+        else:
+          next_proc = _data_get(it)
       except StopIteration:
         next_proc = None
 
@@ -523,9 +545,12 @@ def train_retinanet():
       if getenv("RESET_STEP", 1): _train_step.reset()
 
       with Tensor.train(mode=False), Tensor.test():
-        val_dataloader = batch_load_retinanet(val_dataset, (val:=True), Path(BASE_DIR), batch_size=EVAL_BS, shuffle=False, seed=SEED)
-        it = iter(tqdm(val_dataloader, total=steps_in_val_epoch))
-        i, proc = 0, _data_get(it, val=val)
+        if INITMLPERF:
+          i, proc = 0, _fake_data_get(EVAL_BS, val=(val:=True))
+        else:
+          val_dataloader = batch_load_retinanet(val_dataset, (val:=True), Path(BASE_DIR), batch_size=EVAL_BS, shuffle=False, seed=SEED)
+          it = iter(tqdm(val_dataloader, total=steps_in_val_epoch))
+          i, proc = 0, _data_get(it, val=val)
 
         eval_times, prev_cookies = [], []
         val_img_ids, val_imgs, ncats, narea = [], [], len(coco_val.params.catIds), len(coco_val.params.areaRng)
@@ -549,7 +574,10 @@ def train_retinanet():
 
           if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
           try:
-            next_proc = _data_get(it, val=val)
+            if INITMLPERF:
+              next_proc = _fake_data_get(EVAL_BS, val=val)
+            else:
+              next_proc = _data_get(it, val=val)
           except StopIteration:
             next_proc = None
 
