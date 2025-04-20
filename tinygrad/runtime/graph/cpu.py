@@ -19,12 +19,6 @@ class CPUGraph(GraphRunner):
 
     self.base_bufs = dedup(b.base for ji in jit_cache for b in ji.bufs if b is not None and b not in input_rawbuffers)
     self.base_rawbufs = [b._buf for b in self.base_bufs] + [cast(CompiledRunner, ji.prg)._prg.fxn for ji in cpu_progs]
-    init_lines: list[str] = []
-    for i, ji in enumerate(cpu_progs):
-      runner = cast(CompiledRunner, ji.prg)
-      arg_dtypes = tuple(buf.dtype.ptr() for buf in ji.bufs if buf is not None) + tuple(v.dtype for v in runner.p.vars)
-      s_args = ','.join([device.renderer.render_dtype(dt) for dt in arg_dtypes])
-      init_lines.append(f"  void (*{to_function_name(runner.p.name)})({s_args}) = (void (*)({s_args}))fxnp{i};")
 
     targs = [(f"arg{i}", (x.dtype.ptr(), False)) for i,x in enumerate(input_rawbuffers)] + \
             [(f"cbuf{i}", (dtypes.char.ptr(), False)) for i in range(len(self.base_bufs))] + \
@@ -35,7 +29,13 @@ class CPUGraph(GraphRunner):
       if buf in input_rawbuffers: return f"arg{input_rawbuffers.index(buf)}"
       return f"({device.renderer.render_dtype(buf.dtype)}*)(cbuf{self.base_bufs.index(buf.base)} + {buf.offset})"
 
-    batched = ["void batched("+','.join([f"{device.renderer.render_dtype(x[1][0])} {x[0]}" for x in targs])+") {"] + init_lines
+    batched = ["void batched("+','.join([f"{device.renderer.render_dtype(x[1][0])} {x[0]}" for x in targs])+") {"]
+    for i, ji in enumerate(cpu_progs):
+      runner = cast(CompiledRunner, ji.prg)
+      arg_dtypes = tuple(buf.dtype.ptr() for buf in ji.bufs if buf is not None) + tuple(v.dtype for v in runner.p.vars)
+      s_args = ','.join([device.renderer.render_dtype(dt) for dt in arg_dtypes])
+      batched.append(f"  void (*{to_function_name(runner.p.name)})({s_args}) = (void (*)({s_args}))fxnp{i};")
+
     for i, ji in enumerate(jit_cache):
       args = [render_arg(buf) for buf in ji.bufs] + [x.expr for x in cast(CompiledRunner, ji.prg).p.vars]
       batched.append(f"  {to_function_name(cast(CompiledRunner, ji.prg).p.name)}({','.join(args)});")
