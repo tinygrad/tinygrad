@@ -272,11 +272,12 @@ class YOLOv8:
     self.fpn = Yolov8NECK(w, r, d)
     self.head = DetectionHead(num_classes, filters=(int(256*w), int(512*w), int(512*w*r)))
 
-  def __call__(self, x, do_postprocess=True):
+  def __call__(self, x):
     x = self.net(x)
     x = self.fpn(*x)
     x = self.head(x)
-    return postprocess(x) if do_postprocess else x
+    # TODO: postprocess needs to be in the model to be compiled to webgpu
+    return postprocess(x)
 
   def return_all_trainable_modules(self):
     backbone_modules = [*range(10)]

@@ -1,5 +1,6 @@
 import numpy as np
-from examples.yolov8 import YOLOv8, get_variant_multiples, preprocess, label_predictions
+from examples.yolov8 import YOLOv8, get_variant_multiples, preprocess, label_predictions, postprocess
+from tinygrad import Tensor
 import unittest
 import io, cv2
 import onnxruntime as ort
@@ -57,12 +58,15 @@ class TestYOLOv8(unittest.TestCase):
     onnx_output_name = onnx_session.get_outputs()[0].name
     onnx_output = onnx_session.run([onnx_output_name], {onnx_input_name: input_image.numpy()})
 
-    tiny_output = TinyYolov8(input_image, do_postprocess=False)
+    tiny_output = TinyYolov8(input_image).numpy()
+    onnx_output = postprocess(Tensor(onnx_output[0])).numpy()
+    onnx_output = onnx_output[onnx_output[:, 4] != 0]
+    tiny_output = tiny_output[tiny_output[:, 4] != 0]
 
     # currently rtol is 0.025 because there is a 1-2% difference in our predictions
     # because of the zero padding in SPPF module (line 280) maxpooling layers rather than the -infinity in torch.
     # This difference does not make a difference "visually".
-    np.testing.assert_allclose(onnx_output[0], tiny_output.numpy(), atol=5e-4, rtol=0.025)
+    np.testing.assert_allclose(onnx_output, tiny_output, atol=5e-4, rtol=0.025)
 
 if __name__ == '__main__':
   unittest.main()
