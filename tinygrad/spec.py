@@ -83,8 +83,7 @@ def validate_index(idx:UOp, mask:UOp|None=None):
   if any(x.op is Ops.BITCAST for x in idx.toposort): return True
 
   solver = z3.Solver(ctx=z3.Context())
-  # Use RewriteContext directly to keep rewrite cache between index and mask
-  rewriter = RewriteContext(z3_renderer, ctx=(solver, {}))  # noqa: E0606 # pylint: disable=possibly-used-before-assignment
+  rewriter = RewriteContext(z3_renderer, ctx=(solver, {}))  # Use RewriteContext directly to keep rewrite cache between index and mask
   z3_idx = rewriter.top_down_rewrite(idx.src[1]).arg
   if mask is not None: solver.add(rewriter.top_down_rewrite(mask).arg)
   if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
