@@ -56,7 +56,6 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
   height, width, _ = orig_img.shape
   box_thickness = int((height + width) / 400)
   font_scale = (height + width) / 2500
-
   object_count = defaultdict(int)
 
   for pred in predictions:

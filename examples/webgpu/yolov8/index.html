@@ -221,14 +221,13 @@
                 net = await yolov8.load(device, "./net.safetensors");
                 loadingContainer.style.display = "none";
             }
-            const [input,img_width,img_height] = await prepareInput(offscreenContext);
+            const input = await prepareInput(offscreenContext);
             const output = await net(new Float32Array(input));
             return output[0];
         }
 
         async function prepareInput(offscreenContext) {
             return new Promise(resolve => {
-                const [img_width,img_height] = [modelInputSize, modelInputSize]
                 const imgData = offscreenContext.getImageData(0,0,modelInputSize,modelInputSize);
                 const pixels = imgData.data;
                 const red = [], green = [], blue = [];
@@ -239,7 +238,7 @@
                     blue.push(pixels[index+2]/255.0);
                 }
                 const input = [...red, ...green, ...blue];
-                resolve([input, img_width, img_height])
+                resolve(input)
             })
         }
 
