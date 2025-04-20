@@ -9,7 +9,7 @@ from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPA
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
-from tinygrad.spec import type_verify, kernel_spec
+from tinygrad.spec import type_verify, sched_spec
 
 # creation can recurse a lot
 import sys
@@ -386,6 +386,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   for s in k.src:
     if s.op is Ops.ASSIGN:
       for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
+      parents_rep[s] = s.buf_uop
   ast = k.arg.ast.substitute(parents_rep)
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
@@ -445,7 +446,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # verify Kernels match the spec
   sched_sink = tensor_map[big_sink]
-  type_verify(list(sched_sink.toposort), kernel_spec)
+  type_verify(list(sched_sink.toposort), sched_spec)
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
@@ -461,7 +462,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   if assign_rep:
     tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
     sched_sink = tensor_map[big_sink]
-    type_verify(list(sched_sink.toposort), kernel_spec)
+    type_verify(list(sched_sink.toposort), sched_spec)
 
   # display the final graph
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
