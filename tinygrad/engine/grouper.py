@@ -465,7 +465,6 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # map tensors to buffer/const/assign, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
-    if (kernel:=tensor_map.get(v.base)) is not None and kernel.base.op is Ops.ASSIGN: v = kernel.view(unwrap(v.st))
     if k is v: continue
     op = v.base.op
     if op in {Ops.BUFFER, Ops.ASSIGN}: becomes_map[k] = v
