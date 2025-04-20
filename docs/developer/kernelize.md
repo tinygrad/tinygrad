@@ -10,7 +10,7 @@ Tinygrad lazily builds up a graph of Tensor operations. The Tensor graph include
 
 ## Kernelize flow
 
-Let's see how a multiply add Tensor graph transforms to a fused elementwise kernel.
+Let's see how a multiply add Tensor graph becomes a fused elementwise kernel.
 
 ```py
 # initialize 3 input buffers on the device
@@ -31,7 +31,7 @@ print(mul) # <Tensor <UOp METAL (1,) int (<Ops.MUL: 48>, None)> on METAL with gr
 print(out) # <Tensor <UOp METAL (1,) int (<Ops.ASSIGN: 66>, None)> on METAL with grad None>
 ```
 
-The multiply Tensor stays the same because it is fused. The output Tensor's UOp becomes to a new ASSIGN UOp:
+The multiply Tensor stays the same because it is fused. The output Tensor's UOp becomes a new ASSIGN UOp:
 
 ```py
 print(out.lazydata)
@@ -63,9 +63,9 @@ UOp(Ops.KERNEL, dtypes.void, arg=<Kernel 12 SINK(<Ops.STORE: 45>,) (__add__, __m
     UOp(Ops.UNIQUE, dtypes.void, arg=5, src=()),)),))
 ```
 
-KERNEL describes the compute AST, metadata and memory dependancies.
+KERNEL describes the compute AST, metadata and memory dependencies.
 
-BUFFER has a reference to the device memory location the output will be stored to.
+BUFFER holds a reference to the device memory where the output will be stored.
 
 Once a Tensor is kernelized, all children will LOAD its BUFFER, instead of fusing it:
 
