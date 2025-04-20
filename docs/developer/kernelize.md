@@ -66,7 +66,7 @@ UOp(Ops.KERNEL, dtypes.void, arg=<Kernel 12 SINK(<Ops.STORE: 45>,) (__add__, __m
 
 KERNEL contains the compute AST and metadata, BUFFER contains a reference to the memory location the output will be stored to.
 
-Once a Tensor is kernelized, all its future children will LOAD its BUFFER from global memory, instead of fusing it:
+Once a Tensor is kernelized, all children will LOAD its BUFFER, instead of fusing it:
 
 ```py
 child = out+2
@@ -89,7 +89,7 @@ UOp(Ops.SINK, dtypes.void, arg=None, src=(
 
 `Tensor.realize` will execute the kernels and write outputs to memory:
 
-```
+```py
 Tensor.realize(out)
 print(out)        # <Tensor <UOp METAL (1,) int (<Ops.BUFFER: 23>, <buf real:True device:METAL size:1 dtype:dtypes.int offset:0>)> on METAL with grad None>
 print(out.item()) # 5
@@ -101,6 +101,6 @@ print(out.item()) # 5
 
 - `Tensor.kernelize` splits the Tensor graph into data (BUFFER), compute (KERNEL) and links dependencies with ASSIGN.
 
-- Once `Tensor.realize` is called, the compute is executed on the device and only the BUFFER remains in the graph.
+- `Tensor.realize` executes KERNELs on device and clears the Tensor graph, only BUFFERs remain in the Tensor graph.
 
-- `Tensor.kernelize` can be called multiple times, This allows for incrementally building the kernel fusion layout of a large Tensor graph, without having to call `realize` or `schedule`.
+- `Tensor.kernelize` can be called multiple times on Tensors, This allows for incrementally building the kernel fusion layout of a large Tensor graph, without having to call `realize` or `schedule`.
