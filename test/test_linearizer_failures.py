@@ -1430,6 +1430,7 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.GROUPTOP, axis=0, arg=29), Opt(op=OptOps.PADTO, axis=0, arg=32)]
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["METAL", "GPU", "AMD", "NV"])
 
+  # from BEAM=2 python test/test_softmax_fusion.py TestFuse.test_double_gemm
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test needs TC")
   def test_failure_59(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
@@ -1454,7 +1455,7 @@ class TestLinearizerFailures(unittest.TestCase):
     try:
       lin.apply_opts(opts)
     except AssertionError:
-      # AssertionError from `assert all_same(tensor_core_opts)` in kernel.py
+      # AssertionError is from `assert all_same(tensor_core_opts)` in kernel.py
       # only fails with metal TC
       assert Device.DEFAULT == "METAL"
 
