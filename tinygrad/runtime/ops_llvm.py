@@ -1,8 +1,9 @@
-import ctypes, platform
+import ctypes, platform, functools
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
 from tinygrad.renderer.llvmir import LLVMRenderer
 import tinygrad.runtime.autogen.llvm as llvm
+from tinygrad.runtime.graph.cpu import CPUGraph
 from tinygrad.runtime.support.elf import jit_loader
 
 def cerr(): return ctypes.pointer(ctypes.pointer(ctypes.c_char()))
@@ -60,4 +61,4 @@ class HostLLVMCompiler(LLVMCompiler):
 
 class LLVMDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(device, MallocAllocator, LLVMRenderer(), HostLLVMCompiler(), CPUProgram)
+    super().__init__(device, MallocAllocator, LLVMRenderer(), HostLLVMCompiler(), CPUProgram, functools.partial(CPUGraph, self))
