@@ -10,21 +10,22 @@ from tinygrad.renderer.cstyle import ClangRenderer
 
 class CPUGraph(GraphRunner):
   def __init__(self, device, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
-    cpu_progs = [ item for item in jit_cache if isinstance(item.prg._prg, CPUProgram) ]
-    if cpu_progs:
-      if len(cpu_progs) != len(jit_cache): raise GraphException
-      device = Device["CPU"]
-    elif not isinstance(device.renderer, ClangRenderer): raise GraphException
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 
+    cpu_progs: list[ExecItem] = []
+    if issubclass(device.runtime, CPUProgram):
+      device = Device["CPU"]
+      cpu_progs.extend(dict((cast(CompiledRunner, item.prg).p.name, item) for item in jit_cache).values()) # dedupe by name
+    elif not isinstance(device.renderer, ClangRenderer): raise GraphException
+
     self.base_bufs = dedup(b.base for ji in jit_cache for b in ji.bufs if b is not None and b not in input_rawbuffers)
-    self.base_rawbufs = [b._buf for b in self.base_bufs] + [ji.prg._prg.fxn for ji in cpu_progs]
+    self.base_rawbufs = [b._buf for b in self.base_bufs] + [cast(CompiledRunner, ji.prg)._prg.fxn for ji in cpu_progs]
     init_lines: list[str] = []
     for i, ji in enumerate(cpu_progs):
-      arg_dtypes = tuple(buf.dtype.ptr() for buf in ji.bufs if buf is not None) + tuple(v.dtype for v in cast(CompiledRunner, ji.prg).p.vars)
+      runner = cast(CompiledRunner, ji.prg)
+      arg_dtypes = tuple(buf.dtype.ptr() for buf in ji.bufs if buf is not None) + tuple(v.dtype for v in runner.p.vars)
       s_args = ','.join([device.renderer.render_dtype(dt) for dt in arg_dtypes])
-      fn_name = to_function_name(cast(CompiledRunner, ji.prg).p.name)
-      init_lines.append(f"  void (*{fn_name})({s_args}) = (void (*)({s_args}))fxnp{i};")
+      init_lines.append(f"  void (*{to_function_name(runner.p.name)})({s_args}) = (void (*)({s_args}))fxnp{i};")
 
     targs = [(f"arg{i}", (x.dtype.ptr(), False)) for i,x in enumerate(input_rawbuffers)] + \
             [(f"cbuf{i}", (dtypes.char.ptr(), False)) for i in range(len(self.base_bufs))] + \
