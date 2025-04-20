@@ -30,7 +30,7 @@ class TestSetitem(unittest.TestCase):
     t[4:1:-2] = 11
     self.assertListEqual(t.tolist(), [0, 1, 11, 3, 11, 5, 6, 7, 8, 9])
 
-  def test_setitem_mul(self):
+  def test_setitem_inplace_mul(self):
     t = Tensor.arange(10).realize()
     t[:3] *= 10
     self.assertListEqual(t.tolist(), [0, 10, 20, 3, 4, 5, 6, 7, 8, 9])
