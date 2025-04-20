@@ -68,11 +68,7 @@ def realize_with_views(self: Tensor, views: Tensor):
   if not self.lazydata.st.contiguous: self.replace(self.contiguous())
   self.replace(self.clone().realize())
   for v in views:
-    if v.lazydata.op is Ops.BUFFER_VIEW:
-      subbuf = v.lazydata
-      real_view = next(v.lazydata for v in views if v.lazydata.base is subbuf.src[0])
-      assert real_view.size == subbuf.size and real_view.st.views[-1].offset == v.lazydata.arg[1], "couldn't find VIEW(BUFFER) for BUFFER_VIEW"
-      continue # skip subbuffer, we just use the real buffer view
+    if v.lazydata.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
     ret = self
     st = ShapeTracker(self.lazydata.st.views + v.lazydata.st.views) # TODO: is this right?
     for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
