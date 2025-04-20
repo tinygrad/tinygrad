@@ -307,8 +307,8 @@ def compute_iou_matrix(boxes):
   y1 = Tensor.maximum(y1[:, None], y1[None, :])
   x2 = Tensor.minimum(x2[:, None], x2[None, :])
   y2 = Tensor.minimum(y2[:, None], y2[None, :])
-  w = Tensor.maximum(Tensor(0),x2-x1)
-  h = Tensor.maximum(Tensor(0),y2-y1)
+  w = Tensor.maximum(Tensor(0), x2-x1)
+  h = Tensor.maximum(Tensor(0), y2-y1)
   intersection = w * h
   iou = intersection / (areas[:, None] + areas[None, :] - intersection)
   return iou
