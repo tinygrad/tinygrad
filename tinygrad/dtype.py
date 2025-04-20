@@ -198,19 +198,78 @@ def truncate_bf16(x):
   bf = struct.unpack('f', struct.pack('I', f32_int & 0xFFFF0000))[0]
   return bf
 
+# fp8-float conversions based on https://gitlab.com/nvidia/headers/cuda-individual/cudart/-/blob/main/cuda_fp8.hpp
+def float_to_fp8(x: float, fp8_interpretation: str) -> int:
+  assert fp8_interpretation in ["E4M3", "E5M2"], "Invalid fp8 interpretation"
+  assert x not in [math.nan, -math.nan], "NaN is not supported"
+  config = {
+      "E4M3": {"EXP_BIAS": 7, "SIGNIFICAND_BITS": 4, "MANTISSA_MASK": 0x7, "MINDENORM_O2": 0x3F50000000000000,
+              "OVERFLOW_THRESHOLD": 0x407D000000000000, "MAXNORM": 0x7E, "MINNORM": 0x3F90000000000000, "INF_VALUE": 0x7F},
+      "E5M2": {"EXP_BIAS": 15, "SIGNIFICAND_BITS": 3, "MANTISSA_MASK": 0x3, "MINDENORM_O2": 0x3EE0000000000000,
+              "OVERFLOW_THRESHOLD": 0x40EE000000000000 - 1, "MAXNORM": 0x7B, "MINNORM": 0x3F10000000000000, "INF_VALUE": 0x7E}
+  }[fp8_interpretation]
+  xbits, = struct.unpack('Q', struct.pack('d', x))
+  FP8_DP_HALF_ULP = 1 << (53 - config["SIGNIFICAND_BITS"] - 1)
+  sign = ((xbits >> 63) & 1) << 7
+  exp = (((xbits >> 52) & 0x7FF) - 1023 + config["EXP_BIAS"])
+  mantissa = (xbits >> (53 - config["SIGNIFICAND_BITS"])) & config["MANTISSA_MASK"]
+  absx = xbits & 0x7FFFFFFFFFFFFFFF
+
+  if absx <= config["MINDENORM_O2"]: res = 0
+  elif absx > 0x7FF0000000000000: res = 0x7F if fp8_interpretation == "E4M3" else 0x7E | mantissa
+  elif absx > config["OVERFLOW_THRESHOLD"]: res = config["MAXNORM"]
+  elif absx >= config["MINNORM"]:
+    res = ((exp << (config["SIGNIFICAND_BITS"] - 1)) | mantissa)
+    round_bits = xbits & ((FP8_DP_HALF_ULP << 1) - 1)
+    if (round_bits > FP8_DP_HALF_ULP) or (round_bits == FP8_DP_HALF_ULP and (mantissa & 1)): res = res + 1
+  else:
+    shift = 1 - exp
+    mantissa |= 1 << (config["SIGNIFICAND_BITS"] - 1)
+    res = (mantissa >> shift)
+    round_bits = (xbits | (1 << (53 - 1))) & ((FP8_DP_HALF_ULP << (shift + 1)) - 1)
+    if (round_bits > (FP8_DP_HALF_ULP << shift)) or (round_bits == (FP8_DP_HALF_ULP << shift) and (res & 1)):
+      res = res + 1
+
+  res |= sign
+  return int(res)
+
+def fp8_to_float(x: int, fp8_interpretation: str) -> float:
+  assert fp8_interpretation in ["E4M3", "E5M2"], "Invalid fp8 interpretation"
+  assert x not in [math.nan, -math.nan], "NaN is not supported"
+  ur = x << 8
+
+  if fp8_interpretation == "E5M2" and (ur & 0x7FFF) > 0x7C00: ur = 0x7FFF
+  elif fp8_interpretation == "E4M3":
+    sign = ur & 0x8000
+    exponent = ((ur & 0x7800) >> 1) + 0x2000
+    mantissa = (ur & 0x0700) >> 1
+    absx = x & 0x7F
+    if absx == 0x7F: ur = 0x7FFF
+    elif exponent == 0x2000:
+      if mantissa != 0:
+        mantissa <<= 1
+        while (mantissa & 0x0400) == 0:
+          mantissa <<= 1
+          exponent -= 0x0400
+        mantissa &= 0x03FF
+      else:
+        exponent = 0
+      ur = (sign | exponent) | mantissa
+    else:
+      ur = (sign | exponent) | mantissa
+
+  half_bytes = struct.pack('<H', ur)
+  float32_val = struct.unpack('e', half_bytes)[0]
+  return float(float32_val)
+
 truncate: dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.float16: truncate_fp16, dtypes.bfloat16: truncate_bf16,
+  dtypes.fp8e4m3: lambda x: fp8_to_float(float_to_fp8(x, "E4M3"), "E4M3"), dtypes.fp8e5m2: lambda x: fp8_to_float(float_to_fp8(x, "E5M2"), "E5M2"),
   dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value,
   dtypes.int64: lambda x: ctypes.c_int64(x).value}
-
-try:
-  from extra.fp8_conversions import float_to_fp8, fp8_to_float # noqa: F401 # pylint: disable=unused-import
-  truncate.update({dtypes.fp8e4m3: lambda x: fp8_to_float(float_to_fp8(x, "E4M3"), "E4M3"),
-                   dtypes.fp8e5m2: lambda x: fp8_to_float(float_to_fp8(x, "E5M2"), "E5M2")})
-except ImportError: pass
 
 # numpy and torch dtype interop
 
