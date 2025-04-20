@@ -129,13 +129,12 @@ def get_variant_multiples(variant):
   return {'n':(0.33, 0.25, 2.0), 's':(0.33, 0.50, 2.0), 'm':(0.67, 0.75, 1.5), 'l':(1.0, 1.0, 1.0), 'x':(1, 1.25, 1.0) }.get(variant, None)
 
 def label_predictions(all_predictions):
-  predictions_list = all_predictions.numpy()
-  class_counts = defaultdict(int)
-  for pred in predictions_list:
-    prob = pred[4]
-    class_id = int(pred[5])
-    if prob != 0: class_counts[class_id] += 1
-  return dict(class_counts)
+  class_index_count = defaultdict(int)
+  for pred_np in all_predictions:
+    class_id = int(pred_np[-1])
+    if pred_np[-2] != 0: class_index_count[class_id] += 1
+
+  return dict(class_index_count)
 
 #this is taken from https://github.com/tinygrad/tinygrad/pull/784/files by dc-dc-dc (Now 2 models use upsampling)
 class Upsample:
