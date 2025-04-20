@@ -8,12 +8,12 @@ Tinygrad lazily builds up a graph of Tensor operations. The Tensor graph include
 
 `Tensor.kernelize` transforms a graph of Tensor operations into a graph of Kernels.
 
-### Kernelize flow
+## Kernelize flow
 
 Let's see how a multiply add Tensor graph transforms to a fused elementwise kernel.
 
 ```py
-# initialize 3 input buffers on the GPU
+# initialize 3 input buffers on the device
 a = Tensor([1]).realize()
 b = Tensor([2]).realize()
 c = Tensor([3]).realize()
@@ -31,13 +31,13 @@ print(mul) # <Tensor <UOp METAL (1,) int (<Ops.MUL: 48>, None)> on METAL with gr
 print(out) # <Tensor <UOp METAL (1,) int (<Ops.ASSIGN: 66>, None)> on METAL with grad None>
 ```
 
-The multiply operation stays unchanged because it is fused. The output Tensor's UOp gets transformed to a new ASSIGN UOp:
+The multiply Tensor stays the same because it is fused. The output Tensor's UOp transforms to a new ASSIGN UOp:
 
 ```py
 print(out.lazydata)
 ```
 
-The first source is the target BUFFER:
+The first source is the output BUFFER:
 
 ```
 UOp(Ops.BUFFER, dtypes.int, arg=1, src=(
@@ -45,7 +45,7 @@ UOp(Ops.BUFFER, dtypes.int, arg=1, src=(
   UOp(Ops.UNIQUE, dtypes.void, arg=6, src=()),))
 ```
 
-And the second source is the KERNEL and its 3 dependencies (a, b, c):
+And the second source is the KERNEL and its 4 buffer edges (output_buffer, a, b, c):
 
 ```
 UOp(Ops.KERNEL, dtypes.void, arg=<Kernel 12 SINK(<Ops.STORE: 45>,) (__add__, __mul__)>, src=(
@@ -94,7 +94,9 @@ print(out)        # <Tensor <UOp METAL (1,) int (<Ops.BUFFER: 23>, <buf real:Tru
 print(out.item()) # 5
 ```
 
-#### Summary
+<hr />
+
+**Summary**
 
 - The large Tensor graph is built from a mix of data, compute and movement Ops.
 
