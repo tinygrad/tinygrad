@@ -55,7 +55,7 @@ def tt_time_execution(cb, enable=False) -> float|None:
   return 0 * 1e-3
 
 def find_nodes(ast:UOp, op:Ops, acc: list[UOp]) -> list[UOp]:
-  if ast.op == op:
+  if ast.op == op and ast not in acc:
     acc.append(ast)
   for src in ast.src:
     find_nodes(src, op, acc)
@@ -142,6 +142,7 @@ void kernel_main() {{
     Ops.MOD: "", Ops.IDIV: "", Ops.CMPNE: "",
     Ops.SHR: "right_shift_tile", Ops.SHL: "left_shift_tile", Ops.CMPLT: "",
     Ops.WHERE: "" }
+  binary_ops = [Ops.ADD, Ops.SUB, Ops.MUL]
 
   def build_math(self, op:Ops, loads) -> str:
     if op in self.code_for_op:
@@ -158,11 +159,11 @@ void kernel_main() {{
 
     # TODO: support different buffer lengths
     # TODO: what happens on non divisible by TILE_SIZE?
-    num_tiles = math.ceil(loads[0].size / TILE_SIZE)
+    num_tiles = math.ceil(stores[0].size / TILE_SIZE)
 
     binary_op = stores[0].src[2]
 
-    cbs_vars = ["3"]
+    cbs_vars = []
 
     def build_cb_processor(block: str, cbi: list[str], cbo: str) -> str:
       return f"""
@@ -196,13 +197,19 @@ void kernel_main() {{
             {fn_name}({cbi[0]}, {cbi[1]}, 0, 0, 0);
         ''', cbi, cbo)
 
+    def build_const_load(cbo: str, value: float) -> str:
+      return build_cb_processor(f"init_sfpu({cbo}, {cbo}); fill_tile_init(); fill_tile(0, {value}f);", [], cbo)
+
     compute = f"""
 #include <cstdint>
 #include "compute_kernel_api/eltwise_binary.h"
 #include "compute_kernel_api/eltwise_unary/sfpu_split_includes.h"
 #include "compute_kernel_api/tile_move_copy.h"
 #include "compute_kernel_api/eltwise_unary/recip.h"
+#include "compute_kernel_api/eltwise_unary/fill.h"
 #include "compute_kernel_api/eltwise_unary/eltwise_unary.h"
+#include "sfpi.h"
+using namespace sfpi;
 
 namespace NAMESPACE {{
 constexpr uint32_t onetile = 1;
@@ -211,8 +218,8 @@ void MAIN {{
     constexpr auto cb_tmp = tt::CBIndex::c_3;
     
     for (uint32_t block = 0; block < {num_tiles}; ++block) {{
-        {build_unary("recip_tile", "cb_inp1", "cb_tmp")}
-        {build_binary(self.code_for_op[binary_op.op], ["cb_inp0", "cb_tmp"], "cb_out0")}
+        {build_const_load("cb_out0", binary_op.arg) if binary_op.op == Ops.CONST else ""}
+        {build_binary(self.code_for_op[binary_op.op], ["cb_inp0", "cb_inp1"], "cb_out0") if binary_op.op in self.binary_ops else ""}
     }}
 }}
 }}
