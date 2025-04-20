@@ -176,11 +176,10 @@
             offscreenContext.clearRect(0, 0, modelInputSize, modelInputSize);
             offscreenContext.drawImage(video, offsetX, offsetY, targetWidth, targetHeight);
             let boxes = await detectObjectsOnFrame(offscreenContext);
-            const flat = boxes[0];
-            const reshaped = [];
-            for (let i = 0; i < flat.length; i += 6)
-                if (flat[i + 4] >= 0.25) reshaped.push([flat[i], flat[i + 1], flat[i + 2], flat[i + 3], flat[i + 5]]);
-            drawBoxes(offscreenCanvas, reshaped, targetWidth, targetHeight, offsetX, offsetY);
+            const valid_boxes = [];
+            for (let i = 0; i < boxes.length; i += 6)
+                if (boxes[i + 4] >= 0.25) valid_boxes.push([boxes[i], boxes[i + 1], boxes[i + 2], boxes[i + 3], boxes[i + 5]]);
+            drawBoxes(offscreenCanvas, valid_boxes, targetWidth, targetHeight, offsetX, offsetY);
             requestAnimationFrame(processFrame);
         }
         requestAnimationFrame(processFrame);
@@ -224,7 +223,7 @@
             }
             const [input,img_width,img_height] = await prepareInput(offscreenContext);
             const output = await net(new Float32Array(input));
-            return output;
+            return output[0];
         }
 
         async function prepareInput(offscreenContext) {
