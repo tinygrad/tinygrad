@@ -60,6 +60,7 @@ class TestYOLOv8(unittest.TestCase):
 
     tiny_output = TinyYolov8(input_image).numpy()
     onnx_output = postprocess(Tensor(onnx_output[0])).numpy()
+    #invalid boxes are multiplied by zero in postprocess
     onnx_output = onnx_output[onnx_output[:, 4] != 0]
     tiny_output = tiny_output[tiny_output[:, 4] != 0]
 
