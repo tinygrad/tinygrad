@@ -39,20 +39,20 @@ class TestBeamSearch(unittest.TestCase):
     c = (a/b).sum(1).realize()
     np.testing.assert_allclose(c.numpy(), (a.numpy() / b.numpy()).sum(1), atol=1e-4, rtol=1e-4)
 
-  # def test_variable_big_prime_number(self):
-  #   v = Variable("v", 1, 400).bind(367)
-  #   a = rand(367, 367)
-  #   b = rand(367, 367)
-  #   with Context(CHECK_OOB=0):
-  #     c = (a.reshape(367, v) @ b.reshape(v, 367)).realize()
-  #     np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), atol=1e-4, rtol=1e-4)
+  def test_variable_big_prime_number(self):
+    v = Variable("v", 1, 400).bind(367)
+    a = rand(367, 367)
+    b = rand(367, 367)
+    with Context(CHECK_OOB=0):
+      c = (a.reshape(367, v) @ b.reshape(v, 367)).realize()
+      np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), atol=1e-4, rtol=1e-4)
 
-  # def test_variable_shrink_prime_number(self):
-  #   v = Variable("v", 1, 400).bind(367)
-  #   a = rand(400, 367)
-  #   with Context(CHECK_OOB=0):
-  #     b = (a.shrink(((0,v), None))+1).reshape(367,367).realize()
-  #     np.testing.assert_allclose(b.numpy(), a.numpy()[:367]+1, atol=1e-4, rtol=1e-4)
+  def test_variable_shrink_prime_number(self):
+    v = Variable("v", 1, 400).bind(367)
+    a = rand(400, 367)
+    with Context(CHECK_OOB=0):
+      b = (a.shrink(((0,v), None))+1).reshape(367,367).realize()
+      np.testing.assert_allclose(b.numpy(), a.numpy()[:367]+1, atol=1e-4, rtol=1e-4)
 
   def test_no_mutate_rawbuffers(self):
     a = rand(3, 3).realize()

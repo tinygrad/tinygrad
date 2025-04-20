@@ -17,7 +17,6 @@ MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 TABLE_NAME = f"process_replay_{VERSION}"
 os.environ["RUN_PROCESS_REPLAY"] = "0"
 os.environ["CAPTURE_PROCESS_REPLAY"] = "0"
-os.environ["CHECK_OOB"] = "0"
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 MAX_LINES = 500
