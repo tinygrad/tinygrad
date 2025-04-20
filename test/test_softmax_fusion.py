@@ -67,6 +67,7 @@ class TestFuse(unittest.TestCase):
       c = (Tensor.rand(N,N)-0.5).realize()
     self._test_fuse(lambda a,b,c: a@b@c, a, b, c, atol=1e-5)
 
+  @unittest.skipUnless(Device.DEFAULT == "METAL", "fails only with METAL TC")
   @unittest.expectedFailure
   def test_double_gemm_beam(self):
     with Context(BEAM=2):
