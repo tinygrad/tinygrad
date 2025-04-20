@@ -67,6 +67,11 @@ class TestFuse(unittest.TestCase):
       c = (Tensor.rand(N,N)-0.5).realize()
     self._test_fuse(lambda a,b,c: a@b@c, a, b, c, atol=1e-5)
 
+  @unittest.expectedFailure
+  def test_double_gemm_beam(self):
+    with Context(BEAM=2):
+      self.test_double_gemm()
+
   def test_embedding(self):
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
       vocab_sz = 123
