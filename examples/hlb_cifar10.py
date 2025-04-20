@@ -17,7 +17,7 @@ cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
 
 BS, STEPS = getenv("BS", 512), getenv("STEPS", 1000)
 EVAL_BS = getenv("EVAL_BS", BS)
-GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
+GPUS = [f"{Device.DEFAULT}:{i}" for i in range(int(gpus))] if (gpus:=getenv("GPUS", "1")).isnumeric() else gpus.split(',')
 assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 assert EVAL_BS % len(GPUS) == 0, f"{EVAL_BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 

@@ -49,7 +49,7 @@ def train_resnet():
   else:
     MLLOGGER = None
 
-  GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(int(gpus))] if (gpus:=getenv("GPUS", "1")).isnumeric() else gpus.split(',')
   print(f"training on {GPUS}")
   for x in GPUS: Device[x]
 

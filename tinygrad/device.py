@@ -35,6 +35,9 @@ class _Device:
   def get_available_devices(self) -> Iterator[str]:
     for device in ALL_DEVICES:
       with contextlib.suppress(Exception): yield self[device].device
+  def dma_dereg(self, base_iova:int):
+    for dev in self._opened_devices:
+      if hasattr(dev, 'dma_dereg'): dev.dma_dereg(base_iova)
   @functools.cached_property
   def DEFAULT(self) -> str:
     if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
@@ -182,6 +185,11 @@ class Buffer:
     if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
     return Buffer(self.device, size, dtype, base=self, offset=offset)
 
+class DMABuf:
+  def __init__(self, iova:int, size:int, base_iova:int|None=None, base_size:int|None=None, dmabuf_fd:int|None=None):
+    self.iova, self.size, self.dmabuf_fd = iova, size, dmabuf_fd
+    self.base_iova, self.base_size = base_iova if base_iova is not None else iova, base_size if base_size is not None else size
+
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
   # overridden in LRUAllocator
@@ -225,6 +233,8 @@ class _MallocAllocator(LRUAllocator):
     # TODO: investigate if this is the cause of nondeterminism in speed
     alignment = 0x1000 if size >= 0x1000 else 0x20
     return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else self._alloc_aligned(size, alignment)
+  def _free(self, opaque, options:BufferSpec):
+    Device.dma_dereg(mv_address(opaque))
   def _alloc_aligned(self, size:int, alignment:int):
     buffer = (ctypes.c_uint8 * (size + alignment))()
     offset = round_up(ctypes.addressof(buffer), alignment) - ctypes.addressof(buffer)
@@ -232,7 +242,13 @@ class _MallocAllocator(LRUAllocator):
   def _as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
-  def _offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
+  def _offset(self, buf, size:int, offset:int):
+    opaque = from_mv(self._as_buffer(buf)[offset:offset+size])
+    setattr(opaque, '_base', getattr(buf, '_base') if hasattr(buf, '_base') else buf)
+    return opaque
+  def as_dmabuf(self, buf):
+    base_buf = getattr(buf, '_base') if hasattr(buf, '_base') else buf
+    return DMABuf(ctypes.addressof(buf), ctypes.sizeof(buf), ctypes.addressof(base_buf), ctypes.sizeof(base_buf), None)
 
 MallocAllocator = _MallocAllocator()
 
