@@ -207,4 +207,4 @@ def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
     spec_ret = [cast(bool|None, s.rewrite(u)) for s in specs]
     if any(ret is False for ret in spec_ret) or all(ret is None for ret in spec_ret):
       if DEBUG >= 3: print_uops(uops)
-      raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
+      raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg} {CHECK_OOB=}")
