@@ -122,9 +122,9 @@ def get_variant_multiples(variant):
 
 def label_predictions(all_predictions):
   class_index_count = defaultdict(int)
-  for pred_np in all_predictions:
-    class_id = int(pred_np[-1])
-    if pred_np[-2] != 0: class_index_count[class_id] += 1
+  for pred in all_predictions:
+    class_id = int(pred[-1])
+    if pred[-2] != 0: class_index_count[class_id] += 1
 
   return dict(class_index_count)
 
