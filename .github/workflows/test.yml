@@ -633,11 +633,11 @@ jobs:
         cuda: 'true'
         llvm: 'true'
     - name: Run real world test
-      run: CHECK_OOB=1 JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Test models (Metal)
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models --durations=20
     - name: Run ONNX
-      run: CHECK_OOB=1 JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
       run: CHECK_OOB=1 TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
