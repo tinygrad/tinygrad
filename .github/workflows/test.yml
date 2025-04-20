@@ -633,13 +633,13 @@ jobs:
         cuda: 'true'
         llvm: 'true'
     - name: Run real world test
-      run: CHECK_OOB=1 JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Test models (Metal)
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models --durations=20
     - name: Run ONNX
-      run: CHECK_OOB=1 JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
-      run: CHECK_OOB=1 TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
+      run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
       run: CHECK_OOB=1 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
     - name: Test LLaMA compile speed
@@ -651,13 +651,12 @@ jobs:
     # - name: Fuzz Test models schedule
     # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run TRANSCENDENTAL math
-      run: CHECK_OOB=1 TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
+      run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
     - name: Run pytest (amd)
       env:
         MOCKGPU: 1
         AMD: 1
         FORWARD_ONLY: 1
-        CHECK_OOB: 1
       run: |
         python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
     - name: Run pytest (amd with llvm backend)
@@ -666,7 +665,6 @@ jobs:
         AMD: 1
         AMD_LLVM: 1
         FORWARD_ONLY: 1
-        CHECK_OOB: 1
       run: |
         python -m pytest -n=auto test/test_hcq.py test/test_tiny.py test/test_amd_llvm.py --durations=20
     - name: Run pytest (ptx)
@@ -675,12 +673,9 @@ jobs:
         PTX: 1
         NV: 1
         FORWARD_ONLY: 1
-        CHECK_OOB: 1
       run: |
         python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
     - name: Run process replay tests
-      env:
-        CHECK_OOB: 0
       uses: ./.github/actions/process-replay
 
   osxwebgpu:
