@@ -338,7 +338,7 @@ async function main() {
   if (kernel.name == "View Memory Graph") {
     renderMemoryGraph(ret[currentRewrite].graph);
   } else {
-    renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
+    renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=true);
   }
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
