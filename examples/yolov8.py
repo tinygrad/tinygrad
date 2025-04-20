@@ -62,16 +62,16 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
   for pred in predictions:
     x1, y1, x2, y2, conf, class_id = pred
     if conf == 0: continue
-    color = color_dict[class_labels[int(class_id)]]
-    x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
+    x1, y1, x2, y2, class_id = map(int, (x1, y1, x2, y2, class_id))
+    color = color_dict[class_labels[class_id]]
     cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, box_thickness)
-    label = f"{class_labels[int(class_id)]} {conf:.2f}"
+    label = f"{class_labels[class_id]} {conf:.2f}"
     text_size, _ = cv2.getTextSize(label, font, font_scale, 1)
     label_y, bg_y = (y1 - 4, y1 - text_size[1] - 4) if y1 - text_size[1] - 4 > 0 else (y1 + text_size[1], y1)
     cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
     font_color = (0, 0, 0) if is_bright_color(color) else (255, 255, 255)
     cv2.putText(orig_img, label, (x1, label_y), font, font_scale, font_color, 1, cv2.LINE_AA)
-    object_count[class_labels[int(class_id)]] += 1
+    object_count[class_labels[class_id]] += 1
 
   print("Objects detected:")
   for obj, count in object_count.items():
