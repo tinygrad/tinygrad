@@ -1,10 +1,10 @@
 # Kernel Creation
 
-Tinygrad Lazily builds up a graph of Tensor operations. The Tensor graph includes a mix of:
+Tinygrad lazily builds up a graph of Tensor operations. The Tensor graph includes a mix of:
 
-1. Buffer and Assignment Ops (BUFFER, BUFFER_VIEW, COPY, ASSIGN)
-2. Movement Ops (RESHAPE, PERMUTE, EXPAND, ...)
-3. Compute Ops (ADD, MUL, REDUCE_AXIS ...)
+- Buffer and Assignment Ops: `BUFFER`, `BUFFER_VIEW`, `COPY`, `ASSIGN`
+- Movement Ops: `RESHAPE`, `EXPAND`, `PERMUTE`, `PAD`, `SHRINK`, `FLIP`
+- Compute Ops: `ADD`, `MUL`, `REDUCE_AXIS`, ...
 
 `Tensor.kernelize` transforms a graph of Tensor operations into a graph of Kernels.
 
@@ -31,8 +31,7 @@ print(mul) # <Tensor <UOp METAL (1,) int (<Ops.MUL: 48>, None)> on METAL with gr
 print(out) # <Tensor <UOp METAL (1,) int (<Ops.ASSIGN: 66>, None)> on METAL with grad None>
 ```
 
-The multiply operation stays unchanged because it is fused.
-The output Tensor transforms to an ASSIGN UOp, let's inspect this UOp in more detail.
+The multiply operation stays unchanged because it is fused. The output Tensor's UOp gets transformed to a new ASSIGN UOp:
 
 ```py
 print(out.lazydata)
@@ -46,7 +45,7 @@ UOp(Ops.BUFFER, dtypes.int, arg=1, src=(
   UOp(Ops.UNIQUE, dtypes.void, arg=6, src=()),))
 ```
 
-And the second source is the KERNEL and its 3 dependancies (a, b, c):
+And the second source is the KERNEL and its 3 dependencies (a, b, c):
 
 ```
 UOp(Ops.KERNEL, dtypes.void, arg=<Kernel 12 SINK(<Ops.STORE: 45>,) (__add__, __mul__)>, src=(
@@ -101,6 +100,6 @@ print(out.item()) # 5
 
 - `Tensor.kernelize` splits the Tensor graph into data (BUFFER), compute (KERNEL) and links dependencies with ASSIGN.
 
-- `Tensor.realize` executes KERNELs on device and clears the Tensor graph, only BUFFERs remain in the Tensor graph.
+- `Tensor.realize` executes KERNELs on device and replaces the Tensor graph with just a BUFFER.
 
-- `Tensor.kernelize` can be called multiple times on Tensors, This allows for incrementally building the kernel fusion layout of a large Tensor graph, without having to call `realize` or `schedule`.
+- Kernelize can be called multiple times on a Tensor. This allows for incrementally building the kernel fusion layout of a large Tensor graph, without having to call `realize` or `schedule`.
