@@ -193,7 +193,7 @@
             const scaleX = canvas.width / targetWidth;
             const scaleY = canvas.height / targetHeight;
 
-            boxes.forEach(([x1, y1, x2, y2 , classIndex]) => {
+            boxes.forEach(([x1, y1, x2, y2, classIndex]) => {
                 const label = yolo_classes[classIndex];
                 const color = classColors[classIndex];
                 ctx.strokeStyle = color;
