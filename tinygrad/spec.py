@@ -2,8 +2,10 @@ from typing import cast, Callable
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, RewriteContext
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
 from tinygrad.helpers import all_same, dedup, prod, DEBUG, CHECK_OOB
-if CHECK_OOB:
+
+try:
   import z3
+  z3_imported = True
 
   # IDIV is truncated division but z3 does floored division; mod by power of two sometimes uses Ops.AND
   def z3_cdiv(a,b): return z3.If(a<0, (a+(b-1))/b, a/b)
@@ -26,6 +28,7 @@ if CHECK_OOB:
     (UPat(Ops.CAST, name="x"), lambda x: x.src[0]),
     (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=z3_alu[x.op](*(s.arg for s in x.src)))),
   ])
+except ImportError: z3_imported = False
 
 buffer_spec = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
@@ -72,6 +75,7 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 
 def validate_index(idx:UOp, mask:UOp|None=None):
   if not CHECK_OOB or isinstance(idx.dtype, ImageDType) or (sz := cast(PtrDType, idx.src[0].dtype).size) == -1: return True
+  if not z3_imported: raise ImportError("z3 is required for bounds checking, try CHECK_OOB=0 or install z3: \"z3-solver\"")
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
   if 0<=idx.src[1].vmin and idx.src[1].vmax<sz: return True
 
