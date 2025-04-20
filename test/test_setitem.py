@@ -30,7 +30,6 @@ class TestSetitem(unittest.TestCase):
     t[4:1:-2] = 11
     self.assertListEqual(t.tolist(), [0, 1, 11, 3, 11, 5, 6, 7, 8, 9])
 
-  @unittest.expectedFailure # TODO: fix double ASSIGN in scheduler
   def test_setitem_inplace_mul(self):
     t = Tensor.arange(10).realize()
     t[:3] *= 10
