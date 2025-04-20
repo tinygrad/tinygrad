@@ -226,7 +226,7 @@ class Tensor(SimpleMathTrait):
 
   def kernelize(self, *lst:Tensor) -> Tensor:
     """
-    Transforms the Tensor graph into a graph of Kernels and Assigns the output of some Tensors to buffers.
+    Creates the kernels and buffers needed to realize these Tensor(s).
 
     NOTE: Kernelize can be called multiple times on a Tensor
     """
