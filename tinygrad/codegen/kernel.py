@@ -432,13 +432,6 @@ class Kernel:
   def apply_opts(self, opts:Sequence[Opt]):
     for opt in opts: self.apply_opt(opt)
 
-  def required_optimizations(self) -> Kernel:
-    if isinstance(self.membufs[0].dtype, ImageDType):
-      unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
-      assert unit_stride_axes_mul_4, f"needs a unit stride axis in {self.bufs[0]}"
-      if all(x < self.first_upcast for x in unit_stride_axes_mul_4): self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
-    return self
-
   # **** kernel outputs ****
 
   kernel_cnt: Final[defaultdict[str, int]] = defaultdict(int)
@@ -565,7 +558,7 @@ class Kernel:
 
   def to_program(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> ProgramSpec:
     self.linearize(name_override, ast_transform)
-    assert self.uops[0].op is Ops.NAME, "first uop must be name"
+    assert self.uops[-1].op is Ops.SINK, "last uop must be sink"
     src = self.opts.render(self.uops)
 
     if CAPTURE_PROCESS_REPLAY:
@@ -573,7 +566,8 @@ class Kernel:
       frm = sys._getframe(1)
       while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
       loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, loc, ContextVar._cache, src))
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[-1].arg.name, loc, ContextVar._cache,
+                                                             src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.

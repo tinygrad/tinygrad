@@ -132,8 +132,8 @@ class CStyleLanguage(Renderer):
     c: defaultdict[str, int] = defaultdict(int)
     name = "test"
     for u in uops:
-      if u.op is Ops.NAME:
-        name = u.arg
+      if u.op is Ops.SINK:
+        if u.arg is not None: name = u.arg.name
         continue
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]

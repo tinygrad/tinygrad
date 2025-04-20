@@ -51,7 +51,6 @@ if __name__ == "__main__":
     print(test_lin.ast)
     print(test_lin.applied_opts)
     unoptimized_lin = Kernel(test_lin.ast)
-    unoptimized_lin.required_optimizations()
     print(f"{unoptimized_lin.colored_shape()} -> {test_lin.colored_shape()}")
     (msg,rb,vv,gt) = compare_linearizer(test_lin, None, None, None, rtol=args.rtol, atol=args.atol)
     if msg != "PASS":

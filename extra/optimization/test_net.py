@@ -35,7 +35,7 @@ if __name__ == "__main__":
     rawbufs = bufs_from_lin(lin)
 
     linhc = deepcopy(lin)
-    linhc = hand_coded_optimizations(linhc)
+    linhc.applied_opts(hand_coded_optimizations(linhc))
     tmhc = time_linearizer(linhc, rawbufs)
     print(f"{tmhc*1e6:10.2f}     HC    ", linhc.colored_shape())
 
