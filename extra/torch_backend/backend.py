@@ -3,6 +3,7 @@
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
+from tinygrad.ops import Ops
 from tinygrad.helpers import getenv, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
@@ -67,6 +68,7 @@ def realize_with_views(self: Tensor, views: Tensor):
   if not self.lazydata.st.contiguous: self.replace(self.contiguous())
   self.replace(self.clone().realize())
   for v in views:
+    if v.lazydata.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
     ret = self
     st = ShapeTracker(self.lazydata.st.views + v.lazydata.st.views) # TODO: is this right?
     for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
