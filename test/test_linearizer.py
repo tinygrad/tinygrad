@@ -1739,7 +1739,7 @@ class TestHandCodedOpts(unittest.TestCase):
 
     s = layer_2.schedule()[-1]
     k = Kernel(s.ast)
-    k = hand_coded_optimizations(k)
+    k.apply_opts(hand_coded_optimizations(k))
     assert len(k.bufs) == 6  # make sure all ops are done in one kernel
     # masked upcast should upcast masked axis of size 7
     # masked upcast should not upcast large (20) last axis
@@ -1752,7 +1752,7 @@ class TestHandCodedOpts(unittest.TestCase):
 
     s = monster.schedule()[-1]
     k = Kernel(s.ast)
-    k = hand_coded_optimizations(k)
+    k.apply_opts(hand_coded_optimizations(k))
     assert len(k.bufs) == 37  # make sure all ops are done in one kernel
     # should upcast the two Tensor.stacks
     assert k.upcasted >= 2 and k.full_shape[k.shape_len-k.upcasted:k.shape_len].count(6) == 2
@@ -1768,7 +1768,7 @@ class TestHandCodedOpts(unittest.TestCase):
       # collect upcasts of tile transform kernels
       for i, si in enumerate(wino_schedule):
         k = Kernel(si.ast)
-        k = hand_coded_optimizations(k)
+        k.apply_opts(hand_coded_optimizations(k))
         if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel)
         if len(k.bufs) < 22: continue  # not a tile transform kernel (there's a permute kernel at the end)
         upcasts.append(tuple(k.full_shape[k.shape_len - k.upcasted:k.shape_len]))
@@ -1780,7 +1780,7 @@ class TestHandCodedOpts(unittest.TestCase):
       backward_schedule = Tensor.schedule(x.grad, w.grad)
       for si in backward_schedule:
         k = Kernel(si.ast)
-        k = hand_coded_optimizations(k)
+        k.apply_opts(hand_coded_optimizations(k))
         k.linearize()
         if len(k.bufs) < 20: continue  # not a tile transform kernel
         # heuristic number to make sure that at least some upcasts but not too many upcasts are being done
@@ -1866,7 +1866,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
 
   # Check correctness of handcoded optimiztions.
   k = Kernel(realized_ast)
-  k = hand_coded_optimizations(k)
+  k.apply_opts(hand_coded_optimizations(k))
   lins.append(k)
   prg = get_prg(k)
   reset_bufs(outbufs)

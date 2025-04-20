@@ -266,6 +266,14 @@ class TestDiskTensor(unittest.TestCase):
     reloaded = Tensor.empty(10, 10, device=f"disk:{temp('dt_write_ones')}")
     np.testing.assert_almost_equal(reloaded.numpy(), np.ones((10, 10)))
 
+  def test_simple_setitem(self):
+    pathlib.Path(temp(fn:="dt_simple_setitem")).unlink(missing_ok=True)
+    data = [[1],[2]]
+    src = Tensor(data)
+    dt = src.to(f"disk:{temp(fn)}")
+    dt[1] = [3]
+    self.assertEqual(dt.tolist(), [[1], [3]])
+
   def test_assign_slice(self):
     def assign(x,s,y): x[s] = y
     helper_test_disk_tensor("dt_assign_slice_1", [0,1,2,3], lambda x: assign(x, slice(0,2), [13, 12]))
