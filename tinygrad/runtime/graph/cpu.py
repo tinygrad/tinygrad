@@ -10,13 +10,12 @@ from tinygrad.renderer.cstyle import ClangRenderer
 
 class CPUGraph(GraphRunner):
   def __init__(self, device, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
-    super().__init__(jit_cache, input_rawbuffers, var_vals)
-
     cpu_progs: list[ExecItem] = []
     if issubclass(device.runtime, CPUProgram):
       device = Device["CPU"]
       cpu_progs.extend(dict((cast(CompiledRunner, item.prg).p.name, item) for item in jit_cache).values()) # dedupe by name
     elif not isinstance(device.renderer, ClangRenderer): raise GraphException
+    super().__init__(jit_cache, input_rawbuffers, var_vals)
 
     self.base_bufs = dedup(b.base for ji in jit_cache for b in ji.bufs if b is not None and b not in input_rawbuffers)
     self.base_rawbufs = [b._buf for b in self.base_bufs] + [cast(CompiledRunner, ji.prg)._prg.fxn for ji in cpu_progs]
