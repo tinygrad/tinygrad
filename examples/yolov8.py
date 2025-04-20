@@ -313,7 +313,7 @@ def compute_iou_matrix(boxes):
   iou = intersection / (areas[:, None] + areas[None, :] - intersection)
   return iou
 
-def postprocess(output, max_det=300, conf_threshold=0.25):
+def postprocess(output, max_det=300, conf_threshold=0.25, iou_threshold=0.45):
   xc, yc, w, h, class_scores = output[0][0], output[0][1], output[0][2], output[0][3], output[0][4:]
   class_ids = Tensor.argmax(class_scores, axis=0)
   probs = Tensor.max(class_scores, axis=0)
@@ -328,7 +328,7 @@ def postprocess(output, max_det=300, conf_threshold=0.25):
   iou = compute_iou_matrix(boxes[:, :4])
   iou = Tensor.triu(iou, diagonal=1)
   same_class_mask = boxes[:, -1][:, None] == boxes[:, -1][None, :]
-  high_iou_mask = (iou > 0.45) & same_class_mask
+  high_iou_mask = (iou > iou_threshold) & same_class_mask
   no_overlap_mask = high_iou_mask.sum(axis=0) == 0
   boxes = boxes * no_overlap_mask.unsqueeze(-1)
   return boxes
