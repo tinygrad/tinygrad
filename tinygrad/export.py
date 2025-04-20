@@ -15,7 +15,7 @@ Things we do here for model export. TODO: Should TinyJit/CapturedJit do any of t
   5. Track input indices of symbolic vars, required for using positional args in JS (could switch to kwargs)
 """
 # Common logic for any model export
-def export_init(model: Callable, inputs: Sequence, state_dict:dict[str,Tensor]={}, fix_contiguous=True) -> \
+def export_init(model: Callable, inputs: Sequence, state_dict:dict[str,Tensor]|None=None, fix_contiguous=True) -> \
   tuple[CapturedJit, dict[Buffer, int], dict[UOp, int], dict[Buffer, int], dict[Buffer, str], dict[Buffer, dict[str, str]]]:
 
   if isinstance(model, types.MethodType): weights_holder = model.__self__
@@ -63,7 +63,7 @@ def export_init(model: Callable, inputs: Sequence, state_dict:dict[str,Tensor]={
 
   return cj, in_bufs, in_vars, out_bufs, empty_bufs, state_bufs
 
-def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None, state_dict:dict[str,Tensor]={},
+def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None, state_dict:dict[str,Tensor]|None=None,
                   model_name="model", save_weights=True, fix_contiguous=True) -> tuple[str, dict[str, Tensor]]:
   """
   Exports a javascript WebGPU implementation of a model together with its `state_dict`.
