@@ -10,19 +10,14 @@ from tinygrad import Tensor, dtypes
 
 x_cpu = Tensor(np.random.normal(0, 1, (1000)), dtype=dtypes.float32, device="cpu")
 y_cpu = Tensor(np.random.normal(0, 1, (1000)), dtype=dtypes.float32, device="cpu")
+z_cpu = Tensor(np.random.normal(0, 1, (1000)), dtype=dtypes.float32, device="cpu")
+x, y, z = x_cpu.to("tt"), y_cpu.to("tt"), z_cpu.to("tt")
 
-# x_cpu = Tensor([-0.003850722685456276, 0.7894648909568787], dtype=dtypes.float32, device="cpu")
-# y_cpu = Tensor([0.05602724477648735, 0.981860339641571], dtype=dtypes.float32, device="cpu")
+out_ref = (x_cpu + y_cpu + z_cpu).tolist()
+out = (x + y + z).tolist()
 
-z_ref = (x_cpu / y_cpu).tolist()
-
-x = x_cpu.to("tt")
-y = y_cpu.to("tt")
-z = x / y
-
-print(z_ref[0:10])
-print(z.tolist()[0:10])
-print(z_ref[0:10])
+print(out_ref[0:4])
+print(out[0:4])
 
 # print("Source")
 # print(x_cpu.tolist()[0:10])

@@ -143,6 +143,7 @@ void kernel_main() {{
     Ops.SHR: "right_shift_tile", Ops.SHL: "left_shift_tile", Ops.CMPLT: "",
     Ops.WHERE: "" }
   binary_ops = [Ops.ADD, Ops.SUB, Ops.MUL]
+  unary_ops = [Ops.RECIP, Ops.NEG, Ops.SQRT]
 
   def build_math(self, op:Ops, loads) -> str:
     if op in self.code_for_op:
@@ -161,9 +162,6 @@ void kernel_main() {{
     # TODO: what happens on non divisible by TILE_SIZE?
     num_tiles = math.ceil(stores[0].size / TILE_SIZE)
 
-    binary_op = stores[0].src[2]
-
-    cbs_vars = []
 
     def build_cb_processor(block: str, cbi: list[str], cbo: str) -> str:
       return f"""
@@ -200,6 +198,39 @@ void kernel_main() {{
     def build_const_load(cbo: str, value: float) -> str:
       return build_cb_processor(f"init_sfpu({cbo}, {cbo}); fill_tile_init(); fill_tile(0, {value}f);", [], cbo)
 
+    next_var_cb_index = len(loads) + len(stores)
+    cbs_vars = []
+
+    def get_cb(op: UOp) -> str:
+      if op.op == Ops.LOAD:
+        return f"tt::CBIndex::c_{op.src[0].arg}", ""
+      else:
+         # TODO: reuse CB's
+        nonlocal next_var_cb_index
+        cb_tmp = next_var_cb_index
+        cbs_vars.append(cb_tmp)
+        next_var_cb_index += 1
+        sc = process_ast(op, cb_tmp)
+        return f"tt::CBIndex::c_{cb_tmp}", sc
+
+    def process_ast(ast: UOp, out_cb: int | None = None) -> str:
+      if ast.op == Ops.STORE:
+        return process_ast(ast.src[2], "tt::CBIndex::c_0")
+      elif ast.op in self.binary_ops:
+        a, a_sc = get_cb(ast.src[0])
+        b, b_sc = get_cb(ast.src[1])
+        return a_sc + "\n" + b_sc + "\n" + build_binary(self.code_for_op[ast.op], [a, b], out_cb)
+      elif ast.op == Ops.CONST:
+        return build_const_load(out_cb, ast.arg)
+      elif ast.op in self.unary_ops:
+        a, a_sc = get_cb(ast.src[0])
+        return a_sc + "\n" + build_unary(self.code_for_op[ast.op], a, out_cb)
+      else:
+        raise NotImplementedError(f"Operation {ast.op} not implemented")
+
+    assert ast.op == Ops.SINK, f"Expected SINK, got {ast.op}"
+    compute_src = process_ast(ast.src[0], None)
+
     compute = f"""
 #include <cstdint>
 #include "compute_kernel_api/eltwise_binary.h"
@@ -214,12 +245,8 @@ using namespace sfpi;
 namespace NAMESPACE {{
 constexpr uint32_t onetile = 1;
 void MAIN {{
-    constexpr auto cb_out0 = tt::CBIndex::c_0, cb_inp0 = tt::CBIndex::c_1, cb_inp1 = tt::CBIndex::c_2;
-    constexpr auto cb_tmp = tt::CBIndex::c_3;
-    
     for (uint32_t block = 0; block < {num_tiles}; ++block) {{
-        {build_const_load("cb_out0", binary_op.arg) if binary_op.op == Ops.CONST else ""}
-        {build_binary(self.code_for_op[binary_op.op], ["cb_inp0", "cb_inp1"], "cb_out0") if binary_op.op in self.binary_ops else ""}
+        {compute_src}
     }}
 }}
 }}
