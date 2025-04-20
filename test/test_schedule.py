@@ -590,6 +590,22 @@ class TestSchedule(unittest.TestCase):
     c = (a.sum(2).contiguous() + b).contiguous()
     check_schedule(c, 2)
 
+  def test_kernelize(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = (a+b).kernelize()
+    d = c+2
+    check_schedule(d, 2)
+
+  # unlike schedule, kernelize can be called multiple times on a Tensor
+  def test_double_kerenlize(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = (a+b)
+    d = c.kernelize()+2
+    e = c.kernelize()+d.kernelize()
+    check_schedule(e, 3)
+
   @unittest.skip("no longer supported")
   def test_double_from(self):
     x = Tensor([1,2,3,4])
