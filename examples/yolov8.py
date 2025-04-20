@@ -43,7 +43,7 @@ def preprocess(im, imgsz=640, model_stride=32, model_pt=True):
   return im
 
 
-def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictions, class_labels,size=640, conf_threshold=0.25):
+def draw_bounding_boxes_and_save(orig_img_paths, output_img_paths, all_predictions, class_labels, size=640, conf_threshold=0.25):
   all_predictions = [all_predictions]
   color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
   font = cv2.FONT_HERSHEY_SIMPLEX
@@ -400,7 +400,7 @@ if __name__ == '__main__':
   print(f'did inference in {int(round(((time.time() - st) * 1000)))}ms')
   #v8 and v3 have same 80 class names for Object Detection
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names').read_text().split("\n")
-  for pred in predictions: pred[:4] = scale_boxes(pre_processed_image.shape[2:],pred[:4],image[0].shape)
+  for pred in predictions: pred[:4] = scale_boxes(pre_processed_image.shape[2:], pred[:4], image[0].shape)
   draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=predictions, class_labels=class_labels)
 
 # TODO for later:

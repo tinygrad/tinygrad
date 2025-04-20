@@ -57,7 +57,7 @@ class TestYOLOv8(unittest.TestCase):
     onnx_output_name = onnx_session.get_outputs()[0].name
     onnx_output = onnx_session.run([onnx_output_name], {onnx_input_name: input_image.numpy()})
 
-    tiny_output = TinyYolov8(input_image,do_postprocess=False)
+    tiny_output = TinyYolov8(input_image, do_postprocess=False)
 
     # currently rtol is 0.025 because there is a 1-2% difference in our predictions
     # because of the zero padding in SPPF module (line 280) maxpooling layers rather than the -infinity in torch.
