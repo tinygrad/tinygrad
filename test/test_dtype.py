@@ -21,6 +21,8 @@ core_dtypes = list(DTYPES_DICT.values())
 if Device.DEFAULT == "CPU": core_dtypes.remove(dtypes.bfloat16)  # NOTE: this is for teenygrad, don't remove
 dtype_ints = [dt for dt in core_dtypes if dtypes.is_int(dt) and is_dtype_supported(dt)]
 dtype_floats = [dt for dt in core_dtypes if dtypes.is_float(dt) and is_dtype_supported(dt)]
+FP8E4M3_MAX = 448.0
+FP8E5M2_MAX = 57344.0
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
   if not is_dtype_supported(dtype): return []
@@ -148,8 +150,6 @@ class TestFp8s(unittest.TestCase):
   def test_fp8e4m3_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e4m3).dtype == dtypes.fp8e4m3
   def test_fp8e5m2_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e5m2).dtype == dtypes.fp8e5m2
 
-FP8E4M3_MAX = 448.0
-FP8E5M2_MAX = 57344.0
 class TestFp8sConversions(unittest.TestCase):
 
   @given(strat.floats(width=32, allow_subnormal=False, allow_nan=False, allow_infinity=False, min_value=-FP8E4M3_MAX, max_value=FP8E4M3_MAX))
@@ -163,7 +163,7 @@ class TestFp8sConversions(unittest.TestCase):
     np.testing.assert_equal(float_to_fp8(-FP8E4M3_MAX*1.01, "E4M3"), 254)
     np.testing.assert_equal(float_to_fp8(-math.inf, "E4M3"), 254)
 
-  @given(strat.floats(width=32, allow_subnormal=False, allow_nan=False, allow_infinity=False, min_value=-57344, max_value=57344))
+  @given(strat.floats(width=32, allow_subnormal=False, allow_nan=False, allow_infinity=False, min_value=-FP8E5M2_MAX, max_value=FP8E5M2_MAX))
   def test_float_to_fp8e5m2(self, x): np.testing.assert_equal(float_to_fp8(x, "E5M2"), ml_dtypes.float8_e5m2(x).tobytes()[0])
 
   def test_float_to_fp8e5m2_extreme_values(self):

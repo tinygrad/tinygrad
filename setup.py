@@ -73,7 +73,7 @@ setup(name='tinygrad',
             "capstone",
             "pycocotools",
             "boto3",
-            "pandas",
+            "pandas"
         ],
         'docs': [
             "mkdocs",
