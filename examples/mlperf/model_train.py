@@ -443,7 +443,8 @@ def train_retinanet():
   model = retinanet.RetinaNet(backbone, num_classes=NUM_CLASSES)
   params = get_parameters(model)
 
-  for p in params: p.to_(GPUS)
+  if len(GPUS) > 1:
+    for p in params: p.to_(GPUS)
 
   step_times, start_epoch = [], 0
 
@@ -459,9 +460,8 @@ def train_retinanet():
     val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
     coco_val = COCOeval(cocoGt=val_dataset, iouType="bbox")
 
-    config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(len(train_dataset.imgs.keys()), BS) // BS
-    config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(len(val_dataset.imgs.keys()), EVAL_BS) // EVAL_BS)
-    start_iter = start_epoch * steps_in_train_epoch
+  config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(len(train_dataset.imgs.keys()), BS) // BS
+  config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(len(val_dataset.imgs.keys()), EVAL_BS) // EVAL_BS)
 
   # ** initialize wandb **
   if (WANDB:=getenv("WANDB")):
