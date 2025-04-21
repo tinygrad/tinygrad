@@ -27,7 +27,7 @@ class TestWinograd(unittest.TestCase):
       ops = s.ast.toposort
       with Timing(f"linearize {i} with {len(ops):4d} ops: "):
         l = Kernel(s.ast)
-        l = hand_coded_optimizations(l)
+        l.apply_opts(hand_coded_optimizations(l))
         l.linearize()
       assert len(l.sts) <= 256  # just the current value to prevent regression
       if DEBUG >= 2: print(f"{len(l.sts):4d} shapetrackers with max {max(len(x.views) for x in l.sts)} views")

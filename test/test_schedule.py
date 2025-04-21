@@ -15,7 +15,7 @@ from tinygrad.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite,
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.engine.grouper import view_left, view_right, sym
+from tinygrad.engine.grouper import view_left, view_right, sym, get_becomes_map
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
@@ -29,7 +29,9 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
   elif isinstance(t, List) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
-    sched, _, __ = create_schedule_with_vars(t.sink())
+    sink = UOp.sink(t)
+    becomes_map = get_becomes_map(sink)
+    sched, _, __ = create_schedule_with_vars(sink.substitute(becomes_map))
   # test lowering all the ScheduleItems to ExecItems
   lowered = [x[1] for x in lower_schedule(sched.copy())]
   if filter_sink: sched = [s for s,ei in zip(sched, lowered) if isinstance(ei.prg, CompiledRunner)]
@@ -587,6 +589,33 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.randn(16, 16).realize()
     c = (a.sum(2).contiguous() + b).contiguous()
     check_schedule(c, 2)
+
+  def test_kernelize(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = (a+b).kernelize()
+    d = c+2
+    check_schedule(d, 2)
+
+  # unlike schedule, kernelize can be called multiple times on a Tensor
+  def test_double_kerenlize(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = (a+b)
+    d = c.kernelize()+2
+    e = c.kernelize()+d.kernelize()
+    check_schedule(e, 3)
+
+  @unittest.expectedFailure # TODO: this should pass
+  def test_kernelize_bw(self):
+    a = Tensor.full((3,), 2.0, requires_grad=True).contiguous()
+    b = Tensor.full((3,), 3.0, requires_grad=True).contiguous()
+    x = (a*b).kernelize()
+    y = Tensor.eye(3, requires_grad=True)
+    z = y.matmul(x).sum()
+    if getenv("VIZ"):
+      graph_rewrite(z.lazydata, PatternMatcher([]), name="y.matmul(x).sum()")
+    z.backward()
 
   @unittest.skip("no longer supported")
   def test_double_from(self):
@@ -2510,12 +2539,15 @@ class TestUOpBecome(unittest.TestCase):
     assert b.lazydata is c.lazydata
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).match(c.lazydata, {})
 
-  def test_setitem_becomes_view_of_base(self):
+  def test_setitem_becomes_subbuffer(self):
     a = Tensor.full((4,), 2.).contiguous().realize()
     b = a.shrink(((0, 2),)).assign(Tensor.full((2,), 1.0))
     b.realize()
-    assert b.lazydata.is_realized
-    assert b.lazydata.base.buffer._base is None
+    assert a.lazydata.is_realized
+    assert a.lazydata.buffer._base is None
+    # b is a subbuffer of a
+    assert b.lazydata.op is Ops.BUFFER_VIEW
+    assert b.lazydata.src[0] is a.lazydata
 
   def test_setitem_offset(self):
     a = Tensor.full((16,), 0.).contiguous().realize()

@@ -15,6 +15,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
+from tinygrad.engine.grouper import get_becomes_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -97,12 +98,11 @@ def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
 def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
-  # apply mask to values (already broadcasted) and reduce such that if mask contains repeated indices the last one remains
-  values = values * mask
+  # reduce such that if mask contains repeated indices the last one remains
   for dim in axes: mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
   # remove extra dims from reduce
   for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
-  # select from values for each True element in mask else select from self
+  # select from values for each True element in mask else select from target
   return mask.where(values, target)
 
 #  `(padding_left, padding_right, padding_top, padding_bottom, ...)` ->  `(..., (padding_top, padding_bottom), (padding_left, padding_right))`
@@ -223,11 +223,11 @@ class Tensor(SimpleMathTrait):
 
   # ***** data handlers ****
 
-  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[Variable, int]]:
+  def kernelize(self, *lst:Tensor) -> Tensor:
     """
-    Creates the schedule needed to realize these Tensor(s), with Variables.
+    Creates the kernels and buffers needed to realize these Tensor(s).
 
-    NOTE: A Tensor can only be scheduled once.
+    NOTE: Kernelize can be called multiple times on a Tensor
     """
     big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
 
@@ -240,7 +240,18 @@ class Tensor(SimpleMathTrait):
     # verify Tensors match the spec
     if __debug__: type_verify(list(big_sink.toposort), tensor_uop_spec)
 
-    schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
+    becomes_map = get_becomes_map(big_sink)
+    _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
+    return self
+
+  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[Variable, int]]:
+    """
+    Creates the schedule needed to realize these Tensor(s), with Variables.
+
+    NOTE: A Tensor can only be scheduled once.
+    """
+    self.kernelize(*lst)
+    schedule, var_vals, becomes_map = create_schedule_with_vars(UOp.sink(*[x.lazydata for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return memory_planner(schedule), var_vals
 
@@ -1202,7 +1213,7 @@ class Tensor(SimpleMathTrait):
 
   def __setitem__(self, indices, v:Tensor|ConstType) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
-      self._getitem(indices).assign(v)
+      self.realize()._getitem(indices).assign(v)
       return
     # NOTE: check that setitem target is valid first
     if not unwrap(self.lazydata.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
