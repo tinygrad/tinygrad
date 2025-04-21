@@ -1,11 +1,23 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any, ClassVar
-import contextlib, decimal, statistics, time, ctypes, array, os, fcntl
+import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, struct
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.ops import sym_infer, sint, Variable, UOp
 from tinygrad.runtime.autogen import libc
+
+class HWMemInterface:
+  def __init__(self, va, sz): self.mv, self.va = to_mv(va, sz), va
+
+  def write(self, d, off=0, fmt='Q'):
+    b = struct.pack('<'+fmt, d) if isinstance(d, int) else d
+    self.mv[off:off+len(b)] = b
+
+  def read(self, n=1, off=0, fmt='Q'):
+    b = self.mv[off:off + n * (s:=struct.calcsize(fmt))]
+    u = struct.unpack('<'+(fmt if n==1 else str(n)+fmt), b)
+    return u[0] if n==1 else list(u)
 
 class HWInterface:
   """
@@ -211,17 +223,17 @@ class HCQSignal(Generic[DeviceType]):
     self.timeline_for_device:DeviceType|None = timeline_for_device
 
     if isinstance(self.base_addr, int):
-      self.value_mv, self.timestamp_mv = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q')
-      self.value_mv[0] = value
+      self.value_mv, self.timestamp_mv = HWMemInterface(self.value_addr, 8), HWMemInterface(self.timestamp_addr, 8)
+      self.value_mv.write(0, fmt='Q')
 
   def __del__(self):
     if isinstance(self.base_addr, int) and self.dev_t is not None: self.dev_t.signal_pool.append(self.base_addr)
 
   @property
-  def value(self) -> int: return self.value_mv[0]
+  def value(self) -> int: return self.value_mv.read(1)
 
   @value.setter
-  def value(self, new_value:int): self.value_mv[0] = new_value
+  def value(self, new_value:int): self.value_mv.write(new_value, fmt='Q')
 
   @property
   def timestamp(self) -> decimal.Decimal:
@@ -233,7 +245,7 @@ class HCQSignal(Generic[DeviceType]):
     Returns:
       The timestamp in microseconds.
     """
-    return self.timestamp_mv[0] / self.timestamp_divider
+    return self.timestamp_mv.read(1) / self.timestamp_divider
 
   def _sleep(self, time_spent_waiting_ms:int):
     """
