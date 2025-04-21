@@ -41,8 +41,8 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret:
     (ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, tuple(i for i,(si,so) in enumerate(zip(ret.src[0].shape, ret.arg)) if si!=so)).cast(ctx.dtype),)),
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
-  # there's no gradient for bitcast or assign
-  (UPat((Ops.BITCAST, Ops.ASSIGN)), lambda ctx: (None,)),
+  # there's no gradient for bitcast
+  (UPat(Ops.BITCAST), lambda ctx: (None,)),
 ])
 
 # copied from tensor.py, get relevant toposort of gradients
