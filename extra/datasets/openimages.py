@@ -1,3 +1,4 @@
+import glob
 import sys
 import json
 import numpy as np
@@ -198,6 +199,10 @@ def normalize(img:Tensor, device:list[str]|None = None):
   std = Tensor([0.229, 0.224, 0.225], device=device, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   img = ((img.permute([0, 3, 1, 2]) / 255.0) - mean) / std
   return img.cast(dtypes.default_float)
+
+def get_dataset_count(base_dir:Path, val:bool) -> int:
+  if not (files:=glob.glob(p:=str(base_dir / f"{'validation' if val else 'train'}/data/*.jpg"))): raise FileNotFoundError(f"No files in {p}")
+  return len(files)
 
 if __name__ == "__main__":
   download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), "train")
