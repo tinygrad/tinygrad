@@ -118,6 +118,11 @@ class TestRealizeMeansRealize(unittest.TestCase):
     assert x.lazydata is not x.lazydata.base
     assert x.lazydata.is_realized
 
+  def test_empty_realizes(self):
+    a = Tensor.empty(3)
+    a.realize()
+    assert a.lazydata.is_realized
+
   # NOTE: even though it doesn't realize, this seems fine
   def test_uniform_gradient(self):
     x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
