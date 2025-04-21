@@ -3,6 +3,14 @@
 #include <torch/extension.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <ATen/OpaqueTensorImpl.h>
+#include <ATen/CPUGeneratorImpl.h>
+#include <ATen/core/GeneratorForPrivateuseone.h>
+
+// register generator (using cpu generator currently, cause only use to get initial seed)
+at::Generator make_custom_generator(c10::DeviceIndex device_index) {
+  return at::make_generator<at::CPUGeneratorImpl>(device_index);
+}
+REGISTER_GENERATOR_PRIVATEUSE1(make_custom_generator);
 
 // register guard
 namespace at {
