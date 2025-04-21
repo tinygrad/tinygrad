@@ -41,8 +41,8 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret:
     (ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, tuple(i for i,(si,so) in enumerate(zip(ret.src[0].shape, ret.arg)) if si!=so)).cast(ctx.dtype),)),
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
-  # there's no gradient for bitcast
-  (UPat(Ops.BITCAST), lambda ctx: (None,)),
+  # there's no gradient for bitcast or assign
+  (UPat((Ops.BITCAST, Ops.ASSIGN)), lambda ctx: (None,)),
 ])
 
 # copied from tensor.py, get relevant toposort of gradients
@@ -51,7 +51,7 @@ def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
   def is_in_target_path(x:UOp) -> bool: return any(u in targets or is_in_target_path(u) for u in x.src) # noqa: F821
   def _walk(node:UOp, visited:set[UOp]) -> Iterator[UOp]:
     visited.add(node)
-    if node.op is Ops.DETACH: return
+    if node.op in {Ops.DETACH, Ops.ASSIGN}: return
     if is_in_target_path(node): # noqa: F821
       for i in node.src:
         if i not in visited: yield from _walk(i, visited) # noqa: F821
