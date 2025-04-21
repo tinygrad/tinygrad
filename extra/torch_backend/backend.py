@@ -627,45 +627,7 @@ def _optimizer_patched_init(self, *args, **kwargs):
   self.register_step_post_hook(realize_optimizer_step)
 torch.optim.Optimizer.__init__ = _optimizer_patched_init
 
-# NOTE: patches for multigpu
-_torch_scatter = torch.nn.parallel.comm.scatter
-def _torch_patched_scatter(self: torch.Tensor, devices, chunk_sizes=None, dim=0, streams=None):
-  if not self.is_tiny: return _torch_scatter(self, devices, chunk_sizes, dim, streams)
-  self = unwrap(self)
-  # NOTE: copied from Tensor.shard, torch expects tuple of tensors
-  sz = self.shape[dim] // len(devices)
-  assert chunk_sizes is None or all(s == sz for s in chunk_sizes), "uneven chunk sizes not supported"
-  devices = [_from_torch_device(torch.device("tiny", d)) for d in devices]
-  sizes = [max(0, min(sz, self.shape[dim] - sz*i)) for i in range(len(devices))]
-  lbs = []
-  for sz,off in zip(sizes, itertools.accumulate(sizes, initial=0)):
-    lbs.append(self.shrink(tuple((0,s) if i != dim else (off,off+sz) for i,s in enumerate(self.shape))))
-  sharded_lbs = [wrap(lb.to(d)) for lb,d in zip(lbs, devices)]
-  return tuple(sharded_lbs)
-torch.nn.parallel.comm.scatter = _torch_patched_scatter
-
-_torch_broadcast_coalesced = torch.nn.parallel.comm.broadcast_coalesced
-def _torch_patched_broadcast_coalesced(tensors, devices, buffer_size=10485760):
-  if tensors and not tensors[0].is_tiny: return _torch_broadcast_coalesced(tensors, devices, buffer_size)
-  # NOTE: ignoring buffer_size and straightforward broadcast
-  return [[wrap(unwrap(x).to(_from_torch_device(torch.device("tiny", i)))) for x in tensors] for i in devices]
-torch.nn.parallel.comm.broadcast_coalesced = _torch_patched_broadcast_coalesced
-
-_torch_parallel_apply = torch.nn.parallel.parallel_apply
-def _torch_patched_parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
-  if not inputs[0][0].is_tiny: return _torch_parallel_apply(modules, inputs, kwargs_tup, devices)
-  if kwargs_tup is None: kwargs_tup = ({},) * len(modules)
-  if devices is None: devices = (torch.device("tiny"),) * len(modules)
-  return [m(*i, **k) for m,i,k,d in zip(modules, inputs, kwargs_tup, devices)]
-for m in ['torch.nn.parallel.parallel_apply', 'torch.nn.parallel.data_parallel']:
-  sys.modules[m].parallel_apply = _torch_patched_parallel_apply
-
-_torch_gather = torch.nn.parallel.comm.gather
-def _torch_patched_gather(tensors, dim, dest_index):
-  if not tensors[0].is_tiny: return _torch_gather(tensors, dim, dest_index)
-  return wrap(Tensor.cat(*(unwrap(x).to(_from_torch_device(torch.device("tiny", dest_index))) for x in tensors), dim=dim))
-torch.nn.parallel.comm.gather = _torch_patched_gather
-
+# multigpu
 class TinyDistributedWork(torch.distributed.Work):
   def __init__(self, result):
     super().__init__()

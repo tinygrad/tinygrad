@@ -33,9 +33,9 @@ if __name__ == "__main__":
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
   if DEBUG >= 1: print(f"using torch backend {device}")
 
-  GPUS, DDP, RANK = getenv("GPUS", 1), getenv("DDP", 0), getenv("LOCAL_RANK", 0)
-  if DDP:
-    assert getenv("LOCAL_WORLD_SIZE") == GPUS, "number of workers must match number of gpus"
+  GPUS, RANK = getenv("GPUS", 1), getenv("LOCAL_RANK", 0)
+  if GPUS > 1:
+    assert getenv("LOCAL_WORLD_SIZE") == GPUS, "number of workers must match number of gpus, run with --nproc_per_node=GPUS"
     import os, atexit
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "29500"
@@ -56,11 +56,8 @@ if __name__ == "__main__":
   BS = getenv("BS", 512) // GPUS
 
   if GPUS > 1:
-    if DDP:
       # TODO: model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
       model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[RANK])
-    else:
-      model = torch.nn.DataParallel(model, range(GPUS))
 
   loss_fn = nn.CrossEntropyLoss()
   #@torch.compile
