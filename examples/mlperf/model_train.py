@@ -460,8 +460,8 @@ def train_retinanet():
     val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
     coco_val = COCOeval(cocoGt=val_dataset, iouType="bbox")
 
-  config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(len(train_dataset.imgs.keys()), BS) // BS
-  config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(len(val_dataset.imgs.keys()), EVAL_BS) // EVAL_BS)
+    config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(len(train_dataset.imgs.keys()), BS) // BS
+    config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(len(val_dataset.imgs.keys()), EVAL_BS) // EVAL_BS)
 
   # ** initialize wandb **
   if (WANDB:=getenv("WANDB")):
