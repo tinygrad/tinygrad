@@ -14,7 +14,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#e0ffc0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
                Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55", Ops.IGNORE: "#00C000",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80", Ops.BUFFER_VIEW: "#E5EAFF",
-               Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.NAME:"#808080"}
+               Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0"}
 
 # VIZ API
 
@@ -34,9 +34,11 @@ class GraphRewriteMetadata(TypedDict):
 
 @functools.cache
 def render_program(k:Kernel): return k.opts.render(k.uops)
+
 def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
   return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
           "kernel_code":pcall(render_program, k) if isinstance(k, Kernel) else None, "name":v.name}
+
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
   return [(k.name if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]
 
@@ -45,7 +47,7 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
 class GraphRewriteDetails(TypedDict):
   graph: dict                            # JSON serialized UOp for this rewrite step
   uop: str                               # strigified UOp for this rewrite step
-  diff: list[str]|None                   # string diff of the single UOp that changed
+  diff: list[str]|None                   # diff of the single UOp that changed
   changed_nodes: list[int]|None          # the changed UOp id + all its parents ids
   upat: tuple[tuple[str, int], str]|None # [loc, source_code] of the matched UPat
 
@@ -71,6 +73,11 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       if x in excluded:
         if x.op is Ops.CONST and dtypes.is_float(u.dtype): label += f"\nCONST{idx} {x.arg:g}"
         else: label += f"\n{x.op.name}{idx} {x.arg}"
+    try:
+      if u.op not in {Ops.VIEW, Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u.st is not None:
+        label += f"\n{repr(u.shape)}"
+    except Exception:
+      label += "\n<ISSUE GETTING SHAPE>"
     graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff")}
   return graph
 
@@ -79,7 +86,8 @@ def get_details(k:Any, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails
   replaces: dict[UOp, UOp] = {}
   for u0,u1,upat in tqdm(ctx.matches):
     replaces[u0] = u1
-    new_sink = next_sink.substitute(replaces)
+    try: new_sink = next_sink.substitute(replaces)
+    except RecursionError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     yield {"graph": (sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort if id(x) in sink_json],
            "diff":list(difflib.unified_diff(pcall(str, u0).splitlines(), pcall(str, u1).splitlines())), "upat":(upat.location, upat.printable())}
     if not ctx.bottom_up: next_sink = new_sink

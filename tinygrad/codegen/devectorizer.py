@@ -2,12 +2,67 @@ from typing import Optional, Any, Callable, cast
 import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.dtype import dtypes, ImageDType, PtrDType
+from tinygrad.device import is_dtype_supported
+from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve, graph_rewrite, GroupOp, identity_element
 from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat, gep_pushing
 from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
+
+# ***** image load valid simplification *****
+
+def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
+  if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.const_like(0)
+  if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx, valid)
+
+  # wait for it to be image indexed before running simplification
+  if start_idx.dtype.count != 2: return None
+
+  # can drop valid if idx is out of bound when valid is False
+  drop_stmt = []
+  for stmt in split_uop(valid, Ops.AND):
+    try: X, is_upper_bound, c = parse_valid(stmt)
+    except ValueError: return None
+
+    # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
+    if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in split_uop(X, Ops.ADD)):
+      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), split_uop(X, Ops.ADD), idx)
+      testidx = testidx.simplify()
+      if testidx.gep(0).vmax < 0 or testidx.gep(1).vmax < 0:
+        drop_stmt.append(stmt)
+        continue
+
+    # if X <= c, check if it's out of bound when X = c+1
+    # if X >= c, check if it's out of bound when X = c-1
+    test_value = c + 1 if is_upper_bound else c - 1
+    for i,b in zip(idx.src, (buf.dtype.shape[1], buf.dtype.shape[0])):
+      if i.is_increasing():
+        rw = i.substitute({X:X.const_like(test_value)}).simplify()
+        if rw.vmin >= b or rw.vmax < 0:
+          drop_stmt.append(stmt)
+          break
+
+  if not drop_stmt and idx is start_idx: return None
+  new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in split_uop(valid, Ops.AND) if s not in drop_stmt]) else None
+  return buf.index(idx, new_valid)
+
+def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
+  if store_gate not in [gate.src[0] for gate in val.toposort if gate.op is Ops.IF]: return None
+  # remove the gate from the index
+  return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val)
+
+load_store_indexing = PatternMatcher([
+  # simplify valid
+  (UPat(Ops.AND, name="valid"), simplify_valid),
+  # image load valid idx simplification
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat.var("valid"))), simplify_valid_load),
+  # index True is just Index
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat(Ops.CONST, arg=True))), lambda buf,start_idx: buf.index(start_idx)),
+  # delete_redundant_gates (after expand)
+  (UPat(Ops.STORE, src=(UPat.any(stidx:=UPat.var("buf").index(UPat.var("idx"), UPat.var("store_gate")), stidx.cast().named("cast")),
+                                  UPat.var("val"))), delete_redundant_gates),
+])
 
 # ***** load/store grouping *****
 
@@ -84,43 +139,28 @@ load_store_folding = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(Ops.PTRCAT, name="cat"), UPat(name="data"))), cat_after_store),
 ])
 
-# ***** image load valid simplification *****
-
-def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
-  if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.const_like(0)
-  if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx, valid)
-
-  # wait for it to be image indexed before running simplification
-  if start_idx.dtype.count != 2: return None
-
-  # can drop valid if idx is out of bound when valid is False
-  drop_stmt = []
-  for stmt in split_uop(valid, Ops.AND):
-    X, is_upper_bound, c = parse_valid(stmt)
-
-    # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
-    if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in split_uop(X, Ops.ADD)):
-      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), split_uop(X, Ops.ADD), idx)
-      testidx = testidx.simplify()
-      if testidx.gep(0).vmax < 0 or testidx.gep(1).vmax < 0:
-        drop_stmt.append(stmt)
-        continue
-
-    # if X <= c, check if it's out of bound when X = c+1
-    # if X >= c, check if it's out of bound when X = c-1
-    test_value = c + 1 if is_upper_bound else c - 1
-    for i,b in zip(idx.src, (buf.dtype.shape[1], buf.dtype.shape[0])):
-      if i.is_increasing():
-        rw = i.substitute({X:X.const_like(test_value)}).simplify()
-        if rw.vmin >= b or rw.vmax < 0:
-          drop_stmt.append(stmt)
-          break
-
-  if not drop_stmt and idx is start_idx: return None
-  new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in split_uop(valid, Ops.AND) if s not in drop_stmt]) else None
-  return buf.index(idx, new_valid)
-
 # ***** optional patterns *****
+
+@functools.lru_cache(None)
+def magicgu(vmax:int, d:int) -> tuple[int,int]:
+  # calculate m,s such that x//d == (x*m) >> s for all 0 <= x <= vmax, d>0; adapted from Hacker's Delight, Chapter 10
+  nc = (vmax+1)//(d) * d - 1
+  nbits = vmax.bit_length()
+  for s in range(0, 2*nbits + 1):
+    if 2**s > nc*(d - 1 - (2**s - 1) % d):
+      m = (2**s + d - 1 - (2**s - 1) % d)//d
+      return m, s
+  assert False
+
+def fast_idiv(x: UOp, d: int) -> UOp|None:
+  # idiv is truncated division, but arithmatic shift is floored division, so can only do non-negative numbers!
+  if x.vmin<0: return None
+  sign = 1 if d > 0 else -1
+  m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
+  if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
+  if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype):  # promo_lattice needs to return an unsigned type
+    if m * vmax <= dtypes.max(next_dtype): return sign * ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
+  return None
 
 powers_of_two = {2**i:i for i in range(64)}
 @functools.cache
@@ -137,6 +177,10 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
     # no reason to check x>=0 for uints
     pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
     pat += [(UPat.var("x", dtypes.sints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None)]
+    if not getenv("DISABLE_FAST_IDIV"):
+      pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda x, d: fast_idiv(x, d.arg))]
+      # TODO: This breaks validate_index because of the way _min_max is calucalted on uops
+      # pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("d"), lambda x, d: x - d*f if (f:=fast_idiv(x, d.arg)) is not None else None)]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
@@ -246,23 +290,6 @@ devectorize = PatternMatcher([
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(Ops.DEFINE_ACC, name="acc"), no_vectorized_acc),
-])
-
-def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
-  if store_gate not in [gate.src[0] for gate in val.toposort if gate.op is Ops.IF]: return None
-  # remove the gate from the index
-  return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val)
-
-load_store_indexing = PatternMatcher([
-  # simplify valid
-  (UPat(Ops.AND, name="valid"), simplify_valid),
-  # image load valid idx simplification
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat.var("valid"))), simplify_valid_load),
-  # index True is just Index
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat(Ops.CONST, arg=True))), lambda buf,start_idx: buf.index(start_idx)),
-  # delete_redundant_gates (after expand)
-  (UPat(Ops.STORE, src=(UPat.any(stidx:=UPat.var("buf").index(UPat.var("idx"), UPat.var("store_gate")), stidx.cast().named("cast")),
-                                  UPat.var("val"))), delete_redundant_gates),
 ])
 
 pm_render = PatternMatcher([

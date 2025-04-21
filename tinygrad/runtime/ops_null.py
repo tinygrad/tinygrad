@@ -2,6 +2,7 @@ from tinygrad.device import Compiled, Compiler, Renderer, Allocator
 from tinygrad.engine.jit import MultiGraphRunner
 
 class NullRenderer(Renderer):
+  device = "NULL"
   def render(self, uops:list) -> str: return ""
 
 class NullProgram:

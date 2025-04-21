@@ -54,6 +54,25 @@ async function renderDag(graph, additions, recenter=false) {
       points.push(intersectRect(g.node(e.w), points[points.length-1]));
       return line(points);
     }).attr("marker-end", "url(#arrowhead)");
+    const edgeLabels = d3.select("#edge-labels").selectAll("g").data(g.edges().filter(e => g.edge(e).label != null)).join("g").attr("transform", (e) => {
+      // get a point near the end
+      const [p1, p2] = g.edge(e).points.slice(-2);
+      const dx = p2.x-p1.x;
+      const dy = p2.y-p1.y;
+      // normalize to the unit vector
+      const len = Math.sqrt(dx*dx + dy*dy);
+      const ux = dx / len;
+      const uy = dy / len;
+      // avoid overlap with the arrowhead
+      const offset = 17;
+      const x = p2.x - ux * offset;
+      const y = p2.y - uy * offset;
+      return `translate(${x}, ${y})`
+    });
+    edgeLabels.selectAll("circle").data(e => [g.edge(e).label]).join("circle").attr("r", 5).attr("fill", "#FFD700").attr("stroke", "#B8860B")
+      .attr("stroke-width", 0.8);
+    edgeLabels.selectAll("text").data(e => [g.edge(e).label]).join("text").text(d => d).attr("text-anchor", "middle").attr("dy", "0.35em").
+      attr("font-size", "6px").attr("fill", "black");
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
 
@@ -190,7 +209,7 @@ function renderMemoryGraph(graph) {
 
 // ** zoom and recentering
 
-const zoom = d3.zoom().scaleExtent([0.05, 2]).on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
+const zoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
 d3.select("#graph-svg").call(zoom);
 // zoom to fit into view
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
@@ -426,6 +445,7 @@ document.addEventListener("keydown", async function(event) {
     return setState({ currentRewrite:Math.min(totalRewrites, currentRewrite+1) });
   }
   if (event.key == " ") {
+    event.preventDefault()
     document.getElementById("zoom-to-fit-btn").click();
   }
 });

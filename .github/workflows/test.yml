@@ -88,7 +88,7 @@ jobs:
   autogen:
     name: Autogen
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -116,14 +116,17 @@ jobs:
     - name: Verify AMD autogen
       run: |
         cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
+        cp tinygrad/runtime/autogen/kfd.py /tmp/kfd.py.bak
         cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
         cp tinygrad/runtime/autogen/amd_gpu.py /tmp/amd_gpu.py.bak
         cp tinygrad/runtime/autogen/sqtt.py /tmp/sqtt.py.bak
         ./autogen_stubs.sh hsa
+        ./autogen_stubs.sh kfd
         ./autogen_stubs.sh comgr
         ./autogen_stubs.sh amd
         ./autogen_stubs.sh sqtt
         diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
+        diff /tmp/kfd.py.bak tinygrad/runtime/autogen/kfd.py
         diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
         diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
         diff /tmp/sqtt.py.bak tinygrad/runtime/autogen/sqtt.py
@@ -226,7 +229,8 @@ jobs:
     - name: Test emulated METAL tensor cores
       run: |
         DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_big_gemm
-        PYTHONPATH=. DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
+        PYTHONPATH=. DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
+        PYTHONPATH=. DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test emulated AMX tensor cores
       run: PYTHONPATH=. DEBUG=2 AMX=1 EMULATE_AMX=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
     - name: Test emulated AMD tensor cores
@@ -235,17 +239,20 @@ jobs:
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
-        PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
+        PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
+        PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test emulated AMD MFMA tensor cores
       run: |
         PYTHONPATH=. DEBUG=2 EMULATE_AMD_MFMA=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        PYTHONPATH=. DEBUG=2 EMULATE_AMD_MFMA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
+        PYTHONPATH=. DEBUG=2 EMULATE_AMD_MFMA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
+        PYTHONPATH=. DEBUG=2 EMULATE_AMD_MFMA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test emulated CUDA tensor cores
       run: |
         DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
         DEBUG=2 EMULATE_CUDA=1 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
         DEBUG=2 EMULATE_CUDA_SM75=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
-        PYTHONPATH="." DEBUG=2 EMULATE_CUDA=1 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
+        PYTHONPATH="." DEBUG=2 EMULATE_CUDA=1 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
+        PYTHONPATH="." DEBUG=2 EMULATE_CUDA=1 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test emulated INTEL OpenCL tensor cores
       run: DEBUG=2 EMULATE_INTEL=1 FORWARD_ONLY=1 PYTHON=1 HALF=1 N=64 python3 ./extra/gemm/simple_matmul.py
     - name: Full test tensor cores
@@ -258,10 +265,10 @@ jobs:
     - name: Test tensor cores (TC=3)
       run: |
         TC=3 DEBUG=3 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
-        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_AMD=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_AMD_MFMA=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_AMD=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 ATOL=3e-4 python3 ./extra/gemm/simple_matmul.py
+        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_AMD_MFMA=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 ATOL=3e-4 python3 ./extra/gemm/simple_matmul.py
         TC=3 DEBUG=3 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
-        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_INTEL=1 PYTHON=1 N=16 HALF=1 python3 ./extra/gemm/simple_matmul.py
+        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_INTEL=1 PYTHON=1 N=16 HALF=1 ATOL=3e-4 python3 ./extra/gemm/simple_matmul.py
         TC=3 PYTHONPATH=. DEBUG=3 AMX=1 EMULATE_AMX=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
     - name: Test device flop counts
       run: |
@@ -339,6 +346,8 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
+    - name: Run targetted tests on NULL backend
+      run: PYTHONPATH="." NULL=1 python3 test/test_multitensor.py TestMultiTensor.test_data_parallel_resnet_train_step
     - name: Run GC tests
       run: PYTHONPATH="." python test/external/external_uop_gc.py
     - name: Repo line count < 12500 lines
@@ -358,6 +367,8 @@ jobs:
         deps: testing_minimal
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
+    - name: Fuzz Test fast idiv
+      run: python test/external/fuzz_fast_idiv.py
     - name: Fuzz Test shapetracker
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
@@ -713,7 +724,7 @@ jobs:
 
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4

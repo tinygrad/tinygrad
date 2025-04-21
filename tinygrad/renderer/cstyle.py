@@ -132,8 +132,8 @@ class CStyleLanguage(Renderer):
     c: defaultdict[str, int] = defaultdict(int)
     name = "test"
     for u in uops:
-      if u.op is Ops.NAME:
-        name = u.arg
+      if u.op is Ops.SINK:
+        if u.arg is not None: name = u.arg.name
         continue
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]
@@ -147,10 +147,10 @@ class CStyleLanguage(Renderer):
 
       # naming
       prefix = None
-      if u.op is Ops.SPECIAL:
-        r[u] = u.arg[0]
+      if u.op is Ops.SPECIAL: r[u] = u.arg[0]
+      elif u.op is Ops.RANGE: r[u] = f"ridx{u.arg}"
       else:
-        prefix = {Ops.RANGE: "ridx", Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const",
+        prefix = {Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const",
                   Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.VECTORIZE: "cast", Ops.NOOP: "precast",
                   Ops.INDEX: "bidx", Ops.DEFINE_ACC: "acc", Ops.LOAD: "val"}.get(u.op, "alu")
         r[u] = f"{prefix}{c[prefix]}"
@@ -261,8 +261,8 @@ class IntelRenderer(OpenCLRenderer):
     opts=("l0","l0","l0","u1","u1","u1"), swizzle=(((4,5,6),(0,1,2,3,7,8,9)), ((0,1,2),(7,8,9,3,4,5,6))))]
 
   string_rewrite = PatternMatcher([
-    (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float))), lambda ctx,x: f"intel_convert_bfloat16_as_ushort({ctx[x]})"),
-    (UPat(Ops.CAST, dtype=dtypes.float, src=(UPat.var('x', dtype=dtypes.bfloat16))), lambda ctx,x: f"intel_convert_as_bfloat16_float({ctx[x]})"),
+    (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float),)), lambda ctx,x: f"intel_convert_bfloat16_as_ushort({ctx[x]})"),
+    (UPat(Ops.CAST, dtype=dtypes.float, src=(UPat.var('x', dtype=dtypes.bfloat16),)), lambda ctx,x: f"intel_convert_as_bfloat16_float({ctx[x]})"),
   ]) + OpenCLRenderer.string_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
@@ -410,7 +410,7 @@ class AMDRenderer(CStyleLanguage):
   # https://gpuopen.com/learn/wmma_on_rdna3/
   tensor_cores = [TensorCore(dims=(16,16,16), threads=32, elements_per_thread=(16,16,8), dtype_in=di, dtype_out=do,
     opts=("l0","l0","l0","l0","l1","u1","u1","u1"), swizzle=(((4,9,10,11,0),(1,2,3,5,6,7,8)), ((0,1,2,3,4),(9,10,11,5,6,7,8))))
-    for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half)]]
+    for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float)]]
   # https://gpuopen.com/learn/amd-lab-notes/amd-lab-notes-matrix-cores-readme
   tensor_cores_mfma = [TensorCore(dims=(16,16,16), threads=64, elements_per_thread=(4,4,4), dtype_in=di, dtype_out=do,
     opts=("l0","l0","l0","l0","u1","u1","l1","l1"), swizzle=(((10,11,4,5,8,9),(0,1,2,3,6,7)),((0,1,2,3,8,9),(4,5,10,11,6,7))))
@@ -456,12 +456,15 @@ class AMDRenderer(CStyleLanguage):
     (UPat(GroupOp.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda alu,x,y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), alu.arg)),
     # add float intermediate casting for bfloat16
-    (UPat(Ops.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
-    (UPat(Ops.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
+    (UPat(Ops.CAST, name="x", src=(UPat.var("y", dtypes.bfloat16),)),
+      lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
+    (UPat(Ops.CAST, dtypes.bfloat16, (UPat.var("x"),)),
+      lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
     # bfloat16 casting
     (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg))),
-    (UPat(Ops.CAST, dtypes.float, UPat.var("x", dtypes.bfloat16)), lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
-    (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=UPat.var("x", dtype=dtypes.float)), cast_float_to_bf16)]) + extra_pm
+    (UPat(Ops.CAST, dtypes.float, (UPat.var("x", dtypes.bfloat16),)),
+     lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
+    (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)), cast_float_to_bf16)]) + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
@@ -478,7 +481,8 @@ class AMDRenderer(CStyleLanguage):
     for arg in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
       if self.arch.split(":")[0] == "gfx942":
         prefix.append(f"#define __{arg[0]} __builtin_amdgcn_mfma_f32_16x16x16{'f16' if arg[2] == dtypes.half else 'bf16_1k'}")
-      elif arg[3] == dtypes.float: prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
+      elif arg[3] == dtypes.float:
+        prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_{'f16' if arg[2] == dtypes.half else 'bf16'}_w32")
       else: prefix.append(f"static inline __attribute__((device)) half8 __{arg[0]}"+"""(half16 a, half16 b, half8 c) {
   half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
   c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
