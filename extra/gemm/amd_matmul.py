@@ -82,7 +82,7 @@ if __name__ == "__main__":
           #Opt(op=OptOps.UPCAST, axis=1, arg=4),
           Opt(op=OptOps.LOCAL, axis=1, arg=LN),
           Opt(op=OptOps.LOCAL, axis=0, arg=LN)]
-  for opt in opts: k.apply_opt(opt)
+  k.apply_opts(opts)
   prg = k.to_program(ast_transform=ast_transform)
   if getenv("FAST", 1) and Device.DEFAULT == "AMD":
     #src = (pathlib.Path(__file__).parent / "fp32_sgemm_amd" / "src" / "kernel8_batched_gmem.s").read_text()
