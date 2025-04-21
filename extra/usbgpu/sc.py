@@ -7,7 +7,7 @@ usb = USBConnector("")
 
 x = usb.read(0x0, 0x10000)
 import pickle
-pickle.dump(x, open("jl.bin", "wb"))
+pickle.dump(x, open("jl_2.bin", "wb"))
 
 # xxx = (ctypes.c_uint8 * 512)()
 # for i in range(512): xxx[i] = 0x5c

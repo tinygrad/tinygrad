@@ -2,13 +2,187 @@ import array, time, ctypes, struct
 from hexdump import hexdump
 from tinygrad.runtime.support.am.usb import USBConnector
 from tinygrad.runtime.autogen import pci
+from tinygrad import Device
+
+for i in Device.get_available_devices():
+  print(i)
 
 usb = USBConnector("")
 
 # print(usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=2, dev=0, fn=0, value=None, size=1))
 
+# x = usb.read(0x0, 0x10000)
+COUNTERS = 8 + 5 + 2
 import pickle
-pck_x = pickle.load(open("jl.bin", "rb"))
+# pickle.dump(x, open("vvv_pro.bin", "wb"))
+# exit(0)
+
+for i in range(COUNTERS): print(i, int(usb.read(0x3000 + i, 1)[0]))
+
+# open bad and good and compare bytes by bytes
+pck_x = pickle.load(open("vvv_pro.bin", "rb"))
+usb.write(0x0, pck_x[:0x9000])
+usb.write(0xc000, pck_x[0xc000:0xf000], batch=False)
+
+xxx = (ctypes.c_uint8 * 512)()
+for i in range(len(xxx)): xxx[i] = 0x51
+
+
+
+
+# print(usb.read(0xc806, 1))
+# print(usb.read(0xcef3, 1))
+
+# usb.write(0xc806, bytes([0b10000]))
+# usb.write(0xcef3, bytes([0b100]))
+
+# print(usb.read(0x456, 1))
+# print(usb.read(0xb2e, 1))
+# print(usb.read(0x6e6, 1))
+# usb.write(0x0b35, bytes([1]))
+# usb.write(0x0b37, bytes([3]))
+# print(usb.read(0x0b37, 1))
+# exit(0)
+# before = usb.read(0x0, 0xf000)
+# usb.scsi_write(0xeaeb, xxx)
+# exit(0)
+
+# print(hex(usb.read(0xc806, 1)))
+# print(hex(usb.read(0xcef3, 1)))
+
+# print(usb.read(0xf000, 0x10))
+
+# usb.write(0xc000, pck_x[0xc000:0xc400])
+# usb.write(0xc400, pck_x[0xc400:0xf000])
+
+# 0 1
+# 1 26
+# 2 0
+# 3 9
+# 4 9
+# 5 10
+# 6 10
+# 7 32
+
+# 0 0
+# 1 24
+# 2 0
+# 3 9
+# 4 9
+# 5 9
+# 6 9
+# 7 30
+
+def rst():
+  # usb.write(0xc400, pck_x[0xc400:0xc480])
+  # usb.write(0xc480, pck_x[0xc480:0xc500])
+  # usb.write(0xc500, pck_x[0xc500:0xc540])
+  # usb.write(0xc540, pck_x[0xc540:0xc580])
+
+  # usb.write(0xc580, pck_x[0xc580:0xc5a0])
+
+  usb.write(0xc000, pck_x[0xc000:0xc200], batch=False)
+  usb.write(0xc200, pck_x[0xc200:0xc400], batch=False)
+  usb.write(0xc400, pck_x[0xc400:0xc500], batch=False)
+  usb.write(0xc500, pck_x[0xc500:0xc600], batch=False)
+  usb.write(0xc800, pck_x[0xc800:0xcc00], batch=False)
+  usb.write(0xcc00, pck_x[0xcc00:0xcf00], batch=False)
+  # usb.write(0xe000, pck_x[0xe000:0xf000], batch=False)
+  # usb.write(0x3000, pck_x[0x3000:0x4000])
+
+for i in range(32):
+  for i in range(len(xxx)): xxx[i] = 0xee
+  usb.scsi_write(0xeaeb, xxx)
+  rst()
+
+  print(usb.read(0xf000, 8))
+  # usb.write(0x0000, pck_x[0x0000:0x8000])
+  # usb.write(0xc000, pck_x[0xc000:0xc400])
+
+
+  for i in range(len(xxx)): xxx[i] = 0xde
+  usb.scsi_write(0xeaeb, xxx)
+  rst()
+
+  print(usb.read(0xf000, 8))
+  # usb.write(0x0000, pck_x[0x0000:0x8000])
+  # usb.write(0xc000, pck_x[0xc000:0xd000])
+exit(0)
+
+usb.read(0x9007, 0x10)
+usb.write(0x8000, bytes([0x81] * 0x1000))
+usb.write(0xf000, bytes([0xf0] * 0x1000))
+usb.write(0xaf9, bytes([0x2]))
+usb.write(0xa7d, bytes([0xf0]))
+usb.write(0xb30, bytes([0x2]))
+usb.write(0xcd31, bytes([0b10]))
+# print(usb.read(0xb30, 1))
+# print(usb.read(0x9007, 0x10))
+# print(usb.read(0xf000, 0x10))
+# print(usb.read(0xb30, 1))
+# usb.write(0xb30, bytes([0x0]))
+usb.write(0x9007, bytes([0x10, 0x00]))
+usb.write(0xcd31, bytes([0b10]))
+print(usb.scsi_read(0xeaeb, 8)[:0x1010])
+print(usb.read(0x9007, 6))
+exit(0)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+print(usb.read(0xf000, 0x10))
+
+print(set(usb.read(0xf000, 0x1000)))
+usb.write(0xf000, bytes([0xf0]))
+usb.write(0x8000, bytes([0x80]))
+usb.write(0x7000, bytes([0x70]))
+
+usb.write(0xc000, pck_x[0xc000:0xc400])
+usb.write(0xc400, pck_x[0xc400:0xf000])
+
+usb.write(0xafa, bytes([0x1]))
+usb.write(0xafb, bytes([0x1]))
+usb.write(0xafb, bytes([0x1]))
+print(usb.scsi_read(0xeaeb, 1))
+print(usb.scsi_read(0xeaeb, 1))
+print(usb.read(0xafa, 1))
+print(usb.read(0xafb, 1))
+print(usb.read(0xa7d, 1))
+print(set(usb.read(0xf000, 0x1000)))
+
+# for i in range(0, len(before)):
+#   if before[i] != aft[i]:
+#     print(hex(i), hex(before[i]), hex(aft[i]))
+
+# print(usb.read(0xb2e, 1))
+# print(usb.read(0x7ea, 1))
+# print(usb.read(0x6e6, 1))
+# print(usb.read(0xc512, 1))
+# print(usb.read(0xc520, 1))
+# print(usb.read(0x456, 1))
+# print(usb.read(0xc4cc, 2))
+# print(usb.read(0x7e5, 1))
+# print(usb.read(0xa83, 1))
+# print(usb.read(0x52, 1))
+
+# x = usb.read(0x0, 0x10000)
+# import pickle
+# pickle.dump(x, open("wgood.bin", "wb"))
+
+exit(0)
+
+# import pickle
+# pck_x = pickle.load(open("jl_2.bin", "rb"))
 
 # print(pck_x[0xc420:0xc424])
 # usb.write(0xc659, bytes([1]))
