@@ -5,8 +5,8 @@ Helper scripts to scrape and validate models tagged as `ONNX` in HuggingFace
 ## Files
 
 1. Retrieve current Top N model's metadata (`collect_metadata.py`)
-2. Download the ONNX models and OP coverage of the models specified by the metadata (`download_models.py`)
-3. independently validate model correctness (`run.py`)
+2. Download the models and metadata containing the size of the models and OP coverage (`download_models.py`)
+3. Independent script to validate model correctness (`run.py`)
 
 ### Collect Metadata
 run `python extra/huggingface_onnx/collect_metadata.py --limit 100`  
@@ -76,9 +76,9 @@ stats:
   - sentence-transformers/all-MiniLM-L6-v2/onnx/model_O3.onnx
   total_size: 6.50GB
 ```
-Total size of the download is `6.18GB`
+Total size of the download is `6.50GB`
 `diverse_models` is selected by trying to maximize the op coverage.  
-You can optionally allow more `diverse_models` by using `--diversity 5` to control. If the rest of the models whose ops are a subset of the currently covered ops, `diverse_models` may have less than your specified amount.
+You can optionally increase the number of diverse_models by using `--diversity` to set your desired amount. However, if the remaining models' operations are subsets of the currently covered ops, the actual number of diverse_models may be less than specified.
 
 ### Run
 run `PYTHONPATH=. python extra/huggingface_onnx/run.py FacebookAI/xlm-roberta-large/onnx/model.onnx sentence-transformers/all-mpnet-base-v2/onnx/model_O2.onnx`    
