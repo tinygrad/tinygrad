@@ -115,27 +115,30 @@ def eval_retinanet():
     try: next_proc = data_get()
     except StopIteration: next_proc = None
     nd = time.perf_counter()
-    predictions, img_ids = mdl.postprocess_detections(proc[0].numpy(), orig_image_sizes=proc[2]), proc[1]
-    coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
-      for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
-    with redirect_stdout(None):
-      coco_eval.cocoDt = coco.loadRes(coco_results)
-      coco_eval.params.imgIds = img_ids
-      coco_eval.evaluate()
-    evaluated_imgs.extend(img_ids)
-    coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
-    n += len(proc[0])
-    et = time.perf_counter()
-    tlog(f"****** {(run-st)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize ({(nd-run)*1000:7.2f} ms fetching). {(len(proc))/(et-st):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-st):5.2f} TFLOPS")
-    st = et
-    proc, next_proc = next_proc, None
+    split_idx = mdl.postprocess_detections2(proc[0], orig_image_sizes=proc[2]), proc[1]
+    print(f"--act: {split_idx=}")
+    exp_split_idx = mdl.postprocess_detections(proc[0].numpy(), orig_image_sizes=proc[2]), proc[1]
+    print(f"--exp: {exp_split_idx=}")
+  #   coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
+  #     for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
+  #   with redirect_stdout(None):
+  #     coco_eval.cocoDt = coco.loadRes(coco_results)
+  #     coco_eval.params.imgIds = img_ids
+  #     coco_eval.evaluate()
+  #   evaluated_imgs.extend(img_ids)
+  #   coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
+  #   n += len(proc[0])
+  #   et = time.perf_counter()
+  #   tlog(f"****** {(run-st)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize ({(nd-run)*1000:7.2f} ms fetching). {(len(proc))/(et-st):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-st):5.2f} TFLOPS")
+  #   st = et
+  #   proc, next_proc = next_proc, None
 
-  coco_eval.params.imgIds = evaluated_imgs
-  coco_eval._paramsEval.imgIds = evaluated_imgs
-  coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
-  coco_eval.accumulate()
-  coco_eval.summarize()
-  tlog("done")
+  # coco_eval.params.imgIds = evaluated_imgs
+  # coco_eval._paramsEval.imgIds = evaluated_imgs
+  # coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
+  # coco_eval.accumulate()
+  # coco_eval.summarize()
+  # tlog("done")
 
 def eval_rnnt():
   # RNN-T
