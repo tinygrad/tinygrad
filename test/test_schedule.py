@@ -590,6 +590,33 @@ class TestSchedule(unittest.TestCase):
     c = (a.sum(2).contiguous() + b).contiguous()
     check_schedule(c, 2)
 
+  def test_kernelize(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = (a+b).kernelize()
+    d = c+2
+    check_schedule(d, 2)
+
+  # unlike schedule, kernelize can be called multiple times on a Tensor
+  def test_double_kerenlize(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = (a+b)
+    d = c.kernelize()+2
+    e = c.kernelize()+d.kernelize()
+    check_schedule(e, 3)
+
+  @unittest.expectedFailure # TODO: this should pass
+  def test_kernelize_bw(self):
+    a = Tensor.full((3,), 2.0, requires_grad=True).contiguous()
+    b = Tensor.full((3,), 3.0, requires_grad=True).contiguous()
+    x = (a*b).kernelize()
+    y = Tensor.eye(3, requires_grad=True)
+    z = y.matmul(x).sum()
+    if getenv("VIZ"):
+      graph_rewrite(z.lazydata, PatternMatcher([]), name="y.matmul(x).sum()")
+    z.backward()
+
   @unittest.skip("no longer supported")
   def test_double_from(self):
     x = Tensor([1,2,3,4])
