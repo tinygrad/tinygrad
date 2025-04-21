@@ -40,6 +40,11 @@ class TestSetitem(unittest.TestCase):
     t[1] = 5
     np.testing.assert_allclose(t.numpy(), [[0, 1], [5, 5]])
 
+  def test_setitem_into_empty(self):
+    t = Tensor.empty(4)
+    t[:3] = Tensor([1., 2., 3.])
+    self.assertEqual(t.tolist()[:3], [1., 2., 3.])
+
   def test_setitem_dtype(self):
     for dt in (dtypes.int, dtypes.float, dtypes.bool):
       for v in (5., 5, True):
