@@ -1,7 +1,7 @@
 from typing import TypeVar, Generic, Callable, Union, cast, Optional, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap, all_same
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.ops import UOp, Variable, sym_infer, Ops
@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from weakref import WeakKeyDictionary
 
 class GraphException(Exception): pass
+
+def graph_class(dev): return (dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph) if dev else None
+def match_dev(devs:list[Compiled|None], multi:bool): return all_same(devs) if not multi else all_same([(type(dev), graph_class(dev)) for dev in devs])
 
 def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], max_batch_size=0) -> list[ExecItem]:
   # Split JIT cache into batches for faster graph execution.
@@ -39,23 +42,26 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
     current_device = None
 
   for ji in jit_cache:
-    if isinstance(ji.prg, ViewOp): continue
-    ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
-    if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.dev
-    elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"CUDA", "NV", "AMD", "NULL"}:
-      ji_graph_dev = Device[ji.bufs[0].device]
+    match ji.prg:
+      case CompiledRunner():
+        ji_graph_dev, graph_cls = ji.prg.dev, graph_class(ji.prg.dev)
+        # All GraphRunners can graph CompiledRunners
+        can_be_graphed = graph_cls is not None
+        # Can share graph if same device (eg AMD:1) or if graph supports multi same device and graph types (eg AMD:0, AMD:1 all same type)
+        can_share_graph = match_dev([ji_graph_dev, current_device], multi=graph_cls and graph_cls.supports_multi)
+      case BufferXfer():
+        ji_graph_dev, src_dev = Device[unwrap(ji.bufs[0]).device], Device[unwrap(ji.bufs[1]).device]
+        # All GraphRunners that support multi can graph transfers that don't cross type boundaries (eg clouds on different hosts)
+        can_be_graphed = ji_graph_dev.graph is not None and graph_class(ji_graph_dev).supports_multi and match_dev([ji_graph_dev, src_dev], True)
+        # Same thing as above, but in addition current_device has to match as well
+        can_share_graph = can_be_graphed and match_dev([ji_graph_dev, src_dev, current_device], True)
+      case ViewOp(): continue # ViewOps are just ignored
+      case _: can_be_graphed = False # Everything else is not graphed and flushes existing graph if it's being constructed
 
-    graph_class = (ji_graph_dev.graph.func if isinstance(ji_graph_dev.graph, functools.partial) else ji_graph_dev.graph) if ji_graph_dev else None
-    can_be_graphed = ji_graph_dev and ji_graph_dev.graph
-    can_share_graph = (ji_graph_dev == current_device or (isinstance(graph_class, type) and issubclass(graph_class, MultiGraphRunner)) and
-                       type(ji_graph_dev) is type(current_device))
-    can_extend_graph_batch = can_be_graphed and (max_batch_size == 0 or len(current_batch) < max_batch_size) and can_share_graph
+    can_extend_graph_batch = can_be_graphed and can_share_graph and (max_batch_size == 0 or len(current_batch) < max_batch_size)
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
-
-    if can_be_graphed: current_batch.append(ji)
-    else: graphed_jit_cache.append(ji)
-
-    current_device = ji_graph_dev
+    (current_batch if can_be_graphed else graphed_jit_cache).append(ji)
+    current_device = ji_graph_dev if can_be_graphed else None
 
   if len(current_batch) > 0: flush_batch()
   return graphed_jit_cache
@@ -69,6 +75,8 @@ def get_input_replace(jit_cache: list[ExecItem], input_rawbuffers:list[Buffer]) 
   return input_replace
 
 class GraphRunner(Runner):
+  supports_multi: bool = False
+
   def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     self.jit_cache = jit_cache  # NOTE: this is not used, but you have to keep these objects alive for the Graph
     self.input_replace:dict[tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
@@ -126,9 +134,6 @@ class GraphRunner(Runner):
       else: self.r_dependency_map[id(rawbuf.base._buf)].append(new_dependency)
 
     return list({id(x):x for x in wait_nodes}.values())
-
-# a marker for your graph supporting multiple devices of the same type
-class MultiGraphRunner(GraphRunner): pass
 
 def get_out_buffers_for_ei(ei:ExecItem) -> list[Buffer]:
   if isinstance(ei.prg, CompiledRunner): return [cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins]

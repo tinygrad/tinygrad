@@ -6,9 +6,11 @@ from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEn
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
-from tinygrad.engine.jit import MultiGraphRunner
+from tinygrad.engine.jit import GraphRunner
 
-class HCQGraph(MultiGraphRunner):
+class HCQGraph(GraphRunner):
+  supports_multi = True
+
   def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     self.devices = list(set(cast(HCQCompiled, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))

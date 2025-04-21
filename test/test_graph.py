@@ -5,7 +5,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import Context, CI, dedup, from_mv
 from tinygrad.dtype import dtypes
-from tinygrad.engine.jit import MultiGraphRunner
+from tinygrad.engine.jit import graph_class
 from tinygrad.engine.realize import ExecItem, BufferXfer, get_runner, CompiledRunner
 
 np.random.seed(1337)
@@ -108,7 +108,7 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   def test_order_copy_writed(self):
-    if not issubclass(Device[Device.DEFAULT].graph, MultiGraphRunner): self.skipTest("graph does not supported (not MultiGraphRunner)")
+    if not graph_class(Device.default).supports_multi: self.skipTest("graph does not supported (not MultiGraphRunner)")
 
     d0 = Device.DEFAULT
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(4)]
@@ -120,7 +120,7 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   def test_order_copy_then_read(self):
-    if not issubclass(Device[Device.DEFAULT].graph, MultiGraphRunner): self.skipTest("graph does not supported (not MultiGraphRunner)")
+    if not graph_class(Device.default).supports_multi: self.skipTest("graph does not supported (not MultiGraphRunner)")
 
     d0 = Device.DEFAULT
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(4)]
@@ -151,7 +151,7 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   def test_copies_2_devs(self):
-    if not issubclass(Device[Device.DEFAULT].graph, MultiGraphRunner): self.skipTest("graph does not supported (not MultiGraphRunner)")
+    if not graph_class(Device.default).supports_multi: self.skipTest("graph does not supported (not MultiGraphRunner)")
 
     d0, d1 = Device.DEFAULT, f"{Device.DEFAULT}:1"
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(3)]
@@ -164,7 +164,7 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   def test_copies_after_graph_global(self):
-    if not issubclass(Device[Device.DEFAULT].graph, MultiGraphRunner): self.skipTest("graph does not supported (not MultiGraphRunner)")
+    if not graph_class(Device.default).supports_multi: self.skipTest("graph does not supported (not MultiGraphRunner)")
 
     d0, d1, d2, d3 = Device.DEFAULT, f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3"
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(8)]
@@ -212,7 +212,7 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   def test_graph_after_copies_devs(self):
-    if not issubclass(Device[Device.DEFAULT].graph, MultiGraphRunner): self.skipTest("graph does not supported (not MultiGraphRunner)")
+    if not graph_class(Device.default).supports_multi: self.skipTest("graph does not supported (not MultiGraphRunner)")
 
     d0, d1, d2, d3 = Device.DEFAULT, f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3"
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(8)]
@@ -240,7 +240,7 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   def test_graph_offset_bufs(self):
-    if not issubclass(Device[Device.DEFAULT].graph, MultiGraphRunner): self.skipTest("graph does not supported (not MultiGraphRunner)")
+    if not graph_class(Device.default).supports_multi: self.skipTest("graph does not supported (not MultiGraphRunner)")
 
     d0 = Device.DEFAULT
     if not hasattr(Device[d0].allocator, "_offset"): self.skipTest("device does not support _offset")
