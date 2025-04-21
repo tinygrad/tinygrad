@@ -7,7 +7,7 @@ from tinygrad.ops import Ops
 from tinygrad.helpers import getenv, flatten, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib, math, operator, functools, inspect, itertools, collections, sys, weakref
+import torch, pathlib, math, operator, functools, inspect, collections, weakref
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
