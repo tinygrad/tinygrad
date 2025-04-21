@@ -96,7 +96,7 @@ class Ops(FastEnum):
   SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto(); UNIQUE = auto() # noqa: E702
 
   # MetaOps
-  COPY = auto(); BUFFER_VIEW = auto() # noqa: E702
+  COPY = auto(); BUFFER_VIEW = auto(); EMPTY = auto() # noqa: E702
 
   # blocks in linearizer
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKEND = auto() # noqa: E702
@@ -178,7 +178,7 @@ class GroupOp:
   # do not preserve f(0) = 0
   UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV, Ops.POW}
 
-  Meta = {Ops.COPY, Ops.BUFFER_VIEW}
+  Meta = {Ops.COPY, Ops.BUFFER_VIEW, Ops.EMPTY}
 
   All = set(Ops)
 

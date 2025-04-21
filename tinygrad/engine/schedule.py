@@ -62,10 +62,6 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   if len(schedule) != len(in_degree): raise RuntimeError(f"created {len(in_degree)} kernels but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
-  # add EMPTY ops last
-  for s in sched_sink.src:
-    if s.op is Ops.BUFFER: schedule.append(ScheduleItem(s, (s.buffer,)))
-
   # map ASSIGN to BUFFER after ScheduleItems are constructed
   becomes_map = {u:u.buf_uop for u in toposort if u.op is Ops.ASSIGN}
   assert all(u.op in {Ops.BUFFER, Ops.BUFFER_VIEW} for u in becomes_map.values()), f"Schedule didn't end with BUFFER {becomes_map.values()}"

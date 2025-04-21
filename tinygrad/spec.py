@@ -13,7 +13,7 @@ buffer_spec = PatternMatcher([
 ])
 
 def validate_kernel(k:UOp):
-  assert k.arg.ast.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.SINK}, f"must end with SINK/COPY/BUFFER_VIEW {k.arg}"
+  assert k.arg.ast.op in {*GroupOp.Meta, Ops.SINK}, f"must end with SINK or {GroupOp.Meta} {k.arg}"
   if k.arg.ast.op is Ops.SINK: assert all(s.op is Ops.STORE for s in k.arg.ast.src), f"SINK must end with STORE {k.arg.ast}"
   return True
 
