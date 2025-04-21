@@ -597,6 +597,12 @@ class TestSchedule(unittest.TestCase):
     d = c+2
     check_schedule(d, 2)
 
+  def test_kernelize_view(self):
+    a = Tensor.empty(4,1)
+    b = a*2
+    c = b.kernelize()+Tensor.empty(4,4)
+    check_schedule(c, 2)
+
   # unlike schedule, kernelize can be called multiple times on a Tensor
   def test_double_kerenlize(self):
     a = Tensor.empty(10)
