@@ -76,7 +76,7 @@ def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
 
 multi_graph_runner_only = unittest.skipIf(
   not isinstance(Device[Device.DEFAULT].graph, type) or not issubclass(Device[Device.DEFAULT].graph, MultiGraphRunner),
-  "graph does not supported (not MultiGraphRunner)")
+  "graph is not supported (not MultiGraphRunner)")
 
 @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
 @unittest.skipIf(CI and Device.DEFAULT=="METAL", "no ICB in CI, creation of graph fails")
