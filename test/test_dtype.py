@@ -151,34 +151,37 @@ class TestFp8s(unittest.TestCase):
   def test_fp8e5m2_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e5m2).dtype == dtypes.fp8e5m2
 
 class TestFp8sConversions(unittest.TestCase):
-
-  @given(strat.floats(width=32, allow_subnormal=False, allow_nan=False, allow_infinity=False, min_value=-FP8E4M3_MAX, max_value=FP8E4M3_MAX))
-  def test_float_to_fp8e4m3(self, x): np.testing.assert_equal(float_to_fp8(x, "E4M3"), ml_dtypes.float8_e4m3fn(x).tobytes()[0])
+  @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E4M3_MAX, max_value=FP8E4M3_MAX))
+  def test_float_to_fp8e4m3(self, x): np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e4m3), ml_dtypes.float8_e4m3fn(x).tobytes()[0])
 
   def test_float_to_fp8e4m3_extreme_values(self):
-    np.testing.assert_equal(float_to_fp8(FP8E4M3_MAX, "E4M3"), 126)
-    np.testing.assert_equal(float_to_fp8(FP8E4M3_MAX*1.01, "E4M3"), 126)
-    np.testing.assert_equal(float_to_fp8(math.inf, "E4M3"), 126)
-    np.testing.assert_equal(float_to_fp8(-FP8E4M3_MAX, "E4M3"), 254)
-    np.testing.assert_equal(float_to_fp8(-FP8E4M3_MAX*1.01, "E4M3"), 254)
-    np.testing.assert_equal(float_to_fp8(-math.inf, "E4M3"), 254)
+    np.testing.assert_equal(float_to_fp8(FP8E4M3_MAX, dtypes.fp8e4m3), 126)
+    np.testing.assert_equal(float_to_fp8(FP8E4M3_MAX*1.01, dtypes.fp8e4m3), 126)
+    np.testing.assert_equal(float_to_fp8(math.inf, dtypes.fp8e4m3), 126)
+    np.testing.assert_equal(float_to_fp8(-FP8E4M3_MAX, dtypes.fp8e4m3), 254)
+    np.testing.assert_equal(float_to_fp8(-FP8E4M3_MAX*1.01, dtypes.fp8e4m3), 254)
+    np.testing.assert_equal(float_to_fp8(-math.inf, dtypes.fp8e4m3), 254)
+    np.testing.assert_equal(float_to_fp8(math.nan, dtypes.fp8e4m3), 127)
+    np.testing.assert_equal(float_to_fp8(-math.nan, dtypes.fp8e4m3), 255)
 
-  @given(strat.floats(width=32, allow_subnormal=False, allow_nan=False, allow_infinity=False, min_value=-FP8E5M2_MAX, max_value=FP8E5M2_MAX))
-  def test_float_to_fp8e5m2(self, x): np.testing.assert_equal(float_to_fp8(x, "E5M2"), ml_dtypes.float8_e5m2(x).tobytes()[0])
+  @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E5M2_MAX, max_value=FP8E5M2_MAX))
+  def test_float_to_fp8e5m2(self, x): np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e5m2), ml_dtypes.float8_e5m2(x).tobytes()[0])
 
   def test_float_to_fp8e5m2_extreme_values(self):
-    np.testing.assert_equal(float_to_fp8(FP8E5M2_MAX, "E5M2"), 123)
-    np.testing.assert_equal(float_to_fp8(FP8E5M2_MAX*1.01, "E5M2"), 123)
-    np.testing.assert_equal(float_to_fp8(math.inf, "E5M2"), 123)
-    np.testing.assert_equal(float_to_fp8(-FP8E5M2_MAX, "E5M2"), 251)
-    np.testing.assert_equal(float_to_fp8(-FP8E5M2_MAX*1.01, "E5M2"), 251)
-    np.testing.assert_equal(float_to_fp8(-math.inf, "E5M2"), 251)
+    np.testing.assert_equal(float_to_fp8(FP8E5M2_MAX, dtypes.fp8e5m2), 123)
+    np.testing.assert_equal(float_to_fp8(FP8E5M2_MAX*1.01, dtypes.fp8e5m2), 123)
+    np.testing.assert_equal(float_to_fp8(math.inf, dtypes.fp8e5m2), 123)
+    np.testing.assert_equal(float_to_fp8(-FP8E5M2_MAX, dtypes.fp8e5m2), 251)
+    np.testing.assert_equal(float_to_fp8(-FP8E5M2_MAX*1.01, dtypes.fp8e5m2), 251)
+    np.testing.assert_equal(float_to_fp8(-math.inf, dtypes.fp8e5m2), 251)
+    np.testing.assert_equal(float_to_fp8(math.nan, dtypes.fp8e5m2), 126)
+    np.testing.assert_equal(float_to_fp8(-math.nan, dtypes.fp8e5m2), 254)
 
   @given(strat.integers(min_value=0, max_value=255))
-  def test_fp8e4m3_to_float(self, x): np.testing.assert_equal(fp8_to_float(x, "E4M3"), np.uint8(x).view(ml_dtypes.float8_e4m3fn).item())
+  def test_fp8e4m3_to_float(self, x): np.testing.assert_equal(fp8_to_float(x, dtypes.fp8e4m3), np.uint8(x).view(ml_dtypes.float8_e4m3fn).item())
 
   @given(strat.integers(min_value=0, max_value=255))
-  def test_fp8e5m2_to_float(self, x): np.testing.assert_equal(fp8_to_float(x, "E5M2"), np.uint8(x).view(ml_dtypes.float8_e5m2).item())
+  def test_fp8e5m2_to_float(self, x): np.testing.assert_equal(fp8_to_float(x, dtypes.fp8e5m2), np.uint8(x).view(ml_dtypes.float8_e5m2).item())
 
 @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
 class TestBFloat16(unittest.TestCase):
@@ -493,13 +496,13 @@ class TestHelpers(unittest.TestCase):
     self.assertEqual(truncate_bf16(max_bf16 * 1.00001), math.inf)
     self.assertEqual(truncate_bf16(min_bf16 * 1.00001), -math.inf)
 
-  @given(strat.floats(width=32, allow_subnormal=False, allow_nan=False))
+  @given(strat.floats(width=32, allow_subnormal=True, allow_nan=True, allow_infinity=True))
   def test_truncate_fp8e4m3(self, x):
     if x > FP8E4M3_MAX: np.testing.assert_equal(truncate[dtypes.fp8e4m3](x), FP8E4M3_MAX)
     elif x < -FP8E4M3_MAX: np.testing.assert_equal(truncate[dtypes.fp8e4m3](x), -FP8E4M3_MAX)
     else: np.testing.assert_equal(truncate[dtypes.fp8e4m3](x), ml_dtypes.float8_e4m3fn(x))
 
-  @given(strat.floats(width=32, allow_subnormal=False, allow_nan=False))
+  @given(strat.floats(width=32, allow_subnormal=True, allow_nan=True, allow_infinity=True))
   def test_truncate_fp8e5m2(self, x):
     if x > FP8E5M2_MAX: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), FP8E5M2_MAX)
     elif x < -FP8E5M2_MAX: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), -FP8E5M2_MAX)
