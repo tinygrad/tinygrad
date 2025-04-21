@@ -108,7 +108,7 @@ def index_put(self, indices, values, accumulate=False):
 
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None):
-  return out.copy_(wrap(Tensor.randperm(n, generator=generator, device=unwrap(out).device)))
+  return out.copy_(wrap(Tensor.randperm(n, seed=generator.initial_seed() if generator is not None else None, device=unwrap(out).device)))
 
 @torch.library.impl("aten::cummax", "privateuseone")
 def cummax(self, dim):

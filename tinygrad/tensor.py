@@ -852,10 +852,8 @@ class Tensor(SimpleMathTrait):
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
   @staticmethod
-  def randperm(n: int, *, generator=None, device=None, dtype=dtypes.int32) -> Tensor:
-    if generator is not None:
-      Tensor.manual_seed(generator.initial_seed())
-
+  def randperm(n: int, *, seed: int|None=None, device=None, dtype=dtypes.int32) -> Tensor:
+    if seed is not None: Tensor.manual_seed(seed)
     r = Tensor.rand(n, device=device)
     _, indices = r.sort()
     return indices.cast(dtype)
