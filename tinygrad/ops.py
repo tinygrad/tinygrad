@@ -297,8 +297,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # VIEW and MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
-    # BufferOps flow ShapeTracker from a direct edge
+    # BufferOps and ASSIGN flow ShapeTracker from a direct edge
     if self.op in GroupOp.Buffer: return views[0] if (views:=[x.st for x in self.src if x.op is Ops.VIEW]) else None
+    if self.op is Ops.ASSIGN: return self.src[0].st
 
     from tinygrad.shape.shapetracker import ShapeTracker
     # BUFFER/BUFFER_VIEW and KERNEL only have a size
