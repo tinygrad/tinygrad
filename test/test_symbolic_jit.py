@@ -6,11 +6,12 @@ import numpy as np
 
 class TestSymbolicJit(unittest.TestCase):
   def setUp(self):
-      self.context = Context(IGNORE_OOB=1)
-      self.context.__enter__()
+    # A lot of these test are out of bounds, so we ignore the bounds check
+    self.context = Context(IGNORE_OOB=1)
+    self.context.__enter__()
 
   def tearDown(self):
-      self.context.__exit__(None, None, None)
+    self.context.__exit__(None, None, None)
 
   def test_plus1(self):
     def f(a): return (a+1).realize()
