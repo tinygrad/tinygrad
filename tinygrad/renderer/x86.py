@@ -239,7 +239,8 @@ class X86Renderer(Renderer):
 
     name = "test"
     for i,u in enumerate(uops):
-      if u.op is Ops.NAME: name = u.arg
+      if u.op is Ops.SINK:
+        if u.arg is not None: name = u.arg.name
       elif u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = assign_reg(i, u.dtype)
         if r[u] in ("rax", "xmm8"): # value is in stack instead of register, rbp + 8 is return address
