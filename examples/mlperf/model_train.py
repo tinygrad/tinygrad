@@ -346,7 +346,7 @@ def train_retinanet():
   from contextlib import redirect_stdout
   from examples.mlperf.dataloader import batch_load_retinanet
   from examples.mlperf.initializers import FrozenBatchNorm2dRetinaNet, Conv2dNormalRetinaNet, Conv2dKaimingUniformRetinaNet, Linear, Conv2dRetinaNet
-  from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize
+  from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize, get_dataset_count
   from extra.models import resnet
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
@@ -359,7 +359,7 @@ def train_retinanet():
   config, target_metric = {}, 0.34
 
   NUM_CLASSES = len(MLPERF_CLASSES)
-  BASE_DIR = getenv("BASE_DIR", BASEDIR)
+  BASEDIR = getenv("BASEDIR", BASEDIR)
   BENCHMARK = getenv("BENCHMARK")
   INITMLPERF = getenv("INITMLPERF")
   config["gpus"] = GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 6))]
@@ -410,7 +410,8 @@ def train_retinanet():
   @TinyJit
   def _eval_step(model, x, **kwargs):
     out = model(normalize(x, GPUS), **kwargs)
-    return out.realize()
+    # reassemble on GPUS[0] before sending back to CPU for speed
+    return out.to(GPUS[0]).realize()
 
   # ** hyperparameters **
   config["seed"] = SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
@@ -423,6 +424,11 @@ def train_retinanet():
   config["loss_scaler"] = loss_scaler = getenv("LOSS_SCALER", 2**11 if dtypes.default_float == dtypes.float16 else 1.0)
   config["default_float"] = dtypes.default_float.name
   config["eval_freq"] = eval_freq = getenv("EVAL_FREQ", 1)
+
+  # ** initialize wandb **
+  if (WANDB:=getenv("WANDB")):
+    import wandb
+    wandb.init(config=config, project="MLPerf-RetinaNet")
 
   if SEED: Tensor.manual_seed(SEED)
 
@@ -437,6 +443,7 @@ def train_retinanet():
 
   # ** model setup **
   backbone = resnet.ResNeXt50_32X4D(num_classes=None)
+  # TODO: should not load_from_pretrained during setup
   backbone.load_from_pretrained()
   _freeze_backbone_layers(backbone, 3)
 
@@ -452,21 +459,13 @@ def train_retinanet():
   optim = Adam(params, lr=lr)
 
   # ** dataset **
-  if INITMLPERF:
-    config["steps_in_train_epoch"] = steps_in_train_epoch = BS
-    config["steps_in_val_epoch"] = steps_in_val_epoch = EVAL_BS
-  else:
-    train_dataset = COCO(download_dataset(BASE_DIR, "train"))
-    val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
+  config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(get_dataset_count((base_dir_path:=Path(BASEDIR)), False), BS) // BS
+  config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(get_dataset_count(base_dir_path, True), EVAL_BS) // EVAL_BS)
+
+  if not INITMLPERF:
+    train_dataset = COCO(download_dataset(BASEDIR, "train"))
+    val_dataset = COCO(download_dataset(BASEDIR, "validation"))
     coco_val = COCOeval(cocoGt=val_dataset, iouType="bbox")
-
-    config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(len(train_dataset.imgs.keys()), BS) // BS
-    config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(len(val_dataset.imgs.keys()), EVAL_BS) // EVAL_BS)
-
-  # ** initialize wandb **
-  if (WANDB:=getenv("WANDB")):
-    import wandb
-    wandb.init(config=config, project="MLPerf-RetinaNet")
 
   print(f"training with batch size {BS} for {EPOCHS} epochs")
 
@@ -477,7 +476,7 @@ def train_retinanet():
     if INITMLPERF:
       i, proc = 0, _fake_data_get(BS)
     else:
-      train_dataloader = batch_load_retinanet(train_dataset, False, Path(BASE_DIR), batch_size=BS, seed=SEED)
+      train_dataloader = batch_load_retinanet(train_dataset, False, base_dir_path, batch_size=BS, seed=SEED)
       it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
       i, proc = 0, _data_get(it)
 
@@ -550,7 +549,7 @@ def train_retinanet():
         if INITMLPERF:
           i, proc = 0, _fake_data_get(EVAL_BS, val=(val:=True))
         else:
-          val_dataloader = batch_load_retinanet(val_dataset, (val:=True), Path(BASE_DIR), batch_size=EVAL_BS, shuffle=False, seed=SEED)
+          val_dataloader = batch_load_retinanet(val_dataset, (val:=True), Path(BASEDIR), batch_size=EVAL_BS, shuffle=False, seed=SEED)
           it = iter(tqdm(val_dataloader, total=steps_in_val_epoch))
           i, proc = 0, _data_get(it, val=val)
           val_img_ids, val_imgs, ncats, narea = [], [], len(coco_val.params.catIds), len(coco_val.params.areaRng)

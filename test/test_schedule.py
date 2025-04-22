@@ -15,7 +15,7 @@ from tinygrad.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite,
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.engine.grouper import view_left, view_right, sym, get_becomes_map
+from tinygrad.engine.grouper import view_left, view_right, sym, get_becomes_map, Kernel, create_ast
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
@@ -29,7 +29,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
   elif isinstance(t, List) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
-    sink = UOp.sink(t)
+    sink = UOp.sink(t) if t.op is not Ops.SINK else t
     becomes_map = get_becomes_map(sink)
     sched, _, __ = create_schedule_with_vars(sink.substitute(becomes_map))
   # test lowering all the ScheduleItems to ExecItems
@@ -81,6 +81,7 @@ class TestSchedule(unittest.TestCase):
     with self.assertRaises(RuntimeError): check_schedule(c, 1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and getenv("CAST_AFTER_EXPAND"), "need half and CAST_AFTER_EXPAND=1")
+  @unittest.skip("CAST_AFTER_EXPAND is not supported")
   def test_expand_buffer_before_cast(self):
     a = Tensor.randn(4, 2, 1).realize().permute((1, 0, 2))
     b = a.cast(dtypes.half).expand((2, 4, 4))+2
@@ -603,6 +604,16 @@ class TestSchedule(unittest.TestCase):
     c = b.kernelize()+Tensor.empty(4,4)
     check_schedule(c, 2)
 
+  def test_multioutput_ast(self):
+    a = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().lazydata
+    b = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().lazydata
+    c = Tensor.arange(4).realize().lazydata
+    kernel = UOp(Ops.KERNEL, src=(a, b, c), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
+    kernel = graph_rewrite(kernel, create_ast)
+    run_schedule(check_schedule(UOp.sink(a.assign(kernel), b.assign(kernel)), 1))
+    self.assertEqual(a.buffer.numpy(), [7])
+    self.assertEqual(b.buffer.numpy(), [12])
+
   # unlike schedule, kernelize can be called multiple times on a Tensor
   def test_double_kerenlize(self):
     a = Tensor.empty(10)
@@ -612,16 +623,25 @@ class TestSchedule(unittest.TestCase):
     e = c.kernelize()+d.kernelize()
     check_schedule(e, 3)
 
-  @unittest.expectedFailure # TODO: this should pass
   def test_kernelize_bw(self):
     a = Tensor.full((3,), 2.0, requires_grad=True).contiguous()
     b = Tensor.full((3,), 3.0, requires_grad=True).contiguous()
     x = (a*b).kernelize()
     y = Tensor.eye(3, requires_grad=True)
     z = y.matmul(x).sum()
-    if getenv("VIZ"):
-      graph_rewrite(z.lazydata, PatternMatcher([]), name="y.matmul(x).sum()")
     z.backward()
+    self.assertEqual(z.item(), 18.0)
+    self.assertEqual(z.grad.item(), 1.0)
+
+  def test_kernelize_bw_view(self):
+    a = Tensor.full((3,1), 2.0, requires_grad=True).contiguous()
+    b = Tensor.full((3,1), 3.0, requires_grad=True).contiguous()
+    x = (a*b).kernelize()
+    y = Tensor.eye(6, requires_grad=True)
+    z = y.matmul(x.expand(3,2).reshape(6)).sum()
+    z.backward()
+    self.assertEqual(z.item(), 36.0)
+    self.assertEqual(z.grad.item(), 1.0)
 
   @unittest.skip("no longer supported")
   def test_double_from(self):
