@@ -435,18 +435,13 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # group into kernels
   sink = tensor_map[big_sink]
   realize_map = group_realizes(sink)
-  tensor_map = graph_rewrite_map(sink, create_kernels, KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}),
-                                 bottom_up=True, input_map=tensor_map, name="create_kernels")
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map, name="create_ast")
-
-  # verify Kernels match the spec
-  sched_sink = tensor_map[big_sink]
-  type_verify(list(sched_sink.toposort), sched_spec)
+  tensor_map = graph_rewrite_map(sink, create_kernels, ctx=KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True,
+                                 input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
   assign_rep: dict[UOp, UOp] = {}
-  for u in sched_sink.toposort:
+  for u in tensor_map[big_sink].toposort:
     if u.op is not Ops.ASSIGN: continue
     kernel_assign[u.buf_uop] = u
     for s in u.src[1].src:
@@ -455,9 +450,14 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
         raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on ASSIGN or BUFFER")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep:
-    tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
-    sched_sink = tensor_map[big_sink]
-    type_verify(list(sched_sink.toposort), sched_spec)
+    tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, ctx=assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
+
+  # finally, create the AST for kernels
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map, name="create_ast")
+  sched_sink = tensor_map[big_sink]
+
+  # verify Kernels match the spec
+  type_verify(list(sched_sink.toposort), sched_spec)
 
   # display the final graph
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
