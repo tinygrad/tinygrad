@@ -296,25 +296,27 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
-    from tinygrad.shape.shapetracker import ShapeTracker
-    if self.op is Ops.MULTI:
-      return ShapeTracker.from_shape(
-        tuple(sum(y.shape[a] for y in self.real_lbs) if a == self.axis else s for a,s in enumerate(self.real_lbs[0].shape)))
-    if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
-    if self.op is Ops.KERNEL: return ShapeTracker.from_shape((self.arg.ast.size,))
-    # these ops define a ShapeTracker from the arg
+    # VIEW and MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
-    # buffer ops return the ShapeTracker from sources
-    if self.op in GroupOp.Buffer: return vsrc[0] if len(vsrc:=[x.st for x in self.src if x.op is Ops.VIEW]) != 0 else None
+    # BufferOps flow ShapeTracker from a direct edge
+    if self.op in GroupOp.Buffer: return views[0] if (views:=[x.st for x in self.src if x.op is Ops.VIEW]) else None
+
+    from tinygrad.shape.shapetracker import ShapeTracker
+    # BUFFER/BUFFER_VIEW and KERNEL only have a size
+    if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
+    if self.op is Ops.KERNEL: return ShapeTracker.from_shape((self.arg.ast.size,))
+
+    # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
-    if self.op is Ops.BITCAST:
-      shape = src_sts[0].shape
-      if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
-    # only reduce ops are allowed to change shape, everything else derives shape from sources
-    elif self.op in {Ops.REDUCE_AXIS, Ops.WMMA}: shape = src_sts[0].reduce(self.axis_arg)
-    else: shape = src_sts[0].shape
+    match self.op:
+      case Ops.MULTI: shape = tuple(sum(y.shape[a] for y in self.real_lbs) if a == self.axis else s for a,s in enumerate(self.real_lbs[0].shape))
+      case Ops.BITCAST:
+        shape = src_sts[0].shape
+        if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
+      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
+      case _: shape = src_sts[0].shape
     return ShapeTracker.from_shape(shape)
 
   @functools.cached_property
