@@ -11,11 +11,12 @@ from tinygrad.spec import type_verify
 def block_reorder(lst:list[UOp]) -> list[UOp]:
   in_this_block = set(lst)
   local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
-  in_degree: defaultdict[UOp, int] = defaultdict(int)
+  in_degree:dict[UOp, int] = {}
   priorities:dict[UOp, int] = {}
 
   # get local children and assign priorities
   for u in reversed(lst):
+    in_degree[u] = 0
     for s in u.src:
       if s in in_this_block:
         local_children[s].append(u)
