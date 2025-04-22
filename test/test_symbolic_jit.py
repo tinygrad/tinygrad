@@ -1,7 +1,8 @@
 import unittest
 
-from test.helpers import assert_jit_cache_len, Context
+from test.helpers import assert_jit_cache_len
 from tinygrad import Variable, Tensor, TinyJit
+from tinygrad.helpers import Context
 import numpy as np
 
 class TestSymbolicJit(unittest.TestCase):

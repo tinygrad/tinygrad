@@ -5,7 +5,6 @@ from tinygrad.tensor import Tensor
 from examples.gpt2 import Attention
 import numpy as np
 
-
 class TestSymbolicOps(unittest.TestCase):
   def setUp(self):
     # A lot of these test are out of bounds, so we ignore the bounds check
