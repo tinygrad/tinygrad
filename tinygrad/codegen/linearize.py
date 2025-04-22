@@ -1,5 +1,4 @@
 from __future__ import annotations
-import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat, GroupOp
@@ -7,43 +6,27 @@ from tinygrad.dtype import PtrDType
 from tinygrad.helpers import dedup, partition, all_same, flatten
 from tinygrad.spec import type_verify
 
-# NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
+# NOTE: returning any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(lst:list[UOp]) -> list[UOp]:
   in_this_block = set(lst)
   local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
-  in_degree: defaultdict[UOp, int] = defaultdict(int)
   priorities:dict[UOp, int] = {}
 
   # get local children and assign priorities
+  # NOTE: list must be a valid local toposort on input
   for u in reversed(lst):
     for s in u.src:
-      if s in in_this_block:
-        local_children[s].append(u)
-        in_degree[u] += 1
+      if s in in_this_block: local_children[s].append(u)
+    # NOTE: for the toposort, this promises all parents have a lower priority than their children
+    priority = min([0] + [priorities[x] for x in local_children[u]]) - 1
     # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
-    priority = [0] + [priorities[x] for x in local_children[u]]
-    if u.op is Ops.LOAD: priority.append(-1000)
-    if u.op is Ops.BARRIER: priority.append(-1500)
-    priorities[u] = min(priority)
+    # this is fine for parents to have even lower priority, but you can't add here
+    if u.op is Ops.LOAD: priority -= 1000
+    if u.op is Ops.BARRIER: priority -= 1500
+    priorities[u] = priority
 
-  # placement queue
-  queue:list[tuple[int, tuple, UOp]] = []
-  def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
-
-  # place the first ones that don't have deps
-  for u in lst:
-    if u not in in_degree: push(u)
-
-  newlst = []
-  while queue:
-    _,_,x = heapq.heappop(queue)
-    newlst.append(x)
-    for u in local_children[x]:
-      in_degree[u] -= 1
-      if in_degree[u] == 0: push(u)
-
-  assert len(newlst) == len(lst), f"len mismatch {len(newlst)} != {len(lst)}"
-  return newlst
+  # order based on the new priorities
+  return sorted(lst, key=lambda u: (priorities[u], u.tuplize))
 
 # ***** basic block *****
 
