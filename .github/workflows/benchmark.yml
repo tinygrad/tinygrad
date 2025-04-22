@@ -378,9 +378,8 @@ jobs:
       run: DEBUG=2 AMD=1 python -m pytest -rA test/test_tiny.py
     - name: Test HIP=1
       run: DEBUG=2 HIP=1 python -m pytest -rA test/test_tiny.py
-    # TODO: AMD compiler bug causes this to fail
-    #- name: Fuzz Padded Tensor Core GEMM
-    #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
+    - name: Fuzz Padded Tensor Core GEMM
+      run: AMD=1 DISABLE_COMPILER_CACHE=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Remove amdgpu
       run: sleep 5 && sudo rmmod amdgpu # sleep a bit to let the driver unload the prev pid.
     - name: Test AM cold start time
