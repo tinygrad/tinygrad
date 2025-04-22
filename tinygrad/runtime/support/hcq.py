@@ -14,7 +14,7 @@ class MMIOInterface:
     return self.mv.cast(fmt or self.fmt)[start_idx:start_idx+count].tolist() if count > 1 else self.mv.cast(fmt or self.fmt)[start_idx]
 
   def write(self, value:int|array.array, start_idx=0, fmt=None):
-    if isinstance(value, int): self.mv.cast(fmt or self.fmt)[start_idx] = value
+    if value.__class__ is int: self.mv.cast(fmt or self.fmt)[start_idx] = value
     else: self.mv.cast(fmt or self.fmt)[start_idx : start_idx + len(value)] = value
 
   def __len__(self): return self.size // struct.calcsize(self.fmt)
