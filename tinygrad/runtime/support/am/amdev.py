@@ -2,6 +2,7 @@ from __future__ import annotations
 import ctypes, collections, time, dataclasses, functools, pathlib, fcntl, os
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
 from tinygrad.runtime.autogen.am import am, mp_11_0
+from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
@@ -245,9 +246,9 @@ class AMMemoryManager:
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)
 
 class AMDev:
-  def __init__(self, devfmt, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
+  def __init__(self, devfmt, vram_bar:MMIOInterface, doorbell_bar:MMIOInterface, mmio_bar:MMIOInterface):
     self.devfmt = devfmt
-    self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
+    self.vram, self.doorbell, self.mmio = vram_bar, doorbell_bar, mmio_bar
 
     os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
 
@@ -319,13 +320,13 @@ class AMDev:
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
 
-  def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
+  # def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
 
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
   def rreg(self, reg:int) -> int:
-    val = self.indirect_rreg(reg * 4) if reg > len(self.mmio) else self.mmio[reg]
+    val = self.indirect_rreg(reg * 4) if reg > self.mmio.size else self.mmio.read(offset=reg)
     if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"am {self.devfmt}: Reading register {reg:#x} with value {val:#x}")
     self._prev_rreg = (reg, val)
     return val

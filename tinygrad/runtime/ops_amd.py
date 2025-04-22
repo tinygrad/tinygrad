@@ -3,7 +3,7 @@ from typing import Any, cast, ClassVar
 import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface, MMIOInterface
 from tinygrad.ops import sint
 from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, all_same, flatten, DEBUG, OSX
@@ -304,7 +304,7 @@ class AMDComputeQueue(HWQueue):
   def bind(self, dev:AMDDevice):
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
-    hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
+    hw_view = MMIOInterface(self.hw_page.va_addr, self.hw_page.size).cast("I")
     for i, value in enumerate(self._q): hw_view[i] = value
 
     self.indirect_cmd = [self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(self.hw_page.va_addr),
@@ -375,7 +375,7 @@ class AMDCopyQueue(HWQueue):
 
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc((qsz:=round_up(len(self._q), 8)) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
-    hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
+    hw_view = MMIOInterface(self.hw_page.va_addr, self.hw_page.size, fmt="I")
     for i in range(qsz): hw_view[i] = self._q[i] if i < len(self._q) else 0
 
     self.indirect_cmd = [self.sdma.SDMA_OP_INDIRECT | self.sdma.SDMA_PKT_INDIRECT_HEADER_VMID(0), *data64_le(self.hw_page.va_addr), qsz,
@@ -473,10 +473,10 @@ class ProfileSQTTEvent(ProfileEvent): device:str; se:int; blob:bytes; itrace:boo
 
 @dataclass
 class AMDQueueDesc:
-  ring: memoryview
-  read_ptrs: list[memoryview]
-  write_ptrs: list[memoryview]
-  doorbells: list[memoryview]
+  ring: MMIOInterface
+  read_ptrs: list[MMIOInterface]
+  write_ptrs: list[MMIOInterface]
+  doorbells: list[MMIOInterface]
   put_value: int = 0
 
   @property
@@ -626,9 +626,9 @@ class KFDIface:
       self.doorbells_base = queue.doorbell_offset & (~0x1fff) # doorbell is two pages
       self.doorbells = cast(HWInterface, KFDIface.kfd).mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, self.doorbells_base)
 
-    return AMDQueueDesc(ring=to_mv(ring.va_addr, ring.size).cast("I"),
-                        read_ptrs=[to_mv(queue.read_pointer_address, 8).cast("Q")], write_ptrs=[to_mv(queue.write_pointer_address, 8).cast("Q")],
-                        doorbells=[to_mv(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8).cast("Q")])
+    return AMDQueueDesc(ring=MMIOInterface(ring.va_addr, ring.size, fmt="I"), read_ptrs=[MMIOInterface(queue.read_pointer_address, 8, fmt="Q")],
+                        write_ptrs=[MMIOInterface(queue.write_pointer_address, 8, fmt="Q")],
+                        doorbells=[MMIOInterface(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8, fmt="Q")])
 
   def sleep(self, tm:int): kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=1, wait_for_all=1, timeout=tm)
 
@@ -718,7 +718,7 @@ class PCIIface:
     bar_info = HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
     self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
-    self.adev = AMDev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
+    self.adev = AMDev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2, fmt='Q'), self._map_pci_range(5, fmt='I'))
     self.ip_versions = self.adev.ip_ver
     self.ip_offsets = {hwip: tuple(instances[0]) for hwip,instances in self.adev.regs_offset.items()}
     self.doorbell_cpu_addr = mv_address(dbell)
@@ -733,10 +733,10 @@ class PCIIface:
       'max_slots_scratch_cu': self.adev.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.adev.gc_info.gc_max_waves_per_simd,
       'simd_arrays_per_engine': self.adev.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.adev.gc_info.gc_lds_size}
 
-  def _map_pci_range(self, bar, off=0, addr=0, size=None):
+  def _map_pci_range(self, bar, off=0, addr=0, size=None, fmt="B") -> MMIOInterface:
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
-    return to_mv(loc, sz)
+    return MMIOInterface(loc, sz, fmt=fmt)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     if host or (not getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1) and uncached and cpu_access): # host or gtt-like memory.
@@ -773,8 +773,8 @@ class PCIIface:
       self.adev.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
         eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=0)
 
-    return AMDQueueDesc(ring=to_mv(ring.va_addr, ring.size).cast("I"), doorbells=[to_mv(self.doorbell_cpu_addr + doorbell_index * 8, 8).cast("Q")],
-                        read_ptrs=[to_mv(gart.va_addr, 8).cast("Q")], write_ptrs=[to_mv(gart.va_addr+0x10, 8).cast("Q")])
+    return AMDQueueDesc(ring=MMIOInterface(ring.va_addr, ring.size, "I"), doorbells=[MMIOInterface(self.doorbell_cpu_addr+doorbell_index*8, 8, "Q")],
+                        read_ptrs=[MMIOInterface(gart.va_addr, 8, "Q")], write_ptrs=[MMIOInterface(gart.va_addr+0x10, 8, "Q")])
   def sleep(self, timeout):
     if PCIIface.vfio and (events_cnt:=len(self.irq_poller.poll(timeout))):
       self.irq_fd.read(8 * events_cnt)

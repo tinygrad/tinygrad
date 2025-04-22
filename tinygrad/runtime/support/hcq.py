@@ -7,19 +7,26 @@ from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, Profil
 from tinygrad.ops import sym_infer, sint, Variable, UOp
 from tinygrad.runtime.autogen import libc
 
-class HWMemInterface:
-  def __init__(self, va, sz): self.mv, self.va = to_mv(va, sz), va
+class MMIOInterface:
+  def __init__(self, va, sz, fmt='B'): self.mv, self.va, self.size, self.fmt = to_mv(va, sz), va, sz, fmt
 
-  def write(self, d, off=0, fmt='Q'):
-    b = struct.pack('<'+fmt, d) if isinstance(d, int) else d
-    self.mv[off:off+len(b)] = b
+  def read(self, size=1, offset=0, fmt=None):
+    fmt = fmt or self.fmt
+    bs = struct.calcsize(fmt)
+    start = offset * bs
+    data = self.mv[start : start + size*bs]
+    tpl = struct.unpack('<' + (fmt if size == 1 else f'{size}{fmt}'), data)
+    return tpl[0] if size == 1 else list(tpl)
 
-  def read(self, n=1, off=0, fmt='Q'):
-    b = self.mv[off:off + n * (s:=struct.calcsize(fmt))]
-    u = struct.unpack('<'+(fmt if n==1 else str(n)+fmt), b)
-    return u[0] if n==1 else list(u)
+  def write(self, value, offset=0, fmt=None):
+    fmt = fmt or self.fmt
+    bs = struct.calcsize(fmt)
+    if isinstance(value, int): data = struct.pack('<' + fmt, value)
+    else: data = value # assume bytes/bytearray
+    start = offset * bs
+    self.mv[start : start + len(data)] = data
 
-class HWInterface:
+class FileIOInterface:
   """
   Hardware Abstraction Layer for HCQ devices. The class provides a unified interface for interacting with hardware devices.
   """
@@ -50,6 +57,8 @@ class HWInterface:
   @staticmethod
   def eventfd(initval, flags=None): return HWInterface(fd=os.eventfd(initval, flags))  # type: ignore[attr-defined]
 
+HWInterface = FileIOInterface # TODO: rename in sep PR
+
 if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.mockgpu import MockHWInterface as HWInterface  # noqa: F401 # pylint: disable=unused-import
 
 # **************** for HCQ Compatible Devices ****************
@@ -78,7 +87,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     self._q:Any = []
     self.binded_device:DeviceType|None = None
     self.q_sints:list[tuple[int, int]] = []
-    self.mv_sints:list[tuple[memoryview, int, int, int|None]] = []
+    self.mv_sints:list[tuple[MMIOInterface, int, int, int|None]] = []
     self.syms:list[sint] = []
     self._prev_resolved_syms:list[int|None] = []
 
