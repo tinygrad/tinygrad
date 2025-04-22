@@ -12,7 +12,7 @@ def block_reorder(lst:list[UOp]) -> list[UOp]:
   in_this_block = set(lst)
   local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree: defaultdict[UOp, int] = defaultdict(int)
-  key:dict[UOp, tuple[int, tuple]] = {}
+  priorities:dict[UOp, int] = {}
 
   # get local children and assign priorities
   for u in reversed(lst):
@@ -21,18 +21,16 @@ def block_reorder(lst:list[UOp]) -> list[UOp]:
         local_children[s].append(u)
         in_degree[u] += 1
     # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
-    priority = [0] + [key[x][0] for x in local_children[u]]
+    priority = [0] + [priorities[x] for x in local_children[u]]
     if u.op is Ops.LOAD: priority.append(-1000)
     if u.op is Ops.BARRIER: priority.append(-1500)
-    key[u] = (min(priority), u.tuplize)
+    priorities[u] = min(priority)
 
   # number the uops in "ideal" order
-  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: key[x]))}
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (priorities[x], x.tuplize)))}
 
-  # then force then to be toposorted
-  heap = [(nkey[u],u) for u in lst if in_degree[u] == 0]
-  heapq.heapify(heap)
-
+  # then force then to be toposorted in as close to the ideal order as possible
+  heapq.heapify(heap:=[(nkey[u],u) for u in lst if in_degree[u] == 0])
   newlst = []
   while heap:
     _,u = heapq.heappop(heap)
