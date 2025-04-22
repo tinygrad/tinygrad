@@ -1505,8 +1505,12 @@ impl<'a> Thread<'a> {
             if !self.exec.read() {
                 return Ok(());
             }
-            let offset = sign_ext(instr & 0x1fff, 13);
             let seg = (instr >> 16) & 0x3;
+            let offset_bits = match seg {
+                0 => 12,
+                _ => 13
+            };
+            let offset = sign_ext(instr & 0x1fff, offset_bits);
             let op = ((instr >> 18) & 0x7f) as usize;
             let addr = ((instr >> 32) & 0xff) as usize;
             let data = ((instr >> 40) & 0xff) as usize;
@@ -1539,7 +1543,7 @@ impl<'a> Thread<'a> {
                         _ => todo_instr!(instruction)?,
                     }
                 }
-                2 => {
+                0 | 2 => {
                     print_instr!("GLOBAL", offset, op, addr, data, saddr, vdst);
 
                     let addr = match saddr_off {
