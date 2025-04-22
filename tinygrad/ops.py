@@ -275,7 +275,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if node in ret: continue
       if not visited:
         stack.append((node, True))  # push node back on stack to process after its parents
-        for parent in node.src: stack.append((parent, False)) # push parents on the stack
+        for parent in reversed(node.src): stack.append((parent, False)) # push parents on the stack
       else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
     return ret
 
