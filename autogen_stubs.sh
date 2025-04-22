@@ -1,5 +1,4 @@
-#!/usr/bin/env bash 
-set -e
+#!/bin/bash -e
 
 # setup instructions for clang2py
 if [[ ! $(clang2py -V) ]]; then
