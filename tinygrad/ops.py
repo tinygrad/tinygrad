@@ -4,7 +4,7 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, _METADATA, flatten
+from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten
 from tinygrad.helpers import PICKLE_BUFFERS, dedup, cdiv, cmod
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -228,8 +228,6 @@ class UOpMetaClass(type):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
     for s in src: s.children.add(ref)
-    # NOTE: this will soon be set by Tensor once we remove function.py
-    if (metadata:=_METADATA.get()) is not None: all_metadata[created] = metadata
     # NOTE: this value is set by pickle when pickling a realized tensor
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
@@ -238,7 +236,7 @@ class UOpMetaClass(type):
 
 # some uops map to other stuff
 buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
-all_metadata:weakref.WeakKeyDictionary[UOp, Metadata] = weakref.WeakKeyDictionary()
+all_metadata:weakref.WeakKeyDictionary[UOp, Metadata] = weakref.WeakKeyDictionary() # TODO: should this be here?
 
 def _toposort(u:UOp, cache:set[UOp]):
   if u in cache: return {}
