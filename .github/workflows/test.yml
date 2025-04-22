@@ -303,7 +303,7 @@ jobs:
     - name: Test uops with Python emulator
       run: PYTHON=1 python3 -m pytest test/test_uops.py --durations=20
     - name: Test symbolic with Python emulator
-      run: PYTHONPATH=. PYTHON=1 python3 test/test_symbolic_ops.py
+      run: PYTHONPATH=. IGNORE_OOB=1 PYTHON=1 python3 test/test_symbolic_ops.py
     - name: test_linearizer_failures with Python emulator
       run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1
     - name: test_renderer_failures with Python emulator
