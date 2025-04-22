@@ -143,6 +143,11 @@ x86_matcher = PatternMatcher([
   # *** also in ptx ***
   # cast between pointers is a noop
   (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) else None),
+  # move mask from INDEX to the load/store
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat.var("gate"))), UPat.var("alt"))),
+   lambda buf,idx,gate,alt: UOp(Ops.LOAD, alt.dtype, (buf.index(idx), alt, gate))),
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat())), UPat.var("val"), UPat.var("gate"))),
+   lambda buf,idx,val,gate: UOp.store(buf.index(idx), val, gate)),
   # *** also in llvmir ***
   # rewrite cast to bool to CMPNE 0
   (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),

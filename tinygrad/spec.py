@@ -147,6 +147,8 @@ spec = PatternMatcher([
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
+  # X86 LOAD/STORE we use lea for index for now
+  (UPat((Ops.LOAD, Ops.STORE), allow_any_len=True), lambda: True),
 ])
 
 # *** schedule spec only allows buffers, assigns and kernels in the graph ***
