@@ -1428,7 +1428,7 @@ class TestLinearizerFailures(unittest.TestCase):
           UOp(Ops.CONST, dtypes.int, arg=-1, src=(
             UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(50257, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
     opts = [Opt(op=OptOps.GROUPTOP, axis=0, arg=29), Opt(op=OptOps.PADTO, axis=0, arg=32)]
-    with Context(CHECK_OOB=1):
+    with Context(IGNORE_OOB=0):
       helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["METAL", "GPU", "AMD", "NV", "CUDA"])
 
 if __name__ == '__main__':

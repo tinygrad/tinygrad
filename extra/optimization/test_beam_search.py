@@ -16,7 +16,7 @@ class TestBeamSearch(unittest.TestCase):
     BEAM.value = self.old_beam
 
   def test_variable_ast_beam(self):
-    with Context(CHECK_OOB=0):
+    with Context(IGNORE_OOB=1):
       a = rand(3, 3).reshape((Variable("a", 1, 10).bind(3), 3))
       a = (a+1).realize()
 
@@ -44,14 +44,14 @@ class TestBeamSearch(unittest.TestCase):
     v = Variable("v", 1, 400).bind(367)
     a = rand(367, 367)
     b = rand(367, 367)
-    with Context(CHECK_OOB=0):
+    with Context(IGNORE_OOB=1):
       c = (a.reshape(367, v) @ b.reshape(v, 367)).realize()
       np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), atol=1e-4, rtol=1e-4)
 
   def test_variable_shrink_prime_number(self):
     v = Variable("v", 1, 400).bind(367)
     a = rand(400, 367)
-    with Context(CHECK_OOB=0):
+    with Context(IGNORE_OOB=1):
       b = (a.shrink(((0,v), None))+1).reshape(367,367).realize()
       np.testing.assert_allclose(b.numpy(), a.numpy()[:367]+1, atol=1e-4, rtol=1e-4)
 

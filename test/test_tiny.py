@@ -73,14 +73,14 @@ class TestTiny(unittest.TestCase):
 
   def test_symbolic(self):
     i = Variable('i', 1, 10)
-    with Context(CHECK_OOB=0):
+    with Context(IGNORE_OOB=1):
       for s in [2,5]:
         ret = Tensor.ones(s).contiguous().reshape(i.bind(s)) + 1
         self.assertListEqual(ret.reshape(s).tolist(), [2.0]*s)
 
   def test_symbolic_reduce(self):
     i = Variable('i', 1, 10)
-    with Context(CHECK_OOB=0):
+    with Context(IGNORE_OOB=1):
       for s in [2,5]:
         ret = Tensor.ones(s).contiguous().reshape(i.bind(s)).sum()
         self.assertEqual(ret.item(), s)

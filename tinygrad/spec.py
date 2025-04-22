@@ -1,7 +1,7 @@
 from typing import cast, Callable
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, RewriteContext
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
-from tinygrad.helpers import all_same, dedup, prod, DEBUG, CHECK_OOB
+from tinygrad.helpers import all_same, dedup, prod, DEBUG, IGNORE_OOB
 try:
   import z3
   z3_imported = True
@@ -73,14 +73,14 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 # ***** uop type spec *****
 
 def validate_index(idx:UOp, mask:UOp|None=None):
-  if not CHECK_OOB or isinstance(idx.dtype, ImageDType) or (sz := cast(PtrDType, idx.src[0].dtype).size) == -1: return True
+  if IGNORE_OOB or isinstance(idx.dtype, ImageDType) or (sz := cast(PtrDType, idx.src[0].dtype).size) == -1: return True
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
   if 0<=idx.src[1].vmin and idx.src[1].vmax<sz: return True
 
   # WEBGPU has a BITCAST in the index. TODO: fix
   if any(x.op is Ops.BITCAST for x in idx.toposort): return True
 
-  if not z3_imported: raise ImportError("z3 is required for bounds checking, try CHECK_OOB=0 or install z3: \"z3-solver\"")
+  if not z3_imported: raise ImportError("z3 is required for bounds checking, try IGNORE_OOB: 0 or \"pip install z3-solver\"")
   solver = z3.Solver(ctx=z3.Context())
   rewriter = RewriteContext(z3_renderer, ctx=(solver, {}))  # Use RewriteContext directly to keep rewrite cache between index and mask
   z3_idx = rewriter.top_down_rewrite(idx.src[1]).arg
@@ -207,4 +207,4 @@ def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
     spec_ret = [cast(bool|None, s.rewrite(u)) for s in specs]
     if any(ret is False for ret in spec_ret) or all(ret is None for ret in spec_ret):
       if DEBUG >= 3: print_uops(uops)
-      raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg} {CHECK_OOB.value=}")
+      raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
