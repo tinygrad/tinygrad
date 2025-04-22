@@ -344,32 +344,13 @@ class TestMultiTensor(unittest.TestCase):
     y_shard = norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
-  # NOTE: this is failing on LLVM CI, no idea why. Works locally.
-  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM"), "slow")
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
-  def test_data_parallel_resnet(self):
-    from extra.models.resnet import ResNet18
-
-    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
-    fake_image_sharded = fake_image.shard(devices_2, axis=0)
-    m = ResNet18()
-    m.load_from_pretrained()
-    real_output = m(fake_image).log_softmax().numpy()
-    for p in get_parameters(m): p.shard_(devices_2).realize()
-    GlobalCounters.reset()
-    shard_output = m(fake_image_sharded).log_softmax().realize()
-    assert shard_output.lazydata.src[0].shape == (1, 1000)
-    assert shard_output.lazydata.src[1].shape == (1, 1000)
-    shard_output_np = shard_output.numpy()
-    np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
-
   @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18
     from tinygrad.nn.optim import LARS
 
-    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
+    fake_image = Tensor.rand((2, 3, 224, 224))
     fake_image_sharded = fake_image.shard(devices_2, axis=0)
     labels = Tensor.randint(2, low=0, high=1000)
     labels_sharded = labels.shard(devices_2, axis=0)
@@ -389,7 +370,71 @@ class TestMultiTensor(unittest.TestCase):
     shard_output = m(fake_image_sharded).sparse_categorical_crossentropy(labels_sharded, label_smoothing=0.1)
     shard_output.backward()
     shard_grad = m.conv1.weight.grad.numpy()
-    # sometimes there is zeros in these grads... why?
+    np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
+
+  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
+  def test_grad_metadata_preservation_during_sharding(self):
+    from extra.models.resnet import ResNet18
+    from tinygrad.nn.optim import LARS
+    from tinygrad.nn.datasets import cifar
+    train_x, train_y, _, _ = cifar()
+    batch_size = 4
+    batch_x = train_x[:batch_size]
+    batch_y = train_y[:batch_size]
+    m = ResNet18()
+    optimizer = LARS(get_parameters(m), 0.1)
+    optimizer.zero_grad()
+    output = m(batch_x).sparse_categorical_crossentropy(batch_y, label_smoothing=0.1)
+    output.backward()
+    
+    original_params = {p: (p.numpy(), p.grad.numpy() if p.grad is not None else None) for p in get_parameters(m)}
+    for p in get_parameters(m):
+      if p.grad is not None:
+        assert p.grad.device == p.device, "Grad device should match parameter device pre-sharding"
+      p.shard_(devices_2).realize()
+    for p in get_parameters(m):
+      # Check that all parameters were sharded
+      assert p.device == devices_2, f"Parameter should be sharded to {devices_2}"  
+      if p.grad is not None:
+        assert p.grad.device == p.device, "Grad device should match parameter device post-sharding"
+        assert p.grad.lazydata.axis == p.lazydata.axis, "Grad axis should match parameter axis"
+        np.testing.assert_allclose(p.grad.numpy(), original_params[p][1], atol=1e-5, rtol=1e-5)
+    optimizer.zero_grad()
+    batch_x_sharded = batch_x.shard(devices_2, axis=0)
+    batch_y_sharded = batch_y.shard(devices_2, axis=0)
+    shard_output = m(batch_x_sharded).sparse_categorical_crossentropy(batch_y_sharded, label_smoothing=0.1)
+    shard_output.backward()
+    for p in get_parameters(m):
+      if p.grad is not None:
+        assert np.any(p.grad.numpy() != 0), "Gradients should be non-zero after backward pass"
+
+  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
+  def test_data_parallel_resnet_train_step_cifar(self):
+    from extra.models.resnet import ResNet18
+    from tinygrad.nn.optim import LARS
+    from tinygrad.nn.datasets import cifar
+    train_x, train_y, _, _ = cifar()
+    batch_size = 4
+    batch_x = train_x[:batch_size]
+    batch_y = train_y[:batch_size]
+    batch_x_sharded = batch_x.shard(devices_2, axis=0)
+    batch_y_sharded = batch_y.shard(devices_2, axis=0)
+    m = ResNet18()
+    optimizer = LARS(get_parameters(m), 0.1)
+    # Test non-sharded forward and backward pass
+    optimizer.zero_grad()
+    m.load_from_pretrained()
+    output = m(batch_x).sparse_categorical_crossentropy(batch_y, label_smoothing=0.1)
+    output.backward()
+    grad = m.conv1.weight.grad.numpy()
+    for p in get_parameters(m): p.shard_(devices_2).realize()
+    GlobalCounters.reset()
+    optimizer.zero_grad()
+    shard_output = m(batch_x_sharded).sparse_categorical_crossentropy(batch_y_sharded, label_smoothing=0.1)
+    shard_output.backward()
+    shard_grad = m.conv1.weight.grad.numpy()
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
 
   def test_assign_kv_cache_multi(self):
