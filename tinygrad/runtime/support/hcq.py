@@ -13,7 +13,7 @@ class MMIOInterface:
   def __getitem__(self, k) -> int|list[int]: return self.mv[k].tolist() if isinstance(k, slice) else self.mv[k]
   def __setitem__(self, k, v:int|array.array): self.mv[k] = v
 
-class HWInterface:
+class FileIOInterface:
   """
   Hardware Abstraction Layer for HCQ devices. The class provides a unified interface for interacting with hardware devices.
   """
@@ -42,9 +42,9 @@ class HWInterface:
   @staticmethod
   def readlink(path): return os.readlink(path)
   @staticmethod
-  def eventfd(initval, flags=None): return HWInterface(fd=os.eventfd(initval, flags))  # type: ignore[attr-defined]
+  def eventfd(initval, flags=None): return FileIOInterface(fd=os.eventfd(initval, flags))  # type: ignore[attr-defined]
 
-if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.mockgpu import MockHWInterface as HWInterface  # noqa: F401 # pylint: disable=unused-import
+if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.mockgpu import MockFileIOInterface as FileIOInterface  # noqa: F401 # pylint: disable=unused-import
 
 # **************** for HCQ Compatible Devices ****************
 
