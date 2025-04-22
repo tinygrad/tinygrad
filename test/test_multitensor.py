@@ -9,6 +9,7 @@ from tinygrad.engine.multi import all_reduce
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from tinygrad.device import is_dtype_supported
+from test.helpers import not_support_multi_device
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -34,7 +35,7 @@ def _test_allreduce(t:Tensor):
   b.realize()
   return aa, b
 
-@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+@unittest.skipIf(not_support_multi_device(), "no multi")
 class TestMultiTensor(unittest.TestCase):
   def test_to(self):
     X = Tensor.ones(256).contiguous().realize()
@@ -307,12 +308,11 @@ class TestMultiTensor(unittest.TestCase):
     lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
     lr_sched.step()
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.long), f"long dtype not supported on {Device.DEFAULT}")
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
 
     layer = nn.Embedding(vocab_size, embed_size)
-    x = Tensor(np.random.randint(0, vocab_size, (B, T)))
+    x = Tensor(np.random.randint(0, vocab_size, (B, T), dtype=np.int32))
     z = layer(x)
 
     layer_sharded = nn.Embedding(vocab_size, embed_size)
@@ -363,7 +363,7 @@ class TestMultiTensor(unittest.TestCase):
     shard_output_np = shard_output.numpy()
     np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
 
-  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM"), "slow, and flaky on LLVM")
+  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18
@@ -791,7 +791,7 @@ class TestMultiTensor(unittest.TestCase):
     (d*c).realize()
     assert not d.lazydata.is_realized
 
-@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+@unittest.skipIf(not_support_multi_device(), "no multi")
 class TestHandleData(unittest.TestCase):
   def test_copied_to_device(self):
     device = (d0, d1, d2, d3)
@@ -814,7 +814,7 @@ class TestHandleData(unittest.TestCase):
       covered = t.to(d)
       assert covered.realize().tolist() == [1, 2, 3, 4]
 
-@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+@unittest.skipIf(not_support_multi_device(), "no multi")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   # shrink a multitensor on sharded axis
   def test_shrink_bad_args(self):
@@ -955,7 +955,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     expected = np.arange(64).reshape((8,8)) + np.array([[0,0,1,1,2,2,3,3] for _ in range(8)]).T
     np.testing.assert_allclose(output.numpy(), expected)
 
-@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+@unittest.skipIf(not_support_multi_device(), "no multi")
 @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
 class TestBatchNorm(unittest.TestCase):
   def test_unsynced_backprop_conv_bn(self):
@@ -1111,7 +1111,7 @@ def helper_test_shard_op(shps, fxn, atol=1e-6, rtol=1e-3):
     except Exception as e:
       raise Exception(f"Failed shape {single_out.shape}: {e}")
 
-@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+@unittest.skipIf(not_support_multi_device, "no multi")
 class TestTensorOps(unittest.TestCase):
   def test_interpolate(self):
     helper_test_shard_op([(4,16,16),(4,24,24)], lambda x: Tensor.interpolate(x, (19,19)))

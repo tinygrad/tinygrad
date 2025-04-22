@@ -1,4 +1,4 @@
-import unittest, operator, subprocess, struct, math
+import unittest, operator, subprocess, math
 import numpy as np
 import torch
 from typing import Any, List
@@ -109,7 +109,7 @@ class TestDType(unittest.TestCase):
     fields = dtypes.fields()
     self.assertIn("float", fields)
     self.assertIn("float32", fields)
-    self.assertEqual(len(fields), 24)
+    self.assertEqual(len(fields), 26)
     self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
     self.assertTrue(all(issubclass(_to_np_dtype(value), np.generic) for value in fields.values() if _to_np_dtype(value) is not None))
 
@@ -141,6 +141,10 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)*Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [1,4,9,16])
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
+
+class TestFp8s(unittest.TestCase):
+  def test_fp8e4m3_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e4m3).dtype == dtypes.fp8e4m3
+  def test_fp8e5m2_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e5m2).dtype == dtypes.fp8e5m2
 
 @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
 class TestBFloat16(unittest.TestCase):
@@ -399,6 +403,10 @@ class TestHelpers(unittest.TestCase):
   def test_bf16_is_float(self):
     assert dtypes.is_float(dtypes.bfloat16)
 
+  def test_fp8s_are_float(self):
+    assert dtypes.is_float(dtypes.fp8e4m3)
+    assert dtypes.is_float(dtypes.fp8e5m2)
+
   @given(strat.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_float(d) or dtypes.is_int(d)]), strat.integers(min_value=2, max_value=8))
   def test_scalar(self, dtype, amt):
     assert dtype.vec(amt).scalar() == dtype
@@ -442,10 +450,14 @@ class TestHelpers(unittest.TestCase):
   def test_truncate_bf16(self):
     self.assertEqual(truncate_bf16(1), 1)
     self.assertAlmostEqual(truncate_bf16(1.1), 1.09375, places=7)
-    max_bf16 = struct.unpack('f', struct.pack('I', 0x7f7f0000))[0]
+    for a in [1234, 23456, -777.777]:
+      self.assertEqual(truncate_bf16(a), torch.tensor([a], dtype=torch.bfloat16).item())
+    # TODO: torch bfloat 1.1 gives 1.1015625 instead of 1.09375
+    max_bf16 = torch.finfo(torch.bfloat16).max
     self.assertEqual(truncate_bf16(max_bf16), max_bf16)
     self.assertEqual(truncate_bf16(min_bf16:=-max_bf16), min_bf16)
-    self.assertEqual(truncate_bf16(max_bf16 * 1.001), math.inf)
+    self.assertEqual(truncate_bf16(max_bf16 * 1.00001), math.inf)
+    self.assertEqual(truncate_bf16(min_bf16 * 1.00001), -math.inf)
 
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):
@@ -458,7 +470,7 @@ class TestTypeSpec(unittest.TestCase):
       dtypes.default_int = default_int
       assert dtypes.default_int == default_int
 
-    for default_float in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+    for default_float in [*dtypes.fp8s, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
       dtypes.default_float = default_float
       assert dtypes.default_float == default_float
 
@@ -632,6 +644,7 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.bool, dtypes.float64) == dtypes.float64
     assert least_upper_dtype(dtypes.float16, dtypes.int64) == dtypes.float16
     assert least_upper_dtype(dtypes.float16, dtypes.uint64) == dtypes.float16
+    assert least_upper_dtype(dtypes.fp8e4m3, dtypes.fp8e5m2) == dtypes.half
 
 class TestAutoCastType(unittest.TestCase):
   def setUp(self):
@@ -744,9 +757,20 @@ class TestAutoCastType(unittest.TestCase):
   def test_matmul(self, dt1, dt2, acc_dt):
     t1 = Tensor([0, 1], dtype=dt1)
     t2 = Tensor([0, 1], dtype=dt2)
-    assert (t1 @ t2).dtype == least_upper_dtype(dt1, dt2)
+    self.assertEqual(t1.matmul(t2).dtype, least_upper_dtype(t1.dtype, t2.dtype))
     # if dtype is specified, return in dtype
-    assert (t1.matmul(t2, dtype=acc_dt).dtype == acc_dt)
+    self.assertEqual(t1.matmul(t2, dtype=acc_dt).dtype, acc_dt)
+
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
+  def test_linear(self, dt1, dt2, dt3, acc_dt):
+    x = Tensor([0, 1], dtype=dt1)
+    w = Tensor([0, 1], dtype=dt2)
+    b = Tensor([0, 1], dtype=dt3)
+    self.assertEqual(x.linear(w).dtype, least_upper_dtype(x.dtype, w.dtype))
+    self.assertEqual(x.linear(w, b).dtype, least_upper_dtype(least_upper_dtype(x.dtype, w.dtype), b.dtype))
+    # if dtype is specified, return in dtype
+    self.assertEqual(x.linear(w, dtype=acc_dt).dtype, acc_dt)
+    self.assertEqual(x.linear(w, b, dtype=acc_dt).dtype, acc_dt)
 
   @staticmethod
   def check_where_alternate_input_other(input_, other, data_type):

@@ -1,12 +1,35 @@
 import pickle, sys
 from dataclasses import replace
-from tinygrad import Device, Context
+from tinygrad import Device, Context, Tensor, GlobalCounters
 from tinygrad.device import Buffer
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, BEAM
 from tinygrad.engine.jit import TinyJit
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.engine.realize import CompiledRunner, ExecItem, ScheduleItem, lower_schedule_item
 from tinygrad.renderer import ProgramSpec
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
+from tinygrad.codegen.heuristic import hand_coded_optimizations
+import numpy as np
+
+def move_jit_captured_to_dev(captured, device="DSP"):
+  captured.expected_st_vars_dtype_device = [x[:3] + (device,) for x in captured.expected_st_vars_dtype_device]
+
+  assign = {}
+  def move_buffer(b):
+    if b in assign: return assign[b]
+
+    if b._base is not None:
+      newbuf = Buffer(device, b.size, b.dtype, base=move_buffer(b._base), offset=b.offset)
+    else:
+      newbuf = Buffer(device, b.size, b.dtype)
+      if b.is_allocated(): newbuf.ensure_allocated().copyin(b.as_buffer())
+    assign[b] = newbuf
+    return assign[b]
+
+  for item in captured.jit_cache:
+    for b in item.bufs:
+      if b is not None: move_buffer(b)
+  captured.jit_cache = [ExecItem(item.prg, [assign.get(b,b) for b in item.bufs]) for item in captured.jit_cache]
+  return captured
 
 if __name__ == "__main__":
   with Context(DEBUG=0):
@@ -15,6 +38,10 @@ if __name__ == "__main__":
       print(f"{f.tell()/1e6:.2f}M loaded")
     print(type(fxn))
 
+  # Move all buffers to DSP device.
+  fxn.captured = move_jit_captured_to_dev(fxn.captured, "DSP")
+  new_jit = []
+
   knum = 1
   for ei in fxn.captured.jit_cache:
     # skip the copy and the first kernel
@@ -22,45 +49,27 @@ if __name__ == "__main__":
       if knum == (pknum:=getenv("KNUM", 0)) or pknum == 0:
         p: ProgramSpec = ei.prg.p
         k = Kernel(p.ast, Device["DSP"].renderer)
-        if not getenv("NOOPT"):
-          # only NCHW
-          """
-          if knum in [6,7,9,11]:
-            k.apply_opt(Opt(OptOps.PADTO, 1, 128))
-            k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
-          elif knum in [5,8]:
-            k.apply_opt(Opt(op=OptOps.UNROLL, axis=1, arg=0))
-            k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
-            k.apply_opt(Opt(OptOps.PADTO, 2, 128))
-            k.apply_opt(Opt(OptOps.UPCAST, 2, 128))
-          elif knum == 2:
-            k.apply_opt(Opt(op=OptOps.UNROLL, axis=1, arg=0))
-            k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
-            k.apply_opt(Opt(OptOps.PADTO, 2, 128))
-            k.apply_opt(Opt(OptOps.UPCAST, 2, 128))
-            #k.apply_opt(Opt(op=OptOps.UPCAST, axis=1, arg=4))
-          elif knum == 1:
-            k.apply_opt(Opt(op=OptOps.UNROLL, axis=2, arg=0))
-            k.apply_opt(Opt(op=OptOps.UNROLL, axis=1, arg=0))
-            #k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
-            k.apply_opt(Opt(OptOps.PADTO, 2, 128))
-            k.apply_opt(Opt(OptOps.UPCAST, 2, 128))
-          elif knum == 3:
-            k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=4))
-            k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
-          else:
-            k.hand_coded_optimizations()
-          """
-          if knum == 3:
-            k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
-            k.apply_opt(Opt(OptOps.UPCAST, 1, 16))
-            k.apply_opt(Opt(OptOps.UPCAST, 0, 128//16))
-            #k.apply_opt(Opt(OptOps.UPCAST, 0, 8))
-            pass
-          else:
-            k.hand_coded_optimizations()
-          #if knum in [5]: k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
+
+        if getenv("VALIDATE"):
+          with Context(NOOPT=1):
+            lower_schedule_item(ScheduleItem(p.ast, ei.bufs)).run()
+            correct = ei.bufs[0].numpy()
+            ei.bufs[0].copyin(memoryview(bytearray(b'\x00'*ei.bufs[0].nbytes)))
+            GlobalCounters.kernel_count -= 1
+
+        if not getenv("NOOPT"): k.apply_opts(hand_coded_optimizations(k))
         p2 = k.to_program()
-        new_ei = replace(ei, prg=CompiledRunner(p2), bufs=[Buffer("DSP", 1024+b.size*2, b.dtype).view(b.size, b.dtype, 512) for b in ei.bufs])
+        new_ei = replace(ei, prg=CompiledRunner(p2))
         new_ei.run()
+        new_jit.append(new_ei)
+        test = ei.bufs[0].numpy()
+
+        if getenv("VALIDATE"):
+          import numpy as np
+          np.testing.assert_allclose(correct, test, rtol=1e-3, atol=1e-3)
       knum += 1
+
+  if getenv("RUN_JIT", 0):
+    fxn.captured.free_intermediates()
+    fxn.captured.jit_cache = new_jit
+    fxn(input=Tensor(np.zeros((1, 3, 224, 224), dtype=np.float32), device="DSP"))

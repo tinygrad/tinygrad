@@ -1,6 +1,7 @@
 import onnx, yaml, tempfile, time, collections, pprint, argparse, json
 from pathlib import Path
-from extra.onnx import OnnxRunner, get_onnx_ops
+from tinygrad.frontend.onnx import OnnxRunner
+from extra.onnx import get_onnx_ops
 from extra.onnx_helpers import validate, get_example_inputs
 
 def get_config(root_path: Path):

@@ -1,9 +1,9 @@
 # the job of the lowerer is to do indexing
-import functools, itertools, operator, math
+import itertools, operator, math
 from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, least_upper_dtype
-from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop, GroupOp
+from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, sint_to_uop
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten, unwrap, QUANTIZE
 from tinygrad.codegen.expander import expand_rewrite
@@ -15,6 +15,24 @@ def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> l
   try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
   except ValueError: return None
   return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
+
+def get_contraction_with_reduce(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...], reduce_axis:tuple[int, ...]) -> list[list[int]]|None:
+  if (contraction:=get_contraction(old_shape, new_shape)) is None: return None
+  # contraction returns the 1s as right justified as possible
+  # normally this contraction is good, but sometimes the reduce dim is empty. borrow from the next one, leaving one
+  # this ensures there's always ones available in the reduce dimension. this is also a valid contraction
+  for i in range(len(contraction)):
+    if i in reduce_axis and len(contraction[i]) == 0:
+      take_from = i+1
+      while take_from < len(contraction) and len(contraction[take_from]) == 0:
+        assert new_shape[take_from] == 1
+        take_from += 1
+      if take_from == len(contraction) or new_shape[take_from] != 1: return None # nothing to take
+      for j in range(take_from, i, -1):
+        assert len(contraction[j]) > 0
+        contraction[j-1] = contraction[j][:-1]
+        contraction[j] = contraction[j][-1:]
+  return contraction
 
 # ***** indexing *****
 def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
@@ -116,17 +134,10 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
   alu_op: Ops = x.arg[0]
   ret = x.src[0]
-  # create acc
-  acc = UOp(Ops.DEFINE_ACC, x.dtype, (x.const_like(identity_element(alu_op, x.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
-  ctx.acc_num += 1
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
     ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
-    ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [acc]+[ret.gep(i) for i in range(ret.dtype.count)])
-  else:
-    ret = acc.alu(alu_op, ret)
-  if not len(reduce_range): return ret
-  # create ACC and assign
-  return acc.assign(ret)
+  # REDUCE supports both "horizonal" reduction and range reduction. the horizonal elements are taken in the nearest group
+  return UOp(Ops.REDUCE, x.dtype, (ret,)+tuple(reduce_range), alu_op)
 
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
@@ -135,8 +146,8 @@ def lower_load_store(ctx: IndexContext, x: UOp):
     barrier = (UOp(Ops.BARRIER, dtypes.void, (x.src[2],)),) if x.src[0].op is Ops.DEFINE_LOCAL else ()
     return UOp(Ops.LOAD, x.dtype, (buf.index(idx, valid),) + barrier)
   # NOTE: only store the local reduceop in the threads that are actually doing the reduce
-  if cast(PtrDType, x.src[0].dtype).local and x.src[2].op is Ops.ASSIGN:
-    reduce_input = x.src[2].src[1].src[1] if x.src[2].src[1].src[1] is not x.src[2].src[0] else x.src[2].src[1].src[0]
+  if cast(PtrDType, x.src[0].dtype).local and x.src[2].op is Ops.REDUCE:
+    reduce_input = x.src[2].src[0]
     store_back = reduce_input.op is Ops.LOAD and cast(PtrDType, reduce_input.src[0].dtype).local
   else: store_back = False
   # NOTE: If we're storing the reduced value back into each thread, need to zero-out the reduced axes
@@ -162,25 +173,24 @@ pm_lowerer = PatternMatcher([
 
 # **** this is the "quantization preprocessor", it makes ONNX quantized models, and probably also others, actually use ints ****
 
-def view_to_mask(x:UOp):
-  from tinygrad.shape.shapetracker import ShapeTracker, View
-  st = cast(ShapeTracker, x.st)
-  if len(st.views) > 1: return None
-  if st.views[-1].mask is None: return None
-  return ShapeTracker((View(st.shape, (0,)*len(st.shape), 0, st.views[-1].mask, False),))
-
-FP = (1 << 16)
+FP = (1 << 15)
 pm_quant = symbolic+PatternMatcher([
   # cast after add/mul
   (UPat.var("x").cast(dtypes.float32) + UPat.var("y").cast(dtypes.float32),
    lambda x,y: (x.cast(least_upper_dtype(x.dtype, y.dtype))+y.cast(least_upper_dtype(x.dtype, y.dtype))).cast(dtypes.float32)),
   (UPat.var("x").cast(dtypes.float32) * UPat.var("y").cast(dtypes.float32),
    lambda x,y: (x.cast(least_upper_dtype(x.dtype, y.dtype))*y.cast(least_upper_dtype(x.dtype, y.dtype))).cast(dtypes.float32)),
+
+  # masked MUL after masked ADD
+  ((UPat.var("x") + UPat.var("v").where(UPat.var('cadd'), UPat(Ops.CONST, arg=0))) * UPat.var("v").where(UPat.var('cmul'), UPat(Ops.CONST, arg=0)),
+   lambda x,v,cadd,cmul: x*v.where(cmul, 0)+v.where(cadd*cmul, 0)),
+
   # MUL after reduce
   (UPat(Ops.REDUCE_AXIS, src=(UPat.var("x") * UPat.cvar("c"),), name="r"), lambda x,c,r: r.replace(src=(x,))*c),
   # CAST after reduce (doesn't work if it's a size change)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.CAST, src=(UPat.var("x"),)),), name="r"),
     lambda x,r: r.replace(dtype=x.dtype, src=(x,)).cast(r.dtype) if dtypes.is_float(r.dtype) else None),
+
   # x*c1 + y*c2 -> (x+y)*c1 (if c1 and c2 are close floats)
   (UPat.var("x")*UPat.cvar("c1", dtype=dtypes.floats) + UPat.var("y")*UPat.cvar("c2", dtype=dtypes.floats),
    lambda x,y,c1,c2: (x+y)*c1 if abs(c1.arg-c2.arg) < 1e-9 else None),
@@ -192,9 +202,17 @@ pm_quant = symbolic+PatternMatcher([
    (UPat(Ops.LOAD, src=(UPat(), UPat(Ops.VIEW, name="v"))).cast(dtypes.int) + \
     UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v"),)).where(UPat.cvar(), UPat(Ops.CONST, arg=0))).cast(dtypes.float).named("ld"),
       lambda ld,v,c1: ld*c1),
+
+  # const push through add
+  ((UPat.var("x")*UPat.cvar("c1") + UPat.var("y")*UPat.cvar("c2")) * UPat.cvar("c3"), lambda x,y,c1,c2,c3: (x*c1*c3) + (y*c2*c3)),
+
   # fixed point mult, replace (x.float()*c1+c2).int() with an int expression
-  ((UPat.var("x").cast(dtypes.float)*UPat.cvar("c1")+UPat.cvar("c2")).cast(dtypes.int),
-   lambda x,c1,c2: (x * (c1 * FP).cast(dtypes.int) + (c2 * FP).cast(dtypes.int)) // FP),
+  ((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("cc")).cast(dtypes.int),
+   lambda x,c1,cc: ((x*(c1*FP).cast(x.dtype) + (cc*FP).cast(x.dtype)) // FP).cast(dtypes.int)),
+  # fixed point mult, replace (x.float()*c1 + y.float()*c2)*cc.int() with an int expression
+  ((UPat.var("x").cast(dtypes.float)*UPat.var("c1")+UPat.var("y").cast(dtypes.float)*UPat.var("c2")+UPat.var("cc")).cast(dtypes.int),
+   lambda x,c1,y,c2,cc: ((x*(c1*FP).cast(x.dtype) + y.cast(x.dtype)*(c2*FP).cast(x.dtype) + (cc*FP).cast(x.dtype)) // FP).cast(dtypes.int)),
+
   # where move
   (UPat.var("valid").where(UPat.var("yes"), UPat(Ops.CONST, arg=0))*UPat.var("mul"), lambda valid, yes, mul:
     (yes*mul*valid.where(UOp.const(mul.dtype, 1), UOp.const(mul.dtype, 0))) if yes.op is not Ops.CONST or yes.arg != 1 else None),
@@ -204,14 +222,16 @@ pm_quant = symbolic+PatternMatcher([
   ((UPat.var('x') * UPat.var('v1').where(UPat(Ops.CONST, arg=1), UPat(Ops.CONST, arg=0)) *
     UPat.var('v2').where(UPat(Ops.CONST, arg=1), UPat(Ops.CONST, arg=0))).named("mul"), lambda x, mul, v1, v2:
     x * (v1&v2).where(UOp.const(mul.dtype, 1), UOp.const(mul.dtype, 0))),
-  # don't care
-  (UPat(Ops.STORE, name="x"), lambda x:
-    x.replace(src=(x.src[0], UOp(Ops.IGNORE, src=(x.src[1],), arg=mm), UOp(Ops.IGNORE, x.src[2].dtype, src=(x.src[2],), arg=mm),)) \
-      if x.src[1].op is not Ops.IGNORE and (mm:=view_to_mask(x.src[1])) is not None else None),
-  (UPat(Ops.IGNORE, src=(UPat((*GroupOp.ALU, Ops.CAST), name="alu"),), name="ig"),
-   lambda ig,alu: alu.replace(src=tuple(UOp(Ops.IGNORE, x.dtype, (x,), ig.arg) for x in alu.src))),
-  (UPat(Ops.IGNORE, src=(UPat.cvar("c"),), name="ig"), lambda ig, c: c),
-  (UPat(Ops.IGNORE, src=(UPat(Ops.VALID, name="v"),), name="ig"), lambda ig, v: UOp.const(dtypes.bool, True) if v.src[0].arg == ig.arg else None),
+
+  # where on two adds
+  (UPat.var("x") + UPat.var("v").where(UPat.var("a0"), UPat.var("a1")) + UPat.var("v").where(UPat.var("b0"), UPat.var("b1")),
+    lambda x,v,a0,a1,b0,b1: x + v.where(a0+b0, a1+b1)),
+
+  # split REDUCE into multiple reduces (who remembers FOIL?)
+  (UPat(Ops.REDUCE_AXIS, src=((UPat(Ops.CAST, name="v1")+UPat.var("c1")) * UPat(Ops.CAST, name="v2"),), name="r"),
+    lambda v1,v2,c1,r: r.replace(src=(v1*v2,)) + r.replace(src=(c1*v2,))),
+  (UPat(Ops.REDUCE_AXIS, src=((UPat(Ops.CAST, name="v1")+UPat.var("c1")) * (UPat(Ops.CAST, name="v2",)+UPat.var("c2")),), name="r"),
+    lambda v1,v2,c1,c2,r: r.replace(src=(v1*v2,)) + r.replace(src=(c2*v1,)) + r.replace(src=(c1*v2,)) + r.replace(src=(c1*c2,))),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
