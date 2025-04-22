@@ -131,7 +131,7 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
 
   # count of times we've seen this block, or a seed for a new block if we can't merge it
   unmergable: defaultdict[UOp, int] = defaultdict(int)
-  blockseeds = defaultdict(list)
+  blockseeds: defaultdict[tuple[tuple[UOp, ...], tuple[UOp, ...]|None], list[UOp]] = defaultdict(list)
 
   # add the srcs of this to the frontier
   # NOTE: things may be in here multiple times, that's okay
