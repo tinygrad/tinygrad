@@ -27,7 +27,7 @@ class TrackedMemoryView:
     self.wcb(self.mv, index)
 
   def cast(self, new_type, **kwargs):
-    self.mv = self.mv.cast(new_type, **kwargs)
+    self.mv = self.mv.cast('B').cast(new_type, **kwargs)
     return self
 
   @property
