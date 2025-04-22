@@ -238,15 +238,6 @@ class UOpMetaClass(type):
 buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, Metadata] = weakref.WeakKeyDictionary() # TODO: should this be here?
 
-def _toposort(u:UOp, cache:set[UOp]):
-  if u in cache: return {}
-  nodes: dict[UOp, None] = {}
-  # NOTE: this is a lot faster than the comprehension in parents
-  for parent in u.src: nodes.update(_toposort(parent, cache))
-  nodes[u] = None
-  cache.add(u)
-  return nodes
-
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
 class UOp(MathTrait, metaclass=UOpMetaClass):
@@ -277,7 +268,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def toposort(self) -> dict[UOp, None]:
-    return _toposort(self, cache=set())
+    ret: dict[UOp, None] = {}
+    stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
+    while stack:
+      node, visited = stack.pop()
+      if node in ret: continue
+      if not visited:
+        stack.append((node, True))  # push node back on stack to process after its parents
+        for parent in reversed(node.src): stack.append((parent, False)) # push parents on the stack
+      else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
+    return ret
 
   # returns map of UOps to their children in the graph rooted by self
   def get_children_map(self) -> dict[UOp, dict[UOp, None]]:
