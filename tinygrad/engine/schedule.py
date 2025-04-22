@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from collections import deque
+from collections import deque, defaultdict
 from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
 from tinygrad.device import Buffer
 from tinygrad.helpers import Metadata, DEBUG, unwrap
@@ -35,7 +35,7 @@ pm_unbind = PatternMatcher([
 
 def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   # construnct the KERNEL children graph based on ASSIGNs
-  children: dict[UOp, list[UOp]] = {}
+  children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree: dict[UOp, int] = {}
   for u in (toposort:=sched_sink.toposort):
     if u.op is not Ops.ASSIGN: continue
@@ -43,7 +43,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     in_degree.setdefault(k, 0)
     for s in k.src:
       if s.op is not Ops.ASSIGN: continue
-      children.setdefault(s.src[1], []).append(k)
+      children[s.src[1]].append(k)
       in_degree[k] += 1
 
   # linearize KERNEL UOps into ScheduleItems in BFS order
@@ -52,10 +52,11 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   var_vals: dict[Variable, int] = {}
   while queue:
     k = queue.popleft()
+    # map the BUFFER UOp to a subbuffer if it's a BUFFER_VIEW
     if k.arg.ast.op is Ops.BUFFER_VIEW:
       buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, k.arg.ast.dtype, k.arg.ast.arg[1]*base.dtype.itemsize)
     schedule.append(ScheduleItem(graph_rewrite(k.arg.ast, pm_unbind, ctx=var_vals), tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
-    for x in children.get(k, []):
+    for x in children[k]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
 
