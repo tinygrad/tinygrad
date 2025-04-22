@@ -940,23 +940,10 @@ def launch_viz(env_str:str, data:str):
 # *** simple graph rewrite engine ***
 
 class RewriteContext:
-  def __init__(self, pm, ctx=None, children=None):
+  def __init__(self, pm, ctx=None):
     self.pm: PatternMatcher = pm
-    self.ctx = self if children is not None else ctx
+    self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
-    self.children = children
-  # TODO: is this function always right?
-  def update_children(self):
-    # add any new children from UOps that were replaced
-    for u in self.replace.values():
-      for s in u.src: self.children.setdefault(s, {})[u] = None
-    # find any children that were replaced and replace them
-    for k,v in self.children.items():
-      new_child: dict[UOp, None] = {}
-      for tv in v:
-        while (nv:=self.replace.get(tv, None)) is not None and nv is not tv: tv = nv
-        new_child[tv] = None
-      self.children[k] = new_child
   def top_down_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_src = tuple([self.top_down_rewrite(x) for x in n.src])
@@ -972,13 +959,13 @@ class RewriteContext:
     return ret
 
 @track_matches
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> UOp:
-  rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> UOp:
+  rewrite_ctx = RewriteContext(pm, ctx)
   return rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.top_down_rewrite(sink)
 
 @track_matches
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False, input_map=None) -> dict[UOp, UOp]:
-  rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
+def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, input_map:dict[UOp, UOp]|None=None) -> dict[UOp, UOp]:
+  rewrite_ctx = RewriteContext(pm, ctx)
   new_map = {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
   if input_map is not None:
     for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
