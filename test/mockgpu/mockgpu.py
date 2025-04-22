@@ -1,5 +1,5 @@
 import ctypes, ctypes.util, time, os, builtins, fcntl
-from tinygrad.runtime.support.hcq import HWInterface
+from tinygrad.runtime.support.hcq import FileIOInterface
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
 start = time.perf_counter()
@@ -53,7 +53,7 @@ def _open(path, flags):
         return virtfd.fd
   return os.open(path, flags, 0o777) if os.path.exists(path) else None
 
-class MockHWInterface(HWInterface):
+class MockFileIOInterface(FileIOInterface):
   def __init__(self, path:str="", flags:int=os.O_RDONLY, fd:int|None=None):
     self.path = path
     self.fd = fd or _open(path, flags)
