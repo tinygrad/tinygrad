@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
 import urllib.request, subprocess, shutil, math, contextvars, types, copyreg, inspect, importlib
 from dataclasses import dataclass
-from typing import Union, ClassVar, Optional, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic
+from typing import Union, ClassVar, Optional, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, cast
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -352,3 +352,13 @@ copyreg.pickle(types.CodeType, _serialize_code)
 
 def _serialize_module(module:types.ModuleType): return importlib.import_module, (module.__name__,)
 copyreg.pickle(types.ModuleType, _serialize_module)
+
+# *** simple cached property ***
+
+class cached_property(Generic[T, U]):
+  def __init__(self, func: Callable[[T], U]):
+    self.func: Callable[[T], U] = func
+    functools.update_wrapper(cast(Callable, self), func)
+  def __get__(self, instance:T, owner=None) -> U:
+    setattr(instance, self.func.__name__, ret:=self.func(instance))
+    return ret

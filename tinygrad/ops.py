@@ -5,7 +5,7 @@ from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, _METADATA, flatten
-from tinygrad.helpers import PICKLE_BUFFERS, dedup, cdiv, cmod
+from tinygrad.helpers import PICKLE_BUFFERS, dedup, cdiv, cmod, cached_property
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer
@@ -271,7 +271,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
     if (self.op, self.dtype, self.src, self.arg) == new_args: return self
     return UOp(*new_args)
-  @functools.cached_property
+  @cached_property
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
@@ -289,12 +289,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       for s in u.src: ret[s][u] = None
     return ret
 
-  @functools.cached_property
+  @cached_property
   def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]: return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
 
   # *** uop shape stuff ***
 
-  @functools.cached_property
+  @cached_property
   def st(self) -> ShapeTracker|None:
     from tinygrad.shape.shapetracker import ShapeTracker
     if self.op is Ops.MULTI:
@@ -317,7 +317,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     else: shape = src_sts[0].shape
     return ShapeTracker.from_shape(shape)
 
-  @functools.cached_property
+  @cached_property
   def full_shape(self) -> tuple[sint, ...]:
     if self.op is Ops.VIEW: return self.shape
     # NOTE: if a parent doesn't have st its full_shape is empty
@@ -426,7 +426,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
     return tuple(itertools.pairwise(itertools.accumulate([lb.shape[self.axis] for lb in self.src], initial=0)))
 
-  @functools.cached_property
+  @cached_property
   def axis(self) -> Optional[int]:
     if self.op is Ops.MULTI: return self.arg[0]
     # NOTE: they all have to share an axis, we always choose [-1]
@@ -515,7 +515,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device), UOp.unique()), size)
   @property
   def device(self) -> str|tuple[str, ...]: return cast(str|tuple[str, ...], unwrap(self._device))
-  @functools.cached_property
+  @cached_property
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.MULTI: return tuple(cast(str, x.device) for x in self.src)
@@ -599,7 +599,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def vmin(self) -> ConstType: return self._min_max[0]
   @property
   def vmax(self) -> ConstType: return self._min_max[1]
-  @functools.cached_property
+  @cached_property
   def _min_max(self) -> tuple[ConstType, ConstType]:
     if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):
       (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
@@ -640,7 +640,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.CAST: return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
-  @functools.cached_property
+  @cached_property
   def _sym_fxn(self):
     sself = self.simplify()
     varnames = tuple(x.arg[0] for x in sself.toposort if x.op is Ops.DEFINE_VAR)
