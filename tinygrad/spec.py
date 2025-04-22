@@ -170,10 +170,9 @@ shape_spec = PatternMatcher([
 
 # ***** uop helpers *****
 
-def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
-  specs = [spec, *extra_specs]
+def type_verify(uops:list[UOp], extra_spec:PatternMatcher|None=None):
+  check_spec = (extra_spec+spec) if extra_spec is not None else spec
   for i,u in enumerate(uops):
-    spec_ret = [cast(bool|None, s.rewrite(u)) for s in specs]
-    if any(ret is False for ret in spec_ret) or all(ret is None for ret in spec_ret):
+    if cast(bool|None, check_spec.rewrite(u)) is not True:
       if DEBUG >= 3: print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
