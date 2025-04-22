@@ -9,7 +9,7 @@ from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPA
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
-from tinygrad.spec import type_verify, kernel_spec
+from tinygrad.spec import type_verify, sched_spec
 
 # creation can recurse a lot
 import sys
@@ -333,7 +333,7 @@ view_right = merge_views+PatternMatcher([
   # apply view after reduceops
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="src"),), name="v"),), name="r"), reduceop_view_right),
   # apply view after elementwise ops
-  (UPat(GroupOp.All-DONT_PUSH_VIEWS, name="root"), elementwise_view_right),
+  (UPat(GroupOp.All-{Ops.SINK}, name="root"), elementwise_view_right),
   # merge axes for double reduce (invert of SPLIT_REDUCEOP=1)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="r1"),), name="r2"),
    lambda r1,r2: r1.replace(arg=(r1.arg[0], r2.arg[1]+r1.arg[1])) if r1.arg[0] == r2.arg[0] else None),
@@ -346,17 +346,12 @@ add_buffer_ops = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), x.st.to_uop(), dtype=x.dtype)),
   # STORE (except for meta ops)
   (UPat(Ops.SINK, src=(UPat(GroupOp.Meta, name="x"),)), lambda x:x),
-  # partial assign can store to a non-contiguous ShapeTracker
-  (UPat(Ops.SINK, src=(UPat(Ops.ASSIGN, name="x"),)),
-   lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.src[0].base.size), (), 0), x.src[0].st.to_uop(), x.src[1]).sink()),
-  # otherwise the store is contiguous
-  (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
-   lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), ShapeTracker.from_shape(x.shape).to_uop(), x).sink()),
+  (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda ctx,sink:
+   UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i), s.st.to_uop(), s) for i,x in enumerate(sink.src)])),
+  # passthrough ASSIGN
+  (UPat(Ops.ASSIGN, name="x"), lambda x: x.src[1]),
   # VALID
   (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),), name="view"), lambda x,view: x.valid(view.arg)),
-  # if the last child is a VIEW we merge the ShapeTrackers and store the base
-  (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.VIEW, src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="x"),)))),
-   lambda x,b,st: UOp.store(b, (st.arg+x.st).to_uop(), x)),
 ])
 
 def check_load_st(glbl:UOp, view:UOp):
@@ -386,6 +381,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   for s in k.src:
     if s.op is Ops.ASSIGN:
       for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
+      parents_rep[s] = s.buf_uop
   ast = k.arg.ast.substitute(parents_rep)
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
@@ -423,7 +419,12 @@ if CAPTURE_PROCESS_REPLAY:
   def save_process_replay():
     for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
 
-@track_rewrites(name_fxn=lambda ret: f"Schedule {pluralize('Kernel', len({u.base.src[1] for u in ret.values() if u.base.op is Ops.ASSIGN}))}")
+
+def get_name(becomes_map:dict[UOp, UOp]) -> str:
+  assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
+  return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
+
+@track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # merge_views + simplify
   tensor_map = graph_rewrite_map(big_sink, merge_views+sym+replace_contiguous+pm_fuse, ctx={})
@@ -440,7 +441,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # verify Kernels match the spec
   sched_sink = tensor_map[big_sink]
-  type_verify(list(sched_sink.toposort), kernel_spec)
+  type_verify(list(sched_sink.toposort), sched_spec)
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
@@ -456,7 +457,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   if assign_rep:
     tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
     sched_sink = tensor_map[big_sink]
-    type_verify(list(sched_sink.toposort), kernel_spec)
+    type_verify(list(sched_sink.toposort), sched_spec)
 
   # display the final graph
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
@@ -465,7 +466,6 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # map tensors to buffer/const/assign, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
-    if (kernel:=tensor_map.get(v.base)) is not None and kernel.base.op is Ops.ASSIGN: v = kernel.view(unwrap(v.st))
     if k is v: continue
     op = v.base.op
     if op in {Ops.BUFFER, Ops.ASSIGN}: becomes_map[k] = v

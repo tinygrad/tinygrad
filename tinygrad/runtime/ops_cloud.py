@@ -124,8 +124,7 @@ class CloudHandler(BaseHTTPRequestHandler):
   def do_POST(self): return self._do("POST")
 
 def cloud_server(port:int):
-  multiprocessing.current_process().name = "MainProcess"
-  CloudHandler.device = getenv("CLOUDDEV", "METAL") if Device.DEFAULT == "CLOUD" else Device.DEFAULT
+  CloudHandler.device = getenv("CLOUDDEV", next(Device.get_available_devices()) if Device.DEFAULT == "CLOUD" else Device.DEFAULT)
   print(f"start cloud server on {port} with device {CloudHandler.device}")
   server = HTTPServer(('', port), CloudHandler)
   server.serve_forever()
@@ -166,9 +165,7 @@ class CloudDevice(Compiled):
   def __init__(self, device:str):
     if (host:=getenv("HOST", "")) != "": self.host = host
     else:
-      p = multiprocessing.Process(target=cloud_server, args=(6667,))
-      p.daemon = True
-      p.start()
+      multiprocessing.Process(target=cloud_server, args=(6667,), name="MainProcess", daemon=True).start()
       self.host = "127.0.0.1:6667"
 
     # state for the connection
