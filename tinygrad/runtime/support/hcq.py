@@ -8,10 +8,10 @@ from tinygrad.ops import sym_infer, sint, Variable, UOp
 from tinygrad.runtime.autogen import libc
 
 class MMIOInterface:
-  def __init__(self, va, sz, fmt='B'): self.mv, self.va, self.size, self.fmt = to_mv(va, sz).cast(fmt), va, sz, fmt
+  def __init__(self, va:int, sz:int, fmt:str='B'): self.mv, self.va, self.size, self.fmt = to_mv(va, sz).cast(fmt), va, sz, fmt
   def __len__(self): return self.size // struct.calcsize(self.fmt)
-  def __getitem__(self, k:slice|int) -> int|list[int]: return self.mv[k].tolist() if isinstance(k, slice) else self.mv[k]
-  def __setitem__(self, k:slice|int, v:int|array.array): self.mv[k] = v
+  def __getitem__(self, k) -> int|list[int]: return self.mv[k].tolist() if isinstance(k, slice) else self.mv[k]
+  def __setitem__(self, k, v:int|array.array): self.mv[k] = v
 
 class HWInterface:
   """
