@@ -1,11 +1,17 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any, ClassVar
-import contextlib, decimal, statistics, time, ctypes, array, os, fcntl
+import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, struct
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.ops import sym_infer, sint, Variable, UOp
 from tinygrad.runtime.autogen import libc
+
+class MMIOInterface:
+  def __init__(self, va:int, sz:int, fmt='B'): self.mv, self.va, self.size, self.fmt = to_mv(va, sz).cast(fmt), va, sz, fmt
+  def __len__(self): return self.size // struct.calcsize(self.fmt)
+  def __getitem__(self, k) -> int|list[int]: return self.mv[k].tolist() if isinstance(k, slice) else self.mv[k]
+  def __setitem__(self, k, v:int|array.array): self.mv[k] = v
 
 class HWInterface:
   """
