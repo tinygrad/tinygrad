@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from collections import deque, defaultdict
+from collections import deque
 from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
 from tinygrad.device import Buffer
 from tinygrad.helpers import Metadata, DEBUG, unwrap
@@ -46,7 +46,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       children.setdefault(s.src[1], []).append(k)
       in_degree[k] += 1
 
-  # bfs algorithm
+  # linearize KERNEL UOps into ScheduleItems in BFS order
   queue = deque(k for k,v in in_degree.items() if v == 0)
   schedule: list[ScheduleItem] = []
   var_vals: dict[Variable, int] = {}
