@@ -34,31 +34,34 @@ pm_unbind = PatternMatcher([
 # **** schedule linearizer
 
 def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  # bfs toposort
+  # construnct the KERNEL children graph based on assigns
   children: defaultdict[UOp, list[UOp]] = defaultdict(list)
-  in_degree: defaultdict[UOp, int] = defaultdict(int)
+  in_degree: dict[UOp, int] = {}
   for u in (toposort:=sched_sink.toposort):
     if u.op is not Ops.ASSIGN: continue
-    for s in u.src[1].src:
+    k = u.src[1]
+    in_degree.setdefault(k, 0)
+    for s in k.src:
       if s.op is not Ops.ASSIGN: continue
-      children[s].append(u)
-      in_degree[u] += 1
+      children[s.src[1]].append(k)
+      in_degree[k] += 1
 
-  queue = deque(u for u in toposort if u.op is Ops.ASSIGN and u not in in_degree)
+  # linearize KERNEL UOps into ScheduleItems in BFS order
+  queue = deque(k for k,v in in_degree.items() if v == 0)
   schedule: list[ScheduleItem] = []
   var_vals: dict[Variable, int] = {}
   while queue:
-    u = queue.popleft()
+    k = queue.popleft()
     # map the BUFFER UOp to a subbuffer if it's a BUFFER_VIEW
-    if (k:=u.src[1]).arg.ast.op is Ops.BUFFER_VIEW:
+    if k.arg.ast.op is Ops.BUFFER_VIEW:
       buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, k.arg.ast.dtype, k.arg.ast.arg[1]*base.dtype.itemsize)
     schedule.append(ScheduleItem(graph_rewrite(k.arg.ast, pm_unbind, ctx=var_vals), tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
-    for x in children[u]:
+    for x in children[k]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
 
   # confirm everything was scheduled correctly
-  assert len(schedule) == len([u for u in toposort if u.op is Ops.KERNEL]), f"Schedule length mistmatch {len(schedule)}"
+  assert len(schedule) == len(in_degree), f"Schedule length mistmatch {len(schedule)} != {len(in_degree)}"
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
   # map ASSIGN to BUFFER after ScheduleItems are constructed
