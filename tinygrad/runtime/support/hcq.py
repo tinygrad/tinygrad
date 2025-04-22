@@ -8,18 +8,10 @@ from tinygrad.ops import sym_infer, sint, Variable, UOp
 from tinygrad.runtime.autogen import libc
 
 class MMIOInterface:
-  def __init__(self, va, sz, fmt='B'): self.mv, self.va, self.size, self.fmt = to_mv(va, sz), va, sz, fmt
-
-  def read(self, count=1, start_idx=0, fmt=None) -> int | list[int]:
-    return self.mv.cast(fmt or self.fmt)[start_idx:start_idx+count].tolist() if count > 1 else self.mv.cast(fmt or self.fmt)[start_idx]
-
-  def write(self, value:int|array.array, start_idx=0, fmt=None):
-    if value.__class__ is int: self.mv.cast(fmt or self.fmt)[start_idx] = value
-    else: self.mv.cast(fmt or self.fmt)[start_idx : start_idx + len(value)] = value
-
+  def __init__(self, va, sz, fmt='B'): self.mv, self.va, self.size, self.fmt = to_mv(va, sz).cast(fmt), va, sz, fmt
   def __len__(self): return self.size // struct.calcsize(self.fmt)
-  def __getitem__(self, k): return self.read(1, k) if isinstance(k, int) else self.read(k.stop - k.start, k.start or 0)
-  def __setitem__(self, k, v): return self.write(v, k) if isinstance(k, int) else self.write(v, k.start or 0)
+  def __getitem__(self, k:slice|int) -> int|list[int]: return self.mv[k].tolist() if isinstance(k, slice) else self.mv[k]
+  def __setitem__(self, k:slice|int, v:int|array.array): self.mv[k] = v
 
 class HWInterface:
   """
