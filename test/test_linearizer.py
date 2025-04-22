@@ -2020,7 +2020,7 @@ class TestKernelOpts(unittest.TestCase):
               UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))),)),)),)),)),)) # noqa: E501
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     with self.assertRaises(KernelOptError):
-      k.apply_opt(Opt(OptOps.TC, 0, (-1, , 1)))
+      k.apply_opt(Opt(OptOps.TC, 0, (-1, 1, 1)))
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_core_opts(self):
