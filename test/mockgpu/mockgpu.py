@@ -16,25 +16,24 @@ orignal_memoryview = builtins.memoryview
 class TrackedMemoryView:
   def __init__(self, data, rcb, wcb):
     self.mv = orignal_memoryview(data)
-    self.mv_casted = self.mv
     self.rcb, self.wcb = rcb, wcb
 
   def __getitem__(self, index):
-    self.rcb(self.mv_casted, index)
-    return self.mv_casted[index]
+    self.rcb(self.mv, index)
+    return self.mv[index]
 
   def __setitem__(self, index, value):
-    self.mv_casted[index] = value
-    self.wcb(self.mv_casted, index)
+    self.mv[index] = value
+    self.wcb(self.mv, index)
 
   def cast(self, new_type, **kwargs):
-    self.mv_casted = self.mv.cast(new_type, **kwargs)
+    self.mv = self.mv.cast('B').cast(new_type, **kwargs)
     return self
 
   @property
-  def nbytes(self): return self.mv_casted.nbytes
-  def __len__(self): return len(self.mv_casted)
-  def __repr__(self): return repr(self.mv_casted)
+  def nbytes(self): return self.mv.nbytes
+  def __len__(self): return len(self.mv)
+  def __repr__(self): return repr(self.mv)
 
 def _memoryview(cls, mem):
   if isinstance(mem, int) or isinstance(mem, ctypes.Array):
