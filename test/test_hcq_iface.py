@@ -1,5 +1,5 @@
-import unittest, ctypes, struct, os, array, time
-from tinygrad.helpers import getenv, mv_address
+import unittest, array, time
+from tinygrad.helpers import mv_address
 from tinygrad.runtime.support.hcq import MMIOInterface
 
 class TestHCQIface(unittest.TestCase):
@@ -23,13 +23,13 @@ class TestHCQIface(unittest.TestCase):
     start = time.perf_counter()
     for i in range(10000):
       self.mmio[3:100] = array.array('I', [i] * 97)
-      val = self.mmio[3:100]
+      _ = self.mmio[3:100]
     end = time.perf_counter()
 
     mvstart = time.perf_counter()
     for i in range(10000):
       self.mv[3:100] = array.array('I', [i] * 97)
-      val = self.mv[3:100].tolist()
+      _ = self.mv[3:100].tolist()
     mvend = time.perf_counter()
     print(f"speed: hcq {end - start:.6f}s vs plain mv {mvend - mvstart:.6f}s")
 
