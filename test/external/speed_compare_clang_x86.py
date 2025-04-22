@@ -6,6 +6,7 @@ from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.engine.search import bufs_from_lin
 from tinygrad.runtime.ops_cpu import ClangJITCompiler
 from tinygrad.runtime.ops_x86 import X86Renderer
+from tinygrad.codegen.heuristic import hand_coded_optimizations
 
 if __name__ == "__main__":
   ast_strs = load_worlds(filter_reduce=False, filter_novariable=True)
@@ -20,9 +21,9 @@ if __name__ == "__main__":
   average_tm_clang, average_tm_x86 = 0, 0
   for num,ast in enumerate(ast_strs):
     # clang compile
-    dev.compiler = ClangJITCompiler()
+    dev.compiler = ClangJITCompiler(opt_args=['-O0', '-march=native'])
     lin = ast_str_to_lin(ast, opts=dev.renderer)
-    lin.hand_coded_optimizations()
+    lin.apply_opts(hand_coded_optimizations(lin))
     clang_prg = CompiledRunner(lin.to_program())
 
     bufs = bufs_from_lin(lin)
@@ -30,7 +31,7 @@ if __name__ == "__main__":
     # x86 compile
     dev.compiler = ClangJITCompiler(lang_args=['assembler', '-masm=intel'])
     lin = ast_str_to_lin(ast, opts=x86)
-    lin.hand_coded_optimizations()
+    lin.apply_opts(hand_coded_optimizations(lin))
     x86_prg = CompiledRunner(lin.to_program())
 
     # warmup
