@@ -1,4 +1,5 @@
-#!/bin/bash -e
+#!/usr/bin/env bash 
+set -e
 
 # setup instructions for clang2py
 if [[ ! $(clang2py -V) ]]; then
@@ -431,6 +432,12 @@ generate_am() {
     $AMKERN_INC/asic_reg/nbio/nbio_2_3_sh_mask.h \
     -o $BASE/am/nbio_2_3_0.py
   fixup $BASE/am/nbio_2_3_0.py
+
+  clang2py -k cdefstum \
+    $AMKERN_INC/asic_reg/nbio/nbio_7_2_0_offset.h \
+    $AMKERN_INC/asic_reg/nbio/nbio_7_2_0_sh_mask.h \
+    -o $BASE/am/nbio_7_2_0.py
+  fixup $BASE/am/nbio_7_2_0.py
 
   clang2py -k cdefstum \
     $AMKERN_INC/asic_reg/mmhub/mmhub_4_1_0_offset.h \
