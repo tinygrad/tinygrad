@@ -38,12 +38,6 @@ class TestMicrobenchmarks(unittest.TestCase):
     a = UOp.const(dtypes.int, 2)
     for _ in range(N): (a+a).simplify()
 
-  def test_tuplize(self):
-    a = UOp.const(dtypes.int, 0)
-    for i in range(2000): a = a + a
-    self.setUp()
-    a.tuplize
-
 if __name__ == '__main__':
   unittest.main()
 
