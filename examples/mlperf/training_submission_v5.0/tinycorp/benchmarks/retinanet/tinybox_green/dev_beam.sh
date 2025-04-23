@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export PYTHONPATH="."
+export PYTHONPATH="." NV=1
 export MODEL="retinanet"
 export DEFAULT_FLOAT="HALF" GPUS=6 BS=96 EVAL_BS=96
 export BASEDIR="/raid/datasets/openimages"
