@@ -1,4 +1,4 @@
-import platform, subprocess, sys
+import functools, platform, subprocess, sys
 from tinygrad.helpers import capstone_flatdump, getenv
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.runtime.support.elf import jit_loader
@@ -19,6 +19,8 @@ class ClangJITCompiler(Compiler):
   def disassemble(self, lib:bytes): return capstone_flatdump(lib)
 
 class ClangDevice(Compiled):
-  def __init__(self, device:str): super().__init__(device, MallocAllocator, ClangRenderer(), ClangJITCompiler(), CPUProgram)
+  def __init__(self, device:str):
+    from tinygrad.runtime.graph.cpu import CPUGraph
+    super().__init__(device, MallocAllocator, ClangRenderer(), ClangJITCompiler(), CPUProgram, functools.partial(CPUGraph, self))
 
 CPUDevice = ClangDevice
