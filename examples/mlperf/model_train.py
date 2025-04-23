@@ -362,6 +362,7 @@ def train_retinanet():
   BASEDIR = getenv("BASEDIR", BASEDIR)
   BENCHMARK = getenv("BENCHMARK")
   INITMLPERF = getenv("INITMLPERF")
+  RUNMLPERF = getenv("RUNMLPERF")
   config["gpus"] = GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 6))]
 
   for x in GPUS: Device[x]
@@ -443,12 +444,17 @@ def train_retinanet():
 
   # ** model setup **
   backbone = resnet.ResNeXt50_32X4D(num_classes=None)
-  # TODO: should not load_from_pretrained during setup
-  backbone.load_from_pretrained()
+  if RUNMLPERF:
+    backbone.load_from_pretrained()
   _freeze_backbone_layers(backbone, 3)
 
   model = retinanet.RetinaNet(backbone, num_classes=NUM_CLASSES)
   params = get_parameters(model)
+
+  if not RUNMLPERF:
+    # for init, zero out all weights
+    for p in params:
+      p = p.assign(Tensor.zeros_like(p).contiguous()).realize()
 
   if len(GPUS) > 1:
     for p in params: p.to_(GPUS)
@@ -462,7 +468,7 @@ def train_retinanet():
   config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(get_dataset_count((base_dir_path:=Path(BASEDIR)), False), BS) // BS
   config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(get_dataset_count(base_dir_path, True), EVAL_BS) // EVAL_BS)
 
-  if not INITMLPERF:
+  if RUNMLPERF:
     train_dataset = COCO(download_dataset(BASEDIR, "train"))
     val_dataset = COCO(download_dataset(BASEDIR, "validation"))
     coco_val = COCOeval(cocoGt=val_dataset, iouType="bbox")
@@ -563,7 +569,7 @@ def train_retinanet():
           out, img_ids, img_sizes, proc = _eval_step(model, (x:=proc[0])).numpy(), proc[1], proc[2], proc[3]
           out = model.postprocess_detections(out, input_size=x.shape[1:3], orig_image_sizes=img_sizes)
 
-          if not INITMLPERF:
+          if RUNMLPERF:
             coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
               for i, prediction in enumerate(out) for box, score, label in zip(*prediction.values())]
 
@@ -597,7 +603,7 @@ def train_retinanet():
         if getenv("RESET_STEP", 1): _eval_step.reset()
         total_fw_time = sum(eval_times) / len(eval_times)
 
-        if not INITMLPERF:
+        if RUNMLPERF:
           coco_val.params.imgIds = val_img_ids
           coco_val._paramsEval.imgIds = val_img_ids
           coco_val.evalImgs = list(np.concatenate(val_imgs, -1).flatten())
