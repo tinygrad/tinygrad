@@ -3,14 +3,58 @@
 #include <torch/extension.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <ATen/OpaqueTensorImpl.h>
-#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
 
-// register generator (using cpu generator currently, cause only use to get initial seed)
+struct TinygradGeneratorImpl : public c10::GeneratorImpl {
+  py::object rng;  // Tinygrad RandomGenerator instance
+
+  TinygradGeneratorImpl(c10::DeviceIndex device_index)
+    : GeneratorImpl(
+        c10::Device(c10::DeviceType::PrivateUse1, device_index),
+        c10::DispatchKeySet(c10::DispatchKey::PrivateUse1)
+      ) {
+    py::gil_scoped_acquire gil;
+    py::object rng_class = py::module::import("tinygrad.tensor").attr("RandomGenerator");
+    rng = rng_class();
+  }
+  void set_current_seed(uint64_t seed) override {
+    py::gil_scoped_acquire gil;
+    rng.attr("manual_seed")(seed);
+  }
+  uint64_t current_seed() const override {
+    py::gil_scoped_acquire gil;
+    return rng.attr("seed").cast<uint64_t>();
+  }
+  uint64_t seed() override {
+    auto random = c10::detail::getNonDeterministicRandom(true);
+    this->set_current_seed(random);
+    return random;
+  }
+  GeneratorImpl* clone_impl() const override {
+    auto gen = new TinygradGeneratorImpl(device().index());
+    {
+      py::gil_scoped_acquire gil;
+      py::object deepcopy = py::module::import("copy").attr("deepcopy");
+      gen->rng = deepcopy(rng);
+    }
+    return gen;
+  }
+  void set_state(const c10::TensorImpl&) override {}
+  c10::intrusive_ptr<c10::TensorImpl> get_state() const override { return nullptr; }
+  void set_offset(uint64_t) override {}
+  uint64_t get_offset() const override { return 0; }
+};
+
 at::Generator make_custom_generator(c10::DeviceIndex device_index) {
-  return at::make_generator<at::CPUGeneratorImpl>(device_index);
+  return at::make_generator<TinygradGeneratorImpl>(device_index);
 }
 REGISTER_GENERATOR_PRIVATEUSE1(make_custom_generator);
+
+py::object get_rng_from_generator(const at::Generator &gen) {
+  auto* impl = dynamic_cast<TinygradGeneratorImpl*>(gen.unsafeGetGeneratorImpl());
+  if (!impl) throw std::runtime_error("Not a TinygradGeneratorImpl");
+  return impl->rng;
+}
 
 // register guard
 namespace at {
@@ -149,4 +193,5 @@ py::object unwrap_tensor(const at::Tensor &tensor) {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("wrap", &wrap_tensor);
   m.def("unwrap", &unwrap_tensor);
+  m.def("get_rng_from_generator", &get_rng_from_generator);
 }
