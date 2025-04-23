@@ -1,6 +1,7 @@
 use crate::work_group::WorkGroup;
 use std::os::raw::c_char;
 use std::slice;
+mod rdna3;
 mod helpers;
 mod state;
 mod thread;
