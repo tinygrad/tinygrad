@@ -13,6 +13,7 @@ def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.
 
 # If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
 # or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
+@functools.cache
 def upcast(u: UOp) -> UOp:
   srcs = tuple(upcast(_src) for _src in u.src)
   if u.dtype.scalar() is dtypes.int:
@@ -30,13 +31,11 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...
   for view in reversed(views[0:-1]):
     view = view.minify()
     idx, valid = view.to_indexed_uops([sint_to_uop(i) for i in unravel(view.shape, idx)], valid)
-  # symbolic #1
+  # symbolic
   idx, valid = graph_rewrite(UOp.sink(idx, valid), symbolic_flat).src
   # simplify
-  if (newvalid:=simplify_valid(valid)) is not None: valid = newvalid
-  if (newidx:=uop_given_valid(valid, idx)) is not None: idx = newidx
-  # symbolic #2
-  idx, valid = graph_rewrite(UOp.sink(idx, valid), symbolic_flat).src
+  if (newvalid:=simplify_valid(valid)) is not None: valid = graph_rewrite(newvalid, symbolic_flat)
+  if (newidx:=uop_given_valid(valid, idx)) is not None: idx = graph_rewrite(newidx, symbolic_flat)
   # upcast if needed
   return upcast(idx), upcast(valid)
 
