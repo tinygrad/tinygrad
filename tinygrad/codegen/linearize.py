@@ -15,6 +15,7 @@ def block_reorder(lst:list[UOp]) -> list[UOp]:
   priorities:dict[UOp, int] = {}
 
   # get local children and assign priorities
+  # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
     in_degree[u] = 0
     for s in u.src:
@@ -28,14 +29,13 @@ def block_reorder(lst:list[UOp]) -> list[UOp]:
     priorities[u] = min(priority)
 
   # number the uops in "ideal" order
-  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (priorities[x], x.tuplize)))}
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (priorities[x],)+x.tuplize))}
 
   # then force then to be toposorted in as close to the ideal order as possible
   heapq.heapify(heap:=[(nkey[u],u) for u in lst if in_degree[u] == 0])
   newlst = []
   while heap:
-    _,u = heapq.heappop(heap)
-    newlst.append(u)
+    newlst.append(u:=heapq.heappop(heap)[1])
     for v in local_children[u]:
       in_degree[v] -= 1
       if in_degree[v] == 0: heapq.heappush(heap, (nkey[v],v))
