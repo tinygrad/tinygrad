@@ -361,7 +361,7 @@ def train_retinanet():
   NUM_CLASSES = len(MLPERF_CLASSES)
   BASEDIR = getenv("BASEDIR", BASEDIR)
   BENCHMARK = getenv("BENCHMARK")
-  INITMLPERF = getenv("INITMLPERF")
+  # INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
   config["gpus"] = GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 6))]
 
@@ -479,7 +479,7 @@ def train_retinanet():
     # ** training loop **
     BEAM.value = TRAIN_BEAM
 
-    if INITMLPERF:
+    if not RUNMLPERF:
       i, proc = 0, _fake_data_get(BS)
     else:
       train_dataloader = batch_load_retinanet(train_dataset, False, base_dir_path, batch_size=BS, seed=SEED)
@@ -499,7 +499,7 @@ def train_retinanet():
 
       if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:
-        if INITMLPERF:
+        if not RUNMLPERF:
           next_proc = _fake_data_get(BS)
         else:
           next_proc = _data_get(it)
@@ -552,7 +552,7 @@ def train_retinanet():
       if getenv("RESET_STEP", 1): _train_step.reset()
 
       with Tensor.train(mode=False), Tensor.test():
-        if INITMLPERF:
+        if not RUNMLPERF:
           i, proc = 0, _fake_data_get(EVAL_BS, val=(val:=True))
         else:
           val_dataloader = batch_load_retinanet(val_dataset, (val:=True), Path(BASEDIR), batch_size=EVAL_BS, shuffle=False, seed=SEED)
@@ -583,7 +583,7 @@ def train_retinanet():
 
           if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
           try:
-            if INITMLPERF:
+            if not RUNMLPERF:
               next_proc = _fake_data_get(EVAL_BS, val=val)
             else:
               next_proc = _data_get(it, val=val)
