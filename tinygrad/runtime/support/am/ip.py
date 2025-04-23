@@ -153,7 +153,7 @@ class AM_SMU(AM_IP):
 
   def read_table(self, table_t, cmd):
     self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, cmd)
-    return table_t.from_buffer(array.array('B', self.adev.vram[self.driver_table_paddr:self.driver_table_paddr+ctypes.sizeof(table_t)]))
+    return table_t.from_buffer(array.array('B', self.adev.vram.view(self.driver_table_paddr, ctypes.sizeof(table_t))[:]))
   def read_metrics(self): return self.read_table(self.smu_mod.SmuMetricsExternal_t, self.smu_mod.TABLE_SMU_METRICS)
 
   def set_clocks(self, level):
@@ -241,7 +241,7 @@ class AM_GFX(AM_IP):
       cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.encode(eop_size=(eop_size//4).bit_length()-2))
 
     # Copy mqd into memory
-    self.adev.vram[mqd.paddrs[0][0]:mqd.paddrs[0][0]+ctypes.sizeof(mqd_struct)] = memoryview(mqd_struct).cast('B')
+    self.adev.vram.view(mqd.paddrs[0][0], ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
     self.adev.gmc.flush_hdp()
 
     self._grbm_select(me=1, pipe=pipe, queue=queue)
@@ -406,7 +406,7 @@ class AM_PSP(AM_IP):
   def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.reg(f"{self.reg_pref}_35"), mask=0x80000000, value=0x80000000)
 
   def _prep_msg1(self, data):
-    self.adev.vram[self.msg1_paddr:self.msg1_paddr + len(data)] = data
+    self.adev.vram.view(self.msg1_paddr, len(data))[:] = data
     self.adev.vram[self.msg1_paddr + len(data) + 1] = 0
     self.adev.gmc.flush_hdp()
 
@@ -450,15 +450,12 @@ class AM_PSP(AM_IP):
     self.adev.wait_reg(self.adev.reg(f"{self.reg_pref}_64"), mask=0x8000FFFF, value=0x80000000)
 
   def _ring_submit(self, cmd):
-    prev_wptr = self.adev.reg(f"{self.reg_pref}_67").read()
+    msg = am.struct_psp_gfx_rb_frame(fence_value=(prev_wptr:=self.adev.reg(f"{self.reg_pref}_67").read()),
+      cmd_buf_addr_lo=lo32(self.adev.paddr2mc(self.cmd_paddr)), cmd_buf_addr_hi=hi32(self.adev.paddr2mc(self.cmd_paddr)),
+      fence_addr_lo=lo32(self.adev.paddr2mc(self.fence_paddr)), fence_addr_hi=hi32(self.adev.paddr2mc(self.fence_paddr)))
 
-    write_loc = am.struct_psp_gfx_rb_frame()
-    write_loc.cmd_buf_addr_hi, write_loc.cmd_buf_addr_lo = data64(self.adev.paddr2mc(self.cmd_paddr))
-    write_loc.fence_addr_hi, write_loc.fence_addr_lo = data64(self.adev.paddr2mc(self.fence_paddr))
-    write_loc.fence_value = prev_wptr
-
-    self.adev.vram[self.cmd_paddr:self.cmd_paddr+ctypes.sizeof(cmd)] = memoryview(cmd).cast('B')
-    self.adev.vram[self.ring_paddr+prev_wptr*4:self.ring_paddr+prev_wptr*4+ctypes.sizeof(write_loc)] = memoryview(write_loc).cast('B')
+    self.adev.vram.view(self.cmd_paddr, ctypes.sizeof(cmd))[:] = memoryview(cmd).cast('B')
+    self.adev.vram.view(self.ring_paddr + prev_wptr * 4, ctypes.sizeof(msg))[:] = memoryview(msg).cast('B')
 
     # Move the wptr
     self.adev.reg(f"{self.reg_pref}_67").write(prev_wptr + ctypes.sizeof(am.struct_psp_gfx_rb_frame) // 4)
@@ -466,7 +463,7 @@ class AM_PSP(AM_IP):
     while self.adev.vram.view(self.fence_paddr, 4, 'I')[0] != prev_wptr: pass
     time.sleep(0.005)
 
-    resp = type(cmd).from_buffer(array.array('B', self.adev.vram[self.cmd_paddr:self.cmd_paddr+ctypes.sizeof(cmd)]))
+    resp = type(cmd).from_buffer(array.array('B', self.adev.vram.view(self.cmd_paddr, ctypes.sizeof(cmd))[:]))
     if resp.resp.status != 0: raise RuntimeError(f"PSP command failed {resp.cmd_id} {resp.resp.status}")
 
     return resp
