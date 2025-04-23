@@ -2,7 +2,7 @@ import subprocess
 import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Tensor, Device, dtypes, RandomGenerator
 from tinygrad.tensor import _METADATA
 from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
@@ -236,6 +236,28 @@ class TestTinygrad(unittest.TestCase):
         Tensor.manual_seed(1337)
         b = random_fn(10,10).realize()
         np.testing.assert_allclose(a.numpy(), b.numpy())
+
+  def test_random_fns_are_deterministic_with_generator(self):
+    for random_fn in [Tensor.randn, Tensor.normal, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform, Tensor.kaiming_normal]:
+      with self.subTest(msg=f"Tensor.{random_fn.__name__}"):
+        generator_a = RandomGenerator()
+        generator_a.manual_seed(1337)
+        a1 = random_fn(10,10,generator=generator_a).realize()
+        generator_b = RandomGenerator()
+        generator_b.manual_seed(1337)
+        b1 = random_fn(10,10,generator=generator_b).realize()
+        np.testing.assert_allclose(a1.numpy(), b1.numpy())
+        # test for generator keep its own deterministic state
+        b2 = random_fn(10,10,generator=generator_b).realize()
+        a2 = random_fn(10,10,generator=generator_a).realize()
+        np.testing.assert_allclose(a2.numpy(), b2.numpy())
+
+  def test_randperm(self):
+    Tensor.manual_seed(0)
+    a = Tensor.randperm(10).realize()
+    np.testing.assert_equal(a.numpy(), [5, 2, 8, 1, 3, 7, 9, 6, 0, 4])
+    b = Tensor.randperm(1000).realize()
+    np.testing.assert_equal(set(b.numpy()), set(range(1000)))
 
   def test_randn_isnt_inf_on_zero(self):
     # simulate failure case of rand handing a zero to randn
