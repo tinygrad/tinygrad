@@ -12,6 +12,7 @@ class MMIOInterface:
   def __len__(self): return self.nbytes // struct.calcsize(self.fmt)
   def __getitem__(self, k) -> int|list[int]: return self.mv[k].tolist() if isinstance(k, slice) else self.mv[k]
   def __setitem__(self, k, v:int|array.array): self.mv[k] = v
+  def view(self, offset:int=0, size:int=None, fmt:str=None) -> MMIOInterface: return MMIOInterface(self.addr + offset, size, fmt=fmt)
 
 class FileIOInterface:
   """
