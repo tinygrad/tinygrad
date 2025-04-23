@@ -474,10 +474,10 @@ class ProfileSQTTEvent(ProfileEvent): device:str; se:int; blob:bytes; itrace:boo
 
 @dataclass
 class AMDQueueDesc:
-  ring: memoryview
-  read_ptrs: list[memoryview]
-  write_ptrs: list[memoryview]
-  doorbells: list[memoryview]
+  ring: MMIOInterface
+  read_ptrs: list[MMIOInterface]
+  write_ptrs: list[MMIOInterface]
+  doorbells: list[MMIOInterface]
   put_value: int = 0
 
   @property
