@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Device, dtypes, Tensor, Context
+from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.realize import lower_schedule
 from tinygrad.helpers import prod, unwrap
@@ -12,6 +13,8 @@ class TestImageCopy(unittest.TestCase):
     buf = it.lazydata.buffer
     out = buf.as_buffer()
     np.testing.assert_equal(out.cast(it.dtype.fmt).tolist(), np.arange(4))
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half, device="PYTHON"), "need half")
   def test_imageh_copyout_1x1(self): self.test_image_copyout_1x1(img_type=dtypes.imageh)
 
   def test_image_numpy_1x1(self, img_type=dtypes.imagef):
