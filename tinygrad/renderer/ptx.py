@@ -176,8 +176,8 @@ class PTXRenderer(Renderer):
 
     name = "test"
     for u in uops:
-      if u.op is Ops.NAME:
-        name = u.arg
+      if u.op is Ops.SINK:
+        if u.arg is not None: name = u.arg.name
         continue
       if u.op is Ops.VECTORIZE:
         r[u] = [cast(str,r[x]) for x in u.src]

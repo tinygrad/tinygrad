@@ -15,7 +15,7 @@ if __name__ == "__main__":
   for p in nn.state.get_parameters(mdl): p.replace(Tensor.empty(p.shape))
   img = Tensor.empty(64, 3, 224, 224)
 
-  PROFILE = getenv("PROFILE", 0)
+  PROFILE = getenv("PYPROFILE", 0)
   FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
   SCHEDULE_ONLY = getenv("SCHEDULE_ONLY", 0)
 
@@ -38,7 +38,7 @@ if __name__ == "__main__":
               if BEAM:
                 with Context(DEBUG=max(2, DEBUG.value)): k = beam_search(k, bufs_from_lin(k), BEAM.value)
               elif NOOPT: pass
-              else: k = hand_coded_optimizations(k)
+              else: k.apply_opts(hand_coded_optimizations(k))
               kernels.append(k)
 
         with Timing("***** model lower in     "): uops = [rewrite_shapetracker_with_index(k.get_optimized_ast(), k.opts) for k in kernels]
@@ -50,7 +50,7 @@ if __name__ == "__main__":
                 rewritten_uops.append(full_graph_rewrite(u, k.opts))
             uops = rewritten_uops
         if getenv("LINEARIZE", 1):
-          with Profiling(PROFILE >= 2):
+          with Profiling(PROFILE >= 2, frac=0.5):
             with Timing("***** model linearize in "): uops = [linearize_uop(u) for u in uops]
           print(sum(len(u) for u in uops))
           if getenv("SRC", 0):

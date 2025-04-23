@@ -17,7 +17,11 @@ simple_pm = PatternMatcher([
   ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.arg+c2.arg)),
 ])
 
-def to_uops_list(u:List[UOp]) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u)))
+def to_uops_list(u:List[UOp]) -> List[UOp]:
+  # we strip the SINK here for legacy reasons
+  ret = linearize_uop(full_graph_rewrite(UOp.sink(*u)))
+  assert ret[-1].op is Ops.SINK
+  return ret[:-1]
 
 class TestGraphRewriteEfficiency(unittest.TestCase):
   def test_create_many_uops(self):

@@ -132,7 +132,6 @@ def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=No
 
   if ground_truth is None and not has_bf16:
     unoptimized = Kernel(lin.ast)
-    unoptimized.required_optimizations()
     if run_linearizer(unoptimized, rawbufs, var_vals)[0] != "PASS":
       return ("BASELINE_ERROR", rawbufs, var_vals, ground_truth, None)
     ground_truth = np.frombuffer(rawbufs[0].as_buffer(), _to_np_dtype(rawbufs[0].dtype)).copy()

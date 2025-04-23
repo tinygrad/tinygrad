@@ -80,8 +80,8 @@ generate_kfd() {
   fixup $BASE/kfd.py
   sed -i "s/import ctypes/import ctypes, os/g" $BASE/kfd.py
   sed -i "s/import fcntl, functools/import functools/g" $BASE/kfd.py
-  sed -i "/import functools/a from tinygrad.runtime.support.hcq import HWInterface" $BASE/kfd.py
-  sed -i "s/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, \*\*kwargs):/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:HWInterface, \*\*kwargs):/g" $BASE/kfd.py
+  sed -i "/import functools/a from tinygrad.runtime.support.hcq import FileIOInterface" $BASE/kfd.py
+  sed -i "s/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, \*\*kwargs):/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:FileIOInterface, \*\*kwargs):/g" $BASE/kfd.py
   sed -i "s/fcntl.ioctl(__fd, (__idir<<30)/__fd.ioctl((__idir<<30)/g" $BASE/kfd.py
   python3 -c "import tinygrad.runtime.autogen.kfd"
 }
@@ -287,7 +287,7 @@ generate_vfio() {
   fixup $BASE/vfio.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/vfio.py
   sed -i "s\import fcntl, functools\import functools" $BASE/vfio.py
-  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import HWInterface\g" $BASE/vfio.py
+  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import FileIOInterface\g" $BASE/vfio.py
   sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\return __fd.ioctl((__idir<<30)\g" $BASE/vfio.py
 }
 
@@ -431,6 +431,12 @@ generate_am() {
     $AMKERN_INC/asic_reg/nbio/nbio_2_3_sh_mask.h \
     -o $BASE/am/nbio_2_3_0.py
   fixup $BASE/am/nbio_2_3_0.py
+
+  clang2py -k cdefstum \
+    $AMKERN_INC/asic_reg/nbio/nbio_7_2_0_offset.h \
+    $AMKERN_INC/asic_reg/nbio/nbio_7_2_0_sh_mask.h \
+    -o $BASE/am/nbio_7_2_0.py
+  fixup $BASE/am/nbio_7_2_0.py
 
   clang2py -k cdefstum \
     $AMKERN_INC/asic_reg/mmhub/mmhub_4_1_0_offset.h \

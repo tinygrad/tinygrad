@@ -302,6 +302,7 @@ class Kernel:
       0: will disable any tensor core matching
       1: enable tensor cores
       2: apply tensor core shape but don't use UOp.WMMA
+      3: emulate tensor cores with local memory
     extra_opts -- additional Opt's to apply after the tensor core instead of the hand-coded additional Opt's (default None)
     tc_select -- specifies which tensor core(s) to use for optimization (default -1)
       -1: iterates through all available tensor cores in order and uses the first one that matches the requirements (dims and dtypes)
@@ -313,7 +314,7 @@ class Kernel:
     """
     if tc_select is None: tc_select = TC_SELECT.value
     if tc_opt is None: tc_opt = TC_OPT.value
-    if not self.opts.tensor_cores and use_tensor_cores != 2: return False
+    if not self.opts.tensor_cores: return False
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, (tc_select, tc_opt)))
 
@@ -343,11 +344,12 @@ class Kernel:
 
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
-      check((use_tensor_cores:=USE_TC.value) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
+      check(len(self.opts.tensor_cores) > 0, "must have tensor cores")
       check(opt.axis is not None, "tensor core opts must have an axis")
       check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 2, "tensor core opts must have tc_select and tc_opt")
       check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.opts.tensor_cores), "tensor core opts must have valid tc_select")
       check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
+      check(0 < (use_tensor_cores:=USE_TC.value) <= 3, "use_tensor_cores value is not valid")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
       self.applied_opts.append(opt)
       return
@@ -431,13 +433,6 @@ class Kernel:
 
   def apply_opts(self, opts:Sequence[Opt]):
     for opt in opts: self.apply_opt(opt)
-
-  def required_optimizations(self) -> Kernel:
-    if isinstance(self.membufs[0].dtype, ImageDType):
-      unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
-      assert unit_stride_axes_mul_4, f"needs a unit stride axis in {self.bufs[0]}"
-      if all(x < self.first_upcast for x in unit_stride_axes_mul_4): self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
-    return self
 
   # **** kernel outputs ****
 
@@ -565,7 +560,7 @@ class Kernel:
 
   def to_program(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> ProgramSpec:
     self.linearize(name_override, ast_transform)
-    assert self.uops[0].op is Ops.NAME, "first uop must be name"
+    assert self.uops[-1].op is Ops.SINK, "last uop must be sink"
     src = self.opts.render(self.uops)
 
     if CAPTURE_PROCESS_REPLAY:
@@ -573,7 +568,8 @@ class Kernel:
       frm = sys._getframe(1)
       while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
       loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, loc, ContextVar._cache, src))
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[-1].arg.name, loc, ContextVar._cache,
+                                                             src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.

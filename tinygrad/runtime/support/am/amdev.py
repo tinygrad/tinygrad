@@ -1,6 +1,6 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, functools, pathlib, fcntl, os
-from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
+import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib
+from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module
 from tinygrad.runtime.support.allocator import TLSFAllocator
@@ -24,6 +24,7 @@ class AMRegister(AMDRegBase):
 
 class AMFirmware:
   def __init__(self, adev):
+    self.adev = adev
     def fmt_ver(hwip): return '_'.join(map(str, adev.ip_ver[hwip]))
 
     # Load SOS firmware
@@ -45,12 +46,11 @@ class AMFirmware:
     self.smu_psp_desc = self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes, am.GFX_FW_TYPE_SMU)
 
     # SDMA firmware
-    blob, hdr = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", am.struct_sdma_firmware_header_v3_0)
+    blob, hdr, hdr_v3 = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", am.struct_sdma_firmware_header_v2_0, am.struct_sdma_firmware_header_v3_0)
     if hdr.header.header_version_major < 3:
-      blob, hdr = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", am.struct_sdma_firmware_header_v2_0)
       self.descs += [self.desc(blob, hdr.ctl_ucode_offset, hdr.ctl_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH1)]
       self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ctx_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
-    else: self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
+    else: self.descs += [self.desc(blob, hdr_v3.header.ucode_array_offset_bytes, hdr_v3.ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
 
     # PFP, ME, MEC firmware
     for (fw_name, fw_cnt) in [('PFP', 2), ('ME', 2), ('MEC', 4)]:
@@ -89,8 +89,9 @@ class AMFirmware:
     self.descs += [self.desc(blob, hdr0.header.ucode_array_offset_bytes, hdr0.header.ucode_size_bytes, am.GFX_FW_TYPE_RLC_G)]
 
   def load_fw(self, fname:str, *headers):
-    fpath = next(f for loc in ["/lib/firmware/updates/amdgpu/", "/lib/firmware/amdgpu/"] if (f:=pathlib.Path(loc + fname)).exists())
+    fpath = fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/45f59212aebd226c7630aff4b58598967c0c8c91/amdgpu/{fname}", subdir="fw")
     blob = memoryview(bytearray(fpath.read_bytes()))
+    if AM_DEBUG >= 1: print(f"am {self.adev.devfmt}: loading firmware {fname}: {hashlib.sha256(blob).hexdigest()}")
     return tuple([blob] + [hdr.from_address(mv_address(blob)) for hdr in headers])
 
   def desc(self, blob:memoryview, offset:int, size:int, *types:int) -> tuple[list[int], memoryview]: return (list(types), blob[offset:offset+size])

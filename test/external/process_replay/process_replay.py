@@ -34,7 +34,8 @@ class ProcessReplayWarning(Warning): pass
 # *** recreators
 
 def recreate_sched(big_sink:UOp) -> list[UOp]:
-  sched_sink = get_becomes_map(big_sink)[big_sink]
+  becomes_map = get_becomes_map(big_sink)
+  sched_sink = big_sink.substitute(becomes_map)
   return dedup(u.arg.ast for u in sched_sink.toposort if u.op is Ops.KERNEL)
 
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str, _) -> str:
