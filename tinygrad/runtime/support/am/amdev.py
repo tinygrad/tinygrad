@@ -106,8 +106,6 @@ class AMPageTableEntry:
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
     self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, system, snooped, valid, extra=(paddr & 0x0000FFFFFFFFF000))
-    # self.adev.vram.write(self.paddr + entry_id * 8, (paddr & 0x0000FFFFFFFFF000) | f, 8)
-  # def entry(self, entry_id:int) -> int: return self.adev.vram.read(self.paddr + entry_id * 8, 8)
 
   def entry(self, entry_id:int) -> int: return self.entries[entry_id]
 
@@ -253,7 +251,7 @@ class AMMemoryManager:
 class AMDev:
   def __init__(self, devfmt, vram_bar:MMIOInterface, doorbell_bar:MMIOInterface, mmio_bar:MMIOInterface):
     self.devfmt = devfmt
-    self.vram, self.doorbell, self.mmio = vram_bar, doorbell_bar, mmio_bar
+    self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
 
     os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
 
@@ -325,7 +323,6 @@ class AMDev:
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
 
-  # def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
 
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
