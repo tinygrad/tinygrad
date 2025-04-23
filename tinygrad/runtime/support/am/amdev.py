@@ -1,7 +1,8 @@
 from __future__ import annotations
 import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib, array
-from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp, fetch
+from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am, mp_11_0
+from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
