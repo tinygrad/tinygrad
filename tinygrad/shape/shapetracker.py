@@ -6,24 +6,21 @@ from typing import Optional, Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape, unravel
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context
+from tinygrad.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, PatternMatcher, UPat, GroupOp
 from tinygrad.codegen.symbolic import split_uop, symbolic_flat, uop_given_valid, simplify_valid
-
-def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int)
 
 # If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
 # or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
-@functools.cache
-def upcast(u: UOp) -> UOp:
-  srcs = tuple(upcast(_src) for _src in u.src)
-  if u.dtype.scalar() is dtypes.int:
-    dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
-    upcasted = u.replace(dtype=dtype, src=tuple([_src.cast(dtype) for _src in srcs]))
-    if overflow(u): return upcasted
-    # Check the original src, new srcs has Ops.CAST whose vmin, vmax change the real bounds
-    # Cast back is required because if the node is in range, siblings would never be upcasted
-    if any((overflow(src) for src in u.src)): return upcasted.cast(u.dtype)
-  return u.replace(src=tuple(srcs))
+def handle_upcast(u: UOp) -> UOp|None:
+  dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
+  # check for overflow, upcast this to int64
+  if u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int):
+    return u.replace(dtype=dtype, src=tuple([x.cast(dtype) for x in u.src]))
+  # if any inputs are int64 and this *doesn't* overflow, cast back to int
+  if any(x.dtype == dtypes.int64 for x in u.src):
+    return u.replace(dtype=dtype, src=tuple([x.cast(dtype) for x in u.src])).cast(u.dtype)
+  return None
+pm_upcast = PatternMatcher([(UPat(GroupOp.ALU, dtype=dtypes.int, name="u"), handle_upcast),])
 
 @functools.cache
 def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
@@ -34,10 +31,10 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...
   # symbolic
   idx, valid = graph_rewrite(UOp.sink(idx, valid), symbolic_flat).src
   # simplify
-  if (newvalid:=simplify_valid(valid)) is not None: valid = graph_rewrite(newvalid, symbolic_flat)
-  if (newidx:=uop_given_valid(valid, idx)) is not None: idx = graph_rewrite(newidx, symbolic_flat)
-  # upcast if needed
-  return upcast(idx), upcast(valid)
+  if (newvalid:=simplify_valid(valid)) is not None: valid = newvalid
+  if (newidx:=uop_given_valid(valid, idx)) is not None: idx = newidx
+  # symbolic again, upcast if needed
+  return graph_rewrite(UOp.sink(idx, valid), symbolic_flat+pm_upcast).src
 
 @functools.cache
 def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[Optional[sint], ...]:
