@@ -485,7 +485,7 @@ class AMDQueueDesc:
 
   @classmethod
   def multi(cls, *queues: AMDQueueDesc):
-    assert all_same([(q.ring.va, q.put_value) for q in queues]), f"All queues must have the same ring and put_value: {queues}"
+    assert all_same([(q.ring.addr, q.put_value) for q in queues]), f"All queues must have the same ring and put_value: {queues}"
     return cls(ring=queues[0].ring, put_value=queues[0].put_value, doorbells=flatten(q.doorbells for q in queues),
                read_ptrs=flatten(q.read_ptrs for q in queues), write_ptrs=flatten(q.write_ptrs for q in queues))
 
