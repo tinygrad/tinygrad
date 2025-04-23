@@ -78,7 +78,7 @@ class BlockContext:
   def from_sink(sink:UOp) -> BlockContext:
     # get children and all block contexts
     ctx = BlockContext({}, {}, {})
-    for u in sink.toposort:
+    for u in sink.toposort():
       this_block_ctx: list[UOp] = []
       ctx.child_count[u] = 0
 
@@ -221,7 +221,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
 
   # combine matching BLOCKENDS, the keys of this dictionary are the RANGE UOps, values are the BLOCKENDs
   blockends_to_arg: dict[UOp, list[UOp]] = {}
-  for be in sink.toposort:
+  for be in sink.toposort():
     if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg.end, []).append(be)
   new_forks = {}
   for k,v in blockends_to_arg.items():
