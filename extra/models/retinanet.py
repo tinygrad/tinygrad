@@ -1,4 +1,4 @@
-import math
+import math, functools
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import flatten, get_child
 from examples.mlperf.helpers import generate_anchors, BoxCoder
@@ -35,8 +35,8 @@ def decode_bbox(offsets, anchors):
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 
-def postprocess_one(num_classes, predictions_per_image:Tensor, image_size, orig_image_size, score_thresh, topk_candidates, nms_thresh,
-                    anchors, split_idx):
+def postprocess_one(inputs, num_classes, score_thresh, topk_candidates, nms_thresh, anchors, split_idx):
+  predictions_per_image, image_size, orig_image_size = inputs
   h, w = image_size
 
   predictions_per_image = np.split(predictions_per_image, split_idx)
@@ -133,8 +133,8 @@ class RetinaNet:
     detections = []
     if image_sizes is None: image_sizes = [input_size] * len(predictions)
     if orig_image_sizes is None: orig_image_sizes = [None] * len(predictions)
-    for predictions_per_image, image_size, orig_image_size in zip(predictions, image_sizes, orig_image_sizes):
-      detection = postprocess_one(self.num_classes, predictions_per_image, image_size, orig_image_size, score_thresh, topk_candidates, nms_thresh, anchors, split_idx)
+    func = functools.partial(postprocess_one, num_classes=self.num_classes, score_thresh=score_thresh, topk_candidates=topk_candidates, nms_thresh=nms_thresh, anchors=anchors, split_idx=split_idx)
+    for detection in map(func, zip(predictions, image_sizes, orig_image_sizes)):
       detections.append(detection)
     return detections
 
