@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
 import time, mmap, sys, shutil, os, glob, subprocess
-from tinygrad.helpers import to_mv, DEBUG, colored, ansilen
+from tinygrad.helpers import DEBUG, colored, ansilen
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.am import am
+from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
@@ -58,7 +59,7 @@ def get_bar0_size(pcibus):
   return int(end_hex, 16) - int(start_hex, 16) + 1
 
 class AMSMI(AMDev):
-  def __init__(self, pcibus, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
+  def __init__(self, pcibus, vram_bar:MMIOInterface, doorbell_bar:MMIOInterface, mmio_bar:MMIOInterface):
     self.pcibus = pcibus
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
     self.pci_state = self.read_pci_state()
@@ -106,9 +107,9 @@ class SMICtx:
       bar_fds = {bar: os.open(f"/sys/bus/pci/devices/{pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
       bar_size = {0: get_bar0_size(pcibus), 2: os.fstat(bar_fds[2]).st_size, 5: os.fstat(bar_fds[5]).st_size}
 
-      def map_pci_range(bar):
-        return to_mv(libc.mmap(0, bar_size[bar], mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, bar_fds[bar], 0), bar_size[bar])
-      self.opened_pci_resources[pcibus] = (map_pci_range(0), None, map_pci_range(5).cast('I'))
+      def map_pci_range(bar, fmt='B'):
+        return MMIOInterface(libc.mmap(0, bar_size[bar], mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, bar_fds[bar], 0), bar_size[bar], fmt)
+      self.opened_pci_resources[pcibus] = (map_pci_range(0), None, map_pci_range(5, 'I'))
 
     try:
       self.devs.append(AMSMI(pcibus, *self.opened_pci_resources[pcibus]))
