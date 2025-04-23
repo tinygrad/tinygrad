@@ -3,7 +3,7 @@ from pathlib import Path
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW, Profiling
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam
 
@@ -350,16 +350,16 @@ def train_retinanet():
   from extra.models import resnet
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
-  from tinygrad.helpers import colored, Context
+  from tinygrad.helpers import colored
   from typing import Iterator
   import extra.models.retinanet as retinanet
-  
+
   import numpy as np
 
   config, target_metric = {}, 0.34
 
   NUM_CLASSES = len(MLPERF_CLASSES)
-  BASE_DIR = getenv("BASE_DIR", BASEDIR)
+  BASEDIR = getenv("BASEDIR", BASEDIR)
   BENCHMARK = getenv("BENCHMARK")
   INITMLPERF = getenv("INITMLPERF")
   config["gpus"] = GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 6))]
@@ -376,22 +376,22 @@ def train_retinanet():
   def _data_get(it:Iterator[tuple[Tensor, ...]], val:bool=False):
     if val:
       x, img_ids, img_sizes, cookie = next(it)
-      return x.shard(GPUS, axis=0).realize(), img_ids, img_sizes, cookie
+      return x.shard(GPUS, axis=0), img_ids, img_sizes, cookie
 
     x, y_boxes, y_labels, matches, anchors, cookie = next(it)
-    return x.shard(GPUS, axis=0).realize(), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), cookie
-  
+    return x.shard(GPUS, axis=0), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), cookie
+
   def _fake_data_get(bs:int, val:bool=False):
-    x = Tensor.zeros(bs, 800, 800, 3, dtype=dtypes.uint8).contiguous()
+    x = Tensor.empty(bs, 800, 800, 3, dtype=dtypes.uint8)
     if val:
       img_ids, img_sizes = [0] * bs, [(800, 800)] * bs
-      return x.shard(GPUS, axis=0).realize(), img_ids, img_sizes, None
+      return x.shard(GPUS, axis=0), img_ids, img_sizes, None
 
-    y_boxes = Tensor.zeros(bs, 120087, 4, dtype=dtypes.float32).contiguous()
-    y_labels = Tensor.zeros(bs, 120087, dtype=dtypes.int64).contiguous()
-    matches = Tensor.ones(bs, 120087, dtype=dtypes.int64).contiguous()
-    anchors = Tensor.zeros(bs, 120087, 4, dtype=dtypes.float64).contiguous()
-    return x.shard(GPUS, axis=0).realize(), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), None
+    y_boxes = Tensor.empty(bs, 120087, 4, dtype=dtypes.float32)
+    y_labels = Tensor.empty(bs, 120087, dtype=dtypes.int64)
+    matches = Tensor.empty(bs, 120087, dtype=dtypes.int64)
+    anchors = Tensor.empty(bs, 120087, 4, dtype=dtypes.float64)
+    return x.shard(GPUS, axis=0), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), None
 
   @TinyJit
   def _train_step(model, optim, loss_scaler, x, **kwargs):
@@ -406,11 +406,12 @@ def train_retinanet():
     optim.step()
 
     return loss.realize(), losses
-  
+
   @TinyJit
   def _eval_step(model, x, **kwargs):
     out = model(normalize(x, GPUS), **kwargs)
-    return out.realize()
+    # reassemble on GPUS[0] before sending back to CPU for speed
+    return out.to(GPUS[0]).realize()
 
   # ** hyperparameters **
   config["seed"] = SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
@@ -419,10 +420,15 @@ def train_retinanet():
   config["epochs"] = EPOCHS = getenv("EPOCHS", 4)
   config["train_beam"] = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   config["eval_beam"] = EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
-  config["lr"] = lr = getenv("LR", 8.5e-5 * (BS / 96))
+  config["lr"] = lr = getenv("LR", 9.5e-5 * (BS / 96))
   config["loss_scaler"] = loss_scaler = getenv("LOSS_SCALER", 2**11 if dtypes.default_float == dtypes.float16 else 1.0)
   config["default_float"] = dtypes.default_float.name
   config["eval_freq"] = eval_freq = getenv("EVAL_FREQ", 1)
+
+  # ** initialize wandb **
+  if (WANDB:=getenv("WANDB")):
+    import wandb
+    wandb.init(config=config, project="MLPerf-RetinaNet")
 
   if SEED: Tensor.manual_seed(SEED)
 
@@ -437,6 +443,7 @@ def train_retinanet():
 
   # ** model setup **
   backbone = resnet.ResNeXt50_32X4D(num_classes=None)
+  # TODO: should not load_from_pretrained during setup
   backbone.load_from_pretrained()
   _freeze_backbone_layers(backbone, 3)
 
@@ -452,18 +459,13 @@ def train_retinanet():
   optim = Adam(params, lr=lr)
 
   # ** dataset **
-  config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(get_dataset_count((base_dir_path:=Path(BASE_DIR)), False), BS) // BS
+  config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(get_dataset_count((base_dir_path:=Path(BASEDIR)), False), BS) // BS
   config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(get_dataset_count(base_dir_path, True), EVAL_BS) // EVAL_BS)
 
   if not INITMLPERF:
-    train_dataset = COCO(download_dataset(BASE_DIR, "train"))
-    val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
+    train_dataset = COCO(download_dataset(BASEDIR, "train"))
+    val_dataset = COCO(download_dataset(BASEDIR, "validation"))
     coco_val = COCOeval(cocoGt=val_dataset, iouType="bbox")
-
-  # ** initialize wandb **
-  if (WANDB:=getenv("WANDB")):
-    import wandb
-    wandb.init(config=config, project="MLPerf-RetinaNet")
 
   print(f"training with batch size {BS} for {EPOCHS} epochs")
 
@@ -536,7 +538,7 @@ def train_retinanet():
         # if we are doing beam search, run the first eval too
         if (TRAIN_BEAM or EVAL_BEAM) and e == start_epoch: break
         return
-      
+
     # ** eval loop **
     if (e + 1) % eval_freq == 0:
       BEAM.value = EVAL_BEAM
@@ -547,7 +549,7 @@ def train_retinanet():
         if INITMLPERF:
           i, proc = 0, _fake_data_get(EVAL_BS, val=(val:=True))
         else:
-          val_dataloader = batch_load_retinanet(val_dataset, (val:=True), Path(BASE_DIR), batch_size=EVAL_BS, shuffle=False, seed=SEED)
+          val_dataloader = batch_load_retinanet(val_dataset, (val:=True), Path(BASEDIR), batch_size=EVAL_BS, shuffle=False, seed=SEED)
           it = iter(tqdm(val_dataloader, total=steps_in_val_epoch))
           i, proc = 0, _data_get(it, val=val)
           val_img_ids, val_imgs, ncats, narea = [], [], len(coco_val.params.catIds), len(coco_val.params.areaRng)
@@ -1209,4 +1211,4 @@ if __name__ == "__main__":
       nm = f"train_{m}"
       if nm in globals():
         print(f"training {m}")
-        globals()[nm]()
+        with Profiling(enabled=getenv("PYPROFILE")): globals()[nm]()

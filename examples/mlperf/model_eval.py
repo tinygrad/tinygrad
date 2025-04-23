@@ -94,7 +94,7 @@ def eval_retinanet():
   mdl.load_from_pretrained()
   tlog("loaded models")
 
-  coco = COCO(download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), 'validation'))
+  coco = COCO(download_dataset(base_dir:=getenv("BASEDIR", BASEDIR), 'validation'))
   coco_eval = COCOeval(coco, iouType="bbox")
   coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
   tlog("loaded dataset")
