@@ -10,5 +10,6 @@ export BASEDIR="/raid/datasets/openimages"
 export TRAIN_BEAM=2 IGNORE_JIT_FIRST_BEAM=1 BEAM_UOPS_MAX=1500 BEAM_UPCAST_MAX=64 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5 BEAM_PADTO=0
 
 export WANDB=1 PARALLEL=0
+export RUNMLPERF=1
 
 python examples/mlperf/model_train.py
