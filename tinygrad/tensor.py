@@ -26,7 +26,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
   all_uops: set[UOp] = set()
   search_uops = list(applied_map)
   while len(search_uops):
-    x = search_uops.pop(0)
+    x = search_uops.pop()
     if x in all_uops: continue
     all_uops.add(x)
     search_uops.extend([u for c in x.children if (u:=c()) is not None])
