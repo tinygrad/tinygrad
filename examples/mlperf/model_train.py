@@ -350,10 +350,10 @@ def train_retinanet():
   from extra.models import resnet
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
-  from tinygrad.helpers import colored, Context
+  from tinygrad.helpers import colored
   from typing import Iterator
   import extra.models.retinanet as retinanet
-  
+
   import numpy as np
 
   config, target_metric = {}, 0.34
@@ -376,22 +376,22 @@ def train_retinanet():
   def _data_get(it:Iterator[tuple[Tensor, ...]], val:bool=False):
     if val:
       x, img_ids, img_sizes, cookie = next(it)
-      return x.shard(GPUS, axis=0).realize(), img_ids, img_sizes, cookie
+      return x.shard(GPUS, axis=0), img_ids, img_sizes, cookie
 
     x, y_boxes, y_labels, matches, anchors, cookie = next(it)
-    return x.shard(GPUS, axis=0).realize(), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), cookie
-  
+    return x.shard(GPUS, axis=0), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), cookie
+
   def _fake_data_get(bs:int, val:bool=False):
-    x = Tensor.zeros(bs, 800, 800, 3, dtype=dtypes.uint8).contiguous()
+    x = Tensor.empty(bs, 800, 800, 3, dtype=dtypes.uint8)
     if val:
       img_ids, img_sizes = [0] * bs, [(800, 800)] * bs
-      return x.shard(GPUS, axis=0).realize(), img_ids, img_sizes, None
+      return x.shard(GPUS, axis=0), img_ids, img_sizes, None
 
-    y_boxes = Tensor.zeros(bs, 120087, 4, dtype=dtypes.float32).contiguous()
-    y_labels = Tensor.zeros(bs, 120087, dtype=dtypes.int64).contiguous()
-    matches = Tensor.ones(bs, 120087, dtype=dtypes.int64).contiguous()
-    anchors = Tensor.zeros(bs, 120087, 4, dtype=dtypes.float64).contiguous()
-    return x.shard(GPUS, axis=0).realize(), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), None
+    y_boxes = Tensor.empty(bs, 120087, 4, dtype=dtypes.float32)
+    y_labels = Tensor.empty(bs, 120087, dtype=dtypes.int64)
+    matches = Tensor.empty(bs, 120087, dtype=dtypes.int64)
+    anchors = Tensor.empty(bs, 120087, 4, dtype=dtypes.float64)
+    return x.shard(GPUS, axis=0), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), None
 
   @TinyJit
   def _train_step(model, optim, loss_scaler, x, **kwargs):
@@ -406,7 +406,7 @@ def train_retinanet():
     optim.step()
 
     return loss.realize(), losses
-  
+
   @TinyJit
   def _eval_step(model, x, **kwargs):
     out = model(normalize(x, GPUS), **kwargs)
@@ -420,7 +420,7 @@ def train_retinanet():
   config["epochs"] = EPOCHS = getenv("EPOCHS", 4)
   config["train_beam"] = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   config["eval_beam"] = EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
-  config["lr"] = lr = getenv("LR", 8.5e-5 * (BS / 96))
+  config["lr"] = lr = getenv("LR", 9.5e-5 * (BS / 96))
   config["loss_scaler"] = loss_scaler = getenv("LOSS_SCALER", 2**11 if dtypes.default_float == dtypes.float16 else 1.0)
   config["default_float"] = dtypes.default_float.name
   config["eval_freq"] = eval_freq = getenv("EVAL_FREQ", 1)
@@ -538,7 +538,7 @@ def train_retinanet():
         # if we are doing beam search, run the first eval too
         if (TRAIN_BEAM or EVAL_BEAM) and e == start_epoch: break
         return
-      
+
     # ** eval loop **
     if (e + 1) % eval_freq == 0:
       BEAM.value = EVAL_BEAM
