@@ -279,6 +279,20 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
     return ret
 
+  # TODO: refactor with above
+  def toposort_gated(self, gate:Callable|None) -> dict[UOp, None]:
+    ret: dict[UOp, None] = {}
+    stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
+    while stack:
+      node, visited = stack.pop()
+      if node in ret: continue
+      if not visited:
+        if gate is None or gate(node):
+          stack.append((node, True))  # push node back on stack to process after its parents
+          for parent in reversed(node.src): stack.append((parent, False)) # push parents on the stack
+      else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
+    return ret
+
   # returns map of UOps to their children in the graph rooted by self
   def get_children_map(self) -> dict[UOp, dict[UOp, None]]:
     ret: dict[UOp, dict[UOp, None]] = {}
