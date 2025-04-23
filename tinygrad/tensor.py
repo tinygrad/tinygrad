@@ -236,13 +236,13 @@ class Tensor(SimpleMathTrait):
     big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
 
     # TODO: move this to scheduler tensor_map pass
-    if any(x.op is Ops.MULTI for x in big_sink.toposort):
+    if any(x.op is Ops.MULTI for x in big_sink.toposort()):
       # multi fixup
       _apply_map_to_tensors(get_multi_map(big_sink), name="Apply Multi Map")
       big_sink = UOp.sink(*flatten([x.lazydata.src if x.lazydata.op is Ops.MULTI else [x.lazydata] for x in (self,)+lst]))
 
     # verify Tensors match the spec
-    if __debug__: type_verify(list(big_sink.toposort), tensor_uop_spec)
+    if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
 
     becomes_map = get_becomes_map(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
@@ -916,7 +916,7 @@ class Tensor(SimpleMathTrait):
     print(t.grad.numpy())
     ```
     """
-    all_uops = self.lazydata.toposort
+    all_uops = self.lazydata.toposort()
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
                                        t.lazydata in all_uops and t.requires_grad and not Tensor.no_grad]
     # clear contexts

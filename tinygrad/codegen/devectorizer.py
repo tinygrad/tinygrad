@@ -48,7 +48,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   return buf.index(idx, new_valid)
 
 def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
-  if store_gate not in [gate.src[0] for gate in val.toposort if gate.op is Ops.IF]: return None
+  if store_gate not in [gate.src[0] for gate in val.toposort() if gate.op is Ops.IF]: return None
   # remove the gate from the index
   return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val)
 
