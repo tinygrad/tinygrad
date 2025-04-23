@@ -20,7 +20,7 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
 
-def verify_ast(sink:UOp): return type_verify(list(sink.toposort), shape_spec)
+def verify_ast(sink:UOp): return type_verify(list(sink.toposort()), shape_spec)
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
   if to_prerealize:
@@ -105,7 +105,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(1022).cummax(axis=0)
     sched = check_schedule(a, 5)
     ast = sched[0].ast
-    self.assertLessEqual(len([u for u in ast.toposort if u.op is Ops.WHERE]), 6)
+    self.assertLessEqual(len([u for u in ast.toposort() if u.op is Ops.WHERE]), 6)
 
   def test_basic_binop_fusion(self):
     a = Tensor.empty(10)
@@ -244,7 +244,7 @@ class TestSchedule(unittest.TestCase):
     r1 = (x - r0).sum(axis=0).div(2)
     out = r0 + r1
     schedule = check_schedule(out, 2)
-    reduceops = [x for si in schedule for x in si.ast.toposort if x.op is Ops.REDUCE_AXIS]
+    reduceops = [x for si in schedule for x in si.ast.toposort() if x.op is Ops.REDUCE_AXIS]
     assert len(reduceops) == 2
 
   def test_cache_reduce_multiple_children(self):
@@ -255,7 +255,7 @@ class TestSchedule(unittest.TestCase):
     out0 = r0 + y
     out1 = r1 + y
     schedule = check_schedule([out0, out1], 4)
-    reduceops = [x for si in schedule for x in si.ast.toposort if x.op is Ops.REDUCE_AXIS]
+    reduceops = [x for si in schedule for x in si.ast.toposort() if x.op is Ops.REDUCE_AXIS]
     assert len(reduceops) == 2
 
   def test_div_collapse_buffer(self):
@@ -652,7 +652,7 @@ class TestSchedule(unittest.TestCase):
   def _alu_from_tensor(self, t:Tensor):
     s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
     self.assertEqual(len(s), 1)
-    return [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
+    return [u.op for u in s[0].ast.toposort() if u.op in GroupOp.ALU]
 
   def test_2_pow_is_exp2(self):
     t = 2.0 ** Tensor([1.0, 2.0, 3.0])
@@ -1905,7 +1905,7 @@ class TestIndexing(unittest.TestCase):
 
 @track_rewrites(named=True)
 def swizzle_rewrite(u:UOp) -> UOp: return graph_rewrite(graph_rewrite(u, view_left), view_right)
-def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op is not Ops.BUFFER])
+def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op is not Ops.BUFFER])
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
