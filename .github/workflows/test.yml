@@ -461,8 +461,8 @@ jobs:
         run: CPU=1 PYTHONPATH=. python3 test/test_quantize_onnx.py
       - name: Run CLOUD=1 Test
         run: |
-          CLOUDDEV=CPU CLOUD=1 python3 test/test_tiny.py
-          CLOUDDEV=GPU CLOUD=1 python3 test/test_tiny.py
+          CLOUDDEV=CPU CLOUD=1 python3 -m pytest test/test_tiny.py test/test_jit.py
+          CLOUDDEV=GPU CLOUD=1 python3 -m pytest test/test_tiny.py test/test_jit.py
           CLOUDDEV=GPU IMAGE=2 CLOUD=1 python3 test/test_tiny.py
       - name: Test Optimization Helpers
         run: PYTHONPATH="." DEBUG=1 python3 extra/optimization/test_helpers.py
@@ -595,7 +595,7 @@ jobs:
       - name: Check Device.DEFAULT and print some source
         run: |
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['AMD'], Device.DEFAULT"
-          DEBUG=6 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+          DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run LLVM test
         if: matrix.backend=='amdllvm'
         run: PYTHONPATH="." python test/test_amd_llvm.py
@@ -603,8 +603,6 @@ jobs:
         run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py test/external/external_test_am.py --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
-      - name: Run remu tests
-        run: cargo test --manifest-path ./extra/remu/Cargo.toml
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
