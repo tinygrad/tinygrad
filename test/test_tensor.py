@@ -3,7 +3,8 @@ import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.helpers import getenv, temp, _METADATA, mv_address
+from tinygrad.tensor import _METADATA
+from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
@@ -235,6 +236,13 @@ class TestTinygrad(unittest.TestCase):
         Tensor.manual_seed(1337)
         b = random_fn(10,10).realize()
         np.testing.assert_allclose(a.numpy(), b.numpy())
+
+  def test_randperm(self):
+    Tensor.manual_seed(0)
+    a = Tensor.randperm(10).realize()
+    np.testing.assert_equal(a.numpy(), [5, 2, 8, 1, 3, 7, 9, 6, 0, 4])
+    b = Tensor.randperm(1000).realize()
+    np.testing.assert_equal(set(b.numpy()), set(range(1000)))
 
   def test_randn_isnt_inf_on_zero(self):
     # simulate failure case of rand handing a zero to randn

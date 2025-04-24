@@ -56,12 +56,6 @@
     cursor: default;
     user-select: none;
   }
-  rect {
-    stroke: #4a4b57;
-    stroke-width: 1.4px;
-    rx: 8px;
-    ry: 8px;
-  }
   .label :is(text, p) {
     color: #08090e;
     font-weight: 350;
@@ -198,6 +192,7 @@
         <g id="render">
           <g id="edges"></g>
           <g id="nodes"></g>
+          <g id="edge-labels"></g> <!-- NOTE: this ensures edge labels are always on top -->
           <g id="bars"></g>
         </g>
         <defs>

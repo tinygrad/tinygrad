@@ -35,9 +35,9 @@ def _get_test_global_size(global_size, max_global_size, var_vals):
   return test_global_size, factor
 
 def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbufs:list[Buffer], early_stop:Optional[float]=None,
-                  max_global_size:Optional[int]=65536, clear_l2=False, cnt=3, name="test") -> list[float]:
+                  allow_test_size:int=True, max_global_size:Optional[int]=65536, clear_l2=False, cnt=3, name="test") -> list[float]:
   factor = 1
-  if p.global_size is not None and max_global_size is not None:
+  if allow_test_size and p.global_size is not None and max_global_size is not None:
     global_size, factor = _get_test_global_size(p.global_size, max_global_size, var_vals)
     p = replace(p, global_size=global_size)
   try: car = CompiledRunner(p, precompiled=lib)
@@ -170,7 +170,8 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
         least_compute_ops = min(this_compute_ops:=sym_infer(p.estimates.ops, var_vals), least_compute_ops)
         if least_compute_ops*1000 < this_compute_ops: continue
         seen_libs.add(lib)
-        try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0, clear_l2=hasattr(dev, 'invalidate_caches'))
+        try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0,
+                                 allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'))
         except RuntimeError: continue # for runtime issues
         timed_lins.append((acted_lins[i], min(tms)))
         if BEAM_DEBUG > 1: print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {len(cast(list, p.uops)):5d} uops {time_to_str(compile_et, w=12)} compile/{time_to_str(timed_lins[-1][1], w=12)} run       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}")  # noqa: E501

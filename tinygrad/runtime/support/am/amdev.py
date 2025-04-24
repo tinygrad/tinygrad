@@ -1,7 +1,8 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, functools, pathlib, fcntl, os
-from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
+import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib, array
+from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am, mp_11_0
+from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
@@ -24,6 +25,7 @@ class AMRegister(AMDRegBase):
 
 class AMFirmware:
   def __init__(self, adev):
+    self.adev = adev
     def fmt_ver(hwip): return '_'.join(map(str, adev.ip_ver[hwip]))
 
     # Load SOS firmware
@@ -45,12 +47,11 @@ class AMFirmware:
     self.smu_psp_desc = self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes, am.GFX_FW_TYPE_SMU)
 
     # SDMA firmware
-    blob, hdr = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", am.struct_sdma_firmware_header_v3_0)
+    blob, hdr, hdr_v3 = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", am.struct_sdma_firmware_header_v2_0, am.struct_sdma_firmware_header_v3_0)
     if hdr.header.header_version_major < 3:
-      blob, hdr = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", am.struct_sdma_firmware_header_v2_0)
       self.descs += [self.desc(blob, hdr.ctl_ucode_offset, hdr.ctl_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH1)]
       self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ctx_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
-    else: self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
+    else: self.descs += [self.desc(blob, hdr_v3.header.ucode_array_offset_bytes, hdr_v3.ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
 
     # PFP, ME, MEC firmware
     for (fw_name, fw_cnt) in [('PFP', 2), ('ME', 2), ('MEC', 4)]:
@@ -89,8 +90,9 @@ class AMFirmware:
     self.descs += [self.desc(blob, hdr0.header.ucode_array_offset_bytes, hdr0.header.ucode_size_bytes, am.GFX_FW_TYPE_RLC_G)]
 
   def load_fw(self, fname:str, *headers):
-    fpath = next(f for loc in ["/lib/firmware/updates/amdgpu/", "/lib/firmware/amdgpu/"] if (f:=pathlib.Path(loc + fname)).exists())
+    fpath = fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/45f59212aebd226c7630aff4b58598967c0c8c91/amdgpu/{fname}", subdir="fw")
     blob = memoryview(bytearray(fpath.read_bytes()))
+    if AM_DEBUG >= 1: print(f"am {self.adev.devfmt}: loading firmware {fname}: {hashlib.sha256(blob).hexdigest()}")
     return tuple([blob] + [hdr.from_address(mv_address(blob)) for hdr in headers])
 
   def desc(self, blob:memoryview, offset:int, size:int, *types:int) -> tuple[list[int], memoryview]: return (list(types), blob[offset:offset+size])
@@ -99,11 +101,13 @@ class AMFirmware:
 class AMMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
 
 class AMPageTableEntry:
-  def __init__(self, adev, paddr, lv): self.adev, self.paddr, self.entries, self.lv = adev, paddr, to_mv(adev.paddr2cpu(paddr), 0x1000).cast('Q'), lv
+  def __init__(self, adev, paddr, lv): self.adev, self.paddr, self.lv, self.entries = adev, paddr, lv, adev.vram.view(paddr, 0x1000, fmt='Q')
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
     self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, system, snooped, valid, extra=(paddr & 0x0000FFFFFFFFF000))
+
+  def entry(self, entry_id:int) -> int: return self.entries[entry_id]
 
 class AMPageTableTraverseContext:
   def __init__(self, adev, pt, vaddr, create_pts=False, free_pts=False):
@@ -115,10 +119,10 @@ class AMPageTableTraverseContext:
 
   def level_down(self):
     pt, pte_idx, _ = self.pt_stack[-1]
-    if (entry:=pt.entries[pte_idx]) & am.AMDGPU_PTE_VALID == 0:
+    if (entry:=pt.entry(pte_idx)) & am.AMDGPU_PTE_VALID == 0:
       assert self.create_pts, "Not allowed to create new page table"
       pt.set_entry(pte_idx, self.adev.mm.palloc(0x1000, zero=True), table=True, valid=True)
-      entry = pt.entries[pte_idx]
+      entry = pt.entry(pte_idx)
 
     assert not self.adev.gmc.is_pte_huge_page(entry), f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
     child_page_table = AMPageTableEntry(self.adev, entry & 0x0000FFFFFFFFF000, lv=pt.lv+1)
@@ -128,7 +132,7 @@ class AMPageTableTraverseContext:
 
   def _try_free_pt(self) -> bool:
     pt, _, _ = self.pt_stack[-1]
-    if self.free_pts and pt != self.adev.mm.root_page_table and all(pt.entries[i] & am.AMDGPU_PTE_VALID == 0 for i in range(512)):
+    if self.free_pts and pt != self.adev.mm.root_page_table and all(pt.entry(i) & am.AMDGPU_PTE_VALID == 0 for i in range(512)):
       self.adev.mm.pfree(pt.paddr)
       parent_pt, parent_pte_idx, _ = self.pt_stack[-2]
       parent_pt.set_entry(parent_pte_idx, 0x0, valid=False)
@@ -146,7 +150,7 @@ class AMPageTableTraverseContext:
       if self.create_pts:
         while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while pt.lv!=am.AMDGPU_VM_PTB and not self.adev.gmc.is_pte_huge_page(pt.entries[pte_idx]): pt, pte_idx, pte_covers = self.level_down()
+        while pt.lv!=am.AMDGPU_VM_PTB and not self.adev.gmc.is_pte_huge_page(pt.entry(pte_idx)): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, 512 - pte_idx)
       assert entries > 0, "Invalid entries"
@@ -183,7 +187,7 @@ class AMMemoryManager:
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
-          assert pt.entries[pte_idx + pte_off] & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
+          assert pt.entry(pte_idx + pte_off) & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
                        frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
@@ -198,7 +202,7 @@ class AMMemoryManager:
     ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, free_pts=True)
     for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
-        assert pt.entries[pte_id] & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, f"PTE not mapped: {pt.entries[pte_id]:#x}"
+        assert pt.entry(pte_id) & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, f"PTE not mapped: {pt.entry(pte_id):#x}"
         pt.set_entry(pte_id, paddr=0x0, valid=False)
 
   @staticmethod
@@ -239,13 +243,13 @@ class AMMemoryManager:
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
     assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
     paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
-    if zero: ctypes.memset(self.adev.paddr2cpu(paddr), 0, size)
+    if zero: self.adev.vram[paddr:paddr+size] = bytes(size)
     return paddr
 
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)
 
 class AMDev:
-  def __init__(self, devfmt, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
+  def __init__(self, devfmt, vram_bar:MMIOInterface, doorbell_bar:MMIOInterface, mmio_bar:MMIOInterface):
     self.devfmt = devfmt
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
 
@@ -319,7 +323,6 @@ class AMDev:
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
 
-  def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
 
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
@@ -359,8 +362,8 @@ class AMDev:
     mmRCC_CONFIG_MEMSIZE = 0xde3
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
 
-    bhdr = am.struct_binary_header.from_address(self.paddr2cpu(self.vram_size - (64 << 10)))
-    ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(bhdr) + bhdr.table_list[am.IP_DISCOVERY].offset)
+    self.bhdr = am.struct_binary_header.from_buffer(array.array('B', self.vram.view(self.vram_size - (64 << 10), (10 << 10))[:]))
+    ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE and not ihdr.base_addr_64_bit, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
 
     # Mapping of HW IP to Discovery HW IP
@@ -369,9 +372,9 @@ class AMDev:
     self.ip_ver:dict[int, tuple[int, int, int]] = {}
 
     for num_die in range(ihdr.num_dies):
-      dhdr = am.struct_die_header.from_address(ctypes.addressof(bhdr) + ihdr.die_info[num_die].die_offset)
+      dhdr = am.struct_die_header.from_address(ctypes.addressof(self.bhdr) + ihdr.die_info[num_die].die_offset)
 
-      ip_offset = ctypes.addressof(bhdr) + ctypes.sizeof(dhdr) + ihdr.die_info[num_die].die_offset
+      ip_offset = ctypes.addressof(self.bhdr) + ctypes.sizeof(dhdr) + ihdr.die_info[num_die].die_offset
       for _ in range(dhdr.num_ips):
         ip = am.struct_ip_v4.from_address(ip_offset)
         ba = (ctypes.c_uint32 * ip.num_base_address).from_address(ip_offset + 8)
@@ -382,7 +385,7 @@ class AMDev:
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
 
-    gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(bhdr) + bhdr.table_list[am.GC].offset)
+    gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
 
   def _ip_module(self, prefix:str, hwip, prever_prefix:str=""): return import_module(prefix, self.ip_ver[hwip], prever_prefix)

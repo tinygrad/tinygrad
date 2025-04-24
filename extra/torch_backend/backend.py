@@ -3,6 +3,7 @@
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
+from tinygrad.ops import Ops
 from tinygrad.helpers import getenv, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
@@ -67,6 +68,7 @@ def realize_with_views(self: Tensor, views: Tensor):
   if not self.lazydata.st.contiguous: self.replace(self.contiguous())
   self.replace(self.clone().realize())
   for v in views:
+    if v.lazydata.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
     ret = self
     st = ShapeTracker(self.lazydata.st.views + v.lazydata.st.views) # TODO: is this right?
     for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
@@ -98,16 +100,16 @@ def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   ret = aten._index_put_impl_(self.cpu(), [x.cpu() if isinstance(x, torch.Tensor) else None for x in indices], values.cpu(), accumulate, unsafe).to(self.device)
   return wrap(unwrap(self).assign(unwrap(ret)))
 
-@torch.library.impl("aten::index.Tensor", "privateuseone")
-def index_tensor(x, y):
-  return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).to(x.device)
-
 @torch.library.impl("aten::index_put", "privateuseone")
 def index_put(self, indices, values, accumulate=False):
   return aten.index_put(self.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in indices], values.cpu(), accumulate).tiny()
 
+@torch.library.impl("aten::isin.Tensor_Tensor_out", "privateuseone")
+def isin_tensor_tensor_out(x, y, *, assume_unique=False, invert=False, out=None): return out.copy_(aten.isin(x.cpu(), y.cpu(), assume_unique=assume_unique, invert=invert).tiny())
+
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
-def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
+def randperm_generator(n, generator=None, out=None):
+  return out.copy_(wrap(Tensor.randperm(n, generator=generator, device=unwrap(out).device)))
 
 @torch.library.impl("aten::cummax", "privateuseone")
 def cummax(self, dim):
@@ -131,6 +133,10 @@ for i in [
 
 # *** end bad functions on CPU ***
 
+@torch.library.impl("aten::index.Tensor", "privateuseone")
+def index_tensor(x, y):
+  return wrap(unwrap(x)[[unwrap(_y.to(x.device)) if _y is not None else slice(None) for _y in y]])
+
 @torch.library.impl("aten::zero_", "privateuseone")
 @inplace_fn("x")
 def zero_(x):
@@ -150,7 +156,7 @@ def fill_scalar(x, y):
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
-@functools.lru_cache(None)
+@functools.cache
 def cached_to_movement_ops(shape, st) -> list:
   mops = to_movement_ops(st)
   if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
@@ -456,6 +462,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.expm1.out": lambda self: self.exp() - 1,
   "aten.fmax.out": lambda input,other: Tensor.where(input.isnan() & ~other.isnan(), other, Tensor.where(~input.isnan() & other.isnan(), input, Tensor.maximum(input, other))),
   "aten.fmin.out": lambda input,other: Tensor.where(input.isnan() & ~other.isnan(), other, Tensor.where(~input.isnan() & other.isnan(), input, Tensor.minimum(input, other))),
+  "aten.amax.out": lambda self,dim=None: self.max(axis=dim),
   # TODO: this gets the shape wrong
   #"aten.arange.start_out": Tensor.arange,
   "aten.lerp.Scalar_out": Tensor.lerp,
