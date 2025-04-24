@@ -141,6 +141,11 @@ class PythonProgram:
             def b_elem(x, col, k, goff): return a_elem(x, k, col, goff) # pylint: disable=arguments-out-of-order
             def c_map(lane, elem): return (lane%16, (lane//16)*4 + elem)
             ul[i] = wmma_helper(64, 16, 4, 4, 4, a_elem, b_elem, c_map)
+          elif arg[4] == "AMD" and len(inp[0]) == 8: # RDNA4
+            def a_elem(x, k, row, goff): return x[k - [0, 4, 4, 8][k//4]][goff + row + [0, 16, 0, 16][k//4]]
+            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)
+            def c_map(lane, elem): return (lane%16, (lane//16)*8 + elem)
+            ul[i] = wmma_helper(32, 16, 8, 8, 8, a_elem, b_elem, c_map)
           elif arg[4] == "AMD":
             # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
             def a_elem(x, k, row, goff):
@@ -197,6 +202,7 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
     if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
     if getenv("EMULATE_AMD_MFMA"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores_mfma
+    if getenv("EMULATE_AMD_RDNA4"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores_rdna4
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm80
     if getenv("EMULATE_CUDA_SM75"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm75
     if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
