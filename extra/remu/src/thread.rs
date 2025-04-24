@@ -6,7 +6,9 @@ use half::{bf16, f16};
 use crate::rdna3::{Instruction, decode};
 use num_traits::Float;
 
-const SGPR_COUNT: usize = 105;
+pub const SGPR_COUNT: usize = 105;
+pub const VCC_LO: usize = 106;
+pub const EXEC_LO: usize = 126;
 pub const SCC: usize = 253;
 
 const VGPR_COUNT: usize = 256;
@@ -47,11 +49,7 @@ impl<'a> Thread<'a> {
                 val => val,
             };
 
-            // TODO: refactor vcc_lo to store in scalar register 106
-            let base_addr = match sbase {
-                106 => ((self.scalar_reg[107] as u64) << 32) | self.vcc.value as u64,
-                _ => self.scalar_reg.read64(sbase as usize),
-            };
+            let base_addr = self.scalar_reg.read64(sbase as usize);
             let addr = (base_addr as i64 + offset as i64 + soffset as i64) as u64;
 
             match op {
