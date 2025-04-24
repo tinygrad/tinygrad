@@ -13,15 +13,16 @@ pub enum Instruction {
 
     SMEM { op: u8, sdata: u8, sbase: u8, offset: i32, soffset: u8, glc: bool, dlc: bool },
 
-    VOP1 { op: u8, vdst: u8, src: u8 },
-    VOP2 { op: u8, },
-    VOPC { op: u8, },
-    VOP3 { op: u8, },
-    VOP3P { op: u8, },
+    VOP1 { op: u8, vdst: u8, src: u16 },
+    VOP2 { op: u8, vdst: u8, vsrc: u8, src: u16 },
+    VOPC { op: u8, vsrc: u8, src: u16 },
+    VOP3 { op: u8, cm: bool, opsel: u8, abs: u8, vdst: u8, neg: u8, omod: u8, src2: u16, src1: u16, src0: u16 },
+    VOP3SD { op: u8, cm: bool, sdst: u8, vdst: u8, neg: u8, omod: u8, src2: u16, src1: u16, src0: u16 },
+    VOP3P { op: u8, cm: bool, opslh0: bool, opsel: u8, neg_hi: u8, vdst: u8, neg: u8, opelh: u8, src2: u16, src1: u16, src0: u16 },
 
-    DS { op: u8, },
+    DS { op: u8, gds: bool, offset1: u8, offset0: u8, vdst: u8, data1: u8, data0: u8, addr: u8 },
 
-    FLAT { op: u8, },
+    FLAT { op: u8, offset: u16, dlc: bool, glc: bool, slc: bool, seg: u8, addr: u8, data: u8, saddr: u8, sve: bool, vdst: u8 }
 }
 
 pub fn decode(word:u32, word1:Option<&u32>) -> Instruction {
@@ -60,7 +61,14 @@ pub fn decode(word:u32, word1:Option<&u32>) -> Instruction {
             }
         }
         _ => {
-            todo!()
+            let vdst = bits(word, 24, 17) as u8;
+            let src = bits(word, 8, 0) as u16;
+            let vsrc = bits(word, 16, 9) as u8;
+            match bits(word, 30, 25) {
+                0b111110 => Instruction::VOPC { vsrc, src, op: bits(word, 24, 17) as u8 },
+                0b111111 => Instruction::VOP1 { vdst, src, op: vsrc },
+                _ => Instruction::VOP2 { vdst, vsrc, src, op: bits(word, 30, 25) as u8 },
+            }
         },
     }
 }
@@ -123,7 +131,9 @@ mod test_rdna3 {
     }
 
     #[test]
-    fn test_decode_valu() {
-        assert_eq!(test_decode("v_mov_b32 v1 s1"), Instruction::VOP1 { op: 28, vdst: 1, src: 1 });
+    fn test_decode_valu_32() {
+        assert_eq!(test_decode("v_mov_b32 v0, v0"), Instruction::VOP1 { op: 1, vdst: 0, src: 256 });
+        assert_eq!(test_decode("v_mov_b32 v0, s0"), Instruction::VOP1 { op: 1, vdst: 0, src: 0 });
+        assert_eq!(test_decode("v_cmp_t_f32 v1, v0"), Instruction::VOPC { op: 31, vsrc: 0, src: 257 });
     }
 }
