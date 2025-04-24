@@ -22,9 +22,9 @@ export HCQDEV_WAIT_TIMEOUT_MS=100000  # prevents hang?
 
 # init
 sleep 5 && sudo rmmod amdgpu || true
-BENCHMARK=10 INITMLPERF=1 BERT_LAYERS=2 python3 examples/mlperf/model_train.py | tee $LOGFILE
+BENCHMARK=10 INITMLPERF=1 BERT_LAYERS=2 AM_RESET=1 python3 examples/mlperf/model_train.py | tee $LOGFILE
 
 # run
 # TODO: AM driver resulted in nan
-sudo modprobe amdgpu
-PARALLEL=0 RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a $LOGFILE
+# sudo modprobe amdgpu
+PARALLEL=0 RUNMLPERF=1 AM_RESET=1 AMD_SDMA_BIND=1 python3 examples/mlperf/model_train.py | tee -a $LOGFILE
