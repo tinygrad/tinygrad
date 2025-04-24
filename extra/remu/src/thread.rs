@@ -1,7 +1,7 @@
 use crate::helpers::{extract_mantissa, f16_hi, f16_lo, ldexp, nth, sign_ext, IEEEClass, VOPModifier};
-use crate::helpers::{Colorize, DEBUG};
+use crate::helpers::DEBUG;
 use crate::state::{Register, Value, VecDataStore, WaveValue, VGPR};
-use crate::{print_instr, todo_instr};
+use crate::todo_instr;
 use half::{bf16, f16};
 use crate::rdna3::{Instruction, decode};
 use num_traits::Float;
@@ -36,14 +36,15 @@ impl<'a> Thread<'a> {
     pub fn interpret(&mut self) -> Result<(), i32> {
         let instruction = self.stream[self.pc_offset];
         let decoded = decode(self.stream[self.pc_offset], self.stream.get(self.pc_offset+1));
+        if *DEBUG {
+            print!("{:?}", decoded);
+        }
         if let Instruction::SMEM { sbase, sdata, op, offset, soffset, .. } = decoded {
             let _ = self.u64_instr();
             let soffset = match self.val(soffset as usize) {
                 NULL_SRC => 0,
                 val => val,
             };
-
-            print_instr!("SMEM", sbase, sdata, op, offset, soffset);
 
             // TODO: refactor vcc_lo to store in scalar register 106
             let base_addr = match sbase {
@@ -64,8 +65,6 @@ impl<'a> Thread<'a> {
         else if let Instruction::SOP1 { ssrc0, op, sdst } = decoded {
             let src = ssrc0 as usize;
             let sdst = sdst as usize;
-
-            print_instr!("SOP1", src, sdst, op);
 
             match op {
                 1 => {
@@ -121,8 +120,6 @@ impl<'a> Thread<'a> {
             let s0 = ssrc0 as usize;
             let s1 = ssrc1 as usize;
 
-            print_instr!("SOPC", s0, s1, op);
-
             fn scmp<T>(s0: T, s1: T, offset: u8, op: u8) -> bool
             where
                 T: PartialOrd + PartialEq,
@@ -162,7 +159,6 @@ impl<'a> Thread<'a> {
             self.scalar = true;
         }
         else if let Instruction::SOPP { simm16, op } = decoded {
-            print_instr!("SOPP", simm16, op);
 
             match op {
                 32..=42 => {
@@ -188,8 +184,6 @@ impl<'a> Thread<'a> {
             let simm = simm16 as u16;
             let sdst = sdst as usize;
             let s0: u32 = self.val(sdst);
-
-            print_instr!("SOPK", simm, sdst, s0, op);
 
             match op {
                 0 => self.write_to_sdst(sdst, simm as i16 as i32 as u32),
@@ -239,8 +233,6 @@ impl<'a> Thread<'a> {
             let s0 = ssrc0 as usize;
             let s1 = ssrc1 as usize;
             let sdst = sdst as usize;
-
-            print_instr!("SOP2", s0, s1, sdst, op);
 
             match op {
                 23 | 25 | 27 => {
@@ -418,8 +410,6 @@ impl<'a> Thread<'a> {
             let opsel = [b(11), b(12), b(13)];
             let opsel_hi = [b(59), b(60), b(14)];
 
-            print_instr!("VOPP", op, vdst, src_parts, opsel, opsel_hi, neg, neg_hi);
-
             match op {
                 0..=18 => {
                     let fxn = |x, y, z| -> u16 {
@@ -553,8 +543,6 @@ impl<'a> Thread<'a> {
         else if let Instruction::VOP1 { src, op, vdst } = decoded {
             let s0 = src as usize;
             let vdst = vdst as usize;
-
-            print_instr!("VOP1", s0, op, vdst);
 
             match op {
                 3 | 15 | 21 | 23 | 25 | 26 | 60 | 61 | 47 | 49 => {
@@ -723,8 +711,6 @@ impl<'a> Thread<'a> {
             // LSB is the opposite of VDSTX[0]
             let vdsty = (((instr >> 49) & 0x7f) << 1 | ((vdstx as u64 & 1) ^ 1)) as usize;
 
-            print_instr!("VOPD", opx, vdstx, sx, srcx0, vx, vsrcx1, opy, vdsty, sy, srcy0, vy, vsrcy1);
-
             for (op, s0, s1, dst) in ([(opx, srcx0, vsrcx1, vdstx), (opy, srcy0, vsrcy1, vdsty)]).iter() {
                 let ret = match *op {
                     0 | 1 | 2 | 3 | 4 | 5 | 6 | 10 | 11 => {
@@ -764,8 +750,6 @@ impl<'a> Thread<'a> {
             let s0 = src as usize;
             let s1 = vsrc as usize;
             let op = op as u32;
-
-            print_instr!("VOPC", s0, s1, op);
 
             let dest_offset = if op >= 128 { 128 } else { 0 };
             let ret = match op {
@@ -834,8 +818,6 @@ impl<'a> Thread<'a> {
             let s0 = src as usize;
             let s1 = self.vec_reg[vsrc as usize];
             let vdst = vdst as usize;
-
-            print_instr!("VOP2", s0, s1, vdst, op);
 
             match op {
                 (50..=60) => {
@@ -951,8 +933,6 @@ impl<'a> Thread<'a> {
                     assert_eq!(omod, 0);
                     assert_eq!(clmp, 0);
 
-                    print_instr!("VOPSD", vdst, sdst, op, s0, s1, s2);
-
                     let vcc = match op {
                         766 => {
                             let (s0, s1, s2): (u32, u32, u64) = (self.val(s0), self.val(s1), self.val(s2));
@@ -1025,8 +1005,6 @@ impl<'a> Thread<'a> {
                     assert_eq!(omod, 0);
                     assert_eq!(cm, 0);
                     assert_eq!(opsel, 0);
-
-                    print_instr!("VOP3", vdst, abs, opsel, op, src, neg);
 
                     match op {
                         // VOPC using VOP3 encoding
@@ -1403,8 +1381,6 @@ impl<'a> Thread<'a> {
             let data1 = ((instr >> 48) & 0xff) as usize;
             let vdst = ((instr >> 56) & 0xff) as usize;
 
-            print_instr!("LDS", op, addr, data0, data1, vdst);
-
             let lds_base = self.vec_reg[addr];
             let single_addr = || (lds_base + (instr & 0xffff) as u32) as usize;
             let double_addr = |adj: u32| {
@@ -1500,8 +1476,6 @@ impl<'a> Thread<'a> {
                 1 => {
                     let sve = ((instr >> 50) & 0x1) != 0;
 
-                    print_instr!("SCRATCH", offset, op, addr, data, saddr, vdst, sve);
-
                     let addr = match (sve, saddr_off) {
                         (true, true) => offset as u64 as usize,
                         (false, false) => saddr_val as usize,
@@ -1520,8 +1494,6 @@ impl<'a> Thread<'a> {
                     }
                 }
                 2 => {
-                    print_instr!("GLOBAL", offset, op, addr, data, saddr, vdst);
-
                     let addr = match saddr_off {
                         true => self.vec_reg.read64(addr) as i64 + (offset as i64),
                         false => {
@@ -1562,7 +1534,6 @@ impl<'a> Thread<'a> {
         else if instruction >> 26 == 0b111000 {
             let instr = self.u64_instr();
             let op = ((instr >> 18) & 0x7f) as usize;
-            print_instr!("MUBUF", op);
             match op {
                 43 => {} // NOTE: remu doesn't have an l0 cache, it just has the software managed lds
                 _ => todo_instr!(instruction)?,

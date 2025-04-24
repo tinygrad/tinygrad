@@ -1,4 +1,4 @@
-use crate::helpers::{Colorize, DEBUG};
+use crate::helpers::{colored, DEBUG};
 use crate::state::{Register, VecDataStore, WaveValue, VGPR};
 use crate::thread::{Thread, END_PRG};
 use std::collections::HashMap;
@@ -148,7 +148,7 @@ impl<'a> WorkGroup<'a> {
                         false => "gray",
                     };
                     let [id0, id1, id2] = self.id;
-                    print!("[{id0:<3} {id1:<3} {id2:<3}] [{x:<3} {y:<3} {z:<3}] {}", lane.color(state));
+                    print!("[{id0:<3} {id1:<3} {id2:<3}] [{x:<3} {y:<3} {z:<3}] {}", colored(&lane, state));
                 }
                 if !seeded_lanes.contains(&lane_id) && self.wave_state.get(&wave_id).is_none() {
                     match (self.launch_bounds[1] != 1, self.launch_bounds[2] != 1) {
