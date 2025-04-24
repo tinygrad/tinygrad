@@ -38,7 +38,7 @@ if __name__ == "__main__":
               if BEAM:
                 with Context(DEBUG=max(2, DEBUG.value)): k = beam_search(k, bufs_from_lin(k), BEAM.value)
               elif NOOPT: pass
-              else: k = hand_coded_optimizations(k)
+              else: k.apply_opts(hand_coded_optimizations(k))
               kernels.append(k)
 
         with Timing("***** model lower in     "): uops = [rewrite_shapetracker_with_index(k.get_optimized_ast(), k.opts) for k in kernels]

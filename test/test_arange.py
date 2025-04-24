@@ -73,6 +73,8 @@ class TestArange(unittest.TestCase):
   def test_all_opts_w_upcast_and_unroll(self):
     return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, arg=0)])
 
+DSET, DDIM = 2048, 32
+
 class TestIndexing(unittest.TestCase):
   def test_arange_2_reduce(self):
     needle = Tensor.zeros(16384, dtype=dtypes.int).contiguous()
@@ -88,52 +90,52 @@ class TestIndexing(unittest.TestCase):
 
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_manual_index(self):
-    dataset = Tensor.rand(16384, 256).realize()
+    dataset = Tensor.rand(DSET, DDIM).realize()
     idxs = Tensor([0,3,5,6]).realize()
     real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
     with Context(NOOPT=1, FUSE_ARANGE=1):
       GlobalCounters.reset()
-      rng = Tensor.ones(4, 256, 16384, dtype=dtypes.int)._cumalu(axis=-1, op=Ops.ADD, _include_initial=True).reshape(4, 256, 16384, 1)
-      idxs = idxs.reshape(4,1,1,1).expand(4, 256, 16384, 1)
-      reshape_dataset = dataset.T.reshape(1, 256, 16384, 1).expand(4, 256, 16384, 1)
-      full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, 256, 16384, 1))
+      rng = Tensor.ones(4, DDIM, DSET, dtype=dtypes.int)._cumalu(axis=-1, op=Ops.ADD, _include_initial=True).reshape(4, DDIM, DSET, 1)
+      idxs = idxs.reshape(4,1,1,1).expand(4, DDIM, DSET, 1)
+      reshape_dataset = dataset.T.reshape(1, DDIM, DSET, 1).expand(4, DDIM, DSET, 1)
+      full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, DDIM, DSET, 1))
       X = full.sum(axis=(2,3))
       sched = X.schedule()
       self.assertEqual(len(sched), 1)
       run_schedule(sched)
-      assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops}"
+      assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
 
   def test_index(self):
-    dataset = Tensor.rand(16384, 256).realize()
+    dataset = Tensor.rand(DSET, DDIM).realize()
     idxs = Tensor([0,3,5,6]).realize()
     real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
     with Context(NOOPT=1):
       GlobalCounters.reset()
       X = dataset[idxs]
-      assert X.shape == (4,256)
+      assert X.shape == (4,DDIM)
       sched = X.schedule()
       # TODO: enable these asserts when the scheduler can handle this
       #self.assertEqual(len(sched), 1)
       run_schedule(sched)
-      #assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops}"
+      #assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
 
   def test_index_fused(self, noopt=1):
-    dataset = Tensor.rand(16384, 256).realize()
+    dataset = Tensor.rand(DSET, DDIM).realize()
     idxs = Tensor([0,3,5,6]).realize()
     real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
     with Context(NOOPT=noopt, FUSE_ARANGE=1):
       GlobalCounters.reset()
       X = dataset[idxs]
-      assert X.shape == (4,256)
+      assert X.shape == (4,DDIM)
       sched = X.schedule()
       self.assertEqual(len(sched), 2)
       run_schedule(sched)
-      assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops} != {4*16384}"
+      assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops} != {4*DSET}"
     np.testing.assert_allclose(real_index, X.numpy())
   @unittest.skip("not ready")
   def test_index_fused_opt(self): self.test_index_fused(0)

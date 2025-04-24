@@ -101,7 +101,7 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_ast(sink, [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])[0]
 
     stores = [u for u in lin.uops if u.op is Ops.STORE]
-    mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
+    mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
     assert len(mutable_bufs) == len(stores) == 2
     self.assertSetEqual(set([u.arg for u in mutable_bufs]), set([0,1]))
 
@@ -1009,10 +1009,10 @@ class TestLinearizer(unittest.TestCase):
 
     # the first store is to lds and can be upcasted
     assert stores[0].src[-1].dtype == dtypes.float.vec(4)
-    assert any(x.op is Ops.DEFINE_LOCAL for x in stores[0].toposort)
+    assert any(x.op is Ops.DEFINE_LOCAL for x in stores[0].toposort())
     # the second store is to gds with no upcasts
     assert stores[1].src[-1].dtype == dtypes.float
-    assert any(x.op is Ops.DEFINE_GLOBAL for x in stores[1].toposort)
+    assert any(x.op is Ops.DEFINE_GLOBAL for x in stores[1].toposort())
 
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
@@ -1062,16 +1062,14 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL") or getenv("EMULATE_METAL") or getenv("EMULATE_AMD_MFMA") or getenv("EMULATE_AMD")) and \
-        (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
-      if CI and Device.DEFAULT in ("METAL", "AMD") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
       # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
       helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_codegen(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if CI and Device.DEFAULT == "AMD" and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
       n, m, k = tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2]
       a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
       r = a.matmul(b, dtype=tc.dtype_out)
@@ -1088,12 +1086,23 @@ class TestLinearizer(unittest.TestCase):
       else:
         assert "__WMMA_" in prg.src
 
+  @unittest.skipIf(Device.DEFAULT in {"AMD"}, "AMD has a bug in the compiler for pad == 1, see discussion in #9606")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if (getenv("EMULATE_CUDA") or getenv("EMULATE_METAL") or getenv("EMULATE_AMD_MFMA") or getenv("EMULATE_AMD")) and \
-        (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
-      if CI and Device.DEFAULT in ("METAL", "AMD") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
+      helper_tc_allclose(tc.dims[0]+(pad:=1), tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
+
+  @unittest.skipUnless(Device.DEFAULT in {"AMD"}, "Test for AMD device")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_padded_amd(self):
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
+      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
+      helper_tc_allclose(tc.dims[0]+(pad:=3), tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_padded_uops(self):
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       pad = 1
 
       # check that TC is triggered for TC_OPT=2
@@ -1112,14 +1121,11 @@ class TestLinearizer(unittest.TestCase):
       if not AMX: # AMX tc.dims[2] == 1
         helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[1], tc.dims[2]//4, tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
 
-      # check correctness
-      helper_tc_allclose(tc.dims[0]+pad, tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
-
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI is really slow here")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_multi_reduce(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16: continue
+      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
       # this will be a M=G16, N=G32, M=G16, M=G16, K=R16, K=R16, K=R16 with 9 choices of TC MNK axes
       golden_result = None
       for axis in range(9):
@@ -1202,7 +1208,7 @@ class TestLinearizer(unittest.TestCase):
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes, assert_same_length = True):
       idxs = get_grouped_dims(prefix, dims, max_sizes, reverse_dims)
-      loop_idxs = dedup(flatten([[y for y in x.toposort if y.op is Ops.SPECIAL] for x in idxs]))
+      loop_idxs = dedup(flatten([[y for y in x.toposort() if y.op is Ops.SPECIAL] for x in idxs]))
       loop_idxs = sorted(loop_idxs, key=lambda uop: uop.arg[0])
       sizes = [x.arg[1] for x in loop_idxs]
       assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
@@ -1286,7 +1292,7 @@ class TestLinearizer(unittest.TestCase):
     sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]
     # sum_collapse is a full collapse now
     assert len(sched) == 1
-    assert not any(u.op is Ops.REDUCE_AXIS for u in sched[0].ast.toposort), "found reduce in sum collapse"
+    assert not any(u.op is Ops.REDUCE_AXIS for u in sched[0].ast.toposort()), "found reduce in sum collapse"
     #lin = Kernel(sched[0].ast)
     #assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
 
@@ -1729,7 +1735,7 @@ class TestHandCodedOpts(unittest.TestCase):
 
     s = layer_2.schedule()[-1]
     k = Kernel(s.ast)
-    k = hand_coded_optimizations(k)
+    k.apply_opts(hand_coded_optimizations(k))
     assert len(k.bufs) == 6  # make sure all ops are done in one kernel
     # masked upcast should upcast masked axis of size 7
     # masked upcast should not upcast large (20) last axis
@@ -1742,7 +1748,7 @@ class TestHandCodedOpts(unittest.TestCase):
 
     s = monster.schedule()[-1]
     k = Kernel(s.ast)
-    k = hand_coded_optimizations(k)
+    k.apply_opts(hand_coded_optimizations(k))
     assert len(k.bufs) == 37  # make sure all ops are done in one kernel
     # should upcast the two Tensor.stacks
     assert k.upcasted >= 2 and k.full_shape[k.shape_len-k.upcasted:k.shape_len].count(6) == 2
@@ -1758,7 +1764,7 @@ class TestHandCodedOpts(unittest.TestCase):
       # collect upcasts of tile transform kernels
       for i, si in enumerate(wino_schedule):
         k = Kernel(si.ast)
-        k = hand_coded_optimizations(k)
+        k.apply_opts(hand_coded_optimizations(k))
         if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel)
         if len(k.bufs) < 22: continue  # not a tile transform kernel (there's a permute kernel at the end)
         upcasts.append(tuple(k.full_shape[k.shape_len - k.upcasted:k.shape_len]))
@@ -1770,7 +1776,7 @@ class TestHandCodedOpts(unittest.TestCase):
       backward_schedule = Tensor.schedule(x.grad, w.grad)
       for si in backward_schedule:
         k = Kernel(si.ast)
-        k = hand_coded_optimizations(k)
+        k.apply_opts(hand_coded_optimizations(k))
         k.linearize()
         if len(k.bufs) < 20: continue  # not a tile transform kernel
         # heuristic number to make sure that at least some upcasts but not too many upcasts are being done
@@ -1856,7 +1862,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
 
   # Check correctness of handcoded optimiztions.
   k = Kernel(realized_ast)
-  k = hand_coded_optimizations(k)
+  k.apply_opts(hand_coded_optimizations(k))
   lins.append(k)
   prg = get_prg(k)
   reset_bufs(outbufs)

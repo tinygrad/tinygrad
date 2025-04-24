@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Optional, Any, Iterator, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
-                             cpu_time_execution, colored, Context, round_up
+                             cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -292,7 +292,7 @@ class CPUProgram:
 class CompileError(Exception): pass
 
 class Compiler:
-  def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
+  def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if DISABLE_COMPILER_CACHE else cachekey
   def compile(self, src:str) -> bytes: return src.encode()   # NOTE: empty compiler is the default
   def compile_cached(self, src:str) -> bytes:
     if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
@@ -330,8 +330,10 @@ class Compiled:
 def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
   if device is None: device = Device.DEFAULT
   if dtype == dtypes.bfloat16:
-    # NOTE: this requires bf16 buffer support
-    return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
+    if device in {"METAL", "AMD", "AMD_LLVM"}: return not CI
+    if device in {"CUDA", "NV"}: return not CI and not getenv("PTX")
+    if device in {"CPU", "LLVM"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"}
+    return False
   if dtype in dtypes.fp8s:
     # not supported yet - in progress
     return False

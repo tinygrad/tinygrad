@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typing import Any, cast, ClassVar
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
-from tinygrad.runtime.support.hcq import HWInterface
+from tinygrad.runtime.support.hcq import FileIOInterface
 from tinygrad.runtime.autogen import kgsl, adreno
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
@@ -325,7 +325,7 @@ class QCOMDevice(HCQCompiled):
   dummy_addr: int = 0
 
   def __init__(self, device:str=""):
-    self.fd = HWInterface('/dev/kgsl-3d0', os.O_RDWR)
+    self.fd = FileIOInterface('/dev/kgsl-3d0', os.O_RDWR)
     QCOMDevice.dummy_addr = cast(int, self._gpu_alloc(0x1000).va_addr)
 
     flags = kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC \
@@ -364,7 +364,7 @@ class QCOMDevice(HCQCompiled):
 
   def _gpu_free(self, mem:HCQBuffer):
     kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta.id)
-    HWInterface.munmap(mem.va_addr, mem.meta.mmapsize)
+    FileIOInterface.munmap(mem.va_addr, mem.meta.mmapsize)
 
   def _ensure_stack_size(self, sz):
     if not hasattr(self, '_stack'): self._stack = self._gpu_alloc(sz)
