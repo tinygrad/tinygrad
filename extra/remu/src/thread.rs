@@ -760,10 +760,10 @@ impl<'a> Thread<'a> {
             }
         }
         // vopc
-        else if instruction >> 25 == 0b0111110 {
-            let s0 = (instruction & 0x1ff) as usize;
-            let s1 = ((instruction >> 9) & 0xff) as usize;
-            let op = (instruction >> 17) & 0xff;
+        else if let Instruction::VOPC { vsrc, src, op } = decoded {
+            let s0 = src as usize;
+            let s1 = vsrc as usize;
+            let op = op as u32;
 
             print_instr!("VOPC", s0, s1, op);
 
