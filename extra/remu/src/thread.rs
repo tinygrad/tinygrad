@@ -161,11 +161,7 @@ impl<'a> Thread<'a> {
             } as u32;
             self.scalar = true;
         }
-        // sopp
-        else if instruction >> 23 == 0b10_1111111 {
-            let simm16 = (instruction & 0xffff) as i16;
-            let op = (instruction >> 16) & 0x7f;
-
+        else if let Instruction::SOPP { simm16, op } = decoded {
             print_instr!("SOPP", simm16, op);
 
             match op {
