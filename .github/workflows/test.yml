@@ -761,6 +761,30 @@ jobs:
     - name: Run WEBGPU Efficientnet
       run: node test/web/test_webgpu.js
 
+  osxcloud:
+    name: MacOS (cloud)
+    runs-on: macos-15
+    timeout-minutes: 10
+    env:
+      CLOUD: 1
+      CLOUDDEV: METAL
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: macos-cloud
+          deps: testing_minimal
+      - name: Check Device.DEFAULT and print some source
+        run: |
+          python -c "from tinygrad import Device; assert Device.DEFAULT == 'CLOUD', Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.default.properties['clouddev'] == 'METAL', Device.default.properties['clouddev']"
+          DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
+      - name: Run CLOUD=1 Test
+        run: |
+          python3 -m pytest test/test_tiny.py test/test_jit.py
+
   osxtests:
     strategy:
       fail-fast: false
