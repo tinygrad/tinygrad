@@ -82,7 +82,7 @@ class USBConnector:
     if DEBUG >= 6: libusb.libusb_set_option(self.usb_ctx, libusb.LIBUSB_OPTION_LOG_LEVEL, 4)
     
     # Open device
-    self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2463)
+    self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x2d01, 0x3666)
     if not self.handle: raise Exception("Failed to open device")
 
     # Detach kernel driver if needed

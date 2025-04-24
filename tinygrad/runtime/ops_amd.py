@@ -3,8 +3,8 @@ from typing import Any, cast, ClassVar
 import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select, time
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
-from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQArgsState, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram
+from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.ops import sint
 from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, all_same, flatten, DEBUG, OSX
@@ -12,7 +12,7 @@ from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, libc, pci, vfio, sqtt
 from tinygrad.runtime.autogen.am import am
-from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
+from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping, AMBar
 from tinygrad.runtime.support.am.usb import USBConnector, SCSIConnector
@@ -813,41 +813,93 @@ class PCIIface:
 
   def device_fini(self): self.adev.fini()
 
-class AMUSBBar(AMBar):
-  def __init__(self, addr, usb): (self.addr, self.size), self.usb, self.sz = addr, usb, 1
-  def __getitem__(self, index): return self.read(index * self.sz, self.sz)
-  def __setitem__(self, index, value): self.write(index * self.sz, value, self.sz)
-  def __len__(self): return self.size // self.sz
+class USBMMIOInterface(MMIOInterface):
+  def __init__(self, usb, addr, size, fmt):
+    self.usb, self.addr, self.nbytes, self.fmt = usb, addr, size, fmt
+    self.el_sz = struct.calcsize(self.fmt)
+  def __getitem__(self, index):
+    if isinstance(index, slice): return self._read((index.start or 0) * self.el_sz, ((index.stop or len(self)) - (index.start or 0)) * self.el_sz)
+    if isinstance(index, int): return self._acc_one(index * self.el_sz, self.el_sz)
+  def __setitem__(self, index, val):
+    if isinstance(index, slice): return self._write((index.start or 0) * self.el_sz, ((index.stop or len(self)) - (index.start or 0)) * self.el_sz, val)
+    if isinstance(index, int): self._acc_one(index * self.el_sz, self.el_sz, val)
 
-  @property
-  def nbytes(self): return self.size
+  def view(self, offset:int=0, size:int|None=None, fmt=None) -> MMIOInterface:
+    return USBMMIOInterface(self.usb, self.addr+offset, size or (self.nbytes - offset), fmt=fmt or self.fmt)
 
-  def cast(self, new_type):
-    self.sz = {'B':1, 'H':2, 'I':4, 'Q':8}[new_type]
-    return self
+  def _acc_size(self, sz): return next(x for x in [('I', 4), ('H', 2), ('B', 1)] if sz % x[1] == 0)
+  def _acc_one(self, off, sz, val=None):
+    upper = 0 if sz < 8 else self.usb.pcie_mem_req(self.addr + off + 4, val if val is None else (val >> 32), 4)
+    lower = self.usb.pcie_mem_req(self.addr + off, val if val is None else val & 0xffffffff, min(sz, 4)) 
+    if val is None: return lower | (upper << 32)
 
-  def read(self, off, sz):
-    assert off + sz <= self.size
-    assert sz in [1, 2, 4, 8]
-    upper = 0 if sz < 8 else self.usb.pcie_mem_req(self.addr + off + 4, None, 4)
-    x = self.usb.pcie_mem_req(self.addr + off, None, min(sz, 4)) | (upper << 32)
-    # print('rd', hex(self.addr + off), sz, x)
-    return x
-  def write(self, off, val, sz):
-    assert off + sz <= self.size
-    assert sz in [1, 2, 4, 8]
-    # print('wr', hex(self.addr + off), sz, val)
-    if sz > 4: self.usb.pcie_mem_req(self.addr + off + 4, val >> 32, 4)
-    self.usb.pcie_mem_req(self.addr + off, val & 0xffffffff, min(sz, 4))
-  def _copy_size(self, sz): return next(x for x in [4, 2, 1] if sz % x == 0)
-  def copyin(self, offset, mv):
-    x = mv.cast({1:'B', 2:'H', 4:'I'}[cp_sz:=self._copy_size(mv.nbytes)])
-    for i in trange(len(x), desc=f"copyin {len(x)} {cp_sz}"): self.write(offset + i * cp_sz, x[i], cp_sz)
-  def copyout(self, offset, size):
-    x = memoryview(bytearray(size))
-    mv = x.cast({1:'B', 2:'H', 4:'I'}[cp_sz:=self._copy_size(size)])
-    for i in trange(len(mv), desc=f"copyout {len(mv)} {cp_sz}"): mv[i] = self.read(offset + i * cp_sz, cp_sz)
-    return x
+  def _convert(self, raw:list[int], from_t, to_t) -> list[int]:
+    # normalize bytes → list of ints
+    vals = list(raw) if isinstance(raw, (bytes, bytearray)) else raw
+    if from_t == to_t:
+        return vals
+
+    # pack all from_t-values into one byte blob
+    packed = struct.pack('<' + from_t * len(vals), *vals)
+
+    # figure out how many to_t values fit in there
+    to_size = struct.calcsize(to_t)
+    count   = len(packed) // to_size
+
+    # unpack as count×to_t
+    return list(struct.unpack(f'<{count}{to_t}', packed))
+
+  def _read(self, offset, size):
+    acc, acc_size = self._acc_size(size)
+    return self._convert([self._acc_one(offset + i * acc_size, acc_size) for i in range(size // acc_size)], acc, self.fmt)
+
+  def _write(self, offset, _, data):
+    acc, acc_size = self._acc_size(len(data) * struct.calcsize(self.fmt))
+    per_slice = acc_size // self.el_sz
+    assert per_slice > 0
+    # print(offset, acc, acc_size, len(data) * struct.calcsize(self.fmt))
+
+    for i in range(len(data) // per_slice):
+      int_dat = self._convert(data[i * per_slice:(i + 1) * per_slice], self.fmt, acc)
+      # print(per_slice, list(data[i * per_slice:(i + 1) * per_slice]), hex(int_dat[0]))
+      self._acc_one(offset + i * acc_size, acc_size, int_dat[0])
+      print(hex(offset + i * acc_size), acc_size, hex(int_dat[0]))
+
+# class AMUSBBar(AMBar):
+#   def __init__(self, addr, usb): (self.addr, self.size), self.usb, self.sz = addr, usb, 1
+#   def __getitem__(self, index): return self.read(index * self.sz, self.sz)
+#   def __setitem__(self, index, value): self.write(index * self.sz, value, self.sz)
+#   def __len__(self): return self.size // self.sz
+
+#   @property
+#   def nbytes(self): return self.size
+
+#   def cast(self, new_type):
+#     self.sz = {'B':1, 'H':2, 'I':4, 'Q':8}[new_type]
+#     return self
+
+#   def read(self, off, sz):
+#     assert off + sz <= self.size
+#     assert sz in [1, 2, 4, 8]
+#     upper = 0 if sz < 8 else self.usb.pcie_mem_req(self.addr + off + 4, None, 4)
+#     x = self.usb.pcie_mem_req(self.addr + off, None, min(sz, 4)) | (upper << 32)
+#     # print('rd', hex(self.addr + off), sz, x)
+#     return x
+#   def write(self, off, val, sz):
+#     assert off + sz <= self.size
+#     assert sz in [1, 2, 4, 8]
+#     # print('wr', hex(self.addr + off), sz, val)
+#     if sz > 4: self.usb.pcie_mem_req(self.addr + off + 4, val >> 32, 4)
+#     self.usb.pcie_mem_req(self.addr + off, val & 0xffffffff, min(sz, 4))
+#   def _copy_size(self, sz): return next(x for x in [4, 2, 1] if sz % x == 0)
+#   def copyin(self, offset, mv):
+#     x = mv.cast({1:'B', 2:'H', 4:'I'}[cp_sz:=self._copy_size(mv.nbytes)])
+#     for i in trange(len(x), desc=f"copyin {len(x)} {cp_sz}"): self.write(offset + i * cp_sz, x[i], cp_sz)
+#   def copyout(self, offset, size):
+#     x = memoryview(bytearray(size))
+#     mv = x.cast({1:'B', 2:'H', 4:'I'}[cp_sz:=self._copy_size(size)])
+#     for i in trange(len(mv), desc=f"copyout {len(mv)} {cp_sz}"): mv[i] = self.read(offset + i * cp_sz, cp_sz)
+#     return x
 
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id):
@@ -863,6 +915,8 @@ class USBIface(PCIIface):
 
     try: is_cfg_ok = self.usb.pcie_cfg_req(pci.PCI_VENDOR_ID, bus=gpu_bus, dev=0, fn=0, size=2) == 0x1002
     except RuntimeError as e:
+      # TODO: fast load
+      
       for bus in ([0, 1] if is_24 else [0]):
         self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=gpu_bus, size=1)
         self.usb.pcie_cfg_req(pci.PCI_SECONDARY_BUS, bus=bus, dev=0, fn=0, value=bus+1, size=1)
@@ -914,85 +968,17 @@ class USBIface(PCIIface):
         self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=0x0, size=4)
       bar_off += 8 if bar_cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64 else 4
 
-    import pickle
-    pck_x = pickle.load(open("jl.bin", "rb"))
-    self.usb.write(0x0, pck_x[:0x9000])
-    self.usb.write(0xc000, pck_x[0xc000:0xf000])
-    # self.usb.write(0xb000, pck_x[0xb000:0xc000])
-    # self.usb.write(0xc000, pck_x[0xc000:0xf000])
-
-    # pm_state = self.usb.pcie_cfg_req(caps[0x1]+4, bus=gpu_bus, dev=0, fn=0, value=None, size=1)
-    # self.usb.pcie_cfg_req(caps[0x1]+4, bus=gpu_bus, dev=0, fn=0, value=0x0, size=1)
-    # print("PM cap now", pm_state)
-
     self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
-    # self.bars = 
 
-    vram_bar = AMUSBBar(self.bars[0], self.usb)
-    doorbell_bar = AMUSBBar(self.bars[2], self.usb)
-    mmio_bar = AMUSBBar(self.bars[5], self.usb)
+    vram_bar = USBMMIOInterface(self.usb, *self.bars[0], fmt='B')
+    doorbell_bar = USBMMIOInterface(self.usb, *self.bars[2], fmt='Q')
+    mmio_bar = USBMMIOInterface(self.usb, *self.bars[5], fmt='I')
 
-    print(hex(self.bars[0][0]))
+    # vram_bar[:0x10] = [0xdd] * 0x10
+    # vram_bar.view(0x0, 0x1000, 'I')[0] = 0xdeadbeef
+    # print(vram_bar[:0x8])
 
-    self.usb.write(0x54b, b'\x20')
-    self.usb.write(0x5a8, b'\x02')
-    self.usb.write(0x5f8, b'\x04')
-    self.usb.write(0x7ef, bytes([0])) # checked in FUN_CODE_3f4a
-    self.usb.write(0xc422, b'\x02') 
-    self.usb.write(0x648, bytes([1])) # c
-
-    print(self.usb.read(0xb236, 1))
-    print(self.usb.read(0xb23e, 1))
-    print(self.usb.read(0xb242, 1))
-    print(self.usb.read(0xb246, 1))
-    print(self.usb.read(0xb24a, 1))
-    print(self.usb.read(0xb24e, 1))
-
-    self.usb.pcie_mem_req(0xd00000 + 0x1008, value=0x2, size=4)
-    self.usb.pcie_mem_req(0xd00000 + 0x100c, value=0x2, size=4)
-    print(hex(self.usb.pcie_mem_req(0xd00000 + 0x1000, value=None, size=4)))
-    print(hex(self.usb.pcie_mem_req(0xd00000 + 0x1004, value=None, size=4)))
-    # self.usb.write(0xb200 + 0x51, bytes([2]))
-    # self.usb.write(0xb200 + 0x52, bytes([2]))
-
-    print(self.usb.read(0xf000, 0x10))
-
-    xxx = (ctypes.c_uint8 * 4096)()
-    for i in range(4096): xxx[i] = 0x34
-    
-    import threading
-    def write_thread(): self.usb.scsi_write(0xeaeb, xxx)
-    thread = threading.Thread(target=write_thread)
-    thread.start()
-    time.sleep(0.04)
-    self.usb.reset()
-    # self.usb.write(0x548, b'\x01\x02\x01 ')
-    # self.usb.write(0x5a8, b'\x02\x01\x01\x01')
-    # self.usb.write(0x5f8, b'\x04\x01\x01\x02')
-
-    # self.usb.write(0x0, pck_x[:0x9000])
-    self.usb.write(0xc000, pck_x[0xc000:0xf000])
-
-    print(self.usb.read(0xf000, 0x10))
-    print("pci works?", self.usb.pcie_mem_req(0xd00000 + 0x100c, value=None, size=4))
-
-    xxx = (ctypes.c_uint8 * 4096)()
-    for i in range(4096): xxx[i] = 0x38
-
-    import threading
-    def write_thread(): self.usb.scsi_write(0xeaeb, xxx)
-    thread = threading.Thread(target=write_thread)
-    thread.start()
-    time.sleep(0.04)
-    self.usb.reset()
-
-    print(self.usb.read(0xf000, 0x10))
-    print("pci works?", self.usb.pcie_mem_req(0xd00000 + 0x100c, value=None, size=4))
-
-    print(self.usb.read(0xb200 + 0x51, 1))
-    print(self.usb.read(0xb200 + 0x52, 1))
-
-    exit(0)
+    # exit(0)
 
     self.adev = AMDev("usb:0", vram_bar, doorbell_bar, mmio_bar)
     self.props = {'simd_count': 64, 'simd_per_cu': 2, 'array_count': 4, 'gfx_target_version': 110002, 'max_slots_scratch_cu': 32,

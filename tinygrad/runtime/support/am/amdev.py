@@ -306,6 +306,8 @@ class AMDev:
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
+    print("ok")
+
     if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0):
       if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
       self.fini()
@@ -313,6 +315,8 @@ class AMDev:
 
     # Init sw for all IP blocks
     for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init_sw()
+
+    print("ok")
 
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
@@ -346,15 +350,15 @@ class AMDev:
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
   def rreg(self, reg:int) -> int:
-    val = self.indirect_rreg(reg * 4) if reg > self.mmio.size else self.mmio.read(reg * 4, 4)
+    val = self.indirect_rreg(reg * 4) if reg > len(self.mmio) else self.mmio[reg]
     if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"am {self.devfmt}: Reading register {reg:#x} with value {val:#x}")
     self._prev_rreg = (reg, val)
     return val
 
   def wreg(self, reg:int, val:int):
     if AM_DEBUG >= 4: print(f"am {self.devfmt}: Writing register {reg:#x} with value {val:#x}")
-    if reg > self.mmio.size: self.indirect_wreg(reg * 4, val)
-    else: self.mmio.write(reg * 4, val, 4)
+    if reg > len(self.mmio): self.indirect_wreg(reg * 4, val)
+    else: self.mmio[reg] = val
 
   def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int):
     self.reg(f"{reg_base}{lo_suffix}").write(val & 0xffffffff)
