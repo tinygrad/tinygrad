@@ -567,9 +567,9 @@ def train_retinanet():
           st = time.time()
 
           out, img_ids, img_sizes, proc = _eval_step(model, (x:=proc[0])).numpy(), proc[1], proc[2], proc[3]
-          out = model.postprocess_detections(out, input_size=x.shape[1:3], orig_image_sizes=img_sizes)
 
           if RUNMLPERF:
+            out = model.postprocess_detections(out, input_size=x.shape[1:3], orig_image_sizes=img_sizes)
             coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
               for i, prediction in enumerate(out) for box, score, label in zip(*prediction.values())]
 
