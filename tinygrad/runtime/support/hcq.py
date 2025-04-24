@@ -212,15 +212,14 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
 
 class HCQSignal(Generic[DeviceType]):
   def __init__(self, base_addr:sint|None=None, value:int=0, dev_t:Type[DeviceType]|None=None, timeline_for_device:DeviceType|None=None,
-               timestamp_divider=1, value_off=0, timestamp_off=8, create_mv=None):
+               timestamp_divider=1, value_off=0, timestamp_off=8, interface_t:Type[MMIOInterface]=MMIOInterface):
     self.base_addr = dev_t._alloc_signal_addr() if dev_t is not None and base_addr is None else base_addr
     self.value_addr, self.timestamp_addr, self.dev_t = self.base_addr+value_off, self.base_addr+timestamp_off, dev_t
     self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
     self.timeline_for_device:DeviceType|None = timeline_for_device
 
-    create_mv_func = create_mv or to_mv
     if isinstance(self.base_addr, int):
-      self.value_mv, self.timestamp_mv = create_mv_func(self.value_addr, 8).cast('Q'), create_mv_func(self.timestamp_addr, 8).cast('Q')
+      self.value_mv, self.timestamp_mv = interface_t(self.value_addr, 8, fmt='Q'), interface_t(self.timestamp_addr, 8, fmt='Q')
       self.value_mv[0] = value
 
   def __del__(self):

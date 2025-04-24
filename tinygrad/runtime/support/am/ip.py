@@ -429,9 +429,6 @@ class AM_PSP(AM_IP):
   def _prep_msg1(self, data):
     self.adev.vram.view(self.msg1_paddr, len(data))[:] = data
     self.adev.vram[self.msg1_paddr + len(data)] = 0
-
-    assert self.adev.vram.view(self.msg1_paddr, len(data))[:] == list(data)
-    print("ok prep_msg111")
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw, compid):
@@ -481,8 +478,8 @@ class AM_PSP(AM_IP):
     self.adev.vram.view(self.cmd_paddr, ctypes.sizeof(cmd))[:] = memoryview(cmd).cast('B')
     self.adev.vram.view(self.ring_paddr + prev_wptr * 4, ctypes.sizeof(msg))[:] = memoryview(msg).cast('B')
 
-    self.adev.vram.copyin(self.cmd_paddr, memoryview(cmd).cast('B'))
-    self.adev.vram.copyin(self.ring_paddr + prev_wptr * 4, memoryview(write_loc).cast('B'))
+    # self.adev.vram.copyin(self.cmd_paddr, memoryview(cmd).cast('B'))
+    # self.adev.vram.copyin(self.ring_paddr + prev_wptr * 4, memoryview(write_loc).cast('B'))
 
     # Move the wptr
     self.adev.reg(f"{self.reg_pref}_67").write(prev_wptr + ctypes.sizeof(am.struct_psp_gfx_rb_frame) // 4)
