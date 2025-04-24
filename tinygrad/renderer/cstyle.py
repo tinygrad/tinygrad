@@ -133,8 +133,8 @@ class CStyleLanguage(Renderer):
     c: defaultdict[str, int] = defaultdict(int)
     name = "test"
     for u in uops:
-      if u.op is Ops.NAME:
-        name = u.arg
+      if u.op is Ops.SINK:
+        if u.arg is not None: name = u.arg.name
         continue
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]
@@ -143,7 +143,7 @@ class CStyleLanguage(Renderer):
 
       # mark buffers that we store to writable
       if u.op is Ops.STORE:
-        for up in u.src[0].toposort:
+        for up in u.src[0].toposort():
           if up.op is Ops.DEFINE_GLOBAL: bufs[up] = (bufs[up][0], (bufs[up][1][0], True))
 
       # naming

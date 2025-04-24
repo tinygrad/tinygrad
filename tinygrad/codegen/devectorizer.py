@@ -22,7 +22,8 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
   for stmt in split_uop(valid, Ops.AND):
-    X, is_upper_bound, c = parse_valid(stmt)
+    try: X, is_upper_bound, c = parse_valid(stmt)
+    except ValueError: return None
 
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
     if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in split_uop(X, Ops.ADD)):
@@ -47,7 +48,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   return buf.index(idx, new_valid)
 
 def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
-  if store_gate not in [gate.src[0] for gate in val.toposort if gate.op is Ops.IF]: return None
+  if store_gate not in [gate.src[0] for gate in val.toposort() if gate.op is Ops.IF]: return None
   # remove the gate from the index
   return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val)
 

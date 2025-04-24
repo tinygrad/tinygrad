@@ -11,6 +11,16 @@ else:
   device = "tiny"
 
 class TestTorchBackend(unittest.TestCase):
+  def test_randperm_generator_out(self):
+    n = 10
+    out = torch.empty(n, dtype=torch.long, device=device)
+    res = torch.randperm(n, out=out).cpu().numpy()
+    np.testing.assert_equal(set(res), set(range(n)))
+    np.testing.assert_equal(out.cpu().numpy(), res)
+
+    res2 = torch.randperm(n).cpu().numpy()
+    np.testing.assert_equal(set(res2), set(range(n)))
+
   def test_numpy_ones(self):
     a = torch.ones(4, device=device)
     np.testing.assert_equal(a.cpu().numpy(), [1,1,1,1])
@@ -73,6 +83,26 @@ class TestTorchBackend(unittest.TestCase):
     b = a.exp2()
     np.testing.assert_equal(b.cpu().numpy(), [2,2,2,2])
 
+  def test_amax(self):
+    x = torch.tensor([[[ 1.5,  2.3,  3.1,  4.7],
+                       [ 5.2,  6.8,  7.4,  12.9],
+                       [ 9.0, 12.3, 11.6, 10.1]],
+                      [[13.2, 16.9, 15.5, 14.1],
+                       [17.1, 24.9, 19.8, 20.2],
+                       [21.0, 22.3, 23.6, 18.4]]], device=device)
+
+    y1 = torch.amax(x)
+    expected = np.array([24.9], dtype=np.float32)
+    np.testing.assert_equal(y1.cpu().numpy(), expected)
+
+    y2 = torch.amax(x, dim=(1,2))
+    expected = np.array([12.9, 24.9], dtype=np.float32)
+    np.testing.assert_equal(y2.cpu().numpy(), expected)
+
+    y3 = torch.amax(x, dim=2)
+    expected = np.array([[4.7, 12.9, 12.3], [16.9, 24.9, 23.6]], dtype=np.float32)
+    np.testing.assert_equal(y3.cpu().numpy(), expected)
+
   def test_isfinite(self):
     a = torch.ones(4, device=device)
     np.testing.assert_equal(torch.isfinite(a).cpu().numpy(), [True, True, True, True])
@@ -112,6 +142,16 @@ class TestTorchBackend(unittest.TestCase):
     mask = torch.tensor(True, device=device)
     out = torch.masked_select(a, mask)
     np.testing.assert_equal(out.cpu().numpy(), [4, 3, 2, 1])
+
+  def test_isin_tensor_tensor_out(self):
+    a = torch.tensor([1, 2, 3], device=device)
+    b = torch.tensor([2, 4], device=device)
+    expected_base = torch.tensor([False, True, False], device=device)
+    for assume_unique in [False, True]:
+      for invert, expected in [(False, expected_base), (True, ~expected_base)]:
+        out = torch.empty_like(a, dtype=torch.bool)
+        res = torch.ops.aten.isin.Tensor_Tensor_out(a, b, invert=invert, assume_unique=assume_unique, out=out)
+        np.testing.assert_equal(out.cpu().numpy(), expected.cpu().numpy())
 
   @unittest.skip("meh")
   def test_str(self):

@@ -6,7 +6,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.ops import UOp, Ops
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, Context
 from test.external.fuzz_linearizer import compare_linearizer
 from test.helpers import ast_const
 
@@ -17,13 +17,12 @@ def helper_test_lin(lin: Kernel, opts, failed_platforms, rtol=1e-2, atol=1e-2):
   if any(b.dtype.base == dtypes.half for b in lin.membufs) and not is_dtype_supported(dtypes.half): return
   if any(b.dtype.base == dtypes.bfloat16 for b in lin.membufs) and not is_dtype_supported(dtypes.bfloat16): return
 
-  for opt in opts:
-    try:
-      lin.apply_opt(opt)
-    except KernelOptError:
-      # it's considered fixed if we invalidated the opts
-      assert Device.DEFAULT not in failed_platforms, f"unexpected success on {Device.DEFAULT}"
-      return
+  try:
+    lin.apply_opts(opts)
+  except KernelOptError:
+    # it's considered fixed if we invalidated the opts
+    assert Device.DEFAULT not in failed_platforms, f"unexpected success on {Device.DEFAULT}"
+    return
 
   compare_result = compare_linearizer(lin, rtol=rtol, atol=atol)
   if compare_result[0] in ["PASS", "KernelOptError"]:
@@ -1045,7 +1044,7 @@ class TestLinearizerFailures(unittest.TestCase):
     ifs = [u for u in k.uops if u.op is Ops.IF]
     self.assertEqual(len(ifs), 3)
     #for st in k.uops.sink.src: self.assertEqual(len(st.src), 4)
-    self.assertLessEqual(len(ifs[0].src[0].toposort), 17)
+    self.assertLessEqual(len(ifs[0].src[0].toposort()), 17)
 
   def test_failure_45(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
@@ -1429,7 +1428,8 @@ class TestLinearizerFailures(unittest.TestCase):
           UOp(Ops.CONST, dtypes.int, arg=-1, src=(
             UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(50257, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
     opts = [Opt(op=OptOps.GROUPTOP, axis=0, arg=29), Opt(op=OptOps.PADTO, axis=0, arg=32)]
-    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["METAL", "GPU", "AMD", "NV"])
+    with Context(IGNORE_OOB=0):
+      helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["METAL", "GPU", "AMD", "NV", "CUDA"])
 
 if __name__ == '__main__':
   unittest.main()
