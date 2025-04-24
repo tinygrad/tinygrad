@@ -2,31 +2,32 @@ use crate::helpers::{bits, sign_ext};
 
 const NULL: u8 = 124;
 
+#[allow(dead_code)]
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
-    SOP2 { },
-    SOP1 { },
-    SOPK { },
-    SOPP { },
-    SOPC { },
+    SOP2 { op: u8, ssrc0: u8, ssrc1: u8, sdst: u8 },
+    SOP1 { op: u8, ssrc0: u8, sdst: u8 },
+    SOPK { op: u8, simm16: i16, sdst: u8 },
+    SOPP { op: u8, simm16: i16 },
+    SOPC { op: u8, ssrc0: u8, ssrc1: u8 },
 
     SMEM { op: u8, sdata: u8, sbase: u8, offset: i32, soffset: u8, glc: bool, dlc: bool },
 
-    VOP1 { },
-    VOP2 { },
-    VOPC { },
-    VOP3 { },
-    VOP3P { },
+    VOP1 { op: u8, },
+    VOP2 { op: u8, },
+    VOPC { op: u8, },
+    VOP3 { op: u8, },
+    VOP3P { op: u8, },
 
-    DS { },
+    DS { op: u8, },
 
-    FLAT { },
+    FLAT { op: u8, },
 }
 
-pub fn decode(word0:u32, word1:Option<&u32>) -> Instruction {
-    match bits(word0, 31, 30) {
+pub fn decode(word:u32, word1:Option<&u32>) -> Instruction {
+    match bits(word, 31, 30) {
         0b11 => {
-            let word = (*word1.unwrap() as u64) << 32 | (word0 as u64);
+            let word = (*word1.unwrap() as u64) << 32 | (word as u64);
             match bits(word, 29, 26) {
                 0b1101 => {
                     let sbase = (bits(word, 5, 0) as u8) << 1;
@@ -40,6 +41,36 @@ pub fn decode(word0:u32, word1:Option<&u32>) -> Instruction {
                 }
                 _ => todo!(),
             }
+        }
+        0b10 => {
+            if bits(word, 29, 23) == 0b1111101 {
+                let ssrc0 = bits(word, 7, 0) as u8;
+                let op = bits(word, 15, 8) as u8;
+                let sdst = bits(word, 22, 16) as u8;
+                return Instruction::SOP1 { ssrc0, sdst, op }
+            }
+            if bits(word, 29, 23) == 0b1111111 {
+                let simm16 = bits(word, 15, 0) as i16;
+                let op = bits(word, 22, 16) as u8;
+                return Instruction::SOPP { simm16, op }
+            }
+            if bits(word, 29, 23) == 0b1111110 {
+                let ssrc0 = bits(word, 7, 0) as u8;
+                let ssrc1 = bits(word, 15, 8) as u8;
+                let op = bits(word, 22, 16) as u8;
+                return Instruction::SOPC { ssrc0, ssrc1, op }
+            }
+            if bits(word, 29, 28) == 0b11 {
+                let simm16 = bits(word, 15, 0) as i16;
+                let sdst = bits(word, 22, 16) as u8;
+                let op = bits(word, 27, 23) as u8;
+                return Instruction::SOPK { simm16, sdst, op }
+            }
+            let ssrc0 = bits(word, 7, 0) as u8;
+            let ssrc1 = bits(word, 15, 8) as u8;
+            let sdst = bits(word, 22, 16) as u8;
+            let op = bits(word, 29, 23) as u8;
+            return Instruction::SOP2 { ssrc0, ssrc1, sdst, op }
         }
         _ => todo!(),
     }
@@ -82,7 +113,7 @@ mod test_rdna3 {
     }
 
     #[test]
-    fn test_asm_smem() {
+    fn test_decode_smem() {
         assert_eq!(test_decode("s_load_b128 s[4:7], s[0:1], null"), Instruction::SMEM { op: 2, sdata: 4, sbase: 0, offset: 0, soffset: NULL, glc: false, dlc: false });
         assert_eq!(test_decode("s_load_b32 s10, s[0:1], 0xc"), Instruction::SMEM { op: 0, sdata: 10, sbase: 0, offset: 0xc, soffset: NULL, glc: false, dlc: false });
         assert_eq!(test_decode("s_load_b32 s0, s[4:5], s6"), Instruction::SMEM { op: 0, sdata: 0, sbase: 4, offset: 0, soffset: 6, glc: false, dlc: false });
@@ -90,5 +121,15 @@ mod test_rdna3 {
         assert_eq!(test_decode("s_load_b32 s0, s[4:5], glc"), Instruction::SMEM { op: 0, sdata: 0, sbase: 4, offset: 0, soffset: NULL, glc: true, dlc: false });
         assert_eq!(test_decode("s_load_b32 s0, s[4:5], -20"), Instruction::SMEM { op: 0, sdata: 0, sbase: 4, offset: -20, soffset: NULL, glc: false, dlc: false });
         assert_eq!(test_decode("s_load_b32 s0, s[4:5], -1048576"), Instruction::SMEM { op: 0, sdata: 0, sbase: 4, offset: -1048576, soffset: NULL, glc: false, dlc: false });
+    }
+
+    #[test]
+    fn test_decode_salu() {
+        assert_eq!(test_decode("s_add_u32 s1 s2 s3"), Instruction::SOP2 { op: 0, ssrc0: 2, ssrc1: 3, sdst: 1 });
+        assert_eq!(test_decode("s_add_u32 vcc_hi exec_lo vcc_lo"), Instruction::SOP2 { op: 0, ssrc0: 126, ssrc1: 106, sdst: 107 });
+        assert_eq!(test_decode("s_mov_b32 s1 -0.5"), Instruction::SOP1 { op: 0, ssrc0: 241, sdst: 1 });
+        assert_eq!(test_decode("s_cmpk_eq_i32 s0 -30"), Instruction::SOPK { op: 3, sdst: 0, simm16: -30 });
+        assert_eq!(test_decode("s_cmpk_eq_u32 s0 65535"), Instruction::SOPK { op: 9, sdst: 0, simm16: -1 });
+        assert_eq!(test_decode("s_cmp_ge_i32 s1 s2"), Instruction::SOPC { op: 3, ssrc0: 1, ssrc1: 2 });
     }
 }
