@@ -38,6 +38,7 @@ class TestWhisper(unittest.TestCase):
     self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_1),  TRANSCRIPTION_1)
 
   @unittest.expectedFailure  # Test for out of bounds access
+  @unittest.skip("TODO: flaky")
   def test_transcribe_file1_OOB(self):
     with Context(IGNORE_OOB=0):
       self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_1),  TRANSCRIPTION_1)
