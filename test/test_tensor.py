@@ -237,21 +237,6 @@ class TestTinygrad(unittest.TestCase):
         b = random_fn(10,10).realize()
         np.testing.assert_allclose(a.numpy(), b.numpy())
 
-  def test_random_fns_are_deterministic_with_generator(self):
-    for random_fn in [Tensor.randn, Tensor.normal, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform, Tensor.kaiming_normal]:
-      with self.subTest(msg=f"Tensor.{random_fn.__name__}"):
-        generator_a = RandomGenerator()
-        generator_a.manual_seed(1337)
-        a1 = random_fn(10,10,generator=generator_a).realize()
-        generator_b = RandomGenerator()
-        generator_b.manual_seed(1337)
-        b1 = random_fn(10,10,generator=generator_b).realize()
-        np.testing.assert_allclose(a1.numpy(), b1.numpy())
-        # test for generator keep its own deterministic state
-        b2 = random_fn(10,10,generator=generator_b).realize()
-        a2 = random_fn(10,10,generator=generator_a).realize()
-        np.testing.assert_allclose(a2.numpy(), b2.numpy())
-
   def test_randperm(self):
     Tensor.manual_seed(0)
     a = Tensor.randperm(10).realize()

@@ -495,7 +495,7 @@ class Tensor(SimpleMathTrait):
     return counts0.cat(counts1)
 
   @staticmethod
-  def rand(*shape, device:str|None=None, dtype:DTypeLike|None=None, contiguous:bool=True, generator:RandomGenerator|None=None, **kwargs) -> Tensor:
+  def rand(*shape, device:str|None=None, dtype:DTypeLike|None=None, contiguous:bool=True, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
 
@@ -517,22 +517,19 @@ class Tensor(SimpleMathTrait):
     if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
     num = ceildiv(numel * dtype.itemsize, 4)
 
-    device_seeds = generator.device_seeds if generator is not None else Tensor._device_seeds
-    device_rng_counters = generator.device_rng_counters if generator is not None else Tensor._device_rng_counters
-    seed = generator.seed if generator is not None else Tensor._seed
     # generate per device seeds and rng counter if we haven't seen this device yet
-    if device not in device_seeds:
-      device_seeds[device] = Tensor(
-        [int.from_bytes(hashlib.sha256(len(device_seeds).to_bytes(4, "big")).digest(), "big"), seed],
+    if device not in Tensor._device_seeds:
+      Tensor._device_seeds[device] = Tensor(
+        [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed],
         device=device, dtype=dtypes.uint32, requires_grad=False)
-      device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint32, requires_grad=False)
+      Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint32, requires_grad=False)
     # increment rng counter for devices
-    else: device_rng_counters[device].assign(device_rng_counters[device] + num).contiguous()
+    else: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num).contiguous()
 
     # threefry random bits
-    counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+device_rng_counters[device])
+    counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
     counts1 = counts0 + ceildiv(num, 2)
-    bits = Tensor._threefry_random_bits(device_seeds[device], counts0, counts1)[:num]
+    bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts0, counts1)[:num]
 
     # bitcast to uint with same number of bits
     _, nmant = dtypes.finfo(dtype)
@@ -4236,13 +4233,3 @@ if TRACEMETA >= 1:
   for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
     if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
     setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
-
-class RandomGenerator:
-  seed: int = int(time.time())
-  device_seeds: dict[str, Tensor] = {}
-  device_rng_counters: dict[str, Tensor] = {}
-
-  def manual_seed(self, seed: int) -> None:
-    self.seed = seed
-    self.device_seeds = {}
-    self.device_rng_counters = {}

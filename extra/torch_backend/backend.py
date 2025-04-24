@@ -2,7 +2,7 @@
 # A001 Variable `input` is shadowing a Python builtin
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
-from tinygrad import Tensor, dtypes, Device, RandomGenerator
+from tinygrad import Tensor, dtypes, Device
 from tinygrad.ops import Ops
 from tinygrad.helpers import getenv, prod
 import torch.lib
@@ -22,9 +22,6 @@ def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype),
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
-def get_rng_from_generator(g:torch.Generator) -> RandomGenerator:
-  assert isinstance(g, torch.Generator), f"g isn't {type(g)}"
-  return mod.get_rng_from_generator(g)
 class TinyBackend:
   def is_initialized(self): return True
   def is_available(self): return True
@@ -113,8 +110,7 @@ def index_put(self, indices, values, accumulate=False):
 
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None):
-  rng = get_rng_from_generator(generator)
-  return out.copy_(wrap(Tensor.randperm(n, device=unwrap(out).device, generator=rng)))
+  return out.copy_(wrap(Tensor.randperm(n, generator=generator, device=unwrap(out).device)))
 
 @torch.library.impl("aten::cummax", "privateuseone")
 def cummax(self, dim):
