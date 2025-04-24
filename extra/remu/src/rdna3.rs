@@ -16,14 +16,16 @@ pub enum Instruction {
     VOP1 { op: u8, vdst: u8, src: u16 },
     VOP2 { op: u8, vdst: u8, vsrc: u8, src: u16 },
     VOPC { op: u8, vsrc: u8, src: u16 },
-    VOP3 { op: u8, cm: bool, opsel: u8, abs: u8, vdst: u8, neg: u8, omod: u8, src2: u16, src1: u16, src0: u16 },
-    VOP3SD { op: u8, cm: bool, sdst: u8, vdst: u8, neg: u8, omod: u8, src2: u16, src1: u16, src0: u16 },
-    VOP3P { op: u8, cm: bool, opslh0: bool, opsel: u8, neg_hi: u8, vdst: u8, neg: u8, opelh: u8, src2: u16, src1: u16, src0: u16 },
+    VOP3 { op: u32, opsel: u8, cm: bool, abs: u8, vdst: u8, neg: u8, omod: u8, src2: u16, src1: u16, src0: u16 },
+    VOP3SD { op: u32, cm: bool, sdst: u8, vdst: u8, neg: u8, omod: u8, src2: u16, src1: u16, src0: u16 },
+    VOP3P { op: u8, vdst: u8, neg_hi: u8, opsel: u8, opsel_hi: u8, opsel_hi2: bool, cm: bool, src2: u16, src1: u16, src0: u16, neg: u8 },
 
     DS { op: u8, gds: bool, offset1: u8, offset0: u8, vdst: u8, data1: u8, data0: u8, addr: u8 },
 
     FLAT { op: u8, offset: u16, dlc: bool, glc: bool, slc: bool, seg: u8, addr: u8, data: u8, saddr: u8, sve: bool, vdst: u8 }
 }
+
+const VOP3SD_OPS: [u32; 7] = [764, 765, 766, 767, 768, 769, 770];
 
 pub fn decode(word:u32, word1:Option<&u32>) -> Instruction {
     match bits(word, 31, 30) {
@@ -40,6 +42,63 @@ pub fn decode(word:u32, word1:Option<&u32>) -> Instruction {
                     let soffset = bits(word, 63, 57) as u8;
                     Instruction::SMEM { sbase, sdata, dlc, glc, op, offset, soffset }
                 }
+                0b0101 => {
+                    let op = bits(word, 25, 16) as u32;
+                    let vdst = bits(word, 7, 0) as u8;
+                    let cm = bits(word, 15, 15) != 0;
+                    let src0 = bits(word, 40, 32) as u16;
+                    let src1 = bits(word, 49, 41) as u16;
+                    let src2 = bits(word, 58, 50) as u16;
+                    let omod = bits(word, 60, 59) as u8;
+                    let neg = bits(word, 63, 61) as u8;
+                     if VOP3SD_OPS.contains(&op) {
+                         let sdst = bits(word, 14, 8) as u8;
+                         Instruction::VOP3SD { op, vdst, sdst, cm, src0, src1, src2, omod, neg }
+                     } else {
+                        let abs = bits(word, 10, 8) as u8;
+                        let opsel = bits(word, 14, 11) as u8;
+                        Instruction::VOP3 { opsel, cm, abs, vdst, neg, omod, src2, src1, src0, op }
+                     }
+                }
+                0b0011 => {
+                    let op = bits(word, 22, 16) as u8;
+                    let vdst = bits(word, 7, 0) as u8;
+                    let neg_hi = bits(word, 10, 8) as u8;
+                    let opsel = bits(word, 13, 11) as u8;
+                    let opsel_hi2 = bits(word, 14, 14) != 0;
+                    let cm = bits(word, 15, 15) != 0;
+                    let src0 = bits(word, 40, 32) as u16;
+                    let src1 = bits(word, 49, 41) as u16;
+                    let src2 = bits(word, 58, 50) as u16;
+                    let opsel_hi = bits(word, 60, 59) as u8;
+                    let neg = bits(word, 63, 61) as u8;
+                    Instruction::VOP3P { op, vdst, neg_hi, opsel, opsel_hi, opsel_hi2, cm, src0, src1, src2, neg }
+                }
+                0b0110 => {
+                    let offset0 = bits(word, 7, 0) as u8;
+                    let offset1 = bits(word, 15, 8) as u8;
+                    let gds = bits(word, 17, 17) != 0;
+                    let op = bits(word, 25, 18) as u8;
+                    let addr = bits(word, 39, 32) as u8;
+                    let data0 = bits(word, 47, 40) as u8;
+                    let data1 = bits(word, 55, 48) as u8;
+                    let vdst = bits(word, 63, 56) as u8;
+                    Instruction::DS { op, gds, offset1, offset0, vdst, data1, data0, addr }
+                }
+                0b0111 => {
+                    let offset = bits(word, 12, 0) as u16;
+                    let dlc = bits(word, 13, 13) != 0;
+                    let glc = bits(word, 14, 14) != 0;
+                    let slc = bits(word, 15, 15) != 0;
+                    let seg = bits(word, 17, 16) as u8;
+                    let op = bits(word, 24, 18) as u8;
+                    let addr = bits(word, 39, 32) as u8;
+                    let data = bits(word, 47, 40) as u8;
+                    let saddr = bits(word, 54, 48) as u8;
+                    let sve = bits(word, 55, 55) != 0;
+                    let vdst = bits(word, 63, 56) as u8;
+                    Instruction::FLAT { offset, dlc, glc, slc, seg, op, addr, data, saddr, sve, vdst }
+                },
                 _ => todo!(),
             }
         }
@@ -131,9 +190,22 @@ mod test_rdna3 {
     }
 
     #[test]
-    fn test_decode_valu_32() {
+    fn test_decode_valu_e32() {
         assert_eq!(test_decode("v_mov_b32 v0, v0"), Instruction::VOP1 { op: 1, vdst: 0, src: 256 });
         assert_eq!(test_decode("v_mov_b32 v0, s0"), Instruction::VOP1 { op: 1, vdst: 0, src: 0 });
         assert_eq!(test_decode("v_cmp_t_f32 v1, v0"), Instruction::VOPC { op: 31, vsrc: 0, src: 257 });
+    }
+
+    #[test]
+    fn test_decode_valu_e64() {
+        assert_eq!(test_decode("v_log_f32_e64 v2, |v0|"), Instruction::VOP3 { op: 423, vdst: 2, src0: 256, src1: 0, src2: 0, abs: 0b001, neg: 0, opsel: 0, omod: 0, cm: false });
+        assert_eq!(test_decode("v_div_scale_f32 v2, s1, v0, v1, v2"), Instruction::VOP3SD { op: 764, cm: false, vdst: 2, sdst: 1, src0: 256, src1: 257, src2: 258, omod: 0, neg: 0 });
+        assert_eq!(test_decode("v_pk_add_i16 v1, v0, v2"), Instruction::VOP3P { op: 2, vdst: 1, neg_hi: 0, opsel: 0, opsel_hi: 3, opsel_hi2: true, cm: false, src2: 0, src1: 258, src0: 256, neg: 0 });
+    }
+
+    #[test]
+    fn test_decode_ds() {
+        assert_eq!(test_decode("ds_add_u32 v2, v4 offset:16"), Instruction::DS { op: 0, gds: false, offset1: 0, offset0: 0x10, vdst: 0, data1: 0, data0: 4, addr: 2 });
+        assert_eq!(test_decode("ds_store_b32 v0, v1, offset: 0x04 gds"), Instruction::DS { op: 13, gds: true, offset1: 0, offset0: 0x04, vdst: 0, data1: 0, data0: 1, addr: 0 });
     }
 }
