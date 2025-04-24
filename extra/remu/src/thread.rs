@@ -61,11 +61,9 @@ impl<'a> Thread<'a> {
             };
             self.scalar = true;
         }
-        // sop1
-        else if instruction >> 23 == 0b10_1111101 {
-            let src = (instruction & 0xFF) as usize;
-            let op = (instruction >> 8) & 0xFF;
-            let sdst = ((instruction >> 16) & 0x7F) as usize;
+        else if let Instruction::SOP1 { ssrc0, op, sdst } = decoded {
+            let src = ssrc0 as usize;
+            let sdst = sdst as usize;
 
             print_instr!("SOP1", src, sdst, op);
 
