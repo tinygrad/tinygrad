@@ -4,7 +4,7 @@ import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType
-from tinygrad.helpers import partition, all_same, prod, getenv, DEBUG, flatten
+from tinygrad.helpers import partition, all_same, prod, getenv, DEBUG, flatten, get_single_element
 from tinygrad.codegen.transcendental import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
@@ -49,14 +49,17 @@ symbolic_simple = PatternMatcher([
   (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # ** constant folding **
   # TODO: add const folding for Ops.THREEFRY
-  (UPat(GroupOp.ALU, name="a", src=UPat((Ops.VCONST, Ops.CONST))),
-   lambda a: a.const_like(exec_alu(a.op, a.dtype, [x.arg for x in a.src], False)) if a.op is not Ops.THREEFRY else None),
+  (UPat(GroupOp.Unary, src=(UPat((Ops.VCONST, Ops.CONST)),), name="a"), lambda a: a.const_like(exec_alu(a.op, a.dtype, [a.src[0].arg], False))),
+  (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(UPat((Ops.VCONST, Ops.CONST)),)*2, name="a"),
+   lambda a: a.const_like(exec_alu(a.op, a.dtype, [a.src[0].arg, a.src[1].arg], False))),
+  (UPat(GroupOp.Ternary, src=(UPat((Ops.VCONST, Ops.CONST)),)*3, name="a"),
+   lambda a: a.const_like(exec_alu(a.op, a.dtype, [a.src[0].arg, a.src[1].arg, a.src[2].arg], False))),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
   (UPat.var('x', dtype=dtypes.bool).maximum(UPat.var('y', dtype=dtypes.bool)), lambda x,y: x|y),
   # *** cast/bitcast ***
-  (UPat(Ops.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
+  (UPat(Ops.CAST, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.arg)),
   (UPat((Ops.CAST, Ops.BITCAST), name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
   (UPat(Ops.BITCAST, name="root", src=(UPat.cvar("c"),)), fold_bitcast),
   # ** pow **
@@ -157,7 +160,7 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
 
   if gcd != 1: something_changed = True
   if not something_changed:
-    if which is Ops.IDIV and (1 < div < c) and (newx:=div_and_mod_folding(x, UOp.const(dtypes.int, div), Ops.IDIV)) is not None: return newx//(c//div)
+    if which is Ops.IDIV and (1 < div < c) and (newx:=div_and_mod_folding(x, x.const_like(div), Ops.IDIV)) is not None: return newx//(c//div)
     return None
   quo, rem = x.const_like(const//c), x.const_like((const%c)//gcd)
   for q,r,f,v in zip(quotients, remainders, factors, svars):
@@ -167,12 +170,56 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
       rem += r//gcd * v
       quo += q * v
 
+  # if numerator is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
+  if x.vmin < 0 and remainders: return None
   if which is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
   return rem//(c//gcd)+quo
 
-symbolic = symbolic_simple+PatternMatcher([
+def gep_through_wmma(gep:UOp, wmma:UOp):
+  out_sz = prod(x[1] for x in wmma.arg[6][-1])
+  wmma_idxs = gep.arg[::out_sz]
+  for i in range(out_sz):
+    if tuple(x-i for x in gep.arg[i::out_sz]) != wmma_idxs: return None
+  tsrcs = []
+  for s,sz in zip(wmma.src, wmma.arg[6]):
+    src_args = []
+    ssz = prod(x[1] for x in sz)
+    for w in wmma_idxs: src_args += list(range((w//out_sz)*ssz, (w//out_sz)*ssz + ssz))
+    tsrcs.append(s.gep(tuple(src_args)))
+  return UOp(Ops.WMMA, gep.dtype, tuple(tsrcs), wmma.arg)
+
+gep_pushing = PatternMatcher([
+  # GEP/VECTORIZE, GEP/GEP, GEP/CONST, GEP/VCONST
+  (UPat(Ops.GEP, src=(UPat(Ops.GEP, name='g2'),), name='g1'),
+   lambda g1, g2: g2.src[0].gep(tuple(g2.arg[g1.arg[i]] for i in range(len(g1.arg))))),
+  (UPat(Ops.GEP, src=(UPat(Ops.VECTORIZE, name="vec"),), name="gep"),
+   lambda gep, vec: UOp(Ops.VECTORIZE, gep.dtype, tuple(vec.src[i] for i in gep.arg)) if len(gep.arg) > 1 else vec.src[gep.arg[0]]),
+  (UPat(Ops.GEP, src=(UPat.cvar("c", vec=False),), name="gep"), lambda gep, c: gep.const_like(c.arg)),
+  (UPat(Ops.GEP, src=(UPat(Ops.VCONST, name="c"),), name="gep"), lambda gep, c: gep.const_like(tuple(c.arg[x] for x in gep.arg))),
+  # GEP on void is skipped
+  (UPat(Ops.GEP, src=(UPat(dtype=dtypes.void, name="x"),)), lambda x: x),
+  # GEP in order is removed
+  (UPat(Ops.GEP, name="g"), lambda g: g.src[0] if not isinstance(g.dtype, PtrDType) and g.arg == tuple(range(g.src[0].dtype.count)) else None),
+  # push all GEPs through ALUs (fix arange stuff)
+  (UPat(Ops.GEP, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name='alu'),), name='gep'),
+   lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg) \
+     if not isinstance(gep.dtype, PtrDType) else None),
+  # CAT can't be rendered. it's a VECTORIZE on vectors, we expand to a single VECTORIZEs with GEPs (TODO: move this later)
+  (UPat(Ops.CAT, name="x"), lambda x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count))) \
+    if not isinstance(x.dtype, PtrDType) else None),
+  # VECTORIZE on same GEP
+  (UPat(Ops.VECTORIZE, name="v", src=UPat(Ops.GEP, src=(UPat.var("x"),))), lambda v,x: x.gep(tuple(get_single_element(i.arg) for i in v.src))),
+  # push some GEPs through WMMAs
+  (UPat(Ops.GEP, src=(UPat(Ops.WMMA, name="wmma"),), name="gep"), gep_through_wmma),
+])
+
+commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for ints) **
+  # NOTE: this can break merging vector math by only flipping some of them
   (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+])
+
+symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
@@ -187,6 +234,7 @@ symbolic = symbolic_simple+PatternMatcher([
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
@@ -230,18 +278,7 @@ symbolic = symbolic_simple+PatternMatcher([
   # ** mod **
   # mod folding
   (UPat.var("x") % UPat.var("y"), lambda x,y: div_and_mod_folding(x,y,Ops.MOD)),
-  # GEP/VECTORIZE, GEP/GEP, GEP/CONST, GEP/VCONST
-  (UPat(Ops.GEP, src=(UPat(Ops.GEP, name='g2'),), name='g1'),
-   lambda g1, g2: g2.src[0].gep(tuple(g2.arg[g1.arg[i]] for i in range(g1.dtype.count)))),
-  (UPat(Ops.GEP, src=(UPat(Ops.VECTORIZE, name="vec"),), name="gep"),
-   lambda gep, vec: UOp(Ops.VECTORIZE, gep.dtype, tuple(vec.src[i] for i in gep.arg)) if len(gep.arg) > 1 else vec.src[gep.arg[0]]),
-  (UPat(Ops.GEP, src=(UPat.cvar("c", vec=False),), name="gep"), lambda gep, c: gep.const_like(c.arg)),
-  (UPat(Ops.GEP, src=(UPat(Ops.VCONST, name="c"),), name="gep"), lambda gep, c: gep.const_like(tuple(c.arg[x] for x in gep.arg))),
-  # push all GEPs through ALUs (fix arange stuff)
-  (UPat(Ops.GEP, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name='alu'),), name='gep'),
-   lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg) \
-     if not isinstance(gep.dtype, PtrDType) else None),
-])
+])+gep_pushing
 
 symbolic_flat = symbolic+PatternMatcher([
   # ** combine terms (opinionated) **
@@ -275,17 +312,20 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
 
   # simplify uop given that valid is True
   for expr,v in bounds.items():
+    v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     # some expr has lower bound > upper bound -> valid is an empty set and we return None
-    if v[0] is not None and v[1] is not None and v[0] > v[1]: return None
-
+    if v0 > v1: return None
+    # whole node became a const
+    if v0 == v1:
+      uop = uop.substitute({expr:expr.const_like(v0)}).simplify()
+      continue
     # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
     candidates = []
-    if expr.op is Ops.ADD and v[0] == 1 and all(u.op in GroupOp.Irreducible for u in split_uop(expr, Ops.ADD)):
+    if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in split_uop(expr, Ops.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
       candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
     # try checking the whole clause
-    if expr in uop.toposort:
-      candidates.append([(expr, UOp.variable("fake", expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1], expr.dtype))])
+    if expr in uop.toposort(): candidates.append([(expr, UOp.variable("fake", v0, v1, expr.dtype))])
 
     for candidate in candidates:
       # if every branch in candidate gives the same simplified uop, we can rewrite the uop
@@ -299,7 +339,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
 
 def _valid_priority(v: UOp, valids:list[UOp]):
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
-  try: return sum(-1 if parse_valid(v)[0] in other.toposort else 0 for other in valids)
+  try: return sum(-1 if parse_valid(v)[0] in other.toposort() else 0 for other in valids)
   except ValueError: return 0
 
 def simplify_valid(valid:UOp) -> UOp|None:
@@ -314,11 +354,11 @@ def simplify_valid(valid:UOp) -> UOp|None:
 # ***** threefry *****
 
 def threefry2x32(x: UOp, key: UOp):
-  # split x into two uint32, since x in a uint64
+  # split x and key from uint64 to two uint32
   x0, x1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
+  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
 
   rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
-  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
   ks = [key1, key0 ^ key1 ^ 0x1BD11BDA, key0]
   xr = [x0 + ks[-1], x1 + ks[0]]
   for i in range(5):
@@ -329,7 +369,7 @@ def threefry2x32(x: UOp, key: UOp):
 
 # ******** phase 3 is the complete symbolic, and deals with very complex things like loop rewriting and threefry transform ********
 
-def loop_collapse(compval, multconst, rng:UOp, acc:UOp, extra:UOp, idx2=None,idx3=None,vec=None,ne=None,
+def loop_collapse(compval, multconst, rng:UOp, acc:UOp, extra:UOp, idx2=None,idx3=None,vec=None,
                   add=UOp.const(dtypes.int, 0), mul:UOp=UOp.const(dtypes.int, 1)):
   if getenv("DISABLE_LOOP_COLLAPSE") or rng not in acc.src: return None  # must be the right REDUCE
   if acc not in split_uop(extra, Ops.ADD): return None
@@ -346,10 +386,8 @@ def loop_collapse(compval, multconst, rng:UOp, acc:UOp, extra:UOp, idx2=None,idx
       if x.op is Ops.CONST: return UOp.const(x.dtype.vec(vec.dtype.count), x.arg)
       return UOp(Ops.VECTORIZE, x.dtype.vec(vec.dtype.count), src=(x,)*vec.dtype.count)
     add, mul, loop_start, loop_end = dvec(add), dvec(mul), dvec(loop_start), dvec(loop_end)
-  if mul.vmin > 0 and ne is not None:
-    comprange = UOp.minimum(loop_end, UOp.maximum((add-compval)//mul + (loop_end-loop_start), loop_start))
-  elif mul.vmax < 0 and ne is None:
-    comprange = UOp.minimum(loop_end, UOp.maximum((add-compval-mul)//mul + (loop_end-loop_start), loop_start))
+  if mul.vmin > 0:
+    comprange = UOp.minimum(loop_end, UOp.maximum((add-compval+(loop_end-loop_start)*mul)//mul, loop_start))
   else:
     return None
   new_reduce_op = comprange.cast(multconst.dtype) * multconst
@@ -366,7 +404,7 @@ def index_collapse(idx:UOp,rng:UOp,buf:UOp,ld:UOp,acc:UOp,add=UOp.const(dtypes.i
   return new_acc.assign(new_acc+new_load)
 
 def reduce_collapse(acc:UOp, ret:UOp, alu:UOp):
-  reduce_parented, reduce_unparented = partition(acc.src[1:], lambda x: x in ret.toposort)
+  reduce_parented, reduce_unparented = partition(acc.src[1:], lambda x: x in ret.toposort())
   if len(reduce_unparented) == 0: return None
   new_acc = acc.replace(src=acc.src[0:1]+tuple(reduce_parented))
   ret = new_acc.assign(new_acc.alu(alu.op, ret))
@@ -374,26 +412,24 @@ def reduce_collapse(acc:UOp, ret:UOp, alu:UOp):
     for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
-def gep_through_wmma(gep:UOp, wmma:UOp):
-  out_sz = prod(x[1] for x in wmma.arg[6][-1])
-  wmma_idxs = gep.arg[::out_sz]
-  for i in range(out_sz):
-    if tuple(x-i for x in gep.arg[i::out_sz]) != wmma_idxs: return None
-  tsrcs = []
-  for s,sz in zip(wmma.src, wmma.arg[6]):
-    src_args = []
-    ssz = prod(x[1] for x in sz)
-    for w in wmma_idxs: src_args += list(range((w//out_sz)*ssz, (w//out_sz)*ssz + ssz))
-    tsrcs.append(s.gep(tuple(src_args)))
-  return UOp(Ops.WMMA, gep.dtype, tuple(tsrcs), wmma.arg)
-
 acc_pat, rng_pat = UPat(Ops.DEFINE_ACC, name="acc"), UPat(Ops.RANGE, name="rng")
 rng_aug = UPat.any(rng_pat, UPat.var("add")+rng_pat, UPat.var("mul")*rng_pat, UPat.var("add")+UPat.var("mul")*rng_pat)
 
 index_load = UPat.var("buf").index(rng_aug).load(name="ld")
 
 arange_augrng = UPat.any(rng_aug, rng_aug+UPat.var("idx2"), rng_aug+UPat.var("idx2")+UPat.var("idx3"), UPat(Ops.VECTORIZE, name="vec", src=rng_aug))
-arange_m = ((arange_augrng<UPat.cvar("compval"))!=UPat(Ops.CONST, name="ne", arg=True)).where(UPat.cvar("multconst"), UPat.const(None, 0))
+arange_m = (arange_augrng<UPat.cvar("compval")).where(UPat.const(None, 0), UPat.cvar("multconst"))
+
+def reduce_mul_chain(r:UOp):
+  if r.arg not in {Ops.ADD, Ops.MAX}: return None
+  if r.dtype != r.src[0].dtype: return None
+  inside, outside = [], []
+  for m in split_uop(r.src[0], Ops.MUL):
+    m_parents = m.toposort()
+    if all(r not in m_parents for r in r.src[1:]) and (r.arg != Ops.MAX or m.vmin >= 0): outside.append(m)
+    else: inside.append(m)
+  if len(outside) == 0: return None
+  return r.replace(src=(prod(inside) if len(inside) else r.src[0].const_like(1),)+r.src[1:])*prod(outside)
 
 # this is symbolic 2.0
 sym = symbolic_flat+PatternMatcher([
@@ -410,17 +446,9 @@ sym = symbolic_flat+PatternMatcher([
   # VECTORIZE void is SINK
   (UPat(Ops.VECTORIZE, dtype=dtypes.void, src=UPat(Ops.BARRIER, name='b')), lambda b: b),
   (UPat(Ops.VECTORIZE, dtype=dtypes.void, name='x'), lambda x: UOp(Ops.SINK, dtypes.void, x.src)),
-  # push some GEPs through WMMAs
-  (UPat(Ops.GEP, src=(UPat(Ops.WMMA, name="wmma"),), name="gep"), gep_through_wmma),
-  # CAT can't be rendered. it's a VECTORIZE on vectors, we expand to a single VECTORIZEs with GEPs (TODO: move this later)
-  (UPat(Ops.CAT, name="x"), lambda x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count))) \
-    if not isinstance(x.dtype, PtrDType) else None),
   # tensor core with a 0 input is acc
   (UPat(Ops.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc),
   (UPat(Ops.WMMA, src=(UPat.var(), UPat.const(None, 0.0), UPat.var("acc"))), lambda acc: acc),
-  # tensor core cleanups
-  (UPat.var("add") + UPat(Ops.WMMA, name="wmma"),
-    lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry + remove longs
   (UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32),
   (UPat.var('x', dtypes.uint32).cast(dtypes.uint64).cast(dtypes.uint32), lambda x: x),   # cast there and back is noop (TODO: genericize)
@@ -436,7 +464,7 @@ sym = symbolic_flat+PatternMatcher([
   (acc_pat.assign(arange_m+UPat.var("extra")), loop_collapse),
   # indexing, with cast or where
   (acc_pat.assign(UPat.var("idx").eq(UPat(Ops.RANGE, name="rng")).cast()*index_load+acc_pat), index_collapse),
-  (acc_pat.assign(UPat.var("idx").eq(UPat(Ops.RANGE, name="rng")).where(index_load, UPat.const(None, 0.0))+acc_pat), index_collapse),
+  (acc_pat.assign((UPat.var("idx")!=UPat(Ops.RANGE, name="rng")).where(UPat.const(None, 0.0), index_load)+acc_pat), index_collapse),
   # parentless reduce  # TODO: add MUL
   (acc_pat.assign(UPat((Ops.ADD, Ops.MAX), src=[acc_pat, UPat.var("ret")], name="alu")), reduce_collapse),
   # ** self folding **
@@ -447,6 +475,8 @@ sym = symbolic_flat+PatternMatcher([
   # ** where **
   # push cast to branches
   (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"), lambda s,a,b,cast: s.where(a.cast(cast.dtype), b.cast(cast.dtype))),
+  # a.where(b.where(c, d), d) -> (a & b).where(c, d)
+  (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
   # ** pow **
   ((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src))),
   # ** load/store folding **
@@ -471,4 +501,9 @@ sym = symbolic_flat+PatternMatcher([
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")), lambda x,d: 1-d), # x*/(1+x) -> 1-1/(1+x)
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")*UPat.var("y")), lambda x,y,d: y*(1-d)),
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")+UPat.var("y")), lambda x,y,d: (1-d)+x*y),
+  # move const multiply after REDUCE (NOTE: the mul chain can do this, but only if it's a same dtype reduce)
+  (UPat(Ops.REDUCE, src=(UPat.var("x")*UPat.cvar("c", vec=False),), arg=Ops.ADD, name="r", allow_any_len=True),
+   lambda x,c,r: r.replace(src=(x,)+r.src[1:])*c.arg),
+  # reduce mul chain, move muls after the reduce
+  (UPat(Ops.REDUCE, src=(UPat(Ops.MUL),), name="r", allow_any_len=True), reduce_mul_chain),
 ])

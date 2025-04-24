@@ -534,6 +534,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y)
     helper_test_op([(), ()], lambda x,y: x/y)
 
+  @unittest.skipIf(getenv("AMD_LLVM", 0), "AMD with LLVM backend generate rcp in FP division causes trunc/floor errors")
   def test_div_rounding_mode(self):
     for denominator in [-10, -5, -3, -2, -1, 1, 2, 3, 5, 10]:
       # int numerator
@@ -570,7 +571,7 @@ class TestOps(unittest.TestCase):
       np.testing.assert_equal(x.numpy(), 2**64 - 1)
     # 1 // 0 is device dependent, but it should not raise
     Tensor([1]).idiv(1).realize()
-    if not (CI and (Device.DEFAULT=="LLVM" or getenv("PTX"))):  # TODO: crashed in CI
+    if not (CI and getenv("PTX")):  # TODO: crashed in PTX CI
       # ... because if might be in a where branch that the output is well defined
       t = Tensor([-1, 0, 1, 2])
       np.testing.assert_equal((t > 0).where(1//t, t).numpy(), [-1, 0, 1, 0])
@@ -585,8 +586,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: 2/x)
 
   def test_mod(self):
-    a = [-4, 7, 5, 4, -7, 8]
-    b = [2, -3, 8, -2, 3, 5]
+    a = [-4, 7, 5, 4, -7, 8, -9]
+    b = [2, -3, 8, -2, 3, 5, -5]
     for float_a in [True, False]:
       for float_b in [True, False]:
         va = [float(ai) for ai in a] if float_a else a
@@ -989,6 +990,26 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,0,4)], lambda x: torch.cumsum(x, dim=1), lambda x: Tensor.cumsum(x, axis=1))
     helper_test_op([(0,3)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
     helper_test_op([(2,3,0)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2))
+
+  def test_small_cumprod(self):
+    helper_test_op([(10)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+  def test_simple_cumprod(self):
+    helper_test_op([(512)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+    helper_test_op([(1022)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+  def test_cumprod(self):
+    helper_test_op([()],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+    self.helper_test_exception([()],lambda x: torch.cumprod(x, dim=1),lambda x: Tensor.cumprod(x, axis=1),expected=IndexError)
+    helper_test_op([(20,)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+    self.helper_test_exception([(20,)],lambda x: torch.cumprod(x, dim=1),lambda x: Tensor.cumprod(x, axis=1),expected=IndexError)
+    self.helper_test_exception([(20,)],lambda x: torch.cumprod(x, dim=-2),lambda x: Tensor.cumprod(x, axis=-2),expected=IndexError)
+    helper_test_op([(20, 30)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+    helper_test_op([(20, 30)],lambda x: torch.cumprod(x, dim=1),lambda x: Tensor.cumprod(x, axis=1))
+    helper_test_op([(20, 30, 40)],lambda x: torch.cumprod(x, dim=2),lambda x: Tensor.cumprod(x, axis=2))
+    helper_test_op([(20, 30, 40)],lambda x: torch.cumprod(x, dim=-1),lambda x: Tensor.cumprod(x, axis=-1))
+  def test_cumprod_zero_axis(self):
+    helper_test_op([(2, 0, 4)],lambda x: torch.cumprod(x, dim=1),lambda x: Tensor.cumprod(x, axis=1))
+    helper_test_op([(0, 3)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+    helper_test_op([(2, 3, 0)],lambda x: torch.cumprod(x, dim=2),lambda x: Tensor.cumprod(x, axis=2))
 
   def test_small_cummax(self):
     helper_test_op([(10)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
@@ -2326,6 +2347,56 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,1,5,5)],
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True),
       lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True))
+
+  def test_max_pool2d_return_indices(self):
+    # batch and multi-channel
+    helper_test_op([(2,3,6,6)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), return_indices=True)[1], forward_only=True)
+    # dilation
+    helper_test_op([(1,1,10,10)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,2), dilation=(2,3), return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(3,2), dilation=(2,3), return_indices=True)[1], forward_only=True)
+    # padding
+    helper_test_op([(1,1,5,5)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,3), padding=1, return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), padding=1, return_indices=True)[1], forward_only=True)
+    # ceil mode padding
+    helper_test_op([(1, 1, 7, 7)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2, 2), stride=(2, 2), ceil_mode=True, return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(2, 2), stride=(2, 2), ceil_mode=True, return_indices=True)[1],
+      forward_only=True)
+    # global maxpool
+    helper_test_op([(1,1,12,13)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(12, 13), return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(12, 13), return_indices=True)[1],
+      forward_only=True)
+    # multiple identical values in same window and overlapping windows
+    helper_test_op(None,
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,3), stride=1, return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=1, return_indices=True)[1],
+      vals=[[[[[1]*6]*6]]], forward_only=True)  # Tensor.ones(1,1,6,6)
+    # overlapping max indices
+    helper_test_op(None,
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=1, return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=1, return_indices=True)[1],
+      vals=[[[[[1,2]*3]*6]]], forward_only=True)  # Tensor([1,2,1,2,1,2]).expand(1,1,6,6)
+
+  def test_max_unpool2d(self):
+    args = {"kernel_size":(5,5), "stride":(6,5)}
+    helper_test_op([(8,3,50,50)],
+      lambda x: torch.nn.functional.max_unpool2d(*torch.nn.functional.max_pool2d(x, return_indices=True, **args), **args),
+      lambda x: Tensor.max_unpool2d(*Tensor.max_pool2d(x, return_indices=True, **args), **args), forward_only=True)
+    args = {"kernel_size":(3,3), "stride":(6,7), "padding":1}
+    helper_test_op([(8,3,30,30)],
+      lambda x: torch.nn.functional.max_unpool2d(*torch.nn.functional.max_pool2d(x, return_indices=True, **args), **args, output_size=(30,30)),
+      lambda x: Tensor.max_unpool2d(*Tensor.max_pool2d(x, return_indices=True, **args), **args, output_size=(30,30)), forward_only=True)
+    # batch_size and channel_size of output_size are ignored
+    helper_test_op([(1,3,7,6)],
+      lambda x: torch.nn.functional.max_unpool2d(*torch.nn.functional.max_pool2d(x, kernel_size=(2,2), return_indices=True),
+                                                 kernel_size=(2,2), output_size=(99,99,7,6)),
+      lambda x: Tensor.max_unpool2d(*Tensor.max_pool2d(x, kernel_size=(2,2), return_indices=True),
+                                    kernel_size=(2,2), output_size=(99,99,7,6)), forward_only=True)
 
   def test_avg_pool2d(self):
     shape = (32,2,111,28)

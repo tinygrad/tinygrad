@@ -61,5 +61,11 @@ class TestTorchBackendInplace(unittest.TestCase):
     b[1:3,:] += 1
     np.testing.assert_equal(a.cpu().numpy(), [[0]*4,[1]*4,[1]*4,[0]*4])
 
+  def test_detach(self):
+    a = torch.zeros(4)
+    d = a.detach()
+    d += torch.arange(4)
+    np.testing.assert_array_equal(a.cpu(), torch.arange(4).cpu())
+
 if __name__ == "__main__":
   unittest.main()

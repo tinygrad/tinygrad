@@ -148,12 +148,16 @@ class TestTranscendentalVectorized(unittest.TestCase):
   def test_log2_vectorized(self):
     for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.log2, np.log2, (0.001, 200), vec_size)
 
+  @unittest.skipIf(getenv("DSP"), "requires int division")
   def test_sin_vectorized(self):
     for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.sin, np.sin, (-100, 100), vec_size)
 
   def test_pow_vectorized(self):
     # np.pow returns nan for negative values raised to a non-integral power
     for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.pow, np.pow, (0.001, 200), vec_size, param_range=(-10, 10))
+
+  def test_sqrt_vectorized(self):
+    for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.sqrt, np.sqrt, (0, 100), vec_size)
 
 if __name__ == '__main__':
   unittest.main()

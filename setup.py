@@ -12,7 +12,9 @@ testing_minimal = [
   "torch",
   "pytest",
   "pytest-xdist",
-  "hypothesis",
+  "hypothesis==6.131.0",
+  "z3-solver",
+  "ml_dtypes"
 ]
 
 setup(name='tinygrad',
@@ -41,18 +43,18 @@ setup(name='tinygrad',
             "typing-extensions",
             "pre-commit",
             "ruff",
-            "types-tqdm",
+            "numpy",
         ],
-        #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@4.1.0-rc3"],
+        #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@5.0.0-rc3"],
         'testing_minimal': testing_minimal,
         'testing_unit': testing_minimal + [
             "tqdm",
             "safetensors",
-            "tabulate"  # for sz.py
+            "tabulate",  # for sz.py
         ],
         'testing': testing_minimal + [
             "pillow",
-            "onnx==1.16.0",
+            "onnx==1.17.0",
             "onnx2torch",
             "onnxruntime",
             "opencv-python",
@@ -68,7 +70,10 @@ setup(name='tinygrad',
             "nibabel",
             "bottle",
             "ggml-python",
-            "capstone"
+            "capstone",
+            "pycocotools",
+            "boto3",
+            "pandas"
         ],
         'docs': [
             "mkdocs",

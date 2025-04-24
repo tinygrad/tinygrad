@@ -35,9 +35,9 @@ def _get_test_global_size(global_size, max_global_size, var_vals):
   return test_global_size, factor
 
 def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbufs:list[Buffer], early_stop:Optional[float]=None,
-                  max_global_size:Optional[int]=65536, clear_l2=False, cnt=3, name="test") -> list[float]:
+                  allow_test_size:int=True, max_global_size:Optional[int]=65536, clear_l2=False, cnt=3, name="test") -> list[float]:
   factor = 1
-  if p.global_size is not None and max_global_size is not None:
+  if allow_test_size and p.global_size is not None and max_global_size is not None:
     global_size, factor = _get_test_global_size(p.global_size, max_global_size, var_vals)
     p = replace(p, global_size=global_size)
   try: car = CompiledRunner(p, precompiled=lib)
@@ -65,7 +65,9 @@ def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tup
   try:
     p = x[1].to_program(name_override="test")
     assert p.uops is not None, "uop list wasn't generated?"
-    if len(p.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
+    if len(p.uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
+      if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(p.uops)=}, {uops_max=}")
+      raise RuntimeError("too many uops")
     st = time.perf_counter()
     prog = compiler.compile(p.src)
     et = time.perf_counter() - st
@@ -121,7 +123,9 @@ def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
       for s,c in zip(lin2.full_shape, lin2.colors()):
         if c in {"magenta", "yellow"}: up *= s
         elif c in {"cyan", "green", "white"}: lcl *= s
-      if up//tc_up > max_up or lcl > max_lcl: continue
+      if up//tc_up > max_up or lcl > max_lcl:
+        if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many upcast/local. {up//tc_up=}, {max_up=}, {lcl=}, {max_lcl=}")
+        continue
       acted_lins[i+1] = lin2
     except KernelOptError: pass
   return acted_lins
@@ -138,7 +142,7 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
   beam: list[tuple[Kernel, float]] = [(lin, float("inf"))]
   seen_libs = set()
 
-  default_parallel = multiprocessing.cpu_count() if lin.opts.device in {"CUDA", "AMD", "NV", "METAL"} else 0
+  default_parallel = multiprocessing.cpu_count() if lin.opts.device in {"CUDA", "AMD", "NV", "METAL", "HIP"} else 0
   if beam_pool is None and (workers := getenv("PARALLEL", default_parallel)):
     beam_pool = multiprocessing.get_context("spawn").Pool(workers, _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
     @atexit.register
@@ -166,7 +170,8 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
         least_compute_ops = min(this_compute_ops:=sym_infer(p.estimates.ops, var_vals), least_compute_ops)
         if least_compute_ops*1000 < this_compute_ops: continue
         seen_libs.add(lib)
-        try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0, clear_l2=hasattr(dev, 'invalidate_caches'))
+        try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0,
+                                 allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'))
         except RuntimeError: continue # for runtime issues
         timed_lins.append((acted_lins[i], min(tms)))
         if BEAM_DEBUG > 1: print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {len(cast(list, p.uops)):5d} uops {time_to_str(compile_et, w=12)} compile/{time_to_str(timed_lins[-1][1], w=12)} run       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}")  # noqa: E501

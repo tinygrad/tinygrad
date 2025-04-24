@@ -1,7 +1,9 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, pathlib, fcntl, os, importlib
-from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp, fetch
+import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib, array
+from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am, mp_11_0
+from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
@@ -15,31 +17,22 @@ class AMBar:
   def copyout(self, offset:int, size:int) -> memoryview: return self.bar.cast('B')[offset:offset+size]
 
 @dataclasses.dataclass(frozen=True)
-class AMRegister:
-  adev:AMDev; reg_off:int; reg_fields:dict[str, tuple[int, int]] # noqa: E702
+class AMRegister(AMDRegBase):
+  adev:AMDev; hwip:int # noqa: E702
 
-  def _parse_kwargs(self, **kwargs):
-    mask, values = 0xffffffff, 0
-    for k, v in kwargs.items():
-      if k not in self.reg_fields: raise ValueError(f"Unknown register field: {k}. {self.reg_fields.keys()}")
-      m, s = self.reg_fields[k]
-      if v & (m>>s) != v: raise ValueError(f"Value {v} for {k} is out of range {m=} {s=}")
-      mask &= ~m
-      values |= v << s
-    return mask, values
+  @property
+  def addr(self): return self.adev.regs_offset[self.hwip][0][self.segment] + self.offset
 
-  def build(self, **kwargs) -> int: return self._parse_kwargs(**kwargs)[1]
+  def read(self): return self.adev.rreg(self.addr)
+  def read_bitfields(self) -> dict[str, int]: return self.decode(self.read())
 
-  def update(self, **kwargs): self.write(value=self.read(), **kwargs)
+  def write(self, _am_val:int=0, **kwargs): self.adev.wreg(self.addr, _am_val | self.encode(**kwargs))
 
-  def write(self, value=0, **kwargs):
-    mask, values = self._parse_kwargs(**kwargs)
-    self.adev.wreg(self.reg_off, (value & mask) | values)
-
-  def read(self, **kwargs): return self.adev.rreg(self.reg_off) & self._parse_kwargs(**kwargs)[0]
+  def update(self, **kwargs): self.write(self.encode(**{**self.read_bitfields(), **kwargs}))
 
 class AMFirmware:
   def __init__(self, adev):
+    self.adev = adev
     def fmt_ver(hwip): return '_'.join(map(str, adev.ip_ver[hwip]))
 
     # Load SOS firmware
@@ -61,9 +54,11 @@ class AMFirmware:
     self.smu_psp_desc = self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes, am.GFX_FW_TYPE_SMU)
 
     # SDMA firmware
-    blob, hdr = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", am.struct_sdma_firmware_header_v2_0)
-    self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ctx_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
-    self.descs += [self.desc(blob, hdr.ctl_ucode_offset, hdr.ctl_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH1)]
+    blob, hdr, hdr_v3 = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", am.struct_sdma_firmware_header_v2_0, am.struct_sdma_firmware_header_v3_0)
+    if hdr.header.header_version_major < 3:
+      self.descs += [self.desc(blob, hdr.ctl_ucode_offset, hdr.ctl_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH1)]
+      self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ctx_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
+    else: self.descs += [self.desc(blob, hdr_v3.header.ucode_array_offset_bytes, hdr_v3.ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
 
     # PFP, ME, MEC firmware
     for (fw_name, fw_cnt) in [('PFP', 2), ('ME', 2), ('MEC', 4)]:
@@ -94,18 +89,17 @@ class AMFirmware:
       off, sz = getattr(hdr2, f'rlc_{fmem}_ucode_offset_bytes'), getattr(hdr2, f'rlc_{fmem}_ucode_size_bytes')
       self.descs += [self.desc(blob, off, sz, getattr(am, f'GFX_FW_TYPE_RLC_{mem}'))]
 
-    for mem in ['P', 'V']:
-      off, sz = getattr(hdr3, f'rlc{mem.lower()}_ucode_offset_bytes'), getattr(hdr3, f'rlc{mem.lower()}_ucode_size_bytes')
-      self.descs += [self.desc(blob, off, sz, getattr(am, f'GFX_FW_TYPE_RLC_{mem}'))]
+    if hdr0.header.header_version_minor == 3:
+      for mem in ['P', 'V']:
+        off, sz = getattr(hdr3, f'rlc{mem.lower()}_ucode_offset_bytes'), getattr(hdr3, f'rlc{mem.lower()}_ucode_size_bytes')
+        self.descs += [self.desc(blob, off, sz, getattr(am, f'GFX_FW_TYPE_RLC_{mem}'))]
 
     self.descs += [self.desc(blob, hdr0.header.ucode_array_offset_bytes, hdr0.header.ucode_size_bytes, am.GFX_FW_TYPE_RLC_G)]
 
   def load_fw(self, fname:str, *headers):
-    # if not (path:=pathlib.Path(f"/lib/firmware/amdgpu/{fname}")).exists():
-    fpath = fetch(f"https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/amdgpu/{fname}")
-    # fpath = next(f for loc in ["/lib/firmware/updates/amdgpu/", "/lib/firmware/amdgpu/"] if (f:=pathlib.Path(loc + fname)).exists())
-    print("fname", fname, fpath)
+    fpath = fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/45f59212aebd226c7630aff4b58598967c0c8c91/amdgpu/{fname}", subdir="fw")
     blob = memoryview(bytearray(fpath.read_bytes()))
+    if AM_DEBUG >= 1: print(f"am {self.adev.devfmt}: loading firmware {fname}: {hashlib.sha256(blob).hexdigest()}")
     return tuple([blob] + [hdr.from_address(mv_address(blob)) for hdr in headers])
 
   def desc(self, blob:memoryview, offset:int, size:int, *types:int) -> tuple[list[int], memoryview]: return (list(types), blob[offset:offset+size])
@@ -114,17 +108,13 @@ class AMFirmware:
 class AMMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
 
 class AMPageTableEntry:
-  def __init__(self, adev, paddr, lv): self.adev, self.paddr, self.lv = adev, paddr, lv
+  def __init__(self, adev, paddr, lv): self.adev, self.paddr, self.lv, self.entries = adev, paddr, lv, adev.vram.view(paddr, 0x1000, fmt='Q')
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
+    self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, system, snooped, valid, extra=(paddr & 0x0000FFFFFFFFF000))
 
-    f = (am.AMDGPU_PTE_VALID if valid else 0) | ((am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE) if not table else 0) \
-      | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE if not table and self.lv != am.AMDGPU_VM_PTB else 0) \
-      | ((am.AMDGPU_PTE_SYSTEM) if system else 0) | ((am.AMDGPU_PTE_SNOOPED) if snooped else 0) \
-      | (am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC) if uncached else 0)
-    self.adev.vram.write(self.paddr + entry_id * 8, (paddr & 0x0000FFFFFFFFF000) | f, 8)
-  def entry(self, entry_id:int) -> int: return self.adev.vram.read(self.paddr + entry_id * 8, 8)
+  def entry(self, entry_id:int) -> int: return self.entries[entry_id]
 
 class AMPageTableTraverseContext:
   def __init__(self, adev, pt, vaddr, create_pts=False, free_pts=False):
@@ -141,7 +131,7 @@ class AMPageTableTraverseContext:
       pt.set_entry(pte_idx, self.adev.mm.palloc(0x1000, zero=True), table=True, valid=True)
       entry = pt.entry(pte_idx)
 
-    assert entry & am.AMDGPU_PDE_PTE == 0, f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
+    assert not self.adev.gmc.is_pte_huge_page(entry), f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
     child_page_table = AMPageTableEntry(self.adev, entry & 0x0000FFFFFFFFF000, lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
@@ -167,7 +157,7 @@ class AMPageTableTraverseContext:
       if self.create_pts:
         while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while pt.lv!=am.AMDGPU_VM_PTB and (pt.entry(pte_idx) & am.AMDGPU_PDE_PTE != am.AMDGPU_PDE_PTE): pt, pte_idx, pte_covers = self.level_down()
+        while pt.lv!=am.AMDGPU_VM_PTB and not self.adev.gmc.is_pte_huge_page(pt.entry(pte_idx)): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, 512 - pte_idx)
       assert entries > 0, "Invalid entries"
@@ -231,22 +221,24 @@ class AMMemoryManager:
 
     if contigous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
+      # Traverse the PT to find the largest contiguous sizes we need to allocate. Try to allocate the longest segment to reduce TLB pressure.
       paddrs = []
       ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
       for off, _, _, seg_cnt, seg_size in ctx.next(size):
-        while seg_cnt > 0:
+        rem_len = seg_cnt * seg_size
+        while rem_len > 0:
           # Try to allocate as long segment (power of 2) as possible
-          cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, seg_cnt*seg_size) + 12), None
-          while cont_seg_sz >= seg_size:
-            try: paddr = self.palloc(cont_seg_sz, zero=False)
+          cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, rem_len) + 12), None
+          while cont_seg_sz >= 0x1000:
+            try: paddr = self.palloc(cont_seg_sz, zero=True)
             except MemoryError: cont_seg_sz //= 2
             else: break
 
           if paddr is not None: paddrs += [(paddr, cont_seg_sz)]
           else:
             for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-            raise MemoryError(f"Failed to allocate contigous {cont_seg_sz=:#x} bytes (size={size:#x})")
-          seg_cnt, off = seg_cnt - cont_seg_sz // seg_size, off + cont_seg_sz
+            raise MemoryError(f"Failed to allocate contigous a page. (allocation size={size:#x})")
+          rem_len, off = rem_len - cont_seg_sz, off + cont_seg_sz
 
     return self.map_range(va, size, paddrs, uncached=uncached)
 
@@ -258,13 +250,13 @@ class AMMemoryManager:
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
     assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
     paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
-    if zero: self.adev.vram.copyin(paddr, memoryview(bytearray(size)))
+    if zero: self.adev.vram[paddr:paddr+size] = bytes(size)
     return paddr
 
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)
 
 class AMDev:
-  def __init__(self, devfmt, vram_bar:AMBar, doorbell_bar:AMBar, mmio_bar:AMBar):
+  def __init__(self, devfmt, vram_bar:MMIOInterface, doorbell_bar:MMIOInterface, mmio_bar:MMIOInterface):
     self.devfmt = devfmt
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
 
@@ -319,10 +311,14 @@ class AMDev:
       self.fini()
       # self.partial_boot = False
 
+    # Init sw for all IP blocks
+    for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init_sw()
+
+    # Init hw for IP blocks where it is needed
     if not self.partial_boot:
       if self.psp.is_sos_alive() and self.smu.is_smu_alive(): self.smu.mode1_reset()
-      for ip in [self.soc, self.gmc, self.psp, self.smu]:
-        ip.init()
+      for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu]:
+        ip.init_hw()
         if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
     # Booting done
@@ -330,7 +326,7 @@ class AMDev:
 
     # Re-initialize main blocks
     for ip in [self.gfx, self.sdma]:
-      ip.init()
+      ip.init_hw()
       if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
     self.smu.set_clocks(level=-1) # last level, max perf.
@@ -341,14 +337,11 @@ class AMDev:
 
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
-    for ip in [self.sdma, self.gfx]: ip.fini()
+    for ip in [self.sdma, self.gfx]: ip.fini_hw()
     self.smu.set_clocks(level=0)
     # self.ih.interrupt_handler()
 
-  # def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
-
-  def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__[f"{ip}_HWIP"]][inst][seg]
 
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
@@ -379,7 +372,7 @@ class AMDev:
     for _ in range(timeout):
       if ((rval:=reg.read()) & mask) == value: return rval
       time.sleep(0.001)
-    raise RuntimeError(f'wait_reg timeout reg=0x{reg.reg_off:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
+    raise RuntimeError(f'wait_reg timeout reg=0x{reg.addr:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
 
   def _run_discovery(self):
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.
@@ -398,9 +391,8 @@ class AMDev:
 
     exit(0)
 
-    bhdr = am.struct_binary_header.from_buffer_copy(bn)
-    print(hex(bhdr.table_list[am.IP_DISCOVERY].offset))
-    ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(bhdr) + bhdr.table_list[am.IP_DISCOVERY].offset)
+    self.bhdr = am.struct_binary_header.from_buffer(array.array('B', self.vram.view(self.vram_size - (64 << 10), (10 << 10))[:]))
+    ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE and not ihdr.base_addr_64_bit, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
 
     # Mapping of HW IP to Discovery HW IP
@@ -409,9 +401,9 @@ class AMDev:
     self.ip_ver:dict[int, tuple[int, int, int]] = {}
 
     for num_die in range(ihdr.num_dies):
-      dhdr = am.struct_die_header.from_address(ctypes.addressof(bhdr) + ihdr.die_info[num_die].die_offset)
+      dhdr = am.struct_die_header.from_address(ctypes.addressof(self.bhdr) + ihdr.die_info[num_die].die_offset)
 
-      ip_offset = ctypes.addressof(bhdr) + ctypes.sizeof(dhdr) + ihdr.die_info[num_die].die_offset
+      ip_offset = ctypes.addressof(self.bhdr) + ctypes.sizeof(dhdr) + ihdr.die_info[num_die].die_offset
       for _ in range(dhdr.num_ips):
         ip = am.struct_ip_v4.from_address(ip_offset)
         ba = (ctypes.c_uint32 * ip.num_base_address).from_address(ip_offset + 8)
@@ -422,28 +414,15 @@ class AMDev:
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
 
-    gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(bhdr) + bhdr.table_list[am.GC].offset)
+    gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
 
-  def _ip_module(self, prefix:str, hwip, prever_prefix:str=""):
-    for ver in [self.ip_ver[hwip], self.ip_ver[hwip][:2]+(0,), self.ip_ver[hwip][:1]+(0, 0)]:
-      try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{prefix}_{prever_prefix}{ver[0]}_{ver[1]}_{ver[2]}")
-      except ImportError: pass
-    raise ImportError(f"am {self.devfmt}: failed to load {prefix} module with version {self.ip_ver[hwip]}")
+  def _ip_module(self, prefix:str, hwip, prever_prefix:str=""): return import_module(prefix, self.ip_ver[hwip], prever_prefix)
 
   def _build_regs(self):
-    mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("NBIO", self._ip_module("nbio", am.NBIO_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
+    mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("HDP", self._ip_module("hdp", am.HDP_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
       ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP)),
-      ("HDP", self._ip_module("hdp", am.HDP_HWIP))]
+      ("NBIO", self._ip_module("nbio" if self.ip_ver[am.GC_HWIP] < (12,0,0) else "nbif", am.NBIO_HWIP))]
 
-    for base, module in mods:
-      rpref = "mm" if base == "MP1" else "reg" # MP1 regs starts with mm
-      reg_names: set[str] = set(k[len(rpref):] for k in module.__dict__.keys() if k.startswith(rpref) and not k.endswith("_BASE_IDX"))
-      reg_fields: dict[str, dict[str, tuple]] = collections.defaultdict(dict)
-      for k, val in module.__dict__.items():
-        if k.endswith("_MASK") and ((rname:=k.split("__")[0]) in reg_names):
-          reg_fields[rname][k[2+len(rname):-5].lower()] = (val, module.__dict__.get(f"{k[:-5]}__SHIFT", val.bit_length() - 1))
-
-      for k, regval in module.__dict__.items():
-        if k.startswith(rpref) and not k.endswith("_BASE_IDX") and (base_idx:=getattr(module, f"{k}_BASE_IDX", None)) is not None:
-          setattr(self, k, AMRegister(self, self.ip_base(base, 0, base_idx) + regval, reg_fields.get(k[len(rpref):], {})))
+    for ip, module in mods:
+      self.__dict__.update(collect_registers(module, cls=functools.partial(AMRegister, adev=self, hwip=getattr(am, f"{ip}_HWIP"))))

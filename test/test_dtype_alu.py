@@ -23,7 +23,7 @@ dtypes_bool = (dtypes.bool,)
 binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, operator.eq]
 
 # TODO: LLVM comparing with nan is incorrect
-if Device.DEFAULT == "LLVM":
+if Device.DEFAULT == "LLVM" or getenv("AMD_LLVM", 0):
   binary_operations.remove(operator.lt)
 
 integer_binary_operations = binary_operations + [(Tensor.bitwise_xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
@@ -80,7 +80,7 @@ def universal_test_unary(a, dtype, op):
     np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
-    op = [x for x in ast.toposort if x.op in GroupOp.Unary][0]
+    op = [x for x in ast.toposort() if x.op in GroupOp.Unary][0]
     assert op.dtype == dtype
 
 def universal_test_cast(a, in_dtype, dtype):

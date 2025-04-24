@@ -28,7 +28,7 @@ class TestTrainGpt2Kernel(unittest.TestCase):
 
     opts = [Opt(op=OptOps.LOCAL, axis=0, arg=16), Opt(op=OptOps.UPCAST, axis=1, arg=3), Opt(op=OptOps.LOCAL, axis=0, arg=2)]
     kernel = Kernel(ast)
-    for opt in opts: kernel.apply_opt(opt)
+    kernel.apply_opts(opts)
     run_linearizer(kernel)
 
   def test_2(self):
@@ -48,7 +48,7 @@ class TestTrainGpt2Kernel(unittest.TestCase):
 
     opts = [Opt(op=OptOps.LOCAL, axis=1, arg=16), Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=2, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=3, arg=4)]
     kernel = Kernel(ast)
-    for opt in opts: kernel.apply_opt(opt)
+    kernel.apply_opts(opts)
     run_linearizer(kernel)
 
 if __name__ == "__main__":

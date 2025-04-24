@@ -18,10 +18,6 @@ pip install tqdm tensorflow
 Install the p2p driver per [README](https://github.com/tinygrad/open-gpu-kernel-modules/blob/550.54.15-p2p/README.md)
 This is the default on production tinybox green.
 
-### tinybox_red
-Disable cwsr + increase mes timeout.
-Install the custom amdgpu driver per [README](https://github.com/nimlgen/amdgpu_ubuntu_22_04/blob/v6.1.3/readme.md)
-
 # 2. Directions
 
 ## Steps to download and verify data
@@ -60,12 +56,6 @@ examples/mlperf/training_submission_v4.1/tinycorp/benchmarks/bert/implementation
 ```
 
 ### tinybox_red
-
-#### One time setup
-
-```
-examples/mlperf/training_submission_v4.1/tinycorp/benchmarks/bert/implementations/tinybox_red/setup.sh
-```
 
 #### Steps to run benchmark
 ```

@@ -38,7 +38,7 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
   @TinyJit
   def run(*x):
     out = model.forward(*x) if hasattr(model, "forward") else model(*x)
-    assert isinstance(out, tuple) or isinstance(out, list) or isinstance(out, Tensor), "model output must be a Tensor, tuple, or a list of Tensors for export"
+    assert isinstance(out, (tuple, list, Tensor)), "model output must be a Tensor, tuple, or a list of Tensors for export"
     out = [out] if isinstance(out, Tensor) else out
     return [o.realize() for o in out]
 
@@ -238,7 +238,7 @@ export default {model_name};
 """
 
 def export_model(model, target:str, *inputs, model_name: Optional[str] = "model", stream_weights=False):
-  assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, CPU, CUDA, GPU, METAL are supported"
+  assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, f"only {', '.join(EXPORT_SUPPORTED_DEVICE)} are supported"
   with Context(JIT=2): run,special_names = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
   state = get_state_dict(model)
