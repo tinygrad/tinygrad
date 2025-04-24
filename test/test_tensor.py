@@ -2,7 +2,7 @@ import subprocess
 import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
-from tinygrad import Tensor, Device, dtypes, RandomGenerator
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _METADATA
 from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
