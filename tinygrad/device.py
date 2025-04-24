@@ -330,8 +330,9 @@ class Compiled:
 def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
   if device is None: device = Device.DEFAULT
   if dtype == dtypes.bfloat16:
-    if device in {"AMD", "METAL", "CPU", "LLVM", "AMD_LLVM"}: return not CI and platform.machine() in {"arm64", "aarch64", "x86_64", "amd64"}
+    if device in {"METAL", "AMD", "AMD_LLVM"}: return not CI
     if device in {"CUDA", "NV"}: return not CI and not getenv("PTX")
+    if device in {"CPU", "LLVM"}: return not CI and platform.machine() in {"arm64", "aarch64", "x86_64", "amd64"}
     return False
   if dtype in dtypes.fp8s:
     # not supported yet - in progress
