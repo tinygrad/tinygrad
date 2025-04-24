@@ -430,6 +430,7 @@ class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):
     self.dev:DeviceType = dev
     if not skip_alloc: self.b = [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
+    self.int_buf = (ctypes.c_uint8 * 4096)()
     super().__init__()
 
   def map(self, buf:HCQBuffer): pass
@@ -446,7 +447,12 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
         self.dev.timeline_signal.wait(self.b_timeline[self.b_next])
         # ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
         lsize = min(self.b[self.b_next].size, src.nbytes-i)
-        self.dev.dev_iface.usb.write(0xf000, bytes(src[i:i+lsize]))
+
+        self.int_buf[:lsize] = src[i:i+lsize]
+        self.dev.dev_iface.usb.scsi_write(0xeaeb, self.int_buf)
+        self.dev.dev_iface.usb.write(0x171, b'\xff\xff\xff')
+        self.dev.dev_iface.usb.write(0xce6e, b'\x00\x00')
+
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                   .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)

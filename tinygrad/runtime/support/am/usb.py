@@ -298,9 +298,9 @@ class USBConnector:
 
     cdbs = []
     for offset, value in enumerate(data):
-      if value == 0x18 and not(0xb000 <= start_addr + offset < 0xd000):
-        print(hex(start_addr + offset), "is 0x18")
-        value = 0x17
+      # if value == 0x18 and not(0xb000 <= start_addr + offset < 0xd000):
+        # print(hex(start_addr + offset), "is 0x18")
+        # value = 0x17
 
       current_addr = start_addr + offset
       assert current_addr >> 17 == 0

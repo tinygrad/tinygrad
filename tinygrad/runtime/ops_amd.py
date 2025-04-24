@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQArgsState, HCQAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.ops import sint
 from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, all_same, flatten, DEBUG, OSX
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, all_same, flatten, DEBUG, OSX, Timing
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, libc, pci, vfio, sqtt
@@ -909,6 +909,14 @@ class USBIface(PCIIface):
     perf_mem_base = 0x10000000
     mem_base = 0x40000000
 
+    import pickle
+    x = pickle.load(open("zpro.bin", "rb"))
+    if self.usb.read(0x0, 1) != b'\x33':
+      self.usb.write(0x0, x[:0x1000])
+      self.usb.write(0x0, bytes([0x33]))
+      self.usb.write(0xc422, b'\x02')
+      print("OK?")
+
     try: is_cfg_ok = self.usb.pcie_cfg_req(pci.PCI_VENDOR_ID, bus=gpu_bus, dev=0, fn=0, size=2) == 0x1002
     except RuntimeError as e:
       # TODO: fast load
@@ -1100,8 +1108,8 @@ class AMDDevice(HCQCompiled):
 
     super().__init__(device, AMDUSBAllocator(self), AMDLLVMRenderer(self.arch) if getenv("AMD_LLVM", 0) else AMDRenderer(self.arch),
                      AMDLLVMCompiler(self.arch) if getenv("AMD_LLVM", 0) else HIPCompiler(self.arch), functools.partial(AMDProgram, self),
-                    functools.partial(AMDSignal, dev=self),
-                    functools.partial(AMDComputeQueue, self), functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size))
+                     functools.partial(AMDSignal, dev=self),
+                     functools.partial(AMDComputeQueue, self), functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size))
 
     # print(hex(self.timeline_signal.value_addr))
     # AMDComputeQueue().signal(self.timeline_signal, self.timeline_value).submit(self)
