@@ -1,7 +1,5 @@
 use crate::helpers::{bits, sign_ext};
 
-const NULL: u8 = 124;
-
 #[allow(dead_code)]
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
@@ -153,6 +151,8 @@ mod test_rdna3 {
 
     const LLVM_ARGS: &[&str; 3] = &["--arch=amdgcn", "--mcpu=gfx1100", "--triple=amdgcn-amd-amdhsa"];
     const OFFSET_PRG: usize = 16;
+    const NULL: u8 = 124;
+
     fn llvm_assemble(asm: &str) -> Result<Vec<u8>> {
         let mut proc = Command::new("llvm-mc").args(LLVM_ARGS).args(["-filetype=obj", "-o", "-"]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
         proc.stdin.as_mut().unwrap().write_all(asm.as_bytes())?;
