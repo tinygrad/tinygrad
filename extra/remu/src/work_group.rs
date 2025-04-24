@@ -15,7 +15,6 @@ pub struct WorkGroup<'a> {
 
 struct WaveState {
     scalar_reg: Vec<u32>,
-    scc: u32,
     vec_reg: VGPR,
     vcc: WaveValue,
     exec: WaveValue,
@@ -82,8 +81,8 @@ impl<'a> WorkGroup<'a> {
                 sds
             }
         };
-        let (mut scalar_reg, mut scc, mut pc) = match wave_state {
-            Some(val) => (val.scalar_reg.to_vec(), val.scc, val.pc),
+        let (mut scalar_reg, mut pc) = match wave_state {
+            Some(val) => (val.scalar_reg.to_vec(), val.pc),
             None => {
                 let mut scalar_reg = vec![0; 256];
                 scalar_reg.write64(0, self.kernel_args as u64);
@@ -93,7 +92,7 @@ impl<'a> WorkGroup<'a> {
                     2 => (scalar_reg[14], scalar_reg[15]) = (gx, gy),
                     _ => scalar_reg[15] = gx,
                 }
-                (scalar_reg, 0, 0)
+                (scalar_reg, 0)
             }
         };
         let (mut vec_reg, mut vcc) = match wave_state {
@@ -121,7 +120,6 @@ impl<'a> WorkGroup<'a> {
                     wave_id,
                     WaveState {
                         scalar_reg,
-                        scc,
                         vec_reg,
                         vcc,
                         exec,
@@ -159,7 +157,6 @@ impl<'a> WorkGroup<'a> {
                 }
                 let mut thread = Thread {
                     scalar_reg: &mut scalar_reg,
-                    scc: &mut scc,
                     vec_reg: &mut vec_reg,
                     vcc: &mut vcc,
                     exec: &mut exec,
