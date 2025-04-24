@@ -113,7 +113,7 @@ class CloudHandler(BaseHTTPRequestHandler):
             if r is not None: ret = str(r).encode()
     elif self.path == "/properties" and method == "GET":
       cls, args = Device[CloudHandler.device].renderer.__reduce__()
-      ret = json.dumps({'renderer': (cls.__module__, cls.__name__, args)}).encode()
+      ret = json.dumps({'clouddev': CloudHandler.device, 'renderer': (cls.__module__, cls.__name__, args)}).encode()
     else: status_code = 404
     self.send_response(status_code)
     self.send_header('Content-Length', str(len(ret)))
@@ -182,7 +182,7 @@ class CloudDevice(Compiled):
       except Exception as e:
         print(e)
         time.sleep(0.1)
-    if DEBUG >= 1: print(f"remote has device {self.properties['renderer']}")
+    if DEBUG >= 1: print(f"remote has device {self.properties['clouddev']}")
     # TODO: how to we have BEAM be cached on the backend? this should just send a specification of the compute. rethink what goes in Renderer
     renderer = self.properties['renderer']
     if not renderer[0].startswith("tinygrad.renderer.") or not renderer[1].endswith("Renderer"): raise RuntimeError(f"bad renderer {renderer}")
