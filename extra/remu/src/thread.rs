@@ -3,6 +3,7 @@ use crate::helpers::{Colorize, DEBUG};
 use crate::state::{Register, Value, VecDataStore, WaveValue, VGPR};
 use crate::{print_instr, todo_instr};
 use half::{bf16, f16};
+use crate::rdna3::{Instruction, decode};
 use num_traits::Float;
 
 const SGPR_COUNT: usize = 105;
@@ -34,15 +35,10 @@ pub struct Thread<'a> {
 impl<'a> Thread<'a> {
     pub fn interpret(&mut self) -> Result<(), i32> {
         let instruction = self.stream[self.pc_offset];
-        // smem
-        if instruction >> 26 == 0b111101 {
-            let instr = self.u64_instr();
-            /* addr: s[sbase:sbase+1] */
-            let sbase = (instr & 0x3f) * 2;
-            let sdata = ((instr >> 6) & 0x7f) as usize;
-            let op = (instr >> 18) & 0xff;
-            let offset = sign_ext((instr >> 32) & 0x1fffff, 21);
-            let soffset = match self.val(((instr >> 57) & 0x7f) as usize) {
+        let decoded = decode(self.stream[self.pc_offset], self.stream.get(self.pc_offset+1));
+        if let Instruction::SMEM { sbase, sdata, op, offset, soffset, .. } = decoded {
+            let _ = self.u64_instr();
+            let soffset = match self.val(soffset as usize) {
                 NULL_SRC => 0,
                 val => val,
             };
@@ -54,12 +50,12 @@ impl<'a> Thread<'a> {
                 106 => ((self.scalar_reg[107] as u64) << 32) | self.vcc.value as u64,
                 _ => self.scalar_reg.read64(sbase as usize),
             };
-            let addr = (base_addr as i64 + offset + soffset as i64) as u64;
+            let addr = (base_addr as i64 + offset as i64 + soffset as i64) as u64;
 
             match op {
                 0..=4 => (0..2_usize.pow(op as u32)).for_each(|i| {
                     let ret = unsafe { *((addr + (4 * i as u64)) as *const u32) };
-                    self.write_to_sdst(sdata + i, ret);
+                    self.write_to_sdst(sdata as usize + i, ret);
                 }),
                 _ => todo_instr!(instruction)?,
             };
