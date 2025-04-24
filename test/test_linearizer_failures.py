@@ -6,7 +6,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.ops import UOp, Ops
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, Context
 from test.external.fuzz_linearizer import compare_linearizer
 from test.helpers import ast_const
 
@@ -1044,7 +1044,7 @@ class TestLinearizerFailures(unittest.TestCase):
     ifs = [u for u in k.uops if u.op is Ops.IF]
     self.assertEqual(len(ifs), 3)
     #for st in k.uops.sink.src: self.assertEqual(len(st.src), 4)
-    self.assertLessEqual(len(ifs[0].src[0].toposort), 17)
+    self.assertLessEqual(len(ifs[0].src[0].toposort()), 17)
 
   def test_failure_45(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
@@ -1428,7 +1428,8 @@ class TestLinearizerFailures(unittest.TestCase):
           UOp(Ops.CONST, dtypes.int, arg=-1, src=(
             UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(50257, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
     opts = [Opt(op=OptOps.GROUPTOP, axis=0, arg=29), Opt(op=OptOps.PADTO, axis=0, arg=32)]
-    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["METAL", "GPU", "AMD", "NV"])
+    with Context(IGNORE_OOB=0):
+      helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["METAL", "GPU", "AMD", "NV", "CUDA"])
 
 if __name__ == '__main__':
   unittest.main()

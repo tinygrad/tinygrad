@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from collections import deque
+from collections import deque, defaultdict
 from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
 from tinygrad.device import Buffer
 from tinygrad.helpers import Metadata, DEBUG, unwrap
@@ -34,32 +34,35 @@ pm_unbind = PatternMatcher([
 # **** schedule linearizer
 
 def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  # bfs toposort
-  children: dict[UOp, list[UOp]] = {}
+  # construnct the KERNEL children graph based on assigns
+  children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree: dict[UOp, int] = {}
-  for u in (toposort:=sched_sink.toposort):
+  for u in (toposort:=sched_sink.toposort()):
     if u.op is not Ops.ASSIGN: continue
-    in_degree[u] = 0
-    for s in u.src[1].src:
+    k = u.src[1]
+    in_degree.setdefault(k, 0)
+    for s in k.src:
       if s.op is not Ops.ASSIGN: continue
-      children.setdefault(s, []).append(u)
-      in_degree[u] += 1
+      children[s.src[1]].append(k)
+      in_degree[k] += 1
 
+  # linearize KERNEL UOps into ScheduleItems in BFS order
   queue = deque(k for k,v in in_degree.items() if v == 0)
   schedule: list[ScheduleItem] = []
   var_vals: dict[Variable, int] = {}
   while queue:
-    u = queue.popleft()
-    # map the BUFFER UOp to a subbuffer if it's a BUFFER_VIEW
-    if (k:=u.src[1]).arg.ast.op is Ops.BUFFER_VIEW:
-      buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, k.arg.ast.dtype, k.arg.ast.arg[1]*base.dtype.itemsize)
-    schedule.append(ScheduleItem(graph_rewrite(k.arg.ast, pm_unbind, ctx=var_vals), tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
-    for x in children.get(u, []):
+    k = queue.popleft()
+    # unbind var_vals from the kernel
+    ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=var_vals)
+    # create subbuffers if needed
+    if ast.op is Ops.BUFFER_VIEW: buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
+    schedule.append(ScheduleItem(ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
+    for x in children[k]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
 
   # confirm everything was scheduled correctly
-  if len(schedule) != len(in_degree): raise RuntimeError(f"created {len(in_degree)} kernels but only scheduled {len(schedule)}")
+  assert len(schedule) == len(in_degree), f"Schedule length mistmatch {len(schedule)} != {len(in_degree)}"
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
   # map ASSIGN to BUFFER after ScheduleItems are constructed
