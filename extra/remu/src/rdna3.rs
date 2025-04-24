@@ -4,7 +4,23 @@ const NULL: u8 = 124;
 
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
+    SOP2 { },
+    SOP1 { },
+    SOPK { },
+    SOPP { },
+    SOPC { },
+
     SMEM { op: u8, sdata: u8, sbase: u8, offset: i32, soffset: u8, glc: bool, dlc: bool },
+
+    VOP1 { },
+    VOP2 { },
+    VOPC { },
+    VOP3 { },
+    VOP3P { },
+
+    DS { },
+
+    FLAT { },
 }
 
 pub fn decode(word0:u32, word1:Option<&u32>) -> Instruction {
