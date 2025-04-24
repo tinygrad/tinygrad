@@ -4,7 +4,6 @@ from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
 from tinygrad.helpers import all_same, dedup, prod, DEBUG, IGNORE_OOB
 try:
   import z3
-  z3_imported = True
 
   # IDIV is truncated division but z3 does floored division; mod by power of two sometimes uses Ops.AND
   def z3_cdiv(a,b): return z3.If(a<0, (a+(b-1))/b, a/b)
@@ -27,7 +26,9 @@ try:
     (UPat(Ops.CAST, name="x"), lambda x: x.src[0]),
     (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=z3_alu[x.op](*(s.arg for s in x.src)))),
   ])
-except ImportError: z3_imported = False
+
+  z3_imported = True
+except (ImportError, AttributeError): z3_imported = False
 
 buffer_spec = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
