@@ -347,12 +347,11 @@ def train_retinanet():
   from examples.mlperf.dataloader import batch_load_retinanet
   from examples.mlperf.initializers import FrozenBatchNorm2dRetinaNet, Conv2dNormalRetinaNet, Conv2dKaimingUniformRetinaNet, Linear, Conv2dRetinaNet
   from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize, get_dataset_count
-  from extra.models import resnet
+  from extra.models import resnet, retinanet
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
   from tinygrad.helpers import colored
   from typing import Iterator
-  import extra.models.retinanet as retinanet
 
   import numpy as np
 
@@ -399,7 +398,7 @@ def train_retinanet():
     optim.zero_grad()
 
     losses = model(normalize(x, GPUS), **kwargs)
-    loss = sum([l for l in losses.values()])
+    loss = sum(losses.values())
 
     (loss * loss_scaler).backward()
     for t in optim.params: t.grad = t.grad / loss_scaler
@@ -826,7 +825,7 @@ def train_unet3d():
 
         if mean_dice >= TARGET_METRIC:
           is_successful = True
-          save_checkpoint(get_state_dict(model), f"./ckpts/unet3d.safe")
+          save_checkpoint(get_state_dict(model), "./ckpts/unet3d.safe")
         elif mean_dice < 1e-6:
           print("Model diverging. Aborting.")
           diverged = True
@@ -913,7 +912,7 @@ def train_bert():
     MLLOGGER.logger.propagate = False
 
     if INITMLPERF:
-      assert BENCHMARK, f"BENCHMARK must be set for INITMLPERF"
+      assert BENCHMARK, "BENCHMARK must be set for INITMLPERF"
       MLLOGGER.event(key=mllog_constants.SUBMISSION_ORG, value="tinycorp")
       MLLOGGER.event(key=mllog_constants.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
       MLLOGGER.event(key=mllog_constants.SUBMISSION_DIVISION, value=mllog_constants.CLOSED)
@@ -1187,7 +1186,7 @@ def train_bert():
       if MLLOGGER and RUNMLPERF:
         if previous_step:
           MLLOGGER.end(key=mllog_constants.BLOCK_STOP, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "first_step_num": i, "step_num": i, "step_count": i - previous_step})
-        MLLOGGER.start(key="checkpoint_start", value=None, metadata={"step_num" : i})
+        MLLOGGER.start(key="checkpoint_start", value=None, metadata={"step_num": i})
       if not os.path.exists(ckpt_dir := save_ckpt_dir): os.mkdir(ckpt_dir)
       if WANDB and wandb.run is not None:
         fn = f"{ckpt_dir}/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}.safe"
