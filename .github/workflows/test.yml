@@ -568,11 +568,79 @@ jobs:
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
+  testamd:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [amd, amdllvm]
+
+    name: Linux (${{ matrix.backend }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      AMD: 1
+      MOCKGPU: 1
+      FORWARD_ONLY: 1
+      AMD_LLVM: ${{ matrix.backend == 'amdllvm' && '1' || matrix.backend != 'amdllvm' && '0' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: ${{ matrix.backend }}-minimal
+          deps: testing_minimal
+          amd: 'true'
+          llvm: ${{ matrix.backend == 'amdllvm' && 'true' }}
+      - name: Check Device.DEFAULT and print some source
+        run: |
+          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['AMD'], Device.DEFAULT"
+          DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Run LLVM test
+        if: matrix.backend=='amdllvm'
+        run: PYTHONPATH="." python test/test_amd_llvm.py
+      - name: Run pytest (amd)
+        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py test/external/external_test_am.py --durations=20
+      - name: Run TRANSCENDENTAL math
+        run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
+      - name: Run process replay tests
+        uses: ./.github/actions/process-replay
+
+  testnvidia:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [ptx, nv]
+
+    name: Linux (${{ matrix.backend }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: ${{ matrix.backend }}-minimal
+          deps: testing_minimal
+          cuda: 'true'
+      - name: Set env
+        run: printf "${{ matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+      - name: Check Device.DEFAULT and print some source
+        run: |
+          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CUDA','NV'], Device.DEFAULT"
+          DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Run pytest (cuda)
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --durations=20
+      - name: Run process replay tests
+        uses: ./.github/actions/process-replay
+
   tests:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, cpu, gpu, ptx, amd, nv] #, triton]
+        backend: [llvm, cpu, gpu]
 
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
@@ -587,29 +655,17 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: ${{ matrix.backend }}-minimal
-          deps: testing_minimal${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}
+          deps: testing_minimal
           opencl: ${{ matrix.backend == 'gpu' && 'true' }}
-          amd: ${{ matrix.backend == 'amd' && 'true' }}
-          llvm: ${{ (matrix.backend == 'amd' || matrix.backend == 'llvm') && 'true' }}
-          cuda: ${{ (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv') && 'true' }}
+          llvm: ${{ matrix.backend == 'llvm' && 'true' }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'gpu' && 'GPU=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
-          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CPU','CUDA','GPU','AMD','NV'], Device.DEFAULT"
+          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CPU','GPU'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-      - name: Run pytest (not cuda or amd)
-        if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
+      - name: Run pytest (not cuda)
         run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
-      - name: Run pytest (cuda)
-        if: matrix.backend=='ptx'||matrix.backend=='triton'||matrix.backend=='nv'
-        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --durations=20
-      - name: Run pytest (amd)
-        if: matrix.backend=='amd'
-        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py test/external/external_test_am.py --durations=20
-      - name: Run pytest (amd with llvm backend)
-        if: matrix.backend=='amd'
-        run: AMD_LLVM=1 python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py test/external/external_test_am.py test/test_amd_llvm.py --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
