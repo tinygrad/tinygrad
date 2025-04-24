@@ -90,7 +90,7 @@ def validate_index(idx:UOp, mask:UOp|None=None):
   # WEBGPU has a BITCAST in the index. TODO: fix
   if any(x.op is Ops.BITCAST for x in idx.toposort): return True
 
-  if not z3_imported: raise ImportError("z3 is required for bounds checking, try IGNORE_OOB: 0 or \"pip install z3-solver\"")
+  if not z3_imported: raise ImportError("z3 is required for bounds checking, try IGNORE_OOB=0 or \"pip install z3-solver\"")
   solver = z3.Solver(ctx=z3.Context())
   rewriter = RewriteContext(z3_renderer, ctx=(solver, {}))  # Use RewriteContext directly to keep rewrite cache between index and mask
   z3_idx = rewriter.top_down_rewrite(idx.src[1]).arg
