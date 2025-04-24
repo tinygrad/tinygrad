@@ -361,7 +361,8 @@ def train_retinanet():
   NUM_CLASSES = len(MLPERF_CLASSES)
   BASEDIR = getenv("BASEDIR", BASEDIR)
   BENCHMARK = getenv("BENCHMARK")
-  INITMLPERF = getenv("INITMLPERF")
+  # INITMLPERF = getenv("INITMLPERF")
+  RUNMLPERF = getenv("RUNMLPERF")
   config["gpus"] = GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 6))]
 
   for x in GPUS: Device[x]
@@ -443,12 +444,17 @@ def train_retinanet():
 
   # ** model setup **
   backbone = resnet.ResNeXt50_32X4D(num_classes=None)
-  # TODO: should not load_from_pretrained during setup
-  backbone.load_from_pretrained()
+  if RUNMLPERF:
+    backbone.load_from_pretrained()
   _freeze_backbone_layers(backbone, 3)
 
   model = retinanet.RetinaNet(backbone, num_classes=NUM_CLASSES)
   params = get_parameters(model)
+
+  if not RUNMLPERF:
+    # for init, zero out all weights
+    for p in params:
+      p = p.assign(Tensor.zeros_like(p).contiguous()).realize()
 
   if len(GPUS) > 1:
     for p in params: p.to_(GPUS)
@@ -462,7 +468,7 @@ def train_retinanet():
   config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(get_dataset_count((base_dir_path:=Path(BASEDIR)), False), BS) // BS
   config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(get_dataset_count(base_dir_path, True), EVAL_BS) // EVAL_BS)
 
-  if not INITMLPERF:
+  if RUNMLPERF:
     train_dataset = COCO(download_dataset(BASEDIR, "train"))
     val_dataset = COCO(download_dataset(BASEDIR, "validation"))
     coco_val = COCOeval(cocoGt=val_dataset, iouType="bbox")
@@ -473,7 +479,7 @@ def train_retinanet():
     # ** training loop **
     BEAM.value = TRAIN_BEAM
 
-    if INITMLPERF:
+    if not RUNMLPERF:
       i, proc = 0, _fake_data_get(BS)
     else:
       train_dataloader = batch_load_retinanet(train_dataset, False, base_dir_path, batch_size=BS, seed=SEED)
@@ -493,7 +499,7 @@ def train_retinanet():
 
       if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:
-        if INITMLPERF:
+        if not RUNMLPERF:
           next_proc = _fake_data_get(BS)
         else:
           next_proc = _data_get(it)
@@ -546,7 +552,7 @@ def train_retinanet():
       if getenv("RESET_STEP", 1): _train_step.reset()
 
       with Tensor.train(mode=False), Tensor.test():
-        if INITMLPERF:
+        if not RUNMLPERF:
           i, proc = 0, _fake_data_get(EVAL_BS, val=(val:=True))
         else:
           val_dataloader = batch_load_retinanet(val_dataset, (val:=True), Path(BASEDIR), batch_size=EVAL_BS, shuffle=False, seed=SEED)
@@ -561,9 +567,9 @@ def train_retinanet():
           st = time.time()
 
           out, img_ids, img_sizes, proc = _eval_step(model, (x:=proc[0])).numpy(), proc[1], proc[2], proc[3]
-          out = model.postprocess_detections(out, input_size=x.shape[1:3], orig_image_sizes=img_sizes)
 
-          if not INITMLPERF:
+          if RUNMLPERF:
+            out = model.postprocess_detections(out, input_size=x.shape[1:3], orig_image_sizes=img_sizes)
             coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
               for i, prediction in enumerate(out) for box, score, label in zip(*prediction.values())]
 
@@ -577,7 +583,7 @@ def train_retinanet():
 
           if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
           try:
-            if INITMLPERF:
+            if not RUNMLPERF:
               next_proc = _fake_data_get(EVAL_BS, val=val)
             else:
               next_proc = _data_get(it, val=val)
@@ -597,7 +603,7 @@ def train_retinanet():
         if getenv("RESET_STEP", 1): _eval_step.reset()
         total_fw_time = sum(eval_times) / len(eval_times)
 
-        if not INITMLPERF:
+        if RUNMLPERF:
           coco_val.params.imgIds = val_img_ids
           coco_val._paramsEval.imgIds = val_img_ids
           coco_val.evalImgs = list(np.concatenate(val_imgs, -1).flatten())
