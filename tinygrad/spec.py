@@ -191,7 +191,7 @@ sched_spec = buffer_spec+assign_spec+PatternMatcher([
 # *** this is the UOp shape spec ***
 
 def verify_sink_dims(sink:UOp):
-  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sink.toposort if x.op is not Ops.SINK and x.st is not None])]
+  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sink.toposort() if x.op is not Ops.SINK and x.st is not None])]
   return all_same([x.st_arg.size for x in sink.src]) and all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims)
 
 shape_spec = PatternMatcher([

@@ -26,13 +26,13 @@ class TestMicrobenchmarks(unittest.TestCase):
     a = UOp.const(dtypes.int, 0)
     for i in range(N): a = a + UOp.const(dtypes.int, 100+i)
     self.setUp()
-    self.assertEqual(len(a.toposort), 2*N+1)
+    self.assertEqual(len(a.toposort()), 2*N+1)
 
   def test_uop_toposort_2n(self):
     a = UOp.const(dtypes.int, 0)
     for i in range(N): a = a + a
     self.setUp()
-    self.assertEqual(len(a.toposort), N+1)
+    self.assertEqual(len(a.toposort()), N+1)
 
   def test_uop_simplify(self):
     a = UOp.const(dtypes.int, 2)
