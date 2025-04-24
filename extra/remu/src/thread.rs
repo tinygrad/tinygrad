@@ -550,11 +550,9 @@ impl<'a> Thread<'a> {
                 _ => todo_instr!(instruction)?,
             }
         }
-        // vop1
-        else if instruction >> 25 == 0b0111111 {
-            let s0 = (instruction & 0x1ff) as usize;
-            let op = (instruction >> 9) & 0xff;
-            let vdst = ((instruction >> 17) & 0xff) as usize;
+        else if let Instruction::VOP1 { src, op, vdst } = decoded {
+            let s0 = src as usize;
+            let vdst = vdst as usize;
 
             print_instr!("VOP1", s0, op, vdst);
 
