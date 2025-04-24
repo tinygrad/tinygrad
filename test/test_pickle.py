@@ -149,9 +149,10 @@ class TestPickle(unittest.TestCase):
 class TestPickleJIT(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
+    N = 10
     @TinyJit
     def add(a, b): return a.sum()+b+1
-    for _ in range(3): add(Tensor.rand(1000, 1000), Tensor.rand(1000, 1000))
+    for _ in range(3): add(Tensor.rand(N, N), Tensor.rand(N, N))
     cls.st = pickle.dumps(add)
     del add
 
