@@ -19,6 +19,7 @@ pub enum Instruction {
     VOP3 { op: u32, opsel: u8, cm: bool, abs: u8, vdst: u8, neg: u8, omod: u8, src2: u16, src1: u16, src0: u16 },
     VOP3SD { op: u32, cm: bool, sdst: u8, vdst: u8, neg: u8, omod: u8, src2: u16, src1: u16, src0: u16 },
     VOP3P { op: u8, vdst: u8, neg_hi: u8, opsel: u8, opsel_hi: u8, opsel_hi2: bool, cm: bool, src2: u16, src1: u16, src0: u16, neg: u8 },
+    VOPD { opx: u8, opy: u8, vdstx: u8, vdsty: u8, vsrcx1: u8, vsrcy1: u8, srcx0: u16, srcy0: u16 },
 
     DS { op: u8, gds: bool, offset1: u8, offset0: u8, vdst: u8, data1: u8, data0: u8, addr: u8 },
 
@@ -99,6 +100,17 @@ pub fn decode(word:u32, word1:Option<&u32>) -> Instruction {
                     let vdst = bits(word, 63, 56) as u8;
                     Instruction::FLAT { offset, dlc, glc, slc, seg, op, addr, data, saddr, sve, vdst }
                 },
+                0b0010 => {
+                    let srcx0 = bits(word, 8, 0) as u16;
+                    let vsrcx1 = bits(word, 16, 9) as u8;
+                    let opy = bits(word, 21, 17) as u8;
+                    let opx = bits(word, 25, 22) as u8;
+                    let srcy0 = bits(word, 40, 32) as u16;
+                    let vsrcy1 = bits(word, 48, 41) as u8;
+                    let vdsty = bits(word, 55, 49) as u8;
+                    let vdstx = bits(word, 63, 56) as u8;
+                    Instruction::VOPD { opx, opy, vdstx, vdsty, vsrcx1, vsrcy1, srcx0, srcy0 }
+                }
                 _ => todo!(),
             }
         }
