@@ -11,6 +11,16 @@ else:
   device = "tiny"
 
 class TestTorchBackend(unittest.TestCase):
+  def test_randperm_generator_out(self):
+    n = 10
+    out = torch.empty(n, dtype=torch.long, device=device)
+    res = torch.randperm(n, out=out).cpu().numpy()
+    np.testing.assert_equal(set(res), set(range(n)))
+    np.testing.assert_equal(out.cpu().numpy(), res)
+
+    res2 = torch.randperm(n).cpu().numpy()
+    np.testing.assert_equal(set(res2), set(range(n)))
+
   def test_numpy_ones(self):
     a = torch.ones(4, device=device)
     np.testing.assert_equal(a.cpu().numpy(), [1,1,1,1])
@@ -132,6 +142,16 @@ class TestTorchBackend(unittest.TestCase):
     mask = torch.tensor(True, device=device)
     out = torch.masked_select(a, mask)
     np.testing.assert_equal(out.cpu().numpy(), [4, 3, 2, 1])
+
+  def test_isin_tensor_tensor_out(self):
+    a = torch.tensor([1, 2, 3], device=device)
+    b = torch.tensor([2, 4], device=device)
+    expected_base = torch.tensor([False, True, False], device=device)
+    for assume_unique in [False, True]:
+      for invert, expected in [(False, expected_base), (True, ~expected_base)]:
+        out = torch.empty_like(a, dtype=torch.bool)
+        res = torch.ops.aten.isin.Tensor_Tensor_out(a, b, invert=invert, assume_unique=assume_unique, out=out)
+        np.testing.assert_equal(out.cpu().numpy(), expected.cpu().numpy())
 
   @unittest.skip("meh")
   def test_str(self):
