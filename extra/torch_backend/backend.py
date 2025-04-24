@@ -109,7 +109,8 @@ def index_put(self, indices, values, accumulate=False):
   return aten.index_put(self.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in indices], values.cpu(), accumulate).tiny()
 
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
-def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
+def randperm_generator(n, generator=None, out=None):
+  return out.copy_(wrap(Tensor.randperm(n, generator=generator, device=unwrap(out).device)))
 
 @torch.library.impl("aten::cummax", "privateuseone")
 def cummax(self, dim):
