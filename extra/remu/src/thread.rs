@@ -3,6 +3,7 @@ use crate::helpers::{Colorize, DEBUG};
 use crate::state::{Register, Value, VecDataStore, WaveValue, VGPR};
 use crate::{print_instr, todo_instr};
 use half::{bf16, f16};
+use crate::rdna3::{Instruction, decode};
 use num_traits::Float;
 
 const SGPR_COUNT: usize = 105;
@@ -34,15 +35,10 @@ pub struct Thread<'a> {
 impl<'a> Thread<'a> {
     pub fn interpret(&mut self) -> Result<(), i32> {
         let instruction = self.stream[self.pc_offset];
-        // smem
-        if instruction >> 26 == 0b111101 {
-            let instr = self.u64_instr();
-            /* addr: s[sbase:sbase+1] */
-            let sbase = (instr & 0x3f) * 2;
-            let sdata = ((instr >> 6) & 0x7f) as usize;
-            let op = (instr >> 18) & 0xff;
-            let offset = sign_ext((instr >> 32) & 0x1fffff, 21);
-            let soffset = match self.val(((instr >> 57) & 0x7f) as usize) {
+        let decoded = decode(self.stream[self.pc_offset], self.stream.get(self.pc_offset+1));
+        if let Instruction::SMEM { sbase, sdata, op, offset, soffset, .. } = decoded {
+            let _ = self.u64_instr();
+            let soffset = match self.val(soffset as usize) {
                 NULL_SRC => 0,
                 val => val,
             };
@@ -54,22 +50,20 @@ impl<'a> Thread<'a> {
                 106 => ((self.scalar_reg[107] as u64) << 32) | self.vcc.value as u64,
                 _ => self.scalar_reg.read64(sbase as usize),
             };
-            let addr = (base_addr as i64 + offset + soffset as i64) as u64;
+            let addr = (base_addr as i64 + offset as i64 + soffset as i64) as u64;
 
             match op {
                 0..=4 => (0..2_usize.pow(op as u32)).for_each(|i| {
                     let ret = unsafe { *((addr + (4 * i as u64)) as *const u32) };
-                    self.write_to_sdst(sdata + i, ret);
+                    self.write_to_sdst(sdata as usize + i, ret);
                 }),
                 _ => todo_instr!(instruction)?,
             };
             self.scalar = true;
         }
-        // sop1
-        else if instruction >> 23 == 0b10_1111101 {
-            let src = (instruction & 0xFF) as usize;
-            let op = (instruction >> 8) & 0xFF;
-            let sdst = ((instruction >> 16) & 0x7F) as usize;
+        else if let Instruction::SOP1 { ssrc0, op, sdst } = decoded {
+            let src = ssrc0 as usize;
+            let sdst = sdst as usize;
 
             print_instr!("SOP1", src, sdst, op);
 
@@ -123,15 +117,13 @@ impl<'a> Thread<'a> {
             };
             self.scalar = true;
         }
-        // sopc
-        else if (instruction >> 23) & 0x3ff == 0b101111110 {
-            let s0 = (instruction & 0xff) as usize;
-            let s1 = ((instruction >> 8) & 0xff) as usize;
-            let op = (instruction >> 16) & 0x7f;
+        else if let Instruction::SOPC { ssrc0, ssrc1, op } = decoded {
+            let s0 = ssrc0 as usize;
+            let s1 = ssrc1 as usize;
 
             print_instr!("SOPC", s0, s1, op);
 
-            fn scmp<T>(s0: T, s1: T, offset: u32, op: u32) -> bool
+            fn scmp<T>(s0: T, s1: T, offset: u8, op: u8) -> bool
             where
                 T: PartialOrd + PartialEq,
             {
@@ -169,11 +161,7 @@ impl<'a> Thread<'a> {
             } as u32;
             self.scalar = true;
         }
-        // sopp
-        else if instruction >> 23 == 0b10_1111111 {
-            let simm16 = (instruction & 0xffff) as i16;
-            let op = (instruction >> 16) & 0x7f;
-
+        else if let Instruction::SOPP { simm16, op } = decoded {
             print_instr!("SOPP", simm16, op);
 
             match op {
@@ -196,11 +184,9 @@ impl<'a> Thread<'a> {
             };
             self.scalar = true;
         }
-        // sopk
-        else if instruction >> 28 == 0b1011 {
-            let simm = instruction & 0xffff;
-            let sdst = ((instruction >> 16) & 0x7f) as usize;
-            let op = (instruction >> 23) & 0x1f;
+        else if let Instruction::SOPK { simm16, sdst, op } = decoded {
+            let simm = simm16 as u16;
+            let sdst = sdst as usize;
             let s0: u32 = self.val(sdst);
 
             print_instr!("SOPK", simm, sdst, s0, op);
@@ -249,12 +235,10 @@ impl<'a> Thread<'a> {
             };
             self.scalar = true;
         }
-        // sop2
-        else if instruction >> 30 == 0b10 {
-            let s0 = (instruction & 0xFF) as usize;
-            let s1 = ((instruction >> 8) & 0xFF) as usize;
-            let sdst = ((instruction >> 16) & 0x7F) as usize;
-            let op = (instruction >> 23) & 0xFF;
+        else if let Instruction::SOP2 { ssrc0, ssrc1, sdst, op } = decoded {
+            let s0 = ssrc0 as usize;
+            let s1 = ssrc1 as usize;
+            let sdst = sdst as usize;
 
             print_instr!("SOP2", s0, s1, sdst, op);
 
@@ -566,11 +550,9 @@ impl<'a> Thread<'a> {
                 _ => todo_instr!(instruction)?,
             }
         }
-        // vop1
-        else if instruction >> 25 == 0b0111111 {
-            let s0 = (instruction & 0x1ff) as usize;
-            let op = (instruction >> 9) & 0xff;
-            let vdst = ((instruction >> 17) & 0xff) as usize;
+        else if let Instruction::VOP1 { src, op, vdst } = decoded {
+            let s0 = src as usize;
+            let vdst = vdst as usize;
 
             print_instr!("VOP1", s0, op, vdst);
 
@@ -778,10 +760,10 @@ impl<'a> Thread<'a> {
             }
         }
         // vopc
-        else if instruction >> 25 == 0b0111110 {
-            let s0 = (instruction & 0x1ff) as usize;
-            let s1 = ((instruction >> 9) & 0xff) as usize;
-            let op = (instruction >> 17) & 0xff;
+        else if let Instruction::VOPC { vsrc, src, op } = decoded {
+            let s0 = src as usize;
+            let s1 = vsrc as usize;
+            let op = op as u32;
 
             print_instr!("VOPC", s0, s1, op);
 
@@ -848,12 +830,10 @@ impl<'a> Thread<'a> {
                 false => self.vcc.set_lane(ret),
             };
         }
-        // vop2
-        else if instruction >> 31 == 0b0 {
-            let s0 = (instruction & 0x1FF) as usize;
-            let s1 = self.vec_reg[((instruction >> 9) & 0xFF) as usize];
-            let vdst = ((instruction >> 17) & 0xFF) as usize;
-            let op = (instruction >> 25) & 0x3F;
+        else if let Instruction::VOP2 { vsrc, src, vdst, op } = decoded {
+            let s0 = src as usize;
+            let s1 = self.vec_reg[vsrc as usize];
+            let vdst = vdst as usize;
 
             print_instr!("VOP2", s0, s1, vdst, op);
 
