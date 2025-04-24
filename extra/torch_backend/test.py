@@ -133,6 +133,16 @@ class TestTorchBackend(unittest.TestCase):
     out = torch.masked_select(a, mask)
     np.testing.assert_equal(out.cpu().numpy(), [4, 3, 2, 1])
 
+  def test_isin_tensor_tensor_out(self):
+    a = torch.tensor([1, 2, 3], device=device)
+    b = torch.tensor([2, 4], device=device)
+    expected_base = torch.tensor([False, True, False], device=device)
+    for assume_unique in [False, True]:
+      for invert, expected in [(False, expected_base), (True, ~expected_base)]:
+        out = torch.empty_like(a, dtype=torch.bool)
+        res = torch.ops.aten.isin.Tensor_Tensor_out(a, b, invert=invert, assume_unique=assume_unique, out=out)
+        np.testing.assert_equal(out.cpu().numpy(), expected.cpu().numpy())
+
   @unittest.skip("meh")
   def test_str(self):
     a = torch.ones(4, device=device)
