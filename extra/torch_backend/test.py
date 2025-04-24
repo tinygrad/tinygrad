@@ -11,6 +11,16 @@ else:
   device = "tiny"
 
 class TestTorchBackend(unittest.TestCase):
+  def test_randperm_generator_out(self):
+    n = 10
+    out = torch.empty(n, dtype=torch.long, device=device)
+    res = torch.randperm(n, out=out).cpu().numpy()
+    np.testing.assert_equal(set(res), set(range(n)))
+    np.testing.assert_equal(out.cpu().numpy(), res)
+
+    res2 = torch.randperm(n).cpu().numpy()
+    np.testing.assert_equal(set(res2), set(range(n)))
+
   def test_numpy_ones(self):
     a = torch.ones(4, device=device)
     np.testing.assert_equal(a.cpu().numpy(), [1,1,1,1])
