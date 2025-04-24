@@ -13,7 +13,7 @@ pub enum Instruction {
 
     SMEM { op: u8, sdata: u8, sbase: u8, offset: i32, soffset: u8, glc: bool, dlc: bool },
 
-    VOP1 { op: u8, },
+    VOP1 { op: u8, vdst: u8, src: u8 },
     VOP2 { op: u8, },
     VOPC { op: u8, },
     VOP3 { op: u8, },
@@ -59,7 +59,9 @@ pub fn decode(word:u32, word1:Option<&u32>) -> Instruction {
                 }
             }
         }
-        _ => todo!(),
+        _ => {
+            todo!()
+        },
     }
 }
 
@@ -118,5 +120,10 @@ mod test_rdna3 {
         assert_eq!(test_decode("s_cmpk_eq_i32 s0 -30"), Instruction::SOPK { op: 3, sdst: 0, simm16: -30 });
         assert_eq!(test_decode("s_cmpk_eq_u32 s0 65535"), Instruction::SOPK { op: 9, sdst: 0, simm16: -1 });
         assert_eq!(test_decode("s_cmp_ge_i32 s1 s2"), Instruction::SOPC { op: 3, ssrc0: 1, ssrc1: 2 });
+    }
+
+    #[test]
+    fn test_decode_valu() {
+        assert_eq!(test_decode("v_mov_b32 v1 s1"), Instruction::VOP1 { op: 28, vdst: 1, src: 1 });
     }
 }
