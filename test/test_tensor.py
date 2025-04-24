@@ -2,7 +2,7 @@ import subprocess
 import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Tensor, Device, dtypes, Generator
 from tinygrad.tensor import _METADATA
 from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
@@ -236,6 +236,19 @@ class TestTinygrad(unittest.TestCase):
         Tensor.manual_seed(1337)
         b = random_fn(10,10).realize()
         np.testing.assert_allclose(a.numpy(), b.numpy())
+
+  def test_random_fns_are_deterministic_with_generator(self):
+    for random_fn in [Tensor.randn, Tensor.normal, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform, Tensor.kaiming_normal]:
+      with self.subTest(msg=f"Tensor.{random_fn.__name__}"):
+        gen_a = Generator().manual_seed(1337)
+        a1 = random_fn(10,10, generator=gen_a).realize()
+        gen_b = Generator().manual_seed(1337)
+        b1 = random_fn(10,10, generator=gen_b).realize()
+        np.testing.assert_allclose(a1.numpy(), b1.numpy())
+        b2 = random_fn(10,10, generator=gen_b).realize()
+        a2 = random_fn(10,10, generator=gen_a).realize()
+        np.testing.assert_allclose(a2.numpy(), b2.numpy())
+        np.testing.assert_equal(np.any(np.not_equal(a1.numpy(), a2.numpy())), True)
 
   def test_randperm(self):
     Tensor.manual_seed(0)
