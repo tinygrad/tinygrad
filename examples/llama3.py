@@ -271,7 +271,7 @@ if __name__ == "__main__":
 
   if args.seed is not None: Tensor.manual_seed(args.seed)
   if args.benchmark: Tensor.manual_seed(42)
-  print(f"seed = {Tensor._seed}")
+  print(f"seed = {Tensor._generator._seed}")
   TEMPERATURE = args.temperature
 
   tokenizer = Tokenizer(str((args.model if args.model.is_dir() else args.model.parent) / "tokenizer.model"))

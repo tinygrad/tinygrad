@@ -7,7 +7,7 @@ if __name__ == "__main__":
 
   if (seed := getenv("SEED", 0)) != 0:
     Tensor.manual_seed(seed)
-  print(f"using seed {Tensor._seed}")
+  print(f"using seed {Tensor._generator._seed}")
 
   for N in [10_000_000, 100_000_000, 1_000_000_000]:
     GlobalCounters.reset()

@@ -442,7 +442,7 @@ if __name__ == "__main__":
   height = 16 * (args.height // 16)
   width = 16 * (args.width // 16)
 
-  if args.seed is None: args.seed = Tensor._seed
+  if args.seed is None: args.seed = Tensor._generator._seed
   else: Tensor.manual_seed(args.seed)
 
   print(f"Generating with seed {args.seed}:\n{args.prompt}")

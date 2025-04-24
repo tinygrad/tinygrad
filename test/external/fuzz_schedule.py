@@ -27,7 +27,7 @@ def fuzz_schedule(outs:List[UOp]):
   assign_targets: Dict[UOp, UOp] = {}
   # IMPORTANT: freeze prerealized bufs before ScheduleItem exec
   prerealized: Dict[UOp, memoryview] = {}
-  seed = Tensor._seed
+  seed = Tensor._generator._seed
   ts,_ = toposorts[0]
   for lsi in ts:
     for out in lsi.outputs:

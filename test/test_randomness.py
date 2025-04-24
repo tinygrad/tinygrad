@@ -146,18 +146,18 @@ class TestRandomness(unittest.TestCase):
 
     Tensor.rand(20).realize()
 
-    assert len(Tensor._device_rng_counters) == 1
-    assert len(Tensor._device_seeds) == 1
+    assert len(Tensor._generator._device_rng_counters) == 1
+    assert len(Tensor._generator._device_seeds) == 1
 
     Tensor.rand(20, device=f"{Device.DEFAULT}:1").realize()
 
-    assert len(Tensor._device_rng_counters) == 2
-    assert len(Tensor._device_seeds) == 2
+    assert len(Tensor._generator._device_rng_counters) == 2
+    assert len(Tensor._generator._device_seeds) == 2
 
     Tensor.manual_seed(2)
 
-    assert len(Tensor._device_rng_counters) == 0
-    assert len(Tensor._device_seeds) == 0
+    assert len(Tensor._generator._device_rng_counters) == 0
+    assert len(Tensor._generator._device_seeds) == 0
 
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_threefry_same_kernels(self):
