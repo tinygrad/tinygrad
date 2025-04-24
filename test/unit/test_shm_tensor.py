@@ -8,7 +8,7 @@ class TestRawShmBuffer(unittest.TestCase):
     if sys.platform != "win32":
       import resource
       rlimit = resource.getrlimit(resource.RLIMIT_MEMLOCK)[0]
-      if rlimit < t.nbytes(): raise unittest.SkipTest(f"This test requires a rlimit of at least {t.nbytes()//1024} KiB.")
+      if rlimit < t.nbytes(): raise unittest.SkipTest(f"This test requires RLIMIT_MEMLOCK of at least {t.nbytes()//1024} KiB.")
 
     # copy to shm
     shm_name = (s := shared_memory.SharedMemory(create=True, size=t.nbytes())).name
