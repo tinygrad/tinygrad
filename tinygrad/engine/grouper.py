@@ -153,7 +153,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   # construct children graph (only for bases)
   children: defaultdict[UOp, dict[UOp, None]] = defaultdict(dict)
   assigns: dict[UOp, None] = {}
-  for u in (toposort:=sink.toposort):
+  for u in (toposort:=sink.toposort()):
     if u.op in {Ops.VIEW, Ops.SINK}: continue
     if u.op is Ops.ASSIGN: assigns[u.buf_uop] = None
     for s in u.src: children[s.base][u] = None
@@ -220,7 +220,7 @@ class Kernel:
   metadata: tuple[Metadata, ...] = ()
   def __repr__(self):
     ast_rep = f"SINK{tuple(s.op for s in self.ast.src)}" if self.ast.op is Ops.SINK else repr(self.ast.op)
-    return f"<Kernel {len(list(self.ast.toposort))} {ast_rep} {self.metadata}>"
+    return f"<Kernel {len(list(self.ast.toposort()))} {ast_rep} {self.metadata}>"
 
 @dataclass(frozen=True)
 class KernelContext:
@@ -440,12 +440,12 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
   assign_rep: dict[UOp, UOp] = {}
-  for u in tensor_map[big_sink].toposort:
+  for u in tensor_map[big_sink].toposort():
     if u.op is not Ops.ASSIGN: continue
     kernel_assign[u.buf_uop] = u
     for s in u.src[1].src:
       if s.op is not Ops.BUFFER or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
-      if any(x.op is Ops.ASSIGN and x.buf_uop is s for x in u.toposort):
+      if any(x.op is Ops.ASSIGN and x.buf_uop is s for x in u.toposort()):
         raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on ASSIGN or BUFFER")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep:
@@ -456,7 +456,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   sched_sink = tensor_map[big_sink]
 
   # verify Kernels match the spec
-  type_verify(list(sched_sink.toposort), sched_spec)
+  type_verify(list(sched_sink.toposort()), sched_spec)
 
   # display the final graph
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
@@ -474,7 +474,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0):
       import pickle
-      asts = dedup(u.arg.ast for u in sched_sink.toposort if u.op is Ops.KERNEL)
+      asts = dedup(u.arg.ast for u in sched_sink.toposort() if u.op is Ops.KERNEL)
       PROCESS_REPLAY_CAPTURE[str(big_sink.key)] = pickle.dumps((big_sink, ContextVar._cache, asts))
 
   return becomes_map

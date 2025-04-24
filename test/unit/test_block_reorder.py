@@ -20,7 +20,7 @@ class TestBlockReorder(unittest.TestCase):
       random.shuffle(lst)
       topolst = []
       for u in lst:
-        for p in u.toposort:
+        for p in u.toposort():
           if p not in topolst: topolst.append(p)
       assert is_toposorted(topolst)
 
@@ -54,7 +54,7 @@ class TestBlockReorder(unittest.TestCase):
     sink = c.store(sum(loads)).sink()
 
     # determine golden order
-    golden = block_reorder(sink.toposort)
+    golden = block_reorder(sink.toposort())
 
     # render for test
     print(self._test_render(golden))

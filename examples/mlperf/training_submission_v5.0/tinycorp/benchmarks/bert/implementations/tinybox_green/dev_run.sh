@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export PYTHONPATH="."
+export PYTHONPATH="." NV=1
 export MODEL="bert"
 export DEFAULT_FLOAT="HALF" SUM_DTYPE="HALF" GPUS=6 BS=96 EVAL_BS=96
 
