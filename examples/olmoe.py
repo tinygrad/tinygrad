@@ -7,17 +7,6 @@ from tinygrad import Tensor, nn, Device, GlobalCounters, Context
 from tinygrad.helpers import Timing, getenv
 from extra.models.llama import Transformer, convert_from_huggingface
 
-# def topk(t:Tensor, k:int, dim:int=-1) -> tuple[Tensor, Tensor]:
-#   from tinygrad import dtypes
-#   counter, counter2 = Tensor.arange(t.numel(), device=t.device), Tensor.arange(t.numel() - 1, -1, -1, device=t.device)
-#   output, output_indices = Tensor.zeros(k, device=t.device), Tensor.zeros(k, device=t.device, dtype=dtypes.int32)
-#   for i in range(k):
-#     t_argmax = (t.numel() - ((t == (t_max := t.max())) * counter2).max() - 1).cast(dtypes.default_int)
-#     output = output + t_max.unsqueeze(0).pad(((i, k - i - 1),))
-#     output_indices = output_indices + t_argmax.unsqueeze(0).pad(((i, k - i - 1),))
-#     t = (counter == t_argmax).where(0, t)
-#   return output, output_indices
-
 class MixtureFeedForward:
   def __init__(self, num_experts:int, activated_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
     self.activated_experts = activated_experts
@@ -109,10 +98,6 @@ if __name__ == "__main__":
     timings.append(time.perf_counter()-st)
     toks.append(tok)
     start_pos += 1
-    print("AAAAAAAAAAAA")
-    print("AAAAAAAAAAAA")
-    print("AAAAAAAAAAAA")
-    print("AAAAAAAAAAAA")
     print(toks)
     print(tokenizer.decode(toks))
     print(f"global_mem: {GlobalCounters.global_mem/1e9:.2f} GB")
