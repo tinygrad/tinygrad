@@ -37,7 +37,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   # construnct the KERNEL children graph based on assigns
   children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree: dict[UOp, int] = {}
-  for u in (toposort:=sched_sink.toposort):
+  for u in (toposort:=sched_sink.toposort()):
     if u.op is not Ops.ASSIGN: continue
     k = u.src[1]
     in_degree.setdefault(k, 0)
