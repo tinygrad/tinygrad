@@ -108,6 +108,9 @@ def index_tensor(x, y):
 def index_put(self, indices, values, accumulate=False):
   return aten.index_put(self.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in indices], values.cpu(), accumulate).tiny()
 
+@torch.library.impl("aten::isin.Tensor_Tensor_out", "privateuseone")
+def isin_tensor_tensor_out(x, y, *, assume_unique=False, invert=False, out=None): return out.copy_(aten.isin(x.cpu(), y.cpu(), assume_unique=assume_unique, invert=invert).tiny())
+
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
 
