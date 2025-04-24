@@ -462,8 +462,8 @@ jobs:
       - name: Run CLOUD=1 Test
         run: |
           CLOUDDEV=CPU CLOUD=1 python3 -m pytest test/test_tiny.py test/test_jit.py
-          CLOUDDEV=GPU CLOUD=1 python3 -m pytest test/test_tiny.py test/test_jit.py
-          CLOUDDEV=GPU IMAGE=2 CLOUD=1 python3 test/test_tiny.py
+          CLOUDDEV=GPU CLOUD=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py test/test_jit.py
+          CLOUDDEV=GPU IMAGE=2 CLOUD=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py
       - name: Test Optimization Helpers
         run: PYTHONPATH="." DEBUG=1 python3 extra/optimization/test_helpers.py
       - name: Test Action Space
