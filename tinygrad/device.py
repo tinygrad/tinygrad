@@ -332,7 +332,7 @@ def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
   if dtype == dtypes.bfloat16:
     if device in {"AMD", "METAL"}: return not CI
     if device in {"CUDA", "NV"}: return not CI and not getenv("PTX")
-    if device == "PYTHON": return False
+    return False
   if dtype in dtypes.fp8s:
     # not supported yet - in progress
     return False
