@@ -43,34 +43,21 @@ pub fn decode(word:u32, word1:Option<&u32>) -> Instruction {
             }
         }
         0b10 => {
-            if bits(word, 29, 23) == 0b1111101 {
-                let ssrc0 = bits(word, 7, 0) as u8;
-                let op = bits(word, 15, 8) as u8;
-                let sdst = bits(word, 22, 16) as u8;
-                return Instruction::SOP1 { ssrc0, sdst, op }
-            }
-            if bits(word, 29, 23) == 0b1111111 {
-                let simm16 = bits(word, 15, 0) as i16;
-                let op = bits(word, 22, 16) as u8;
-                return Instruction::SOPP { simm16, op }
-            }
-            if bits(word, 29, 23) == 0b1111110 {
-                let ssrc0 = bits(word, 7, 0) as u8;
-                let ssrc1 = bits(word, 15, 8) as u8;
-                let op = bits(word, 22, 16) as u8;
-                return Instruction::SOPC { ssrc0, ssrc1, op }
-            }
-            if bits(word, 29, 28) == 0b11 {
-                let simm16 = bits(word, 15, 0) as i16;
-                let sdst = bits(word, 22, 16) as u8;
-                let op = bits(word, 27, 23) as u8;
-                return Instruction::SOPK { simm16, sdst, op }
-            }
             let ssrc0 = bits(word, 7, 0) as u8;
             let ssrc1 = bits(word, 15, 8) as u8;
+            let simm16 = word as i16;
             let sdst = bits(word, 22, 16) as u8;
-            let op = bits(word, 29, 23) as u8;
-            return Instruction::SOP2 { ssrc0, ssrc1, sdst, op }
+            match bits(word, 29, 23) {
+                0b1111101 => Instruction::SOP1 { ssrc0, sdst, op: bits(word, 15, 8) as u8 },
+                0b1111110 => Instruction::SOPC { ssrc0, ssrc1, op: bits(word, 22, 16) as u8 },
+                0b1111111 => Instruction::SOPP { simm16, op: bits(word, 22, 16) as u8 },
+                _ => {
+                    match bits(word, 29, 28) {
+                        0b11 => Instruction::SOPK { simm16, sdst, op: bits(word, 27, 23) as u8 },
+                        _ => Instruction::SOP2 { ssrc0, ssrc1, sdst, op: bits(word, 29, 23) as u8 }
+                    }
+                }
+            }
         }
         _ => todo!(),
     }
