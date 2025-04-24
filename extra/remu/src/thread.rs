@@ -184,11 +184,9 @@ impl<'a> Thread<'a> {
             };
             self.scalar = true;
         }
-        // sopk
-        else if instruction >> 28 == 0b1011 {
-            let simm = instruction & 0xffff;
-            let sdst = ((instruction >> 16) & 0x7f) as usize;
-            let op = (instruction >> 23) & 0x1f;
+        else if let Instruction::SOPK { simm16, sdst, op } = decoded {
+            let simm = simm16 as u16;
+            let sdst = sdst as usize;
             let s0: u32 = self.val(sdst);
 
             print_instr!("SOPK", simm, sdst, s0, op);
