@@ -1,6 +1,5 @@
 use crate::helpers::{bits, sign_ext};
 
-#[allow(dead_code)]
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
     SOP2 { op: u8, ssrc0: u8, ssrc1: u8, sdst: u8 },
