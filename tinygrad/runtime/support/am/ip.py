@@ -1,4 +1,4 @@
-import ctypes, time, contextlib, importlib
+import ctypes, time, contextlib, importlib, array
 from typing import Literal
 from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG
@@ -153,7 +153,7 @@ class AM_SMU(AM_IP):
 
   def read_table(self, table_t, cmd):
     self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, cmd)
-    return table_t.from_buffer(to_mv(self.adev.paddr2cpu(self.driver_table_paddr), ctypes.sizeof(table_t)))
+    return table_t.from_buffer(array.array('B', self.adev.vram.view(self.driver_table_paddr, ctypes.sizeof(table_t))[:]))
   def read_metrics(self): return self.read_table(self.smu_mod.SmuMetricsExternal_t, self.smu_mod.TABLE_SMU_METRICS)
 
   def set_clocks(self, level):
@@ -241,7 +241,7 @@ class AM_GFX(AM_IP):
       cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.encode(eop_size=(eop_size//4).bit_length()-2))
 
     # Copy mqd into memory
-    ctypes.memmove(self.adev.paddr2cpu(mqd.paddrs[0][0]), ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct))
+    self.adev.vram.view(mqd.paddrs[0][0], ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
     self.adev.gmc.flush_hdp()
 
     self._grbm_select(me=1, pipe=pipe, queue=queue)
@@ -321,7 +321,7 @@ class AM_IH(AM_IP):
 
   def interrupt_handler(self):
     _, rwptr_vm, suf, _ = self.rings[0]
-    wptr = to_mv(self.adev.paddr2cpu(rwptr_vm), 8).cast('Q')[0]
+    wptr = self.adev.vram.view(offset=rwptr_vm, size=8, fmt='Q')[0]
 
     if self.adev.reg(f"regIH_RB_WPTR{suf}").read_bitfields()['rb_overflow']:
       self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
@@ -406,8 +406,8 @@ class AM_PSP(AM_IP):
   def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.reg(f"{self.reg_pref}_35"), mask=0x80000000, value=0x80000000)
 
   def _prep_msg1(self, data):
-    ctypes.memset(cpu_addr:=self.adev.paddr2cpu(self.msg1_paddr), 0, am.PSP_1_MEG)
-    to_mv(cpu_addr, len(data))[:] = data
+    self.adev.vram.view(self.msg1_paddr, len(data))[:] = data
+    self.adev.vram[self.msg1_paddr + len(data) + 1] = 0
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw, compid):
@@ -449,57 +449,47 @@ class AM_PSP(AM_IP):
 
     self.adev.wait_reg(self.adev.reg(f"{self.reg_pref}_64"), mask=0x8000FFFF, value=0x80000000)
 
-  def _ring_submit(self):
-    prev_wptr = self.adev.reg(f"{self.reg_pref}_67").read()
-    ring_entry_addr = self.adev.paddr2cpu(self.ring_paddr) + prev_wptr * 4
+  def _ring_submit(self, cmd):
+    msg = am.struct_psp_gfx_rb_frame(fence_value=(prev_wptr:=self.adev.reg(f"{self.reg_pref}_67").read()),
+      cmd_buf_addr_lo=lo32(self.adev.paddr2mc(self.cmd_paddr)), cmd_buf_addr_hi=hi32(self.adev.paddr2mc(self.cmd_paddr)),
+      fence_addr_lo=lo32(self.adev.paddr2mc(self.fence_paddr)), fence_addr_hi=hi32(self.adev.paddr2mc(self.fence_paddr)))
 
-    ctypes.memset(ring_entry_addr, 0, ctypes.sizeof(am.struct_psp_gfx_rb_frame))
-    write_loc = am.struct_psp_gfx_rb_frame.from_address(ring_entry_addr)
-    write_loc.cmd_buf_addr_hi, write_loc.cmd_buf_addr_lo = data64(self.adev.paddr2mc(self.cmd_paddr))
-    write_loc.fence_addr_hi, write_loc.fence_addr_lo = data64(self.adev.paddr2mc(self.fence_paddr))
-    write_loc.fence_value = prev_wptr
+    self.adev.vram.view(self.cmd_paddr, ctypes.sizeof(cmd))[:] = memoryview(cmd).cast('B')
+    self.adev.vram.view(self.ring_paddr + prev_wptr * 4, ctypes.sizeof(msg))[:] = memoryview(msg).cast('B')
 
     # Move the wptr
     self.adev.reg(f"{self.reg_pref}_67").write(prev_wptr + ctypes.sizeof(am.struct_psp_gfx_rb_frame) // 4)
 
-    while to_mv(self.adev.paddr2cpu(self.fence_paddr), 4).cast('I')[0] != prev_wptr: pass
+    while self.adev.vram.view(self.fence_paddr, 4, 'I')[0] != prev_wptr: pass
     time.sleep(0.005)
 
-    resp = am.struct_psp_gfx_cmd_resp.from_address(self.adev.paddr2cpu(self.cmd_paddr))
+    resp = type(cmd).from_buffer(array.array('B', self.adev.vram.view(self.cmd_paddr, ctypes.sizeof(cmd))[:]))
     if resp.resp.status != 0: raise RuntimeError(f"PSP command failed {resp.cmd_id} {resp.resp.status}")
 
     return resp
-
-  def _prep_ring_cmd(self, hdr):
-    ctypes.memset(self.adev.paddr2cpu(self.cmd_paddr), 0, 0x1000)
-    cmd = am.struct_psp_gfx_cmd_resp.from_address(self.adev.paddr2cpu(self.cmd_paddr))
-    cmd.cmd_id = hdr
-    return cmd
 
   def _load_ip_fw_cmd(self, fw_types, fw_bytes):
     self._prep_msg1(fw_bytes)
     for fw_type in fw_types:
       if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading fw: {am.psp_gfx_fw_type__enumvalues[fw_type]}")
-      cmd = self._prep_ring_cmd(am.GFX_CMD_ID_LOAD_IP_FW)
+      cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_LOAD_IP_FW)
       cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.adev.paddr2mc(self.msg1_paddr))
       cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)
       cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
-      self._ring_submit()
+      self._ring_submit(cmd)
 
   def _tmr_load_cmd(self):
-    cmd = self._prep_ring_cmd(am.GFX_CMD_ID_SETUP_TMR)
+    cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_SETUP_TMR)
     cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.adev.paddr2mc(self.tmr_paddr))
     cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.tmr_paddr)
     cmd.cmd.cmd_setup_tmr.bitfield.virt_phy_addr = 1
     cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_size
-    return self._ring_submit()
+    return self._ring_submit(cmd)
 
   def _load_toc_cmd(self, toc_size):
-    cmd = self._prep_ring_cmd(am.GFX_CMD_ID_LOAD_TOC)
+    cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_LOAD_TOC)
     cmd.cmd.cmd_load_toc.toc_phy_addr_hi, cmd.cmd.cmd_load_toc.toc_phy_addr_lo = data64(self.adev.paddr2mc(self.msg1_paddr))
     cmd.cmd.cmd_load_toc.toc_size = toc_size
-    return self._ring_submit()
+    return self._ring_submit(cmd)
 
-  def _rlc_autoload_cmd(self):
-    self._prep_ring_cmd(am.GFX_CMD_ID_AUTOLOAD_RLC)
-    return self._ring_submit()
+  def _rlc_autoload_cmd(self): return self._ring_submit(am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_AUTOLOAD_RLC))

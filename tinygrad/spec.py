@@ -12,16 +12,30 @@ buffer_spec = PatternMatcher([
    lambda buf_view: isinstance(buf_view.arg, tuple) and len(buf_view.arg) == 2 and all(isinstance(arg, (int, UOp)) for arg in buf_view.arg)),
 ])
 
+def validate_kernel(k:UOp):
+  assert k.arg.ast.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.SINK}, f"must end with SINK/COPY/BUFFER_VIEW {k.arg}"
+  if k.arg.ast.op is Ops.SINK: assert all(s.op is Ops.STORE for s in k.arg.ast.src), f"SINK must end with STORE {k.arg.ast}"
+  return True
+
+assign_spec = PatternMatcher([
+  # KERNEL can attach to an ASSIGN to describe the compute required to realize a BUFFER
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN)), name="k"), validate_kernel),
+
+  # ASSIGN has a target buffer and a value. It can also optionally depend on other assigns
+  (UPat(Ops.ASSIGN, name="x"),
+   lambda x: x.src[0].base.op in {Ops.BUFFER, Ops.BUFFER_VIEW} and (len(x.src) == 2 or all(s.op is Ops.ASSIGN for s in x.src[2:]))),
+])
+
 # *** this is the spec of a Tensor in UOp ***
 
-tensor_uop_spec = buffer_spec+PatternMatcher([
+tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
   (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)),
    # naturally correct
    lambda mv,x: (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
    # "make things that can't be images not images" can change the buffer dtype
    # this is fine as long as it's a realized buffer and base dtypes match.
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.base.op is Ops.BUFFER)),
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE}),)), lambda: False),
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.CONST, Ops.DEVICE}),)), lambda: False),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
@@ -38,10 +52,6 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
   # COPY
   # NOTE: the arg here specifies clone=True, which prevents folding same device copy
   (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("x"))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
-
-  # ASSIGN changes the value of a buffer
-  (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))),
-   lambda assign,target,new_val: target.base.op is Ops.BUFFER and (assign.dtype == target.dtype == new_val.dtype)),
 ])
 
 # ***** uop type spec *****
@@ -51,7 +61,7 @@ def validate_index(idx:UOp, mask:UOp|None=None):
   # this checks for out of bounds access. it is not complete but should catch some issues
   if mask is None and not isinstance(idx.dtype, ImageDType):
     # WEBGPU has a BITCAST in the index. TODO: fix
-    if any(x.op in {Ops.DEFINE_VAR, Ops.BITCAST} or (x.op is Ops.SPECIAL and any(not isinstance(y, int) for y in x.arg[1:])) for x in idx.toposort):
+    if any(x.op in {Ops.DEFINE_VAR, Ops.BITCAST} or (x.op is Ops.SPECIAL and any(not isinstance(y, int) for y in x.arg[1:])) for x in idx.toposort()):
       return True
     vmin, vmax, sz = idx.src[1].vmin, idx.src[1].vmax, cast(PtrDType, idx.src[0].dtype).size
     if sz != -1 and (vmin < 0 or vmax >= sz):
@@ -132,31 +142,23 @@ spec = PatternMatcher([
 
   # NOTE: for testing, we let sinks be anything
   #(UPat(Ops.SINK, src=UPat(Ops.STORE)), lambda: True),
-  (UPat((Ops.NAME, Ops.SINK), dtypes.void), lambda: True),
+  (UPat(Ops.SINK, dtypes.void), lambda: True),
   (UPat((Ops.NOOP, Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
 ])
 
-# *** this is the spec of a Kernel in UOp ***
+# *** schedule spec only allows buffers, assigns and kernels in the graph ***
 
-def validate_kernel(k:UOp):
-  assert k.arg.ast.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.SINK}, f"must end with SINK/COPY/BUFFER_VIEW {k.arg}"
-  if k.arg.ast.op is Ops.SINK: assert all(s.op is Ops.STORE for s in k.arg.ast.src), f"SINK must end with STORE {k.arg.ast}"
-  return True
-
-kernel_spec = buffer_spec+PatternMatcher([
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN)), name="k"), validate_kernel),
-  # assign has a buffer and kernel source, it can optionally depend on other assigns
-  (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
+sched_spec = buffer_spec+assign_spec+PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK}), lambda: False),
 ])
 
 # *** this is the UOp shape spec ***
 
 def verify_sink_dims(sink:UOp):
-  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sink.toposort if x.op is not Ops.SINK and x.st is not None])]
+  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sink.toposort() if x.op is not Ops.SINK and x.st is not None])]
   return all_same([x.st_arg.size for x in sink.src]) and all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims)
 
 shape_spec = PatternMatcher([
@@ -168,10 +170,9 @@ shape_spec = PatternMatcher([
 
 # ***** uop helpers *****
 
-def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
-  specs = [spec, *extra_specs]
+def type_verify(uops:list[UOp], extra_spec:PatternMatcher|None=None):
+  check_spec = (extra_spec+spec) if extra_spec is not None else spec
   for i,u in enumerate(uops):
-    spec_ret = [cast(bool|None, s.rewrite(u)) for s in specs]
-    if any(ret is False for ret in spec_ret) or all(ret is None for ret in spec_ret):
+    if cast(bool|None, check_spec.rewrite(u)) is not True:
       if DEBUG >= 3: print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")

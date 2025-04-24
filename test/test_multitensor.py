@@ -778,7 +778,7 @@ class TestMultiTensor(unittest.TestCase):
     sched = b.schedule()
     self.assertEqual(len(sched), 6)
     # notably, only two copies (for the arange) - vs 4 copies if we didn't fold the const copy
-    self.assertEqual(len([x for x in sched if any(u.op is Ops.COPY for u in x.ast.toposort)]), 2)
+    self.assertEqual(len([x for x in sched if any(u.op is Ops.COPY for u in x.ast.toposort())]), 2)
     run_schedule(sched)
     self.assertListEqual(b.tolist(), [0, 0, 0])
 

@@ -1,20 +1,21 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref, contextvars
 from contextlib import ContextDecorator
-from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar
+from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Optional
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
+from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.engine.multi import get_multi_map
 from tinygrad.gradient import compute_gradient
-from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
+from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element, all_metadata
 from tinygrad.spec import tensor_uop_spec, type_verify
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
+from tinygrad.engine.grouper import get_becomes_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -25,7 +26,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
   all_uops: set[UOp] = set()
   search_uops = list(applied_map)
   while len(search_uops):
-    x = search_uops.pop(0)
+    x = search_uops.pop()
     if x in all_uops: continue
     all_uops.add(x)
     search_uops.extend([u for c in x.children if (u:=c()) is not None])
@@ -45,6 +46,9 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
       t.lazydata = ns
 
 # **** Tensor helper functions ****
+
+# this tracks the tensor.py METADATA
+_METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
 
 def _metaop(op, shape:tuple[sint,...], dtype:DType, device:str|tuple[str, ...], arg=None) -> UOp:
   if isinstance(device, str): return UOp.metaop(op, shape, dtype, device, arg)
@@ -97,12 +101,11 @@ def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
 def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
-  # apply mask to values (already broadcasted) and reduce such that if mask contains repeated indices the last one remains
-  values = values * mask
+  # reduce such that if mask contains repeated indices the last one remains
   for dim in axes: mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
   # remove extra dims from reduce
   for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
-  # select from values for each True element in mask else select from self
+  # select from values for each True element in mask else select from target
   return mask.where(values, target)
 
 #  `(padding_left, padding_right, padding_top, padding_bottom, ...)` ->  `(..., (padding_top, padding_bottom), (padding_left, padding_right))`
@@ -177,6 +180,7 @@ class Tensor(SimpleMathTrait):
 
   def _apply_uop(self, fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
     new_uop: UOp = fxn(*[t.lazydata for t in (self,)+x], **kwargs)
+    if (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = metadata
     needs_input_grad = [t.requires_grad for t in (self,)+x]
     return Tensor(new_uop, device=new_uop.device, requires_grad=True if any(needs_input_grad) else None if None in needs_input_grad else False)
 
@@ -223,24 +227,35 @@ class Tensor(SimpleMathTrait):
 
   # ***** data handlers ****
 
+  def kernelize(self, *lst:Tensor) -> Tensor:
+    """
+    Creates the kernels and buffers needed to realize these Tensor(s).
+
+    NOTE: Kernelize can be called multiple times on a Tensor
+    """
+    big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
+
+    # TODO: move this to scheduler tensor_map pass
+    if any(x.op is Ops.MULTI for x in big_sink.toposort()):
+      # multi fixup
+      _apply_map_to_tensors(get_multi_map(big_sink), name="Apply Multi Map")
+      big_sink = UOp.sink(*flatten([x.lazydata.src if x.lazydata.op is Ops.MULTI else [x.lazydata] for x in (self,)+lst]))
+
+    # verify Tensors match the spec
+    if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
+
+    becomes_map = get_becomes_map(big_sink)
+    _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
+    return self
+
   def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[Variable, int]]:
     """
     Creates the schedule needed to realize these Tensor(s), with Variables.
 
     NOTE: A Tensor can only be scheduled once.
     """
-    big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
-
-    # TODO: move this to scheduler tensor_map pass
-    if any(x.op is Ops.MULTI for x in big_sink.toposort):
-      # multi fixup
-      _apply_map_to_tensors(get_multi_map(big_sink), name="Apply Multi Map")
-      big_sink = UOp.sink(*flatten([x.lazydata.src if x.lazydata.op is Ops.MULTI else [x.lazydata] for x in (self,)+lst]))
-
-    # verify Tensors match the spec
-    if __debug__: type_verify(list(big_sink.toposort), tensor_uop_spec)
-
-    schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
+    self.kernelize(*lst)
+    schedule, var_vals, becomes_map = create_schedule_with_vars(UOp.sink(*[x.lazydata for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return memory_planner(schedule), var_vals
 
@@ -901,7 +916,7 @@ class Tensor(SimpleMathTrait):
     print(t.grad.numpy())
     ```
     """
-    all_uops = self.lazydata.toposort
+    all_uops = self.lazydata.toposort()
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
                                        t.lazydata in all_uops and t.requires_grad and not Tensor.no_grad]
     # clear contexts
@@ -1202,7 +1217,7 @@ class Tensor(SimpleMathTrait):
 
   def __setitem__(self, indices, v:Tensor|ConstType) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
-      self._getitem(indices).assign(v)
+      self.realize()._getitem(indices).assign(v)
       return
     # NOTE: check that setitem target is valid first
     if not unwrap(self.lazydata.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
@@ -3966,8 +3981,8 @@ class Tensor(SimpleMathTrait):
 
   def is_floating_point(self) -> bool:
     """
-    Returns `True` if the tensor contains floating point types, i.e. is one of `dtype.float64`, `dtype.float32`,
-    `dtype.float16`, `dtype.bfloat16`.
+    Returns `True` if the tensor contains floating point types, i.e. is one of `dtypes.float64`, `dtypes.float32`,
+    `dtypes.float16`, `dtypes.bfloat16`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([8, 9], dtype=dtypes.float32)
