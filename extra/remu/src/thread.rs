@@ -10,6 +10,7 @@ pub const SGPR_COUNT: usize = 105;
 pub const VCC_LO: usize = 106;
 pub const EXEC_LO: usize = 126;
 pub const SCC: usize = 253;
+pub const NULL: usize = 124; // TODO: remove NULL_SRC below
 
 const VGPR_COUNT: usize = 256;
 const NULL_SRC: u32 = 124;
@@ -49,7 +50,11 @@ impl<'a> Thread<'a> {
                 val => val,
             };
 
-            let base_addr = self.scalar_reg.read64(sbase as usize);
+            // TODO: refactor vcc_lo to store in scalar register 106
+            let base_addr = match sbase as usize {
+                VCC_LO => panic!("using vcc as sbase"),
+                s => self.scalar_reg.read64(s),
+            };
             let addr = (base_addr as i64 + offset as i64 + soffset as i64) as u64;
 
             match op {
@@ -985,8 +990,8 @@ impl<'a> Thread<'a> {
                     };
 
                     match sdst {
-                        106 => self.vcc.set_lane(vcc),
-                        124 => {}
+                        VCC_LO => self.vcc.set_lane(vcc),
+                        NULL => {}
                         _ => self.set_sgpr_co(sdst, vcc),
                     }
                 }
@@ -1695,7 +1700,7 @@ impl<'a> Thread<'a> {
         match sdst_bf {
             // NOTE: remu is only wave32, vcc_hi is treated as a regular SGPR
             0..=SGPR_COUNT | 107 => self.scalar_reg[sdst_bf] = val,
-            106 => self.vcc.value = val,
+            VCC_LO => self.vcc.value = val,
             126 => self.exec.value = val,
             _ => todo!("write to sdst {}", sdst_bf),
         }
@@ -1854,7 +1859,7 @@ mod test_alu_utils {
     fn test_write_to_sdst_vcc_val() {
         let mut thread = _helper_test_thread();
         let val = 0b1011101011011011111011101111;
-        thread.write_to_sdst(106, val);
+        thread.write_to_sdst(VCC_LO, val);
         assert_eq!(thread.vcc.value, 195935983);
     }
 
@@ -1938,7 +1943,7 @@ mod test_smem {
         }
         let addr = buf.as_ptr() as u64;
         // NOTE: vcc is an alias for s[106:107]
-        thread.scalar_reg.write64(106, addr);
+        thread.scalar_reg.write64(VCC_LO, addr);
         // TODO: vcc_lo should just read from s106
         thread.vcc.value = (addr & 0xffffffff) as u32;
         r(&vec![0xF4000035, 0xF8000000, END_PRG], &mut thread);
