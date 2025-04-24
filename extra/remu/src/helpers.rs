@@ -1,5 +1,11 @@
 use half::f16;
-use num_traits::float::FloatCore;
+use num_traits::{float::FloatCore, PrimInt, Unsigned};
+
+pub fn bits<T>(word: T, hi: usize, lo: usize) -> T where T: PrimInt + Unsigned {
+    assert!(hi >= lo);
+    let width = hi - lo + 1;
+    (word >> lo) & ((T::one() << width) - T::one())
+}
 
 pub fn nth(val: u32, pos: usize) -> u32 {
     (val >> (31 - pos as u32)) & 1
