@@ -117,15 +117,13 @@ impl<'a> Thread<'a> {
             };
             self.scalar = true;
         }
-        // sopc
-        else if (instruction >> 23) & 0x3ff == 0b101111110 {
-            let s0 = (instruction & 0xff) as usize;
-            let s1 = ((instruction >> 8) & 0xff) as usize;
-            let op = (instruction >> 16) & 0x7f;
+        else if let Instruction::SOPC { ssrc0, ssrc1, op } = decoded {
+            let s0 = ssrc0 as usize;
+            let s1 = ssrc1 as usize;
 
             print_instr!("SOPC", s0, s1, op);
 
-            fn scmp<T>(s0: T, s1: T, offset: u32, op: u32) -> bool
+            fn scmp<T>(s0: T, s1: T, offset: u8, op: u8) -> bool
             where
                 T: PartialOrd + PartialEq,
             {
