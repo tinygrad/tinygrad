@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export PYTHONPATH="."
+export PYTHONPATH="." AMD=1
 export MODEL="bert"
 export DEFAULT_FLOAT="HALF" GPUS=1 BS=128 EVAL_BS=128
 

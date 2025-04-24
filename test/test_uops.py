@@ -539,7 +539,7 @@ class TestShapeSpec(unittest.TestCase):
     a = Tensor.ones((1, 1)).pad(((1, 1), (1, 1)))
     ast = a.contiguous().schedule()[0].ast
     valid_pattern = UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat.cvar(), UPat.cvar()))
-    valid_ternary = [x for x in ast.toposort if valid_pattern.match(x, {})][0]
+    valid_ternary = [x for x in ast.toposort() if valid_pattern.match(x, {})][0]
     # the WHERE outputs a contiguous (3, 3)
     self.assertEqual(valid_ternary.st, ShapeTracker.from_shape((3, 3)))
     valid, x, y = valid_ternary.src

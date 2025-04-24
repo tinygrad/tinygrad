@@ -325,7 +325,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
       candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
     # try checking the whole clause
-    if expr in uop.toposort: candidates.append([(expr, UOp.variable("fake", v0, v1, expr.dtype))])
+    if expr in uop.toposort(): candidates.append([(expr, UOp.variable("fake", v0, v1, expr.dtype))])
 
     for candidate in candidates:
       # if every branch in candidate gives the same simplified uop, we can rewrite the uop
@@ -339,7 +339,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
 
 def _valid_priority(v: UOp, valids:list[UOp]):
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
-  try: return sum(-1 if parse_valid(v)[0] in other.toposort else 0 for other in valids)
+  try: return sum(-1 if parse_valid(v)[0] in other.toposort() else 0 for other in valids)
   except ValueError: return 0
 
 def simplify_valid(valid:UOp) -> UOp|None:
@@ -404,7 +404,7 @@ def index_collapse(idx:UOp,rng:UOp,buf:UOp,ld:UOp,acc:UOp,add=UOp.const(dtypes.i
   return new_acc.assign(new_acc+new_load)
 
 def reduce_collapse(acc:UOp, ret:UOp, alu:UOp):
-  reduce_parented, reduce_unparented = partition(acc.src[1:], lambda x: x in ret.toposort)
+  reduce_parented, reduce_unparented = partition(acc.src[1:], lambda x: x in ret.toposort())
   if len(reduce_unparented) == 0: return None
   new_acc = acc.replace(src=acc.src[0:1]+tuple(reduce_parented))
   ret = new_acc.assign(new_acc.alu(alu.op, ret))
@@ -425,7 +425,7 @@ def reduce_mul_chain(r:UOp):
   if r.dtype != r.src[0].dtype: return None
   inside, outside = [], []
   for m in split_uop(r.src[0], Ops.MUL):
-    m_parents = m.toposort
+    m_parents = m.toposort()
     if all(r not in m_parents for r in r.src[1:]) and (r.arg != Ops.MAX or m.vmin >= 0): outside.append(m)
     else: inside.append(m)
   if len(outside) == 0: return None
