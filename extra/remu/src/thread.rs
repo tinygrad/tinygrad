@@ -830,12 +830,10 @@ impl<'a> Thread<'a> {
                 false => self.vcc.set_lane(ret),
             };
         }
-        // vop2
-        else if instruction >> 31 == 0b0 {
-            let s0 = (instruction & 0x1FF) as usize;
-            let s1 = self.vec_reg[((instruction >> 9) & 0xFF) as usize];
-            let vdst = ((instruction >> 17) & 0xFF) as usize;
-            let op = (instruction >> 25) & 0x3F;
+        else if let Instruction::VOP2 { vsrc, src, vdst, op } = decoded {
+            let s0 = src as usize;
+            let s1 = self.vec_reg[vsrc as usize];
+            let vdst = vdst as usize;
 
             print_instr!("VOP2", s0, s1, vdst, op);
 
