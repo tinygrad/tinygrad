@@ -17,7 +17,7 @@ impl<T> Register for T where T: Index<usize, Output = u32> + IndexMut<usize> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct VGPR {
     values: [[u32; 256]; 32],
     pub default_lane: Option<usize>,

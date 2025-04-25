@@ -15,6 +15,7 @@ pub struct WorkGroup<'a> {
     wave_state: HashMap<usize, WaveState>,
 }
 
+#[derive(Debug, Clone)]
 struct WaveState {
     scalar_reg: [u32; SGPR_COUNT],
     scc: u32,
@@ -66,56 +67,44 @@ impl<'a> WorkGroup<'a> {
     }
 
     fn exec_wave(&mut self, (wave_id, threads): (usize, &&[[u32; 3]])) -> Result<(), i32> {
-        let wave_state = self.wave_state.get(&wave_id);
-        let mut sds = match wave_state {
-            Some(val) => val.sds.clone(),
-            None => {
-                let mut sds = HashMap::new();
-                for i in 0..=31 {
-                    sds.insert(i, VecDataStore::new());
-                }
-                sds
+        let (mut scalar_reg, mut scc, mut pc, mut vec_reg, mut vcc, mut exec, mut sds) = match self.wave_state.get(&wave_id) {
+          Some(val) => {
+            let val = val.clone();
+            (val.scalar_reg, val.scc, val.pc, val.vec_reg, val.vcc, val.exec, val.sds)
+          }
+          None => {
+            let mut scalar_reg = [0; SGPR_COUNT];
+            scalar_reg.write64(0, self.kernel_args as u64);
+
+            let [gx, gy, gz] = self.id;
+            match self.dispatch_dim {
+              3 => (scalar_reg[13], scalar_reg[14], scalar_reg[15]) = (gx, gy, gz),
+              2 => (scalar_reg[14], scalar_reg[15]) = (gx, gy),
+              _ => scalar_reg[15] = gx,
             }
-        };
-        let (mut scalar_reg, mut scc, mut pc) = match wave_state {
-            Some(val) => (val.scalar_reg.clone(), val.scc, val.pc),
-            None => {
-                let mut scalar_reg = [0; SGPR_COUNT];
-                scalar_reg.write64(0, self.kernel_args as u64);
-                let [gx, gy, gz] = self.id;
-                match self.dispatch_dim {
-                    3 => (scalar_reg[13], scalar_reg[14], scalar_reg[15]) = (gx, gy, gz),
-                    2 => (scalar_reg[14], scalar_reg[15]) = (gx, gy),
-                    _ => scalar_reg[15] = gx,
-                }
-                (scalar_reg, 0, 0)
+
+            let mut vec_reg = VGPR::new();
+            for (t, [x, y, z]) in threads.iter().enumerate() {
+              vec_reg.get_lane_mut(t)[0] = match &self.launch_bounds {
+                [_, 1, 1] => *x,
+                _ => (z << 20) | (y << 10) | x,
+              }
             }
-        };
-        let (mut vec_reg, mut vcc) = match wave_state {
-            Some(val) => (val.vec_reg.clone(), val.vcc.clone()),
-            None => (VGPR::new(), WaveValue::new(0, threads.len())),
-        };
-        if wave_state.is_none() {
-            threads.iter().enumerate().for_each(|(t, [x,y,z])| {
-                vec_reg.get_lane_mut(t)[0] = match &self.launch_bounds {
-                    [_, 1, 1] => *x,
-                    _ => (z << 20) | (y << 10) | x,
-                }
-            });
-        }
-        let mut exec = match wave_state {
-            Some(val) => val.exec.clone(),
-            None => {
-                let active = (!0u32).wrapping_shr(32 - (threads.len() as u32));
-                WaveValue::new(active, threads.len())
-            }
+
+            let vcc = WaveValue::new(0, threads.len());
+            let active = (!0u32).wrapping_shr(32 - (threads.len() as u32));
+            let exec = WaveValue::new(active, threads.len());
+
+            let sds = (0..=31).map(|i| (i, VecDataStore::new())).collect();
+            (scalar_reg, 0, 0, vec_reg, vcc, exec, sds)
+          }
         };
 
         loop {
             if self.kernel[pc] == END_PRG {
                 break Ok(());
             }
-            if BARRIERS.contains(&[self.kernel[pc], self.kernel[pc + 1]]) && wave_state.is_none() {
+            if BARRIERS.contains(&[self.kernel[pc], self.kernel[pc + 1]]) && self.wave_state.get(&wave_id).is_none() {
                 self.wave_state.insert(wave_id, WaveState { scalar_reg, scc, vec_reg, vcc, exec, pc, sds });
                 break Ok(());
             }
