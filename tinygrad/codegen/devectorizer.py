@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve, graph_rewrite, GroupOp, identity_element
-from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat, gep_pushing
+from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat, gep_pushing, const_folding
 from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE, partition
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
@@ -341,48 +341,59 @@ def no_vectorized_reduce(inp:UOp, red:UOp):
     if red.dtype.vcount == 1: return red
   return no_vectorized_alu(red)
 
+def range_fold(lo:UOp, hi:UOp, st:UOp, cut:UOp, val:UOp):
+  # psuedo code: sum(val if i >= cut else 0) for i in range(lo, hi, st))
+  # TODO: this function is so tricky. test it
+  total = (hi-lo+st-1) // st # real count in the range
+  length = ((lo-cut+total*st)//st).maximum(0).minimum(total) # number in cut
+  return length.cast(val.dtype) * val
+
 pm_reduce_collapse = PatternMatcher([
-  # third arg in range
+  # put third arg in range
   (UPat(Ops.RANGE, src=(UPat.var(), UPat.var()), name="r"), lambda r: r.replace(src=r.src+(UOp.const(r.dtype, 1),))),
   # mul to range
   (UPat.var("x") * UPat(Ops.RANGE, name="r"), lambda x,r: r.replace(src=(r.src[0]*x, r.src[1]*x, r.src[2]*x))),
   # add to range
   (UPat.var("x") + UPat(Ops.RANGE, name="r"), lambda x,r: r.replace(src=(r.src[0]+x, r.src[1]+x, r.src[2]))),
-  # 0 is "true" arg in where
-  ((UPat(Ops.RANGE, name="r") < UPat.cvar("c")).where(UPat(Ops.CONST, arg=0), UPat.cvar("v")),
-   lambda r,c,v: r.replace(src=(c, r.src[1], r.src[2])).where(v, v)),
-  # reduce ADD on RANGE
-  (UPat(Ops.RANGE, name="r").where(UPat.cvar("v"), UPat.cvar("v")).reduce(arg=Ops.ADD),
-   lambda r,v: ((r.src[1]-r.src[0])//r.src[2]).cast(v.dtype)*v),
+  # 0 is "true" arg in where. fold the range
+  ((UPat(Ops.RANGE, src=(UPat.var("lo"), UPat.var("hi"), UPat.var("st"))) < UPat.cvar("cut")) \
+   .where(UPat(Ops.CONST, arg=0), UPat.cvar("val")).reduce(arg=Ops.ADD), range_fold),
   # devectorize REDUCE
   (UPat(Ops.VECTORIZE, name="inp").reduce(name="red"), no_vectorized_reduce),
   # REDUCE on ADD
   ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD), lambda x,y: x.reduce(arg=Ops.ADD) + y.reduce(arg=Ops.ADD)),
-])
+  # MUL casted bool
+  ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast()), lambda x,gate: gate.where(x, 0)),
+  # WHERE on LOAD (works on max too)
+  (UPat.var("gate").where(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load(), 0).reduce(arg=Ops.ADD),
+   lambda buf,idx,gate: buf.index(idx, gate).load()),
+  # INDEX on RANGE / gated RANGE.
+  (UPat.var("buf").index(UPat(Ops.RANGE, name="r"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r2"))),
+    lambda buf,r,idx,r2: buf.index(idx*r.src[2] + r.src[0], (idx >= r2.src[0]) & (idx < r2.src[1])) if r.arg == r2.arg else None),
+])+const_folding
 
 def reduce_collapse(red:UOp):
-  if len(red.src) > 2: return None # TODO: support multi range
   included, not_included = partition(red.parents, lambda x: any(y in x.sparents for y in red.src[1:]))
-  if any(x.op in {Ops.LOAD, Ops.STORE, Ops.REDUCE} for x in included): return None
+  if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
   replaces = {red:red.replace(src=red.src[0:1])}
   for u in included:
     for s in u.src:
-      if s in not_included and s not in replaces and s.op not in {Ops.CONST, Ops.VCONST}:
+      if s in not_included and s not in replaces and s.op not in {Ops.CONST, Ops.VCONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}:
         replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse+devectorize, name="reduce_collapse")
-  if any(x.op is Ops.REDUCE for x in sink.toposort()): return None
+  if any(x.op in {Ops.REDUCE, Ops.RANGE} for x in sink.toposort()): return None
   return sink.substitute({v:k for k,v in replaces.items()})
 
 pm_reduce = PatternMatcher([
-  # remove REDUCE without loads (generic arange opt)
-  (UPat(Ops.REDUCE, name="red"), reduce_collapse),
+  # remove REDUCE without loads (generic arange opt). TODO: support multi range
+  (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
   # REDUCE -> DEFINE_ACC+ASSIGN
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
   # tensor core built in accumulate
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
-])
+])+sym
 
 # *** uop graph ***
 
