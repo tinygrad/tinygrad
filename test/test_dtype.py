@@ -61,10 +61,13 @@ def _test_cast(a:Tensor, target_dtype:DType):
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(_to_np_dtype(target_dtype))))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
-  if target_dtype in dtypes.fp8s: raise unittest.SkipTest("no test for fp8s bitcast yet")
-  if getenv("PTX") and a.dtype == dtypes.int8 and target_dtype.itemsize != a.dtype.itemsize:
-    raise unittest.SkipTest("shape changing bitcast of int8 broken on PTX")
-  _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(_to_np_dtype(target_dtype)).tolist())
+  if target_dtype in dtypes.fp8s:
+    if not is_dtype_supported(target_dtype): raise unittest.SkipTest("no test for fp8s bitcast for this device")
+    _test_op(lambda: a.bitcast(target_dtype), target_dtype, a.numpy().view(target_dtype.name).tolist())
+  else:
+    if getenv("PTX") and a.dtype == dtypes.int8 and target_dtype.itemsize != a.dtype.itemsize:
+      raise unittest.SkipTest("shape changing bitcast of int8 broken on PTX")
+    _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(_to_np_dtype(target_dtype)).tolist())
 
 class TestDType(unittest.TestCase):
   DTYPE: Any = None
