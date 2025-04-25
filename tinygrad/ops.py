@@ -266,6 +266,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else repr(self.arg)
 
+  @functools.cached_property
+  def parents(self:UOp) -> dict[UOp, None]:
+    ret = {s:None for s in self.src}
+    for s in self.src: ret.update(s.parents)
+    return ret
+  @property
+  def sparents(self:UOp) -> dict[UOp, None]: return {self:None, **self.parents}
+
   def toposort(self, gate:Callable|None=None) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)

@@ -6,7 +6,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve, graph_rewrite, GroupOp, identity_element
 from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat, gep_pushing
-from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
+from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE, partition
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
 
@@ -332,7 +332,23 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   return acc.assign(ret) if len(reduce_range) != 0 else ret
 
+def reduce_collapse(red:UOp):
+  dat, rngs = red.src[0], red.src[1:]
+  included, not_included = partition(red.sparents, lambda x: any(y in x.sparents for y in rngs))
+  if any(x.op in {Ops.LOAD, Ops.STORE} for x in included): return None
+  replaces = {}
+  for u in included:
+    for s in u.src:
+      if s in not_included and s not in replaces and s.op not in {Ops.CONST, Ops.VCONST}:
+        replaces[s] = UOp(Ops.CUSTOM, arg=len(replaces))
+  collapse_fxn = red.substitute(replaces)
+  graph_rewrite(collapse_fxn, PatternMatcher([]), name="reduce_collapse")
+  print(collapse_fxn)
+  return None
+
 pm_reduce = PatternMatcher([
+  # remove REDUCE without loads (generic arange opt)
+  (UPat(Ops.REDUCE, name="red"), reduce_collapse),
   # REDUCE -> DEFINE_ACC+ASSIGN
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
   # tensor core built in accumulate
