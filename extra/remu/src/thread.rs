@@ -6,11 +6,12 @@ use half::{bf16, f16};
 use crate::rdna3::{Instruction, decode};
 use num_traits::Float;
 
-pub const SGPR_COUNT: usize = 105;
+pub const SGPR_COUNT: usize = 128;
 pub const VCC: usize = 106;
-pub const SCC: usize = 253;
+pub const SCC: usize = 105; // WRONG
 pub const EXEC: usize = 126;
 pub const NULL_SRC: usize = 124;
+pub const SGPR_SRC: usize = 105;
 
 const VGPR_COUNT: usize = 256;
 const SIMM_SRC: usize = 255;
@@ -18,7 +19,7 @@ const SIMM_SRC: usize = 255;
 pub const END_PRG: u32 = 0xbfb00000;
 
 pub struct Thread<'a> {
-    pub scalar_reg: &'a mut Vec<u32>,
+    pub scalar_reg: &'a mut [u32; SGPR_COUNT],
 
     pub vec_reg: &'a mut VGPR,
     pub vcc: &'a mut WaveValue,
@@ -1072,7 +1073,7 @@ impl<'a> Thread<'a> {
                             };
 
                             match vdst {
-                                0..=SGPR_COUNT | 107 => self.set_sgpr_co(vdst, ret),
+                                0..=SGPR_SRC | 107 => self.set_sgpr_co(vdst, ret),
                                 VCC => self.vcc.set_lane(ret),
                                 EXEC => self.exec.set_lane(ret),
                                 _ => todo_instr!(instruction)?,
@@ -1694,7 +1695,7 @@ impl<'a> Thread<'a> {
     fn write_to_sdst(&mut self, sdst_bf: usize, val: u32) {
         match sdst_bf {
             // NOTE: remu is only wave32, vcc_hi is treated as a regular SGPR
-            0..=SGPR_COUNT | 107 => self.scalar_reg[sdst_bf] = val,
+            0..=SGPR_SRC | 107 => self.scalar_reg[sdst_bf] = val,
             VCC => self.vcc.value = val,
             126 => self.exec.value = val,
             _ => todo!("write to sdst {}", sdst_bf),
@@ -1752,7 +1753,7 @@ pub trait ALUSrc<T> {
 impl ALUSrc<u16> for Thread<'_> {
     fn val(&mut self, code: usize) -> u16 {
         match code {
-            0..=SGPR_COUNT => self.scalar_reg[code] as u16,
+            0..=SGPR_SRC => self.scalar_reg[code] as u16,
             VGPR_COUNT..=511 => self.vec_reg[code - VGPR_COUNT] as u16,
             129..=192 => (code - 128) as u16,
             193..=208 => ((code - 192) as i16 * -1) as u16,
@@ -1780,7 +1781,7 @@ impl ALUSrc<u16> for Thread<'_> {
 impl ALUSrc<u32> for Thread<'_> {
     fn val(&mut self, code: usize) -> u32 {
         match code {
-            0..=SGPR_COUNT => self.scalar_reg[code],
+            0..=SGPR_SRC => self.scalar_reg[code],
             VGPR_COUNT..=511 => self.vec_reg[code - VGPR_COUNT],
             129..=192 => (code - 128) as u32,
             193..=208 => ((code - 192) as i32 * -1) as u32,
@@ -1806,7 +1807,7 @@ impl ALUSrc<u32> for Thread<'_> {
 impl ALUSrc<u64> for Thread<'_> {
     fn val(&mut self, code: usize) -> u64 {
         match code {
-            0..=SGPR_COUNT => self.scalar_reg.read64(code),
+            0..=SGPR_SRC => self.scalar_reg.read64(code),
             VGPR_COUNT..=511 => self.vec_reg.read64(code - VGPR_COUNT),
             129..=192 => (code - 128) as u64,
             193..=208 => ((code - 192) as i64 * -1) as u64,
@@ -3636,7 +3637,7 @@ fn r(prg: &Vec<u32>, thread: &mut Thread) {
 }
 fn _helper_test_thread() -> Thread<'static> {
     let static_lds: &'static mut VecDataStore = Box::leak(Box::new(VecDataStore::new()));
-    let static_sgpr: &'static mut Vec<u32> = Box::leak(Box::new(vec![0; 256]));
+    let static_sgpr: &'static mut [u32; SGPR_COUNT] = Box::leak(Box::new([0; SGPR_COUNT]));
     let static_vgpr: &'static mut VGPR = Box::leak(Box::new(VGPR::new()));
     let static_exec: &'static mut WaveValue = Box::leak(Box::new(WaveValue::new(u32::MAX, 32)));
     let static_vcc: &'static mut WaveValue = Box::leak(Box::new(WaveValue::new(0, 32)));

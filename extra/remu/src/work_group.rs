@@ -1,7 +1,9 @@
 use crate::helpers::{colored, DEBUG};
 use crate::state::{Register, VecDataStore, WaveValue, VGPR};
-use crate::thread::{Thread, END_PRG};
+use crate::thread::{Thread, END_PRG, SGPR_COUNT};
 use std::collections::HashMap;
+
+pub const WAVE_SIZE: usize = 32;
 
 pub struct WorkGroup<'a> {
     dispatch_dim: u32,
@@ -14,7 +16,7 @@ pub struct WorkGroup<'a> {
 }
 
 struct WaveState {
-    scalar_reg: Vec<u32>,
+    scalar_reg: [u32; SGPR_COUNT],
     vec_reg: VGPR,
     vcc: WaveValue,
     exec: WaveValue,
@@ -44,7 +46,7 @@ impl<'a> WorkGroup<'a> {
                 }
             }
         }
-        let waves = threads.chunks(32).collect::<Vec<_>>();
+        let waves = threads.chunks(WAVE_SIZE).collect::<Vec<_>>();
 
         let mut sync = false;
         for (i, x) in self.kernel.iter().enumerate() {
@@ -75,9 +77,9 @@ impl<'a> WorkGroup<'a> {
             }
         };
         let (mut scalar_reg, mut pc) = match wave_state {
-            Some(val) => (val.scalar_reg.to_vec(), val.pc),
+            Some(val) => (val.scalar_reg.clone(), val.pc),
             None => {
-                let mut scalar_reg = vec![0; 256];
+                let mut scalar_reg = [0; SGPR_COUNT];
                 scalar_reg.write64(0, self.kernel_args as u64);
                 let [gx, gy, gz] = self.id;
                 match self.dispatch_dim {
