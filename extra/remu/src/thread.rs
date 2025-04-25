@@ -1679,7 +1679,7 @@ impl<'a> Thread<'a> {
             VCC => self.vcc.value,
             107 => self.scalar_reg[code as usize],
             EXEC => self.exec.value,
-            124 | 128 => 0,
+            NULL_SRC | 128 => 0,
             255 => match self.simm {
                 None => {
                     let val = self.stream[self.pc_offset + 1];
