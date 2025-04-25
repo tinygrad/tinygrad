@@ -224,13 +224,18 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   for be in sink.toposort():
     if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg.end, []).append(be)
   new_forks = {}
+  be_sink_dup = set()
   for k,v in blockends_to_arg.items():
     # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
     if len(v) > 1:
-      bb = BasicBlock2(v[0].arg.lst, _sort_ctx(flatten([y.arg.ctx for y in v])), k, cnt=len(v))
+      ctx_len_lst = [len(x.arg.ctx) for x in v]
+      curr_lv_len = max(ctx_len_lst)
+      bb = BasicBlock2(v[0].arg.lst, _sort_ctx(flatten([y.arg.ctx for y in v])), k, cnt=ctx_len_lst.count(curr_lv_len))
       out = UOp(Ops.BLOCKEND, src=tuple(flatten([x.src for x in v])), arg=bb)
       for u in v: new_forks[u] = out
+      if any(x.arg.ctx for x in v) and any(x in v for x in sink.src): be_sink_dup.add(out.arg)
   sink = sink.substitute(new_forks)
+  if be_sink_dup: sink = sink.replace(src=tuple(x for x in sink.src if (not x.arg) or (x.arg not in be_sink_dup)))
 
   # merge blockends
   sink = graph_rewrite(sink, block_merge, name="Linearizer: Merge Blocks")
