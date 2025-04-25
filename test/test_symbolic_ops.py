@@ -1,10 +1,19 @@
 import unittest
 from tinygrad import Variable
+from tinygrad.helpers import Context
 from tinygrad.tensor import Tensor
 from examples.gpt2 import Attention
 import numpy as np
 
 class TestSymbolicOps(unittest.TestCase):
+  def setUp(self):
+    # A lot of these test are out of bounds, so we ignore the bounds check
+    self.context = Context(IGNORE_OOB=1)
+    self.context.__enter__()
+
+  def tearDown(self):
+    self.context.__exit__(None, None, None)
+
   def test_plus1(self):
     def f(a): return (a+1).realize()
     for i in range(1, 5):

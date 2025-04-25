@@ -94,7 +94,7 @@ class TestTensorUopRepresentation(unittest.TestCase):
   def test_consts_dont_have_buffers(self):
     a = Tensor.ones(10, 10)
     print(a.lazydata)
-    buffers_in_parents = [x.op for x in a.lazydata.toposort if x.op is Ops.BUFFER]
+    buffers_in_parents = [x.op for x in a.lazydata.toposort() if x.op is Ops.BUFFER]
     self.assertEqual(len(buffers_in_parents), 0)
 
   # currently, COPY has an extra BUFFER on the output
