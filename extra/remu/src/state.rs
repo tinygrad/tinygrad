@@ -4,22 +4,20 @@ pub trait Register {
     fn read64(&self, idx: usize) -> u64;
     fn write64(&mut self, idx: usize, addr: u64);
 }
-impl<T> Register for T
-where
-    T: Index<usize, Output = u32> + IndexMut<usize>,
-{
+impl<T> Register for T where T: Index<usize, Output = u32> + IndexMut<usize> {
     fn read64(&self, idx: usize) -> u64 {
-        let addr_lsb = self[idx];
-        let addr_msb = self[idx + 1];
-        ((addr_msb as u64) << 32) | addr_lsb as u64
+        let lsb = self[idx] as u64;
+        let msb = self[idx + 1] as u64;
+        (msb << 32) | lsb
     }
-    fn write64(&mut self, idx: usize, addr: u64) {
-        self[idx] = (addr & 0xffffffff) as u32;
-        self[idx + 1] = ((addr & (0xffffffff << 32)) >> 32) as u32;
+
+    fn write64(&mut self, idx: usize, value: u64) {
+        self[idx] = (value & 0xffffffff) as u32;
+        self[idx + 1] = ((value & (0xffffffff << 32)) >> 32) as u32;
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct VGPR {
     values: [[u32; 256]; 32],
     pub default_lane: Option<usize>,
