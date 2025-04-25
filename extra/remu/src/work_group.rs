@@ -32,15 +32,7 @@ const BARRIERS: [[u32; 2]; 5] = [
 ];
 impl<'a> WorkGroup<'a> {
     pub fn new(dispatch_dim: u32, id: [u32; 3], launch_bounds: [u32; 3], kernel: &'a Vec<u32>, kernel_args: *const u64) -> Self {
-        return Self {
-            dispatch_dim,
-            id,
-            kernel,
-            launch_bounds,
-            kernel_args,
-            lds: VecDataStore::new(),
-            wave_state: HashMap::new(),
-        };
+        Self { dispatch_dim, id, kernel, launch_bounds, kernel_args, lds: VecDataStore::new(), wave_state: HashMap::new() }
     }
 
     pub fn exec_waves(&mut self) -> Result<(), i32> {
@@ -52,7 +44,7 @@ impl<'a> WorkGroup<'a> {
                 }
             }
         }
-        let waves = threads.chunks(32).map(|w| w.to_vec()).collect::<Vec<_>>();
+        let waves = threads.chunks(32).collect::<Vec<_>>();
 
         let mut sync = false;
         for (i, x) in self.kernel.iter().enumerate() {
@@ -61,6 +53,7 @@ impl<'a> WorkGroup<'a> {
                 break;
             }
         }
+
         for _ in 0..=(sync as usize) {
             for w in waves.iter().enumerate() {
                 self.exec_wave(w)?
@@ -69,7 +62,7 @@ impl<'a> WorkGroup<'a> {
         Ok(())
     }
 
-    fn exec_wave(&mut self, (wave_id, threads): (usize, &Vec<[u32; 3]>)) -> Result<(), i32> {
+    fn exec_wave(&mut self, (wave_id, threads): (usize, &&[[u32; 3]])) -> Result<(), i32> {
         let wave_state = self.wave_state.get(&wave_id);
         let mut sds = match wave_state {
             Some(val) => val.sds.clone(),
@@ -102,10 +95,7 @@ impl<'a> WorkGroup<'a> {
         let mut exec = match wave_state {
             Some(val) => val.exec.clone(),
             None => {
-                let active = match threads.len() == 32 {
-                    true => u32::MAX,
-                    false => (1 << threads.len()) - 1,
-                };
+                let active = (!0u32).wrapping_shr(32 - (threads.len() as u32));
                 WaveValue::new(active, threads.len())
             }
         };
@@ -116,17 +106,7 @@ impl<'a> WorkGroup<'a> {
                 break Ok(());
             }
             if BARRIERS.contains(&[self.kernel[pc], self.kernel[pc + 1]]) && wave_state.is_none() {
-                self.wave_state.insert(
-                    wave_id,
-                    WaveState {
-                        scalar_reg,
-                        vec_reg,
-                        vcc,
-                        exec,
-                        pc,
-                        sds,
-                    },
-                );
+                self.wave_state.insert(wave_id, WaveState { scalar_reg, vec_reg, vcc, exec, pc, sds });
                 break Ok(());
             }
             if SYNCS.contains(&self.kernel[pc]) || self.kernel[pc] >> 20 == 0xbf8 || self.kernel[pc] == 0x7E000000 {
