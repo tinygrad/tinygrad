@@ -1,4 +1,4 @@
-import os, random, subprocess, shlex, datetime, time
+import os, random, subprocess, shlex, datetime, time, signal
 from extra.hcqfuzz.tools import create_report, on_start_run, collect_tests, init_log, log
 from extra.hcqfuzz.spec import AMSpec
 
@@ -24,7 +24,15 @@ def run_test(dev, test):
   proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
   try:
     stdout, stderr = proc.communicate(timeout=timeout)
-    ret = process.returncode
+    ret = proc.returncode
+  except KeyboardInterrupt:
+    print("\nExiting...", flush=True)
+    proc.send_signal(signal.SIGINT)
+    try: stdout, stderr = proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+      proc.kill()
+      stdout, stderr = proc.communicate()
+    raise
   except subprocess.TimeoutExpired:
     cur_time = datetime.datetime.now()
     log(f"\r[{cur_time:%Y-%m-%d %H:%M:%S}] {test.name()} send SIGKILL", end="", flush=True)
@@ -47,6 +55,8 @@ if __name__ == "__main__":
   dev = AMSpec()
 
   start_seed = os.environ.get("SEED", 3332)
+  random.seed(start_seed)
+
   log(f"Starting with seed {start_seed}")
 
   test_set = collect_tests()

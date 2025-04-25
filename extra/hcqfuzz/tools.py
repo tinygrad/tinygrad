@@ -1,21 +1,28 @@
 import pickle, datetime, os, tempfile, subprocess, zipfile, importlib.util
 from extra.hcqfuzz.spec import TestSpec
+from tinygrad.helpers import getenv
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_DIR = os.path.join(BASE_DIR, "tests")
 REPORTS_DIR = os.path.join(BASE_DIR, "reports")
 
 def collect_tests():
+  run_files = getenv("RUN_FILES", "").split(",")
+  skip_tests = getenv("SKIP_FILES", "").split(",")
+
   tests = []
   for filename in os.listdir(TEST_DIR):
     if filename.endswith(".py") and not filename.startswith("__"):
+      if run_files and filename[:-3] not in run_files: continue
+      if skip_tests and filename[:-3] in skip_tests: continue
+
       filepath = os.path.join(TEST_DIR, filename)
       module_name = f"tests.{filename[:-3]}"
       module = importlib.import_module(module_name)
       for attr_name in dir(module):
-          attr = getattr(module, attr_name)
-          if isinstance(attr, type) and issubclass(attr, TestSpec) and attr is not TestSpec:
-              tests.append(attr())
+        attr = getattr(module, attr_name)
+        if isinstance(attr, type) and issubclass(attr, TestSpec) and attr is not TestSpec:
+          tests.append(attr())
   return tests
 
 def on_start_run(dev, test):
@@ -66,4 +73,4 @@ def log(msg="", end="\n", flush=False):
   global _log_file
   _log_file.write(msg.replace("\r", "\n") + end)
   if flush: _log_file.flush()
-  print(msg, end=end, flush=flush)
+  print(msg + " " * 60, end=end, flush=flush)
