@@ -1123,12 +1123,13 @@ impl<'a> Thread<'a> {
                                 self.vec_reg.write64(vdst, ret)
                             }
                         }
-                        306 | 313 | 596 | 584 | 585 | 588 => {
+                        306 | 309 | 313 | 596 | 584 | 585 | 588 => {
                             let (s0, s1, s2) = (self.val(src.0), self.val(src.1), self.val(src.2));
                             let s0 = f16::from_bits(s0).negate(0, neg).absolute(0, abs);
                             let s1 = f16::from_bits(s1).negate(1, neg).absolute(1, abs);
                             let s2 = f16::from_bits(s2).negate(1, neg).absolute(1, abs);
                             let ret = match op {
+                                309 => s0 * s1,
                                 306 => s0 + s1,
                                 584 => f16::mul_add(s0, s1, s2),
                                 585 => f16::min(f16::min(s0, s1), s2),
@@ -1433,13 +1434,14 @@ impl<'a> Thread<'a> {
                         *x = (self.vec_reg[data0] as u8).to_le_bytes()[i];
                     });
                 }
-                31 => {
+                31 | 161 => {
                     let addr = single_addr();
                     if addr + 2 >= self.lds.data.len() {
                         self.lds.data.resize(self.lds.data.len() + addr + 3, 0);
                     }
+                    let b32 = self.vec_reg[data0];
                     self.lds.data[addr..addr + 2].iter_mut().enumerate().for_each(|(i, x)| {
-                        *x = (self.vec_reg[data0] as u16).to_le_bytes()[i];
+                        *x = (if op == 31 { b32 as u16 } else { ((b32 >> 16) & 0xffff) as u16 }).to_le_bytes()[i];
                     });
                 }
                 14 => {
@@ -2946,6 +2948,15 @@ mod test_vop3 {
     }
 
     #[test]
+    fn test_v_mul_f16() {
+        let mut thread = _helper_test_thread();
+        thread.vec_reg[1].mut_lo16(f16::from_f32(2.0).to_bits());
+        thread.vec_reg[2].mut_lo16(f16::from_f32(4.0).to_bits());
+        r(&vec![0xD5350000, 0x00020501, END_PRG], &mut thread);
+        assert_eq!(f16::from_bits(thread.vec_reg[0] as u16), f16::from_f32(8.0));
+    }
+
+    #[test]
     fn test_v_max_f32() {
         assert_eq!(helper_test_vop3(0xd5100000, 0.4, 0.2), 0.4);
         assert_eq!(helper_test_vop3(0xd5100000, 0.2, 0.8), 0.8);
@@ -3598,6 +3609,18 @@ mod test_lds {
         r(&vec![0xD83403E8, 0x00000900, END_PRG], &mut thread);
         assert_eq!(thread.lds.read(1000), 69);
     }
+
+    #[test]
+    fn test_ds_store_half() {
+        let mut thread = _helper_test_thread();
+        thread.vec_reg[9].mut_lo16(f16::from_f32(1.2).to_bits());
+        thread.vec_reg[9].mut_hi16(f16::from_f32(4.3).to_bits());
+        thread.vec_reg[0] = 0;
+        thread.vec_reg[1] = 2;
+        r(&vec![0xDA840000, 0x00000900, 0xD87C0000, 0x00000901, END_PRG], &mut thread);
+        assert_eq!(thread.lds.read(0) as u16, f16::from_f32(4.3).to_bits());
+        assert_eq!(thread.lds.read(2) as u16, f16::from_f32(1.2).to_bits());
+    }
 }
 #[allow(dead_code)]
 fn r(prg: &Vec<u32>, thread: &mut Thread) {
@@ -3631,6 +3654,9 @@ fn r(prg: &Vec<u32>, thread: &mut Thread) {
         if let Some((idx, mut wv)) = thread.sgpr_co {
             wv.apply_muts();
             thread.scalar_reg[*idx] = wv.value;
+        }
+        if *DEBUG {
+            println!()
         }
         pc = ((pc as isize) + 1 + (thread.pc_offset as isize)) as usize;
     }
