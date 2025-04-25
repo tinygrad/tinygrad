@@ -2948,6 +2948,15 @@ mod test_vop3 {
     }
 
     #[test]
+    fn test_v_mul_f16() {
+        let mut thread = _helper_test_thread();
+        thread.vec_reg[1].mut_lo16(f16::from_f32(2.0).to_bits());
+        thread.vec_reg[2].mut_lo16(f16::from_f32(4.0).to_bits());
+        r(&vec![0xD5350000, 0x00020501, END_PRG], &mut thread);
+        assert_eq!(f16::from_bits(thread.vec_reg[0] as u16), f16::from_f32(8.0));
+    }
+
+    #[test]
     fn test_v_max_f32() {
         assert_eq!(helper_test_vop3(0xd5100000, 0.4, 0.2), 0.4);
         assert_eq!(helper_test_vop3(0xd5100000, 0.2, 0.8), 0.8);
