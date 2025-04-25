@@ -330,9 +330,11 @@ class Compiled:
 def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
   if device is None: device = Device.DEFAULT
   if dtype == dtypes.bfloat16:
-    # NOTE: this requires bf16 buffer support
-    return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
-  if dtype in dtypes.fp8s: return (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
+    if device == "METAL": return not CI
+    if device in {"CUDA", "NV"}: return not CI and not getenv("PTX")
+    if device in {"CPU", "LLVM"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"}
+    return device == "AMD"
+  if dtype in dtypes.fp8s: return (device in {"CUDA", "NV"} and not CI and not getenv("PTX")) or device == "PYTHON"
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
                                           dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
   # for CI GPU and OSX, cl_khr_fp16 isn't supported

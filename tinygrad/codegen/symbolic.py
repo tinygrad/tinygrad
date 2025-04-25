@@ -502,8 +502,7 @@ sym = symbolic_flat+PatternMatcher([
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")*UPat.var("y")), lambda x,y,d: y*(1-d)),
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")+UPat.var("y")), lambda x,y,d: (1-d)+x*y),
   # move const multiply after REDUCE (NOTE: the mul chain can do this, but only if it's a same dtype reduce)
-  (UPat(Ops.REDUCE, src=(UPat.var("x")*UPat.cvar("c", vec=False),), arg=Ops.ADD, name="r", allow_any_len=True),
-   lambda x,c,r: r.replace(src=(x,)+r.src[1:])*c.arg),
+  ((UPat.var("x")*UPat.cvar("c", vec=False)).reduce(arg=Ops.ADD, name="r", allow_any_len=True), lambda x,c,r: r.replace(src=(x,)+r.src[1:])*c.arg),
   # reduce mul chain, move muls after the reduce
-  (UPat(Ops.REDUCE, src=(UPat(Ops.MUL),), name="r", allow_any_len=True), reduce_mul_chain),
+  (UPat(Ops.MUL).reduce(name="r", allow_any_len=True), reduce_mul_chain),
 ])
