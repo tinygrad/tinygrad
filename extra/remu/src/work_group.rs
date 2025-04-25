@@ -17,9 +17,10 @@ pub struct WorkGroup<'a> {
 
 struct WaveState {
     scalar_reg: [u32; SGPR_COUNT],
-    vec_reg: VGPR,
+    scc: u32,
     vcc: WaveValue,
     exec: WaveValue,
+    vec_reg: VGPR,
     pc: usize,
     sds: HashMap<usize, VecDataStore>,
 }
@@ -76,8 +77,8 @@ impl<'a> WorkGroup<'a> {
                 sds
             }
         };
-        let (mut scalar_reg, mut pc) = match wave_state {
-            Some(val) => (val.scalar_reg.clone(), val.pc),
+        let (mut scalar_reg, mut scc, mut pc) = match wave_state {
+            Some(val) => (val.scalar_reg.clone(), val.scc, val.pc),
             None => {
                 let mut scalar_reg = [0; SGPR_COUNT];
                 scalar_reg.write64(0, self.kernel_args as u64);
@@ -87,7 +88,7 @@ impl<'a> WorkGroup<'a> {
                     2 => (scalar_reg[14], scalar_reg[15]) = (gx, gy),
                     _ => scalar_reg[15] = gx,
                 }
-                (scalar_reg, 0)
+                (scalar_reg, 0, 0)
             }
         };
         let (mut vec_reg, mut vcc) = match wave_state {
@@ -115,7 +116,7 @@ impl<'a> WorkGroup<'a> {
                 break Ok(());
             }
             if BARRIERS.contains(&[self.kernel[pc], self.kernel[pc + 1]]) && wave_state.is_none() {
-                self.wave_state.insert(wave_id, WaveState { scalar_reg, vec_reg, vcc, exec, pc, sds });
+                self.wave_state.insert(wave_id, WaveState { scalar_reg, scc, vec_reg, vcc, exec, pc, sds });
                 break Ok(());
             }
             if SYNCS.contains(&self.kernel[pc]) || self.kernel[pc] >> 20 == 0xbf8 || self.kernel[pc] == 0x7E000000 {
@@ -139,6 +140,7 @@ impl<'a> WorkGroup<'a> {
                 }
                 let mut thread = Thread {
                     scalar_reg: &mut scalar_reg,
+                    scc: &mut scc,
                     vec_reg: &mut vec_reg,
                     vcc: &mut vcc,
                     exec: &mut exec,

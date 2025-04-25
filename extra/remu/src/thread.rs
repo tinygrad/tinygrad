@@ -8,7 +8,6 @@ use num_traits::Float;
 
 pub const SGPR_COUNT: usize = 128;
 pub const VCC: usize = 106;
-pub const SCC: usize = 105; // WRONG
 pub const EXEC: usize = 126;
 pub const NULL_SRC: usize = 124;
 pub const SGPR_SRC: usize = 105;
@@ -20,6 +19,7 @@ pub const END_PRG: u32 = 0xbfb00000;
 
 pub struct Thread<'a> {
     pub scalar_reg: &'a mut [u32; SGPR_COUNT],
+    pub scc: &'a mut u32, // SCC is physically an sgpr, unclear which one
 
     pub vec_reg: &'a mut VGPR,
     pub vcc: &'a mut WaveValue,
@@ -95,7 +95,7 @@ impl<'a> Thread<'a> {
                         }
                         30 => {
                             let ret = !s0;
-                            self.scalar_reg[SCC] = (ret != 0) as u32;
+                            *self.scc = (ret != 0) as u32;
                             ret
                         }
                         32 | 34 | 48 => {
@@ -106,7 +106,7 @@ impl<'a> Thread<'a> {
                                 48 => s0 & !saveexec,
                                 _ => todo_instr!(instruction)?,
                             };
-                            self.scalar_reg[SCC] = (self.exec.value != 0) as u32;
+                            *self.scc = (self.exec.value != 0) as u32;
                             saveexec
                         }
                         _ => todo_instr!(instruction)?,
@@ -134,7 +134,7 @@ impl<'a> Thread<'a> {
                     _ => s0 <= s1,
                 }
             }
-            self.scalar_reg[SCC] = match op {
+            *self.scc = match op {
                 0..=5 => {
                     let (s0, s1): (u32, u32) = (self.val(s0), self.val(s1));
                     scmp(s0 as i32, s1 as i32, 0, op)
@@ -165,8 +165,8 @@ impl<'a> Thread<'a> {
                 32..=42 => {
                     let should_jump = match op {
                         32 => true,
-                        33 => self.scalar_reg[SCC] == 0,
-                        34 => self.scalar_reg[SCC] == 1,
+                        33 => *self.scc == 0,
+                        34 => *self.scc == 1,
                         35 => self.vcc.value == 0,
                         36 => self.vcc.value != 0,
                         37 => self.exec.value == 0,
@@ -191,7 +191,7 @@ impl<'a> Thread<'a> {
                 3..=8 => {
                     let s1 = simm as i16 as i64;
                     let s0 = s0 as i32 as i64;
-                    self.scalar_reg[SCC] = match op {
+                    *self.scc = match op {
                         3 => s0 == s1,
                         4 => s0 != s1,
                         5 => s0 > s1,
@@ -201,7 +201,7 @@ impl<'a> Thread<'a> {
                 }
                 9..=14 => {
                     let s1 = simm as u16 as u32;
-                    self.scalar_reg[SCC] = match op {
+                    *self.scc = match op {
                         9 => s0 == s1,
                         10 => s0 != s1,
                         11 => s0 > s1,
@@ -219,7 +219,7 @@ impl<'a> Thread<'a> {
                     let temp_sign = ((temp >> 31) & 1) as u32;
                     let simm_sign = ((simm16 >> 15) & 1) as u32;
                     let dest_sign = ((dest >> 31) & 1) as u32;
-                    self.scalar_reg[SCC] = ((temp_sign == simm_sign) && (temp_sign != dest_sign)) as u32;
+                    *self.scc = ((temp_sign == simm_sign) && (temp_sign != dest_sign)) as u32;
                 }
                 16 => {
                     let simm16 = simm as i16;
@@ -245,7 +245,7 @@ impl<'a> Thread<'a> {
                         _ => todo_instr!(instruction)?,
                     };
                     self.scalar_reg.write64(sdst as usize, ret);
-                    self.scalar_reg[SCC] = (ret != 0) as u32;
+                    *self.scc = (ret != 0) as u32;
                 }
                 9 | 13 | 11 | 40 | 41 => {
                     let (s0, s1): (u64, u32) = (self.val(s0), self.val(s1));
@@ -277,7 +277,7 @@ impl<'a> Thread<'a> {
                     };
                     self.scalar_reg.write64(sdst as usize, ret.0);
                     if let Some(val) = ret.1 {
-                        self.scalar_reg[SCC] = val as u32
+                        *self.scc = val as u32
                     }
                 }
                 _ => {
@@ -287,13 +287,13 @@ impl<'a> Thread<'a> {
                             let (s0, s1) = (s0 as u64, s1 as u64);
                             let ret = match op {
                                 0 => s0 + s1,
-                                4 => s0 + s1 + self.scalar_reg[SCC] as u64,
+                                4 => s0 + s1 + *self.scc as u64,
                                 _ => todo_instr!(instruction)?,
                             };
                             (ret as u32, Some(ret >= 0x100000000))
                         }
                         1 => (s0 - s1, Some(s1 > s0)),
-                        5 => (s0 - s1 - self.scalar_reg[SCC], Some((s1 as u64 + self.scalar_reg[SCC] as u64) > s0 as u64)),
+                        5 => (s0 - s1 - *self.scc, Some((s1 as u64 + *self.scc as u64) > s0 as u64)),
                         2 | 3 => {
                             let s0 = s0 as i32 as i64;
                             let s1 = s1 as i32 as i64;
@@ -355,7 +355,7 @@ impl<'a> Thread<'a> {
                         44 => (((s0 as i32) * (s1 as i32)) as u32, None),
                         45 => (((s0 as u64) * (s1 as u64) >> 32) as u32, None),
                         46 => ((((s0 as i32 as i64 * s1 as i32 as i64) as u64) >> 32u64) as i32 as u32, None),
-                        48 => match self.scalar_reg[SCC] != 0 {
+                        48 => match *self.scc != 0 {
                             true => (s0, None),
                             false => (s1, None),
                         },
@@ -373,7 +373,7 @@ impl<'a> Thread<'a> {
 
                     self.write_to_sdst(sdst, ret.0);
                     if let Some(val) = ret.1 {
-                        self.scalar_reg[SCC] = val as u32
+                        *self.scc = val as u32
                     }
                 }
             };
@@ -2042,7 +2042,7 @@ mod test_sop1 {
                 thread.scalar_reg[10] = *a;
                 r(&vec![0xBE8A1E0A, END_PRG], &mut thread);
                 assert_eq!(thread.scalar_reg[10], *ret);
-                assert_eq!(thread.scalar_reg[SCC], *scc);
+                assert_eq!(*thread.scc, *scc);
             });
     }
 }
@@ -2056,10 +2056,10 @@ mod test_sopk {
         let mut thread = _helper_test_thread();
         thread.scalar_reg[20] = 0xcd14;
         r(&vec![0xB494CD14, END_PRG], &mut thread);
-        assert_eq!(thread.scalar_reg[SCC], 1);
+        assert_eq!(*thread.scc, 1);
 
         r(&vec![0xB194CD14, END_PRG], &mut thread);
-        assert_eq!(thread.scalar_reg[SCC], 0);
+        assert_eq!(*thread.scc, 0);
     }
 
     #[test]
@@ -2067,10 +2067,10 @@ mod test_sopk {
         let mut thread = _helper_test_thread();
         thread.scalar_reg[6] = 0x2db4;
         r(&vec![0xB1862DB4, END_PRG], &mut thread);
-        assert_eq!(thread.scalar_reg[SCC], 1);
+        assert_eq!(*thread.scc, 1);
 
         r(&vec![0xB1862DB4, END_PRG], &mut thread);
-        assert_eq!(thread.scalar_reg[SCC], 1);
+        assert_eq!(*thread.scc, 1);
     }
 }
 
@@ -2097,7 +2097,7 @@ mod test_sop2 {
                 thread.scalar_reg[6] = *b;
                 r(&vec![0x80060206, END_PRG], &mut thread);
                 assert_eq!(thread.scalar_reg[6], *expected);
-                assert_eq!(thread.scalar_reg[SCC], *scc);
+                assert_eq!(*thread.scc, *scc);
             });
     }
 
@@ -2107,12 +2107,12 @@ mod test_sop2 {
             .iter()
             .for_each(|[a, b, expected, scc_before, scc_after]| {
                 let mut thread = _helper_test_thread();
-                thread.scalar_reg[SCC] = *scc_before;
+                *thread.scc = *scc_before;
                 thread.scalar_reg[7] = *a;
                 thread.scalar_reg[3] = *b;
                 r(&vec![0x82070307, END_PRG], &mut thread);
                 assert_eq!(thread.scalar_reg[7], *expected);
-                assert_eq!(thread.scalar_reg[SCC], *scc_after);
+                assert_eq!(*thread.scc, *scc_after);
             });
     }
 
@@ -2126,7 +2126,7 @@ mod test_sop2 {
                 thread.scalar_reg[10] = *b as u32;
                 r(&vec![0x81060E0A, END_PRG], &mut thread);
                 assert_eq!(thread.scalar_reg[6], *expected as u32);
-                assert_eq!(thread.scalar_reg[SCC], *scc as u32);
+                assert_eq!(*thread.scc, *scc as u32);
             });
     }
 
@@ -2140,7 +2140,7 @@ mod test_sop2 {
                 thread.scalar_reg[8] = *b as u32;
                 r(&vec![0x818C080D, END_PRG], &mut thread);
                 assert_eq!(thread.scalar_reg[12], *expected as u32);
-                assert_eq!(thread.scalar_reg[SCC], *scc as u32);
+                assert_eq!(*thread.scc, *scc as u32);
             });
     }
 
@@ -2151,7 +2151,7 @@ mod test_sop2 {
             thread.scalar_reg[15] = *a as u32;
             r(&vec![0x8408810F, END_PRG], &mut thread);
             assert_eq!(thread.scalar_reg[8], *expected as u32);
-            assert_eq!(thread.scalar_reg[SCC], *scc as u32);
+            assert_eq!(*thread.scc, *scc as u32);
         });
     }
 
@@ -2162,7 +2162,7 @@ mod test_sop2 {
         r(&vec![0x84828202, END_PRG], &mut thread);
         assert_eq!(thread.scalar_reg[2], 4294967172);
         assert_eq!(thread.scalar_reg[3], 4294967295);
-        assert_eq!(thread.scalar_reg[SCC], 1);
+        assert_eq!(*thread.scc, 1);
     }
 
     #[test]
@@ -2171,7 +2171,7 @@ mod test_sop2 {
         thread.scalar_reg[2] = 36855;
         r(&vec![0x86039F02, END_PRG], &mut thread);
         assert_eq!(thread.scalar_reg[3], 0);
-        assert_eq!(thread.scalar_reg[SCC], 0);
+        assert_eq!(*thread.scc, 0);
     }
 
     #[test]
@@ -2190,7 +2190,7 @@ mod test_sop2 {
         thread.scalar_reg[3] = -92i32 as u32;
         r(&vec![0x89020203, END_PRG], &mut thread);
         assert_eq!(thread.scalar_reg[2], -92i32 as u32);
-        assert_eq!(thread.scalar_reg[SCC], 1);
+        assert_eq!(*thread.scc, 1);
     }
 
     #[test]
@@ -2306,7 +2306,7 @@ mod test_sopc {
                 thread.scalar_reg[3] = *s0;
                 thread.scalar_reg[4] = *s1;
                 r(&vec![0xBF0C0304, END_PRG], &mut thread);
-                assert_eq!(thread.scalar_reg[SCC], *scc);
+                assert_eq!(*thread.scc, *scc);
             })
     }
 }
@@ -3639,6 +3639,7 @@ fn _helper_test_thread() -> Thread<'static> {
     let static_lds: &'static mut VecDataStore = Box::leak(Box::new(VecDataStore::new()));
     let static_sgpr: &'static mut [u32; SGPR_COUNT] = Box::leak(Box::new([0; SGPR_COUNT]));
     let static_vgpr: &'static mut VGPR = Box::leak(Box::new(VGPR::new()));
+    let static_scc: &'static mut u32 = Box::leak(Box::new(0));
     let static_exec: &'static mut WaveValue = Box::leak(Box::new(WaveValue::new(u32::MAX, 32)));
     let static_vcc: &'static mut WaveValue = Box::leak(Box::new(WaveValue::new(0, 32)));
     let static_sds: &'static mut VecDataStore = Box::leak(Box::new(VecDataStore::new()));
@@ -3647,6 +3648,7 @@ fn _helper_test_thread() -> Thread<'static> {
     let thread = Thread {
         scalar_reg: static_sgpr,
         vec_reg: static_vgpr,
+        scc: static_scc,
         vcc: static_vcc,
         exec: static_exec,
         lds: static_lds,
