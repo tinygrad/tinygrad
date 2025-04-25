@@ -7,13 +7,12 @@ use crate::rdna3::{Instruction, decode};
 use num_traits::Float;
 
 pub const SGPR_COUNT: usize = 105;
-pub const VCC_LO: usize = 106;
-pub const EXEC_LO: usize = 126;
+pub const VCC: usize = 106;
 pub const SCC: usize = 253;
-pub const NULL: usize = 124; // TODO: remove NULL_SRC below
+pub const EXEC: usize = 126;
+pub const NULL_SRC: usize = 124;
 
 const VGPR_COUNT: usize = 256;
-const NULL_SRC: u32 = 124;
 const SIMM_SRC: usize = 255;
 
 pub const END_PRG: u32 = 0xbfb00000;
@@ -45,14 +44,11 @@ impl<'a> Thread<'a> {
         }
         if let Instruction::SMEM { sbase, sdata, op, offset, soffset, .. } = decoded {
             let _ = self.u64_instr();
-            let soffset = match self.val(soffset as usize) {
-                NULL_SRC => 0,
-                val => val,
-            };
+            let soffset: u32 = self.val(soffset as usize);
 
             // TODO: refactor vcc_lo to store in scalar register 106
             let base_addr = match sbase as usize {
-                VCC_LO => panic!("using vcc as sbase"),
+                VCC => ((self.scalar_reg[107] as u64) << 32) | self.vcc.value as u64,
                 s => self.scalar_reg.read64(s),
             };
             let addr = (base_addr as i64 + offset as i64 + soffset as i64) as u64;
@@ -990,8 +986,8 @@ impl<'a> Thread<'a> {
                     };
 
                     match sdst {
-                        VCC_LO => self.vcc.set_lane(vcc),
-                        NULL => {}
+                        VCC => self.vcc.set_lane(vcc),
+                        NULL_SRC => {}
                         _ => self.set_sgpr_co(sdst, vcc),
                     }
                 }
@@ -1077,8 +1073,8 @@ impl<'a> Thread<'a> {
 
                             match vdst {
                                 0..=SGPR_COUNT | 107 => self.set_sgpr_co(vdst, ret),
-                                106 => self.vcc.set_lane(ret),
-                                126 => self.exec.set_lane(ret),
+                                VCC => self.vcc.set_lane(ret),
+                                EXEC => self.exec.set_lane(ret),
                                 _ => todo_instr!(instruction)?,
                             }
                         }
@@ -1474,7 +1470,7 @@ impl<'a> Thread<'a> {
             let vdst = ((instr >> 56) & 0xff) as usize;
 
             let saddr_val: u32 = self.val(saddr);
-            let saddr_off = saddr_val == 0x7F || saddr as u32 == NULL_SRC;
+            let saddr_off = saddr_val == 0x7F || saddr == NULL_SRC;
 
             match seg {
                 1 => {
@@ -1679,11 +1675,10 @@ impl<'a> Thread<'a> {
     /* ALU utils */
     fn _common_srcs(&mut self, code: usize) -> u32 {
         match code {
-            106 => self.vcc.value,
+            VCC => self.vcc.value,
             107 => self.scalar_reg[code as usize],
-            126 => self.exec.value,
-            128 => 0,
-            124 => NULL_SRC,
+            EXEC => self.exec.value,
+            124 | 128 => 0,
             255 => match self.simm {
                 None => {
                     let val = self.stream[self.pc_offset + 1];
@@ -1700,7 +1695,7 @@ impl<'a> Thread<'a> {
         match sdst_bf {
             // NOTE: remu is only wave32, vcc_hi is treated as a regular SGPR
             0..=SGPR_COUNT | 107 => self.scalar_reg[sdst_bf] = val,
-            VCC_LO => self.vcc.value = val,
+            VCC => self.vcc.value = val,
             126 => self.exec.value = val,
             _ => todo!("write to sdst {}", sdst_bf),
         }
@@ -1859,7 +1854,7 @@ mod test_alu_utils {
     fn test_write_to_sdst_vcc_val() {
         let mut thread = _helper_test_thread();
         let val = 0b1011101011011011111011101111;
-        thread.write_to_sdst(VCC_LO, val);
+        thread.write_to_sdst(VCC, val);
         assert_eq!(thread.vcc.value, 195935983);
     }
 
@@ -1943,7 +1938,7 @@ mod test_smem {
         }
         let addr = buf.as_ptr() as u64;
         // NOTE: vcc is an alias for s[106:107]
-        thread.scalar_reg.write64(VCC_LO, addr);
+        thread.scalar_reg.write64(VCC, addr);
         // TODO: vcc_lo should just read from s106
         thread.vcc.value = (addr & 0xffffffff) as u32;
         r(&vec![0xF4000035, 0xF8000000, END_PRG], &mut thread);

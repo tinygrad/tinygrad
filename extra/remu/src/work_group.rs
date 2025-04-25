@@ -44,15 +44,15 @@ impl<'a> WorkGroup<'a> {
     }
 
     pub fn exec_waves(&mut self) -> Result<(), i32> {
-        let mut blocks = vec![];
+        let mut threads = vec![];
         for z in 0..self.launch_bounds[2] {
             for y in 0..self.launch_bounds[1] {
                 for x in 0..self.launch_bounds[0] {
-                    blocks.push([x, y, z])
+                    threads.push([x, y, z])
                 }
             }
         }
-        let waves = blocks.chunks(32).map(|w| w.to_vec()).collect::<Vec<_>>();
+        let waves = threads.chunks(32).map(|w| w.to_vec()).collect::<Vec<_>>();
 
         let mut sync = false;
         for (i, x) in self.kernel.iter().enumerate() {
