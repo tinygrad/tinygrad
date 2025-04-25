@@ -1,5 +1,5 @@
 from typing import cast, Callable
-from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, RewriteContext
+from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
 from tinygrad.helpers import all_same, dedup, prod, DEBUG, IGNORE_OOB
 try:
@@ -93,9 +93,9 @@ def validate_index(idx:UOp, mask:UOp|None=None):
 
   if not z3_imported: raise ImportError("z3 is required for bounds checking, try IGNORE_OOB=0 or \"pip install z3-solver\"")
   solver = z3.Solver(ctx=z3.Context())
-  rewriter = RewriteContext(z3_renderer, ctx=(solver, {}))  # Use RewriteContext directly to keep rewrite cache between index and mask
-  z3_idx = rewriter.top_down_rewrite(idx.src[1]).arg
-  if mask is not None: solver.add(rewriter.top_down_rewrite(mask).arg)
+  z3_sink = graph_rewrite(idx.src[1].sink(mask), z3_renderer, ctx=(solver, {}))
+  z3_idx = z3_sink.src[0].arg
+  if mask is not None: solver.add(z3_sink.src[1].arg)
   if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
     print(f"idx={idx.src[1].render(simplify=False)}")
     if mask is not None: print(f"mask={mask.render(simplify=False)}")
