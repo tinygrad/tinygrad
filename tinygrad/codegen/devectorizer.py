@@ -367,6 +367,8 @@ pm_reduce_collapse = PatternMatcher([
   # WHERE on LOAD (works on max too)
   (UPat.var("gate").where(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load(), 0).reduce(arg=Ops.ADD),
    lambda buf,idx,gate: buf.index(idx, gate).load()),
+  (UPat.var("gate").where(UPat(Ops.CONST, arg=0), UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()).reduce(arg=Ops.ADD),
+   lambda buf,idx,gate: buf.index(idx, gate.logical_not()).load()),
   # INDEX on RANGE / gated RANGE.
   (UPat.var("buf").index(UPat(Ops.RANGE, name="r"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r2"))),
     lambda buf,r,idx,r2: buf.index(idx*r.src[2] + r.src[0], (idx >= r2.src[0]) & (idx < r2.src[1])) if r.arg == r2.arg else None),
