@@ -3600,6 +3600,18 @@ mod test_lds {
         r(&vec![0xD83403E8, 0x00000900, END_PRG], &mut thread);
         assert_eq!(thread.lds.read(1000), 69);
     }
+
+    #[test]
+    fn test_ds_store_half() {
+        let mut thread = _helper_test_thread();
+        thread.vec_reg[9].mut_lo16(f16::from_f32(1.2).to_bits());
+        thread.vec_reg[9].mut_hi16(f16::from_f32(4.3).to_bits());
+        thread.vec_reg[0] = 0;
+        thread.vec_reg[1] = 2;
+        r(&vec![0xDA840000, 0x00000900, 0xD87C0000, 0x00000901, END_PRG], &mut thread);
+        assert_eq!(thread.lds.read(0) as u16, f16::from_f32(4.3).to_bits());
+        assert_eq!(thread.lds.read(2) as u16, f16::from_f32(1.2).to_bits());
+    }
 }
 #[allow(dead_code)]
 fn r(prg: &Vec<u32>, thread: &mut Thread) {
@@ -3633,6 +3645,9 @@ fn r(prg: &Vec<u32>, thread: &mut Thread) {
         if let Some((idx, mut wv)) = thread.sgpr_co {
             wv.apply_muts();
             thread.scalar_reg[*idx] = wv.value;
+        }
+        if *DEBUG {
+            println!()
         }
         pc = ((pc as isize) + 1 + (thread.pc_offset as isize)) as usize;
     }
