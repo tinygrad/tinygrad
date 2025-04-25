@@ -112,7 +112,7 @@ def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
     for i, action in enumerate(kernel_actions):
       if action.op == OptOps.TC and (tc_arg := cast(tuple, action.arg))[0] == -1:
         # replace every tc_action with default tc with one tc_action for each available tc
-        kernel_actions[i : i + 1] = \
+        kernel_actions[i:i+1] = \
           [Opt(op=OptOps.TC, axis=action.axis, arg=(tc_select, tc_arg[1], tc_arg[2])) for tc_select,_ in enumerate(lin.opts.tensor_cores)]
 
   for i,a in enumerate(kernel_actions):
