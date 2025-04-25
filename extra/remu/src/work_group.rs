@@ -100,7 +100,6 @@ impl<'a> WorkGroup<'a> {
             }
         };
 
-        let mut seeded_lanes = vec![];
         loop {
             if self.kernel[pc] == END_PRG {
                 break Ok(());
@@ -127,13 +126,6 @@ impl<'a> WorkGroup<'a> {
                     };
                     let [id0, id1, id2] = self.id;
                     print!("[{id0:<3} {id1:<3} {id2:<3}] [{x:<3} {y:<3} {z:<3}] {}", colored(&lane, state));
-                }
-                if !seeded_lanes.contains(&lane_id) && self.wave_state.get(&wave_id).is_none() {
-                    match (self.launch_bounds[1] != 1, self.launch_bounds[2] != 1) {
-                        (false, false) => vec_reg[0] = *x,
-                        _ => vec_reg[0] = (z << 20) | (y << 10) | x,
-                    }
-                    seeded_lanes.push(lane_id);
                 }
                 let mut thread = Thread {
                     scalar_reg: &mut scalar_reg,
