@@ -102,7 +102,7 @@ class PythonProgram:
         elif uop is Ops.VECTORIZE: ul[i] = inp
         elif uop is Ops.BITCAST:
           assert (dtp[0].fmt and dtype.fmt) or (dtp[0] in dtypes.fp8s and dtype) or (dtype in dtypes.fp8s and dtp[0])
-          if dtp[0] in dtypes.fp8s: packed = b''.join([float_to_fp8(z, dtp[0]).to_bytes() for z in inp[0]])
+          if dtp[0] in dtypes.fp8s: packed = b''.join([float_to_fp8(z, dtp[0]).to_bytes(1, "little") for z in inp[0]])
           else: packed = struct.pack(str(warp_size) + str(dtp[0].fmt), *inp[0])
           if dtype in dtypes.fp8s: ul[i] = [fp8_to_float(int(byte), dtype) for byte in packed]
           else: ul[i] = list(struct.unpack(str(warp_size) + str(dtype.fmt), packed))
