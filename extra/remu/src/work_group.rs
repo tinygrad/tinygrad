@@ -68,10 +68,6 @@ impl<'a> WorkGroup<'a> {
 
     fn exec_wave(&mut self, (wave_id, threads): (usize, &&[[u32; 3]])) -> Result<(), i32> {
         let (mut scalar_reg, mut scc, mut pc, mut vec_reg, mut vcc, mut exec, mut sds) = match self.wave_state.get(&wave_id) {
-          Some(val) => {
-            let val = val.clone();
-            (val.scalar_reg, val.scc, val.pc, val.vec_reg, val.vcc, val.exec, val.sds)
-          }
           None => {
             let mut scalar_reg = [0; SGPR_COUNT];
             scalar_reg.write64(0, self.kernel_args as u64);
@@ -97,6 +93,11 @@ impl<'a> WorkGroup<'a> {
 
             let sds = (0..=31).map(|i| (i, VecDataStore::new())).collect();
             (scalar_reg, 0, 0, vec_reg, vcc, exec, sds)
+          }
+
+          Some(val) => {
+            let val = val.clone();
+            (val.scalar_reg, val.scc, val.pc, val.vec_reg, val.vcc, val.exec, val.sds)
           }
         };
 
