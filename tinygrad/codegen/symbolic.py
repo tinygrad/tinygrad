@@ -406,6 +406,7 @@ def index_collapse(idx:UOp,rng:UOp,buf:UOp,ld:UOp,acc:UOp,add=UOp.const(dtypes.i
 def reduce_collapse(acc:UOp, ret:UOp, alu:UOp):
   reduce_parented, reduce_unparented = partition(acc.src[1:], lambda x: x in ret.toposort())
   if len(reduce_unparented) == 0: return None
+  if reduce_unparented and reduce_parented and min(x.arg for x in reduce_parented) > max(x.arg for x in reduce_unparented): return None
   new_acc = acc.replace(src=acc.src[0:1]+tuple(reduce_parented))
   ret = new_acc.assign(new_acc.alu(alu.op, ret))
   if alu.op is Ops.ADD:
