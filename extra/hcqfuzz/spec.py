@@ -18,7 +18,7 @@ class HCQSpec(DeviceSpec): pass
 class AMDSpec(HCQSpec):
   def __init__(self):
     assert os.path.exists('/sys/module/amdgpu'), "amdgpu module should be loaded"
-  
+
   def prepare(self, seed):
     self.env = {
       "AMD": 1,
