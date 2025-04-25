@@ -91,9 +91,9 @@ class BlockContext:
       # save the block ctx
       ctx.block_ctxs[u] = _sort_ctx(this_block_ctx)
 
-      # RANGE/IF add to the next ctx
+      # RANGE/IF/VALID add to the next ctx
       # STORE/ASSIGN subtract from the next ctx
-      if u.op in {Ops.RANGE, Ops.IF}: ctx.child_ctxs[u] = _sort_ctx(ctx.block_ctxs[u] + (u,))
+      if u.op in {Ops.RANGE, Ops.IF, Ops.VALID}: ctx.child_ctxs[u] = _sort_ctx(ctx.block_ctxs[u] + (u,))
       elif u.op is Ops.STORE:
         # ugh, deal with non-reduce locals. probably wrong
         if isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.local:
@@ -114,7 +114,7 @@ def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp
   while len(ends_to_add):
     r:UOp = ends_to_add.pop(-1)
     new_ctx = tuple([z for z in new_ctx if z is not r])
-    end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
+    end_uop = UOp(Ops.ENDIF if r.op in {Ops.IF, Ops.VALID} else Ops.ENDRANGE, src=(r,))
     base_block = UOp(Ops.BLOCKEND, src=(base_block,), arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=1))
   return base_block
 
@@ -192,16 +192,19 @@ def remove_blockend(x:UOp):
 
   parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and y.arg.child_ctx is not None and x.arg.end in y.arg.child_ctx]
   assert all_same(parent_blocks), f"should never have two parent blocks (has {len(parent_blocks)})"
-  if len(parent_blocks) > 0:
-    parent_block = parent_blocks[0]
-    assert len(parent_blocks) == parent_block.arg.cnt
-    # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
-    early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
-    # NOTE: we have to add a barrier at the start if barrier is used in the range
-    if x.op is Ops.BLOCKEND and any(y.op is Ops.BARRIER for y in late_ops) and late_ops[-1].op is Ops.ENDRANGE:
+  if len(parent_blocks) == 0: return UOp(Ops.BLOCK, src=tuple(x.src), arg=x.arg)
+  parent = parent_blocks[0]
+  assert len(parent_blocks) == parent.arg.cnt
+  # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
+  early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
+  # NOTE: we have to add a barrier at the start if barrier is used in the range
+  if x.op is Ops.BLOCKEND and late_ops and late_ops[-1].op is Ops.ENDRANGE:
+    if any(y.op is Ops.BARRIER for y in late_ops):
       late_ops = [UOp(Ops.BARRIER)] + late_ops
-    arg = BasicBlock2(tuple(early_ops)+parent_block.arg.lst+tuple(late_ops), tuple([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt)
-    return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src, arg=arg)
+  new_ctx = tuple(y for y in x.arg.ctx if y is not x.arg.end)
+  arg = BasicBlock2(lst=tuple(early_ops) + parent.arg.lst + tuple(late_ops), ctx=new_ctx, cnt=x.arg.cnt)
+  new_src = tuple(y for y in x.src if y is not parent) + parent.src
+  return UOp(Ops.BLOCK, src=new_src, arg=arg)
 
 block_merge = PatternMatcher([
   (UPat((Ops.BLOCK, Ops.BLOCKEND), name="x"), merge_block),
