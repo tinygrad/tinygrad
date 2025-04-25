@@ -92,6 +92,14 @@ impl<'a> WorkGroup<'a> {
             Some(val) => (val.vec_reg.clone(), val.vcc.clone()),
             None => (VGPR::new(), WaveValue::new(0, threads.len())),
         };
+        if wave_state.is_none() {
+            threads.iter().enumerate().for_each(|(t, [x,y,z])| {
+                vec_reg.get_lane_mut(t)[0] = match &self.launch_bounds {
+                    [_, 1, 1] => *x,
+                    _ => (z << 20) | (y << 10) | x,
+                }
+            });
+        }
         let mut exec = match wave_state {
             Some(val) => val.exec.clone(),
             None => {
