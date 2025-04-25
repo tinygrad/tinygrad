@@ -276,7 +276,9 @@ def no_vectorized_wmma(wmma:UOp):
 
 def no_vectorized_alu(alu:UOp):
   if alu.dtype.vcount == 1: return None
-  alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
+  alus = tuple(UOp(alu.op, alu.dtype.scalar(),
+                   tuple(s.gep(i) if s.op not in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL} else s for s in alu.src),
+                   alu.arg) for i in range(alu.dtype.vcount))
   return UOp(Ops.VECTORIZE, alu.dtype, alus)
 
 def no_vectorized_acc(acc:UOp):
@@ -369,9 +371,11 @@ pm_reduce_collapse = PatternMatcher([
    lambda buf,idx,gate: buf.index(idx, gate).load()),
   (UPat.var("gate").where(UPat(Ops.CONST, arg=0), UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()).reduce(arg=Ops.ADD),
    lambda buf,idx,gate: buf.index(idx, gate.logical_not()).load()),
-  # INDEX on RANGE / gated RANGE.
+  # INDEX on RANGE / gated RANGE. TODO: what if r2 has non-one src[2]?
   (UPat.var("buf").index(UPat(Ops.RANGE, name="r"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r2"))),
-    lambda buf,r,idx,r2: buf.index(idx*r.src[2] + r.src[0], (idx >= r2.src[0]) & (idx < r2.src[1])) if r.arg == r2.arg else None),
+    lambda buf,r,idx,r2: buf.index(idx*r.src[2] + r.src[0] - r2.src[0], (idx >= r2.src[0]) & (idx < r2.src[1])) if r.arg == r2.arg else None),
+  # index/load. TODO: this is more aggressive than needed
+  (UPat((Ops.INDEX, Ops.LOAD), name="alu"), no_vectorized_alu),
 ])+sym
 
 def reduce_collapse(red:UOp):
