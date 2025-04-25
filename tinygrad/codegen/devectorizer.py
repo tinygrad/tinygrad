@@ -332,19 +332,47 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   return acc.assign(ret) if len(reduce_range) != 0 else ret
 
+def no_vectorized_reduce(inp:UOp, red:UOp):
+  if inp.dtype != red.dtype:
+    # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
+    horizontal_amount = inp.dtype.count//red.dtype.count
+    lst = [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)]
+    red = red.replace(src=(functools.reduce(lambda x,y: x.alu(red.arg, y), lst),))
+    if red.dtype.vcount == 1: return red
+  return no_vectorized_alu(red)
+
+pm_reduce_collapse = PatternMatcher([
+  # third arg in range
+  (UPat(Ops.RANGE, src=(UPat.var(), UPat.var()), name="r"), lambda r: r.replace(src=r.src+(UOp.const(r.dtype, 1),))),
+  # mul to range
+  (UPat.var("x") * UPat(Ops.RANGE, name="r"), lambda x,r: r.replace(src=(r.src[0]*x, r.src[1]*x, r.src[2]*x))),
+  # add to range
+  (UPat.var("x") + UPat(Ops.RANGE, name="r"), lambda x,r: r.replace(src=(r.src[0]+x, r.src[1]+x, r.src[2]))),
+  # 0 is "true" arg in where
+  ((UPat(Ops.RANGE, name="r") < UPat.cvar("c")).where(UPat(Ops.CONST, arg=0), UPat.cvar("v")),
+   lambda r,c,v: r.replace(src=(c, r.src[1], r.src[2])).where(v, v)),
+  # reduce ADD on RANGE
+  (UPat(Ops.RANGE, name="r").where(UPat.cvar("v"), UPat.cvar("v")).reduce(arg=Ops.ADD),
+   lambda r,v: ((r.src[1]-r.src[0])//r.src[2]).cast(v.dtype)*v),
+  # devectorize REDUCE
+  (UPat(Ops.VECTORIZE, name="inp").reduce(name="red"), no_vectorized_reduce),
+  # REDUCE on ADD
+  ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD), lambda x,y: x.reduce(arg=Ops.ADD) + y.reduce(arg=Ops.ADD)),
+])
+
 def reduce_collapse(red:UOp):
-  dat, rngs = red.src[0], red.src[1:]
-  included, not_included = partition(red.sparents, lambda x: any(y in x.sparents for y in rngs))
-  if any(x.op in {Ops.LOAD, Ops.STORE} for x in included): return None
-  replaces = {}
+  if len(red.src) > 2: return None # TODO: support multi range
+  included, not_included = partition(red.parents, lambda x: any(y in x.sparents for y in red.src[1:]))
+  if any(x.op in {Ops.LOAD, Ops.STORE, Ops.REDUCE} for x in included): return None
+  replaces = {red:red.replace(src=red.src[0:1])}
   for u in included:
     for s in u.src:
       if s in not_included and s not in replaces and s.op not in {Ops.CONST, Ops.VCONST}:
-        replaces[s] = UOp(Ops.CUSTOM, arg=len(replaces))
+        replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
-  graph_rewrite(collapse_fxn, PatternMatcher([]), name="reduce_collapse")
-  print(collapse_fxn)
-  return None
+  sink = graph_rewrite(collapse_fxn, pm_reduce_collapse+devectorize, name="reduce_collapse")
+  if any(x.op is Ops.REDUCE for x in sink.toposort()): return None
+  return sink.substitute({v:k for k,v in replaces.items()})
 
 pm_reduce = PatternMatcher([
   # remove REDUCE without loads (generic arange opt)
