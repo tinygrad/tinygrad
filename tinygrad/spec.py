@@ -192,7 +192,8 @@ sched_spec = buffer_spec+assign_spec+PatternMatcher([
 # *** this is the UOp shape spec ***
 
 def verify_sink_dims(sink:UOp):
-  for dims in zip(*[x.shape for x in sink.toposort() if x.op is not Ops.SINK and x.st is not None]):
+  if not all_same([s.shape for s in sink.src]): return False
+  for dims in zip(*[x.shape for x in sink.toposort() if x.st is not None]):
     if len(n_dims:={s for s in dims if resolve(s!=1)}) > 1:
       print(f"# INVALID KERNEL DIMS: can only have 1 or n in each dimension: {n_dims}")
       return False
