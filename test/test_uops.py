@@ -359,7 +359,7 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.IDIV, ops)
 
-  def test_fast_idiv(self):
+  def test_fast_idiv_and_mod(self):
     g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
     c = UOp(Ops.CONST, dtypes.uint, (), 3)
     l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
@@ -369,6 +369,13 @@ class TestAssembly(unittest.TestCase):
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.IDIV, ops)
+
+    b = UOp(Ops.MOD, dtypes.uint, (l, c))
+    uops = to_uops_list([b], opts=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHR, ops)
+    self.assertNotIn(Ops.MOD, ops)
 
   @unittest.expectedFailure
   def test_fast_idiv_overflow(self):
