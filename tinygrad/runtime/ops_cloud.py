@@ -111,9 +111,9 @@ class CloudHandler(BaseHTTPRequestHandler):
             extra_args = {k:v for k,v in [("global_size", c.global_size), ("local_size", c.local_size)] if v is not None}
             r = session.programs[(c.name, c.datahash)](*bufs, vals=c.vals, wait=c.wait, **extra_args)
             if r is not None: ret = str(r).encode()
-    elif self.path == "/renderer" and method == "GET":
+    elif self.path == "/properties" and method == "GET":
       cls, args = Device[CloudHandler.device].renderer.__reduce__()
-      ret = json.dumps((cls.__module__, cls.__name__, args)).encode()
+      ret = json.dumps({'clouddev': CloudHandler.device, 'renderer': (cls.__module__, cls.__name__, args)}).encode()
     else: status_code = 404
     self.send_response(status_code)
     self.send_header('Content-Length', str(len(ret)))
@@ -124,8 +124,7 @@ class CloudHandler(BaseHTTPRequestHandler):
   def do_POST(self): return self._do("POST")
 
 def cloud_server(port:int):
-  multiprocessing.current_process().name = "MainProcess"
-  CloudHandler.device = getenv("CLOUDDEV", "METAL") if Device.DEFAULT == "CLOUD" else Device.DEFAULT
+  CloudHandler.device = getenv("CLOUDDEV", next(Device.get_available_devices()) if Device.DEFAULT == "CLOUD" else Device.DEFAULT)
   print(f"start cloud server on {port} with device {CloudHandler.device}")
   server = HTTPServer(('', port), CloudHandler)
   server.serve_forever()
@@ -166,9 +165,7 @@ class CloudDevice(Compiled):
   def __init__(self, device:str):
     if (host:=getenv("HOST", "")) != "": self.host = host
     else:
-      p = multiprocessing.Process(target=cloud_server, args=(6667,))
-      p.daemon = True
-      p.start()
+      multiprocessing.Process(target=cloud_server, args=(6667,), name="MainProcess", daemon=True).start()
       self.host = "127.0.0.1:6667"
 
     # state for the connection
@@ -180,17 +177,18 @@ class CloudDevice(Compiled):
     while 1:
       try:
         self.conn = http.client.HTTPConnection(self.host, timeout=60.0)
-        clouddev = json.loads(self.send("GET", "renderer").decode())
+        self.properties = json.loads(self.send("GET", "properties").decode())
         break
       except Exception as e:
         print(e)
         time.sleep(0.1)
-    if DEBUG >= 1: print(f"remote has device {clouddev}")
+    if DEBUG >= 1: print(f"remote has device {self.properties['clouddev']}")
     # TODO: how to we have BEAM be cached on the backend? this should just send a specification of the compute. rethink what goes in Renderer
-    if not clouddev[0].startswith("tinygrad.renderer.") or not clouddev[1].endswith("Renderer"): raise RuntimeError(f"bad renderer {clouddev}")
-    renderer_class = fromimport(clouddev[0], clouddev[1])  # TODO: is this secure?
-    if not issubclass(renderer_class, Renderer): raise RuntimeError(f"renderer isn't a Renderer {clouddev}")
-    super().__init__(device, CloudAllocator(self), renderer_class(*clouddev[2]), Compiler(), functools.partial(CloudProgram, self))
+    renderer = self.properties['renderer']
+    if not renderer[0].startswith("tinygrad.renderer.") or not renderer[1].endswith("Renderer"): raise RuntimeError(f"bad renderer {renderer}")
+    renderer_class = fromimport(renderer[0], renderer[1])  # TODO: is this secure?
+    if not issubclass(renderer_class, Renderer): raise RuntimeError(f"renderer isn't a Renderer {renderer}")
+    super().__init__(device, CloudAllocator(self), renderer_class(*renderer[2]), Compiler(), functools.partial(CloudProgram, self))
 
   def __del__(self):
     # TODO: this is never being called

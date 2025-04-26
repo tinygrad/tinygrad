@@ -24,6 +24,8 @@ nav:
     - Intro: developer/developer.md
     - Speed: developer/speed.md
     - UOp: developer/uop.md
+    - Grouper:
+      - developer/kernelize.md
     - Runtime:
       - developer/runtime.md
       - HCQ: developer/hcq.md
