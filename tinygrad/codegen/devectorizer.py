@@ -351,7 +351,7 @@ def range_fold(lo:UOp, hi:UOp, st:UOp, cut:UOp, val:UOp) -> UOp:
 def index_fold(buf:UOp, r:UOp, idx:UOp, r2:UOp) -> UOp|None:
   if r.arg != r2.arg: return None
   base_idx = (idx-r2.src[0])//r2.src[2]  # indexed from 0 to the length of the range
-  return buf.index(base_idx*r.src[2] + r.src[0], (idx >= r2.src[0]) & (idx < r2.src[1]))
+  return buf.index(base_idx.cast(r.dtype)*r.src[2] + r.src[0], (idx >= r2.src[0]) & (idx < r2.src[1]))
 
 pm_reduce_collapse = PatternMatcher([
   # put third arg in range
@@ -378,6 +378,8 @@ pm_reduce_collapse = PatternMatcher([
   (UPat.var("buf").index(UPat(Ops.RANGE, name="r"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r2"))), index_fold),
   # index/load. TODO: this is more aggressive than needed
   (UPat((Ops.INDEX, Ops.LOAD), name="alu"), no_vectorized_alu),
+  # cast on RANGE (fix torch indexing)
+  (UPat(Ops.RANGE, name="r").cast(name="c"), lambda r,c: r.replace(src=tuple([x.cast(c.dtype) for x in r.src]), dtype=c.dtype)),
 ])+sym
 
 def reduce_collapse(red:UOp):
