@@ -173,7 +173,7 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   if Ops.AND in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
   # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.arg, 0)) else None)]
-  if Ops.SHR in ops:
+  if False and Ops.SHR in ops:
     # no reason to check x>=0 for uints
     pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
     pat += [(UPat.var("x", dtypes.sints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None)]
@@ -359,8 +359,8 @@ def range_fold_hi(lo:UOp, hi:UOp, st:UOp, cut:UOp, val:UOp) -> UOp:
 
 def index_fold(buf:UOp, r:UOp, idx:UOp, r2:UOp) -> UOp|None:
   if r.arg != r2.arg: return None
-  base_idx = (idx-r2.src[0])//r2.src[2]  # indexed from 0 to the length of the range
-  return buf.index(base_idx.cast(r.dtype)*r.src[2] + r.src[0], (idx >= r2.src[0]) & (idx < r2.src[1]))
+  base_idx = (idx-r2.src[0])  # indexed from 0 to the length of the range
+  return buf.index(base_idx.cast(r.dtype) + r.src[0], (idx >= r2.src[0]) & (idx < r2.src[1]))
 
 def reduce_rangeless(red:UOp):
   # TODO: share code with reduce_unparented
@@ -370,22 +370,24 @@ def reduce_rangeless(red:UOp):
   ret = red.src[0]
   if red.arg is Ops.ADD:
     for r in red.src[1:]:
-      total = (r.src[1]-r.src[0]+r.src[2]-1) // r.src[2] # real count in the range
-      ret = ret * total.cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+      ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
+def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
+
 pm_reduce_collapse = PatternMatcher([
-  # put third arg in range
-  (UPat(Ops.RANGE, src=(UPat.var(), UPat.var()), name="r"), lambda r: r.replace(src=r.src+(UOp.const(r.dtype, 1),))),
-  # mul to range
-  (UPat.var("x") * UPat(Ops.RANGE, name="r"), lambda x,r: r.replace(src=(r.src[0]*x, r.src[1]*x, r.src[2]*x))),
-  # add to range
-  (UPat.var("x") + UPat(Ops.RANGE, name="r"), lambda x,r: r.replace(src=(r.src[0]+x, r.src[1]+x, r.src[2]))),
-  # fold the range with 0 in either the true or false slot
-  ((UPat(Ops.RANGE, src=(UPat.var("lo"), UPat.var("hi"), UPat.var("st"))) < UPat.cvar("cut")) \
-   .where(UPat.cvar("val"), 0).reduce(arg=Ops.ADD, allow_any_len=True), range_fold_lo),
-  ((UPat(Ops.RANGE, src=(UPat.var("lo"), UPat.var("hi"), UPat.var("st"))) < UPat.cvar("cut")) \
-   .where(UPat(Ops.CONST, arg=0), UPat.cvar("val")).reduce(arg=Ops.ADD, allow_any_len=True), range_fold_hi),
+  # lift x+y out of reduce
+  ((UPat.var("x")+UPat.var("y")) < UPat.var("c"), lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
+  # lift x*y out of reduce
+  ((UPat.var("x")*UPat.var("y")) < UPat.var("c"),
+   lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and y.vmin > 0 else None),
+
+  # fold the range
+  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat(Ops.CONST, arg=0), UPat.cvar("val")).reduce(arg=Ops.ADD, allow_any_len=True),
+   lambda r,cut,val: (r.src[1]-cut).maximum(0).minimum(r.src[1]-r.src[0]).cast(val.dtype) * val),
+  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat.cvar("val"), 0).reduce(arg=Ops.ADD, allow_any_len=True),
+   lambda r,cut,val: (cut-r.src[0]).maximum(0).minimum(r.src[1]-r.src[0]).cast(val.dtype) * val),
+
   # devectorize REDUCE
   (UPat(Ops.VECTORIZE, name="inp").reduce(name="red", allow_any_len=True), no_vectorized_reduce),
   # REDUCE on ADD
@@ -411,7 +413,7 @@ pm_reduce_collapse = PatternMatcher([
     lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
   # remove REDUCEs that no longer have a RANGE in the src
   (UPat(Ops.REDUCE, name="red"), reduce_rangeless),
-])+sym
+]) #+sym
 
 def reduce_collapse(red:UOp):
   included, not_included = partition(red.parents, lambda x: any(y in x.sparents for y in red.src[1:]))
@@ -424,8 +426,10 @@ def reduce_collapse(red:UOp):
   collapse_fxn = red.substitute(replaces)
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse+devectorize, name="reduce_collapse")
   # TODO: why is REDUCE needed here and just RANGE isn't enough?
-  if any(x.op in {Ops.REDUCE, Ops.RANGE} for x in sink.toposort()): return None
-  return sink.substitute({v:k for k,v in replaces.items()})
+  #if any(x.op in {Ops.REDUCE, Ops.RANGE} for x in sink.toposort()): return None
+  sink = sink.substitute({v:k for k,v in replaces.items()})
+  if sink == red: return None
+  return sink
 
 def reduce_unparented(red:UOp):
   if red.arg not in {Ops.ADD, Ops.MAX}: return None
