@@ -173,7 +173,7 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   if Ops.AND in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
   # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.arg, 0)) else None)]
-  if False and Ops.SHR in ops:
+  if Ops.SHR in ops:
     # no reason to check x>=0 for uints
     pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
     pat += [(UPat.var("x", dtypes.sints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None)]
@@ -413,7 +413,7 @@ pm_reduce_collapse = PatternMatcher([
     lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
   # remove REDUCEs that no longer have a RANGE in the src
   (UPat(Ops.REDUCE, name="red"), reduce_rangeless),
-]) #+sym
+])+sym
 
 def reduce_collapse(red:UOp):
   included, not_included = partition(red.parents, lambda x: any(y in x.sparents for y in red.src[1:]))
@@ -426,10 +426,8 @@ def reduce_collapse(red:UOp):
   collapse_fxn = red.substitute(replaces)
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse+devectorize, name="reduce_collapse")
   # TODO: why is REDUCE needed here and just RANGE isn't enough?
-  #if any(x.op in {Ops.REDUCE, Ops.RANGE} for x in sink.toposort()): return None
-  sink = sink.substitute({v:k for k,v in replaces.items()})
-  if sink == red: return None
-  return sink
+  if any(x.op in {Ops.REDUCE, Ops.RANGE} for x in sink.toposort()): return None
+  return sink.substitute({v:k for k,v in replaces.items()})
 
 def reduce_unparented(red:UOp):
   if red.arg not in {Ops.ADD, Ops.MAX}: return None
