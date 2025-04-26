@@ -34,12 +34,12 @@ class TestVerifyAST(unittest.TestCase):
     store = UOp(Ops.STORE, dtypes.void, (buf_0, ShapeTracker.from_shape((32, 1)).to_uop(), a+b))
     helper_test_verify_ast(store)
 
-  def test_exactly_one_ndim(self):
+  def test_exactly_one_full_shape(self):
     dtype = dtypes.int
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), i) for i in range(6)]
-    a = UOp(Ops.LOAD, dtype, (bufs[2], ShapeTracker.from_shape((32, 4)).to_uop()))
-    b = UOp(Ops.LOAD, dtype, (bufs[3], ShapeTracker.from_shape((32, 4)).to_uop()))
-    st0 = UOp.store(bufs[0], ShapeTracker.from_shape((32, 4)).to_uop(), a+b)
+    a = UOp(Ops.LOAD, dtype, (bufs[2], ShapeTracker.from_shape((32, 1)).to_uop()))
+    b = UOp(Ops.LOAD, dtype, (bufs[3], ShapeTracker.from_shape((32, 1)).to_uop()))
+    st0 = UOp.store(bufs[0], ShapeTracker.from_shape((32, 1)).to_uop(), a+b)
     a = UOp(Ops.LOAD, dtype, (bufs[4], ShapeTracker.from_shape((32, 32)).to_uop()))
     b = UOp(Ops.LOAD, dtype, (bufs[5], ShapeTracker.from_shape((32, 32)).to_uop()))
     st1 = UOp.store(bufs[1], ShapeTracker.from_shape((32, 32)).to_uop(), a+b)
