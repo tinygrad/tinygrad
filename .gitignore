@@ -9,6 +9,7 @@ notebooks
 *.pyc
 *.so
 *.txt
+!requirements.txt
 build
 !examples/tinychat/assets/cdn.jsdelivr.net/npm/purecss@3.0.0/build/
 /dist

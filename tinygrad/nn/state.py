@@ -46,7 +46,68 @@ def safe_load_metadata(t:Tensor) -> tuple[Tensor, int, dict[str, Any]]:
   Loads a .safetensor file, returning the source tensor, data start position, and metadata.
   """
   data_start = int.from_bytes(t[0:8].data(), "little") + 8
-  return t, data_start, json.loads(t[8:data_start].data().tobytes())
+  metadata_bytes = t[8:data_start].data().tobytes()
+  
+  metadata = {} # Ensure metadata is defined in all paths before return
+  try:
+    # Attempt 1: UTF-8 (strict)
+    metadata_str = metadata_bytes.decode('utf-8')
+    metadata = json.loads(metadata_str)
+    if DEBUG >= 1: print("[DEBUG Cascade] Successfully decoded and parsed metadata as UTF-8 (strict).")
+  except UnicodeDecodeError as e_utf8:
+    # This block is entered if UTF-8 strict decoding fails.
+    print(f"[DEBUG Cascade] UnicodeDecodeError with utf-8 (strict): {e_utf8}")
+    print(f"[DEBUG Cascade] Byte at error: {hex(metadata_bytes[e_utf8.start])} at position {e_utf8.start}")
+    error_snippet_start = max(0, e_utf8.start - 20)
+    error_snippet_end = min(len(metadata_bytes), e_utf8.start + 20)
+    print(f"[DEBUG Cascade] Snippet around error ({error_snippet_start}-{error_snippet_end}): {metadata_bytes[error_snippet_start:error_snippet_end]}")
+
+    # Fallback 1: UTF-8 with errors='replace'
+    print("[DEBUG Cascade] Attempting to decode metadata as UTF-8 (errors='replace')...")
+    try:
+      metadata_str_utf8_replace = metadata_bytes.decode('utf-8', errors='replace')
+      metadata = json.loads(metadata_str_utf8_replace) # Try parsing this potentially fixed string
+      if DEBUG >= 1: print("[DEBUG Cascade] Successfully parsed metadata using UTF-8 (errors='replace') decoding.")
+    except Exception as e_utf8_replace_parse: # Catches JSONDecodeError or other issues with this attempt
+      print(f"[DEBUG Cascade] Failed to parse metadata with UTF-8 (errors='replace'): {e_utf8_replace_parse}")
+
+      # Fallback 2: latin-1 decoding, then sanitize null bytes, then parse
+      print("[DEBUG Cascade] Attempting to decode metadata as 'latin-1', sanitize nulls, and parse...")
+      try:
+        metadata_str_latin1 = metadata_bytes.decode('latin-1')
+        metadata_str_latin1_sanitized = metadata_str_latin1.replace('\x00', '') # Sanitize null bytes
+        if metadata_str_latin1 != metadata_str_latin1_sanitized and DEBUG >=1:
+             print(f"[DEBUG Cascade] Null characters were removed from latin-1 decoded string before JSON parsing.")
+        
+        metadata = json.loads(metadata_str_latin1_sanitized) # Try parsing this sanitized string
+        if DEBUG >= 1: print("[DEBUG Cascade] Successfully parsed metadata using 'latin-1' decoding (with null sanitization).")
+      except Exception as e_latin1_parse: # Catches JSONDecodeError or other issues with this attempt
+        print(f"[DEBUG Cascade] Failed to parse metadata after 'latin-1' decoding and null sanitization: {e_latin1_parse}")
+        
+        # All fallbacks failed if we reach here. Save problematic metadata and re-raise the original UTF-8 error.
+        error_metadata_path = pathlib.Path("/tmp/problematic_safetensors_metadata.json")
+        try:
+          with open(error_metadata_path, "wb") as f_err:
+            f_err.write(metadata_bytes)
+          print(f"[DEBUG Cascade] Saved raw problematic metadata bytes to {error_metadata_path}")
+        except Exception as e_save:
+          print(f"[DEBUG Cascade] Could not save problematic metadata: {e_save}")
+        
+        raise e_utf8 # Re-raise the original UTF-8 error that got us into this complex except block
+  
+  except json.JSONDecodeError as e_json_initial:
+    # This block is entered if initial UTF-8 decoding was successful, but JSON parsing failed.
+    print(f"[DEBUG Cascade] Initial UTF-8 decoding was successful, but JSON parsing failed: {e_json_initial}")
+    error_metadata_path = pathlib.Path("/tmp/problematic_safetensors_metadata.json")
+    try:
+        with open(error_metadata_path, "wb") as f_err:
+            f_err.write(metadata_bytes) # Save the original bytes
+        print(f"[DEBUG Cascade] Saved raw problematic metadata bytes to {error_metadata_path} due to JSONDecodeError on initial UTF-8 decoded string.")
+    except Exception as e_save:
+        print(f"[DEBUG Cascade] Could not save problematic metadata: {e_save}")
+    raise e_json_initial # Re-raise this JSON parsing error
+
+  return t, data_start, metadata
 
 def safe_load(fn:Union[Tensor, str, pathlib.Path]) -> dict[str, Tensor]:
   """
@@ -144,6 +205,7 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
   with Timing("loaded weights in ",
               lambda et_ns: f", {(B:=(GlobalCounters.mem_used-start_mem_used))/1e9:.2f} GB loaded at {B/et_ns:.2f} GB/s", enabled=verbose):
     model_state_dict = get_state_dict(model)
+
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
     for k,v in (t := tqdm(model_state_dict.items(), disable=CI or not verbose)):
@@ -287,6 +349,19 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
     shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
     return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
+  if ggml_type == 36:  # GGML_TYPE_I2_S
+    # Calculate the number of bytes needed for the weights (2 bits per value)
+    weight_bytes = (n + 3) // 4  # Each byte holds 4 weights
+      
+    # Extract the scale factor (stored as float32 at the end)
+    scale_bytes = t[weight_bytes:weight_bytes+4]
+    scale = scale_bytes.bitcast(dtypes.float32)
+      
+    # Use the raw bytes for BitLinear.unpack_i2_weights
+    raw_bytes = t[:weight_bytes+4].data()
+      
+    # Return both the raw bytes and shape for later processing
+    return (raw_bytes, (n,))
   # map to (number of elements, number of bytes)
   if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 14: (256, 210), 8: (32, 34) }.get(ggml_type)) is not None:
     blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1]))
@@ -300,6 +375,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((-1, 16, 16)).reshape((-1, 256))
       d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
       return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
+  
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
 @accept_filename
@@ -335,6 +411,11 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   alignment, pos = kv_data.get("general.alignment", 32), reader.tell()
   data_start = round_up(pos, alignment)
 
-  for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
+  for name, dims, typ, off in t_infos:
+    tensor_data = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ)
+    if isinstance(tensor_data, tuple):
+      state_dict[name] = tensor_data  # Store the tuple directly for BitNet processing
+    else:
+      state_dict[name] = tensor_data.reshape(*reversed(dims))
 
   return kv_data, state_dict
