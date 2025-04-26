@@ -401,8 +401,6 @@ pm_reduce_collapse = PatternMatcher([
   (UPat((Ops.INDEX, Ops.LOAD), name="alu"), no_vectorized_alu),
   # cast on RANGE (fix torch indexing)
   (UPat(Ops.RANGE, name="r").cast(name="c"), lambda r,c: r.replace(src=tuple([x.cast(c.dtype) for x in r.src]), dtype=c.dtype)),
-  # remove any ranges from a REDUCE that aren't referenced in the reduce source
-  (UPat(Ops.REDUCE, name="red"), reduce_unparented),
 ])+sym
 
 def reduce_collapse(red:UOp):
