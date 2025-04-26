@@ -1,7 +1,7 @@
 from typing import cast
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.engine.realize import ExecItem, CompiledRunner
-from tinygrad.runtime.ops_webgpu import WebGPUProgram
+from tinygrad.runtime.ops_webgpu import WebGPUProgram, WGPUBufPtr
 from tinygrad.device import Buffer
 from tinygrad.ops import Variable
 
@@ -17,7 +17,9 @@ class WebGPUGraph(GraphRunner):
       for ji in self.jit_cache:
         _prg = cast(WebGPUProgram, (prg:=cast(CompiledRunner, ji.prg))._prg)
         vals = tuple(var_vals[k] for k in prg.p.vars)
-        _prg.add_compute_pass(command_encoder, comp_pass_desc, *[b._buf for b in ji.bufs], global_size=prg.p.launch_dims(var_vals)[0], vals=vals)
+        bufs: list[WGPUBufPtr] = [b._buf for b in ji.bufs if b is not None]
+        assert len(bufs) == len(ji.bufs)
+        _prg.add_compute_pass(command_encoder, comp_pass_desc, *bufs, global_size=prg.p.launch_dims(var_vals)[0], vals=vals)
 
     time = cast(WebGPUProgram, cast(CompiledRunner, self.jit_cache[0].prg)._prg).execute_commands(callback, wait)
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None # for CapturedJit.free_intermediates to work
