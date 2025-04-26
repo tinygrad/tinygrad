@@ -61,13 +61,11 @@ def _test_cast(a:Tensor, target_dtype:DType):
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(_to_np_dtype(target_dtype))))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
-  if target_dtype in dtypes.fp8s:
-    if not is_dtype_supported(target_dtype): raise unittest.SkipTest("no test for fp8s bitcast for this device")
-    _test_op(lambda: a.bitcast(target_dtype), target_dtype, a.numpy().view(target_dtype.name).tolist())
-  else:
-    if getenv("PTX") and a.dtype == dtypes.int8 and target_dtype.itemsize != a.dtype.itemsize:
-      raise unittest.SkipTest("shape changing bitcast of int8 broken on PTX")
-    _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(_to_np_dtype(target_dtype)).tolist())
+  if target_dtype in dtypes.fp8s and not is_dtype_supported(target_dtype): raise unittest.SkipTest("no test for fp8s bitcast for this device")
+  if getenv("PTX") and a.dtype == dtypes.int8 and target_dtype.itemsize != a.dtype.itemsize:
+    raise unittest.SkipTest("shape changing bitcast of int8 broken on PTX")
+  _test_op(lambda: a.bitcast(target_dtype), target_dtype,
+           target or a.numpy().view(_to_np_dtype(target_dtype) if target_dtype not in dtypes.fp8s else target_dtype.name).tolist())
 
 class TestDType(unittest.TestCase):
   DTYPE: Any = None
@@ -343,10 +341,11 @@ class TestBitCast(unittest.TestCase):
   def test_shape_change_bitcast(self, dt1, dt2):
     # NOTE: this has to be assume to prevent hypothesis from skipping all samples
     assume(dt2 != dtypes.bfloat16 and dt1 != dtypes.bfloat16) # no test for bf16 bitcast yet
-    assume(dt1 not in dtypes.fp8s and dt2 not in dtypes.fp8s) # no test for fp8 bitcast yet
+    assume(not any(dt in dtypes.fp8s and not is_dtype_supported(dt) for dt in (dt1, dt2))) # fp8s only for supported devices
     assume(not (getenv("PTX") and dt1 == dtypes.int8)) # TODO: bitcasting int8 fails in PTX
     data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
-    _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2, data.view(_to_np_dtype(dt2)).tolist())
+    _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2,
+             data.view(_to_np_dtype(dt2) if dt2 not in dtypes.fp8s else dt2.name).tolist())
 
   def test_shape_change_bitcast_exceptions(self):
     with self.assertRaises(RuntimeError):
