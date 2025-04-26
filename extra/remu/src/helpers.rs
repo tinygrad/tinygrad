@@ -140,19 +140,13 @@ mod tests {
 use std::sync::LazyLock;
 pub static DEBUG: LazyLock<bool> = LazyLock::new(|| std::env::var("DEBUG").map(|v| v.parse::<usize>().unwrap_or(0) >= 6).unwrap_or(false));
 
-pub trait Colorize {
-    fn color(self, color: &str) -> String;
-}
-impl<'a> Colorize for &'a str {
-    fn color(self, color: &str) -> String {
-        let ansi_code = match color {
-            "blue" => format!("\x1b[{};2;112;184;255m", 38),
-            "green" => format!("\x1b[{};2;39;176;139m", 38),
-            "gray" => format!("\x1b[{};2;169;169;169m", 38),
-            _ => format!("\x1b[{};2;255;255;255m", 38),
-        };
-        format!("{}{}{}", ansi_code, self, "\x1b[0m")
-    }
+pub fn colored(st:&str, color:&str) -> String {
+    let ansi_code = match color {
+        "green" => format!("\x1b[{};2;39;176;139m", 38),
+        "gray" => format!("\x1b[{};2;169;169;169m", 38),
+        _ => format!("\x1b[{};2;255;255;255m", 38),
+    };
+    format!("{}{}{}", ansi_code, st, "\x1b[0m")
 }
 
 #[macro_export]
@@ -161,16 +155,4 @@ macro_rules! todo_instr {
         println!("{:08X}", $x);
         Err(1)
     }};
-}
-
-#[macro_export]
-macro_rules! print_instr {
-  ($name:expr $(, $arg:ident)* $(,)?) => {
-    if *DEBUG {
-      print!("{}", format!("{:<8}", $name).color("blue"));
-      $(
-        print!(" {:<16}", format!("{}={:?}", stringify!($arg), $arg));
-      )*
-    }
-  };
 }
