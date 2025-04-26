@@ -5,7 +5,7 @@
 #  - symbolic removal
 
 from examples.beautiful_mnist import Model
-from tinygrad import Tensor, nn, getenv, GlobalCounters
+from tinygrad import Tensor, nn, getenv, GlobalCounters, Variable
 from tinygrad.nn.datasets import mnist
 from tinygrad.helpers import trange, DEBUG
 
@@ -30,10 +30,12 @@ if __name__ == "__main__":
     losses = model(X_samp[i]).sparse_categorical_crossentropy(Y_samp[i]).backward().contract(i)
     opt.schedule_steps(i)
     """
+    vi = Variable('i', 0, samples.shape[0]-1)
     losses = []
     for i in range(samples.shape[0]):
+      vib = Tensor(vi.bind(i)) # TODO: make this not require a Tensor
       opt.zero_grad()
-      losses.append(model(X_samp[i]).sparse_categorical_crossentropy(Y_samp[i]).backward())
+      losses.append(model(X_samp[vib]).sparse_categorical_crossentropy(Y_samp[vib]).backward())
       opt.schedule_step()
     # TODO: this stack currently breaks the "generator" aspect of losses. it probably shouldn't
     #losses = Tensor.stack(*losses)
