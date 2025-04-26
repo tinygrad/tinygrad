@@ -336,7 +336,7 @@ def reduce_unparented(red:UOp):
   if red.arg not in {Ops.ADD, Ops.MAX}: return None
   reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].sparents)
   if len(reduce_unparented) == 0: return None
-  ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) else red.src[0]
+  ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
   if red.arg is Ops.ADD:
     for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
