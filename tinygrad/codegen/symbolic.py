@@ -170,8 +170,8 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
       rem += r//gcd * v
       quo += q * v
 
-  # if numerator is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
-  if x.vmin < 0 and remainders: return None
+  # if numerator before/after is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
+  if (x.vmin < 0 or rem.vmin < 0) and remainders: return None
   if which is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
   return rem//(c//gcd)+quo
 
