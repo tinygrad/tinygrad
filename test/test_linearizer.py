@@ -374,7 +374,6 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_ast(sink, [x], wanna_output=[wanna_output, wanna_output/15])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.expectedFailure
   def test_multiout_intermediate_multireduce(self):
     # check how it outputing at different stages of the multireduce works
     # TODO: Fails because the stores shapes do not match: store1.shape = (27,15,1,5) != store0.shape = (27,1,1,5)
@@ -393,14 +392,9 @@ class TestLinearizer(unittest.TestCase):
     wanna_output0 = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
     wanna_output1 = x.numpy().sum(axis=1).reshape(27,1,1,5)
 
-    ast = UOp(Ops.SINK, src=(store0, store1))
-    k = Kernel(ast)
-    prg = CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
-    inbufs = [x.lazydata.base.buffer]
-    outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
-    prg.exec(outbufs+inbufs)
-    np.testing.assert_allclose(np.frombuffer(outbufs[0].as_buffer(), _to_np_dtype(outbufs[0].dtype)).reshape(27,1,1,5), wanna_output0)
-    np.testing.assert_allclose(np.frombuffer(outbufs[1].as_buffer(), _to_np_dtype(outbufs[1].dtype))[:135].reshape(27,1,1,5), wanna_output1)
+    sink = UOp(Ops.SINK, src=(store0, store1))
+    with self.assertRaises(RuntimeError): # AST is invalid
+      helper_linearizer_ast(sink, [x], wanna_output=[wanna_output0, wanna_output1])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_complete_unroll_multireduce(self):
