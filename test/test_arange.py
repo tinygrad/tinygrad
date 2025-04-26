@@ -85,6 +85,7 @@ class TestRand(unittest.TestCase):
     with Context(FUSE_ARANGE=1, NOOPT=noopt):
       out = Tensor.rand(16384)
       out.realize()
+    print(f"fused {GlobalCounters.global_ops} unfused {unfused_ops}")
     self.assertLessEqual(GlobalCounters.global_ops, unfused_ops*2)
   def test_fused_rand_less_ops_opt(self): self.test_fused_rand_less_ops(0)
 
