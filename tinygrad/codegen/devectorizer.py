@@ -393,7 +393,6 @@ def reduce_collapse(red:UOp):
   collapse_fxn = red.substitute(replaces)
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse+devectorize, name="reduce_collapse")
   if any(x.op in {Ops.REDUCE, Ops.RANGE} for x in sink.toposort()): return None
-  #if any(x.op in {Ops.LOAD} for x in sink.toposort()): return None
   return sink.substitute({v:k for k,v in replaces.items()})
 
 pm_reduce = PatternMatcher([
