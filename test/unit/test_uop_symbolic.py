@@ -332,6 +332,9 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("a", 0, 5)+4)//4, 1, 2, "((a//4)+1)")
     self.helper_test_variable((Variable("a", 0, 5)+5)//4, 1, 2, "(((a+1)//4)+1)")
 
+  def test_div_neg_rem(self):
+    self.helper_test_variable((-Variable("a", 0, 255)+256)//2, 0, 128, "(((a*-1)+256)//2)")
+
   def test_mul_div_factor_mul(self):
     self.helper_test_variable((Variable("a", 0, 10)*8)//4, 0, 20, "(a*2)")
 
