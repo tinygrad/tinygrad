@@ -73,6 +73,22 @@ class TestArange(unittest.TestCase):
   def test_all_opts_w_upcast_and_unroll(self):
     return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, arg=0)])
 
+class TestRand(unittest.TestCase):
+  def test_fused_rand_less_ops(self, noopt=1):
+    GlobalCounters.reset()
+    with Context(FUSE_ARANGE=0, NOOPT=noopt):
+      out = Tensor.rand(16384)
+      out.realize()
+    unfused_ops = GlobalCounters.global_ops
+
+    GlobalCounters.reset()
+    with Context(FUSE_ARANGE=1, NOOPT=noopt):
+      out = Tensor.rand(16384)
+      out.realize()
+    print(f"fused {GlobalCounters.global_ops} unfused {unfused_ops}")
+    self.assertLessEqual(GlobalCounters.global_ops, unfused_ops*2)
+  def test_fused_rand_less_ops_opt(self): self.test_fused_rand_less_ops(0)
+
 DSET, DDIM = 2048, 32
 
 class TestIndexing(unittest.TestCase):

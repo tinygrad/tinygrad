@@ -332,15 +332,6 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   return acc.assign(ret) if len(reduce_range) != 0 else ret
 
-def reduce_unparented(red:UOp):
-  if red.arg not in {Ops.ADD, Ops.MAX}: return None
-  reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].sparents)
-  if len(reduce_unparented) == 0: return None
-  ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
-  if red.arg is Ops.ADD:
-    for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
-  return ret
-
 def no_vectorized_reduce(inp:UOp, red:UOp):
   if inp.dtype != red.dtype:
     # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
@@ -371,6 +362,18 @@ def index_fold(buf:UOp, r:UOp, idx:UOp, r2:UOp) -> UOp|None:
   base_idx = (idx-r2.src[0])//r2.src[2]  # indexed from 0 to the length of the range
   return buf.index(base_idx.cast(r.dtype)*r.src[2] + r.src[0], (idx >= r2.src[0]) & (idx < r2.src[1]))
 
+def reduce_rangeless(red:UOp):
+  # TODO: share code with reduce_unparented
+  if red.arg not in {Ops.ADD, Ops.MAX}: return None
+  if red.src[0].dtype != red.dtype: return None
+  if any(x.op in {Ops.RANGE} for x in red.src[0].toposort()): return None
+  ret = red.src[0]
+  if red.arg is Ops.ADD:
+    for r in red.src[1:]:
+      total = (r.src[1]-r.src[0]+r.src[2]-1) // r.src[2] # real count in the range
+      ret = ret * total.cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+  return ret
+
 pm_reduce_collapse = PatternMatcher([
   # put third arg in range
   (UPat(Ops.RANGE, src=(UPat.var(), UPat.var()), name="r"), lambda r: r.replace(src=r.src+(UOp.const(r.dtype, 1),))),
@@ -386,7 +389,8 @@ pm_reduce_collapse = PatternMatcher([
   # devectorize REDUCE
   (UPat(Ops.VECTORIZE, name="inp").reduce(name="red", allow_any_len=True), no_vectorized_reduce),
   # REDUCE on ADD
-  ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True), lambda x,y: x.reduce(arg=Ops.ADD) + y.reduce(arg=Ops.ADD)),
+  ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
+   lambda x,y,r: x.reduce(*r.src[1:], arg=Ops.ADD) + y.reduce(*r.src[1:],arg=Ops.ADD)),
   # MUL casted bool
   ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast()), lambda x,gate: gate.where(x, 0)),
   # WHERE on LOAD (works on max too)
@@ -401,8 +405,12 @@ pm_reduce_collapse = PatternMatcher([
   (UPat((Ops.INDEX, Ops.LOAD), name="alu"), no_vectorized_alu),
   # cast on RANGE (fix torch indexing)
   (UPat(Ops.RANGE, name="r").cast(name="c"), lambda r,c: r.replace(src=tuple([x.cast(c.dtype) for x in r.src]), dtype=c.dtype)),
-  # remove any ranges from a REDUCE that aren't referenced in the reduce source
-  (UPat(Ops.REDUCE, name="red"), reduce_unparented),
+  # AND on WHERE
+  ((UPat.any(UPat(Ops.DEFINE_VAR, name="x"), UPat(Ops.DEFINE_VAR).gep(name="x")) & UPat.var("y")) \
+   .where(UPat.cvar("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
+    lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
+  # remove REDUCEs that no longer have a RANGE in the src
+  (UPat(Ops.REDUCE, name="red"), reduce_rangeless),
 ])+sym
 
 def reduce_collapse(red:UOp):
@@ -415,8 +423,18 @@ def reduce_collapse(red:UOp):
         replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse+devectorize, name="reduce_collapse")
+  # TODO: why is REDUCE needed here and just RANGE isn't enough?
   if any(x.op in {Ops.REDUCE, Ops.RANGE} for x in sink.toposort()): return None
   return sink.substitute({v:k for k,v in replaces.items()})
+
+def reduce_unparented(red:UOp):
+  if red.arg not in {Ops.ADD, Ops.MAX}: return None
+  reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].sparents)
+  if len(reduce_unparented) == 0: return None
+  ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
+  if red.arg is Ops.ADD:
+    for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+  return ret
 
 pm_reduce = PatternMatcher([
   # remove any ranges from a REDUCE that aren't referenced in the reduce source
