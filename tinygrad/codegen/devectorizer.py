@@ -374,7 +374,7 @@ pm_reduce_collapse = PatternMatcher([
    lambda buf,idx,gate: buf.index(idx, gate).load()),
   (UPat.var("gate").where(UPat(Ops.CONST, arg=0), UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()).reduce(arg=Ops.ADD),
    lambda buf,idx,gate: buf.index(idx, gate.logical_not()).load()),
-  # INDEX on RANGE / gated RANGE. TODO: what if r2 has non-one src[2]?
+  # INDEX on RANGE / gated RANGE
   (UPat.var("buf").index(UPat(Ops.RANGE, name="r"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r2"))), index_fold),
   # index/load. TODO: this is more aggressive than needed
   (UPat((Ops.INDEX, Ops.LOAD), name="alu"), no_vectorized_alu),
@@ -396,7 +396,7 @@ def reduce_collapse(red:UOp):
   return sink.substitute({v:k for k,v in replaces.items()})
 
 pm_reduce = PatternMatcher([
-  # remove REDUCE without loads (generic arange opt). TODO: support multi range
+  # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
   # REDUCE -> DEFINE_ACC+ASSIGN
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
