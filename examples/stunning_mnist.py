@@ -38,7 +38,7 @@ if __name__ == "__main__":
       losses.append(model(X_samp[vib]).sparse_categorical_crossentropy(Y_samp[vib]).backward())
       opt.schedule_step()
     # TODO: this stack currently breaks the "generator" aspect of losses. it probably shouldn't
-    #losses = Tensor.stack(*losses)
+    if getenv("STACK", 0): losses = Tensor.stack(*losses)
   print("*** scheduled training")
 
   # evaluate the model
@@ -52,4 +52,5 @@ if __name__ == "__main__":
   # only actually do anything at the end
   if getenv("LOSS", 1):
     for i in (t:=trange(len(losses))): t.set_description(f"loss: {losses[i].item():6.2f}")
-  print(f"test_accuracy: {test_acc.item():5.2f}%")
+  if getenv("TEST", 1):
+    print(f"test_accuracy: {test_acc.item():5.2f}%")
