@@ -378,9 +378,9 @@ pm_reduce_collapse = PatternMatcher([
   # put third arg in range
   (UPat(Ops.RANGE, src=(UPat.var(), UPat.var()), name="r"), lambda r: r.replace(src=r.src+(UOp.const(r.dtype, 1),))),
   # mul to range
-  (UPat.var("x") * UPat(Ops.RANGE, name="r"), lambda x,r: r.replace(src=(r.src[0]*x, r.src[1]*x, r.src[2]*x))),
+  (UPat.var("x") * UPat(Ops.RANGE, name="r"), lambda x,r: r.replace(src=(r.src[0]*x,), arg=r.arg)),
   # add to range
-  (UPat.var("x") + UPat(Ops.RANGE, name="r"), lambda x,r: r.replace(src=(r.src[0]+x, r.src[1]+x, r.src[2]))),
+  (UPat.var("x") + UPat(Ops.RANGE, name="r"), lambda x,r: r.replace(src=(r.src[0]+x,), arg=r.arg)),
   # fold the range with 0 in either the true or false slot
   ((UPat(Ops.RANGE, src=(UPat.var("lo"), UPat.var("hi"), UPat.var("st"))) < UPat.cvar("cut")) \
    .where(UPat.cvar("val"), 0).reduce(arg=Ops.ADD, allow_any_len=True), range_fold_lo),
