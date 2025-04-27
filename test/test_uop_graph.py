@@ -311,7 +311,7 @@ class TestUOpGraph(unittest.TestCase):
       uops = to_uops_list([out])
       if DEBUG >= 4:
         from tinygrad import Device
-        print(Device[Device.DEFAULT].renderer.render("test", uops))
+        print(Device[Device.DEFAULT].renderer.render(uops))
       return uops[-1].src[-1]
 
     # possible

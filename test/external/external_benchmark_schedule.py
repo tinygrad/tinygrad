@@ -55,4 +55,4 @@ if __name__ == "__main__":
           print(sum(len(u) for u in uops))
           if getenv("SRC", 0):
             renderer = Device[Device.DEFAULT].renderer
-            for k,u in zip(kernels, uops): print(renderer.render(k.name, u))
+            for k,u in zip(kernels, uops): print(renderer.render(u))

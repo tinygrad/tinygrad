@@ -252,7 +252,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     store = UOp(Ops.STORE, dtypes.void, (idx, val))
     uops = to_uops_list([store])
-    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     if_uop = next(u for u in uops if u.op is Ops.IF)
     endif = next(u for u in uops if u.op is Ops.ENDIF)
     assert endif.src[0] is if_uop
@@ -270,7 +270,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
-    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     if_uop = next(u for u in uops if u.op is Ops.IF)
     endif = next(u for u in uops if u.op is Ops.ENDIF)
     assert endif.src[0] is if_uop
@@ -290,7 +290,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
-    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     ifs = [u for u in uops if u.op is Ops.IF]
     endifs = [u for u in uops if u.op is Ops.ENDIF]
     self.assertEqual(len(ifs), 1)

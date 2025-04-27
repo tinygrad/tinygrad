@@ -109,13 +109,13 @@ class BlockContext:
 
 DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}
 
-def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp, ...]):
+def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp, ...], cnt:int=1) -> UOp:
   ends_to_add = [z for z in new_ctx if z not in current_ctx]
   while len(ends_to_add):
     r:UOp = ends_to_add.pop(-1)
     new_ctx = tuple([z for z in new_ctx if z is not r])
     end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
-    base_block = UOp(Ops.BLOCKEND, src=(base_block,), arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=1))
+    base_block = UOp(Ops.BLOCKEND, src=(base_block,)*cnt, arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=cnt))
   return base_block
 
 def make_block_bottom_up(ctx:BlockContext, x:UOp):
@@ -152,7 +152,7 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
 
   # add unmergables to sources
   srcs = []
-  for u,cnt in unmergable.items(): srcs += [add_blockends(u, ctx.block_ctxs[u], current_ctx)]*cnt
+  for u,cnt in unmergable.items(): srcs += [add_blockends(u, ctx.block_ctxs[u], current_ctx, cnt=cnt)]*cnt
 
   # add blockseeds, with blockends as needed
   for (new_ctx, new_child_ctx), v in blockseeds.items():
@@ -227,14 +227,14 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   for k,v in blockends_to_arg.items():
     # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
     if len(v) > 1:
-      bb = BasicBlock2(v[0].arg.lst, _sort_ctx(flatten([y.arg.ctx for y in v])), k, cnt=len(v))
+      bb = BasicBlock2(v[0].arg.lst, _sort_ctx(flatten([y.arg.ctx for y in v])), k, cnt=sum(y.arg.cnt for y in v))
       out = UOp(Ops.BLOCKEND, src=tuple(flatten([x.src for x in v])), arg=bb)
       for u in v: new_forks[u] = out
   sink = sink.substitute(new_forks)
 
   # merge blockends
   sink = graph_rewrite(sink, block_merge, name="Linearizer: Merge Blocks")
-  assert sink.op is Ops.BLOCK and all(x.op in DONT_PLACE_IN_BLOCK for x in sink.src)
+  if sink.op is not Ops.BLOCK or not all(x.op in DONT_PLACE_IN_BLOCK for x in sink.src): raise RuntimeError("linearize failure")
 
   # place the early things
   lst = sorted(dedup(sink.src), key=lambda x: x.tuplize) + list(sink.arg.lst)

@@ -1431,5 +1431,49 @@ class TestLinearizerFailures(unittest.TestCase):
     with Context(IGNORE_OOB=0):
       helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["METAL", "GPU", "AMD", "NV", "CUDA"])
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
+  def test_failure_59(self):
+    # stable diffusion with SINGLE_KERNEL_SOFTMAX=1
+    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(268435456), arg=0, src=()),
+        x2:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 8, 4096, 4096, 1, 1), strides=(134217728, 16777216, 4096, 1, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(Ops.MUL, dtypes.float, arg=None, src=(
+          UOp(Ops.EXP2, dtypes.float, arg=None, src=(
+            UOp(Ops.MUL, dtypes.float, arg=None, src=(
+              UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                  x8:=UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(268435456), arg=1, src=()),
+                  x2,)),
+                UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.MAX, (5,), True), src=(
+                    UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                      x8,
+                      UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 8, 4096, 4096, 1, 4096), strides=(134217728, 16777216, 4096, 0, 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),
+                  UOp(Ops.CONST, dtypes.float, arg=-1.0, src=(
+                    x14:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 8, 4096, 4096, 1, 1), strides=(0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+              UOp(Ops.CONST, dtypes.float, arg=1.4426950408889634, src=(
+                x14,)),)),)),
+          UOp(Ops.RECIP, dtypes.float, arg=None, src=(
+            UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (4,)), src=(
+              UOp(Ops.EXP2, dtypes.float, arg=None, src=(
+                UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                  UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                    UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                      x8,
+                      UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 8, 4096, 4096, 4096, 1), strides=(134217728, 16777216, 4096, 0, 1, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                    UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                      UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.MAX, (5,), True), src=(
+                        UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                          x8,
+                          UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 8, 4096, 4096, 4096, 4096), strides=(134217728, 16777216, 4096, 0, 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),
+                      UOp(Ops.CONST, dtypes.float, arg=-1.0, src=(
+                        x28:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 8, 4096, 4096, 4096, 1), strides=(0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+                  UOp(Ops.CONST, dtypes.float, arg=1.4426950408889634, src=(
+                    x28,)),)),)),)),)),)),)),))
+    opts = [Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UNROLL, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.LOCAL, axis=1, arg=16)]
+    # NOTE: this is slow to run, just confirm it can generate the program without Exception
+    Kernel(ast, opts=Device[Device.DEFAULT].renderer).apply_opts(opts).to_program()
+
 if __name__ == '__main__':
   unittest.main()
