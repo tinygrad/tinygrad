@@ -3,7 +3,7 @@ from collections import OrderedDict
 from typing import Union, Optional, Any, Callable, BinaryIO, Iterable
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up, T
+from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up, T, Context
 from tinygrad.shape.view import strides_for_shape
 
 class TensorIO(io.RawIOBase, BinaryIO):
@@ -145,19 +145,20 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
     model_state_dict = get_state_dict(model)
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
-    for k,v in (t := tqdm(model_state_dict.items(), disable=CI or not verbose)):
-      t.desc = f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}: "
-      if k not in state_dict and not strict:
-        if DEBUG >= 1: print(f"WARNING: not loading {k}")
-        continue
-      if v.shape != state_dict[k].shape:
-        raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.shape}, but found {state_dict[k].shape} in state dict.')
-      if isinstance(v.device, tuple):
-        if isinstance(state_dict[k].device, tuple): v.replace(state_dict[k])
-        else: v.replace(state_dict[k].shard(v.device, v.lazydata.axis))
-      else: v.replace(state_dict[k].to(v.device))
-      if realize: v.realize()
-      if consume: del state_dict[k]
+    with Context(DEBUG=0): # don't DEBUG load_state_dict, it's spam and is slow
+      for k,v in (t := tqdm(model_state_dict.items(), disable=CI or not verbose)):
+        t.desc = f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}: "
+        if k not in state_dict and not strict:
+          if DEBUG >= 1: print(f"WARNING: not loading {k}")
+          continue
+        if v.shape != state_dict[k].shape:
+          raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.shape}, but found {state_dict[k].shape} in state dict.')
+        if isinstance(v.device, tuple):
+          if isinstance(state_dict[k].device, tuple): v.replace(state_dict[k])
+          else: v.replace(state_dict[k].shard(v.device, v.lazydata.axis))
+        else: v.replace(state_dict[k].to(v.device))
+        if realize: v.realize()
+        if consume: del state_dict[k]
 
 @accept_filename
 def tar_extract(t: Tensor) -> dict[str, Tensor]:
