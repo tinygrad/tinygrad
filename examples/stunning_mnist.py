@@ -9,7 +9,7 @@ from tinygrad import Tensor, nn, getenv, GlobalCounters, Variable
 from tinygrad.nn.datasets import mnist
 from tinygrad.helpers import trange, DEBUG
 
-# STEPS=70 FUSE_ARANGE=1 python3 examples/stunning_mnist.py
+# STEPS=70 python3 examples/stunning_mnist.py
 # NOTE: it's broken with STACK=1, why?
 
 if __name__ == "__main__":
@@ -25,9 +25,6 @@ if __name__ == "__main__":
   samples = Tensor.randint(getenv("STEPS", 10), getenv("BS", 512), high=X_train.shape[0])
   X_samp, Y_samp = X_train[samples], Y_train[samples]
   print("*** got samples")
-
-  # TODO: remove this contiguous, it's needed for FUSE_ARANGE to work
-  X_samp, Y_samp = X_samp.contiguous(), Y_samp.contiguous()
 
   with Tensor.train():
     """

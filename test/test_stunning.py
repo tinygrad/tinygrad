@@ -26,7 +26,7 @@ class TestStunning(unittest.TestCase):
     else: opt = nn.optim.SGD(nn.state.get_parameters(model), momentum=0.1)
     samples = Tensor.randint(steps, bs, high=X_train.shape[0])
     Y_train = Y_train.one_hot(10)
-    X_samp, Y_samp = X_train[samples].realize(), Y_train[samples].realize()
+    X_samp, Y_samp = X_train[samples], Y_train[samples]
     vi = Variable('i', 0, samples.shape[0]-1)
     with Context(FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
       with Tensor.train():

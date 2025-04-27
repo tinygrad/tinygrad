@@ -351,7 +351,6 @@ class TestJit(unittest.TestCase):
     assert res3 != res2, "Jit rand is diff with diff seeds"
 
   #@unittest.expectedFailure # requires contiguous folding
-  @unittest.skip("assign is now contiguous")
   def test_jit_random_after_unrealized_random(self):
     @TinyJit
     def f(): return Tensor.rand()
