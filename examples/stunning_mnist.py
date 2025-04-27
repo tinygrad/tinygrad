@@ -39,7 +39,7 @@ if __name__ == "__main__":
     vi = Variable('i', 0, samples.shape[0]-1)
     losses = []
     for i in range(samples.shape[0]):
-      vib = Tensor(vi.bind(i)) # TODO: make this not require a Tensor
+      vib = vi.bind(i)
       opt.zero_grad()
       losses.append(model(X_samp[vib]).sparse_categorical_crossentropy(Y_samp[vib]).backward())
       opt.schedule_step()

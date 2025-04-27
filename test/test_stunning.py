@@ -7,6 +7,18 @@ class Model:
   def __call__(self, x:Tensor) -> Tensor: return self.layer(x.flatten(1))
 
 class TestStunning(unittest.TestCase):
+  def test_indexing_variable(self):
+    a = Tensor.arange(100*10).reshape(100, 10).contiguous()
+
+    # index without variable
+    nv = a[12].tolist()
+
+    # index with variable
+    vi = Variable('i', 0, a.shape[0]-1)
+    wv = a[vi.bind(12)].tolist()
+
+    self.assertListEqual(nv, wv)
+
   def test_simple_train(self, steps=6, bs=4, adam=True):
     X_train, Y_train, _, _ = nn.datasets.mnist()
     model = Model()
@@ -20,7 +32,7 @@ class TestStunning(unittest.TestCase):
       with Tensor.train():
         losses = []
         for i in range(samples.shape[0]):
-          vib = Tensor(vi.bind(i)) # TODO: make this not require a Tensor
+          vib = vi.bind(i)
           opt.zero_grad()
           pred = model(X_samp[vib])
           loss = (pred - Y_samp[vib]).square().mean()
