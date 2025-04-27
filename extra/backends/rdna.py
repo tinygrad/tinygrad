@@ -1,12 +1,12 @@
 from typing import Dict, List, Union, cast, Callable, Tuple
 import subprocess
 from functools import reduce
-from operator import add
+from operator import add, mul
 import yaml
 
 from tinygrad.device import Compiler
 from tinygrad.helpers import temp
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.ops import Ops, UOp, PatternMatcher, UPat, DType, GroupOp
 from tinygrad.dtype import dtypes
 
@@ -69,20 +69,19 @@ def render_reg_range(regs: List[str]) -> str:
   r = list(sorted(reduce(add, map(get_reg_range, regs))))
   return f"{p}{r[0]}" if len(r) == 1 else f"{p}[{r[0]}:{r[-1]}]"
 
-def render_addr_calc(ctx, base_ptr, offset) -> Tuple[List[str], str, str]:
+def render_addr_calc(ctx, base_ptr, offset_reg, dt) -> Tuple[List[str], str, str]:
   instructions = []
 
-  off = ctx.r[offset]
   base_lo, base_hi = get_regs_contained(ctx.r[base_ptr])
   addr_lo, addr_hi, tmp = ctx.tmpv[:3]
   tmp_off = ctx.tmps[:1]
 
   # Ensure offset is in a VGPR for src1 of VOP2
-  if off[0] == "s":
-    instructions.append(f"s_mul_lo_u32 {tmp_off}, {off}, {offset.dtype.scalar().itemsize}")
+  if offset_reg[0] == "s":
+    instructions.append(f"s_mul_lo_u32 {tmp_off}, {offset_reg}, {dt.itemsize * dt.vcount}")
     instructions.append(f"v_mov_b32 {tmp}, {tmp_off}")
   else:
-    instructions.append(f"v_mul_lo_u32 {tmp}, {off}, {offset.dtype.scalar().itemsize}")
+    instructions.append(f"v_mul_lo_u32 {tmp}, {offset_reg}, {dt.itemsize * dt.vcount}")
   off = tmp
 
   # Reset overflow
@@ -100,38 +99,90 @@ def render_addr_calc(ctx, base_ptr, offset) -> Tuple[List[str], str, str]:
 
   return instructions, addr_lo, addr_hi
 
+def is_smem_load(x):
+  return any(_x.op is Ops.DEFINE_LOCAL for _x in x.src[0].toposort)
 
-def render_load(ctx, x, ptr, offset) -> List[str]:
-  load_bits = max(int(ctx.types[x.dtype][1:]) * x.dtype.count, 32)
+def render_load(ctx, d, ptr, offset, dt, smem) -> List[str]:
+  def load_instruction(load_type, reg, addr):
+    return f"{load_type} {reg}, {addr} offset:0x8" # offset: cannot be used with v registers. not sure what is the path of least resistance
+
+  load_bits = max(int(ctx.types[dt.scalar()][1:]) * dt.count, 32)
+  load_type = "ds_load_b" if smem else "global_load_b"
+
+  addr_setup_ins = []
+  tmp_addr_base = ctx.tmpv[0]
+
   if len(get_reg_range(ctx.r[ptr])) == 2:
-    addr_setup_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, offset)
-    addr_reg = render_reg_range([addr_lo_v, addr_hi_v])
+    base_addr_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, ctx.r[offset], offset.dtype)
+    addr_setup_ins += base_addr_ins
+    addr_reg_base = render_reg_range([addr_lo_v, addr_hi_v])
   else:
-    addr_reg = ctx.tmpv[0]
-    addr_setup_ins = [f"v_add_u32 {addr_reg}, {ctx.r[ptr]}, {ctx.r[offset]}"]
+    addr_setup_ins.append(f"v_add_u32 {tmp_addr_base}, {ctx.r[ptr]}, {ctx.r[offset]}")
+    addr_reg_base = tmp_addr_base
 
-  if any(_x.op is Ops.DEFINE_LOCAL for _x in x.src[0].toposort):
-    # shared mem
-    load_ins = f"ds_load_b{load_bits} {ctx.r[x]}, {addr_reg}"
-  else:
-    load_ins = f"global_load_b{load_bits} {ctx.r[x]}, {addr_reg} off"
-  return addr_setup_ins + [load_ins]
+  if dt.count > 1:
+    load_ins = []
+    full_chunks = dt.itemsize // 16
+    remaining_bytes = dt.itemsize % 16
+
+    for i in range(full_chunks):
+      reg_slice = slice_reg(d, i * 4, (i + 1) * 4 - 1)
+      addr_tmp = render_reg_range(ctx.tmpv[:2])
+      offset_val = i * 16
+      addr_setup_ins.append(f"v_add_u32 {get_regs_contained(addr_tmp)[0]}, {get_regs_contained(addr_reg_base)[0]}, {offset_val}") # doesn't mov the other part of the address adjacent
+      load_ins.append(load_instruction(f"{load_type}64", reg_slice, addr_tmp))
+
+    if remaining_bytes > 0:
+      regs_used = full_chunks * 4
+      rem_regs = remaining_bytes // dt.scalar().itemsize
+      reg_slice = slice_reg(d, regs_used, regs_used + rem_regs)
+      addr_tmp = ctx.tmpv[2]
+      offset_val = full_chunks * 16
+      addr_setup_ins.append(f"v_add_u32 {addr_tmp}, {addr_reg_base}, {offset_val}")
+      load_ins.append(load_instruction(f"{load_type}{remaining_bytes // 4 * 8}", reg_slice, addr_tmp))
+
+    return addr_setup_ins + load_ins
+
+  load_ins = [load_instruction(f"{load_type}{load_bits}", d, addr_reg_base)]
+  return addr_setup_ins + load_ins
 
 def render_store(ctx, x, ptr, offset, val) -> List[str]:
-  store_bits = max(int(ctx.types[val.dtype.scalar()][1:]) * x.dtype.count, 32)
-  if len(get_reg_range(ctx.r[ptr])) == 2:
-    addr_setup_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, offset)
-    addr_reg = render_reg_range([addr_lo_v, addr_hi_v])
-  else:
-    addr_reg = ctx.tmpv[0]
-    addr_setup_ins = [f"v_add_u32 {addr_reg}, {ctx.r[ptr]}, {ctx.r[offset]}"]
+    store_bits = max(int(ctx.types[val.dtype.scalar()][1:]) * x.dtype.count, 32)
+    
+    addr_setup_ins = []
+    if len(get_reg_range(ctx.r[ptr])) == 2:
+        base_addr_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, ctx.r[offset], offset.dtype)
+        addr_setup_ins += base_addr_ins
+        addr_reg_base = render_reg_range([addr_lo_v, addr_hi_v])
+    else:
+        addr_setup_ins.append(f"v_add_u32 {ctx.tmpv[0]}, {ctx.r[ptr]}, {ctx.r[offset]}")
+        addr_reg_base = ctx.tmpv[0]
 
-  if any(_x.op is Ops.DEFINE_LOCAL for _x in x.src[0].toposort):
-    # shared mem
-    store_ins = f"ds_store_b{store_bits} {addr_reg}, {ctx.r[val]}"
-  else:
-    store_ins = f"global_store_b{store_bits} {addr_reg}, {ctx.r[val]} off"
-  return addr_setup_ins + [store_ins]
+    store_ins = []
+    if val.dtype.count > 1:
+        full_chunks = val.dtype.itemsize // 8
+        remaining_bytes = val.dtype.itemsize % 8
+
+        for i in range(full_chunks):
+          reg_slice = slice_reg(ctx.r[val], i * 2, (i + 1) * 2 - 1)
+          addr_tmp = render_reg_range(ctx.tmpv[:2])
+          addr_lo = get_regs_contained(addr_tmp)[0]
+          offset_val = 8
+          addr_setup_ins.append(f"v_add_u32 {addr_lo}, {get_regs_contained(addr_reg_base)[0]}, {offset_val}")
+          store_ins.append(f"global_store_b64 {addr_tmp}, {reg_slice} off 8")
+
+        if remaining_bytes > 0:
+            regs_used = full_chunks * 2
+            rem_regs = remaining_bytes // val.dtype.scalar().itemsize
+            reg_slice = slice_reg(x, regs_used, regs_used + rem_regs)
+            addr_tmp = ctx.tmpv[2]
+            offset_val = 8
+            addr_setup_ins.append(f"v_add_u32 {addr_tmp}, {addr_reg_base}, {offset_val}") # this could overflow. I should write a render_add_64
+            store_ins.append(f"global_store_b{remaining_bytes // 4 * 8} {addr_tmp}, {reg_slice} off")
+    else:
+        store_ins.append(f"global_store_b{store_bits} {addr_reg_base}, {ctx.r[val]} off")
+    
+    return addr_setup_ins + store_ins
 
 def render_const_mod(ctx, d, val, modulus) -> List[str]:
   if not dtypes.is_unsigned(val.dtype):
@@ -157,6 +208,26 @@ def render_const_mod(ctx, d, val, modulus) -> List[str]:
     f"v_sub_u32 {d}, {ctx.r[val]}, {t2}",
   ]
 
+def slice_reg(reg: str, start: int, end: int) -> str:
+  s = int(reg[2:].split(":")[0])
+  return f"{reg[0]}[{s + start}:{s + end}]"
+
+def render_wmma(ctx, uop):
+  shape, dtype_in, dtype_out = uop.arg[1], uop.arg[2], uop.arg[3]
+  assert shape == (16, 16, 16)
+
+  a_base = ctx.r[uop.src[0]]
+  b_base = ctx.r[uop.src[1]]
+  c_base = ctx.r[uop.src[2]]
+  d_base = ctx.r[uop]
+
+  a = slice_reg(a_base, 0, 7)
+  b = slice_reg(b_base, 0, 7)
+  c = slice_reg(c_base, 0, 7)
+  d = slice_reg(d_base, 0, 7)
+
+  return [f"v_wmma_f16_16x16x16_f16 {d}, {a}, {b}, {c}"]
+
 supports_half: List[Ops] = [Ops.EXP2, Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPLT, Ops.WHERE]
 doesnt_support_half: Tuple[Ops, ...] = tuple(op for op in asm_for_op.keys() if op not in supports_half)
 rdna3_rewrite = PatternMatcher([
@@ -179,7 +250,7 @@ rdna3_rewrite = PatternMatcher([
   # only local idx
   (UPat(Ops.SPECIAL, name="x"),
     lambda ctx, x: [
-     f"v_lshrrev_b32 {ctx.r[x]}, {10 * x.arg[0]}, v0",
+     f"v_lshrrev_b32 {ctx.r[x]}, {10 * x.arg[0]}, v0", # the isa document disagrees with the emulator
      f"v_and_b32 {ctx.r[x]}, {ctx.r[x]}, 0x3FF",
    ]),
 
@@ -196,7 +267,7 @@ rdna3_rewrite = PatternMatcher([
     lambda ctx, x: asm_for_op[(Ops.MOD,)](ctx, ctx.r[x], ctx.r[x.src[0]], ctx.r[x.src[1]], x.dtype, ctx.types[x.dtype])),
   
   (UPat(Ops.LOAD, name="x", src=(UPat.var("ptr"), UPat.var("offset"))), lambda ctx, x, ptr, offset:
-    render_load(ctx, x, ptr, offset)
+    render_load(ctx, ctx.r[x], ptr, offset, x.dtype, is_smem_load(x))
   ),
 
   (UPat(Ops.STORE, name="x", src=(UPat.var("ptr"), UPat.var("offset"), UPat.var("val"))),
@@ -209,7 +280,7 @@ rdna3_rewrite = PatternMatcher([
    lambda ctx, x: [f"v_mov_b32 {ctx.r[x]}, {ctx.r[x.src[0]]}", f"LABEL_LOOP_{ctx.r[x][1:]}:"]),
 
   (UPat(Ops.WMMA, name="x"),
-   lambda ctx, x: f"v_wmma_f16_16x16x16_f16 {ctx.r[x.src[2]]} {ctx.r[x.src[0]]} {ctx.r[x.src[1]]} {ctx.r[x.src[2]]}"), # TODO: split into multiple calls if input too large
+   lambda ctx, x: list(render_wmma(ctx, x))),
 
   (UPat(Ops.IF, name="x"),
    lambda ctx, x: [
@@ -236,6 +307,8 @@ rdna3_rewrite = PatternMatcher([
        f"s_cbranch_vccnz LABEL_LOOP_{ctx.r[src0][1:]}"
    ]),
 
+  (UPat(Ops.BITCAST, name="x"), lambda ctx,x: []),
+
   (UPat(Ops.DEFINE_ACC, name="x", src=(UPat.cvar("pred", dtype=dtypes.bool),), allow_any_len=True),
    lambda ctx, x, pred: [
        f"v_cmp_neq_{ctx.types[x.src[0].dtype]} {str(pred.arg)}, 0",
@@ -258,10 +331,13 @@ dual_combs: List[Tuple[Ops, Ops]] = [
 
 class RDNA3Renderer(Renderer):
   device = "ROCm"
-  # tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
   extra_matcher = None
   tmpv = [f"v{i}" for i in range(3, 6)]
   tmps = [f"s{i}" for i in range(60, 63)]
+
+
+  # tc_8168_f16 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=di, dtype_out=do, opts=(),
+  #   swizzle=(((6,7,2,3,4),(0,1,8,5,9)), ((6,7,8,0,1),(2,3,4,9,5)))) for di,do in [(dtypes.half,dtypes.float), (dtypes.half,dtypes.half)]]
 
   def __init__(self, arch:str="gfx1100", device="ROCm"):
     self.device, self.tensor_cores, self.arch = device, [], arch
@@ -286,7 +362,7 @@ class RDNA3Renderer(Renderer):
 
   def render(self, uops:List[UOp]) -> str:
     self.v_cnt = 6  # v[0:2] is local_xyz, v[3:5] are used for temporaries
-    self.s_cnt = 5  # s[0:1] is the global address, s[2:4] is global_xyz
+    self.s_cnt = 2  # s[0:1] is the global address, s[2:4] is global_xyz
 
     self.r: Dict[UOp, str] = {}
     ins: List[str] = []
@@ -295,7 +371,14 @@ class RDNA3Renderer(Renderer):
     allocate = 0
     args_offset = 0
 
-    # put defines first, then specials
+    def alloc_vregs(elems: int):
+      if elems == 1:
+        reg = f"v{self.v_cnt}"
+      else:
+        reg = f"v[{self.v_cnt}:{self.v_cnt + elems - 1}]"
+      self.v_cnt += elems
+      return reg
+
     for u in uops:
       if u.op == Ops.DEFINE_GLOBAL:
         self.args[u] = {".address_space": "global", ".name": f"buf_{u.arg}", ".offset": args_offset, ".size": 8,
@@ -313,9 +396,10 @@ class RDNA3Renderer(Renderer):
         self.s_cnt += 1
 
     # reserve for global_xyz
-    self.s_cnt += 3
+    self.s_cnt = 16
 
     for u in uops:
+      print(uops.index(u), u.op)
       if any(src.op is Ops.LOAD for src in u.src):
         ins.append("  s_waitcnt vmcnt(0)")
 
@@ -325,12 +409,7 @@ class RDNA3Renderer(Renderer):
       elif u.op == Ops.MULACC:
         self.r[u] = self.r[u.src[0]]
       elif u.op in GroupOp.ALU | {Ops.CONST, Ops.LOAD, Ops.RANGE}:
-        cnt = (u.dtype.itemsize * u.dtype.vcount) // 4
-        if cnt <= 1:
-          self.r[u] = f"v{self.v_cnt}"
-        else:
-          self.r[u] = f"v[{self.v_cnt}:{self.v_cnt + cnt - 1}]"
-        self.v_cnt += cnt
+        self.r[u] = alloc_vregs(u.dtype.itemsize // 4)
       elif u.op == Ops.IF:
         self.r[u] = f"s[{self.s_cnt}:{self.s_cnt + 1}]"
         self.s_cnt += 2
@@ -339,10 +418,28 @@ class RDNA3Renderer(Renderer):
           self.r[u] = f"v{self.v_cnt}"
           self.v_cnt += 1
         elif u.arg[1].startswith("gidx"):
-          self.r[u] = f"s{2 + len(self.args) + u.arg[0]}"
+          self.r[u] = f"s{13 + u.arg[0]}"# the isa document disagrees with the emulator
           continue
         else:
           raise NotImplementedError
+      elif u.op == Ops.WMMA:
+        def alloc_wmma_tile(dtype: DType, num_tiles: int):
+          elems = 16 * 16
+          # the whole wavefront is cooporating (assume wave32, 32bit lanes)
+          eff_size = 32 * 4
+          return alloc_vregs((elems * dtype.itemsize) // eff_size * num_tiles)
+
+        (N, M, K), dtype_in, dtype_out = u.arg[1], u.arg[2], u.arg[3]
+        MT, NT, KT = 16, 16, 16
+
+        # num_a_tiles = (M // MT) * (K // KT)
+        # num_b_tiles = (K // KT) * (N // NT)
+        num_c_tiles = (M // MT) * (N // NT)
+
+        self.r[u] = alloc_wmma_tile(dtype_out, num_c_tiles)
+      if u.op in {Ops.BITCAST}:
+        # noops
+        self.r[u] = self.r[u.src[0]]
       if u.op == Ops.RANGE:
         # TODO: what is the arg?
         self.l[u] = self.r[u.src[1]]
@@ -545,8 +642,83 @@ def test_uniform_conditional():
 
     assert np.allclose(out, [float(0 == val)])
 
+def test_wmma_matmul():
+  device = AMDDevice()
+  allocator = AMDAllocator(device)
+  compiler = RDNACompiler("gfx1100")
+  renderer = RDNA3Renderer("gfx1100")
+
+  uops = []
+  shape = (16, 16, 16)
+
+  gA = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), (), 0)
+  gB = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), (), 1)
+  gC = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 2)
+  gD = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), (), 3)
+  uops += [gA, gB, gC, gD]
+
+  i = UOp(Ops.SPECIAL, dtypes.uint32, (), (0, "lidx0"))  # thread id in wave32
+  uops += [i]
+
+  const_16 = UOp(Ops.CONST, dtypes.uint32, (), 16)
+  const_32 = UOp(Ops.CONST, dtypes.uint32, (), 32)
+  uops += [const_16, const_32]
+
+  const_8 = UOp(Ops.CONST, dtypes.uint32, (), 8)
+  a_offset = UOp(Ops.MUL, dtypes.uint32, (i, const_16))  # 16 FP16 elems per thread
+  b_offset = UOp(Ops.MUL, dtypes.uint32, (i, const_16))
+  c_offset = UOp(Ops.MUL, dtypes.uint32, (i, const_8))  # 8 FP32 elems
+  uops += [a_offset, b_offset, const_8, c_offset]
+
+  a_vec = UOp(Ops.LOAD, dtypes.half.vec(16), (gA, a_offset))
+  b_vec = UOp(Ops.LOAD, dtypes.half.vec(16), (gB, b_offset))
+  c_vec = UOp(Ops.LOAD, dtypes.float32.vec(8), (gC, c_offset))
+  uops += [a_vec, b_vec, c_vec]
+
+  # wmma = UOp(Ops.WMMA, dtypes.float32.vec(8), (a_vec, b_vec, c_vec), (None, shape, dtypes.half, dtypes.float32))
+  # uops += [wmma]
+
+  # store = UOp(Ops.STORE, dtypes.void, (gD, c_offset, wmma))
+  # uops += [store]
+
+  # Compile and run
+  exe = compiler.compile(renderer.render(uops))
+  prog = AMDProgram(device, "test_wmma_matmul", exe)
+
+  # Allocate exact amount: 32 threads × per-thread tile
+  a = allocator.alloc(32 * 16 * 2)   # 16 FP16 = 32B
+  b = allocator.alloc(32 * 16 * 2)
+  c = allocator.alloc(32 * 8 * 4)    # 8 FP32 = 32B
+  d = allocator.alloc(32 * 8 * 4)
+
+  # Fill tiles
+  A = np.arange(32 * 16, dtype=np.float16)
+  B = np.arange(32 * 16, dtype=np.float16)
+  C = np.zeros(32 * 8, dtype=np.float32)
+
+  allocator._copyin(a, memoryview(A))
+  allocator._copyin(b, memoryview(B))
+  allocator._copyin(c, memoryview(C))
+
+  prog(a, b, c, d, global_size=(1, 1, 1), local_size=(32, 1, 1), wait=True)
+
+  out = np.empty(32 * 8, dtype=np.float32)
+  allocator._copyout(memoryview(out), d)
+
+  # Check: matmul + acc per thread
+  expected = np.zeros(32 * 8, dtype=np.float32)
+  for t in range(32):
+    tile_A = A[t * 16:t * 16 + 16].astype(np.float32)
+    tile_B = B[t * 16:t * 16 + 16].astype(np.float32)
+    acc = C[t * 8:t * 8 + 8]
+    dot = np.dot(tile_A.reshape(1, 16), tile_B.reshape(16, 1)).flatten()[:8]  # Just approximate to 8 FP32 outs
+    expected[t * 8:t * 8 + 8] = acc + dot
+
+  assert np.allclose(out, expected, rtol=1e-2, atol=1e-2), f"Got {out}, expected {expected}"
+
 if __name__ == "__main__":
   test_simple()
   test_scalar_add()
   test_matrix_transpose()
   test_uniform_conditional()
+  test_wmma_matmul()
