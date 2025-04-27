@@ -7,7 +7,7 @@ class Model:
   def __call__(self, x:Tensor) -> Tensor: return self.layer(x.flatten(1))
 
 class TestStunning(unittest.TestCase):
-  def test_simple_train(self, steps=6, bs=4, adam=False):
+  def test_simple_train(self, steps=6, bs=4, adam=True):
     X_train, Y_train, X_test, Y_test = nn.datasets.mnist()
     model = Model()
     if adam: opt = nn.optim.Adam(nn.state.get_parameters(model))

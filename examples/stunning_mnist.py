@@ -9,6 +9,9 @@ from tinygrad import Tensor, nn, getenv, GlobalCounters, Variable
 from tinygrad.nn.datasets import mnist
 from tinygrad.helpers import trange, DEBUG
 
+# NOTE: training is broken
+# STACK=1 DEBUG=0 STEPS=70 FUSE_ARANGE=1 SPLIT_REDUCEOP=0 python3 examples/stunning_mnist.py
+
 if __name__ == "__main__":
   X_train, Y_train, X_test, Y_test = mnist()
   print("*** got data")
@@ -22,6 +25,9 @@ if __name__ == "__main__":
   samples = Tensor.randint(getenv("STEPS", 10), getenv("BS", 512), high=X_train.shape[0])
   X_samp, Y_samp = X_train[samples], Y_train[samples]
   print("*** got samples")
+
+  # TODO: remove this contiguous
+  X_samp, Y_samp = X_samp.contiguous(), Y_samp.contiguous()
 
   with Tensor.train():
     # TODO: this shouldn't be a for loop. something like: (contract is still up in the air)
@@ -51,6 +57,8 @@ if __name__ == "__main__":
 
   # only actually do anything at the end
   if getenv("LOSS", 1):
-    for i in (t:=trange(len(losses))): t.set_description(f"loss: {losses[i].item():6.2f}")
+    for i in (t:=trange(len(losses))):
+      GlobalCounters.reset()
+      t.set_description(f"loss: {losses[i].item():6.2f}")
   if getenv("TEST", 1):
     print(f"test_accuracy: {test_acc.item():5.2f}%")
