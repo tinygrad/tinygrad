@@ -231,7 +231,7 @@ class SDXL:
     self.model = DiffusionModel(**config["model"])
 
     self.discretization = LegacyDDPMDiscretization()
-    self.sigmas = self.discretization(config["denoiser"]["num_idx"], flip=True)
+    self.sigmas = self.discretization(config["denoiser"]["num_idx"], flip=True).cast(dtypes.float16)
     self.denoise = TinyJit(self._denoise, prune=True)
 
   # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/inference/helpers.py#L173
@@ -255,6 +255,8 @@ class SDXL:
 
   # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/denoiser.py#L42
   def _denoise(self, x:Tensor, sigma:Tensor, crossattn:Tensor, vector:Tensor) -> Tensor:
+    x = x.cast(dtypes.float16)
+
     def sigma_to_idx(s:Tensor) -> Tensor:
       dists = s - self.sigmas.unsqueeze(1)
       return dists.abs().argmin(axis=0).view(*s.shape)
