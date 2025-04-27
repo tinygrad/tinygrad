@@ -2,10 +2,10 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys
 assert sys.platform != 'win32'
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, cast, ClassVar
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
-from tinygrad.runtime.support.hcq import HWInterface
+from tinygrad.runtime.support.hcq import FileIOInterface
 from tinygrad.runtime.autogen import kgsl, adreno
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
@@ -38,10 +38,7 @@ class QCOMCompiler(CLCompiler):
 
 class QCOMSignal(HCQSignal):
   def __init__(self, base_addr:int|None=None, **kwargs):
-    super().__init__(QCOMDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=19.2)
-
-  def __del__(self):
-    if isinstance(self.base_addr, int): QCOMDevice.signals_pool.append(self.base_addr)
+    super().__init__(base_addr, **kwargs, timestamp_divider=19.2, dev_t=QCOMDevice)
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Sleep only for only timeline signals. Do it immediately to free cpu.
@@ -320,16 +317,16 @@ class QCOMAllocator(HCQAllocatorBase):
     self.dev._gpu_free(opaque)
 
 class QCOMDevice(HCQCompiled):
-  signals_page: Any = None
-  signals_pool: list[int] = []
+  devices: ClassVar[list[HCQCompiled]] = []
+  signal_pages: ClassVar[list[Any]] = []
+  signal_pool: ClassVar[list[int]] = []
+
   gpu_id: int = 0
   dummy_addr: int = 0
 
   def __init__(self, device:str=""):
-    self.fd = HWInterface('/dev/kgsl-3d0', os.O_RDWR)
+    self.fd = FileIOInterface('/dev/kgsl-3d0', os.O_RDWR)
     QCOMDevice.dummy_addr = cast(int, self._gpu_alloc(0x1000).va_addr)
-    QCOMDevice.signals_page = self._gpu_alloc(16 * 65536, uncached=True)
-    QCOMDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, self.signals_page.size, 16)]
 
     flags = kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC \
               | kgsl.KGSL_CONTEXT_PRIORITY(8) | kgsl.KGSL_CONTEXT_PREEMPT_STYLE(kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN)
@@ -367,7 +364,7 @@ class QCOMDevice(HCQCompiled):
 
   def _gpu_free(self, mem:HCQBuffer):
     kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta.id)
-    HWInterface.munmap(mem.va_addr, mem.meta.mmapsize)
+    FileIOInterface.munmap(mem.va_addr, mem.meta.mmapsize)
 
   def _ensure_stack_size(self, sz):
     if not hasattr(self, '_stack'): self._stack = self._gpu_alloc(sz)

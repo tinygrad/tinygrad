@@ -1,8 +1,8 @@
 from typing import List
 import unittest, time, pytest
-from tinygrad import dtypes, Device
-from tinygrad.helpers import DEBUG, AMX
-from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher
+from tinygrad import dtypes, Device, Variable
+from tinygrad.helpers import DEBUG, Context
+from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher, track_rewrites
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.codegen.devectorizer import full_graph_rewrite, graph_rewrite, sym
@@ -17,7 +17,11 @@ simple_pm = PatternMatcher([
   ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.arg+c2.arg)),
 ])
 
-def to_uops_list(u:List[UOp]) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u)))
+def to_uops_list(u:List[UOp]) -> List[UOp]:
+  # we strip the SINK here for legacy reasons
+  ret = linearize_uop(full_graph_rewrite(UOp.sink(*u)))
+  assert ret[-1].op is Ops.SINK
+  return ret[:-1]
 
 class TestGraphRewriteEfficiency(unittest.TestCase):
   def test_create_many_uops(self):
@@ -61,7 +65,7 @@ class TestGraphRewriteEfficiency(unittest.TestCase):
     new_sink = full_graph_rewrite(lower_sink)
     et = time.perf_counter() - st
     UOp.__init__ = old_init
-    print(f"rewrote in {et*1000:.2f} ms, from {len(lower_sink.toposort)} -> {len(new_sink.toposort)}, creating {cnt[0]} uops")
+    print(f"rewrote in {et*1000:.2f} ms, from {len(lower_sink.toposort())} -> {len(new_sink.toposort())}, creating {cnt[0]} uops")
 
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
@@ -158,7 +162,7 @@ class TestGraphRewrite(unittest.TestCase):
     a1 = UOp(Ops.DEFINE_VAR, dtypes.int, (), ("a1", UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 11)))
     a2 = UOp(Ops.DEFINE_VAR, dtypes.int, (), ("a2", UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 11)))
     sink = a1.sink(a2)
-    define_vars = [x for x in graph_rewrite(sink, PatternMatcher([])).toposort if x.op is Ops.DEFINE_VAR]
+    define_vars = [x for x in graph_rewrite(sink, PatternMatcher([])).toposort() if x.op is Ops.DEFINE_VAR]
     self.assertEqual(len(define_vars), 1)
 
   def test_simple(self):
@@ -239,7 +243,7 @@ class TestGraphRewrite(unittest.TestCase):
       print(sink.render())
       self.assertEqual(sink.op, Ops.ADD)
       self.assertEqual(sink.src[1].op, Ops.CONST)
-      self.assertEqual(len([x for x in sink.toposort if x.op is Ops.CONST]), 1)
+      self.assertEqual(len([x for x in sink.toposort() if x.op is Ops.CONST]), 1)
 
 class TestUOpGraph(unittest.TestCase):
   def test_add_constant_fold(self):
@@ -307,7 +311,7 @@ class TestUOpGraph(unittest.TestCase):
       uops = to_uops_list([out])
       if DEBUG >= 4:
         from tinygrad import Device
-        print(Device[Device.DEFAULT].renderer.render("test", uops))
+        print(Device[Device.DEFAULT].renderer.render(uops))
       return uops[-1].src[-1]
 
     # possible
@@ -442,6 +446,71 @@ class TestUOpGraph(unittest.TestCase):
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST]), 0, f"dtype = {dt}")
 
+  def test_in_out_of_bounds_access(self):
+    with Context(IGNORE_OOB=0):
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 0)),))
+      to_uops_list([ld0])
+      ld1 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 15)),))
+      to_uops_list([ld1])
+      ld1 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 7)),))
+      to_uops_list([ld1])
+
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 42)),))
+      with self.assertRaises(RuntimeError): to_uops_list([ld0])
+
+  def test_in_out_of_bounds_access_symbolic(self):
+    with Context(IGNORE_OOB=0):
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(Variable("i", 1, 10)),))
+      to_uops_list([ld0])
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(Variable("i", 0, 15)),))
+      to_uops_list([ld0])
+
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(Variable("i", 0, 20)),))
+      with self.assertRaises(RuntimeError): to_uops_list([ld0])
+
+  def test_out_of_bounds_off_by_one_access(self):
+    with Context(IGNORE_OOB=0):
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 16)),))
+      with self.assertRaises(RuntimeError): to_uops_list([ld0])
+
+  def test_in_out_bounds_access_with_mask(self):
+    with Context(IGNORE_OOB=0):
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      gidx0 = UOp(Ops.SPECIAL, dtype=dtypes.int, arg=("gidx0", 42))
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, (5<gidx0)&(gidx0<16)),))
+      ld1 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, gidx0<16),))
+      to_uops_list([ld0, ld1])
+
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, gidx0<17),))
+      with self.assertRaises(RuntimeError): to_uops_list([ld0])
+
+  def test_in_out_of_bounds_access_symbolic_mask(self):
+    with Context(IGNORE_OOB=0):
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      i = Variable("i", 1, 80)
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, i<10),))
+      to_uops_list([ld0])
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, i<15),))
+      to_uops_list([ld0])
+
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, i<20),))
+      with self.assertRaises(RuntimeError): to_uops_list([ld0])
+
+  def test_in_out_of_bounds_access_index_load(self):
+    with Context(IGNORE_OOB=0):
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(64), (), 0)
+      gidx0 = UOp(Ops.SPECIAL, dtype=dtypes.int, arg=("gidx0", 42))
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, gidx0<8),))
+      ld1 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(ld0*2, (ld0>=0)&(ld0<32)),))
+      to_uops_list([ld1])
+
+      ld1 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(ld0*2, (ld0>=0)&(ld0<64)),))
+      with self.assertRaises(RuntimeError): to_uops_list([ld1])
+
   def test_fold_gated_load(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
@@ -456,7 +525,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(size=1, local=True), (), "temp")
+    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(size=18, local=True), (), "temp")
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     st = UOp(Ops.STORE, dtypes.void, (smem.index(lidx), UOp.load(glbl0.index(lidx), dtype=dtypes.int)))
     barrier = UOp(Ops.BARRIER, dtypes.void, (st, ))
@@ -502,7 +571,9 @@ class TestUOpGraph(unittest.TestCase):
     # ranges are closed in the right order
     self.assertEqual(endranges[-1].src[0], ranges[0])
 
+@track_rewrites()
 def expander_rewrite(sink): return graph_rewrite(sink, sym + expander)
+@track_rewrites()
 def float4_rewrite(sink): return full_graph_rewrite(sink, Renderer())
 
 class TestExpander(unittest.TestCase):
@@ -652,72 +723,6 @@ class TestExpander(unittest.TestCase):
     sink = expander_rewrite(sink)
     print(sink)
 
-class TestLoadStoreFolder(unittest.TestCase):
-  def test_simple_load_fold(self):
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
-    load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i)),)) for i in range(4)]
-    sink = UOp(Ops.VECTORIZE, dtypes.float.vec(len(load)), tuple(load))
-
-    sink = float4_rewrite(sink.sink())
-    assert len([x for x in sink.toposort if x.op is Ops.LOAD]) == 1
-
-  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
-  def test_two_load_fold(self):
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
-    load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i)),)) for i in range(8)]
-    sink = UOp(Ops.VECTORIZE, dtypes.float.vec(len(load)), tuple(load))
-    sink = float4_rewrite(sink.sink())
-    assert len([x for x in sink.toposort if x.op is Ops.LOAD]) == 2
-
-  def test_simple_load_fold_gated(self):
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
-    gate = UOp(Ops.DEFINE_VAR, dtypes.bool)
-    load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i), gate),)) for i in range(4)]
-    sink = UOp(Ops.VECTORIZE, dtypes.float.vec(len(load)), tuple(load))
-    sink = float4_rewrite(sink.sink())
-    assert len([x for x in sink.toposort if x.op is Ops.LOAD]) == 1
-    single_load = [x for x in sink.toposort if x.op is Ops.LOAD][0]
-    self.assertEqual(single_load.src[1].op, Ops.VECTORIZE)
-
-  def test_simple_load_dont_fold_different_gated(self):
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
-    gate = UOp.variable("g1", False, True, dtypes.bool)
-    gate2 = UOp.variable("g2", False, True, dtypes.bool)
-    load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i), gate if i == 0 else gate2),
-                                          UOp.const(dtypes.float, 0))) for i in range(4)]
-    sink = UOp(Ops.VECTORIZE, dtypes.float.vec(len(load)), tuple(load))
-    sink = float4_rewrite(sink.sink())
-    assert len([x for x in sink.toposort if x.op is Ops.LOAD]) == 3
-
-  def test_simple_store_fold(self):
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
-    load = [UOp(Ops.STORE, dtypes.float, (buf.index(UOp.const(dtypes.int, i)), UOp.const(dtypes.float, 0))) for i in range(4)]
-    sink = UOp(Ops.SINK, dtypes.void, tuple(load))
-    sink = float4_rewrite(sink)
-    assert len([x for x in sink.toposort if x.op is Ops.STORE]) == 1
-
-  def test_simple_store_fold_gate(self):
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
-    gate = UOp.variable("g1", False, True, dtypes.bool)
-    load = [UOp(Ops.STORE, dtypes.float, (buf.index(UOp.const(dtypes.int, i)), UOp.const(dtypes.float, 0), gate)) for i in range(4)]
-    sink = UOp(Ops.SINK, dtypes.void, tuple(load))
-    sink = float4_rewrite(sink)
-    assert len([x for x in sink.toposort if x.op is Ops.STORE]) == 1
-    one_store = [x for x in sink.toposort if x.op is Ops.STORE][0]
-    assert len(one_store.src) == 3
-    _if_node = one_store.src[2]
-    assert _if_node.op == Ops.IF and _if_node.src[0] == gate
-
-  def test_simple_store_dont_fold(self):
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
-    gate = UOp.variable("g1", False, True, dtypes.bool)
-    gate2 = UOp.variable("g2", False, True, dtypes.bool)
-    load = [UOp(Ops.STORE, dtypes.float, (buf.index(UOp.const(dtypes.int, i), gate if i == 0 else gate2),
-                                           UOp.const(dtypes.float, i))) for i in range(4)]
-    sink = UOp(Ops.SINK, dtypes.void, tuple(load))
-    sink = float4_rewrite(sink)
-    assert len([x for x in sink.toposort if x.op is Ops.STORE]) == 3
-
 class TestIFUOps(unittest.TestCase):
   def test_create_ifs(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
@@ -732,7 +737,7 @@ class TestIFUOps(unittest.TestCase):
     store = UOp(Ops.STORE, dtypes.void, (gbuf.index(UOp.const(dtypes.int, 0), gate), lbuf))
     sink = UOp(Ops.SINK, dtypes.void, (store,))
     sink = full_graph_rewrite(expand_rewrite(sink))
-    if_uops = [u for u in sink.toposort if u.op is Ops.IF]
+    if_uops = [u for u in sink.toposort() if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
     for st in sink.src:
@@ -750,7 +755,7 @@ class TestIFUOps(unittest.TestCase):
     stores = [UOp(Ops.STORE, dtypes.void, (gbuf.index(UOp.const(dtypes.int, i), gate), lbufs[i])) for i in range(4)]
     sink = UOp(Ops.SINK, dtypes.void, tuple(stores))
     sink = full_graph_rewrite(expand_rewrite(sink))
-    if_uops = [u for u in sink.toposort if u.op is Ops.IF]
+    if_uops = [u for u in sink.toposort() if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
     for st in sink.src:
@@ -766,7 +771,7 @@ class TestIFUOps(unittest.TestCase):
     stores = [UOp(Ops.STORE, dtypes.void, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate)) for i in range(4)]
     sink = UOp(Ops.SINK, dtypes.void, tuple(stores))
     sink = full_graph_rewrite(sink)
-    if_uops = [u for u in sink.toposort if u.op is Ops.IF]
+    if_uops = [u for u in sink.toposort() if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
     for st in sink.src:

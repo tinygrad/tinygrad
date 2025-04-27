@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
-from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
-from tinygrad.ops import PatternMatcher
+from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, print_uops, PatternMatcher
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
@@ -17,6 +16,7 @@ from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
+from tinygrad.engine.grouper import view_left
 
 class KernelOptError(Exception): pass
 
@@ -37,20 +37,22 @@ class TensorCoreOptions:
 
 class Kernel:
   def __init__(self, ast:UOp, opts:Optional[Renderer]=None):
-    if ast.op is Ops.SINK: self.ast = ast
+    assert ast.op is Ops.SINK, ast.op
+    self.ast = ast
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     # verify AST matches the spec
-    if __debug__: type_verify(list(self.ast.toposort), shape_spec)
+    if __debug__: type_verify(list(self.ast.toposort()), shape_spec)
 
-    self.reduceops = [x for x in self.ast.toposort if x.op is Ops.REDUCE_AXIS]
+    self.reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE_AXIS]
 
     self.vars: list[Variable] = self.ast.variables()
     # NOTE: this requires a specific order with the [::-1], this is likely a bug
-    self.bufs: list[UOp] = [x for x in self.ast.toposort if x.op in GroupOp.Buffer][::-1]
+    self.bufs: list[UOp] = [x for x in self.ast.toposort() if x.op in GroupOp.Buffer][::-1]
 
     # get earlybufs, before any reduceops
-    earlybufs: list[UOp] = [x for reduceop in self.reduceops for x in reduceop.src[0].toposort if x.op in GroupOp.Buffer]
+    earlybufs: list[UOp] = sorted([x for reduceop in self.reduceops for x in reduceop.src[0].toposort() if x.op in GroupOp.Buffer],
+                                  key=lambda x: -prod(x.shape))
     self.full_buf_index: int = self.bufs.index(earlybufs[0]) if earlybufs else 0
     # NOTE: full_shape can be wrong if there's a tree of reduces
 
@@ -101,9 +103,6 @@ class Kernel:
 
   @property
   def membufs(self) -> list[UOp]: return dedup([x.src[0] for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
-
-  # TODO: these need more tests or it might silently be no-op
-  def float4_axis(self, i:int): return [x-self.first_upcast for x in self.sts[i].unit_stride_axes() if x >= self.first_upcast and self.sts[i].shape[x]%4 == 0]  # noqa: E501
 
   def upcasted_axis(self, i:int) -> list[tuple[int, Optional[sint], bool]]:
     upcasted_shape, upcasted_stride = self.sts[i].shape[self.first_upcast:], self.sts[i].real_strides()[self.first_upcast:]
@@ -303,6 +302,7 @@ class Kernel:
       0: will disable any tensor core matching
       1: enable tensor cores
       2: apply tensor core shape but don't use UOp.WMMA
+      3: emulate tensor cores with local memory
     extra_opts -- additional Opt's to apply after the tensor core instead of the hand-coded additional Opt's (default None)
     tc_select -- specifies which tensor core(s) to use for optimization (default -1)
       -1: iterates through all available tensor cores in order and uses the first one that matches the requirements (dims and dtypes)
@@ -314,13 +314,12 @@ class Kernel:
     """
     if tc_select is None: tc_select = TC_SELECT.value
     if tc_opt is None: tc_opt = TC_OPT.value
-    if not self.opts.tensor_cores and use_tensor_cores != 2: return False
+    if not self.opts.tensor_cores: return False
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, (tc_select, tc_opt)))
 
       if (tc_opts:=self.tensor_core_opts) is not None:
-        if extra_opts is not None:
-          for opt in extra_opts: self.apply_opt(opt)
+        if extra_opts is not None: self.apply_opts(extra_opts)
         else:
           if AMX: return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
           # hand-coded TC opts
@@ -345,11 +344,12 @@ class Kernel:
 
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
-      check((use_tensor_cores:=USE_TC.value) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
+      check(len(self.opts.tensor_cores) > 0, "must have tensor cores")
       check(opt.axis is not None, "tensor core opts must have an axis")
       check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 2, "tensor core opts must have tc_select and tc_opt")
       check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.opts.tensor_cores), "tensor core opts must have valid tc_select")
       check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
+      check(0 < (use_tensor_cores:=USE_TC.value) <= 3, "use_tensor_cores value is not valid")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
       self.applied_opts.append(opt)
       return
@@ -374,7 +374,7 @@ class Kernel:
       check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
 
     if opt.op is OptOps.LOCAL:    # cyan
-      # NOTE: LLVM/CLANG can use locals too, but they are treated the same as globals (still helpful for L1 cache)
+      # NOTE: LLVM/CPU can use locals too, but they are treated the same as globals (still helpful for L1 cache)
       # it's disabled for now since it makes BEAM slow for little gain
       check(self.opts.has_local, "target does not support local")
       check(axis < self.global_dims, "local is for globals")
@@ -431,132 +431,8 @@ class Kernel:
     if self.simplify_ones() and self.tensor_core_opts:
       self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
 
-  def required_optimizations(self) -> Kernel:
-    if isinstance(self.membufs[0].dtype, ImageDType):
-      unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
-      assert unit_stride_axes_mul_4, f"needs a unit stride axis in {self.bufs[0]}"
-      if all(x < self.first_upcast for x in unit_stride_axes_mul_4): self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
-    return self
-
-  def hand_coded_optimizations(self) -> Kernel:
-    self.required_optimizations()
-
-    # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
-    MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
-    if self.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
-        self.reduceop is not None and self.reduceop.arg[0] is Ops.ADD and len(self.full_shape) >= 2 and self.opts.has_shared and \
-        (mulop:=self.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
-      st0, st1 = self.sts[self.bufs.index(mulop.src[0])], self.sts[self.bufs.index(mulop.src[1])]
-      strides0, strides1 = st0.real_strides(), st1.real_strides()
-      def has_expanded_axis(shape, strides): return any(resolve(s > 1) and not resolve(st != 0) for s,st in zip(shape,strides))
-      if strides0[self.first_reduce] == 1 and not (has_expanded_axis(st0.shape, strides0) and has_expanded_axis(st1.shape, strides1)):
-        for global_idx in range(self.global_dims):
-          if self.full_shape[self.first_reduce]%MV_THREADS_PER_ROW == 0 and self.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
-            if DEBUG >= 3:
-              print(f"MATVEC: {self.full_shape=} {self.first_reduce=} {strides0=} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
-            if MV_THREADS_PER_ROW > 1: self.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
-            if MV_BLOCKSIZE > 1: self.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
-            if MV_ROWS_PER_THREAD > 1: self.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
-            return self
-
-    if self.opts.has_local and self.opts.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
-      # are we grouping? (requires local shape support)
-      if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:  # noqa: E501
-        # TODO: use 1024 if it's allowed in a smarter way
-        for sz in ([256, 16] if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
-          if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
-            try: # may fail due to excessive smem usage
-              self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
-              break
-            except KernelOptError: pass
-
-    # upcast float4 images
-    for buf_index,buf in enumerate(self.bufs):
-      unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes(ignore_valid=True) if self.sts[buf_index].shape[i]%4 == 0]
-      if buf.src[0].dtype.__class__ is ImageDType:
-        #assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
-        if len(unit_stride_axes_mul_4) and all(x < self.first_upcast for x in unit_stride_axes_mul_4):
-          if unit_stride_axes_mul_4[0] < self.first_reduce:
-            self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
-          else:
-            self.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-self.first_reduce, 4))
-
-    # no more opt if we are grouping
-    if self.group_for_reduces: return self
-
-    # **** below this line need to be optional and benchmarked ****
-
-    # TODO: doing extra upcasts with images doesn't work for some reason (maybe has to do with to_image_idx)
-    # to trigger the above bug, remove prod(self.full_shape[self.first_upcast:]) from the below
-    # expression and run test/test_ops.py with IMAGE=2
-    # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
-    # this can be made much smarter
-    to_upcast: list[int] = []
-    # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
-    for axis in range(self.first_reduce):
-      # we might want to be able to split axes that are masked, or refuse to merge them in simplify_merge_adjacent
-      # for now skip upcasting here if there is a symbolic axis
-      if isinstance(self.full_shape[axis], int) and self.full_shape[axis] <= 7 and any(st.axis_is_masked(axis) for st in self.sts) and \
-        prod(self.full_shape[self.first_upcast:]) * prod(self.full_shape[j] for j in to_upcast) * self.full_shape[axis] <= 7 * 7:
-        if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
-        to_upcast.append(axis)
-    for axis in to_upcast[::-1]: self.apply_opt(Opt(OptOps.UPCAST, axis, 0))
-
-    # potentially do more upcasts of non reduce axes based on a heuristic
-    upcasted_axis: set[int] = set()
-    while resolve(prod(self.sts[0].shape[:self.first_reduce]) >= 1024):
-      xb_choices = []
-      for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
-        # if we haven't upcasted it, it's not symbolic, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
-        if axis not in upcasted_axis and isinstance(self.full_shape[axis], int) and self.full_shape[axis]%upcast_amount == 0 and any(st.views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index, st in enumerate(self.sts)):  # noqa: E501
-          xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in self.sts), sum(st.views[-1].strides[axis] for st in self.sts), axis, upcast_amount))  # noqa: E501
-      if xb_choices:
-        xb_choices = sorted(xb_choices)
-        if DEBUG >= 4: print(f"float4 merging axis : {xb_choices}")
-        self.apply_opt(Opt(OptOps.UPCAST, xb_choices[0][2], xb_choices[0][3]))
-        upcasted_axis.add(xb_choices[0][2])
-      else: break
-
-    # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast.
-    if self.first_reduce < self.first_upcast and (prod(self.full_shape[self.first_upcast:]) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))) and (self.upcasted == 0 or prod(self.full_shape[-self.upcasted:]) < 64):  # noqa: E501
-      if isinstance(s:=self.full_unupcasted_shape[-1], int) and s <= 32:  # NOTE: cannot loop unroll symbolic axis
-        self.apply_opt(Opt(OptOps.UNROLL, len(self.full_unupcasted_shape)-1-self.first_reduce, 0))
-        # if it's small, upcast a second reduce dimension too
-        if self.first_reduce < self.first_upcast and s <= 3 and isinstance(s2:=self.full_unupcasted_shape[-1], int) and s2 <= 3:
-          self.apply_opt(Opt(OptOps.UNROLL, len(self.full_unupcasted_shape)-1-self.first_reduce, 0))
-      else:
-        for splits in [4]:
-          if self.full_unupcasted_shape[-1]%splits == 0:
-            self.apply_opt(Opt(OptOps.UNROLL, len(self.full_unupcasted_shape)-1-self.first_reduce, splits))
-            break
-
-    # if nothing at all is upcasted and it's easy to, do an upcast
-    # TODO: this is breaking the tests
-    for splits in [4]:
-      if self.upcasted == 0 and self.full_unupcasted_shape and self.full_unupcasted_shape[-1] % splits == 0:
-        self.apply_opt(Opt(OptOps.UPCAST, len(self.full_unupcasted_shape)-1, splits))
-
-    # **** local groups ****
-
-    if self.opts.has_local:
-      if getenv("NOLOCALS") and self.local_dims == 0 and not self.group_for_reduces:
-        self.apply_opt(Opt(OptOps.NOLOCALS))
-      else:
-        # prioritize making expand axes local
-        local_axis_ranking = [(any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))), axis) for axis in range(len(self.full_shape[:self.first_reduce]))]  # noqa: E501
-        to_local: list[tuple[int, int]] = []
-        for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
-          local_size = prod(sz for _, sz in to_local)
-          local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)  # noqa: E501
-          if local_sz is not None: to_local.append((axis, local_sz))
-        deleted_shape = 0
-        for axis, local_sz in sorted(to_local[:3]):
-          axis = axis - deleted_shape
-          will_delete_shape = local_sz == self.full_shape[axis]
-          self.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
-          if will_delete_shape: deleted_shape += 1
-
-    return self
+  def apply_opts(self, opts:Sequence[Opt]):
+    for opt in opts: self.apply_opt(opt)
 
   # **** kernel outputs ****
 
@@ -564,7 +440,7 @@ class Kernel:
   @functools.cached_property
   def name(self) -> str:
     # kernel name (before late upcast)
-    kernel_type = "r" if self.reduceop is not None else ("C" if all(x.op is Ops.SINK or x.op in GroupOp.Buffer for x in self.ast.toposort) else "E")
+    kernel_type = "r" if self.reduceop is not None else ("C" if all(x.op is Ops.SINK or x.op in GroupOp.Buffer for x in self.ast.toposort()) else "E")
     suffix = colored('_', 'BLACK').join([colored(x.render() if isinstance(x, UOp) else str(x), c) for x,c in zip(self.full_shape, self.colors())])
     name = kernel_type + (f"{len(self.ast.src)}" if len(self.ast.src) > 1 else "") + "_" + suffix
 
@@ -574,9 +450,9 @@ class Kernel:
     return name + colored(num, 'BLACK')
 
   def get_optimized_ast(self, name_override:Optional[str]=None) -> UOp:
-    @functools.lru_cache(None)
+    @functools.cache
     def fixup_ast(op:UOp) -> UOp:
-      ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
+      ret = op.replace(src=tuple(fixup_ast(x) for x in op.src)) # noqa: F821
       if op.op in GroupOp.Buffer and op in self.bufs:
         st_uop = self.sts[self.bufs.index(op)].to_uop()
         # NOTE: if CONST got masked after applying opts, we create a new VALID
@@ -608,10 +484,12 @@ class Kernel:
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
-            if swizzle: srcs[i] = src.view(get_tc_swizzle_st((src if src.op is Ops.LOAD else src.src[0]).st_arg.shape, *swizzle))
+            src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
+            if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
-              local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
+              local_shape = tuple(1 if st == 0 or i < wd or (i >= self.first_reduce and i < tcd) else src_st.shape[i] \
+                                  for i,st in enumerate(src_st.real_strides()))
               st = store_st = ShapeTracker.from_shape(local_shape)
               local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), f"temp{i}")
               if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
@@ -649,45 +527,54 @@ class Kernel:
           return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
 
       return ret
-
-    return graph_rewrite(fixup_ast(self.ast), view_left)
+    fixed_ast = fixup_ast(self.ast)
+    del fixup_ast
+    return graph_rewrite(fixed_ast, view_left)
 
   # **** this is the lowerer ****
 
   @track_rewrites()
-  def linearize(self, name_override:Optional[str]=None) -> Kernel:
+  def linearize(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> Kernel:
     # display the AST
     if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
 
     modified_ast = self.get_optimized_ast(name_override)
+    if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
 
     if DEBUG >= 3:
       print(self.name)
-      if getenv("RAWAST"): print(self.ast)
+      if DEBUG >= 5: print(self.ast)
       for i,(buf,st) in enumerate([(buf,st) for buf,st in zip(self.bufs, self.sts) if buf.op not in {Ops.CONST, Ops.VALID}]):
-        print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s}", st.real_strides())
+        print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s} {str(st.real_strides()):30s}",
+              str(st) if DEBUG >= 4 else "")
       print(self.applied_opts)
+      if DEBUG >= 5: print(modified_ast)
     # verify AST matches the spec after applying opts
-    if __debug__: type_verify(list(modified_ast.toposort))
+    if __debug__: type_verify(list(modified_ast.toposort()))
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
-    #if __debug__: type_verify(list(modified_ast.toposort), shape_spec)
+    #if __debug__: type_verify(list(modified_ast.toposort()), shape_spec)
 
     self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
-    if DEBUG >= 5: print_uops(self.uops)
+    if DEBUG >= 6: print_uops(self.uops)
     return self
 
-  def to_program(self, name_override:Optional[str]=None) -> ProgramSpec:
-    self.linearize(name_override)
-    assert self.uops[0].op is Ops.NAME, "first uop must be name"
+  def to_program(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> ProgramSpec:
+    self.linearize(name_override, ast_transform)
+    assert self.uops[-1].op is Ops.SINK, "last uop must be sink"
     src = self.opts.render(self.uops)
 
     if CAPTURE_PROCESS_REPLAY:
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, ContextVar._cache, src))
+      import sys
+      frm = sys._getframe(1)
+      while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
+      loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[-1].arg.name, loc, ContextVar._cache,
+                                                             src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
     mem_bytes = sum(max(x.src[0].dtype.itemsize * x.st_arg.real_size() for x in group)
-      for _, group in itertools.groupby([x for x in self.ast.toposort if x.op in GroupOp.Buffer and x.src[0].op is Ops.DEFINE_GLOBAL],
+      for _, group in itertools.groupby([x for x in self.ast.toposort() if x.op in GroupOp.Buffer and x.src[0].op is Ops.DEFINE_GLOBAL],
                         key=lambda x: (x.op, x.src[0].arg)))
     return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops, self.applied_opts, mem_bytes,
                        global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)

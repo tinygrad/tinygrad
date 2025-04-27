@@ -6,7 +6,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.ops import UOp, Ops
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, Context
 from test.external.fuzz_linearizer import compare_linearizer
 from test.helpers import ast_const
 
@@ -17,13 +17,12 @@ def helper_test_lin(lin: Kernel, opts, failed_platforms, rtol=1e-2, atol=1e-2):
   if any(b.dtype.base == dtypes.half for b in lin.membufs) and not is_dtype_supported(dtypes.half): return
   if any(b.dtype.base == dtypes.bfloat16 for b in lin.membufs) and not is_dtype_supported(dtypes.bfloat16): return
 
-  for opt in opts:
-    try:
-      lin.apply_opt(opt)
-    except KernelOptError:
-      # it's considered fixed if we invalidated the opts
-      assert Device.DEFAULT not in failed_platforms, f"unexpected success on {Device.DEFAULT}"
-      return
+  try:
+    lin.apply_opts(opts)
+  except KernelOptError:
+    # it's considered fixed if we invalidated the opts
+    assert Device.DEFAULT not in failed_platforms, f"unexpected success on {Device.DEFAULT}"
+    return
 
   compare_result = compare_linearizer(lin, rtol=rtol, atol=atol)
   if compare_result[0] in ["PASS", "KernelOptError"]:
@@ -498,7 +497,7 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.PADTO, axis=0, arg=32)]
     helper_test_lin(Kernel(ast), opts, failed_platforms=[])
 
-  #@unittest.skipIf(Device.DEFAULT in ("LLVM", "METAL", "CLANG"), "flaky")
+  #@unittest.skipIf(Device.DEFAULT in ("LLVM", "METAL", "CPU"), "flaky")
   @unittest.skip("flaky everywhere")
   def test_failure_22(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
@@ -1045,7 +1044,7 @@ class TestLinearizerFailures(unittest.TestCase):
     ifs = [u for u in k.uops if u.op is Ops.IF]
     self.assertEqual(len(ifs), 3)
     #for st in k.uops.sink.src: self.assertEqual(len(st.src), 4)
-    self.assertLessEqual(len(ifs[0].src[0].toposort), 17)
+    self.assertLessEqual(len(ifs[0].src[0].toposort()), 17)
 
   def test_failure_45(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
@@ -1410,6 +1409,27 @@ class TestLinearizerFailures(unittest.TestCase):
               UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(128, 16, 5, 2, 5, 2), strides=(1600, 100, 20, 2, 4, 1), offset=0, mask=None, contiguous=False), View(shape=(128, 16, 11, 11), strides=(1600, 100, 10, 1), offset=0, mask=((0, 128), (0, 16), (0, 10), (0, 10)), contiguous=False))), src=()),)),)),)),)),))
     opts = [Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.PADTO, axis=1, arg=32)]
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
+
+  def test_failure_58(self):
+    # OUT OF BOUNDS ACCESS in INDEX 0 - 50271 not in 0 - 50257. idx.src[1].render()='gidx0'
+    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(50257), arg=0, src=()),
+        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(50257, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(Ops.ADD, dtypes.int, arg=None, src=(
+          UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(Ops.ADD, (1,)), src=(
+            UOp(Ops.WHERE, dtypes.int, arg=None, src=(
+              UOp(Ops.VALID, dtypes.bool, arg=None, src=(
+                UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(50258, 100513), strides=(0, 0), offset=0, mask=((0, 50258), (50256, 100513)), contiguous=False), View(shape=(50257, 50257), strides=(1, 100514), offset=0, mask=None, contiguous=False))), src=()),)),
+              UOp(Ops.CONST, dtypes.int, arg=1, src=(
+                x9:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(50257, 50257), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+              UOp(Ops.CONST, dtypes.int, arg=0, src=(
+                x9,)),)),)),
+          UOp(Ops.CONST, dtypes.int, arg=-1, src=(
+            UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(50257, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
+    opts = [Opt(op=OptOps.GROUPTOP, axis=0, arg=29), Opt(op=OptOps.PADTO, axis=0, arg=32)]
+    with Context(IGNORE_OOB=0):
+      helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["METAL", "GPU", "AMD", "NV", "CUDA"])
 
 if __name__ == '__main__':
   unittest.main()

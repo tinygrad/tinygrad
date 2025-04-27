@@ -1,14 +1,14 @@
 # An example to compile a small Tensorflow model to extremely portable C code
 
 import os, sys
-os.environ["CLANG"] = '1'
+os.environ["CPU"] = '1'
 os.environ["JIT"] = '2'
 
 import numpy as np
 import subprocess
 import tensorflow as tf
 import tf2onnx
-from extra.onnx import OnnxRunner
+from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
 from extra.export_model import export_model_clang, compile_net, jit_model
 

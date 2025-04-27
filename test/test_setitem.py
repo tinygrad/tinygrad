@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Tensor, TinyJit, Variable, dtypes
+from tinygrad.helpers import Context
 import numpy as np
 
 class TestSetitem(unittest.TestCase):
@@ -24,6 +25,16 @@ class TestSetitem(unittest.TestCase):
       n = np.zeros(shp)
       n[slc] = val.numpy() if isinstance(val, Tensor) else val
       np.testing.assert_allclose(t.numpy(), n)
+
+  def test_padded_setitem(self):
+    t = Tensor.arange(10)
+    t[4:1:-2] = 11
+    self.assertListEqual(t.tolist(), [0, 1, 11, 3, 11, 5, 6, 7, 8, 9])
+
+  def test_setitem_inplace_mul(self):
+    t = Tensor.arange(10).realize()
+    t[:3] *= 10
+    self.assertListEqual(t.tolist(), [0, 10, 20, 3, 4, 5, 6, 7, 8, 9])
 
   def test_setitem_into_unrealized(self):
     t = Tensor.arange(4).reshape(2, 2)
@@ -121,20 +132,21 @@ class TestSetitem(unittest.TestCase):
       np.testing.assert_allclose(t.numpy(), n)
 
   def test_jit_setitem_variable_offset(self):
-    @TinyJit
-    def f(t:Tensor, a:Tensor, v:Variable):
-      t.shrink(((v,v+1), None)).assign(a).realize()
+    with Context(IGNORE_OOB=1):
+      @TinyJit
+      def f(t:Tensor, a:Tensor, v:Variable):
+        t.shrink(((v,v+1), None)).assign(a).realize()
 
-    t = Tensor.zeros(6, 6).contiguous().realize()
-    n = np.zeros((6, 6))
+      t = Tensor.zeros(6, 6).contiguous().realize()
+      n = np.zeros((6, 6))
 
-    for i in range(6):
-      v = Variable("v", 0, 6).bind(i)
-      a = Tensor.full((1, 6), fill_value=i+1, dtype=dtypes.float).contiguous()
-      n[i, :] = i+1
-      f(t, a, v)
-      np.testing.assert_allclose(t.numpy(), n)
-    np.testing.assert_allclose(t.numpy(), [[1,1,1,1,1,1],[2,2,2,2,2,2],[3,3,3,3,3,3],[4,4,4,4,4,4],[5,5,5,5,5,5],[6,6,6,6,6,6]])
+      for i in range(6):
+        v = Variable("v", 0, 6).bind(i)
+        a = Tensor.full((1, 6), fill_value=i+1, dtype=dtypes.float).contiguous()
+        n[i, :] = i+1
+        f(t, a, v)
+        np.testing.assert_allclose(t.numpy(), n)
+      np.testing.assert_allclose(t.numpy(), [[1,1,1,1,1,1],[2,2,2,2,2,2],[3,3,3,3,3,3],[4,4,4,4,4,4],[5,5,5,5,5,5],[6,6,6,6,6,6]])
 
   def test_setitem_overlapping_inplace1(self):
     t = Tensor([[3.0], [2.0], [1.0]]).contiguous()

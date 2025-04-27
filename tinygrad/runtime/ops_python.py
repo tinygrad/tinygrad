@@ -17,8 +17,8 @@ def _load(m, i):
   return m[i]
 
 def load(inp, j=0):
-  if len(inp) == 3: return [_load(m, x+j if x is not None else None) if gate else default for (m,x),default,gate in zip(*inp)]
-  return [_load(m, x+j if x is not None else None) for m,x in inp[0]]
+  if len(inp) == 2: return [_load(m, x+j if x is not None else None) if gate else default for (m,x,gate),default in zip(*inp)]
+  return [_load(m, x+j if x is not None else None) for m,x,_ in inp[0]]
 
 def _store(m, i, v):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
@@ -40,19 +40,19 @@ class PythonProgram:
       loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.NAME}
+        void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK}
         if uop is Ops.DEFINE_ACC: idp = [idp[0]]
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is Ops.STORE:
-          if len(inp) == 2: inp.append([True] * len(inp[0]))  # set the gate to True
+          assert len(inp) == 2, "expected store is ([(memory, offset, gate)], [value])"
           if dtp[1].count > 1:
             for j,val in enumerate(inp[1]):
-              for (m,o),v,g in zip(inp[0], val, inp[2]):
+              for (m,o,g),v in zip(inp[0], val):
                 if g: _store(m, o+j, v)
           else:
-            for (m,o),v,g in zip(*inp):
+            for (m,o,g),v in zip(*inp):
               if g: _store(m, o, v)
           i += 1
           continue
@@ -60,7 +60,7 @@ class PythonProgram:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
-        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.NAME):
+        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -80,14 +80,14 @@ class PythonProgram:
         elif uop is Ops.DEFINE_ACC:
           ul[i] = [[inp[0][0][0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [inp[0][0]] * warp_size
         elif uop is Ops.INDEX:
-          ret = []
+          ret:list = []
           if isinstance(dtp[0], ImageDType):
             for m,ox,oy in zip(inp[0], inp[1][0], inp[1][1]):
               if ox < 0 or ox >= dtp[0].shape[1] or oy < 0 or oy >= dtp[0].shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*dtp[0].shape[1]*4))
           else:
             for m,o in zip(inp[0], inp[1]): ret.append((m,o))
-          ul[i] = ret
+          ul[i] = [(m,o,g) for (m,o),g in zip(ret, inp[2] if len(inp) == 3 else [True]*len(ret))] # set the gate last
         elif uop is Ops.CAST and isinstance(dtype, PtrDType):
           ul[i] = inp[0]
         elif uop is Ops.RANGE:
@@ -136,6 +136,16 @@ class PythonProgram:
             # (i, j), C, D (2 elements on 32 threads): row major same as A/B
             def c_map(lane, elem): return (elem + ((lane%2)*2) + ((lane//8)%2)*4, ((lane//2)%4) + (lane//16)*4)
             ul[i] = wmma_helper(32, 8, 2, 2, 2, a_b_elem, a_b_elem, c_map)
+          elif arg[4] == "AMD" and arg[5] == 64:
+            def a_elem(x, k, row, goff): return x[k%4][goff + (k//4)*16 + row]
+            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff) # pylint: disable=arguments-out-of-order
+            def c_map(lane, elem): return (lane%16, (lane//16)*4 + elem)
+            ul[i] = wmma_helper(64, 16, 4, 4, 4, a_elem, b_elem, c_map)
+          elif arg[4] == "AMD" and len(inp[0]) == 8: # RDNA4
+            def a_elem(x, k, row, goff): return x[k - [0, 4, 4, 8][k//4]][goff + row + [0, 16, 0, 16][k//4]]
+            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)
+            def c_map(lane, elem): return (lane%16, (lane//16)*8 + elem)
+            ul[i] = wmma_helper(32, 16, 8, 8, 8, a_elem, b_elem, c_map)
           elif arg[4] == "AMD":
             # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
             def a_elem(x, k, row, goff):
@@ -173,7 +183,7 @@ class PythonProgram:
             # C, D (8 elements on 8 threads)
             def c_map(lane, elem): return (lane, elem)
             ul[i] = wmma_helper(8, 16, 16, 16, 8, a_elem, b_elem, c_map)
-          elif arg[4] == "CLANG":
+          elif arg[4] == "CPU":
             def elem(x, col, row, _): return x[col+row][0] # k is always 0
             def c_map(_, elem): return (elem%16, elem//16)
             ul[i] = wmma_helper(1, 1, 16, 16, 256, elem, elem, c_map)
@@ -191,10 +201,12 @@ class PythonRenderer(Renderer):
   def __init__(self):
     if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
     if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
+    if getenv("EMULATE_AMD_MFMA"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores_mfma
+    if getenv("EMULATE_AMD_RDNA4"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores_rdna4
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm80
     if getenv("EMULATE_CUDA_SM75"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm75
     if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
-    if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CLANG", ClangRenderer.tensor_cores
+    if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CPU", ClangRenderer.tensor_cores
 
   def render(self, uops:list[UOp]) -> str:
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src], u.arg) for u in uops]

@@ -2,7 +2,7 @@ import unittest, pickle, types
 import numpy as np
 from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.helpers import GlobalCounters, ContextVar, Context
-from tinygrad.ops import PatternMatcher, UPat, UOp
+from tinygrad.ops import PatternMatcher, UPat, UOp, Ops
 
 class TestPickle(unittest.TestCase):
   def test_pickle_code_object(self):
@@ -21,7 +21,9 @@ class TestPickle(unittest.TestCase):
 
   def test_pickle_main_pattern_matcher(self):
     from tinygrad.codegen.devectorizer import sym
-    pickle.dumps(sym)
+    ssym = pickle.dumps(sym)
+    dsym = pickle.loads(ssym)
+    self.assertEqual(dsym.patterns[0][0].location, sym.patterns[0][0].location)
 
   def test_pickle_realized_tensor(self):
     print("** init")
@@ -38,7 +40,7 @@ class TestPickle(unittest.TestCase):
 
   def test_pickle_realized_tensor_alt(self):
     print("** init")
-    t = Tensor.rand(10, 10).to("CLANG").realize()
+    t = Tensor.rand(10, 10).to("CPU").realize()
     st = pickle.dumps(t)
     t_values = t.numpy()
     del t # free buffers
@@ -50,7 +52,7 @@ class TestPickle(unittest.TestCase):
 
   def test_pickle_realized_tensor_alt2(self):
     print("** init")
-    t = Tensor.rand(10, 10).to("CLANG").realize()
+    t = Tensor.rand(10, 10).to("CPU").realize()
     tensor_uop = t.lazydata
     assert tensor_uop.is_realized, f"expected {tensor_uop} to be realized"
     t_values = t.numpy()
@@ -67,7 +69,8 @@ class TestPickle(unittest.TestCase):
   # NOTE: currently Buffer exists on the uop, not tensor
   def test_pickle_buffer_uop(self):
     t = Tensor.arange(4).realize()
-    a = t.lazydata.buf_uop
+    a = t.lazydata
+    assert a.op is Ops.BUFFER
     self.assertIsNotNone(buffer:=a.realized)
     s = pickle.dumps(a)
     # free buffers
@@ -93,7 +96,7 @@ class TestPickle(unittest.TestCase):
     np.testing.assert_equal(vt2.numpy(), 20)
 
   def test_pickle_buffer_view(self):
-    t = Tensor.arange(10, device="CLANG").contiguous().realize()
+    t = Tensor.arange(10, device="CPU").contiguous().realize()
     vt = t[3:5].contiguous().realize()
     assert hasattr(vt.lazydata.buffer, 'base')
     ref_value = vt.tolist()
@@ -146,9 +149,10 @@ class TestPickle(unittest.TestCase):
 class TestPickleJIT(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
+    N = 10
     @TinyJit
     def add(a, b): return a.sum()+b+1
-    for _ in range(3): add(Tensor.rand(1000, 1000), Tensor.rand(1000, 1000))
+    for _ in range(3): add(Tensor.rand(N, N), Tensor.rand(N, N))
     cls.st = pickle.dumps(add)
     del add
 

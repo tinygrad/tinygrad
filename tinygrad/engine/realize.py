@@ -2,28 +2,27 @@ from typing import Optional, cast, Generator
 import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
-from tinygrad.helpers import DEVECTORIZE, time_to_str
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU
 from tinygrad.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.codegen.kernel import Kernel
+from tinygrad.codegen.heuristic import hand_coded_optimizations
 from tinygrad.engine.schedule import ScheduleItem
 
 # **************** Program Creation ****************
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 def get_kernel(renderer:Renderer, ast:UOp) -> Kernel:
-  if DEBUG >= 5: print(ast)
-  k = Kernel(ast, opts=renderer).required_optimizations()
+  k = Kernel(ast, opts=renderer)
   if not NOOPT:
-    if not k.apply_tensor_cores(getenv("TC", 1)): k.hand_coded_optimizations()
+    if not k.apply_tensor_cores(getenv("TC", 1)): k.apply_opts(hand_coded_optimizations(k))
     if BEAM >= 1:
       from tinygrad.engine.search import beam_search, bufs_from_lin
-      kb = Kernel(ast, opts=renderer).required_optimizations()
+      kb = Kernel(ast, opts=renderer)
       rawbufs = bufs_from_lin(kb, allocate=False)
       k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
   if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
-  if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
   return k
 
 # **************** Runners ****************
@@ -43,7 +42,7 @@ class CompiledRunner(Runner):
     if DEBUG >= 4: print(p.src)
     self.p:ProgramSpec = p
     self.lib:bytes = precompiled if precompiled is not None else Device[p.device].compiler.compile_cached(p.src)
-    if DEBUG >= 6: Device[p.device].compiler.disassemble(self.lib)
+    if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
     self._prg = Device[p.device].runtime(p.function_name, self.lib)
     super().__init__(p.name, p.device, p.estimates)
 
@@ -150,10 +149,10 @@ si_lowerer = PatternMatcher([
 ])
 def lower_schedule_item(si:ScheduleItem) -> ExecItem: return ExecItem(*cast(tuple[Runner,list], si_lowerer.rewrite(si.ast, si.bufs)), si.metadata)
 
-def lower_schedule(schedule:list[ScheduleItem]) -> Generator[ExecItem, None, None]:
+def lower_schedule(schedule:list[ScheduleItem]) -> Generator[tuple[ScheduleItem, ExecItem], None, None]:
   while len(schedule):
     si = schedule.pop(0)
-    try: yield lower_schedule_item(si)
+    try: yield (si, lower_schedule_item(si))
     except Exception as e:
       if DEBUG >= 2:
         print(f"error lowering {si.ast.op}")
@@ -166,6 +165,21 @@ def lower_schedule(schedule:list[ScheduleItem]) -> Generator[ExecItem, None, Non
 capturing: list = []  # put classes with an add method in here
 
 def run_schedule(schedule:list[ScheduleItem], var_vals:Optional[dict[Variable, int]]=None, do_update_stats=True):
-  for ei in lower_schedule(schedule):
+  for si, ei in lower_schedule(schedule):
     if len(capturing) and CAPTURING: capturing[0].add(ei)
-    ei.run(var_vals, do_update_stats=do_update_stats)
+    if VALIDATE_WITH_CPU and si.ast.op is Ops.SINK:
+      # copy in allocated buffers from the GPU
+      nb: tuple[Buffer, ...] = tuple(Buffer("CPU", b.size, b.dtype) for b in si.bufs)
+      for cpu_b, gpu_b in zip(nb, si.bufs):
+        if gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_buffer())
+
+      # run on GPU
+      ei.run(var_vals, do_update_stats=do_update_stats)
+
+      # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
+      lower_schedule_item(ScheduleItem(si.ast, nb, si.metadata)).run(var_vals, do_update_stats=do_update_stats)
+      import numpy as np
+      np.testing.assert_allclose(nb[0].numpy(), si.bufs[0].numpy(), rtol=1e-3, atol=1e-3)
+    else:
+      ei.run(var_vals, do_update_stats=do_update_stats)
+

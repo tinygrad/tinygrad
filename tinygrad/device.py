@@ -4,23 +4,23 @@ from collections import defaultdict
 from typing import Optional, Any, Iterator, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
-                             cpu_time_execution, colored, Context, round_up
-from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
+                             cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE
+from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
 # **************** Device ****************
 
-ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM", "DSP", "WEBGPU"]
+ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CPU", "LLVM", "DSP", "WEBGPU"]
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
     self._opened_devices:set[str] = set()
-  @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
+  @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _canonicalize(self, device:str) -> str: return re.sub(r":0$", "", (d:=device.split(":", 1)[0].upper()) + device[len(d):])
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
-  def canonicalize(self, device:Optional[str]) -> str: return self._canonicalize(device) if device is not None else Device.DEFAULT
+  def canonicalize(self, device:Optional[str]) -> str: return self._canonicalize(device if device is not None else Device.DEFAULT)
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
-  @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
+  @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
     cpn = multiprocessing.current_process().name
     assert (cpn == "MainProcess") or ix.split(":")[0] in ["DISK", "NPY", "PYTHON"], f"can only open device {ix} from parent, not {cpn}"
@@ -58,6 +58,9 @@ class ProfileDeviceEvent(ProfileEvent):
 class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; en:decimal.Decimal; is_copy:bool # noqa: E702
 
 @dataclass(frozen=True)
+class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; base:int|None # noqa: E702
+
+@dataclass(frozen=True)
 class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:bool # noqa: E702
 
 @dataclass(frozen=True)
@@ -91,7 +94,7 @@ class Buffer:
                lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
     if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
-    self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
+    self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = device, size, dtype, options, offset, 0
     if base is None:
       assert offset == 0, "base buffers can't have offset"
       self._base = None
@@ -119,6 +122,7 @@ class Buffer:
       self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferSpec(external_ptr=external_ptr)
     if self._base is not None:
       self._base.ensure_allocated()
+      self._base.allocated_views += 1
       assert hasattr(self.allocator, "_offset"), "offset function required for view"
       self._buf: Any = self.allocator._offset(self.base._buf, self.nbytes, self.offset)
     else:
@@ -130,6 +134,7 @@ class Buffer:
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
+    elif self._base is not None: self._base.allocated_views -= 1
     del self._buf
   def __reduce__(self):
     buf = None
@@ -152,6 +157,14 @@ class Buffer:
       return self.allocator._as_buffer(self._buf)
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
     return self.copyout(memoryview(bytearray(self.nbytes)))
+  def as_typed_buffer(self, shape=None, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
+    assert self.dtype.base.fmt is not None, f"no fmt dtype for {self.dtype.base}"
+    assert self.dtype.base.fmt != "e" or sys.version_info >= (3, 12)
+    return self.as_buffer(allow_zero_copy, force_zero_copy).cast(self.dtype.base.fmt, shape if shape is not None else (self.size,))
+  def numpy(self) -> 'np.ndarray': # type: ignore [name-defined] # noqa: F821
+    import numpy as np
+    assert _to_np_dtype(self.dtype.base) is not None, f"no np dtype for {self.dtype.base}"
+    return np.frombuffer(self.as_buffer(), dtype=_to_np_dtype(self.dtype.base))
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
@@ -279,7 +292,7 @@ class CPUProgram:
 class CompileError(Exception): pass
 
 class Compiler:
-  def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
+  def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if DISABLE_COMPILER_CACHE else cachekey
   def compile(self, src:str) -> bytes: return src.encode()   # NOTE: empty compiler is the default
   def compile_cached(self, src:str) -> bytes:
     if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
@@ -317,8 +330,13 @@ class Compiled:
 def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
   if device is None: device = Device.DEFAULT
   if dtype == dtypes.bfloat16:
-    # NOTE: this requires bf16 buffer support
-    return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
+    if device == "METAL": return not CI
+    if device in {"CUDA", "NV"}: return not CI and not getenv("PTX")
+    if device in {"CPU", "LLVM"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"}
+    return device == "AMD"
+  if dtype in dtypes.fp8s:
+    # not supported yet - in progress
+    return False
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
                                           dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
   # for CI GPU and OSX, cl_khr_fp16 isn't supported
@@ -342,8 +360,9 @@ if PROFILE:
 
     with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(Compiled.profile_events, f)
 
-    from tinygrad.ops import launch_viz
-    launch_viz("PROFILE", fn)
+    if not getenv("SQTT", 0):
+      from tinygrad.ops import launch_viz
+      launch_viz("PROFILE", fn)
 
 if __name__ == "__main__":
   for device in ALL_DEVICES:

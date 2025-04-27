@@ -3,7 +3,8 @@ import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.helpers import getenv, temp, _METADATA, mv_address
+from tinygrad.tensor import _METADATA
+from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
@@ -152,6 +153,27 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5, rtol=1e-6)
 
+  @unittest.expectedFailure
+  def test_const_backward_pass(self):
+    init = 3.5
+
+    def test_pytorch():
+      w1 = torch.tensor(init, requires_grad=True)
+      w2 = torch.tensor(init, requires_grad=True)
+      out = w1.add(w2)
+      out.backward()
+      return w1.grad, w2.grad
+
+    def test_tinygrad():
+      w1 = Tensor(init, requires_grad=True)
+      w2 = Tensor(init, requires_grad=True)
+      out = w1.add(w2)
+      out.backward()
+      return w1.grad.numpy(), w2.grad.numpy()
+
+    for x, y in zip(test_tinygrad(), test_pytorch()):
+      np.testing.assert_allclose(x, y, atol=1e-5)
+
   def test_nograd(self):
     x = Tensor(x_init, requires_grad=False)
     m = Tensor(m_init, requires_grad=False)
@@ -215,6 +237,13 @@ class TestTinygrad(unittest.TestCase):
         b = random_fn(10,10).realize()
         np.testing.assert_allclose(a.numpy(), b.numpy())
 
+  def test_randperm(self):
+    Tensor.manual_seed(0)
+    a = Tensor.randperm(10).realize()
+    np.testing.assert_equal(a.numpy(), [5, 2, 8, 1, 3, 7, 9, 6, 0, 4])
+    b = Tensor.randperm(1000).realize()
+    np.testing.assert_equal(set(b.numpy()), set(range(1000)))
+
   def test_randn_isnt_inf_on_zero(self):
     # simulate failure case of rand handing a zero to randn
     original_rand, Tensor.rand = Tensor.rand, Tensor.zeros
@@ -247,7 +276,7 @@ class TestTinygrad(unittest.TestCase):
     assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
   def test_rand_like_device(self):
-    a = Tensor.ones(3, 3, device="CLANG")
+    a = Tensor.ones(3, 3, device="CPU")
     b = Tensor.rand_like(a)
     self.assertEqual(b.device, a.device)
 
@@ -326,7 +355,7 @@ class TestTinygrad(unittest.TestCase):
   def test_tensor_from_blob(self):
     x = memoryview(bytearray(16)).cast('I')
 
-    t = Tensor.from_blob(mv_address(x), (4,), dtype=dtypes.int, device="CLANG")
+    t = Tensor.from_blob(mv_address(x), (4,), dtype=dtypes.int, device="CPU")
     z = (t+1)
     np.testing.assert_equal(z.numpy(), [1, 1, 1, 1])
 
@@ -414,7 +443,7 @@ class TestTinygrad(unittest.TestCase):
 
   def test_tensor_dtype_errors(self):
     with self.assertRaises(AttributeError): Tensor([3], dtype="typo")
-    with self.assertRaises(TypeError): Tensor([3], dtype=(dtypes.int,))
+    with self.assertRaises(AttributeError): Tensor([3], dtype=(dtypes.int,))
 
   def test_tensor_bytes(self):
     data = b"abc123"
@@ -695,7 +724,7 @@ class TestZeroShapeTensor(unittest.TestCase):
 class TestTensorCreationDevice(unittest.TestCase):
   # test auxiliary tensors are created on the same device
   def test_one_hot(self):
-    y = Tensor([1, 2, 3]).to("CLANG")
+    y = Tensor([1, 2, 3]).to("CPU")
     x = y.one_hot(10)
     x.realize()
 
@@ -746,6 +775,23 @@ class TestInferenceMode(unittest.TestCase):
 
 class TestTensorMetadata(unittest.TestCase):
   def setUp(self) -> None: _METADATA.set(None)
+
+  # NOOPs are not included in kernel metadata
+  def test_exclude_noop_metadata(self):
+    a = Tensor.rand(4, 4)*1
+    self.assertEqual(a.lazydata.metadata.name, "__mul__")
+    k = a.schedule()[-1]
+    self.assertEqual([m.name for m in k.metadata], ["rand"])
+
+  # we exclude const from kernel metadata because tensor methods can share the same CONST UOp
+  @unittest.skip("TODO: flaky")
+  def test_exclude_const_metadata(self):
+    a = Tensor.arange(4)
+    b = Tensor.full((4,), -1, dtype=dtypes.int).contiguous()
+    sched = Tensor.schedule(a, b)
+    self.assertEqual([m.name for m in sched[0].metadata], ["arange"])
+    self.assertEqual([m.name for m in sched[1].metadata], ["contiguous"])
+
   def test_matmul(self):
     x = Tensor.rand(3, requires_grad=True)
     W = Tensor.rand(3, 3, requires_grad=True)

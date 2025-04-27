@@ -15,7 +15,7 @@ def helper_test_verify_ast(*stores:UOp) -> Kernel:
   sink = UOp(Ops.SINK, dtypes.void, stores)
   if DEBUG >= 3:
     for op in stores: print(op)
-  try: type_verify(list(sink.toposort), shape_spec)
+  try: type_verify(list(sink.toposort()), shape_spec)
   except RuntimeError as e: raise InvalidASTException(e.args)
   k = Kernel(sink)
   k.linearize()
@@ -76,9 +76,9 @@ class TestVerifyAST(unittest.TestCase):
   def test_buffer_uops_st(self):
     a = Tensor.randn(4, 4)+2
     helper_test_verify_ast(ast:=a.schedule()[-1].ast)
-    store_st = [u.st for u in ast.toposort if u.op is Ops.STORE][0]
+    store_st = [u.st for u in ast.toposort() if u.op is Ops.STORE][0]
     self.assertEqual(store_st, ShapeTracker.from_shape((4, 4)))
-    const_st = [u.st for u in ast.toposort if u.op is Ops.CONST][0]
+    const_st = [u.st for u in ast.toposort() if u.op is Ops.CONST][0]
     self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
 
   @unittest.skip("questionable if we want this")
@@ -91,7 +91,7 @@ class TestVerifyAST(unittest.TestCase):
 
   def test_const_view_always_valid(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    a = UOp.const(dtypes.int, 0).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg="CLANG"),), ShapeTracker.from_shape(())),))
+    a = UOp.const(dtypes.int, 0).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg="CPU"),), ShapeTracker.from_shape(())),))
     st = UOp.store(buf, ShapeTracker.from_shape(()).to_uop(), a.cast(dtypes.float))
     helper_test_verify_ast(st)
 

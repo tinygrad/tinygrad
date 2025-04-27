@@ -1,4 +1,4 @@
-import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal
+import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
 from typing import Any, Union, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, cpu_profile, ProfileDeviceEvent, ProfileRangeEvent
@@ -35,7 +35,7 @@ libobjc.sel_registerName.restype = objc_id
 libmetal.MTLCreateSystemDefaultDevice.restype = objc_instance
 libdispatch.dispatch_data_create.restype = objc_instance
 
-@functools.lru_cache(None)
+@functools.cache
 def msg(selector: str, restype: type[T] = objc_id):  # type: ignore [assignment]
   resname = libobjc.sel_registerName(selector.encode())
   sender = libobjc["objc_msgSend"] # Using attribute access returns a new reference so setting restype is safe
@@ -43,7 +43,7 @@ def msg(selector: str, restype: type[T] = objc_id):  # type: ignore [assignment]
   def _msg(ptr: objc_id, *args: Any) -> T: return sender(ptr, resname, *args)
   return _msg
 
-@functools.lru_cache(None)
+@functools.cache
 def to_ns_str(s: str): return msg("stringWithUTF8String:", objc_instance)(libobjc.objc_getClass(b"NSString"), s.encode())
 def from_ns_str(s): return bytes(msg("UTF8String", ctypes.c_char_p)(s)).decode()
 
@@ -117,9 +117,14 @@ class MetalCompiler(Compiler):
         ret = reply[sum(struct.unpack('<LL', reply[8:16])):]
       else:
         ret = CompileError(errorMessage.decode())
+
+    # no changes for compute in 2.0 - 2.4 specs, use 2.0 as default for old versions.
+    macos_major = int(platform.mac_ver()[0].split('.')[0])
+    metal_version = "metal3.1" if macos_major >= 14 else "metal3.0" if macos_major >= 13 else "macos-metal2.0"
+
     # llvm will create modules.timestamp in cache path and cache compilation of metal stdlib (250ms => 8ms compilation time)
     # note that llvm won't necessarily create anything else here as apple has prebuilt versions of many standard libraries
-    params = f'-fno-fast-math -std=metal3.1 --driver-mode=metal -x metal -fmodules-cache-path="{cache_dir}" -fno-caret-diagnostics'
+    params = f'-fno-fast-math -std={metal_version} --driver-mode=metal -x metal -fmodules-cache-path="{cache_dir}" -fno-caret-diagnostics'
     # source blob has to be padded to multiple of 4 but at least one 'b\x00' should be added, params blob just has to be null terminated
     src_padded, params_padded = src.encode() + b'\x00'*(round_up(len(src) + 1, 4) - len(src)), params.encode() + b'\x00'
     request = struct.pack('<QQ', len(src_padded), len(params_padded)) + src_padded + params_padded
@@ -187,6 +192,8 @@ class MetalAllocator(LRUAllocator):
     self.dev:MetalDevice = dev
     super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
+    if options.external_ptr: return MetalBuffer(objc_id(options.external_ptr), size)
+
     # Buffer is explicitly released in _free() rather than garbage collected via reference count
     ret = msg("newBufferWithLength:options:", objc_id)(self.dev.sysdevice, ctypes.c_ulong(size), MTLResourceOptions.MTLResourceStorageModeShared)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
