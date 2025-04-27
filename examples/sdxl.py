@@ -389,6 +389,7 @@ if __name__ == "__main__":
   start_mem_used = GlobalCounters.mem_used
   with Timing("loaded weights in ", lambda et_ns: f", {(B:=(GlobalCounters.mem_used-start_mem_used))/1e9:.2f} GB loaded at {B/et_ns:.2f} GB/s"):
     Tensor.realize(*loaded_weights)
+    del loaded_weights
 
   N = 1
   C = 4
