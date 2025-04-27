@@ -125,6 +125,7 @@ Enabling `DEBUG=2` shows the `tinygrad` kernels being compiled and executed, con
 *** CUDA    1719 E_6144_32_3n1                             arg  2 mem  0.92 GB tm     17.92us/  1730.40ms (    32.91 GFLOPS  131.7|131.7   GB/s) ['contiguous', '__rmul__']
 *** CUDA    1720 E_4608_32_4                               arg  2 mem  0.92 GB tm     12.48us/  1730.41ms (     0.00 GFLOPS  189.0|189.0   GB/s)
 # ... (rest of the debug log truncated)
+```
 
 
 This is just the first step in integrating the `tinygrad` backend. Future improvements will focus on transitioning the model initialization and data preprocessing entirely to `tinygrad`.
