@@ -75,23 +75,10 @@ def split_uop(x:UOp, sep:Ops):
     for s in x.src: yield from split_uop(s, sep)
   else: yield x
 
-def non_folded_divs(vmin, vmax, d) -> tuple[list[int], int]:
-  if vmax - vmin > d:
-    non_folded_c: list[int] = list(range(d))
-    offset = 0
-  elif (q1:=vmin//d)!=(q2:=vmax//d):
-    non_folded_c = list(range(0, d-vmin%d)) + list(range(d-vmax%d, d))
-    offset = ((d-vmax%d) - (d-vmin%d)) * q2
-  else: # q1 == q2
-    non_folded_c = list(range(d-vmax%d, d-vmin%d))
-    offset = (d-vmax%d)*q1 + (d - (d-vmin%d))*(q1+1)
-  return non_folded_c, offset
-
 def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
   # div pattern in unrolled arange
   # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  seen_const, ans = [], None
-  offset1 = 0
+  seen_const, ans, offset = [], None, 0
   for u in split_uop(divs, Ops.ADD):
     if fac!=1:
       if u.op is not Ops.MUL or u.src[1].op is not Ops.CONST or u.src[1].arg != fac: return None
@@ -101,16 +88,18 @@ def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
     # assumed CONST is the last of an ADD
     if (s0:=u.src[0]).op is Ops.ADD and s0.src[1].op is Ops.CONST and s0.src[1].op is Ops.CONST:
       const = s0.src[1].arg
-      offset1 += cdiv(const, denominator)
+      offset += cdiv(const, denominator)
       seen_const.append(cmod(const, denominator))
       s0 = s0.src[0]
     else: seen_const.append(0)
     if ans is None: ans = s0
     if ans is not s0: return None
   if ans is None: return None
-  expected_const, offset2 = non_folded_divs(ans.vmin, ans.vmax, denominator)
-  if len(seen_const) == len(expected_const) and sorted(seen_const)==expected_const:
-    return fac*(ans - offset2 + offset1)
+  # the first (denominator-len(seen_const)) terms may have been folded to 0 already
+  for i in range(denominator-len(seen_const)):
+    if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
+  if sorted(seen_const)==list(range(denominator)):
+    return fac*(ans + offset)
   return None
 
 def lt_folding(x:UOp, c:int) -> UOp|None:
