@@ -300,6 +300,7 @@ def parse_valid(valid:UOp) -> tuple[UOp, bool, int]:
   if valid.op is Ops.CMPLT and valid.src[1].op is Ops.CONST and dtypes.is_int(valid.src[0].dtype): return valid.src[0], True, valid.src[1].arg-1
   raise ValueError(f"not able to parse {valid=}")
 
+@functools.cache
 def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
   # return None if valid is always False, otherwise the simplified uop (might be the same as input)
 

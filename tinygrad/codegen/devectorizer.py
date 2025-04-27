@@ -118,8 +118,7 @@ def cat_after_store(cat:UOp, data:UOp):
 def gep_on_store(gep:UOp, st:UOp):
   # NOTE: we need to invert the gep here, but it may be an expanding gep
   # fake argsort. TODO: handle duplicates
-  a = {}
-  for i,x in enumerate(gep.arg): a[x] = i
+  a = {x: i for i, x in enumerate(gep.arg)}
   new_arg = tuple(x[1] for x in sorted(a.items()))
   return UOp(Ops.STORE, src=(gep.src[0], st.gep(new_arg)))
 
@@ -276,13 +275,13 @@ def no_vectorized_wmma(wmma:UOp):
 
 def no_vectorized_alu(alu:UOp):
   if alu.dtype.vcount == 1: return None
-  alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
+  alus = tuple([UOp(alu.op, alu.dtype.scalar(), tuple([s.gep(i) for s in alu.src]), alu.arg) for i in range(alu.dtype.vcount)])
   return UOp(Ops.VECTORIZE, alu.dtype, alus)
 
 def no_vectorized_acc(acc:UOp):
   if acc.dtype.count == 1: return None
-  alus = tuple(UOp(acc.op, acc.dtype.scalar(),
-    tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
+  alus = tuple([UOp(acc.op, acc.dtype.scalar(),
+    tuple([s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)]), acc.arg+(i,)) for i in range(acc.dtype.count)])
   return UOp(Ops.VECTORIZE, acc.dtype, alus)
 
 devectorize = PatternMatcher([

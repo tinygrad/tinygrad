@@ -100,6 +100,9 @@ class dtypes:
     return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   @functools.cache
+  def minmax(dtype:DType): return dtypes.min(dtype), dtypes.max(dtype)
+  @staticmethod
+  @functools.cache
   def min(dtype:DType):
     if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
     return -float("inf") if dtypes.is_float(dtype) else False

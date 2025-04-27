@@ -406,6 +406,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     out_dtype = (self, *src)[-1].dtype
     if arg in {Ops.CMPLT, Ops.CMPNE}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(arg, out_dtype, (self,)+src)
+  @functools.cache
   @staticmethod
   def const(dtype:DType, b:ConstLike):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
@@ -652,7 +653,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
     if self.op is Ops.CAST: return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
-    return dtypes.min(self.dtype), dtypes.max(self.dtype)
+    return dtypes.minmax(self.dtype)
 
   @functools.cached_property
   def _sym_fxn(self):
