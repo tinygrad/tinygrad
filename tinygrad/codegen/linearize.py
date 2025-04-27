@@ -234,7 +234,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
 
   # merge blockends
   sink = graph_rewrite(sink, block_merge, name="Linearizer: Merge Blocks")
-  assert sink.op is Ops.BLOCK and all(x.op in DONT_PLACE_IN_BLOCK for x in sink.src)
+  if sink.op is not Ops.BLOCK or not all(x.op in DONT_PLACE_IN_BLOCK for x in sink.src): raise RuntimeError("linearize failure")
 
   # place the early things
   lst = sorted(dedup(sink.src), key=lambda x: x.tuplize) + list(sink.arg.lst)
