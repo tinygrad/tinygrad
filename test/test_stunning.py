@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import nn, Tensor, Variable, Context
+from tinygrad import nn, Tensor, Variable, Context, Device
 from tinygrad.helpers import trange
 
 class Model:
@@ -30,6 +30,7 @@ class TestStunning(unittest.TestCase):
 
     self.assertListEqual(nv, wv)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Too many buffers on WebGPU (until assign is fixed)")
   def test_simple_train(self, steps=6, bs=4, adam=True):
     X_train, Y_train, _, _ = nn.datasets.mnist()
     model = Model()
