@@ -1,6 +1,6 @@
 import unittest, contextlib
 import numpy as np
-from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device
+from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import CI, Context, getenv
 from tinygrad.engine.realize import run_schedule
 from tinygrad.codegen.kernel import Opt, OptOps, Kernel, KernelOptError
@@ -122,6 +122,17 @@ class TestIndexing(unittest.TestCase):
       run_schedule(sched)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
+
+  def test_index_variable(self):
+    dataset = Tensor.rand(DSET, DDIM).realize()
+    v = Variable("v", 0, DDIM-1)
+    with Context(NOOPT=1, FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
+      GlobalCounters.reset()
+      vb = Tensor(v.bind(12))
+      comp = dataset[vb].numpy()
+      # no global ops because they are all indexing
+      self.assertEqual(GlobalCounters.global_ops, 0)
+    np.testing.assert_allclose(comp, dataset.numpy()[12])
 
   def test_index(self):
     dataset = Tensor.rand(DSET, DDIM).realize()
