@@ -384,10 +384,11 @@ if __name__ == "__main__":
 
   default_weight_url = 'https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors'
   weights = args.weights if args.weights else fetch(default_weight_url, 'sd_xl_base_1.0.safetensors')
+  loaded_weights = load_state_dict(model, safe_load(weights), strict=False, verbose=False, realize=False)
 
   start_mem_used = GlobalCounters.mem_used
   with Timing("loaded weights in ", lambda et_ns: f", {(B:=(GlobalCounters.mem_used-start_mem_used))/1e9:.2f} GB loaded at {B/et_ns:.2f} GB/s"):
-    Tensor.realize(*load_state_dict(model, safe_load(weights), strict=False, verbose=False, realize=False))
+    Tensor.realize(*loaded_weights)
 
   N = 1
   C = 4
