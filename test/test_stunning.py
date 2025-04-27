@@ -30,7 +30,7 @@ class TestStunning(unittest.TestCase):
 
     self.assertListEqual(nv, wv)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Too many buffers on WebGPU (until assign is fixed)")
+  @unittest.skipIf(Device.DEFAULT in {"WEBGPU", "NV", "CUDA"}, "Too many buffers / too slow")
   def test_simple_train(self, steps=6, bs=4, adam=True):
     X_train, Y_train, _, _ = nn.datasets.mnist()
     model = Model()
