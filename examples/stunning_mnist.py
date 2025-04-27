@@ -9,8 +9,8 @@ from tinygrad import Tensor, nn, getenv, GlobalCounters, Variable
 from tinygrad.nn.datasets import mnist
 from tinygrad.helpers import trange, DEBUG
 
-# NOTE: training is broken
-# STACK=1 DEBUG=0 STEPS=70 FUSE_ARANGE=1 SPLIT_REDUCEOP=0 python3 examples/stunning_mnist.py
+# STEPS=70 FUSE_ARANGE=1 python3 examples/stunning_mnist.py
+# NOTE: it's broken with STACK=1, why?
 
 if __name__ == "__main__":
   X_train, Y_train, X_test, Y_test = mnist()
@@ -30,12 +30,12 @@ if __name__ == "__main__":
   X_samp, Y_samp = X_samp.contiguous(), Y_samp.contiguous()
 
   with Tensor.train():
-    # TODO: this shouldn't be a for loop. something like: (contract is still up in the air)
     """
     i = UOp.range(samples.shape[0])  # TODO: fix range function on UOp
     losses = model(X_samp[i]).sparse_categorical_crossentropy(Y_samp[i]).backward().contract(i)
     opt.schedule_steps(i)
     """
+    # TODO: this shouldn't be a for loop. something like: (contract is still up in the air)
     vi = Variable('i', 0, samples.shape[0]-1)
     losses = []
     for i in range(samples.shape[0]):
