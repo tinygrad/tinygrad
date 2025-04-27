@@ -2750,7 +2750,7 @@ class Tensor(SimpleMathTrait):
     Useful for single kernel softmax and flash attention.
     Careful, this can break codegen or make kernels really slow.
     """
-    return self._apply_uop(UOp.fuse).contiguous()
+    return self._apply_uop(UOp.fuse)
 
   def contiguous_backward(self) -> Tensor:
     """
