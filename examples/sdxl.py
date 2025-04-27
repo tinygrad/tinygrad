@@ -356,8 +356,7 @@ class DPMPP2MSampler:
           c=c,
           uc=uc,
         )
-        x.realize()
-        old_denoised.realize()
+        x.realize(old_denoised)
 
     return x
 
@@ -396,8 +395,7 @@ if __name__ == "__main__":
 
   c, uc = model.create_conditioning([args.prompt], args.width, args.height)
   del model.conditioner
-  for v in c .values(): v.realize()
-  for v in uc.values(): v.realize()
+  Tensor.realize(*c.values(), *uc.values())
   print("created batch")
 
   # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/inference/helpers.py#L101
