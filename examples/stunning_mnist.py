@@ -26,7 +26,7 @@ if __name__ == "__main__":
   X_samp, Y_samp = X_train[samples], Y_train[samples]
   print("*** got samples")
 
-  # TODO: remove this contiguous
+  # TODO: remove this contiguous, it's needed for FUSE_ARANGE to work
   X_samp, Y_samp = X_samp.contiguous(), Y_samp.contiguous()
 
   with Tensor.train():

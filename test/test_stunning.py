@@ -8,7 +8,7 @@ class Model:
 
 class TestStunning(unittest.TestCase):
   def test_simple_train(self, steps=6, bs=4, adam=True):
-    X_train, Y_train, X_test, Y_test = nn.datasets.mnist()
+    X_train, Y_train, _, _ = nn.datasets.mnist()
     model = Model()
     if adam: opt = nn.optim.Adam(nn.state.get_parameters(model))
     else: opt = nn.optim.SGD(nn.state.get_parameters(model), momentum=0.1)
