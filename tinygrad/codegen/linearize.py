@@ -109,15 +109,14 @@ class BlockContext:
 
 DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}
 
-def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp, ...], cnt:int=1) -> tuple[UOp, int]:
+def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp, ...], cnt:int=1) -> UOp:
   ends_to_add = [z for z in new_ctx if z not in current_ctx]
   while len(ends_to_add):
     r:UOp = ends_to_add.pop(-1)
     new_ctx = tuple([z for z in new_ctx if z is not r])
     end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
-    base_block = UOp(Ops.BLOCKEND, src=(base_block,)*cnt, arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=1))
-    cnt = 1
-  return base_block, cnt
+    base_block = UOp(Ops.BLOCKEND, src=(base_block,)*cnt, arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=cnt))
+  return base_block
 
 def make_block_bottom_up(ctx:BlockContext, x:UOp):
   if x.op is Ops.BLOCKSTART:
@@ -153,14 +152,12 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
 
   # add unmergables to sources
   srcs = []
-  for u,cnt in unmergable.items():
-    u,cnt = add_blockends(u, ctx.block_ctxs[u], current_ctx, cnt=cnt)
-    srcs += [u]*cnt
+  for u,cnt in unmergable.items(): srcs += [add_blockends(u, ctx.block_ctxs[u], current_ctx, cnt=cnt)]*cnt
 
   # add blockseeds, with blockends as needed
   for (new_ctx, new_child_ctx), v in blockseeds.items():
     base_block = UOp(Ops.BLOCKSTART, src=tuple(v), arg=(new_ctx, new_child_ctx))
-    srcs.append(add_blockends(base_block, new_ctx, current_ctx)[0])
+    srcs.append(add_blockends(base_block, new_ctx, current_ctx))
 
   lst = block_reorder(lst[::-1])
   bb = BasicBlock2(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
@@ -230,7 +227,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   for k,v in blockends_to_arg.items():
     # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
     if len(v) > 1:
-      bb = BasicBlock2(v[0].arg.lst, _sort_ctx(flatten([y.arg.ctx for y in v])), k, cnt=len(v))
+      bb = BasicBlock2(v[0].arg.lst, _sort_ctx(flatten([y.arg.ctx for y in v])), k, cnt=sum(y.arg.cnt for y in v))
       out = UOp(Ops.BLOCKEND, src=tuple(flatten([x.src for x in v])), arg=bb)
       for u in v: new_forks[u] = out
   sink = sink.substitute(new_forks)
