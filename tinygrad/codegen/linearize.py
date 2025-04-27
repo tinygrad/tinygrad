@@ -109,14 +109,15 @@ class BlockContext:
 
 DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}
 
-def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp, ...]):
+def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp, ...], cnt:int=1) -> tuple[UOp, int]:
   ends_to_add = [z for z in new_ctx if z not in current_ctx]
   while len(ends_to_add):
     r:UOp = ends_to_add.pop(-1)
     new_ctx = tuple([z for z in new_ctx if z is not r])
     end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
-    base_block = UOp(Ops.BLOCKEND, src=(base_block,), arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=1))
-  return base_block
+    base_block = UOp(Ops.BLOCKEND, src=(base_block,)*cnt, arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=1))
+    cnt = 1
+  return base_block, cnt
 
 def make_block_bottom_up(ctx:BlockContext, x:UOp):
   if x.op is Ops.BLOCKSTART:
@@ -152,12 +153,14 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
 
   # add unmergables to sources
   srcs = []
-  for u,cnt in unmergable.items(): srcs += [add_blockends(u, ctx.block_ctxs[u], current_ctx)]*cnt
+  for u,cnt in unmergable.items():
+    u,cnt = add_blockends(u, ctx.block_ctxs[u], current_ctx, cnt=cnt)
+    srcs += [u]*cnt
 
   # add blockseeds, with blockends as needed
   for (new_ctx, new_child_ctx), v in blockseeds.items():
     base_block = UOp(Ops.BLOCKSTART, src=tuple(v), arg=(new_ctx, new_child_ctx))
-    srcs.append(add_blockends(base_block, new_ctx, current_ctx))
+    srcs.append(add_blockends(base_block, new_ctx, current_ctx)[0])
 
   lst = block_reorder(lst[::-1])
   bb = BasicBlock2(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
