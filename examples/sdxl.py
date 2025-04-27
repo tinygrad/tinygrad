@@ -223,12 +223,6 @@ def append_dims(x:Tensor, t:Tensor) -> Tensor:
   assert dims_to_append >= 0
   return x.reshape(x.shape + (1,)*dims_to_append)
 
-
-@TinyJit
-def run(model, x, tms, ctx, y, c_out, add):
-  return (model(x, tms, ctx, y)*c_out + add).realize()
-
-
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/models/diffusion.py#L19
 class SDXL:
   def __init__(self, config:Dict):
@@ -238,6 +232,7 @@ class SDXL:
 
     self.discretization = LegacyDDPMDiscretization()
     self.sigmas = self.discretization(config["denoiser"]["num_idx"], flip=True)
+    self.denoise = TinyJit(self._denoise, prune=True)
 
   # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/inference/helpers.py#L173
   def create_conditioning(self, pos_prompts:List[str], img_width:int, img_height:int, aesthetic_score:float=5.0) -> Tuple[Dict,Dict]:
@@ -259,8 +254,7 @@ class SDXL:
     return self.conditioner(batch_c), self.conditioner(batch_uc, force_zero_embeddings=["txt"])
 
   # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/denoiser.py#L42
-  def denoise(self, x:Tensor, sigma:Tensor, cond:Dict) -> Tensor:
-
+  def _denoise(self, x:Tensor, sigma:Tensor, crossattn:Tensor, vector:Tensor) -> Tensor:
     def sigma_to_idx(s:Tensor) -> Tensor:
       dists = s - self.sigmas.unsqueeze(1)
       return dists.abs().argmin(axis=0).view(*s.shape)
@@ -273,10 +267,7 @@ class SDXL:
     c_in    = 1 / (sigma**2 + 1.0) ** 0.5
     c_noise = sigma_to_idx(sigma.reshape(sigma_shape))
 
-    def prep(*tensors:Tensor):
-      return tuple(t.cast(dtypes.float16).realize() for t in tensors)
-
-    return run(self.model.diffusion_model, *prep(x*c_in, c_noise, cond["crossattn"], cond["vector"], c_out, x))
+    return self.model.diffusion_model(x*c_in, c_noise, crossattn, vector)*c_out + x
 
   def decode(self, x:Tensor) -> Tensor:
     return self.first_stage_model.decode(1.0 / 0.13025 * x)
@@ -297,14 +288,14 @@ class VanillaCFG(Guider):
       assert k in ["vector", "crossattn", "concat"]
       c_out[k] = Tensor.cat(uc[k], c[k], dim=0)
 
-    x_u, x_c = denoiser(Tensor.cat(x, x), Tensor.cat(s, s), c_out).chunk(2)
+    x_u, x_c = denoiser(Tensor.cat(x, x), Tensor.cat(s, s), **c_out).chunk(2)
     x_pred = x_u + self.scale*(x_c - x_u)
     return x_pred
 
 class SplitVanillaCFG(Guider):
   def __call__(self, denoiser, x:Tensor, s:Tensor, c:Dict, uc:Dict) -> Tensor:
-    x_u = denoiser(x, s, uc).clone().realize()
-    x_c = denoiser(x, s, c)
+    x_u = denoiser(x, s, **uc).clone().realize()
+    x_c = denoiser(x, s, **c)
     x_pred = x_u + self.scale*(x_c - x_u)
     return x_pred
 
@@ -356,8 +347,7 @@ class DPMPP2MSampler:
           c=c,
           uc=uc,
         )
-        x.realize()
-        old_denoised.realize()
+        x.realize(old_denoised)
 
     return x
 
@@ -396,8 +386,7 @@ if __name__ == "__main__":
 
   c, uc = model.create_conditioning([args.prompt], args.width, args.height)
   del model.conditioner
-  for v in c .values(): v.realize()
-  for v in uc.values(): v.realize()
+  Tensor.realize(*c.values(), *uc.values())
   print("created batch")
 
   # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/inference/helpers.py#L101
