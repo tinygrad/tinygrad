@@ -175,7 +175,8 @@ class Transformer:
     _bsz, seqlen = tokens.shape
     h = self.tok_embeddings(tokens)
 
-    self.freqs_cis = self.freqs_cis.cast(h.dtype).realize()
+    #self.freqs_cis = self.freqs_cis.cast(h.dtype).realize()
+    self.freqs_cis = self.freqs_cis.cast(h.dtype).kernelize()
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
 
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1).realize() if seqlen > 1 else None
