@@ -78,7 +78,7 @@ def split_uop(x:UOp, sep:Ops):
 def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
   # div pattern in unrolled arange
   # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  seen_const, ans, offset = [], None, 0
+  seen_const, ans = [], None
   for u in split_uop(divs, Ops.ADD):
     if fac!=1:
       if u.op is not Ops.MUL or u.src[1].op is not Ops.CONST or u.src[1].arg != fac: return None
@@ -88,9 +88,7 @@ def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
     if (s0:=u.src[0]).vmin < 0: return None
     # assumed CONST is the last of an ADD
     if s0.op is Ops.ADD and s0.src[1].op is Ops.CONST and s0.src[1].op is Ops.CONST:
-      const = s0.src[1].arg
-      offset += cdiv(const, denominator)
-      seen_const.append(cmod(const, denominator))
+      seen_const.append(s0.src[1].arg)
       s0 = s0.src[0]
     else: seen_const.append(0)
     if ans is None: ans = s0
@@ -100,7 +98,7 @@ def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
   for i in range(denominator-len(seen_const)):
     if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
   if sorted(seen_const)==list(range(denominator)):
-    return fac*(ans + offset)
+    return fac*ans
   return None
 
 def lt_folding(x:UOp, c:int) -> UOp|None:
