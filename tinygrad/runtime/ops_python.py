@@ -24,7 +24,7 @@ def _store(m, i, v):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
   m[i] = v
 
-def with_fp8_handling(values, dtypes_from, dtype_to, operation_fn):
+def with_fp8_handling(values, dtypes_from: list[DType]|DType|None, dtype_to: DType, operation_fn):
   def convert_values(data, convert_fn, dtype):
       if isinstance(data, (list, tuple)): return [convert_values(item, convert_fn, dtype) for item in data]
       return convert_fn(data, dtype)
@@ -83,7 +83,7 @@ class PythonProgram:
           assert (dtype.fmt is not None or dtype.base in dtypes.fp8s) and isinstance(dtype, PtrDType)
           if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
           buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
-          ul[i] = [buf.cast(dtype.fmt) if dtype.fmt else buf.cast("B")] * warp_size
+          ul[i] = [buf.cast(dtype.fmt or 'B')] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
@@ -115,8 +115,8 @@ class PythonProgram:
         elif uop is Ops.VECTORIZE: ul[i] = inp
         elif uop is Ops.BITCAST:
           assert (dtp[0].fmt and dtype.fmt) or (dtp[0] in dtypes.fp8s and dtype) or (dtype in dtypes.fp8s and dtp[0])
-          packed = struct.pack(f"{warp_size}{dtp[0].fmt if dtp[0].fmt else 'B'}", *inp[0])
-          ul[i] = list(struct.unpack(f"{warp_size}{dtype.fmt if dtype.fmt else 'B'}", packed))
+          packed = struct.pack(f"{warp_size}{dtp[0].fmt or 'B'}", *inp[0])
+          ul[i] = list(struct.unpack(f"{warp_size}{dtype.fmt or 'B'}", packed))
         elif uop is Ops.CAST:
           ul[i] = with_fp8_handling(inp[0], dtp[0], dtype, lambda vals: [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in vals])
         elif uop is Ops.LOAD:
