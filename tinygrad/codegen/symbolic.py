@@ -85,8 +85,9 @@ def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
       u = u.src[0]
     if not (u.op is Ops.IDIV and u.src[1].op is Ops.CONST): return None
     if denominator != u.src[1].arg: return None
+    if (s0:=u.src[0]).vmin < 0: return None
     # assumed CONST is the last of an ADD
-    if (s0:=u.src[0]).op is Ops.ADD and s0.src[1].op is Ops.CONST and s0.src[1].op is Ops.CONST:
+    if s0.op is Ops.ADD and s0.src[1].op is Ops.CONST and s0.src[1].op is Ops.CONST:
       const = s0.src[1].arg
       offset += cdiv(const, denominator)
       seen_const.append(cmod(const, denominator))
