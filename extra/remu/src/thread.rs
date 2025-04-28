@@ -810,10 +810,12 @@ impl<'a> Thread<'a> {
                 _ => todo_instr!(instruction)?,
             };
 
-            match op >= 128 {
-                true => self.exec.set_lane(ret),
-                false => self.vcc.set_lane(ret),
-            };
+            if self.exec.read() {
+                match op >= 128 {
+                    true => self.exec.set_lane(ret),
+                    false => self.vcc.set_lane(ret),
+                };
+            }
         }
         else if let Instruction::VOP2 { vsrc, src, vdst, op } = decoded {
             let s0 = src as usize;
@@ -1072,11 +1074,13 @@ impl<'a> Thread<'a> {
                                 _ => todo_instr!(instruction)?,
                             };
 
-                            match vdst {
-                                0..=SGPR_SRC | 107 => self.set_sgpr_co(vdst, ret),
-                                VCC => self.vcc.set_lane(ret),
-                                EXEC => self.exec.set_lane(ret),
-                                _ => todo_instr!(instruction)?,
+                            if self.exec.read() {
+                                match vdst {
+                                    0..=SGPR_SRC | 107 => self.set_sgpr_co(vdst, ret),
+                                    VCC => self.vcc.set_lane(ret),
+                                    EXEC => self.exec.set_lane(ret),
+                                    _ => todo_instr!(instruction)?,
+                                }
                             }
                         }
                         828..=830 => {
