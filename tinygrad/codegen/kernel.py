@@ -60,13 +60,13 @@ class Kernel:
       self.sts.append(unwrap(x.st))
       self.sts.append(unwrap(x.src[0].st))
 
+    # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
+    self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*self.shape_len))
+
     # move all reduce axes to the end
-    reduce = list(enumerate(zip(self.early_full_shape, self.output_shape)))
+    reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
     permute = tuple([i for i,(s,n) in reduce if not resolve(s != n)] + [i for i,(s,n) in reduce if resolve(s != n)])
     self.reshape_and_permute(None, permute)
-
-    # add a shapetracker to the end to track the full shape (must be done after moving reduce axis for merge adjacent)
-    self.sts.append(ShapeTracker.from_shape(self.early_full_shape))
 
     # parameters for optimization
     self.applied_opts: list[Opt] = []
@@ -120,10 +120,6 @@ class Kernel:
 
   @property
   def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
-
-  # NOTE: this is always correct, it's just slow
-  @property
-  def early_full_shape(self) -> tuple[sint, ...]: return tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])])
 
   @property
   def full_shape(self) -> tuple[sint, ...]: return self.sts[-1].shape
