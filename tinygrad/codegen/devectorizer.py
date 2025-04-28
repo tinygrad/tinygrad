@@ -344,24 +344,6 @@ def no_vectorized_reduce(inp:UOp, red:UOp):
   alus = tuple(UOp(red.op, red.dtype.scalar(), (red.src[0].gep(i),)+red.src[1:], red.arg) for i in range(red.dtype.vcount))
   return UOp(Ops.VECTORIZE, red.dtype, alus)
 
-def range_fold_lo(lo:UOp, hi:UOp, st:UOp, cut:UOp, val:UOp) -> UOp:
-  # psuedo code: sum(val if i < cut else 0) for i in range(lo, hi, st))
-  total = (hi-lo+st-1) // st # real count in the range
-  length = ((cut-lo+st-1) // st).maximum(0).minimum(total)
-  return length.cast(val.dtype) * val
-
-def range_fold_hi(lo:UOp, hi:UOp, st:UOp, cut:UOp, val:UOp) -> UOp:
-  # psuedo code: sum(val if i >= cut else 0) for i in range(lo, hi, st))
-  # TODO: this function is so tricky and still probably wrong. test it
-  total = (hi-lo+st-1) // st # real count in the range
-  length = ((lo-cut+total*st)//st).maximum(0).minimum(total) # number in cut
-  return length.cast(val.dtype) * val
-
-def index_fold(buf:UOp, r:UOp, idx:UOp, r2:UOp) -> UOp|None:
-  if r.arg != r2.arg: return None
-  base_idx = (idx-r2.src[0])//r2.src[2]  # indexed from 0 to the length of the range
-  return buf.index(base_idx.cast(r.dtype)*r.src[2] + r.src[0], (idx >= r2.src[0]) & (idx < r2.src[1]))
-
 def reduce_rangeless(red:UOp):
   # TODO: share code with reduce_unparented
   if red.arg not in {Ops.ADD, Ops.MAX}: return None
@@ -370,22 +352,24 @@ def reduce_rangeless(red:UOp):
   ret = red.src[0]
   if red.arg is Ops.ADD:
     for r in red.src[1:]:
-      total = (r.src[1]-r.src[0]+r.src[2]-1) // r.src[2] # real count in the range
-      ret = ret * total.cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+      ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
+def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
+
 pm_reduce_collapse = PatternMatcher([
-  # put third arg in range
-  (UPat(Ops.RANGE, src=(UPat.var(), UPat.var()), name="r"), lambda r: r.replace(src=r.src+(UOp.const(r.dtype, 1),))),
-  # mul to range
-  (UPat.var("x") * UPat(Ops.RANGE, name="r"), lambda x,r: r.replace(src=(r.src[0]*x, r.src[1]*x, r.src[2]*x))),
-  # add to range
-  (UPat.var("x") + UPat(Ops.RANGE, name="r"), lambda x,r: r.replace(src=(r.src[0]+x, r.src[1]+x, r.src[2]))),
-  # fold the range with 0 in either the true or false slot
-  ((UPat(Ops.RANGE, src=(UPat.var("lo"), UPat.var("hi"), UPat.var("st"))) < UPat.cvar("cut")) \
-   .where(UPat.cvar("val"), 0).reduce(arg=Ops.ADD, allow_any_len=True), range_fold_lo),
-  ((UPat(Ops.RANGE, src=(UPat.var("lo"), UPat.var("hi"), UPat.var("st"))) < UPat.cvar("cut")) \
-   .where(UPat(Ops.CONST, arg=0), UPat.cvar("val")).reduce(arg=Ops.ADD, allow_any_len=True), range_fold_hi),
+  # lift x+y out of reduce on lt
+  ((UPat.var("x")+UPat.var("y")) < UPat.var("c"), lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
+  # lift x*y out of reduce
+  ((UPat.var("x")*UPat.var("y")) < UPat.var("c"),
+   lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and y.vmin > 0 else None),
+  # lift x+y out of reduce on ne
+  ((UPat.var("x")+UPat.var("y")) != UPat.var("c"), lambda x,y,c: (x != (c-y)) if no_range(y) and no_range(c) else None),
+  # fold the range
+  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat(Ops.CONST, arg=0), UPat.cvar("val")).reduce(arg=Ops.ADD, allow_any_len=True),
+   lambda r,cut,val: (r.src[1]-cut).maximum(0).minimum(r.src[1]-r.src[0]).cast(val.dtype) * val),
+  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat.cvar("val"), 0).reduce(arg=Ops.ADD, allow_any_len=True),
+   lambda r,cut,val: (cut-r.src[0]).maximum(0).minimum(r.src[1]-r.src[0]).cast(val.dtype) * val),
   # devectorize REDUCE
   (UPat(Ops.VECTORIZE, name="inp").reduce(name="red", allow_any_len=True), no_vectorized_reduce),
   # REDUCE on ADD
@@ -400,11 +384,10 @@ pm_reduce_collapse = PatternMatcher([
                           UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()).reduce(arg=Ops.ADD, allow_any_len=True),
    lambda buf,idx,gate: buf.index(idx, gate.logical_not()).load()),
   # INDEX on RANGE / gated RANGE
-  (UPat.var("buf").index(UPat(Ops.RANGE, name="r"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r2"))), index_fold),
+  (UPat.var("buf").index(UPat.var("expr"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted())),
+   lambda buf,r,idx,expr: buf.index(expr.substitute({r:idx.cast(r.dtype)}), (idx.cast(r.dtype) >= r.src[0]) & (idx.cast(r.dtype) < r.src[1]))),
   # index/load. TODO: this is more aggressive than needed
   (UPat((Ops.INDEX, Ops.LOAD), name="alu"), no_vectorized_alu),
-  # cast on RANGE (fix torch indexing)
-  (UPat(Ops.RANGE, name="r").cast(name="c"), lambda r,c: r.replace(src=tuple([x.cast(c.dtype) for x in r.src]), dtype=c.dtype)),
   # AND on WHERE
   ((UPat.any(UPat(Ops.DEFINE_VAR, name="x"), UPat(Ops.DEFINE_VAR).gep(name="x")) & UPat.var("y")) \
    .where(UPat.cvar("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),

@@ -95,6 +95,8 @@ jobs:
       run: HALF=1 python3.11 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
     - name: Run GPT2 w HALF/BEAM
       run: HALF=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3.11 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
+    - name: Run OLMoE
+      run: python3.11 examples/olmoe.py
     - name: Train MNIST
       run: time PYTHONPATH=. TARGET_EVAL_ACC_PCT=96.0 python3.11 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps

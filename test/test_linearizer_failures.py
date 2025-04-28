@@ -1475,5 +1475,150 @@ class TestLinearizerFailures(unittest.TestCase):
     # NOTE: this is slow to run, just confirm it can generate the program without Exception
     Kernel(ast, opts=Device[Device.DEFAULT].renderer).apply_opts(opts).to_program()
 
+  @unittest.expectedFailure
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
+  def test_failure_60(self):
+    # TestSymbolicOps.test_attention
+    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(80), arg=0, src=()),
+        x2:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 4, 1, UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()), 1, 1), strides=(UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        UOp(Ops.MUL, dtypes.int, arg=None, src=(
+          x2:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+          UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),
+        x2,)),
+      UOp(Ops.CONST, dtypes.int, arg=4, src=()),)), UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        x1:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+        UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),
+      x1,)), 0, 1, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(Ops.MUL, dtypes.float, arg=None, src=(
+          UOp(Ops.EXP2, dtypes.float, arg=None, src=(
+            UOp(Ops.MUL, dtypes.float, arg=None, src=(
+              UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                  UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(80), arg=1, src=()),
+                  x2,)),
+                UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.MAX, (5,), True), src=(
+                    UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                      x12:=UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(80), arg=2, src=()),
+                      UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 4, 1, UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()), 1, UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=())), strides=(UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        UOp(Ops.CONST, dtypes.int, arg=4, src=()),
+        UOp(Ops.MUL, dtypes.int, arg=None, src=(
+          x3:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+          UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)),
+      x3,)), UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        x1:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+        UOp(Ops.MUL, dtypes.int, arg=None, src=(
+          x1,
+          UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)),
+      x1,)), 0, UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        UOp(Ops.CONST, dtypes.int, arg=0, src=()),
+        UOp(Ops.MUL, dtypes.int, arg=None, src=(
+          x3:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+          UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)),
+      x3,)), 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),
+                  UOp(Ops.CONST, dtypes.float, arg=-1.0, src=(
+                    x15:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 4, 1, UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()), 1, 1), strides=(0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+              UOp(Ops.CONST, dtypes.float, arg=1.4426950408889634, src=(
+                x15,)),)),)),
+          UOp(Ops.RECIP, dtypes.float, arg=None, src=(
+            UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (4,)), src=(
+              UOp(Ops.EXP2, dtypes.float, arg=None, src=(
+                UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                  UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                    UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                      x12,
+                      UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 4, 1, UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()), UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()), 1), strides=(UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        UOp(Ops.CONST, dtypes.int, arg=4, src=()),
+        UOp(Ops.MUL, dtypes.int, arg=None, src=(
+          x3:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+          UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)),
+      x3,)), UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        x1:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+        UOp(Ops.MUL, dtypes.int, arg=None, src=(
+          x1,
+          UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)),
+      x1,)), 0, UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        UOp(Ops.CONST, dtypes.int, arg=0, src=()),
+        UOp(Ops.MUL, dtypes.int, arg=None, src=(
+          x3:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+          UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)),
+      x3,)), 1, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                    UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                      UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.MAX, (5,), True), src=(
+                        UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                          x12,
+                          UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 4, 1, UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()), UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=())), strides=(UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.CONST, dtypes.int, arg=4, src=()),
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+        UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)), UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      x0:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        x0,
+        UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)), 0, UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.CONST, dtypes.int, arg=0, src=()),
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+        UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)), 1), offset=0, mask=None, contiguous=False), View(shape=(2, 4, 1, UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()), UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()), UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=())), strides=(UOp(Ops.
+    MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        UOp(Ops.CONST, dtypes.int, arg=4, src=()),
+        x2:=UOp(Ops.MUL, dtypes.int, arg=None, src=(
+          UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+          UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)),
+      x2,)), UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        x1:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+        x2:=UOp(Ops.MUL, dtypes.int, arg=None, src=(
+          x1,
+          UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)),
+      x2,)), 0, UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        UOp(Ops.CONST, dtypes.int, arg=0, src=()),
+        x2:=UOp(Ops.MUL, dtypes.int, arg=None, src=(
+          UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+          UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)),
+      x2,)), UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      x0:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        x0,
+        UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)), 1), offset=0, mask=None, contiguous=False))), src=()),)),)),
+                      UOp(Ops.CONST, dtypes.float, arg=-1.0, src=(
+                        x29:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 4, 1, UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=())), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False), View(shape=(2, 4, 1, UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()), UOp(Ops.DEFINE_VAR, dtypes.int
+    , arg=('i', 1, 10), src=()), 1), strides=(UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        UOp(Ops.CONST, dtypes.int, arg=4, src=()),
+        UOp(Ops.MUL, dtypes.int, arg=None, src=(
+          x3:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+          UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)),
+      x3,)), UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        x1:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+        UOp(Ops.MUL, dtypes.int, arg=None, src=(
+          x1,
+          UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)),
+      x1,)), 0, UOp(Ops.MUL, dtypes.int, arg=None, src=(
+      UOp(Ops.MUL, dtypes.int, arg=None, src=(
+        UOp(Ops.CONST, dtypes.int, arg=0, src=()),
+        UOp(Ops.MUL, dtypes.int, arg=None, src=(
+          x3:=UOp(Ops.CONST, dtypes.int, arg=1, src=()),
+          UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10), src=()),)),)),
+      x3,)), 1, 0), offset=0, mask=None, contiguous=False))), src=()),)),)),)),
+                  UOp(Ops.CONST, dtypes.float, arg=1.4426950408889634, src=(
+                    x29,)),)),)),)),)),)),)),))
+    opts = [Opt(op=OptOps.LOCAL, axis=0, arg=2), Opt(op=OptOps.LOCAL, axis=0, arg=4)]
+    # NOTE: this is slow to run, just confirm it can generate the program without Exception
+    Kernel(ast, opts=Device[Device.DEFAULT].renderer).apply_opts(opts).to_program()
+
 if __name__ == '__main__':
   unittest.main()
