@@ -179,7 +179,7 @@ def run_schedule(schedule:list[ScheduleItem], var_vals:Optional[dict[Variable, i
       # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
       lower_schedule_item(ScheduleItem(si.ast, nb, si.metadata)).run(var_vals, do_update_stats=do_update_stats)
       import numpy as np
-      np.testing.assert_allclose(nb[0].numpy(), si.bufs[0].numpy(), rtol=1e-3, atol=1e-3)
+      np.testing.assert_allclose(si.bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
     else:
       ei.run(var_vals, do_update_stats=do_update_stats)
 

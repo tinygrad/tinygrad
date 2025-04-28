@@ -291,8 +291,7 @@ class AM_GFX(AM_IP):
 class AM_IH(AM_IP):
   def init_sw(self):
     self.ring_size = 512 << 10
-    def _alloc_ring(size): return (self.adev.mm.palloc(size, zero=not self.adev.partial_boot, boot=True),
-                                    self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True))
+    def _alloc_ring(size): return (self.adev.mm.palloc(size, zero=False, boot=True), self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.rings = [(*_alloc_ring(self.ring_size), "", 0), (*_alloc_ring(self.ring_size), "_RING1", 1)]
 
   def init_hw(self):
@@ -367,8 +366,8 @@ class AM_SDMA(AM_IP):
 class AM_PSP(AM_IP):
   def init_sw(self):
     self.reg_pref = "regMP0_SMN_C2PMSG" if self.adev.ip_ver[am.MP0_HWIP] < (14,0,0) else "regMPASP_SMN_C2PMSG"
-    self.msg1_paddr = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=not self.adev.partial_boot, boot=True)
-    self.cmd_paddr = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
+    self.msg1_paddr = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=False, boot=True)
+    self.cmd_paddr = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE, zero=False, boot=True)
     self.fence_paddr = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
 
     self.ring_size = 0x10000
@@ -377,7 +376,7 @@ class AM_PSP(AM_IP):
     self.max_tmr_size = 0x1300000
     self.boot_time_tmr = self.adev.ip_ver[am.GC_HWIP] >= (12,0,0)
     if not self.boot_time_tmr:
-      self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=not self.adev.partial_boot, boot=True)
+      self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=False, boot=True)
 
   def init_hw(self):
     spl_key = am.PSP_FW_TYPE_PSP_SPL if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0) else am.PSP_FW_TYPE_PSP_KDB
@@ -407,7 +406,7 @@ class AM_PSP(AM_IP):
 
   def _prep_msg1(self, data):
     self.adev.vram.view(self.msg1_paddr, len(data))[:] = data
-    self.adev.vram[self.msg1_paddr + len(data) + 1] = 0
+    self.adev.vram[self.msg1_paddr + len(data)] = 0
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw, compid):

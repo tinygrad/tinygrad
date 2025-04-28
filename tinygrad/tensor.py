@@ -292,7 +292,7 @@ class Tensor(SimpleMathTrait):
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
     assert not x.requires_grad  # self requires_grad is okay?
-    if not self.lazydata.is_realized: return self.replace(x)
+    if not self.lazydata.is_realized: return self.replace(x.contiguous())
     self.lazydata = self.lazydata.assign(x.lazydata)
     return self
 
@@ -1145,7 +1145,7 @@ class Tensor(SimpleMathTrait):
         x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
 
     # dim injection from None by including None dim size (which is 1) and dim collapse by skipping int dim size
-    x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], int)))
+    x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], (int, UOp))))
 
     # tensor indexing
     if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
@@ -2750,7 +2750,7 @@ class Tensor(SimpleMathTrait):
     Useful for single kernel softmax and flash attention.
     Careful, this can break codegen or make kernels really slow.
     """
-    return self._apply_uop(UOp.fuse).contiguous()
+    return self._apply_uop(UOp.fuse)
 
   def contiguous_backward(self) -> Tensor:
     """

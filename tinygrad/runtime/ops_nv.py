@@ -195,7 +195,10 @@ class NVProgram(HCQProgram):
   def __init__(self, dev:NVDevice, name:str, lib:bytes):
     self.dev, self.name, self.lib = dev, name, lib
 
-    if MOCKGPU: image, sections, relocs, cbuf0_size = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [], 0x160 # type: ignore
+    # For MOCKGPU, the lib is PTX code, so some values are emulated.
+    cbuf0_size = 0 if not MOCKGPU else 0x160
+
+    if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
     else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
 
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
