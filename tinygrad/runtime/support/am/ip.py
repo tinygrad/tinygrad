@@ -407,7 +407,7 @@ class AM_PSP(AM_IP):
 
   def _prep_msg1(self, data):
     self.adev.vram.view(self.msg1_paddr, len(data))[:] = data
-    self.adev.vram[self.msg1_paddr + len(data) + 1] = 0
+    self.adev.vram[self.msg1_paddr + len(data)] = 0
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw, compid):
