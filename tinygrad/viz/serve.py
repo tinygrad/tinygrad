@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, Callable, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap
-from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp
+from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
 from tinygrad.dtype import dtypes
@@ -51,6 +51,8 @@ class GraphRewriteDetails(TypedDict):
   changed_nodes: list[int]|None          # the changed UOp id + all its parents ids
   upat: tuple[tuple[str, int], str]|None # [loc, source_code] of the matched UPat
 
+def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
+
 def uop_to_json(x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
   graph: dict[int, dict] = {}
@@ -65,8 +67,8 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
     if u in excluded: continue
     argst = str(u.arg)
     if u.op is Ops.VIEW:
-      argst = ("\n".join([f"{v.shape} / {v.strides}"+(f"\nMASK {v.mask}" if v.mask is not None else "")+
-                          ("" if v.offset == 0 else f" / {v.offset}") for v in unwrap(u.st).views]))
+      argst = ("\n".join([f"{shape_to_str(v.shape)} / {shape_to_str(v.strides)}"+(f"\nMASK {v.mask}" if v.mask is not None else "")+
+                          ("" if v.offset == 0 else f" / {srender(v.offset)}") for v in unwrap(u.st).views]))
     label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src):
@@ -75,7 +77,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
         else: label += f"\n{x.op.name}{idx} {x.arg}"
     try:
       if u.op not in {Ops.VIEW, Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u.st is not None:
-        label += f"\n{repr(u.shape)}"
+        label += f"\n{shape_to_str(u.shape)}"
     except Exception:
       label += "\n<ISSUE GETTING SHAPE>"
     graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff")}
