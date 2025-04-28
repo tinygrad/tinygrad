@@ -431,8 +431,9 @@ class Kernel:
     if self.simplify_ones() and self.tensor_core_opts:
       self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
 
-  def apply_opts(self, opts:Sequence[Opt]):
+  def apply_opts(self, opts:Sequence[Opt]) -> Kernel:
     for opt in opts: self.apply_opt(opt)
+    return self
 
   # **** kernel outputs ****
 
@@ -554,7 +555,13 @@ class Kernel:
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
     #if __debug__: type_verify(list(modified_ast.toposort()), shape_spec)
 
-    self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
+    try:
+      self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
+    except RuntimeError:
+      print("***** LINEARIZE FAILURE *****")
+      print(f"ast = {self.ast}")
+      print(f"opts = {self.applied_opts}")
+      raise
     if DEBUG >= 6: print_uops(self.uops)
     return self
 
