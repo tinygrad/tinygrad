@@ -277,17 +277,14 @@ class AM_GFX(AM_IP):
 
   def _config_gfx_rs64(self):
     def _config_helper(eng_name, cntl_reg, eng_reg, pipe_cnt, me=0):
-      if eng_name == "MEC":
-        for pipe in range(pipe_cnt):
-          self._grbm_select(me=me, pipe=pipe)
-          self.adev.wreg_pair(f"regCP_{eng_reg}_PRGRM_CNTR_START", "", "_HI", self.adev.fw.ucode_start[eng_name] >> 2)
+      for pipe in range(pipe_cnt):
+        self._grbm_select(me=me, pipe=pipe)
+        self.adev.wreg_pair(f"regCP_{eng_reg}_PRGRM_CNTR_START", "", "_HI", self.adev.fw.ucode_start[eng_name] >> 2)
       self._grbm_select()
       self.adev.reg(f"regCP_{cntl_reg}_CNTL").update(**{f"{eng_name.lower()}_pipe{pipe}_reset": 1 for pipe in range(pipe_cnt)})
       self.adev.reg(f"regCP_{cntl_reg}_CNTL").update(**{f"{eng_name.lower()}_pipe{pipe}_reset": 0 for pipe in range(pipe_cnt)})
 
-    _config_helper(eng_name="PFP", cntl_reg="ME", eng_reg="PFP", pipe_cnt=2)
-    _config_helper(eng_name="ME", cntl_reg="ME", eng_reg="ME", pipe_cnt=2)
-    _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=4, me=1)
+    _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=1, me=1)
 
 class AM_IH(AM_IP):
   def init_sw(self):
