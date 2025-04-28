@@ -56,7 +56,7 @@ where
     fn negate(&self, pos: usize, modifier: usize) -> T {
         match (modifier >> pos) & 1 {
             1 => match self.is_zero() {
-                true => *self,
+                true => T::zero(),
                 false => -*self,
             },
             _ => *self,
@@ -123,6 +123,7 @@ mod tests {
         assert_eq!(0.3_f32.negate(0, 0b110), 0.3_f32);
         assert_eq!(0.3_f32.negate(1, 0b010), -0.3_f32);
         assert_eq!(0.0_f32.negate(0, 0b001).to_bits(), 0);
+        assert_eq!((-0.0_f32).negate(0, 0b001).to_bits(), 0);
     }
 
     #[test]
