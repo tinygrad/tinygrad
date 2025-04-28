@@ -207,6 +207,7 @@ def _suop(lst, uop_fxn, python_fxn):
   return ssimplify(functools.reduce(uop_fxn, uops + ([python_fxn(nums)] if nums else [])))
 def smax(*lst): return _suop(argfix(*lst), UOp.maximum, max)
 def smin(*lst): return _suop(argfix(*lst), UOp.minimum, min)
+def srender(x) -> str: return x.render() if isinstance(x, UOp) else str(x)
 
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: Union[UOp, int], var_vals: dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
@@ -1001,6 +1002,7 @@ renderer = PatternMatcher([
   (UPat(Ops.CAST, name="x"), lambda x: UOp(Ops.NOOP, arg=f"({str(x.dtype)[7:]})({x.src[0].arg})")),
   (UPat(Ops.LOAD), lambda: UOp(Ops.NOOP, arg="load")),
   (UPat(Ops.BIND, src=UPat(Ops.NOOP), name="x"), lambda x: x.src[0]),
+  #(UPat(Ops.BIND, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}[={x.src[1].arg}]")),
   (UPat(Ops.NEG, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"(-{x.src[0].arg})")),
   (UPat(Ops.MAX, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"max({x.src[0].arg}, {x.src[1].arg})")),
   (UPat(Ops.MULACC, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[0].arg}*{x.src[1].arg}+{x.src[2].arg})")),
