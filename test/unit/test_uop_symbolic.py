@@ -464,6 +464,11 @@ class TestSymbolic(unittest.TestCase):
     unrolled_div = (gidx+2561)//4+(gidx+2562)//4+(gidx+2560)//4+(gidx+2559)//4
     self.helper_test_variable(unrolled_div, 2559, 5118, "(gidx+2559)")
 
+  def test_arange_unrolled4_mul(self):
+    gidx = Variable("gidx", 0, 2559)
+    unrolled_div = 2*((gidx+2561)//4)+2*((gidx+2562)//4)+2*((gidx+2560)//4)+2*((gidx+2559)//4)
+    self.helper_test_variable(unrolled_div, 5118, 10236, "((gidx*2)+5118)")
+
   def test_arange_unrolled4_small(self):
     gidx = Variable("gidx", 0, 3)
     unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
@@ -481,6 +486,11 @@ class TestSymbolic(unittest.TestCase):
     gidx = Variable("gidx", 0, 2559)
     unrolled_div = (gidx+2559)//2+(gidx+2560)//2+3
     self.helper_test_variable(unrolled_div, 2562, 5121, "(gidx+2562)")
+
+  def test_arange_unrolled2_neg(self):
+    ridx = Variable("ridx", 0, 255)
+    unrolled_div = -((255-ridx)//2) - ((256-ridx)//2)
+    self.helper_test_variable(unrolled_div, -255, 0, "(ridx+-255)")
 
   def test_gated_load(self):
     idx = Variable("idx", 0, 24)
