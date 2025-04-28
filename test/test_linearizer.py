@@ -26,16 +26,17 @@ def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer
   bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
   return s[-1].ast, bufs
 
-def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0):
+def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0, use_tensor_cores:int=1):
   a, b = Tensor.rand(M, K, dtype=dtype_in), Tensor.rand(K, N, dtype=dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, dtype=dtype_out)
   if dtype_in == dtypes.bfloat16: r = r.float()
   realized_ast, bufs = helper_realized_ast(r)
   k = Kernel(realized_ast)
-  k.apply_tensor_cores(1, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
+  k.apply_tensor_cores(use_tensor_cores, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
   prg = CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
-  assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
+  if use_tensor_cores == 1: assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
+  elif use_tensor_cores == 3: assert len([uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL]) == 2, "local buffers not triggered"
   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   prg.exec(bufs)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
@@ -1061,6 +1062,14 @@ class TestLinearizer(unittest.TestCase):
       helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_emulation(self):
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
+      if CI and getenv("AMD_LLVM") and tc.dtype_in is dtypes.bfloat16: continue # TODO: compilation error in CI
+      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
+      # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
+      helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0, use_tensor_cores=3)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_codegen(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
@@ -2016,7 +2025,7 @@ class TestKernelOpts(unittest.TestCase):
               UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))),)),)),)),)),)) # noqa: E501
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     with self.assertRaises(KernelOptError):
-      k.apply_opt(Opt(OptOps.TC, 0, (-1, 1)))
+      k.apply_opt(Opt(OptOps.TC, 0, (-1, 1, 1)))
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_core_opts(self):
