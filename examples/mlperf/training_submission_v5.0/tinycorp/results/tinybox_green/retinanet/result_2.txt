@@ -1,0 +1,46 @@
+:::MLLOG {"namespace": "", "time_ms": 1745757942370, "event_type": "POINT_IN_TIME", "key": "submission_org", "value": "tinycorp", "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 380}}
+:::MLLOG {"namespace": "", "time_ms": 1745757942411, "event_type": "POINT_IN_TIME", "key": "submission_platform", "value": "tinybox_green", "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 381}}
+:::MLLOG {"namespace": "", "time_ms": 1745757942411, "event_type": "POINT_IN_TIME", "key": "submission_division", "value": "closed", "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 382}}
+:::MLLOG {"namespace": "", "time_ms": 1745757942411, "event_type": "POINT_IN_TIME", "key": "submission_status", "value": "onprem", "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 383}}
+:::MLLOG {"namespace": "", "time_ms": 1745757942411, "event_type": "POINT_IN_TIME", "key": "submission_benchmark", "value": "retinanet", "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 385}}
+:::MLLOG {"namespace": "", "time_ms": 1745757943058, "event_type": "POINT_IN_TIME", "key": "cache_clear", "value": true, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 388}}
+:::MLLOG {"namespace": "", "time_ms": 1745757943059, "event_type": "INTERVAL_START", "key": "init_start", "value": null, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 389}}
+:::MLLOG {"namespace": "", "time_ms": 1745759379793, "event_type": "POINT_IN_TIME", "key": "init_stop", "value": null, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 656}}
+:::MLLOG {"namespace": "", "time_ms": 1745759394363, "event_type": "INTERVAL_START", "key": "run_start", "value": null, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 392}}
+:::MLLOG {"namespace": "", "time_ms": 1745759394404, "event_type": "POINT_IN_TIME", "key": "seed", "value": 7068, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 393}}
+:::MLLOG {"namespace": "", "time_ms": 1745759401265, "event_type": "POINT_IN_TIME", "key": "global_batch_size", "value": 96, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 502}}
+:::MLLOG {"namespace": "", "time_ms": 1745759401265, "event_type": "POINT_IN_TIME", "key": "train_samples", "value": 12191, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 503}}
+:::MLLOG {"namespace": "", "time_ms": 1745759401266, "event_type": "POINT_IN_TIME", "key": "eval_samples", "value": 259, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 504}}
+:::MLLOG {"namespace": "", "time_ms": 1745759401266, "event_type": "POINT_IN_TIME", "key": "epoch_count", "value": 4, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 505}}
+:::MLLOG {"namespace": "", "time_ms": 1745759401266, "event_type": "POINT_IN_TIME", "key": "first_epoch_num", "value": 0, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 506}}
+:::MLLOG {"namespace": "", "time_ms": 1745759401266, "event_type": "POINT_IN_TIME", "key": "opt_name", "value": "adam", "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 508}}
+:::MLLOG {"namespace": "", "time_ms": 1745759401266, "event_type": "POINT_IN_TIME", "key": "opt_base_learning_rate", "value": 9.5e-05, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 509}}
+:::MLLOG {"namespace": "", "time_ms": 1745759401266, "event_type": "POINT_IN_TIME", "key": "opt_weight_decay", "value": 0, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 510}}
+:::MLLOG {"namespace": "", "time_ms": 1745759401266, "event_type": "POINT_IN_TIME", "key": "opt_learning_rate_warmup_epochs", "value": 0, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 511}}
+:::MLLOG {"namespace": "", "time_ms": 1745759401267, "event_type": "POINT_IN_TIME", "key": "opt_learning_rate_warmup_factor", "value": 0, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 512}}
+:::MLLOG {"namespace": "", "time_ms": 1745759401267, "event_type": "POINT_IN_TIME", "key": "gradient_accumulation_steps", "value": 1, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 513}}
+:::MLLOG {"namespace": "", "time_ms": 1745759458864, "event_type": "INTERVAL_START", "key": "epoch_start", "value": 1, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 525, "epoch_num": 1}}
+:::MLLOG {"namespace": "", "time_ms": 1745766229351, "event_type": "POINT_IN_TIME", "key": "epoch_stop", "value": 1, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 596, "epoch_num": 1}}
+:::MLLOG {"namespace": "", "time_ms": 1745766229352, "event_type": "INTERVAL_START", "key": "eval_start", "value": 1, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 601, "epoch_num": 1}}
+
+:::MLLOG {"namespace": "", "time_ms": 1745771664180, "event_type": "POINT_IN_TIME", "key": "eval_accuracy", "value": 0.2618442233208197, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 677, "epoch_num": 1}}
+:::MLLOG {"namespace": "", "time_ms": 1745771664180, "event_type": "INTERVAL_END", "key": "eval_stop", "value": 1, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 678, "epoch_num": 1}}
+:::MLLOG {"namespace": "", "time_ms": 1745771664181, "event_type": "INTERVAL_START", "key": "epoch_start", "value": 2, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 525, "epoch_num": 2}}
+:::MLLOG {"namespace": "", "time_ms": 1745778271730, "event_type": "POINT_IN_TIME", "key": "epoch_stop", "value": 2, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 596, "epoch_num": 2}}
+:::MLLOG {"namespace": "", "time_ms": 1745778271731, "event_type": "INTERVAL_START", "key": "eval_start", "value": 2, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 601, "epoch_num": 2}}
+
+:::MLLOG {"namespace": "", "time_ms": 1745783649281, "event_type": "POINT_IN_TIME", "key": "eval_accuracy", "value": 0.3050222595524408, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 677, "epoch_num": 2}}
+:::MLLOG {"namespace": "", "time_ms": 1745783649281, "event_type": "INTERVAL_END", "key": "eval_stop", "value": 2, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 678, "epoch_num": 2}}
+:::MLLOG {"namespace": "", "time_ms": 1745783649282, "event_type": "INTERVAL_START", "key": "epoch_start", "value": 3, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 525, "epoch_num": 3}}
+:::MLLOG {"namespace": "", "time_ms": 1745790269694, "event_type": "POINT_IN_TIME", "key": "epoch_stop", "value": 3, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 596, "epoch_num": 3}}
+:::MLLOG {"namespace": "", "time_ms": 1745790269695, "event_type": "INTERVAL_START", "key": "eval_start", "value": 3, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 601, "epoch_num": 3}}
+
+:::MLLOG {"namespace": "", "time_ms": 1745795622203, "event_type": "POINT_IN_TIME", "key": "eval_accuracy", "value": 0.33438554461867026, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 677, "epoch_num": 3}}
+:::MLLOG {"namespace": "", "time_ms": 1745795622204, "event_type": "INTERVAL_END", "key": "eval_stop", "value": 3, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 678, "epoch_num": 3}}
+:::MLLOG {"namespace": "", "time_ms": 1745795622204, "event_type": "INTERVAL_START", "key": "epoch_start", "value": 4, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 525, "epoch_num": 4}}
+:::MLLOG {"namespace": "", "time_ms": 1745802201592, "event_type": "POINT_IN_TIME", "key": "epoch_stop", "value": 4, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 596, "epoch_num": 4}}
+:::MLLOG {"namespace": "", "time_ms": 1745802201593, "event_type": "INTERVAL_START", "key": "eval_start", "value": 4, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 601, "epoch_num": 4}}
+
+:::MLLOG {"namespace": "", "time_ms": 1745807409644, "event_type": "POINT_IN_TIME", "key": "eval_accuracy", "value": 0.3413173788267323, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 677, "epoch_num": 4}}
+:::MLLOG {"namespace": "", "time_ms": 1745807409644, "event_type": "INTERVAL_END", "key": "eval_stop", "value": 4, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 678, "epoch_num": 4}}
+:::MLLOG {"namespace": "", "time_ms": 1745807409644, "event_type": "INTERVAL_END", "key": "run_stop", "value": null, "metadata": {"file": "tinygrad/examples/mlperf/model_train.py", "lineno": 684, "status": "success"}}
