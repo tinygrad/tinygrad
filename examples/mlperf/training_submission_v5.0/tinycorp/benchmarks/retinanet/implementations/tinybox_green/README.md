@@ -4,7 +4,7 @@ This problem uses RetinaNet for SSD.
 
 ## Requirements
 
-Install tinygrad and mlperf-logging from master.
+Install tinygrad and mlperf-logging (uncomment mlperf from setup.py) from branch mlperf_training_v5.0.
 ```
 git clone https://github.com/tinygrad/tinygrad.git
 python3 -m pip install -e ".[mlperf]"
