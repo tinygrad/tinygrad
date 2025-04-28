@@ -60,6 +60,9 @@ class Kernel:
       self.sts.append(unwrap(x.st))
       self.sts.append(unwrap(x.src[0].st))
 
+    # add a shapetracker to the end to track the full shape
+    self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])])))
+
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
     permute = tuple([i for i,(s,n) in reduce if not resolve(s != n)] + [i for i,(s,n) in reduce if resolve(s != n)])
@@ -87,7 +90,7 @@ class Kernel:
 
     # things downstream of the AST
     ret.reduceops, ret.vars, ret.bufs = self.reduceops, self.vars, self.bufs
-    ret.sts = self.sts[:len(ret.bufs)+len(ret.reduceops)*2] # NOTE: must redo the local buffers with TC in beam
+    ret.sts = self.sts[:]
 
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
@@ -119,7 +122,7 @@ class Kernel:
   def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
 
   @property
-  def full_shape(self) -> tuple[sint, ...]: return tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])])
+  def full_shape(self) -> tuple[sint, ...]: return self.sts[-1].shape
 
   @property
   def full_unupcasted_shape(self) -> tuple[sint, ...]: return self.full_shape[:self.first_upcast]
