@@ -2,7 +2,7 @@
 import unittest
 import torch
 import numpy as np
-from tinygrad.helpers import getenv, Context
+from tinygrad.helpers import getenv, Context, GlobalCounters
 if getenv("TINY_BACKEND2"):
   import extra.torch_backend.backend2
   device = "cpu"
@@ -167,6 +167,7 @@ class TestTorchBackend(unittest.TestCase):
 
   def test_mnist_index(self):
     with Context(FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
+      GlobalCounters.reset()
       from tinygrad.nn.datasets import mnist
       X_train, Y_train, _, _ = mnist()
       X_train = torch.tensor(X_train.float().numpy(), device=device)
@@ -174,6 +175,7 @@ class TestTorchBackend(unittest.TestCase):
       samples = torch.randint(0, X_train.shape[0], (32,))
       X,Y = X_train[samples], Y_train[samples]
       X.cpu(), Y.cpu()
+      self.assertLessEqual(GlobalCounters.global_ops, 10_000_000)
 
 if __name__ == "__main__":
   unittest.main()
