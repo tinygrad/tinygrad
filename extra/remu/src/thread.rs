@@ -3019,7 +3019,7 @@ mod test_vop3 {
 
     #[test]
     fn test_v_cndmask_b32_e64_neg() {
-        [[0.0f32, 0.0], [1.0f32, -1.0], [-1.0f32, 1.0]].iter().for_each(|[input, ret]| {
+        [[0.0f32, 0.0], [-0.0f32, 0.0], [1.0f32, -1.0], [-1.0f32, 1.0]].iter().for_each(|[input, ret]| {
             let mut thread = _helper_test_thread();
             thread.scalar_reg[0] = false as u32;
             thread.vec_reg[3] = input.to_bits();
