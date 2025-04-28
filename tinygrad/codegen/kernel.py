@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, print_uops, PatternMatcher
+from tinygrad.ops import smax
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
@@ -50,12 +51,6 @@ class Kernel:
     # NOTE: this requires a specific order with the [::-1], this is likely a bug
     self.bufs: list[UOp] = [x for x in self.ast.toposort() if x.op in GroupOp.Buffer][::-1]
 
-    # get earlybufs, before any reduceops
-    earlybufs: list[UOp] = sorted([x for reduceop in self.reduceops for x in reduceop.src[0].toposort() if x.op in GroupOp.Buffer],
-                                  key=lambda x: -prod(x.shape))
-    self.full_buf_index: int = self.bufs.index(earlybufs[0]) if earlybufs else 0
-    # NOTE: full_shape can be wrong if there's a tree of reduces
-
     # create new shapetrackers inside this kernel, we will permute them
     self.sts: list[ShapeTracker] = [x.st_arg for x in self.bufs]
 
@@ -64,6 +59,9 @@ class Kernel:
     for x in self.reduceops:
       self.sts.append(unwrap(x.st))
       self.sts.append(unwrap(x.src[0].st))
+
+    # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
+    self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*self.shape_len))
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
@@ -91,8 +89,8 @@ class Kernel:
     ret.opts, ret.ast = self.opts, self.ast
 
     # things downstream of the AST
-    ret.reduceops, ret.vars, ret.bufs, ret.full_buf_index = self.reduceops, self.vars, self.bufs, self.full_buf_index
-    ret.sts = self.sts[:len(ret.bufs)+len(ret.reduceops)*2] # NOTE: must redo the local buffers with TC in beam
+    ret.reduceops, ret.vars, ret.bufs = self.reduceops, self.vars, self.bufs
+    ret.sts = self.sts[:]
 
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
@@ -124,7 +122,7 @@ class Kernel:
   def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
 
   @property
-  def full_shape(self) -> tuple[sint, ...]: return self.sts[self.full_buf_index].shape
+  def full_shape(self) -> tuple[sint, ...]: return self.sts[-1].shape
 
   @property
   def full_unupcasted_shape(self) -> tuple[sint, ...]: return self.full_shape[:self.first_upcast]
