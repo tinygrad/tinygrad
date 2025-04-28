@@ -370,7 +370,7 @@ def reduce_rangeless(red:UOp):
   ret = red.src[0]
   if red.arg is Ops.ADD:
     for r in red.src[1:]:
-      total = (r.src[1]-r.src[0]+r.src[2]-1) // r.src[2] # real count in the range
+      total = r.src[0] # since r.src = (end,)
       ret = ret * total.cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 

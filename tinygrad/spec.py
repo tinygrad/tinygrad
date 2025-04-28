@@ -112,7 +112,7 @@ spec = PatternMatcher([
    lambda x,c: all(y.op is Ops.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
-  (UPat(Ops.RANGE, src=(UPat.var("end"),), name="rng"), lambda rng,end: rng.dtype == end.dtype and isinstance(rng.arg, int)),  
+  (UPat(Ops.RANGE, src=(UPat.var("end"),), name="rng"), lambda rng,end: rng.dtype == end.dtype and isinstance(rng.arg, int)),
   (UPat(Ops.SPECIAL, src=()), lambda: True),
 
   # TODO: confirm the args of both of these are shapetrackers
