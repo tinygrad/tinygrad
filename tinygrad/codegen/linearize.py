@@ -229,6 +229,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
     if len(v) > 1:
       bb = BasicBlock2(v[0].arg.lst, _sort_ctx(flatten([y.arg.ctx for y in v])), k, cnt=sum(y.arg.cnt for y in v))
       out = UOp(Ops.BLOCKEND, src=tuple(flatten([x.src for x in v])), arg=bb)
+      # NOTE: bb.ctx != u.arg.ctx can cause problems here
       for u in v: new_forks[u] = out
   sink = sink.substitute(new_forks)
 
