@@ -1,4 +1,4 @@
-import os, json, hashlib, math
+import os, json, hashlib, math, sys
 from extra.export_model import export_model
 from examples.llama3 import build_transformer, Tokenizer
 from tinygrad.nn.state import get_state_dict, load_state_dict
@@ -119,9 +119,10 @@ if __name__=="__main__":
   Device.DEFAULT="CPU"
   model = build_transformer(model_path, model_size="1B", quantize="int8", scale_dtype=dtypes.float32, device=Device.DEFAULT, max_context=max_context)
   state_dict = get_state_dict(model)
-  validate_model(model, tokenizer)
+  #validate_model(model, tokenizer)
   model_name = "transformer"
 
+  """
   with Context(BEAM=3):
     cprog, js_wrapper = export_model(model, "wasm", *model_input(), model_name=model_name)
     # ensure consistency with exported weights
@@ -129,6 +130,7 @@ if __name__=="__main__":
 
   with open(os.path.join(os.path.dirname(__file__), f"{model_name}.c"), "w") as f: f.write(cprog)
   with open(os.path.join(os.path.dirname(__file__), "net_clang.js"), "w") as f: f.write(js_wrapper)
+  """
 
   Device.DEFAULT="WEBGPU"
   # float16 is not yet supported for dawn/Vulkan/NVIDIA stack, see: https://issues.chromium.org/issues/42251215
@@ -139,6 +141,7 @@ if __name__=="__main__":
   model.output.weight, model.output.scale = model.tok_embeddings.weight, model.tok_embeddings.scale
 
   validate_model(model, tokenizer)
+  sys.exit()
   metadata = prepare_browser_chunks(model) # export weights to disk
 
   with Context(BEAM=3):
