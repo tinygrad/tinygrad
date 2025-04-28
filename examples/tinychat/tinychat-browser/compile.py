@@ -2,7 +2,7 @@ import os, json, hashlib, math, sys
 from extra.export_model import export_model
 from examples.llama3 import build_transformer, Tokenizer
 from tinygrad.nn.state import get_state_dict, load_state_dict
-from tinygrad import Device, Variable, Tensor, dtypes, TinyJit
+from tinygrad import Device, Variable, Tensor, dtypes
 from tinygrad.helpers import fetch, Context
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
 
@@ -86,7 +86,8 @@ def validate_model(model, tokenizer):
   toks += tokenizer.encode(prompt) + [tokenizer.special_tokens["<|eot_id|>"]]
   toks += [tokenizer.special_tokens["<|start_header_id|>"]] + tokenizer.encode("assistant") + [tokenizer.special_tokens["<|end_header_id|>"]] + tokenizer.encode("\n\n")
   start_pos = 0
-  run = TinyJit(model.forward)
+  #run = TinyJit(model.forward)
+  run = model.forward
   for tok in toks[:-1]:
     run(Tensor([[tok]]), Variable("start_pos", 0, model.max_context).bind(start_pos), 0.0, 0, 0.0, 0.0, 0.0).realize()
     start_pos += 1
