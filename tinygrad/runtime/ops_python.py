@@ -11,18 +11,31 @@ from tinygrad.ops import exec_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
 
-def _load(m, i, dtype=None):
+def _load(m, i):
   if i is None: return 0.0
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
-  return m[i] if dtype not in dtypes.fp8s else fp8_to_float(m[i], dtype)
+  return m[i]
 
-def load(inp, j=0, dtype=None):
-  if len(inp) == 2: return [_load(m, x+j if x is not None else None, dtype) if gate else default for (m,x,gate),default in zip(*inp)]
-  return [_load(m, x+j if x is not None else None, dtype) for m,x,_ in inp[0]]
+def load(inp, j=0):
+  if len(inp) == 2: return [_load(m, x+j if x is not None else None) if gate else default for (m,x,gate),default in zip(*inp)]
+  return [_load(m, x+j if x is not None else None) for m,x,_ in inp[0]]
 
-def _store(m, i, v, dtype=None):
+def _store(m, i, v):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
-  m[i] = v if dtype not in dtypes.fp8s else float_to_fp8(v, dtype)
+  m[i] = v
+
+def with_fp8_handling(values, dtypes_from, dtype_to, operation_fn):
+  def convert_values(data, convert_fn, dtype):
+      if isinstance(data, (list, tuple)): return [convert_values(item, convert_fn, dtype) for item in data]
+      return convert_fn(data, dtype)
+
+  if isinstance(dtypes_from, (list, tuple)) and any(dtype in dtypes.fp8s for dtype in dtypes_from):
+    assert len(dtypes_from) == len(values), f"expected {len(dtypes_from)} dtypes, got {len(values)}"
+    values = [convert_values(v, lambda x, dt: fp8_to_float(x, dt) if dt in dtypes.fp8s else x, dt) for v, dt in zip(values, dtypes_from)]
+  elif dtypes_from in dtypes.fp8s: values = convert_values(values, fp8_to_float, dtypes_from)
+  result = operation_fn(values)
+  if dtype_to in dtypes.fp8s: result = [float_to_fp8(x, dtype_to) for x in result]
+  return result
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
@@ -50,10 +63,10 @@ class PythonProgram:
           if dtp[1].count > 1:
             for j,val in enumerate(inp[1]):
               for (m,o,g),v in zip(inp[0], val):
-                if g: _store(m, o+j, v, dtp[0].base)
+                if g: _store(m, o+j, v)
           else:
             for (m,o,g),v in zip(*inp):
-              if g: _store(m, o, v, dtp[0].base)
+              if g: _store(m, o, v)
           i += 1
           continue
         if uop is Ops.ENDRANGE:
@@ -76,7 +89,7 @@ class PythonProgram:
         elif uop is Ops.SPECIAL:
           if arg[0][0] == 'g': ul[i] = [idxs[2-int(arg[0][-1])]] * warp_size
           elif arg[0][0] == 'l': ul[i] = [x[2-int(arg[0][-1])] for x in warp]
-        elif uop is Ops.CONST: ul[i] = [arg] * warp_size
+        elif uop is Ops.CONST: ul[i] = with_fp8_handling(arg, None, dtype, lambda x: [x] * warp_size)
         elif uop is Ops.DEFINE_ACC:
           ul[i] = [[inp[0][0][0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [inp[0][0]] * warp_size
         elif uop is Ops.INDEX:
@@ -102,17 +115,15 @@ class PythonProgram:
         elif uop is Ops.VECTORIZE: ul[i] = inp
         elif uop is Ops.BITCAST:
           assert (dtp[0].fmt and dtype.fmt) or (dtp[0] in dtypes.fp8s and dtype) or (dtype in dtypes.fp8s and dtp[0])
-          packed = struct.pack(f"{warp_size}{dtp[0].fmt}", *inp[0]) if dtp[0] not in dtypes.fp8s else \
-                   b''.join([float_to_fp8(z, dtp[0]).to_bytes(1, "little") for z in inp[0]])
-          ul[i] = list(struct.unpack(f"{warp_size}{dtype.fmt}", packed)) if dtype not in dtypes.fp8s else \
-                  [fp8_to_float(int(byte), dtype) for byte in packed]
+          packed = struct.pack(f"{warp_size}{dtp[0].fmt if dtp[0].fmt else 'B'}", *inp[0])
+          ul[i] = list(struct.unpack(f"{warp_size}{dtype.fmt if dtype.fmt else 'B'}", packed))
         elif uop is Ops.CAST:
-          ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
+          ul[i] = with_fp8_handling(inp[0], dtp[0], dtype, lambda vals: [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in vals])
         elif uop is Ops.LOAD:
           if dtype.count > 1:
-            ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j, dtype.base) for j in range(dtype.count)]
+            ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
           else:
-            ul[i] = load(inp, dtype=dtype.base)
+            ul[i] = load(inp)
         elif uop is Ops.ASSIGN:
           for j in range(len(inp[0])): inp[0][j] = inp[1][j]
           ul[i] = inp[0]
@@ -194,7 +205,7 @@ class PythonProgram:
         elif uop in GroupOp.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {uop}"
           assert all_same([dtype] + dtp) or uop in {Ops.CMPNE, Ops.CMPLT, Ops.WHERE}, f"dtype mismatch on {uop}"
-          ul[i] = [exec_alu(uop, dtype, p) for p in zip(*inp)]
+          ul[i] = with_fp8_handling(inp, dtp, dtype, lambda vals: [exec_alu(uop, dtype, p) for p in zip(*vals)])
         assert i in ul, (uop, dtype, idp, arg)
         i += 1
     return time.perf_counter() - st
