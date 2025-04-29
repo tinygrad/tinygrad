@@ -1,6 +1,6 @@
 import random
 from z3 import Int, Solver, sat
-from tinygrad import dtypes
+from tinygrad import dtypes, Device
 from tinygrad.ops import UOp, Ops, UPat, graph_rewrite, PatternMatcher
 from tinygrad.codegen.devectorizer import fast_idiv
 random.seed(42)
@@ -25,7 +25,7 @@ if __name__ == "__main__":
     u = UOp(Ops.DEFINE_VAR, dt, arg=('x', 0, random.randint(1, dtypes.max(dt))), src=())
     d = random.randint(1, max(1, u.arg[2]))
 
-    expr = fast_idiv(u, d)
+    expr = fast_idiv(Device[Device.DEFAULT].renderer, u, d)
     if expr is None: continue
     solver = Solver()
     solver.add(x>=u.arg[1], x<=u.arg[2])

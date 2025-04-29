@@ -158,7 +158,8 @@ def fast_idiv(ctx: Renderer|None, x: UOp, d: int) -> UOp|None:
   sign = 1 if d > 0 else -1
   m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
   if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
-  if ctx is not None and dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype, ctx.device):  # promo_lattice needs to return an unsigned type
+  # promo_lattice needs to return an unsigned type
+  if ctx is not None and dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype, ctx.device):
     if m * vmax <= dtypes.max(next_dtype): return sign * ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
   return None
 
