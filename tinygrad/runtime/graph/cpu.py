@@ -45,7 +45,8 @@ class CPUGraph(BatchedGraph):
     batched.append("}")
 
     prep = [renderer._render(cast(CompiledRunner, ji.prg).p.uops) for i,ji in enumerate(jit_cache)]
-    funcs = dedup(renderer._render_body(prep[i][0], *prep[i][1:], cast(CompiledRunner, ji.prg).p.uops, ["static"]) for i,ji in enumerate(jit_cache))
+    funcs = dedup(renderer._render_body(prep[i][0], *prep[i][1:], cast(CompiledRunner, ji.prg).p.uops,
+                                        ["static", "__attribute__((always_inline))"]) for i,ji in enumerate(jit_cache))
 
     defines = dedup(itertools.chain.from_iterable(renderer._render_defines(cast(CompiledRunner, ji.prg).p.uops) for ji in jit_cache))
     entry = renderer._render_entry("batched", [(t[0], (t[1], False)) for t in targs])
