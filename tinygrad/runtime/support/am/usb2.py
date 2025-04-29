@@ -1,6 +1,7 @@
 import ctypes, struct, time, os, dataclasses
 from tinygrad.runtime.autogen import libusb
 from tinygrad.helpers import DEBUG
+from tinygrad.runtime.support.hcq import MMIOInterface
 
 class USB3:
   def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=24, max_read_len:int=0x1000):
@@ -123,6 +124,13 @@ class ASMController:
     self.usb = USB3(0x2D01, 0x3666, 0x81, 0x83, 0x02, 0x04)
     self._cache: dict[int, int] = {}
 
+    import pickle
+    x = pickle.load(open("zpro.bin", "rb"))
+    if self.read(0x0, 1) != b'\x33':
+      self.write(0x0, x[:0x1000])
+      self.write(0x0, bytes([0x33]))
+      self.write(0xc422, b'\x02')
+
   def ops_to_cmd(self, ops:list[WriteOp|ReadOp], _add_req:callable):
     for op in ops:
       if isinstance(op, WriteOp):
@@ -209,3 +217,61 @@ class ASMController:
     return self.pcie_request(fmt_type, address, value, size)
 
   def pcie_mem_req(self, address, value=None, size=4): return self.pcie_request(0x40 if value is not None else 0x0, address, value, size)
+
+class USBMMIOInterface(MMIOInterface):
+  def __init__(self, usb, addr, size, fmt, pci_spc=True):
+    self.usb, self.addr, self.nbytes, self.fmt, self.pci_spc = usb, addr, size, fmt, pci_spc
+    self.el_sz = struct.calcsize(self.fmt)
+  def __getitem__(self, index):
+    if isinstance(index, slice): return self._read((index.start or 0) * self.el_sz, ((index.stop or len(self)) - (index.start or 0)) * self.el_sz)
+    if isinstance(index, int): return self._acc_one(index * self.el_sz, self.el_sz) if self.pci_spc else self._read(index * self.el_sz, self.el_sz)[0]
+  def __setitem__(self, index, val):
+    if isinstance(index, slice): return self._write((index.start or 0) * self.el_sz, ((index.stop or len(self)) - (index.start or 0)) * self.el_sz, val)
+    if isinstance(index, int): self._acc_one(index * self.el_sz, self.el_sz, val) if self.pci_spc else self._write(index * self.el_sz, self.el_sz, val)
+
+  def view(self, offset:int=0, size:int|None=None, fmt=None) -> MMIOInterface:
+    return USBMMIOInterface(self.usb, self.addr+offset, size or (self.nbytes - offset), fmt=fmt or self.fmt, pci_spc=self.pci_spc)
+
+  def _acc_size(self, sz): return next(x for x in [('I', 4), ('H', 2), ('B', 1)] if sz % x[1] == 0)
+  def _acc_one(self, off, sz, val=None):
+    upper = 0 if sz < 8 else self.usb.pcie_mem_req(self.addr + off + 4, val if val is None else (val >> 32), 4)
+    lower = self.usb.pcie_mem_req(self.addr + off, val if val is None else val & 0xffffffff, min(sz, 4)) 
+    if val is None: return lower | (upper << 32)
+
+  def _convert(self, raw:list[int], from_t, to_t) -> list[int]:
+    # normalize bytes → list of ints
+    vals = list(raw) if isinstance(raw, (bytes, bytearray)) else raw
+    if from_t == to_t:
+        return vals
+
+    # pack all from_t-values into one byte blob
+    packed = struct.pack('<' + from_t * len(vals), *vals)
+
+    # figure out how many to_t values fit in there
+    to_size = struct.calcsize(to_t)
+    count   = len(packed) // to_size
+
+    # unpack as count×to_t
+    return list(struct.unpack(f'<{count}{to_t}', packed))
+
+  def _read(self, offset, size):
+    if not self.pci_spc:
+      # print("read from non-pci space", hex(self.addr + offset), size)
+      return self._convert(self.usb.read(self.addr + offset, size), 'B', self.fmt)
+
+    acc, acc_size = self._acc_size(size)
+    return self._convert([self._acc_one(offset + i * acc_size, acc_size) for i in range(size // acc_size)], acc, self.fmt)
+
+  def _write(self, offset, _, data):
+    if not self.pci_spc:
+      if isinstance(data, int): data = struct.pack(self.fmt, data)
+
+      # print("write to non-pci space", hex(self.addr + offset), data)
+      return self.usb.write(self.addr + offset, bytes(data))
+
+    acc, acc_size = self._acc_size(len(data) * struct.calcsize(self.fmt))
+    per_slice = acc_size // self.el_sz
+    assert per_slice > 0
+
+    for i in range(len(data) // per_slice):
+      self._acc_one(offset + i * acc_size, acc_size, self._convert(data[i * per_slice:(i + 1) * per_slice], self.fmt, acc)[0])

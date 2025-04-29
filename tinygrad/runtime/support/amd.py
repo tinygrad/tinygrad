@@ -1,7 +1,9 @@
-import functools, importlib
+import functools, importlib, time
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.helpers import getbits
+from tinygrad.helpers import getbits, round_up
+from tinygrad.runtime.autogen import pci
+from tinygrad.runtime.support.am.usb2 import ASMController
 
 @dataclass(frozen=True)
 class AMDRegBase:
@@ -29,3 +31,40 @@ def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
     try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{name}_{version_prefix}{'_'.join(map(str, ver))}")
     except ImportError: pass
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")
+
+def setup_pci_bars(usb:ASMController, gpu_bus:int, mem_base:int, perf_mem_base:int):
+  try: is_cfg_ok = usb.pcie_cfg_req(pci.PCI_VENDOR_ID, bus=gpu_bus, dev=0, fn=0, size=2) == 0x1002
+  except RuntimeError as e:
+    for bus in range(gpu_bus):
+      time.sleep(0.4)
+      usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=gpu_bus, size=1)
+      usb.pcie_cfg_req(pci.PCI_SECONDARY_BUS, bus=bus, dev=0, fn=0, value=bus+1, size=1)
+      usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=max(0, bus-1), size=1)
+
+      usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=mem_base>>16, size=2)
+      usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xf000, size=2)
+      usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=perf_mem_base>>16, size=2)
+      usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=mem_base>>16, size=2)
+
+      usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_BUS_RESET, size=1)
+      time.sleep(0.1)
+      usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=0x0, size=1)
+      usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
+
+  bar_next_addr, bar_off, bars = [mem_base, perf_mem_base], 0, {}
+  for bar_id in range(4):
+    bar_cfg = usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4)
+    if (bar_cfg & pci.PCI_BASE_ADDRESS_SPACE) == pci.PCI_BASE_ADDRESS_SPACE_MEMORY:
+      usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=0xffffffff, size=4)
+      bar_size = 0xffffffff - (usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4) & 0xFFFFFFF0) + 1
+      if bar_id in {0, 1, 3}:
+        is_pref = int(bool(bar_cfg & pci.PCI_BASE_ADDRESS_MEM_PREFETCH))
+        usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=bar_next_addr[is_pref], size=4)
+        bars[bar_off // 4] = (bar_next_addr[is_pref], bar_size)
+        bar_next_addr[is_pref] += round_up(bar_size, 2 << 20)
+    if bar_cfg & pci.PCI_BASE_ADDRESS_SPACE == pci.PCI_BASE_ADDRESS_MEM_TYPE_64:
+      usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=0x0, size=4)
+    bar_off += 8 if bar_cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64 else 4
+
+  usb.pcie_cfg_req(pci.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
+  return bars

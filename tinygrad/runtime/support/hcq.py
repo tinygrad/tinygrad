@@ -212,14 +212,14 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
 
 class HCQSignal(Generic[DeviceType]):
   def __init__(self, base_addr:sint|None=None, value:int=0, dev_t:Type[DeviceType]|None=None, timeline_for_device:DeviceType|None=None,
-               timestamp_divider=1, value_off=0, timestamp_off=8, interface_t:Type[MMIOInterface]=MMIOInterface):
+               timestamp_divider=1, value_off=0, timestamp_off=8, mmio_iface_t:Type[MMIOInterface]=MMIOInterface):
     self.base_addr = dev_t._alloc_signal_addr() if dev_t is not None and base_addr is None else base_addr
     self.value_addr, self.timestamp_addr, self.dev_t = self.base_addr+value_off, self.base_addr+timestamp_off, dev_t
     self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
     self.timeline_for_device:DeviceType|None = timeline_for_device
 
     if isinstance(self.base_addr, int):
-      self.value_mv, self.timestamp_mv = interface_t(self.value_addr, 8, fmt='Q'), interface_t(self.timestamp_addr, 8, fmt='Q')
+      self.value_mv, self.timestamp_mv = mmio_iface_t(self.value_addr, 8, fmt='Q'), mmio_iface_t(self.timestamp_addr, 8, fmt='Q')
       self.value_mv[0] = value
 
   def __del__(self):
@@ -332,13 +332,13 @@ class HCQProgram(Generic[DeviceType]):
     kernargs = self.fill_kernargs(bufs, vals)
     q = self.dev.hw_compute_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1).memory_barrier()
 
-    # with hcq_profile(self.dev, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
-    q.exec(self, kernargs, global_size, local_size)
+    with hcq_profile(self.dev, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
+      q.exec(self, kernargs, global_size, local_size)
 
     q.signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 
     if wait: self.dev.synchronize()
-    return 1#(float(sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
+    return (float(sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
 
 class HCQCompiled(Compiled, Generic[SignalType]):
   """
@@ -349,7 +349,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   signal_pool: ClassVar[list[int]] = []
 
   def __init__(self, device:str, allocator:HCQAllocatorBase, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
-               comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None):
+               comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None,
+               kernargs_size=(32 << 20)):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
 
     from tinygrad.runtime.graph.hcq import HCQGraph
@@ -361,11 +362,11 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
-    # self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
-    # self._shadow_timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
+    self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
+    self._shadow_timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
     self.sig_prof_records:list[tuple[HCQSignal, HCQSignal, str, bool]] = []
 
-    self.kernargs_page:HCQBuffer = self.allocator.alloc(8 << 10, BufferSpec(cpu_access=True))
+    self.kernargs_page:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True))
     self.kernargs_allocator:BumpAllocator = BumpAllocator(self.kernargs_page.size, base=cast(int, self.kernargs_page.va_addr), wrap=True)
 
   def synchronize(self):
@@ -430,7 +431,6 @@ class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):
     self.dev:DeviceType = dev
     if not skip_alloc: self.b = [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
-    self.int_buf = (ctypes.c_uint8 * 4096)()
     super().__init__()
 
   def map(self, buf:HCQBuffer): pass
@@ -441,44 +441,35 @@ class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):
 class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
   def _copyin(self, dest:HCQBuffer, src:memoryview):
     assert self.dev.hw_copy_queue_t is not None
-    with Timing():
-      with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"CPU -> {self.dev.device}", enabled=PROFILE):
-        for i in range(0, src.nbytes, self.b[0].size):
-          self.b_next = (self.b_next + 1) % len(self.b)
-          self.dev.timeline_signal.wait(self.b_timeline[self.b_next])
-          # ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
-          lsize = min(self.b[self.b_next].size, src.nbytes-i)
+    with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"CPU -> {self.dev.device}", enabled=PROFILE):
+      for i in range(0, src.nbytes, self.b[0].size):
+        self.b_next = (self.b_next + 1) % len(self.b)
+        self.dev.timeline_signal.wait(self.b_timeline[self.b_next])
+        # ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
+        lsize = min(self.b[self.b_next].size, src.nbytes-i)
 
-          self.dev.dev_iface.usb.scsi_write(src[i:i+lsize])
+        self.dev.dev_iface.usb.scsi_write(src[i:i+lsize])
+        self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
+                                  .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
+                                  .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+        self.b_timeline[self.b_next] = self.dev.timeline_value - 1
 
-          # with Timing(prefix="tt"):
-          #   self.int_buf[:lsize] = src[i:i+lsize]
-          #   self.dev.dev_iface.usb.scsi_write(0xeaeb, self.int_buf)
-          #   self.dev.dev_iface.usb.write(0x171, b'\xff\xff\xff')
-          #   self.dev.dev_iface.usb.write(0xce6e, b'\x00\x00')
+  def copy_from_disk(self, dest:HCQBuffer, src, size):
+    def _get_temp_buf():
+      # Check if the next buffer is safe to be used (its signal has passed) and reserve it.
+      if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.dev.timeline_signal.value:
+        self.b_timeline[(self.b_next + 1) % len(self.b)], self.b_next = (1 << 64), (self.b_next + 1) % len(self.b)
+        return (self.b[self.b_next].va_addr, self.b_next)
+      return None
 
-          with Timing(prefix="pp"):
-            self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                                      .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
-                                      .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
-          self.b_timeline[self.b_next] = self.dev.timeline_value - 1
-
-  # def copy_from_disk(self, dest:HCQBuffer, src, size):
-  #   def _get_temp_buf():
-  #     # Check if the next buffer is safe to be used (its signal has passed) and reserve it.
-  #     if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.dev.timeline_signal.value:
-  #       self.b_timeline[(self.b_next + 1) % len(self.b)], self.b_next = (1 << 64), (self.b_next + 1) % len(self.b)
-  #       return (self.b[self.b_next].va_addr, self.b_next)
-  #     return None
-
-  #   assert self.dev.hw_copy_queue_t is not None
-  #   with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"DISK -> {self.dev.device}", enabled=PROFILE):
-  #     for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
-  #       self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-  #                                 .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
-  #                                 .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
-  #       self.b_timeline[batch_info[1]] = self.dev.timeline_value
-  #       self.dev.timeline_value += 1
+    assert self.dev.hw_copy_queue_t is not None
+    with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"DISK -> {self.dev.device}", enabled=PROFILE):
+      for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
+        self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
+                                  .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
+                                  .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
+        self.b_timeline[batch_info[1]] = self.dev.timeline_value
+        self.dev.timeline_value += 1
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
