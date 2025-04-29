@@ -297,6 +297,7 @@ async function main() {
       const inner = ul.appendChild(document.createElement("ul"));
       if (i === currentKernel && j === currentUOp) inner.className = "active";
       inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]} - ${u.match_count}`;
+      inner.style.marginLeft = `${8*u.depth}px`;
       inner.style.display = i === currentKernel && expandKernel ? "block" : "none";
       inner.onclick = (e) => {
         e.stopPropagation();
