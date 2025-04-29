@@ -148,12 +148,11 @@ class CapturedJit(Generic[ReturnType]):
   extra_view_inputs: list[tuple[int, int, str, int, DType]]
   expected_names: list[Union[int, str]]
   expected_st_vars_dtype_device: list[tuple[ShapeTracker, tuple[Variable, ...], DType, str]]
-  real_at_first_capture_bufs: set[Buffer]
 
   def __reduce__(self):
     # TODO: free_intermediates here? replan_buffers_memory_layout here?
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
-                            self.expected_names, self.expected_st_vars_dtype_device, self.real_at_first_capture_bufs)
+                            self.expected_names, self.expected_st_vars_dtype_device)
 
   def __post_init__(self):
     self._jit_cache: list[ExecItem] = self.jit_cache
@@ -228,8 +227,6 @@ class TinyJit(Generic[ReturnType]):
     self.optimize = optimize
 
   def add_buffer(self, b:Buffer) -> Buffer:
-    if b not in self._seen_bufs and b.is_allocated(): self._real_at_first_capture_bufs.add(b)
-    self._seen_bufs.add(b)
     if found:=self._buffer_replace.get(b, None): return found
     if b.is_allocated() or b.lb_refcount > 0: return b
     if b._base is not None:
@@ -272,19 +269,16 @@ class TinyJit(Generic[ReturnType]):
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._jit_cache: list[ExecItem] = []
       self._buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
-      self._seen_bufs: set[Buffer] = set()
-      self._real_at_first_capture_bufs: set[Buffer] = set()
       # TODO: should we always disable the memory planner here? it must be off for prune
       with Context(BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=int(self.prune)):
         capturing.append(self)
         try:
           ret = self.fxn(*args, **kwargs)
           if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
-          noopt_buffers = {t.lazydata.base.realized for t in params}
         except Exception as e: raise e
         finally: capturing.clear()
-      jit_cache, real_at_first_capture_bufs = self._jit_cache, self._real_at_first_capture_bufs
-      del self._buffer_replace, self._jit_cache, self._seen_bufs, self._real_at_first_capture_bufs
+      jit_cache = self._jit_cache
+      del self._buffer_replace, self._jit_cache
       assert len(jit_cache), "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_buffers)} inputs")
 
@@ -311,9 +305,7 @@ class TinyJit(Generic[ReturnType]):
 
       # memory planning (optional)
       # Exclude buffers involved in transfer ops to preserve parallelism.
-      noopt_buffers.update(b for ji in jit_cache if isinstance(ji.prg, BufferCopy) for b in ji.bufs)
-      noopt_buffers.update(real_at_first_capture_bufs)
-      if self.prune: noopt_buffers.update(b for ji in onetime for b in ji.bufs)
+      noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
       assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
       jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
 
@@ -321,7 +313,7 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
 
       # set this for next run
-      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, st_vars_dtype_device, real_at_first_capture_bufs)
+      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, st_vars_dtype_device)
       if self.optimize: self.captured.replan_buffers_memory_layout()
     elif self.cnt >= 2:
       # jit exec
