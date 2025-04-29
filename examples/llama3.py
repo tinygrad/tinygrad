@@ -173,9 +173,9 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dt
   else:
     weights = load(str(model_path))
   if "model.embed_tokens.weight" in weights:
-    weights = convert_from_huggingface(weights, model, MODEL_PARAMS[model_size]["args"]["n_heads"], MODEL_PARAMS[model_size]["args"]["n_kv_heads"])
+    weights = convert_from_huggingface(weights, MODEL_PARAMS[model_size]["args"]["n_layers"], MODEL_PARAMS[model_size]["args"]["n_heads"], MODEL_PARAMS[model_size]["args"]["n_kv_heads"])
   elif "token_embd.weight" in weights:
-    weights = convert_from_gguf(weights, model)
+    weights = convert_from_gguf(weights, MODEL_PARAMS[model_size]["args"]["n_layers"])
   weights = fix_bf16(weights)
 
   with Context(BEAM=0):
