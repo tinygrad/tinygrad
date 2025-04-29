@@ -3,7 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, round_up
 from tinygrad.runtime.autogen import pci
-from tinygrad.runtime.support.am.usb2 import ASMController
+from tinygrad.runtime.support.usb import ASMController
 
 @dataclass(frozen=True)
 class AMDRegBase:

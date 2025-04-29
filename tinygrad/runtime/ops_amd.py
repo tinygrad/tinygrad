@@ -15,8 +15,7 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
-# from tinygrad.runtime.support.am.usb import USBConnector
-from tinygrad.runtime.support.am.usb2 import ASMController, USBMMIOInterface
+from tinygrad.runtime.support.usb import ASMController, USBMMIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
 from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module, setup_pci_bars
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
