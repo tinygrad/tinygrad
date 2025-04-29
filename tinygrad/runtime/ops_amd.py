@@ -440,7 +440,6 @@ class AMDProgram(HCQProgram):
     self.name, self.lib = name, lib
     image, sections, _ = elf_loader(self.lib)
     self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), BufferSpec(cpu_access=True, nolru=True))
-    # ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
     dev.allocator._copyin(self.lib_gpu, image)
     rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
     text_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".text"), -1)
@@ -739,7 +738,6 @@ class PCIIface:
     bar_info = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
     self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
-    # TODO: usbgpu
     self.adev = AMDev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2, fmt='Q'), self._map_pci_range(5, fmt='I'))
     self.ip_versions = self.adev.ip_ver
     self.ip_offsets = {hwip: tuple(instances[0]) for hwip,instances in self.adev.regs_offset.items()}
@@ -756,7 +754,6 @@ class PCIIface:
       'simd_arrays_per_engine': self.adev.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.adev.gc_info.gc_lds_size}
 
   def _map_pci_range(self, bar, off=0, addr=0, size=None, fmt='B'):
-    # TODO: usbgpu
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     assert loc != 0xffffffffffffffff, f"Failed to mmap {size} bytes at {hex(addr)}"
@@ -827,22 +824,17 @@ class USBIface(PCIIface):
     self.props = {'simd_count': 64, 'simd_per_cu': 2, 'array_count': 4, 'gfx_target_version': 110002, 'max_slots_scratch_cu': 32,
       'max_waves_per_simd': 16, 'simd_arrays_per_engine': 2, 'lds_size_in_kb': 64}
 
-    vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
-    self.system_mapping = self.adev.mm.map_range(vaddr, 0x1000, [(0x200000, 0x1000)], system=True, snooped=False, uncached=True)
-    self.system_i = USBMMIOInterface(self.usb, 0xf000, 0x1000, fmt='B', pci_spc=False)
+    # vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
+    # self.system_mapping = self.adev.mm.map_range(vaddr, 0x1000, [(0x200000, 0x1000)], system=True, snooped=False, uncached=True)
+    # self.system_i = USBMMIOInterface(self.usb, 0xf000, 0x1000, fmt='B', pci_spc=False)
 
-    vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
-    self.queues_mapping = self.adev.mm.map_range(vaddr, 0x1000, [(0x820000, 0x1000)], system=True, snooped=False, uncached=True)
-    self.queue_i = USBMMIOInterface(self.usb, 0xa000, 0x1000, fmt='B', pci_spc=False)
+    # vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
+    # self.queues_mapping = self.adev.mm.map_range(vaddr, 0x1000, [(0x820000, 0x1000)], system=True, snooped=False, uncached=True)
+    # self.queue_i = USBMMIOInterface(self.usb, 0xa000, 0x1000, fmt='B', pci_spc=False)
   
-    # self.usb.write(0xa000, bytes([0x0] * 1000))
-    # with Timing():
-    #   self.queue_i.view(0x400, 0x400, fmt='B')[:1] = array.array('B', [0xde] * 1)
-    # exit(0)
-
-    vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
-    self.signals_mapping = self.adev.mm.map_range(vaddr, 0x1000, [(0x800000, 0x1000)], system=True, snooped=False, uncached=True)
-    self.sig_i = USBMMIOInterface(self.usb, 0xb000, 0x200, fmt='B', pci_spc=False)
+    # vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
+    # self.signals_mapping = self.adev.mm.map_range(vaddr, 0x1000, [(0x800000, 0x1000)], system=True, snooped=False, uncached=True)
+    # self.sig_i = USBMMIOInterface(self.usb, 0xb000, 0x200, fmt='B', pci_spc=False)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
@@ -950,7 +942,7 @@ class AMDDevice(HCQCompiled):
       AMDComputeQueue(self).sqtt_start(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
-    self.ring = ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
+    ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
     gart = self.dev_iface.alloc(0x1000, uncached=True, cpu_access=True)
     eop_buffer = self.dev_iface.alloc(eop_buffer_size) if eop_buffer_size else None
     cwsr_buffer_size = round_up((ctx_save_restore_size + debug_memory_size) * self.dev_iface.props.get('num_xcc', 1), mmap.PAGESIZE)
