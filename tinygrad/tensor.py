@@ -1868,7 +1868,7 @@ class Tensor(SimpleMathTrait):
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
+  def softmax(self, axis=-1, dtype:DTypeLike|None=None, _single_kernel=getenv("SINGLE_KERNEL_SOFTMAX")) -> Tensor:
     """
     Applies the softmax function to the tensor along the specified axis.
 
@@ -1888,7 +1888,7 @@ class Tensor(SimpleMathTrait):
     print(t.softmax(axis=0).numpy())
     ```
     """
-    if getenv("SINGLE_KERNEL_SOFTMAX"):
+    if _single_kernel:
       _, e, ss = self.contiguous()._softmax(axis, dtype)
       return e.div(ss).fuse()
     _, e, ss = self._softmax(axis, dtype)

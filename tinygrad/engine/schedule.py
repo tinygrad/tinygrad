@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from collections import deque, defaultdict
 from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
 from tinygrad.device import Buffer
-from tinygrad.helpers import Metadata, DEBUG, unwrap
+from tinygrad.helpers import Metadata, DEBUG, unwrap, merge_dicts
 
 # **** ScheduleItem return type
 
@@ -14,16 +14,16 @@ class ScheduleItem:
 
 # **** unbind Variables
 
-def unbind_view(ctx:dict[Variable, int], x:UOp):
+def unbind_view(ctx:list[dict[Variable, int]], x:UOp):
   st = unwrap(x.st).simplify()
   if any(x.op is Ops.BIND for x in st.vars()):
     st, var_vals = st.unbind()
-    ctx.update(var_vals)
+    ctx.append(var_vals)
   return x.replace(arg=st) if st != x.st else None
 
-def unbind_bind(ctx:dict[Variable, int], x:UOp):
+def unbind_bind(ctx:list[dict[Variable, int]], x:UOp):
   var, val = x.unbind()
-  ctx[var.replace(src=())] = val
+  ctx.append({var.replace(src=()):val})
   return var
 
 pm_unbind = PatternMatcher([
@@ -53,7 +53,9 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   while queue:
     k = queue.popleft()
     # unbind var_vals from the kernel
-    ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=var_vals)
+    local_var_vals: list[dict[Variable, int]] = []
+    ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=local_var_vals)
+    var_vals = merge_dicts([var_vals, *local_var_vals])
     # create subbuffers if needed
     if ast.op is Ops.BUFFER_VIEW: buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
     schedule.append(ScheduleItem(ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))

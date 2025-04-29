@@ -352,7 +352,7 @@ def reduce_rangeless(red:UOp):
   ret = red.src[0]
   if red.arg is Ops.ADD:
     for r in red.src[1:]:
-      ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+      ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
 def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
@@ -367,9 +367,9 @@ pm_reduce_collapse = PatternMatcher([
   ((UPat.var("x")+UPat.var("y")) != UPat.var("c"), lambda x,y,c: (x != (c-y)) if no_range(y) and no_range(c) else None),
   # fold the range
   ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat(Ops.CONST, arg=0), UPat.cvar("val")).reduce(arg=Ops.ADD, allow_any_len=True),
-   lambda r,cut,val: (r.src[1]-cut).maximum(0).minimum(r.src[1]-r.src[0]).cast(val.dtype) * val),
+   lambda r,cut,val: (r.src[0]-cut).maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
   ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat.cvar("val"), 0).reduce(arg=Ops.ADD, allow_any_len=True),
-   lambda r,cut,val: (cut-r.src[0]).maximum(0).minimum(r.src[1]-r.src[0]).cast(val.dtype) * val),
+   lambda r,cut,val: cut.maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
   # devectorize REDUCE
   (UPat(Ops.VECTORIZE, name="inp").reduce(name="red", allow_any_len=True), no_vectorized_reduce),
   # REDUCE on ADD
@@ -385,7 +385,7 @@ pm_reduce_collapse = PatternMatcher([
    lambda buf,idx,gate: buf.index(idx, gate.logical_not()).load()),
   # INDEX on RANGE / gated RANGE
   (UPat.var("buf").index(UPat.var("expr"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted())),
-   lambda buf,r,idx,expr: buf.index(expr.substitute({r:idx.cast(r.dtype)}), (idx.cast(r.dtype) >= r.src[0]) & (idx.cast(r.dtype) < r.src[1]))),
+   lambda buf,r,idx,expr: buf.index(expr.substitute({r:idx.cast(r.dtype)}), (idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0]))),
   # index/load. TODO: this is more aggressive than needed
   (UPat((Ops.INDEX, Ops.LOAD), name="alu"), no_vectorized_alu),
   # AND on WHERE
@@ -416,7 +416,7 @@ def reduce_unparented(red:UOp):
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
   if red.arg is Ops.ADD:
-    for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+    for r in reduce_unparented: ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
 pm_reduce = PatternMatcher([
