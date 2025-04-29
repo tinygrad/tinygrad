@@ -85,6 +85,10 @@ jobs:
       run: |
         python3.11 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing --quantize int8 | tee llama_int8.txt
         python3.11 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing --quantize nf4 | tee llama_nf4.txt
+    - name: Run quantized LLaMA3
+      run: |
+        python3.11 examples/llama3.py --size 8B --temperature 0 --benchmark --quantize int8 | tee llama3_int8.txt
+        python3.11 examples/llama3.py --size 8B --temperature 0 --benchmark --quantize nf4 | tee llama3_nf4.txt
     #- name: Run LLaMA 7B on 4 (virtual) GPUs
     #  run: python3.11 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run GPT2
@@ -118,6 +122,8 @@ jobs:
           llama_beam.txt
           llama_int8.txt
           llama_nf4.txt
+          llama3_int8.txt
+          llama3_nf4.txt
           llama_four_gpu.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
