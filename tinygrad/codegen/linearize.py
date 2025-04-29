@@ -11,11 +11,13 @@ from tinygrad.spec import type_verify
 def block_reorder(lst:list[UOp]) -> list[UOp]:
   in_this_block = set(lst)
   local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
-  in_degree: defaultdict[UOp, int] = defaultdict(int)
+  in_degree:dict[UOp, int] = {}
   priorities:dict[UOp, int] = {}
 
   # get local children and assign priorities
+  # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
+    in_degree[u] = 0
     for s in u.src:
       if s in in_this_block:
         local_children[s].append(u)
@@ -26,21 +28,17 @@ def block_reorder(lst:list[UOp]) -> list[UOp]:
     if u.op is Ops.BARRIER: priority.append(-1500)
     priorities[u] = min(priority)
 
-  # placement queue
-  queue:list[tuple[int, tuple, UOp]] = []
-  def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
+  # number the uops in "ideal" order
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (priorities[x],)+x.tuplize))}
 
-  # place the first ones that don't have deps
-  for u in lst:
-    if u not in in_degree: push(u)
-
+  # then force then to be toposorted in as close to the ideal order as possible
+  heapq.heapify(heap:=[(nkey[u],u) for u in lst if in_degree[u] == 0])
   newlst = []
-  while queue:
-    _,_,x = heapq.heappop(queue)
-    newlst.append(x)
-    for u in local_children[x]:
-      in_degree[u] -= 1
-      if in_degree[u] == 0: push(u)
+  while heap:
+    newlst.append(u:=heapq.heappop(heap)[1])
+    for v in local_children[u]:
+      in_degree[v] -= 1
+      if in_degree[v] == 0: heapq.heappush(heap, (nkey[v],v))
 
   assert len(newlst) == len(lst), f"len mismatch {len(newlst)} != {len(lst)}"
   return newlst
@@ -80,7 +78,7 @@ class BlockContext:
   def from_sink(sink:UOp) -> BlockContext:
     # get children and all block contexts
     ctx = BlockContext({}, {}, {})
-    for u in sink.toposort:
+    for u in sink.toposort():
       this_block_ctx: list[UOp] = []
       ctx.child_count[u] = 0
 
@@ -111,13 +109,13 @@ class BlockContext:
 
 DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}
 
-def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp, ...]):
+def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp, ...], cnt:int=1) -> UOp:
   ends_to_add = [z for z in new_ctx if z not in current_ctx]
   while len(ends_to_add):
     r:UOp = ends_to_add.pop(-1)
     new_ctx = tuple([z for z in new_ctx if z is not r])
     end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
-    base_block = UOp(Ops.BLOCKEND, src=(base_block,), arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=1))
+    base_block = UOp(Ops.BLOCKEND, src=(base_block,)*cnt, arg=BasicBlock2((end_uop,), tuple(new_ctx), end=r, cnt=cnt))
   return base_block
 
 def make_block_bottom_up(ctx:BlockContext, x:UOp):
@@ -154,7 +152,7 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
 
   # add unmergables to sources
   srcs = []
-  for u,cnt in unmergable.items(): srcs += [add_blockends(u, ctx.block_ctxs[u], current_ctx)]*cnt
+  for u,cnt in unmergable.items(): srcs += [add_blockends(u, ctx.block_ctxs[u], current_ctx, cnt=cnt)]*cnt
 
   # add blockseeds, with blockends as needed
   for (new_ctx, new_child_ctx), v in blockseeds.items():
@@ -223,20 +221,21 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
 
   # combine matching BLOCKENDS, the keys of this dictionary are the RANGE UOps, values are the BLOCKENDs
   blockends_to_arg: dict[UOp, list[UOp]] = {}
-  for be in sink.toposort:
+  for be in sink.toposort():
     if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg.end, []).append(be)
   new_forks = {}
   for k,v in blockends_to_arg.items():
     # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
     if len(v) > 1:
-      bb = BasicBlock2(v[0].arg.lst, _sort_ctx(flatten([y.arg.ctx for y in v])), k, cnt=len(v))
+      bb = BasicBlock2(v[0].arg.lst, _sort_ctx(flatten([y.arg.ctx for y in v])), k, cnt=sum(y.arg.cnt for y in v))
       out = UOp(Ops.BLOCKEND, src=tuple(flatten([x.src for x in v])), arg=bb)
+      # NOTE: bb.ctx != u.arg.ctx can cause problems here
       for u in v: new_forks[u] = out
   sink = sink.substitute(new_forks)
 
   # merge blockends
   sink = graph_rewrite(sink, block_merge, name="Linearizer: Merge Blocks")
-  assert sink.op is Ops.BLOCK and all(x.op in DONT_PLACE_IN_BLOCK for x in sink.src)
+  if sink.op is not Ops.BLOCK or not all(x.op in DONT_PLACE_IN_BLOCK for x in sink.src): raise RuntimeError("linearize failure")
 
   # place the early things
   lst = sorted(dedup(sink.src), key=lambda x: x.tuplize) + list(sink.arg.lst)

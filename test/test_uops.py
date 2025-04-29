@@ -252,7 +252,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     store = UOp(Ops.STORE, dtypes.void, (idx, val))
     uops = to_uops_list([store])
-    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     if_uop = next(u for u in uops if u.op is Ops.IF)
     endif = next(u for u in uops if u.op is Ops.ENDIF)
     assert endif.src[0] is if_uop
@@ -270,7 +270,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
-    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     if_uop = next(u for u in uops if u.op is Ops.IF)
     endif = next(u for u in uops if u.op is Ops.ENDIF)
     assert endif.src[0] is if_uop
@@ -290,7 +290,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
-    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     ifs = [u for u in uops if u.op is Ops.IF]
     endifs = [u for u in uops if u.op is Ops.ENDIF]
     self.assertEqual(len(ifs), 1)
@@ -539,7 +539,7 @@ class TestShapeSpec(unittest.TestCase):
     a = Tensor.ones((1, 1)).pad(((1, 1), (1, 1)))
     ast = a.contiguous().schedule()[0].ast
     valid_pattern = UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat.cvar(), UPat.cvar()))
-    valid_ternary = [x for x in ast.toposort if valid_pattern.match(x, {})][0]
+    valid_ternary = [x for x in ast.toposort() if valid_pattern.match(x, {})][0]
     # the WHERE outputs a contiguous (3, 3)
     self.assertEqual(valid_ternary.st, ShapeTracker.from_shape((3, 3)))
     valid, x, y = valid_ternary.src

@@ -73,10 +73,10 @@ class TestGC(unittest.TestCase):
     x = Tensor.ones(4,4).contiguous().realize()+1
     self.assertEqual(bufs_allocated()-init, 1)
     # try commenting this part out, it's green!
-    x.lazydata.toposort
+    x.lazydata.toposort()
     del x
     if bufs_allocated()-init != 0:
-      print(inspect.getclosurevars(UOp.toposort.fget))
+      print(inspect.getclosurevars(UOp.toposort().fget))
       raise AssertionError(f"never gced {[x for x in gc.get_objects() if isinstance(x, Buffer)]}")
 
   def test_buffer_refcount(self):

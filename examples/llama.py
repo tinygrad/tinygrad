@@ -211,7 +211,7 @@ class LLaMa:
     else:
       weights = load(str(model_path))
     if "model.embed_tokens.weight" in weights:
-      weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
+      weights = convert_from_huggingface(weights, params["args"]["n_layers"], params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
 
     weights = fix_bf16(weights)
 
