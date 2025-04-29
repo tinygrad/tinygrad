@@ -31,6 +31,7 @@ class GraphRewriteMetadata(TypedDict):
   code_line: str                         # source code calling graph_rewrite
   kernel_code: str|None                  # optionally render the final kernel code
   name: str|None                         # optional name of the rewrite
+  depth: int                             # depth if it's a subrewrite
 
 @functools.cache
 def render_program(k:Kernel): return k.opts.render(k.uops)
