@@ -418,6 +418,7 @@ def do_fusion(x:UOp):
     if is_contiguous:=(x.op is Ops.CONTIGUOUS): found_contiguous[x] = x.replace(src=(UOp(Ops.VIEW, arg=x.st),))
     return not is_contiguous
   x.toposort(gate=gate_contiguous)
+  del gate_contiguous
   return graph_rewrite(x.substitute(found_contiguous), pm_fuse, name="local fusion").substitute({v:k for k,v in found_contiguous.items()})
 do_fuse = PatternMatcher([(UPat(Ops.FUSE, name="x"), do_fusion),])
 
