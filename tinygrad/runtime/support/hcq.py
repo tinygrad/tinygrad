@@ -173,13 +173,13 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     """
 
   def bind_args_state(self, args_state:ArgsStateType):
-    for vals, mmio_iface, fmt in args_state.bind_data: self.bind_sints_to_mmioiface(*vals, mmio_iface=mmio_iface, fmt=fmt)
+    for vals, mem, fmt in args_state.bind_data: self.bind_sints_to_mem(*vals, mem=mem, fmt=fmt)
 
-  def bind_sints(self, *vals:sint, mmio_iface:MMIOInterface, struct_t:ctypes.Structure, start_field:str, fmt, mask:int|None=None):
-    self.bind_sints_to_mmioiface(*vals, mmio_iface=mmio_iface, fmt=fmt, mask=mask, offset=getattr(type(struct), start_field).offset)
+  def bind_sints(self, *vals:sint, mem:MMIOInterface, struct_t:ctypes.Structure, start_field:str, fmt, mask:int|None=None):
+    self.bind_sints_to_mem(*vals, mem=mem, fmt=fmt, mask=mask, offset=getattr(struct_t, start_field).offset)
 
-  def bind_sints_to_mmioiface(self, *vals:sint, mmio_iface:MMIOInterface, fmt, mask:int|None=None, offset:int=0):
-    mv = mmio_iface.view(offset=offset, size=len(vals)*8, fmt=fmt)
+  def bind_sints_to_mem(self, *vals:sint, mem:MMIOInterface, fmt, mask:int|None=None, offset:int=0):
+    mv = mem.view(offset=offset, size=len(vals)*8, fmt=fmt)
     for i, val in enumerate(vals):
       if isinstance(val, int): mv[i] = val if mask is None else ((mv[i] & ~mask) | val)
       else: self.mv_sints.append((mv, i, self._new_sym(val), mask))
@@ -291,7 +291,7 @@ class CLikeArgsState(HCQArgsState[ProgramType]):
   def __init__(self, buf:HCQBuffer, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint, ...]=(), prefix:list[int]|None=None):
     super().__init__(buf, prg, bufs, vals=vals)
 
-    if prefix is not None: to_mv(self.buf, len(prefix) * 4).cast('I')[:] = array.array('I', prefix)
+    if prefix is not None: self.buf.view.view(size=len(prefix) * 4, fmt='I')[:] = array.array('I', prefix)
 
     self.bind_sints_to_buf(*[b.va_addr for b in bufs], buf=self.buf, fmt='Q', offset=len(prefix or []) * 4)
     self.bind_sints_to_buf(*vals, buf=self.buf, fmt='I', offset=len(prefix or []) * 4 + len(bufs) * 8)
