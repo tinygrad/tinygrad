@@ -152,13 +152,14 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
       return m, s
   assert False
 
-def fast_idiv(x: UOp, d: int) -> UOp|None:
+def fast_idiv(ctx: Renderer|None, x: UOp, d: int) -> UOp|None:
   # idiv is truncated division, but arithmatic shift is floored division, so can only do non-negative numbers!
   if x.vmin<0: return None
   sign = 1 if d > 0 else -1
   m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
   if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
-  if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype):  # promo_lattice needs to return an unsigned type
+  # promo_lattice needs to return an unsigned type
+  if ctx is not None and dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype, ctx.device):
     if m * vmax <= dtypes.max(next_dtype): return sign * ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
   return None
 
@@ -178,7 +179,7 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
     pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
     pat += [(UPat.var("x", dtypes.sints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None)]
     if not getenv("DISABLE_FAST_IDIV"):
-      pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda x, d: fast_idiv(x, d.arg))]
+      pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
       # TODO: This breaks validate_index because of the way _min_max is calucalted on uops
       # pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("d"), lambda x, d: x - d*f if (f:=fast_idiv(x, d.arg)) is not None else None)]
   if Ops.NEG in ops:
@@ -450,5 +451,5 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)
 
   # final rules for the renderer (without sym)
-  sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
+  sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher, ctx=opts)
   return sink
