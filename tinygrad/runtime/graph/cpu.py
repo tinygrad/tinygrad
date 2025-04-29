@@ -14,8 +14,8 @@ class BatchedGraph(GraphRunner, Generic[T]):
   def __init__(self, device, jit_cache: list[ExecItem], input_rawbufs: list[Buffer], var_vals: dict[Variable, int]):
     renderer_class = get_typing_args(getattr(self, "__orig_bases__")[1])[0]
     if not issubclass(type(device.renderer), renderer_class) and not isinstance(device.renderer, renderer_class): raise GraphException
-    super().__init__(jit_cache, input_rawbufs, var_vals)
 
+    super().__init__(jit_cache, input_rawbufs, var_vals)
     self.base_bufs = dedup(b.base for ji in jit_cache for b in ji.bufs if b is not None and b not in input_rawbufs)
     self.base_rawbufs = [b._buf for b in self.base_bufs]
 
@@ -45,7 +45,6 @@ class CPUGraph(BatchedGraph[ClangRenderer]):
     prep = [renderer._render(cast(CompiledRunner, ji.prg).p.uops or []) for i,ji in enumerate(jit_cache)]
     funcs = dedup(renderer._render_body(prep[i][0], *prep[i][1:], cast(CompiledRunner, ji.prg).p.uops,
                                         ["static", "__attribute__((always_inline))"]) for i,ji in enumerate(jit_cache))
-
     defines = dedup(itertools.chain.from_iterable(renderer._render_defines(cast(CompiledRunner, ji.prg).p.uops) for ji in jit_cache))
     entry = renderer._render_entry("batched", [(t[0], (t[1], False)) for t in targs])
     return '\n'.join(defines) + '\n' + '\n'.join([''.join(f) for f in funcs]) + '\n'.join(batched) + '\n' + entry
