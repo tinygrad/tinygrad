@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any, ClassVar
 import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, struct
-from tinygrad.helpers import PROFILE, getenv, to_mv, round_up
+from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.ops import sym_infer, sint, Variable, UOp
@@ -449,10 +449,9 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
     assert self.dev.hw_copy_queue_t is not None
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"CPU -> {self.dev.device}", enabled=PROFILE):
       for i in range(0, src.nbytes, self.b[0].size):
-        lsize = min(self.b[self.b_next].size, src.nbytes - i)
         self.b_next = (self.b_next + 1) % len(self.b)
         self.dev.timeline_signal.wait(self.b_timeline[self.b_next])
-        self.b[self.b_next].cpu_view().view(size=lsize, fmt='B')[:] = src[i:i+lsize]
+        ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                   .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
@@ -484,7 +483,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
                                   .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i)) \
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
         self.dev.timeline_signal.wait(self.dev.timeline_value - 1)
-        dest[i:i+lsize] = array.array('B', self.b[0].cpu_view().view(size=lsize, fmt='B')[:])
+        ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
   def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:DeviceType, dest_dev:DeviceType):
     cast(HCQAllocator, src_dev.allocator).map(dest)
