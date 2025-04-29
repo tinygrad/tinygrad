@@ -84,10 +84,9 @@ runs:
 
     # **** Python deps ****
 
-    # fix ImportError: cannot import name 'RequirementInformation' from 'pip._vendor.resolvelib.structs'
-    - name: Fix resolver crash
+    - name: Upgrade pip
       shell: bash
-      run: python -m pip install --upgrade "resolvelib>=1.0.1"
+      run: python -m ensurepip --upgrade
     - name: Install dependencies (with extra)
       if: inputs.deps != ''
       shell: bash
