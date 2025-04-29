@@ -265,7 +265,7 @@ class TestHCQ(unittest.TestCase):
       if queue_type is None: continue
 
       virt_val = Variable("sig_val", 0, 0xffffffff, dtypes.uint32)
-      virt_signal = TestHCQ.d0.signal_t(base_buf=HCQBuffer(Variable("sig_addr", 0, 0xffffffffffffffff, dtypes.uint64)))
+      virt_signal = TestHCQ.d0.signal_t(base_buf=HCQBuffer(Variable("sig_addr", 0, 0xffffffffffffffff, dtypes.uint64), 16))
 
       with self.subTest(name=str(queue_type)):
         fake_signal = TestHCQ.d0.signal_t()
