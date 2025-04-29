@@ -1,4 +1,4 @@
-from typing import cast
+from typing import cast, TypeVar, Generic, get_args as get_typing_args
 import itertools
 from tinygrad.helpers import dedup, flatten, DEBUG, to_function_name
 from tinygrad.engine.jit import GraphRunner, GraphException
@@ -6,14 +6,14 @@ from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.ops import Variable
 from tinygrad.dtype import DType, dtypes
-from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import LLVMRenderer, ldt
 
-class BatchedGraph(GraphRunner):
-  renderer:type[Renderer]
+T = TypeVar('T')
+class BatchedGraph(GraphRunner, Generic[T]):
   def __init__(self, device, jit_cache: list[ExecItem], input_rawbufs: list[Buffer], var_vals: dict[Variable, int]):
-    if not issubclass(type(device.renderer), self.renderer) and not isinstance(device.renderer, self.renderer): raise GraphException
+    renderer_class = get_typing_args(getattr(self, "__orig_bases__")[1])[0]
+    if not issubclass(type(device.renderer), renderer_class) and not isinstance(device.renderer, renderer_class): raise GraphException
     super().__init__(jit_cache, input_rawbufs, var_vals)
 
     self.base_bufs = dedup(b.base for ji in jit_cache for b in ji.bufs if b is not None and b not in input_rawbufs)
@@ -26,14 +26,12 @@ class BatchedGraph(GraphRunner):
     if DEBUG >= 4: print(code)
     self.clprg = device.runtime("batched", device.compiler.compile_cached(code))
 
-  def _prepare_code(self, renderer, jit_cache:list[ExecItem], input_rawbufs:list[Buffer], targs:list[tuple[str, DType]]) -> str: return ""
+  def _prepare_code(self, renderer:T, jit_cache:list[ExecItem], input_rawbufs:list[Buffer], targs:list[tuple[str, DType]]) -> str: return ""
   def __call__(self, rawbufs: list[Buffer], var_vals: dict[Variable, int], wait=False):
     return self.clprg(*[x._buf for x in rawbufs], *self.base_rawbufs, *[x[1] for x in sorted(var_vals.items(), key=lambda x: x[0].expr)], wait=wait)
 
-class CPUGraph(BatchedGraph):
-  renderer = ClangRenderer
-  def _prepare_code(self, renderer, jit_cache:list[ExecItem], input_rawbufs:list[Buffer], targs:list[tuple[str, DType]]) -> str:
-    renderer = cast(ClangRenderer, renderer)
+class CPUGraph(BatchedGraph[ClangRenderer]):
+  def _prepare_code(self, renderer:ClangRenderer, jit_cache:list[ExecItem], input_rawbufs:list[Buffer], targs:list[tuple[str, DType]]) -> str:
     def render_arg(buf):
       if buf in input_rawbufs: return f"arg{input_rawbufs.index(buf)}"
       return f"({renderer.render_dtype(buf.dtype)}*)(cbuf{self.base_bufs.index(buf.base)} + {buf.offset})"
@@ -44,7 +42,7 @@ class CPUGraph(BatchedGraph):
       batched.append(f"  {to_function_name(cast(CompiledRunner, ji.prg).p.name)}({','.join(args)});")
     batched.append("}")
 
-    prep = [renderer._render(cast(CompiledRunner, ji.prg).p.uops) for i,ji in enumerate(jit_cache)]
+    prep = [renderer._render(cast(CompiledRunner, ji.prg).p.uops or []) for i,ji in enumerate(jit_cache)]
     funcs = dedup(renderer._render_body(prep[i][0], *prep[i][1:], cast(CompiledRunner, ji.prg).p.uops,
                                         ["static", "__attribute__((always_inline))"]) for i,ji in enumerate(jit_cache))
 
@@ -52,10 +50,8 @@ class CPUGraph(BatchedGraph):
     entry = renderer._render_entry("batched", [(t[0], (t[1], False)) for t in targs])
     return '\n'.join(defines) + '\n' + '\n'.join([''.join(f) for f in funcs]) + '\n'.join(batched) + '\n' + entry
 
-class LLVMGraph(BatchedGraph):
-  renderer = LLVMRenderer
+class LLVMGraph(BatchedGraph[LLVMRenderer]):
   def _prepare_code(self, renderer, jit_cache:list[ExecItem], input_rawbufs:list[Buffer], targs:list[tuple[str, DType]]) -> str:
-    renderer = cast(LLVMRenderer, renderer)
     out = []
     for i,ji in enumerate(jit_cache):
       args = []
