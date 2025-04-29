@@ -292,8 +292,8 @@ class GPFifo:
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class NVDevice(HCQCompiled[NVSignal]):
   devices: ClassVar[list[HCQCompiled]] = []
-  signal_pages: ClassVar[list[Any]] = []
-  signal_pool: ClassVar[list[int]] = []
+  signal_pages: ClassVar[list[HCQBuffer]] = []
+  signal_pool: ClassVar[list[HCQBuffer]] = []
 
   root = None
   fd_ctl: FileIOInterface

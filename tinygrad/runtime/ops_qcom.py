@@ -318,8 +318,8 @@ class QCOMAllocator(HCQAllocatorBase):
 
 class QCOMDevice(HCQCompiled):
   devices: ClassVar[list[HCQCompiled]] = []
-  signal_pages: ClassVar[list[Any]] = []
-  signal_pool: ClassVar[list[int]] = []
+  signal_pages: ClassVar[list[HCQBuffer]] = []
+  signal_pool: ClassVar[list[HCQBuffer]] = []
 
   gpu_id: int = 0
   dummy_addr: int = 0
