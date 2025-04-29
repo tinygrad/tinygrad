@@ -91,11 +91,11 @@ class PythonProgram:
         elif uop is Ops.CAST and isinstance(dtype, PtrDType):
           ul[i] = inp[0]
         elif uop is Ops.RANGE:
-          if i not in ul: ul[i] = [inp[0][0]] * warp_size
+          if i not in ul: ul[i] = [0] * warp_size
           else:
             for j in range(len(ul[i])):
               ul[i][j] += 1
-            if ul[i][0] == inp[1][0]:
+            if ul[i][0] == inp[0][0]:
               del ul[i]
               i = loop_ends[i] + 1
               continue
