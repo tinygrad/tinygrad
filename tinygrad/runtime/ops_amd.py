@@ -3,7 +3,7 @@ from typing import Any, cast, ClassVar
 import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select, time
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQArgsState, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.ops import sint
 from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
@@ -243,7 +243,7 @@ class AMDComputeQueue(HWQueue):
       dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, args_state.ptr
       user_regs += [*data64_le(dp_addr)]
 
-    user_regs += [*data64_le(args_state.ptr)]
+    user_regs += [*data64_le(args_state.buf.va_addr)]
 
     if prg.dev.sqtt_enabled: self.sqtt_prg_marker(prg, global_size)
 
@@ -416,22 +416,6 @@ class AMDCopyQueue(HWQueue):
 
     dev.sdma_queue.signal_doorbell(dev)
 
-class USBArgsState(HCQArgsState):
-  def __init__(self, ptr:int, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint, ...]=(), prefix:list[int]|None=None):
-    super().__init__(ptr, prg, bufs, vals=vals)
-
-    # if prefix is not None: to_mv(self.ptr, len(prefix) * 4).cast('I')[:] = array.array('I', prefix)
-
-    for i,b in enumerate(bufs):
-      off = ptr - self.prg.dev.kernargs_page.va_addr + self.prg.dev.kernargs_page.meta.mapping.paddrs[0][0] + i * 8
-      self.prg.dev.dev_iface.adev.vram.view(off, 8, 'Q')[0] = b.va_addr
-    for i,val in enumerate(vals):
-      off = ptr - self.prg.dev.kernargs_page.va_addr + self.prg.dev.kernargs_page.meta.mapping.paddrs[0][0] + len(bufs) * 8 + i * 4
-      self.prg.dev.dev_iface.adev.vram.view(off, 4, 'i')[0] = val
-
-    # self.bind_sints_to_ptr(*[b.va_addr for b in bufs], ptr=self.ptr + len(prefix or []) * 4, fmt='Q')
-    # self.bind_sints_to_ptr(*vals, ptr=self.ptr + len(prefix or []) * 4 + len(bufs) * 8, fmt='I')
-
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
@@ -469,7 +453,7 @@ class AMDProgram(HCQProgram):
 
     if dev.sqtt_enabled: self.libhash: tuple[int, int] = struct.unpack('<Q', hashlib.md5(self.lib).digest()[:8])*2
 
-    super().__init__(USBArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, lib=self.lib,
+    super().__init__(CLikeArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, lib=self.lib,
                      base=self.lib_gpu.va_addr)
 
   def __del__(self):
@@ -837,7 +821,8 @@ class USBIface(PCIIface):
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
-    return HCQBuffer(am_mapping.va_addr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=False))
+    return HCQBuffer(am_mapping.va_addr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=False),
+      view=USBMMIOInterface(self.usb, self.bars[0][0] + am_mapping.paddrs[0][0], size, fmt='B') if cpu_access else None)
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
@@ -910,8 +895,7 @@ class AMDDevice(HCQCompiled):
     sig_mmio = lambda x, y, fmt: USBMMIOInterface(self.dev_iface.usb, self.dev_iface.bars[0][0] + self.signal_pages[0].meta.mapping.paddrs[0][0] + x - self.signal_pages[0].va_addr, y, fmt)
     super().__init__(device, AMDUSBAllocator(self), AMDLLVMRenderer(self.arch) if getenv("AMD_LLVM", 0) else AMDRenderer(self.arch),
                      AMDLLVMCompiler(self.arch) if getenv("AMD_LLVM", 0) else HIPCompiler(self.arch), functools.partial(AMDProgram, self),
-                     functools.partial(AMDSignal, mmio_iface_t=sig_mmio),
-                     functools.partial(AMDComputeQueue, self), functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size),
+                     AMDSignal, functools.partial(AMDComputeQueue, self), functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size),
                      kernargs_size=(8 << 10))
 
     # Scratch setup
