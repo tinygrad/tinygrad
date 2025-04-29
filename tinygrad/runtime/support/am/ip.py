@@ -389,7 +389,6 @@ class AM_PSP(AM_IP):
     sos_components = [(am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE), (spl_key, am.PSP_BL__LOAD_TOS_SPL_TABLE),
       (am.PSP_FW_TYPE_PSP_SYS_DRV, am.PSP_BL__LOAD_SYSDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV)]
 
-    # print(self.is_sos_alive())
     if not self.is_sos_alive():
       for fw, compid in sos_components: self._bootloader_load_component(fw, compid)
       while not self.is_sos_alive(): time.sleep(0.01)
@@ -459,9 +458,6 @@ class AM_PSP(AM_IP):
 
     self.adev.vram.view(self.cmd_paddr, ctypes.sizeof(cmd))[:] = memoryview(cmd).cast('B')
     self.adev.vram.view(self.ring_paddr + prev_wptr * 4, ctypes.sizeof(msg))[:] = memoryview(msg).cast('B')
-
-    # self.adev.vram.copyin(self.cmd_paddr, memoryview(cmd).cast('B'))
-    # self.adev.vram.copyin(self.ring_paddr + prev_wptr * 4, memoryview(write_loc).cast('B'))
 
     # Move the wptr
     self.adev.reg(f"{self.reg_pref}_67").write(prev_wptr + ctypes.sizeof(am.struct_psp_gfx_rb_frame) // 4)

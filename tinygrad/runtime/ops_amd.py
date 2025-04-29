@@ -14,7 +14,7 @@ from tinygrad.runtime.autogen import kfd, hsa, libc, pci, vfio, sqtt
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.support.am.amdev import AMDev, AMMapping, AMBar
+from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
 # from tinygrad.runtime.support.am.usb import USBConnector
 from tinygrad.runtime.support.am.usb2 import ASMController, USBMMIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
@@ -224,7 +224,7 @@ class AMDComputeQueue(HWQueue):
     prg.dev.cmd_id += 1
 
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
-    # self.bind_args_state(args_state)
+    self.bind_args_state(args_state)
 
     self.acquire_mem(gli=0, gl2=0)
 
@@ -404,14 +404,15 @@ class AMDCopyQueue(HWQueue):
       tail_blit_dword += cmdsz
 
     start_idx = (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes) // 4
-    for i in range(tail_blit_dword): dev.sdma_queue.ring[start_idx + i] = cmds[i]
+    dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', cmds[:tail_blit_dword])
     dev.sdma_queue.put_value += tail_blit_dword * 4
 
     if (rem_packet_cnt := len(cmds) - tail_blit_dword) > 0:
       zero_fill = dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes
       dev.sdma_queue.ring.view(dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes, zero_fill, fmt='B')[:] = bytes(zero_fill)
       dev.sdma_queue.put_value += zero_fill
-      for i in range(rem_packet_cnt): dev.sdma_queue.ring[i] = cmds[tail_blit_dword + i]
+
+      dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
       dev.sdma_queue.put_value += rem_packet_cnt * 4
 
     dev.sdma_queue.signal_doorbell(dev)

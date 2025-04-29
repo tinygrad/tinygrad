@@ -9,13 +9,6 @@ from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
-class AMBar:
-  def __init__(self, addr, size): self.bar, self.size = to_mv(addr, size), size
-  def read(self, offset:int, size:int) -> int: return self.bar.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[size])[offset//size]
-  def write(self, offset:int, value:int, size:int): self.bar.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[size])[offset//size] = value
-  def copyin(self, offset:int, data:memoryview): self.bar.cast('B')[offset:offset+data.nbytes] = data.cast('B')
-  def copyout(self, offset:int, size:int) -> memoryview: return self.bar.cast('B')[offset:offset+size]
-
 @dataclasses.dataclass(frozen=True)
 class AMRegister(AMDRegBase):
   adev:AMDev; hwip:int # noqa: E702
@@ -280,15 +273,6 @@ class AMDev:
     self.is_booting, self.smi_dev = True, False # During boot only boot memory can be allocated. This flag is to validate this.
     self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000003)) and (getenv("AM_RESET", 0) != 1)
 
-    # self.reg("regSCRATCH_REG7").write(am_version)
-    # print(hex(self.reg("regSCRATCH_REG7").read()))
-
-    # print(self.partial_boot, hex(self.reg("regSCRATCH_REG7").read()))
-    # print(self.is_booting)
-    # exit(0)
-
-    # self.partial_boot = True
-
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
     self.fw = AMFirmware(self)
@@ -302,9 +286,9 @@ class AMDev:
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
-    # if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0):
-    #   if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
-    #   self.partial_boot = False
+    if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0):
+      if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
+      self.partial_boot = False
 
     # Init sw for all IP blocks
     for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init_sw()
@@ -327,14 +311,13 @@ class AMDev:
     self.smu.set_clocks(level=-1) # last level, max perf.
     for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(am_version)
-    print(hex(self.reg("regSCRATCH_REG7").read()))
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
     self.smu.set_clocks(level=0)
-    # self.ih.interrupt_handler()
+    self.ih.interrupt_handler()
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
 
