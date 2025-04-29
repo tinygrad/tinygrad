@@ -55,7 +55,7 @@ if __name__ == "__main__":
     del model_state_dict['freqs_cis']
 
   with Timing("load weights to GPU: "):
-    nhf_state = convert_from_huggingface(fetch_weights(), model, 16, 16)
+    nhf_state = convert_from_huggingface(fetch_weights(), 16, 16, 16)
     # NOTE: i'm not sure this actually needs float32, it may just change the type of things downstream from it. but doesn't match torch w/o this
     for needs_float32 in ['tok_embeddings.weight']: nhf_state[needs_float32] = nhf_state[needs_float32].float()
   print(f"ram used: {GlobalCounters.mem_used/1e9:.2f} GB")
