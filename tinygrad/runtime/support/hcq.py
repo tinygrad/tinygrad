@@ -175,11 +175,10 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   def bind_args_state(self, args_state:ArgsStateType):
     for vals, mem, fmt in args_state.bind_data: self.bind_sints_to_mem(*vals, mem=mem, fmt=fmt)
 
-  def bind_sints(self, *vals:sint, mem:MMIOInterface|None, struct_t:Type[ctypes.Structure], start_field:str, fmt, mask:int|None=None):
+  def bind_sints(self, *vals:sint, mem:MMIOInterface, struct_t:Type[ctypes.Structure], start_field:str, fmt, mask:int|None=None):
     self.bind_sints_to_mem(*vals, mem=mem, fmt=fmt, mask=mask, offset=getattr(struct_t, start_field).offset)
 
-  def bind_sints_to_mem(self, *vals:sint, mem:MMIOInterface|None, fmt, mask:int|None=None, offset:int=0):
-    assert mem is not None, "cannot access this mem"
+  def bind_sints_to_mem(self, *vals:sint, mem:MMIOInterface, fmt, mask:int|None=None, offset:int=0):
     mv = mem.view(offset=offset, size=len(vals)*8, fmt=fmt)
     for i, val in enumerate(vals):
       if isinstance(val, int): mv[i] = val if mask is None else ((mv[i] & ~mask) | val)

@@ -139,9 +139,9 @@ class NVComputeQueue(NVCommandQueue):
 
     qmd = qmd_struct_t.from_address(qmd_buf.va_addr) # Save qmd for later update
 
-    self.bind_sints_to_mem(*global_size, mem=qmd_buf.view, fmt='I', offset=nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8)
-    self.bind_sints_to_mem(*local_size, mem=qmd_buf.view, fmt='H', offset=nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8)
-    self.bind_sints_to_mem(*local_size, *global_size, mem=args_state.buf.view, fmt='I')
+    self.bind_sints_to_mem(*global_size, mem=qmd_buf.cpu_view(), fmt='I', offset=nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8)
+    self.bind_sints_to_mem(*local_size, mem=qmd_buf.cpu_view(), fmt='H', offset=nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8)
+    self.bind_sints_to_mem(*local_size, *global_size, mem=args_state.buf.cpu_view(), fmt='I')
     qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = data64(args_state.buf.va_addr)
 
     if self.active_qmd is None:
@@ -161,9 +161,9 @@ class NVComputeQueue(NVCommandQueue):
       for i in range(2):
         if getattr(self.active_qmd, f'release{i}_enable') == 0:
           setattr(self.active_qmd, f'release{i}_enable', 1)
-          self.bind_sints(signal.value_addr, mem=self.active_qmd_buf.view, struct_t=qmd_struct_t, start_field=f'release{i}_address',
+          self.bind_sints(signal.value_addr, mem=self.active_qmd_buf.cpu_view(), struct_t=qmd_struct_t, start_field=f'release{i}_address',
             fmt='Q', mask=0xfffffffff)
-          self.bind_sints(value, mem=self.active_qmd_buf.view, struct_t=qmd_struct_t, start_field=f'release{i}_payload', fmt='Q')
+          self.bind_sints(value, mem=self.active_qmd_buf.cpu_view(), struct_t=qmd_struct_t, start_field=f'release{i}_payload', fmt='Q')
           return self
 
     self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(signal.value_addr), *data64_le(value),
