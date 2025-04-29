@@ -45,7 +45,7 @@ class TestStunning(unittest.TestCase):
         for i in range(samples.shape[0]):
           vib = vi.bind(i)
           opt.zero_grad()
-          pred = model(X_samp[vib])
+          pred = model(X_samp[vib].realize())
           loss = (pred - Y_samp[vib]).square().mean()
           losses.append(loss.backward())
           opt.schedule_step()

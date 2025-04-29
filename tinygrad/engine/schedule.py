@@ -49,11 +49,13 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   # linearize KERNEL UOps into ScheduleItems in BFS order
   queue = deque(k for k,v in in_degree.items() if v == 0)
   schedule: list[ScheduleItem] = []
-  var_vals: list[dict[Variable, int]] = []
+  var_vals: dict[Variable, int] = {}
   while queue:
     k = queue.popleft()
     # unbind var_vals from the kernel
-    ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=var_vals)
+    local_var_vals: list[dict[Variable, int]] = []
+    ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=local_var_vals)
+    var_vals = merge_dicts([var_vals, *local_var_vals])
     # create subbuffers if needed
     if ast.op is Ops.BUFFER_VIEW: buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
     schedule.append(ScheduleItem(ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
@@ -69,4 +71,4 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   becomes_map = {u:u.buf_uop for u in toposort if u.op is Ops.ASSIGN}
   assert all(u.op in {Ops.BUFFER, Ops.BUFFER_VIEW} for u in becomes_map.values()), f"Schedule didn't end with BUFFER {becomes_map.values()}"
 
-  return schedule, merge_dicts(var_vals), becomes_map
+  return schedule, var_vals, becomes_map
