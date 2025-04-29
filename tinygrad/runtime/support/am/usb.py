@@ -155,11 +155,7 @@ class USBConnector:
 
     self.cached = {}
 
-  def _detect_version(self):
-    try: self.read(0x07f0, 6)
-    except Exception: pass
-
-  def setup_transfer(self, transfer, endpoint, stream_id, data, length):
+  def _prep_transfer(self, transfer, endpoint, stream_id, data, length):
     transfer.contents.dev_handle = self.handle
     transfer.contents.status = 0xff
     transfer.contents.flags = 0
@@ -167,51 +163,22 @@ class USBConnector:
     transfer.contents.type = libusb.LIBUSB_TRANSFER_TYPE_BULK if stream_id is None else libusb.LIBUSB_TRANSFER_TYPE_BULK_STREAM
     transfer.contents.timeout = 1000
     transfer.contents.length = length
-    # transfer.contents.callback = None
     transfer.contents.user_data = None
     transfer.contents.buffer = data
     transfer.contents.num_iso_packets = 0
     if stream_id is not None: libusb.libusb_transfer_set_stream_id(transfer, stream_id)
   
-  def _send_ops_and_wait(self, *cmds, wait=True, ignore_ep=None):
-    # st = time.perf_counter()
-    for x in cmds: libusb.libusb_submit_transfer(x)
-    if not wait: return True
+  def _submit_and_wait(self, cmds):
+    for tr in cmds: libusb.libusb_submit_transfer(tr)
 
     while True:
       libusb.libusb_handle_events(self.usb_ctx)
-
-      all_complete = True
-      for transfer in cmds:
-        # print(ignore_ep, transfer.contents.endpoint, transfer.contents.status)
-        if ignore_ep == transfer.contents.endpoint: continue
-        # print("ack", transfer.contents.endpoint, transfer.contents.status)
-
-        if transfer.contents.status == libusb.LIBUSB_TRANSFER_COMPLETED:
-          continue
-        elif transfer.contents.status != libusb.LIBUSB_TRANSFER_COMPLETED:
-          if transfer.contents.status != 0xff: return False
-          all_complete = False
-      if all_complete:
-        if ignore_ep is not None:
-          for transfer in cmds:
-            if transfer.contents.endpoint == ignore_ep:
-              transfer.contents.status = libusb.LIBUSB_TRANSFER_COMPLETED
-              libusb.libusb_cancel_transfer(transfer)
-              print("canceled", transfer.contents.endpoint)
-        # en = time.perf_counter()
-        # print("run in s: ", (en - st), "s", "kb/s", 0xff / (en - st) / 1024)
-        return True
-
-  def post_write_request(self, in_data):
-    in_transfer = libusb.libusb_alloc_transfer(0)
-    self.setup_transfer(in_transfer, 0x02, 0x1, in_data, len(in_data))
-    libusb.libusb_submit_transfer(in_transfer)
-
-  def post_read_request(self, in_data):
-    in_transfer = libusb.libusb_alloc_transfer(0)
-    self.setup_transfer(in_transfer, 0x81, 0x1, in_data, len(in_data))
-    libusb.libusb_submit_transfer(in_transfer)
+      ready = True
+      for tr in cmds:
+        if tr.contents.status == libusb.LIBUSB_TRANSFER_COMPLETED: continue
+        if tr.contents.status != 0xFF: raise RuntimeError(f"EP 0x{tr.contents.endpoint:02X} error: {tr.contents.status}")
+        ready = False
+      if ready: return
 
   def _send_batch(self, cdbs, ret_lens=[]):
     ops_sub = []
@@ -223,13 +190,13 @@ class USBConnector:
       self.read_cmds[emm][16:16+len(cdbs[i])] = cdbs[i]
       if ret_lens[i] > 0:
         assert False
-        # self.setup_transfer(self.res_transfers[i], 0x81, 1, self.read_cmds[i], ret_lens[i])
+        # self._prep_transfer(self.res_transfers[i], 0x81, 1, self.read_cmds[i], ret_lens[i])
         # ops_sub.append(self.res_transfers[i])
-      self.setup_transfer(self.stat_transfers[emm], 0x83, emm + 1, self.read_statuses[emm], 64)
-      self.setup_transfer(self.cmd_transfers[emm], 0x04, None, self.read_cmds[emm], len(self.read_cmds[emm]))
+      self._prep_transfer(self.stat_transfers[emm], 0x83, emm + 1, self.read_statuses[emm], 64)
+      self._prep_transfer(self.cmd_transfers[emm], 0x04, None, self.read_cmds[emm], len(self.read_cmds[emm]))
       ops_sub += [self.stat_transfers[emm], self.cmd_transfers[emm]]
       if i + 1 == len(cdbs) or len(ops_sub) == self.max_parallel * 2:
-        self._send_ops_and_wait(*ops_sub)
+        self._submit_and_wait(ops_sub)
         ops_sub = []
 
   def _send(self, cdb, ret_len=0, in_data=None, do_not_send_ack=False, wait=True, ignore_ep=None):
@@ -237,10 +204,10 @@ class USBConnector:
       actual_length = ctypes.c_int(0)
       for i in range(3):
         #assert len(self.read_cmd) == 31
-        if ret_len > 0: self.setup_transfer(self.res_transfer, 0x81, 0x1, self.read_data, ret_len)
-        self.setup_transfer(self.stat_transfer, 0x83, 0x1, self.read_status, 64)
-        self.setup_transfer(self.cmd_transfer, 0x04, None, self.read_cmd, len(self.read_cmd))
-        if in_data is not None: self.setup_transfer(self.in_transfer, 0x02, 0x1, in_data, len(in_data))
+        if ret_len > 0: self._prep_transfer(self.res_transfer, 0x81, 0x1, self.read_data, ret_len)
+        self._prep_transfer(self.stat_transfer, 0x83, 0x1, self.read_status, 64)
+        self._prep_transfer(self.cmd_transfer, 0x04, None, self.read_cmd, len(self.read_cmd))
+        if in_data is not None: self._prep_transfer(self.in_transfer, 0x02, 0x1, in_data, len(in_data))
 
         # ret = libusb.libusb_bulk_transfer(self.handle, 0x04, self.read_cmd, len(self.read_cmd), ctypes.byref(actual_length), 1000)
         # assert actual_length.value == len(self.read_cmd)
@@ -250,7 +217,7 @@ class USBConnector:
         if not do_not_send_ack: transfers += [self.stat_transfer]
         transfers += [self.cmd_transfer]
         if in_data is not None: transfers.append(self.in_transfer)
-        self._send_ops_and_wait(*transfers, wait=wait, ignore_ep=ignore_ep)
+        self._submit_and_wait(transfers)
         if not wait: return transfers
         # print("stat is ", [x for x in self.read_status])
         return bytes(self.read_data[:])
@@ -264,18 +231,6 @@ class USBConnector:
       read_data = __send()
       if read_data: return read_data
     raise RuntimeError("USB transfer failed")
-
-  def wrcfg(self, buf):
-    if DEBUG >= 4: print("wrcf", hex(len(buf)))
-    assert len(buf) == 128
-    cdb = struct.pack('>B15x', 0xe1)
-    self._send(cdb, in_data=buf)
-
-  def rdcfg(self, sz):
-    if DEBUG >= 4: print("rdcfg", hex(sz))
-    assert sz == 128
-    cdb = struct.pack('>BBI', 0xe0, 0, 0)
-    return self._send(cdb)
 
   def read(self, start_addr, read_len, stride=255):
     if DEBUG >= 4: print("read", hex(start_addr))
@@ -311,8 +266,8 @@ class USBConnector:
 
       self.cached[current_addr] = value
       # print("dal", offset)
-      self._send(cdb)
-    # self._send_batch(cdbs, [0] * len(cdbs))
+      # self._send(cdb)
+    self._send_batch(cdbs, [0] * len(cdbs))
 
   def write_batch(self, start_addrs, datas, ignores):
     if DEBUG >= 4: print("write", hex(start_addr))
@@ -507,15 +462,3 @@ class USBConnector:
     if value is not None: fmt_type = 0x40
 
     return self.pcie_request(fmt_type, address, value, size)
-
-class SCSIConnector(USBConnector):
-  def __init__(self, name):
-    self._file = os.fdopen(os.open(name, os.O_RDWR | os.O_NONBLOCK))
-    self._detect_version()
-
-  def _send(self, cdb, ret_len=0):
-    import sgio
-    buf = bytearray(ret_len) if ret_len > 0 else None
-    ret = sgio.execute(self._file, cdb, None, buf)
-    assert ret == 0
-    return buf

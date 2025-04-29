@@ -15,7 +15,8 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping, AMBar
-from tinygrad.runtime.support.am.usb import USBConnector, SCSIConnector
+from tinygrad.runtime.support.am.usb import USBConnector
+from tinygrad.runtime.support.am.usb2 import ASMController
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
 from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
@@ -477,8 +478,6 @@ class AMDProgram(HCQProgram):
 
     if dev.sqtt_enabled: self.libhash: tuple[int, int] = struct.unpack('<Q', hashlib.md5(self.lib).digest()[:8])*2
 
-    print("dune")
-
     super().__init__(USBArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, lib=self.lib,
                      base=self.lib_gpu.va_addr)
 
@@ -879,8 +878,11 @@ class USBMMIOInterface(MMIOInterface):
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id):
     self.dev = dev
-    connector_t = USBConnector if getenv("LIBUSB", 1) else SCSIConnector
-    self.usb = connector_t("")
+    self.usb = ASMController()
+    # self.usb = USBConnector("")
+
+    # self.usb.write(0x0, b'\x03')
+    # print(self.usb.read(0x0, 1))
 
     is_24 = True # if self.usb.is_24 else 3
     gpu_bus = 4 if is_24 else 3
@@ -969,6 +971,12 @@ class USBIface(PCIIface):
     vram_bar = USBMMIOInterface(self.usb, *self.bars[0], fmt='B')
     doorbell_bar = USBMMIOInterface(self.usb, *self.bars[2], fmt='Q')
     mmio_bar = USBMMIOInterface(self.usb, *self.bars[5], fmt='I')
+
+    # for i in range(10):
+    #   self.usb.scsi_write(bytes([0x0]*0x1000))
+    # print(vram_bar[:0x1])
+    # print(vram_bar[:0x10000])
+    # exit(0)
 
     self.adev = AMDev("usb:0", vram_bar, doorbell_bar, mmio_bar)
     self.ip_versions = self.adev.ip_ver

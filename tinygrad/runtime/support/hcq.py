@@ -333,7 +333,7 @@ class HCQProgram(Generic[DeviceType]):
     q = self.dev.hw_compute_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1).memory_barrier()
 
     # with hcq_profile(self.dev, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
-    # q.exec(self, kernargs, global_size, local_size)
+    q.exec(self, kernargs, global_size, local_size)
 
     q.signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 
@@ -449,11 +449,13 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
           # ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
           lsize = min(self.b[self.b_next].size, src.nbytes-i)
 
-          with Timing(prefix="tt"):
-            self.int_buf[:lsize] = src[i:i+lsize]
-            self.dev.dev_iface.usb.scsi_write(0xeaeb, self.int_buf)
-            self.dev.dev_iface.usb.write(0x171, b'\xff\xff\xff')
-            self.dev.dev_iface.usb.write(0xce6e, b'\x00\x00')
+          self.dev.dev_iface.usb.scsi_write(src[i:i+lsize])
+
+          # with Timing(prefix="tt"):
+          #   self.int_buf[:lsize] = src[i:i+lsize]
+          #   self.dev.dev_iface.usb.scsi_write(0xeaeb, self.int_buf)
+          #   self.dev.dev_iface.usb.write(0x171, b'\xff\xff\xff')
+          #   self.dev.dev_iface.usb.write(0xce6e, b'\x00\x00')
 
           with Timing(prefix="pp"):
             self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
