@@ -10,9 +10,9 @@ from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import LLVMRenderer, ldt
 
 T = TypeVar('T')
-class BatchedGraph(GraphRunner, Generic[T]):
+class BatchedGraph(Generic[T], GraphRunner):
   def __init__(self, device, jit_cache: list[ExecItem], input_rawbufs: list[Buffer], var_vals: dict[Variable, int]):
-    renderer_class = get_typing_args(getattr(self, "__orig_bases__")[1])[0]
+    renderer_class = get_typing_args(getattr(self, "__orig_bases__")[0])[0]
     if not issubclass(type(device.renderer), renderer_class) and not isinstance(device.renderer, renderer_class): raise GraphException
 
     super().__init__(jit_cache, input_rawbufs, var_vals)
