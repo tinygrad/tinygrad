@@ -2,7 +2,7 @@ import unittest, ctypes, struct, os
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import getenv
 from tinygrad.device import Buffer, BufferSpec
-from tinygrad.runtime.support.hcq import HCQCompiled
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
 from tinygrad.engine.realize import get_runner, CompiledRunner
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad import Variable
@@ -45,17 +45,17 @@ class TestHCQ(unittest.TestCase):
       if queue_type is None: continue
 
       virt_val = Variable("sig_val", 0, 0xffffffff, dtypes.uint32)
-      virt_signal = TestHCQ.d0.signal_t(base_addr=Variable("sig_addr", 0, 0xffffffffffffffff, dtypes.uint64))
+      virt_signal = TestHCQ.d0.signal_t(base_buf=HCQBuffer(Variable("sig_addr", 0, 0xffffffffffffffff, dtypes.uint64), 16))
 
       with self.subTest(name=str(queue_type)):
         q = queue_type().signal(virt_signal, virt_val)
 
-        var_vals = {virt_signal.base_addr: TestHCQ.d0.timeline_signal.base_addr, virt_val: TestHCQ.d0.timeline_value}
+        var_vals = {virt_signal.base_buf.va_addr: TestHCQ.d0.timeline_signal.base_buf.va_addr, virt_val: TestHCQ.d0.timeline_value}
         q.submit(TestHCQ.d0, var_vals)
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
-        var_vals = {virt_signal.base_addr: TestHCQ.d0.timeline_signal.base_addr, virt_val: TestHCQ.d0.timeline_value}
+        var_vals = {virt_signal.base_buf.va_addr: TestHCQ.d0.timeline_signal.base_buf.va_addr, virt_val: TestHCQ.d0.timeline_value}
         q.submit(TestHCQ.d0, var_vals)
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
@@ -97,14 +97,14 @@ class TestHCQ(unittest.TestCase):
 
       with self.subTest(name=str(queue_type)):
         virt_val = Variable("sig_val", 0, 0xffffffff, dtypes.uint32)
-        virt_signal = TestHCQ.d0.signal_t(base_addr=Variable("sig_addr", 0, 0xffffffffffffffff, dtypes.uint64))
+        virt_signal = TestHCQ.d0.signal_t(base_buf=HCQBuffer(Variable("sig_addr", 0, 0xffffffffffffffff, dtypes.uint64), 16))
 
         fake_signal = TestHCQ.d0.signal_t()
         q = queue_type().wait(virt_signal, virt_val).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
         fake_signal.value = 0x30
 
-        q.submit(TestHCQ.d0, {virt_signal.base_addr: fake_signal.base_addr, virt_val: fake_signal.value})
+        q.submit(TestHCQ.d0, {virt_signal.base_buf.va_addr: fake_signal.base_buf.va_addr, virt_val: fake_signal.value})
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
@@ -265,7 +265,7 @@ class TestHCQ(unittest.TestCase):
       if queue_type is None: continue
 
       virt_val = Variable("sig_val", 0, 0xffffffff, dtypes.uint32)
-      virt_signal = TestHCQ.d0.signal_t(base_addr=Variable("sig_addr", 0, 0xffffffffffffffff, dtypes.uint64))
+      virt_signal = TestHCQ.d0.signal_t(base_buf=HCQBuffer(Variable("sig_addr", 0, 0xffffffffffffffff, dtypes.uint64), 16))
 
       with self.subTest(name=str(queue_type)):
         fake_signal = TestHCQ.d0.signal_t()
@@ -274,7 +274,7 @@ class TestHCQ(unittest.TestCase):
 
         fake_signal.value = 0x30
 
-        q.submit(TestHCQ.d0, {virt_signal.base_addr: fake_signal.base_addr, virt_val: fake_signal.value})
+        q.submit(TestHCQ.d0, {virt_signal.base_buf.va_addr: fake_signal.base_buf.va_addr, virt_val: fake_signal.value})
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
