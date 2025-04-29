@@ -89,13 +89,13 @@ def validate_model(model, tokenizer):
   #run = TinyJit(model.forward)
   run = model.forward
   for tok in toks[:-1]:
-    run(Tensor([[tok]]), Variable("start_pos", 0, model.max_context).bind(start_pos), 0.0, 0, 0.0, 0.0, 0.0).realize()
+    run(Tensor([[tok]]), Variable("start_pos", 0, model.max_context - 1).bind(start_pos), 0.0, 0, 0.0, 0.0, 0.0).realize()
     start_pos += 1
   tok = toks[-1]
   result = ""
   expected = "How's it going?"
   while True:
-    tok = run(Tensor([[tok]]), Variable("start_pos", 0, model.max_context).bind(start_pos), 0.0, 0, 0.0, 0.0, 0.0).item()
+    tok = run(Tensor([[tok]]), Variable("start_pos", 0, model.max_context - 1).bind(start_pos), 0.0, 0, 0.0, 0.0, 0.0).item()
     start_pos += 1
     if tok in tokenizer.stop_tokens or len(result) > len(expected): break
     result += tokenizer.decode([tok])
