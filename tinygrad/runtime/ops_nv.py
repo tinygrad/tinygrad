@@ -134,7 +134,7 @@ class NVComputeQueue(NVCommandQueue):
     self.bind_args_state(args_state)
 
     qmd_buf = args_state.buf.offset(round_up(prg.constbufs[0][1], 1 << 8))
-    qmd_buf.view.view(size=0x40 * 4, fmt='B')[:] = bytes(prg.qmd)
+    qmd_buf.cpu_view().view(size=0x40 * 4, fmt='B')[:] = bytes(prg.qmd)
     assert qmd_buf.va_addr < (1 << 40), f"large qmd addr {qmd_buf.va_addr:x}"
 
     qmd = qmd_struct_t.from_address(qmd_buf.va_addr) # Save qmd for later update
@@ -189,9 +189,9 @@ class NVCopyQueue(NVCommandQueue):
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.dma_gpfifo)
 
 class NVArgsState(CLikeArgsState):
-  def __init__(self, ptr:int, prg:NVProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
+  def __init__(self, buf:HCQBuffer, prg:NVProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
     if MOCKGPU: prg.constbuffer_0[80:82] = [len(bufs), len(vals)]
-    super().__init__(ptr, prg, bufs, vals=vals, prefix=prg.constbuffer_0)
+    super().__init__(buf, prg, bufs, vals=vals, prefix=prg.constbuffer_0)
 
 class NVProgram(HCQProgram):
   def __init__(self, dev:NVDevice, name:str, lib:bytes):

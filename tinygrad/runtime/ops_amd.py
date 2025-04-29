@@ -234,11 +234,11 @@ class AMDComputeQueue(HWQueue):
       user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000]
 
     if prg.enable_dispatch_ptr:
-      dp = (dp_t:=hsa.hsa_kernel_dispatch_packet_t).from_address((disp_buf:=args_state.buf.offset(prg.kernargs_segment_size)).va_addr)
+      dp = (dp_t:=hsa.hsa_kernel_dispatch_packet_t).from_address(cast(int, (disp_buf:=args_state.buf.offset(prg.kernargs_segment_size)).va_addr))
 
       self.bind_sints(*local_size, mem=disp_buf.view, struct_t=dp_t, start_field='workgroup_size_x', fmt='H')
       self.bind_sints(*[g*l for g,l in zip(global_size, local_size)], mem=disp_buf.view, struct_t=dp_t, start_field='grid_size_x', fmt='I')
-      dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, args_state.ptr
+      dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, args_state.buf.va_addr
       user_regs += [*data64_le(disp_buf.va_addr)]
 
     user_regs += [*data64_le(args_state.buf.va_addr)]
