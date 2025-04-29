@@ -3,7 +3,6 @@ import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat, GroupOp
-from tinygrad.dtype import PtrDType
 from tinygrad.helpers import dedup, partition, all_same, flatten
 from tinygrad.spec import type_verify
 
@@ -96,7 +95,7 @@ class BlockContext:
       if u.op in {Ops.RANGE, Ops.IF}: ctx.child_ctxs[u] = _sort_ctx(ctx.block_ctxs[u] + (u,))
       elif u.op is Ops.STORE:
         # ugh, deal with non-reduce locals. probably wrong
-        if isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.local:
+        if any(x.op is Ops.DEFINE_LOCAL for x in u.src[0].toposort()):
           idx_context, store_context = ctx.last_ctx(u.src[0]), ctx.last_ctx(u.src[1])
           ctx.child_ctxs[u] = tuple([y for y in store_context if y not in idx_context and y.op is Ops.RANGE])
         else: ctx.child_ctxs[u] = ()
