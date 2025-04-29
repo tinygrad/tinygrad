@@ -215,7 +215,9 @@ class LLaMa:
 
     weights = fix_bf16(weights)
 
-    with Context(BEAM=0):
+    # prevent tracking model weights
+    # this is a part of a larger problem with BUFFER UOps and gc in TRACK_MATCH_STATS=2
+    with Context(BEAM=0, TRACK_MATCH_STATS=0):
       # quantize
       if quantize is not None:
         weights = linear.quantize(weights, device)
@@ -442,10 +444,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
-  # prevent tracking model weights
-  # TODO: this is a part of a larger problem with BUFFER UOps and gc in TRACK_MATCH_STATS=2
-  with Context(TRACK_MATCH_STATS=0):
-    llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, device=device)
+  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, device=device)
   param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(llama.model))
 
   outputted = pre_prompt if chatbot else args.prompt
