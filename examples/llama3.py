@@ -126,7 +126,8 @@ def NF4Linear(block_size):
       return x.linear(unscaled.reshape(self.out_features, self.in_features).T)
 
     @staticmethod
-    def quantize(state_dict: dict[str, Tensor], device, scale_dtype=dtypes.float16) -> dict[str, Tensor]:
+    def quantize(state_dict: dict[str, Tensor], device, scale_dtype=dtypes.float16, quantize_embeds=False) -> dict[str, Tensor]:
+      assert not quantize_embeds  # TODO: support this?
       new_state_dict = {}
       for k, v in state_dict.items():
         if "feed_forward" in k or "attention.w" in k:
