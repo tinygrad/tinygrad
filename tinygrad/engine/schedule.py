@@ -54,7 +54,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     k = queue.popleft()
     # unbind var_vals from the kernel
     local_var_vals: list[dict[Variable, int]] = []
-    ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=local_var_vals)
+    ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=local_var_vals, name="unbind vars")
     var_vals = merge_dicts([var_vals, *local_var_vals])
     # create subbuffers if needed
     if ast.op is Ops.BUFFER_VIEW: buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
