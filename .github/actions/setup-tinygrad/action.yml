@@ -84,9 +84,6 @@ runs:
 
     # **** Python deps ****
 
-    - name: Upgrade pip
-      shell: bash
-      run: python -m ensurepip --upgrade
     - name: Install dependencies (with extra)
       if: inputs.deps != ''
       shell: bash
