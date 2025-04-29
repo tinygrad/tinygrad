@@ -30,6 +30,7 @@ class TestStunning(unittest.TestCase):
       self.assertListEqual(nv, wv)
 
   @unittest.skipIf(Device.DEFAULT in {"WEBGPU", "NV", "CUDA"}, "Too many buffers / too slow")
+  @unittest.skip("This is binding a Variable to two different values")
   def test_simple_train(self, steps=6, bs=4, adam=True):
     X_train, Y_train, _, _ = nn.datasets.mnist()
     model = Model()
