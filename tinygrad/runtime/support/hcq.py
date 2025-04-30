@@ -350,7 +350,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   signal_pool: ClassVar[list[HCQBuffer]] = []
 
   def __init__(self, device:str, allocator:HCQAllocatorBase, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
-               comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None):
+               comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None, kernargs_size=(16 << 20)):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
 
     from tinygrad.runtime.graph.hcq import HCQGraph
@@ -366,7 +366,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self._shadow_timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
     self.sig_prof_records:list[tuple[HCQSignal, HCQSignal, str, bool]] = []
 
-    self.kernargs_buf:HCQBuffer = self.allocator.alloc(16 << 20, BufferSpec(cpu_access=True))
+    self.kernargs_buf:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True))
     self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(self.kernargs_buf.size, wrap=True)
 
   def synchronize(self):
@@ -435,9 +435,9 @@ class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):
   This class implements basic copy operations following the HCQ API, utilizing both types of `HWQueue`.
   """
 
-  def __init__(self, dev:DeviceType, batch_size:int=(2 << 20), batch_cnt:int=32):
+  def __init__(self, dev:DeviceType, batch_size:int=(2 << 20), batch_cnt:int=32, copy_bufs=None):
     self.dev:DeviceType = dev
-    self.b = [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
+    self.b = copy_bufs or [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
     super().__init__()
 
