@@ -24,8 +24,8 @@ WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
 class AMDSignal(HCQSignal):
-  def __init__(self, base_addr:int|None=None, **kwargs):
-    super().__init__(base_addr, **kwargs, timestamp_divider=100, dev_t=AMDDevice)
+  def __init__(self, base_buf:HCQBuffer|None=None, **kwargs):
+    super().__init__(base_buf, **kwargs, timestamp_divider=100, dev_t=AMDDevice)
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
@@ -234,14 +234,14 @@ class AMDComputeQueue(HWQueue):
       user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000]
 
     if prg.enable_dispatch_ptr:
-      dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=args_state.ptr + prg.kernargs_segment_size)
+      dp = (dp_t:=hsa.hsa_kernel_dispatch_packet_t).from_address(cast(int, (disp_buf:=args_state.buf.offset(prg.kernargs_segment_size)).va_addr))
 
-      self.bind_sints(*local_size, struct=dp, start_field='workgroup_size_x', fmt='H')
-      self.bind_sints(*[g*l for g,l in zip(global_size, local_size)], struct=dp, start_field='grid_size_x', fmt='I')
-      dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, args_state.ptr
-      user_regs += [*data64_le(dp_addr)]
+      self.bind_sints(*local_size, mem=disp_buf.cpu_view(), struct_t=dp_t, start_field='workgroup_size_x', fmt='H')
+      self.bind_sints(*[g*l for g,l in zip(global_size, local_size)], mem=disp_buf.cpu_view(), struct_t=dp_t, start_field='grid_size_x', fmt='I')
+      dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, args_state.buf.va_addr
+      user_regs += [*data64_le(disp_buf.va_addr)]
 
-    user_regs += [*data64_le(args_state.ptr)]
+    user_regs += [*data64_le(args_state.buf.va_addr)]
 
     if prg.dev.sqtt_enabled: self.sqtt_prg_marker(prg, global_size)
 
@@ -597,7 +597,7 @@ class KFDIface:
       buf = self.drm_fd.mmap(mem.va_addr, mem.size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_FIXED, mem.mmap_offset)
       assert addr == buf == mem.va_addr
 
-    self.map(hcqbuf:=HCQBuffer(mem.va_addr, mem.size, meta=mem))
+    self.map(hcqbuf:=HCQBuffer(mem.va_addr, mem.size, meta=mem, view=MMIOInterface(mem.va_addr, mem.size, fmt='B') if cpu_access or host else None))
     return hcqbuf
 
   def free(self, mem):
@@ -750,11 +750,13 @@ class PCIIface:
       self.pagemap.seek(va // mmap.PAGESIZE * 8)
       paddrs = [((x & ((1<<55) - 1)) * mmap.PAGESIZE, mmap.PAGESIZE) for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
       am_mapping = self.adev.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=cpu_access))
+      return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=cpu_access),
+        view=MMIOInterface(am_mapping.va_addr, size, fmt='B'))
 
     am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
     if cpu_access: self._map_pci_range(bar=0, off=am_mapping.paddrs[0][0], addr=am_mapping.va_addr, size=am_mapping.size)
-    return HCQBuffer(am_mapping.va_addr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=cpu_access))
+    return HCQBuffer(am_mapping.va_addr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=cpu_access),
+      view=MMIOInterface(am_mapping.va_addr, size, fmt='B') if cpu_access else None)
 
   def free(self, mem):
     for dev in mem.meta.mapped_devs[1:]: dev.dev_iface.adev.mm.unmap_range(mem.va_addr, mem.size)
@@ -793,8 +795,8 @@ class PCIIface:
 
 class AMDDevice(HCQCompiled):
   devices: ClassVar[list[HCQCompiled]] = []
-  signal_pages: ClassVar[list[Any]] = []
-  signal_pool: ClassVar[list[int]] = []
+  signal_pages: ClassVar[list[HCQBuffer]] = []
+  signal_pool: ClassVar[list[HCQBuffer]] = []
 
   driverless:bool = not FileIOInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
 
