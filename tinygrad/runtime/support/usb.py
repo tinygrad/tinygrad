@@ -56,14 +56,13 @@ class USB3:
   def _submit_and_wait(self, cmds):
     for tr in cmds: libusb.libusb_submit_transfer(tr)
 
-    while True:
+    running = len(cmds)
+    while running:
       libusb.libusb_handle_events(self.ctx)
-      ready = True
+      running = len(cmds)
       for tr in cmds:
-        if tr.contents.status == libusb.LIBUSB_TRANSFER_COMPLETED: continue
-        if tr.contents.status != 0xFF: raise RuntimeError(f"EP 0x{tr.contents.endpoint:02X} error: {tr.contents.status}")
-        ready = False
-      if ready: return
+        if tr.contents.status == libusb.LIBUSB_TRANSFER_COMPLETED: running -= 1
+        elif tr.contents.status != 0xFF: raise RuntimeError(f"EP 0x{tr.contents.endpoint:02X} error: {tr.contents.status}")
 
   def send_batch(self, cdbs:list[bytes], idata:list[int]|None=None, odata:list[bytes|None]|None=None) -> list[bytes|None]:
     if idata is None: idata = [0] * len(cdbs)
