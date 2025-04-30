@@ -838,19 +838,15 @@ class AMDDevice(HCQCompiled):
   signal_pages: ClassVar[list[HCQBuffer]] = []
   signal_pool: ClassVar[list[HCQBuffer]] = []
 
-  def is_am(self) -> bool: return isinstance(self.dev_iface, PCIIface)
+  def is_am(self) -> bool: return isinstance(self.dev_iface, (PCIIface, USBIface))
+  def is_usb(self) -> bool: return isinstance(self.dev_iface, USBIface)
 
   def _select_iface(self):
     errs:str = ""
-    for iface_t in (KFDIface, PCIIface) if len(nm:=getenv("AMD_IFACE", "")) == 0 else (getattr(sys.modules[__name__], f"{nm}Iface"),):
+    for iface_t in (KFDIface, PCIIface, USBIface) if len(nm:=getenv("AMD_IFACE", "")) == 0 else (getattr(sys.modules[__name__], f"{nm}Iface"),):
       try: return iface_t(self, self.device_id)
       except Exception as e: errs += f"\n{iface_t.__name__}: {type(e).__name__}: {e}"
     raise RuntimeError(f"Cannot find a usable interface for AMD:{self.device_id}:{errs}")
-
-  def _select_iface(self):
-    for iface_t in (KFDIface, PCIIface, USBIface):
-      with contextlib.suppress(Exception): return iface_t(self, self.device_id)
-    raise RuntimeError(f"Cannot find a usable interface for device {self.device_id}")
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
@@ -886,16 +882,16 @@ class AMDDevice(HCQCompiled):
     nbio_pad = (0,) if self.target[0] == 9 else ()
     self.nbio = AMDIP('nbio' if self.target[0]<12 else 'nbif', nbio_ver, nbio_pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
 
-    queue_size = 0x8000 if self.dev_iface.__class__ is USBIface else 0x800000
+    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x8000 if self.is_usb() else 0x800000,
+      ctx_save_restore_size=wg_data_size + ctl_stack_size, eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
+
     max_copy_size = 0x40000000 if self.dev_iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
-    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, queue_size, ctx_save_restore_size=wg_data_size + ctl_stack_size,
-                                           eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
-    self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, queue_size)
+    self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x8000 if self.is_usb() else 0x800000)
 
     super().__init__(device, AMDAllocator(self), AMDLLVMRenderer(self.arch) if getenv("AMD_LLVM", 0) else AMDRenderer(self.arch),
                      AMDLLVMCompiler(self.arch) if getenv("AMD_LLVM", 0) else HIPCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, functools.partial(AMDComputeQueue, self), functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size),
-                     kernargs_size=(8 << 10) if self.dev_iface.__class__ is USBIface else (16 << 20))
+                     kernargs_size=(8 << 10) if self.is_usb() else (16 << 20))
 
     # Scratch setup
     self.max_private_segment_size = 0
