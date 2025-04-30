@@ -1,22 +1,21 @@
 from __future__ import annotations
 from typing import Any, cast, ClassVar
-import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select, time
+import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.ops import sint
 from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, all_same, flatten, DEBUG, OSX, Timing
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, all_same, flatten, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, libc, pci, vfio, sqtt
 from tinygrad.runtime.autogen.am import am
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
+from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
-from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
 from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module, setup_pci_bars
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 

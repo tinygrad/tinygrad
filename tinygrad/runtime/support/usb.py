@@ -1,4 +1,4 @@
-import ctypes, struct, time, os, dataclasses, array
+import ctypes, struct, dataclasses, array
 from tinygrad.runtime.autogen import libusb
 from tinygrad.helpers import DEBUG
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -98,7 +98,7 @@ class USB3:
         if rlen > self.max_read_len: raise ValueError("read length > max_read_len per CDB")
         self._prep_transfer(self.tr[self.ep_data_in][slot], self.ep_data_in, stream, self.buf_data_in[slot], rlen)
         pending.append(self.tr[self.ep_data_in][slot])
-      
+
       if send_data is not None:
         if len(send_data) > len(self.buf_data_out[slot]): self.buf_data_out[slot] = (ctypes.c_uint8 * len(send_data))()
         self.buf_data_out[slot][:len(send_data)] = send_data
@@ -114,10 +114,10 @@ class USB3:
 class WriteOp: addr:int; data:bytes; ignore_cache:bool=True # noqa: E702
 
 @dataclasses.dataclass(frozen=True)
-class ReadOp: addr:int; size:int; # noqa: E702
+class ReadOp: addr:int; size:int # noqa: E702
 
 @dataclasses.dataclass(frozen=True)
-class ScsiWriteOp: data:bytes; lba:int=0; # noqa: E702
+class ScsiWriteOp: data:bytes; lba:int=0 # noqa: E702
 
 class ASM24Controller:
   def __init__(self):
@@ -168,7 +168,7 @@ class ASM24Controller:
     masked_address, offset = address & 0xFFFFFFFC, address & 0x3
     assert size + offset <= 4
 
-    ops: List[Op] = []
+    ops = []
     if value is not None:
       assert value >> (8 * size) == 0
       ops.append(WriteOp(0xB220, struct.pack('>I', value << (8 * offset)), ignore_cache=False))
@@ -234,7 +234,7 @@ class USBMMIOInterface(MMIOInterface):
   def _acc_size(self, sz): return next(x for x in [('I', 4), ('H', 2), ('B', 1)] if sz % x[1] == 0)
   def _acc_one(self, off, sz, val=None):
     upper = 0 if sz < 8 else self.usb.pcie_mem_req(self.addr + off + 4, val if val is None else (val >> 32), 4)
-    lower = self.usb.pcie_mem_req(self.addr + off, val if val is None else val & 0xffffffff, min(sz, 4)) 
+    lower = self.usb.pcie_mem_req(self.addr + off, val if val is None else val & 0xffffffff, min(sz, 4))
     if val is None: return lower | (upper << 32)
 
   def _read(self, offset, size):

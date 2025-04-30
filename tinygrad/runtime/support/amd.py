@@ -33,8 +33,8 @@ def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")
 
 def setup_pci_bars(usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
-  try: is_cfg_ok = usb.pcie_cfg_req(pci.PCI_VENDOR_ID, bus=gpu_bus, dev=0, fn=0, size=2) == 0x1002
-  except RuntimeError as e:
+  try: usb.pcie_cfg_req(pci.PCI_VENDOR_ID, bus=gpu_bus, dev=0, fn=0, size=2)
+  except RuntimeError:
     for bus in range(gpu_bus):
       usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=gpu_bus, size=1)
       usb.pcie_cfg_req(pci.PCI_SECONDARY_BUS, bus=bus, dev=0, fn=0, value=bus+1, size=1)
@@ -51,19 +51,19 @@ def setup_pci_bars(usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base
   mem_space_addr, bar_off, bars = [mem_base, pref_mem_base], 0, {}
   while bar_off < 24:
     cfg = usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4)
-    bar_pref, bar_space, bar64 = bool(cfg & pci.PCI_BASE_ADDRESS_MEM_PREFETCH), cfg & pci.PCI_BASE_ADDRESS_SPACE, cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64
+    bar_mem, bar_space = bool(cfg & pci.PCI_BASE_ADDRESS_MEM_PREFETCH), cfg & pci.PCI_BASE_ADDRESS_SPACE
 
     if bar_space == pci.PCI_BASE_ADDRESS_SPACE_MEMORY:
       usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=0xffffffff, size=4)
       bar_size = 0xffffffff - (usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4) & 0xfffffff0) + 1
 
-      usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=mem_space_addr[bar_pref], size=4)
-      bars[bar_off // 4] = (mem_space_addr[bar_pref], bar_size)
-      mem_space_addr[bar_pref] += round_up(bar_size, 2 << 20)
+      usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=mem_space_addr[bar_mem], size=4)
+      bars[bar_off // 4] = (mem_space_addr[bar_mem], bar_size)
+      mem_space_addr[bar_mem] += round_up(bar_size, 2 << 20)
 
     # 64bit bar, zero out the upper 32 bits
-    if bar_space == pci.PCI_BASE_ADDRESS_MEM_TYPE_64: usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=0x0, size=4)
-    bar_off += 8 if bar64 else 4
+    if bar_space == pci.PCI_BASE_ADDRESS_MEM_TYPE_64: usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=0,size=4)
+    bar_off += 8 if cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64 else 4
 
   usb.pcie_cfg_req(pci.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
   return bars
