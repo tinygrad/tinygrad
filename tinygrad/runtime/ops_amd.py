@@ -299,7 +299,7 @@ class AMDComputeQueue(HWQueue):
       self.release_mem(signal.value_addr, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
                        self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
 
-      if not AMDDevice.driverless and (dev:=signal.timeline_for_device) is not None:
+      if (dev:=signal.timeline_for_device) is not None and not dev.is_am():
         self.release_mem(dev.queue_event_mailbox_ptr, dev.queue_event.event_id, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
                          self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, ctxid=dev.queue_event.event_id)
     return self
@@ -355,10 +355,10 @@ class AMDCopyQueue(HWQueue):
     fence_flags = self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.dev.target >= (10,0,0) else 0
     self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(signal.value_addr), value)
 
-    if not AMDDevice.driverless and (dev:=signal.timeline_for_device) is not None:
+    if (dev:=signal.timeline_for_device) is not None and not dev.is_am():
       self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
       self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id))
-    elif AMDDevice.driverless: self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(0))
+    elif dev is not None and dev.is_am(): self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(0))
 
     return self
 
@@ -374,7 +374,7 @@ class AMDCopyQueue(HWQueue):
     return self
 
   def bind(self, dev:AMDDevice):
-    if not getenv("AMD_SDMA_BIND", 0) or not dev.driverless: return
+    if not getenv("AMD_SDMA_BIND", 0) or not dev.is_am(): return
 
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc((qsz:=round_up(len(self._q), 8)) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
@@ -500,7 +500,7 @@ class AMDQueueDesc:
     if CPUProgram.atomic_lib is not None: CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
 
     # Flush hdp if queue is in dev mem.
-    if dev.driverless and getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1): dev.dev_iface.adev.gmc.flush_hdp()
+    if dev.is_am() and getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1): dev.dev_iface.adev.gmc.flush_hdp()
     for doorbell in self.doorbells: doorbell[0] = self.put_value
 
 @dataclass(frozen=True)
@@ -838,7 +838,14 @@ class AMDDevice(HCQCompiled):
   signal_pages: ClassVar[list[HCQBuffer]] = []
   signal_pool: ClassVar[list[HCQBuffer]] = []
 
-  driverless:bool = not FileIOInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
+  def is_am(self) -> bool: return isinstance(self.dev_iface, PCIIface)
+
+  def _select_iface(self):
+    errs:str = ""
+    for iface_t in (KFDIface, PCIIface) if len(nm:=getenv("AMD_IFACE", "")) == 0 else (getattr(sys.modules[__name__], f"{nm}Iface"),):
+      try: return iface_t(self, self.device_id)
+      except Exception as e: errs += f"\n{iface_t.__name__}: {type(e).__name__}: {e}"
+    raise RuntimeError(f"Cannot find a usable interface for AMD:{self.device_id}:{errs}")
 
   def _select_iface(self):
     for iface_t in (KFDIface, PCIIface, USBIface):
@@ -905,8 +912,8 @@ class AMDDevice(HCQCompiled):
     self.sqtt_enabled = PROFILE and bool(getenv("SQTT", 0))
     if self.sqtt_enabled:
       if self.arch != 'gfx1100': raise RuntimeError('SQ Thread Tracing is only supported on 7900XTX')
-      if not self.driverless and (ppfeaturemask:=int(FileIOInterface('/sys/module/amdgpu/parameters/ppfeaturemask', os.O_RDONLY).read(), 16))&0x8000:
-        raise RuntimeError("SQTT can't be enabled because of hardware bug, to workaround either use driverless or add "
+      if not self.is_am() and (ppfeaturemask:=int(FileIOInterface('/sys/module/amdgpu/parameters/ppfeaturemask', os.O_RDONLY).read(), 16))&0x8000:
+        raise RuntimeError("SQTT can't be enabled because of hardware bug, to workaround either use AMD_IFACE=PCI or add "
                            f"ppfeaturemask={(ppfeaturemask&~0x8000):#x} (current {ppfeaturemask=:#x} & ~PP_GFXOFF_MASK) to amdgpu module parameters\n"
                            "For more information read https://github.com/tinygrad/tinygrad/blob/master/extra/sqtt/README.md")
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
