@@ -1,23 +1,35 @@
 import array, time, ctypes, struct, random
 from hexdump import hexdump
-from tinygrad.runtime.support.am.usb import USBConnector
+from tinygrad.runtime.support.usb import ASMController, WriteOp
 from tinygrad.runtime.autogen import pci
 from tinygrad.helpers import Timing
 from tinygrad import Device
 
-usb = USBConnector("")
+usb = ASMController()
 
 COUNTERS = 2
 
 for i in range(COUNTERS): print(i, int(usb.read(0x3000 + i, 1)[0]))
 
-import pickle
-x = pickle.load(open("zpro.bin", "rb"))
-if usb.read(0x0, 1) != b'\x33':
-  # print(x[:0x1000])
-  usb.write(0x0, x[:0x1000])
-  usb.write(0x0, bytes([0x33]))
-  usb.write(0xc422, b'\x02')
+usb.exec_ops([WriteOp(0x54b, b' ', ignore_cache=True), WriteOp(0x5a8, b'\x02', ignore_cache=True), WriteOp(0x5f8, b'\x04', ignore_cache=True),
+  WriteOp(0x7ec, b'\x01\x00\x00\x00', ignore_cache=True), WriteOp(0xc422, b'\x02', ignore_cache=True), WriteOp(0x0, b'\x33', ignore_cache=True)])
+
+# import pickle
+# x = pickle.load(open("zpro.bin", "rb"))
+# if usb.read(0x0, 1) != b'\x33':
+#   print(x[0x54b:0x54c])
+#   print(x[0x5a8:0x5a9])
+#   print(x[0x5f8:0x5f9])
+#   print(x[0x7ec:0x7f0])
+#   usb.write(0x54b, x[0x54b:0x54c])
+#   usb.write(0x5a8, x[0x5a8:0x5a9])
+#   usb.write(0x5f8, x[0x5f8:0x5f9])
+#   usb.write(0x7ec, x[0x7ec:0x7f0])
+#   usb.write(0x0, bytes([0x33]))
+#   usb.write(0xc422, b'\x02')
+
+#   usb.exec_ops([WriteOp(0x54b, b' ', ignore_cache=True), WriteOp(0x5a8, b'\x02', ignore_cache=True), WriteOp(0x5a8, b'\x04', ignore_cache=True),
+#     WriteOp(0xc422, b'\x02', ignore_cache=True), WriteOp(0x0, b'\x01', ignore_cache=True)])
   # print(usb.read(0x398, 4))
 # usb.write(0xc420, b'\x00')
 # usb.write(0xc421, b'\x00')
@@ -49,13 +61,14 @@ print(dfg, usb.read(0xf000, 0x10))
 print(usb.write(0x3, bytes([1])))
 
 with Timing():
-  usb.scsi_write(0xeaeb, xxx)
-  usb.write(0xce6e, x[0xce6e:0xce70])
+  for i in range(64):
+    usb.scsi_write(xxx)
+    # usb.write(0xce6e, x[0xce6e:0xce70])
   # usb.scsi_write(0xeaeb, xxx)
   # usb.write(0xce6e, x[0xce6e:0xce70])
 
 with Timing():
-  usb.read(0xf000, 0x1000)
+  for i in range(64): usb.read(0xf000, 0x1000)
 
 print(usb.read(0x3, 1))
 

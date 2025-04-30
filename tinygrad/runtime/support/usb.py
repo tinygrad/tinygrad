@@ -13,7 +13,7 @@ class USB3:
     if libusb.libusb_init(ctypes.byref(self.ctx)): raise RuntimeError("libusb_init failed")
     if DEBUG >= 6: libusb.libusb_set_option(self.ctx, libusb.LIBUSB_OPTION_LOG_LEVEL, 4)
 
-    self.handle = libusb.libusb_open_device_with_vid_pid(self.ctx, 0x2D01, 0x3666)
+    self.handle = libusb.libusb_open_device_with_vid_pid(self.ctx, self.vendor, self.dev)
     if not self.handle: raise RuntimeError("device not found")
 
     # Detach kernel driver if needed
@@ -87,7 +87,7 @@ class USB3:
       stream = slot + 1  # firmware convention
 
       # build cmd packet
-      struct.pack_into(">BH", self.buf_cmd[slot], 3, stream, len(cdb))
+      struct.pack_into(">B", self.buf_cmd[slot], 3, stream)
       self.buf_cmd[slot][16:16+len(cdb)] = cdb
 
       # cmd + stat transfers
@@ -101,8 +101,9 @@ class USB3:
         pending.append(self.tr[self.ep_data_in][slot])
       
       if send_data is not None:
+        if len(send_data) > len(self.buf_data_out[slot]): self.buf_data_out[slot] = (ctypes.c_uint8 * len(send_data))()
         self.buf_data_out[slot][:len(send_data)] = send_data
-        self._prep_transfer(self.tr[self.ep_data_out][slot], self.ep_data_out, stream, self.buf_data_out[slot], 4096)
+        self._prep_transfer(self.tr[self.ep_data_out][slot], self.ep_data_out, stream, self.buf_data_out[slot], len(send_data))
         pending.append(self.tr[self.ep_data_out][slot])
 
       window.append((idx, slot, rlen))
@@ -121,7 +122,7 @@ class ScsiWriteOp: data:bytes; lba:int=0; # noqa: E702
 
 class ASM24Controller:
   def __init__(self):
-    self.usb = USB3(0x2D01, 0x3666, 0x81, 0x83, 0x02, 0x04)
+    self.usb = USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04)
     self._cache: dict[int, int] = {}
 
     # Init controller.
@@ -141,7 +142,7 @@ class ASM24Controller:
         addr = (op.addr & 0x1FFFF) | 0x500000
         _add_req(struct.pack('>BBBHB', 0xE4, op.size, addr >> 16, addr & 0xFFFF, 0), op.size, None)
         for i in range(op.size): self._cache[addr + i] = None
-      elif isinstance(op, ScsiWriteOp): _add_req(struct.pack('>BBQIBB', 0x8A, 0, op.lba, 4096//512, 0, 0), None, op.data)
+      elif isinstance(op, ScsiWriteOp): _add_req(struct.pack('>BBQIBB', 0x8A, 0, op.lba, 4096//512, 0, 0), None, op.data+b'\x00'*(4096-len(op.data)))
 
   def exec_ops(self, ops:list[WriteOp|ReadOp]):
     cdbs, idata, odata = [], [], []
