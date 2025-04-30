@@ -67,6 +67,7 @@ tiny = Tensor.from_blob(rawbuf_ptr, (h*w*4,), dtype=dtypes.imagef((h,w)), device
 
 ## AMD Interfaces
 AMD backend supports several interfaces for communicating with devices:
+
 * `KFD`: uses the amdgpu driver
 * `PCI`: uses the [AM driver](developer/am.md)
 
