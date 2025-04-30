@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 # -*- coding: utf-8 -*-
 #
 # TARGET arch is: []
@@ -12,13 +13,13 @@ class FunctionFactoryStub:
     def __getattr__(self, _):
       return ctypes.CFUNCTYPE(lambda y:y)
 
-# libraries['FIXME_STUB'] explanation
+# libraries['libusb'] explanation
 # As you did not list (-l libraryname.so) a library that exports this function
-# This is a non-working stub instead. 
+# This is a non-working stub instead.
 # You can either re-run clan2py with -l /path/to/library.so
 # Or manually fix this by comment the ctypes.CDLL loading
 _libraries = {}
-_libraries['FIXME_STUB'] = FunctionFactoryStub() #  ctypes.CDLL('FIXME_STUB')
+_libraries['libusb'] = None if (lib_path:=os.getenv('LIBUSB_PATH', ctypes.util.find_library('usb-1.0'))) is None else ctypes.CDLL(lib_path) #  ctypes.CDLL('libusb')
 class AsDictMixin:
     @classmethod
     def as_dict(cls, self):
@@ -154,14 +155,12 @@ if ctypes.sizeof(ctypes.c_longdouble) == 16:
 else:
     c_long_double_t = ctypes.c_ubyte*16
 
-_path = os.getenv("LIBUSB_PATH", ctypes.util.find_library("usb-1.0"))
-print("libusb path", _path)
-_libraries['libusb-1.0.so'] = ctypes.CDLL(_path)
+
 
 LIBUSB_H = True # macro
 ZERO_SIZED_ARRAY = True # macro
 # def LIBUSB_DEPRECATED_FOR(f):  # macro
-#    return ((deprecated))  
+#    return ((deprecated))
 # LIBUSB_PACKED = ((packed)) # macro
 LIBUSB_CALL = True # macro
 LIBUSB_API_VERSION = 0x01000109 # macro
@@ -189,12 +188,12 @@ LIBUSB_HOTPLUG_NO_FLAGS = 0 # macro
 LIBUSB_HOTPLUG_MATCH_ANY = -1 # macro
 uint16_t = ctypes.c_uint16
 try:
-    libusb_cpu_to_le16 = _libraries['FIXME_STUB'].libusb_cpu_to_le16
+    libusb_cpu_to_le16 = _libraries['libusb'].libusb_cpu_to_le16
     libusb_cpu_to_le16.restype = uint16_t
     libusb_cpu_to_le16.argtypes = [uint16_t]
 except AttributeError:
     pass
-libusb_le16_to_cpu = libusb_cpu_to_le16 # macro
+ # macro
 
 # values for enumeration 'libusb_class_code'
 libusb_class_code__enumvalues = {
@@ -768,534 +767,534 @@ LIBUSB_LOG_CB_CONTEXT = 2
 libusb_log_cb_mode = ctypes.c_uint32 # enum
 libusb_log_cb = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_context), libusb_log_level, ctypes.POINTER(ctypes.c_char))
 try:
-    libusb_init = _libraries['libusb-1.0.so'].libusb_init
+    libusb_init = _libraries['libusb'].libusb_init
     libusb_init.restype = ctypes.c_int32
     libusb_init.argtypes = [ctypes.POINTER(ctypes.POINTER(struct_libusb_context))]
 except AttributeError:
     pass
 try:
-    libusb_exit = _libraries['libusb-1.0.so'].libusb_exit
+    libusb_exit = _libraries['libusb'].libusb_exit
     libusb_exit.restype = None
     libusb_exit.argtypes = [ctypes.POINTER(struct_libusb_context)]
 except AttributeError:
     pass
 try:
-    libusb_set_debug = _libraries['libusb-1.0.so'].libusb_set_debug
+    libusb_set_debug = _libraries['libusb'].libusb_set_debug
     libusb_set_debug.restype = None
     libusb_set_debug.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_set_log_cb = _libraries['libusb-1.0.so'].libusb_set_log_cb
+    libusb_set_log_cb = _libraries['libusb'].libusb_set_log_cb
     libusb_set_log_cb.restype = None
     libusb_set_log_cb.argtypes = [ctypes.POINTER(struct_libusb_context), libusb_log_cb, ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_get_version = _libraries['libusb-1.0.so'].libusb_get_version
+    libusb_get_version = _libraries['libusb'].libusb_get_version
     libusb_get_version.restype = ctypes.POINTER(struct_libusb_version)
     libusb_get_version.argtypes = []
 except AttributeError:
     pass
 uint32_t = ctypes.c_uint32
 try:
-    libusb_has_capability = _libraries['libusb-1.0.so'].libusb_has_capability
+    libusb_has_capability = _libraries['libusb'].libusb_has_capability
     libusb_has_capability.restype = ctypes.c_int32
     libusb_has_capability.argtypes = [uint32_t]
 except AttributeError:
     pass
 try:
-    libusb_error_name = _libraries['libusb-1.0.so'].libusb_error_name
+    libusb_error_name = _libraries['libusb'].libusb_error_name
     libusb_error_name.restype = ctypes.POINTER(ctypes.c_char)
     libusb_error_name.argtypes = [ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_setlocale = _libraries['libusb-1.0.so'].libusb_setlocale
+    libusb_setlocale = _libraries['libusb'].libusb_setlocale
     libusb_setlocale.restype = ctypes.c_int32
     libusb_setlocale.argtypes = [ctypes.POINTER(ctypes.c_char)]
 except AttributeError:
     pass
 try:
-    libusb_strerror = _libraries['libusb-1.0.so'].libusb_strerror
+    libusb_strerror = _libraries['libusb'].libusb_strerror
     libusb_strerror.restype = ctypes.POINTER(ctypes.c_char)
     libusb_strerror.argtypes = [ctypes.c_int32]
 except AttributeError:
     pass
 ssize_t = ctypes.c_int64
 try:
-    libusb_get_device_list = _libraries['libusb-1.0.so'].libusb_get_device_list
+    libusb_get_device_list = _libraries['libusb'].libusb_get_device_list
     libusb_get_device_list.restype = ssize_t
     libusb_get_device_list.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.POINTER(ctypes.POINTER(ctypes.POINTER(struct_libusb_device)))]
 except AttributeError:
     pass
 try:
-    libusb_free_device_list = _libraries['libusb-1.0.so'].libusb_free_device_list
+    libusb_free_device_list = _libraries['libusb'].libusb_free_device_list
     libusb_free_device_list.restype = None
     libusb_free_device_list.argtypes = [ctypes.POINTER(ctypes.POINTER(struct_libusb_device)), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_ref_device = _libraries['libusb-1.0.so'].libusb_ref_device
+    libusb_ref_device = _libraries['libusb'].libusb_ref_device
     libusb_ref_device.restype = ctypes.POINTER(struct_libusb_device)
     libusb_ref_device.argtypes = [ctypes.POINTER(struct_libusb_device)]
 except AttributeError:
     pass
 try:
-    libusb_unref_device = _libraries['libusb-1.0.so'].libusb_unref_device
+    libusb_unref_device = _libraries['libusb'].libusb_unref_device
     libusb_unref_device.restype = None
     libusb_unref_device.argtypes = [ctypes.POINTER(struct_libusb_device)]
 except AttributeError:
     pass
 try:
-    libusb_get_configuration = _libraries['libusb-1.0.so'].libusb_get_configuration
+    libusb_get_configuration = _libraries['libusb'].libusb_get_configuration
     libusb_get_configuration.restype = ctypes.c_int32
     libusb_get_configuration.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.POINTER(ctypes.c_int32)]
 except AttributeError:
     pass
 try:
-    libusb_get_device_descriptor = _libraries['libusb-1.0.so'].libusb_get_device_descriptor
+    libusb_get_device_descriptor = _libraries['libusb'].libusb_get_device_descriptor
     libusb_get_device_descriptor.restype = ctypes.c_int32
     libusb_get_device_descriptor.argtypes = [ctypes.POINTER(struct_libusb_device), ctypes.POINTER(struct_libusb_device_descriptor)]
 except AttributeError:
     pass
 try:
-    libusb_get_active_config_descriptor = _libraries['libusb-1.0.so'].libusb_get_active_config_descriptor
+    libusb_get_active_config_descriptor = _libraries['libusb'].libusb_get_active_config_descriptor
     libusb_get_active_config_descriptor.restype = ctypes.c_int32
     libusb_get_active_config_descriptor.argtypes = [ctypes.POINTER(struct_libusb_device), ctypes.POINTER(ctypes.POINTER(struct_libusb_config_descriptor))]
 except AttributeError:
     pass
 uint8_t = ctypes.c_uint8
 try:
-    libusb_get_config_descriptor = _libraries['libusb-1.0.so'].libusb_get_config_descriptor
+    libusb_get_config_descriptor = _libraries['libusb'].libusb_get_config_descriptor
     libusb_get_config_descriptor.restype = ctypes.c_int32
     libusb_get_config_descriptor.argtypes = [ctypes.POINTER(struct_libusb_device), uint8_t, ctypes.POINTER(ctypes.POINTER(struct_libusb_config_descriptor))]
 except AttributeError:
     pass
 try:
-    libusb_get_config_descriptor_by_value = _libraries['libusb-1.0.so'].libusb_get_config_descriptor_by_value
+    libusb_get_config_descriptor_by_value = _libraries['libusb'].libusb_get_config_descriptor_by_value
     libusb_get_config_descriptor_by_value.restype = ctypes.c_int32
     libusb_get_config_descriptor_by_value.argtypes = [ctypes.POINTER(struct_libusb_device), uint8_t, ctypes.POINTER(ctypes.POINTER(struct_libusb_config_descriptor))]
 except AttributeError:
     pass
 try:
-    libusb_free_config_descriptor = _libraries['libusb-1.0.so'].libusb_free_config_descriptor
+    libusb_free_config_descriptor = _libraries['libusb'].libusb_free_config_descriptor
     libusb_free_config_descriptor.restype = None
     libusb_free_config_descriptor.argtypes = [ctypes.POINTER(struct_libusb_config_descriptor)]
 except AttributeError:
     pass
 try:
-    libusb_get_ss_endpoint_companion_descriptor = _libraries['libusb-1.0.so'].libusb_get_ss_endpoint_companion_descriptor
+    libusb_get_ss_endpoint_companion_descriptor = _libraries['libusb'].libusb_get_ss_endpoint_companion_descriptor
     libusb_get_ss_endpoint_companion_descriptor.restype = ctypes.c_int32
     libusb_get_ss_endpoint_companion_descriptor.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_libusb_endpoint_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_ss_endpoint_companion_descriptor))]
 except AttributeError:
     pass
 try:
-    libusb_free_ss_endpoint_companion_descriptor = _libraries['libusb-1.0.so'].libusb_free_ss_endpoint_companion_descriptor
+    libusb_free_ss_endpoint_companion_descriptor = _libraries['libusb'].libusb_free_ss_endpoint_companion_descriptor
     libusb_free_ss_endpoint_companion_descriptor.restype = None
     libusb_free_ss_endpoint_companion_descriptor.argtypes = [ctypes.POINTER(struct_libusb_ss_endpoint_companion_descriptor)]
 except AttributeError:
     pass
 try:
-    libusb_get_bos_descriptor = _libraries['libusb-1.0.so'].libusb_get_bos_descriptor
+    libusb_get_bos_descriptor = _libraries['libusb'].libusb_get_bos_descriptor
     libusb_get_bos_descriptor.restype = ctypes.c_int32
     libusb_get_bos_descriptor.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.POINTER(ctypes.POINTER(struct_libusb_bos_descriptor))]
 except AttributeError:
     pass
 try:
-    libusb_free_bos_descriptor = _libraries['libusb-1.0.so'].libusb_free_bos_descriptor
+    libusb_free_bos_descriptor = _libraries['libusb'].libusb_free_bos_descriptor
     libusb_free_bos_descriptor.restype = None
     libusb_free_bos_descriptor.argtypes = [ctypes.POINTER(struct_libusb_bos_descriptor)]
 except AttributeError:
     pass
 try:
-    libusb_get_usb_2_0_extension_descriptor = _libraries['libusb-1.0.so'].libusb_get_usb_2_0_extension_descriptor
+    libusb_get_usb_2_0_extension_descriptor = _libraries['libusb'].libusb_get_usb_2_0_extension_descriptor
     libusb_get_usb_2_0_extension_descriptor.restype = ctypes.c_int32
     libusb_get_usb_2_0_extension_descriptor.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_usb_2_0_extension_descriptor))]
 except AttributeError:
     pass
 try:
-    libusb_free_usb_2_0_extension_descriptor = _libraries['libusb-1.0.so'].libusb_free_usb_2_0_extension_descriptor
+    libusb_free_usb_2_0_extension_descriptor = _libraries['libusb'].libusb_free_usb_2_0_extension_descriptor
     libusb_free_usb_2_0_extension_descriptor.restype = None
     libusb_free_usb_2_0_extension_descriptor.argtypes = [ctypes.POINTER(struct_libusb_usb_2_0_extension_descriptor)]
 except AttributeError:
     pass
 try:
-    libusb_get_ss_usb_device_capability_descriptor = _libraries['libusb-1.0.so'].libusb_get_ss_usb_device_capability_descriptor
+    libusb_get_ss_usb_device_capability_descriptor = _libraries['libusb'].libusb_get_ss_usb_device_capability_descriptor
     libusb_get_ss_usb_device_capability_descriptor.restype = ctypes.c_int32
     libusb_get_ss_usb_device_capability_descriptor.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_ss_usb_device_capability_descriptor))]
 except AttributeError:
     pass
 try:
-    libusb_free_ss_usb_device_capability_descriptor = _libraries['libusb-1.0.so'].libusb_free_ss_usb_device_capability_descriptor
+    libusb_free_ss_usb_device_capability_descriptor = _libraries['libusb'].libusb_free_ss_usb_device_capability_descriptor
     libusb_free_ss_usb_device_capability_descriptor.restype = None
     libusb_free_ss_usb_device_capability_descriptor.argtypes = [ctypes.POINTER(struct_libusb_ss_usb_device_capability_descriptor)]
 except AttributeError:
     pass
 try:
-    libusb_get_container_id_descriptor = _libraries['libusb-1.0.so'].libusb_get_container_id_descriptor
+    libusb_get_container_id_descriptor = _libraries['libusb'].libusb_get_container_id_descriptor
     libusb_get_container_id_descriptor.restype = ctypes.c_int32
     libusb_get_container_id_descriptor.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_container_id_descriptor))]
 except AttributeError:
     pass
 try:
-    libusb_free_container_id_descriptor = _libraries['libusb-1.0.so'].libusb_free_container_id_descriptor
+    libusb_free_container_id_descriptor = _libraries['libusb'].libusb_free_container_id_descriptor
     libusb_free_container_id_descriptor.restype = None
     libusb_free_container_id_descriptor.argtypes = [ctypes.POINTER(struct_libusb_container_id_descriptor)]
 except AttributeError:
     pass
 try:
-    libusb_get_bus_number = _libraries['libusb-1.0.so'].libusb_get_bus_number
+    libusb_get_bus_number = _libraries['libusb'].libusb_get_bus_number
     libusb_get_bus_number.restype = uint8_t
     libusb_get_bus_number.argtypes = [ctypes.POINTER(struct_libusb_device)]
 except AttributeError:
     pass
 try:
-    libusb_get_port_number = _libraries['libusb-1.0.so'].libusb_get_port_number
+    libusb_get_port_number = _libraries['libusb'].libusb_get_port_number
     libusb_get_port_number.restype = uint8_t
     libusb_get_port_number.argtypes = [ctypes.POINTER(struct_libusb_device)]
 except AttributeError:
     pass
 try:
-    libusb_get_port_numbers = _libraries['libusb-1.0.so'].libusb_get_port_numbers
+    libusb_get_port_numbers = _libraries['libusb'].libusb_get_port_numbers
     libusb_get_port_numbers.restype = ctypes.c_int32
     libusb_get_port_numbers.argtypes = [ctypes.POINTER(struct_libusb_device), ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_get_port_path = _libraries['libusb-1.0.so'].libusb_get_port_path
+    libusb_get_port_path = _libraries['libusb'].libusb_get_port_path
     libusb_get_port_path.restype = ctypes.c_int32
     libusb_get_port_path.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_libusb_device), ctypes.POINTER(ctypes.c_ubyte), uint8_t]
 except AttributeError:
     pass
 try:
-    libusb_get_parent = _libraries['libusb-1.0.so'].libusb_get_parent
+    libusb_get_parent = _libraries['libusb'].libusb_get_parent
     libusb_get_parent.restype = ctypes.POINTER(struct_libusb_device)
     libusb_get_parent.argtypes = [ctypes.POINTER(struct_libusb_device)]
 except AttributeError:
     pass
 try:
-    libusb_get_device_address = _libraries['libusb-1.0.so'].libusb_get_device_address
+    libusb_get_device_address = _libraries['libusb'].libusb_get_device_address
     libusb_get_device_address.restype = uint8_t
     libusb_get_device_address.argtypes = [ctypes.POINTER(struct_libusb_device)]
 except AttributeError:
     pass
 try:
-    libusb_get_device_speed = _libraries['libusb-1.0.so'].libusb_get_device_speed
+    libusb_get_device_speed = _libraries['libusb'].libusb_get_device_speed
     libusb_get_device_speed.restype = ctypes.c_int32
     libusb_get_device_speed.argtypes = [ctypes.POINTER(struct_libusb_device)]
 except AttributeError:
     pass
 try:
-    libusb_get_max_packet_size = _libraries['libusb-1.0.so'].libusb_get_max_packet_size
+    libusb_get_max_packet_size = _libraries['libusb'].libusb_get_max_packet_size
     libusb_get_max_packet_size.restype = ctypes.c_int32
     libusb_get_max_packet_size.argtypes = [ctypes.POINTER(struct_libusb_device), ctypes.c_ubyte]
 except AttributeError:
     pass
 try:
-    libusb_get_max_iso_packet_size = _libraries['libusb-1.0.so'].libusb_get_max_iso_packet_size
+    libusb_get_max_iso_packet_size = _libraries['libusb'].libusb_get_max_iso_packet_size
     libusb_get_max_iso_packet_size.restype = ctypes.c_int32
     libusb_get_max_iso_packet_size.argtypes = [ctypes.POINTER(struct_libusb_device), ctypes.c_ubyte]
 except AttributeError:
     pass
 intptr_t = ctypes.c_int64
 try:
-    libusb_wrap_sys_device = _libraries['libusb-1.0.so'].libusb_wrap_sys_device
+    libusb_wrap_sys_device = _libraries['libusb'].libusb_wrap_sys_device
     libusb_wrap_sys_device.restype = ctypes.c_int32
     libusb_wrap_sys_device.argtypes = [ctypes.POINTER(struct_libusb_context), intptr_t, ctypes.POINTER(ctypes.POINTER(struct_libusb_device_handle))]
 except AttributeError:
     pass
 try:
-    libusb_open = _libraries['libusb-1.0.so'].libusb_open
+    libusb_open = _libraries['libusb'].libusb_open
     libusb_open.restype = ctypes.c_int32
     libusb_open.argtypes = [ctypes.POINTER(struct_libusb_device), ctypes.POINTER(ctypes.POINTER(struct_libusb_device_handle))]
 except AttributeError:
     pass
 try:
-    libusb_close = _libraries['libusb-1.0.so'].libusb_close
+    libusb_close = _libraries['libusb'].libusb_close
     libusb_close.restype = None
     libusb_close.argtypes = [ctypes.POINTER(struct_libusb_device_handle)]
 except AttributeError:
     pass
 try:
-    libusb_get_device = _libraries['libusb-1.0.so'].libusb_get_device
+    libusb_get_device = _libraries['libusb'].libusb_get_device
     libusb_get_device.restype = ctypes.POINTER(struct_libusb_device)
     libusb_get_device.argtypes = [ctypes.POINTER(struct_libusb_device_handle)]
 except AttributeError:
     pass
 try:
-    libusb_set_configuration = _libraries['libusb-1.0.so'].libusb_set_configuration
+    libusb_set_configuration = _libraries['libusb'].libusb_set_configuration
     libusb_set_configuration.restype = ctypes.c_int32
     libusb_set_configuration.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_claim_interface = _libraries['libusb-1.0.so'].libusb_claim_interface
+    libusb_claim_interface = _libraries['libusb'].libusb_claim_interface
     libusb_claim_interface.restype = ctypes.c_int32
     libusb_claim_interface.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_release_interface = _libraries['libusb-1.0.so'].libusb_release_interface
+    libusb_release_interface = _libraries['libusb'].libusb_release_interface
     libusb_release_interface.restype = ctypes.c_int32
     libusb_release_interface.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_open_device_with_vid_pid = _libraries['libusb-1.0.so'].libusb_open_device_with_vid_pid
+    libusb_open_device_with_vid_pid = _libraries['libusb'].libusb_open_device_with_vid_pid
     libusb_open_device_with_vid_pid.restype = ctypes.POINTER(struct_libusb_device_handle)
     libusb_open_device_with_vid_pid.argtypes = [ctypes.POINTER(struct_libusb_context), uint16_t, uint16_t]
 except AttributeError:
     pass
 try:
-    libusb_set_interface_alt_setting = _libraries['libusb-1.0.so'].libusb_set_interface_alt_setting
+    libusb_set_interface_alt_setting = _libraries['libusb'].libusb_set_interface_alt_setting
     libusb_set_interface_alt_setting.restype = ctypes.c_int32
     libusb_set_interface_alt_setting.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.c_int32, ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_clear_halt = _libraries['libusb-1.0.so'].libusb_clear_halt
+    libusb_clear_halt = _libraries['libusb'].libusb_clear_halt
     libusb_clear_halt.restype = ctypes.c_int32
     libusb_clear_halt.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.c_ubyte]
 except AttributeError:
     pass
 try:
-    libusb_reset_device = _libraries['libusb-1.0.so'].libusb_reset_device
+    libusb_reset_device = _libraries['libusb'].libusb_reset_device
     libusb_reset_device.restype = ctypes.c_int32
     libusb_reset_device.argtypes = [ctypes.POINTER(struct_libusb_device_handle)]
 except AttributeError:
     pass
 try:
-    libusb_alloc_streams = _libraries['libusb-1.0.so'].libusb_alloc_streams
+    libusb_alloc_streams = _libraries['libusb'].libusb_alloc_streams
     libusb_alloc_streams.restype = ctypes.c_int32
     libusb_alloc_streams.argtypes = [ctypes.POINTER(struct_libusb_device_handle), uint32_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_free_streams = _libraries['libusb-1.0.so'].libusb_free_streams
+    libusb_free_streams = _libraries['libusb'].libusb_free_streams
     libusb_free_streams.restype = ctypes.c_int32
     libusb_free_streams.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32]
 except AttributeError:
     pass
 size_t = ctypes.c_uint64
 try:
-    libusb_dev_mem_alloc = _libraries['libusb-1.0.so'].libusb_dev_mem_alloc
+    libusb_dev_mem_alloc = _libraries['libusb'].libusb_dev_mem_alloc
     libusb_dev_mem_alloc.restype = ctypes.POINTER(ctypes.c_ubyte)
     libusb_dev_mem_alloc.argtypes = [ctypes.POINTER(struct_libusb_device_handle), size_t]
 except AttributeError:
     pass
 try:
-    libusb_dev_mem_free = _libraries['libusb-1.0.so'].libusb_dev_mem_free
+    libusb_dev_mem_free = _libraries['libusb'].libusb_dev_mem_free
     libusb_dev_mem_free.restype = ctypes.c_int32
     libusb_dev_mem_free.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.POINTER(ctypes.c_ubyte), size_t]
 except AttributeError:
     pass
 try:
-    libusb_kernel_driver_active = _libraries['libusb-1.0.so'].libusb_kernel_driver_active
+    libusb_kernel_driver_active = _libraries['libusb'].libusb_kernel_driver_active
     libusb_kernel_driver_active.restype = ctypes.c_int32
     libusb_kernel_driver_active.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_detach_kernel_driver = _libraries['libusb-1.0.so'].libusb_detach_kernel_driver
+    libusb_detach_kernel_driver = _libraries['libusb'].libusb_detach_kernel_driver
     libusb_detach_kernel_driver.restype = ctypes.c_int32
     libusb_detach_kernel_driver.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_attach_kernel_driver = _libraries['libusb-1.0.so'].libusb_attach_kernel_driver
+    libusb_attach_kernel_driver = _libraries['libusb'].libusb_attach_kernel_driver
     libusb_attach_kernel_driver.restype = ctypes.c_int32
     libusb_attach_kernel_driver.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_set_auto_detach_kernel_driver = _libraries['libusb-1.0.so'].libusb_set_auto_detach_kernel_driver
+    libusb_set_auto_detach_kernel_driver = _libraries['libusb'].libusb_set_auto_detach_kernel_driver
     libusb_set_auto_detach_kernel_driver.restype = ctypes.c_int32
     libusb_set_auto_detach_kernel_driver.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_control_transfer_get_data = _libraries['FIXME_STUB'].libusb_control_transfer_get_data
+    libusb_control_transfer_get_data = _libraries['libusb'].libusb_control_transfer_get_data
     libusb_control_transfer_get_data.restype = ctypes.POINTER(ctypes.c_ubyte)
     libusb_control_transfer_get_data.argtypes = [ctypes.POINTER(struct_libusb_transfer)]
 except AttributeError:
     pass
 try:
-    libusb_control_transfer_get_setup = _libraries['FIXME_STUB'].libusb_control_transfer_get_setup
+    libusb_control_transfer_get_setup = _libraries['libusb'].libusb_control_transfer_get_setup
     libusb_control_transfer_get_setup.restype = ctypes.POINTER(struct_libusb_control_setup)
     libusb_control_transfer_get_setup.argtypes = [ctypes.POINTER(struct_libusb_transfer)]
 except AttributeError:
     pass
 try:
-    libusb_fill_control_setup = _libraries['FIXME_STUB'].libusb_fill_control_setup
+    libusb_fill_control_setup = _libraries['libusb'].libusb_fill_control_setup
     libusb_fill_control_setup.restype = None
     libusb_fill_control_setup.argtypes = [ctypes.POINTER(ctypes.c_ubyte), uint8_t, uint8_t, uint16_t, uint16_t, uint16_t]
 except AttributeError:
     pass
 try:
-    libusb_alloc_transfer = _libraries['libusb-1.0.so'].libusb_alloc_transfer
+    libusb_alloc_transfer = _libraries['libusb'].libusb_alloc_transfer
     libusb_alloc_transfer.restype = ctypes.POINTER(struct_libusb_transfer)
     libusb_alloc_transfer.argtypes = [ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_submit_transfer = _libraries['libusb-1.0.so'].libusb_submit_transfer
+    libusb_submit_transfer = _libraries['libusb'].libusb_submit_transfer
     libusb_submit_transfer.restype = ctypes.c_int32
     libusb_submit_transfer.argtypes = [ctypes.POINTER(struct_libusb_transfer)]
 except AttributeError:
     pass
 try:
-    libusb_cancel_transfer = _libraries['libusb-1.0.so'].libusb_cancel_transfer
+    libusb_cancel_transfer = _libraries['libusb'].libusb_cancel_transfer
     libusb_cancel_transfer.restype = ctypes.c_int32
     libusb_cancel_transfer.argtypes = [ctypes.POINTER(struct_libusb_transfer)]
 except AttributeError:
     pass
 try:
-    libusb_free_transfer = _libraries['libusb-1.0.so'].libusb_free_transfer
+    libusb_free_transfer = _libraries['libusb'].libusb_free_transfer
     libusb_free_transfer.restype = None
     libusb_free_transfer.argtypes = [ctypes.POINTER(struct_libusb_transfer)]
 except AttributeError:
     pass
 try:
-    libusb_transfer_set_stream_id = _libraries['libusb-1.0.so'].libusb_transfer_set_stream_id
+    libusb_transfer_set_stream_id = _libraries['libusb'].libusb_transfer_set_stream_id
     libusb_transfer_set_stream_id.restype = None
     libusb_transfer_set_stream_id.argtypes = [ctypes.POINTER(struct_libusb_transfer), uint32_t]
 except AttributeError:
     pass
 try:
-    libusb_transfer_get_stream_id = _libraries['libusb-1.0.so'].libusb_transfer_get_stream_id
+    libusb_transfer_get_stream_id = _libraries['libusb'].libusb_transfer_get_stream_id
     libusb_transfer_get_stream_id.restype = uint32_t
     libusb_transfer_get_stream_id.argtypes = [ctypes.POINTER(struct_libusb_transfer)]
 except AttributeError:
     pass
 try:
-    libusb_fill_control_transfer = _libraries['FIXME_STUB'].libusb_fill_control_transfer
+    libusb_fill_control_transfer = _libraries['libusb'].libusb_fill_control_transfer
     libusb_fill_control_transfer.restype = None
     libusb_fill_control_transfer.argtypes = [ctypes.POINTER(struct_libusb_transfer), ctypes.POINTER(struct_libusb_device_handle), ctypes.POINTER(ctypes.c_ubyte), libusb_transfer_cb_fn, ctypes.POINTER(None), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    libusb_fill_bulk_transfer = _libraries['FIXME_STUB'].libusb_fill_bulk_transfer
+    libusb_fill_bulk_transfer = _libraries['libusb'].libusb_fill_bulk_transfer
     libusb_fill_bulk_transfer.restype = None
     libusb_fill_bulk_transfer.argtypes = [ctypes.POINTER(struct_libusb_transfer), ctypes.POINTER(struct_libusb_device_handle), ctypes.c_ubyte, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, libusb_transfer_cb_fn, ctypes.POINTER(None), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    libusb_fill_bulk_stream_transfer = _libraries['FIXME_STUB'].libusb_fill_bulk_stream_transfer
+    libusb_fill_bulk_stream_transfer = _libraries['libusb'].libusb_fill_bulk_stream_transfer
     libusb_fill_bulk_stream_transfer.restype = None
     libusb_fill_bulk_stream_transfer.argtypes = [ctypes.POINTER(struct_libusb_transfer), ctypes.POINTER(struct_libusb_device_handle), ctypes.c_ubyte, uint32_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, libusb_transfer_cb_fn, ctypes.POINTER(None), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    libusb_fill_interrupt_transfer = _libraries['FIXME_STUB'].libusb_fill_interrupt_transfer
+    libusb_fill_interrupt_transfer = _libraries['libusb'].libusb_fill_interrupt_transfer
     libusb_fill_interrupt_transfer.restype = None
     libusb_fill_interrupt_transfer.argtypes = [ctypes.POINTER(struct_libusb_transfer), ctypes.POINTER(struct_libusb_device_handle), ctypes.c_ubyte, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, libusb_transfer_cb_fn, ctypes.POINTER(None), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    libusb_fill_iso_transfer = _libraries['FIXME_STUB'].libusb_fill_iso_transfer
+    libusb_fill_iso_transfer = _libraries['libusb'].libusb_fill_iso_transfer
     libusb_fill_iso_transfer.restype = None
     libusb_fill_iso_transfer.argtypes = [ctypes.POINTER(struct_libusb_transfer), ctypes.POINTER(struct_libusb_device_handle), ctypes.c_ubyte, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, ctypes.c_int32, libusb_transfer_cb_fn, ctypes.POINTER(None), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    libusb_set_iso_packet_lengths = _libraries['FIXME_STUB'].libusb_set_iso_packet_lengths
+    libusb_set_iso_packet_lengths = _libraries['libusb'].libusb_set_iso_packet_lengths
     libusb_set_iso_packet_lengths.restype = None
     libusb_set_iso_packet_lengths.argtypes = [ctypes.POINTER(struct_libusb_transfer), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    libusb_get_iso_packet_buffer = _libraries['FIXME_STUB'].libusb_get_iso_packet_buffer
+    libusb_get_iso_packet_buffer = _libraries['libusb'].libusb_get_iso_packet_buffer
     libusb_get_iso_packet_buffer.restype = ctypes.POINTER(ctypes.c_ubyte)
     libusb_get_iso_packet_buffer.argtypes = [ctypes.POINTER(struct_libusb_transfer), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    libusb_get_iso_packet_buffer_simple = _libraries['FIXME_STUB'].libusb_get_iso_packet_buffer_simple
+    libusb_get_iso_packet_buffer_simple = _libraries['libusb'].libusb_get_iso_packet_buffer_simple
     libusb_get_iso_packet_buffer_simple.restype = ctypes.POINTER(ctypes.c_ubyte)
     libusb_get_iso_packet_buffer_simple.argtypes = [ctypes.POINTER(struct_libusb_transfer), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    libusb_control_transfer = _libraries['libusb-1.0.so'].libusb_control_transfer
+    libusb_control_transfer = _libraries['libusb'].libusb_control_transfer
     libusb_control_transfer.restype = ctypes.c_int32
     libusb_control_transfer.argtypes = [ctypes.POINTER(struct_libusb_device_handle), uint8_t, uint8_t, uint16_t, uint16_t, ctypes.POINTER(ctypes.c_ubyte), uint16_t, ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    libusb_bulk_transfer = _libraries['libusb-1.0.so'].libusb_bulk_transfer
+    libusb_bulk_transfer = _libraries['libusb'].libusb_bulk_transfer
     libusb_bulk_transfer.restype = ctypes.c_int32
     libusb_bulk_transfer.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.c_ubyte, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, ctypes.POINTER(ctypes.c_int32), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    libusb_interrupt_transfer = _libraries['libusb-1.0.so'].libusb_interrupt_transfer
+    libusb_interrupt_transfer = _libraries['libusb'].libusb_interrupt_transfer
     libusb_interrupt_transfer.restype = ctypes.c_int32
     libusb_interrupt_transfer.argtypes = [ctypes.POINTER(struct_libusb_device_handle), ctypes.c_ubyte, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, ctypes.POINTER(ctypes.c_int32), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    libusb_get_descriptor = _libraries['FIXME_STUB'].libusb_get_descriptor
+    libusb_get_descriptor = _libraries['libusb'].libusb_get_descriptor
     libusb_get_descriptor.restype = ctypes.c_int32
     libusb_get_descriptor.argtypes = [ctypes.POINTER(struct_libusb_device_handle), uint8_t, uint8_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_get_string_descriptor = _libraries['FIXME_STUB'].libusb_get_string_descriptor
+    libusb_get_string_descriptor = _libraries['libusb'].libusb_get_string_descriptor
     libusb_get_string_descriptor.restype = ctypes.c_int32
     libusb_get_string_descriptor.argtypes = [ctypes.POINTER(struct_libusb_device_handle), uint8_t, uint16_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_get_string_descriptor_ascii = _libraries['libusb-1.0.so'].libusb_get_string_descriptor_ascii
+    libusb_get_string_descriptor_ascii = _libraries['libusb'].libusb_get_string_descriptor_ascii
     libusb_get_string_descriptor_ascii.restype = ctypes.c_int32
     libusb_get_string_descriptor_ascii.argtypes = [ctypes.POINTER(struct_libusb_device_handle), uint8_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    libusb_try_lock_events = _libraries['libusb-1.0.so'].libusb_try_lock_events
+    libusb_try_lock_events = _libraries['libusb'].libusb_try_lock_events
     libusb_try_lock_events.restype = ctypes.c_int32
     libusb_try_lock_events.argtypes = [ctypes.POINTER(struct_libusb_context)]
 except AttributeError:
     pass
 try:
-    libusb_lock_events = _libraries['libusb-1.0.so'].libusb_lock_events
+    libusb_lock_events = _libraries['libusb'].libusb_lock_events
     libusb_lock_events.restype = None
     libusb_lock_events.argtypes = [ctypes.POINTER(struct_libusb_context)]
 except AttributeError:
     pass
 try:
-    libusb_unlock_events = _libraries['libusb-1.0.so'].libusb_unlock_events
+    libusb_unlock_events = _libraries['libusb'].libusb_unlock_events
     libusb_unlock_events.restype = None
     libusb_unlock_events.argtypes = [ctypes.POINTER(struct_libusb_context)]
 except AttributeError:
     pass
 try:
-    libusb_event_handling_ok = _libraries['libusb-1.0.so'].libusb_event_handling_ok
+    libusb_event_handling_ok = _libraries['libusb'].libusb_event_handling_ok
     libusb_event_handling_ok.restype = ctypes.c_int32
     libusb_event_handling_ok.argtypes = [ctypes.POINTER(struct_libusb_context)]
 except AttributeError:
     pass
 try:
-    libusb_event_handler_active = _libraries['libusb-1.0.so'].libusb_event_handler_active
+    libusb_event_handler_active = _libraries['libusb'].libusb_event_handler_active
     libusb_event_handler_active.restype = ctypes.c_int32
     libusb_event_handler_active.argtypes = [ctypes.POINTER(struct_libusb_context)]
 except AttributeError:
     pass
 try:
-    libusb_interrupt_event_handler = _libraries['libusb-1.0.so'].libusb_interrupt_event_handler
+    libusb_interrupt_event_handler = _libraries['libusb'].libusb_interrupt_event_handler
     libusb_interrupt_event_handler.restype = None
     libusb_interrupt_event_handler.argtypes = [ctypes.POINTER(struct_libusb_context)]
 except AttributeError:
     pass
 try:
-    libusb_lock_event_waiters = _libraries['libusb-1.0.so'].libusb_lock_event_waiters
+    libusb_lock_event_waiters = _libraries['libusb'].libusb_lock_event_waiters
     libusb_lock_event_waiters.restype = None
     libusb_lock_event_waiters.argtypes = [ctypes.POINTER(struct_libusb_context)]
 except AttributeError:
     pass
 try:
-    libusb_unlock_event_waiters = _libraries['libusb-1.0.so'].libusb_unlock_event_waiters
+    libusb_unlock_event_waiters = _libraries['libusb'].libusb_unlock_event_waiters
     libusb_unlock_event_waiters.restype = None
     libusb_unlock_event_waiters.argtypes = [ctypes.POINTER(struct_libusb_context)]
 except AttributeError:
@@ -1310,49 +1309,49 @@ struct_timeval._fields_ = [
 ]
 
 try:
-    libusb_wait_for_event = _libraries['libusb-1.0.so'].libusb_wait_for_event
+    libusb_wait_for_event = _libraries['libusb'].libusb_wait_for_event
     libusb_wait_for_event.restype = ctypes.c_int32
     libusb_wait_for_event.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_timeval)]
 except AttributeError:
     pass
 try:
-    libusb_handle_events_timeout = _libraries['libusb-1.0.so'].libusb_handle_events_timeout
+    libusb_handle_events_timeout = _libraries['libusb'].libusb_handle_events_timeout
     libusb_handle_events_timeout.restype = ctypes.c_int32
     libusb_handle_events_timeout.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_timeval)]
 except AttributeError:
     pass
 try:
-    libusb_handle_events_timeout_completed = _libraries['libusb-1.0.so'].libusb_handle_events_timeout_completed
+    libusb_handle_events_timeout_completed = _libraries['libusb'].libusb_handle_events_timeout_completed
     libusb_handle_events_timeout_completed.restype = ctypes.c_int32
     libusb_handle_events_timeout_completed.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_timeval), ctypes.POINTER(ctypes.c_int32)]
 except AttributeError:
     pass
 try:
-    libusb_handle_events = _libraries['libusb-1.0.so'].libusb_handle_events
+    libusb_handle_events = _libraries['libusb'].libusb_handle_events
     libusb_handle_events.restype = ctypes.c_int32
     libusb_handle_events.argtypes = [ctypes.POINTER(struct_libusb_context)]
 except AttributeError:
     pass
 try:
-    libusb_handle_events_completed = _libraries['libusb-1.0.so'].libusb_handle_events_completed
+    libusb_handle_events_completed = _libraries['libusb'].libusb_handle_events_completed
     libusb_handle_events_completed.restype = ctypes.c_int32
     libusb_handle_events_completed.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.POINTER(ctypes.c_int32)]
 except AttributeError:
     pass
 try:
-    libusb_handle_events_locked = _libraries['libusb-1.0.so'].libusb_handle_events_locked
+    libusb_handle_events_locked = _libraries['libusb'].libusb_handle_events_locked
     libusb_handle_events_locked.restype = ctypes.c_int32
     libusb_handle_events_locked.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_timeval)]
 except AttributeError:
     pass
 try:
-    libusb_pollfds_handle_timeouts = _libraries['libusb-1.0.so'].libusb_pollfds_handle_timeouts
+    libusb_pollfds_handle_timeouts = _libraries['libusb'].libusb_pollfds_handle_timeouts
     libusb_pollfds_handle_timeouts.restype = ctypes.c_int32
     libusb_pollfds_handle_timeouts.argtypes = [ctypes.POINTER(struct_libusb_context)]
 except AttributeError:
     pass
 try:
-    libusb_get_next_timeout = _libraries['libusb-1.0.so'].libusb_get_next_timeout
+    libusb_get_next_timeout = _libraries['libusb'].libusb_get_next_timeout
     libusb_get_next_timeout.restype = ctypes.c_int32
     libusb_get_next_timeout.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_timeval)]
 except AttributeError:
@@ -1370,19 +1369,19 @@ struct_libusb_pollfd._fields_ = [
 libusb_pollfd_added_cb = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_int16, ctypes.POINTER(None))
 libusb_pollfd_removed_cb = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.POINTER(None))
 try:
-    libusb_get_pollfds = _libraries['libusb-1.0.so'].libusb_get_pollfds
+    libusb_get_pollfds = _libraries['libusb'].libusb_get_pollfds
     libusb_get_pollfds.restype = ctypes.POINTER(ctypes.POINTER(struct_libusb_pollfd))
     libusb_get_pollfds.argtypes = [ctypes.POINTER(struct_libusb_context)]
 except AttributeError:
     pass
 try:
-    libusb_free_pollfds = _libraries['libusb-1.0.so'].libusb_free_pollfds
+    libusb_free_pollfds = _libraries['libusb'].libusb_free_pollfds
     libusb_free_pollfds.restype = None
     libusb_free_pollfds.argtypes = [ctypes.POINTER(ctypes.POINTER(struct_libusb_pollfd))]
 except AttributeError:
     pass
 try:
-    libusb_set_pollfd_notifiers = _libraries['libusb-1.0.so'].libusb_set_pollfd_notifiers
+    libusb_set_pollfd_notifiers = _libraries['libusb'].libusb_set_pollfd_notifiers
     libusb_set_pollfd_notifiers.restype = None
     libusb_set_pollfd_notifiers.argtypes = [ctypes.POINTER(struct_libusb_context), libusb_pollfd_added_cb, libusb_pollfd_removed_cb, ctypes.POINTER(None)]
 except AttributeError:
@@ -1410,19 +1409,19 @@ libusb_hotplug_flag = c__EA_libusb_hotplug_flag
 libusb_hotplug_flag__enumvalues = c__EA_libusb_hotplug_flag__enumvalues
 libusb_hotplug_callback_fn = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_libusb_device), c__EA_libusb_hotplug_event, ctypes.POINTER(None))
 try:
-    libusb_hotplug_register_callback = _libraries['libusb-1.0.so'].libusb_hotplug_register_callback
+    libusb_hotplug_register_callback = _libraries['libusb'].libusb_hotplug_register_callback
     libusb_hotplug_register_callback.restype = ctypes.c_int32
     libusb_hotplug_register_callback.argtypes = [ctypes.POINTER(struct_libusb_context), ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, libusb_hotplug_callback_fn, ctypes.POINTER(None), ctypes.POINTER(ctypes.c_int32)]
 except AttributeError:
     pass
 try:
-    libusb_hotplug_deregister_callback = _libraries['libusb-1.0.so'].libusb_hotplug_deregister_callback
+    libusb_hotplug_deregister_callback = _libraries['libusb'].libusb_hotplug_deregister_callback
     libusb_hotplug_deregister_callback.restype = None
     libusb_hotplug_deregister_callback.argtypes = [ctypes.POINTER(struct_libusb_context), libusb_hotplug_callback_handle]
 except AttributeError:
     pass
 try:
-    libusb_hotplug_get_user_data = _libraries['libusb-1.0.so'].libusb_hotplug_get_user_data
+    libusb_hotplug_get_user_data = _libraries['libusb'].libusb_hotplug_get_user_data
     libusb_hotplug_get_user_data.restype = ctypes.POINTER(None)
     libusb_hotplug_get_user_data.argtypes = [ctypes.POINTER(struct_libusb_context), libusb_hotplug_callback_handle]
 except AttributeError:
@@ -1442,7 +1441,7 @@ LIBUSB_OPTION_MAX = 3
 libusb_option = ctypes.c_uint32 # enum
 LIBUSB_OPTION_WEAK_AUTHORITY = LIBUSB_OPTION_NO_DEVICE_DISCOVERY # macro
 try:
-    libusb_set_option = _libraries['libusb-1.0.so'].libusb_set_option
+    libusb_set_option = _libraries['libusb'].libusb_set_option
     libusb_set_option.restype = ctypes.c_int32
     libusb_set_option.argtypes = [ctypes.POINTER(struct_libusb_context), libusb_option]
 except AttributeError:

@@ -534,7 +534,9 @@ generate_libusb() {
     -o $BASE/libusb.py
 
   fixup $BASE/libusb.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/libusb.py
   sed -i "s/FIXME_STUB/libusb/g" "$BASE/libusb.py"
+  sed -i "s/libusb_le16_to_cpu = libusb_cpu_to_le16//g" "$BASE/libusb.py"
   sed -i "s/FunctionFactoryStub()/None if (lib_path:=os.getenv('LIBUSB_PATH', ctypes.util.find_library('usb-1.0'))) is None else ctypes.CDLL(lib_path)/g" "$BASE/libusb.py"
   python3 -c "import tinygrad.runtime.autogen.libusb"
 }
