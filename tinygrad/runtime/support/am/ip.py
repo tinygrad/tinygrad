@@ -369,7 +369,7 @@ class AM_PSP(AM_IP):
     self.fence_paddr = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
 
     self.ring_size = 0x10000
-    self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=not self.adev.partial_boot, boot=True)
+    self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=False, boot=True)
 
     self.max_tmr_size = 0x1300000
     self.boot_time_tmr = self.adev.ip_ver[am.GC_HWIP] >= (12,0,0)
