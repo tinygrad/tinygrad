@@ -77,10 +77,10 @@ class Attention:
 
     # update the cache
     assert xk.dtype == xv.dtype == self.cache_kv.dtype, f"{xk.dtype=}, {xv.dtype=}, {self.cache_kv.dtype=}"
-    self.cache_kv.shrink((None, None, (start_pos, start_pos+seqlen), None, None)).assign(Tensor.stack(xk, xv)).realize()
+    self.cache_kv[:, :, start_pos:start_pos+seqlen, :, :].assign(Tensor.stack(xk, xv)).realize()
 
-    keys = self.cache_kv[0].shrink((None, (0, start_pos+seqlen), None, None))
-    values = self.cache_kv[1].shrink((None, (0, start_pos+seqlen), None, None))
+    keys = self.cache_kv[0, :, 0:start_pos+seqlen, :, :]
+    values = self.cache_kv[1, :, 0:start_pos+seqlen, :, :]
 
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
@@ -176,7 +176,7 @@ class Transformer:
     h = self.tok_embeddings(tokens)
 
     self.freqs_cis = self.freqs_cis.cast(h.dtype).kernelize()
-    freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
+    freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen, :, :, :]
 
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1).kernelize() if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
