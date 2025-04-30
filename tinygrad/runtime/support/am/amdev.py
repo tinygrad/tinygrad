@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib, array
+import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib
 from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -161,8 +161,8 @@ class AMMemoryManager:
 
   def __init__(self, adev:AMDev, vram_size:int):
     self.adev, self.vram_size = adev, vram_size
-    self.boot_allocator = TLSFAllocator(32 << 20, base=vram_size - (64 << 20)) # per device
-    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
+    self.boot_allocator = TLSFAllocator(32 << 20, base=0) # per device
+    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.size) # per device
     self.root_page_table = AMPageTableEntry(self.adev, self.palloc(0x1000, zero=not self.adev.smi_dev, boot=True), lv=am.AMDGPU_VM_PDB1)
 
   def _frag_size(self, va, sz, must_cover=True):
@@ -219,7 +219,7 @@ class AMMemoryManager:
           # Try to allocate as long segment (power of 2) as possible
           cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, rem_len) + 12), None
           while cont_seg_sz >= 0x1000:
-            try: paddr = self.palloc(cont_seg_sz, zero=True)
+            try: paddr = self.palloc(cont_seg_sz, zero=False)
             except MemoryError: cont_seg_sz //= 2
             else: break
 
@@ -271,7 +271,7 @@ class AMDev:
     # all blocks that are initialized only during the initial AM boot.
     # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
     self.is_booting, self.smi_dev = True, False # During boot only boot memory can be allocated. This flag is to validate this.
-    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000002)) and (getenv("AM_RESET", 0) != 1)
+    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000003)) and (getenv("AM_RESET", 0) != 1)
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
@@ -358,7 +358,7 @@ class AMDev:
     mmRCC_CONFIG_MEMSIZE = 0xde3
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
 
-    self.bhdr = am.struct_binary_header.from_buffer(array.array('B', self.vram.view(self.vram_size - (64 << 10), (10 << 10))[:]))
+    self.bhdr = am.struct_binary_header.from_buffer(bytearray(self.vram.view(self.vram_size - (64 << 10), (10 << 10))[:]))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE and not ihdr.base_addr_64_bit, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
 

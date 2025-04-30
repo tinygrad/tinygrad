@@ -1,6 +1,6 @@
 import unittest, ctypes, struct, os
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, CI
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
 from tinygrad.engine.realize import get_runner, CompiledRunner
@@ -217,6 +217,25 @@ class TestHCQ(unittest.TestCase):
 
     mv_buf1 = buf1.as_buffer().cast('Q')
     for i in range(sz//8): assert mv_buf1[i] == 0x0101010101010101, f"offset {i*8} differs, not all copied, got {hex(mv_buf1[i])}"
+
+  @unittest.skipIf(CI, "skip in CI")
+  def test_copy_6g(self):
+    if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
+
+    sz = 6 << 30
+    buf1 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
+    ctypes.memset(buf2._buf.va_addr, 1, sz)
+
+    TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
+                                .copy(buf1._buf.va_addr, buf2._buf.va_addr, sz) \
+                                .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+
+    TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
+    TestHCQ.d0.timeline_value += 1
+
+    mv_buf1 = buf1.as_buffer().cast('Q')
+    for i in range(0, sz//8, (2 << 20)): assert mv_buf1[i] == 0x0101010101010101, f"offset {i*8} differs, not all copied, got {hex(mv_buf1[i])}"
 
   def test_update_copy(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")

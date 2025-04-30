@@ -1,4 +1,4 @@
-import ctypes, time, contextlib, importlib, array
+import ctypes, time, contextlib, importlib
 from typing import Literal
 from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG
@@ -153,7 +153,7 @@ class AM_SMU(AM_IP):
 
   def read_table(self, table_t, cmd):
     self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, cmd)
-    return table_t.from_buffer(array.array('B', self.adev.vram.view(self.driver_table_paddr, ctypes.sizeof(table_t))[:]))
+    return table_t.from_buffer(bytearray(self.adev.vram.view(self.driver_table_paddr, ctypes.sizeof(table_t))[:]))
   def read_metrics(self): return self.read_table(self.smu_mod.SmuMetricsExternal_t, self.smu_mod.TABLE_SMU_METRICS)
 
   def set_clocks(self, level):
@@ -369,7 +369,7 @@ class AM_PSP(AM_IP):
     self.fence_paddr = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
 
     self.ring_size = 0x10000
-    self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=not self.adev.partial_boot, boot=True)
+    self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=False, boot=True)
 
     self.max_tmr_size = 0x1300000
     self.boot_time_tmr = self.adev.ip_ver[am.GC_HWIP] >= (12,0,0)
@@ -459,7 +459,7 @@ class AM_PSP(AM_IP):
     while self.adev.vram.view(self.fence_paddr, 4, 'I')[0] != prev_wptr: pass
     time.sleep(0.005)
 
-    resp = type(cmd).from_buffer(array.array('B', self.adev.vram.view(self.cmd_paddr, ctypes.sizeof(cmd))[:]))
+    resp = type(cmd).from_buffer(bytearray(self.adev.vram.view(self.cmd_paddr, ctypes.sizeof(cmd))[:]))
     if resp.resp.status != 0: raise RuntimeError(f"PSP command failed {resp.cmd_id} {resp.resp.status}")
 
     return resp
