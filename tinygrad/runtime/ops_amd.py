@@ -801,7 +801,8 @@ class AMDDevice(HCQCompiled):
   def is_am(self) -> bool: return isinstance(self.dev_iface, PCIIface)
 
   def _select_iface(self):
-    for iface_t in (KFDIface, PCIIface) if len(nm:=getenv("AMD_IFACE", "")) == 0 else (getattr(sys.modules[__name__], f"{nm}Iface"),):
+    if len(nm:=getenv("AMD_IFACE", "")) > 0: return getattr(sys.modules[__name__], f"{nm}Iface")(self, self.device_id)
+    for iface_t in (KFDIface, PCIIface):
       with contextlib.suppress(Exception): return iface_t(self, self.device_id)
     raise RuntimeError(f"Cannot find a usable interface for device {self.device_id}")
 
