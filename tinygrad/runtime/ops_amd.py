@@ -801,10 +801,11 @@ class AMDDevice(HCQCompiled):
   def is_am(self) -> bool: return isinstance(self.dev_iface, PCIIface)
 
   def _select_iface(self):
-    if len(nm:=getenv("AMD_IFACE", "")) > 0: return getattr(sys.modules[__name__], f"{nm}Iface")(self, self.device_id)
-    for iface_t in (KFDIface, PCIIface):
-      with contextlib.suppress(Exception): return iface_t(self, self.device_id)
-    raise RuntimeError(f"Cannot find a usable interface for device {self.device_id}")
+    errs:str = ""
+    for iface_t in (KFDIface, PCIIface) if len(nm:=getenv("AMD_IFACE", "")) == 0 else (getattr(sys.modules[__name__], f"{nm}Iface"),):
+      try: return iface_t(self, self.device_id)
+      except Exception as e: errs += f"\n{iface_t.__name__}: {type(e).__name__}: {e}"
+    raise RuntimeError(f"Cannot find a usable interface for AMD:{self.device_id}:{errs}")
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
