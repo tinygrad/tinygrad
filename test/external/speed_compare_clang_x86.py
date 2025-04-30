@@ -21,7 +21,7 @@ if __name__ == "__main__":
   average_tm_clang, average_tm_x86 = 0, 0
   for num,ast in enumerate(ast_strs):
     # clang compile
-    dev.compiler = ClangJITCompiler(opt_args=['-O0', '-march=native'])
+    dev.compiler = ClangJITCompiler(opt_args=['-O1', '-march=native'])
     lin = ast_str_to_lin(ast, opts=dev.renderer)
     lin.apply_opts(hand_coded_optimizations(lin))
     clang_prg = CompiledRunner(lin.to_program())
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     except RuntimeError:
       print("clang failed ast:", num)
       continue
-    if runtime > 5:
+    if runtime > 1:
       print("kernel timeout")
       continue
     x86_prg(bufs, {}, wait=True)
