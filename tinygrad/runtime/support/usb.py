@@ -4,7 +4,7 @@ from tinygrad.helpers import DEBUG
 from tinygrad.runtime.support.hcq import MMIOInterface
 
 class USB3:
-  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=24, max_read_len:int=0x1000):
+  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=16, max_read_len:int=4096):
     self.vendor, self.dev = vendor, dev
     self.ep_data_in, self.ep_stat_in, self.ep_data_out, self.ep_cmd_out = ep_data_in, ep_stat_in, ep_data_out, ep_cmd_out
     self.max_streams, self.max_read_len = max_streams, max_read_len
@@ -119,7 +119,7 @@ class ReadOp: addr:int; size:int; # noqa: E702
 @dataclasses.dataclass(frozen=True)
 class ScsiWriteOp: data:bytes; lba:int=0; # noqa: E702
 
-class ASMController:
+class ASM24Controller:
   def __init__(self):
     self.usb = USB3(0x2D01, 0x3666, 0x81, 0x83, 0x02, 0x04)
     self._cache: dict[int, int] = {}
@@ -221,14 +221,14 @@ class USBMMIOInterface(MMIOInterface):
     self.usb, self.addr, self.nbytes, self.fmt, self.pcimem, self.el_sz = usb, addr, size, fmt, pcimem, struct.calcsize(fmt)
 
   def __getitem__(self, index):
-    if isinstance(index, slice): return self._read((index.start or 0) * self.el_sz, ((index.stop or len(self)) - (index.start or 0)) * self.el_sz)
+    if isinstance(index, slice): return self._read((index.start or 0) * self.el_sz, ((index.stop or len(self))-(index.start or 0)) * self.el_sz)
     if isinstance(index, int): return self._acc_one(index * self.el_sz, self.el_sz) if self.pcimem else self._read(index * self.el_sz, self.el_sz)[0]
 
   def __setitem__(self, index, val):
-    if isinstance(index, slice): return self._write((index.start or 0) * self.el_sz, ((index.stop or len(self)) - (index.start or 0)) * self.el_sz, val)
+    if isinstance(index, slice): return self._write((index.start or 0) * self.el_sz, ((index.stop or len(self))-(index.start or 0)) * self.el_sz, val)
     if isinstance(index, int): self._acc_one(index * self.el_sz, self.el_sz, val) if self.pcimem else self._write(index * self.el_sz, self.el_sz, val)
 
-  def view(self, offset:int=0, size:int|None=None, fmt=None) -> USBMMIOInterface:
+  def view(self, offset:int=0, size:int|None=None, fmt=None):
     return USBMMIOInterface(self.usb, self.addr+offset, size or (self.nbytes - offset), fmt=fmt or self.fmt, pcimem=self.pcimem)
 
   def _acc_size(self, sz): return next(x for x in [('I', 4), ('H', 2), ('B', 1)] if sz % x[1] == 0)
@@ -247,8 +247,8 @@ class USBMMIOInterface(MMIOInterface):
     data = struct.pack(self.fmt, data) if isinstance(data, int) else bytes(data)
 
     if not self.pcimem:
-      if self.addr == 0xf000: return self.usb.scsi_write(bytes(data))
-      return self.usb.write(self.addr + offset, bytes(data))
+      # Fast path for writing into buffer 0xf000
+      return self.usb.scsi_write(bytes(data)) if self.addr == 0xf000 else self.usb.write(self.addr + offset, bytes(data))
 
     _, acc_sz = self._acc_size(len(data) * struct.calcsize(self.fmt))
     for i in range(0, len(data), acc_sz): self._acc_one(offset + i, acc_sz, int.from_bytes(data[i:i+acc_sz], "little"))

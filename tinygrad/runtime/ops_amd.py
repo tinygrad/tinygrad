@@ -15,7 +15,7 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
-from tinygrad.runtime.support.usb import ASMController, USBMMIOInterface
+from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
 from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module, setup_pci_bars
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
@@ -460,7 +460,7 @@ class AMDProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
-  def __init__(self, dev:AMDDevice): super().__init__(dev, copy_bufs=[dev.dev_iface.copy_buf])
+  def __init__(self, dev:AMDDevice): super().__init__(dev, copy_bufs=getattr(dev.dev_iface, 'copy_bufs', None))
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.dev_iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
@@ -500,7 +500,7 @@ class AMDQueueDesc:
     if CPUProgram.atomic_lib is not None: CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
 
     # Flush hdp if queue is in dev mem.
-    # if dev.driverless and getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1): dev.dev_iface.adev.gmc.flush_hdp()
+    if dev.driverless and getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1): dev.dev_iface.adev.gmc.flush_hdp()
     for doorbell in self.doorbells: doorbell[0] = self.put_value
 
 @dataclass(frozen=True)
@@ -803,7 +803,7 @@ class PCIIface:
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id):
     self.dev = dev
-    self.usb = ASMController()
+    self.usb = ASM24Controller()
     self.bars = setup_pci_bars(self.usb, gpu_bus=4, mem_base=0x40000000, perf_mem_base=0x10000000)
 
     self._setup_adev(f"usb:{dev_id}", USBMMIOInterface(self.usb, *self.bars[0], fmt='B'), USBMMIOInterface(self.usb, *self.bars[2], fmt='Q'),
@@ -812,8 +812,8 @@ class USBIface(PCIIface):
     # special regions
     copy_vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
     self.copy_region = self.adev.mm.map_range(copy_vaddr, 0x1000, [(0x200000, 0x1000)], system=True, snooped=False, uncached=True)
-    self.copy_buf = HCQBuffer(copy_vaddr, 0x1000, meta=AMAllocationMeta(self.dev, [self.dev], self.copy_region, has_cpu_mapping=False),
-      view=USBMMIOInterface(self.usb, 0xf000, 0x1000, fmt='B', pcimem=False))
+    self.copy_bufs = [HCQBuffer(copy_vaddr, 0x1000, meta=AMAllocationMeta(self.dev, [self.dev], self.copy_region, has_cpu_mapping=False),
+      view=USBMMIOInterface(self.usb, 0xf000, 0x1000, fmt='B', pcimem=False))]
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
@@ -840,11 +840,14 @@ class AMDDevice(HCQCompiled):
 
   driverless:bool = not FileIOInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
 
+  def _select_iface(self):
+    for iface_t in (KFDIface, PCIIface, USBIface):
+      with contextlib.suppress(Exception): return iface_t(self, self.device_id)
+    raise RuntimeError(f"Cannot find a usable interface for device {self.device_id}")
+
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    # TODO: USBGPU
-    # self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
-    self.dev_iface = USBIface(self, self.device_id)
+    self.dev_iface = self._select_iface()
     self.target:tuple[int, ...] = ((trgt:=self.dev_iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
     if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")
@@ -876,8 +879,7 @@ class AMDDevice(HCQCompiled):
     nbio_pad = (0,) if self.target[0] == 9 else ()
     self.nbio = AMDIP('nbio' if self.target[0]<12 else 'nbif', nbio_ver, nbio_pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
 
-    # TODO: USBGPU
-    queue_size = 0x8000
+    queue_size = 0x8000 if self.dev_iface.__class__ is USBIface else 0x800000
     max_copy_size = 0x40000000 if self.dev_iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, queue_size, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
@@ -886,7 +888,7 @@ class AMDDevice(HCQCompiled):
     super().__init__(device, AMDAllocator(self), AMDLLVMRenderer(self.arch) if getenv("AMD_LLVM", 0) else AMDRenderer(self.arch),
                      AMDLLVMCompiler(self.arch) if getenv("AMD_LLVM", 0) else HIPCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, functools.partial(AMDComputeQueue, self), functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size),
-                     kernargs_size=(8 << 10))
+                     kernargs_size=(8 << 10) if self.dev_iface.__class__ is USBIface else (16 << 20))
 
     # Scratch setup
     self.max_private_segment_size = 0

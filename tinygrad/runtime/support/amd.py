@@ -3,7 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, round_up
 from tinygrad.runtime.autogen import pci
-from tinygrad.runtime.support.usb import ASMController
+from tinygrad.runtime.support.usb import ASM24Controller
 
 @dataclass(frozen=True)
 class AMDRegBase:
@@ -32,7 +32,7 @@ def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
     except ImportError: pass
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")
 
-def setup_pci_bars(usb:ASMController, gpu_bus:int, mem_base:int, perf_mem_base:int):
+def setup_pci_bars(usb:ASM24Controller, gpu_bus:int, mem_base:int, perf_mem_base:int):
   try: is_cfg_ok = usb.pcie_cfg_req(pci.PCI_VENDOR_ID, bus=gpu_bus, dev=0, fn=0, size=2) == 0x1002
   except RuntimeError as e:
     for bus in range(gpu_bus):
