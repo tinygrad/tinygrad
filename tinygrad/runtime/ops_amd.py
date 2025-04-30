@@ -435,7 +435,8 @@ class AMDProgram(HCQProgram):
     # Ensure scratch size
     self.dev._ensure_has_local_memory(self.private_segment_size)
 
-    code = hsa.amd_kernel_code_t.from_buffer_copy(image[rodata_entry:]) # NOTE: this is wrong, it's not this object
+    # NOTE: this is wrong, it's not this object. pad it, since it might be smaller than the struct
+    code = hsa.amd_kernel_code_t.from_buffer_copy(image[rodata_entry:rodata_entry+256] + b'\x00'*256)
     self.wave32: bool = code.kernel_code_properties & 0x400 == 0x400
 
     # Set rsrc1.priv=1 on gfx11 to workaround cwsr.

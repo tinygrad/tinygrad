@@ -69,17 +69,16 @@ class USB3:
     if odata is None: odata = [None] * len(cdbs)
     if len(cdbs) != len(idata): raise ValueError("cdbs and idata length mismatch")
 
-    results: list[bytes|None] = [None] * len(cdbs)
-    window: list[tuple[int, int, int]] = []  # (idx, slot, rlen)
-    pending = []
+    results:list[bytes|None] = [None] * len(cdbs)
+    window:list[tuple[int, int, int]] = []  # (idx, slot, rlen)
+    transactions:list = []
 
     def _flush():
-      nonlocal pending, window
-      if not pending: return
-      self._submit_and_wait(pending)
+      nonlocal transactions, window
+      self._submit_and_wait(transactions)
       for idx, slot, rlen in window:
         if rlen: results[idx] = bytes(self.buf_data_in[slot][:rlen])
-        pending, window = [], []
+        transactions, window = [], []
 
     for idx, (cdb, rlen, send_data) in enumerate(zip(cdbs, idata, odata)):
       slot = idx % self.max_streams
@@ -92,18 +91,18 @@ class USB3:
       # cmd + stat transfers
       self._prep_transfer(self.tr[self.ep_cmd_out][slot], self.ep_cmd_out, None, self.buf_cmd[slot], len(self.buf_cmd[slot]))
       self._prep_transfer(self.tr[self.ep_stat_in][slot], self.ep_stat_in, stream, self.buf_stat[slot], 64)
-      pending += [self.tr[self.ep_stat_in][slot], self.tr[self.ep_cmd_out][slot]]
+      transactions += [self.tr[self.ep_stat_in][slot], self.tr[self.ep_cmd_out][slot]]
 
       if rlen:
         if rlen > self.max_read_len: raise ValueError("read length > max_read_len per CDB")
         self._prep_transfer(self.tr[self.ep_data_in][slot], self.ep_data_in, stream, self.buf_data_in[slot], rlen)
-        pending.append(self.tr[self.ep_data_in][slot])
+        transactions.append(self.tr[self.ep_data_in][slot])
 
       if send_data is not None:
         if len(send_data) > len(self.buf_data_out[slot]): self.buf_data_out[slot] = (ctypes.c_uint8 * len(send_data))()
         self.buf_data_out[slot][:len(send_data)] = send_data
         self._prep_transfer(self.tr[self.ep_data_out][slot], self.ep_data_out, stream, self.buf_data_out[slot], len(send_data))
-        pending.append(self.tr[self.ep_data_out][slot])
+        transactions.append(self.tr[self.ep_data_out][slot])
 
       window.append((idx, slot, rlen))
       if (idx + 1 == len(cdbs)) or len(window) >= self.max_streams: _flush()
@@ -128,7 +127,7 @@ class ASM24Controller:
     self.exec_ops([WriteOp(0x54b, b' '), WriteOp(0x5a8, b'\x02'), WriteOp(0x5f8, b'\x04'), WriteOp(0x7ec, b'\x01\x00\x00\x00'),
       WriteOp(0xc422, b'\x02'), WriteOp(0x0, b'\x33')])
 
-  def ops_to_cmd(self, ops:list[WriteOp|ReadOp], _add_req:callable):
+  def ops_to_cmd(self, ops:list[WriteOp|ReadOp|ScsiWriteOp], _add_req):
     for op in ops:
       if isinstance(op, WriteOp):
         for off, value in enumerate(op.data):
@@ -143,9 +142,9 @@ class ASM24Controller:
         for i in range(op.size): self._cache[addr + i] = None
       elif isinstance(op, ScsiWriteOp): _add_req(struct.pack('>BBQIBB', 0x8A, 0, op.lba, 4096//512, 0, 0), None, op.data+b'\x00'*(4096-len(op.data)))
 
-  def exec_ops(self, ops:list[WriteOp|ReadOp]):
+  def exec_ops(self, ops:list[WriteOp|ReadOp|ScsiWriteOp]):
     cdbs, idata, odata = [], [], []
-    def _add_req(cdb, i, o):
+    def _add_req(cdb:bytes, i:int|None, o:bytes|None):
       nonlocal cdbs, idata, odata
       cdbs, idata, odata = cdbs + [cdb], idata + [i], odata + [o]
 
