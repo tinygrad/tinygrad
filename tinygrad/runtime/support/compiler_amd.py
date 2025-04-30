@@ -1,7 +1,7 @@
 import ctypes, subprocess
 import tinygrad.runtime.autogen.comgr as comgr
 from tinygrad.device import Compiler, CompileError
-# from tinygrad.runtime.ops_llvm import LLVMCompiler
+from tinygrad.runtime.ops_llvm import LLVMCompiler
 from tinygrad.helpers import OSX
 
 def amdgpu_disassemble(lib:bytes):
@@ -71,16 +71,16 @@ class HIPCompiler(Compiler):
     except RuntimeError as e: raise CompileError(e) from e
   def disassemble(self, lib:bytes): amdgpu_disassemble(lib)
 
-# class AMDLLVMCompiler(LLVMCompiler):
-#   jit = False
-#   target_arch = "AMDGPU"
-#   def __init__(self, arch: str):
-#     self.arch = arch
-#     super().__init__(self.arch, "+cumode")
-#   def __reduce__(self): return (AMDLLVMCompiler, (self.arch,))
-#   def compile(self, src:str) -> bytes:
-#     try: return super().compile(src)
-#     except RuntimeError as e:
-#       if "undefined value '@llvm.amdgcn." in str(e): raise CompileError(str(e) + "AMD with LLVM backend requires LLVM >= 18") from e
-#       raise CompileError(e) from e
-#   def disassemble(self, lib:bytes): amdgpu_disassemble(lib)
+class AMDLLVMCompiler(LLVMCompiler):
+  jit = False
+  target_arch = "AMDGPU"
+  def __init__(self, arch: str):
+    self.arch = arch
+    super().__init__(self.arch, "+cumode")
+  def __reduce__(self): return (AMDLLVMCompiler, (self.arch,))
+  def compile(self, src:str) -> bytes:
+    try: return super().compile(src)
+    except RuntimeError as e:
+      if "undefined value '@llvm.amdgcn." in str(e): raise CompileError(str(e) + "AMD with LLVM backend requires LLVM >= 18") from e
+      raise CompileError(e) from e
+  def disassemble(self, lib:bytes): amdgpu_disassemble(lib)
