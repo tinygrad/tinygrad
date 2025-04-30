@@ -358,7 +358,7 @@ class AMDev:
     mmRCC_CONFIG_MEMSIZE = 0xde3
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
 
-    self.bhdr = am.struct_binary_header.from_buffer(array.array('B', self.vram.view(self.vram_size - (64 << 10), (10 << 10))[:]))
+    self.bhdr = am.struct_binary_header.from_buffer(self.vram.view(self.vram_size - (64 << 10), (10 << 10))[:])
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE and not ihdr.base_addr_64_bit, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
 
