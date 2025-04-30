@@ -176,9 +176,10 @@ class NVComputeQueue(NVCommandQueue):
 
 class NVCopyQueue(NVCommandQueue):
   def copy(self, dest:sint, src:sint, copy_size:int):
-    self.nvm(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, *data64(src), *data64(dest))
-    self.nvm(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, copy_size)
-    self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, 0x182) # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
+    for off in range(0, copy_size, 0xffffffff):
+      self.nvm(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, *data64(src+off), *data64(dest+off))
+      self.nvm(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, min(copy_size-off, 0xffffffff))
+      self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, 0x182) # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
     return self
 
   def signal(self, signal:NVSignal, value:sint=0):
