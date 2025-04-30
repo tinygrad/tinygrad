@@ -1,4 +1,5 @@
 import ctypes, struct, dataclasses, array
+from typing import Sequence
 from tinygrad.runtime.autogen import libusb
 from tinygrad.helpers import DEBUG
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -86,7 +87,7 @@ class USB3:
 
       # build cmd packet
       struct.pack_into(">B", self.buf_cmd[slot], 3, stream)
-      self.buf_cmd[slot][16:16+len(cdb)] = cdb
+      self.buf_cmd[slot][16:16+len(cdb)] = list(cdb)
 
       # cmd + stat transfers
       self._prep_transfer(self.tr[self.ep_cmd_out][slot], self.ep_cmd_out, None, self.buf_cmd[slot], len(self.buf_cmd[slot]))
@@ -100,7 +101,7 @@ class USB3:
 
       if send_data is not None:
         if len(send_data) > len(self.buf_data_out[slot]): self.buf_data_out[slot] = (ctypes.c_uint8 * len(send_data))()
-        self.buf_data_out[slot][:len(send_data)] = send_data
+        self.buf_data_out[slot][:len(send_data)] = list(send_data)
         self._prep_transfer(self.tr[self.ep_data_out][slot], self.ep_data_out, stream, self.buf_data_out[slot], len(send_data))
         transactions.append(self.tr[self.ep_data_out][slot])
 
@@ -121,13 +122,13 @@ class ScsiWriteOp: data:bytes; lba:int=0 # noqa: E702
 class ASM24Controller:
   def __init__(self):
     self.usb = USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04)
-    self._cache: dict[int, int] = {}
+    self._cache: dict[int, int|None] = {}
 
     # Init controller.
     self.exec_ops([WriteOp(0x54b, b' '), WriteOp(0x5a8, b'\x02'), WriteOp(0x5f8, b'\x04'), WriteOp(0x7ec, b'\x01\x00\x00\x00'),
       WriteOp(0xc422, b'\x02'), WriteOp(0x0, b'\x33')])
 
-  def ops_to_cmd(self, ops:list[WriteOp|ReadOp|ScsiWriteOp], _add_req):
+  def ops_to_cmd(self, ops:Sequence[WriteOp|ReadOp|ScsiWriteOp], _add_req):
     for op in ops:
       if isinstance(op, WriteOp):
         for off, value in enumerate(op.data):
@@ -140,11 +141,14 @@ class ASM24Controller:
         addr = (op.addr & 0x1FFFF) | 0x500000
         _add_req(struct.pack('>BBBHB', 0xE4, op.size, addr >> 16, addr & 0xFFFF, 0), op.size, None)
         for i in range(op.size): self._cache[addr + i] = None
-      elif isinstance(op, ScsiWriteOp): _add_req(struct.pack('>BBQIBB', 0x8A, 0, op.lba, 4096//512, 0, 0), None, op.data+b'\x00'*(4096-len(op.data)))
+      elif isinstance(op, ScsiWriteOp): _add_req(struct.pack('>BBQIBB', 0x8A, 0, op.lba, 4096//512, 0, 0), 0, op.data+b'\x00'*(4096-len(op.data)))
 
-  def exec_ops(self, ops:list[WriteOp|ReadOp|ScsiWriteOp]):
-    cdbs, idata, odata = [], [], []
-    def _add_req(cdb:bytes, i:int|None, o:bytes|None):
+  def exec_ops(self, ops:Sequence[WriteOp|ReadOp|ScsiWriteOp]):
+    cdbs:list[bytes] = []
+    idata:list[int] = []
+    odata:list[bytes|None] = []
+
+    def _add_req(cdb:bytes, i:int, o:bytes|None):
       nonlocal cdbs, idata, odata
       cdbs, idata, odata = cdbs + [cdb], idata + [i], odata + [o]
 
