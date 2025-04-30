@@ -452,7 +452,6 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
         self.b_next = (self.b_next + 1) % len(self.b)
         self.dev.timeline_signal.wait(self.b_timeline[self.b_next])
 
-        # self.dev.dev_iface.usb.scsi_write(src[i:i+lsize])
         lsize = min(self.b[self.b_next].size, src.nbytes - i)
         self.b[self.b_next].cpu_view().view(size=lsize, fmt='B')[:] = src[i:i+lsize]
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
@@ -473,9 +472,8 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
       for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                   .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
-                                  .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
-        self.b_timeline[batch_info[1]] = self.dev.timeline_value
-        self.dev.timeline_value += 1
+                                  .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+        self.b_timeline[batch_info[1]] = self.dev.timeline_value - 1
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()

@@ -124,12 +124,9 @@ class ASMController:
     self.usb = USB3(0x2D01, 0x3666, 0x81, 0x83, 0x02, 0x04)
     self._cache: dict[int, int] = {}
 
-    import pickle
-    x = pickle.load(open("zpro.bin", "rb"))
-    if self.read(0x0, 1) != b'\x33':
-      self.write(0x0, x[:0x1000])
-      self.write(0x0, bytes([0x33]))
-      self.write(0xc422, b'\x02')
+    # Init controller.
+    self.exec_ops([WriteOp(0x54b, b' ', ignore_cache=True), WriteOp(0x5a8, b'\x02', ignore_cache=True), WriteOp(0x5f8, b'\x04', ignore_cache=True),
+      WriteOp(0x7ec, b'\x01\x00\x00\x00', ignore_cache=True), WriteOp(0xc422, b'\x02', ignore_cache=True), WriteOp(0x0, b'\x33', ignore_cache=True)])
 
   def ops_to_cmd(self, ops:list[WriteOp|ReadOp], _add_req:callable):
     for op in ops:
