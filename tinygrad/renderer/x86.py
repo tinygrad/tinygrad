@@ -58,7 +58,8 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}\ntest {ctx[mask]}, 1\n"
    f"jz .L{ctx.uops.index(x)}\n{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
-  (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]"),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, name="idx"),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]"),
+  (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[idx]}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x:
    f"{x86op[x.src[1].dtype][x.op]}{size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ''} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
@@ -105,7 +106,18 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f".L{ctx.uops.index(x.src[0])}:"),
 ])
 
+def x86_is_imm(u:UOp) -> bool: return u.op is Ops.CONST and not dtypes.is_float(u.dtype) and abs(u.arg) <= dtypes.max(dtypes.int32)
+
 x86_matcher = PatternMatcher([
+  # 64 bit consts can't be immediates
+  #(UPat(Ops.CONST, dtype=(dtypes.int64, dtypes.uint64), name="x"), lambda x: x.load()),
+  # float consts can't be immediates and need gen reg to be loaded into xmm reg
+  #(UPat(Ops.CONST, dtype=dtypes.floats, name="x"), lambda x: x.load(dtype=dtypes.int64).bitcast(x.dtype)),
+  # some ops can't take imm in srcs
+  (UPat((Ops.WHERE, Ops.IDIV, Ops.MOD), name="x"),
+   lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if x86_is_imm(s) else s for s in x.src)) != x.src else None),
+  (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.cvar("c"), UPat()), name="x"),
+   lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1])) if x86_is_imm(c) else None),
   # we use general registers to load/store the 2 bytes of float16
   (UPat(Ops.LOAD, dtype=dtypes.float16, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"),
    lambda x,idx,alt,mask: idx.load(alt.bitcast(dtypes.int16), mask, dtype=dtypes.int16).bitcast(x.dtype)),
@@ -212,7 +224,6 @@ class X86Renderer(Renderer):
     self.uops = uops
     last_use: Dict[UOp, int] = {var:i for i,u in enumerate(uops) for var in (v for v in (u,) + u.src if v.dtype != dtypes.void)}
 
-    def is_imm(u:UOp) -> bool: return u.op is Ops.CONST and not dtypes.is_float(u.dtype) and abs(u.arg) <= dtypes.max(dtypes.int32)
     def is_mem(u:UOp) -> bool: return u in r and u in mem and r[u] == mem[u]
     def is_reg(loc:str) -> bool: return loc in self.all_regs
     def free_reg(reg:str): float_regs.insert(0, reg) if reg.startswith("xmm") else gen_regs.insert(0, reg)
@@ -254,7 +265,7 @@ class X86Renderer(Renderer):
           arg_stack_offset += 8
       elif u.op is Ops.CONST:
         r[u] = to_hex(u.arg, u.dtype)
-        if not is_imm(u):
+        if not x86_is_imm(u):
           mov_to_reg(u, "r15")
           mov_to_stack(u)
       # casting to <= int or src is uint32 (already zero extended) is a noop
@@ -268,10 +279,8 @@ class X86Renderer(Renderer):
         if u.src[0] in mem: mem[u] = mem[u.src[0]]
       else:
         for ii,s in enumerate(u.src): # mov srcs
-          # these can't take imm values, #NOTE: cmp can take imm as the second operand
           #if u.op in (Ops.ADD, Ops.MUL) and ii == 1 and is_mem(s): continue
-          if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD, Ops.CMPNE, Ops.CMPLT): mov_to_reg(s, assign_reg(i, s.dtype))
-          elif is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
+          if is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
         if u.dtype != dtypes.void: # assign destination
           if u.op is Ops.ASSIGN: r[u] = mem[u] = mem[u.src[0]] # define acc was already spilled here
           # reuse first operand register when possible TODO: why do we need the last check??
