@@ -238,7 +238,9 @@ class AMDLLVMRenderer(LLVMRenderer):
     if self.arch.split(":")[0] == "gfx1100":
       self.extra_matcher += PatternMatcher([
         (UPat(Ops.WMMA, name="x", dtype=dtypes.half.vec(8)),
-          lambda x: UOp(Ops.WMMA, dtypes.half.vec(16), (x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), (*x.arg,)).cast(dtypes.half.vec(8)))
+          lambda x: UOp(Ops.WMMA, dtypes.half.vec(16), (x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), (*x.arg,)).cast(dtypes.half.vec(8))),
+        (UPat(Ops.WMMA, name="x"), lambda x: UOp(Ops.WMMA, x.dtype, (x.src[0].bitcast(dtypes.uint16.vec(16)), x.src[1].bitcast(dtypes.uint16.vec(16)),
+          x.src[2]), x.arg) if x.src[0].dtype == dtypes.bfloat16.vec(16) else None),
       ])
     if self.arch.split(":")[0] == "gfx1201":
       self.extra_matcher += PatternMatcher([
