@@ -60,12 +60,12 @@ sym = symbolic_simple+PatternMatcher([
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
   # COPY(CONST) creates a new CONST on the destination device
-  (UPat(Ops.COPY, name="root", src=(UPat.cvar("x"), UPat())), lambda root,x: root.const_like(x.arg)),
+  (UPat(Ops.COPY, name="root", src=(UPat(), UPat.cvar("x"),)), lambda root,x: root.const_like(x.arg)),
   # no COPY to same device, except clone (arg is True)
-  (UPat(Ops.COPY, src=(UPat.var("copyin"), UPat()), name="copy"),
+  (UPat(Ops.COPY, src=(UPat(), UPat.var("copyin")), name="copy"),
    lambda copyin,copy: copyin if copyin.device == copy.device and copy.arg is not True else None),
   # store a shrink before COPY, otherwise view after the COPY
-  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, name="v"), UPat()), name="copy"), lambda copy,v: v.contiguous().copy_to_device(copy.device) \
+  (UPat(Ops.COPY, src=(UPat(), UPat(Ops.VIEW, name="v")), name="copy"), lambda copy,v: v.contiguous().copy_to_device(copy.device) \
     if prod(v.shape) < prod(v.base.shape) else v.base.copy_to_device(copy.device, clone=copy.arg).view(v.st)),
   # remove cast to image when it's already a contiguous image
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(Ops.CONTIGUOUS, name="base"),)),)),
@@ -124,7 +124,7 @@ do_realize = PatternMatcher([
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"),), name="view"), realize_before_view),
   # realize before COPY
-  (UPat(Ops.COPY, src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"), UPat())), realize),
+  (UPat(Ops.COPY, src=(UPat(), UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"))), realize),
 ])
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
@@ -249,7 +249,7 @@ create_kernels = merge_views+PatternMatcher([
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
   (UPat(Ops.CONTIGUOUS, name="x"), lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype))),
   # create a buffer for COPY on the new device
-  (UPat(Ops.COPY, src=(UPat(), UPat(Ops.DEVICE, name="d")), name="x"), lambda ctx,d,x: create_kernel(ctx, x, UOp.new_buffer(d.arg, x.size, x.dtype))),
+  (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="d"), UPat()), name="x"), lambda ctx,d,x: create_kernel(ctx, x, UOp.new_buffer(d.arg, x.size, x.dtype))),
   # otherwise check the context if we're realizing this UOp
   (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"),
    lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype)) if x in ctx.realizes else None),
