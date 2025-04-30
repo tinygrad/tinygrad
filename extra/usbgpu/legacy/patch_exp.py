@@ -50,7 +50,7 @@ def add_traphandler(addr, sec):
   cntr_addr = 0x3000 + next_traphandler
   patches += [
     (addr + 4, sec, b'\x02' + trap_addr.to_bytes(2, 'big') + b'\x22'*(len(sec)-3)),
-    (trap_addr + 4, b'\x00' * (21 + len(sec)), 
+    (trap_addr + 4, b'\x00' * (21 + len(sec)),
       b'\xc0\xe0\xc0\x82\xc0\x83\x90' + cntr_addr.to_bytes(2, 'big') + b'\xe0\x04\xf0\xd0\x83\xd0\x82\xd0\xe0' + sec + b'\x02' + return_addr.to_bytes(2, 'big')),
   ]
   next_traphandler += 1

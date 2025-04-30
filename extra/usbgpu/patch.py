@@ -62,7 +62,7 @@ config2 = bytes([
 part1 = patched_fw[:0xff00]
 part2 = patched_fw[0xff00:]
 
-# config patch 
+# config patch
 cdb = struct.pack('>BBB12x', 0xe1, 0x50, 0x0)
 dev.send_batch(cdbs=[cdb], odata=[config1])
 
