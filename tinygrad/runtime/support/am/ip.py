@@ -153,7 +153,7 @@ class AM_SMU(AM_IP):
 
   def read_table(self, table_t, cmd):
     self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, cmd)
-    return table_t.from_buffer(self.adev.vram.view(self.driver_table_paddr, ctypes.sizeof(table_t))[:])
+    return table_t.from_buffer(bytearray(self.adev.vram.view(self.driver_table_paddr, ctypes.sizeof(table_t))[:]))
   def read_metrics(self): return self.read_table(self.smu_mod.SmuMetricsExternal_t, self.smu_mod.TABLE_SMU_METRICS)
 
   def set_clocks(self, level):
@@ -459,7 +459,7 @@ class AM_PSP(AM_IP):
     while self.adev.vram.view(self.fence_paddr, 4, 'I')[0] != prev_wptr: pass
     time.sleep(0.005)
 
-    resp = type(cmd).from_buffer(self.adev.vram.view(self.cmd_paddr, ctypes.sizeof(cmd))[:])
+    resp = type(cmd).from_buffer(bytearray(self.adev.vram.view(self.cmd_paddr, ctypes.sizeof(cmd))[:]))
     if resp.resp.status != 0: raise RuntimeError(f"PSP command failed {resp.cmd_id} {resp.resp.status}")
 
     return resp
