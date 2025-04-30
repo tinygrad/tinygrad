@@ -1,4 +1,4 @@
-import ctypes, struct, time, os, dataclasses
+import ctypes, struct, time, os, dataclasses, array
 from tinygrad.runtime.autogen import libusb
 from tinygrad.helpers import DEBUG
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -125,8 +125,8 @@ class ASMController:
     self._cache: dict[int, int] = {}
 
     # Init controller.
-    self.exec_ops([WriteOp(0x54b, b' ', ignore_cache=True), WriteOp(0x5a8, b'\x02', ignore_cache=True), WriteOp(0x5f8, b'\x04', ignore_cache=True),
-      WriteOp(0x7ec, b'\x01\x00\x00\x00', ignore_cache=True), WriteOp(0xc422, b'\x02', ignore_cache=True), WriteOp(0x0, b'\x33', ignore_cache=True)])
+    self.exec_ops([WriteOp(0x54b, b' '), WriteOp(0x5a8, b'\x02'), WriteOp(0x5f8, b'\x04'), WriteOp(0x7ec, b'\x01\x00\x00\x00'),
+      WriteOp(0xc422, b'\x02'), WriteOp(0x0, b'\x33')])
 
   def ops_to_cmd(self, ops:list[WriteOp|ReadOp], _add_req:callable):
     for op in ops:
@@ -179,6 +179,7 @@ class ASMController:
       WriteOp(0xB254, b"\x0f", ignore_cache=True), WriteOp(0xB296, b"\x04", ignore_cache=True)]
     self.exec_ops(ops)
 
+    # Fast path for write requests
     if ((fmt_type & 0b11011111) == 0b01000000) or ((fmt_type & 0b10111000) == 0b00110000): return
 
     while (stat:=self.read(0xB296, 1)[0]) & 2 == 0:
@@ -216,18 +217,19 @@ class ASMController:
   def pcie_mem_req(self, address, value=None, size=4): return self.pcie_request(0x40 if value is not None else 0x0, address, value, size)
 
 class USBMMIOInterface(MMIOInterface):
-  def __init__(self, usb, addr, size, fmt, pci_spc=True):
-    self.usb, self.addr, self.nbytes, self.fmt, self.pci_spc = usb, addr, size, fmt, pci_spc
-    self.el_sz = struct.calcsize(self.fmt)
+  def __init__(self, usb, addr, size, fmt, pcimem=True):
+    self.usb, self.addr, self.nbytes, self.fmt, self.pcimem, self.el_sz = usb, addr, size, fmt, pcimem, struct.calcsize(fmt)
+
   def __getitem__(self, index):
     if isinstance(index, slice): return self._read((index.start or 0) * self.el_sz, ((index.stop or len(self)) - (index.start or 0)) * self.el_sz)
-    if isinstance(index, int): return self._acc_one(index * self.el_sz, self.el_sz) if self.pci_spc else self._read(index * self.el_sz, self.el_sz)[0]
+    if isinstance(index, int): return self._acc_one(index * self.el_sz, self.el_sz) if self.pcimem else self._read(index * self.el_sz, self.el_sz)[0]
+
   def __setitem__(self, index, val):
     if isinstance(index, slice): return self._write((index.start or 0) * self.el_sz, ((index.stop or len(self)) - (index.start or 0)) * self.el_sz, val)
-    if isinstance(index, int): self._acc_one(index * self.el_sz, self.el_sz, val) if self.pci_spc else self._write(index * self.el_sz, self.el_sz, val)
+    if isinstance(index, int): self._acc_one(index * self.el_sz, self.el_sz, val) if self.pcimem else self._write(index * self.el_sz, self.el_sz, val)
 
-  def view(self, offset:int=0, size:int|None=None, fmt=None) -> MMIOInterface:
-    return USBMMIOInterface(self.usb, self.addr+offset, size or (self.nbytes - offset), fmt=fmt or self.fmt, pci_spc=self.pci_spc)
+  def view(self, offset:int=0, size:int|None=None, fmt=None) -> USBMMIOInterface:
+    return USBMMIOInterface(self.usb, self.addr+offset, size or (self.nbytes - offset), fmt=fmt or self.fmt, pcimem=self.pcimem)
 
   def _acc_size(self, sz): return next(x for x in [('I', 4), ('H', 2), ('B', 1)] if sz % x[1] == 0)
   def _acc_one(self, off, sz, val=None):
@@ -235,37 +237,18 @@ class USBMMIOInterface(MMIOInterface):
     lower = self.usb.pcie_mem_req(self.addr + off, val if val is None else val & 0xffffffff, min(sz, 4)) 
     if val is None: return lower | (upper << 32)
 
-  def _convert(self, raw:list[int], from_t, to_t) -> list[int]:
-    # normalize bytes → list of ints
-    vals = list(raw) if isinstance(raw, (bytes, bytearray)) else raw
-    if from_t == to_t:
-        return vals
-
-    # pack all from_t-values into one byte blob
-    packed = struct.pack('<' + from_t * len(vals), *vals)
-
-    # figure out how many to_t values fit in there
-    to_size = struct.calcsize(to_t)
-    count   = len(packed) // to_size
-
-    # unpack as count×to_t
-    return list(struct.unpack(f'<{count}{to_t}', packed))
-
   def _read(self, offset, size):
-    if not self.pci_spc: return self.usb.read(self.addr + offset, size)
+    if not self.pcimem: return self.usb.read(self.addr + offset, size)
 
     acc, acc_size = self._acc_size(size)
-    return self._convert([self._acc_one(offset + i * acc_size, acc_size) for i in range(size // acc_size)], acc, 'B')
+    return bytes(array.array(acc, [self._acc_one(offset + i * acc_size, acc_size) for i in range(size // acc_size)]))
 
   def _write(self, offset, _, data):
-    if not self.pci_spc:
-      if isinstance(data, int): data = struct.pack(self.fmt, data)
+    data = struct.pack(self.fmt, data) if isinstance(data, int) else bytes(data)
+
+    if not self.pcimem:
       if self.addr == 0xf000: return self.usb.scsi_write(bytes(data))
       return self.usb.write(self.addr + offset, bytes(data))
 
-    acc, acc_size = self._acc_size(len(data) * struct.calcsize(self.fmt))
-    per_slice = acc_size // self.el_sz
-    assert per_slice > 0
-
-    for i in range(len(data) // per_slice):
-      self._acc_one(offset + i * acc_size, acc_size, self._convert(data[i * per_slice:(i + 1) * per_slice], self.fmt, acc)[0])
+    _, acc_sz = self._acc_size(len(data) * struct.calcsize(self.fmt))
+    for i in range(0, len(data), acc_sz): self._acc_one(offset + i, acc_sz, int.from_bytes(data[i:i+acc_sz], "little"))

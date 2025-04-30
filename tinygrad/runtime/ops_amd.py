@@ -813,7 +813,7 @@ class USBIface(PCIIface):
     copy_vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
     self.copy_region = self.adev.mm.map_range(copy_vaddr, 0x1000, [(0x200000, 0x1000)], system=True, snooped=False, uncached=True)
     self.copy_buf = HCQBuffer(copy_vaddr, 0x1000, meta=AMAllocationMeta(self.dev, [self.dev], self.copy_region, has_cpu_mapping=False),
-      view=USBMMIOInterface(self.usb, 0xf000, 0x1000, fmt='B', pci_spc=False))
+      view=USBMMIOInterface(self.usb, 0xf000, 0x1000, fmt='B', pcimem=False))
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
