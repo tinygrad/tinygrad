@@ -72,8 +72,8 @@ qmd_struct_t = make_qmd_struct_type()
 assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 
 class NVSignal(HCQSignal):
-  def __init__(self, base_addr:int|None=None, **kwargs):
-    super().__init__(base_addr, **kwargs, timestamp_divider=1000, dev_t=NVDevice)
+  def __init__(self, base_buf:HCQBuffer|None=None, **kwargs):
+    super().__init__(base_buf, **kwargs, timestamp_divider=1000, dev_t=NVDevice)
 
 class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
   def __init__(self):
@@ -133,26 +133,27 @@ class NVComputeQueue(NVCommandQueue):
   def exec(self, prg:NVProgram, args_state:NVArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
     self.bind_args_state(args_state)
 
-    ctypes.memmove(qmd_addr:=(args_state.ptr + round_up(prg.constbufs[0][1], 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
-    assert qmd_addr < (1 << 40), f"large qmd addr {qmd_addr:x}"
+    qmd_buf = args_state.buf.offset(round_up(prg.constbufs[0][1], 1 << 8))
+    qmd_buf.cpu_view().view(size=0x40 * 4, fmt='B')[:] = bytes(prg.qmd)
+    assert qmd_buf.va_addr < (1 << 40), f"large qmd addr {qmd_buf.va_addr:x}"
 
-    qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
+    qmd = qmd_struct_t.from_address(qmd_buf.va_addr) # Save qmd for later update
 
-    self.bind_sints_to_ptr(*global_size, ptr=qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, fmt='I')
-    self.bind_sints_to_ptr(*local_size, ptr=qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, fmt='H')
-    self.bind_sints_to_ptr(*local_size, *global_size, ptr=args_state.ptr, fmt='I')
-    qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = data64(args_state.ptr)
+    self.bind_sints_to_mem(*global_size, mem=qmd_buf.cpu_view(), fmt='I', offset=nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8)
+    self.bind_sints_to_mem(*local_size, mem=qmd_buf.cpu_view(), fmt='H', offset=nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8)
+    self.bind_sints_to_mem(*local_size, *global_size, mem=args_state.buf.cpu_view(), fmt='I')
+    qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = data64(args_state.buf.va_addr)
 
     if self.active_qmd is None:
-      self.nvm(1, nv_gpu.NVC6C0_SEND_PCAS_A, qmd_addr >> 8)
+      self.nvm(1, nv_gpu.NVC6C0_SEND_PCAS_A, qmd_buf.va_addr >> 8)
       self.nvm(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 9)
     else:
-      self.active_qmd.dependent_qmd0_pointer = qmd_addr >> 8
+      self.active_qmd.dependent_qmd0_pointer = qmd_buf.va_addr >> 8
       self.active_qmd.dependent_qmd0_action = 1
       self.active_qmd.dependent_qmd0_prefetch = 1
       self.active_qmd.dependent_qmd0_enable = 1
 
-    self.active_qmd = qmd
+    self.active_qmd, self.active_qmd_buf = qmd, qmd_buf
     return self
 
   def signal(self, signal:NVSignal, value:sint=0):
@@ -160,8 +161,9 @@ class NVComputeQueue(NVCommandQueue):
       for i in range(2):
         if getattr(self.active_qmd, f'release{i}_enable') == 0:
           setattr(self.active_qmd, f'release{i}_enable', 1)
-          self.bind_sints(signal.value_addr, struct=self.active_qmd, start_field=f'release{i}_address', fmt='Q', mask=0xfffffffff)
-          self.bind_sints(value, struct=self.active_qmd, start_field=f'release{i}_payload', fmt='Q')
+          self.bind_sints(signal.value_addr, mem=self.active_qmd_buf.cpu_view(), struct_t=qmd_struct_t, start_field=f'release{i}_address',
+            fmt='Q', mask=0xfffffffff)
+          self.bind_sints(value, mem=self.active_qmd_buf.cpu_view(), struct_t=qmd_struct_t, start_field=f'release{i}_payload', fmt='Q')
           return self
 
     self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(signal.value_addr), *data64_le(value),
@@ -174,9 +176,10 @@ class NVComputeQueue(NVCommandQueue):
 
 class NVCopyQueue(NVCommandQueue):
   def copy(self, dest:sint, src:sint, copy_size:int):
-    self.nvm(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, *data64(src), *data64(dest))
-    self.nvm(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, copy_size)
-    self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, 0x182) # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
+    for off in range(0, copy_size, 0xffffffff):
+      self.nvm(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, *data64(src+off), *data64(dest+off))
+      self.nvm(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, min(copy_size-off, 0xffffffff))
+      self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, 0x182) # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
     return self
 
   def signal(self, signal:NVSignal, value:sint=0):
@@ -187,9 +190,9 @@ class NVCopyQueue(NVCommandQueue):
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.dma_gpfifo)
 
 class NVArgsState(CLikeArgsState):
-  def __init__(self, ptr:int, prg:NVProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
+  def __init__(self, buf:HCQBuffer, prg:NVProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
     if MOCKGPU: prg.constbuffer_0[80:82] = [len(bufs), len(vals)]
-    super().__init__(ptr, prg, bufs, vals=vals, prefix=prg.constbuffer_0)
+    super().__init__(buf, prg, bufs, vals=vals, prefix=prg.constbuffer_0)
 
 class NVProgram(HCQProgram):
   def __init__(self, dev:NVDevice, name:str, lib:bytes):
@@ -292,8 +295,8 @@ class GPFifo:
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class NVDevice(HCQCompiled[NVSignal]):
   devices: ClassVar[list[HCQCompiled]] = []
-  signal_pages: ClassVar[list[Any]] = []
-  signal_pool: ClassVar[list[int]] = []
+  signal_pages: ClassVar[list[HCQBuffer]] = []
+  signal_pool: ClassVar[list[HCQBuffer]] = []
 
   root = None
   fd_ctl: FileIOInterface
@@ -376,7 +379,8 @@ class NVDevice(HCQCompiled[NVSignal]):
     self._debug_mappings[(va_base, size)] = tag
     return HCQBuffer(va_base, size, meta=uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl.fd,
       hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs,
-      mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping))
+      mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping),
+      view=MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None)
 
   def _gpu_map(self, mem:HCQBuffer):
     if self.gpu_uuid in mem.meta.mapped_gpu_ids: return

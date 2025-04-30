@@ -215,7 +215,9 @@ class LLaMa:
 
     weights = fix_bf16(weights)
 
-    with Context(BEAM=0):
+    # prevent tracking model weights
+    # this is a part of a larger problem with BUFFER UOps and gc in TRACK_MATCH_STATS=2
+    with Context(BEAM=0, TRACK_MATCH_STATS=0):
       # quantize
       if quantize is not None:
         weights = linear.quantize(weights, device)
