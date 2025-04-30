@@ -255,18 +255,15 @@ class USBMMIOInterface(MMIOInterface):
     return list(struct.unpack(f'<{count}{to_t}', packed))
 
   def _read(self, offset, size):
-    if not self.pci_spc:
-      # print("read from non-pci space", hex(self.addr + offset), size)
-      return self._convert(self.usb.read(self.addr + offset, size), 'B', self.fmt)
+    if not self.pci_spc: return self.usb.read(self.addr + offset, size)
 
     acc, acc_size = self._acc_size(size)
-    return self._convert([self._acc_one(offset + i * acc_size, acc_size) for i in range(size // acc_size)], acc, self.fmt)
+    return self._convert([self._acc_one(offset + i * acc_size, acc_size) for i in range(size // acc_size)], acc, 'B')
 
   def _write(self, offset, _, data):
     if not self.pci_spc:
       if isinstance(data, int): data = struct.pack(self.fmt, data)
-
-      # print("write to non-pci space", hex(self.addr + offset), data)
+      if self.addr == 0xf000: return self.usb.scsi_write(bytes(data))
       return self.usb.write(self.addr + offset, bytes(data))
 
     acc, acc_size = self._acc_size(len(data) * struct.calcsize(self.fmt))

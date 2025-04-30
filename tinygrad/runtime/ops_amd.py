@@ -460,6 +460,8 @@ class AMDProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
+  def __init__(self, dev:AMDDevice): super().__init__(dev, copy_bufs=[dev.dev_iface.copy_buf])
+
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.dev_iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
 
@@ -721,13 +723,16 @@ class PCIIface:
     bar_info = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
     self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
-    self.adev = AMDev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2, fmt='Q'), self._map_pci_range(5, fmt='I'))
-    self.ip_versions = self.adev.ip_ver
-    self.ip_offsets = {hwip: tuple(instances[0]) for hwip,instances in self.adev.regs_offset.items()}
+    self._setup_adev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2, fmt='Q'), self._map_pci_range(5, fmt='I'))
     self.doorbell_cpu_addr = dbell.addr
 
     pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
     self.cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=pci.PCI_COMMAND)
+
+  def _setup_adev(self, name, vram:MMIOInterface, doorbell:MMIOInterface, mmio:MMIOInterface):
+    self.adev = AMDev(name, vram, doorbell, mmio)
+    self.ip_versions = self.adev.ip_ver
+    self.ip_offsets = {hwip: tuple(instances[0]) for hwip,instances in self.adev.regs_offset.items()}
 
     gfxver = int(f"{self.adev.ip_ver[am.GC_HWIP][0]:02d}{self.adev.ip_ver[am.GC_HWIP][1]:02d}{self.adev.ip_ver[am.GC_HWIP][2]:02d}")
     array_count = self.adev.gc_info.gc_num_sa_per_se * self.adev.gc_info.gc_num_se
@@ -801,25 +806,14 @@ class USBIface(PCIIface):
     self.usb = ASMController()
     self.bars = setup_pci_bars(self.usb, gpu_bus=4, mem_base=0x40000000, perf_mem_base=0x10000000)
 
-    self.adev = AMDev("usb:0", USBMMIOInterface(self.usb, *self.bars[0], fmt='B'), USBMMIOInterface(self.usb, *self.bars[2], fmt='Q'),
+    self._setup_adev(f"usb:{dev_id}", USBMMIOInterface(self.usb, *self.bars[0], fmt='B'), USBMMIOInterface(self.usb, *self.bars[2], fmt='Q'),
       USBMMIOInterface(self.usb, *self.bars[5], fmt='I'))
 
-    self.ip_versions = self.adev.ip_ver
-    self.ip_offsets = {hwip: tuple(instances[0]) for hwip,instances in self.adev.regs_offset.items()}
-    self.props = {'simd_count': 64, 'simd_per_cu': 2, 'array_count': 4, 'gfx_target_version': 110002, 'max_slots_scratch_cu': 32,
-      'max_waves_per_simd': 16, 'simd_arrays_per_engine': 2, 'lds_size_in_kb': 64}
-
-    # vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
-    # self.system_mapping = self.adev.mm.map_range(vaddr, 0x1000, [(0x200000, 0x1000)], system=True, snooped=False, uncached=True)
-    # self.system_i = USBMMIOInterface(self.usb, 0xf000, 0x1000, fmt='B', pci_spc=False)
-
-    # vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
-    # self.queues_mapping = self.adev.mm.map_range(vaddr, 0x1000, [(0x820000, 0x1000)], system=True, snooped=False, uncached=True)
-    # self.queue_i = USBMMIOInterface(self.usb, 0xa000, 0x1000, fmt='B', pci_spc=False)
-  
-    # vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
-    # self.signals_mapping = self.adev.mm.map_range(vaddr, 0x1000, [(0x800000, 0x1000)], system=True, snooped=False, uncached=True)
-    # self.sig_i = USBMMIOInterface(self.usb, 0xb000, 0x200, fmt='B', pci_spc=False)
+    # special regions
+    copy_vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
+    self.copy_region = self.adev.mm.map_range(copy_vaddr, 0x1000, [(0x200000, 0x1000)], system=True, snooped=False, uncached=True)
+    self.copy_buf = HCQBuffer(copy_vaddr, 0x1000, meta=AMAllocationMeta(self.dev, [self.dev], self.copy_region, has_cpu_mapping=False),
+      view=USBMMIOInterface(self.usb, 0xf000, 0x1000, fmt='B', pci_spc=False))
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
@@ -838,12 +832,6 @@ class USBIface(PCIIface):
       doorbells=[self.adev.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
       read_ptrs=[self.adev.vram.view(gart.meta.mapping.paddrs[0][0], 8, fmt='Q')],
       write_ptrs=[self.adev.vram.view(gart.meta.mapping.paddrs[0][0]+0x10, 8, fmt='Q')])
-
-class AMDUSBAllocator(AMDAllocator):
-  def __init__(self, dev:DeviceType):
-    vaddr = dev.dev_iface.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
-    self.b = [dev.dev_iface.adev.mm.map_range(vaddr, 0x1000, [(0x200000, 0x1000)], system=True, snooped=False, uncached=True)]
-    super().__init__(dev, batch_size=0x1000, batch_cnt=1, skip_alloc=True)
 
 class AMDDevice(HCQCompiled):
   devices: ClassVar[list[HCQCompiled]] = []
@@ -888,14 +876,14 @@ class AMDDevice(HCQCompiled):
     nbio_pad = (0,) if self.target[0] == 9 else ()
     self.nbio = AMDIP('nbio' if self.target[0]<12 else 'nbif', nbio_ver, nbio_pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
 
+    # TODO: USBGPU
     queue_size = 0x8000
     max_copy_size = 0x40000000 if self.dev_iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, queue_size, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, queue_size)
 
-    sig_mmio = lambda x, y, fmt: USBMMIOInterface(self.dev_iface.usb, self.dev_iface.bars[0][0] + self.signal_pages[0].meta.mapping.paddrs[0][0] + x - self.signal_pages[0].va_addr, y, fmt)
-    super().__init__(device, AMDUSBAllocator(self), AMDLLVMRenderer(self.arch) if getenv("AMD_LLVM", 0) else AMDRenderer(self.arch),
+    super().__init__(device, AMDAllocator(self), AMDLLVMRenderer(self.arch) if getenv("AMD_LLVM", 0) else AMDRenderer(self.arch),
                      AMDLLVMCompiler(self.arch) if getenv("AMD_LLVM", 0) else HIPCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, functools.partial(AMDComputeQueue, self), functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size),
                      kernargs_size=(8 << 10))

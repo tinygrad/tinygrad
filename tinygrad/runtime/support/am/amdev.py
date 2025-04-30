@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib
+import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib, array
 from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -352,24 +352,24 @@ class AMDev:
       time.sleep(0.001)
     raise RuntimeError(f'wait_reg timeout reg=0x{reg.addr:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
 
+  def _read_vram(self, addr, size) -> bytes:
+    assert addr % 4 == 0 and size % 4 == 0, f"Invalid address {addr:#x} or size {size:#x}"
+    res = []
+    for caddr in range(addr, addr + size, 4):
+      self.wreg(0x06, caddr >> 31)
+      self.wreg(0x00, (caddr & 0x7FFFFFFF) | 0x80000000)
+      res.append(self.rreg(0x01))
+    return bytes(array.array('I', res))
+
   def _run_discovery(self):
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.
     #       The table is located at the end of VRAM - 64KB and is 10KB in size.
     mmRCC_CONFIG_MEMSIZE = 0xde3
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
-    print("vram", self.vram_size)
+    tmr_offset, tmr_size = self.vram_size - (64 << 10), (10 << 10)
 
-    self.ip_ver = {13: (3, 0, 2), 28: (13, 0, 7), 22: (3, 2, 1), 21: (4, 4, 0), 1: (11, 0, 2), 2: (6, 0, 1), 11: (6, 0, 2), 12: (3, 0, 2), 15: (13, 0, 7), 16: (13, 0, 7), 14: (4, 3, 1), 26: (4, 3, 1), 23: (6, 0, 2), 33: (7, 6, 0), 25: (9, 0, 0), 3: (6, 0, 2), 4: (6, 0, 2), 24: (13, 0, 8), 27: (13, 0, 7), 29: (8, 11, 0), 17: (4, 0, 4)}
-    self.regs_offset = {13: {0: [3072, 37784576]}, 28: {0: [93184, 37754880], 1: [93696, 37755904], 2: [94208, 37756928], 3: [94720, 37757952], 4: [110592, 37935104], 5: [111104, 37936128], 6: [111616, 37937152]}, 22: {0: [18, 192, 13504, 36864, 37764096]}, 21: {0: [28672, 12582912, 37795840, 130023424, 306184192]}, 1: {0: [4704, 40960, 114688, 37760000]}, 2: {0: [3872, 37790720]}, 11: {0: [70656, 38103040]}, 12: {0: [106496, 37783552]}, 15: {0: [90112, 14417920, 14680064, 14942208, 38009856]}, 16: {0: [90112, 14417920, 14680064, 14942208, 38009856]}, 14: {0: [0, 20, 3360, 66560, 37859328, 67371008]}, 26: {0: [0, 20, 3360, 66560, 37859328, 67371008]}, 23: {0: [4256, 37789696]}, 33: {0: [0, 20, 3360, 66560, 37859328, 67371008]}, 25: {0: []}, 3: {0: [4704, 40960, 114688, 37760000]}, 4: {0: [4704, 40960, 114688, 37760000]}, 24: {0: [92160, 92672, 37752832, 54788096]}, 27: {0: [91648, 37751808]}, 29: {0: [81920, 37902336], 1: [344064, 37903360], 2: [606208, 37904384], 3: [868352, 37905408]}, 17: {0: [30720, 32256]}}
-    return
-
-    bn = self.vram.copyout((256 << 20) - (64 << 10), 1 << 10)
-    from hexdump import hexdump
-    hexdump(bn)
-
-    exit(0)
-
-    self.bhdr = am.struct_binary_header.from_buffer(bytearray(self.vram.view(self.vram_size - (64 << 10), (10 << 10))[:]))
+    disc_tbl = self._read_vram(tmr_offset, tmr_size) if self.vram.nbytes < self.vram_size else self.vram.view(tmr_offset, tmr_size)[:]
+    self.bhdr = am.struct_binary_header.from_buffer(bytearray(disc_tbl))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE and not ihdr.base_addr_64_bit, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
 
