@@ -1,4 +1,4 @@
-import ctypes, time, contextlib, importlib, array
+import ctypes, time, contextlib, importlib
 from typing import Literal
 from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG
