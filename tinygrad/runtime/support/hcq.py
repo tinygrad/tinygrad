@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any, ClassVar
 import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, struct
-from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
+from tinygrad.helpers import PROFILE, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.ops import sym_infer, sint, Variable, UOp
@@ -10,7 +10,7 @@ from tinygrad.runtime.autogen import libc
 class MMIOInterface:
   def __init__(self, addr:int, nbytes:int, fmt='B'): self.mv, self.addr, self.nbytes, self.fmt = to_mv(addr, nbytes).cast(fmt), addr, nbytes, fmt
   def __len__(self): return self.nbytes // struct.calcsize(self.fmt)
-  def __getitem__(self, k): return self.mv[k].tolist() if isinstance(k, slice) else self.mv[k]
+  def __getitem__(self, k): return (bytes(self.mv[k]) if self.fmt == 'B' else self.mv[k].tolist()) if isinstance(k, slice) else self.mv[k]
   def __setitem__(self, k, v): self.mv[k] = v
   def view(self, offset:int=0, size:int|None=None, fmt=None) -> MMIOInterface:
     return MMIOInterface(self.addr+offset, size or (self.nbytes - offset), fmt=fmt or self.fmt)
@@ -451,7 +451,9 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
         self.dev.timeline_signal.wait(self.b_timeline[self.b_next])
-        ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
+
+        lsize = min(self.b[self.b_next].size, src.nbytes - i)
+        self.b[self.b_next].cpu_view().view(size=lsize, fmt='B')[:] = src[i:i+lsize]
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                   .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
@@ -483,7 +485,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
                                   .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i)) \
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
         self.dev.timeline_signal.wait(self.dev.timeline_value - 1)
-        ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
+        dest[i:i+lsize] = self.b[0].cpu_view().view(size=lsize, fmt='B')[:]
 
   def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:DeviceType, dest_dev:DeviceType):
     cast(HCQAllocator, src_dev.allocator).map(dest)
