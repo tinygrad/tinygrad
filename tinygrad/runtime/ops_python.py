@@ -142,10 +142,8 @@ class PythonProgram:
                   (c_i, c_j) = c_map(lane_id, elem_idx)
                   if dtp[0].scalar() in dtypes.fp8s:
                     assert dtp[0].scalar() == dtp[1].scalar()
-                    # fp8s are accumulated in fp16
-                    out[elem_idx][goff+lane_id] += truncate[dtypes.float16](
-                      sum(truncate[dtp[0].scalar()](fp8_to_float(a_elem(inp[0], _k, c_j, goff), dtp[0].scalar()) * \
-                                                    fp8_to_float(b_elem(inp[1], c_i, _k, goff), dtp[0].scalar())) for _k in range(K)))
+                    out[elem_idx][goff+lane_id] += sum(truncate[dtp[0].scalar()](fp8_to_float(a_elem(inp[0], _k, c_j, goff), dtp[0].scalar()) * \
+                                                       fp8_to_float(b_elem(inp[1], c_i, _k, goff), dtp[0].scalar())) for _k in range(K))
                   else:
                     out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
             return out

@@ -3003,7 +3003,6 @@ class TestOpsUint8(unittest.TestCase):
       lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
 
 class TestOpsFp8s(unittest.TestCase):
-  # fp8s use float16 for acc in matmul
   def _fp8_tc_numpy_matmul(self, A, B, dtype):
     M, K = A.shape
     K2, N = B.shape
@@ -3012,7 +3011,7 @@ class TestOpsFp8s(unittest.TestCase):
     C = np.zeros((M, N), dtype=dtype)
     for i in range(M):
         for j in range(N):
-            acc = np.float16(0.0)
+            acc = np.float32(0.0)
             for k in range(K):
                 acc += A[i, k] * B[k, j]
             C[i, j] = acc
