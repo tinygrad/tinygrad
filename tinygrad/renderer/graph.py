@@ -31,8 +31,8 @@ def define_graph(fxn:Callable, inputs:Sequence) -> tuple[list[UOp], list[UOp]]:
   # TODO: assert no realizes happen within model, only kernelize is allowed
   # TODO: if only one output, return a typed array instead of array of typed arrays?
   outputs = [t.kernelize().lazydata for t in get_parameters(fxn(*inputs))]
+  assert len(outputs) > 0, "The function which constructs the kernel graph must return one or more Tensors, so that the kernel graph can be accessed."
 
-  # NOTE: kernel graph is implicit from outputs
   return dynamic_inputs, outputs
 
 def export_webgpu(model:Callable, inputs:Sequence) -> tuple[str, dict[str, Tensor]]:
