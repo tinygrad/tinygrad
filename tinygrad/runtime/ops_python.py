@@ -4,7 +4,7 @@
 # this is the (living) definition of uops
 from typing import Optional, Any, TYPE_CHECKING
 import pickle, base64, itertools, time, struct, sys
-from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
+from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, fp8_to_float, float_to_fp8
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.ops import exec_alu, Ops, UOp, GroupOp
@@ -23,6 +23,19 @@ def load(inp, j=0):
 def _store(m, i, v):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
   m[i] = v
+
+def with_fp8_handling(values, dtypes_from: list[DType]|DType|None, dtype_to: DType, operation_fn):
+  def convert_values(data, convert_fn, dtype):
+      if isinstance(data, (list, tuple)): return [convert_values(item, convert_fn, dtype) for item in data]
+      return convert_fn(data, dtype)
+
+  if isinstance(dtypes_from, (list, tuple)) and any(dtype in dtypes.fp8s for dtype in dtypes_from):
+    assert len(dtypes_from) == len(values), f"expected {len(dtypes_from)} dtypes, got {len(values)}"
+    values = [convert_values(v, lambda x, dt: fp8_to_float(x, dt) if dt in dtypes.fp8s else x, dt) for v, dt in zip(values, dtypes_from)]
+  elif dtypes_from in dtypes.fp8s: values = convert_values(values, fp8_to_float, dtypes_from)
+  result = operation_fn(values)
+  if dtype_to in dtypes.fp8s: result = [float_to_fp8(x, dtype_to) for x in result]
+  return result
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
@@ -67,16 +80,16 @@ class PythonProgram:
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
         if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}:
-          assert dtype.fmt is not None and isinstance(dtype, PtrDType)
+          assert (dtype.fmt is not None or dtype.base in dtypes.fp8s) and isinstance(dtype, PtrDType)
           if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
           buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
-          ul[i] = [buf.cast(dtype.fmt)] * warp_size
+          ul[i] = [buf.cast(dtype.fmt or 'B')] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
           if arg[0][0] == 'g': ul[i] = [idxs[2-int(arg[0][-1])]] * warp_size
           elif arg[0][0] == 'l': ul[i] = [x[2-int(arg[0][-1])] for x in warp]
-        elif uop is Ops.CONST: ul[i] = [arg] * warp_size
+        elif uop is Ops.CONST: ul[i] = with_fp8_handling(arg, None, dtype, lambda x: [x] * warp_size)
         elif uop is Ops.DEFINE_ACC:
           ul[i] = [[inp[0][0][0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [inp[0][0]] * warp_size
         elif uop is Ops.INDEX:
@@ -100,11 +113,12 @@ class PythonProgram:
               i = loop_ends[i] + 1
               continue
         elif uop is Ops.VECTORIZE: ul[i] = inp
-        elif uop in {Ops.CAST, Ops.BITCAST}:
-          assert dtp[0].fmt and dtype.fmt
-          pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
-          if uop is Ops.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
-          else: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
+        elif uop is Ops.BITCAST:
+          assert (dtp[0].fmt and dtype.fmt) or (dtp[0] in dtypes.fp8s and dtype) or (dtype in dtypes.fp8s and dtp[0])
+          packed = struct.pack(f"{warp_size}{dtp[0].fmt or 'B'}", *inp[0])
+          ul[i] = list(struct.unpack(f"{warp_size}{dtype.fmt or 'B'}", packed))
+        elif uop is Ops.CAST:
+          ul[i] = with_fp8_handling(inp[0], dtp[0], dtype, lambda vals: [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in vals])
         elif uop is Ops.LOAD:
           if dtype.count > 1:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
@@ -191,7 +205,7 @@ class PythonProgram:
         elif uop in GroupOp.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {uop}"
           assert all_same([dtype] + dtp) or uop in {Ops.CMPNE, Ops.CMPLT, Ops.WHERE}, f"dtype mismatch on {uop}"
-          ul[i] = [exec_alu(uop, dtype, p) for p in zip(*inp)]
+          ul[i] = with_fp8_handling(inp, dtp, dtype, lambda vals: [exec_alu(uop, dtype, p) for p in zip(*vals)])
         assert i in ul, (uop, dtype, idp, arg)
         i += 1
     return time.perf_counter() - st
