@@ -227,7 +227,7 @@ class WebGpuDevice(Compiled):
     webgpu.WGPUQueueWorkDoneStatus__enumvalues, None, None, webgpu.wgpuDeviceGetQueue(self.runtime.args[0][0]))
 
 # Mirror the above runtime, but instead of executing the dawn C API commands, render JavaScript API commands for deferred execution, e.g. in browser
-class WebGPUJavaScriptRenderer(Renderer):
+class JavaScriptRenderer(Renderer):
   device_init = f"""if (!navigator.gpu) throw new Error("WebGPU not supported.");
 const adapter = await navigator.gpu.requestAdapter();
 const {{ maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup }} = adapter.limits;
