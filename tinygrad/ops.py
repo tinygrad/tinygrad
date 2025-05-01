@@ -490,7 +490,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
     return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
-  def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False): return UOp(Ops.COPY, self.dtype, (UOp(Ops.DEVICE, arg=device), self), clone)
+  def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False): return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)), clone)
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   @property
   def metadata(self) -> tuple[Metadata, ...]|Metadata|None: return self.arg.metadata if self.op is Ops.KERNEL else all_metadata.get(self, None)
@@ -532,6 +532,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.MULTI: return tuple(cast(str, x.device) for x in self.src)
+    if self.op is Ops.COPY:
+      if len(self.src) > 2: return tuple(cast(str, x.device) for x in self.src[1:])
+      return self.src[1].device
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
