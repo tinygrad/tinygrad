@@ -305,7 +305,7 @@ class AMDComputeQueue(HWQueue):
   def bind(self, dev:AMDDevice):
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
-    hw_view = MMIOInterface(self.hw_page.va_addr, self.hw_page.size, fmt='I')
+    hw_view = self.hw_page.cpu_view().view(fmt='I')
     for i, value in enumerate(self._q): hw_view[i] = value
 
     self.indirect_cmd = [self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(self.hw_page.va_addr),
@@ -376,7 +376,7 @@ class AMDCopyQueue(HWQueue):
 
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc((qsz:=round_up(len(self._q), 8)) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
-    hw_view = MMIOInterface(self.hw_page.va_addr, self.hw_page.size, fmt='I')
+    hw_view = self.hw_page.cpu_view().view(fmt='I')
     for i in range(qsz): hw_view[i] = self._q[i] if i < len(self._q) else 0
 
     self.indirect_cmd = [self.sdma.SDMA_OP_INDIRECT | self.sdma.SDMA_PKT_INDIRECT_HEADER_VMID(0), *data64_le(self.hw_page.va_addr), qsz,
