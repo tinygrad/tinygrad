@@ -15,7 +15,7 @@ class USB3:
     if DEBUG >= 6: libusb.libusb_set_option(self.ctx, libusb.LIBUSB_OPTION_LOG_LEVEL, 4)
 
     self.handle = libusb.libusb_open_device_with_vid_pid(self.ctx, self.vendor, self.dev)
-    if not self.handle: raise RuntimeError(f"device {self.vendor:04x}:{self.dev:04x} not found")
+    if not self.handle: raise RuntimeError(f"device {self.vendor:04x}:{self.dev:04x} not found. sudo required?")
 
     # Detach kernel driver if needed
     if libusb.libusb_kernel_driver_active(self.handle, 0):
@@ -49,10 +49,10 @@ class USB3:
 
   def _prep_transfer(self, tr, ep, stream_id, buf, length):
     tr.contents.dev_handle, tr.contents.endpoint, tr.contents.length, tr.contents.buffer = self.handle, ep, length, buf
-    tr.contents.status, tr.contents.flags, tr.contents.timeout = 0xff, 0, 1000
+    tr.contents.status, tr.contents.flags, tr.contents.timeout, tr.contents.num_iso_packets = 0xff, 0, 1000, 0
     tr.contents.type = (libusb.LIBUSB_TRANSFER_TYPE_BULK_STREAM if stream_id is not None else libusb.LIBUSB_TRANSFER_TYPE_BULK)
-    tr.contents.num_iso_packets = 0
     if stream_id is not None: libusb.libusb_transfer_set_stream_id(tr, stream_id)
+    return tr
 
   def _submit_and_wait(self, cmds):
     for tr in cmds: libusb.libusb_submit_transfer(tr)
@@ -66,47 +66,35 @@ class USB3:
         elif tr.contents.status != 0xFF: raise RuntimeError(f"EP 0x{tr.contents.endpoint:02X} error: {tr.contents.status}")
 
   def send_batch(self, cdbs:list[bytes], idata:list[int]|None=None, odata:list[bytes|None]|None=None) -> list[bytes|None]:
-    if idata is None: idata = [0] * len(cdbs)
-    if odata is None: odata = [None] * len(cdbs)
-    if len(cdbs) != len(idata): raise ValueError("cdbs and idata length mismatch")
-
-    results:list[bytes|None] = [None] * len(cdbs)
-    window:list[tuple[int, int, int]] = []  # (idx, slot, rlen)
-    transactions:list = []
-
-    def _flush():
-      nonlocal transactions, window
-      self._submit_and_wait(transactions)
-      for idx, slot, rlen in window:
-        if rlen: results[idx] = bytes(self.buf_data_in[slot][:rlen])
-        transactions, window = [], []
+    idata, odata = idata or [0] * len(cdbs), odata or [None] * len(cdbs)
+    results, tr_window, op_window = [], [], []
 
     for idx, (cdb, rlen, send_data) in enumerate(zip(cdbs, idata, odata)):
-      slot = idx % self.max_streams
-      stream = slot + 1  # firmware convention
+      # allocate slot and stream. stream is 1-based
+      slot, stream = idx % self.max_streams, (idx % self.max_streams) + 1
 
       # build cmd packet
       struct.pack_into(">B", self.buf_cmd[slot], 3, stream)
       self.buf_cmd[slot][16:16+len(cdb)] = list(cdb)
 
       # cmd + stat transfers
-      self._prep_transfer(self.tr[self.ep_cmd_out][slot], self.ep_cmd_out, None, self.buf_cmd[slot], len(self.buf_cmd[slot]))
-      self._prep_transfer(self.tr[self.ep_stat_in][slot], self.ep_stat_in, stream, self.buf_stat[slot], 64)
-      transactions += [self.tr[self.ep_stat_in][slot], self.tr[self.ep_cmd_out][slot]]
+      tr_window.append(self._prep_transfer(self.tr[self.ep_cmd_out][slot], self.ep_cmd_out, None, self.buf_cmd[slot], len(self.buf_cmd[slot])))
+      tr_window.append(self._prep_transfer(self.tr[self.ep_stat_in][slot], self.ep_stat_in, stream, self.buf_stat[slot], 64))
 
       if rlen:
         if rlen > self.max_read_len: raise ValueError("read length > max_read_len per CDB")
-        self._prep_transfer(self.tr[self.ep_data_in][slot], self.ep_data_in, stream, self.buf_data_in[slot], rlen)
-        transactions.append(self.tr[self.ep_data_in][slot])
+        tr_window.append(self._prep_transfer(self.tr[self.ep_data_in][slot], self.ep_data_in, stream, self.buf_data_in[slot], rlen))
 
       if send_data is not None:
         if len(send_data) > len(self.buf_data_out[slot]): self.buf_data_out[slot] = (ctypes.c_uint8 * len(send_data))()
         self.buf_data_out[slot][:len(send_data)] = list(send_data)
-        self._prep_transfer(self.tr[self.ep_data_out][slot], self.ep_data_out, stream, self.buf_data_out[slot], len(send_data))
-        transactions.append(self.tr[self.ep_data_out][slot])
+        tr_window.append(self._prep_transfer(self.tr[self.ep_data_out][slot], self.ep_data_out, stream, self.buf_data_out[slot], len(send_data)))
 
-      window.append((idx, slot, rlen))
-      if (idx + 1 == len(cdbs)) or len(window) >= self.max_streams: _flush()
+      op_window.append((idx, slot, rlen))
+      if (idx + 1 == len(cdbs)) or len(op_window) >= self.max_streams:
+        self._submit_and_wait(tr_window)
+        for idx, slot, rlen in op_window: results.append(bytes(self.buf_data_in[slot][:rlen]) if rlen else None)
+        tr_window = []
 
     return results
 
@@ -128,21 +116,6 @@ class ASM24Controller:
     self.exec_ops([WriteOp(0x54b, b' '), WriteOp(0x5a8, b'\x02'), WriteOp(0x5f8, b'\x04'), WriteOp(0x7ec, b'\x01\x00\x00\x00'),
       WriteOp(0xc422, b'\x02'), WriteOp(0x0, b'\x33')])
 
-  def ops_to_cmd(self, ops:Sequence[WriteOp|ReadOp|ScsiWriteOp], _add_req):
-    for op in ops:
-      if isinstance(op, WriteOp):
-        for off, value in enumerate(op.data):
-          addr = ((op.addr + off) & 0x1FFFF) | 0x500000
-          if not op.ignore_cache and self._cache.get(addr) == value: continue
-          _add_req(struct.pack('>BBBHB', 0xE5, value, addr >> 16, addr & 0xFFFF, 0), None, None)
-          self._cache[addr] = value
-      elif isinstance(op, ReadOp):
-        assert op.size <= 0xff
-        addr = (op.addr & 0x1FFFF) | 0x500000
-        _add_req(struct.pack('>BBBHB', 0xE4, op.size, addr >> 16, addr & 0xFFFF, 0), op.size, None)
-        for i in range(op.size): self._cache[addr + i] = None
-      elif isinstance(op, ScsiWriteOp): _add_req(struct.pack('>BBQIBB', 0x8A, 0, op.lba, 4096//512, 0, 0), 0, op.data+b'\x00'*(4096-len(op.data)))
-
   def exec_ops(self, ops:Sequence[WriteOp|ReadOp|ScsiWriteOp]):
     cdbs:list[bytes] = []
     idata:list[int] = []
@@ -152,7 +125,20 @@ class ASM24Controller:
       nonlocal cdbs, idata, odata
       cdbs, idata, odata = cdbs + [cdb], idata + [i], odata + [o]
 
-    self.ops_to_cmd(ops, _add_req)
+    for op in ops:
+      if isinstance(op, WriteOp):
+        for off, value in enumerate(op.data):
+          addr = ((op.addr + off) & 0x1FFFF) | 0x500000
+          if not op.ignore_cache and self._cache.get(addr) == value: continue
+          _add_req(struct.pack('>BBBHB', 0xE5, value, addr >> 16, addr & 0xFFFF, 0), 0, None)
+          self._cache[addr] = value
+      elif isinstance(op, ReadOp):
+        assert op.size <= 0xff
+        addr = (op.addr & 0x1FFFF) | 0x500000
+        _add_req(struct.pack('>BBBHB', 0xE4, op.size, addr >> 16, addr & 0xFFFF, 0), op.size, None)
+        for i in range(op.size): self._cache[addr + i] = None
+      elif isinstance(op, ScsiWriteOp): _add_req(struct.pack('>BBQIBB', 0x8A, 0, op.lba, 4096//512, 0, 0), 0, op.data+b'\x00'*(4096-len(op.data)))
+
     return self.usb.send_batch(cdbs, idata, odata)
 
   def write(self, base_addr:int, data:bytes, ignore_cache:bool=True): return self.exec_ops([WriteOp(base_addr, data, ignore_cache)])
@@ -223,35 +209,35 @@ class USBMMIOInterface(MMIOInterface):
   def __init__(self, usb, addr, size, fmt, pcimem=True):
     self.usb, self.addr, self.nbytes, self.fmt, self.pcimem, self.el_sz = usb, addr, size, fmt, pcimem, struct.calcsize(fmt)
 
-  def __getitem__(self, index):
-    if isinstance(index, slice): return self._read((index.start or 0) * self.el_sz, ((index.stop or len(self))-(index.start or 0)) * self.el_sz)
-    if isinstance(index, int): return self._acc_one(index * self.el_sz, self.el_sz) if self.pcimem else self._read(index * self.el_sz, self.el_sz)[0]
+  def __getitem__(self, index): return self._access_items(index)
+  def __setitem__(self, index, val): self._access_items(index, val)
 
-  def __setitem__(self, index, val):
-    if isinstance(index, slice): return self._write((index.start or 0) * self.el_sz, ((index.stop or len(self))-(index.start or 0)) * self.el_sz, val)
-    if isinstance(index, int): self._acc_one(index * self.el_sz, self.el_sz, val) if self.pcimem else self._write(index * self.el_sz, self.el_sz, val)
+  def _access_items(self, index, val=None):
+    if isinstance(index, slice): return self._acc((index.start or 0) * self.el_sz, ((index.stop or len(self))-(index.start or 0)) * self.el_sz, val)
+    return self._acc_one(index * self.el_sz, self.el_sz, val) if self.pcimem else self._acc(index * self.el_sz, self.el_sz, val)
 
   def view(self, offset:int=0, size:int|None=None, fmt=None):
     return USBMMIOInterface(self.usb, self.addr+offset, size or (self.nbytes - offset), fmt=fmt or self.fmt, pcimem=self.pcimem)
 
   def _acc_size(self, sz): return next(x for x in [('I', 4), ('H', 2), ('B', 1)] if sz % x[1] == 0)
+
   def _acc_one(self, off, sz, val=None):
     upper = 0 if sz < 8 else self.usb.pcie_mem_req(self.addr + off + 4, val if val is None else (val >> 32), 4)
     lower = self.usb.pcie_mem_req(self.addr + off, val if val is None else val & 0xffffffff, min(sz, 4))
     if val is None: return lower | (upper << 32)
 
-  def _read(self, offset, size):
-    if not self.pcimem: return self.usb.read(self.addr + offset, size)
+  def _acc(self, off, sz, data=None):
+    if data is None: # read op
+      if not self.pcimem: return self.usb.read(self.addr + off, sz)
 
-    acc, acc_size = self._acc_size(size)
-    return bytes(array.array(acc, [self._acc_one(offset + i * acc_size, acc_size) for i in range(size // acc_size)]))
+      acc, acc_size = self._acc_size(sz)
+      return bytes(array.array(acc, [self._acc_one(off + i * acc_size, acc_size) for i in range(sz // acc_size)]))
+    else: # write op
+      data = struct.pack(self.fmt, data) if isinstance(data, int) else bytes(data)
 
-  def _write(self, offset, _, data):
-    data = struct.pack(self.fmt, data) if isinstance(data, int) else bytes(data)
+      if not self.pcimem:
+        # Fast path for writing into buffer 0xf000
+        return self.usb.scsi_write(bytes(data)) if self.addr == 0xf000 else self.usb.write(self.addr + off, bytes(data))
 
-    if not self.pcimem:
-      # Fast path for writing into buffer 0xf000
-      return self.usb.scsi_write(bytes(data)) if self.addr == 0xf000 else self.usb.write(self.addr + offset, bytes(data))
-
-    _, acc_sz = self._acc_size(len(data) * struct.calcsize(self.fmt))
-    for i in range(0, len(data), acc_sz): self._acc_one(offset + i, acc_sz, int.from_bytes(data[i:i+acc_sz], "little"))
+      _, acc_sz = self._acc_size(len(data) * struct.calcsize(self.fmt))
+      for i in range(0, len(data), acc_sz): self._acc_one(off + i, acc_sz, int.from_bytes(data[i:i+acc_sz], "little"))

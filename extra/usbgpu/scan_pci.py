@@ -1,9 +1,9 @@
 import array, time
 from hexdump import hexdump
-from tinygrad.runtime.support.am.usb import USBConnector
+from tinygrad.runtime.support.usb import ASM24Controller
 from tinygrad.runtime.autogen import pci
 
-usb = USBConnector("")
+usb = ASM24Controller()
 
 def print_cfg(bus, dev):
   cfg = []
@@ -63,3 +63,5 @@ setup_bus(3, gpu_bus=4)
 dmp = print_cfg(4, 0)
 print(dmp[0:4])
 assert dmp[0:4] == b"\x02\x10\x80\x74", "GPU NOT FOUND!"
+
+print("GPU FOUND!")
