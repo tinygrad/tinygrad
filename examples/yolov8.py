@@ -352,13 +352,9 @@ def postprocess(output, max_det=300, conf_threshold=0.25, iou_threshold=0.45):
 def get_weights_location(yolo_variant: str) -> Path:
   weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
   fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location)
-
-  if not is_dtype_supported(dtypes.half):
-    f32_weights = weights_location.with_name(f"{weights_location.stem}_f32.safetensors")
-    if not f32_weights.exists(): convert_f16_safetensor_to_f32(weights_location, f32_weights)
-    weights_location = f32_weights
-
-  return weights_location
+  f32_weights = weights_location.with_name(f"{weights_location.stem}_f32.safetensors")
+  if not f32_weights.exists(): convert_f16_safetensor_to_f32(weights_location, f32_weights)
+  return f32_weights
 
 if __name__ == '__main__':
 
