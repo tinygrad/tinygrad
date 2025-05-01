@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib
+import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib, array
 from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -352,13 +352,24 @@ class AMDev:
       time.sleep(0.001)
     raise RuntimeError(f'wait_reg timeout reg=0x{reg.addr:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
 
+  def _read_vram(self, addr, size) -> bytes:
+    assert addr % 4 == 0 and size % 4 == 0, f"Invalid address {addr:#x} or size {size:#x}"
+    res = []
+    for caddr in range(addr, addr + size, 4):
+      self.wreg(0x06, caddr >> 31)
+      self.wreg(0x00, (caddr & 0x7FFFFFFF) | 0x80000000)
+      res.append(self.rreg(0x01))
+    return bytes(array.array('I', res))
+
   def _run_discovery(self):
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.
     #       The table is located at the end of VRAM - 64KB and is 10KB in size.
     mmRCC_CONFIG_MEMSIZE = 0xde3
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
+    tmr_offset, tmr_size = self.vram_size - (64 << 10), (10 << 10)
 
-    self.bhdr = am.struct_binary_header.from_buffer(bytearray(self.vram.view(self.vram_size - (64 << 10), (10 << 10))[:]))
+    disc_tbl = self._read_vram(tmr_offset, tmr_size) if self.vram.nbytes < self.vram_size else self.vram.view(tmr_offset, tmr_size)[:]
+    self.bhdr = am.struct_binary_header.from_buffer(bytearray(disc_tbl))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE and not ihdr.base_addr_64_bit, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
 
