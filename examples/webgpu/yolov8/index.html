@@ -7,9 +7,6 @@
     <script type="module">
         import yolov8 from "./net.js"
         window.yolov8 = yolov8;
-        document.addEventListener('DOMContentLoaded', () => {
-            if (window.startProcessing) window.startProcessing();
-        });
     </script>
     <style>
         body {
@@ -130,15 +127,24 @@
         const offscreenContext = offscreenCanvas.getContext('2d');
 
 
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            navigator.mediaDevices.getUserMedia({ audio: false,  video: { facingMode: { ideal: "environment" }}}).then(function (stream) {
+        if (navigator.mediaDevices?.getUserMedia) {
+            const tryCamera = facing => navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing } } });
+            const handle = stream => {
                 video.srcObject = stream;
-                video.onloadedmetadata = function() {
+                video.onloadedmetadata = () => {
                     canvas.width = video.clientWidth;
                     canvas.height = video.clientHeight;
-                }
-            });
+                };
+            };
+            tryCamera("environment").then(handle).catch(() => 
+                tryCamera("user").then(handle).catch(e => {
+                    wgpuError.textContent = "Error: Could not access camera."
+                    wgpuError.style.display = "block";
+                    loadingContainer.style.display = "none";
+                })
+            );
         }
+
 
         async function processFrame() {
             if (video.videoWidth == 0 || video.videoHeight == 0) {
@@ -185,10 +191,7 @@
             drawBoxes(offscreenCanvas, validBoxes, targetWidth, targetHeight, offsetX, offsetY);
             requestAnimationFrame(processFrame);
         }
-
-        window.startProcessing = function() {
-            requestAnimationFrame(processFrame);
-        };
+        requestAnimationFrame(processFrame);
 
         function drawBoxes(offscreenCanvas, boxes, targetWidth, targetHeight, offsetX, offsetY) {
             const ctx = document.querySelector("canvas").getContext("2d");
@@ -224,14 +227,8 @@
                     wgpuError.style.display = "block";
                     loadingContainer.style.display = "none";
                 }
-                try {
-                    net = await window.yolov8.load(device, "./net.safetensors");
-                    loadingContainer.style.display = "none";
-                } catch (error) {
-                    loadingContainer.style.display = "none";
-                    wgpuError.style.display = "block";
-                    wgpuError.textContent = "Failed to load model."
-                }
+                net = await yolov8.load(device, "./net.safetensors");
+                loadingContainer.style.display = "none";
             }
             const input = await prepareInput(offscreenContext);
             const output = await net(new Float32Array(input));
@@ -258,7 +255,6 @@
             if (!navigator.gpu) return false;
             const adapter = await navigator.gpu.requestAdapter();
             return await adapter.requestDevice({
-                requiredFeatures: ["shader-f16"],
                 powerPreference: "high-performance"
 		    });
         };
