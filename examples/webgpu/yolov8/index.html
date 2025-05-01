@@ -131,7 +131,7 @@
             const tryCamera = facing => navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing } } });
             const handle = stream => {
                 video.srcObject = stream;
-                video.onloadedmetadata = () => {
+                video.onloadedmetadata = function() {
                     canvas.width = video.clientWidth;
                     canvas.height = video.clientHeight;
                 };
@@ -144,7 +144,6 @@
                 })
             );
         }
-
 
         async function processFrame() {
             if (video.videoWidth == 0 || video.videoHeight == 0) {
