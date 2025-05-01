@@ -604,6 +604,24 @@ class TestSchedule(unittest.TestCase):
     c = b.kernelize()+Tensor.empty(4,4)
     check_schedule(c, 2)
 
+  def test_kernelize_setitem(self):
+    a = Tensor.full((4,), 0.0).contiguous().realize()
+    at = a[:2].assign(Tensor.full((2,), 1.0)).kernelize()
+    self.assertIs(at.lazydata.op, Ops.ASSIGN)
+    at.realize()
+    self.assertIs(at.lazydata.op, Ops.BUFFER)
+    self.assertEqual(a.tolist(), [1.0, 1.0, 0.0, 0.0])
+
+  def test_kernelize_setitem_with_offset(self):
+    a = Tensor.full((4,), 0.0).contiguous().realize()
+    at1 = a[:2].assign(Tensor.full((2,), 1.0))
+    at2 = a[2:].assign(Tensor.full((2,), 2.0))
+    Tensor.kernelize(at1, at2)
+    self.assertEqual({at1.lazydata.op, at2.lazydata.op}, {Ops.ASSIGN, Ops.ASSIGN})
+    Tensor.realize(at1, at2)
+    self.assertEqual({at1.lazydata.op, at2.lazydata.op}, {Ops.BUFFER, Ops.BUFFER})
+    self.assertEqual(a.tolist(), [1.0, 1.0, 2.0, 2.0])
+
   def test_multioutput_ast(self):
     a = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().lazydata
     b = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().lazydata
