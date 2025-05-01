@@ -140,7 +140,14 @@ class PythonProgram:
               for lane_id in range(WARP_THREADS):
                 for elem_idx in range(NUM_C): # calculate new muls and add to acc
                   (c_i, c_j) = c_map(lane_id, elem_idx)
-                  out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
+                  if dtp[0].scalar() in dtypes.fp8s:
+                    assert dtp[0].scalar() == dtp[1].scalar()
+                    # fp8s are accumulated in fp16
+                    out[elem_idx][goff+lane_id] += truncate[dtypes.float16](
+                      sum(truncate[dtp[0].scalar()](fp8_to_float(a_elem(inp[0], _k, c_j, goff), dtp[0].scalar()) * \
+                                                    fp8_to_float(b_elem(inp[1], c_i, _k, goff), dtp[0].scalar())) for _k in range(K)))
+                  else:
+                    out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
             return out
 
           # TODO: refactor these to a shared TensorCoreLayout in kernel.py
@@ -188,6 +195,11 @@ class PythonProgram:
               def b_elem(x, col, k, goff): return x[k//4][goff + k%4 + col*4]
               ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
 
+            elif arg[1] == (8,16,32):
+              def a_elem(x, k, row, goff): return x[k%4 + (k//16)*8 + (row//8)*4][goff + (k//4)%4 + (row%8)*4]
+              def b_elem(x, col, k, goff): return x[k%4 + (k//16)*4][goff + (k//4)%4  + col*4]
+              ul[i] = wmma_helper(32, 32, 16, 8, 4, a_elem, b_elem, c_map)
+
             else: raise NotImplementedError(f"unimplemented tensor core {arg}")
           elif arg[4] == "INTEL":
             # A (16 elements on 8 threads)
@@ -219,6 +231,7 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_AMD_RDNA4"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores_rdna4
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm80
     if getenv("EMULATE_CUDA_SM75"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm75
+    if getenv("EMULATE_CUDA_SM89"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm89
     if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
     if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CPU", ClangRenderer.tensor_cores
 

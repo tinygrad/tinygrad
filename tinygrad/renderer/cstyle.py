@@ -332,14 +332,21 @@ class CUDARenderer(CStyleLanguage):
                                                                                         (dtypes.half,dtypes.half)]]
   tc_8168_f16 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
     swizzle=(((6,7,2,3,4),(0,1,8,5,9)), ((6,7,8,0,1),(2,3,4,9,5)))) for di,do in [(dtypes.half,dtypes.float), (dtypes.half,dtypes.half)]]
+  tc_81632_f8 = [TensorCore(dims=(8,16,32), threads=32, elements_per_thread=(16,8,4), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
+    swizzle=(((7,8,2,3,4),(0,1,10,5,6,11,9)), ((7,8,10,0,1),(2,3,4,11,5,6,9))))
+    for di,do in [(dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float)]]
   tc_8168_tf32 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=dtypes.float, dtype_out=dtypes.float, opts=cuda_tc_opts,
     swizzle=(((5,6,2,3,4),(0,1,8,9,7)), ((5,6,8,0,1),(2,3,4,9,7))))]
 
-  tc_sm80 = tc_81616 + tc_8168_f16
-  if getenv("ALLOW_TF32", 0): tc_sm80 += tc_8168_tf32
   tc_sm75 = tc_8168_f16
-  def __init__(self, arch:str):
-    self.tensor_cores, self.arch = CUDARenderer.tc_sm80 if int(arch[3:]) >= 80 else CUDARenderer.tc_sm75 if int(arch[3:]) >= 75 else [], arch
+  tc_sm80 = tc_sm75 + tc_81616
+  if getenv("ALLOW_TF32"): tc_sm80 += tc_8168_tf32
+  tc_sm89 = tc_sm80 + tc_81632_f8
+
+  def __init__(self, arch: str):
+    self.arch = arch
+    tensor_cores_versions = [(89, CUDARenderer.tc_sm89), (80, CUDARenderer.tc_sm80), (75, CUDARenderer.tc_sm75)]
+    self.tensor_cores = next((tc for version, tc in tensor_cores_versions if int(arch[3:]) >= version), [])
   def __reduce__(self): return self.__class__, (self.arch,)
 
   # language options
@@ -386,7 +393,7 @@ class CUDARenderer(CStyleLanguage):
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if (dt.count in (4,8) and dt.scalar() in {dtypes.half, dtypes.bfloat16})
                 or (dt.count in (8,16) and dt.scalar() in dtypes.fp8s)]
 
-    dt_map_in = { dtypes.float: "tf32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
+    dt_map_in = { dtypes.float: "tf32", dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.fp8e4m3: "e4m3", dtypes.fp8e5m2: "e5m2"}
     dt_map_out = { dtypes.float: "f32", dtypes.half: "f16" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
       upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
