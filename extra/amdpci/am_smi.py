@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
-AM_VERSION = 0xA0000002
+AM_VERSION = 0xA0000003
 
 def bold(s): return f"\033[1m{s}\033[0m"
 

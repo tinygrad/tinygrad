@@ -161,8 +161,8 @@ class AMMemoryManager:
 
   def __init__(self, adev:AMDev, vram_size:int):
     self.adev, self.vram_size = adev, vram_size
-    self.boot_allocator = TLSFAllocator(32 << 20, base=vram_size - (64 << 20)) # per device
-    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
+    self.boot_allocator = TLSFAllocator(32 << 20, base=0) # per device
+    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.size) # per device
     self.root_page_table = AMPageTableEntry(self.adev, self.palloc(0x1000, zero=not self.adev.smi_dev, boot=True), lv=am.AMDGPU_VM_PDB1)
 
   def _frag_size(self, va, sz, must_cover=True):
@@ -219,7 +219,7 @@ class AMMemoryManager:
           # Try to allocate as long segment (power of 2) as possible
           cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, rem_len) + 12), None
           while cont_seg_sz >= 0x1000:
-            try: paddr = self.palloc(cont_seg_sz, zero=True)
+            try: paddr = self.palloc(cont_seg_sz, zero=False)
             except MemoryError: cont_seg_sz //= 2
             else: break
 
@@ -271,7 +271,7 @@ class AMDev:
     # all blocks that are initialized only during the initial AM boot.
     # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
     self.is_booting, self.smi_dev = True, False # During boot only boot memory can be allocated. This flag is to validate this.
-    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000002)) and (getenv("AM_RESET", 0) != 1)
+    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000003)) and (getenv("AM_RESET", 0) != 1)
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
@@ -352,13 +352,24 @@ class AMDev:
       time.sleep(0.001)
     raise RuntimeError(f'wait_reg timeout reg=0x{reg.addr:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
 
+  def _read_vram(self, addr, size) -> bytes:
+    assert addr % 4 == 0 and size % 4 == 0, f"Invalid address {addr:#x} or size {size:#x}"
+    res = []
+    for caddr in range(addr, addr + size, 4):
+      self.wreg(0x06, caddr >> 31)
+      self.wreg(0x00, (caddr & 0x7FFFFFFF) | 0x80000000)
+      res.append(self.rreg(0x01))
+    return bytes(array.array('I', res))
+
   def _run_discovery(self):
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.
     #       The table is located at the end of VRAM - 64KB and is 10KB in size.
     mmRCC_CONFIG_MEMSIZE = 0xde3
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
+    tmr_offset, tmr_size = self.vram_size - (64 << 10), (10 << 10)
 
-    self.bhdr = am.struct_binary_header.from_buffer(array.array('B', self.vram.view(self.vram_size - (64 << 10), (10 << 10))[:]))
+    disc_tbl = self._read_vram(tmr_offset, tmr_size) if self.vram.nbytes < self.vram_size else self.vram.view(tmr_offset, tmr_size)[:]
+    self.bhdr = am.struct_binary_header.from_buffer(bytearray(disc_tbl))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE and not ihdr.base_addr_64_bit, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
 
