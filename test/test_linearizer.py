@@ -64,13 +64,6 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
     assert wmmas == 0, "tensor core is incorrectly triggered"
     assert tcs == 0, "tensor core opt is incorrectly included"
 
-# def is_emulated(tc) -> bool:
-#   return (getenv("EMULATE_CUDA_SM89") or getenv("EMULATE_CUDA_SM75") or getenv("EMULATE_CUDA") getenv("EMULATE_INTEL") \
-#           or getenv("EMULATE_METAL") or getenv("EMULATE_AMD_MFMA") or getenv("EMULATE_AMD")) and \
-#           ((tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16) or \
-#           (tc.dtype_in == dtypes.fp8e4m3 or tc.dtype_out == dtypes.fp8e4m3) or \
-#           (tc.dtype_in == dtypes.fp8e5m2 or tc.dtype_out == dtypes.fp8e5m2))
-
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
     # NOTE: this realize exists because Tensor.numpy calls .contiguous() internally
