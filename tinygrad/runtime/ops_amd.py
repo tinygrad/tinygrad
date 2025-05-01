@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.ops import sint
 from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, all_same, flatten, DEBUG, OSX
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, all_same, flatten, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, libc, pci, vfio, sqtt
@@ -417,11 +417,13 @@ class AMDCopyQueue(HWQueue):
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
-    self.dev: AMDDevice = dev
-    self.name, self.lib = name, lib
+    self.dev, self.name, self.lib = dev, name, lib
+
     image, sections, _ = elf_loader(self.lib)
     self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), BufferSpec(cpu_access=True, nolru=True))
-    ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
+    self.dev.allocator._copyin(self.lib_gpu, image)
+    self.dev.synchronize()
+
     rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
     text_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".text"), -1)
     assert rodata_entry >= 0 and text_entry >= 0, ".text or .rodata section not found"
@@ -434,7 +436,8 @@ class AMDProgram(HCQProgram):
     # Ensure scratch size
     self.dev._ensure_has_local_memory(self.private_segment_size)
 
-    code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + rodata_entry) # NOTE: this is wrong, it's not this object
+    # NOTE: this is wrong, it's not this object. pad it, since it might be smaller than the struct
+    code = hsa.amd_kernel_code_t.from_buffer_copy(bytes(image[rodata_entry:rodata_entry+256]) + b'\x00'*256)
     self.wave32: bool = code.kernel_code_properties & 0x400 == 0x400
 
     # Set rsrc1.priv=1 on gfx11 to workaround cwsr.
