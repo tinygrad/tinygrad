@@ -113,7 +113,7 @@ class TestTensorUopRepresentation(unittest.TestCase):
     a = Tensor([1.,2,3]).realize()
     c = a.to("TEST")   # NOTE: this isn't checked
     print(c.lazydata)
-    is_pattern(c, UPat(Ops.COPY, src=(UPat(Ops.DEVICE), realized_pattern,)))
+    is_pattern(c, UPat(Ops.COPY, src=(realized_pattern, UPat(Ops.DEVICE))))
 
   def test_empty_buf(self):
     a = Tensor.empty(3, 3)

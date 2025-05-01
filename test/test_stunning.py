@@ -19,18 +19,18 @@ class TestStunning(unittest.TestCase):
 
     self.assertListEqual(nv, wv)
 
-  @unittest.skip("this is sliently broken")
   def test_indexing_two_bind(self):
     a = Tensor.arange(100*10).reshape(100, 10).contiguous()
 
     nv = a[12].cat(a[76]).tolist()
 
     vi = Variable('i', 0, a.shape[0]-1)
-    wv = a[vi.bind(12)].cat(a[vi.bind(76)]).tolist()
-
-    self.assertListEqual(nv, wv)
+    with self.assertRaisesRegex(AssertionError, "different values for the same key"):
+      wv = a[vi.bind(12)].cat(a[vi.bind(76)]).tolist()
+      self.assertListEqual(nv, wv)
 
   @unittest.skipIf(Device.DEFAULT in {"WEBGPU", "NV", "CUDA"}, "Too many buffers / too slow")
+  @unittest.skip("This is binding a Variable to two different values")
   def test_simple_train(self, steps=6, bs=4, adam=True):
     X_train, Y_train, _, _ = nn.datasets.mnist()
     model = Model()
@@ -46,7 +46,7 @@ class TestStunning(unittest.TestCase):
         for i in range(samples.shape[0]):
           vib = vi.bind(i)
           opt.zero_grad()
-          pred = model(X_samp[vib])
+          pred = model(X_samp[vib].realize())
           loss = (pred - Y_samp[vib]).square().mean()
           losses.append(loss.backward())
           opt.schedule_step()

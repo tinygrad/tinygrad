@@ -3030,6 +3030,13 @@ class TestOpsFp8s(unittest.TestCase):
   def test_gemm_fp8e4m3(self): self._compare_to_numpy_gemm((64, 64), (64, 64), dtypes.fp8e4m3, ml_dtypes.float8_e4m3fn)
   @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2, Device.DEFAULT), f"no fp8e5m2 on {Device.DEFAULT}")
   def test_gemm_fp8e5m2(self): self._compare_to_numpy_gemm((64, 64), (64, 64), dtypes.fp8e5m2, ml_dtypes.float8_e5m2)
+@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
+class TestOpsBFloat16(unittest.TestCase):
+  def test_cast(self):
+    # TODO: helper_test_op breaks in unrelated part
+    # TODO: wrong output with GPU=1 / PYTHON=1 on mac
+    data = [60000.0, 70000.0, 80000.0]
+    np.testing.assert_allclose(Tensor(data).cast("bfloat16").numpy(), torch.tensor(data).type(torch.bfloat16).float().numpy())
 
 if __name__ == '__main__':
   np.random.seed(1337)
