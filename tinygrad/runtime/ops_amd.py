@@ -927,5 +927,6 @@ class AMDDevice(HCQCompiled):
     super()._at_profile_finalize()
 
   def finalize(self):
-    self.synchronize()
+    try: self.synchronize() # Try to finalize device in any case.
+    except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
     if hasattr(self.dev_iface, 'device_fini'): self.dev_iface.device_fini()
