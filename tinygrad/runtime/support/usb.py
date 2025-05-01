@@ -15,7 +15,7 @@ class USB3:
     if DEBUG >= 6: libusb.libusb_set_option(self.ctx, libusb.LIBUSB_OPTION_LOG_LEVEL, 4)
 
     self.handle = libusb.libusb_open_device_with_vid_pid(self.ctx, self.vendor, self.dev)
-    if not self.handle: raise RuntimeError("device not found")
+    if not self.handle: raise RuntimeError(f"device {self.vendor:04x}:{self.dev:04x} not found")
 
     # Detach kernel driver if needed
     if libusb.libusb_kernel_driver_active(self.handle, 0):
@@ -24,7 +24,7 @@ class USB3:
 
     # Set configuration and claim interface
     if libusb.libusb_set_configuration(self.handle, 1): raise RuntimeError("set_configuration failed")
-    if libusb.libusb_claim_interface(self.handle, 0): raise RuntimeError("claim_interface failed")
+    if libusb.libusb_claim_interface(self.handle, 0): raise RuntimeError("claim_interface failed. sudo required?")
     if libusb.libusb_set_interface_alt_setting(self.handle, 0, 1): raise RuntimeError("alt_setting failed")
 
     # Clear any stalled endpoints
