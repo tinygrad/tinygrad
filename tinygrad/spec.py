@@ -1,7 +1,7 @@
 from typing import cast, Callable
-from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite
+from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, resolve
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
-from tinygrad.helpers import all_same, dedup, prod, DEBUG, IGNORE_OOB
+from tinygrad.helpers import all_same, prod, DEBUG, IGNORE_OOB
 try:
   import z3
 
@@ -20,7 +20,7 @@ try:
     (UPat(Ops.SPECIAL, src=(), name="x"), lambda x: UOp(Ops.SPECIAL, arg=x.arg[0], src=(x.ufix(x.arg[1]),))),
     (UPat(Ops.SPECIAL, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg, 0, x.src[0].arg-1, ctx[0]))),
     (UPat(Ops.DEFINE_VAR, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg[0], x.arg[1], x.arg[2], ctx[0]))),
-    (UPat(Ops.RANGE, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"ridx{x.arg}", x.src[0].arg, x.src[1].arg-1, ctx[0]))),
+    (UPat(Ops.RANGE, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"ridx{x.arg}", 0, x.src[0].arg-1, ctx[0]))),
     (UPat(Ops.LOAD, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"load{ctx[1].setdefault(x, len(ctx[1]))}", x.vmin, x.vmax, ctx[0]))),
     (UPat(Ops.CONST, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(z3.BoolVal if dtypes.is_bool(x.dtype) else z3.IntVal)(x.arg, ctx=ctx[0].ctx))),
     (UPat(Ops.CAST, name="x"), lambda x: x.src[0]),
@@ -48,9 +48,8 @@ assign_spec = PatternMatcher([
   # KERNEL can attach to an ASSIGN to describe the compute required to realize a BUFFER
   (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN)), name="k"), validate_kernel),
 
-  # ASSIGN has a target buffer and a value. It can also optionally depend on other assigns
-  (UPat(Ops.ASSIGN, name="x"),
-   lambda x: x.src[0].base.op in {Ops.BUFFER, Ops.BUFFER_VIEW} and (len(x.src) == 2 or all(s.op is Ops.ASSIGN for s in x.src[2:]))),
+  # ASSIGN has a target and a value. It can also optionally depend on other assigns
+  (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
 ])
 
 # *** this is the spec of a Tensor in UOp ***
@@ -62,7 +61,7 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
    # "make things that can't be images not images" can change the buffer dtype
    # this is fine as long as it's a realized buffer and base dtypes match.
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.base.op is Ops.BUFFER)),
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.CONST, Ops.DEVICE}),)), lambda: False),
+  (UPat(Ops.VIEW, src=(UPat.var("x"),)), lambda x: x.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.CONST, Ops.DEVICE}),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
@@ -78,7 +77,7 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
 
   # COPY
   # NOTE: the arg here specifies clone=True, which prevents folding same device copy
-  (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("x"))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
+  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
 ])
 
 # ***** uop type spec *****
@@ -112,7 +111,7 @@ spec = PatternMatcher([
    lambda x,c: all(y.op is Ops.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
-  (UPat(Ops.RANGE, src=(UPat.var("x"), UPat.var("y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype and isinstance(rng.arg, int)),
+  (UPat(Ops.RANGE, src=(UPat.var("x"),), name="rng"), lambda rng,x: rng.dtype == x.dtype and isinstance(rng.arg, int)),
   (UPat(Ops.SPECIAL, src=()), lambda: True),
 
   # TODO: confirm the args of both of these are shapetrackers
@@ -192,8 +191,11 @@ sched_spec = buffer_spec+assign_spec+PatternMatcher([
 # *** this is the UOp shape spec ***
 
 def verify_sink_dims(sink:UOp):
-  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sink.toposort() if x.op is not Ops.SINK and x.st is not None])]
-  return all_same([x.st_arg.size for x in sink.src]) and all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims)
+  if not all_same([s.shape for s in sink.src]): return False
+  for dims in zip(*[x.shape for x in sink.toposort() if x.st is not None]):
+    if len(n_dims:={s for s in dims if resolve(s!=1)}) > 1:
+      print(f"# INVALID KERNEL DIMS: can only have 1 or n in each dimension: {n_dims}")
+      return False
 
 shape_spec = PatternMatcher([
   # shapes must have either 1 or n in each dimension
