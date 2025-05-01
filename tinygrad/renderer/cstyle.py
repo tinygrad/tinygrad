@@ -339,7 +339,7 @@ class CUDARenderer(CStyleLanguage):
     swizzle=(((5,6,2,3,4),(0,1,8,9,7)), ((5,6,8,0,1),(2,3,4,9,7))))]
 
   tc_sm75 = tc_8168_f16
-  tc_sm80 = tc_sm75 + tc_81616
+  tc_sm80 = tc_81616 + tc_8168_f16
   if getenv("ALLOW_TF32"): tc_sm80 += tc_8168_tf32
   tc_sm89 = tc_sm80 + tc_81632_f8
 
