@@ -104,7 +104,7 @@ class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
   def bind(self, dev:NVDevice):
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True))
-    hw_view = MMIOInterface(self.hw_page.va_addr, self.hw_page.size, fmt='I')
+    hw_view = self.hw_page.cpu_view().view(fmt='I')
     for i, value in enumerate(self._q): hw_view[i] = value
 
     # From now on, the queue is on the device for faster submission.
