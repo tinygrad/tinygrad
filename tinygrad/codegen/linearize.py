@@ -201,7 +201,7 @@ def remove_blockend(x:UOp):
       late_ops = [UOp(Ops.BARRIER)] + late_ops
     arg = BasicBlock2(tuple(early_ops)+parent_block.arg.lst+tuple(late_ops), tuple([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt)
     return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src, arg=arg)
-  elif x.arg.end.op is Ops.IF and x.arg.end in x.arg.lst: # case for if already present in blockend
+  if x.arg.end.op is Ops.IF and x.arg.end in x.arg.lst: # case for if already present in blockend
     arg = BasicBlock2(x.arg.lst, tuple([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt)
     return UOp(Ops.BLOCK, src=x.src, arg=arg)
 
