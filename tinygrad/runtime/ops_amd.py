@@ -417,12 +417,12 @@ class AMDCopyQueue(HWQueue):
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
-    self.dev: AMDDevice = dev
-    self.name, self.lib = name, lib
+    self.dev, self.name, self.lib = dev, name, lib
+
     image, sections, _ = elf_loader(self.lib)
     self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), BufferSpec(cpu_access=True, nolru=True))
-    dev.allocator._copyin(self.lib_gpu, image)
-    dev.synchronize()
+    self.dev.allocator._copyin(self.lib_gpu, image)
+    self.dev.synchronize()
 
     rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
     text_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".text"), -1)
