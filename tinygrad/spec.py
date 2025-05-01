@@ -48,9 +48,8 @@ assign_spec = PatternMatcher([
   # KERNEL can attach to an ASSIGN to describe the compute required to realize a BUFFER
   (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN)), name="k"), validate_kernel),
 
-  # ASSIGN has a target buffer and a value. It can also optionally depend on other assigns
-  (UPat(Ops.ASSIGN, name="x"),
-   lambda x: x.src[0].base.op in {Ops.BUFFER, Ops.BUFFER_VIEW} and (len(x.src) == 2 or all(s.op is Ops.ASSIGN for s in x.src[2:]))),
+  # ASSIGN has a target and a value. It can also optionally depend on other assigns
+  (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
 ])
 
 # *** this is the spec of a Tensor in UOp ***
