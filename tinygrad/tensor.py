@@ -292,7 +292,6 @@ class Tensor(SimpleMathTrait):
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
     assert not x.requires_grad  # self requires_grad is okay?
-    if not self.lazydata.is_realized: return self.replace(x)
     self.lazydata = self.lazydata.assign(x.lazydata)
     return self
 
@@ -1118,13 +1117,18 @@ class Tensor(SimpleMathTrait):
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
         case slice():
           if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
-          if not all(isinstance(s,int) or s is None for s in (index.start,index.stop,index.step)): raise TypeError("only int slicing is supported")
-          # handle int slicing
-          *boundary, stride = index.indices(cast(SupportsIndex, size))
-          if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
-          elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
-          # update size for slice
-          size = ceildiv((boundary[1] - boundary[0]), abs(stride))
+          if all(isinstance(s, int) or s is None for s in (index.start,index.stop,index.step)):
+            # handle int slicing
+            *boundary, stride = index.indices(cast(SupportsIndex, size))
+            if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
+            elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
+            # update size for slice
+            size = ceildiv((boundary[1] - boundary[0]), abs(stride))
+          elif index.step is None and all(isinstance(s,(int,UOp))for s in (index.start,index.stop)) and resolve((index.stop-index.start) > 0, False):
+            # simple symbolic slice
+            boundary = [index.start, index.stop]
+            size = (index.stop - index.start).ssimplify()
+          else: raise TypeError(f"slice {index=} is not supported")
         case None: pass # do nothing
         case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
       indices_parsed.append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})
@@ -1145,7 +1149,7 @@ class Tensor(SimpleMathTrait):
         x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
 
     # dim injection from None by including None dim size (which is 1) and dim collapse by skipping int dim size
-    x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], int)))
+    x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], (int, UOp))))
 
     # tensor indexing
     if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
@@ -1868,7 +1872,7 @@ class Tensor(SimpleMathTrait):
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
+  def softmax(self, axis=-1, dtype:DTypeLike|None=None, _single_kernel=getenv("SINGLE_KERNEL_SOFTMAX")) -> Tensor:
     """
     Applies the softmax function to the tensor along the specified axis.
 
@@ -1888,7 +1892,7 @@ class Tensor(SimpleMathTrait):
     print(t.softmax(axis=0).numpy())
     ```
     """
-    if getenv("SINGLE_KERNEL_SOFTMAX"):
+    if _single_kernel:
       _, e, ss = self.contiguous()._softmax(axis, dtype)
       return e.div(ss).fuse()
     _, e, ss = self._softmax(axis, dtype)
@@ -2750,7 +2754,7 @@ class Tensor(SimpleMathTrait):
     Useful for single kernel softmax and flash attention.
     Careful, this can break codegen or make kernels really slow.
     """
-    return self._apply_uop(UOp.fuse).contiguous()
+    return self._apply_uop(UOp.fuse)
 
   def contiguous_backward(self) -> Tensor:
     """

@@ -4,7 +4,7 @@ import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType
-from tinygrad.helpers import partition, all_same, prod, getenv, DEBUG, flatten, get_single_element
+from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element
 from tinygrad.codegen.transcendental import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
@@ -41,6 +41,7 @@ symbolic_simple = PatternMatcher([
   (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, True), UPat.const(dtypes.bool, False)), lambda x: x),
   # ** zero folding **
   (UPat.var("x") < UPat.var("x"), lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x < x -> False
+  (UPat.var("x") % UPat.var("x"), lambda x: x.const_like(0)), # x%x -> 0
   (UPat.var("x", dtype=dtypes.ints) != UPat.var("x", dtype=dtypes.ints),
    lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x != x -> False (only ints)
   # x*0 -> 0 or 0*x -> 0
@@ -75,26 +76,31 @@ def split_uop(x:UOp, sep:Ops):
     for s in x.src: yield from split_uop(s, sep)
   else: yield x
 
-def fold_unrolled_divs(divs:UOp):
+def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
   # div pattern in unrolled arange
   # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  add_chain, denominator, seen_const, ans = list(split_uop(divs, Ops.ADD)), None, [], None
-  for u in add_chain:
+  seen_const, ans = [], None
+  for u in split_uop(divs, Ops.ADD):
+    if fac!=1:
+      if u.op is not Ops.MUL or u.src[1].op is not Ops.CONST or u.src[1].arg != fac: return None
+      u = u.src[0]
     if not (u.op is Ops.IDIV and u.src[1].op is Ops.CONST): return None
-    if denominator is None: denominator = u.src[1].arg
     if denominator != u.src[1].arg: return None
+    if (s0:=u.src[0]).vmin < 0: return None
     # assumed CONST is the last of an ADD
-    if (s0:=u.src[0]).op is Ops.ADD and s0.src[1].op is Ops.CONST and s0.src[1].op is Ops.CONST:
+    if s0.op is Ops.ADD and s0.src[1].op is Ops.CONST and s0.src[1].op is Ops.CONST:
       seen_const.append(s0.src[1].arg)
       s0 = s0.src[0]
     else: seen_const.append(0)
     if ans is None: ans = s0
     if ans is not s0: return None
-  if denominator is None: return None
+  if ans is None: return None
   # the first (denominator-len(seen_const)) terms may have been folded to 0 already
   for i in range(denominator-len(seen_const)):
     if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
-  return ans if ans is not None and sorted(seen_const)==list(range(denominator)) else None
+  if sorted(seen_const)==list(range(denominator)):
+    return fac*ans
+  return None
 
 def lt_folding(x:UOp, c:int) -> UOp|None:
   p, np = partition(split_uop(x, Ops.ADD), lambda u: u.const_factor() == 1)
@@ -170,8 +176,8 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
       rem += r//gcd * v
       quo += q * v
 
-  # if numerator is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
-  if x.vmin < 0 and remainders: return None
+  # if numerator before/after is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
+  if (x.vmin < 0 or rem.vmin < 0) and remainders: return None
   if which is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
   return rem//(c//gcd)+quo
 
@@ -265,7 +271,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
   # *** rules from symbolic ***
   # unrolled arange div folding
-  (UPat(Ops.ADD, name="divs", src=[UPat(), UPat(Ops.IDIV)]), fold_unrolled_divs),
+  ((UPat() + UPat()//UPat.cvar("d", vec=False)).named("divs"), lambda divs,d: fold_unrolled_divs(divs, d.arg)),
+  ((UPat() + (UPat()//UPat.cvar("d", vec=False))*UPat.cvar("c")).named("divs"), lambda divs,d,c: fold_unrolled_divs(divs, d.arg, c.arg)),
   # generic lt folding
   (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   # canonicalize a simplex with positive coefficients > 0
@@ -275,6 +282,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # div folding
   ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)),  # (x//c+a)//d -> (x+a*c)//(c*d)
   (UPat.var("x", dtypes.sints) // UPat.var("y"), lambda x,y: div_and_mod_folding(x,y,Ops.IDIV)),
+  ((UPat.var("x", dtypes.sints)+UPat.cvar("c")).named("n")//UPat.cvar("d"),
+    lambda x,c,n,d: (-(-(c.arg%d.arg + x - (d.arg-1))//d) + c.arg//d.arg) if x.vmax<=0 and n.vmin>=0 and d.arg>0 else None),
   # ** mod **
   # mod folding
   (UPat.var("x") % UPat.var("y"), lambda x,y: div_and_mod_folding(x,y,Ops.MOD)),
@@ -369,57 +378,6 @@ def threefry2x32(x: UOp, key: UOp):
 
 # ******** phase 3 is the complete symbolic, and deals with very complex things like loop rewriting and threefry transform ********
 
-def loop_collapse(compval, multconst, rng:UOp, acc:UOp, extra:UOp, idx2=None,idx3=None,vec=None,
-                  add=UOp.const(dtypes.int, 0), mul:UOp=UOp.const(dtypes.int, 1)):
-  if getenv("DISABLE_LOOP_COLLAPSE") or rng not in acc.src: return None  # must be the right REDUCE
-  if acc not in split_uop(extra, Ops.ADD): return None
-  loop_start, loop_end = rng.src
-  if loop_start.arg != 0:
-    # TODO: support and test this with other mul and loop_starts
-    if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mul:{mul.arg} loop_start:{loop_start.arg}")
-    return None
-  if idx2 is not None: add = add + idx2
-  if idx3 is not None: add = add + idx3
-  if vec is not None:
-    # add, mul, loop_start, loop_end
-    def dvec(x:UOp):
-      if x.op is Ops.CONST: return UOp.const(x.dtype.vec(vec.dtype.count), x.arg)
-      return UOp(Ops.VECTORIZE, x.dtype.vec(vec.dtype.count), src=(x,)*vec.dtype.count)
-    add, mul, loop_start, loop_end = dvec(add), dvec(mul), dvec(loop_start), dvec(loop_end)
-  if mul.vmin > 0:
-    comprange = UOp.minimum(loop_end, UOp.maximum((add-compval+(loop_end-loop_start)*mul)//mul, loop_start))
-  else:
-    return None
-  new_reduce_op = comprange.cast(multconst.dtype) * multconst
-  # TODO: what does it mean to have the same numbered DEFINE_ACC with different ranges?
-  new_acc = acc.replace(src=acc.src[0:1]+tuple(x for x in acc.src[1:] if x is not rng))
-  ret = new_acc.assign(new_acc+new_reduce_op)
-  if extra is not acc: ret = ret + acc.assign(extra)
-  return ret
-
-def index_collapse(idx:UOp,rng:UOp,buf:UOp,ld:UOp,acc:UOp,add=UOp.const(dtypes.int, 0),mul=UOp.const(dtypes.int, 1)):
-  if rng not in acc.src: return None
-  new_load = UOp.load(buf.index(add+mul*idx, (idx >= rng.src[0]) & (idx < rng.src[1])), dtype=ld.dtype)
-  new_acc = acc.replace(src=acc.src[0:1]+tuple(x for x in acc.src[1:] if x is not rng))
-  return new_acc.assign(new_acc+new_load)
-
-def reduce_collapse(acc:UOp, ret:UOp, alu:UOp):
-  reduce_parented, reduce_unparented = partition(acc.src[1:], lambda x: x in ret.toposort())
-  if len(reduce_unparented) == 0: return None
-  new_acc = acc.replace(src=acc.src[0:1]+tuple(reduce_parented))
-  ret = new_acc.assign(new_acc.alu(alu.op, ret))
-  if alu.op is Ops.ADD:
-    for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
-  return ret
-
-acc_pat, rng_pat = UPat(Ops.DEFINE_ACC, name="acc"), UPat(Ops.RANGE, name="rng")
-rng_aug = UPat.any(rng_pat, UPat.var("add")+rng_pat, UPat.var("mul")*rng_pat, UPat.var("add")+UPat.var("mul")*rng_pat)
-
-index_load = UPat.var("buf").index(rng_aug).load(name="ld")
-
-arange_augrng = UPat.any(rng_aug, rng_aug+UPat.var("idx2"), rng_aug+UPat.var("idx2")+UPat.var("idx3"), UPat(Ops.VECTORIZE, name="vec", src=rng_aug))
-arange_m = (arange_augrng<UPat.cvar("compval")).where(UPat.const(None, 0), UPat.cvar("multconst"))
-
 def reduce_mul_chain(r:UOp):
   if r.arg not in {Ops.ADD, Ops.MAX}: return None
   if r.dtype != r.src[0].dtype: return None
@@ -460,13 +418,6 @@ sym = symbolic_flat+PatternMatcher([
    lambda x,y: y.where(x, UOp.const(dtypes.uint32, 0)).cast(dtypes.uint64) * (1<<32)),
   ((UPat.var('x', dtypes.uint64)&(UPat.var('y').where(UPat.const(dtypes.uint64, 0xFFFFFFFF), UPat.const(dtypes.uint64, 0)))).cast(dtypes.uint32),
    lambda x,y: y.where(x.cast(dtypes.uint32), UOp.const(dtypes.uint32, 0))),
-  # arange loop folding
-  (acc_pat.assign(arange_m+UPat.var("extra")), loop_collapse),
-  # indexing, with cast or where
-  (acc_pat.assign(UPat.var("idx").eq(UPat(Ops.RANGE, name="rng")).cast()*index_load+acc_pat), index_collapse),
-  (acc_pat.assign((UPat.var("idx")!=UPat(Ops.RANGE, name="rng")).where(UPat.const(None, 0.0), index_load)+acc_pat), index_collapse),
-  # parentless reduce  # TODO: add MUL
-  (acc_pat.assign(UPat((Ops.ADD, Ops.MAX), src=[acc_pat, UPat.var("ret")], name="alu")), reduce_collapse),
   # ** self folding **
   (UPat(Ops.DEFINE_ACC, src=(UPat.var("x"),)), lambda x: x),            # a DEFINE_ACC without ranges is a CONST
   (UPat(Ops.ASSIGN, src=(UPat.cvar(),UPat.var("x"))), lambda x: x),     # an ASSIGN to a const is a NOOP
