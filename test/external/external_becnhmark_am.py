@@ -3,7 +3,7 @@ from tinygrad import Device
 
 if __name__ == "__main__":
   am = Device["AMD"]
-  assert am.is_am(), "should run AM"
 
+  # kfd is 0.55ms!
   with Profiling("allocation 127.7mb"):
-    am.dev_iface.adev.mm.valloc(int(127.7*1024*1024))
+    am.allocator.alloc(int(127.7*1024*1024))
