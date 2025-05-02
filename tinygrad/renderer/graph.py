@@ -1,7 +1,7 @@
 # render the kernel graph for execution outside tinygrad
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor
 from tinygrad.device import Buffer
-from tinygrad.ops import UOp, Variable, UPat, Ops, PatternMatcher
+from tinygrad.ops import UOp, Variable, Ops
 from tinygrad.renderer import Renderer
 from tinygrad.runtime.ops_webgpu import JavaScriptRenderer
 from tinygrad.engine.schedule import create_schedule_with_vars
@@ -11,23 +11,26 @@ from tinygrad.nn.state import get_parameters
 from typing import Callable, Sequence
 import itertools
 
-def is_partial_write(ast:UOp, i:int) -> bool:
+def is_partial_write(ast:UOp, buf_idx:int) -> bool:
   for u in ast.toposort():
-    if u.op is Ops.STORE and (buf:=u.src[0]).arg == i and buf.dtype.size > u.src[1].arg.size: return True
+    if u.op is Ops.STORE and (buf:=u.src[0]).arg == buf_idx and buf.dtype.size > u.src[1].arg.size: return True
   return False
 
 # Common logic regardless of render target (e.g. WebGPU-JS, C)
 class GraphRenderer(Renderer):
   def __init__(self, inputs:list[UOp], outputs:list[UOp]):
-    self.graph, self.inputs, self.outputs = UOp.sink(*outputs), inputs, outputs
-
     # linearize the kernel graph
-    self.schedule = memory_planner(create_schedule_with_vars(self.graph)[0])
+    schedule, _, becomes_map = create_schedule_with_vars(UOp.sink(*outputs))
+    outputs = [becomes_map[uop.base] for uop in outputs]
+    self.inputs, self.outputs, schedule = inputs, outputs, memory_planner(schedule)
 
     # render kernels, render buffer names
     # mark which buffers have state
-    self.kernels, self.empty_bufs, self.state_bufs, seen_bufs, ctr = dict(), dict(), dict(), set(), itertools.count()
-    for si, ei in lower_schedule(self.schedule):
+    self.kernels: dict[str, str] = dict()
+    self.empty_bufs: dict[Buffer, str] = dict()
+    self.state_bufs: dict[Buffer, str] = dict()
+    seen_bufs, ctr = set([i.base.buffer for i in inputs if i.base.op is Ops.BUFFER]), itertools.count()
+    for si, ei in lower_schedule(schedule):
       if isinstance(ei.prg, CompiledRunner): self.kernels[ei.prg.p.function_name] = ei.prg.p.src
       out_idxs = set([0]) if isinstance(ei.prg, BufferCopy) else ei.prg.p.outs if isinstance(ei.prg, CompiledRunner) else []
       for i, buf in enumerate(ei.bufs):
@@ -38,28 +41,18 @@ class GraphRenderer(Renderer):
 class JSGraphRenderer(GraphRenderer, JavaScriptRenderer):
   def render_graph(self) -> str: pass
 
-def create_graph_with_io(fxn:Callable, inputs:Sequence) -> tuple[list[UOp], list[UOp]]:
-
-  # Inputs
-  # dynamic_inputs are the input args to the exported function
-  dynamic_inputs = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in inputs if isinstance(x, (Tensor, Variable))]
-  # - Tensor input becomes typed array of closest type, e.g. dtypes.int32 -> Int32Array (JS) or int* (C)
-  # - Variable input becomes signed integer type, e.g. number (JS), int (C)
-  # TODO: should not all args be positional? instead use Object w/ names for Variable args, or for everything?
-  
-  # Outputs
-  # exported function output is an array of typed arrays whose order matches below outputs
-  outputs = [t.kernelize().lazydata for t in get_parameters(fxn(*inputs))]
+def create_graph_with_io(fxn:Callable, args:Sequence) -> tuple[list[UOp], list[UOp]]:
   # TODO: assert no realizes happen within model, only kernelize is allowed
-  # TODO: if only one output, return a typed array instead of array of typed arrays?
-  assert len(outputs) > 0, "The input function must return at least one Tensor so that the kernel graph can be accessed."
+  inputs = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
+  outputs = [t.kernelize().lazydata for t in get_parameters(fxn(*args))]
+  assert len(outputs) > 0, "The function argument must return at least one Tensor so that the kernel graph can be accessed."
 
-  return dynamic_inputs, outputs
+  return inputs, outputs
 
-def export_webgpu(model:Callable, inputs:Sequence) -> tuple[str, dict[str, Tensor]]:
+def export_webgpu(fxn:Callable, args:Sequence) -> tuple[str, dict[str, Tensor]]:
   """
-  Renders the model's kernel graph into JavaScript and exports the model's state.
+  Generates a kernel graph, renders the graph into JavaScript, and exports the graph's state as a `state_dict`.
   """
-  renderer = JSGraphRenderer(create_graph_with_io(model, inputs))
-  state = renderer.
-  return renderer.render_graph(), renderer
+  renderer = JSGraphRenderer(*create_graph_with_io(fxn, args))
+  state_dict = {v: Tensor(bytes(k.as_buffer()), dtype=k.dtype, device=k.device).realize() for k,v in renderer.state_bufs.items()}
+  return renderer.render_graph(), state_dict
