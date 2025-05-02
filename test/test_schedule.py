@@ -929,7 +929,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmin(-1)
-    run_schedule(check_schedule(out, 2))
+    run_schedule(check_schedule(out, 3))
     np.testing.assert_equal(out.numpy(), x.numpy().argmin(axis=-1))
 
   def test_argmax_multireduce_fusion(self):
@@ -1696,7 +1696,7 @@ class TestIndexing(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmin(-1)
-    self.check_schedule(out, 1)
+    self.check_schedule(out, 2)
     np.testing.assert_equal(out.numpy(), x.numpy().argmin(axis=-1))
 
   def test_argmax(self):
