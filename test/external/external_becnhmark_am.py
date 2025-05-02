@@ -1,5 +1,4 @@
-import random, os
-from tinygrad.helpers import Timing, Profiling
+from tinygrad.helpers import Profiling
 from tinygrad import Device
 
 if __name__ == "__main__":
