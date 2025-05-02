@@ -459,6 +459,11 @@ class TestSymbolic(unittest.TestCase):
     with self.assertRaises(AssertionError):
       self.helper_test_variable((30 * b + 1) % 18 + ((30 * b + 1) // 18) * 18, 1, 3001, "((b*30)+1)")
 
+  def test_div_sym(self):
+    a = Variable("a", 0, 2)
+    self.helper_test_variable((a*a)//a, 0, 2, "a")
+    self.helper_test_variable((a*a)%a, 0, 0, "0")
+
   def test_arange_unrolled4(self):
     gidx = Variable("gidx", 0, 2559)
     unrolled_div = (gidx+2561)//4+(gidx+2562)//4+(gidx+2560)//4+(gidx+2559)//4
