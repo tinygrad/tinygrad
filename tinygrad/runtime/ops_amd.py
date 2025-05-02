@@ -902,8 +902,8 @@ class AMDDevice(HCQCompiled):
     # XCC setup
     self.xcc_sync: tuple[AMDSignal, AMDSignal]|None = None
     if self.xccs > 1:
-      self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True))
-      self.xcc_sync = (AMDSignal(base_addr=self.xcc_sync_area.va_addr), AMDSignal(base_addr=self.xcc_sync_area.va_addr + 256))
+      self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, cpu_access=True))
+      self.xcc_sync = (AMDSignal(base_buf=self.xcc_sync_area), AMDSignal(base_buf=self.xcc_sync_area.offset(256)))
       AMDComputeQueue(self).xcc_config().submit(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
