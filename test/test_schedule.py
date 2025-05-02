@@ -929,7 +929,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmin(-1)
-    run_schedule(check_schedule(out, 3))
+    run_schedule(check_schedule(out, 2))
     np.testing.assert_equal(out.numpy(), x.numpy().argmin(axis=-1))
 
   def test_argmax_multireduce_fusion(self):
@@ -1703,7 +1703,7 @@ class TestIndexing(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmax(-1)
-    self.check_schedule(out, 1)
+    self.check_schedule(out, 2)
     np.testing.assert_equal(out.numpy(), x.numpy().argmax(axis=-1))
 
   def test_arange_transposed(self):
@@ -1835,7 +1835,7 @@ class TestIndexing(unittest.TestCase):
     X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
     Y = Tensor([1, 2]).realize()
     loss = X.sparse_categorical_crossentropy(Y)
-    self.check_schedule(loss, 2)
+    self.check_schedule(loss, 4)
     np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Validation error on WebGPU")
@@ -1847,7 +1847,7 @@ class TestIndexing(unittest.TestCase):
     yt = Tensor.randn(BS, 10).realize()
     with Context(SPLIT_REDUCEOP=0):
       loss = yt.sparse_categorical_crossentropy(Y_train[samples])
-      self.check_schedule(loss, 6)
+      self.check_schedule(loss, 5)
       loss_fused = loss.numpy()
     loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
     np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)

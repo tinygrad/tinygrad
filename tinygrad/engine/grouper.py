@@ -9,7 +9,7 @@ from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPA
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
-from tinygrad.spec import type_verify, sched_spec
+from tinygrad.spec import type_verify, sched_spec, shape_spec
 
 # creation can recurse a lot
 import sys
@@ -385,6 +385,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # replace buffer with define_global + add load/store last
   ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs:=tuple(s.buf_uop for s in k.src), bottom_up=True, name="replace buffer")
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
+  type_verify(list(ast.toposort()), shape_spec)
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
@@ -424,13 +425,15 @@ def fuse_arange(root:UOp):
   if not FUSE_ARANGE or (dtypes.is_unsigned(root.dtype) and not getenv("FUSE_ARANGE_UINT",1)) or root.src[0].base.op is Ops.CONST: return None
   # gather all local aranges (including any fused ones)
   local_arange: list[UOp] = []
-  local_children: dict[UOp, list[UOp]] = {}
   def gate_reduce(u):
     if u.op is Ops.REDUCE_AXIS and u.src[0].base.op is Ops.CONST: local_arange.append(u)
-    for s in u.src: local_children.setdefault(s, []).append(u)
     return u.op not in {Ops.CONTIGUOUS, Ops.REDUCE_AXIS} or u is root
-  root.toposort(gate=gate_reduce)
+  toposort = root.toposort(gate=gate_reduce)
+  if not local_arange: return None
   # fuse the nearest expand child of arange
+  local_children: dict[UOp, list[UOp]] = {}
+  for u in toposort:
+    for s in u.src: local_children.setdefault(s, []).append(u)
   fuse_rep: dict[UOp, UOp] = {}
   for r in local_arange:
     # skip if already fused
@@ -438,10 +441,13 @@ def fuse_arange(root:UOp):
     q = list(local_children[r])
     while q:
       u = q.pop()
-      if not (children:=local_children.get(u)): continue
-      for child in children: fuse_rep[child] = child.replace(src=tuple(s.fuse() if s is u else s for s in child.src))
-      q.extend(children)
-  return root.substitute(fuse_rep) if fuse_rep else None
+      if not (curr_children:=local_children.get(u, [])): continue
+      for child in curr_children:
+        reduce_paths = {s for s in child.toposort() if s.op is Ops.REDUCE_AXIS and s not in {root, r}}
+        fuse_rep[child] = child.replace(src=tuple(s.fuse() if s is u else s for s in child.src))
+        if reduce_paths: break
+      else: q.extend(curr_children)
+  return root.substitute(fuse_rep, name="fuse_arange") if fuse_rep else None
 
 insert_fuse = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
