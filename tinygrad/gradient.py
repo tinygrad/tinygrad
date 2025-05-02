@@ -38,11 +38,11 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.SHRINK, name="ret"), lambda ctx, ret: (ctx.pad(tuple([(p[0], s-p[1]) for s,p in zip(ret.src[0].shape, ret.arg)])),)),
   (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip(ret.arg),)),
   # TODO: this cast can be removed by putting the casts around the EXPAND
-  (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret:
-    (ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, tuple(i for i,(si,so) in enumerate(zip(ret.src[0].shape, ret.arg)) if si!=so)).cast(ctx.dtype),)),
+  (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret: (ctx.r(Ops.ADD, tuple(i for i,(si,so) in enumerate(zip(ret.src[0].shape, ret.arg)) if si!=so)),)),
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda ctx: (None,)),
+  (UPat(Ops.NOOP, name="ret"), lambda ctx, ret: (ctx,)*len(ret.src)),
 ])
 
 def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
@@ -52,11 +52,21 @@ def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
   # don't flow through DETACH/ASSIGN or anything not in target path
   return list(root.toposort(lambda node: node.op not in {Ops.DETACH, Ops.ASSIGN} and in_target_path[node]))
 
+def compute_gradient_for_expand(expand_node:UOp, grad_ctx:UOp) -> UOp|None:
+  parent_src = expand_node.src
+  cast_after_expand = UOp(Ops.CAST, src=(UOp(Ops.NOOP, grad_ctx.dtype, src=parent_src, arg="computing expand gradient"),))
+  expand_node.src = (cast_after_expand,)
+  cast_before_expand = UOp(Ops.CAST, src=(UOp(Ops.NOOP, sum_acc_dtype(grad_ctx.dtype), src=(expand_node,), arg="computing expand gradient"),))
+  targets = set(cast_after_expand.src)
+  gradient_dict = compute_gradient(cast_before_expand, grad_ctx, targets)
+  return gradient_dict[list(targets)[0]]
+  
 def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
   grads = {root: root_grad}
   for t0 in reversed(_deepwalk(root, targets)):
     if t0 not in grads: continue
-    lgrads: tuple[UOp|None, ...]|None = cast(tuple[UOp, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
+    if t0.op is Ops.EXPAND and any(x.arg == "computing expand gradient" for x in targets): lgrads: tuple[UOp|None, ...]|None = (compute_gradient_for_expand(t0, grads[t0]),)
+    else: lgrads = cast(tuple[UOp, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
     if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}\n\nin {str(t0)[0:1000]}...")
     assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
     for k,v in zip(t0.src, lgrads):
