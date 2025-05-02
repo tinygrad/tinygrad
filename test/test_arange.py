@@ -100,7 +100,7 @@ class TestIndexing(unittest.TestCase):
       GlobalCounters.reset()
       out = ((Tensor.arange(1,16385)-1)*needle).sum()
       sched = out.schedule()
-      self.assertEqual(len(sched), 2) # why is 1 a good idea? reshape doesn't collapse
+      self.assertEqual(len(sched), 1)
       run_schedule(sched)
     self.assertEqual(out.item(), 1337)
 
@@ -118,10 +118,9 @@ class TestIndexing(unittest.TestCase):
       full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, DDIM, DSET, 1))
       X = full.sum(axis=(2,3))
       sched = X.schedule()
-      self.assertEqual(len(sched), 2) # why is 1 a good idea? reshape doesn't collapse
-
+      self.assertEqual(len(sched), 1)
       run_schedule(sched)
-      #assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
+      assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
 
   def test_index_variable(self):
@@ -161,7 +160,7 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       assert X.shape == (4,DDIM)
       sched = X.schedule()
-      self.assertEqual(len(sched), 2)
+      self.assertEqual(len(sched), 1)
       run_schedule(sched)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops} != {4*DSET}"
     np.testing.assert_allclose(real_index, X.numpy())
