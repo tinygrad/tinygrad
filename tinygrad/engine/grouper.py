@@ -439,8 +439,7 @@ def fuse_arange(root:UOp):
     while q:
       u = q.pop()
       if not (children:=local_children.get(u)): continue
-      if u.op is Ops.VIEW and resolve(prod(u.shape) > prod(r.shape)):
-        for child in children: fuse_rep[child] = child.replace(src=tuple(s.fuse() if s is u else s for s in child.src))
+      for child in children: fuse_rep[child] = child.replace(src=tuple(s.fuse() if s is u else s for s in child.src))
       q.extend(children)
   return root.substitute(fuse_rep) if fuse_rep else None
 
