@@ -5,7 +5,7 @@
 
 from tinygrad import Tensor, TinyJit, dtypes, GlobalCounters
 from tinygrad.nn import Conv2d, GroupNorm
-from tinygrad.nn.state import safe_load, load_state_dict
+from tinygrad.nn.state import safe_load, load_state_dict, get_state_dict
 from tinygrad.helpers import fetch, trange, colored, Timing
 from extra.models.clip import Embedder, FrozenClosedClipEmbedder, FrozenOpenClipEmbedder
 from extra.models.unet import UNetModel, Upsample, Downsample, timestep_embedding
@@ -356,8 +356,7 @@ class DPMPP2MSampler:
           c=c,
           uc=uc,
         )
-        x.realize()
-        old_denoised.realize()
+        x.realize(old_denoised)
 
     return x
 
@@ -385,7 +384,12 @@ if __name__ == "__main__":
 
   default_weight_url = 'https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors'
   weights = args.weights if args.weights else fetch(default_weight_url, 'sd_xl_base_1.0.safetensors')
-  load_state_dict(model, safe_load(weights), strict=False)
+  loaded_weights = load_state_dict(model, safe_load(weights), strict=False, verbose=False, realize=False)
+
+  start_mem_used = GlobalCounters.mem_used
+  with Timing("loaded weights in ", lambda et_ns: f", {(B:=(GlobalCounters.mem_used-start_mem_used))/1e9:.2f} GB loaded at {B/et_ns:.2f} GB/s"):
+    Tensor.realize(*loaded_weights)
+    del loaded_weights
 
   N = 1
   C = 4
@@ -396,8 +400,7 @@ if __name__ == "__main__":
 
   c, uc = model.create_conditioning([args.prompt], args.width, args.height)
   del model.conditioner
-  for v in c .values(): v.realize()
-  for v in uc.values(): v.realize()
+  Tensor.realize(*c.values(), *uc.values())
   print("created batch")
 
   # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/inference/helpers.py#L101

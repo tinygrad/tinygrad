@@ -29,12 +29,12 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...
     view = view.minify()
     idx, valid = view.to_indexed_uops([sint_to_uop(i) for i in unravel(view.shape, idx)], valid)
   # symbolic
-  idx, valid = graph_rewrite(UOp.sink(idx, valid), symbolic_flat).src
+  idx, valid = graph_rewrite(UOp.sink(idx, valid), symbolic_flat, name="indexing sym @ 1").src
   # simplify
   if (newvalid:=simplify_valid(valid)) is not None: valid = newvalid
   if (newidx:=uop_given_valid(valid, idx)) is not None: idx = newidx
   # symbolic again, upcast if needed
-  return graph_rewrite(UOp.sink(idx, valid), symbolic_flat+pm_upcast).src
+  return graph_rewrite(UOp.sink(idx, valid), symbolic_flat+pm_upcast, name="indexing sym @ 2").src
 
 @functools.cache
 def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[Optional[sint], ...]:
@@ -69,7 +69,7 @@ class ShapeTracker:
     return ShapeTracker(tuple(inverted_views)).reshape(out_shape)
 
   @staticmethod
-  def from_shape(shape:tuple[sint, ...]) -> ShapeTracker: return ShapeTracker((View.create(shape),))
+  def from_shape(shape:tuple[sint, ...], strides:tuple[sint, ...]|None=None) -> ShapeTracker: return ShapeTracker((View.create(shape, strides),))
 
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous

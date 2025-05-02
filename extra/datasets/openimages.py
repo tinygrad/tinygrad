@@ -205,5 +205,5 @@ def get_dataset_count(base_dir:Path, val:bool) -> int:
   return len(files)
 
 if __name__ == "__main__":
-  download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), "train")
+  download_dataset(base_dir:=getenv("BASEDIR", BASEDIR), "train")
   download_dataset(base_dir, "validation")

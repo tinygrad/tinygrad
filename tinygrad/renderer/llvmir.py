@@ -8,7 +8,7 @@ from tinygrad.helpers import prod, AMX
 
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
-  if isinstance(dt, PtrDType): return ldt(dt.base) + (" addrspace(3)*" if dt.local else "*")
+  if isinstance(dt, PtrDType): return ldt(dt.base) + "*"
   return {dtypes.void: "void", dtypes.bool: "i1", dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
           dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64",
           dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double"}[dt]
@@ -45,7 +45,7 @@ def render_wmma_amx(ctx, wmma: UOp) -> str:
       f'  {ctx[wmma]} = load {ldt(wmma.dtype)}, ptr {ctx[wmma]}_amx2, align {wmma.dtype.itemsize}'])
 
 def render_wmma_amd(ctx, wmma: UOp) -> str:
-  dt_map = {dtypes.half: "f16", dtypes.float: "f32"}
+  dt_map = {dtypes.half: "f16", dtypes.float: "f32", dtypes.bfloat16: "bf16", dtypes.ushort: "bf16"}
   # https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AMDGPU/GlobalISel/llvm.amdgcn.wmma_32.ll
   # example: %wmma0 = call <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.f16(<16 x half> %v99,<16 x half> %v100,<8 x float> %v101)
   return f"  {ctx[wmma]} = call {ldt(wmma.dtype)} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype.scalar()]}.16x16x16." + \
@@ -98,15 +98,17 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
    f"  br label %loop_entry_{x.arg}\nloop_entry_{x.arg}:\n"
    f"  br label %loop_body_{x.arg}\nloop_body_{x.arg}:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x.src[0]]}, %loop_entry_{x.arg}], [{ctx[x]}phi, %loop_latch_{x.arg}]"),
+   f"  {ctx[x]} = phi {ldt(x.dtype)} [0, %loop_entry_{x.arg}], [{ctx[x]}phi, %loop_latch_{x.arg}]"),
   (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x:
    f"  br label %loop_latch_{x.src[0].arg}\nloop_latch_{x.src[0].arg}:\n"
-   f"  {ctx[x.src[0]]}phi = add i32 {ctx[x.src[0]]}, 1\n  {ctx[x]} = icmp ult i32 {ctx[x.src[0]]}phi, {ctx[x.src[0].src[1]]}\n"
+   f"  {ctx[x.src[0]]}phi = add i32 {ctx[x.src[0]]}, 1\n  {ctx[x]} = icmp ult i32 {ctx[x.src[0]]}phi, {ctx[x.src[0].src[0]]}\n"
    f"  br i1 {ctx[x]}, label %loop_body_{x.src[0].arg}, label %loop_exit_{x.src[0].arg}\nloop_exit_{x.src[0].arg}:"),
 
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
+
+  (UPat(Ops.BARRIER), lambda ctx: "")
 ])
 
 def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
@@ -118,7 +120,6 @@ class LLVMRenderer(Renderer):
   abi = 'win64cc' if sys.platform == 'win32' else None
   supports_float4 = True
   has_local = False
-  has_shared = False
   global_max: tuple[int, ...] | None = None
   string_rewrite = base_rewrite + PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
   if AMX: tensor_cores = ClangRenderer.amx_tc
@@ -172,9 +173,12 @@ class LLVMRenderer(Renderer):
         # NOTE: MallocAllocator promises 0x20 alignment
         args.append(f"{ldt(u.dtype)}{' noalias align 32' if isinstance(u.dtype, PtrDType) else ''} {r[u]}")
       elif u.op == Ops.DEFINE_LOCAL:
-        r[u] = f"@local_{u.arg}"
+        r[u] = f"%local_{u.arg}"
         assert isinstance(u.dtype, PtrDType)
-        local_args.append(f"{r[u]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
+        if self.device == "LLVM": kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype)}], align 16")
+        else:
+          local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
+          kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{u.dtype.size} x {ldt(u.dtype)}]*")
       elif u.op is Ops.ASSIGN: pass  # assign is already handled by the first pass
       elif u.op is Ops.DEFINE_ACC: r[u] = r[u.src[0]]  # a define acc can be used and never be assigned to
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
@@ -215,10 +219,8 @@ code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{c
 class AMDLLVMRenderer(LLVMRenderer):
   device = "AMD"
   has_local = True
-  has_shared = True
   shared_max = AMDRenderer.shared_max
   global_max = AMDRenderer.global_max
-  tensor_cores = AMDRenderer.tensor_cores
   abi = "amdgpu_kernel"
   string_rewrite = PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
@@ -229,9 +231,24 @@ class AMDLLVMRenderer(LLVMRenderer):
       f"  {ctx[x]}= shufflevector <16 x half> {ctx[y]}, <16 x half> undef, <8 x i32> <{', '.join([f'i32 {x}' for x in range(0, 16, 2)])}>"),
     (UPat(Ops.WMMA, name="wmma"), render_wmma_amd),
   ]) + base_rewrite
-  extra_matcher = PatternMatcher([
-    (UPat(Ops.WMMA, name="x", dtype=dtypes.half.vec(8)),
-     lambda x: UOp(Ops.WMMA, dtypes.half.vec(16), (x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), (*x.arg,)).cast(dtypes.half.vec(8)))
-  ]) + LLVMRenderer.extra_matcher
-  def __init__(self, arch:str): self.arch = arch
+  extra_matcher = LLVMRenderer.extra_matcher
+  def __init__(self, arch:str):
+    self.arch = arch
+    self.tensor_cores = AMDRenderer.get_tensor_cores(arch)
+    if self.arch.split(":")[0] == "gfx1100":
+      self.extra_matcher += PatternMatcher([
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.half.vec(8)),
+          lambda x: UOp(Ops.WMMA, dtypes.half.vec(16), (x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), (*x.arg,)).cast(dtypes.half.vec(8))),
+        (UPat(Ops.WMMA, name="x"), lambda x: UOp(Ops.WMMA, x.dtype, (x.src[0].bitcast(dtypes.uint16.vec(16)), x.src[1].bitcast(dtypes.uint16.vec(16)),
+          x.src[2]), x.arg) if x.src[0].dtype == dtypes.bfloat16.vec(16) else None),
+      ])
+    if self.arch.split(":")[0] == "gfx1201":
+      self.extra_matcher += PatternMatcher([
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16.vec(8)), lambda x: UOp(Ops.WMMA, dtypes.uint16.vec(8),
+          (x.src[0].bitcast(dtypes.uint16.vec(8)), x.src[1].bitcast(dtypes.uint16.vec(8)), x.src[2].bitcast(dtypes.uint16.vec(8))), (*x.arg,))
+            .bitcast(dtypes.bfloat16.vec(8)) if x.src[0].dtype == dtypes.bfloat16.vec(8) else None),
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(8)),
+          lambda x: UOp(Ops.WMMA, dtypes.float.vec(8), (x.src[0].bitcast(dtypes.uint16.vec(8)), x.src[1].bitcast(dtypes.uint16.vec(8)),
+            x.src[2]), (*x.arg,)) if x.src[0].dtype == dtypes.bfloat16.vec(8) else None)
+      ])
   def __reduce__(self): return self.__class__, (self.arch,)

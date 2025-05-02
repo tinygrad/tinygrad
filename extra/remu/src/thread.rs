@@ -1,20 +1,25 @@
 use crate::helpers::{extract_mantissa, f16_hi, f16_lo, ldexp, nth, sign_ext, IEEEClass, VOPModifier};
-use crate::helpers::{Colorize, DEBUG};
+use crate::helpers::DEBUG;
 use crate::state::{Register, Value, VecDataStore, WaveValue, VGPR};
-use crate::{print_instr, todo_instr};
+use crate::todo_instr;
 use half::{bf16, f16};
+use crate::rdna3::{Instruction, decode};
 use num_traits::Float;
 
-const SGPR_COUNT: usize = 105;
+pub const SGPR_COUNT: usize = 128;
+pub const VCC: usize = 106;
+pub const EXEC: usize = 126;
+pub const NULL_SRC: usize = 124;
+pub const SGPR_SRC: usize = 105;
+
 const VGPR_COUNT: usize = 256;
-const NULL_SRC: u32 = 124;
 const SIMM_SRC: usize = 255;
 
 pub const END_PRG: u32 = 0xbfb00000;
 
 pub struct Thread<'a> {
-    pub scalar_reg: &'a mut Vec<u32>,
-    pub scc: &'a mut u32,
+    pub scalar_reg: &'a mut [u32; SGPR_COUNT],
+    pub scc: &'a mut u32, // SCC is physically an sgpr, unclear which one
 
     pub vec_reg: &'a mut VGPR,
     pub vcc: &'a mut WaveValue,
@@ -34,44 +39,33 @@ pub struct Thread<'a> {
 impl<'a> Thread<'a> {
     pub fn interpret(&mut self) -> Result<(), i32> {
         let instruction = self.stream[self.pc_offset];
-        // smem
-        if instruction >> 26 == 0b111101 {
-            let instr = self.u64_instr();
-            /* addr: s[sbase:sbase+1] */
-            let sbase = (instr & 0x3f) * 2;
-            let sdata = ((instr >> 6) & 0x7f) as usize;
-            let op = (instr >> 18) & 0xff;
-            let offset = sign_ext((instr >> 32) & 0x1fffff, 21);
-            let soffset = match self.val(((instr >> 57) & 0x7f) as usize) {
-                NULL_SRC => 0,
-                val => val,
-            };
-
-            print_instr!("SMEM", sbase, sdata, op, offset, soffset);
+        let decoded = decode(self.stream[self.pc_offset], self.stream.get(self.pc_offset+1));
+        if *DEBUG {
+            print!("{:?}", decoded);
+        }
+        if let Instruction::SMEM { sbase, sdata, op, offset, soffset, .. } = decoded {
+            let _ = self.u64_instr();
+            let soffset: u32 = self.val(soffset as usize);
 
             // TODO: refactor vcc_lo to store in scalar register 106
-            let base_addr = match sbase {
-                106 => ((self.scalar_reg[107] as u64) << 32) | self.vcc.value as u64,
-                _ => self.scalar_reg.read64(sbase as usize),
+            let base_addr = match sbase as usize {
+                VCC => ((self.scalar_reg[107] as u64) << 32) | self.vcc.value as u64,
+                s => self.scalar_reg.read64(s),
             };
-            let addr = (base_addr as i64 + offset + soffset as i64) as u64;
+            let addr = (base_addr as i64 + offset as i64 + soffset as i64) as u64;
 
             match op {
                 0..=4 => (0..2_usize.pow(op as u32)).for_each(|i| {
                     let ret = unsafe { *((addr + (4 * i as u64)) as *const u32) };
-                    self.write_to_sdst(sdata + i, ret);
+                    self.write_to_sdst(sdata as usize + i, ret);
                 }),
                 _ => todo_instr!(instruction)?,
             };
             self.scalar = true;
         }
-        // sop1
-        else if instruction >> 23 == 0b10_1111101 {
-            let src = (instruction & 0xFF) as usize;
-            let op = (instruction >> 8) & 0xFF;
-            let sdst = ((instruction >> 16) & 0x7F) as usize;
-
-            print_instr!("SOP1", src, sdst, op);
+        else if let Instruction::SOP1 { ssrc0, op, sdst } = decoded {
+            let src = ssrc0 as usize;
+            let sdst = sdst as usize;
 
             match op {
                 1 => {
@@ -123,15 +117,11 @@ impl<'a> Thread<'a> {
             };
             self.scalar = true;
         }
-        // sopc
-        else if (instruction >> 23) & 0x3ff == 0b101111110 {
-            let s0 = (instruction & 0xff) as usize;
-            let s1 = ((instruction >> 8) & 0xff) as usize;
-            let op = (instruction >> 16) & 0x7f;
+        else if let Instruction::SOPC { ssrc0, ssrc1, op } = decoded {
+            let s0 = ssrc0 as usize;
+            let s1 = ssrc1 as usize;
 
-            print_instr!("SOPC", s0, s1, op);
-
-            fn scmp<T>(s0: T, s1: T, offset: u32, op: u32) -> bool
+            fn scmp<T>(s0: T, s1: T, offset: u8, op: u8) -> bool
             where
                 T: PartialOrd + PartialEq,
             {
@@ -169,12 +159,7 @@ impl<'a> Thread<'a> {
             } as u32;
             self.scalar = true;
         }
-        // sopp
-        else if instruction >> 23 == 0b10_1111111 {
-            let simm16 = (instruction & 0xffff) as i16;
-            let op = (instruction >> 16) & 0x7f;
-
-            print_instr!("SOPP", simm16, op);
+        else if let Instruction::SOPP { simm16, op } = decoded {
 
             match op {
                 32..=42 => {
@@ -196,14 +181,10 @@ impl<'a> Thread<'a> {
             };
             self.scalar = true;
         }
-        // sopk
-        else if instruction >> 28 == 0b1011 {
-            let simm = instruction & 0xffff;
-            let sdst = ((instruction >> 16) & 0x7f) as usize;
-            let op = (instruction >> 23) & 0x1f;
+        else if let Instruction::SOPK { simm16, sdst, op } = decoded {
+            let simm = simm16 as u16;
+            let sdst = sdst as usize;
             let s0: u32 = self.val(sdst);
-
-            print_instr!("SOPK", simm, sdst, s0, op);
 
             match op {
                 0 => self.write_to_sdst(sdst, simm as i16 as i32 as u32),
@@ -249,14 +230,10 @@ impl<'a> Thread<'a> {
             };
             self.scalar = true;
         }
-        // sop2
-        else if instruction >> 30 == 0b10 {
-            let s0 = (instruction & 0xFF) as usize;
-            let s1 = ((instruction >> 8) & 0xFF) as usize;
-            let sdst = ((instruction >> 16) & 0x7F) as usize;
-            let op = (instruction >> 23) & 0xFF;
-
-            print_instr!("SOP2", s0, s1, sdst, op);
+        else if let Instruction::SOP2 { ssrc0, ssrc1, sdst, op } = decoded {
+            let s0 = ssrc0 as usize;
+            let s1 = ssrc1 as usize;
+            let sdst = sdst as usize;
 
             match op {
                 23 | 25 | 27 => {
@@ -434,8 +411,6 @@ impl<'a> Thread<'a> {
             let opsel = [b(11), b(12), b(13)];
             let opsel_hi = [b(59), b(60), b(14)];
 
-            print_instr!("VOPP", op, vdst, src_parts, opsel, opsel_hi, neg, neg_hi);
-
             match op {
                 0..=18 => {
                     let fxn = |x, y, z| -> u16 {
@@ -566,13 +541,9 @@ impl<'a> Thread<'a> {
                 _ => todo_instr!(instruction)?,
             }
         }
-        // vop1
-        else if instruction >> 25 == 0b0111111 {
-            let s0 = (instruction & 0x1ff) as usize;
-            let op = (instruction >> 9) & 0xff;
-            let vdst = ((instruction >> 17) & 0xff) as usize;
-
-            print_instr!("VOP1", s0, op, vdst);
+        else if let Instruction::VOP1 { src, op, vdst } = decoded {
+            let s0 = src as usize;
+            let vdst = vdst as usize;
 
             match op {
                 3 | 15 | 21 | 23 | 25 | 26 | 60 | 61 | 47 | 49 => {
@@ -741,8 +712,6 @@ impl<'a> Thread<'a> {
             // LSB is the opposite of VDSTX[0]
             let vdsty = (((instr >> 49) & 0x7f) << 1 | ((vdstx as u64 & 1) ^ 1)) as usize;
 
-            print_instr!("VOPD", opx, vdstx, sx, srcx0, vx, vsrcx1, opy, vdsty, sy, srcy0, vy, vsrcy1);
-
             for (op, s0, s1, dst) in ([(opx, srcx0, vsrcx1, vdstx), (opy, srcy0, vsrcy1, vdsty)]).iter() {
                 let ret = match *op {
                     0 | 1 | 2 | 3 | 4 | 5 | 6 | 10 | 11 => {
@@ -778,12 +747,10 @@ impl<'a> Thread<'a> {
             }
         }
         // vopc
-        else if instruction >> 25 == 0b0111110 {
-            let s0 = (instruction & 0x1ff) as usize;
-            let s1 = ((instruction >> 9) & 0xff) as usize;
-            let op = (instruction >> 17) & 0xff;
-
-            print_instr!("VOPC", s0, s1, op);
+        else if let Instruction::VOPC { vsrc, src, op } = decoded {
+            let s0 = src as usize;
+            let s1 = vsrc as usize;
+            let op = op as u32;
 
             let dest_offset = if op >= 128 { 128 } else { 0 };
             let ret = match op {
@@ -843,19 +810,17 @@ impl<'a> Thread<'a> {
                 _ => todo_instr!(instruction)?,
             };
 
-            match op >= 128 {
-                true => self.exec.set_lane(ret),
-                false => self.vcc.set_lane(ret),
-            };
+            if self.exec.read() {
+                match op >= 128 {
+                    true => self.exec.set_lane(ret),
+                    false => self.vcc.set_lane(ret),
+                };
+            }
         }
-        // vop2
-        else if instruction >> 31 == 0b0 {
-            let s0 = (instruction & 0x1FF) as usize;
-            let s1 = self.vec_reg[((instruction >> 9) & 0xFF) as usize];
-            let vdst = ((instruction >> 17) & 0xFF) as usize;
-            let op = (instruction >> 25) & 0x3F;
-
-            print_instr!("VOP2", s0, s1, vdst, op);
+        else if let Instruction::VOP2 { vsrc, src, vdst, op } = decoded {
+            let s0 = src as usize;
+            let s1 = self.vec_reg[vsrc as usize];
+            let vdst = vdst as usize;
 
             match op {
                 (50..=60) => {
@@ -971,8 +936,6 @@ impl<'a> Thread<'a> {
                     assert_eq!(omod, 0);
                     assert_eq!(clmp, 0);
 
-                    print_instr!("VOPSD", vdst, sdst, op, s0, s1, s2);
-
                     let vcc = match op {
                         766 => {
                             let (s0, s1, s2): (u32, u32, u64) = (self.val(s0), self.val(s1), self.val(s2));
@@ -1026,8 +989,8 @@ impl<'a> Thread<'a> {
                     };
 
                     match sdst {
-                        106 => self.vcc.set_lane(vcc),
-                        124 => {}
+                        VCC => self.vcc.set_lane(vcc),
+                        NULL_SRC => {}
                         _ => self.set_sgpr_co(sdst, vcc),
                     }
                 }
@@ -1045,8 +1008,6 @@ impl<'a> Thread<'a> {
                     assert_eq!(omod, 0);
                     assert_eq!(cm, 0);
                     assert_eq!(opsel, 0);
-
-                    print_instr!("VOP3", vdst, abs, opsel, op, src, neg);
 
                     match op {
                         // VOPC using VOP3 encoding
@@ -1113,11 +1074,13 @@ impl<'a> Thread<'a> {
                                 _ => todo_instr!(instruction)?,
                             };
 
-                            match vdst {
-                                0..=SGPR_COUNT | 107 => self.set_sgpr_co(vdst, ret),
-                                106 => self.vcc.set_lane(ret),
-                                126 => self.exec.set_lane(ret),
-                                _ => todo_instr!(instruction)?,
+                            if self.exec.read() {
+                                match vdst {
+                                    0..=SGPR_SRC | 107 => self.set_sgpr_co(vdst, ret),
+                                    VCC => self.vcc.set_lane(ret),
+                                    EXEC => self.exec.set_lane(ret),
+                                    _ => todo_instr!(instruction)?,
+                                }
                             }
                         }
                         828..=830 => {
@@ -1164,12 +1127,13 @@ impl<'a> Thread<'a> {
                                 self.vec_reg.write64(vdst, ret)
                             }
                         }
-                        306 | 313 | 596 | 584 | 585 | 588 => {
+                        306 | 309 | 313 | 596 | 584 | 585 | 588 => {
                             let (s0, s1, s2) = (self.val(src.0), self.val(src.1), self.val(src.2));
                             let s0 = f16::from_bits(s0).negate(0, neg).absolute(0, abs);
                             let s1 = f16::from_bits(s1).negate(1, neg).absolute(1, abs);
                             let s2 = f16::from_bits(s2).negate(1, neg).absolute(1, abs);
                             let ret = match op {
+                                309 => s0 * s1,
                                 306 => s0 + s1,
                                 584 => f16::mul_add(s0, s1, s2),
                                 585 => f16::min(f16::min(s0, s1), s2),
@@ -1423,8 +1387,6 @@ impl<'a> Thread<'a> {
             let data1 = ((instr >> 48) & 0xff) as usize;
             let vdst = ((instr >> 56) & 0xff) as usize;
 
-            print_instr!("LDS", op, addr, data0, data1, vdst);
-
             let lds_base = self.vec_reg[addr];
             let single_addr = || (lds_base + (instr & 0xffff) as u32) as usize;
             let double_addr = |adj: u32| {
@@ -1476,13 +1438,14 @@ impl<'a> Thread<'a> {
                         *x = (self.vec_reg[data0] as u8).to_le_bytes()[i];
                     });
                 }
-                31 => {
+                31 | 161 => {
                     let addr = single_addr();
                     if addr + 2 >= self.lds.data.len() {
                         self.lds.data.resize(self.lds.data.len() + addr + 3, 0);
                     }
+                    let b32 = self.vec_reg[data0];
                     self.lds.data[addr..addr + 2].iter_mut().enumerate().for_each(|(i, x)| {
-                        *x = (self.vec_reg[data0] as u16).to_le_bytes()[i];
+                        *x = (if op == 31 { b32 as u16 } else { ((b32 >> 16) & 0xffff) as u16 }).to_le_bytes()[i];
                     });
                 }
                 14 => {
@@ -1514,13 +1477,11 @@ impl<'a> Thread<'a> {
             let vdst = ((instr >> 56) & 0xff) as usize;
 
             let saddr_val: u32 = self.val(saddr);
-            let saddr_off = saddr_val == 0x7F || saddr as u32 == NULL_SRC;
+            let saddr_off = saddr_val == 0x7F || saddr == NULL_SRC;
 
             match seg {
                 1 => {
                     let sve = ((instr >> 50) & 0x1) != 0;
-
-                    print_instr!("SCRATCH", offset, op, addr, data, saddr, vdst, sve);
 
                     let addr = match (sve, saddr_off) {
                         (true, true) => offset as u64 as usize,
@@ -1540,8 +1501,6 @@ impl<'a> Thread<'a> {
                     }
                 }
                 2 => {
-                    print_instr!("GLOBAL", offset, op, addr, data, saddr, vdst);
-
                     let addr = match saddr_off {
                         true => self.vec_reg.read64(addr) as i64 + (offset as i64),
                         false => {
@@ -1582,7 +1541,6 @@ impl<'a> Thread<'a> {
         else if instruction >> 26 == 0b111000 {
             let instr = self.u64_instr();
             let op = ((instr >> 18) & 0x7f) as usize;
-            print_instr!("MUBUF", op);
             match op {
                 43 => {} // NOTE: remu doesn't have an l0 cache, it just has the software managed lds
                 _ => todo_instr!(instruction)?,
@@ -1724,11 +1682,10 @@ impl<'a> Thread<'a> {
     /* ALU utils */
     fn _common_srcs(&mut self, code: usize) -> u32 {
         match code {
-            106 => self.vcc.value,
+            VCC => self.vcc.value,
             107 => self.scalar_reg[code as usize],
-            126 => self.exec.value,
-            128 => 0,
-            124 => NULL_SRC,
+            EXEC => self.exec.value,
+            NULL_SRC | 128 => 0,
             255 => match self.simm {
                 None => {
                     let val = self.stream[self.pc_offset + 1];
@@ -1744,8 +1701,8 @@ impl<'a> Thread<'a> {
     fn write_to_sdst(&mut self, sdst_bf: usize, val: u32) {
         match sdst_bf {
             // NOTE: remu is only wave32, vcc_hi is treated as a regular SGPR
-            0..=SGPR_COUNT | 107 => self.scalar_reg[sdst_bf] = val,
-            106 => self.vcc.value = val,
+            0..=SGPR_SRC | 107 => self.scalar_reg[sdst_bf] = val,
+            VCC => self.vcc.value = val,
             126 => self.exec.value = val,
             _ => todo!("write to sdst {}", sdst_bf),
         }
@@ -1802,7 +1759,7 @@ pub trait ALUSrc<T> {
 impl ALUSrc<u16> for Thread<'_> {
     fn val(&mut self, code: usize) -> u16 {
         match code {
-            0..=SGPR_COUNT => self.scalar_reg[code] as u16,
+            0..=SGPR_SRC => self.scalar_reg[code] as u16,
             VGPR_COUNT..=511 => self.vec_reg[code - VGPR_COUNT] as u16,
             129..=192 => (code - 128) as u16,
             193..=208 => ((code - 192) as i16 * -1) as u16,
@@ -1830,7 +1787,7 @@ impl ALUSrc<u16> for Thread<'_> {
 impl ALUSrc<u32> for Thread<'_> {
     fn val(&mut self, code: usize) -> u32 {
         match code {
-            0..=SGPR_COUNT => self.scalar_reg[code],
+            0..=SGPR_SRC => self.scalar_reg[code],
             VGPR_COUNT..=511 => self.vec_reg[code - VGPR_COUNT],
             129..=192 => (code - 128) as u32,
             193..=208 => ((code - 192) as i32 * -1) as u32,
@@ -1856,7 +1813,7 @@ impl ALUSrc<u32> for Thread<'_> {
 impl ALUSrc<u64> for Thread<'_> {
     fn val(&mut self, code: usize) -> u64 {
         match code {
-            0..=SGPR_COUNT => self.scalar_reg.read64(code),
+            0..=SGPR_SRC => self.scalar_reg.read64(code),
             VGPR_COUNT..=511 => self.vec_reg.read64(code - VGPR_COUNT),
             129..=192 => (code - 128) as u64,
             193..=208 => ((code - 192) as i64 * -1) as u64,
@@ -1904,7 +1861,7 @@ mod test_alu_utils {
     fn test_write_to_sdst_vcc_val() {
         let mut thread = _helper_test_thread();
         let val = 0b1011101011011011111011101111;
-        thread.write_to_sdst(106, val);
+        thread.write_to_sdst(VCC, val);
         assert_eq!(thread.vcc.value, 195935983);
     }
 
@@ -1988,7 +1945,7 @@ mod test_smem {
         }
         let addr = buf.as_ptr() as u64;
         // NOTE: vcc is an alias for s[106:107]
-        thread.scalar_reg.write64(106, addr);
+        thread.scalar_reg.write64(VCC, addr);
         // TODO: vcc_lo should just read from s106
         thread.vcc.value = (addr & 0xffffffff) as u32;
         r(&vec![0xF4000035, 0xF8000000, END_PRG], &mut thread);
@@ -2995,6 +2952,15 @@ mod test_vop3 {
     }
 
     #[test]
+    fn test_v_mul_f16() {
+        let mut thread = _helper_test_thread();
+        thread.vec_reg[1].mut_lo16(f16::from_f32(2.0).to_bits());
+        thread.vec_reg[2].mut_lo16(f16::from_f32(4.0).to_bits());
+        r(&vec![0xD5350000, 0x00020501, END_PRG], &mut thread);
+        assert_eq!(f16::from_bits(thread.vec_reg[0] as u16), f16::from_f32(8.0));
+    }
+
+    #[test]
     fn test_v_max_f32() {
         assert_eq!(helper_test_vop3(0xd5100000, 0.4, 0.2), 0.4);
         assert_eq!(helper_test_vop3(0xd5100000, 0.2, 0.8), 0.8);
@@ -3057,7 +3023,7 @@ mod test_vop3 {
 
     #[test]
     fn test_v_cndmask_b32_e64_neg() {
-        [[0.0f32, 0.0], [1.0f32, -1.0], [-1.0f32, 1.0]].iter().for_each(|[input, ret]| {
+        [[0.0f32, 0.0], [-0.0f32, 0.0], [1.0f32, -1.0], [-1.0f32, 1.0]].iter().for_each(|[input, ret]| {
             let mut thread = _helper_test_thread();
             thread.scalar_reg[0] = false as u32;
             thread.vec_reg[3] = input.to_bits();
@@ -3647,6 +3613,18 @@ mod test_lds {
         r(&vec![0xD83403E8, 0x00000900, END_PRG], &mut thread);
         assert_eq!(thread.lds.read(1000), 69);
     }
+
+    #[test]
+    fn test_ds_store_half() {
+        let mut thread = _helper_test_thread();
+        thread.vec_reg[9].mut_lo16(f16::from_f32(1.2).to_bits());
+        thread.vec_reg[9].mut_hi16(f16::from_f32(4.3).to_bits());
+        thread.vec_reg[0] = 0;
+        thread.vec_reg[1] = 2;
+        r(&vec![0xDA840000, 0x00000900, 0xD87C0000, 0x00000901, END_PRG], &mut thread);
+        assert_eq!(thread.lds.read(0) as u16, f16::from_f32(4.3).to_bits());
+        assert_eq!(thread.lds.read(2) as u16, f16::from_f32(1.2).to_bits());
+    }
 }
 #[allow(dead_code)]
 fn r(prg: &Vec<u32>, thread: &mut Thread) {
@@ -3681,12 +3659,15 @@ fn r(prg: &Vec<u32>, thread: &mut Thread) {
             wv.apply_muts();
             thread.scalar_reg[*idx] = wv.value;
         }
+        if *DEBUG {
+            println!()
+        }
         pc = ((pc as isize) + 1 + (thread.pc_offset as isize)) as usize;
     }
 }
 fn _helper_test_thread() -> Thread<'static> {
     let static_lds: &'static mut VecDataStore = Box::leak(Box::new(VecDataStore::new()));
-    let static_sgpr: &'static mut Vec<u32> = Box::leak(Box::new(vec![0; 256]));
+    let static_sgpr: &'static mut [u32; SGPR_COUNT] = Box::leak(Box::new([0; SGPR_COUNT]));
     let static_vgpr: &'static mut VGPR = Box::leak(Box::new(VGPR::new()));
     let static_scc: &'static mut u32 = Box::leak(Box::new(0));
     let static_exec: &'static mut WaveValue = Box::leak(Box::new(WaveValue::new(u32::MAX, 32)));
