@@ -348,7 +348,7 @@ class AMDev:
 
   def wait_reg(self, reg:AMRegister, value:int, mask=0xffffffff, timeout=10000) -> int:
     start_time = int(time.perf_counter() * 1000)
-    while int(time.perf_counter() * 1000) - start_time < timeout:
+    while int(time.perf_counter() * 1000) - start_time < (timeout // 10):
       if ((rval:=reg.read()) & mask) == value: return rval
     raise RuntimeError(f'wait_reg timeout reg=0x{reg.addr:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
 
