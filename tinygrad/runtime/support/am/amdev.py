@@ -206,7 +206,7 @@ class AMMemoryManager:
 
   def valloc(self, size:int, align=0x1000, uncached=False, contigous=False) -> AMMapping:
     # Alloc physical memory and map it to the virtual address
-    va = self.alloc_vaddr(size, align)
+    va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
 
     if contigous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
