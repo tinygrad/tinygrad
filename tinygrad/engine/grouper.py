@@ -203,11 +203,6 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
       group = {tr: None}
       realizes[tr] = None
     reduce_for_op.update((tr, r) for tr in group)
-    if FUSE_ARANGE and r.arg[0] is Ops.ADD and r.src[0].base.op is Ops.CONST and (getenv("FUSE_ARANGE_UINT", 1) or not dtypes.is_unsigned(r.dtype)):
-      # maybe fuse arange with its children
-      # TODO: FUSE_ARANGE_UINT is for not fusing rand. should not be here.
-      if len(flatten(children[tr] for tr in group)) != 0:
-        for tr in group: del realizes[tr]
   # fuse double reduces with no other child
   for reduceop in double_reduces:
     top_reduce = reduceop.src[0].base
@@ -424,6 +419,35 @@ def do_fusion(x:UOp):
   return graph_rewrite(x.substitute(found_contiguous), pm_fuse, name="local fusion").substitute({v:k for k,v in found_contiguous.items()})
 do_fuse = PatternMatcher([(UPat(Ops.FUSE, name="x"), do_fusion),])
 
+def fuse_arange(root:UOp):
+  # skip if root is arange
+  if not FUSE_ARANGE or (dtypes.is_unsigned(root.dtype) and not getenv("FUSE_ARANGE_UINT",1)) or root.src[0].base.op is Ops.CONST: return None
+  # gather all local aranges (including any fused ones)
+  local_arange: list[UOp] = []
+  local_children: dict[UOp, list[UOp]] = {}
+  def gate_reduce(u):
+    if u.op is Ops.REDUCE_AXIS and u.src[0].base.op is Ops.CONST: local_arange.append(u)
+    for s in u.src: local_children.setdefault(s, []).append(u)
+    return u.op not in {Ops.CONTIGUOUS, Ops.REDUCE_AXIS} or u is root
+  root.toposort(gate=gate_reduce)
+  # fuse the nearest expand child of arange
+  fuse_rep: dict[UOp, UOp] = {}
+  for r in local_arange:
+    # skip if already fused
+    if len(r.arg) > 2: continue
+    q = list(local_children[r])
+    while q:
+      u = q.pop()
+      if not (children:=local_children.get(u)): continue
+      if u.op is Ops.VIEW and resolve(prod(u.shape) > prod(r.shape)):
+        for child in children: fuse_rep[child] = child.replace(src=tuple(s.fuse() if s is u else s for s in child.src))
+      q.extend(children)
+  return root.substitute(fuse_rep) if fuse_rep else None
+
+insert_fuse = PatternMatcher([
+  (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
+])
+
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
   import atexit
@@ -438,7 +462,7 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
 @track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, do_fuse+merge_views+sym+replace_contiguous, ctx={})
+  tensor_map = graph_rewrite_map(big_sink, insert_fuse+do_fuse+merge_views+sym+replace_contiguous, ctx={})
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")

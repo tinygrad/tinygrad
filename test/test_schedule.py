@@ -1661,7 +1661,7 @@ class TestIndexing(unittest.TestCase):
   def test_advanced_indexing(self):
     X = Tensor.arange(10)+1
     xt = X[[0]]
-    self.check_schedule(xt, 2)
+    self.check_schedule(xt, 3) # reshapes are not folded
     np.testing.assert_equal(xt.numpy(), (np.arange(10)+1)[[0]])
 
   @unittest.expectedFailure
@@ -1688,8 +1688,8 @@ class TestIndexing(unittest.TestCase):
     Tensor.manual_seed(0)
     a = Tensor.arange(4,)
     b = Tensor.randn(4, 4).realize()
-    out = a+b
-    self.check_schedule(out, 1)
+    out = (a+b)
+    self.check_schedule(out, 2) # not fusing elementwise children
     np.testing.assert_allclose(out.numpy(), np.arange(4)+b.numpy())
 
   def test_argmin(self):
@@ -1710,7 +1710,7 @@ class TestIndexing(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randint(4, 1).realize()
     a = (Tensor.arange(4,)*x).T
-    self.check_schedule(a, 1)
+    self.check_schedule(a, 2) # reshaped aranges do not fold
     np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T)
 
   def test_arange_transposed_descendants(self):
@@ -1719,7 +1719,7 @@ class TestIndexing(unittest.TestCase):
     a = (Tensor.arange(4,)*x).T
     b = Tensor.randint(4, 4).realize()
     out = a+b
-    self.check_schedule(out, 1)
+    self.check_schedule(out, 2) # elementwise expand children do not fuse
     np.testing.assert_equal(out.numpy(), (np.arange(4)*x.numpy()).T+b.numpy())
 
   def test_arange_index(self):
@@ -1727,7 +1727,7 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10)
     out = (x + a[2]).sum()
-    self.check_schedule(out, 2)
+    self.check_schedule(out, 3) # reshaped aranges do not fold
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   @unittest.skip("TOOD: FUSE_ARANGE overrules Tensor.arange().contiguous()")
@@ -1744,7 +1744,7 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10)+1
     out = (x + a[2]).sum()
-    self.check_schedule(out, 2)
+    self.check_schedule(out, 3) # reshaped aranges do not fold
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   @unittest.skip("TOOD: FUSE_ARANGE overrules Tensor.arange().contiguous()")
@@ -1791,15 +1791,16 @@ class TestIndexing(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from ext device")
   def test_arange_shrink_copy(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).to("CPU")
-    sched = self.check_schedule(a, 1)
+    sched = self.check_schedule(a, 2) # shrink does not fold
     self.assertIs(sched[-1].ast.op, Ops.COPY)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from ext device")
   def test_arange_expand_copy(self):
     a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).contiguous().to("CPU")
-    sched = self.check_schedule(a, 1)
-    self.assertIs(sched[1].ast.op, Ops.COPY)
+    sched = self.check_schedule(a, 2) # there is a CONTIGUOUS between arange and COPY
+    self.assertIs(sched[2].ast.op, Ops.COPY)
+    self.assertIs(sched[1].ast.src[0].src[2].op, Ops.LOAD)
     self.assertIs(sched[0].ast.src[0].src[2].op, Ops.ADD)
     np.testing.assert_equal(a.numpy(), [[[0, 0], [1, 1]], [[2, 2], [3, 3]]])
 
