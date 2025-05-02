@@ -5,6 +5,7 @@ from tinygrad.nn.state import get_state_dict, load_state_dict
 from tinygrad import Device, Variable, Tensor, dtypes
 from tinygrad.helpers import fetch, Context
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
+from tinygrad.renderer.graph import export_webgpu
 
 def prepare_browser_chunks(model):
   # split weights into browser-friendly chunks
@@ -142,6 +143,8 @@ if __name__=="__main__":
   model.output.weight, model.output.scale = model.tok_embeddings.weight, model.tok_embeddings.scale
 
   validate_model(model, tokenizer)
+  #model.forward(Tensor([[tok]]), Variable("start_pos", 0, model.max_context - 1).bind(0), 0.0, 0, 0.0, 0.0, 0.0).realize()
+  #r = export_webgpu(model.forward, [Tensor([[123]]), Variable("start_pos", 0, model.max_context - 1).bind(1), 0.95, 0, 0.0, 0.0, 0.0])
   sys.exit()
   metadata = prepare_browser_chunks(model) # export weights to disk
 
