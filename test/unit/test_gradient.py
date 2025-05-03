@@ -129,7 +129,6 @@ class TestCastsAroundExpand(unittest.TestCase):
     t = Tensor.arange(9, dtype=dtypes.uint32).reshape(1, 1, 3, 3)
     w = Tensor.ones(1, 1, 2, 2, dtype=dtypes.uint32)
     dt, dw = t.conv2d(w).sum().gradient(t,w)
-    
     self.assertListEqual(dt.tolist(), [[[[1, 2, 1], [2, 4, 2], [1, 2, 1]]]])
     self.assertListEqual(dw.tolist(), [[[[8, 12], [20, 24]]]])
     
@@ -137,7 +136,6 @@ class TestCastsAroundExpand(unittest.TestCase):
     t = Tensor.arange(9, dtype=dtypes.int64).reshape(1, 1, 3, 3)
     w = Tensor([[[[-3, -1], [2, -4]]]], dtype=dtypes.int64)
     dt, dw = t.conv2d(w).sum().gradient(t,w)
-    
     self.assertListEqual(dt.tolist(), [[[[-3, -4, -1], [-1, -6, -5], [2, -2, -4]]]])
     self.assertListEqual(dw.tolist(), [[[[8, 12], [20, 24]]]])
     
@@ -145,7 +143,6 @@ class TestCastsAroundExpand(unittest.TestCase):
     t = Tensor.arange(9).reshape(1, 1, 3, 3)
     w = Tensor.ones(1, 1, 2, 2)
     dt, dw = t.conv2d(w).sum().gradient(t,w)
-    
     self.assertListEqual(dt.tolist(), [[[[1, 2, 1], [2, 4, 2], [1, 2, 1]]]])
     self.assertListEqual(dw.tolist(), [[[[8.0, 12.0], [20.0, 24.0]]]])
     
@@ -153,7 +150,6 @@ class TestCastsAroundExpand(unittest.TestCase):
     t = Tensor.eye(3)
     w = Tensor([[2.0,0,-2.0]])
     dt, dw = w.matmul(t).sum().gradient(t,w)
-    
     self.assertListEqual(dt.tolist(), [[2.0, 2.0, 2.0], [0.0, 0.0, 0.0], [-2.0, -2.0, -2.0]])
     self.assertListEqual(dw.tolist(), [[1.0, 1.0, 1.0]])
 
