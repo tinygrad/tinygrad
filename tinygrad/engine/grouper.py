@@ -60,10 +60,13 @@ sym = symbolic_simple+PatternMatcher([
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
   # COPY(CONST) creates a new CONST on the destination device
-  (UPat(Ops.COPY, name="root", src=(UPat(), UPat.cvar("x"),)), lambda root,x: root.const_like(x.arg)),
+  (UPat(Ops.COPY, name="root", src=(UPat.cvar("x"), UPat())), lambda root,x: root.const_like(x.arg)),
   # no COPY to same device, except clone (arg is True)
-  (UPat(Ops.COPY, src=(UPat(), UPat.var("copyin")), name="copy"),
+  (UPat(Ops.COPY, src=(UPat.var("copyin"), UPat()), name="copy"),
    lambda copyin,copy: copyin if copyin.device == copy.device and copy.arg is not True else None),
+  # store a shrink before COPY, otherwise view after the COPY
+  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, name="v"), UPat()), name="copy"), lambda copy,v: v.contiguous().copy_to_device(copy.device) \
+    if prod(v.shape) < prod(v.base.shape) else v.base.copy_to_device(copy.device, clone=copy.arg).view(v.st)),
   # remove cast to image when it's already a contiguous image
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(Ops.CONTIGUOUS, name="base"),)),)),
    lambda cast,base,vm: base.view(vm.st) if isinstance(cast.dtype, ImageDType) and isinstance(base.dtype, ImageDType) else None),
@@ -79,13 +82,12 @@ sym = symbolic_simple+PatternMatcher([
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat.var("x"),), name="t"),
    lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (t.size, x.st.views[0].offset)).reshape(t.shape) if x.device.startswith("DISK") else None),
   # double ASSIGN to same target is one ASSIGN
-  (UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat()), name="x"))), lambda x,t: x),
+  (UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat.var("x"))))), lambda x,t: t.assign(x.contiguous())),
+  # ASSIGN to unrealized replaces the UOp
+  (UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat.var("x"))), lambda x,t: x.contiguous() if t.base.op not in {Ops.BUFFER, Ops.BUFFER_VIEW} else None),
   # put CAST to smaller dtype before EXPAND
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm"),)), lambda cast,vm: vm.base.cast(cast.dtype).view(vm.st)
     if cast.dtype.itemsize <= vm.dtype.itemsize and resolve(prod(vm.shape) > vm.st.real_size()) else None),
-  # store a shrink before COPY, otherwise view after the COPY
-  (UPat(Ops.COPY, src=(UPat(), UPat(Ops.VIEW, name="v")), name="copy"), lambda copy,v: v.contiguous().copy_to_device(copy.device) \
-    if prod(v.shape) < prod(v.base.shape) else v.base.copy_to_device(copy.device, clone=copy.arg).view(v.st)),
   # put UnaryOps before EXPANDs
   (UPat(GroupOp.Unary, src=(UPat(Ops.VIEW, src=(UPat.var("inp"),), name="v"),), name="alu"),
    lambda inp,v,alu: inp.alu(alu.op).view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
@@ -122,9 +124,9 @@ do_realize = PatternMatcher([
   # always realize ASSIGN/CONTIGUOUS/GroupOp.Meta
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}, name="tr"), realize),
   # realize before expand or unsafe pad ops
-  (UPat(Ops.VIEW, name="view", src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"),)), realize_before_view),
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"),), name="view"), realize_before_view),
   # realize before COPY
-  (UPat(Ops.COPY, src=(UPat(), UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"))), realize),
+  (UPat(Ops.COPY, src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"), UPat())), realize),
 ])
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
@@ -249,7 +251,7 @@ create_kernels = merge_views+PatternMatcher([
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
   (UPat(Ops.CONTIGUOUS, name="x"), lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype))),
   # create a buffer for COPY on the new device
-  (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="d"), UPat()), name="x"), lambda ctx,d,x: create_kernel(ctx, x, UOp.new_buffer(d.arg, x.size, x.dtype))),
+  (UPat(Ops.COPY, src=(UPat(), UPat(Ops.DEVICE, name="d")), name="x"), lambda ctx,d,x: create_kernel(ctx, x, UOp.new_buffer(d.arg, x.size, x.dtype))),
   # otherwise check the context if we're realizing this UOp
   (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"),
    lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype)) if x in ctx.realizes else None),
@@ -336,14 +338,14 @@ view_right = merge_views+PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), elementwise_view_right),
   # merge axes for double reduce (invert of SPLIT_REDUCEOP=1)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="r1"),), name="r2"),
-   lambda r1,r2: r1.replace(arg=(r1.arg[0], r2.arg[1]+r1.arg[1])) if r1.arg[0] == r2.arg[0] else None),
+   lambda r1,r2: r1.replace(arg=(r1.arg[0], r2.arg[1]+r1.arg[1])) if r1.arg[0] is r2.arg[0] else None),
 ])
 
 # **** fix kernel AST
 
 add_buffer_ops = PatternMatcher([
   # LOAD
-  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), x.st.to_uop(), dtype=x.dtype)),
+  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), x.st.to_uop())),
   # STORE (except for meta ops)
   (UPat(Ops.SINK, src=(UPat(GroupOp.Meta, name="x"),)), lambda x:x),
   (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda ctx,sink:
@@ -386,7 +388,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
-  ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs:=tuple(s.buf_uop for s in k.src), bottom_up=True)
+  ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs:=tuple(s.buf_uop for s in k.src), bottom_up=True, name="replace buffer")
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
@@ -428,7 +430,6 @@ if CAPTURE_PROCESS_REPLAY:
   @atexit.register
   def save_process_replay():
     for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
-
 
 def get_name(becomes_map:dict[UOp, UOp]) -> str:
   assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
@@ -473,7 +474,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
 
-  # map tensors to buffer/const/assign, optionally apply a VIEW on top
+  # map tensors to buffer/assign/const, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
     if k is v: continue

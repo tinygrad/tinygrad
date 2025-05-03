@@ -466,17 +466,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def real_lbs(self): return [lb for lb,r in zip(self.src, self.real) if r]
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
-    if axis is None: lbs = [self] * len(devices)
-    else:
+    lbs = [self.copy_to_device(d) for d in devices]
+    if axis is not None:
       if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
       # NOTE: this works for both even shards and uneven shards
       sz = self.shape[axis] // len(devices)
       sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
-      lbs = []
-      for sz,off in zip(sizes, itertools.accumulate(sizes, initial=0)):
-        lbs.append(self.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape))))
-    sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
-    return UOp.multi(*[lb.contiguous() for lb in sharded_lbs], axis=axis)
+      lbs = [lb.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape)))
+        for lb,sz,off in zip(lbs, sizes, itertools.accumulate(sizes, initial=0))]
+    return UOp.multi(*lbs, axis=axis)
 
   # *** from LazyBuffer ***
 
@@ -492,7 +490,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
     return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
-  def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False): return UOp(Ops.COPY, self.dtype, (UOp(Ops.DEVICE, arg=device), self), clone)
+  def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False): return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)), clone)
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   @property
   def metadata(self) -> tuple[Metadata, ...]|Metadata|None: return self.arg.metadata if self.op is Ops.KERNEL else all_metadata.get(self, None)
@@ -534,6 +532,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.MULTI: return tuple(cast(str, x.device) for x in self.src)
+    if self.op is Ops.COPY:
+      if len(self.src) > 2: return tuple(cast(str, x.device) for x in self.src[1:])
+      return self.src[1].device
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
