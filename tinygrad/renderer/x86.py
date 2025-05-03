@@ -107,12 +107,20 @@ x86_rewrite = PatternMatcher([
 ])
 
 def x86_is_imm(u:UOp) -> bool: return u.op is Ops.CONST and not dtypes.is_float(u.dtype) and abs(u.arg) <= dtypes.max(dtypes.int32)
+def load_consts(x:UOp) -> UOp|None:
+  if x.op is Ops.LOAD and x.src[0].op is Ops.CONST: return None
+  nsrc = []
+  for s in x.src:
+    if s.op is Ops.CONST and not x86_is_imm(s):
+      if s.dtype in (dtypes.int64, dtypes.uint64): s = s.load(dtype=s.dtype)
+      elif s.dtype is dtypes.float32: s = s.load(dtype=dtypes.int32).bitcast(dtypes.float32)
+      elif s.dtype is dtypes.float64: s = s.load(dtype=dtypes.int64).bitcast(dtypes.float64)
+    nsrc.append(s)
+  return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
 
 x86_matcher = PatternMatcher([
-  # 64 bit consts can't be immediates
-  #(UPat(Ops.CONST, dtype=(dtypes.int64, dtypes.uint64), name="x"), lambda x: x.load()),
-  # float consts can't be immediates and need gen reg to be loaded into xmm reg
-  #(UPat(Ops.CONST, dtype=dtypes.floats, name="x"), lambda x: x.load(dtype=dtypes.int64).bitcast(x.dtype)),
+  # int64 and floats can't be immediates
+  (UPat(GroupOp.All, name="x"), load_consts),
   # some ops can't take imm in srcs
   (UPat((Ops.WHERE, Ops.IDIV, Ops.MOD), name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if x86_is_imm(s) else s for s in x.src)) != x.src else None),
@@ -263,11 +271,7 @@ class X86Renderer(Renderer):
           free_reg(r[u])
           r[u] = mem[u] = f"[rbp + {arg_stack_offset}]"
           arg_stack_offset += 8
-      elif u.op is Ops.CONST:
-        r[u] = to_hex(u.arg, u.dtype)
-        if not x86_is_imm(u):
-          mov_to_reg(u, "r15")
-          mov_to_stack(u)
+      elif u.op is Ops.CONST: r[u] = to_hex(u.arg, u.dtype)
       # casting to <= int or src is uint32 (already zero extended) is a noop
       elif u.op is Ops.CAST and dtypes.is_int(u.dtype) and u.src[0].dtype in (dtypes.bool,) + dtypes.ints \
             and (u.dtype.itemsize <= u.src[0].dtype.itemsize or u.src[0].dtype is dtypes.uint32):
