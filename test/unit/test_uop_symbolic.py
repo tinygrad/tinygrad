@@ -502,6 +502,7 @@ class TestSymbolic(unittest.TestCase):
     idx = Variable("idx", 0, 24)
     self.helper_test_variable((idx//4<3), 0, 1, "(idx<12)")
     self.helper_test_variable(((idx-20)//4<-3), 0, 1, "(idx<5)")
+    self.helper_test_variable(((idx-10)//4<0), 0, 1, "(idx<7)")
     self.helper_test_variable((idx//-4<-3), 0, 1, "((idx//-4)<-3)")
 
   def test_simplex_lt(self):
