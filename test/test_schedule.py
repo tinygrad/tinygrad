@@ -1648,7 +1648,7 @@ class TestIndexing(unittest.TestCase):
     X = Tensor.randn(10, 10).realize()
     idxs = Tensor([0, 2]).realize()
     xt = X[idxs]
-    self.check_schedule(xt, 1)
+    self.check_schedule(xt, 2)
     np.testing.assert_equal(xt.numpy(), X.numpy()[idxs.numpy()])
 
   @unittest.skip("TODO: support pads in graph_rewrite")
@@ -1661,7 +1661,7 @@ class TestIndexing(unittest.TestCase):
   def test_advanced_indexing(self):
     X = Tensor.arange(10)+1
     xt = X[[0]]
-    self.check_schedule(xt, 1)
+    self.check_schedule(xt, 2)
     np.testing.assert_equal(xt.numpy(), (np.arange(10)+1)[[0]])
 
   @unittest.expectedFailure
@@ -1688,9 +1688,9 @@ class TestIndexing(unittest.TestCase):
     Tensor.manual_seed(0)
     a = Tensor.arange(4,)
     b = Tensor.randn(4, 4).realize()
-    out = (a+b)
-    self.check_schedule(out, 2) # not fusing elementwise children
-    np.testing.assert_allclose(out.numpy(), np.arange(4)+b.numpy())
+    out = (a+b).sum()
+    self.check_schedule(out, 1)
+    np.testing.assert_allclose(out.numpy(), (np.arange(4)+b.numpy()).sum(), atol=1e-5)
 
   def test_argmin(self):
     Tensor.manual_seed(0)
@@ -1709,18 +1709,18 @@ class TestIndexing(unittest.TestCase):
   def test_arange_transposed(self):
     Tensor.manual_seed(0)
     x = Tensor.randint(4, 1).realize()
-    a = (Tensor.arange(4,)*x).T
-    self.check_schedule(a, 2) # reshaped aranges do not fold
-    np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T)
+    a = ((Tensor.arange(4,)*x).T).sum()
+    self.check_schedule(a, 1)
+    np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T.sum())
 
   def test_arange_transposed_descendants(self):
     Tensor.manual_seed(0)
     x = Tensor.randint(4, 1).realize()
     a = (Tensor.arange(4,)*x).T
     b = Tensor.randint(4, 4).realize()
-    out = a+b
-    self.check_schedule(out, 2) # elementwise expand children do not fuse
-    np.testing.assert_equal(out.numpy(), (np.arange(4)*x.numpy()).T+b.numpy())
+    out = (a+b).sum()
+    self.check_schedule(out, 1)
+    np.testing.assert_equal(out.numpy(), ((np.arange(4)*x.numpy()).T+b.numpy()).sum())
 
   def test_arange_index(self):
     Tensor.manual_seed(0)
@@ -1791,14 +1791,14 @@ class TestIndexing(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from ext device")
   def test_arange_shrink_copy(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).to("CPU")
-    sched = self.check_schedule(a, 2) # shrink does not fold
+    sched = self.check_schedule(a, 2) # NOTE: there is a contiguous between REDUCE_AXIS and COPY
     self.assertIs(sched[-1].ast.op, Ops.COPY)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from ext device")
   def test_arange_expand_copy(self):
     a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).contiguous().to("CPU")
-    sched = self.check_schedule(a, 2) # there is a CONTIGUOUS between arange and COPY
+    sched = self.check_schedule(a, 2) # NOTE: there is a contiguous between REDUCE_AXIS and COPY
     self.assertIs(sched[2].ast.op, Ops.COPY)
     self.assertIs(sched[1].ast.src[0].src[2].op, Ops.LOAD)
     self.assertIs(sched[0].ast.src[0].src[2].op, Ops.ADD)
@@ -1847,7 +1847,7 @@ class TestIndexing(unittest.TestCase):
     yt = Tensor.randn(BS, 10).realize()
     with Context(SPLIT_REDUCEOP=0):
       loss = yt.sparse_categorical_crossentropy(Y_train[samples])
-      self.check_schedule(loss, 5)
+      self.check_schedule(loss, 6)
       loss_fused = loss.numpy()
     loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
     np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)

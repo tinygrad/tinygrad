@@ -403,7 +403,7 @@ pm_fuse = PatternMatcher([
    lambda r: r.replace(src=(r.src[0].fuse(),), arg=r.arg+(True,)) if len(r.arg) == 2 else None),
 
   # FUSE elementwise. TODO: check for PAD
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.ALU, name="alu"),), name="view").fuse(),
+  (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST}, name="alu"),), name="view").fuse(),
    lambda alu, view: alu.replace(src=tuple(x.view(view.arg).fuse() for x in alu.src))),
 
   # push FUSE through to srcs
@@ -443,9 +443,9 @@ def fuse_arange(root:UOp):
       u = q.pop()
       if not (curr_children:=local_children.get(u, [])): continue
       for child in curr_children:
-        reduce_paths = {s for s in child.toposort() if s.op is Ops.REDUCE_AXIS and s not in {root, r}}
+        other_paths = {s for s in child.toposort() if s.op in {Ops.REDUCE_AXIS, Ops.BUFFER} and s not in {root, r}}
         fuse_rep[child] = child.replace(src=tuple(s.fuse() if s is u else s for s in child.src))
-        if reduce_paths: break
+        if other_paths: break
       else: q.extend(curr_children)
   return root.substitute(fuse_rep, name="fuse_arange") if fuse_rep else None
 
