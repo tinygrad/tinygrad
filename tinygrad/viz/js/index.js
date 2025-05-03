@@ -217,7 +217,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   svg.call(zoom.transform, d3.zoomIdentity);
   const mainRect = rect(".main-container");
   const x0 = rect(".kernel-list-parent").right;
-  const x1 = rect(".metadata").left;
+  const x1 = rect(".metadata-parent").left;
   const pad = 16;
   const R = { x: x0+pad, y: mainRect.top+pad, width: (x1>0 ? x1-x0 : mainRect.width)-2*pad, height: mainRect.height-2*pad };
   const r = rect("#render");
@@ -348,7 +348,6 @@ async function main() {
   const metadata = document.querySelector(".metadata");
   const [code, lang] = kernel.kernel_code != null ? [kernel.kernel_code, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(kernel.code_line, "python", { loc:kernel.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
-  appendResizer(metadata, { minWidth: 20, maxWidth: 50 });
   // ** rewrite steps
   if (kernel.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -406,6 +405,7 @@ function appendResizer(element, { minWidth, maxWidth }, left=false) {
   });
 }
 appendResizer(document.querySelector(".kernel-list-parent"), { minWidth: 15, maxWidth: 50 }, left=true);
+appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWidth: 50 });
 
 // **** keyboard shortcuts
 
