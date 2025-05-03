@@ -14,14 +14,15 @@ helpers = ["const createEmptyBuf = (size) => {",
   f"  {ops_webgpu.js_copyin("buf", "data")}",
   "};\n"]
 
-class WebGPUJSRenderer(GraphRenderer):
-  def declare_kernel(self, ei:ExecItem) -> str:
-    return f"const {(fn:=ei.prg.p.function_name)} = `{ei.prg.p.src.replace(fn, 'main')}`;" if isinstance(ei.prg, CompiledRunner) else ""
+def declare_kernel(ei:ExecItem) -> str:
+  return f"const {(fn:=ei.prg.p.function_name)} = `{ei.prg.p.src.replace(fn, 'main')}`;" if isinstance(ei.prg, CompiledRunner) else ""
 
+class WebGPUJSRenderer(GraphRenderer):
   def render_graph(self) -> str:
     prg: list[str] = ops_webgpu.js_init_device + helpers
-    kernels = [self.declare_kernel(ei) for ei in self.eis if isinstance(ei.prg, CompiledRunner)]
+    kernels = [declare_kernel(ei) for ei in self.eis if isinstance(ei.prg, CompiledRunner)]
     bufs = [f"const {name} = createEmptyBuf({buf.nbytes})" for buf,name in self.empty_bufs.items()]
+    # TODO: complete rendering
     return "\n".join(prg)
 
 def export_webgpu(fxn:Callable, args:Sequence) -> tuple[str, dict[str, Tensor]]:

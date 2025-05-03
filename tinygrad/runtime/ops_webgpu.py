@@ -1,6 +1,5 @@
 import functools, struct
 from tinygrad.device import  Compiled, Allocator, Compiler, BufferSpec
-from tinygrad.renderer import Renderer
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up
 from tinygrad.runtime.autogen import webgpu
@@ -198,11 +197,11 @@ class WebGpuAllocator(Allocator):
 def js_alloc(size:int, usage:str) -> str: return f"device.createBuffer({{size: {round_up(size, 4)}, usage: {usage}}})"
 
 # NOTE: dest/src names are resolved by tinygrad.renderer.graph.GraphRenderer
-def js_copyin(sdest:str, src:str) -> str: return f"device.queue.writeBuffer({dest}, 0, {src});"
-def js_copyout(dest:str, src:str) -> str:
-  return f"""await {src}.mapAsync(GPUMapMode.READ);
-{dest}.set(new {dest}.constructor({src}.getMappedRange()));
-{src}.unmap();"""
+def js_copyin(dest:str, src:str) -> str: return f"device.queue.writeBuffer({dest}, 0, {src});"
+def js_copyout(dest:str, src:str) -> list[str]:
+  return [f'await {src}.mapAsync(GPUMapMode.READ);',
+    f'{dest}.set(new {dest}.constructor({src}.getMappedRange()));',
+    f'{src}.unmap();']
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
@@ -237,10 +236,10 @@ class WebGpuDevice(Compiled):
     _run(webgpu.wgpuQueueOnSubmittedWorkDone2, webgpu.WGPUQueueWorkDoneCallbackInfo2, webgpu.WGPUQueueWorkDoneCallback2,
     webgpu.WGPUQueueWorkDoneStatus__enumvalues, None, None, webgpu.wgpuDeviceGetQueue(self.runtime.args[0][0]))
 
-js_init_device = f"""if (!navigator.gpu) throw new Error("WebGPU not supported.");
-const adapter = await navigator.gpu.requestAdapter();
-const {{ maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup }} = adapter.limits;
-const device = await adapter.requestDevice({{
-	requiredFeatures: adapter.features.has("shader-f16") ? ["shader-f16"] : [], powerPreference: "high-performance",
-  requiredLimits: {{ maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup}}
-}});"""
+js_init_device = ['if (!navigator.gpu) throw new Error("WebGPU not supported.");',
+  'const adapter = await navigator.gpu.requestAdapter();',
+  'const { maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup } = adapter.limits;',
+  'const device = await adapter.requestDevice({',
+	'  requiredFeatures: adapter.features.has("shader-f16") ? ["shader-f16"] : [], powerPreference: "high-performance",',
+  '  requiredLimits: { maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup }',
+  '});']
