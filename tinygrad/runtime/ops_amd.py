@@ -844,8 +844,10 @@ class AMDDevice(HCQCompiled):
   def is_usb(self) -> bool: return isinstance(self.dev_iface, USBIface)
 
   def _select_iface(self):
+    if len(nm:=getenv("AMD_IFACE", "")) > 0: return getattr(sys.modules[__name__], f"{nm}Iface")(self, self.device_id)
+
     errs:str = ""
-    for iface_t in (KFDIface, PCIIface, USBIface) if len(nm:=getenv("AMD_IFACE", "")) == 0 else (getattr(sys.modules[__name__], f"{nm}Iface"),):
+    for iface_t in (KFDIface, PCIIface, USBIface):
       try: return iface_t(self, self.device_id)
       except Exception as e: errs += f"\n{iface_t.__name__}: {type(e).__name__}: {e}"
     raise RuntimeError(f"Cannot find a usable interface for AMD:{self.device_id}:{errs}")
