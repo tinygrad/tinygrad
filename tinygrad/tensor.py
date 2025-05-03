@@ -26,7 +26,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
   all_uops: set[UOp] = set()
   search_uops = list(applied_map)
   while len(search_uops):
-    x = search_uops.pop(0)
+    x = search_uops.pop()
     if x in all_uops: continue
     all_uops.add(x)
     search_uops.extend([u for c in x.children if (u:=c()) is not None])
@@ -236,13 +236,13 @@ class Tensor(SimpleMathTrait):
     big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
 
     # TODO: move this to scheduler tensor_map pass
-    if any(x.op is Ops.MULTI for x in big_sink.toposort):
+    if any(x.op is Ops.MULTI for x in big_sink.toposort()):
       # multi fixup
       _apply_map_to_tensors(get_multi_map(big_sink), name="Apply Multi Map")
       big_sink = UOp.sink(*flatten([x.lazydata.src if x.lazydata.op is Ops.MULTI else [x.lazydata] for x in (self,)+lst]))
 
     # verify Tensors match the spec
-    if __debug__: type_verify(list(big_sink.toposort), tensor_uop_spec)
+    if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
 
     becomes_map = get_becomes_map(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
@@ -292,7 +292,6 @@ class Tensor(SimpleMathTrait):
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
     assert not x.requires_grad  # self requires_grad is okay?
-    if not self.lazydata.is_realized: return self.replace(x)
     self.lazydata = self.lazydata.assign(x.lazydata)
     return self
 
@@ -866,6 +865,12 @@ class Tensor(SimpleMathTrait):
     std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:]))
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
+  @staticmethod
+  def randperm(n: int, *, device=None, dtype=dtypes.int32, **kwargs) -> Tensor:
+    r = Tensor.rand(n, device=device, **kwargs)
+    _, indices = r.sort()
+    return indices.cast(dtype)
+
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
     assert 1 <= self.ndim <= 2 and num_samples > 0, f"{self.ndim=} must be 1 or 2 dim, {num_samples=} must be positive"
     assert replacement or num_samples == 1, "no replacement only supports num_samples = 1"
@@ -916,7 +921,7 @@ class Tensor(SimpleMathTrait):
     print(t.grad.numpy())
     ```
     """
-    all_uops = self.lazydata.toposort
+    all_uops = self.lazydata.toposort()
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
                                        t.lazydata in all_uops and t.requires_grad and not Tensor.no_grad]
     # clear contexts
@@ -1112,13 +1117,18 @@ class Tensor(SimpleMathTrait):
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
         case slice():
           if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
-          if not all(isinstance(s,int) or s is None for s in (index.start,index.stop,index.step)): raise TypeError("only int slicing is supported")
-          # handle int slicing
-          *boundary, stride = index.indices(cast(SupportsIndex, size))
-          if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
-          elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
-          # update size for slice
-          size = ceildiv((boundary[1] - boundary[0]), abs(stride))
+          if all(isinstance(s, int) or s is None for s in (index.start,index.stop,index.step)):
+            # handle int slicing
+            *boundary, stride = index.indices(cast(SupportsIndex, size))
+            if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
+            elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
+            # update size for slice
+            size = ceildiv((boundary[1] - boundary[0]), abs(stride))
+          elif index.step is None and all(isinstance(s,(int,UOp))for s in (index.start,index.stop)) and resolve((index.stop-index.start) > 0, False):
+            # simple symbolic slice
+            boundary = [index.start, index.stop]
+            size = (index.stop - index.start).ssimplify()
+          else: raise TypeError(f"slice {index=} is not supported")
         case None: pass # do nothing
         case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
       indices_parsed.append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})
@@ -1139,7 +1149,7 @@ class Tensor(SimpleMathTrait):
         x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
 
     # dim injection from None by including None dim size (which is 1) and dim collapse by skipping int dim size
-    x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], int)))
+    x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], (int, UOp))))
 
     # tensor indexing
     if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
@@ -1862,7 +1872,7 @@ class Tensor(SimpleMathTrait):
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
+  def softmax(self, axis=-1, dtype:DTypeLike|None=None, _single_kernel=getenv("SINGLE_KERNEL_SOFTMAX")) -> Tensor:
     """
     Applies the softmax function to the tensor along the specified axis.
 
@@ -1882,7 +1892,7 @@ class Tensor(SimpleMathTrait):
     print(t.softmax(axis=0).numpy())
     ```
     """
-    if getenv("SINGLE_KERNEL_SOFTMAX"):
+    if _single_kernel:
       _, e, ss = self.contiguous()._softmax(axis, dtype)
       return e.div(ss).fuse()
     _, e, ss = self._softmax(axis, dtype)
@@ -2744,7 +2754,7 @@ class Tensor(SimpleMathTrait):
     Useful for single kernel softmax and flash attention.
     Careful, this can break codegen or make kernels really slow.
     """
-    return self._apply_uop(UOp.fuse).contiguous()
+    return self._apply_uop(UOp.fuse)
 
   def contiguous_backward(self) -> Tensor:
     """

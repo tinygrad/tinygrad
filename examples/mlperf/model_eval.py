@@ -94,7 +94,7 @@ def eval_retinanet():
   mdl.load_from_pretrained()
   tlog("loaded models")
 
-  coco = COCO(download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), 'validation'))
+  coco = COCO(download_dataset(base_dir:=getenv("BASEDIR", BASEDIR), 'validation'))
   coco_eval = COCOeval(coco, iouType="bbox")
   coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
   tlog("loaded dataset")
@@ -116,6 +116,7 @@ def eval_retinanet():
     except StopIteration: next_proc = None
     nd = time.perf_counter()
     predictions, img_ids = mdl.postprocess_detections(proc[0].numpy(), orig_image_sizes=proc[2]), proc[1]
+    pd = time.perf_counter()
     coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
       for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
     with redirect_stdout(None):
@@ -126,7 +127,7 @@ def eval_retinanet():
     coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
     n += len(proc[0])
     et = time.perf_counter()
-    tlog(f"****** {(run-st)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize ({(nd-run)*1000:7.2f} ms fetching). {(len(proc))/(et-st):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-st):5.2f} TFLOPS")
+    tlog(f"****** {(run-st)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize ({(nd-run)*1000:7.2f} ms fetching, {(pd-run)*1000:4.2f} ms postprocess_detections). {(len(proc))/(et-st):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-st):5.2f} TFLOPS")
     st = et
     proc, next_proc = next_proc, None
 

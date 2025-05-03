@@ -126,7 +126,8 @@ def NF4Linear(block_size):
       return x.linear(unscaled.reshape(self.out_features, self.in_features).T)
 
     @staticmethod
-    def quantize(state_dict: dict[str, Tensor], device, scale_dtype=dtypes.float16) -> dict[str, Tensor]:
+    def quantize(state_dict: dict[str, Tensor], device, scale_dtype=dtypes.float16, quantize_embeds=False) -> dict[str, Tensor]:
+      assert not quantize_embeds  # TODO: support this?
       new_state_dict = {}
       for k, v in state_dict.items():
         if "feed_forward" in k or "attention.w" in k:
@@ -173,9 +174,9 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dt
   else:
     weights = load(str(model_path))
   if "model.embed_tokens.weight" in weights:
-    weights = convert_from_huggingface(weights, model, MODEL_PARAMS[model_size]["args"]["n_heads"], MODEL_PARAMS[model_size]["args"]["n_kv_heads"])
+    weights = convert_from_huggingface(weights, MODEL_PARAMS[model_size]["args"]["n_layers"], MODEL_PARAMS[model_size]["args"]["n_heads"], MODEL_PARAMS[model_size]["args"]["n_kv_heads"])
   elif "token_embd.weight" in weights:
-    weights = convert_from_gguf(weights, model)
+    weights = convert_from_gguf(weights, MODEL_PARAMS[model_size]["args"]["n_layers"])
   weights = fix_bf16(weights)
 
   with Context(BEAM=0):

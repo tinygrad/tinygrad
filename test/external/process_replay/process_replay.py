@@ -36,7 +36,7 @@ class ProcessReplayWarning(Warning): pass
 def recreate_sched(big_sink:UOp) -> list[UOp]:
   becomes_map = get_becomes_map(big_sink)
   sched_sink = big_sink.substitute(becomes_map)
-  return dedup(u.arg.ast for u in sched_sink.toposort if u.op is Ops.KERNEL)
+  return dedup(u.arg.ast for u in sched_sink.toposort() if u.op is Ops.KERNEL)
 
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str, _) -> str:
   k = Kernel(ast, opts=opts)
@@ -72,9 +72,9 @@ def diff(offset:int, name:str, fxn:Callable) -> None:
       if good is None: continue
     except Exception as e:
       changed += 1
-      warnings.warn(f"FAILED TO RECREATE KERNEL {e}", ProcessReplayWarning)
       if ctx_vars: logging.info(ctx_vars)
       for x in args[:-2]: trunc_log(x)
+      warnings.warn(f"FAILED TO RECREATE KERNEL {e}", ProcessReplayWarning)
       continue
     # diff kernels
     try: assert str(args[-1]) == str(good)

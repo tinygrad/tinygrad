@@ -26,24 +26,24 @@ def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer
   bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
   return s[-1].ast, bufs
 
-def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0):
+def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0, use_tensor_cores:int=1):
   a, b = Tensor.rand(M, K, dtype=dtype_in), Tensor.rand(K, N, dtype=dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, dtype=dtype_out)
-  sched = r.schedule()
-  realized_ast = sched[-1].ast
-  run_schedule(sched)
-  out = r.numpy()
+  if dtype_in == dtypes.bfloat16: r = r.float()
+  realized_ast, bufs = helper_realized_ast(r)
   k = Kernel(realized_ast)
-  k.apply_tensor_cores(1, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
-  k.linearize()
-  assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
+  k.apply_tensor_cores(use_tensor_cores, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
+  prg = CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
+  if use_tensor_cores == 1: assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
+  elif use_tensor_cores == 3: assert len([uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL]) == 2, "local buffers not triggered"
   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
-  np_c = np_a @ np_b
+  prg.exec(bufs)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
   else: tc_atol, tc_rtol = 5e-3, 1e-4
-  np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
+  c = bufs[0].numpy().reshape((M,N))
+  np.testing.assert_allclose(c, np_a @ np_b, atol=tc_atol, rtol=tc_rtol)
 
 def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
                                          ensure_triggered:bool=True):
@@ -101,7 +101,7 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_ast(sink, [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])[0]
 
     stores = [u for u in lin.uops if u.op is Ops.STORE]
-    mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
+    mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
     assert len(mutable_bufs) == len(stores) == 2
     self.assertSetEqual(set([u.arg for u in mutable_bufs]), set([0,1]))
 
@@ -375,7 +375,6 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_ast(sink, [x], wanna_output=[wanna_output, wanna_output/15])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.expectedFailure
   def test_multiout_intermediate_multireduce(self):
     # check how it outputing at different stages of the multireduce works
     # TODO: Fails because the stores shapes do not match: store1.shape = (27,15,1,5) != store0.shape = (27,1,1,5)
@@ -394,14 +393,9 @@ class TestLinearizer(unittest.TestCase):
     wanna_output0 = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
     wanna_output1 = x.numpy().sum(axis=1).reshape(27,1,1,5)
 
-    ast = UOp(Ops.SINK, src=(store0, store1))
-    k = Kernel(ast)
-    prg = CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
-    inbufs = [x.lazydata.base.buffer]
-    outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
-    prg.exec(outbufs+inbufs)
-    np.testing.assert_allclose(np.frombuffer(outbufs[0].as_buffer(), _to_np_dtype(outbufs[0].dtype)).reshape(27,1,1,5), wanna_output0)
-    np.testing.assert_allclose(np.frombuffer(outbufs[1].as_buffer(), _to_np_dtype(outbufs[1].dtype))[:135].reshape(27,1,1,5), wanna_output1)
+    sink = UOp(Ops.SINK, src=(store0, store1))
+    with self.assertRaises(RuntimeError): # AST is invalid
+      helper_linearizer_ast(sink, [x], wanna_output=[wanna_output0, wanna_output1])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_complete_unroll_multireduce(self):
@@ -1009,10 +1003,10 @@ class TestLinearizer(unittest.TestCase):
 
     # the first store is to lds and can be upcasted
     assert stores[0].src[-1].dtype == dtypes.float.vec(4)
-    assert any(x.op is Ops.DEFINE_LOCAL for x in stores[0].toposort)
+    assert any(x.op is Ops.DEFINE_LOCAL for x in stores[0].toposort())
     # the second store is to gds with no upcasts
     assert stores[1].src[-1].dtype == dtypes.float
-    assert any(x.op is Ops.DEFINE_GLOBAL for x in stores[1].toposort)
+    assert any(x.op is Ops.DEFINE_GLOBAL for x in stores[1].toposort())
 
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
@@ -1062,16 +1056,21 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL") or getenv("EMULATE_METAL") or getenv("EMULATE_AMD_MFMA") or getenv("EMULATE_AMD")) and \
-        (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
-      if CI and Device.DEFAULT in ("METAL", "AMD") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
       # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
       helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_emulation(self):
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
+      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
+      # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
+      helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0, use_tensor_cores=3)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_codegen(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if CI and Device.DEFAULT == "AMD" and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
       n, m, k = tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2]
       a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
       r = a.matmul(b, dtype=tc.dtype_out)
@@ -1085,24 +1084,27 @@ class TestLinearizer(unittest.TestCase):
         assert "0x201000" in prg.src
       elif Device.DEFAULT == "AMD" and getenv("AMD_LLVM", 0):
         assert "@llvm.amdgcn.wmma" in prg.src
+      elif Device[Device.DEFAULT].renderer.suffix == "PTX":
+        assert "mma.sync.aligned" in prg.src
       else:
         assert "__WMMA_" in prg.src
 
-  @unittest.skipIf(Device.DEFAULT in {"AMD"}, "AMD has a bug in the compiler for pad == 1, see discussion in #9606")
+  @unittest.skipIf(Device.DEFAULT in ("AMD", "AMD_LLVM") or (Device.DEFAULT == "PYTHON" and getenv("EMULATE_AMD")), "broken for AMD")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if (getenv("EMULATE_CUDA") or getenv("EMULATE_METAL") or getenv("EMULATE_AMD_MFMA") or getenv("EMULATE_AMD")) and \
-        (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
-      if CI and Device.DEFAULT in ("METAL", "AMD") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
       helper_tc_allclose(tc.dims[0]+(pad:=1), tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
 
-  @unittest.skipUnless(Device.DEFAULT in {"AMD"}, "Test for AMD device")
+  # AMD compiler bug: AMD miscompiles non-zero padded tc kernels with -O3, producing wrong results, nans or hang (see #9606)
+  # Internal bug: zero-stride dimensions combined with a mask may produce wrong index/valid for pad == 1 on AMD
+  @unittest.skipUnless(Device.DEFAULT in ("AMD", "AMD_LLVM") or (Device.DEFAULT == "PYTHON" and getenv("EMULATE_AMD")), "test for AMD's tc")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.expectedFailure
   def test_tensor_cores_padded_amd(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if CI and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
-      helper_tc_allclose(tc.dims[0]+(pad:=3), tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
+      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
+      helper_tc_allclose(tc.dims[0]+(pad:=1), tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded_uops(self):
@@ -1129,7 +1131,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_multi_reduce(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16: continue
+      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
       # this will be a M=G16, N=G32, M=G16, M=G16, K=R16, K=R16, K=R16 with 9 choices of TC MNK axes
       golden_result = None
       for axis in range(9):
@@ -1145,6 +1147,8 @@ class TestLinearizer(unittest.TestCase):
         assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
 
         prg = CompiledRunner(k.to_program())
+        # TODO: support this even if numpy doesn't
+        if _to_np_dtype(real_bufs[0].dtype) is None: continue
         real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=_to_np_dtype(real_bufs[0].dtype)).data) # Zero to check that all values are filled
         prg.exec(real_bufs)
         result = np.frombuffer(real_bufs[0].as_buffer(), _to_np_dtype(real_bufs[0].dtype))
@@ -1212,7 +1216,7 @@ class TestLinearizer(unittest.TestCase):
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes, assert_same_length = True):
       idxs = get_grouped_dims(prefix, dims, max_sizes, reverse_dims)
-      loop_idxs = dedup(flatten([[y for y in x.toposort if y.op is Ops.SPECIAL] for x in idxs]))
+      loop_idxs = dedup(flatten([[y for y in x.toposort() if y.op is Ops.SPECIAL] for x in idxs]))
       loop_idxs = sorted(loop_idxs, key=lambda uop: uop.arg[0])
       sizes = [x.arg[1] for x in loop_idxs]
       assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
@@ -1296,7 +1300,7 @@ class TestLinearizer(unittest.TestCase):
     sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]
     # sum_collapse is a full collapse now
     assert len(sched) == 1
-    assert not any(u.op is Ops.REDUCE_AXIS for u in sched[0].ast.toposort), "found reduce in sum collapse"
+    assert not any(u.op is Ops.REDUCE_AXIS for u in sched[0].ast.toposort()), "found reduce in sum collapse"
     #lin = Kernel(sched[0].ast)
     #assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
 
@@ -2020,7 +2024,7 @@ class TestKernelOpts(unittest.TestCase):
               UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))),)),)),)),)),)) # noqa: E501
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     with self.assertRaises(KernelOptError):
-      k.apply_opt(Opt(OptOps.TC, 0, (-1, 1)))
+      k.apply_opt(Opt(OptOps.TC, 0, (-1, 1, 1)))
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_core_opts(self):

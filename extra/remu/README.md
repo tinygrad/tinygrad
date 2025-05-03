@@ -36,7 +36,7 @@ The DEBUG output has 3 sections:
 
 ```
 <------------ 1 ----------> <--- 2 ---> <--------------------------------------- 3 ------------------------------------------>
-[0   0   0  ] [0   0   0  ] 0  F4080100 SMEM     sbase=0          sdata=4          op=2             offset=0         soffset=0
+[0   0   0  ] [0   0   0  ] 0  F4080100 SMEM { op: 2, sdata: 4, sbase: 0, offset: 0, soffset: 124, glc: false, dlc: false }
 ```
 
 #### Section 1: Grid info
@@ -61,11 +61,11 @@ Gray = The thread has been "turned off" by the EXEC mask, it skips execution of 
 
 To see the colors in action, try running `DEBUG=6 PYTHONPATH="." MOCKGPU=1 AMD=1 python test/test_ops.py TestOps.test_arange_big`. See how only lane 0 writes to global memory:
 ```
-[255 0   0  ] [0   0   0  ] 0  DC6A0000 GLOBAL   offset=0         op=26            addr=8           data=0           saddr=0          vdst=0
+[255 0   0  ] [0   0   0  ] 0  DC6A0000 FLAT { op: 26, offset: 0, dlc: false, glc: false, slc: false, seg: 2, addr: 8, data: 0, saddr: 0, sve: false, vdst: 0 }
 [255 0   0  ] [1   0   0  ] 1  DC6A0000
 [255 0   0  ] [2   0   0  ] 2  DC6A0000
 [255 0   0  ] [3   0   0  ] 3  DC6A0000
-[255 0   0  ] [4   0   0  ] 4  DC6A0000
+[255 0   0  ] [3   0   0  ] 4  DC6A0000
 ```
 
 #### Section 3: Decoded Instruction
@@ -76,5 +76,5 @@ Remu output vs llvm-objdump:
 
 ```
 s_load_b64 s[0:1], s[0:1], 0x10                            // 00000000160C: F4040000 F8000010
-SMEM       sbase=0          sdata=0          op=1             offset=16        soffset=0
+SMEM { op: 1, sdata: 0, sbase: 0, offset: 16, soffset: 124, glc: false, dlc: false }
 ```

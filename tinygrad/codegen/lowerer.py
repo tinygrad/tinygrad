@@ -92,8 +92,8 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   full_shape = ast.full_shape
   first_upcasted = len(full_shape)-ki.upcasted
   # if there's no reduce, this is first_upcasted. assumes reduces are at the end
-  first_reduce = min([first_upcasted]+flatten(x.axis_arg for x in ast.toposort if x.op is Ops.REDUCE_AXIS))
-  local_loads = [x for x in ast.toposort if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL]
+  first_reduce = min([first_upcasted]+flatten(x.axis_arg for x in ast.toposort() if x.op is Ops.REDUCE_AXIS))
+  local_loads = [x for x in ast.toposort() if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL]
   # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
   group_for_reduces = sum([any(l.st_arg.shape[i]!=ast.src[0].st_arg.shape[i] for l in local_loads) for i in range(first_reduce,first_upcasted)])
   global_dims = first_reduce-ki.local_dims
@@ -108,10 +108,10 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
              get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
   else:
     # all loops are RANGES
-    idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(g)), i) for i,g in enumerate(full_shape[:first_reduce])]
+    idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i) for i,g in enumerate(full_shape[:first_reduce])]
 
   # reduce loops
-  idxs += [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(g)), i)
+  idxs += [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i)
     for i,g in enumerate(full_shape[first_reduce+group_for_reduces:first_upcasted], start=first_reduce+group_for_reduces)]
 
   # upcast loops
@@ -122,7 +122,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   # late indexes (group for reduce)
   ridxs = idxs[:]
   for a in range(first_reduce, first_reduce+group_for_reduces):
-    ridxs[a] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(full_shape[a])), 1000+a)
+    ridxs[a] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(full_shape[a]),), 1000+a)
 
   return IndexContext(idxs, ridxs)
 

@@ -65,4 +65,5 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
   return out_buf.cast(uop.dtype.fmt).tolist()[0]
 
 def not_support_multi_device():
-  return CI and Device.DEFAULT in ("GPU", "CUDA", "METAL")
+  # CLOUD doesn't support multi device anywhere, GPU, CUDA and METAL don't support multi device if in CI
+  return Device.DEFAULT == "CLOUD" or (CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"))

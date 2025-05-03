@@ -1,6 +1,6 @@
 import unittest, contextlib
 import numpy as np
-from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device
+from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import CI, Context, getenv
 from tinygrad.engine.realize import run_schedule
 from tinygrad.codegen.kernel import Opt, OptOps, Kernel, KernelOptError
@@ -73,6 +73,24 @@ class TestArange(unittest.TestCase):
   def test_all_opts_w_upcast_and_unroll(self):
     return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, arg=0)])
 
+class TestRand(unittest.TestCase):
+  def test_fused_rand_less_ops(self, noopt=1):
+    GlobalCounters.reset()
+    with Context(FUSE_ARANGE=0, NOOPT=noopt):
+      out = Tensor.rand(16384)
+      out.realize()
+    unfused_ops = GlobalCounters.global_ops
+
+    GlobalCounters.reset()
+    with Context(FUSE_ARANGE=1, NOOPT=noopt):
+      out = Tensor.rand(16384)
+      out.realize()
+    print(f"fused {GlobalCounters.global_ops} unfused {unfused_ops}")
+    self.assertLessEqual(GlobalCounters.global_ops, unfused_ops*2)
+  def test_fused_rand_less_ops_opt(self): self.test_fused_rand_less_ops(0)
+
+DSET, DDIM = 2048, 32
+
 class TestIndexing(unittest.TestCase):
   def test_arange_2_reduce(self):
     needle = Tensor.zeros(16384, dtype=dtypes.int).contiguous()
@@ -88,52 +106,63 @@ class TestIndexing(unittest.TestCase):
 
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_manual_index(self):
-    dataset = Tensor.rand(16384, 256).realize()
+    dataset = Tensor.rand(DSET, DDIM).realize()
     idxs = Tensor([0,3,5,6]).realize()
     real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
     with Context(NOOPT=1, FUSE_ARANGE=1):
       GlobalCounters.reset()
-      rng = Tensor.ones(4, 256, 16384, dtype=dtypes.int)._cumalu(axis=-1, op=Ops.ADD, _include_initial=True).reshape(4, 256, 16384, 1)
-      idxs = idxs.reshape(4,1,1,1).expand(4, 256, 16384, 1)
-      reshape_dataset = dataset.T.reshape(1, 256, 16384, 1).expand(4, 256, 16384, 1)
-      full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, 256, 16384, 1))
+      rng = Tensor.ones(4, DDIM, DSET, dtype=dtypes.int)._cumalu(axis=-1, op=Ops.ADD, _include_initial=True).reshape(4, DDIM, DSET, 1)
+      idxs = idxs.reshape(4,1,1,1).expand(4, DDIM, DSET, 1)
+      reshape_dataset = dataset.T.reshape(1, DDIM, DSET, 1).expand(4, DDIM, DSET, 1)
+      full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, DDIM, DSET, 1))
       X = full.sum(axis=(2,3))
       sched = X.schedule()
       self.assertEqual(len(sched), 1)
       run_schedule(sched)
-      assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops}"
+      assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
 
+  def test_index_variable(self):
+    dataset = Tensor.rand(DSET, DDIM).realize()
+    v = Variable("v", 0, DDIM-1)
+    with Context(NOOPT=1, FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
+      GlobalCounters.reset()
+      vb = Tensor(v.bind(12))
+      comp = dataset[vb].numpy()
+      # no global ops because they are all indexing
+      self.assertEqual(GlobalCounters.global_ops, 0)
+    np.testing.assert_allclose(comp, dataset.numpy()[12])
+
   def test_index(self):
-    dataset = Tensor.rand(16384, 256).realize()
+    dataset = Tensor.rand(DSET, DDIM).realize()
     idxs = Tensor([0,3,5,6]).realize()
     real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
     with Context(NOOPT=1):
       GlobalCounters.reset()
       X = dataset[idxs]
-      assert X.shape == (4,256)
+      assert X.shape == (4,DDIM)
       sched = X.schedule()
       # TODO: enable these asserts when the scheduler can handle this
       #self.assertEqual(len(sched), 1)
       run_schedule(sched)
-      #assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops}"
+      #assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
 
   def test_index_fused(self, noopt=1):
-    dataset = Tensor.rand(16384, 256).realize()
+    dataset = Tensor.rand(DSET, DDIM).realize()
     idxs = Tensor([0,3,5,6]).realize()
     real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
     with Context(NOOPT=noopt, FUSE_ARANGE=1):
       GlobalCounters.reset()
       X = dataset[idxs]
-      assert X.shape == (4,256)
+      assert X.shape == (4,DDIM)
       sched = X.schedule()
       self.assertEqual(len(sched), 2)
       run_schedule(sched)
-      assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops} != {4*16384}"
+      assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops} != {4*DSET}"
     np.testing.assert_allclose(real_index, X.numpy())
   @unittest.skip("not ready")
   def test_index_fused_opt(self): self.test_index_fused(0)
@@ -146,10 +175,10 @@ class TestIndexing(unittest.TestCase):
       np.testing.assert_equal(X.numpy(), 0)
 
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
-  def test_index_mnist(self, noopt=1, op_limit=512*784*13):
+  def test_index_mnist(self, noopt=1, op_limit=512*784*13, split_reduceop=0):
     from tinygrad.nn.datasets import mnist
     X_train, Y_train, _, _ = mnist()
-    with Context(NOOPT=noopt, FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
+    with Context(NOOPT=noopt, FUSE_ARANGE=1, SPLIT_REDUCEOP=split_reduceop):
       samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0]).realize()
       GlobalCounters.reset()
       x = X_train[samples].numpy()
@@ -157,8 +186,14 @@ class TestIndexing(unittest.TestCase):
       assert GlobalCounters.global_ops < op_limit, f"too many ops {GlobalCounters.global_ops} != {op_limit}"
     np.testing.assert_allclose(X_train.numpy()[samples.numpy()], x)
     np.testing.assert_allclose(Y_train.numpy()[samples.numpy()], y)
-  @unittest.skip("not ready")
+
+  # TODO: fix these on WEBGPU, it looks like it has to do with packed stuff
+  @unittest.skipIf(getenv("WEBGPU"), "broken on webgpu for some reason")
   def test_index_mnist_opt(self): self.test_index_mnist(0)
+  @unittest.skipIf(getenv("WEBGPU"), "broken on webgpu for some reason")
+  def test_index_mnist_split(self): self.test_index_mnist(1, split_reduceop=1)
+  @unittest.skipIf(getenv("WEBGPU"), "broken on webgpu for some reason")
+  def test_index_mnist_opt_split(self): self.test_index_mnist(0, split_reduceop=1)
 
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_llama_embedding(self, noopt=1, op_limit=65536):

@@ -252,6 +252,12 @@ class TestSymbolic(unittest.TestCase):
   def test_div_const_div(self):
     a = Variable("a", 0, 124)
     self.helper_test_variable((a//2+1)//2, 0, 31, "((a+2)//4)")
+    self.helper_test_variable(((-a)//2-1)//2, -31, 0, "(((a*-1)+-2)//4)")
+    self.helper_test_variable(((-a)//2+10)//2, -26, 5, "(((a*-1)+20)//4)")
+
+  def test_div_const_div_wrong_sign(self):
+    a = Variable("a", 0, 124)
+    self.helper_test_variable(((a-10)//2+10)//2, 2, 33, "((((a+-10)//2)+10)//2)")
 
   def test_distribute_mul(self):
     self.helper_test_variable(usum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
@@ -331,6 +337,9 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("a", 0, 5)+3)//4, 0, 2, "((a+3)//4)")
     self.helper_test_variable((Variable("a", 0, 5)+4)//4, 1, 2, "((a//4)+1)")
     self.helper_test_variable((Variable("a", 0, 5)+5)//4, 1, 2, "(((a+1)//4)+1)")
+
+  def test_div_neg_rem(self):
+    self.helper_test_variable((-Variable("a", 0, 255)+256)//2, 0, 128, "((((a+1)//2)*-1)+128)")
 
   def test_mul_div_factor_mul(self):
     self.helper_test_variable((Variable("a", 0, 10)*8)//4, 0, 20, "(a*2)")
@@ -461,6 +470,11 @@ class TestSymbolic(unittest.TestCase):
     unrolled_div = (gidx+2561)//4+(gidx+2562)//4+(gidx+2560)//4+(gidx+2559)//4
     self.helper_test_variable(unrolled_div, 2559, 5118, "(gidx+2559)")
 
+  def test_arange_unrolled4_mul(self):
+    gidx = Variable("gidx", 0, 2559)
+    unrolled_div = 2*((gidx+2561)//4)+2*((gidx+2562)//4)+2*((gidx+2560)//4)+2*((gidx+2559)//4)
+    self.helper_test_variable(unrolled_div, 5118, 10236, "((gidx*2)+5118)")
+
   def test_arange_unrolled4_small(self):
     gidx = Variable("gidx", 0, 3)
     unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
@@ -478,6 +492,11 @@ class TestSymbolic(unittest.TestCase):
     gidx = Variable("gidx", 0, 2559)
     unrolled_div = (gidx+2559)//2+(gidx+2560)//2+3
     self.helper_test_variable(unrolled_div, 2562, 5121, "(gidx+2562)")
+
+  def test_arange_unrolled2_neg(self):
+    ridx = Variable("ridx", 0, 255)
+    unrolled_div = -((255-ridx)//2) - ((256-ridx)//2)
+    self.helper_test_variable(unrolled_div, -255, 0, "(ridx+-255)")
 
   def test_gated_load(self):
     idx = Variable("idx", 0, 24)

@@ -35,7 +35,7 @@ def _try_dlopen_$name():
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
     except OSError: pass
-  raise RuntimeError("library $name not found")
+  return None
 EOF
 }
 
@@ -80,8 +80,8 @@ generate_kfd() {
   fixup $BASE/kfd.py
   sed -i "s/import ctypes/import ctypes, os/g" $BASE/kfd.py
   sed -i "s/import fcntl, functools/import functools/g" $BASE/kfd.py
-  sed -i "/import functools/a from tinygrad.runtime.support.hcq import HWInterface" $BASE/kfd.py
-  sed -i "s/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, \*\*kwargs):/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:HWInterface, \*\*kwargs):/g" $BASE/kfd.py
+  sed -i "/import functools/a from tinygrad.runtime.support.hcq import FileIOInterface" $BASE/kfd.py
+  sed -i "s/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, \*\*kwargs):/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:FileIOInterface, \*\*kwargs):/g" $BASE/kfd.py
   sed -i "s/fcntl.ioctl(__fd, (__idir<<30)/__fd.ioctl((__idir<<30)/g" $BASE/kfd.py
   python3 -c "import tinygrad.runtime.autogen.kfd"
 }
@@ -287,7 +287,7 @@ generate_vfio() {
   fixup $BASE/vfio.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/vfio.py
   sed -i "s\import fcntl, functools\import functools" $BASE/vfio.py
-  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import HWInterface\g" $BASE/vfio.py
+  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import FileIOInterface\g" $BASE/vfio.py
   sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\return __fd.ioctl((__idir<<30)\g" $BASE/vfio.py
 }
 
@@ -528,6 +528,19 @@ generate_webgpu() {
   python3 -c "import tinygrad.runtime.autogen.webgpu"
 }
 
+generate_libusb() {
+  clang2py -k cdefstum \
+    /usr/include/libusb-1.0/libusb.h \
+    -o $BASE/libusb.py
+
+  fixup $BASE/libusb.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/libusb.py
+  sed -i "s/FIXME_STUB/libusb/g" "$BASE/libusb.py"
+  sed -i "s/libusb_le16_to_cpu = libusb_cpu_to_le16//g" "$BASE/libusb.py"
+  sed -i "s/FunctionFactoryStub()/None if (lib_path:=os.getenv('LIBUSB_PATH', ctypes.util.find_library('usb-1.0'))) is None else ctypes.CDLL(lib_path)/g" "$BASE/libusb.py"
+  python3 -c "import tinygrad.runtime.autogen.libusb"
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
@@ -548,6 +561,7 @@ elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "pci" ]; then generate_pci
 elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "webgpu" ]; then generate_webgpu
+elif [ "$1" == "libusb" ]; then generate_libusb
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am; generate_webgpu
 else echo "usage: $0 <type>"
 fi

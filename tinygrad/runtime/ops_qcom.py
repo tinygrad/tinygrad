@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typing import Any, cast, ClassVar
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
-from tinygrad.runtime.support.hcq import HWInterface
+from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, adreno
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
@@ -37,8 +37,8 @@ class QCOMCompiler(CLCompiler):
   def disassemble(self, lib:bytes): fromimport('extra.disassemblers.adreno', 'disasm')(lib)
 
 class QCOMSignal(HCQSignal):
-  def __init__(self, base_addr:int|None=None, **kwargs):
-    super().__init__(base_addr, **kwargs, timestamp_divider=19.2, dev_t=QCOMDevice)
+  def __init__(self, base_buf:HCQBuffer|None=None, **kwargs):
+    super().__init__(base_buf, **kwargs, timestamp_divider=19.2, dev_t=QCOMDevice)
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Sleep only for only timeline signals. Do it immediately to free cpu.
@@ -132,7 +132,7 @@ class QCOMComputeQueue(HWQueue):
 
     self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
                                                                state_block=adreno.SB6_CS_SHADER, num_unit=1024 // 4),
-             *data64_le(args_state.ptr))
+             *data64_le(args_state.buf.va_addr))
     self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_SHADER, state_src=adreno.SS6_INDIRECT,
                                                                state_block=adreno.SB6_CS_SHADER, num_unit=round_up(prg.image_size, 128) // 128),
              *data64_le(prg.lib_gpu.va_addr))
@@ -145,21 +145,21 @@ class QCOMComputeQueue(HWQueue):
     if args_state.prg.samp_cnt > 0:
       self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_SHADER, state_src=adreno.SS6_INDIRECT,
                                                                  state_block=adreno.SB6_CS_TEX, num_unit=args_state.prg.samp_cnt),
-               *data64_le(args_state.ptr + args_state.prg.samp_off))
-      self.reg(adreno.REG_A6XX_SP_CS_TEX_SAMP, *data64_le(args_state.ptr + args_state.prg.samp_off))
+               *data64_le(args_state.buf.va_addr + args_state.prg.samp_off))
+      self.reg(adreno.REG_A6XX_SP_CS_TEX_SAMP, *data64_le(args_state.buf.va_addr + args_state.prg.samp_off))
       self.reg(adreno.REG_A6XX_SP_PS_TP_BORDER_COLOR_BASE_ADDR, *data64_le(prg.dev.border_color_buf.va_addr))
 
     if args_state.prg.tex_cnt > 0:
       self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
                                                                  state_block=adreno.SB6_CS_TEX, num_unit=min(16, args_state.prg.tex_cnt)),
-               *data64_le(args_state.ptr + args_state.prg.tex_off))
-      self.reg(adreno.REG_A6XX_SP_CS_TEX_CONST, *data64_le(args_state.ptr + args_state.prg.tex_off))
+               *data64_le(args_state.buf.va_addr + args_state.prg.tex_off))
+      self.reg(adreno.REG_A6XX_SP_CS_TEX_CONST, *data64_le(args_state.buf.va_addr + args_state.prg.tex_off))
 
     if args_state.prg.ibo_cnt > 0:
       self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST6_IBO, state_src=adreno.SS6_INDIRECT,
                                                                  state_block=adreno.SB6_CS_SHADER, num_unit=args_state.prg.ibo_cnt),
-               *data64_le(args_state.ptr + args_state.prg.ibo_off))
-      self.reg(adreno.REG_A6XX_SP_CS_IBO, *data64_le(args_state.ptr + args_state.prg.ibo_off))
+               *data64_le(args_state.buf.va_addr + args_state.prg.ibo_off))
+      self.reg(adreno.REG_A6XX_SP_CS_IBO, *data64_le(args_state.buf.va_addr + args_state.prg.ibo_off))
 
     self.reg(adreno.REG_A6XX_SP_CS_CONFIG,
              qreg.a6xx_sp_cs_config(enabled=True, nsamp=args_state.prg.samp_cnt, ntex=args_state.prg.tex_cnt, nibo=args_state.prg.ibo_cnt))
@@ -168,24 +168,24 @@ class QCOMComputeQueue(HWQueue):
     return self
 
 class QCOMArgsState(HCQArgsState):
-  def __init__(self, ptr:int, prg:QCOMProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
-    super().__init__(ptr, prg, bufs, vals=vals)
+  def __init__(self, buf:HCQBuffer, prg:QCOMProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
+    super().__init__(buf, prg, bufs, vals=vals)
 
     if len(bufs) + len(vals) != len(prg.buf_info): raise RuntimeError(f'incorrect args size given={len(bufs)+len(vals)} != want={len(prg.buf_info)}')
 
-    self.buf_info, self.args_info, self.args_view = prg.buf_info[:len(bufs)], prg.buf_info[len(bufs):], to_mv(ptr, prg.kernargs_alloc_size).cast('Q')
+    self.buf_info, self.args_info = prg.buf_info[:len(bufs)], prg.buf_info[len(bufs):]
 
-    ctypes.memset(self.ptr, 0, prg.kernargs_alloc_size)
-    for cnst_val, cnst_off, cnst_sz in prg.consts_info: to_mv(self.ptr + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
+    ctypes.memset(cast(int, self.buf.va_addr), 0, prg.kernargs_alloc_size)
+    for cnst_val,cnst_off,cnst_sz in prg.consts_info: to_mv(self.buf.va_addr + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
-    if prg.samp_cnt > 0: to_mv(self.ptr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
+    if prg.samp_cnt > 0: to_mv(self.buf.va_addr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     for i, b in enumerate(bufs):
       if prg.buf_info[i].type in {BUFTYPE_TEX, BUFTYPE_IBO}:
         obj = b.texture_info.desc if prg.buf_info[i].type is BUFTYPE_TEX else b.texture_info.ibo
-        to_mv(self.ptr + prg.buf_info[i].offset, len(obj) * 4).cast('I')[:] = array.array('I', obj)
-      self.bind_sints_to_ptr(b.va_addr, ptr=self.ptr + self.buf_info[i].offset + (0 if self.buf_info[i].type is BUFTYPE_BUF else 16), fmt='Q')
+        to_mv(self.buf.va_addr + prg.buf_info[i].offset, len(obj) * 4).cast('I')[:] = array.array('I', obj)
+      self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=self.buf_info[i].offset+(0 if self.buf_info[i].type is BUFTYPE_BUF else 16))
 
-    for i, v in enumerate(vals): self.bind_sints_to_ptr(v, ptr=self.ptr + self.args_info[i].offset, fmt='I')
+    for i, v in enumerate(vals): self.bind_sints_to_buf(v, buf=self.buf, fmt='I', offset=self.args_info[i].offset)
 
 class QCOMProgram(HCQProgram):
   def __init__(self, dev: QCOMDevice, name: str, lib: bytes):
@@ -318,14 +318,14 @@ class QCOMAllocator(HCQAllocatorBase):
 
 class QCOMDevice(HCQCompiled):
   devices: ClassVar[list[HCQCompiled]] = []
-  signal_pages: ClassVar[list[Any]] = []
-  signal_pool: ClassVar[list[int]] = []
+  signal_pages: ClassVar[list[HCQBuffer]] = []
+  signal_pool: ClassVar[list[HCQBuffer]] = []
 
   gpu_id: int = 0
   dummy_addr: int = 0
 
   def __init__(self, device:str=""):
-    self.fd = HWInterface('/dev/kgsl-3d0', os.O_RDWR)
+    self.fd = FileIOInterface('/dev/kgsl-3d0', os.O_RDWR)
     QCOMDevice.dummy_addr = cast(int, self._gpu_alloc(0x1000).va_addr)
 
     flags = kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC \
@@ -360,11 +360,11 @@ class QCOMDevice(HCQCompiled):
     va_addr = self.fd.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, alloc.id * 0x1000)
 
     if fill_zeroes: ctypes.memset(va_addr, 0, size)
-    return HCQBuffer(va_addr=va_addr, size=size, meta=alloc)
+    return HCQBuffer(va_addr=va_addr, size=size, meta=alloc, view=MMIOInterface(va_addr, size, fmt='B'))
 
   def _gpu_free(self, mem:HCQBuffer):
     kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta.id)
-    HWInterface.munmap(mem.va_addr, mem.meta.mmapsize)
+    FileIOInterface.munmap(mem.va_addr, mem.meta.mmapsize)
 
   def _ensure_stack_size(self, sz):
     if not hasattr(self, '_stack'): self._stack = self._gpu_alloc(sz)

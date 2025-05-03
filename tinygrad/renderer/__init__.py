@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Callable
+from typing import Optional, Callable, cast
 import functools, math
 from enum import Enum, auto
 from dataclasses import dataclass, field, replace
@@ -62,16 +62,16 @@ class Estimates:
     if ignore_indexing:
       for u in uops:
         if u.op in {Ops.LOAD, Ops.STORE}:
-          dont_count = dont_count.union(u.src[0].toposort)
-          if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort)
+          dont_count = dont_count.union(u.src[0].toposort())
+          if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort())
         elif u.op is Ops.IF:
-          dont_count = dont_count.union(u.src[0].toposort)
+          dont_count = dont_count.union(u.src[0].toposort())
     for u in uops:
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
-        mults *= (u.src[1] - u.src[0]).ssimplify()
+        mults *= cast(sint, u.src[0].ssimplify())
         # SPECIAL are already counted in mults
-        mults = mults.substitute({x:x.const_like(0) for x in mults.toposort if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
+        mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op is Ops.ENDRANGE: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
       elif u.op is Ops.LOAD: lds += u.dtype.itemsize * mults
@@ -105,8 +105,8 @@ class ProgramSpec:
       for u in self.uops:
         if u.op is Ops.DEFINE_VAR: self.vars.append(u)
         if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
-        if u.op is Ops.STORE: self.outs.extend([x.arg for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL])
-        if u.op is Ops.LOAD: self.ins.extend([x.arg for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL])
+        if u.op is Ops.STORE: self.outs.extend([x.arg for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL])
+        if u.op is Ops.LOAD: self.ins.extend([x.arg for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL])
         if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0][0] == 'i': self.local_size = None

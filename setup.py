@@ -14,6 +14,7 @@ testing_minimal = [
   "pytest-xdist",
   "hypothesis==6.131.0",
   "z3-solver",
+  "ml_dtypes"
 ]
 
 setup(name='tinygrad',
@@ -44,7 +45,7 @@ setup(name='tinygrad',
             "ruff",
             "numpy",
         ],
-        #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@5.0.0-rc1"],
+        #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@5.0.0-rc3"],
         'testing_minimal': testing_minimal,
         'testing_unit': testing_minimal + [
             "tqdm",
