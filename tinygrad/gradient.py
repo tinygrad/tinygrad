@@ -60,7 +60,7 @@ def compute_gradient_for_expand(expand_node:UOp, grad_ctx:UOp) -> UOp|None:
   targets = set(cast_after_expand.src)
   gradient_dict = compute_gradient(cast_before_expand, grad_ctx, targets)
   return gradient_dict[list(targets)[0]]
-  
+
 def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
   grads = {root: root_grad}
   for t0 in reversed(_deepwalk(root, targets)):
