@@ -15,7 +15,7 @@ class TestConvShapetracker(unittest.TestCase):
     # run it again to get the kernels
     sched = [si for si in conv(Tensor.empty(1, 16, 10, 10)).schedule() if si.ast.op is Ops.SINK]
     assert len(sched) == 1, f"conv should only have one kernel, getting {len(sched)}"
-    for st in [x.st_arg for x in sched[0].ast.toposort if x.op is Ops.LOAD]:
+    for st in [x.st_arg for x in sched[0].ast.toposort() if x.op is Ops.LOAD]:
       assert len(st.views) == 1
 
   def test_conv_2x2_backward_one_view(self):
@@ -24,7 +24,7 @@ class TestConvShapetracker(unittest.TestCase):
     conv(X).mean().backward()
     si = X.grad.schedule()[-1]
     print(si)
-    ldb = [x for x in si.ast.toposort if x.op is Ops.LOAD][0]
+    ldb = [x for x in si.ast.toposort() if x.op is Ops.LOAD][0]
     st: ShapeTracker = ldb.st_arg.simplify()
     print(si.bufs[1].size)
     self.assertEqual(si.bufs[1].size, st.real_size())

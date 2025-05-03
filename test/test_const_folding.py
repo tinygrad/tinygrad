@@ -3,10 +3,10 @@ from typing import Any
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
 from tinygrad.ops import Ops, UOp
-from tinygrad.helpers import CI
 from tinygrad.codegen.devectorizer import full_graph_rewrite
 import numpy as np
 from tinygrad.device import is_dtype_supported
+from test.helpers import not_support_multi_device
 
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
@@ -246,7 +246,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
         t = Tensor.ones(16, dtype=dt).reshape(4, 4)
         assert t.sum().dtype == t.contiguous().sum().dtype
 
-@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+@unittest.skipIf(not_support_multi_device(), "no multi")
 class TestMultiConstFolding(unittest.TestCase):
   def test_multi_const_folding_literal(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))

@@ -12,6 +12,8 @@ function intersectRect(r1, r2) {
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
 
+const rect = (s) => document.querySelector(s).getBoundingClientRect();
+
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
@@ -36,7 +38,7 @@ async function renderDag(graph, additions, recenter=false) {
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`);
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style);
+      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => "rx:8; ry:8; stroke:#4a4b57; stroke-width:1.4px;"+d.style);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2;
@@ -52,6 +54,25 @@ async function renderDag(graph, additions, recenter=false) {
       points.push(intersectRect(g.node(e.w), points[points.length-1]));
       return line(points);
     }).attr("marker-end", "url(#arrowhead)");
+    const edgeLabels = d3.select("#edge-labels").selectAll("g").data(g.edges().filter(e => g.edge(e).label != null)).join("g").attr("transform", (e) => {
+      // get a point near the end
+      const [p1, p2] = g.edge(e).points.slice(-2);
+      const dx = p2.x-p1.x;
+      const dy = p2.y-p1.y;
+      // normalize to the unit vector
+      const len = Math.sqrt(dx*dx + dy*dy);
+      const ux = dx / len;
+      const uy = dy / len;
+      // avoid overlap with the arrowhead
+      const offset = 17;
+      const x = p2.x - ux * offset;
+      const y = p2.y - uy * offset;
+      return `translate(${x}, ${y})`
+    });
+    edgeLabels.selectAll("circle").data(e => [g.edge(e).label]).join("circle").attr("r", 5).attr("fill", "#FFD700").attr("stroke", "#B8860B")
+      .attr("stroke-width", 0.8);
+    edgeLabels.selectAll("text").data(e => [g.edge(e).label]).join("text").text(d => d).attr("text-anchor", "middle").attr("dy", "0.35em").
+      attr("font-size", "6px").attr("fill", "black");
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
 
@@ -188,18 +209,18 @@ function renderMemoryGraph(graph) {
 
 // ** zoom and recentering
 
-const zoom = d3.zoom().scaleExtent([0.05, 2]).on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
+const zoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
 d3.select("#graph-svg").call(zoom);
 // zoom to fit into view
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const svg = d3.select("#graph-svg");
   svg.call(zoom.transform, d3.zoomIdentity);
-  const mainRect = document.querySelector(".main-container").getBoundingClientRect();
-  const x0 = document.querySelector(".kernel-list-parent").getBoundingClientRect().right;
-  const x1 = document.querySelector(".metadata").getBoundingClientRect().left;
+  const mainRect = rect(".main-container");
+  const x0 = rect(".kernel-list-parent").right;
+  const x1 = rect(".metadata").left;
   const pad = 16;
   const R = { x: x0+pad, y: mainRect.top+pad, width: (x1>0 ? x1-x0 : mainRect.width)-2*pad, height: mainRect.height-2*pad };
-  const r = document.querySelector("#render").getBoundingClientRect();
+  const r = rect("#render");
   if (r.width === 0) return;
   const scale = Math.min(R.width/r.width, R.height/r.height);
   const [tx, ty] = [R.x+(R.width-r.width*scale)/2, R.y+(R.height-r.height*scale)/2];
@@ -276,6 +297,7 @@ async function main() {
       const inner = ul.appendChild(document.createElement("ul"));
       if (i === currentKernel && j === currentUOp) inner.className = "active";
       inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]} - ${u.match_count}`;
+      inner.style.marginLeft = `${8*u.depth}px`;
       inner.style.display = i === currentKernel && expandKernel ? "block" : "none";
       inner.onclick = (e) => {
         e.stopPropagation();
@@ -351,10 +373,9 @@ async function main() {
 // **** collapse/expand
 
 let isCollapsed = false;
-const mainContainer = document.querySelector('.main-container');
 document.querySelector(".collapse-btn").addEventListener("click", (e) => {
   isCollapsed = !isCollapsed;
-  mainContainer.classList.toggle("collapsed", isCollapsed);
+  document.querySelector(".main-container").classList.toggle("collapsed", isCollapsed);
   e.currentTarget.blur();
   e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
 });
@@ -372,7 +393,7 @@ function appendResizer(element, { minWidth, maxWidth }, left=false) {
   handle.addEventListener("mousedown", (e) => {
     e.preventDefault();
     element.dataset.startX = e.clientX;
-    element.dataset.containerWidth = mainContainer.getBoundingClientRect().width;
+    element.dataset.containerWidth = rect(".main-container").width;
     element.dataset.startWidth = element.getBoundingClientRect().width;
     document.documentElement.addEventListener("mousemove", resize, false);
     document.documentElement.addEventListener("mouseup", () => {
@@ -425,6 +446,7 @@ document.addEventListener("keydown", async function(event) {
     return setState({ currentRewrite:Math.min(totalRewrites, currentRewrite+1) });
   }
   if (event.key == " ") {
+    event.preventDefault()
     document.getElementById("zoom-to-fit-btn").click();
   }
 });

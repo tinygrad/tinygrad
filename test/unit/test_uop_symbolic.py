@@ -332,6 +332,9 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("a", 0, 5)+4)//4, 1, 2, "((a//4)+1)")
     self.helper_test_variable((Variable("a", 0, 5)+5)//4, 1, 2, "(((a+1)//4)+1)")
 
+  def test_div_neg_rem(self):
+    self.helper_test_variable((-Variable("a", 0, 255)+256)//2, 0, 128, "((((a+1)//2)*-1)+128)")
+
   def test_mul_div_factor_mul(self):
     self.helper_test_variable((Variable("a", 0, 10)*8)//4, 0, 20, "(a*2)")
 
@@ -461,6 +464,11 @@ class TestSymbolic(unittest.TestCase):
     unrolled_div = (gidx+2561)//4+(gidx+2562)//4+(gidx+2560)//4+(gidx+2559)//4
     self.helper_test_variable(unrolled_div, 2559, 5118, "(gidx+2559)")
 
+  def test_arange_unrolled4_mul(self):
+    gidx = Variable("gidx", 0, 2559)
+    unrolled_div = 2*((gidx+2561)//4)+2*((gidx+2562)//4)+2*((gidx+2560)//4)+2*((gidx+2559)//4)
+    self.helper_test_variable(unrolled_div, 5118, 10236, "((gidx*2)+5118)")
+
   def test_arange_unrolled4_small(self):
     gidx = Variable("gidx", 0, 3)
     unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
@@ -478,6 +486,11 @@ class TestSymbolic(unittest.TestCase):
     gidx = Variable("gidx", 0, 2559)
     unrolled_div = (gidx+2559)//2+(gidx+2560)//2+3
     self.helper_test_variable(unrolled_div, 2562, 5121, "(gidx+2562)")
+
+  def test_arange_unrolled2_neg(self):
+    ridx = Variable("ridx", 0, 255)
+    unrolled_div = -((255-ridx)//2) - ((256-ridx)//2)
+    self.helper_test_variable(unrolled_div, -255, 0, "(ridx+-255)")
 
   def test_gated_load(self):
     idx = Variable("idx", 0, 24)
@@ -534,6 +547,13 @@ class TestSymbolic(unittest.TestCase):
     # not combining  # TODO: can combine if one is identity element const
     self.helper_test_variable(aa+ab, 0, 6, "((a if (x<2) else b)+(a if (x<2) else 0))")
 
+  def test_negation_in_where(self):
+    cond = Variable("x", 0, 3) < 2
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    w = cond.logical_not().where(a, b)
+    self.helper_test_variable(w, 0, 3, "(b if (x<2) else a)")
+
   def test_where_cast(self):
     s = Variable("s", 0, 3)
     cond = s < 2
@@ -547,6 +567,23 @@ class TestSymbolic(unittest.TestCase):
     rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[-1]
 
     self.assertEqual(rewritten_uop, cond.where(a.cast(dtypes.half), b.cast(dtypes.half)))
+
+  def test_where_merge_branches(self):
+    cond1 = Variable("s", 0, 10) < 6
+    cond2 = Variable("s", 0, 10) > 2
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    expr = cond1.where(cond2.where(a, b), b)
+    self.helper_test_variable(expr, 0, 3, "(a if ((s<6)&(2<s)) else b)")
+
+  def test_where_merge_branches2(self):
+    cond1 = Variable("s", 0, 10) < 5
+    cond2 = Variable("s", 0, 10) < 6
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    expr = cond1.where(cond2.where(a, b), b)
+    # (a if ((s<5)&(s<6)) else b) -> (a if (s<5) else b)
+    self.helper_test_variable(expr, 0, 3, "(a if (s<5) else b)")
 
   def test_symbolic_div(self):
     # from symbolic arange
