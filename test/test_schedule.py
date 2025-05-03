@@ -1727,7 +1727,7 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10)
     out = (x + a[2]).sum()
-    self.check_schedule(out, 2)
+    self.check_schedule(out, 1)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   @unittest.skip("TOOD: FUSE_ARANGE overrules Tensor.arange().contiguous()")
@@ -1744,7 +1744,7 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10)+1
     out = (x + a[2]).sum()
-    self.check_schedule(out, 2)
+    self.check_schedule(out, 1)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   @unittest.skip("TOOD: FUSE_ARANGE overrules Tensor.arange().contiguous()")
