@@ -38,7 +38,7 @@ async function renderDag(graph, additions, recenter=false) {
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`);
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => "rx:8; ry:8; stroke:#4a4b57; stroke-width:1.4px;"+d.style);
+      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => "stroke:#4a4b57; stroke-width:1.4px;"+d.style);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2;
@@ -71,8 +71,8 @@ async function renderDag(graph, additions, recenter=false) {
     });
     edgeLabels.selectAll("circle").data(e => [g.edge(e).label]).join("circle").attr("r", 5).attr("fill", "#FFD700").attr("stroke", "#B8860B")
       .attr("stroke-width", 0.8);
-    edgeLabels.selectAll("text").data(e => [g.edge(e).label]).join("text").text(d => d).attr("text-anchor", "middle").attr("dy", "0.35em").
-      attr("font-size", "6px").attr("fill", "black");
+    edgeLabels.selectAll("text").data(e => [g.edge(e).label]).join("text").text(d => d).attr("text-anchor", "middle").attr("dy", "0.35em")
+      .attr("font-size", "6px").attr("fill", "black");
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
 
@@ -412,31 +412,28 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 document.addEventListener("keydown", async function(event) {
   const { currentKernel, currentUOp, currentRewrite, expandKernel } = state;
   // up and down change the UOp or kernel from the list
-  if (!expandKernel) {
-    if (event.key == "ArrowUp") {
-      event.preventDefault()
-      return setState({ currentUOp:0, currentRewrite:0, currentKernel:Math.max(0, currentKernel-1) });
+  if (event.key == "ArrowUp") {
+    event.preventDefault();
+    if (expandKernel) {
+      return setState({ currentRewrite:0, currentUOp:Math.max(0, currentUOp-1) });
     }
-    if (event.key == "ArrowDown") {
-      event.preventDefault()
-      return setState({ currentUOp:0, currentRewrite:0, currentKernel:Math.min(kernels.length-1, currentKernel+1) });
-    }
+    return setState({ currentUOp:0, currentRewrite:0, currentKernel:Math.max(0, currentKernel-1) });
   }
+  if (event.key == "ArrowDown") {
+    event.preventDefault();
+    if (expandKernel) {
+      const totalUOps = kernels[currentKernel][1].length-1;
+      return setState({ currentRewrite:0, currentUOp:Math.min(totalUOps, currentUOp+1) });
+    }
+    return setState({ currentUOp:0, currentRewrite:0, currentKernel:Math.min(kernels.length-1, currentKernel+1) });
+  }
+  // enter toggles focus on a single rewrite stage
   if (event.key == "Enter") {
     event.preventDefault()
     if (state.currentKernel === -1) {
       return setState({ currentKernel:0, expandKernel:true });
     }
     return setState({ currentUOp:0, currentRewrite:0, expandKernel:!expandKernel });
-  }
-  if (event.key == "ArrowUp") {
-    event.preventDefault()
-    return setState({ currentRewrite:0, currentUOp:Math.max(0, currentUOp-1) });
-  }
-  if (event.key == "ArrowDown") {
-    event.preventDefault()
-    const totalUOps = kernels[currentKernel][1].length-1;
-    return setState({ currentRewrite:0, currentUOp:Math.min(totalUOps, currentUOp+1) });
   }
   // left and right go through rewrites in a single UOp
   if (event.key == "ArrowLeft") {
@@ -448,6 +445,7 @@ document.addEventListener("keydown", async function(event) {
     const totalRewrites = ret.length-1;
     return setState({ currentRewrite:Math.min(totalRewrites, currentRewrite+1) });
   }
+  // space recenters the graph
   if (event.key == " ") {
     event.preventDefault()
     document.getElementById("zoom-to-fit-btn").click();
