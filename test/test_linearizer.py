@@ -1056,7 +1056,6 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if CI and getenv("AMD_LLVM") and tc.dtype_in is dtypes.bfloat16: continue # TODO: compilation error in CI
       if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
       # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
       helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
@@ -1064,7 +1063,6 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_emulation(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if CI and getenv("AMD_LLVM") and tc.dtype_in is dtypes.bfloat16: continue # TODO: compilation error in CI
       if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
       # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
       helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0, use_tensor_cores=3)
@@ -1086,6 +1084,8 @@ class TestLinearizer(unittest.TestCase):
         assert "0x201000" in prg.src
       elif Device.DEFAULT == "AMD" and getenv("AMD_LLVM", 0):
         assert "@llvm.amdgcn.wmma" in prg.src
+      elif Device[Device.DEFAULT].renderer.suffix == "PTX":
+        assert "mma.sync.aligned" in prg.src
       else:
         assert "__WMMA_" in prg.src
 
@@ -1103,7 +1103,6 @@ class TestLinearizer(unittest.TestCase):
   @unittest.expectedFailure
   def test_tensor_cores_padded_amd(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if CI and getenv("AMD_LLVM") and tc.dtype_in is dtypes.bfloat16: continue # TODO: compilation error in CI
       if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
       helper_tc_allclose(tc.dims[0]+(pad:=1), tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
 

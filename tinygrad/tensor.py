@@ -292,7 +292,6 @@ class Tensor(SimpleMathTrait):
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
     assert not x.requires_grad  # self requires_grad is okay?
-    if not self.lazydata.is_realized: return self.replace(x.contiguous())
     self.lazydata = self.lazydata.assign(x.lazydata)
     return self
 
@@ -1118,13 +1117,18 @@ class Tensor(SimpleMathTrait):
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
         case slice():
           if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
-          if not all(isinstance(s,int) or s is None for s in (index.start,index.stop,index.step)): raise TypeError("only int slicing is supported")
-          # handle int slicing
-          *boundary, stride = index.indices(cast(SupportsIndex, size))
-          if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
-          elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
-          # update size for slice
-          size = ceildiv((boundary[1] - boundary[0]), abs(stride))
+          if all(isinstance(s, int) or s is None for s in (index.start,index.stop,index.step)):
+            # handle int slicing
+            *boundary, stride = index.indices(cast(SupportsIndex, size))
+            if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
+            elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
+            # update size for slice
+            size = ceildiv((boundary[1] - boundary[0]), abs(stride))
+          elif index.step is None and all(isinstance(s,(int,UOp))for s in (index.start,index.stop)) and resolve((index.stop-index.start) > 0, False):
+            # simple symbolic slice
+            boundary = [index.start, index.stop]
+            size = (index.stop - index.start).ssimplify()
+          else: raise TypeError(f"slice {index=} is not supported")
         case None: pass # do nothing
         case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
       indices_parsed.append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})

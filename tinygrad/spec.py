@@ -1,7 +1,7 @@
 from typing import cast, Callable
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, resolve
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
-from tinygrad.helpers import all_same, prod, DEBUG, IGNORE_OOB
+from tinygrad.helpers import all_same, prod, DEBUG, IGNORE_OOB, Context
 try:
   import z3
 
@@ -48,9 +48,8 @@ assign_spec = PatternMatcher([
   # KERNEL can attach to an ASSIGN to describe the compute required to realize a BUFFER
   (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN)), name="k"), validate_kernel),
 
-  # ASSIGN has a target buffer and a value. It can also optionally depend on other assigns
-  (UPat(Ops.ASSIGN, name="x"),
-   lambda x: x.src[0].base.op in {Ops.BUFFER, Ops.BUFFER_VIEW} and (len(x.src) == 2 or all(s.op is Ops.ASSIGN for s in x.src[2:]))),
+  # ASSIGN has a target and a value. It can also optionally depend on other assigns
+  (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
 ])
 
 # *** this is the spec of a Tensor in UOp ***
@@ -62,7 +61,7 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
    # "make things that can't be images not images" can change the buffer dtype
    # this is fine as long as it's a realized buffer and base dtypes match.
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.base.op is Ops.BUFFER)),
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.CONST, Ops.DEVICE}),)), lambda: False),
+  (UPat(Ops.VIEW, src=(UPat.var("x"),)), lambda x: x.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.CONST, Ops.DEVICE}),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
@@ -78,7 +77,7 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
 
   # COPY
   # NOTE: the arg here specifies clone=True, which prevents folding same device copy
-  (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("x"))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
+  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
 ])
 
 # ***** uop type spec *****
@@ -210,6 +209,7 @@ shape_spec = PatternMatcher([
 def type_verify(uops:list[UOp], extra_spec:PatternMatcher|None=None):
   check_spec = (extra_spec+spec) if extra_spec is not None else spec
   for i,u in enumerate(uops):
-    if cast(bool|None, check_spec.rewrite(u)) is not True:
+    with Context(TRACK_MATCH_STATS=0): ret = check_spec.rewrite(u)
+    if cast(bool|None, ret) is not True:
       if DEBUG >= 3: print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
