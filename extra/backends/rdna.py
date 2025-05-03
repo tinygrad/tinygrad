@@ -5,10 +5,12 @@ from operator import add, mul
 import yaml
 
 from tinygrad.device import Compiler
-from tinygrad.helpers import temp
+from tinygrad.helpers import getenv, temp
 from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.ops import Ops, UOp, PatternMatcher, UPat, DType, GroupOp
 from tinygrad.dtype import dtypes
+
+DEBUG = getenv("DEBUG")
 
 def asm_emulated_mod(ctx, d, a, b, dt, name) -> List[str]:
   t0, t1, t2 = ctx.tmpv[:3]
@@ -24,9 +26,9 @@ def asm_emulated_mod(ctx, d, a, b, dt, name) -> List[str]:
     raise NotImplementedError
 
 def render_where(ctx, d, a, b, c, dt, name) -> List[str]:
-    if a == "vcc":
-        return [f"v_cndmask_b32 {d}, {c}, {b}"]
-    return [f"v_cmp_neq_b32 {a}, 0", f"v_cndmask_b32 {d}, {c}, {b}"]
+  if a == "vcc":
+    return [f"v_cndmask_b32 {d}, {c}, {b}"]
+  return [f"v_cmp_neq_b32 {a}, 0", f"v_cndmask_b32 {d}, {c}, {b}"]
 
 asm_for_op: Dict[Tuple[Ops, ...], Callable] = {
   (Ops.RECIP,): lambda ctx, d, a, dt, name: f"v_rcp_{name} {d}, {a}",
@@ -102,15 +104,39 @@ def render_addr_calc(ctx, base_ptr, offset_reg, dt) -> Tuple[List[str], str, str
 def is_smem_load(x):
   return any(_x.op is Ops.DEFINE_LOCAL for _x in x.src[0].toposort)
 
+def render_add_64(ctx, dst, val: int) -> List[str]:
+  instructions = []
+
+  base_lo, base_hi = get_regs_contained(dst)
+  tmp = ctx.tmpv[0]
+
+  # Reset overflow
+  instructions.append("s_mov_b64 vcc, 0")
+
+  instructions.append(f"v_mov_b32 {tmp}, {val}")
+  # Add low 32-bits: addr_lo = base_lo + offset
+  instructions.append(f"v_add_co_ci_u32 {base_lo}, {base_lo}, {tmp}")
+
+  # Add high 32-bits: addr_hi = base_hi + carry
+  if base_hi[0] == "s":
+    instructions.append(f"v_mov_b32 {tmp}, {base_hi}")
+    base_hi = tmp
+
+  instructions.append(f"v_add_co_ci_u32 {base_hi}, 0, {base_hi}")
+
+  return instructions
+
+
 def render_load(ctx, d, ptr, offset, dt, smem) -> List[str]:
   def load_instruction(load_type, reg, addr):
-    return f"{load_type} {reg}, {addr} offset:0x8" # offset: cannot be used with v registers. not sure what is the path of least resistance
+    return f"{load_type} {reg}, {addr} off"
 
   load_bits = max(int(ctx.types[dt.scalar()][1:]) * dt.count, 32)
   load_type = "ds_load_b" if smem else "global_load_b"
 
   addr_setup_ins = []
   tmp_addr_base = ctx.tmpv[0]
+  addr_reg_base: str
 
   if len(get_reg_range(ctx.r[ptr])) == 2:
     base_addr_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, ctx.r[offset], offset.dtype)
@@ -127,19 +153,20 @@ def render_load(ctx, d, ptr, offset, dt, smem) -> List[str]:
 
     for i in range(full_chunks):
       reg_slice = slice_reg(d, i * 4, (i + 1) * 4 - 1)
-      addr_tmp = render_reg_range(ctx.tmpv[:2])
-      offset_val = i * 16
-      addr_setup_ins.append(f"v_add_u32 {get_regs_contained(addr_tmp)[0]}, {get_regs_contained(addr_reg_base)[0]}, {offset_val}") # doesn't mov the other part of the address adjacent
-      load_ins.append(load_instruction(f"{load_type}64", reg_slice, addr_tmp))
+      offset_val = 16
+      load_ins.extend(render_add_64(ctx, addr_reg_base, offset_val))
+      load_ins.append(load_instruction(f"{load_type}128", reg_slice, addr_reg_base))
 
     if remaining_bytes > 0:
       regs_used = full_chunks * 4
       rem_regs = remaining_bytes // dt.scalar().itemsize
       reg_slice = slice_reg(d, regs_used, regs_used + rem_regs)
-      addr_tmp = ctx.tmpv[2]
-      offset_val = full_chunks * 16
-      addr_setup_ins.append(f"v_add_u32 {addr_tmp}, {addr_reg_base}, {offset_val}")
-      load_ins.append(load_instruction(f"{load_type}{remaining_bytes // 4 * 8}", reg_slice, addr_tmp))
+      offset_val = 16
+      if len(get_regs_contained(addr_reg_base)) == 2:
+        load_ins.extend(render_add_64(ctx, addr_reg_base, offset_val))
+      else:
+        load_ins.append(f"v_add_u32 {addr_reg_base}, {offset_val}")
+      load_ins.append(load_instruction(f"{load_type}{remaining_bytes // 4 * 8}", reg_slice, addr_reg_base))
 
     return addr_setup_ins + load_ins
 
@@ -147,42 +174,41 @@ def render_load(ctx, d, ptr, offset, dt, smem) -> List[str]:
   return addr_setup_ins + load_ins
 
 def render_store(ctx, x, ptr, offset, val) -> List[str]:
-    store_bits = max(int(ctx.types[val.dtype.scalar()][1:]) * x.dtype.count, 32)
-    
-    addr_setup_ins = []
-    if len(get_reg_range(ctx.r[ptr])) == 2:
-        base_addr_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, ctx.r[offset], offset.dtype)
-        addr_setup_ins += base_addr_ins
-        addr_reg_base = render_reg_range([addr_lo_v, addr_hi_v])
-    else:
-        addr_setup_ins.append(f"v_add_u32 {ctx.tmpv[0]}, {ctx.r[ptr]}, {ctx.r[offset]}")
-        addr_reg_base = ctx.tmpv[0]
+  store_bits = max(int(ctx.types[val.dtype.scalar()][1:]) * x.dtype.count, 32)
 
-    store_ins = []
-    if val.dtype.count > 1:
-        full_chunks = val.dtype.itemsize // 8
-        remaining_bytes = val.dtype.itemsize % 8
+  addr_setup_ins = []
+  if len(get_reg_range(ctx.r[ptr])) == 2:
+    base_addr_ins, addr_lo_v, addr_hi_v = render_addr_calc(ctx, ptr, ctx.r[offset], offset.dtype)
+    addr_setup_ins += base_addr_ins
+    addr_reg_base = render_reg_range([addr_lo_v, addr_hi_v])
+  else:
+    addr_setup_ins.append(f"v_add_u32 {ctx.tmpv[0]}, {ctx.r[ptr]}, {ctx.r[offset]}")
+    addr_reg_base = ctx.tmpv[0]
 
-        for i in range(full_chunks):
-          reg_slice = slice_reg(ctx.r[val], i * 2, (i + 1) * 2 - 1)
-          addr_tmp = render_reg_range(ctx.tmpv[:2])
-          addr_lo = get_regs_contained(addr_tmp)[0]
-          offset_val = 8
-          addr_setup_ins.append(f"v_add_u32 {addr_lo}, {get_regs_contained(addr_reg_base)[0]}, {offset_val}")
-          store_ins.append(f"global_store_b64 {addr_tmp}, {reg_slice} off 8")
+  store_ins = []
+  if val.dtype.count > 1:
+    full_chunks = val.dtype.itemsize // 8
+    remaining_bytes = val.dtype.itemsize % 8
 
-        if remaining_bytes > 0:
-            regs_used = full_chunks * 2
-            rem_regs = remaining_bytes // val.dtype.scalar().itemsize
-            reg_slice = slice_reg(x, regs_used, regs_used + rem_regs)
-            addr_tmp = ctx.tmpv[2]
-            offset_val = 8
-            addr_setup_ins.append(f"v_add_u32 {addr_tmp}, {addr_reg_base}, {offset_val}") # this could overflow. I should write a render_add_64
-            store_ins.append(f"global_store_b{remaining_bytes // 4 * 8} {addr_tmp}, {reg_slice} off")
-    else:
-        store_ins.append(f"global_store_b{store_bits} {addr_reg_base}, {ctx.r[val]} off")
-    
-    return addr_setup_ins + store_ins
+    for i in range(full_chunks):
+      reg_slice = slice_reg(ctx.r[val], i * 2, (i + 1) * 2 - 1)
+      addr_tmp = render_reg_range(ctx.tmpv[:2])
+      offset_val = 8
+      store_ins.extend(render_add_64(ctx, addr_reg_base, offset_val))
+      store_ins.append(f"global_store_b64 {addr_tmp}, {reg_slice} off")
+
+    if remaining_bytes > 0:
+      regs_used = full_chunks * 2
+      rem_regs = remaining_bytes // val.dtype.scalar().itemsize
+      reg_slice = slice_reg(x, regs_used, regs_used + rem_regs)
+      addr_tmp = ctx.tmpv[2]
+      offset_val = 8
+      store_ins.extend(render_add_64(ctx, addr_reg_base, offset_val))
+      store_ins.append(f"global_store_b{remaining_bytes // 4 * 8} {addr_tmp}, {reg_slice} off")
+  else:
+    store_ins.append(f"global_store_b{store_bits} {addr_reg_base}, {ctx.r[val]} off")
+
+  return addr_setup_ins + store_ins
 
 def render_const_mod(ctx, d, val, modulus) -> List[str]:
   if not dtypes.is_unsigned(val.dtype):
@@ -196,10 +222,9 @@ def render_const_mod(ctx, d, val, modulus) -> List[str]:
 
   m, r = two_to_n // divisor, two_to_n % divisor
   if r >= divisor // 2:
-      m += 1
+    m += 1
 
   t0, t1, t2 = ctx.tmpv[:3]
-  
 
   return [
     f"v_mul_hi_u32 {t0}, {ctx.r[val]}, {m}",
@@ -246,7 +271,7 @@ rdna3_rewrite = PatternMatcher([
 
   (UPat(Ops.MULACC, name="x"),
     lambda ctx, x: asm_for_op[(Ops.MULACC,)](ctx, ctx.r[x.src[0]], ctx.r[x.src[1]], ctx.r[x.src[2]], x.dtype, ctx.types[x.dtype])),
-  
+
   # only local idx
   (UPat(Ops.SPECIAL, name="x"),
     lambda ctx, x: [
@@ -265,7 +290,7 @@ rdna3_rewrite = PatternMatcher([
 
   (UPat(Ops.MOD, name="x"),
     lambda ctx, x: asm_for_op[(Ops.MOD,)](ctx, ctx.r[x], ctx.r[x.src[0]], ctx.r[x.src[1]], x.dtype, ctx.types[x.dtype])),
-  
+
   (UPat(Ops.LOAD, name="x", src=(UPat.var("ptr"), UPat.var("offset"))), lambda ctx, x, ptr, offset:
     render_load(ctx, ctx.r[x], ptr, offset, x.dtype, is_smem_load(x))
   ),
@@ -273,7 +298,7 @@ rdna3_rewrite = PatternMatcher([
   (UPat(Ops.STORE, name="x", src=(UPat.var("ptr"), UPat.var("offset"), UPat.var("val"))),
    lambda ctx, x, ptr, offset, val: render_store(ctx, x, ptr, offset, val)),
 
-  (UPat(Ops.ASSIGN, name="x"), 
+  (UPat(Ops.ASSIGN, name="x"),
    lambda ctx, x: f"v_mov_b{ctx.types[x.dtype][1:] * x.dtype.count} {ctx.r[x.src[0]]}, {ctx.r[x.src[1]]}"),
 
   (UPat(Ops.RANGE, name="x"),
@@ -300,7 +325,7 @@ rdna3_rewrite = PatternMatcher([
     f"LABEL_ELSE_{ctx.r[x.src[0].src[0]][1:]}:",
    ]),
 
-  (UPat(Ops.ENDRANGE, name="x", src=(UPat.var("src0"),)), 
+  (UPat(Ops.ENDRANGE, name="x", src=(UPat.var("src0"),)),
    lambda ctx, x, src0: [
        asm_for_op[(Ops.ADD,)](ctx, ctx.r[src0], ctx.r[src0], "1", dtypes.int, ctx.types[dtypes.int]),
        asm_for_op[(Ops.CMPLT,)](ctx, ctx.r[src0], ctx.r[src0], ctx.l[src0], dtypes.int, ctx.types[dtypes.int]),
@@ -503,6 +528,8 @@ class RDNACompiler(Compiler):
     super().__init__(f"compile_{cache_key}_{self.arch}")
 
   def compile(self, src:str) -> bytes:
+    if DEBUG >= 4:
+      print(src)
     code, obj = temp("code"), temp("obj")
     with open(code, "w") as f: f.write(src)
     subprocess.run(["llvm-mc", "--arch=amdgcn", f"--mcpu={self.arch}", "--triple=amdgcn-amd-amdhsa", "-filetype=obj", "-o", obj, code])
@@ -628,7 +655,7 @@ def test_uniform_conditional():
     val_then = UOp(Ops.CONST, dtypes.float32, (), 1.0)
     store_then = UOp(Ops.STORE, dtypes.float32, (gC, c0, val_then))
     endif = UOp(Ops.ENDIF, dtypes.void, (if_op,))
-    
+
     uops += [lidx0, gC, c0, v, pred, if_op, val_then, store_then, endif]
 
     exe = compiler.compile(renderer.render(uops))
@@ -675,11 +702,11 @@ def test_wmma_matmul():
   c_vec = UOp(Ops.LOAD, dtypes.float32.vec(8), (gC, c_offset))
   uops += [a_vec, b_vec, c_vec]
 
-  # wmma = UOp(Ops.WMMA, dtypes.float32.vec(8), (a_vec, b_vec, c_vec), (None, shape, dtypes.half, dtypes.float32))
-  # uops += [wmma]
+  wmma = UOp(Ops.WMMA, dtypes.float32.vec(8), (a_vec, b_vec, c_vec), (None, shape, dtypes.half, dtypes.float32))
+  uops += [wmma]
 
-  # store = UOp(Ops.STORE, dtypes.void, (gD, c_offset, wmma))
-  # uops += [store]
+  store = UOp(Ops.STORE, dtypes.void, (gD, c_offset, wmma))
+  uops += [store]
 
   # Compile and run
   exe = compiler.compile(renderer.render(uops))
