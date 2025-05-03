@@ -193,6 +193,17 @@ class WebGpuAllocator(Allocator):
   def _free(self, opaque:WGPUBufPtr, options:BufferSpec):
     webgpu.wgpuBufferDestroy(opaque)
 
+# TODO: handle 4-byte alignment
+#if src.nbytes % 4: pad_src = f"const padded = new Uint8Array({src}.length + (4 - {src}.length % 4) % 4); padded.set({src});"
+def js_alloc(size:int, usage:str) -> str: return f"device.createBuffer({{size: {round_up(size, 4)}, usage: {usage}}})"
+
+# NOTE: dest/src names are resolved by tinygrad.renderer.graph.GraphRenderer
+def js_copyin(sdest:str, src:str) -> str: return f"device.queue.writeBuffer({dest}, 0, {src});"
+def js_copyout(dest:str, src:str) -> str:
+  return f"""await {src}.mapAsync(GPUMapMode.READ);
+{dest}.set(new {dest}.constructor({src}.getMappedRange()));
+{src}.unmap();"""
+
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
     # Requesting an adapter
@@ -226,25 +237,10 @@ class WebGpuDevice(Compiled):
     _run(webgpu.wgpuQueueOnSubmittedWorkDone2, webgpu.WGPUQueueWorkDoneCallbackInfo2, webgpu.WGPUQueueWorkDoneCallback2,
     webgpu.WGPUQueueWorkDoneStatus__enumvalues, None, None, webgpu.wgpuDeviceGetQueue(self.runtime.args[0][0]))
 
-# Mirror the above runtime, but instead of executing the dawn C API commands, render JavaScript API commands for deferred execution, e.g. in browser
-class JavaScriptRenderer(Renderer):
-  device_init = f"""if (!navigator.gpu) throw new Error("WebGPU not supported.");
+js_init_device = f"""if (!navigator.gpu) throw new Error("WebGPU not supported.");
 const adapter = await navigator.gpu.requestAdapter();
 const {{ maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup }} = adapter.limits;
 const device = await adapter.requestDevice({{
 	requiredFeatures: adapter.features.has("shader-f16") ? ["shader-f16"] : [], powerPreference: "high-performance",
   requiredLimits: {{ maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup}}
 }});"""
-
-  # TODO: handle 4-byte alignment
-  #if src.nbytes % 4: pad_src = f"const padded = new Uint8Array({src}.length + (4 - {src}.length % 4) % 4); padded.set({src});"
-  def alloc(self, size:int, usage:str) -> str: return f"device.createBuffer({{size: {round_up(size, 4)}, usage: {usage}}})"
-
-  # NOTE: dest/src names are resolved by tinygrad.renderer.graph.GraphRenderer
-  def copyin(self, dest:str, src:str) -> str: return f"device.queue.writeBuffer({dest}, 0, {src});"
-  def copyout(self, dest:str, src:str) -> str:
-    return f"""await {src}.mapAsync(GPUMapMode.READ);
-{dest}.set(new {dest}.constructor({src}.getMappedRange()));
-{src}.unmap();"""
-  def copy_buffer_to_buffer(self): pass
-  def add_compute_pass(self): pass
