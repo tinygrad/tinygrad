@@ -81,7 +81,10 @@ class MathTrait(SimpleMathTrait):
 
   def maximum(self, x): return self.alu(Ops.MAX, self.ufix(x))
   def minimum(self, x): return -(-self).maximum(-x)
-  def where(self, x, y): return self.alu(Ops.WHERE, x, x.ufix(y))
+  def where(self, x, y):
+    if type(self) is type(x): return self.alu(Ops.WHERE, x, x.ufix(y))
+    if type(self) is type(y): return self.alu(Ops.WHERE, y.ufix(x), y)
+    raise RuntimeError("where needs at least one UOp arg")
   def threefry(self, seed): return self.alu(Ops.THREEFRY, seed)
   def reciprocal(self): return self.alu(Ops.RECIP)
   def sqrt(self): return self.alu(Ops.SQRT)
@@ -424,7 +427,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     return self if len(axis) == 0 else UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
-  def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, self.dtype, src=(self,)+src, **kwargs)
+  def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def fuse(self): return self.alu(Ops.FUSE)
@@ -780,6 +783,7 @@ class UPat(MathTrait):
   def assign(self, x:UPat, **kwargs): return UPat(Ops.ASSIGN, self.dtype, (self,x), **kwargs)
   def reduce(self, *src:UPat, **kwargs): return UPat(Ops.REDUCE, self.dtype, src=(self,)+src, **kwargs)
   def fuse(self): return self.alu(Ops.FUSE)
+  def or_broadcasted(self, **kwargs): return UPat.any(self, UPat(Ops.VECTORIZE, self.dtype, src=self, **kwargs))
 
   def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
   def alu(self, op:Ops, *src:UPat):
