@@ -262,7 +262,4 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   # finalize
   sink = graph_rewrite(sink, pm_finalize, name="Linearizer: Finalize")
 
-  from tinygrad.ops import print_uops
-  print_uops(sink.arg.lst)
-
   return list(sink.arg.lst)
