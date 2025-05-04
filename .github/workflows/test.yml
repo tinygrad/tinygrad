@@ -29,9 +29,9 @@ jobs:
     - name: External Benchmark Schedule
       run: PYTHONPATH="." python3 test/external/external_benchmark_schedule.py
     - name: Speed Test
-      run: LLVM=1 LLVMOPT=1 python3 test/test_speed_v_torch.py
+      run: LLVM=1 python3 test/test_speed_v_torch.py
     - name: Speed Test (BEAM=2)
-      run: BEAM=2 LLVM=1 LLVMOPT=1 python3 test/test_speed_v_torch.py
+      run: BEAM=2 LLVM=1 python3 test/test_speed_v_torch.py
 
   docs:
     name: Docs
