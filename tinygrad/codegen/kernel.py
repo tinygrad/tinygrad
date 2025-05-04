@@ -18,6 +18,7 @@ from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
 from tinygrad.engine.grouper import view_left
+from tinygrad.codegen.flow import get_rewrites_for_renderer, apply_rewrites
 
 class KernelOptError(Exception): pass
 
@@ -528,7 +529,7 @@ class Kernel:
       return ret
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
-    return graph_rewrite(fixed_ast, view_left)
+    return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
 
   # **** this is the lowerer ****
 
@@ -554,7 +555,8 @@ class Kernel:
     #if __debug__: type_verify(list(modified_ast.toposort()), shape_spec)
 
     try:
-      self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
+      rewrite_list = get_rewrites_for_renderer(self.opts)
+      self.uops:list[UOp] = linearize_uop(apply_rewrites(modified_ast, rewrite_list), self.opts)
     except RuntimeError:
       print("***** LINEARIZE FAILURE *****")
       print(f"ast = {self.ast}")
