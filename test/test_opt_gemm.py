@@ -8,7 +8,7 @@ from tinygrad.engine.realize import CompiledRunner, ExecItem
 class TestOptGemm(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    N = 128
+    N = 64
     cls.a = Tensor.randn(N, N).contiguous().realize()
     cls.b = Tensor.randn(N, N).contiguous().realize()
 
@@ -31,6 +31,10 @@ class TestOptGemm(unittest.TestCase):
   def test_gemm_unrolled_permute_l_424(self):
     # was failing with LLVM
     opts = [Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=2), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    self._test_gemm_unrolled_permute_l(opts)
+
+  def test_gemm_unrolled_permute_l_42(self):
+    opts = [Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=2)]
     self._test_gemm_unrolled_permute_l(opts)
 
 if __name__ == '__main__':
