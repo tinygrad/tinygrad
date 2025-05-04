@@ -26,10 +26,10 @@ def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduc
 
 def get_rewrites_for_renderer(opts:Renderer, linearizer:bool=True) -> list[RewriteStep]:
   # cache with the values of the context vars
-  return _get_rewrites_for_renderer(opts, linearizer, QUANTIZE, DEVECTORIZE, TRANSCENDENTAL)
+  return _get_rewrites_for_renderer(opts, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value)
 
 @functools.cache
-def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE:bool, _DEVECTORIZE:bool, _TRANSCENDENTAL:bool) -> list[RewriteStep]:
+def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
   if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
