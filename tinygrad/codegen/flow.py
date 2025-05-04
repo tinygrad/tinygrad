@@ -1,4 +1,4 @@
-from typing import Optional, Any, Callable
+from typing import Any, Callable
 import functools
 from dataclasses import dataclass
 from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL
@@ -15,13 +15,13 @@ from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexin
 @dataclass
 class RewriteStep:
   pm: PatternMatcher
-  ctx: Callable[[UOp], Any] = None
+  ctx: Callable[[UOp], Any]|None = None
   name: str|None = None
   def __call__(self, sink:UOp): return graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name)
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
 
-def get_rewrites_for_renderer(opts:Optional[Renderer]=None) -> list[RewriteStep]:
+def get_rewrites_for_renderer(opts:Renderer) -> list[RewriteStep]:
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
   if QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
@@ -48,11 +48,11 @@ def get_rewrites_for_renderer(opts:Optional[Renderer]=None) -> list[RewriteStep]
   else: pm_devectorize = sym+load_store_folding+correct_load_store+load_store_indexing
   ret.append(RewriteStep(pm_devectorize, lambda _: opts, name="main devectorize"))
 
-  supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
-  extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
+  supported_ops = tuple(opts.code_for_op.keys())
+  extra_matcher = opts.extra_matcher if opts.extra_matcher is not None else PatternMatcher([])
 
   # optional pre matcher
-  if opts is not None and opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))
+  if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))
 
   # final rules for the renderer (without sym)
   ret.append(RewriteStep(
