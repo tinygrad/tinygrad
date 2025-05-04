@@ -3,7 +3,7 @@ import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice
+from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice, DType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve, graph_rewrite, GroupOp, identity_element
 from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat, gep_pushing
 from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE, partition
@@ -333,12 +333,15 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   return acc.assign(ret) if len(reduce_range) != 0 else ret
 
+def hreduce(inp:UOp, out_dtype:DType, op:Ops):
+  # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
+  horizontal_amount = inp.dtype.count//out_dtype.count
+  lst = [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)]
+  return functools.reduce(lambda x,y: x.alu(op, y), lst)
+
 def no_vectorized_reduce(inp:UOp, red:UOp):
   if inp.dtype != red.dtype:
-    # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
-    horizontal_amount = inp.dtype.count//red.dtype.count
-    lst = [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)]
-    red = red.replace(src=(functools.reduce(lambda x,y: x.alu(red.arg, y), lst),)+red.src[1:])
+    red = red.replace(src=(hreduce(inp, red.dtype, red.arg),)+red.src[1:])
     if red.dtype.vcount == 1: return red
   # no_vectorize_alu ignoring ranges
   if red.dtype.vcount == 1: return None
@@ -358,20 +361,25 @@ def reduce_rangeless(red:UOp):
 
 def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
 
+def fold_range(r:UOp, cut:UOp, tval:UOp, fval:UOp, red:UOp):
+  brange = r.src[0].broadcast(cut.dtype.count)
+  if tval.op is Ops.CONST and tval.arg == 0: comp = (brange-cut).maximum(0).minimum(brange).cast(fval.dtype) * fval
+  elif fval.op is Ops.CONST and fval.arg == 0: comp = cut.maximum(0).minimum(brange).cast(tval.dtype) * tval
+  else: return None # TODO: support this case (probably a sum of the two cases)
+  return hreduce(comp, red.dtype, red.arg)
+
 pm_reduce_collapse = PatternMatcher([
-  # lift x+y out of reduce on lt
-  ((UPat.var("x")+UPat.var("y")) < UPat.var("c"), lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
-  # lift x*y out of reduce
-  ((UPat.var("x")*UPat.var("y")) < UPat.var("c"),
-   lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and y.vmin > 0 else None),
+  # lift broadcasted x+y out of reduce on lt
+  ((UPat.var("x")+UPat.var("y")).or_broadcasted() < UPat.var("c"), lambda x,y,c:
+   (x.broadcast(c.dtype.count) < (c-y.broadcast(c.dtype.count))) if no_range(y) and no_range(c) else None),
+  # lift broadcasted x*y out of reduce on lt
+  ((UPat.var("x")*UPat.var("y")).or_broadcasted() < UPat.var("c"), lambda x,y,c:
+   (x.broadcast(c.dtype.count) < ((c+(by:=y.broadcast(c.dtype.count))-1) // by)) if no_range(y) and no_range(c) and y.vmin > 0 else None),
   # lift x+y out of reduce on ne
   ((UPat.var("x")+UPat.var("y")) != UPat.var("c"), lambda x,y,c: (x != (c-y)) if no_range(y) and no_range(c) else None),
   # fold the range
-  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat(Ops.CONST, arg=0), UPat.cvar("val")).reduce(arg=Ops.ADD, allow_any_len=True),
-   lambda r,cut,val: (r.src[0]-cut).maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
-  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat.cvar("val"), 0).reduce(arg=Ops.ADD, allow_any_len=True),
-   lambda r,cut,val: cut.maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
-  # devectorize REDUCE
+  ((UPat(Ops.RANGE, name="r").or_broadcasted() < UPat.var("cut")) \
+   .where(UPat.cvar("tval"), UPat.cvar("fval")).reduce(arg=Ops.ADD, name="red", allow_any_len=True), fold_range),
   (UPat(Ops.VECTORIZE, name="inp").reduce(name="red", allow_any_len=True), no_vectorized_reduce),
   # REDUCE on ADD
   ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
@@ -406,7 +414,7 @@ def reduce_collapse(red:UOp):
       if s in not_included and s not in replaces and s.op not in {Ops.CONST, Ops.VCONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}:
         replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
-  sink = graph_rewrite(collapse_fxn, pm_reduce_collapse+devectorize, name="reduce_collapse")
+  sink = graph_rewrite(collapse_fxn, pm_reduce_collapse, name="reduce_collapse")
   # TODO: why is REDUCE needed here and just RANGE isn't enough?
   if any(x.op in {Ops.REDUCE, Ops.RANGE} for x in sink.toposort()): return None
   return sink.substitute({v:k for k,v in replaces.items()})
