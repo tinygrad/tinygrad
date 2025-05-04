@@ -424,7 +424,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     return self if len(axis) == 0 else UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
-  def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, self.dtype, src=(self,)+src, **kwargs)
+  def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def fuse(self): return self.alu(Ops.FUSE)

@@ -398,9 +398,8 @@ pm_reduce_collapse = PatternMatcher([
   # index/load. TODO: this is more aggressive than needed
   (UPat((Ops.INDEX, Ops.LOAD), name="alu"), no_vectorized_alu),
   # AND on WHERE
-  ((UPat.any(UPat(Ops.DEFINE_VAR, name="x"), UPat(Ops.DEFINE_VAR).gep(name="x")) & UPat.var("y")) \
-   .where(UPat.cvar("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
-    lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
+  ((UPat.any(UPat(Ops.DEFINE_VAR, name="x"), UPat(Ops.DEFINE_VAR).gep(name="x")) & UPat.var("y")).where(UPat.cvar("c"), 0) \
+   .reduce(arg=Ops.ADD, allow_any_len=True, name="r"), lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], dtype=r.dtype, arg=r.arg)*x.cast(c.dtype)),
   # remove REDUCEs that no longer have a RANGE in the src
   (UPat(Ops.REDUCE, name="red"), reduce_rangeless),
 ])+sym
