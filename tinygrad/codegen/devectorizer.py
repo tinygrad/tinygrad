@@ -3,7 +3,7 @@ import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice
+from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice, DType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve, graph_rewrite, GroupOp, identity_element
 from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat, gep_pushing
 from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE, partition
@@ -315,15 +315,17 @@ pm_render = PatternMatcher([
 class ReduceContext:
   acc_num: int = 0
 
+def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
+  # if this has a horizontal reduction component, do that first
+  if inp.dtype != out_dtype:
+    # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
+    horizontal_amount = inp.dtype.count//out_dtype.count
+    return [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)]
+  return [inp]
+
 def reduce_to_acc(ctx:ReduceContext, red:UOp):
   inp, reduce_range = red.src[0], red.src[1:]
-  # if this has a horizontal reduction component, do that first
-  if inp.dtype != red.dtype:
-    # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
-    horizontal_amount = inp.dtype.count//red.dtype.count
-    lst = [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)]
-  else:
-    lst = [inp]
+  lst = horizontal_reduce(inp, red.dtype)
   assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
   # if we have a range
   if len(reduce_range) != 0:
@@ -335,10 +337,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
 
 def no_vectorized_reduce(inp:UOp, red:UOp):
   if inp.dtype != red.dtype:
-    # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
-    horizontal_amount = inp.dtype.count//red.dtype.count
-    lst = [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)]
-    red = red.replace(src=(functools.reduce(lambda x,y: x.alu(red.arg, y), lst),)+red.src[1:])
+    red = red.replace(src=(functools.reduce(lambda x,y: x.alu(red.arg, y), horizontal_reduce(inp, red.dtype)),)+red.src[1:])
     if red.dtype.vcount == 1: return red
   # no_vectorize_alu ignoring ranges
   if red.dtype.vcount == 1: return None
