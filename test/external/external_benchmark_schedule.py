@@ -40,7 +40,7 @@ if __name__ == "__main__":
               else: k.apply_opts(hand_coded_optimizations(k))
               kernels.append(k)
 
-        with Timing("***** model prep in     "):
+        with Timing("***** model prep in      "):
           kernels = [(k, k.get_optimized_ast(), get_rewrites_for_renderer(k.opts, linearizer=LINEARIZE)) for k in kernels]
 
         with Profiling(PROFILE, fn="/tmp/rewrite.prof"):
