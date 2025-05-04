@@ -875,23 +875,22 @@ TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:dict[UPat, list[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
-  loc: tuple[str, int]
-  sink: Union[weakref.ReferenceType, UOp]  # Type annotation simplified for mypy
+  loc: tuple[str, int]                                                                       # location that called graph_rewrite
+  sink: Union[weakref.ReferenceType[UOp], UOp]                                               # the sink input to graph_rewrite
   bottom_up: bool
-  matches: list[tuple[Any, Any, UPat]]  # Use Any to avoid complex type issues
+  matches: list[Union[tuple[weakref.ReferenceType[UOp], weakref.ReferenceType[UOp], UPat],   # before+after of all the matches
+                      tuple[UOp, UOp, UPat]]]
   name: str|None
   depth: int
 
   def __reduce__(self):
-    # Cast to Any to avoid mypy errors with weakref
     sink_obj = self.sink() if isinstance(self.sink, weakref.ReferenceType) else self.sink
     serializable_matches = []
     for match in self.matches:
       if len(match) == 3:
         before, after, pat = match
         if isinstance(before, weakref.ReferenceType):
-          before_obj = before()  # type: ignore
-          after_obj = after()  # type: ignore
+          before_obj, after_obj = before(), after()
           if before_obj is not None and after_obj is not None:
             serializable_matches.append((before_obj, after_obj, pat))
         else:
@@ -919,7 +918,7 @@ def track_matches(func):
     if tracking:=(TRACK_MATCH_STATS >= 2 and tracked_ctxs):
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
       depth = len(active_rewrites)
-      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, weakref.ref(args[0]), kwargs.get("bottom_up", False),[], kwargs.get("name", None), depth))
+      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, weakref.ref(args[0]), kwargs.get("bottom_up", False), [], kwargs.get("name", None), depth))
       active_rewrites.append(ctx)
     ret = func(*args, **kwargs)
     if tracking: active_rewrites.pop()
@@ -961,12 +960,13 @@ if TRACK_MATCH_STATS:
           if sink_obj is None: continue
 
           serializable_matches = []
-          for before_ref, after_ref, pat in ctx.matches:
-            # Add type ignores to avoid mypy errors with weakref
-            before_obj = before_ref() if isinstance(before_ref, weakref.ReferenceType) else before_ref  # type: ignore
-            after_obj = after_ref() if isinstance(after_ref, weakref.ReferenceType) else after_ref  # type: ignore
-            if before_obj is not None and after_obj is not None:
-              serializable_matches.append((before_obj, after_obj, pat))
+          for match in ctx.matches:
+            if len(match) == 3:
+              before_ref, after_ref, pat = match
+              before_obj = before_ref() if isinstance(before_ref, weakref.ReferenceType) else before_ref
+              after_obj = after_ref() if isinstance(after_ref, weakref.ReferenceType) else after_ref
+              if before_obj is not None and after_obj is not None:
+                serializable_matches.append((before_obj, after_obj, pat))
 
           serializable_ctx = TrackedGraphRewrite(
             ctx.loc, sink_obj, ctx.bottom_up, serializable_matches, ctx.name, ctx.depth
