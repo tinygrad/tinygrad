@@ -944,7 +944,8 @@ class TrackedPatternMatcher(PatternMatcher):
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
         if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
           # Explicitly cast to the expected type
-          match_tuple: Union[tuple[weakref.ReferenceType[UOp], weakref.ReferenceType[UOp], UPat], tuple[UOp, UOp, UPat]] = (weakref.ref(uop), weakref.ref(ret), p)
+          match_tuple: Union[tuple[weakref.ReferenceType[UOp], weakref.ReferenceType[UOp], UPat],
+                             tuple[UOp, UOp, UPat]] = (weakref.ref(uop), weakref.ref(ret), p)
           active_rewrites[-1].matches.append(match_tuple)
         return ret
       match_stats[p][2] += time.perf_counter()-st
