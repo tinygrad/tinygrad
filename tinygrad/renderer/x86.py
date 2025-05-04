@@ -68,8 +68,8 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"insertps {ctx[x]}, {ctx[x.src[0]]}, {gep_imm[x.arg[0]]}"),
   (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {vec_imm[i]}" for i,s in enumerate(x.src))),
   # range
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx[x.src[0]]}\n.LOOP_{x.arg}:"),
-  (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x: f"inc {ctx[x.src[0]]}\ncmp {ctx[x.src[0]]}, {ctx[x.src[0].src[1]]}\njl .LOOP_{x.src[0].arg}"),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: f"mov {ctx[x]}, {to_hex(0, x.dtype)}\n.LOOP_{x.arg}:"),
+  (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x: f"inc {ctx[x.src[0]]}\ncmp {ctx[x.src[0]]}, {ctx[x.src[0].src[0]]}\njl .LOOP_{x.src[0].arg}"),
   # casting
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints),), name="x"), lambda ctx,x: f"movzx {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.sints),), name="x"),
@@ -106,12 +106,11 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f".L{ctx.uops.index(x.src[0])}:"),
 ])
 
-def x86_is_imm(u:UOp) -> bool: return u.op is Ops.CONST and not dtypes.is_float(u.dtype) and abs(u.arg) <= dtypes.max(dtypes.int32)
 def load_consts(x:UOp) -> UOp|None:
   if x.op is Ops.LOAD and x.src[0].op is Ops.CONST: return None
   nsrc = []
   for s in x.src:
-    if s.op is Ops.CONST and not x86_is_imm(s):
+    if s.op is Ops.CONST and (dtypes.is_float(s.dtype) or abs(s.arg) > dtypes.max(dtypes.int32)):
       if s.dtype in (dtypes.int64, dtypes.uint64): s = s.load(dtype=s.dtype)
       elif s.dtype is dtypes.float32: s = s.load(dtype=dtypes.int32).bitcast(dtypes.float32)
       elif s.dtype is dtypes.float64: s = s.load(dtype=dtypes.int64).bitcast(dtypes.float64)
@@ -123,9 +122,9 @@ x86_matcher = PatternMatcher([
   (UPat(GroupOp.All, name="x"), load_consts),
   # some ops can't take imm in srcs
   (UPat((Ops.WHERE, Ops.IDIV, Ops.MOD), name="x"),
-   lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if x86_is_imm(s) else s for s in x.src)) != x.src else None),
+   lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.cvar("c"), UPat()), name="x"),
-   lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1])) if x86_is_imm(c) else None),
+   lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1])) if c.op is Ops.CONST else None),
   # we use general registers to load/store the 2 bytes of float16
   (UPat(Ops.LOAD, dtype=dtypes.float16, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"),
    lambda x,idx,alt,mask: idx.load(alt.bitcast(dtypes.int16), mask, dtype=dtypes.int16).bitcast(x.dtype)),
@@ -295,7 +294,7 @@ class X86Renderer(Renderer):
           for var in (v for v in r if is_reg(r[v]) and v.op is not Ops.RANGE):
             free_reg(r[var])
             mov_to_stack(var)
-          last_use[u.src[1]] = max(last_use[u], last_use[u.src[1]])
+          last_use[u.src[0]] = max(last_use[u], last_use[u.src[0]])
         # render x86 assembly
         if (l:=x86_rewrite.rewrite(u, ctx=self)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
