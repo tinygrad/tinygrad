@@ -141,11 +141,17 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
   ])
 
-  def render(self, uops: list[UOp]) -> str:
+  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer()))
+  def _render_footer(self) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
+  def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
+    # NOTE: MallocAllocator promises 0x20 alignment
+    sargs = ", ".join([f"{ldt(dt)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
+    sprefix = "".join([f" {x}" for x in (prefix or []) + [self.abi] if x is not None])
+    return "\n".join([f"define{sprefix} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
+  def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
     r: dict[UOp, str] = {}
-    args: list[str] = []
+    args: list[tuple[str, DType]] = []
     kernel: list[str] = []
-    end_lines: dict[str, None] = {}
     vc = -1
 
     local_args: list[str] = []
@@ -170,8 +176,7 @@ class LLVMRenderer(Renderer):
         continue
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
-        # NOTE: MallocAllocator promises 0x20 alignment
-        args.append(f"{ldt(u.dtype)}{' noalias align 32' if isinstance(u.dtype, PtrDType) else ''} {r[u]}")
+        args.append((r[u], u.dtype))
       elif u.op == Ops.DEFINE_LOCAL:
         r[u] = f"%local_{u.arg}"
         assert isinstance(u.dtype, PtrDType)
@@ -201,17 +206,7 @@ class LLVMRenderer(Renderer):
               vc += 1
               kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)}" f"[{r[x]}, %loop_entry_{u.arg}], [{r[acc_to_assign[x]]}, %loop_latch_{u.arg}]")
               r[x] = f"%acc{vc}"
-
-    # output the function. chr(10) is '\n' (python < 3.12 doesn't support backslashes in f-strings)
-    prg = f'''\
-define{(' '+self.abi) if self.abi is not None else ''} void @{name}({','.join(args)}) #0 {{
-{chr(10).join(kernel)}
-  ret void
-}}
-{chr(10).join(end_lines.keys())}
-attributes #0 = {{ nounwind "no-builtins" "no-trapping-math"="true" }}
-'''
-    return prg if len(local_args) == 0 else "\n".join(local_args)+f"\n{prg}"
+    return tuple(local_args), self._render_fn(name, args, kernel, prefix)
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
