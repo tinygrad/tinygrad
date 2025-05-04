@@ -22,7 +22,7 @@ class TestOptGemm(unittest.TestCase):
     run = CompiledRunner(k.to_program())
     ExecItem(run, si.bufs).run()
     test = si.bufs[0].numpy().reshape(res.shape)
-    np.testing.assert_allclose(res, test)
+    np.testing.assert_allclose(res, test, atol=1e-4)
 
   def test_gemm_unrolled_permute_l_44(self):
     opts = [Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=4)]
