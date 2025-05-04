@@ -879,9 +879,9 @@ class TrackedGraphRewrite:
   sink: Union[weakref.ReferenceType[UOp], UOp]                                               # the sink input to graph_rewrite
   bottom_up: bool
   matches: list[Union[tuple[weakref.ReferenceType[UOp], weakref.ReferenceType[UOp], UPat],   # before+after of all the matches
-                      tuple[UOp, UOp, UPat]]]
-  name: str|None
-  depth: int
+                      tuple[UOp, UOp, UPat]]] = field(default_factory=list)
+  name: str|None = None
+  depth: int = 0
 
   def __reduce__(self):
     sink_obj = self.sink() if isinstance(self.sink, weakref.ReferenceType) else self.sink
@@ -890,7 +890,8 @@ class TrackedGraphRewrite:
       if len(match) == 3:
         before, after, pat = match
         if isinstance(before, weakref.ReferenceType):
-          before_obj, after_obj = before(), after()
+          before_obj = before()
+          after_obj = after()
           if before_obj is not None and after_obj is not None:
             serializable_matches.append((before_obj, after_obj, pat))
         else:
@@ -942,7 +943,9 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][3] += (et:=time.perf_counter()-st)
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
         if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
-          active_rewrites[-1].matches.append((weakref.ref(uop), weakref.ref(ret), p))
+          # Explicitly cast to the expected type
+          match_tuple: Union[tuple[weakref.ReferenceType[UOp], weakref.ReferenceType[UOp], UPat], tuple[UOp, UOp, UPat]] = (weakref.ref(uop), weakref.ref(ret), p)
+          active_rewrites[-1].matches.append(match_tuple)
         return ret
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -969,6 +972,7 @@ if TRACK_MATCH_STATS:
               if before_obj is not None and after_obj is not None:
                 serializable_matches.append((before_obj, after_obj, pat))
 
+          # Convert to the expected type for TrackedGraphRewrite
           serializable_ctx = TrackedGraphRewrite(
             ctx.loc, sink_obj, ctx.bottom_up, serializable_matches, ctx.name, ctx.depth
           )
