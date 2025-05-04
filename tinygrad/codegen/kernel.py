@@ -16,7 +16,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.lowerer import get_contraction
 from tinygrad.engine.grouper import view_left
-from tinygrad.codegen.flow import get_rewrites_for_renderer, apply_rewrites
+from tinygrad.codegen import get_rewrites_for_renderer, apply_rewrites
 
 class KernelOptError(Exception): pass
 
