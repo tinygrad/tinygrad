@@ -1,7 +1,7 @@
 from typing import cast, Callable
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, resolve
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
-from tinygrad.helpers import all_same, prod, DEBUG, IGNORE_OOB
+from tinygrad.helpers import all_same, prod, DEBUG, IGNORE_OOB, Context
 try:
   import z3
 
@@ -209,6 +209,7 @@ shape_spec = PatternMatcher([
 def type_verify(uops:list[UOp], extra_spec:PatternMatcher|None=None):
   check_spec = (extra_spec+spec) if extra_spec is not None else spec
   for i,u in enumerate(uops):
-    if cast(bool|None, check_spec.rewrite(u)) is not True:
+    with Context(TRACK_MATCH_STATS=0): ret = check_spec.rewrite(u)
+    if cast(bool|None, ret) is not True:
       if DEBUG >= 3: print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")

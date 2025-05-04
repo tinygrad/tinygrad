@@ -38,7 +38,7 @@ async function renderDag(graph, additions, recenter=false) {
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`);
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => "rx:8; ry:8; stroke:#4a4b57; stroke-width:1.4px;"+d.style);
+      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => "stroke:#4a4b57; stroke-width:1.4px;"+d.style);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2;
@@ -71,8 +71,8 @@ async function renderDag(graph, additions, recenter=false) {
     });
     edgeLabels.selectAll("circle").data(e => [g.edge(e).label]).join("circle").attr("r", 5).attr("fill", "#FFD700").attr("stroke", "#B8860B")
       .attr("stroke-width", 0.8);
-    edgeLabels.selectAll("text").data(e => [g.edge(e).label]).join("text").text(d => d).attr("text-anchor", "middle").attr("dy", "0.35em").
-      attr("font-size", "6px").attr("fill", "black");
+    edgeLabels.selectAll("text").data(e => [g.edge(e).label]).join("text").text(d => d).attr("text-anchor", "middle").attr("dy", "0.35em")
+      .attr("font-size", "6px").attr("fill", "black");
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
 
@@ -217,7 +217,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   svg.call(zoom.transform, d3.zoomIdentity);
   const mainRect = rect(".main-container");
   const x0 = rect(".kernel-list-parent").right;
-  const x1 = rect(".metadata").left;
+  const x1 = rect(".metadata-parent").left;
   const pad = 16;
   const R = { x: x0+pad, y: mainRect.top+pad, width: (x1>0 ? x1-x0 : mainRect.width)-2*pad, height: mainRect.height-2*pad };
   const r = rect("#render");
@@ -295,7 +295,10 @@ async function main() {
     }
     for (const [j,u] of k[1].entries()) {
       const inner = ul.appendChild(document.createElement("ul"));
-      if (i === currentKernel && j === currentUOp) inner.className = "active";
+      if (i === currentKernel && j === currentUOp) {
+        inner.className = "active";
+        requestAnimationFrame(() => inner.scrollIntoView({ behavior: "auto", block: "nearest" }));
+      }
       inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]} - ${u.match_count}`;
       inner.style.marginLeft = `${8*u.depth}px`;
       inner.style.display = i === currentKernel && expandKernel ? "block" : "none";
@@ -345,7 +348,6 @@ async function main() {
   const metadata = document.querySelector(".metadata");
   const [code, lang] = kernel.kernel_code != null ? [kernel.kernel_code, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(kernel.code_line, "python", { loc:kernel.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
-  appendResizer(metadata, { minWidth: 20, maxWidth: 50 });
   // ** rewrite steps
   if (kernel.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -403,37 +405,35 @@ function appendResizer(element, { minWidth, maxWidth }, left=false) {
   });
 }
 appendResizer(document.querySelector(".kernel-list-parent"), { minWidth: 15, maxWidth: 50 }, left=true);
+appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWidth: 50 });
 
 // **** keyboard shortcuts
 
 document.addEventListener("keydown", async function(event) {
   const { currentKernel, currentUOp, currentRewrite, expandKernel } = state;
   // up and down change the UOp or kernel from the list
-  if (!expandKernel) {
-    if (event.key == "ArrowUp") {
-      event.preventDefault()
-      return setState({ currentUOp:0, currentRewrite:0, currentKernel:Math.max(0, currentKernel-1) });
+  if (event.key == "ArrowUp") {
+    event.preventDefault();
+    if (expandKernel) {
+      return setState({ currentRewrite:0, currentUOp:Math.max(0, currentUOp-1) });
     }
-    if (event.key == "ArrowDown") {
-      event.preventDefault()
-      return setState({ currentUOp:0, currentRewrite:0, currentKernel:Math.min(kernels.length-1, currentKernel+1) });
-    }
+    return setState({ currentUOp:0, currentRewrite:0, currentKernel:Math.max(0, currentKernel-1) });
   }
+  if (event.key == "ArrowDown") {
+    event.preventDefault();
+    if (expandKernel) {
+      const totalUOps = kernels[currentKernel][1].length-1;
+      return setState({ currentRewrite:0, currentUOp:Math.min(totalUOps, currentUOp+1) });
+    }
+    return setState({ currentUOp:0, currentRewrite:0, currentKernel:Math.min(kernels.length-1, currentKernel+1) });
+  }
+  // enter toggles focus on a single rewrite stage
   if (event.key == "Enter") {
     event.preventDefault()
     if (state.currentKernel === -1) {
       return setState({ currentKernel:0, expandKernel:true });
     }
     return setState({ currentUOp:0, currentRewrite:0, expandKernel:!expandKernel });
-  }
-  if (event.key == "ArrowUp") {
-    event.preventDefault()
-    return setState({ currentRewrite:0, currentUOp:Math.max(0, currentUOp-1) });
-  }
-  if (event.key == "ArrowDown") {
-    event.preventDefault()
-    const totalUOps = kernels[currentKernel][1].length-1;
-    return setState({ currentRewrite:0, currentUOp:Math.min(totalUOps, currentUOp+1) });
   }
   // left and right go through rewrites in a single UOp
   if (event.key == "ArrowLeft") {
@@ -445,6 +445,7 @@ document.addEventListener("keydown", async function(event) {
     const totalRewrites = ret.length-1;
     return setState({ currentRewrite:Math.min(totalRewrites, currentRewrite+1) });
   }
+  // space recenters the graph
   if (event.key == " ") {
     event.preventDefault()
     document.getElementById("zoom-to-fit-btn").click();

@@ -1084,6 +1084,8 @@ class TestLinearizer(unittest.TestCase):
         assert "0x201000" in prg.src
       elif Device.DEFAULT == "AMD" and getenv("AMD_LLVM", 0):
         assert "@llvm.amdgcn.wmma" in prg.src
+      elif Device[Device.DEFAULT].renderer.suffix == "PTX":
+        assert "mma.sync.aligned" in prg.src
       else:
         assert "__WMMA_" in prg.src
 

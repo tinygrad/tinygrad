@@ -590,6 +590,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
+      IGNORE_OOB: 0
       AMD: 1
       MOCKGPU: 1
       FORWARD_ONLY: 1
@@ -720,8 +721,6 @@ jobs:
       run: PYTHONPATH="." METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
     - name: Fuzz Test linearizer
       run: PYTHONPATH="." METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
-    # - name: Fuzz Test models schedule
-    # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run TRANSCENDENTAL math
       run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
     - name: Run pytest (amd)
@@ -748,8 +747,6 @@ jobs:
       run: |
         python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
     - name: Run process replay tests
-      env:
-        IGNORE_OOB: 1
       uses: ./.github/actions/process-replay
 
   osxwebgpu:
