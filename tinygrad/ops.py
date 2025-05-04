@@ -81,7 +81,10 @@ class MathTrait(SimpleMathTrait):
 
   def maximum(self, x): return self.alu(Ops.MAX, self.ufix(x))
   def minimum(self, x): return -(-self).maximum(-x)
-  def where(self, x, y): return self.alu(Ops.WHERE, x, x.ufix(y))
+  def where(self, x, y):
+    if type(self) is type(x): return self.alu(Ops.WHERE, x, x.ufix(y))
+    if type(self) is type(y): return self.alu(Ops.WHERE, y.ufix(x), y)
+    raise RuntimeError("where needs at least one UOp arg")
   def threefry(self, seed): return self.alu(Ops.THREEFRY, seed)
   def reciprocal(self): return self.alu(Ops.RECIP)
   def sqrt(self): return self.alu(Ops.SQRT)

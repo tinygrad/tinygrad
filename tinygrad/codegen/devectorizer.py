@@ -389,19 +389,19 @@ pm_reduce_collapse = PatternMatcher([
   # WHERE on LOAD (works on max too)
   (UPat.var("gate").where(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load(), 0).reduce(arg=Ops.ADD, allow_any_len=True),
    lambda buf,idx,gate: buf.index(idx, gate).load()),
-  (UPat.var("gate").where(UPat(Ops.CONST, arg=0),
-                          UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()).reduce(arg=Ops.ADD, allow_any_len=True),
+  (UPat.var("gate").where(0, UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()).reduce(arg=Ops.ADD, allow_any_len=True),
    lambda buf,idx,gate: buf.index(idx, gate.logical_not()).load()),
   # INDEX on RANGE / gated RANGE
   (UPat.var("buf").index(UPat.var("expr"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted())),
    lambda buf,r,idx,expr: buf.index(expr.substitute({r:idx.cast(r.dtype)}), (idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0]))),
-  # index/load. TODO: this is more aggressive than needed
-  (UPat((Ops.INDEX, Ops.LOAD), name="alu"), no_vectorized_alu),
-  # AND on WHERE
+  # AND on WHERE (split the reduce / hreduce component)
   ((UPat.any(UPat(Ops.DEFINE_VAR, name="x"), UPat(Ops.DEFINE_VAR).gep(name="x")) & UPat.var("y")).where(UPat.cvar("c"), 0) \
-   .reduce(arg=Ops.ADD, allow_any_len=True, name="r"), lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], dtype=r.dtype, arg=r.arg)*x.cast(c.dtype)),
+   .reduce(arg=Ops.ADD, allow_any_len=True, name="r"), lambda x,y,c,r:
+   (y.where(c, 0).reduce(*r.src[1:], arg=r.arg)*x.cast(c.dtype)).reduce(dtype=r.dtype, arg=r.arg)),
   # remove REDUCEs that no longer have a RANGE in the src
   (UPat(Ops.REDUCE, name="red"), reduce_rangeless),
+  # index/load. TODO: this is more aggressive than needed
+  (UPat((Ops.INDEX, Ops.LOAD, Ops.WHERE), name="alu"), no_vectorized_alu),
 ])+sym
 
 def reduce_collapse(red:UOp):
