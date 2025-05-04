@@ -1,27 +1,32 @@
 from tinygrad import Tensor
 from tinygrad.runtime import ops_webgpu
+from tinygrad.renderer import ProgramSpec
 from tinygrad.renderer.graph import GraphRenderer, create_graph_with_io
-from tinygrad.engine.realize import ExecItem, CompiledRunner
+from tinygrad.engine.realize import CompiledRunner
 from typing import Callable, Sequence
 
-# helper functions that make the output JavaScript easier to read
-helpers = ["const createEmptyBuf = (size) => {",
-  f'  return {ops_webgpu.js_alloc("size", "GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST")};'
-  "};\n",
+def declare_kernel(p:ProgramSpec) -> str: return f"const {p.function_name} = `{p.src.replace(p.function_name, 'main')}`;"
 
-  "const createWeightBuf = (size, data) => {",
-  f'  const buf = {ops_webgpu.js_alloc("size", "GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST")};',
-  f"  {ops_webgpu.js_copyin("buf", "data")}",
-  "};\n"]
-
-def declare_kernel(ei:ExecItem) -> str:
-  return f"const {(fn:=ei.prg.p.function_name)} = `{ei.prg.p.src.replace(fn, 'main')}`;" if isinstance(ei.prg, CompiledRunner) else ""
+safe_load_state_dict = f"""const safeLoadStateDict = async (modelStateDict, safeTensorPath) => {{
+  const safetensorBuffer = await fetch(safetensorPath).then(x => x.arrayBuffer()).then(x => new Uint8Array(x));
+  const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
+  const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
+  for (const [key, info] of Object.entries(metadata)) {{
+    if (key === "__metadata__") continue;
+    const src = safetensorBuffer.subarray(8 + metadataLength + info.data_offsets[0], 8 + metadataLength + info.data_offsets[1]);
+    {ops_webgpu.js_copyin("modelStateDict[key]", "src")}
+  }}
+}};"""
+empty_buf_flags = (state_buf_flags:="GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST") + "GPUBufferUsage.COPY_SRC"
 
 class WebGPUJSRenderer(GraphRenderer):
   def render_graph(self) -> str:
-    prg: list[str] = ops_webgpu.js_init_device + helpers
-    kernels = [declare_kernel(ei) for ei in self.eis if isinstance(ei.prg, CompiledRunner)]
-    bufs = [f"const {name} = createEmptyBuf({buf.nbytes})" for buf,name in self.empty_bufs.items()]
+    prg: list[str] = ops_webgpu.js_init_device + safe_load_state_dict.split("\n")
+    kernel_declares = [declare_kernel(ei.prg.p) for ei in self.eis if isinstance(ei.prg, CompiledRunner)]
+    empty_buf_declares = [f"const {name} = {ops_webgpu.js_alloc(str(buf.nbytes), empty_buf_flags)}" for buf, name in self.empty_bufs.items()]
+    state_dict_kv_pairs = [f'"{name}": {ops_webgpu.js_alloc(str(buf.nbytes), state_buf_flags)}' for buf, name in self.state_bufs.items()]
+    state_dict_declare = f"const stateDict = {{ {",\n".join(state_dict_kv_pairs)} }};"
+    state_dict_load = f"await safeLoadStateDict(stateDict, safeTensorPath);"
     # TODO: complete rendering
     return "\n".join(prg)
 
