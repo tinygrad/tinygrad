@@ -37,5 +37,9 @@ class TestOptGemm(unittest.TestCase):
     opts = [Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=2)]
     self._test_gemm_unrolled_permute_l(opts)
 
+  def test_gemm_unrolled_permute_l_22(self):
+    opts = [Opt(op=OptOps.UPCAST, axis=0, arg=2), Opt(op=OptOps.UPCAST, axis=1, arg=2)]
+    self._test_gemm_unrolled_permute_l(opts)
+
 if __name__ == '__main__':
   unittest.main()
