@@ -98,7 +98,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
    f"  br label %loop_entry_{x.arg}\nloop_entry_{x.arg}:\n"
    f"  br label %loop_body_{x.arg}\nloop_body_{x.arg}:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype)} [0, %loop_entry_{x.arg}], [{ctx[x]}phi, %loop_latch_{x.arg}]"),
+   f"  {ctx[x]} = phi {ldt(x.dtype)} [ 0, %loop_entry_{x.arg} ], [ {ctx[x]}phi, %loop_latch_{x.arg} ]"),
   (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x:
    f"  br label %loop_latch_{x.src[0].arg}\nloop_latch_{x.src[0].arg}:\n"
    f"  {ctx[x.src[0]]}phi = add i32 {ctx[x.src[0]]}, 1\n  {ctx[x]} = icmp ult i32 {ctx[x.src[0]]}phi, {ctx[x.src[0].src[0]]}\n"
@@ -204,7 +204,7 @@ class LLVMRenderer(Renderer):
           for x in acc_to_assign:
             if u in x.src:  # if this range is relevant for this acc
               vc += 1
-              kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)}" f"[{r[x]}, %loop_entry_{u.arg}], [{r[acc_to_assign[x]]}, %loop_latch_{u.arg}]")
+              kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)} [ {r[x]}, %loop_entry_{u.arg} ], [ {r[acc_to_assign[x]]}, %loop_latch_{u.arg} ]")
               r[x] = f"%acc{vc}"
     return tuple(local_args), self._render_fn(name, args, kernel, prefix)
 
