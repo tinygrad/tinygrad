@@ -875,12 +875,26 @@ TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:dict[UPat, list[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
-  loc: tuple[str, int]                                                                       # location that called graph_rewrite
-  sink: UOp                                                                                  # the sink input to graph_rewrite
+  loc: tuple[str, int]
+  sink: Union[weakref.ReferenceType[UOp], UOp]
   bottom_up: bool
-  matches: list[tuple[UOp, UOp, UPat]]                                                       # before+after of all the matches
+  matches: list[Union[tuple[weakref.ReferenceType[UOp], weakref.ReferenceType[UOp], UPat], tuple[UOp, UOp, UPat]]]
   name: str|None
   depth: int
+
+  def __reduce__(self):
+    sink_obj = self.sink() if isinstance(self.sink, weakref.ReferenceType) else self.sink
+    serializable_matches = []
+    for match in self.matches:
+      if len(match) == 3:
+        before, after, pat = match
+        if isinstance(before, weakref.ReferenceType):
+          before_obj, after_obj = before(), after()
+          if before_obj is not None and after_obj is not None:
+            serializable_matches.append((before_obj, after_obj, pat))
+        else:
+          serializable_matches.append(match)
+    return TrackedGraphRewrite, (self.loc, sink_obj, self.bottom_up, serializable_matches, self.name, self.depth)
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, int] = {}
@@ -903,7 +917,7 @@ def track_matches(func):
     if tracking:=(TRACK_MATCH_STATS >= 2 and tracked_ctxs):
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
       depth = len(active_rewrites)
-      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0], kwargs.get("bottom_up", False),[], kwargs.get("name", None), depth))
+      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, weakref.ref(args[0]), kwargs.get("bottom_up", False),[], kwargs.get("name", None), depth))
       active_rewrites.append(ctx)
     ret = func(*args, **kwargs)
     if tracking: active_rewrites.pop()
@@ -925,7 +939,8 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((uop, ret, p))
+        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
+          active_rewrites[-1].matches.append((weakref.ref(uop), weakref.ref(ret), p))
         return ret
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -936,9 +951,31 @@ if TRACK_MATCH_STATS:
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
+      serializable_ctxs = []
+      for ctx_list in tracked_ctxs:
+        serializable_ctx_list = []
+        for ctx in ctx_list:
+          sink_obj = ctx.sink()
+          if sink_obj is None: continue
+
+          serializable_matches = []
+          for before_ref, after_ref, pat in ctx.matches:
+            before_obj, after_obj = before_ref(), after_ref()
+            if before_obj is not None and after_obj is not None:
+              serializable_matches.append((before_obj, after_obj, pat))
+
+          serializable_ctx = TrackedGraphRewrite(
+            ctx.loc, sink_obj, ctx.bottom_up, serializable_matches, ctx.name, ctx.depth
+          )
+          serializable_ctx_list.append(serializable_ctx)
+
+        if serializable_ctx_list:
+          serializable_ctxs.append(serializable_ctx_list)
+
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
-        print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
-        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
+        print(f"rewrote {len(serializable_ctxs)} graphs and matched {sum(len(r.matches) for x in serializable_ctxs for r in x)} times, saved to {fn}")
+        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, serializable_ctxs), f)
+
     if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]

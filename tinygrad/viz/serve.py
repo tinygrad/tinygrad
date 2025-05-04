@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver
+import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver, weakref
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, Callable, TypedDict, Generator
@@ -85,15 +85,28 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
   return graph
 
 def get_details(k:Any, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
-  yield {"graph":uop_to_json(next_sink:=ctx.sink), "uop":str(ctx.sink), "changed_nodes":None, "diff":None, "upat":None}
+  sink_obj = ctx.sink() if isinstance(ctx.sink, weakref.ReferenceType) else ctx.sink
+  if sink_obj is None:
+    yield {"graph":{}, "uop":"<gc'd>", "changed_nodes":None, "diff":None, "upat":None}
+    return
+
+  yield {"graph":uop_to_json(next_sink:=sink_obj), "uop":str(sink_obj), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
-  for u0,u1,upat in tqdm(ctx.matches):
-    replaces[u0] = u1
-    try: new_sink = next_sink.substitute(replaces)
-    except RecursionError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
-    yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
-           "diff":list(difflib.unified_diff(pcall(str, u0).splitlines(), pcall(str, u1).splitlines())), "upat":(upat.location, upat.printable())}
-    if not ctx.bottom_up: next_sink = new_sink
+
+  for match in tqdm(ctx.matches):
+    if len(match) == 3:
+      u0_ref, u1_ref, upat = match
+      u0 = u0_ref() if isinstance(u0_ref, weakref.ReferenceType) else u0_ref
+      u1 = u1_ref() if isinstance(u1_ref, weakref.ReferenceType) else u1_ref
+
+      if u0 is None or u1 is None: continue
+
+      replaces[u0] = u1
+      try: new_sink = next_sink.substitute(replaces)
+      except RecursionError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
+      yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
+             "diff":list(difflib.unified_diff(pcall(str, u0).splitlines(), pcall(str, u1).splitlines())), "upat":(upat.location, upat.printable())}
+      if not ctx.bottom_up: next_sink = new_sink
 
 # Profiler API
 devices:dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
