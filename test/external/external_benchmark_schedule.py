@@ -5,7 +5,7 @@ from tinygrad.helpers import Profiling, Timing, getenv, BEAM, NOOPT, DEBUG, Cont
 from tinygrad.ops import Ops
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.heuristic import hand_coded_optimizations
-from tinygrad.codegen.flow import get_rewrites_for_renderer, apply_rewrites
+from tinygrad.codegen import get_rewrites_for_renderer, apply_rewrites
 from tinygrad.engine.search import beam_search, bufs_from_lin
 
 if __name__ == "__main__":
