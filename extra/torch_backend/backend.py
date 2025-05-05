@@ -311,12 +311,7 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
     # TODO we need to properly match dest shape and strides, not blindly assign
     if dest.lazydata.st.contiguous or dest.lazydata.is_realized: src = src.contiguous() # this only solves some cases
     dest.assign(src.cast(cast_dtype).to(to_device))
-    try:
-      if realize: Tensor.realize(dest)
-    except Exception as e:
-      from tinygrad.ops import graph_rewrite, PatternMatcher
-      graph_rewrite(dest.lazydata, PatternMatcher([]), name=repr(e))
-      raise e
+    if realize: Tensor.realize(dest)
   elif src.is_tiny and dest.is_cpu:
     # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
