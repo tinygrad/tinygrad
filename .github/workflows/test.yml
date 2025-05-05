@@ -471,11 +471,11 @@ jobs:
         run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_ops.py
       - name: Test Quantize ONNX
         run: CPU=1 PYTHONPATH=. python3 test/test_quantize_onnx.py
-      - name: Run CLOUD=1 Test
+      - name: Run REMOTE=1 Test
         run: |
-          CLOUDDEV=CPU CLOUD=1 python3 -m pytest test/test_tiny.py test/test_jit.py
-          CLOUDDEV=GPU CLOUD=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py test/test_jit.py
-          CLOUDDEV=GPU IMAGE=2 CLOUD=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py
+          REMOTEDEV=CPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_jit.py
+          REMOTEDEV=GPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py test/test_jit.py
+          REMOTEDEV=GPU IMAGE=2 REMOTE=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py
       - name: Test Optimization Helpers
         run: PYTHONPATH="." DEBUG=1 python3 extra/optimization/test_helpers.py
       - name: Test Action Space
@@ -770,27 +770,27 @@ jobs:
     - name: Run WEBGPU Efficientnet
       run: node test/web/test_webgpu.js
 
-  osxcloud:
-    name: MacOS (cloud)
+  osxremote:
+    name: MacOS (remote)
     runs-on: macos-15
     timeout-minutes: 10
     env:
-      CLOUD: 1
-      CLOUDDEV: METAL
+      REMOTE: 1
+      REMOTEDEV: METAL
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: macos-cloud
+          key: macos-remote
           deps: testing_minimal
       - name: Check Device.DEFAULT and print some source
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == 'CLOUD', Device.DEFAULT"
-          python -c "from tinygrad import Device; assert Device.default.properties['clouddev'] == 'METAL', Device.default.properties['clouddev']"
+          python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.default.properties['remotedev'] == 'METAL', Device.default.properties['remotedev']"
           DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
-      - name: Run CLOUD=1 Test
+      - name: Run REMOTE=1 Test
         run: |
           python3 -m pytest test/test_tiny.py test/test_jit.py
 
