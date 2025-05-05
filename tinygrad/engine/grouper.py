@@ -446,7 +446,7 @@ def fuse_arange(root:UOp):
   local_arange: list[UOp] = []
   def gate_reduce(u):
     if u.op is Ops.REDUCE_AXIS and u.src[0].base.op is Ops.CONST: local_arange.append(u)
-    return u.op not in {Ops.CONTIGUOUS, Ops.REDUCE_AXIS} or u is root
+    return u.op not in {Ops.CONTIGUOUS, Ops.REDUCE_AXIS, Ops.ASSIGN} or u is root
   toposort = root.toposort(gate=gate_reduce)
   if not local_arange: return None
   # fuse the nearest expand child of arange
