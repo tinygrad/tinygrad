@@ -11,11 +11,11 @@ from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites, merge_views
+from tinygrad.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.engine.grouper import view_left, view_right, sym, get_becomes_map, Kernel, create_ast
+from tinygrad.engine.grouper import view_left, view_right, sym, get_becomes_map, Kernel, create_ast, merge_views
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
@@ -1688,9 +1688,9 @@ class TestIndexing(unittest.TestCase):
     Tensor.manual_seed(0)
     a = Tensor.arange(4,)
     b = Tensor.randn(4, 4).realize()
-    out = a+b
+    out = (a+b).sum()
     self.check_schedule(out, 1)
-    np.testing.assert_allclose(out.numpy(), np.arange(4)+b.numpy())
+    np.testing.assert_allclose(out.numpy(), (np.arange(4)+b.numpy()).sum(), atol=1e-5)
 
   def test_argmin(self):
     Tensor.manual_seed(0)
@@ -1709,25 +1709,25 @@ class TestIndexing(unittest.TestCase):
   def test_arange_transposed(self):
     Tensor.manual_seed(0)
     x = Tensor.randint(4, 1).realize()
-    a = (Tensor.arange(4,)*x).T
+    a = ((Tensor.arange(4,)*x).T).sum()
     self.check_schedule(a, 1)
-    np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T)
+    np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T.sum())
 
   def test_arange_transposed_descendants(self):
     Tensor.manual_seed(0)
     x = Tensor.randint(4, 1).realize()
     a = (Tensor.arange(4,)*x).T
     b = Tensor.randint(4, 4).realize()
-    out = a+b
+    out = (a+b).sum()
     self.check_schedule(out, 1)
-    np.testing.assert_equal(out.numpy(), (np.arange(4)*x.numpy()).T+b.numpy())
+    np.testing.assert_equal(out.numpy(), ((np.arange(4)*x.numpy()).T+b.numpy()).sum())
 
   def test_arange_index(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10)
     out = (x + a[2]).sum()
-    self.check_schedule(out, 2)
+    self.check_schedule(out, 1)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   @unittest.skip("TOOD: FUSE_ARANGE overrules Tensor.arange().contiguous()")
@@ -1744,7 +1744,7 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10)+1
     out = (x + a[2]).sum()
-    self.check_schedule(out, 2)
+    self.check_schedule(out, 1)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   @unittest.skip("TOOD: FUSE_ARANGE overrules Tensor.arange().contiguous()")
@@ -1791,15 +1791,16 @@ class TestIndexing(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from ext device")
   def test_arange_shrink_copy(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).to("CPU")
-    sched = self.check_schedule(a, 1)
+    sched = self.check_schedule(a, 2) # NOTE: there is a contiguous between REDUCE_AXIS and COPY
     self.assertIs(sched[-1].ast.op, Ops.COPY)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from ext device")
   def test_arange_expand_copy(self):
     a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).contiguous().to("CPU")
-    sched = self.check_schedule(a, 1)
-    self.assertIs(sched[1].ast.op, Ops.COPY)
+    sched = self.check_schedule(a, 2) # NOTE: there is a contiguous between REDUCE_AXIS and COPY
+    self.assertIs(sched[2].ast.op, Ops.COPY)
+    self.assertIs(sched[1].ast.src[0].src[2].op, Ops.LOAD)
     self.assertIs(sched[0].ast.src[0].src[2].op, Ops.ADD)
     np.testing.assert_equal(a.numpy(), [[[0, 0], [1, 1]], [[2, 2], [3, 3]]])
 
