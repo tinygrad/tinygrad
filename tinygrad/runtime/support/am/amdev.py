@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib
+import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib, array
 from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -101,9 +101,7 @@ class AMPageTableEntry:
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
-    self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, system, snooped, valid, extra=(paddr & 0x0000FFFFFFFFF000))
-
-  def entry(self, entry_id:int) -> int: return self.entries[entry_id]
+    self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, system, snooped, valid) | (paddr & 0x0000FFFFFFFFF000)
 
 class AMPageTableTraverseContext:
   def __init__(self, adev, pt, vaddr, create_pts=False, free_pts=False):
@@ -115,10 +113,10 @@ class AMPageTableTraverseContext:
 
   def level_down(self):
     pt, pte_idx, _ = self.pt_stack[-1]
-    if (entry:=pt.entry(pte_idx)) & am.AMDGPU_PTE_VALID == 0:
+    if (entry:=pt.entries[pte_idx]) & am.AMDGPU_PTE_VALID == 0:
       assert self.create_pts, "Not allowed to create new page table"
       pt.set_entry(pte_idx, self.adev.mm.palloc(0x1000, zero=True), table=True, valid=True)
-      entry = pt.entry(pte_idx)
+      entry = pt.entries[pte_idx]
 
     assert not self.adev.gmc.is_pte_huge_page(entry), f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
     child_page_table = AMPageTableEntry(self.adev, entry & 0x0000FFFFFFFFF000, lv=pt.lv+1)
@@ -128,7 +126,7 @@ class AMPageTableTraverseContext:
 
   def _try_free_pt(self) -> bool:
     pt, _, _ = self.pt_stack[-1]
-    if self.free_pts and pt != self.adev.mm.root_page_table and all(pt.entry(i) & am.AMDGPU_PTE_VALID == 0 for i in range(512)):
+    if self.free_pts and pt != self.adev.mm.root_page_table and all(pt.entries[i] & am.AMDGPU_PTE_VALID == 0 for i in range(512)):
       self.adev.mm.pfree(pt.paddr)
       parent_pt, parent_pte_idx, _ = self.pt_stack[-2]
       parent_pt.set_entry(parent_pte_idx, 0x0, valid=False)
@@ -146,7 +144,7 @@ class AMPageTableTraverseContext:
       if self.create_pts:
         while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while pt.lv!=am.AMDGPU_VM_PTB and not self.adev.gmc.is_pte_huge_page(pt.entry(pte_idx)): pt, pte_idx, pte_covers = self.level_down()
+        while pt.lv!=am.AMDGPU_VM_PTB and not self.adev.gmc.is_pte_huge_page(pt.entries[pte_idx]): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, 512 - pte_idx)
       assert entries > 0, "Invalid entries"
@@ -183,7 +181,7 @@ class AMMemoryManager:
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
-          assert pt.entry(pte_idx + pte_off) & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
+          assert pt.entries[pte_idx + pte_off] & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
                        frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
@@ -198,7 +196,7 @@ class AMMemoryManager:
     ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, free_pts=True)
     for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
-        assert pt.entry(pte_id) & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, f"PTE not mapped: {pt.entry(pte_id):#x}"
+        assert pt.entries[pte_id] & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, f"PTE not mapped: {pt.entries[pte_id]:#x}"
         pt.set_entry(pte_id, paddr=0x0, valid=False)
 
   @staticmethod
@@ -206,7 +204,7 @@ class AMMemoryManager:
 
   def valloc(self, size:int, align=0x1000, uncached=False, contigous=False) -> AMMapping:
     # Alloc physical memory and map it to the virtual address
-    va = self.alloc_vaddr(size, align)
+    va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
 
     if contigous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
@@ -347,18 +345,29 @@ class AMDev:
     self.reg("regBIF_BX_PF0_RSMU_DATA").write(val)
 
   def wait_reg(self, reg:AMRegister, value:int, mask=0xffffffff, timeout=10000) -> int:
-    for _ in range(timeout):
+    start_time = int(time.perf_counter() * 1000)
+    while int(time.perf_counter() * 1000) - start_time < timeout:
       if ((rval:=reg.read()) & mask) == value: return rval
-      time.sleep(0.001)
     raise RuntimeError(f'wait_reg timeout reg=0x{reg.addr:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
+
+  def _read_vram(self, addr, size) -> bytes:
+    assert addr % 4 == 0 and size % 4 == 0, f"Invalid address {addr:#x} or size {size:#x}"
+    res = []
+    for caddr in range(addr, addr + size, 4):
+      self.wreg(0x06, caddr >> 31)
+      self.wreg(0x00, (caddr & 0x7FFFFFFF) | 0x80000000)
+      res.append(self.rreg(0x01))
+    return bytes(array.array('I', res))
 
   def _run_discovery(self):
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.
     #       The table is located at the end of VRAM - 64KB and is 10KB in size.
     mmRCC_CONFIG_MEMSIZE = 0xde3
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
+    tmr_offset, tmr_size = self.vram_size - (64 << 10), (10 << 10)
 
-    self.bhdr = am.struct_binary_header.from_buffer(bytearray(self.vram.view(self.vram_size - (64 << 10), (10 << 10))[:]))
+    disc_tbl = self._read_vram(tmr_offset, tmr_size) if self.vram.nbytes < self.vram_size else self.vram.view(tmr_offset, tmr_size)[:]
+    self.bhdr = am.struct_binary_header.from_buffer(bytearray(disc_tbl))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE and not ihdr.base_addr_64_bit, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
 

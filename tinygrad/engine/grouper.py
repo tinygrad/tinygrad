@@ -1,10 +1,10 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from tinygrad.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, merge_views
+from tinygrad.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
 from tinygrad.ops import can_pad, sint, track_rewrites, _substitute
 from tinygrad.codegen.lowerer import get_contraction_with_reduce
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, flatten, getenv, pluralize, ContextVar, Context, diskcache_put
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -14,6 +14,26 @@ from tinygrad.spec import type_verify, sched_spec
 # creation can recurse a lot
 import sys
 sys.setrecursionlimit(10000)
+
+# *** UOp merge views ***
+
+merge_views = PatternMatcher([
+  # merge adjacent views
+  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="v2"),), name="v1"), lambda v1,v2: v2.replace(arg=v2.arg+v1.arg)),
+  # merge unmasked const views
+  (UPat(Ops.VIEW, name="v", src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="const"),)),
+   lambda v,const: const.replace(src=(const.src[0].replace(arg=const.st+v.st),)) if all(x.mask is None for x in (const.st+v.st).views) else None),
+  # merge view on load/store/valid
+  (UPat(Ops.VIEW, name="v", src=(UPat((Ops.LOAD, Ops.STORE, Ops.VALID), name="b"),)),
+   lambda b,v: b.replace(src=tuple((s.st+v.st).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
+  # remove view if it's a contiguous and the shapes match
+  (UPat(Ops.VIEW, name="v", src=(UPat(GroupOp.All-{Ops.DEVICE}, name="x"),)), lambda v,x: x if v.arg.contiguous and x.shape == v.shape else None),
+  # remove mask if there's a zero in the masked dim
+  (UPat(Ops.VIEW, name="v", src=(UPat(),)),
+   lambda v: v.const_like(0) if (mask:=v.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
+  # movement ops apply a new view on the base
+  (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
+])
 
 # **** schedule simplifier
 
@@ -105,7 +125,7 @@ replace_contiguous = PatternMatcher([
 
 # **** Grouper decides which of the UOps realize
 
-DONT_PUSH_VIEWS = {Ops.BUFFER, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.ASSIGN, Ops.SINK, Ops.CONTIGUOUS, Ops.COPY}
+ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE}
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
@@ -120,13 +140,13 @@ def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
 
 do_realize = PatternMatcher([
   # always realize SINK parents
-  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in DONT_PUSH_VIEWS)),
+  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
   # always realize ASSIGN/CONTIGUOUS/GroupOp.Meta
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}, name="tr"), realize),
   # realize before expand or unsafe pad ops
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"),), name="view"), realize_before_view),
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), name="view"), realize_before_view),
   # realize before COPY
-  (UPat(Ops.COPY, src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"), UPat())), realize),
+  (UPat(Ops.COPY, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"), UPat())), realize),
 ])
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
@@ -203,11 +223,6 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
       group = {tr: None}
       realizes[tr] = None
     reduce_for_op.update((tr, r) for tr in group)
-    if FUSE_ARANGE and r.arg[0] is Ops.ADD and r.src[0].base.op is Ops.CONST and (getenv("FUSE_ARANGE_UINT", 1) or not dtypes.is_unsigned(r.dtype)):
-      # maybe fuse arange with its children
-      # TODO: FUSE_ARANGE_UINT is for not fusing rand. should not be here.
-      if len(flatten(children[tr] for tr in group)) != 0:
-        for tr in group: del realizes[tr]
   # fuse double reduces with no other child
   for reduceop in double_reduces:
     top_reduce = reduceop.src[0].base
@@ -320,7 +335,7 @@ def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   return src.r(r.arg[0], tuple(i for i,(s,u) in enumerate(zip(src.shape, r.shape)) if resolve(s != u))).view(ShapeTracker.from_shape(r.shape))
 
 def elementwise_view_right(root:UOp):
-  if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW and x.base.op not in DONT_PUSH_VIEWS]): return None
+  if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW and x.base.op not in ALWAYS_CONTIGUOUS]): return None
   assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
   # place view after applying the elementwise op
   new_st = ShapeTracker.from_shape(swizzles[0].base.shape)
@@ -333,7 +348,7 @@ view_right = merge_views+PatternMatcher([
   # push a non contiguous ShapeTracker through reduceop
   (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), swizzle_reduceop),
   # apply view after reduceops
-  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="src"),), name="v"),), name="r"), reduceop_view_right),
+  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="src"),), name="v"),), name="r"), reduceop_view_right),
   # apply view after elementwise ops
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), elementwise_view_right),
   # merge axes for double reduce (invert of SPLIT_REDUCEOP=1)
@@ -407,7 +422,7 @@ pm_fuse = PatternMatcher([
    lambda r: r.replace(src=(r.src[0].fuse(),), arg=r.arg+(True,)) if len(r.arg) == 2 else None),
 
   # FUSE elementwise. TODO: check for PAD
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.ALU, name="alu"),), name="view").fuse(),
+  (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST}, name="alu"),), name="view").fuse(),
    lambda alu, view: alu.replace(src=tuple(x.view(view.arg).fuse() for x in alu.src))),
 
   # push FUSE through to srcs
@@ -424,6 +439,39 @@ def do_fusion(x:UOp):
   return graph_rewrite(x.substitute(found_contiguous), pm_fuse, name="local fusion").substitute({v:k for k,v in found_contiguous.items()})
 do_fuse = PatternMatcher([(UPat(Ops.FUSE, name="x"), do_fusion),])
 
+def fuse_arange(root:UOp):
+  # skip if root is arange
+  if not FUSE_ARANGE or (dtypes.is_unsigned(root.dtype) and not getenv("FUSE_ARANGE_UINT",1)) or root.src[0].base.op is Ops.CONST: return None
+  # gather all local aranges (including any fused ones)
+  local_arange: list[UOp] = []
+  def gate_reduce(u):
+    if u.op is Ops.REDUCE_AXIS and u.src[0].base.op is Ops.CONST: local_arange.append(u)
+    return u.op not in {*ALWAYS_CONTIGUOUS, Ops.REDUCE_AXIS} or u is root
+  toposort = root.toposort(gate=gate_reduce)
+  if not local_arange: return None
+  # fuse the nearest expand child of arange
+  local_children: dict[UOp, list[UOp]] = {}
+  for u in toposort:
+    for s in u.src: local_children.setdefault(s, []).append(u)
+  fuse_rep: dict[UOp, UOp] = {}
+  for r in local_arange:
+    # skip if already fused
+    if len(r.arg) > 2: continue
+    q = list(local_children[r])
+    while q:
+      u = q.pop()
+      if not (curr_children:=local_children.get(u, [])): continue
+      for child in curr_children:
+        other_paths = {s for s in child.toposort() if s.op in {Ops.REDUCE_AXIS, Ops.BUFFER} and s not in {root, r}}
+        fuse_rep[child] = child.replace(src=tuple(s.fuse() if s is u else s for s in child.src))
+        if other_paths: break
+      else: q.extend(curr_children)
+  return root.substitute(fuse_rep, name="fuse_arange") if fuse_rep else None
+
+insert_fuse = PatternMatcher([
+  (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
+])
+
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
   import atexit
@@ -438,7 +486,7 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
 @track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, do_fuse+merge_views+sym+replace_contiguous, ctx={})
+  tensor_map = graph_rewrite_map(big_sink, insert_fuse+do_fuse+merge_views+sym+replace_contiguous, ctx={})
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
