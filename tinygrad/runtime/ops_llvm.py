@@ -1,6 +1,6 @@
 import functools, ctypes, platform
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
-from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
+from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG, to_char_p_p
 from tinygrad.renderer.llvmir import LLVMRenderer
 import tinygrad.runtime.autogen.llvm as llvm
 from tinygrad.runtime.support.elf import jit_loader
@@ -16,6 +16,9 @@ class LLVMCompiler(Compiler):
   target_arch = {'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()]
   def __init__(self, processor:str, feats:str):
     for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmParser', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{self.target_arch}{component}')()
+
+    # NOTE: fix `TestOptGemm.test_gemm_unrolled_permute_l_42` bug in LLVM 20
+    llvm.LLVMParseCommandLineOptions(2, to_char_p_p([b"llvm", b"-enable-constraint-elimination=0"]), None)
 
     triple = {'AArch64': b'aarch64-none-unknown-elf', 'X86': b'x86_64-none-unknown-elf', 'AMDGPU': b'amdgcn-amd-amdhsa'}[self.target_arch]
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
