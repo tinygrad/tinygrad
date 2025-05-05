@@ -221,4 +221,4 @@ runs:
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
       run: |
-        brew install llvm
+        brew install llvm@19

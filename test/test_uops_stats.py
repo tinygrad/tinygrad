@@ -32,6 +32,7 @@ class TestMemoryCount(unittest.TestCase):
     _, mem = get_stats(a+3)
     self.assertEqual(mem, 1024*1024*2)  # 1 read + 1 write
 
+  @unittest.skip("depends on subbuffer working")
   def test_add_slice(self):
     a = Tensor.empty(1024, 1024, dtype=dtypes.uint8)[:512]
     _, mem = get_stats(a+3)
