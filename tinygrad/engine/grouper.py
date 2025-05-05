@@ -101,6 +101,7 @@ sym = symbolic_simple+PatternMatcher([
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat(GroupOp.All-{Ops.BUFFER_VIEW}, name="x"),), name="t"), lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, \
     (x.base,), (t.size, x.st.views[0].offset)).contiguous().reshape(t.shape) if x.device.startswith("DISK") else None),
+  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER_VIEW),), name="x"),)), lambda x: x.base.contiguous().view(x.st).contiguous()),
   # double ASSIGN to same target is one ASSIGN
   (UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat.var("x"))))), lambda x,t: t.assign(x.contiguous())),
   # ASSIGN to unrealized replaces the UOp
