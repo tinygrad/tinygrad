@@ -34,7 +34,7 @@ pm_unbind = PatternMatcher([
 # **** schedule linearizer
 
 def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  # construnct the KERNEL children graph based on assigns
+  # construct the KERNEL children graph based on assigns
   children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree: dict[UOp, int] = {}
   for u in (toposort:=sched_sink.toposort()):
