@@ -708,7 +708,7 @@ jobs:
     - name: Run real world test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Test models (Metal)
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/models --durations=20
+      run: JIT=2 METAL=1 python -m pytest test/models -v --durations=20
     - name: Run ONNX
       run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
