@@ -1,4 +1,5 @@
 from tinygrad import Tensor
+from tinygrad.ops import Ops
 from tinygrad.runtime import ops_webgpu
 from tinygrad.renderer import ProgramSpec
 from tinygrad.renderer.graph import GraphRenderer
@@ -7,7 +8,7 @@ from typing import Callable, Sequence
 
 def declare_kernel(p:ProgramSpec) -> str: return f"const {p.function_name} = `{p.src.replace(p.function_name, 'main')}`;"
 
-safe_load_state_dict = f"""const safeLoadStateDict = async (modelStateDict, safeTensorPath) => {{
+safe_load_state_dict = f"""const safeLoadStateDict = async (modelStateDict, safetensorPath) => {{
   const safetensorBuffer = await fetch(safetensorPath).then(x => x.arrayBuffer()).then(x => new Uint8Array(x));
   const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
   const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
@@ -16,17 +17,42 @@ safe_load_state_dict = f"""const safeLoadStateDict = async (modelStateDict, safe
     const src = safetensorBuffer.subarray(8 + metadataLength + info.data_offsets[0], 8 + metadataLength + info.data_offsets[1]);
     {ops_webgpu.js_copyin("modelStateDict[key]", "src")}
   }}
-}};"""
-empty_buf_flags = (state_buf_flags:="GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST") + "GPUBufferUsage.COPY_SRC"
+}};\n"""
+
+empty_flags = (state_flags:="GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST") + " | GPUBufferUsage.COPY_SRC"
+uniform_flags, copyout_flags = "GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST", "GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ"
 
 class WebGPUJSRenderer(GraphRenderer):
   def render_graph(self) -> str:
     prg: list[str] = ops_webgpu.js_init_device + safe_load_state_dict.split("\n")
-    kernel_declares = [declare_kernel(ei.prg.p) for ei in self.eis if isinstance(ei.prg, CompiledRunner)]
-    empty_buf_declares = [f"const {name} = {ops_webgpu.js_alloc(str(buf.nbytes), empty_buf_flags)};" for buf, name in self.empty_bufs.items()]
-    state_dict_kv_pairs = [f'"{name}": {ops_webgpu.js_alloc(str(buf.nbytes), state_buf_flags)}' for buf, name in self.state_bufs.items()]
-    state_dict_declare = f"const stateDict = {{ {",\n".join(state_dict_kv_pairs)} }};"
-    state_dict_load = f"await safeLoadStateDict(stateDict, safeTensorPath);"
+    prg.append("const setupNet = async (safetensorPath) => {")
+
+    # setup I/O between host/WebGPU
+    input_bufs, input_copyins, output_bufs, output_read_bufs, output_copies, output_copyouts, ret_bufs = [], [], [], [], [], [], []
+    for i, uop in enumerate(self.inputs):
+      if uop.base.op is Ops.BUFFER: # from Tensor input
+        input_bufs.append(f"const input_{i} = {ops_webgpu.js_alloc(str(uop.base.buffer.nbytes), empty_flags)};")
+        input_copyins.append(ops_webgpu.js_copyin(f"input_{i}", f"_input_{i}"))
+
+      elif uop.op is Ops.BIND: # from symbolic variable input
+        input_bufs.append(f"const input_{i} = {ops_webgpu.js_alloc("4", uniform_flags)};")
+        input_copyins.append(ops_webgpu.js_copyin(f"input_{i}", f"new Int32Array([{uop.unbind()[0].arg[0]}])"))
+
+    for i, uop in enumerate(self.outputs):
+      output_bufs.append(f"const output_{i} = {ops_webgpu.js_alloc(str(uop.base.buffer.nbytes), empty_flags)};")
+      output_read_bufs.append(f"const outputReader_{i} = {ops_webgpu.js_alloc(str(uop.base.buffer.nbytes), copyout_flags)};")
+      output_copies.append(ops_webgpu.js_copy(f"output_{i}", f"outputReader_{i}", f"output_{i}.size"))
+      ret_bufs.append(f"const ret_{i} = new Uint8Array(output_{i}.size);")
+      output_copyouts.append(ops_webgpu.js_copyout(f"ret_{i}", f"outputReader_{i}"))
+
+    # setup model
+    kernels = [declare_kernel(ei.prg.p) for ei in self.eis if isinstance(ei.prg, CompiledRunner)]
+    empty_bufs = [f"const {name} = {ops_webgpu.js_alloc(str(buf.nbytes), empty_flags)};" for buf, name in self.empty_bufs.items()]
+    state_dict_kv_pairs = [f'"{name}": {ops_webgpu.js_alloc(str(buf.nbytes), state_flags)}' for buf, name in self.state_bufs.items()]
+    state_dict = f"const stateDict = {{ {",\n".join(state_dict_kv_pairs)} }};"
+    load_state_dict = f"await safeLoadStateDict(stateDict, safeTensorPath);"
+
+
     # TODO: complete rendering
     return "\n".join(prg)
 
