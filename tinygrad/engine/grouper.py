@@ -125,7 +125,7 @@ replace_contiguous = PatternMatcher([
 
 # **** Grouper decides which of the UOps realize
 
-ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.BUFFER, Ops.ASSIGN, Ops.COPY, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE}
+ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE}
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
@@ -462,7 +462,7 @@ def fuse_arange(root:UOp):
       u = q.pop()
       if not (curr_children:=local_children.get(u, [])): continue
       for child in curr_children:
-        other_paths = {s for s in child.toposort() if s.op in {Ops.REDUCE_AXIS, *ALWAYS_CONTIGUOUS} and s not in {root, r}}
+        other_paths = {s for s in child.toposort() if s.op in {Ops.REDUCE_AXIS, Ops.BUFFER} and s not in {root, r}}
         fuse_rep[child] = child.replace(src=tuple(s.fuse() if s is u else s for s in child.src))
         if other_paths: break
       else: q.extend(curr_children)
