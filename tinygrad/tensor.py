@@ -2677,12 +2677,12 @@ class Tensor(SimpleMathTrait):
         crossover_dim = dim + n_stages - stage - 1
         blue_box, green_box = x.split(1, crossover_dim)
         flip_dims = tuple(-i for i in range(1, stage+1+(self.ndim-dim)))
-        x = (blue_box.cat(green_box.flip(flip_dims), dim=crossover_dim))
+        x = blue_box.cat(green_box.flip(flip_dims), dim=crossover_dim)
       for substage in range(stage-1, -1, -1):
         partner_dim = dim + n_stages - substage - 1
         x_top, x_bottom = x.split(1, partner_dim)
         x_larger, x_smaller = x_top.maximum(x_bottom), x_top.minimum(x_bottom)
-        x = (x_larger.cat(x_smaller, dim=partner_dim) if descending else x_smaller.cat(x_larger, dim=partner_dim)).kernelize()
+        x = (x_larger.cat(x_smaller, dim=partner_dim) if descending else x_smaller.cat(x_larger, dim=partner_dim)).contiguous()
       if stage != n_stages:
         # flip wires back to undo the crossover
         blue_box, flipped_green_box = x.split(1, crossover_dim)

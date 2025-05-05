@@ -91,6 +91,8 @@ if __name__ == "__main__":
     timings.append(time.perf_counter()-st)
     toks.append(tok)
     start_pos += 1
+    print(toks)
+    print(tokenizer.decode(toks))
   print(f"fastest token {min(timings)*1e3:.2f} ms, {1/min(timings):.1f} tok/s")
 
   if temperature == 0:
