@@ -24,23 +24,22 @@ class GraphRenderer(Renderer):
 
     # construct the kernel graph
     # designate the input and output nodes
-    inputs = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
+    self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
     # TODO: assert no realizes happen here in function call, only kernelize is allowed
     outputs = [t.kernelize().lazydata for t in get_parameters(fxn(*args))]
     assert len(outputs) > 0, "The function argument must return at least one Tensor so that the kernel graph can be accessed."
 
     # linearize the kernel graph
     schedule, _, becomes_map = create_schedule_with_vars(UOp.sink(*outputs))
-    outputs = [becomes_map[uop.base] for uop in outputs]
-    self.inputs, self.outputs, schedule = inputs, outputs, memory_planner(schedule)
+    self.outputs: list[UOp] = [becomes_map[uop.base] for uop in outputs]
 
     # render kernels, render buffer names
     # mark which buffers have state
     self.eis: list[ExecItem] = []
     self.empty_bufs: dict[Buffer, str] = dict()
     self.state_bufs: dict[Buffer, str] = dict()
-    seen, ctr = set([i.base.buffer for i in inputs if i.base.op is Ops.BUFFER]), itertools.count()
-    for si, ei in lower_schedule(schedule):
+    seen, ctr = set([i.base.buffer for i in self.inputs if i.base.op is Ops.BUFFER]), itertools.count()
+    for si, ei in lower_schedule(memory_planner(schedule)):
       assert isinstance(ei.prg, CompiledRunner), "BufferCopy not yet supported, ensure all Tensors are on the same device"
       self.eis.append(ei)
       for i, buf in enumerate(ei.bufs):

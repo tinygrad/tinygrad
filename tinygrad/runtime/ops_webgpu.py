@@ -194,7 +194,7 @@ class WebGpuAllocator(Allocator):
 
 # TODO: handle 4-byte alignment
 #if src.nbytes % 4: pad_src = f"const padded = new Uint8Array({src}.length + (4 - {src}.length % 4) % 4); padded.set({src});"
-def js_alloc(size:str, usage:str) -> str: return f"device.createBuffer({{size: {size}, usage: {usage}}});"
+def js_alloc(size:str, usage:str) -> str: return f"device.createBuffer({{size: {size}, usage: {usage}}})"
 
 # NOTE: dest/src names are resolved by tinygrad.renderer.graph.GraphRenderer
 def js_copyin(dest:str, src:str) -> str: return f"device.queue.writeBuffer({dest}, 0, {src});"
