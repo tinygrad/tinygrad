@@ -29,9 +29,9 @@ jobs:
     - name: External Benchmark Schedule
       run: PYTHONPATH="." python3 test/external/external_benchmark_schedule.py
     - name: Speed Test
-      run: LLVM=1 LLVMOPT=1 python3 test/test_speed_v_torch.py
+      run: LLVM=1 python3 test/test_speed_v_torch.py
     - name: Speed Test (BEAM=2)
-      run: BEAM=2 LLVM=1 LLVMOPT=1 python3 test/test_speed_v_torch.py
+      run: BEAM=2 LLVM=1 python3 test/test_speed_v_torch.py
 
   docs:
     name: Docs
@@ -368,8 +368,8 @@ jobs:
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
     - name: Run GC tests
       run: PYTHONPATH="." python test/external/external_uop_gc.py
-    - name: Repo line count < 12800 lines
-      run: MAX_LINE_COUNT=12800 python sz.py
+    - name: Repo line count < 13000 lines
+      run: MAX_LINE_COUNT=13000 python sz.py
 
   fuzzing:
     name: Fuzzing
@@ -708,7 +708,7 @@ jobs:
     - name: Run real world test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Test models (Metal)
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/models --durations=20
+      run: JIT=2 METAL=1 python -m pytest test/models -v --durations=20
     - name: Run ONNX
       run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)

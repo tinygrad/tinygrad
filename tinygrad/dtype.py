@@ -41,6 +41,7 @@ class DType(metaclass=DTypeMetaClass):
   def ptr(self, size=-1, local=False) -> PtrDType:
     return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, None, self, local, 1, size)
   def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
+  def nbytes(self): raise RuntimeError("only ptr types have nbytes")
 
 @dataclass(frozen=True, eq=False)
 class PtrDType(DType):
@@ -58,6 +59,9 @@ class PtrDType(DType):
       return ImageDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz, self.size, self.shape)
     return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz, self.size)
   def ptr(self, size=-1, local=False): raise RuntimeError("can't make a pointer from a pointer")
+  def nbytes(self) -> int:
+    if self.size == -1: return 0  # TODO: this should be an exception
+    return self.size*self.itemsize
   @property
   def vcount(self): return self.v
   def __repr__(self):
