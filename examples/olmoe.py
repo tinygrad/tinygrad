@@ -1,7 +1,6 @@
 # https://arxiv.org/pdf/2409.02060
 import time, os
-if "FLOAT16" not in os.environ: os.environ["FUSE_ARANGE"] = "1"
-if "FUSE_ARANGE_UINT" not in os.environ: os.environ["FUSE_ARANGE_UINT"] = "0"
+if "FUSE_ARANGE" not in os.environ: os.environ["FUSE_ARANGE"] = "1"
 import numpy as np
 np.set_printoptions(suppress=True, linewidth=1000)
 import functools
@@ -27,6 +26,7 @@ class MixtureFeedForward:
     selected_gate_projs = self.gate_proj[sel]
     selected_up_projs = self.up_proj[sel]
     selected_down_projs = self.down_proj[sel]
+    # fusing indexing kernels with dot kernels might disable dot kernel optimizations, so we split it.
     selected_gate_projs.kernelize(selected_up_projs, selected_down_projs)
 
     # run MoE
