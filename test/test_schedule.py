@@ -609,7 +609,7 @@ class TestSchedule(unittest.TestCase):
     at = a[:2].assign(Tensor.full((2,), 1.0)).kernelize()
     self.assertIs(at.lazydata.op, Ops.ASSIGN)
     at.realize()
-    self.assertIs(at.lazydata.op, Ops.BUFFER)
+    self.assertIs(at.lazydata.op, Ops.BUFFER_VIEW)
     self.assertEqual(a.tolist(), [1.0, 1.0, 0.0, 0.0])
 
   def test_kernelize_setitem_with_offset(self):
@@ -619,7 +619,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.kernelize(at1, at2)
     self.assertEqual({at1.lazydata.op, at2.lazydata.op}, {Ops.ASSIGN, Ops.ASSIGN})
     Tensor.realize(at1, at2)
-    self.assertEqual({at1.lazydata.op, at2.lazydata.op}, {Ops.BUFFER, Ops.BUFFER})
+    self.assertEqual({at1.lazydata.op, at2.lazydata.op}, {Ops.BUFFER_VIEW, Ops.BUFFER_VIEW})
     self.assertEqual(a.tolist(), [1.0, 1.0, 2.0, 2.0])
 
   def test_multioutput_ast(self):
