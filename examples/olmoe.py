@@ -24,10 +24,10 @@ class MixtureFeedForward:
     g = g.squeeze() # (BS, length, num_experts) -> (num_experts,)
     probs, sel = g.topk(self.activated_experts)
 
-    sel = sel.kernelize()
-    selected_gate_projs = self.gate_proj[sel].kernelize()
-    selected_up_projs = self.up_proj[sel].kernelize()
-    selected_down_projs = self.down_proj[sel].kernelize()
+    selected_gate_projs = self.gate_proj[sel]
+    selected_up_projs = self.up_proj[sel]
+    selected_down_projs = self.down_proj[sel]
+    selected_gate_projs.kernelize(selected_up_projs, selected_down_projs)
 
     # run MoE
     x_up_gate = x.dot(selected_gate_projs.permute(0,2,1)).silu() * x.dot(selected_up_projs.permute(0,2,1))
