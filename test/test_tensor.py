@@ -10,9 +10,7 @@ from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
 from tinygrad.ops import Ops, UOp
 from tinygrad.runtime.support.compiler_cuda import PTX
-from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.devectorizer import full_graph_rewrite
-from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
+from tinygrad.codegen import full_rewrite
 from tinygrad.dtype import DType
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -847,7 +845,7 @@ class TestIdxUpcast(unittest.TestCase):
     for s in schedule:
       if s.ast.op is Ops.SINK:
         renderer = Device[s.bufs[0].device].renderer
-        uops = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(s.ast, renderer), renderer))
+        uops = full_rewrite(s.ast, renderer)
         renderer.render(uops)
         return uops
 

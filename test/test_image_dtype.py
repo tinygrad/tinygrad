@@ -7,7 +7,7 @@ from tinygrad.engine.realize import lower_schedule
 from tinygrad.helpers import prod, unwrap
 
 IMAGE_SUPPORTED_DEVICES = ("QCOM", "GPU")
-REAL_DEV = (Device.DEFAULT if Device.DEFAULT != "CLOUD" else Device['CLOUD'].properties['clouddev'])
+REAL_DEV = (Device.DEFAULT if Device.DEFAULT != "REMOTE" else Device['REMOTE'].properties['remotedev'])
 
 @unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageCopy(unittest.TestCase):

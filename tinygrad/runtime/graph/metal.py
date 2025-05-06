@@ -59,10 +59,9 @@ class MetalGraph(GraphRunner):
     self.range = to_struct(0, len(jit_cache))
 
   def __call__(self, input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], wait=False) -> float|None:
-
     if self.command_buffer is not None and self.command_buffer in self.dev.mtl_buffers_in_flight: wait_check(self.command_buffer)
-    all_resources = dedup(self.all_resources + [x._buf.buf for x in input_rawbuffers])
 
+    all_resources = dedup(self.all_resources + [input_rawbuffers[input_idx]._buf.buf for input_idx in self.input_replace.values()])
     for (j,i),input_idx in self.input_replace.items():
       computeCommand = msg("indirectComputeCommandAtIndex:", objc_id)(self.icb, j)
       msg("setKernelBuffer:offset:atIndex:")(computeCommand, input_rawbuffers[input_idx]._buf.buf, input_rawbuffers[input_idx]._buf.offset, i)
