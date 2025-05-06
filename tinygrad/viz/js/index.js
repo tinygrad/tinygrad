@@ -43,8 +43,8 @@ async function renderDag(graph, additions, recenter=false) {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2;
       return `translate(-${x}, -${y})`;
-     }).selectAll("text").data(d => [d.label.split("\n")]).join("text").selectAll("tspan").data(d => d).join("tspan").text(d => d).attr("x", "1")
-       .attr("dy", 14).attr("xml:space", "preserve");
+     }).selectAll("text").data(d => [d.label.split("\n")]).join("text").selectAll("tspan").data(d => d).join("tspan").text(d => d).attr("x", "0")
+      .attr("dy", (_, i) => i === 0 ? 12 : 14).attr("xml:space", "preserve");
     // draw edges
     const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis);
     d3.select("#edges").selectAll("path.edgePath").data(g.edges()).join("path").attr("class", "edgePath").attr("d", (e) => {
