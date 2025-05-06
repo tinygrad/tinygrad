@@ -1407,6 +1407,7 @@ impl<'a> Thread<'a> {
                         self.vec_reg[vdst + i] = self.lds.read(single_addr() + 4 * i);
                     });
                 }
+                58 => self.vec_reg[vdst] = self.lds.read(single_addr()) as u8 as u32,
                 60 => self.vec_reg[vdst] = self.lds.read(single_addr()) as u16 as u32,
                 55 => {
                     let (addr0, addr1) = double_addr(4);
