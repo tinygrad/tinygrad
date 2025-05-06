@@ -1407,6 +1407,7 @@ impl<'a> Thread<'a> {
                         self.vec_reg[vdst + i] = self.lds.read(single_addr() + 4 * i);
                     });
                 }
+                58 => self.vec_reg[vdst] = self.lds.read(single_addr()) as u8 as u32,
                 60 => self.vec_reg[vdst] = self.lds.read(single_addr()) as u16 as u32,
                 55 => {
                     let (addr0, addr1) = double_addr(4);
@@ -3603,6 +3604,30 @@ mod test_lds {
         assert_eq!(thread.vec_reg[1], 2);
         assert_eq!(thread.vec_reg[2], 3);
         assert_eq!(thread.vec_reg[3], 4);
+    }
+
+    #[test]
+    fn test_ds_load_u8() {
+        let mut thread = _helper_test_thread();
+        thread.lds.write(0, 17);
+        thread.vec_reg[0] = 0;
+        r(&vec![0xD8E80000, 0x00000100, END_PRG], &mut thread);
+        assert_eq!(thread.vec_reg[0], 17);
+
+        thread.lds.write(0, 264);
+        thread.vec_reg[0] = 0;
+        r(&vec![0xD8E80000, 0x00000100, END_PRG], &mut thread);
+        assert_eq!(thread.vec_reg[0], 8);
+
+        thread.lds.write(8, 23);
+        thread.vec_reg[0] = 0;
+        r(&vec![0xD8E80008, 0x00000100, END_PRG], &mut thread);
+        assert_eq!(thread.vec_reg[0], 23);
+
+        thread.lds.write(16, 29);
+        thread.vec_reg[0] = 0;
+        r(&vec![0xD8E80010, 0x00000100, END_PRG], &mut thread);
+        assert_eq!(thread.vec_reg[0], 29);
     }
 
     #[test]
