@@ -1,6 +1,6 @@
 import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
 from typing import Any, Union, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, CI
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, cpu_profile, ProfileDeviceEvent, ProfileRangeEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -73,8 +73,10 @@ class MetalDevice(Compiled):
     Compiled.profile_events += [ProfileDeviceEvent(device)]
 
     from tinygrad.runtime.graph.metal import MetalGraph
+    # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
+    # This can be reproduced locally with any virtualization software (like utm) that can create macOS VMs with apple's own virtualization framework.
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
-                     functools.partial(MetalProgram, self), MetalGraph)
+                     functools.partial(MetalProgram, self), MetalGraph if not CI else None)
 
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:

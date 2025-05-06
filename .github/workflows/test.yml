@@ -706,11 +706,11 @@ jobs:
         cuda: 'true'
         llvm: 'true'
     - name: Run real world test
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
+      run: METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Test models (Metal)
-      run: JIT=2 METAL=1 python -m pytest test/models -v --durations=20
+      run: METAL=1 python -m pytest test/models -v --durations=20
     - name: Run ONNX
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
       run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
@@ -814,7 +814,7 @@ jobs:
           deps: testing_minimal
           llvm: ${{ matrix.backend == 'llvm' && 'true' }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'metal' && 'METAL=1\nJIT=2'}}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'metal' && 'METAL=1'}}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == '${{ matrix.backend }}'.upper(), Device.DEFAULT"
