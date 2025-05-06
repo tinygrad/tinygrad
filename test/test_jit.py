@@ -394,7 +394,6 @@ class TestJit(unittest.TestCase):
     np.testing.assert_allclose(result_2.numpy(), [6], atol=1e-4, rtol=1e-5)
     np.testing.assert_allclose(result_3.numpy(), [6], atol=1e-4, rtol=1e-5)
 
-  @unittest.skipIf(CI and Device.DEFAULT=="METAL", "no ICB in CI, creation of graph fails")
   def test_jit_batch_split(self):
     if Device[Device.DEFAULT].graph is None or JIT >= 2: raise unittest.SkipTest("only test graphs")
 
