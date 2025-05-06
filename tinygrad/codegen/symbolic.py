@@ -124,8 +124,8 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
 def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split_rem: bool=False) -> UOp|None:
   # simplify x // y or x % y, None means no change
   # simple cancel div/mod case
-  if y.vmin != 0 != y.vmax and (q:=cdiv(x.vmin,y.vmin)) == cdiv(x.vmin,y.vmax) == cdiv(x.vmax,y.vmin) == cdiv(x.vmax,y.vmax):
-      return x - q*y if which is Ops.MOD else x.const_like(q)
+  if y.vmin*y.vmax > 0 and (q:=cdiv(x.vmin,y.vmin)) == cdiv(x.vmin,y.vmax) == cdiv(x.vmax,y.vmin) == cdiv(x.vmax,y.vmax):
+    return x - q*y if which is Ops.MOD else x.const_like(q)
 
   if (y.op is not Ops.CONST) or ((c := y.arg) <= 0) or (x.dtype.count > 1): return None
 
