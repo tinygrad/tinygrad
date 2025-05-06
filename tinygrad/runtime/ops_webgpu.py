@@ -102,9 +102,7 @@ class WebGPUProgram:
         buf_patch = True
 
     # Creating bind group layout
-    binding_layouts = [webgpu.WGPUBindGroupLayoutEntry(binding=0, visibility= webgpu.WGPUShaderStage_Compute,
-      buffer=webgpu.WGPUBufferBindingLayout(type=webgpu.WGPUBufferBindingType_Uniform))]
-    binding_layouts += [webgpu.WGPUBindGroupLayoutEntry(binding=i+1, visibility=webgpu.WGPUShaderStage_Compute,
+    binding_layouts = [webgpu.WGPUBindGroupLayoutEntry(binding=i, visibility=webgpu.WGPUShaderStage_Compute,
       buffer=webgpu.WGPUBufferBindingLayout(type=webgpu.WGPUBufferBindingType_Uniform if i >= len(tmp_bufs)
       else webgpu.WGPUBufferBindingType_Storage)) for i in range(len(tmp_bufs)+len(vals))]
 
@@ -125,8 +123,7 @@ class WebGPUProgram:
     if pipe_err := pop_error(self.dev): raise RuntimeError(f"Error creating pipeline layout: {pipe_err}")
 
     # Creating bind group
-    bindings = [webgpu.WGPUBindGroupEntry(binding=0, buffer=create_uniform(self.dev, float('inf')), offset=0, size=4)]
-    bindings += [webgpu.WGPUBindGroupEntry(binding=i+1, buffer=create_uniform(self.dev, x) if i >= len(tmp_bufs) else x, offset=0,
+    bindings = [webgpu.WGPUBindGroupEntry(binding=i, buffer=create_uniform(self.dev, x) if i >= len(tmp_bufs) else x, offset=0,
       size=4 if i >= len(tmp_bufs) else webgpu.wgpuBufferGetSize(x)) for i,x in enumerate(tuple(tmp_bufs)+vals)]
 
     bg_arr_type = webgpu.WGPUBindGroupEntry * len(bindings)
