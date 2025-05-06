@@ -1,4 +1,4 @@
-import functools, importlib, time
+import functools, importlib
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, round_up, getenv
