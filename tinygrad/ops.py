@@ -109,7 +109,7 @@ class Ops(FastEnum):
 
   # misc ops
   UNROLL = auto(); CONTRACT = auto() # noqa: E702
-  VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
+  VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto(); MULTIBUFFER = auto() # noqa: E702
   DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
 
@@ -149,7 +149,7 @@ class Ops(FastEnum):
   VCONST = auto(); CONST = auto() # noqa: E702
 
   # device
-  DEVICE = auto()
+  DEVICE = auto(); DNUM = auto() # noqa: E702
   MULTI = auto()
 
   # CUSTOMI is inline
@@ -250,6 +250,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
   children:set[weakref.ref[UOp]] = field(default_factory=set)
+  def __post_init__(self):
+    if self.op is Ops.DEVICE: assert isinstance(self.arg, str)
   def __del__(self):
     if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
     if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg))) is not None:
@@ -317,13 +319,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.shape.shapetracker import ShapeTracker
     # BUFFER/BUFFER_VIEW and KERNEL only have a size
     if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
+    if self.op is Ops.MULTIBUFFER: return ShapeTracker.from_shape((sum(x.size for x in self.src),))
     if self.op is Ops.KERNEL: return ShapeTracker.from_shape((self.arg.ast.size,))
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
-      case Ops.MULTI: shape = tuple(sum(y.shape[a] for y in self.real_lbs) if a == self.axis else s for a,s in enumerate(self.real_lbs[0].shape))
+      case Ops.MULTI: shape = tuple(self.src[0].shape[a]*len(self.device) if a == self.axis else s for a,s in enumerate(self.src[0].shape))
       case Ops.BITCAST:
         shape = src_sts[0].shape
         if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
@@ -469,6 +472,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def real_lbs(self): return [lb for lb,r in zip(self.src, self.real) if r]
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
+    lb = self.copy_to_device(devices) #UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in devices), False)
+    dnum = UOp(Ops.DNUM, dtypes.int)
+    if axis is not None:
+      if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
+      sz = self.shape[axis] // len(devices)
+      lb = lb.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
+    return UOp.multi(lb, axis=axis)
+
+    """"
     lbs = [self.copy_to_device(d) for d in devices]
     if axis is not None:
       if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
@@ -478,6 +490,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       lbs = [lb.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape)))
         for lb,sz,off in zip(lbs, sizes, itertools.accumulate(sizes, initial=0))]
     return UOp.multi(*lbs, axis=axis)
+    """
 
   # *** from LazyBuffer ***
 
@@ -493,7 +506,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
     return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
-  def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False): return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)), clone)
+  def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False):
+    if isinstance(device, tuple): return UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in device), clone)
+    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)), clone)
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   @property
   def metadata(self) -> tuple[Metadata, ...]|Metadata|None: return self.arg.metadata if self.op is Ops.KERNEL else all_metadata.get(self, None)
@@ -528,13 +543,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop Buffer stuff ***
 
   @staticmethod
-  def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device), UOp.unique()), size)
+  def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType):
+    if isinstance(device, tuple):
+      bufs = [UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=d), UOp.unique()), size) for d in device]
+      return UOp(Ops.MULTIBUFFER, dtype, tuple(bufs))
+    return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device), UOp.unique()), size)
   @property
   def device(self) -> str|tuple[str, ...]: return cast(str|tuple[str, ...], unwrap(self._device))
   @functools.cached_property
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
-    if self.op is Ops.MULTI: return tuple(cast(str, x.device) for x in self.src)
+    if self.op is Ops.MULTI: return self.src[0].device
     if self.op is Ops.COPY:
       if len(self.src) > 2: return tuple(cast(str, x.device) for x in self.src[1:])
       return self.src[1].device
