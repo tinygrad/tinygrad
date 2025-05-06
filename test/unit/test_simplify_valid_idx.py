@@ -1,6 +1,6 @@
 import unittest, itertools
 
-from tinygrad.codegen.devectorizer import full_graph_rewrite
+from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Ops
 from tinygrad.codegen.symbolic import simplify_valid
@@ -45,7 +45,7 @@ class TestHelpers(unittest.TestCase):
 
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid):
-    load = full_graph_rewrite(load.sink()).src[0]
+    load = full_rewrite_to_sink(load.sink()).src[0]
     idx, valid = load.src[0].src[1], load.src[0].src[2]
     self.assertEqual(idx.render(simplify=False), sidx)
     self.assertEqual(valid.render(simplify=False), svalid)
@@ -167,7 +167,7 @@ class TestValidIdxSimplification(unittest.TestCase):
 
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
-    load = full_graph_rewrite(load.sink()).src[0]
+    load = full_rewrite_to_sink(load.sink()).src[0]
     idx = load.src[0].src[1]
     self.assertEqual(idx.op, Ops.VECTORIZE)
     self.assertEqual(len(idx.src), 2)
@@ -233,7 +233,7 @@ class TestImageSimplification(unittest.TestCase):
 
     # empty -> invalid
     load = get_load_image_uop(shape, (gidx0<8) & (gidx0<8).ne(True), idx)
-    load = full_graph_rewrite(load.sink()).src[0]
+    load = full_rewrite_to_sink(load.sink()).src[0]
     self.assertEqual(load.op, Ops.VECTORIZE)
     self.assertEqual(load.dtype.count, 4)
 

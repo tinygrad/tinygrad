@@ -3,7 +3,7 @@ from typing import Any
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
 from tinygrad.ops import Ops, UOp
-from tinygrad.codegen.devectorizer import full_graph_rewrite
+from tinygrad.codegen import full_rewrite_to_sink
 import numpy as np
 from tinygrad.device import is_dtype_supported
 from test.helpers import not_support_multi_device
@@ -105,7 +105,7 @@ class TestBitcastConstFolding(unittest.TestCase):
     def t(cases: dict[DType, Any]):
       for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
         if not math.isnan(from_v):
-          r = full_graph_rewrite(UOp.const(from_dt, from_v).bitcast(to_dt).sink()).src[0]
+          r = full_rewrite_to_sink(UOp.const(from_dt, from_v).bitcast(to_dt).sink()).src[0]
           self.assertEqual(r.op, Ops.CONST, msg:=f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
           self.assertEqual(r.dtype, to_dt, msg)
           np.testing.assert_equal(r.arg, to_v, msg)
@@ -128,7 +128,7 @@ class TestBitcastConstFolding(unittest.TestCase):
     t({dtypes.int64: 4598983288165178391, dtypes.uint64: 4598983288165178391, dtypes.float64: 0.29485681936461233})
 
   def test_vec_bitcast(self):
-    r = full_graph_rewrite(UOp.const(dtypes.int32.vec(3), (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src[0]
+    r = full_rewrite_to_sink(UOp.const(dtypes.int32.vec(3), (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src[0]
     self.assertEqual(r.op, Ops.VECTORIZE)
     self.assertEqual(r.dtype, dtypes.uint32.vec(3))
     self.assertEqual(tuple(x.arg for x in r.src), (2**32-1, 2**31, 75))
