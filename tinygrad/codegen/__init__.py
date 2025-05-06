@@ -72,3 +72,5 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
     ret.append(RewriteStep(block_merge, name="Linearizer: Merge Blocks"))
     ret.append(RewriteStep(pm_finalize, name="Linearizer: Finalize"))
   return ret
+
+def full_rewrite(sink:UOp, opts:Renderer) -> list[UOp]: return list(apply_rewrites(sink, get_rewrites_for_renderer(opts)).arg.lst)

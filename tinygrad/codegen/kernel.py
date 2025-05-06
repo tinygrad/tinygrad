@@ -16,7 +16,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.lowerer import get_contraction
 from tinygrad.engine.grouper import view_left
-from tinygrad.codegen import get_rewrites_for_renderer, apply_rewrites
+from tinygrad.codegen import full_rewrite
 
 class KernelOptError(Exception): pass
 
@@ -553,8 +553,7 @@ class Kernel:
     #if __debug__: type_verify(list(modified_ast.toposort()), shape_spec)
 
     try:
-      rewrite_list = get_rewrites_for_renderer(self.opts)
-      self.uops:list[UOp] = list(apply_rewrites(modified_ast, rewrite_list).arg.lst)
+      self.uops:list[UOp] = full_rewrite(modified_ast, self.opts)
     except RuntimeError:
       print("***** LINEARIZE FAILURE *****")
       print(f"ast = {self.ast}")
