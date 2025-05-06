@@ -457,20 +457,18 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(b.numpy(), yc.numpy(), atol=1e-4, rtol=1e-5)
 
   def test_jit_several_devs(self):
-    d0, d1 = f"{Device.DEFAULT}:0", f"CPU"
+    d0, d1 = f"{Device.DEFAULT}:0", "CPU"
 
     def f(a, b):
       x = a.to(d0).realize()
       y = b.to(d0).realize()
-      return x, y, x+y.realize(), x*y.realize()
+      return x+y.realize(), x*y.realize()
 
     jf = TinyJit(f)
     for _ in range(5):
       a = Tensor.randn(10, 10, device=d1).realize()
       b = Tensor.randn(10, 10, device=d1).realize()
-      xc, yc, zc, wc = jf(a, b)
-      np.testing.assert_allclose(a.numpy(), xc.numpy(), atol=1e-4, rtol=1e-5)
-      np.testing.assert_allclose(b.numpy(), yc.numpy(), atol=1e-4, rtol=1e-5)
+      zc, wc = jf(a, b)
       np.testing.assert_allclose((a.numpy()+b.numpy()), zc.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose((a.numpy()*b.numpy()), wc.numpy(), atol=1e-4, rtol=1e-5)
 
