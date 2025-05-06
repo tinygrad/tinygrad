@@ -49,6 +49,7 @@ class WGSLRenderer(CStyleLanguage):
   supports_float4 = False
   barrier = "workgroupBarrier();"
   code_for_op = {**CStyleLanguage.code_for_op, Ops.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a})"}
+  infinity = "INFINITY()"
   nan = "nan()"
   type_map = { dtypes.float: "f32", dtypes.uchar: "u32", dtypes.ushort: "u32", dtypes.short: "i32",
               dtypes.char: "i32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.half: "f16" }
@@ -87,9 +88,9 @@ class WGSLRenderer(CStyleLanguage):
     external_local_bufs = [line.lstrip() for line in kernel if "var<workgroup>" in line]
     kernel[:] = [line for line in kernel if "var<workgroup>" not in line]
     prg = "enable f16;\n" if any(uop.dtype.base == dtypes.half for uop in uops) else ""
+    prg += "fn INFINITY() -> f32 { let bits = 0x7F800000u; return bitcast<f32>(bits); }\n"
     prg += "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
-    prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
-    prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)+1})" +
+    prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)})" +
       f"{'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'}" +
       f"{name}:{f'array<{self.buf_map(dtype.base)}>' if isinstance(dtype,PtrDType) else self.buf_map(dtype)};" for name,(dtype,_) in bufs])
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>,"
