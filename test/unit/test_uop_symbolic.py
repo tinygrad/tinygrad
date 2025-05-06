@@ -2,8 +2,8 @@
 import unittest, pickle
 
 from tinygrad.dtype import dtypes, ConstType
-from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.devectorizer import full_graph_rewrite, sym
+from tinygrad.codegen import full_rewrite
+from tinygrad.codegen.devectorizer import sym
 from tinygrad.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
 import functools
@@ -11,7 +11,7 @@ import functools
 def render(self) -> tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
   glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
-  uops = linearize_uop(full_graph_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), self)).sink()))
+  uops = full_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), self)).sink())
   rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[-1]
   return rewritten_uop.render(simplify=False), rewritten_uop.vmin, rewritten_uop.vmax
 
@@ -569,7 +569,7 @@ class TestSymbolic(unittest.TestCase):
 
     # TODO: copied from render, render does not support cast
     glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
-    uops = linearize_uop(full_graph_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink()))
+    uops = full_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink())
     rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[-1]
 
     self.assertEqual(rewritten_uop, cond.where(a.cast(dtypes.half), b.cast(dtypes.half)))

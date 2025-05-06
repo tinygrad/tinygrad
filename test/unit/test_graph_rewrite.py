@@ -2,11 +2,11 @@ import unittest, math
 from tinygrad import dtypes
 from tinygrad.helpers import all_same
 from tinygrad.ops import GroupOp, UOp, Ops, exec_alu
-from tinygrad.codegen.devectorizer import full_graph_rewrite
+from tinygrad.codegen import full_rewrite_to_sink
 
 # Helper function to apply the graph rewrite
 def apply_rewrite(expr):
-  return full_graph_rewrite(expr.sink()).src[0]
+  return full_rewrite_to_sink(expr.sink()).src[0]
 
 def evaluate_uop(uop, variables):
   if uop.op == Ops.CONST:
@@ -145,7 +145,7 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
 
 class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
   def test_full_graph_rewrite_transcendental_edge_cases(self):
-    optimized_sink = full_graph_rewrite(UOp.const(dtypes.float32, -1.0).log2().sink(UOp.const(dtypes.float32, 0.0).reciprocal()))
+    optimized_sink = full_rewrite_to_sink(UOp.const(dtypes.float32, -1.0).log2().sink(UOp.const(dtypes.float32, 0.0).reciprocal()))
     optimized_log2_neg, optimized_recip_zero = optimized_sink.src
     self.assertTrue(math.isnan(optimized_log2_neg.arg), f"Expected NaN for log2(-1.0), got {optimized_log2_neg.arg}")
     self.assertTrue(math.isinf(optimized_recip_zero.arg) and optimized_recip_zero.arg > 0,
@@ -154,14 +154,14 @@ class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
   @unittest.skip("broken")
   def test_full_graph_rewrite_modulo_negative_dividend(self):
     x_var_uop = UOp.variable('x', -5, -1)
-    optimized_sink = full_graph_rewrite((x_var_uop % 3).sink())
+    optimized_sink = full_rewrite_to_sink((x_var_uop % 3).sink())
     for x_value in range(-5, 0):
       self.assertEqual(x_value % 3, evaluate_uop(optimized_sink.src[0], {'x': x_value}))
 
   @unittest.skip("broken")
   def test_full_graph_rewrite_division_negative_divisor(self):
     x_var_uop = UOp.variable('x', 1, 5)
-    optimized_sink = full_graph_rewrite((x_var_uop // -2).sink())
+    optimized_sink = full_rewrite_to_sink((x_var_uop // -2).sink())
     for x_value in range(1, 6):
       self.assertEqual(x_value // -2, evaluate_uop(optimized_sink.src[0], {'x': x_value}))
 
