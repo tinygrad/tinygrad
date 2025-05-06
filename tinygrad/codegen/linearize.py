@@ -2,7 +2,7 @@ from __future__ import annotations
 import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from tinygrad.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat, GroupOp
+from tinygrad.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
 from tinygrad.helpers import dedup, partition, all_same, flatten
 from tinygrad.spec import type_verify
 
@@ -243,23 +243,3 @@ def finalize(sink:UOp) -> UOp:
   return UOp(Ops.BLOCKFINAL, arg=BasicBlock2(tuple(lst)))
 
 pm_finalize = PatternMatcher([(UPat(Ops.BLOCK, name="sink"), finalize)])
-
-def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
-  assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
-
-  # get block context
-  ctx = BlockContext.from_sink(sink)
-
-  # wrap all uops in blocks, already reordered
-  sink = graph_rewrite(sink, block_create, ctx=ctx, name="Linearizer: Create Blocks", bottom_up=True)
-
-  # merge blockends
-  sink = graph_rewrite(sink, pm_blockend_merge, name="Linearizer: Merge Blockends")
-
-  # merge blocks
-  sink = graph_rewrite(sink, block_merge, name="Linearizer: Merge Blocks")
-
-  # finalize
-  sink = graph_rewrite(sink, pm_finalize, name="Linearizer: Finalize")
-
-  return list(sink.arg.lst)
