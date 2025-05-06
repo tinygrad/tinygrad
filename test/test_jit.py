@@ -7,7 +7,7 @@ from test.helpers import assert_jit_cache_len, not_support_multi_device
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.device import Device
-from tinygrad.helpers import CI, Context, JIT, GlobalCounters
+from tinygrad.helpers import Context, JIT, GlobalCounters
 from tinygrad.dtype import dtypes
 from extra.models.unet import ResBlock
 
