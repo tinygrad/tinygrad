@@ -1,0 +1,7 @@
+<html><script type="module">
+
+  let test_wgsl = (await import("./test_wgsl.js")).default;
+  const fxn = await test_wgsl.run();
+  await fxn();
+
+</script></html>
