@@ -4,10 +4,10 @@ from tinygrad import dtypes, Device, Variable
 from tinygrad.helpers import DEBUG, Context
 from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher, track_rewrites
 from tinygrad.renderer import Renderer
+from tinygrad.codegen import full_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.codegen.devectorizer import full_graph_rewrite, graph_rewrite, sym
 from tinygrad.codegen.expander import expander, expand_rewrite
-from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.shape.shapetracker import ShapeTracker, View
 
 simple_pm = PatternMatcher([
@@ -19,7 +19,7 @@ simple_pm = PatternMatcher([
 
 def to_uops_list(u:List[UOp]) -> List[UOp]:
   # we strip the SINK here for legacy reasons
-  ret = linearize_uop(full_graph_rewrite(UOp.sink(*u)))
+  ret = full_rewrite(UOp.sink(*u))
   assert ret[-1].op is Ops.SINK
   return ret[:-1]
 

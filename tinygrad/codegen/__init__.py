@@ -73,4 +73,5 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
     ret.append(RewriteStep(pm_finalize, name="Linearizer: Finalize"))
   return ret
 
-def full_rewrite(sink:UOp, opts:Renderer) -> list[UOp]: return list(apply_rewrites(sink, get_rewrites_for_renderer(opts)).arg.lst)
+def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
+  return list(apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer())).arg.lst)
