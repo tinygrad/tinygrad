@@ -192,7 +192,7 @@ class ASM24Controller:
     if status or ((fmt_type & 0xbe == 0x04) and (((value is None) and (not (b284 & 0x01))) or ((value is not None) and (b284 & 0x01)))):
       status_map = {0b001: "Unsupported Request: invalid address/function (target might not be reachable)",
                     0b100: "Completer Abort: abort due to internal error", 0b010: "Configuration Request Retry Status: configuration space busy"}
-      raise RuntimeError(f"TLP status: {status_map.get(status, "Reserved (0b{:03b})".format(status))}")
+      raise RuntimeError(f"TLP status: {status_map.get(status, 'Reserved (0b{:03b})'.format(status))}")
 
     if value is None: return (struct.unpack('>I', self.read(0xB220, 4))[0] >> (8 * offset)) & ((1 << (8 * size)) - 1)
 
