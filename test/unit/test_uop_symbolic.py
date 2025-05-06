@@ -354,6 +354,11 @@ class TestSymbolic(unittest.TestCase):
   def test_div_numerator_negative(self):
     self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "((((idx*-10)+99)//11)+-9)")
 
+  def test_div_gcd_negtive_var_positive_const(self):
+    lidx0=UOp(Ops.DEFINE_VAR, dtypes.int, arg=('lidx0', 0, 16), src=())
+    gidx0=UOp(Ops.DEFINE_VAR, dtypes.int, arg=('gidx0', 0, 640), src=())
+    self.helper_test_variable((40-((gidx0*-4)+(lidx0*-160)+2556)//4), 0, 0, "((((gidx0*-1)+(lidx0*-40))*-1)+-599)")
+
   def test_div_into_mod(self):
     self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
 
