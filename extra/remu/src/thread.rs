@@ -3607,6 +3607,30 @@ mod test_lds {
     }
 
     #[test]
+    fn test_ds_load_u8() {
+        let mut thread = _helper_test_thread();
+        thread.lds.write(0, 17);
+        thread.vec_reg[0] = 0;
+        r(&vec![0xD8E80000, 0x00000100, END_PRG], &mut thread);
+        assert_eq!(thread.vec_reg[0], 17);
+
+        thread.lds.write(0, 264);
+        thread.vec_reg[0] = 0;
+        r(&vec![0xD8E80000, 0x00000100, END_PRG], &mut thread);
+        assert_eq!(thread.vec_reg[0], 8);
+
+        thread.lds.write(8, 23);
+        thread.vec_reg[0] = 0;
+        r(&vec![0xD8E80008, 0x00000100, END_PRG], &mut thread);
+        assert_eq!(thread.vec_reg[0], 23);
+
+        thread.lds.write(16, 29);
+        thread.vec_reg[0] = 0;
+        r(&vec![0xD8E80010, 0x00000100, END_PRG], &mut thread);
+        assert_eq!(thread.vec_reg[0], 29);
+    }
+
+    #[test]
     fn test_ds_store_dwords() {
         let mut thread = _helper_test_thread();
         thread.vec_reg[9] = 69;
