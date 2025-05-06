@@ -846,7 +846,7 @@ class AMDDevice(HCQCompiled):
   def is_usb(self) -> bool: return isinstance(self.dev_iface, USBIface)
 
   def _select_iface(self):
-    if len(nm:=getenv("AMD_IFACE", "")) > 0: return getattr(sys.modules[__name__], f"{nm}Iface")(self, self.device_id)
+    if len(nm:=getenv("AMD_IFACE", "")) > 0: return getattr(sys.modules[__name__], f"{nm.upper()}Iface")(self, self.device_id)
 
     errs:str = ""
     for iface_t in (KFDIface, PCIIface, USBIface):
