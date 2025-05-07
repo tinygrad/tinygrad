@@ -54,11 +54,16 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     k = queue.popleft()
     # unbind var_vals from the kernel
     local_var_vals: list[dict[Variable, int]] = []
-    ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=local_var_vals, name="unbind vars")
-    var_vals = merge_dicts([var_vals, *local_var_vals])
-    # create subbuffers if needed
-    if ast.op is Ops.BUFFER_VIEW: buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-    schedule.append(ScheduleItem(ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
+    if k.op is Ops.COPY:
+      schedule.append(ScheduleItem(UOp(Ops.COPY), tuple(s.buf_uop.buffer for s in k.src)))
+    elif k.op is Ops.KERNEL:
+      ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=local_var_vals, name="unbind vars")
+      var_vals = merge_dicts([var_vals, *local_var_vals])
+      # create subbuffers if needed
+      if ast.op is Ops.BUFFER_VIEW: buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
+      schedule.append(ScheduleItem(ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
+    else:
+      raise NotImplementedError(f"{k.op} isn't supported in schedule")
     for x in children[k]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)

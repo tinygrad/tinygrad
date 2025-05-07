@@ -186,6 +186,9 @@ spec = PatternMatcher([
 # *** schedule spec only allows buffers, assigns and kernels in the graph ***
 
 sched_spec = buffer_spec+assign_spec+PatternMatcher([
+  # COPY is now allowed in schedule
+  (UPat(Ops.COPY), lambda: True),
+  # everything else isn't
   (UPat(GroupOp.All-{Ops.SINK}), lambda: False),
 ])
 

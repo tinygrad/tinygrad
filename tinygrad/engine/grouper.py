@@ -263,10 +263,12 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
 
 create_kernels = merge_views+PatternMatcher([
   # always give assign/contiguous a kernel
-  (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
+  (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL, Ops.COPY}), name="x"), create_kernel),
   (UPat(Ops.CONTIGUOUS, name="x"), lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype))),
   # create a buffer for COPY on the new device
-  (UPat(Ops.COPY, src=(UPat(), UPat(Ops.DEVICE, name="d")), name="x"), lambda ctx,d,x: create_kernel(ctx, x, UOp.new_buffer(d.arg, x.size, x.dtype))),
+  (UPat(Ops.COPY, src=(UPat(name="b"), UPat(Ops.DEVICE, name="d")), name="x"),
+   lambda d,x,b: UOp(Ops.ASSIGN, x.dtype, (nb:=UOp.new_buffer(d.arg, x.size, x.dtype), UOp(Ops.COPY, x.dtype, (nb,b))))),
+   #lambda ctx,d,x: create_kernel(ctx, x, UOp.new_buffer(d.arg, x.size, x.dtype))),
   # otherwise check the context if we're realizing this UOp
   (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"),
    lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype)) if x in ctx.realizes else None),
@@ -382,8 +384,9 @@ def check_load_st(glbl:UOp, view:UOp):
                      +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
 
 fix_kernel_ops = PatternMatcher([
-  # remove CONTIGUOUS/DEVICE from kernel AST
+  # remove CONTIGUOUS/COPY/DEVICE from kernel AST
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
+  (UPat(Ops.COPY, src=(UPat(Ops.BUFFER, src=(UPat(), UPat(Ops.DEVICE, name="d")), name="x"), UPat(Ops.DEVICE, name="d"))), lambda x,d: x),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
   # no ImageDType after load
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
@@ -397,7 +400,9 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   parents_rep: dict[UOp, UOp] = {}
   for s in k.src:
     if s.op is Ops.ASSIGN:
-      for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
+      if s.src[1].op is Ops.KERNEL:
+        for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
+      elif s.src[1].op is Ops.COPY: parents_rep[s.src[1].src[1]] = s.src[1].src[0]
       parents_rep[s] = s.buf_uop
   ast = k.arg.ast.substitute(parents_rep)
   # push views to edges
