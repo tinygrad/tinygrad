@@ -1,7 +1,7 @@
 import gc, unittest, os, weakref
 from tinygrad.tensor import Tensor
 from tinygrad.device import Buffer
-from tinygrad.ops import tracked_ctxs, tracked_keys, TrackedGraphRewrite
+from tinygrad.ops import tracked_ctxs, TrackedGraphRewrite
 
 def count_buffers():
   gc.collect()

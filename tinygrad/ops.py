@@ -1015,7 +1015,14 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name: 
   return rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.top_down_rewrite(sink)
 
 @track_matches
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name: str|None = None, input_map: dict[UOp, UOp] | None = None) -> dict[UOp, UOp]:
+def graph_rewrite_map(
+    sink: UOp,
+    pm: PatternMatcher,
+    ctx=None,
+    bottom_up=False,
+    name: str | None = None,
+    input_map: dict[UOp, UOp] | None = None
+) -> dict[UOp, UOp]:
   rewrite_ctx = RewriteContext(pm, ctx)
   new_map = {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort())[::-1]}
   if input_map is not None:
