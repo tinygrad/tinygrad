@@ -1375,23 +1375,21 @@ impl<'a> Thread<'a> {
                     };
                 }
             }
-        } else if instruction >> 26 == 0b110110 {
-            let instr = self.u64_instr();
+        } else if let Instruction::DS { op, gds, addr, data0, offset0, data1, offset1, vdst } = decoded {
+            let _ = self.u64_instr();
+            if gds {
+                return todo_instr!(instruction)?;
+            }
             if !self.exec.read() {
                 return Ok(());
             }
-            let op = (instr >> 18) & 0xff;
-            assert_eq!((instr >> 17) & 0x1, 0);
-            let addr = ((instr >> 32) & 0xff) as usize;
-            let data0 = ((instr >> 40) & 0xff) as usize;
-            let data1 = ((instr >> 48) & 0xff) as usize;
-            let vdst = ((instr >> 56) & 0xff) as usize;
 
-            let lds_base = self.vec_reg[addr];
-            let single_addr = || (lds_base + (instr & 0xffff) as u32) as usize;
+            let [data0, data1, vdst] = [data0 as usize, data1 as usize, vdst as usize];
+            let lds_base = self.vec_reg[addr as usize];
+            let single_addr = || (lds_base + u16::from_le_bytes([offset0, offset1]) as u32) as usize;
             let double_addr = |adj: u32| {
-                let addr0 = lds_base + (instr & 0xff) as u32 * adj;
-                let addr1 = lds_base + ((instr >> 8) & 0xff) as u32 * adj;
+                let addr0 = lds_base + offset0 as u32 * adj;
+                let addr1 = lds_base + offset1 as u32 * adj;
                 (addr0 as usize, addr1 as usize)
             };
 
