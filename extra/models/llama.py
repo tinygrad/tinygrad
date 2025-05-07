@@ -221,8 +221,10 @@ def convert_from_huggingface(weights:dict[str, Tensor], n_layers: int, n_heads: 
     if '.mlp.experts.' in k:
       # support MoE models
       _, _, layer, _, _, expert, name, _ = k.split('.')
+      if int(layer) >= n_layers: continue
       experts[f'layers.{layer}.feed_forward.{name}'][int(expert)] = v
       continue
+    if k not in keymap: continue
     sd[keymap[k]] = v
   for k,v in experts.items(): sd[k] = Tensor.stack(*[v[i] for i in range(len(v))])
   return sd

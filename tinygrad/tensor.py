@@ -2671,6 +2671,7 @@ class Tensor(SimpleMathTrait):
     pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
     x = x.pad(pads, value=fill_value).unflatten(dim, (2,)*n_stages)
     # https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
+    meow = 0
     for stage in range(1, n_stages+1):
       if stage != n_stages:
         # flip so arrows of green boxes point the same way as blue boxes
@@ -2678,15 +2679,21 @@ class Tensor(SimpleMathTrait):
         blue_box, green_box = x.split(1, crossover_dim)
         flip_dims = tuple(-i for i in range(1, stage+1+(self.ndim-dim)))
         x = blue_box.cat(green_box.flip(flip_dims), dim=crossover_dim)
+        meow += 1
+        if meow % 4 == 0: x = x.contiguous()
       for substage in range(stage-1, -1, -1):
         partner_dim = dim + n_stages - substage - 1
         x_top, x_bottom = x.split(1, partner_dim)
         x_larger, x_smaller = x_top.maximum(x_bottom), x_top.minimum(x_bottom)
-        x = (x_larger.cat(x_smaller, dim=partner_dim) if descending else x_smaller.cat(x_larger, dim=partner_dim)).contiguous()
+        x = x_larger.cat(x_smaller, dim=partner_dim) if descending else x_smaller.cat(x_larger, dim=partner_dim)
+        meow += 1
+        if meow % 4 == 0: x = x.contiguous()
       if stage != n_stages:
         # flip wires back to undo the crossover
         blue_box, flipped_green_box = x.split(1, crossover_dim)
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
+        meow += 1
+        if meow % 4 == 0: x = x.contiguous()
     x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
     # compute indices for sorted values
     idx = Tensor.arange(orig_len, requires_grad=False, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim)))
