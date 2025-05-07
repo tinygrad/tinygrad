@@ -110,6 +110,9 @@ class TestSymbolic(unittest.TestCase):
   def test_sub_1(self):
     self.helper_test_variable(Variable("a", 0, 8)-1, -1, 7, "(a+-1)")
 
+  def test_const_var(self):
+    self.helper_test_variable(Variable("fake", 1, 1), 1, 1, "1")
+
   def test_add_self(self):
     a = Variable("a", 0, 8)
     b = Variable("b", 0, 8)
