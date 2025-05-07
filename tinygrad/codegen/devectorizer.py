@@ -312,9 +312,11 @@ def split_cat(sink, store, load1, load2, lt, idx_l1, idx_s, rng_s, mul_s, rng2_s
               globals_l1, globals_s, globals_l2, idx_l2, rng_l2, rng2_l2, mul_l2, const_s=None, const_l1=None,
               const_l2=None, mul2_s=None, mul2_l1=None, mul2_l2=None, extra=None):
   is_vec = globals_s.op is Ops.VECTORIZE
-  split_rng2 = lt.arg == rng2_s.src[1].arg // 2
+  split_rng2 = mul_s != mul_l2
   full = rng2_s.src[1] if split_rng2 else rng_s.src[1]
-  if lt.arg != full.arg // 2: return None
+  # doesnt work with SWAP OptOp
+  if lt >= full or rng_s.arg > rng2_s.arg or rng_l1.arg > rng2_l1.arg \
+     or rng_l2.arg > rng2_l2.arg or (mul2_s.arg > mul_s.arg if mul2_s is not None else False): return None
   if split_rng2: rng2_s, rng2_l1 = rng2_s.replace(src=(rng2_s.src[0], lt)), rng2_l1.replace(src=(rng2_l1.src[0], lt))
   else: rng_s, rng_l1 = rng_s.replace(src=(rng_s.src[0], lt)), rng_l1.replace(src=(rng_l1.src[0], lt))
 
@@ -356,7 +358,7 @@ pm_split = PatternMatcher([
       UPat(Ops.ADD, src=(
         UPat(Ops.LOAD, name="load1", src=(UPat(Ops.INDEX, name="idx_l1", src=(UPat(name="globals_l1"), _loop("l1"),
             UPat.any(UPat(Ops.CMPLT, src=(UPat(), UPat(name="lt"))), UPat(Ops.VECTORIZE, src=UPat(Ops.CMPLT, src=(UPat(), UPat(name="lt"))))))))),
-        UPat(Ops.LOAD, name="load2", src=(UPat(Ops.INDEX, name="idx_l2", src=(UPat(name="globals_l2"), _loop("l2"),UPat())))))))))),
+        UPat(Ops.LOAD, name="load2", src=(UPat(Ops.INDEX, name="idx_l2", src=(UPat(name="globals_l2"), _loop("l2"), UPat())))))))))),
     split_cat)
 ])
 
