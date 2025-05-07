@@ -879,12 +879,21 @@ TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:dict[UPat, list[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
-  loc: tuple[str, int]                                                                       # location that called graph_rewrite
-  sink: UOp                                                                                  # the sink input to graph_rewrite
-  bottom_up: bool
-  matches: list[tuple[UOp, UOp, UPat]]                                                       # before+after of all the matches
-  name: str|None
-  depth: int
+  loc: tuple[str, int]
+  sink: UOp | weakref.ReferenceType[UOp]
+  bottom_up: bool = False
+  matches: list[tuple[UOp | weakref.ReferenceType[UOp], UOp | weakref.ReferenceType[UOp], Any]] = field(default_factory=list)
+  name: str | None = None
+  depth: int = 0
+
+  def __reduce__(self):
+    def resolve(obj):
+      return obj() if isinstance(obj, weakref.ReferenceType) else obj
+    sink = resolve(self.sink)
+    matches = [(resolve(u0), resolve(u1), upat) for u0, u1, upat in self.matches]
+    matches = [(u0, u1, upat) for u0, u1, upat in matches if u0 is not None and u1 is not None]
+    return (self.__class__, (self.loc, sink, self.bottom_up, matches, self.name, self.depth))
+
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, int] = {}
@@ -907,7 +916,9 @@ def track_matches(func):
     if tracking:=(TRACK_MATCH_STATS >= 2 and tracked_ctxs):
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
       depth = len(active_rewrites)
-      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0], kwargs.get("bottom_up", False),[], kwargs.get("name", None), depth))
+      # Store sink as weakref
+      sink = weakref.ref(args[0]) if isinstance(args[0], UOp) else args[0]
+      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, sink, kwargs.get("bottom_up", False), [], kwargs.get("name", None), depth))
       active_rewrites.append(ctx)
     ret = func(*args, **kwargs)
     if tracking: active_rewrites.pop()
@@ -929,7 +940,9 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((uop, ret, p))
+        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
+          # Store matches as weakrefs
+          active_rewrites[-1].matches.append((weakref.ref(uop), weakref.ref(ret), p))
         return ret
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -942,7 +955,22 @@ if TRACK_MATCH_STATS:
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
-        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
+        # Only serialize serializable data
+        def resolve(obj):
+          return obj() if isinstance(obj, weakref.ReferenceType) else obj
+        serializable_ctxs = []
+        for ctxs in tracked_ctxs:
+          serializable_ctxs.append([
+            TrackedGraphRewrite(
+              v.loc,
+              resolve(v.sink),
+              v.bottom_up,
+              [(resolve(u0), resolve(u1), upat) for u0, u1, upat in v.matches if resolve(u0) is not None and resolve(u1) is not None],
+              v.name,
+              v.depth
+            ) for v in ctxs if resolve(v.sink) is not None
+          ])
+        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, serializable_ctxs), f)
     if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
@@ -982,12 +1010,12 @@ class RewriteContext:
     return ret
 
 @track_matches
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> UOp:
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name: str|None = None) -> UOp:
   rewrite_ctx = RewriteContext(pm, ctx)
   return rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.top_down_rewrite(sink)
 
 @track_matches
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, input_map:dict[UOp, UOp]|None=None) -> dict[UOp, UOp]:
+def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name: str|None = None, input_map: dict[UOp, UOp] | None = None) -> dict[UOp, UOp]:
   rewrite_ctx = RewriteContext(pm, ctx)
   new_map = {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort())[::-1]}
   if input_map is not None:
