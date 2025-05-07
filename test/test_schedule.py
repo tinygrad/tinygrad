@@ -2482,7 +2482,7 @@ class TestUOpBecome(unittest.TestCase):
     b = a.expand(4, 4).reciprocal()
     check_schedule(b, 1)
     self.assertEqual(b.lazydata.base.buffer.size, 16)
-    self.assertEqual(b.lazydata.st, ShapeTracker.from_shape((16, 1)))
+    self.assertEqual(b.lazydata.st, ShapeTracker.from_shape((4, 4)))
 
   def test_reorder_expand_alt(self):
     x = Tensor.empty(4, 1)
