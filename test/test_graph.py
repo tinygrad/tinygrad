@@ -75,7 +75,6 @@ def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
     for i in range(len(ground_thruth_bufs)): np.testing.assert_equal(ground_truth_np[i], test_bufs_np[i])
 
 @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
-@unittest.skipIf(CI and Device.DEFAULT=="METAL", "no ICB in CI, creation of graph fails")
 class TestGraph(unittest.TestCase):
   def test_order_2_writes_to_same_buf(self):
     d0 = Device.DEFAULT
