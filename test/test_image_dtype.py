@@ -5,9 +5,9 @@ from tinygrad.device import LRUAllocator, is_dtype_supported
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.realize import lower_schedule
 from tinygrad.helpers import prod, unwrap
+from test.helpers import REAL_DEV
 
 IMAGE_SUPPORTED_DEVICES = ("QCOM", "GPU")
-REAL_DEV = (Device.DEFAULT if Device.DEFAULT != "REMOTE" else Device['REMOTE'].properties['remotedev'])
 
 @unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageCopy(unittest.TestCase):
