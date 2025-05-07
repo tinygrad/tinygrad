@@ -20,8 +20,9 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 
 # NOTE: if any extra rendering in VIZ fails, we don't crash
 def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
+  err = kwargs.pop("err", "")
   try: return fxn(*args, **kwargs)
-  except Exception: return f"ERROR in {fxn.__name__}\n{kwargs.get('err', '')}"
+  except Exception: return f"ERROR in {fxn.__name__}\n{err}"
 
 # ** Metadata for a track_rewrites scope
 
