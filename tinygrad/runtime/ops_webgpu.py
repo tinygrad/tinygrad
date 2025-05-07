@@ -175,6 +175,9 @@ class WebGPUProgram:
       return time
     return None
 
+def js_create_pipeline(code:str) -> str: return f"""await device.createComputePipelineAsync(
+  {{layout: "auto", compute: {{ module: device.createShaderModule({{ code: {code} }}), entryPoint: "main" }}}}\n);"""
+
 class WebGpuAllocator(Allocator):
   def __init__(self, dev:WGPUDevPtr): self.dev = dev
   def _alloc(self, size:int, options:BufferSpec) -> WGPUBufPtr:
