@@ -147,10 +147,9 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
   lbound = ubound = offset = offset % c
   # we can fold if the expression has only one non-constant term and this term can only take on two values
   if len(svars)==1 and (v:=svars[0]).vmax-v.vmin == 1:
-    r = (offset+remainders[0])%c - offset%c
-    offset -= r * v.vmin
-    if which is Ops.MOD: return r*v + offset
-    return (factors[0]-r)//c * v + (const-offset)//c
+    y1 = (factors[0]*v.vmin+const)%c if which is Ops.MOD else (factors[0]*v.vmin+const)//c
+    y2 = (factors[0]*v.vmax+const)%c if which is Ops.MOD else (factors[0]*v.vmax+const)//c
+    return (y2-y1)*(v-v.vmin) + y1
 
   # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
   # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
