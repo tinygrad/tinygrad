@@ -387,7 +387,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   @classmethod
   def _alloc_signal(cls) -> HCQBuffer:
     if not cls.signal_pool:
-      cls.signal_pages.append(alc:=cls.devices[0].allocator.alloc(0x1000, BufferSpec(host=True, uncached=True, cpu_access=True)))
+      cls.signal_pages.append(alc:=cls.devices[0].allocator.alloc(0x240, BufferSpec(host=True, uncached=True, cpu_access=True)))
       cls.signal_pool += [alc.offset(offset=off, size=16) for off in range(0, alc.size, 16)]
       for dev in cls.devices: cast(HCQAllocator, dev.allocator).map(alc)
     return cls.signal_pool.pop()

@@ -284,9 +284,9 @@ class AMDev:
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
-    if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0):
-      if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
-      self.partial_boot = False
+    # if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0):
+    #   if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
+    #   self.partial_boot = False
 
     # Init sw for all IP blocks
     for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init_sw()

@@ -400,6 +400,7 @@ class AMDCopyQueue(HWQueue):
     for cmdsz in cmd_sizes:
       if (tail_blit_dword + cmdsz) * 4 >= dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes: break
       tail_blit_dword += cmdsz
+    if (rem_packet_cnt := len(cmds) - tail_blit_dword) > 0: tail_blit_dword = 0
 
     start_idx = (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes) // 4
     dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', cmds[:tail_blit_dword])
@@ -496,13 +497,13 @@ class AMDQueueDesc:
                read_ptrs=flatten(q.read_ptrs for q in queues), write_ptrs=flatten(q.write_ptrs for q in queues))
 
   def signal_doorbell(self, dev):
-    for write_ptr in self.write_ptrs: write_ptr[0] = self.put_value
+    # for write_ptr in self.write_ptrs: write_ptr[0] = self.put_value
 
     # Ensure all prior writes are visible to the GPU.
     if CPUProgram.atomic_lib is not None: CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
 
     # Flush hdp if queue is in dev mem.
-    if dev.is_am() and getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1): dev.dev_iface.adev.gmc.flush_hdp()
+    # if dev.is_am() and getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1): dev.dev_iface.adev.gmc.flush_hdp()
     for doorbell in self.doorbells: doorbell[0] = self.put_value
 
 @dataclass(frozen=True)
@@ -819,20 +820,30 @@ class USBIface(PCIIface):
     self.copy_bufs = [HCQBuffer(copy_vaddr, 0x1000, meta=AMAllocationMeta(self.dev, [self.dev], self.copy_region, has_cpu_mapping=False),
       view=USBMMIOInterface(self.usb, 0xf000, 0x1000, fmt='B', pcimem=False))]
 
+    queue_vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
+    self.queues_region = self.adev.mm.map_range(queue_vaddr, 0x1000, [(0x820000, 0x1000)], system=True, snooped=False, uncached=True)
+    self.queues_buf = HCQBuffer(queue_vaddr, 0x1000, meta=AMAllocationMeta(self.dev, [self.dev], self.queues_region, has_cpu_mapping=False),
+      view=USBMMIOInterface(self.usb, 0xa000, 0x1000, fmt='B', pcimem=False))
+
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
+    if size == 0x240:
+      return self.queues_buf.offset(0x600, 0x200)
+
     am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
     return HCQBuffer(am_mapping.va_addr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=False),
       view=USBMMIOInterface(self.usb, self.bars[0][0] + am_mapping.paddrs[0][0], size, fmt='B') if cpu_access else None)
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
-      self.adev.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
+      ring = self.queues_buf.offset(0x400, 0x200)
+      self.adev.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, 
+                                wptr_addr=gart.va_addr+0x10,
                                 doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0), pipe=0, queue=0)
     else:
       self.adev.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
         eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=0)
 
-    return AMDQueueDesc(ring=self.adev.vram.view(ring.meta.mapping.paddrs[0][0], 0x8000, fmt='I'),
+    return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'),
       doorbells=[self.adev.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
       read_ptrs=[self.adev.vram.view(gart.meta.mapping.paddrs[0][0], 8, fmt='Q')],
       write_ptrs=[self.adev.vram.view(gart.meta.mapping.paddrs[0][0]+0x10, 8, fmt='Q')])
@@ -892,7 +903,7 @@ class AMDDevice(HCQCompiled):
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     max_copy_size = 0x40000000 if self.dev_iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
-    self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x8000 if self.is_usb() else 0x800000)
+    self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else 0x800000)
 
     super().__init__(device, AMDAllocator(self), AMDLLVMRenderer(self.arch) if getenv("AMD_LLVM", 0) else AMDRenderer(self.arch),
                      AMDLLVMCompiler(self.arch) if getenv("AMD_LLVM", 0) else HIPCompiler(self.arch), functools.partial(AMDProgram, self),

@@ -5,7 +5,7 @@ from tinygrad.helpers import DEBUG
 from tinygrad.runtime.support.hcq import MMIOInterface
 
 class USB3:
-  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=16, max_read_len:int=4096):
+  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=31, max_read_len:int=4096):
     self.vendor, self.dev = vendor, dev
     self.ep_data_in, self.ep_stat_in, self.ep_data_out, self.ep_cmd_out = ep_data_in, ep_stat_in, ep_data_out, ep_cmd_out
     self.max_streams, self.max_read_len = max_streams, max_read_len
@@ -204,6 +204,24 @@ class ASM24Controller:
     return self.pcie_request(fmt_type, address, value, size)
 
   def pcie_mem_req(self, address, value=None, size=4): return self.pcie_request(0x40 if value is not None else 0x0, address, value, size)
+  def pcie_wr_reqs(self, address, values, sizes):
+    ops = []
+    for i, (value, size) in enumerate(zip(values, sizes)):
+      masked_address, offset = address & 0xFFFFFFFC, address & 0x3
+      assert size + offset <= 4
+
+      if value is not None:
+        assert value >> (8 * size) == 0
+        ops.append(WriteOp(0xB220, struct.pack('>I', value << (8 * offset)), ignore_cache=False))
+
+      ops += [WriteOp(0xB218, struct.pack('>I', masked_address), ignore_cache=False),
+        WriteOp(0xB217, bytes([((1 << size) - 1) << offset]), ignore_cache=False),
+        WriteOp(0xB210, bytes([0x40]), ignore_cache=False),
+        WriteOp(0xB254, b"\x0f", ignore_cache=True), WriteOp(0xB296, b"\x04", ignore_cache=True)]
+      address += size
+      if i % 4 == 3 or i+1 == len(values):
+        self.exec_ops(ops)
+        ops = []
 
 class USBMMIOInterface(MMIOInterface):
   def __init__(self, usb, addr, size, fmt, pcimem=True):
@@ -228,7 +246,8 @@ class USBMMIOInterface(MMIOInterface):
 
   def _acc(self, off, sz, data=None):
     if data is None: # read op
-      if not self.pcimem: return self.usb.read(self.addr + off, sz)
+      if not self.pcimem:
+        return int.from_bytes(self.usb.read(self.addr + off, sz), "little") if sz == self.el_sz else self.usb.read(self.addr + off, sz)
 
       acc, acc_size = self._acc_size(sz)
       return bytes(array.array(acc, [self._acc_one(off + i * acc_size, acc_size) for i in range(sz // acc_size)]))
@@ -237,7 +256,9 @@ class USBMMIOInterface(MMIOInterface):
 
       if not self.pcimem:
         # Fast path for writing into buffer 0xf000
-        return self.usb.scsi_write(bytes(data)) if self.addr == 0xf000 else self.usb.write(self.addr + off, bytes(data))
+        can_use_cache = 0xa000 <= self.addr <= 0xb200
+        return self.usb.scsi_write(bytes(data)) if self.addr == 0xf000 else self.usb.write(self.addr + off, bytes(data), ignore_cache=not can_use_cache)
 
       _, acc_sz = self._acc_size(len(data) * struct.calcsize(self.fmt))
-      for i in range(0, len(data), acc_sz): self._acc_one(off + i, acc_sz, int.from_bytes(data[i:i+acc_sz], "little"))
+      self.usb.pcie_wr_reqs(self.addr + off, [int.from_bytes(data[i:i+acc_sz], "little") for i in range(0, len(data), acc_sz)], [acc_sz] * (len(data) // acc_sz))
+      # for i in range(0, len(data), acc_sz): self._acc_one(off + i, acc_sz, int.from_bytes(data[i:i+acc_sz], "little"))
