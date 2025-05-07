@@ -109,12 +109,12 @@ class Ops(FastEnum):
 
   # misc ops
   UNROLL = auto(); CONTRACT = auto() # noqa: E702
-  VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto(); MULTIBUFFER = auto() # noqa: E702
+  VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
   DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
 
   # reduce
-  REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto() # noqa: E702
+  REDUCE_AXIS = auto(); REDUCE = auto() # noqa: E702
 
   # helper ops
   GEP = auto(); VECTORIZE = auto(); CAT = auto(); PTRCAT = auto() # noqa: E702
@@ -149,7 +149,7 @@ class Ops(FastEnum):
   VCONST = auto(); CONST = auto() # noqa: E702
 
   # device
-  DEVICE = auto(); DNUM = auto() # noqa: E702
+  DEVICE = auto() # noqa: E702
   MULTI = auto()
 
   # CUSTOMI is inline
@@ -319,7 +319,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.shape.shapetracker import ShapeTracker
     # BUFFER/BUFFER_VIEW and KERNEL only have a size
     if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
-    if self.op is Ops.MULTIBUFFER: return ShapeTracker.from_shape((sum(x.size for x in self.src),))
     if self.op is Ops.KERNEL: return ShapeTracker.from_shape((self.arg.ast.size,))
 
     # otherwise we get the shape from sources
@@ -473,24 +472,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
     lb = self.copy_to_device(devices) #UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in devices), False)
-    dnum = UOp(Ops.DNUM, dtypes.int, arg=len(devices))
+    dnum = UOp.variable("_device_num", 0, len(devices)-1)
     if axis is not None:
       if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
       sz = self.shape[axis] // len(devices)
       lb = lb.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
     return UOp.multi(lb, axis=axis)
-
-    """"
-    lbs = [self.copy_to_device(d) for d in devices]
-    if axis is not None:
-      if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
-      # NOTE: this works for both even shards and uneven shards
-      sz = self.shape[axis] // len(devices)
-      sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
-      lbs = [lb.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape)))
-        for lb,sz,off in zip(lbs, sizes, itertools.accumulate(sizes, initial=0))]
-    return UOp.multi(*lbs, axis=axis)
-    """
 
   # *** from LazyBuffer ***
 
@@ -544,10 +531,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType):
-    if isinstance(device, tuple):
-      bufs = [UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=d), UOp.unique()), size) for d in device]
-      return UOp(Ops.MULTIBUFFER, dtype, tuple(bufs))
-    return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device), UOp.unique()), size)
+    if isinstance(device, tuple): return UOp(Ops.BUFFER, dtype, (UOp.unique(), *[UOp(Ops.DEVICE, arg=d) for d in device]), size)
+    return UOp(Ops.BUFFER, dtype, (UOp.unique(), UOp(Ops.DEVICE, arg=device)), size)
   @property
   def device(self) -> str|tuple[str, ...]: return cast(str|tuple[str, ...], unwrap(self._device))
   @functools.cached_property
@@ -676,7 +661,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
     if self.op is Ops.CAST: return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
-    if self.op is Ops.DNUM: return 0, self.arg-1
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
   @functools.cached_property
