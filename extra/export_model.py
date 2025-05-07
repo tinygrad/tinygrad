@@ -119,7 +119,14 @@ def export_model_webgpu(functions, statements, bufs, weight_names, input_names, 
   output_buffer_types = [dtype_to_js_type(bufs[out_name][1]) for out_name in output_names]
 
   buf_type = lambda x: "uniform" if x in set(symbolic_vars.values()) else "storage"
-  kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, pipelines[{i}], [{', '.join(args)}], [{', '.join(str(x) for x in global_size)}]);" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
+  create_bind_group_layouts = ",".join([
+    "device.createBindGroupLayout({{entries: [{{binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {{ type: 'uniform' }}}}, {}]}})".format(
+        ",".join([f"{{binding: {argIdx+1}, visibility: GPUShaderStage.COMPUTE, buffer: {{ type: '{buf_type(argName)}' }} }}" for argIdx, argName in enumerate(args)])
+    )
+    for _, (_, args, _, _) in enumerate(statements)
+  ])
+  layouts = f"const layouts=[{create_bind_group_layouts}]"
+  kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, pipelines[{i}], layouts[{i}], infinityBuf, [{', '.join(args)}], [{', '.join(str(x) for x in global_size)}]);" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
 
   buf_type = lambda x: "createUniformBuf" if x in set(uop.arg[0] for uop in symbolic_vars) else "createEmptyBuf"
   map_to_external_weight = lambda _key: f"state_dict['{weight_names[_key]}']" if stream_weights else f"getTensorBuffer(safetensor, metadata['{weight_names[_key]}'])"
@@ -149,17 +156,30 @@ const createUniformBuf = (device, size) => {{
   return device.createBuffer({{size, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST}})
 }}
 
+const createInfinityUniformBuf = (device) => {{
+  const size = 4;
+  const buf = device.createBuffer({{
+    mappedAtCreation: true,
+    size,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+  }});
+  new Float32Array(buf.getMappedRange())[0] = Infinity;
+  buf.unmap();
+  return buf;
+}};
+
 const createWeightBuf = (device, size, data) => {{
   const buf = device.createBuffer({{ size, usage: GPUBufferUsage.STORAGE{" | GPUBufferUsage.COPY_DST" if stream_weights else ", mappedAtCreation: true"} }});
   {"data.bytes = buf;" if stream_weights else "new Uint8Array(buf.getMappedRange()).set(data); buf.unmap();"}
   return buf;
 }};
 
-const addComputePass = (device, commandEncoder, pipeline, bufs, workgroup) => {{
+const addComputePass = (device, commandEncoder, pipeline, layout, infinityUniformBuf, bufs, workgroup) => {{
   const bindGroup = device.createBindGroup({{
-    layout: pipeline.getBindGroupLayout(0),
+    layout: layout,
     entries: [
-      ...bufs.map((buffer, index) => ({{ binding: index, resource: {{ buffer }} }}))
+      {{ binding: 0, resource: {{ buffer: infinityUniformBuf }} }},
+      ...bufs.map((buffer, index) => ({{ binding: index + 1, resource: {{ buffer }} }}))
     ]
   }});
 
@@ -174,6 +194,9 @@ const addComputePass = (device, commandEncoder, pipeline, bufs, workgroup) => {{
 
 const setupNet = async (device, {"state_dict" if stream_weights else "safetensor"}) => {{
     {"const metadata = getTensorMetadata(safetensor);" if not stream_weights else ""}
+    const infinityBuf = createInfinityUniformBuf(device);
+
+    {layouts}
 
     {_bufs}
 
@@ -184,7 +207,9 @@ const setupNet = async (device, {"state_dict" if stream_weights else "safetensor
     const kernels = [{kernel_names}];
     const pipelines = await Promise.all(kernels.map(async (name, i) => {{
       return await device.createComputePipelineAsync({{
-          layout: "auto",
+          layout: device.createPipelineLayout({{
+              bindGroupLayouts: [layouts[i]],
+          }}),
           compute: {{
               module: device.createShaderModule({{
                   code: name,
