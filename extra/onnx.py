@@ -89,7 +89,7 @@ required_input_python_consts: dict[str, tuple[int, ...]] = {
 }
 
 cache_misses = 0
-@functools.cache
+@functools.lru_cache(None)
 def _cached_to_python_const(t:Tensor):
   if t.dtype is dtypes.uint8: return t.data().tobytes()
   if 0 in t.shape: return []
@@ -281,7 +281,6 @@ def get_onnx_ops():
   # ***** Unary Ops (math) *****
   def Not(x:Tensor): return x.logical_not()
   def Clip(x: Tensor, min:Tensor|None=None, max:Tensor|None=None): return x if min is None and max is None else x.clip(min, max)
-  def IsInf(x:Tensor, detect_negative:int=1, detect_positive:int=1): return x.isinf(bool(detect_positive), bool(detect_negative))
 
   # ***** Unary Ops (activation) *****
   def Softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
@@ -416,6 +415,7 @@ def get_onnx_ops():
 
   def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
           kernel_shape:list[int]|None=None, pads:list[int]|int=0, strides:list[int]|int=1):
+    if W.shape[1:] == (1,3,3) and group > 1: group = W.shape[0]
     return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations,
                     padding=_resolve_pool_pads(X, pads, kernel_shape or W.shape[2:], dilations, strides, auto_pad))
 
@@ -725,6 +725,19 @@ def get_onnx_ops():
       ret = _clamp_cast((x / y_scale + 0.4999999 + y_zero_point).int(), out_dtype)
     else:
       ret = _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype)
+    # you need both NHWC=1 DONT_GROUP_REDUCES=1 for this to work
+    if getenv("NHWC") and len(ret.shape) == 4:
+      in_chans = ret.shape[1]
+      if ret.shape[1] == 3 or in_chans%32 != 0:
+        return ret.permute(0,2,3,1).contiguous().permute(0,3,1,2)
+      else:
+        if in_chans%32 != 0: ret = ret.pad(((0,0), (0,32-(in_chans%32)), (0,0), (0,0)))
+        ret = ret.reshape(ret.shape[0], ret.shape[1]//32, 32, ret.shape[-2], ret.shape[-1])
+        order = (0, 1, 3, 4, 2)
+        ret = ret.permute(order).contiguous().permute(*argsort(order))
+        ret = ret.reshape(ret.shape[0], -1, ret.shape[-2], ret.shape[-1])
+        if in_chans%32 != 0: ret = ret[:, :in_chans, :, :]
+        return ret
     return ret.contiguous()
 
   def DynamicQuantizeLinear(x: Tensor):
@@ -736,6 +749,66 @@ def get_onnx_ops():
     return y, scale, zero_point
 
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
+    if getenv("NHWC"):
+      # pad channels
+      in_shape = x.shape
+      if len(x.shape) == 4 and x.shape[1:] == (1,3,3) and x.shape[0]%32 != 0:
+        # 3x3 depthwise (C,1,3,3). pad C to 32
+        x = x.pad(((0,32-(x.shape[0]%32)), (0,0), (0,0), (0,0)))
+      elif len(x.shape) == 4 and x.shape[2:] == (1,1) and x.shape[0] != 1:
+        # 1x1 conv (C_out,C_in,1,1), pad C_out and C_in to 32
+        if x.shape[0]%32 != 0: x = x.pad(((0,32-(x.shape[0]%32)), (0,0), (0,0), (0,0)))
+        if x.shape[1]%32 != 0: x = x.pad(((0,0), (0,32-(x.shape[1]%32)), (0,0), (0,0)))
+      elif len(x.shape) == 1 and x.shape[0]%32 != 0 and x.shape[0] != 1000:
+        # bias
+        x = x.pad(((0,32-(x.shape[0]%32)),))
+
+      if in_shape != x.shape:
+        xzp = x_zero_point.item()
+        print(f"{in_shape} -> {x.shape}", xzp)
+        # fix up the zero point in the padded area
+        pp = (Tensor.full(in_shape, -xzp, dtype=dtypes.int).pad(tuple([(0, so-si) for si,so in zip(in_shape, x.shape)])) + xzp).cast(x.dtype)
+        x = (x + pp).contiguous()
+
+    if getenv("NHWC") and len(x.shape) == 4 and x.shape[1:] == (3,3,3):
+      x = x.pad(((0,0), (0,0), (0,0), (0,1)))
+      assert x.shape[0] == 32
+      order = (1,2,0,3)
+      x = x.permute(*order).contiguous().permute(*argsort(order))
+      x = x[:, :, :, :3]
+
+    if getenv("NHWC") and len(x.shape) == 4 and x.shape[1:] == (1,3,3):
+      # 3x3 depthwise (C,1,3,3)
+      # "width multiple of 4 depth multiple of 32 aligned to 128bytes"
+      x = x.pad(((0,0), (0,0), (0,0), (0,1)))
+      if x.shape[0]%32 == 0:
+        # depth/32 is a loop -- lsr(depth, #5)
+        # width/4 is a loop -- lsr(out_width, #2)
+        # height is a loop
+        x = x.reshape(-1, 32, 1, 3, 4)
+        order = (0,3,1,2,4)
+        x = x.permute(*order).contiguous().permute(*argsort(order))
+        x = x.reshape(-1, 1, 3, 4)
+      else:
+        assert False  # (doesn't happen anymore)
+        #print("HERE", x.shape)
+        order = (2,0,1,3)
+        x = x.permute(*order).contiguous().permute(*argsort(order))
+      x = x[:, :, :, :3]
+      # we increase the filts to 4-aligned for speed (75% util)
+    WEIGHT_SHIFT = 4
+    if getenv("NHWC") and len(x.shape) == 4 and x.shape[2:] == (1,1) and x.shape[1]%WEIGHT_SHIFT == 0:
+      if x.shape[0]%32 == 0:
+        # DSP swizzle memory (big)
+        x = x.reshape(x.shape[0]//32, 32, x.shape[1]//WEIGHT_SHIFT, WEIGHT_SHIFT).permute(0,2,1,3).contiguous().permute(0,2,1,3).reshape(x.shape)
+      else:
+        # DSP swizzle memory
+        x = x.reshape(x.shape[0], x.shape[1]//WEIGHT_SHIFT, WEIGHT_SHIFT).permute(1,0,2).contiguous().permute(1,0,2).reshape(x.shape)
+    if getenv("NHWC") and x.shape == (1000, 1280):
+      x = x.reshape(-1, 320, 4)
+      order = (1,0,2)
+      x = x.permute(*order).contiguous().permute(*argsort(order))
+      x = x.reshape(-1, 1280)
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
     return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
@@ -813,7 +886,7 @@ def get_onnx_ops():
   return {
     # Tensor ops
     **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
-    "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
+    "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
     "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Round", "Erf")},
     # Implemented ops
     **{name:obj for name,obj in locals().items() if isinstance(obj, types.FunctionType) and not name.startswith("_") and name[0].isupper()},
