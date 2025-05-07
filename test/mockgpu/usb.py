@@ -5,7 +5,7 @@ class MockUSB:
   def read(self, address, size):
     return bytes(self.mem[address:address+size])
 
-  def write(self, address, data):
+  def write(self, address, data, ignore_cache=False):
     self.mem[address:address+len(data)] = data
 
   def pcie_mem_req(self, address, value=None, size=1):
