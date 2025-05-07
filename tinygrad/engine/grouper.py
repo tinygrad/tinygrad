@@ -268,7 +268,8 @@ create_kernels = merge_views+PatternMatcher([
   # create a buffer for COPY on the new device
   (UPat(Ops.COPY, src=(UPat(name="b"), UPat(Ops.DEVICE, name="d")), name="x"),
    lambda d,x,b: UOp(Ops.ASSIGN, x.dtype, (nb:=UOp.new_buffer(d.arg, x.size, x.dtype), UOp(Ops.COPY, x.dtype, (nb,b))))),
-   #lambda ctx,d,x: create_kernel(ctx, x, UOp.new_buffer(d.arg, x.size, x.dtype))),
+  # VIEW into COPY is meaningless
+  (UPat(Ops.COPY, src=(UPat(), UPat(Ops.VIEW)), name="x"), lambda x: x.replace(src=(x.src[0], x.src[1].src[0]))),
   # otherwise check the context if we're realizing this UOp
   (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"),
    lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype)) if x in ctx.realizes else None),
