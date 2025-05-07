@@ -2476,12 +2476,20 @@ class TestUOpBecome(unittest.TestCase):
 
   # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
 
+  # NOTE: this expand is not reordered because there's before it to fuse
   def test_reorder_expand(self):
     a = Tensor.empty(4, 1)
     b = a.expand(4, 4).reciprocal()
     check_schedule(b, 1)
-    self.assertEqual(b.lazydata.base.buffer.size, 4)
-    self.assertEqual(b.lazydata.st, ShapeTracker.from_shape((4, 1)).expand((4, 4)))
+    self.assertEqual(b.lazydata.base.buffer.size, 16)
+    self.assertEqual(b.lazydata.st, ShapeTracker.from_shape((4, 4)))
+
+  def test_reorder_expand_alt(self):
+    x = Tensor.empty(4, 1)
+    y = Tensor.empty(4, 1)
+    img = Tensor.empty(4, 4)
+    z = (img*x) / y
+    check_schedule(z, 1)
 
   def test_become_existing_buffer(self):
     a = Tensor.empty(4, 4)
