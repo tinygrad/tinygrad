@@ -21,7 +21,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 # NOTE: if any extra rendering in VIZ fails, we don't crash
 def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
   try: return fxn(*args, **kwargs)
-  except Exception as e: return f"ERROR in {fxn.__name__}: {e}"
+  except Exception: return f"ERROR in {fxn.__name__}\n{kwargs.get('err', '')}"
 
 # ** Metadata for a track_rewrites scope
 
@@ -37,8 +37,8 @@ class GraphRewriteMetadata(TypedDict):
 def render_program(k:Kernel): return k.opts.render(k.uops)
 
 def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
-  return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
-          "kernel_code":pcall(render_program, k) if isinstance(k, Kernel) else None, "name":v.name, "depth":v.depth}
+  return {"loc":v.loc, "match_count":len(v.matches), "name":v.name, "depth":v.depth, "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
+          "kernel_code":pcall(render_program, k, err=f"ast = {k.ast}\nopts = {k.applied_opts}") if isinstance(k, Kernel) else None}
 
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
   return [(k.name if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]

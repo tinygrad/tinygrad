@@ -350,7 +350,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   signal_pool: ClassVar[list[HCQBuffer]] = []
 
   def __init__(self, device:str, allocator:HCQAllocatorBase, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
-               comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None, kernargs_size=(16 << 20)):
+               comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None, kernargs_size=(16 << 20), sigalloc_size=0x1000):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
 
     from tinygrad.runtime.graph.hcq import HCQGraph
@@ -360,6 +360,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     for sig_page in self.signal_pages: cast(HCQAllocator, self.allocator).map(sig_page)
     self.devices.append(self)
 
+    self.sigalloc_size = sigalloc_size
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
     self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
@@ -387,7 +388,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   @classmethod
   def _alloc_signal(cls) -> HCQBuffer:
     if not cls.signal_pool:
-      cls.signal_pages.append(alc:=cls.devices[0].allocator.alloc(0x1000, BufferSpec(host=True, uncached=True, cpu_access=True)))
+      cls.signal_pages.append(alc:=cls.devices[0].allocator.alloc(cls.devices[0].sigalloc_size, BufferSpec(host=True,uncached=True,cpu_access=True)))
       cls.signal_pool += [alc.offset(offset=off, size=16) for off in range(0, alc.size, 16)]
       for dev in cls.devices: cast(HCQAllocator, dev.allocator).map(alc)
     return cls.signal_pool.pop()
