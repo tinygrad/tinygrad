@@ -39,12 +39,12 @@ async function renderDag(graph, additions, recenter=false) {
       .attr("transform", d => `translate(${d.x},${d.y})`);
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => "stroke:#4a4b57; stroke-width:1.4px;"+d.style);
-    nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
+    nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("dominant-baseline", "text-after-edge").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
-      const y = (d.height-d.padding*2)/2;
+      const y = (d.height-d.padding*2)/2-1.4;
       return `translate(-${x}, -${y})`;
      }).selectAll("text").data(d => [d.label.split("\n")]).join("text").selectAll("tspan").data(d => d).join("tspan").text(d => d).attr("x", "0")
-      .attr("dy", (_, i) => i === 0 ? 14-2.1 : 14).attr("xml:space", "preserve");
+      .attr("dy", 14).attr("xml:space", "preserve");
     // draw edges
     const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis);
     d3.select("#edges").selectAll("path.edgePath").data(g.edges()).join("path").attr("class", "edgePath").attr("d", (e) => {
