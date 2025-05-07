@@ -66,3 +66,6 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
 def not_support_multi_device():
   # REMOTE doesn't support multi device anywhere, GPU, CUDA and METAL don't support multi device if in CI
   return Device.DEFAULT == "REMOTE" or (CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"))
+
+# NOTE: This will open REMOTE if it's the default device
+REAL_DEV = (Device.DEFAULT if Device.DEFAULT != "REMOTE" else Device['REMOTE'].properties['remotedev'])
