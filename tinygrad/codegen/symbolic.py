@@ -29,6 +29,7 @@ symbolic_simple = PatternMatcher([
   (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
   (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
   (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
+  (UPat(GroupOp.Irreducible-{Ops.CONST}, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
   ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
   (UPat.var("x")%UPat.cvar("c")+(UPat.var("x")//UPat.cvar("c"))*UPat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
