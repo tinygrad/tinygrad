@@ -185,7 +185,7 @@ function renderMemoryGraph(graph) {
     return `${p0.join(' ')} ${p1.join(' ')}`;
   }).attr("fill", d => `#${colors[d.buf.num % colors.length]}`).on("mouseover", (e, { id, buf, x }) => {
     d3.select(e.currentTarget).attr("stroke", "rgba(26, 27, 38, 0.8)").attr("stroke-width", 0.8);
-    const metadata = document.querySelector(".container.metadata");
+    const metadata = document.querySelector(".metadata");
     document.getElementById("current-buf")?.remove();
     const { num, dtype, nbytes, ...rest } = buf;
     let label = `<BUFFER n${num} ${dtype} ${nbytes_format(nbytes)}>\nalive for ${pluralize(x[x.length-1]-x[0], 'timestep')}`;
