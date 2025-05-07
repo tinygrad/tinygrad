@@ -3,6 +3,7 @@ from tinygrad import Tensor, nn, Device, GlobalCounters, Variable
 from tinygrad.helpers import Timing, Profiling, CI, tqdm
 from tinygrad.nn.state import torch_load, get_state_dict
 from extra.models.llama import FeedForward, Transformer
+from extra.bench_log import log_event_start, log_event_end, BenchEvent
 
 class MixtureFeedForward:
   def __init__(self, num_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
@@ -30,6 +31,7 @@ if __name__ == "__main__":
                       help="Path to the downloaded weights")
   args = parser.parse_args()
 
+  log_event_start(BenchEvent.LOAD_WEIGHTS)
   state = torch_load(args.weights + "/consolidated.00.pth.b")
   model = Transformer(n_layers=32, dim=4096, hidden_dim=14336, n_heads=32, n_kv_heads=8, norm_eps=1e-5, vocab_size=32000, feed_forward=functools.partial(MixtureFeedForward, 8), jit=False)
   model_state_dict = get_state_dict(model)
@@ -43,6 +45,7 @@ if __name__ == "__main__":
     t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, loading {k} to {device}")
     model_state_dict[k].replace(state[k].to(device).half()).realize()
   if CI: print(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
+  log_event_end(BenchEvent.LOAD_WEIGHTS)
 
   from sentencepiece import SentencePieceProcessor
   spp = SentencePieceProcessor(model_file=args.weights + "/tokenizer.model")
@@ -53,7 +56,9 @@ if __name__ == "__main__":
     GlobalCounters.reset()
     with Profiling(sort="time", frac=0.1, enabled=args.profile):
       with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
+        log_event_start(BenchEvent.STEP)
         tok = model(Tensor([toks[start_pos:]]), 0 if start_pos == 0 else Variable("start_pos", 1, 1024).bind(start_pos), args.temperature).item()
+        log_event_end(BenchEvent.STEP)
     toks.append(tok)
     start_pos += 1
     print(spp.decode(toks))
