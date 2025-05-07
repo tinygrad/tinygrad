@@ -76,7 +76,7 @@ class TestUSBMMIOInterface(unittest.TestCase):
   def test_view(self):
     self.mmio[0] = 5
     view = self.mmio.view(offset=1, size=3)
-    self.assertEqual(view[0], bytes([self.usb.mem[1]]))
+    self.assertEqual(view[0], self.usb.mem[1])
     view[:] = [7, 8, 9]
     self.assertEqual(list(self.usb.mem[1:4]), [7, 8, 9])
     full_view = self.mmio.view()
