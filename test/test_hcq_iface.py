@@ -62,7 +62,7 @@ class TestUSBMMIOInterface(unittest.TestCase):
 
   def test_getitem_setitem_byte(self):
     self.mmio[1] = 0xAB
-    self.assertEqual(self.mmio[1], bytes([0xAB]))
+    self.assertEqual(self.mmio[1], 0xAB)
     self.assertEqual(self.usb.mem[1], 0xAB)
 
   def test_slice_getitem_setitem(self):
@@ -76,13 +76,13 @@ class TestUSBMMIOInterface(unittest.TestCase):
   def test_view(self):
     self.mmio[0] = 5
     view = self.mmio.view(offset=1, size=3)
-    self.assertEqual(view[0], bytes([self.usb.mem[1]]))
+    self.assertEqual(view[0], self.usb.mem[1])
     view[:] = [7, 8, 9]
     self.assertEqual(list(self.usb.mem[1:4]), [7, 8, 9])
     full_view = self.mmio.view()
     self.assertEqual(len(full_view), len(self.mmio))
     self.mmio[2] = 0xFE
-    self.assertEqual(full_view[2], bytes([0xFE]))
+    self.assertEqual(full_view[2], 0xFE)
 
   def test_pcimem_byte(self):
     usb2 = MockUSB(bytearray(self.size))
