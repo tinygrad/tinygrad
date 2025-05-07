@@ -1,4 +1,6 @@
-import gc, unittest, os, weakref
+import os
+os.environ["VIZ"] = "1"
+import gc, unittest, weakref
 from tinygrad.tensor import Tensor
 from tinygrad.device import Buffer
 from tinygrad.ops import tracked_ctxs, TrackedGraphRewrite
