@@ -231,7 +231,8 @@ class USBMMIOInterface(MMIOInterface):
 
   def _acc(self, off, sz, data=None):
     if data is None: # read op
-      if not self.pcimem: return self.usb.read(self.addr + off, sz)
+      if not self.pcimem:
+        return int.from_bytes(self.usb.read(self.addr + off, sz), "little") if sz == self.el_sz else self.usb.read(self.addr + off, sz)
 
       acc, acc_size = self._acc_size(sz)
       return bytes(array.array(acc, [self._acc_one(off + i * acc_size, acc_size) for i in range(sz // acc_size)]))
@@ -240,7 +241,8 @@ class USBMMIOInterface(MMIOInterface):
 
       if not self.pcimem:
         # Fast path for writing into buffer 0xf000
-        return self.usb.scsi_write(bytes(data)) if self.addr == 0xf000 else self.usb.write(self.addr + off, bytes(data))
+        use_cache = 0xa000 <= self.addr <= 0xb200
+        return self.usb.scsi_write(bytes(data)) if self.addr == 0xf000 else self.usb.write(self.addr + off, bytes(data), ignore_cache=not use_cache)
 
       _, acc_sz = self._acc_size(len(data) * struct.calcsize(self.fmt))
       self.usb.pcie_mem_write(self.addr+off, [int.from_bytes(data[i:i+acc_sz], "little") for i in range(0, len(data), acc_sz)], acc_sz)
