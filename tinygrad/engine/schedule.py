@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from collections import deque, defaultdict
 from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import Metadata, DEBUG, unwrap, merge_dicts
 
 # **** ScheduleItem return type
@@ -58,7 +58,24 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     var_vals = merge_dicts([var_vals, *local_var_vals])
     # create subbuffers if needed
     if ast.op is Ops.BUFFER_VIEW: buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-    schedule.append(ScheduleItem(ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
+    buffers = tuple(s.buf_uop.buffer for s in k.src)
+    print(ast)
+    if any(isinstance(x, MultiBuffer) for x in buffers):
+      if ast.op is Ops.COPY:
+        if isinstance(buffers[0], MultiBuffer) and isinstance(buffers[1], Buffer):
+          # BROADCAST
+          for b in buffers[0].bufs: schedule.append(ScheduleItem(ast, (b, buffers[1]), k.arg.metadata))
+        elif isinstance(buffers[0], Buffer) and isinstance(buffers[1], MultiBuffer):
+          # REDUCE
+          raise NotImplementedError("REDUCE")
+        elif isinstance(buffers[0], MultiBuffer) and isinstance(buffers[1], MultiBuffer):
+          # ALLREDUCE
+          raise NotImplementedError("ALLREDUCE")
+      else:
+        assert all(isinstance(x, MultiBuffer) for x in buffers), "kernel must all be multibuffer"
+        for bufs in zip(*[x.bufs for x in buffers]): schedule.append(ScheduleItem(ast, bufs, k.arg.metadata))
+    else:
+      schedule.append(ScheduleItem(ast, buffers, k.arg.metadata))
     for x in children[k]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)

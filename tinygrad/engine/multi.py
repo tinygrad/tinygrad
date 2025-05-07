@@ -139,6 +139,18 @@ def assign_multi(dest:UOp, src:UOp):
 
 def passthrough_multi(root:UOp, multi:UOp): return UOp.multi(*[root.replace(src=(m,)) for m in multi.src], axis=multi.axis, real=multi.real)
 
+def fixup_multidevice_copy(x:UOp) -> UOp|None:
+  in_devices = x.src[0].device
+  if isinstance(in_devices, str): return None # broadcast can be handled by scheduler
+  in_src = x.src[0].contiguous()
+  if len(x.src) == 2:
+    # REDUCE
+    lbs = [UOp(Ops.SELECT, dtype=in_src.dtype, src=(in_src, UOp(Ops.DEVICE, arg=d))).copy_to_device(x.src[1].arg) for d in in_devices]
+    return functools.reduce(lambda x,y: x+y, lbs)
+  elif len(x.src) >= 2:
+    # ALLREDUCE
+    raise NotImplementedError
+
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
@@ -153,6 +165,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))), copy_multi),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
+  #(UPat(Ops.COPY, name="x"), fixup_multidevice_copy),
 ])
 
 @track_rewrites(named=True)

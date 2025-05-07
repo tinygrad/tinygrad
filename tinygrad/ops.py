@@ -8,7 +8,7 @@ from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Contex
 from tinygrad.helpers import PICKLE_BUFFERS, dedup, cdiv, cmod
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
-  from tinygrad.device import Buffer
+  from tinygrad.device import Buffer, MultiBuffer
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
@@ -150,7 +150,7 @@ class Ops(FastEnum):
 
   # device
   DEVICE = auto()
-  MULTI = auto()
+  MULTI = auto(); SELECT = auto() # noqa: E702
 
   # CUSTOMI is inline
   CUSTOM = auto(); CUSTOMI = auto() # noqa: E702
@@ -539,7 +539,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.MULTI: return self.src[0].device
-    if self.op is Ops.COPY:
+    if self.op is Ops.SELECT: return self.src[1].device
+    if self.op in {Ops.COPY, Ops.BUFFER}:
       if len(self.src) > 2: return tuple(cast(str, x.device) for x in self.src[1:])
       return self.src[1].device
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
@@ -549,16 +550,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.op is Ops.ASSIGN, f"must be ASSIGN {self.op}"
     return self.src[0].base
   @property
-  def buffer(self) -> Buffer:
+  def buffer(self) -> Buffer|MultiBuffer:
     if self is not self.base:
       assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
       return self.src[0].buffer
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
     if (cret:=buffers.get(self)) is not None: return cret
-    from tinygrad.device import Buffer
-    assert isinstance(self.device, str), f"buffer not supported on multi {self.device}"
-    buffers[self] = ret = Buffer(self.device, self.size, self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base)
-    ret.ref(1)
+    from tinygrad.device import Buffer, MultiBuffer
+    ret = (MultiBuffer if isinstance(self.device, tuple) else Buffer)(self.device, self.size,
+                                                                      self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base).ref(1)
+    buffers[self] = ret
     return ret
   @property
   def realized(self) -> Optional[Buffer]: return self.buffer if self.op is Ops.BUFFER and self.buffer.is_allocated() else None

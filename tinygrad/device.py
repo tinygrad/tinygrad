@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Optional, Any, Iterator, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
-                             cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE
+                             cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE, all_same
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -88,6 +88,16 @@ class BufferSpec:
   host: bool = False
   nolru: bool = False
   external_ptr: Optional[int] = None
+
+class MultiBuffer:
+  def __init__(self, device:tuple[str, ...], size:int, dtype:DType):
+    self.bufs = [Buffer(d, size, dtype) for d in device]
+  def ref(self, cnt):
+    for b in self.bufs: b.ref(cnt)
+    return self
+  def is_allocated(self):
+    assert all_same([x.is_allocated() for x in self.bufs])
+    return self.bufs[0].is_allocated()
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,
