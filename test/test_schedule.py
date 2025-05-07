@@ -2483,6 +2483,13 @@ class TestUOpBecome(unittest.TestCase):
     self.assertEqual(b.lazydata.base.buffer.size, 4)
     self.assertEqual(b.lazydata.st, ShapeTracker.from_shape((4, 1)).expand((4, 4)))
 
+  def test_reorder_expand_alt(self):
+    x = Tensor.empty(4, 1)
+    y = Tensor.empty(4, 1)
+    img = Tensor.empty(4, 4)
+    z = (img*x) / y
+    check_schedule(z, 1)
+
   def test_become_existing_buffer(self):
     a = Tensor.empty(4, 4)
     b = a*1
