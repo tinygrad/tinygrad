@@ -760,6 +760,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: osx-webgpu
+        deps: testing_minimal
         webgpu: 'true'
     - name: Test infinity math in WGSL
       run: WEBGPU=1 python -m pytest -n=auto test/test_renderer_failures.py::TestWGSLFailures::test_multiply_infinity --durations=20

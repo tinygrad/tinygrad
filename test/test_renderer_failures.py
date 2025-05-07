@@ -2,7 +2,7 @@ import unittest
 from typing import List, cast
 import numpy as np
 from tinygrad.device import Buffer, Device, is_dtype_supported
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, ConstType
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import dedup, flatten, prod
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -28,7 +28,7 @@ def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
   ei.exec(outbufs+inbufs)
   return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
 
-def _setup_and_test_alu(alu_op:Ops, input_val:int, *alu_src_uops:UOp):
+def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
   dtype = alu_src_uops[0].dtype
   a = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 0)
   b = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 1)
