@@ -1,4 +1,5 @@
 import functools, itertools, operator
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
 from tinygrad.ops import Ops, UOp, sint
 
@@ -128,12 +129,10 @@ def copy_multi(multi:UOp, device:UOp):
   # if we already have a copy on the device, return that
   if multi.axis is None: return next((lb for lb in multi.real_lbs if lb.device == device.arg), multi.real_lbs[0].copy_to_device(device.arg))
   # copy lbs to device, pad to final shape, and sum
-  llbs:list[UOp] = []
-  for lb,real,(start,end) in zip(multi.src, multi.real, multi.bounds):
-    if not real: continue
-    pad_arg = tuple((0,0) if a != multi.axis else (start, multi.bounds[-1][1]-end) for a in range(len(lb.shape)))
-    llbs.append(lb.copy_to_device(device.arg).pad(pad_arg))
-  return functools.reduce(operator.add, llbs)
+  bsz, dcount = multi.shape[multi.axis]/len(multi.device), len(multi.device)
+  dnum = UOp(Ops.DNUM, dtypes.int, arg=len(multi.device))
+  padded = multi.src[0].pad(tuple((0,0) if a != multi.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(multi.shape))))
+  return UOp(Ops.ALLREDUCE, multi.dtype, (padded, device))
 
 def assign_multi(dest:UOp, src:UOp):
   assert dest.axis == src.axis, f"axis must match in assign {dest.axis} != {src.axis}"

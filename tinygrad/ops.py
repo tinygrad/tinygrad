@@ -114,7 +114,7 @@ class Ops(FastEnum):
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
 
   # reduce
-  REDUCE_AXIS = auto(); REDUCE = auto() # noqa: E702
+  REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto() # noqa: E702
 
   # helper ops
   GEP = auto(); VECTORIZE = auto(); CAT = auto(); PTRCAT = auto() # noqa: E702
@@ -473,7 +473,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
     lb = self.copy_to_device(devices) #UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in devices), False)
-    dnum = UOp(Ops.DNUM, dtypes.int)
+    dnum = UOp(Ops.DNUM, dtypes.int, arg=len(devices))
     if axis is not None:
       if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
       sz = self.shape[axis] // len(devices)
@@ -676,6 +676,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
     if self.op is Ops.CAST: return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
+    if self.op is Ops.DNUM: return 0, self.arg-1
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
   @functools.cached_property
