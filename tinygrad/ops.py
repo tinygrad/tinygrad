@@ -149,7 +149,7 @@ class Ops(FastEnum):
   VCONST = auto(); CONST = auto() # noqa: E702
 
   # device
-  DEVICE = auto() # noqa: E702
+  DEVICE = auto()
   MULTI = auto()
 
   # CUSTOMI is inline
