@@ -494,9 +494,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     var, val = arg.unbind()
     return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
   def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False):
-    if isinstance(device, tuple): return UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in device), clone)
-    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)), clone)
-  def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
+    if not clone and device == self.device: return self  # no clone
+    if isinstance(device, tuple): return UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in device))
+    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)))
+  def clone(self) -> UOp:
+    assert isinstance(self.device, str), "can't clone multidevice tensors"
+    return self.copy_to_device(self.device, clone=True)
   @property
   def metadata(self) -> tuple[Metadata, ...]|Metadata|None: return self.arg.metadata if self.op is Ops.KERNEL else all_metadata.get(self, None)
 
