@@ -99,7 +99,7 @@ class Ops(FastEnum):
   SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto(); UNIQUE = auto() # noqa: E702
 
   # MetaOps
-  COPY = auto(); BUFFER_VIEW = auto() # noqa: E702
+  COPY = auto(); CLONE = auto(); BUFFER_VIEW = auto() # noqa: E702
 
   # blocks in linearizer
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKEND = auto(); BLOCKFINAL = auto() # noqa: E702
@@ -493,10 +493,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
     return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
-  def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False):
-    if isinstance(device, tuple): return UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in device), clone)
-    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)), clone)
-  def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
+  def copy_to_device(self, device:str|tuple[str, ...]):
+    if isinstance(device, tuple): return UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in device))
+    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)))
+  def clone(self) -> UOp: return UOp(Ops.CLONE, self.dtype, (self,))
   @property
   def metadata(self) -> tuple[Metadata, ...]|Metadata|None: return self.arg.metadata if self.op is Ops.KERNEL else all_metadata.get(self, None)
 

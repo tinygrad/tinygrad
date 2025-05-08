@@ -88,7 +88,7 @@ sym = symbolic_simple+PatternMatcher([
    lambda copyin,copy: copyin if copyin.device == copy.device and copy.arg is not True else None),
   # store a shrink before COPY, otherwise view after the COPY
   (UPat(Ops.COPY, src=(UPat(Ops.VIEW, name="v"), UPat()), name="copy"), lambda copy,v: v.contiguous().copy_to_device(copy.device) \
-    if prod(v.shape) < prod(v.base.shape) else v.base.copy_to_device(copy.device, clone=copy.arg).view(v.st)),
+    if prod(v.shape) < prod(v.base.shape) else v.base.copy_to_device(copy.device).view(v.st)),
   # remove cast to image when it's already a contiguous image
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(Ops.CONTIGUOUS, name="base"),)),)),
    lambda cast,base,vm: base.view(vm.st) if isinstance(cast.dtype, ImageDType) and isinstance(base.dtype, ImageDType) else None),
@@ -483,6 +483,10 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
   assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
   return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
 
+fixup_copy = PatternMatcher([
+  (UPat(Ops.CLONE, name="c"), lambda c: c.src[0].copy_to_device(c.device)),
+])
+
 @track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # merge_views + simplify
@@ -494,7 +498,8 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # group into kernels
   sink = tensor_map[big_sink]
   realize_map = group_realizes(sink)
-  tensor_map = graph_rewrite_map(sink, create_kernels, ctx=KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True,
+  tensor_map = graph_rewrite_map(sink, fixup_copy+create_kernels,
+                                 ctx=KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}), bottom_up=True,
                                  input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
