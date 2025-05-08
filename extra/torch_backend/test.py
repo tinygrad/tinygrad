@@ -158,7 +158,7 @@ class TestTorchBackend(unittest.TestCase):
       a = torch.rand(10, 10, device=device, dtype=torch_dtype)
       self.assertEqual(a.dtype, torch_dtype)
 
-  def test_normal_dtype(self):
+  def test_normal(self):
     for torch_dtype in [torch.float32, torch.float16]:
       a = torch.randn(10, 10, device=device, dtype=torch_dtype)
       self.assertEqual(a.dtype, torch_dtype)
