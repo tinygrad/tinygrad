@@ -5,10 +5,12 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_parameters, load_state_dict, safe_load
 from tinygrad.helpers import getenv
+from extra.bench_log import log_event_start, log_event_end, BenchEvent
 def tlog(x): print(f"{x:25s}  @ {time.perf_counter()-start:5.2f}s")
 
 def eval_resnet():
   Tensor.no_grad = True
+  log_event_start(BenchEvent.FULL)
   # Resnet50-v1.5
   from extra.models.resnet import ResNet50
   tlog("imports")
@@ -60,6 +62,7 @@ def eval_resnet():
     st = et
     proc, next_proc = next_proc, None
   tlog("done")
+  log_event_end(BenchEvent.FULL)
 
 def eval_unet3d():
   # UNet3D

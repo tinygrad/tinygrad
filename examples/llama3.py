@@ -7,6 +7,7 @@ from extra.models.llama import Transformer, convert_from_huggingface, convert_fr
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters, gguf_load
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
 from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm
+from extra.bench_log import log_event_start, log_event_end, BenchEvent
 
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
@@ -166,7 +167,9 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dt
   model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, embedding=embedding, max_context=max_context, jit=True)
 
   if not load_weights: return model
+
   # load weights
+  log_event_start(BenchEvent.LOAD_WEIGHTS)
   if model_path.is_dir():
     if (model_path / "model.safetensors.index.json").exists(): weights = load(str(model_path / "model.safetensors.index.json"))
     elif (model_path / "model.safetensors").exists(): weights = load(str(model_path / "model.safetensors"))
@@ -200,6 +203,7 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dt
 
     # replace weights in model
     load_state_dict(model, weights, strict=False, consume=True)
+  log_event_end(BenchEvent.LOAD_WEIGHTS)
   return model
 
 # default settings
@@ -435,11 +439,13 @@ if __name__ == "__main__":
       st = GlobalCounters.time_sum_s
       with Profiling(enabled=args.profile):
         with Timing("total ", on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
+          log_event_start(BenchEvent.STEP)
           with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None):
             tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
           tok = tok.item()
+          log_event_end(BenchEvent.STEP)
       start_pos += 1
       last_tok = tok
       generated += tokenizer.decode([tok])

@@ -9,6 +9,7 @@ from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam
 
 from extra.lr_scheduler import LRSchedulerGroup
 from examples.mlperf.helpers import get_training_state, load_training_state
+from extra.bench_log import log_event_start, log_event_end, BenchEvent
 # TODO: fix benchmark logging and use tinygrad tqdm
 from tqdm import tqdm
 
@@ -204,6 +205,7 @@ def train_resnet():
     prev_cookies = []
     st = time.perf_counter()
     while proc is not None:
+      log_event_start(BenchEvent.STEP)
       GlobalCounters.reset()
       (loss, top_1), y, proc = train_step(proc[0], proc[1]), proc[2], proc[3]
 
@@ -225,6 +227,7 @@ def train_resnet():
       top_1_acc = top_1 / sum(yi != -1 for yi in y)
 
       cl = time.perf_counter()
+      log_event_end(BenchEvent.STEP)
       if BENCHMARK:
         step_times.append(cl - st)
 
