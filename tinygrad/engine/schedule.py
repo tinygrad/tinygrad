@@ -62,19 +62,20 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     ubufs = tuple(s.buf_uop.buffer for s in k.src)
     if any(isinstance(x, MultiBuffer) for x in ubufs):
       if ast.op is Ops.COPY:
-        if isinstance(ubufs[0], MultiBuffer) and isinstance(ubufs[1], Buffer):
+        if isinstance(ubufs[1], MultiBuffer):
+          assert ast.arg is not None
+          # TODO: support ALLREDUCE here
+          src_buf = ubufs[1].bufs[ast.arg]
+        else:
+          src_buf = ubufs[1]
+
+        if isinstance(ubufs[0], MultiBuffer):
           # BROADCAST
-          for b in ubufs[0].bufs: schedule.append(ScheduleItem(ast, (b, ubufs[1]), k.arg.metadata))
-        elif isinstance(ubufs[0], Buffer) and isinstance(ubufs[1], MultiBuffer):
-          if ast.arg is not None:
-            # copy from one (with arg)
-            schedule.append(ScheduleItem(ast, (ubufs[0], ubufs[1].bufs[ast.arg]), k.arg.metadata))
-          else:
-            # REDUCE (without arg)
-            raise NotImplementedError("REDUCE")
-        elif isinstance(ubufs[0], MultiBuffer) and isinstance(ubufs[1], MultiBuffer):
-          # ALLREDUCE
-          raise NotImplementedError("ALLREDUCE")
+          for b in ubufs[0].bufs: schedule.append(ScheduleItem(ast, (b, src_buf), k.arg.metadata))
+        else:
+          # COPY
+          schedule.append(ScheduleItem(ast, (ubufs[0], src_buf), k.arg.metadata))
+
       else:
         assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
         dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']

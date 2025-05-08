@@ -484,8 +484,9 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
 # TODO: support ring allreduce
 replace_allreduce = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red", allow_any_len=True), lambda buf, red:
+   # TODO: why is this contiguous needed?
    functools.reduce(lambda x,y: x.alu(red.arg, y),
-                    [UOp(Ops.COPY, buf.dtype, (buf.contiguous(),)+red.src[1:], arg=i) for i in range(len(buf.device))])),
+    [UOp(Ops.COPY, buf.dtype, (buf.contiguous(),)+red.src[1:], arg=i) for i in range(len(buf.device))]) if isinstance(buf.device, tuple) else None),
 ])
 
 @track_rewrites(name_fxn=get_name)
