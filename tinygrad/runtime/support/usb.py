@@ -111,6 +111,8 @@ class ASM24Controller:
   def __init__(self):
     self.usb = USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04)
     self._cache: dict[int, int|None] = {}
+    self._pci_cacheable: list[tuple[int, int]] = []
+    self._pci_cache: dict[int, int|None] = {}
 
     # Init controller.
     self.exec_ops([WriteOp(0x54b, b' '), WriteOp(0x5a8, b'\x02'), WriteOp(0x5f8, b'\x04'), WriteOp(0x7ec, b'\x01\x00\x00\x00'),
@@ -150,12 +152,16 @@ class ASM24Controller:
     parts = self.exec_ops([ReadOp(base_addr + off, min(stride, length - off)) for off in range(0, length, stride)])
     return b''.join(p or b'' for p in parts)[:length]
 
+  def _is_pci_cacheable(self, addr:int) -> bool: return any(x <= addr <= x + sz for x, sz in self._pci_cacheable)
   def pcie_prep_request(self, fmt_type:int, address:int, value:int|None=None, size:int=4) -> list[WriteOp]:
+    if fmt_type == 0x40 and size == 4 and self._is_pci_cacheable(address) and self._pci_cache.get(address) == value: return []
+
     assert fmt_type >> 8 == 0 and size > 0 and size <= 4, f"Invalid fmt_type {fmt_type} or size {size}"
-    if DEBUG >= 3: print("pcie_prep_req", hex(fmt_type), hex(address), value, size)
+    if DEBUG >= 3: print("pcie_request", hex(fmt_type), hex(address), value, size)
 
     masked_address, offset = address & 0xFFFFFFFC, address & 0x3
     assert size + offset <= 4 and (value is None or value >> (8 * size) == 0)
+    self._pci_cache[masked_address] = value if size == 4 and fmt_type == 0x40 else None
 
     return ([WriteOp(0xB220, struct.pack('>I', value << (8 * offset)), ignore_cache=False)] if value is not None else []) + \
       [WriteOp(0xB218, struct.pack('>I', masked_address), ignore_cache=False),
