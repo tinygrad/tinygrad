@@ -1,5 +1,7 @@
 import unittest, time
 from tinygrad.runtime.support.usb import ASM24Controller
+from tinygrad.helpers import Timing
+from tinygrad import Tensor, Device
 
 class TestASMController(unittest.TestCase):
   @classmethod
@@ -34,6 +36,27 @@ class TestASMController(unittest.TestCase):
     dur_ms = (time.perf_counter() - start) * 1000
     print(f"read 4K took {dur_ms:.3f} ms")
     self.assertEqual(out, payload)
+
+class TestDevCopySpeeds(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    cls.sz = 256
+    cls.dev = Device["AMD"]
+    if not cls.dev.is_usb(): raise unittest.SkipTest("only test this on USB devices")
+
+  def testCopyCPUtoDefault(self):
+    for _ in range(3):
+      t = Tensor.ones(self.sz, self.sz, device="CPU").contiguous().realize()
+      with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns * 1e3:.2f} MB/s"): # noqa: F821
+        t.to(Device.DEFAULT).realize()
+        Device[Device.DEFAULT].synchronize()
+      del t
+
+  def testCopyDefaulttoCPU(self):
+    t = Tensor.ones(self.sz, self.sz).contiguous().realize()
+    for _ in range(3):
+      with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns * 1e3:.2f} MB/s"):
+        t.to('CPU').realize()
 
 if __name__ == "__main__":
   unittest.main()
