@@ -40,14 +40,14 @@ class TestASMController(unittest.TestCase):
 class TestDevCopySpeeds(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls.sz = 256
+    cls.sz = 512
     cls.dev = Device["AMD"]
     if not cls.dev.is_usb(): raise unittest.SkipTest("only test this on USB devices")
 
   def testCopyCPUtoDefault(self):
     for _ in range(3):
       t = Tensor.ones(self.sz, self.sz, device="CPU").contiguous().realize()
-      with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns * 1e3:.2f} MB/s"): # noqa: F821
+      with Timing(f"copyin of {t.nbytes()/1e6:.2f} MB:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns * 1e3:.2f} MB/s"): # noqa: F821
         t.to(Device.DEFAULT).realize()
         Device[Device.DEFAULT].synchronize()
       del t
@@ -55,7 +55,7 @@ class TestDevCopySpeeds(unittest.TestCase):
   def testCopyDefaulttoCPU(self):
     t = Tensor.ones(self.sz, self.sz).contiguous().realize()
     for _ in range(3):
-      with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns * 1e3:.2f} MB/s"):
+      with Timing(f"copyout of {t.nbytes()/1e6:.2f} MB:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns * 1e3:.2f} MB/s"):
         t.to('CPU').realize()
 
 if __name__ == "__main__":
