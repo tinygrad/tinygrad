@@ -535,9 +535,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.MULTI: return tuple(cast(str, x.device) for x in self.src)
-    if self.op in {Ops.COPY, Ops.BUFFER}:
-      if len(self.src) > 2: return tuple(cast(str, x.device) for x in self.src[1:])
-      return self.src[1].device
+    if self.op in {Ops.COPY, Ops.BUFFER}: return self.src[1].device
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
