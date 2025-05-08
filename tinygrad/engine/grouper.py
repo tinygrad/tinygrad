@@ -273,7 +273,7 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
 
 # walk back the local graph until we reach a realized parent
-pm_append = PatternMatcher([(UPat(Ops.KERNEL, name="x"), append_to_kernel),])
+create_kernels = insert_kernels+PatternMatcher([(UPat(Ops.KERNEL, name="x"), append_to_kernel),])
 
 # **** swizzler
 
@@ -490,9 +490,8 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
   # group into kernels
-  sink = tensor_map[big_sink]
-  realize_map = group_realizes(sink)
-  tensor_map = graph_rewrite_map(sink, insert_kernels+pm_append, ctx=KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}),
+  realize_map = group_realizes(tensor_map[big_sink])
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx=KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}),
                                  bottom_up=True, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
@@ -511,14 +510,14 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # finally, create the AST for kernels
   tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map, name="create_ast")
-  sched_sink = tensor_map[big_sink]
-
-  # verify Kernels match the spec
-  type_verify(list(sched_sink.toposort()), sched_spec)
 
   # display the final graph
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
+
+  # verify Kernels match the spec
+  sched_sink = tensor_map[big_sink]
+  type_verify(list(sched_sink.toposort()), sched_spec)
 
   # map tensors to buffer/assign/const, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
