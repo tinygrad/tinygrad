@@ -8,7 +8,7 @@ from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Contex
 from tinygrad.helpers import PICKLE_BUFFERS, dedup, cdiv, cmod
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
-  from tinygrad.device import Buffer
+  from tinygrad.device import Buffer, MultiBuffer
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
@@ -114,7 +114,7 @@ class Ops(FastEnum):
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
 
   # reduce
-  REDUCE_AXIS = auto(); REDUCE = auto() # noqa: E702
+  REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto() # noqa: E702
 
   # helper ops
   GEP = auto(); VECTORIZE = auto(); CAT = auto(); PTRCAT = auto() # noqa: E702
@@ -247,6 +247,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
   children:set[weakref.ref[UOp]] = field(default_factory=set)
+  def __post_init__(self):
+    if self.op is Ops.DEVICE: assert isinstance(self.arg, str)
   def __del__(self):
     if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
     if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg))) is not None:
@@ -320,7 +322,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
-      case Ops.MULTI: shape = tuple(sum(y.shape[a] for y in self.real_lbs) if a == self.axis else s for a,s in enumerate(self.real_lbs[0].shape))
+      case Ops.MULTI: shape = tuple(self.src[0].shape[a]*len(self.device) if a == self.axis else s for a,s in enumerate(self.src[0].shape))
       case Ops.BITCAST:
         shape = src_sts[0].shape
         if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
@@ -379,7 +381,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
     if self._device is None: return UOp.const(self.dtype, b)
-    if isinstance(self.device, tuple): return UOp.multi(*[UOp.metaop(Ops.CONST, self.shape, self.dtype, d, b) for d in self.device], axis=None)
+    if isinstance(self.device, tuple):
+      return UOp.multi(*[UOp.metaop(Ops.CONST, self.shape, self.dtype, d, b) for d in self.device], axis=None)
     return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
@@ -428,6 +431,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def fuse(self): return self.alu(Ops.FUSE)
+  def allreduce(self, op, *devs):
+    assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
+    return UOp(Ops.ALLREDUCE, self.dtype, (self,)+devs, op)
 
   # *** from MultiLazyBuffer ***
 
@@ -466,30 +472,29 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def real_lbs(self): return [lb for lb,r in zip(self.src, self.real) if r]
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
-    lbs = [self.copy_to_device(d) if self.device != d else self for d in devices]
+    lb = self.copy_to_device(devices)
+    dnum = UOp.variable("_device_num", 0, len(devices)-1)
     if axis is not None:
       if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
-      # NOTE: this works for both even shards and uneven shards
       sz = self.shape[axis] // len(devices)
-      sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
-      lbs = [lb.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape)))
-        for lb,sz,off in zip(lbs, sizes, itertools.accumulate(sizes, initial=0))]
-    return UOp.multi(*lbs, axis=axis)
+      lb = lb.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
+    return UOp.multi(lb, axis=axis)
 
   # *** from LazyBuffer ***
 
   @staticmethod
   def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str, arg=None) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
+    device_uops = (UOp(Ops.DEVICE, arg=device),) if isinstance(device, str) else tuple(UOp(Ops.DEVICE, arg=d) for d in device)
     # Tensor const is CONST(VIEW(DEVICE)) -> RESHAPE -> EXPAND
     if op is Ops.CONST:
       assert isinstance(arg, get_args(ConstType)), f"trying to create CONST with {arg=}"
-      return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),),
+      return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, device_uops,
                  ShapeTracker.from_shape(())),)).reshape((1,)*len(shape)).expand(shape)
     # Tensor variable binding is BIND(VAR(VIEW(DEVICE)), CONST(VIEW(DEVICE)))
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
-    return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
+    return var.replace(src=(UOp(Ops.VIEW, dtypes.void, device_uops, ShapeTracker.from_shape(shape)),)).bind(val)
   def copy_to_device(self, device:str|tuple[str, ...], arg=None):
     if isinstance(device, tuple): return UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in device), arg)
     return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)), arg)
@@ -535,8 +540,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
-    if self.op is Ops.MULTI: return tuple(cast(str, x.device) for x in self.src)
-    if self.op in {Ops.COPY, Ops.BUFFER}:
+    if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}:
       if len(self.src) > 2: return tuple(cast(str, x.device) for x in self.src[1:])
       return self.src[1].device
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
@@ -546,16 +550,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.op is Ops.ASSIGN, f"must be ASSIGN {self.op}"
     return self.src[0].base
   @property
-  def buffer(self) -> Buffer:
+  def buffer(self) -> Buffer|MultiBuffer:
     if self is not self.base:
       assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
       return self.src[0].buffer
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
     if (cret:=buffers.get(self)) is not None: return cret
-    from tinygrad.device import Buffer
-    assert isinstance(self.device, str), f"buffer not supported on multi {self.device}"
-    buffers[self] = ret = Buffer(self.device, self.size, self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base)
-    ret.ref(1)
+    from tinygrad.device import Buffer, MultiBuffer
+    ret = (MultiBuffer if isinstance(self.device, tuple) else Buffer)(self.device, self.size,
+                                                                      self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base).ref(1)
+    buffers[self] = ret
     return ret
   @property
   def realized(self) -> Optional[Buffer]: return self.buffer if self.op is Ops.BUFFER and self.buffer.is_allocated() else None

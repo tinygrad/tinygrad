@@ -167,6 +167,7 @@ capturing: list = []  # put classes with an add method in here
 def run_schedule(schedule:list[ScheduleItem], var_vals:Optional[dict[Variable, int]]=None, do_update_stats=True):
   for si, ei in lower_schedule(schedule):
     if len(capturing) and CAPTURING: capturing[0].add(ei)
+    lvar_vals = var_vals|si.fixedvars
     if VALIDATE_WITH_CPU and si.ast.op is Ops.SINK:
       # copy in allocated buffers from the GPU
       nb: tuple[Buffer, ...] = tuple(Buffer("CPU", b.size, b.dtype) for b in si.bufs)
@@ -174,12 +175,12 @@ def run_schedule(schedule:list[ScheduleItem], var_vals:Optional[dict[Variable, i
         if gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_buffer())
 
       # run on GPU
-      ei.run(var_vals, do_update_stats=do_update_stats)
+      ei.run(lvar_vals, do_update_stats=do_update_stats)
 
       # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
-      lower_schedule_item(ScheduleItem(si.ast, nb, si.metadata)).run(var_vals, do_update_stats=do_update_stats)
+      lower_schedule_item(ScheduleItem(si.ast, nb, si.metadata)).run(lvar_vals, do_update_stats=do_update_stats)
       import numpy as np
       np.testing.assert_allclose(si.bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
     else:
-      ei.run(var_vals, do_update_stats=do_update_stats)
+      ei.run(lvar_vals, do_update_stats=do_update_stats)
 

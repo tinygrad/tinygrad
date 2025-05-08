@@ -46,8 +46,33 @@ def alu_multi(root:UOp):
   msrcs = root.src
   assert all(x.op is Ops.MULTI for x in msrcs), f"all buffers must be MultiLazyBuffer {[x.op for x in msrcs]}"
   assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"
-
   axis = root.axis
+
+  srcs = []
+  for mlb in msrcs:
+    if mlb.axis == axis:
+      srcs.append(mlb.src[0])
+    elif mlb.axis is None:
+      #if mlb.axis is None: tsrc = mlb.src[0]
+      #else: tsrc = mlb.copy_to_device(root.device)
+      # TODO: share code with shard
+      dcount = len(root.device)
+      dnum = UOp.variable("_device_num", 0, dcount-1)
+      sz = root.shape[axis] // dcount
+      srcs.append(mlb.src[0].shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(root.shape))))
+    else:
+      # TODO: logic copied from COPY
+      bsz, dcount = mlb.shape[mlb.axis]//len(mlb.device), len(mlb.device)
+      dnum = UOp.variable("_device_num", 0, len(mlb.device)-1)
+      padded = mlb.src[0].pad(tuple((0,0) if a != mlb.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(mlb.shape))))
+      ret = padded.allreduce(Ops.ADD, *tuple(UOp(Ops.DEVICE, arg=d) for d in mlb.device))
+      # TODO: logic from above
+      sz = root.shape[axis] // dcount
+      srcs.append(ret.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(root.shape))))
+
+  return UOp.multi(srcs[0].alu(root.op, *srcs[1:]), axis=axis)
+
+
   bounds = dedup([x.bounds for x in root.src if x.axis == axis])[-1] if axis is not None else None
   srcs:list[list[UOp]] = []
   not_all_real = not all(all(mlb.real) for mlb in msrcs)
@@ -66,13 +91,18 @@ def reduce_multi(root:UOp, multi:UOp):
   op, axis = root.arg
   if multi.axis is not None and multi.axis in axis:
     # all-reduce on sharded axes
+    red = multi.src[0].r(op, axis)
+    ret = red.allreduce(op, *tuple(UOp(Ops.DEVICE, arg=d) for d in red.device))
+    return ret.multi(axis=None)
+    """
     reduced_parts = [(x if r else x.const_like(0)).r(op, axis) for x,r in zip(multi.src, multi.real)]
     # if all partitions are real, do all_reduce
     if all(multi.real): return UOp.multi(*all_reduce(op, reduced_parts), axis=root.axis)
     # only one partition is real, keep it
     return UOp.multi(*reduced_parts, axis=root.axis, real=multi.real)
+    """
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
-  return UOp.multi(*[x.r(op, axis) for x in multi.src], axis=root.axis, real=multi.real)
+  return multi.src[0].r(op, axis).multi(axis=multi.axis)
 
 def _shape_to_single_shard(axis, shape:tuple[sint, ...], lb:UOp) -> tuple[sint, ...]:
   return tuple(lb.shape[axis] if a == axis else s for a,s in enumerate(shape))
@@ -124,16 +154,20 @@ def flip_multi(root:UOp, multi:UOp):
   assert multi.axis is None or not root.arg[multi.axis], "flipping not supported on sharded axis"
   return UOp.multi(*[x.flip(root.arg) for x in multi.src], axis=multi.axis, real=multi.real)
 
-def copy_multi(multi:UOp, device:UOp):
-  # if we already have a copy on the device, return that
-  if multi.axis is None: return next((lb for lb in multi.real_lbs if lb.device == device.arg), multi.real_lbs[0].copy_to_device(device.arg))
-  # copy lbs to device, pad to final shape, and sum
-  llbs:list[UOp] = []
-  for lb,real,(start,end) in zip(multi.src, multi.real, multi.bounds):
-    if not real: continue
-    pad_arg = tuple((0,0) if a != multi.axis else (start, multi.bounds[-1][1]-end) for a in range(len(lb.shape)))
-    llbs.append(lb.copy_to_device(device.arg).pad(pad_arg))
-  return functools.reduce(operator.add, llbs)
+# from multiple devices -> one
+def copy_multi(multi:UOp, copy:UOp):
+  if multi.axis is None:
+    # if we already have a copy on the device, return that
+    #if any(d == device.arg for d in multi.device): return multi.src[0].select(device.arg)
+    # otherwise select the first one and copy it
+    return UOp(Ops.COPY, multi.dtype, (multi.src[0],)+copy.src[1:], arg=0)
+    #return multi.src[0].copy_to_device(device.arg, arg=0)
+  # this is a multi axis one
+  bsz, dcount = multi.shape[multi.axis]//len(multi.device), len(multi.device)
+  dnum = UOp.variable("_device_num", 0, len(multi.device)-1)
+  padded = multi.src[0].pad(tuple((0,0) if a != multi.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(multi.shape))))
+  ret = padded.allreduce(Ops.ADD, *copy.src[1:])
+  return ret if len(copy.src) == 2 else ret.multi(axis=None)
 
 def assign_multi(dest:UOp, src:UOp):
   assert dest.axis == src.axis, f"axis must match in assign {dest.axis} != {src.axis}"
@@ -152,7 +186,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.SHRINK, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), shrink_multi),
   (UPat(Ops.FLIP, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), flip_multi),
   (UPat(Ops.ASSIGN, src=(UPat(Ops.MULTI, name="dest"), UPat(Ops.MULTI, name="src"))), assign_multi),
-  (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))), copy_multi),
+  (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE)), allow_any_len=True, name="copy"), copy_multi),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])

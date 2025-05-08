@@ -1,5 +1,6 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
+import functools
 from tinygrad.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
 from tinygrad.ops import can_pad, sint, track_rewrites, _substitute
 from tinygrad.codegen.lowerer import get_contraction_with_reduce
@@ -84,8 +85,8 @@ sym = symbolic_simple+PatternMatcher([
   # COPY(CONST) creates a new CONST on the destination device
   (UPat(Ops.COPY, name="root", src=(UPat.cvar("x"),), allow_any_len=True), lambda root,x: root.const_like(x.arg)),
   # store a shrink before COPY, otherwise view after the COPY
-  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, name="v"),), name="copy", allow_any_len=True), lambda copy,v: v.contiguous().copy_to_device(copy.device) \
-    if prod(v.shape) < prod(v.base.shape) else v.base.copy_to_device(copy.device).view(v.st)),
+  #(UPat(Ops.COPY, src=(UPat(Ops.VIEW, name="v"),), name="copy", allow_any_len=True), lambda copy,v: v.contiguous().copy_to_device(copy.device) \
+  #  if prod(v.shape) < prod(v.base.shape) else v.base.copy_to_device(copy.device).view(v.st)),
   # remove cast to image when it's already a contiguous image
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(Ops.CONTIGUOUS, name="base"),)),)),
    lambda cast,base,vm: base.view(vm.st) if isinstance(cast.dtype, ImageDType) and isinstance(base.dtype, ImageDType) else None),
@@ -481,10 +482,18 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
   assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
   return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
 
+# TODO: support ring allreduce
+replace_allreduce = PatternMatcher([
+  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red", allow_any_len=True), lambda buf, red:
+   # TODO: why is this contiguous needed?
+   functools.reduce(lambda x,y: x.alu(red.arg, y),
+    [UOp(Ops.COPY, buf.dtype, (buf.contiguous(),)+red.src[1:], arg=i) for i in range(len(buf.device))]) if isinstance(buf.device, tuple) else None),
+])
+
 @track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, insert_fuse+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
+  tensor_map = graph_rewrite_map(big_sink, insert_fuse+do_fuse+merge_views+sym+replace_contiguous+replace_allreduce, ctx={}, name="merge_views")
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")

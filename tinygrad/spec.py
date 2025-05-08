@@ -77,6 +77,10 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
 
   # COPY
   (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), allow_any_len=True), lambda copy,x: copy.dtype == x.dtype),
+
+  # ALLREDUCE
+  (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"), UPat(Ops.DEVICE)), allow_any_len=True),
+   lambda red,x: red.dtype == x.dtype and isinstance(red.arg, Ops)),
 ])
 
 # ***** uop type spec *****
