@@ -90,7 +90,7 @@ class WebGPUJSRenderer(GraphRenderer):
     prg += ["const createGraph = async () => {"]
     prg += indent(input_bufs + empty_bufs + state_dict + output_bufs + output_read_bufs + ret_bufs + [declare_infinity, write_infinity], 1)
     prg += indent(add_compute_pass + layouts + kernels + make_pipelines, 1)
-    prg += indent([f"const run = async ({args}) {{"], 1)
+    prg += indent([f"const run = async ({args}) => {{"], 1)
     prg += indent(command_encoder + input_copyins + compute_passes + output_copies + trigger_gpu + output_copyouts + [f"return [{ret}];"], 2)
     prg += indent(["};", "return { stateDict, run };"], 1)
     prg += ["};"]

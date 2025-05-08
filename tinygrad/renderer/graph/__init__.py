@@ -18,7 +18,6 @@ def is_partial_write(ast:UOp, buf_idx:int) -> bool:
 # Common logic regardless of render target (e.g. JavaScript, C)
 class GraphRenderer(Renderer):
   def __init__(self, fxn:Callable, args:Sequence):
-
     # Ensure random seeds are on-device
     Tensor.randn(1).realize()
 
