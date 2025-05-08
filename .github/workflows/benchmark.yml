@@ -24,6 +24,9 @@ on:
 jobs:
   testmacbenchmark:
     name: Mac Benchmark
+    env:
+      # since sudo is required for usbgpu on macos, move the cache to a new location, as some of the files are owned by root
+      PYTHONPYCACHEPREFIX: /tmp/tiny_python_pycache
     runs-on: [self-hosted, macOS]
     timeout-minutes: 20
     defaults:
@@ -111,6 +114,12 @@ jobs:
     #  run: STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3.11 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     - name: Run 10 CIFAR training steps w winograd
       run: JIT=1 WINO=1 STEPS=10 python3.11 examples/hlb_cifar10.py | tee train_cifar_wino.txt
+    - name: UsbGPU boot time
+      run: sudo -E PYTHONPATH=. DEBUG=2 AM_RESET=1 AMD=1 AMD_IFACE=USB time python3.11 test/test_tiny.py TestTiny.test_plus
+    - name: UsbGPU tiny tests
+      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/test_tiny.py
+    - name: UsbGPU copy speeds
+      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)

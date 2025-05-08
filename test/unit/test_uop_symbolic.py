@@ -110,6 +110,9 @@ class TestSymbolic(unittest.TestCase):
   def test_sub_1(self):
     self.helper_test_variable(Variable("a", 0, 8)-1, -1, 7, "(a+-1)")
 
+  def test_const_var(self):
+    self.helper_test_variable(Variable("fake", 1, 1), 1, 1, "1")
+
   def test_add_self(self):
     a = Variable("a", 0, 8)
     b = Variable("b", 0, 8)
@@ -564,6 +567,11 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 0, 3)
     w = cond.logical_not().where(a, b)
     self.helper_test_variable(w, 0, 3, "(b if (x<2) else a)")
+
+  def test_neg_in_comp(self):
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    self.helper_test_variable(-a<-b, False, True, "(b<a)")
 
   def test_where_cast(self):
     s = Variable("s", 0, 3)

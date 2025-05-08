@@ -129,13 +129,22 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV]) -> UO
 
   if (y.op is not Ops.CONST) or ((c := y.arg) <= 0) or (x.dtype.count > 1): return None
 
+<<<<<<< HEAD
   svars, factors, gcd, div, const, something_changed = [], [], c, 1, 0, False
+=======
+  svars, factors, quotients, remainders, gcd, div, const, something_changed = [], [], [], [], c, 1, 0, False
+>>>>>>> master
   for u in split_uop(x, Ops.ADD):
     if u.op is Ops.MOD and which is Ops.MOD and u.src[1].op is Ops.CONST and u.src[1].arg%c == 0 and x.vmin>=0:
       u = u.src[0]
       something_changed = True
     v: UOp = u.divides(f:=u.const_factor())
+<<<<<<< HEAD
     if f%c==0 or (x.vmin>=0 and (which is Ops.MOD or u.op is Ops.CONST) and f%c!=f): something_changed = True
+=======
+    q, r = divmod(f, c)
+    if r==0 or ((which is Ops.MOD or split_rem or u.op is Ops.CONST) and r!=f): something_changed = True
+>>>>>>> master
     if u.op is Ops.CONST: const += f
     else:  # div is the smallest common divisor of all terms
       if f > 1 and c % f == 0 and (div == 1 or div > f): div = f
@@ -239,8 +248,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
-  # ALU min==max -> CONST (slow!)
-  (UPat(GroupOp.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
+  # ALU/variable min==max -> CONST (slow!)
+  (UPat(GroupOp.ALU|{Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
   (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # TODO: why does this rule break beautiful_mnist?
@@ -270,6 +279,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat() + (UPat()//UPat.cvar("d", vec=False))*UPat.cvar("c")).named("divs"), lambda divs,d,c: fold_unrolled_divs(divs, d.arg, c.arg)),
   # generic lt folding
   (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
+  (UPat.var("x", dtypes.sints)*-1 < UPat.var("y", dtypes.sints)*-1, lambda x,y: y<x),
   # canonicalize a simplex with positive coefficients > 0
   # not x < 1 -> X > 0
   ((UPat.var("x", dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
