@@ -496,6 +496,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False):
     if isinstance(device, tuple): return UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in device), clone)
     return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)), clone)
+  def select(self, device:str): return UOp(Ops.SELECT, self.dtype, (self, UOp(Ops.DEVICE, arg=device)))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   @property
   def metadata(self) -> tuple[Metadata, ...]|Metadata|None: return self.arg.metadata if self.op is Ops.KERNEL else all_metadata.get(self, None)

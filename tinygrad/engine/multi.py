@@ -124,14 +124,23 @@ def flip_multi(root:UOp, multi:UOp):
   assert multi.axis is None or not root.arg[multi.axis], "flipping not supported on sharded axis"
   return UOp.multi(*[x.flip(root.arg) for x in multi.src], axis=multi.axis, real=multi.real)
 
+# from multiple devices -> one
 def copy_multi(multi:UOp, device:UOp):
-  # if we already have a copy on the device, return that
-  if multi.axis is None: return next((lb for lb in multi.real_lbs if lb.device == device.arg), multi.real_lbs[0].copy_to_device(device.arg))
-  # copy lbs to device, pad to final shape, and sum
-  bsz, dcount = multi.shape[multi.axis]/len(multi.device), len(multi.device)
-  dnum = UOp.variable("_device_num", 0, len(multi.device)-1)
-  padded = multi.src[0].pad(tuple((0,0) if a != multi.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(multi.shape))))
-  return padded.copy_to_device(device.arg)
+  if multi.axis is None:
+    # if we already have a copy on the device, return that
+    if any(d == device.arg for d in multi.device): return multi.src[0].select(device.arg)
+    # otherwise select the first one and copy it
+    return multi.src[0].select(multi.device[0]).copy_to_device(device.arg)
+  # this is a multi axis one
+  bsz, dcount = multi.shape[multi.axis]//len(multi.device), len(multi.device)
+  to_sum = []
+  for dnum,d in enumerate(multi.device):
+    pad_arg = tuple((0,0) if a != multi.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(multi.shape)))
+    to_sum.append(multi.src[0].select(d).copy_to_device(device.arg).pad(pad_arg))
+  return functools.reduce(lambda x,y: x+y, to_sum)
+  #dnum = UOp.variable("_device_num", 0, len(multi.device)-1)
+  #padded = multi.src[0].pad(tuple((0,0) if a != multi.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(multi.shape))))
+  #return functools.reduce(lambda x,y: x+y, [padded.select(d).copy_to_device(device.arg) for d in multi.device])
 
 def assign_multi(dest:UOp, src:UOp):
   assert dest.axis == src.axis, f"axis must match in assign {dest.axis} != {src.axis}"
