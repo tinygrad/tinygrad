@@ -24,6 +24,9 @@ on:
 jobs:
   testmacbenchmark:
     name: Mac Benchmark
+    env:
+      # since sudo is required for usbgpu on macos, move the cache to a new location, as some of the files are owned by root
+      PYTHONPYCACHEPREFIX: /tmp/tiny_python_pycache
     runs-on: [self-hosted, macOS]
     timeout-minutes: 20
     defaults:
