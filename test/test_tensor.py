@@ -500,6 +500,31 @@ class TestTinygrad(unittest.TestCase):
     print(a)
     print(c)
 
+  def test_requires_grad_(self):
+    # Only floats and bool allowed to have requires_grad=True
+    with self.assertRaises(TypeError):
+      a = Tensor([1, 2, 3], requires_grad=True)
+
+    with self.assertRaises(TypeError):
+      a = Tensor([1, 2, 3], dtype=dtypes.uint8, requires_grad=True)
+
+    with self.assertRaises(TypeError):
+      a = Tensor([1, 2, 3], dtype=dtypes.int16)
+      a.requires_grad_()
+
+    a = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+    self.assertEqual(a.dtype.name, "float")
+    self.assertEqual(a.requires_grad, True)
+
+    b = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+    c = (a < b)
+    self.assertEqual(c.dtype.name, "bool")
+    self.assertEqual(c.requires_grad, True)
+
+    d = Tensor([1.0, 2.0, 3.0], requires_grad=True).relu()
+    self.assertEqual(d.dtype.name, "float")
+    self.assertEqual(d.requires_grad, True)
+
   def test_env_overwrite_default_device(self):
     subprocess.run(['DISK=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT != \\"DISK\\""'],
                     shell=True, check=True)
