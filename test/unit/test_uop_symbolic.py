@@ -245,7 +245,7 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_lt(self):
     self.helper_test_variable(Variable("a", 0, 5)*4 < 13, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", 0, 5)*4 < 16, 0, 1, "(a<4)")
-    self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "((a*-1)<0)")
+    self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "(0<a)")
     self.helper_test_variable(Variable("a", 0, 5)*4 >= 12, 0, 1, "((a<3)!=True)")
     self.helper_test_variable(Variable("a", 0, 5)*4 >= 13, 0, 1, "((a<4)!=True)")
 
@@ -510,7 +510,7 @@ class TestSymbolic(unittest.TestCase):
   def test_idiv_lt(self):
     idx = Variable("idx", 0, 24)
     self.helper_test_variable((idx//4<3), 0, 1, "(idx<12)")
-    self.helper_test_variable((idx//-4<-3), 0, 1, "(((idx//4)*-1)<-3)")
+    self.helper_test_variable((idx//-4<-3), 0, 1, "(3<(idx//4))")
 
   def test_simplex_lt(self):
     a = Variable("a", 0, 3)
@@ -567,6 +567,8 @@ class TestSymbolic(unittest.TestCase):
     a = Variable("a", 0, 3)
     b = Variable("b", 0, 3)
     self.helper_test_variable(-a<-b, False, True, "(b<a)")
+    self.helper_test_variable(-a<3*b, False, True, "((b*-3)<a)")
+    self.helper_test_variable(-a<-2, False, True, "(2<a)")
 
   def test_where_cast(self):
     s = Variable("s", 0, 3)
