@@ -121,7 +121,7 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
     ret.append(u)
   return functools.reduce(operator.add, ret) if changed else None
 
-def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split_rem: bool=False) -> UOp|None:
+def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV]) -> UOp|None:
   # simplify x // y or x % y, None means no change
   # simple cancel div/mod case
   if y.vmin*y.vmax > 0 and (q:=cdiv(x.vmin,y.vmin)) == cdiv(x.vmin,y.vmax) == cdiv(x.vmax,y.vmin) == cdiv(x.vmax,y.vmax): # type: ignore
@@ -129,20 +129,19 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
 
   if (y.op is not Ops.CONST) or ((c := y.arg) <= 0) or (x.dtype.count > 1): return None
 
-  svars, factors, quotients, remainders, gcd, div, const, offset, something_changed = [], [], [], [], c, 1, 0, 0, False
+  svars, factors, gcd, div, const, something_changed = [], [], c, 1, 0, False
   for u in split_uop(x, Ops.ADD):
-    if u.op is Ops.MOD and which is Ops.MOD and u.src[1].op is Ops.CONST and u.src[1].arg%c == 0:
+    if u.op is Ops.MOD and which is Ops.MOD and u.src[1].op is Ops.CONST and u.src[1].arg%c == 0 and x.vmin>=0:
       u = u.src[0]
       something_changed = True
     v: UOp = u.divides(f:=u.const_factor())
-    q, r = cdiv(f,c), cmod(f,c)
-    if r==0 or ((which is Ops.MOD or split_rem or u.op is Ops.CONST) and r!=f): something_changed = True
-    offset += (f%c)*v.vmin
+    if f%c==0 or (x.vmin>=0 and (which is Ops.MOD or u.op is Ops.CONST) and f%c!=f): something_changed = True
     if u.op is Ops.CONST: const += f
     else:  # div is the smallest common divisor of all terms
       if f > 1 and c % f == 0 and (div == 1 or div > f): div = f
-      gcd = math.gcd(r, gcd)
-      factors.append(f); svars.append(v); quotients.append(q); remainders.append(r)  # noqa: E702
+      gcd = math.gcd(f, gcd)
+      factors.append(f); svars.append(v) # noqa: E702
+  if gcd != 1: something_changed = True
 
   # we can fold if the expression has only one non-constant term and this term can only take on two values
   if len(svars)==1 and (v:=svars[0]).vmax-v.vmin == 1:
@@ -150,35 +149,30 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
     y2 = cmod(factors[0]*v.vmax+const, c) if which is Ops.MOD else cdiv(factors[0]*v.vmax+const, c)
     return (y2-y1)*(v-v.vmin) + y1
 
-  if x.vmin < 0: return None
-  # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
-  # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
-  lbound = ubound = offset = offset % c
-  for (f, v) in zip(factors, svars):
-    r = f % c
-    if r > c//2:
-      if (lbound := lbound + (r:=r-c) * (v.vmax-v.vmin)) < 0: break
-    elif (ubound := ubound + r * (v.vmax-v.vmin)) >= c: break
-    offset -= r * v.vmin  # determine what the new offset would be
-  else: # vmin/vmax of the remainder is between 0 and c, we can remove the mod/div
-    remainders = [min((f%c), (f%c)-c, key=abs) for f in factors]
-    if which is Ops.MOD: return functools.reduce(operator.add, [r*v for r,v in zip(remainders,svars)], x.const_like(offset))
-    return functools.reduce(operator.add, [(f-r)//c * v for f,r,v in zip(factors, remainders,svars)], x.const_like((const-offset)//c))
+  if x.vmin >= 0:
+    # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
+    # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
+    rems = [min(f%c, f%c-c, key=abs) for f in factors]
+    if (rem:=sum(r*v for r,v in zip(rems,svars))+const%c).vmin//c==rem.vmax//c:
+      if which is Ops.MOD: return rem - rem.vmin//c*c
+      return sum((f-r)//c * v for f,r,v in zip(factors,rems,svars)) + (const-const%c+rem.vmin//c*c)//c
 
-  if gcd != 1: something_changed = True
   if not something_changed:
     if which is Ops.IDIV and (1 < div < c) and (newx:=div_and_mod_folding(x, x.const_like(div), Ops.IDIV)) is not None: return newx//(c//div)
     return None
-  quo, rem = x.const_like(const//c), x.const_like((const%c)//gcd)
-  for q,r,f,v in zip(quotients, remainders, factors, svars):
-    if which is Ops.IDIV and (not split_rem) and r!=0:
-      rem += f//gcd * v
-    else:
-      rem += r//gcd * v
-      quo += q * v
+
+  if math.gcd(gcd, const)!=1:
+    gcd = math.gcd(gcd, const)
+    ret = UOp(which, x.dtype, src=(sum(f//gcd * v for f,v in zip(factors, svars)) + const//gcd, x.const_like(c//gcd)))
+    return ret*gcd if which is Ops.MOD else ret
+
+  if x.vmin<0: return None
+  quo = sum(f//c * v for f,v in zip(factors, svars) if f%c==0) + x.const_like(const//c)
+  rem = sum(f//gcd * v for f,v in zip(factors, svars) if f%c!=0) if which is Ops.IDIV else sum((f%c)//gcd * v for f,v in zip(factors, svars))
+  rem += x.const_like((const%c)//gcd)
 
   # if numerator after is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
-  if rem.vmin < 0 and remainders: return None
+  if rem.vmin < 0 and factors: return None
   if which is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
   return rem//(c//gcd)+quo
 
