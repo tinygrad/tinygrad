@@ -189,7 +189,7 @@ class Tensor(SimpleMathTrait):
     return lhs._apply_uop(fxn, rhs)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
-    if not(dtypes.is_float(self.lazydata.dtype) or dtypes.is_bool(self.lazydata.dtype)) and requires_grad:
+    if not (dtypes.is_float(self.lazydata.dtype) or dtypes.is_bool(self.lazydata.dtype)) and requires_grad:
       raise TypeError(f"Tensor of dtype: {self.lazydata.dtype.name}, should have requires_grad=False")
     self.requires_grad = requires_grad
     return self
