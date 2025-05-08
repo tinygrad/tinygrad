@@ -129,22 +129,13 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV]) -> UO
 
   if (y.op is not Ops.CONST) or ((c := y.arg) <= 0) or (x.dtype.count > 1): return None
 
-<<<<<<< HEAD
   svars, factors, gcd, div, const, something_changed = [], [], c, 1, 0, False
-=======
-  svars, factors, quotients, remainders, gcd, div, const, something_changed = [], [], [], [], c, 1, 0, False
->>>>>>> master
   for u in split_uop(x, Ops.ADD):
     if u.op is Ops.MOD and which is Ops.MOD and u.src[1].op is Ops.CONST and u.src[1].arg%c == 0 and x.vmin>=0:
       u = u.src[0]
       something_changed = True
     v: UOp = u.divides(f:=u.const_factor())
-<<<<<<< HEAD
     if f%c==0 or (x.vmin>=0 and (which is Ops.MOD or u.op is Ops.CONST) and f%c!=f): something_changed = True
-=======
-    q, r = divmod(f, c)
-    if r==0 or ((which is Ops.MOD or split_rem or u.op is Ops.CONST) and r!=f): something_changed = True
->>>>>>> master
     if u.op is Ops.CONST: const += f
     else:  # div is the smallest common divisor of all terms
       if f > 1 and c % f == 0 and (div == 1 or div > f): div = f
