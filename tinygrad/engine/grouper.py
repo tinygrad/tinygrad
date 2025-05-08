@@ -252,9 +252,9 @@ DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
 insert_kernels = merge_views+PatternMatcher([
   # always give assign/contiguous a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
-  (UPat(Ops.CONTIGUOUS, name="x"), lambda ctx,x: create_kernel(ctx, x)),
+  (UPat(Ops.CONTIGUOUS, name="x"), create_kernel),
   # create a buffer for COPY on the new device
-  (UPat(Ops.COPY, src=(UPat(), UPat(Ops.DEVICE)), name="x"), lambda ctx,x: create_kernel(ctx, x)),
+  (UPat(Ops.COPY, src=(UPat(), UPat(Ops.DEVICE)), name="x"), create_kernel),
   # remove CONST/BIND/VIEW from SINK
   (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=new_src)
     if (new_src:=tuple(dedup(s.base for s in x.src if s.op not in {Ops.CONST, Ops.BIND}))) != x.src else None),
