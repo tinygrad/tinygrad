@@ -24,6 +24,8 @@ on:
 jobs:
   testmacbenchmark:
     name: Mac Benchmark
+    env:
+      PYTHONPYCACHEPREFIX: /tmp/tiny_python_pycache
     runs-on: [self-hosted, macOS]
     timeout-minutes: 20
     defaults:
