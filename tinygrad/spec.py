@@ -76,9 +76,7 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
    lambda root,x: root.dtype == x.dtype),
 
   # COPY
-  # NOTE: the arg here specifies clone=True, which prevents folding same device copy
-  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), allow_any_len=True),
-   lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
+  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), allow_any_len=True), lambda copy,x: copy.dtype == x.dtype),
 ])
 
 # ***** uop type spec *****

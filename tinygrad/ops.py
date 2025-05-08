@@ -469,7 +469,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def real_lbs(self): return [lb for lb,r in zip(self.src, self.real) if r]
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
-    lbs = [self.copy_to_device(d) for d in devices]
+    lbs = [self.copy_to_device(d) if self.device != d else self for d in devices]
     if axis is not None:
       if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
       # NOTE: this works for both even shards and uneven shards
@@ -493,10 +493,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
     return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
-  def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False):
-    if isinstance(device, tuple): return UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in device), clone)
-    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)), clone)
-  def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
+  def copy_to_device(self, device:str|tuple[str, ...]):
+    if isinstance(device, tuple): return UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in device))
+    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)))
+  def clone(self) -> UOp: return self.copy_to_device(self.device)
   @property
   def metadata(self) -> tuple[Metadata, ...]|Metadata|None: return self.arg.metadata if self.op is Ops.KERNEL else all_metadata.get(self, None)
 
