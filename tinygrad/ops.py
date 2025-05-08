@@ -469,7 +469,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def real_lbs(self): return [lb for lb,r in zip(self.src, self.real) if r]
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
-    lbs = [self.copy_to_device(d) for d in devices]
+    lbs = [self.copy_to_device(d) if self.device != d else self for d in devices]
     if axis is not None:
       if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
       # NOTE: this works for both even shards and uneven shards
