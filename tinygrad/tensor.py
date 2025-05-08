@@ -137,10 +137,6 @@ class Tensor(SimpleMathTrait):
     # tensors can have gradients if you have called .backward
     self.grad:Tensor|None = None
 
-    # NOTE: this can be in three states. False and None: no gradient, True: gradient
-    # None (the default) will be updated to True if it's put in an optimizer
-    self.requires_grad:bool|None = requires_grad
-
     # create a UOp from the different types of inputs
     if isinstance(data, UOp):
       assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
@@ -174,6 +170,10 @@ class Tensor(SimpleMathTrait):
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
       self.lazydata = data
 
+    # NOTE: this can be in three states. False and None: no gradient, True: gradient
+    # None (the default) will be updated to True if it's put in an optimizer
+    self.requires_grad:bool|None = self.requires_grad_(requires_grad).requires_grad
+
     # add to all_tensors after construction succeeds
     all_tensors.add(weakref.ref(self))
   def __del__(self): all_tensors.discard(weakref.ref(self))
@@ -189,6 +189,7 @@ class Tensor(SimpleMathTrait):
     return lhs._apply_uop(fxn, rhs)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
+    if self.lazydata.dtype not in dtypes.floats + (dtypes.bool,) and requires_grad: raise TypeError(f"Tensor of dtype: {self.lazydata.dtype.name}, should have requires_grad=False")
     self.requires_grad = requires_grad
     return self
 
