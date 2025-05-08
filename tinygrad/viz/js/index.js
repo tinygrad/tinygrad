@@ -83,7 +83,7 @@ async function renderDag(graph, additions, recenter=false) {
 DTYPE_SIZE = {"bool": 1, "char": 1, "uchar": 1, "short": 2, "ushort": 2, "int": 4, "uint": 4,
               "long": 8, "ulong": 8, "half": 2, "bfloat": 2, "float": 4, "double": 8}
 function getBuffer(e) {
-  const [_, size, dtype, device, num] = e.label.split("\n");
+  const [_, size, dtype, num, device] = e.label.split("\n");
   return {nbytes:size*DTYPE_SIZE[dtype.split("dtypes.")[1]], dtype, device:device.split(" ")[1], num:parseInt(num.split(" ")[1])};
 }
 
