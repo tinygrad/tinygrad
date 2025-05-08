@@ -211,8 +211,7 @@ class AM_GFX(AM_IP):
     self.adev.regCP_MEC_DOORBELL_RANGE_UPPER.write(0x450)
 
     # Enable MEC
-    self.adev.regCP_MEC_RS64_CNTL.update(mec_invalidate_icache=0, mec_pipe0_reset=0, mec_pipe1_reset=0, mec_pipe2_reset=0, mec_pipe3_reset=0,
-                                         mec_pipe0_active=1, mec_pipe1_active=1, mec_pipe2_active=1, mec_pipe3_active=1, mec_halt=0)
+    self.adev.regCP_MEC_RS64_CNTL.update(mec_invalidate_icache=0, mec_pipe0_reset=0, mec_pipe0_active=1, mec_halt=0)
 
     # NOTE: Wait for MEC to be ready. The kernel does udelay here as well.
     time.sleep(0.05)
@@ -285,6 +284,9 @@ class AM_GFX(AM_IP):
       self.adev.reg(f"regCP_{cntl_reg}_CNTL").update(**{f"{eng_name.lower()}_pipe{pipe}_reset": 1 for pipe in range(pipe_cnt)})
       self.adev.reg(f"regCP_{cntl_reg}_CNTL").update(**{f"{eng_name.lower()}_pipe{pipe}_reset": 0 for pipe in range(pipe_cnt)})
 
+    if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0):
+      _config_helper(eng_name="PFP", cntl_reg="ME", eng_reg="PFP", pipe_cnt=1)
+      _config_helper(eng_name="ME", cntl_reg="ME", eng_reg="ME", pipe_cnt=1)
     _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=1, me=1)
 
 class AM_IH(AM_IP):
