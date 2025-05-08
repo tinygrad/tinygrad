@@ -239,6 +239,9 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(((5*Variable("a", 0, 31)) % 12) % 5, 0, 4, "(((a*5)%12)%5)")
     self.helper_test_variable((Variable("a", 0, 31) % 4) % 12, 0, 3, "(a%4)")
 
+  def test_mod_mod_factor(self):
+    self.helper_test_variable(((Variable("a", 0, 31))%12*3)%4, 0, 3, "((a*3)%4)")
+
   def test_mul_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)*9, 0, 5*10*9, "(a*90)")
 
