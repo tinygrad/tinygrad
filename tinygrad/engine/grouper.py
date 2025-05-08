@@ -272,7 +272,7 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
       if s.base.op not in {Ops.CONST, Ops.DEVICE} and (m:=ctx.metadata.get(s)): metadata[m] = None
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
 
-# walk back the local graph until we reach a buffer/assign parent
+# walk back the local graph until we reach a realized parent
 pm_append = PatternMatcher([(UPat(Ops.KERNEL, name="x"), append_to_kernel),])
 
 # **** swizzler
@@ -397,7 +397,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
     if s.op is Ops.ASSIGN:
       for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
       parents_rep[s] = s.buf_uop
-  ast = k.arg.ast.substitute(parents_rep, name="replace kernel")
+  ast = k.arg.ast.substitute(parents_rep, name="replace realized")
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
