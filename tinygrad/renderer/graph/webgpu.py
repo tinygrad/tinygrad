@@ -22,6 +22,8 @@ empty = (state:="GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST") + " | GPUBuf
 uniform, copyout = "GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST", "GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ"
 buf_usages = [f"const {label} = {usage};" for label, usage in zip(("empty", "state", "uniform", "copyout"), (empty, state, uniform, copyout))]
 
+def indent(strings:list[str], indents:int) -> list[str]: return [indents*"  " + s for s in strings]
+
 class WebGPUJSRenderer(GraphRenderer):
   def render_graph(self) -> str:
 
@@ -42,7 +44,7 @@ class WebGPUJSRenderer(GraphRenderer):
         kernel_bufs[uop.unbind()[0]] = f"inputBuf_{i}"
 
     # render outputs
-    command_encoder = f"const commandEncoder = {js_init_encoder};"
+    command_encoder = [f"const commandEncoder = {js_init_encoder};"]
     for i, uop in enumerate(self.outputs):
       output_bufs.append(f"const output_{i} = {js_alloc(str(uop.base.buffer.nbytes), "empty")};")
       output_read_bufs.append(f"const outputReader_{i} = {js_alloc(str(uop.base.buffer.nbytes), "copyout")};")
@@ -50,13 +52,14 @@ class WebGPUJSRenderer(GraphRenderer):
       ret_bufs.append(f"const ret_{i} = new Uint8Array(output_{i}.size);")
       output_copyouts.append(js_copyout(f"ret_{i}", f"outputReader_{i}"))
 
+    args, ret = ", ".join(arg_names), ", ".join(ret_bufs)
+
     # render setup of buffers used only by WebGPU kernels
     empty_bufs = [f"const {name} = {js_alloc(str(buf.nbytes), "empty")};" for buf, name in self.empty_bufs.items()]
     state_dict_kv_pairs = [f'"{name}": {js_alloc(str(buf.nbytes), "state")}' for buf, name in self.state_bufs.items()]
-    state_dict = f"const stateDict = {{ {",\n".join(state_dict_kv_pairs)} }};"
-    load_state_dict = f"await safeLoadStateDict(stateDict, safeTensorPath);"
+    state_dict = ["const stateDict = {", indent(state_dict_kv_pairs, 1), "};"]
     # representing Infinity with a runtime buffer is the most correct way known, see https://github.com/tinygrad/tinygrad/pull/10179
-    infinity_buf = f'const infinityBuf = {js_alloc("4", "uniform")};'
+    declare_infinity = f'const infinityBuf = {js_alloc("4", "uniform")};'
     write_infinity = f'{js_copyin(f"infinityBuf", f"new Float32Array([Infinity])")}'
 
     # render WebGPU compute
@@ -80,16 +83,22 @@ class WebGPUJSRenderer(GraphRenderer):
       # deliberately display p.function_name in every addComputePass for easier debugging/understanding
       compute_passes.append(f'addComputePass(pipelines[{i}]["{p.function_name}"], [{buf_names}], [{global_size}], commandEncoder, layouts[{i}]);')
     
-    layouts = f'const layouts = [{", ".join(layouts)}];'
-    kernels = ["const kernels = {"] + [f'  "{k}": {v}' for k,v in kernels.items()] + ["};\n"]
+    layouts = [f'const layouts = [{", ".join(layouts)}];']
+    kernels = ["const kernels = {"] + indent([f'"{k}": {v}' for k,v in kernels.items()], 1) + ["};\n"]
     make_pipelines = [f'const kernelNameSequence = [{", ".join(kernel_name_sequence)}];',
       f'let pipelines = await Promise.all(kernelNameSequence.map((name, i) => {js_create_pipeline("layouts[i]", "kernels[name]")}));',
       'pipelines = pipelines.map((pipeline, i) => { kernelNameSequence[i] : pipeline });']
+    trigger_gpu = ["const gpuCommands = commandEncoder.finish();", "device.queue.submit([gpuCommands]);"]
 
-    prg: list[str] = js_init_device + safe_load_state_dict.split("\n") + buf_usages
-    prg.append("const setupNet = async (safetensorPath) => {")
-    # TODO: complete rendering
-
+    prg: list[str] = js_init_device + safe_load_state_dict.split("\n") + buf_usages + kernels
+    prg += ["const createGraph = async () => {"]
+    prg += indent(input_bufs + empty_bufs + state_dict + output_bufs + output_read_bufs + ret_bufs + [declare_infinity, write_infinity], 1)
+    prg += indent(add_compute_pass + layouts + kernels + make_pipelines, 1)
+    prg += indent([f"const run = async ({args}) {{"], 1)
+    prg += indent(command_encoder + input_copyins + compute_passes + output_copies + trigger_gpu + output_copyouts + [f"return {ret}"], 2)
+    prg += indent(["};", "return { stateDict, run };"], 1)
+    prg += ["};"]
+    prg += ["export { createGraph, safeLoadStateDict, device };"]
     return "\n".join(prg)
 
 def export_webgpu(fxn:Callable, args:Sequence) -> tuple[str, dict[str, Tensor]]:
