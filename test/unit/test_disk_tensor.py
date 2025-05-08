@@ -78,7 +78,7 @@ class TestRawDiskBuffer(unittest.TestCase):
 
     with self.assertRaises(RuntimeError):
       # should fail because backprop through bitcast is undefined
-      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True, device=f"DISK:{tmp}").bitcast(dtypes.float16)
+      Tensor.empty((4,), dtype=dtypes.float32, requires_grad=True, device=f"DISK:{tmp}").bitcast(dtypes.float16)
 
     pathlib.Path(tmp).unlink()
 

@@ -2910,7 +2910,7 @@ class TestOps(unittest.TestCase):
         lambda x,y: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.int32), reduction=r), forward_only=True)
     self.helper_test_exception([(32,10), (32)],
       lambda x,y: torch.nn.functional.nll_loss(x, torch.clip(y,0).type(torch.long), reduction="typo"),
-      lambda x,y: x.nll_loss(y.clip(0).cast(dtypes.int32), reduction="typo"), expected=ValueError)
+      lambda x,y: x.nll_loss(y.clip(0).cast(dtypes.int32), reduction="typo"), expected=ValueError, forward_only=True)
 
   def test_nll_loss_weight(self):
     for r in ("mean", "sum", "none"):
