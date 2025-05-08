@@ -150,7 +150,7 @@ class Ops(FastEnum):
 
   # device
   DEVICE = auto()
-  MULTI = auto(); SELECT = auto() # noqa: E702
+  MULTI = auto()
 
   # CUSTOMI is inline
   CUSTOM = auto(); CUSTOMI = auto() # noqa: E702
@@ -535,8 +535,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
-    if self.op is Ops.MULTI: return self.src[0].device
-    if self.op is Ops.SELECT: return self.src[1].device
     if self.op in {Ops.COPY, Ops.BUFFER}:
       if len(self.src) > 2: return tuple(cast(str, x.device) for x in self.src[1:])
       return self.src[1].device
