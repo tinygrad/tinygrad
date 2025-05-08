@@ -246,6 +246,8 @@ def create_kernel(ctx:KernelContext, x:UOp, b:UOp):
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return UOp(Ops.ASSIGN, x.dtype, (buffer, kernel)).reshape(x.shape)
 
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
+
 insert_kernels = merge_views+PatternMatcher([
   # always give assign/contiguous a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
@@ -256,11 +258,9 @@ insert_kernels = merge_views+PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=new_src)
     if (new_src:=tuple(dedup(s.base for s in x.src if s.op not in {Ops.CONST, Ops.BIND}))) != x.src else None),
   # otherwise check the context if we're realizing this UOp
-  (UPat(GroupOp.All-{Ops.BUFFER}, name="x"),
+  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"),
    lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype)) if x in ctx.realizes else None),
 ])
-
-DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
 
 def append_to_kernel(ctx:KernelContext, x:UOp):
   new_srcs: list[UOp] = []
