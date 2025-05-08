@@ -131,10 +131,10 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
 
   svars, factors, quotients, remainders, gcd, div, const, something_changed = [], [], [], [], c, 1, 0, False
   for u in split_uop(x, Ops.ADD):
-    if u.op is Ops.MOD and which is Ops.MOD and u.src[1].op is Ops.CONST and u.src[1].arg%c == 0:
-      u = u.src[0]
-      something_changed = True
     v: UOp = u.divides(f:=u.const_factor())
+    if v.op is Ops.MOD and which is Ops.MOD and v.src[1].op is Ops.CONST and v.src[1].arg%c == 0:
+      v = v.src[0]
+      something_changed = True
     q, r = divmod(f, c)
     if r==0 or ((which is Ops.MOD or split_rem or u.op is Ops.CONST) and r!=f): something_changed = True
     if u.op is Ops.CONST: const += f
