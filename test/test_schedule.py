@@ -559,21 +559,17 @@ class TestSchedule(unittest.TestCase):
     check_schedule(x, 3)
 
   def test_resnet_block(self):
-    old_training = Tensor.training
-    Tensor.training = False
-
-    in_planes, planes = 64, 64
-    conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
-    bn1 = nn.BatchNorm2d(planes)
-    conv2 = nn.Conv2d(planes, planes, kernel_size=3, padding=1, stride=1, bias=False)
-    bn2 = nn.BatchNorm2d(planes)
-
-    x = Tensor.empty(1, 64, 32, 32)
-    out = bn1(conv1(x)).relu()
-    out = bn2(conv2(out))
-    out = (out + x).relu()
-    check_schedule(out, 2, [conv1.weight, conv2.weight])
-    Tensor.training = old_training
+    with Tensor.train(False):
+      in_planes, planes = 64, 64
+      conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
+      bn1 = nn.BatchNorm2d(planes)
+      conv2 = nn.Conv2d(planes, planes, kernel_size=3, padding=1, stride=1, bias=False)
+      bn2 = nn.BatchNorm2d(planes)
+      x = Tensor.empty(1, 64, 32, 32)
+      out = bn1(conv1(x)).relu()
+      out = bn2(conv2(out))
+      out = (out + x).relu()
+      run_schedule(check_schedule(out, 2, [conv1.weight, conv2.weight]))
 
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
