@@ -402,7 +402,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
     if s.op is Ops.ASSIGN:
       if s.src[1].op is Ops.KERNEL:
         for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
-      elif s.src[1].op is Ops.COPY: parents_rep[s.src[1].arg] = s.src[1].src[0]
+      elif s.src[1].op is Ops.COPY: parents_rep[s.src[1].arg] = s.src[1].src[0].view(unwrap(s.src[1].arg.st))
       parents_rep[s] = s.buf_uop
   ast = k.arg.ast.substitute(parents_rep)
   # push views to edges

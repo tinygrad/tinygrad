@@ -67,11 +67,11 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       excluded.update(u.src)
   for u in toposort:
     if u in excluded: continue
-    argst = str(u.arg)
+    # ugh, the str is large from the COPY in the schedule, because the u.arg is the old UOP needed to replace in kernels
+    argst = str(u.arg) if u.op is not Ops.COPY or not isinstance(u.arg, UOp) else "<schedule>"
     if u.op is Ops.VIEW:
       argst = ("\n".join([f"{shape_to_str(v.shape)} / {shape_to_str(v.strides)}"+(f"\nMASK {v.mask}" if v.mask is not None else "")+
                           ("" if v.offset == 0 else f" / {srender(v.offset)}") for v in unwrap(u.st).views]))
-    if u.op is Ops.COPY and isinstance(u.arg, UOp): argst = "<schedule>"
     label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src):
