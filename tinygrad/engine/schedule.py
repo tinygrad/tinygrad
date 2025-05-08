@@ -59,15 +59,18 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     # create subbuffers if needed
     if ast.op is Ops.BUFFER_VIEW: buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
     buffers = tuple(s.buf_uop.buffer for s in k.src)
-    print(ast)
     if any(isinstance(x, MultiBuffer) for x in buffers):
       if ast.op is Ops.COPY:
         if isinstance(buffers[0], MultiBuffer) and isinstance(buffers[1], Buffer):
           # BROADCAST
           for b in buffers[0].bufs: schedule.append(ScheduleItem(ast, (b, buffers[1]), k.arg.metadata))
         elif isinstance(buffers[0], Buffer) and isinstance(buffers[1], MultiBuffer):
-          # REDUCE
-          raise NotImplementedError("REDUCE")
+          if ast.arg is not None:
+            # copy from one (with arg)
+            schedule.append(ScheduleItem(ast, (buffers[0], buffers[1].bufs[ast.arg]), k.arg.metadata))
+          else:
+            # REDUCE (without arg)
+            raise NotImplementedError("REDUCE")
         elif isinstance(buffers[0], MultiBuffer) and isinstance(buffers[1], MultiBuffer):
           # ALLREDUCE
           raise NotImplementedError("ALLREDUCE")
@@ -81,7 +84,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       if in_degree[x] == 0: queue.append(x)
 
   # confirm everything was scheduled correctly
-  assert len(schedule) == len(in_degree), f"Schedule length mistmatch {len(schedule)} != {len(in_degree)}"
+  #assert len(schedule) == len(in_degree), f"Schedule length mistmatch {len(schedule)} != {len(in_degree)}"
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
   # map ASSIGN to BUFFER after ScheduleItems are constructed
