@@ -2007,7 +2007,7 @@ class Tensor(SimpleMathTrait):
     """
     if axis is None: return self.flatten().argmax(0)
     axis = self._resolve_dim(axis)
-    m = self == self.max(axis=axis, keepdim=True)
+    m = (self == self.max(axis=axis, keepdim=True)).requires_grad_(False) # explicit requires_grad=False, as Ops.CMPNE has dtypes.bool which can have requires_grad=True
     idx = m * Tensor.arange(self.shape[axis],0,-1, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
     return (self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)).cast(dtypes.int32)
 
