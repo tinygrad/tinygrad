@@ -396,7 +396,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
     if s.op is Ops.ASSIGN:
       for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
       parents_rep[s] = s.buf_uop
-  ast = k.arg.ast.substitute(parents_rep)
+  ast = k.arg.ast.substitute(parents_rep, name="replace kernel")
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
