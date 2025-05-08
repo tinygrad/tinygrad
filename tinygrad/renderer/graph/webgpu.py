@@ -26,7 +26,6 @@ def indent(strings:list[str], indents:int) -> list[str]: return [indents*"  " + 
 
 class WebGPUJSRenderer(GraphRenderer):
   def render_graph(self) -> str:
-
     # render I/O between host/WebGPU
     kernel_bufs = merge_dicts(self.empty_bufs, self.state_bufs)
     arg_names, input_bufs, input_copyins, output_bufs, output_read_bufs, output_copies, ret_bufs, output_copyouts = [], [], [], [], [], [], [], []
@@ -51,7 +50,6 @@ class WebGPUJSRenderer(GraphRenderer):
       output_copies.append(js_copy("commandEncoder", f"output_{i}", f"outputReader_{i}", f"output_{i}.size"))
       ret_bufs.append(f"const ret_{i} = new Uint8Array(output_{i}.size);")
       output_copyouts.append(js_copyout(f"ret_{i}", f"outputReader_{i}"))
-
     args, ret = ", ".join(arg_names), ", ".join(ret_bufs)
 
     # render setup of buffers used only by WebGPU kernels
@@ -71,7 +69,6 @@ class WebGPUJSRenderer(GraphRenderer):
 
     layouts, kernels, kernel_name_sequence, compute_passes = [], {}, [], []
     for i, (ei, p) in enumerate((ei, ei.prg.p) for ei in self.eis if isinstance(ei.prg, CompiledRunner)):
-
       # first buf in every kernel is infinity_buf, a uniform buffer
       layouts.append(js_create_layout(["uniform"] + ["storage"] * len(ei.bufs) + ["uniform"] * len(p.vars)))
       kernels[p.function_name] = p.src.replace(p.function_name, "main")
@@ -79,7 +76,6 @@ class WebGPUJSRenderer(GraphRenderer):
       kernel_name_sequence.append(f'"{p.function_name}"') 
       buf_names = ", ".join(kernel_bufs[arg] for arg in ei.bufs + p.vars)
       global_size = ', '.join(idx.simplify().render() if isinstance(idx, Variable) else str(idx) for idx in p.global_size)
-
       # deliberately display p.function_name in every addComputePass for easier debugging/understanding
       compute_passes.append(f'addComputePass(pipelines[{i}]["{p.function_name}"], [{buf_names}], [{global_size}], commandEncoder, layouts[{i}]);')
     
@@ -95,7 +91,7 @@ class WebGPUJSRenderer(GraphRenderer):
     prg += indent(input_bufs + empty_bufs + state_dict + output_bufs + output_read_bufs + ret_bufs + [declare_infinity, write_infinity], 1)
     prg += indent(add_compute_pass + layouts + kernels + make_pipelines, 1)
     prg += indent([f"const run = async ({args}) {{"], 1)
-    prg += indent(command_encoder + input_copyins + compute_passes + output_copies + trigger_gpu + output_copyouts + [f"return {ret}"], 2)
+    prg += indent(command_encoder + input_copyins + compute_passes + output_copies + trigger_gpu + output_copyouts + [f"return [{ret}];"], 2)
     prg += indent(["};", "return { stateDict, run };"], 1)
     prg += ["};"]
     prg += ["export { createGraph, safeLoadStateDict, device };"]
