@@ -815,6 +815,7 @@ class USBIface(PCIIface):
 
     self._setup_adev(f"usb:{dev_id}", USBMMIOInterface(self.usb, *self.bars[0], fmt='B'), USBMMIOInterface(self.usb, *self.bars[2], fmt='Q'),
       USBMMIOInterface(self.usb, *self.bars[5], fmt='I'))
+    self.usb._pci_cacheable += [self.bars[2]] # doorbell region is cacheable
 
     # special regions
     self.copy_bufs = [self._new_dma_region(ctrl_addr=0xf000, sys_addr=0x200000, size=0x1000)]

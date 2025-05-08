@@ -7,6 +7,7 @@ from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import dedup, flatten, prod
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
 from tinygrad.ops import UOp, Ops
 from tinygrad.renderer import ProgramSpec
@@ -67,6 +68,14 @@ class TestCStyleFailures(unittest.TestCase):
     # CPU doesn't use the max function
     ret = _setup_and_test_alu(Ops.MAX, 1, UOp.const(dtypes.int, dtypes.min(dtypes.int)+1))
     self.assertEqual(ret[0], 1)
+
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "tests for wgsl renderer")
+class TestWGSLFailures(unittest.TestCase):
+  def test_multiply_infinity(self):
+    # multiplying a positive constant by infinity should return infinity
+    # WGSL pipelines do not handle this reliably, some of which return zero, unless infinity always comes from a read on a dynamic buffer
+    ret = _setup_and_test_alu(Ops.MUL, 5.0, UOp.const(dtypes.float32, float("inf")))
+    self.assertEqual(ret[0], float("inf"))
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "tests for ptx renderer")
 class TestPTXFailures(unittest.TestCase):
