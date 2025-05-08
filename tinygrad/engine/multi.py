@@ -151,7 +151,7 @@ def copy_multi(multi:UOp, device:UOp):
   bsz, dcount = multi.shape[multi.axis]//len(multi.device), len(multi.device)
   dnum = UOp.variable("_device_num", 0, len(multi.device)-1)
   padded = multi.src[0].pad(tuple((0,0) if a != multi.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(multi.shape))))
-  return functools.reduce(lambda x,y: x+y, [padded.contiguous().copy_to_device(device.arg, arg=i) for i in range(dcount)])
+  return UOp(Ops.ALLREDUCE, padded.dtype, (padded, UOp(Ops.DEVICE, arg=device.arg)), Ops.ADD)
 
 def assign_multi(dest:UOp, src:UOp):
   assert dest.axis == src.axis, f"axis must match in assign {dest.axis} != {src.axis}"
