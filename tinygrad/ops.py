@@ -490,9 +490,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
     return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
-  def copy_to_device(self, device:str|tuple[str, ...], arg=None):
-    if isinstance(device, tuple): return UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in device), arg)
-    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)), arg)
+  def copy_to_device(self, device:str|tuple[str, ...]|UOp, arg=None):
+    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), arg)
   def clone(self) -> UOp: return self.copy_to_device(self.device)
   @property
   def metadata(self) -> tuple[Metadata, ...]|Metadata|None: return self.arg.metadata if self.op is Ops.KERNEL else all_metadata.get(self, None)
