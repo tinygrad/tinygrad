@@ -2,8 +2,7 @@
 
 import functools, itertools, operator
 from tinygrad.helpers import AMX, dedup, flatten, all_same, prod
-from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, graph_rewrite
-from tinygrad.codegen.symbolic import sym
+from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, GroupOp
 
 def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> int:
   idx, mul = 0, 1
@@ -137,16 +136,3 @@ pm_delete_ignore = PatternMatcher([
   # IGNORE on SELF is nothing
   (UPat(Ops.IGNORE, src=(UPat(name="x"), UPat())), lambda x: x),
 ])
-
-def expand_rewrite(sink:UOp) -> UOp:
-  # initial symbolic + migrate indexing (remove this)
-  sink = graph_rewrite(sink, sym+migrate_indexing)
-
-  # store IGNORE
-  sink = graph_rewrite(sink, pm_store_ignore, name="store_ignore")
-
-  # move IGNORE
-  sink = graph_rewrite(sink, pm_move_ignore, name="move_ignore")
-
-  # expand + remove surviving ignores
-  return graph_rewrite(sink, pm_delete_ignore+sym+expander)

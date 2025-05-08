@@ -1,12 +1,12 @@
-from typing import Optional, Any, Callable, cast
+from typing import Any, Callable, cast
 import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice
+from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice, DType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve, graph_rewrite, GroupOp, identity_element
-from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat, gep_pushing
-from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE, partition
+from tinygrad.codegen.symbolic import split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
+from tinygrad.helpers import getenv, flatten, AMX, prod, partition
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
 
@@ -180,8 +180,7 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
     pat += [(UPat.var("x", dtypes.sints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None)]
     if not getenv("DISABLE_FAST_IDIV"):
       pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
-      # TODO: This breaks validate_index because of the way _min_max is calucalted on uops
-      # pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("d"), lambda x, d: x - d*f if (f:=fast_idiv(x, d.arg)) is not None else None)]
+      pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("d"), lambda ctx, x, d: x - d*f if (f:=fast_idiv(ctx, x, d.arg)) is not None else None)]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
@@ -315,15 +314,17 @@ pm_render = PatternMatcher([
 class ReduceContext:
   acc_num: int = 0
 
+def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
+  # if this has a horizontal reduction component, do that first
+  if inp.dtype != out_dtype:
+    # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
+    horizontal_amount = inp.dtype.count//out_dtype.count
+    return [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)]
+  return [inp]
+
 def reduce_to_acc(ctx:ReduceContext, red:UOp):
   inp, reduce_range = red.src[0], red.src[1:]
-  # if this has a horizontal reduction component, do that first
-  if inp.dtype != red.dtype:
-    # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
-    horizontal_amount = inp.dtype.count//red.dtype.count
-    lst = [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)]
-  else:
-    lst = [inp]
+  lst = horizontal_reduce(inp, red.dtype)
   assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
   # if we have a range
   if len(reduce_range) != 0:
@@ -335,10 +336,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
 
 def no_vectorized_reduce(inp:UOp, red:UOp):
   if inp.dtype != red.dtype:
-    # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
-    horizontal_amount = inp.dtype.count//red.dtype.count
-    lst = [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)]
-    red = red.replace(src=(functools.reduce(lambda x,y: x.alu(red.arg, y), lst),)+red.src[1:])
+    red = red.replace(src=(functools.reduce(lambda x,y: x.alu(red.arg, y), horizontal_reduce(inp, red.dtype)),)+red.src[1:])
     if red.dtype.vcount == 1: return red
   # no_vectorize_alu ignoring ranges
   if red.dtype.vcount == 1: return None
@@ -367,34 +365,34 @@ pm_reduce_collapse = PatternMatcher([
   # lift x+y out of reduce on ne
   ((UPat.var("x")+UPat.var("y")) != UPat.var("c"), lambda x,y,c: (x != (c-y)) if no_range(y) and no_range(c) else None),
   # fold the range
-  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat(Ops.CONST, arg=0), UPat.cvar("val")).reduce(arg=Ops.ADD, allow_any_len=True),
+  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(0, UPat.cvar("val")).reduce(arg=Ops.ADD, allow_any_len=True),
    lambda r,cut,val: (r.src[0]-cut).maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
   ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat.cvar("val"), 0).reduce(arg=Ops.ADD, allow_any_len=True),
    lambda r,cut,val: cut.maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
-  # devectorize REDUCE
-  (UPat(Ops.VECTORIZE, name="inp").reduce(name="red", allow_any_len=True), no_vectorized_reduce),
   # REDUCE on ADD
   ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
    lambda x,y,r: x.reduce(*r.src[1:], arg=Ops.ADD) + y.reduce(*r.src[1:],arg=Ops.ADD)),
   # MUL casted bool
-  ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast()), lambda x,gate: gate.where(x, 0)),
+  ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast().or_broadcasted(name="b")),
+   lambda x,gate,b=None: gate.broadcast(x.dtype.count).where(x, 0) if b is not None else gate.where(x, 0)),
   # WHERE on LOAD (works on max too)
   (UPat.var("gate").where(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load(), 0).reduce(arg=Ops.ADD, allow_any_len=True),
    lambda buf,idx,gate: buf.index(idx, gate).load()),
-  (UPat.var("gate").where(UPat(Ops.CONST, arg=0),
-                          UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()).reduce(arg=Ops.ADD, allow_any_len=True),
+  (UPat.var("gate").where(0, UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()).reduce(arg=Ops.ADD, allow_any_len=True),
    lambda buf,idx,gate: buf.index(idx, gate.logical_not()).load()),
   # INDEX on RANGE / gated RANGE
   (UPat.var("buf").index(UPat.var("expr"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted())),
    lambda buf,r,idx,expr: buf.index(expr.substitute({r:idx.cast(r.dtype)}), (idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0]))),
-  # index/load. TODO: this is more aggressive than needed
-  (UPat((Ops.INDEX, Ops.LOAD), name="alu"), no_vectorized_alu),
   # AND on WHERE
   ((UPat.any(UPat(Ops.DEFINE_VAR, name="x"), UPat(Ops.DEFINE_VAR).gep(name="x")) & UPat.var("y")) \
    .where(UPat.cvar("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
     lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
   # remove REDUCEs that no longer have a RANGE in the src
   (UPat(Ops.REDUCE, name="red"), reduce_rangeless),
+  # devectorize REDUCE
+  (UPat(Ops.VECTORIZE, name="inp").reduce(name="red", allow_any_len=True), no_vectorized_reduce),
+  # index/load/where. TODO: this is more aggressive than needed
+  (UPat((Ops.INDEX, Ops.LOAD, Ops.WHERE), name="alu"), no_vectorized_alu),
 ])+sym
 
 def reduce_collapse(red:UOp):
@@ -406,7 +404,7 @@ def reduce_collapse(red:UOp):
       if s in not_included and s not in replaces and s.op not in {Ops.CONST, Ops.VCONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}:
         replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
-  sink = graph_rewrite(collapse_fxn, pm_reduce_collapse+devectorize, name="reduce_collapse")
+  sink = graph_rewrite(collapse_fxn, pm_reduce_collapse, name="reduce_collapse")
   # TODO: why is REDUCE needed here and just RANGE isn't enough?
   if any(x.op in {Ops.REDUCE, Ops.RANGE} for x in sink.toposort()): return None
   return sink.substitute({v:k for k,v in replaces.items()})
@@ -431,25 +429,3 @@ pm_reduce = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
 ])+sym
-
-# *** uop graph ***
-
-def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
-  assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
-  supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
-  extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
-
-  # remove reduce
-  sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")
-
-  # devectorize is optional
-  if DEVECTORIZE >= 2: sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)
-  elif DEVECTORIZE: sink = graph_rewrite(sink, sym+devectorize+load_store_folding+correct_load_store+load_store_indexing, ctx=opts)
-  else: sink = graph_rewrite(sink, sym+load_store_folding+correct_load_store+load_store_indexing, ctx=opts)
-
-  # optional pre matcher
-  if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)
-
-  # final rules for the renderer (without sym)
-  sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher, ctx=opts)
-  return sink

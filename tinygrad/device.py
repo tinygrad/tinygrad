@@ -112,7 +112,9 @@ class Buffer:
   def base(self) -> Buffer: return self._base if self._base is not None else self
   @property
   def lb_refcount(self): return self.base._lb_refcount
-  def ref(self, cnt): self.base._lb_refcount += cnt
+  def ref(self, cnt):
+    self.base._lb_refcount += cnt
+    return self
   def is_allocated(self) -> bool: return hasattr(self, '_buf')
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:

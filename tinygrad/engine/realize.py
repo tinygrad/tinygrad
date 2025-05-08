@@ -38,12 +38,12 @@ class Runner:
     raise NotImplementedError("override this")
 
 class CompiledRunner(Runner):
-  def __init__(self, p:ProgramSpec, precompiled:Optional[bytes]=None):
+  def __init__(self, p:ProgramSpec, precompiled:Optional[bytes]=None, prg=None):
     if DEBUG >= 4: print(p.src)
     self.p:ProgramSpec = p
     self.lib:bytes = precompiled if precompiled is not None else Device[p.device].compiler.compile_cached(p.src)
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
-    self._prg = Device[p.device].runtime(p.function_name, self.lib)
+    self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)

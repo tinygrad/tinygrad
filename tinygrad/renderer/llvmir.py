@@ -64,7 +64,7 @@ base_rewrite = PatternMatcher([
   # memory load/store
   (UPat(Ops.INDEX, name="x"), lambda ctx,x:
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
-  (UPat(Ops.LOAD, src=(UPat.or_casted(name='idx', self=UPat(src=(UPat(), UPat(), UPat.var('mask')))), UPat.var('alt')), name="x"),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat.var("mask"))).or_casted("idx"), UPat.var("alt")), name="x"),
    lambda ctx,x,idx,alt,mask:
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
    f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
@@ -83,9 +83,6 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join([(f"  {ctx[x]}_{i}" if i+1 != len(x.src) else f"  {ctx[x]}")+
                                                             f" = insertelement {ldt(x.dtype)} "+(f"{ctx[x]}_{i-1}" if i != 0 else "poison")+
                                                             f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
-  (UPat(Ops.CAST, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}" if isinstance(x.dtype, PtrDType) else None),
-
   # unary/binary/ternary ops
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
@@ -98,7 +95,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
    f"  br label %loop_entry_{x.arg}\nloop_entry_{x.arg}:\n"
    f"  br label %loop_body_{x.arg}\nloop_body_{x.arg}:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype)} [0, %loop_entry_{x.arg}], [{ctx[x]}phi, %loop_latch_{x.arg}]"),
+   f"  {ctx[x]} = phi {ldt(x.dtype)} [ 0, %loop_entry_{x.arg} ], [ {ctx[x]}phi, %loop_latch_{x.arg} ]"),
   (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x:
    f"  br label %loop_latch_{x.src[0].arg}\nloop_latch_{x.src[0].arg}:\n"
    f"  {ctx[x.src[0]]}phi = add i32 {ctx[x.src[0]]}, 1\n  {ctx[x]} = icmp ult i32 {ctx[x.src[0]]}phi, {ctx[x.src[0].src[0]]}\n"
@@ -141,11 +138,17 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
   ])
 
-  def render(self, uops: list[UOp]) -> str:
+  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer()))
+  def _render_footer(self) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
+  def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
+    # NOTE: MallocAllocator promises 0x20 alignment
+    sargs = ", ".join([f"{ldt(dt)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
+    sprefix = "".join([f" {x}" for x in (prefix or []) + [self.abi] if x is not None])
+    return "\n".join([f"define{sprefix} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
+  def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
     r: dict[UOp, str] = {}
-    args: list[str] = []
+    args: list[tuple[str, DType]] = []
     kernel: list[str] = []
-    end_lines: dict[str, None] = {}
     vc = -1
 
     local_args: list[str] = []
@@ -170,8 +173,7 @@ class LLVMRenderer(Renderer):
         continue
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
-        # NOTE: MallocAllocator promises 0x20 alignment
-        args.append(f"{ldt(u.dtype)}{' noalias align 32' if isinstance(u.dtype, PtrDType) else ''} {r[u]}")
+        args.append((r[u], u.dtype))
       elif u.op == Ops.DEFINE_LOCAL:
         r[u] = f"%local_{u.arg}"
         assert isinstance(u.dtype, PtrDType)
@@ -182,7 +184,8 @@ class LLVMRenderer(Renderer):
       elif u.op is Ops.ASSIGN: pass  # assign is already handled by the first pass
       elif u.op is Ops.DEFINE_ACC: r[u] = r[u.src[0]]  # a define acc can be used and never be assigned to
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
-      elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype): r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop
+      elif u.op is Ops.CAST and (ldt(u.dtype) == ldt(u.src[0].dtype) or isinstance(u.dtype, PtrDType)):
+        r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
       else:
         # if it's an assign target, it's already preallocated
         if u not in r:
@@ -199,19 +202,9 @@ class LLVMRenderer(Renderer):
           for x in acc_to_assign:
             if u in x.src:  # if this range is relevant for this acc
               vc += 1
-              kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)}" f"[{r[x]}, %loop_entry_{u.arg}], [{r[acc_to_assign[x]]}, %loop_latch_{u.arg}]")
+              kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)} [ {r[x]}, %loop_entry_{u.arg} ], [ {r[acc_to_assign[x]]}, %loop_latch_{u.arg} ]")
               r[x] = f"%acc{vc}"
-
-    # output the function. chr(10) is '\n' (python < 3.12 doesn't support backslashes in f-strings)
-    prg = f'''\
-define{(' '+self.abi) if self.abi is not None else ''} void @{name}({','.join(args)}) #0 {{
-{chr(10).join(kernel)}
-  ret void
-}}
-{chr(10).join(end_lines.keys())}
-attributes #0 = {{ nounwind "no-builtins" "no-trapping-math"="true" }}
-'''
-    return prg if len(local_args) == 0 else "\n".join(local_args)+f"\n{prg}"
+    return tuple(local_args), self._render_fn(name, args, kernel, prefix)
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
