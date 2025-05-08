@@ -46,8 +46,24 @@ def alu_multi(root:UOp):
   msrcs = root.src
   assert all(x.op is Ops.MULTI for x in msrcs), f"all buffers must be MultiLazyBuffer {[x.op for x in msrcs]}"
   assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"
-
   axis = root.axis
+
+  srcs = []
+  for mlb in msrcs:
+    if mlb.axis == axis:
+      srcs.append(mlb.src[0])
+    elif mlb.axis is None:
+      # TODO: share code with shard
+      dcount = len(root.device)
+      dnum = UOp.variable("_device_num", 0, dcount-1)
+      sz = root.shape[axis] // dcount
+      srcs.append(mlb.src[0].shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(root.shape))))
+    else:
+      raise NotImplementedError
+
+  return UOp.multi(srcs[0].alu(root.op, *srcs[1:]), axis=axis)
+
+
   bounds = dedup([x.bounds for x in root.src if x.axis == axis])[-1] if axis is not None else None
   srcs:list[list[UOp]] = []
   not_all_real = not all(all(mlb.real) for mlb in msrcs)
@@ -135,7 +151,7 @@ def copy_multi(multi:UOp, device:UOp):
   bsz, dcount = multi.shape[multi.axis]//len(multi.device), len(multi.device)
   dnum = UOp.variable("_device_num", 0, len(multi.device)-1)
   padded = multi.src[0].pad(tuple((0,0) if a != multi.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(multi.shape))))
-  return functools.reduce(lambda x,y: x+y, [padded.copy_to_device(device.arg, arg=i) for i in range(dcount)])
+  return functools.reduce(lambda x,y: x+y, [padded.contiguous().copy_to_device(device.arg, arg=i) for i in range(dcount)])
 
 def assign_multi(dest:UOp, src:UOp):
   assert dest.axis == src.axis, f"axis must match in assign {dest.axis} != {src.axis}"

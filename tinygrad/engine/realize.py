@@ -126,7 +126,10 @@ class ExecItem:
       dnum = [x for x in self.prg.p.vars if x.arg[0] == "_device_num"]
       if len(dnum):
         var_vals = var_vals.copy()
-        var_vals[dnum[0]] = int(self.bufs[0].device.split(":")[1])
+        #print(self.bufs[0].device)
+        # TODO: this is broken...you don't have access to all the devices here
+        var_vals[dnum[0]] = int(self.bufs[0].device.split(":")[1])-1
+        #print(var_vals)
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
     et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
     if do_update_stats:
