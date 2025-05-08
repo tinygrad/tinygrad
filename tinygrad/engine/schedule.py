@@ -1,6 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import deque, defaultdict
-from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite
+from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import Metadata, DEBUG, unwrap, merge_dicts
 
@@ -11,6 +11,7 @@ class ScheduleItem:
   ast: UOp
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...] = ()
+  fixedvars: dict[Variable, int] = field(default_factory=dict)
 
 # **** unbind Variables
 
@@ -57,28 +58,30 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=local_var_vals, name="unbind vars")
     var_vals = merge_dicts([var_vals, *local_var_vals])
     # create subbuffers if needed
-    buffers = tuple(s.buf_uop.buffer for s in k.src)
     if ast.op is Ops.BUFFER_VIEW: buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-    if any(isinstance(x, MultiBuffer) for x in buffers):
+    ubufs = tuple(s.buf_uop.buffer for s in k.src)
+    if any(isinstance(x, MultiBuffer) for x in ubufs):
       if ast.op is Ops.COPY:
-        if isinstance(buffers[0], MultiBuffer) and isinstance(buffers[1], Buffer):
+        if isinstance(ubufs[0], MultiBuffer) and isinstance(ubufs[1], Buffer):
           # BROADCAST
-          for b in buffers[0].bufs: schedule.append(ScheduleItem(ast, (b, buffers[1]), k.arg.metadata))
-        elif isinstance(buffers[0], Buffer) and isinstance(buffers[1], MultiBuffer):
+          for b in ubufs[0].bufs: schedule.append(ScheduleItem(ast, (b, ubufs[1]), k.arg.metadata))
+        elif isinstance(ubufs[0], Buffer) and isinstance(ubufs[1], MultiBuffer):
           if ast.arg is not None:
             # copy from one (with arg)
-            schedule.append(ScheduleItem(ast, (buffers[0], buffers[1].bufs[ast.arg]), k.arg.metadata))
+            schedule.append(ScheduleItem(ast, (ubufs[0], ubufs[1].bufs[ast.arg]), k.arg.metadata))
           else:
             # REDUCE (without arg)
             raise NotImplementedError("REDUCE")
-        elif isinstance(buffers[0], MultiBuffer) and isinstance(buffers[1], MultiBuffer):
+        elif isinstance(ubufs[0], MultiBuffer) and isinstance(ubufs[1], MultiBuffer):
           # ALLREDUCE
           raise NotImplementedError("ALLREDUCE")
       else:
-        assert all(isinstance(x, MultiBuffer) for x in buffers), "kernel must all be multibuffer"
-        for bufs in zip(*[x.bufs for x in buffers]): schedule.append(ScheduleItem(ast, bufs, k.arg.metadata))
+        assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
+        dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
+        for i,bufs in enumerate(zip(*[x.bufs for x in ubufs])):
+          schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0]:i} if len(dnums) else {}))
     else:
-      schedule.append(ScheduleItem(ast, buffers, k.arg.metadata))
+      schedule.append(ScheduleItem(ast, ubufs, k.arg.metadata))
     for x in children[k]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
