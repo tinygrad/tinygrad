@@ -1,11 +1,11 @@
-from tinygrad import Tensor, dtypes
-from tinygrad.ops import Ops, UOp, UPat
-from tinygrad.runtime.ops_webgpu import js_init_device, js_alloc, js_copyin, js_copy, js_copyout, js_create_pipeline
+from tinygrad import Tensor
+from tinygrad.ops import Ops
+from tinygrad.runtime.ops_webgpu import js_init_device, js_init_encoder, js_alloc, js_copyin, js_copy, js_copyout, js_create_layout, \
+  js_create_pipeline, js_create_bind_group, js_begin_compute_pass
 from tinygrad.renderer import ProgramSpec
 from tinygrad.renderer.graph import GraphRenderer
 from tinygrad.engine.realize import CompiledRunner
 from typing import Callable, Sequence
-import math
 
 def declare_kernel(p:ProgramSpec) -> str: return f"const {p.function_name} = `{p.src.replace(p.function_name, 'main')}`;"
 
@@ -24,6 +24,12 @@ empty = (state:="GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST") + " | GPUBuf
 uniform, copyout = "GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST", "GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ"
 buf_usages = [f"const {label} = {usage};" for label, usage in zip(("empty", "state", "uniform", "copyout"), (empty, state, uniform, copyout))]
 
+add_compute_pass = f"""const addComputePass = (commandEncoder, layout, pipeline, buffers, globalDims, infinityBuf) => {{
+  const entries = [...[infinityBuf].concat(buffers).map((buffer, index) => ({{ binding: index, resource: {{ buffer }} }})))];
+  const bindGroup = {js_create_bind_group("layout", "entries")};
+  {"  \n".join(js_begin_compute_pass("commandEncoder", "pipeline", "bindGroup", "globalDims"))}
+}};"""
+
 class WebGPUJSRenderer(GraphRenderer):
   def render_graph(self) -> str:
     prg: list[str] = js_init_device + safe_load_state_dict.split("\n") + buf_usages
@@ -40,10 +46,11 @@ class WebGPUJSRenderer(GraphRenderer):
         input_bufs.append(f"const input_{i} = {js_alloc("4", "uniform")};")
         input_copyins.append(js_copyin(f"input_{i}", f"new Int32Array([{uop.unbind()[0].arg[0]}])"))
 
+    command_encoder = f"const commandEncoder = {js_init_encoder};"
     for i, uop in enumerate(self.outputs):
       output_bufs.append(f"const output_{i} = {js_alloc(str(uop.base.buffer.nbytes), "empty")};")
       output_read_bufs.append(f"const outputReader_{i} = {js_alloc(str(uop.base.buffer.nbytes), "copyout")};")
-      output_copies.append(js_copy(f"output_{i}", f"outputReader_{i}", f"output_{i}.size"))
+      output_copies.append(js_copy("commandEncoder", f"output_{i}", f"outputReader_{i}", f"output_{i}.size"))
       ret_bufs.append(f"const ret_{i} = new Uint8Array(output_{i}.size);")
       output_copyouts.append(js_copyout(f"ret_{i}", f"outputReader_{i}"))
 
@@ -53,18 +60,19 @@ class WebGPUJSRenderer(GraphRenderer):
     state_dict = f"const stateDict = {{ {",\n".join(state_dict_kv_pairs)} }};"
     load_state_dict = f"await safeLoadStateDict(stateDict, safeTensorPath);"
     # representing Infinity with a runtime buffer is the most correct way known, see https://github.com/tinygrad/tinygrad/pull/10179
-    infinity_buf = f'const infinity_buf = {js_alloc("4", "uniform")};'
-    write_infinity = f'{js_copyin(f"infinity_buf", f"new Float32Array([Infinity])")}'
+    infinity_buf = f'const infinityBuf = {js_alloc("4", "uniform")};'
+    write_infinity = f'{js_copyin(f"infinityBuf", f"new Float32Array([Infinity])")}'
 
     # render WebGPU compute
     declare_kernels = list(set(declare_kernel(ei.prg.p) for ei in self.eis if isinstance(ei.prg, CompiledRunner)))
-    invocation_order = f"const kernels = [{", ".join(ei.prg.p.function_name for ei in self.eis if isinstance(ei.prg, CompiledRunner))}];"
+    call_order = f"const kernels = [{", ".join(ei.prg.p.function_name for ei in self.eis if isinstance(ei.prg, CompiledRunner))}];"
+    layouts = f'const layouts = [{", ".join(js_create_layout(["uniform"] + ["storage"]*len(ei.bufs) + ["uniform"]*len(ei.prg.p.vars))
+                                            for ei in self.eis if isinstance(ei.prg, CompiledRunner))}]'
     # group pipelines by kernel name, so developers can see a kernel name on every added compute pass, making debugging easier
-    pipelines = [f'const pending = kernels.reduce((r, k) => ((r[k] = r[k] || []).push({js_create_pipeline("k")})), r), {{}});',
-"const pipelines = Object.fromEntries(await Promise.all(Object.entries(pending).map(async([k,ps]) => [k, await Promise.all(ps)])));"]
-    pos_inf, neg_inf = UPat(Ops.CONST, arg=math.inf, name="x"), UPat(Ops.CONST, arg=-math.inf, name="x")
-    def p_has_inf(p:ProgramSpec): return "true" if any(pos_inf.match(u, {}) or neg_inf.match(u, {}) for u in p.uops) else "false"
-    uses_inf = f'const usesInf = [{", ".join(p_has_inf(ei.prg.p) for ei in self.eis if isinstance(ei.prg, CompiledRunner))}];'
+    pipelines = [f'const pending = kernels.reduce((r, k, i) => ((r[k] = r[k] || []).push({js_create_pipeline("layouts[i]", "k")})), r), {{}});',
+      "const pipelines = Object.fromEntries(await Promise.all(Object.entries(pending).map(async([k,ps]) => [k, await Promise.all(ps)])));"]
+    calls = [f"addComputePass(commandEncoder, ...)"]
+    
 
     # TODO: complete rendering
     return "\n".join(prg)

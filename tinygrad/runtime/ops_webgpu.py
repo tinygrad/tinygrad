@@ -175,8 +175,18 @@ class WebGPUProgram:
       return time
     return None
 
-def js_create_pipeline(code:str) -> str: return f"""await device.createComputePipelineAsync(
-  {{layout: "auto", compute: {{ module: device.createShaderModule({{ code: {code} }}), entryPoint: "main" }}}}\n);"""
+def js_create_layout(buf_types:list[str]) -> str: return f"device.createBindGroupLayout({{entries:" + \
+  f'[{", ".join(f"{{binding: {i}, visibility: GPUShaderStage.COMPUTE, buffer: {{type: {btype}}} }}" for i, btype in enumerate(buf_types))}]}})'
+
+def js_create_pipeline(layout:str, code:str) -> str: return f"""await device.createComputePipelineAsync(
+  {{layout: {layout}, compute: {{ module: device.createShaderModule({{ code: {code} }}), entryPoint: "main" }}}}\n);"""
+
+def js_create_bind_group(layout:str, entries:str) -> str: return f"device.createBindGroup({{ layout: {layout}, entries: {entries} }})"
+
+js_init_encoder = "device.createCommandEncoder()"
+def js_begin_compute_pass(command_encoder:str, pipeline:str, bind_group:str, global_dims:str) -> list[str]:
+  return [f"const passEncoder = {command_encoder}.beginComputePass();", f"passEncoder.setPipeline({pipeline});",
+    f"passEncoder.setBindGroup(0, {bind_group});", f"passEncoder.dispatchWorkgroups(...{global_dims});", "passEncoder.end();"]
 
 class WebGpuAllocator(Allocator):
   def __init__(self, dev:WGPUDevPtr): self.dev = dev
@@ -205,7 +215,7 @@ def js_copyout(dest:str, src:str) -> list[str]:
   return [f'await {src}.mapAsync(GPUMapMode.READ);',
     f'{dest}.set(new {dest}.constructor({src}.getMappedRange()));',
     f'{src}.unmap();']
-def js_copy(dest:str, src:str, size:str) -> str: return f"commandEncoder.copyBufferToBuffer({src}, 0, {dest}, 0, {size});"
+def js_copy(encoder:str, dest:str, src:str, size:str) -> str: return f"{encoder}.copyBufferToBuffer({src}, 0, {dest}, 0, {size});"
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
@@ -246,4 +256,4 @@ js_init_device = ['if (!navigator.gpu) throw new Error("WebGPU not supported.");
   'const device = await adapter.requestDevice({',
 	'  requiredFeatures: adapter.features.has("shader-f16") ? ["shader-f16"] : [], powerPreference: "high-performance",',
   '  requiredLimits: { maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup }',
-  '});']
+  '});\n']
