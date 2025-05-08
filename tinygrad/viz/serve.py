@@ -54,6 +54,7 @@ class GraphRewriteDetails(TypedDict):
   upat: tuple[tuple[str, int], str]|None # [loc, source_code] of the matched UPat
 
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
+def mask_to_str(s:tuple[tuple[sint, sint], ...]): return "(" + ','.join(shape_to_str(x) for x in s) + ")"
 
 def uop_to_json(x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
@@ -69,8 +70,8 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
     if u in excluded: continue
     argst = str(u.arg)
     if u.op is Ops.VIEW:
-      argst = ("\n".join([f"{shape_to_str(v.shape)} / {shape_to_str(v.strides)}"+(f"\nMASK {v.mask}" if v.mask is not None else "")+
-                          ("" if v.offset == 0 else f" / {srender(v.offset)}") for v in unwrap(u.st).views]))
+      argst = ("\n".join([f"{shape_to_str(v.shape)} / {shape_to_str(v.strides)}"+("" if v.offset == 0 else f" / {srender(v.offset)}")+
+                          (f"\nMASK {mask_to_str(v.mask)}" if v.mask is not None else "") for v in unwrap(u.st).views]))
     label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src):
