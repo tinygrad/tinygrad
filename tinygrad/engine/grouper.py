@@ -512,11 +512,11 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map, name="create_ast")
 
   # display the final graph
+  sched_sink = tensor_map[big_sink]
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
 
   # verify Kernels match the spec
-  sched_sink = tensor_map[big_sink]
   type_verify(list(sched_sink.toposort()), sched_spec)
 
   # map tensors to buffer/assign/const, optionally apply a VIEW on top
