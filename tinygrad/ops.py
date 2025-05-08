@@ -612,8 +612,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.VCONST: return self.const_like(tuple(x//v for x in self.arg)) if all(x%v == 0 for x in self.arg) else None
     if self.op is Ops.ADD: return d0+d1 if (d0:=self.src[0].divides(v)) is not None and (d1:=self.src[1].divides(v)) is not None else None
     if self.op is Ops.MUL:
-      if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
-      if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
+      if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1] if d0!=1 else self.src[1]
+      if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1 if d1!=1 else self.src[0]
     return None # generic None if we aren't sure
   @property
   def vmin(self) -> ConstType: return self._min_max[0]
