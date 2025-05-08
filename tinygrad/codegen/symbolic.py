@@ -121,7 +121,7 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
     ret.append(u)
   return functools.reduce(operator.add, ret) if changed else None
 
-def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV]) -> UOp|None:
+def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], is_positive=False) -> UOp|None:
   # simplify x // y or x % y, None means no change
   # simple cancel div/mod case
   if y.vmin*y.vmax > 0 and (q:=cdiv(x.vmin,y.vmin)) == cdiv(x.vmin,y.vmax) == cdiv(x.vmax,y.vmin) == cdiv(x.vmax,y.vmax): # type: ignore
@@ -129,13 +129,14 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV]) -> UO
 
   if (y.op is not Ops.CONST) or ((c := y.arg) <= 0) or (x.dtype.count > 1): return None
 
+  is_positive = is_positive or x.vmin>=0
   svars, factors, gcd, div, const, something_changed = [], [], c, 1, 0, False
   for u in split_uop(x, Ops.ADD):
-    if u.op is Ops.MOD and which is Ops.MOD and u.src[1].op is Ops.CONST and u.src[1].arg%c == 0 and x.vmin>=0:
+    if u.op is Ops.MOD and which is Ops.MOD and u.src[1].op is Ops.CONST and u.src[1].arg%c == 0 and is_positive:
       u = u.src[0]
       something_changed = True
     v: UOp = u.divides(f:=u.const_factor())
-    if f%c==0 or (x.vmin>=0 and (which is Ops.MOD or u.op is Ops.CONST) and f%c!=f): something_changed = True
+    if f%c==0 or (is_positive and (which is Ops.MOD or u.op is Ops.CONST) and f%c!=f): something_changed = True
     if u.op is Ops.CONST: const += f
     else:  # div is the smallest common divisor of all terms
       if f > 1 and c % f == 0 and (div == 1 or div > f): div = f
@@ -149,7 +150,7 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV]) -> UO
     y2 = cmod(factors[0]*v.vmax+const, c) if which is Ops.MOD else cdiv(factors[0]*v.vmax+const, c)
     return (y2-y1)*(v-v.vmin) + y1
 
-  if x.vmin >= 0:
+  if is_positive:
     # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
     # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
     rems = [min(f%c, f%c-c, key=abs) for f in factors]
@@ -166,7 +167,7 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV]) -> UO
     ret = UOp(which, x.dtype, src=(sum(f//gcd * v for f,v in zip(factors, svars)) + const//gcd, x.const_like(c//gcd)))
     return ret*gcd if which is Ops.MOD else ret
 
-  if x.vmin<0: return None
+  if not is_positive: return None
   quo = sum(f//c * v for f,v in zip(factors, svars) if f%c==0) + x.const_like(const//c)
   rem = sum(f//gcd * v for f,v in zip(factors, svars) if f%c!=0) if which is Ops.IDIV else sum((f%c)//gcd * v for f,v in zip(factors, svars))
   rem += x.const_like((const%c)//gcd)
