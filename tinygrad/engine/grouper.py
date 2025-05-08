@@ -82,9 +82,9 @@ sym = symbolic_simple+PatternMatcher([
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
   # COPY(CONST) creates a new CONST on the destination device
-  (UPat(Ops.COPY, name="root", src=(UPat.cvar("x"), UPat())), lambda root,x: root.const_like(x.arg)),
+  (UPat(Ops.COPY, name="root", src=(UPat.cvar("x"),), allow_any_len=True), lambda root,x: root.const_like(x.arg)),
   # store a shrink before COPY, otherwise view after the COPY
-  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, name="v"), UPat()), name="copy"), lambda copy,v: v.contiguous().copy_to_device(copy.device) \
+  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, name="v"),), name="copy", allow_any_len=True), lambda copy,v: v.contiguous().copy_to_device(copy.device) \
     if prod(v.shape) < prod(v.base.shape) else v.base.copy_to_device(copy.device).view(v.st)),
   # remove cast to image when it's already a contiguous image
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(Ops.CONTIGUOUS, name="base"),)),)),
@@ -143,7 +143,7 @@ do_realize = PatternMatcher([
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), name="view"), realize_before_view),
   # realize before COPY
-  (UPat(Ops.COPY, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"), UPat())), realize),
+  (UPat(Ops.COPY, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), allow_any_len=True), realize),
 ])
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
