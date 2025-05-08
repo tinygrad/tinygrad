@@ -262,19 +262,6 @@ insert_kernels = merge_views+PatternMatcher([
   (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: create_kernel(ctx, x) if x in ctx.realizes else None),
 ])
 
-def append_to_kernel(ctx:KernelContext, x:UOp):
-  new_srcs: list[UOp] = []
-  metadata = dict.fromkeys(x.arg.metadata)
-  for s in x.src:
-    if s.op in DONT_PLACE_IN_KERNEL or s in ctx.realizes: new_srcs.append(s)
-    else:
-      new_srcs.extend(s.src)
-      if s.base.op not in {Ops.CONST, Ops.DEVICE} and (m:=ctx.metadata.get(s)): metadata[m] = None
-  if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
-
-# walk back the local graph until we reach a realized parent
-create_kernels = insert_kernels+PatternMatcher([(UPat(Ops.KERNEL, name="x"), append_to_kernel),])
-
 # **** swizzler
 
 def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
@@ -389,7 +376,17 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
-def fix_kernel_ast(k:UOp) -> UOp|None:
+def finalize(ctx:dict[UOp, Metadata|None], k:UOp) -> UOp|None:
+  # walk back the kernel sources until we reach a realized parent
+  new_srcs: list[UOp] = []
+  metadata = dict.fromkeys(k.arg.metadata)
+  for s in k.src:
+    if s.op in DONT_PLACE_IN_KERNEL: new_srcs.append(s)
+    else:
+      new_srcs.extend(s.src)
+      if s.base.op not in {Ops.CONST, Ops.DEVICE} and (m:=ctx.get(s)): metadata[m] = None
+  if (new_src:=tuple(dedup(new_srcs))) != k.src: return k.replace(src=new_src, arg=Kernel(k.arg.ast, tuple(metadata)))
+  # once we're done fusing, create the local ast with load/stores
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
   # replace assign sources with a view of the target buffer
   parents_rep: dict[UOp, UOp] = {}
@@ -405,7 +402,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
-create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
+finalize_kernels = PatternMatcher([(UPat(Ops.KERNEL, name="k"), finalize),])
 
 pm_fuse = PatternMatcher([
   # FUSE on CONTIGUOUS removes FUSE
@@ -491,8 +488,10 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # group into kernels
   realize_map = group_realizes(tensor_map[big_sink])
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx=KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}),
-                                 bottom_up=True, input_map=tensor_map, name="create_kernels")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], insert_kernels, ctx=KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}),
+                                 bottom_up=True, input_map=tensor_map, name="insert_kernels")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], finalize_kernels, ctx={v:k.metadata for k,v in tensor_map.items()}, bottom_up=True,
+                                 input_map=tensor_map, name="finalize_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
@@ -507,9 +506,6 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep:
     tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, ctx=assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
-
-  # finally, create the AST for kernels
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map, name="create_ast")
 
   # display the final graph
   sched_sink = tensor_map[big_sink]
