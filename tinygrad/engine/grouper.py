@@ -122,7 +122,41 @@ replace_contiguous = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
-# **** Grouper decides which of the UOps realize
+# **** create kernels
+
+@dataclass(frozen=True)
+class Kernel:
+  ast: UOp
+  metadata: tuple[Metadata, ...] = ()
+  def __repr__(self):
+    ast_rep = f"SINK{tuple(s.op for s in self.ast.src)}" if self.ast.op is Ops.SINK else repr(self.ast.op)
+    return f"<Kernel {len(list(self.ast.toposort()))} {ast_rep} {self.metadata}>"
+
+@dataclass(frozen=True)
+class KernelContext:
+  realizes: dict[UOp, None]
+  metadata: dict[UOp, Metadata|None]
+
+def create_kernel(ctx:KernelContext, x:UOp, b:UOp|None=None):
+  if b is None: b = UOp.new_buffer(x.device, x.size, x.dtype)
+  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), (m,) if (m:=ctx.metadata.get(x)) else ()))
+  buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
+  return UOp(Ops.ASSIGN, x.dtype, (buffer, kernel)).reshape(x.shape)
+
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
+
+insert_kernels = merge_views+PatternMatcher([
+  # always give assign/contiguous a kernel
+  (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
+  (UPat(Ops.CONTIGUOUS, name="x"), create_kernel),
+  # create a buffer for COPY on the new device
+  (UPat(Ops.COPY, src=(UPat(), UPat(Ops.DEVICE)), name="x"), create_kernel),
+  # remove CONST/BIND/VIEW from SINK
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=new_src)
+    if (new_src:=tuple(dedup(s.base for s in x.src if s.op not in {Ops.CONST, Ops.BIND}))) != x.src else None),
+  # otherwise check the context if we're realizing this UOp
+  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: create_kernel(ctx, x) if x in ctx.realizes else None),
+])
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
@@ -163,10 +197,10 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
     if len(st_childs:=dedup(unwrap(x.st) for x in tr_next.src if x.base == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, realizes, reduce_for_op, group, cache)
 
-def group_realizes(sink:UOp) -> dict[UOp, None]:
+def group_realizes(big_sink:UOp, tensor_map:dict[UOp, UOp]) -> dict[UOp, UOp]:
   # start by adding uops that always realize
   realizes: dict[UOp, None] = {}
-  sink = graph_rewrite(sink, do_realize, ctx=realizes, name="do_realize")
+  sink = graph_rewrite(tensor_map[big_sink], do_realize, ctx=realizes, name="do_realize")
   if DONT_GROUP_REDUCES: return realizes
 
   # construct children graph (only for bases)
@@ -224,43 +258,10 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   for reduceop in double_reduces:
     top_reduce = reduceop.src[0].base
     if len(children[top_reduce]) == 1: del realizes[top_reduce]
-  return realizes
 
-# **** create kernels
-
-@dataclass(frozen=True)
-class Kernel:
-  ast: UOp
-  metadata: tuple[Metadata, ...] = ()
-  def __repr__(self):
-    ast_rep = f"SINK{tuple(s.op for s in self.ast.src)}" if self.ast.op is Ops.SINK else repr(self.ast.op)
-    return f"<Kernel {len(list(self.ast.toposort()))} {ast_rep} {self.metadata}>"
-
-@dataclass(frozen=True)
-class KernelContext:
-  realizes: dict[UOp, None]
-  metadata: dict[UOp, Metadata|None]
-
-def create_kernel(ctx:KernelContext, x:UOp, b:UOp|None=None):
-  if b is None: b = UOp.new_buffer(x.device, x.size, x.dtype)
-  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), (m,) if (m:=ctx.metadata.get(x)) else ()))
-  buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
-  return UOp(Ops.ASSIGN, x.dtype, (buffer, kernel)).reshape(x.shape)
-
-DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
-
-insert_kernels = merge_views+PatternMatcher([
-  # always give assign/contiguous a kernel
-  (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
-  (UPat(Ops.CONTIGUOUS, name="x"), create_kernel),
-  # create a buffer for COPY on the new device
-  (UPat(Ops.COPY, src=(UPat(), UPat(Ops.DEVICE)), name="x"), create_kernel),
-  # remove CONST/BIND/VIEW from SINK
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=new_src)
-    if (new_src:=tuple(dedup(s.base for s in x.src if s.op not in {Ops.CONST, Ops.BIND}))) != x.src else None),
-  # otherwise check the context if we're realizing this UOp
-  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: create_kernel(ctx, x) if x in ctx.realizes else None),
-])
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], insert_kernels, ctx=KernelContext(realizes, {v:k.metadata for k,v in tensor_map.items()}),
+                                 bottom_up=True, input_map=tensor_map, name="insert_kernels")
+  return tensor_map
 
 # **** swizzler
 
@@ -487,9 +488,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
   # group into kernels
-  realize_map = group_realizes(tensor_map[big_sink])
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], insert_kernels, ctx=KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}),
-                                 bottom_up=True, input_map=tensor_map, name="insert_kernels")
+  tensor_map = group_realizes(big_sink, tensor_map)
   tensor_map = graph_rewrite_map(tensor_map[big_sink], finalize_kernels, ctx={v:k.metadata for k,v in tensor_map.items()}, bottom_up=True,
                                  input_map=tensor_map, name="finalize_kernels")
 
