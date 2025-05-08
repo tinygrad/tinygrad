@@ -121,7 +121,10 @@ class ExecItem:
   bufs: list[Optional[Buffer]]
   metadata: Optional[tuple[Metadata, ...]] = None
   def run(self, _var_vals:Optional[dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
-    var_vals = {} if _var_vals is None else _var_vals
+    var_vals = {} if _var_vals is None else _var_vals.copy()
+    if isinstance(self.prg, CompiledRunner):
+      dnum = [x for x in self.prg.p.vars if x.arg[0] == "_device_num"]
+      if len(dnum): var_vals[dnum[0]] = int(self.bufs[0].device.split(":")[1])
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
     et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
     if do_update_stats:
