@@ -44,7 +44,8 @@ def parse_events(events:list[tuple]) -> dict[str, list[float]]:
   return event_data
 
 if BENCHMARK:
-  INFLUXDB_HOST = getenv("INFLUXDB_HOST", "http://localhost:8181")
+  INFLUXDB_HOST = getenv("INFLUXDB_HOST", "https://us-east-1-1.aws.cloud2.influxdata.com")
+  INFLUXDB_ORG = getenv("INFLUXDB_ORG", "tiny")
   INFLUXDB_TOKEN = getenv("INFLUXDB_TOKEN", "")
 
   @atexit.register
@@ -71,5 +72,5 @@ if BENCHMARK:
 
     write_options = WriteOptions(write_type=WriteType.synchronous, retry_interval=5000, max_retries=5, max_retry_delay=30000, exponential_base=2)
     wco = write_client_options(write_options=write_options)
-    with InfluxDBClient3(host=INFLUXDB_HOST, token=INFLUXDB_TOKEN, database="benchmark", write_client_options=wco) as client:
+    with InfluxDBClient3(host=INFLUXDB_HOST, org=INFLUXDB_ORG, token=INFLUXDB_TOKEN, database="benchmark", write_client_options=wco) as client:
       client.write(points)
