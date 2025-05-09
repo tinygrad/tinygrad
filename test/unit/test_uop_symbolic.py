@@ -345,8 +345,20 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_div_factor_mul(self):
     self.helper_test_variable((Variable("a", 0, 10)*8)//4, 0, 20, "(a*2)")
 
+  def test_mul_div_factor_mul_neg(self):
+    self.helper_test_variable((Variable("a", 0, 10)*-8+16)//4, -16, 4, "((a*-2)+4)")
+
   def test_mul_div_factor_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//8, 0, 5, "(a//2)")
+
+  def test_mul_div_factor_div_neg(self):
+    self.helper_test_variable((Variable("a", 0, 10)*-4+4)//8, -4, 0, "(((a*-1)+1)//2)")
+
+  def test_mod_gcd_factor_neg(self):
+    self.helper_test_variable((Variable("a", 0, 10)*-4+4)%8, -4, 4, "((((a*-1)+1)%2)*4)")
+
+  def test_mod_gcd_fold_neg(self):
+    self.helper_test_variable((Variable("a", 0, 10)*-8+20)%4, 0, 0, "0")
 
   def test_sum_div_partial_remove(self):
     self.helper_test_variable(usum([Variable("idx0", 0, 127)*4, Variable("idx2", 0, 3)])//4, 0, 127, "idx0")
