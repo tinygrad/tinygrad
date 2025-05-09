@@ -4,9 +4,9 @@ from enum import Enum
 from tinygrad.device import Device
 from tinygrad.helpers import ContextVar, getenv
 
-BENCHMARK = ContextVar("BENCHMARK", "")
+BENCHMARK_LOG = ContextVar("BENCHMARK_LOG", "")
 
-if BENCHMARK:
+if BENCHMARK_LOG:
   from influxdb_client_3 import InfluxDBClient3, Point, WriteOptions, write_client_options
   from influxdb_client_3.write_client.client.write_api import WriteType
 
@@ -43,7 +43,7 @@ def parse_events(events:list[tuple]) -> dict[str, list[float]]:
     event_data[event_type.value] = data
   return event_data
 
-if BENCHMARK:
+if BENCHMARK_LOG:
   INFLUXDB_HOST = getenv("INFLUXDB_HOST", "https://us-east-1-1.aws.cloud2.influxdata.com")
   INFLUXDB_ORG = getenv("INFLUXDB_ORG", "tiny")
   INFLUXDB_TOKEN = getenv("INFLUXDB_TOKEN", "")
@@ -64,7 +64,7 @@ if BENCHMARK:
     for event_type, values in event_data.items():
       run_id = str(uuid.uuid4())
       for i, value in enumerate(values):
-        point = Point(BENCHMARK.value).tag("id", run_id).tag("index", i)
+        point = Point(BENCHMARK_LOG.value).tag("id", run_id).tag("index", i)
         point = point.tag("device", Device.DEFAULT)
         point = point.tag("run", run).tag("attempt", attempt).tag("ref", ref).tag("commit", commit)
         point = point.field(event_type, value)
