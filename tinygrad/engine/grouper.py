@@ -236,14 +236,9 @@ class Kernel:
     ast_rep = f"SINK{tuple(s.op for s in self.ast.src)}" if self.ast.op is Ops.SINK else repr(self.ast.op)
     return f"<Kernel {len(list(self.ast.toposort()))} {ast_rep} {self.metadata}>"
 
-@dataclass(frozen=True)
-class KernelContext:
-  realizes: dict[UOp, str]
-  metadata: dict[UOp, Metadata|None]
-
-def create_kernel(ctx:KernelContext, x:UOp, b:UOp|None=None):
+def create_kernel(x:UOp, b:UOp|None=None):
   if b is None: b = UOp.new_buffer(x.device, x.size, x.dtype)
-  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), (m,) if (m:=ctx.metadata.get(x)) else ()))
+  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), (m,) if (m:=x.metadata) else ()))
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return UOp(Ops.ASSIGN, x.dtype, (buffer, kernel)).reshape(x.shape)
 
@@ -259,17 +254,17 @@ insert_kernels = merge_views+PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=new_src)
     if (new_src:=tuple(dedup(s.base for s in x.src if s.op not in {Ops.CONST, Ops.BIND}))) != x.src else None),
   # otherwise check the context if we're realizing this UOp
-  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: create_kernel(ctx, x) if x in ctx.realizes else None),
+  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: create_kernel(x) if x in ctx else None),
 ])
 
-def append_to_kernel(ctx:KernelContext, x:UOp):
+def append_to_kernel(ctx:dict[UOp, None], x:UOp):
   new_srcs: list[UOp] = []
   metadata = dict.fromkeys(x.arg.metadata)
   for s in x.src:
-    if s.op in DONT_PLACE_IN_KERNEL or s in ctx.realizes: new_srcs.append(s)
+    if s.op in DONT_PLACE_IN_KERNEL or s in ctx: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
-      if s.base.op not in {Ops.CONST, Ops.DEVICE} and (m:=ctx.metadata.get(s)): metadata[m] = None
+      if s.base.op not in {Ops.CONST, Ops.DEVICE} and (m:=s.metadata): metadata[m] = None
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
 
 # walk back the local graph until we reach a realized parent
@@ -491,8 +486,6 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # group into kernels
   realize_map = group_realizes(tensor_map[big_sink])
-  metadata = {v:k.metadata for k,v in tensor_map.items()}
-
   if getenv("VIZ"):
     # VIZ the contiguous graph
     children: dict[UOp, list[UOp]] = {}
@@ -508,13 +501,11 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
             continue
           # if it's a contiguous already, track down where it's coming from
           if x.op is Ops.CONTIGUOUS:
-            m = metadata[x]
-            new_src.append(x.replace(arg=f"user inserted contiguous @ {m.caller}"))
+            new_src.append(x.replace(arg=f"user inserted contiguous @ {repr(x.metadata)}"))
           else: new_src.append(UOp(Ops.CONTIGUOUS, x.dtype, (x,), arg=reason))
         sub[child] = child.replace(src=tuple(new_src))
     graph_rewrite(tensor_map[big_sink].substitute(sub), PatternMatcher([]), name="View Contiguous Graph")
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx=KernelContext(realize_map, metadata),
-                                 bottom_up=True, input_map=tensor_map, name="create_kernels")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
