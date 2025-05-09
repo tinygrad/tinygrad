@@ -490,9 +490,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
     return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
-  def copy_to_device(self, device:str|tuple[str, ...], arg=None):
-    if isinstance(device, tuple): return UOp(Ops.COPY, self.dtype, (self,)+tuple(UOp(Ops.DEVICE, arg=d) for d in device), arg)
-    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)), arg)
+  def copy_to_device(self, device:str|tuple[str, ...]|UOp, arg=None):
+    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), arg)
   def clone(self) -> UOp: return self.copy_to_device(self.device)
   @property
   def metadata(self) -> tuple[Metadata, ...]|Metadata|None: return self.arg.metadata if self.op is Ops.KERNEL else all_metadata.get(self, None)
@@ -536,9 +535,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.MULTI: return tuple(cast(str, x.device) for x in self.src)
-    if self.op in {Ops.COPY, Ops.BUFFER}:
-      if len(self.src) > 2: return tuple(cast(str, x.device) for x in self.src[1:])
-      return self.src[1].device
+    if self.op in {Ops.COPY, Ops.BUFFER}: return self.src[1].device
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
@@ -630,16 +627,18 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       # SHL/SHR on consts only
       if self.op is Ops.SHL and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] << t[2], t[1] << t[2]
       if self.op is Ops.SHR and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] >> t[2], t[1] >> t[2]
-      if self.op is Ops.MOD and s1_vmin > 0:
-        return (0, s1_vmax-1) if s0_vmin >= 0 else (-(s1_vmax-1), s1_vmax-1)
+      if self.op is Ops.MOD:
+        if s1_vmin > 0: return (0, s1_vmax-1) if s0_vmin >= 0 else (-(s1_vmax-1), 0) if s0_vmax <= 0 else (-(s1_vmax-1), s1_vmax-1)
+        if s1_vmax < 0: return (0, -s1_vmax-1) if s0_vmin >= 0 else (-(-s1_vmax-1), 0) if s0_vmax <= 0 else (-(-s1_vmax-1), -s1_vmax-1)
       if self.op is Ops.IDIV:
         assert isinstance(s0_vmin, int) and isinstance(s0_vmax, int) and isinstance(s1_vmin, int) and isinstance(s1_vmax, int)
         if (c:=s1_vmin) == s1_vmax:  # s1 is a const
           if c > 0: return cdiv(s0_vmin, c), cdiv(s0_vmax, c)
           if c < 0: return cdiv(s0_vmax, c), cdiv(s0_vmin, c)
-        # don't know exact bounds, but know the sign
-        if (s0_vmax <= 0 and s1_vmax < 0) or (s0_vmin >= 0 and s1_vmin > 0): return 0, dtypes.max(self.dtype)
-        if (s0_vmax <= 0 and s1_vmin > 0) or (s0_vmin >= 0 and s1_vmax < 0): return dtypes.min(self.dtype), 0
+        if (s0_vmax <= 0 and s1_vmax < 0): return cdiv(s0_vmax, s1_vmin), cdiv(s0_vmin, s1_vmax)
+        if (s0_vmin >= 0 and s1_vmin > 0): return cdiv(s0_vmin, s1_vmax), cdiv(s0_vmax, s1_vmin)
+        if (s0_vmax <= 0 and s1_vmin > 0): return cdiv(s0_vmin, s1_vmin), cdiv(s0_vmax, s1_vmax)
+        if (s0_vmin >= 0 and s1_vmax < 0): return cdiv(s0_vmax, s1_vmax), cdiv(s0_vmin, s1_vmin)
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
       if self.op is Ops.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
       if self.op is Ops.CMPNE: return ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin), not (s0_vmin == s0_vmax == s1_vmin == s1_vmax))

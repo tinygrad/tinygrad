@@ -153,6 +153,16 @@ class TestTorchBackend(unittest.TestCase):
         res = torch.ops.aten.isin.Tensor_Tensor_out(a, b, invert=invert, assume_unique=assume_unique, out=out)
         np.testing.assert_equal(out.cpu().numpy(), expected.cpu().numpy())
 
+  def test_uniform(self):
+    for torch_dtype in [torch.float32, torch.float16]:
+      a = torch.rand(10, 10, device=device, dtype=torch_dtype)
+      self.assertEqual(a.dtype, torch_dtype)
+
+  def test_normal(self):
+    for torch_dtype in [torch.float32, torch.float16]:
+      a = torch.randn(10, 10, device=device, dtype=torch_dtype)
+      self.assertEqual(a.dtype, torch_dtype)
+
   @unittest.skip("meh")
   def test_str(self):
     a = torch.ones(4, device=device)

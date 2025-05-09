@@ -1,7 +1,7 @@
 // in browser, max stack depth is hardcoded
 // the DSP schedule graph is very deep, so you need to proxy the layout calculation through this extra server to VIZ it:
 // npm install
-// node --stack-size=65500 index.js
+// node --stack-size=65500 ./tinygrad/viz/proxy/index.js
 
 const { createCanvas } = require("canvas");
 const dagre = require("dagre");
