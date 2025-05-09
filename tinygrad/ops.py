@@ -225,10 +225,11 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
-  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, _buffer:Buffer|None=None):
+  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, metadata:Metadata|None=None, _buffer:Buffer|None=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
     for s in src: s.children.add(ref)
+    if metadata is not None: all_metadata[created] = metadata
     # NOTE: this value is set by pickle when pickling a realized tensor
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
@@ -254,6 +255,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       del UOpMetaClass.ucache[k]
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg]
+    args.append(self.metadata)
     if self.op is Ops.BUFFER and self.realized is not None and PICKLE_BUFFERS: args.append(self.realized)
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
