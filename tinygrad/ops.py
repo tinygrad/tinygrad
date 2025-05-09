@@ -634,9 +634,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         if (c:=s1_vmin) == s1_vmax:  # s1 is a const
           if c > 0: return cdiv(s0_vmin, c), cdiv(s0_vmax, c)
           if c < 0: return cdiv(s0_vmax, c), cdiv(s0_vmin, c)
-        # don't know exact bounds, but know the sign
-        if (s0_vmax <= 0 and s1_vmax < 0) or (s0_vmin >= 0 and s1_vmin > 0): return 0, dtypes.max(self.dtype)
-        if (s0_vmax <= 0 and s1_vmin > 0) or (s0_vmin >= 0 and s1_vmax < 0): return dtypes.min(self.dtype), 0
+        if (s0_vmax <= 0 and s1_vmax < 0): return cdiv(s0_vmax, s1_vmin), cdiv(s0_vmin, s1_vmax)
+        if (s0_vmin >= 0 and s1_vmin > 0): return cdiv(s0_vmin, s1_vmax), cdiv(s0_vmax, s1_vmin)
+        if (s0_vmax <= 0 and s1_vmin > 0): return cdiv(s0_vmin, s1_vmin), cdiv(s0_vmax, s1_vmax)
+        if (s0_vmin >= 0 and s1_vmax < 0): return cdiv(s0_vmax, s1_vmax), cdiv(s0_vmin, s1_vmin)
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
       if self.op is Ops.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
       if self.op is Ops.CMPNE: return ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin), not (s0_vmin == s0_vmax == s1_vmin == s1_vmax))

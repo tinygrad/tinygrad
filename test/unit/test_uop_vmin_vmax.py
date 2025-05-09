@@ -147,6 +147,27 @@ class TestVminVmaxDivMod(unittest.TestCase):
     self.assertEqual(uop.vmin, -3)
     self.assertEqual(uop.vmax, 3)
 
+  def test_vmin_vmax_div_symbolic(self):
+    x = UOp.variable('x', 1, 10)
+    y = UOp.variable('y', 3, 5)
+    self.assertEqual((x//y).vmin, 0)
+    self.assertEqual((x//y).vmax, 3)
+    self.assertEqual(((-x)//y).vmin, -3)
+    self.assertEqual(((-x)//y).vmax, 0)
+    self.assertEqual((x//(-y)).vmin, -3)
+    self.assertEqual((x//(-y)).vmax, 0)
+    self.assertEqual(((-x)//(-y)).vmin, 0)
+    self.assertEqual(((-x)//(-y)).vmax, 3)
+
+    self.assertEqual((100//y).vmin, 20)
+    self.assertEqual((100//y).vmax, 33)
+    self.assertEqual(((-100)//y).vmin, -33)
+    self.assertEqual(((-100)//y).vmax, -20)
+    self.assertEqual((100//(-y)).vmin, -33)
+    self.assertEqual((100//(-y)).vmax, -20)
+    self.assertEqual(((-100)//(-y)).vmin, 20)
+    self.assertEqual(((-100)//(-y)).vmax, 33)
+
   def test_vmin_vmax_mod_positive(self):
     # vmin and vmax for modulo of a variable by a positive constant
     x = UOp.variable('x', 10, 20)
