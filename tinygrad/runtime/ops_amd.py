@@ -385,7 +385,8 @@ class AMDCopyQueue(HWQueue):
     self._q, self.cmd_sizes = hw_view, [len(self.indirect_cmd)]
 
   def _submit(self, dev:AMDDevice):
-    if dev.sdma_queue.put_value - dev.sdma_queue.read_ptr > dev.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
+    # usb devices run in single-step mode, so they can't overrun the queue.
+    if not dev.is_usb() and dev.sdma_queue.put_value - dev.sdma_queue.read_ptr > dev.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
 
     if self.binded_device == dev:
       # An IB packet must end on a 8 DW boundary.
