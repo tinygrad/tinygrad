@@ -466,7 +466,8 @@ class AMDProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
-  def __init__(self, dev:AMDDevice): super().__init__(dev, copy_bufs=getattr(dev.dev_iface, 'copy_bufs', None))
+  def __init__(self, dev:AMDDevice):
+    super().__init__(dev, copy_bufs=getattr(dev.dev_iface, 'copy_bufs', None), max_copyout_size=0x1000 if dev.is_usb() else None)
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.dev_iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
@@ -819,7 +820,7 @@ class USBIface(PCIIface):
     self.usb._pci_cacheable += [self.bars[2]] # doorbell region is cacheable
 
     # special regions
-    self.copy_bufs = [self._new_dma_region(ctrl_addr=0xf000, sys_addr=0x200000, size=0x1000)]
+    self.copy_bufs = [self._new_dma_region(ctrl_addr=0xf000, sys_addr=0x200000, size=0x4000)]
     self.sys_buf, self.sys_next_off = self._new_dma_region(ctrl_addr=0xa000, sys_addr=0x820000, size=0x1000), 0
 
   def _new_dma_region(self, ctrl_addr, sys_addr, size):
