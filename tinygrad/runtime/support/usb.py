@@ -91,7 +91,7 @@ class USB3:
           self.buf_data_out[slot] = (ctypes.c_uint8 * len(send_data))()
           self.buf_data_out_mvs[slot] = to_mv(ctypes.addressof(self.buf_data_out[slot]), len(send_data))
 
-        self.buf_data_out_mvs[slot][:len(send_data)] = list(send_data)
+        self.buf_data_out_mvs[slot][:len(send_data)] = bytes(send_data)
         tr_window.append(self._prep_transfer(self.tr[self.ep_data_out][slot], self.ep_data_out, stream, self.buf_data_out[slot], len(send_data)))
 
       op_window.append((idx, slot, rlen))
