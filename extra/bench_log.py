@@ -67,7 +67,7 @@ if BENCHMARK_LOG:
         point = Point(BENCHMARK_LOG.value).tag("id", run_id).tag("index", i)
         point = point.tag("device", Device.DEFAULT)
         point = point.tag("run", run).tag("attempt", attempt).tag("ref", ref).tag("commit", commit)
-        point = point.field(event_type, value)
+        point = point.field(event_type, value).field("x", run)
         points.append(point)
 
     write_options = WriteOptions(write_type=WriteType.synchronous, retry_interval=5000, max_retries=5, max_retry_delay=30000, exponential_base=2)
