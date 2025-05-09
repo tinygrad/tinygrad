@@ -993,6 +993,7 @@ def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, na
   new_map = {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort())[::-1]}
   if input_map is not None:
     for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
+  all_metadata.update((v, k.metadata) for k,v in new_map.items() if isinstance(k.metadata, Metadata))
   return new_map
 
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
