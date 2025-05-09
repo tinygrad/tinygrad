@@ -319,11 +319,11 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_num_hoisted_and_factors_cancel_out(self):
     self.helper_test_variable(usum([Variable("a", 0, 1) * -4 + 1, Variable("a", 0, 1) * 4]), 1, 1, "1")
 
-  def test_div_cancel(self):
-    self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "((((a*2)+(b*40))+-40)//40)")
+  def test_div_doesnt_cancel(self):
+    self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(((a+(b*20))+-20)//20)")
 
-  def test_mod_cancel(self):
-    self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, -39, 39, "((((a*2)+(b*40))+-40)%40)")
+  def test_mod_doesnt_cancel(self):
+    self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, -38, 38, "((((a+(b*20))+-20)%20)*2)")
 
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
