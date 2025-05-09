@@ -2,6 +2,7 @@ import unittest, time
 from tinygrad.runtime.support.usb import ASM24Controller
 from tinygrad.helpers import Timing
 from tinygrad import Tensor, Device
+import numpy as np
 
 class TestASMController(unittest.TestCase):
   @classmethod
@@ -57,6 +58,16 @@ class TestDevCopySpeeds(unittest.TestCase):
     for _ in range(3):
       with Timing(f"copyout of {t.nbytes()/1e6:.2f} MB:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns * 1e3:.2f} MB/s"):
         t.to('CPU').realize()
+
+  def testValidateCopies(self):
+    t = Tensor.randn(self.sz, self.sz, device="CPU").contiguous().realize()
+    x = t.to(Device.DEFAULT).realize()
+    Device[Device.DEFAULT].synchronize()
+
+    y = x.to('CPU').realize()
+
+    np.testing.assert_equal(t.numpy(), y.numpy())
+    del x, y, t
 
 if __name__ == "__main__":
   unittest.main()

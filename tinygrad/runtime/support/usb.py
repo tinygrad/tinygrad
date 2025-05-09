@@ -1,7 +1,7 @@
 import ctypes, struct, dataclasses, array, itertools
 from typing import Sequence
 from tinygrad.runtime.autogen import libusb
-from tinygrad.helpers import DEBUG, to_mv
+from tinygrad.helpers import DEBUG, to_mv, round_up
 from tinygrad.runtime.support.hcq import MMIOInterface
 
 class USB3:
@@ -143,7 +143,9 @@ class ASM24Controller:
         addr = (op.addr & 0x1FFFF) | 0x500000
         _add_req(struct.pack('>BBBHB', 0xE4, op.size, addr >> 16, addr & 0xFFFF, 0), op.size, None)
         for i in range(op.size): self._cache[addr + i] = None
-      elif isinstance(op, ScsiWriteOp): _add_req(struct.pack('>BBQIBB', 0x8A, 0, op.lba, 4096//512, 0, 0), 0, op.data+b'\x00'*(4096-len(op.data)))
+      elif isinstance(op, ScsiWriteOp):
+        sectors = round_up(len(op.data), 512) // 512
+        _add_req(struct.pack('>BBQIBB', 0x8A, 0, op.lba, sectors, 0, 0), 0, op.data+b'\x00'*((sectors*512)-len(op.data)))
 
     return self.usb.send_batch(cdbs, idata, odata)
 
