@@ -427,4 +427,6 @@ def train_cifar():
       raise ValueError(colored(f"{eval_acc_pct=} < {target}", "red"))
 
 if __name__ == "__main__":
+  log_event_start(BenchEvent.FULL)
   train_cifar()
+  log_event_end(BenchEvent.FULL)
