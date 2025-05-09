@@ -162,10 +162,10 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], is_po
     if which is Ops.IDIV and (1 < div < c) and (newx:=div_and_mod_folding(x, x.const_like(div), Ops.IDIV)) is not None: return newx//(c//div)
     return None
 
-  # if math.gcd(gcd, const)!=1:
-  #   gcd = math.gcd(gcd, const)
-  #   ret = UOp(which, x.dtype, src=(sum(f//gcd * v for f,v in zip(factors, svars)) + const//gcd, x.const_like(c//gcd)))
-  #   return ret*gcd if which is Ops.MOD else ret
+  if math.gcd(gcd, const)!=1:
+    gcd = math.gcd(gcd, const)
+    ret = UOp(which, x.dtype, src=(sum(f//gcd * v for f,v in zip(factors, svars)) + const//gcd, x.const_like(c//gcd)))
+    return ret*gcd if which is Ops.MOD else ret
 
   if not is_positive: return None
   quo = sum(f//c * v for f,v in zip(factors, svars) if f%c==0) + x.const_like(const//c)
