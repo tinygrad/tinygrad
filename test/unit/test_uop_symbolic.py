@@ -576,6 +576,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(-a<3*b, False, True, "((b*-3)<a)")
     self.helper_test_variable(-a<-2, False, True, "(2<a)")
 
+  def test_bounded_is_eq(self):
+    a = Variable("a", 1, 3)
+    self.helper_test_variable((1<a)&(a<3), False, True, "((a!=2)!=True)")
+
   def test_where_cast(self):
     s = Variable("s", 0, 3)
     cond = s < 2
