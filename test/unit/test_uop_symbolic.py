@@ -363,6 +363,14 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_partial_remove(self):
     self.helper_test_variable(usum([Variable("idx0", 0, 127)*4, Variable("idx2", 0, 3)])//4, 0, 127, "idx0")
 
+  def test_cdiv_const_evaluation(self):
+    self.helper_test_variable((Variable("a", 0, 2)-12)//8, -1, -1, "-1")
+    self.helper_test_variable((-Variable("a", 0, 2))//7, 0, 0, "0")
+
+  def test_cmod_const_evaluation(self):
+    self.helper_test_variable((Variable("a", 1, 1)*-3)%8, -3, -3, "-3")
+    self.helper_test_variable((-Variable("a", 10, 10))%7, -3, -3, "-3")
+
   def test_div_numerator_negative(self):
     self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -8, 0, "(((idx*10)//11)*-1)")
 
