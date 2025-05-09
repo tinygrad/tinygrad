@@ -598,6 +598,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return False  # False if not sure
   def const_factor(self) -> int:
     """largest known int that divides self"""
+    # TODO: for negatives it's not the largest
     if self.op is Ops.CONST: return self.arg
     if self.op is Ops.VCONST: return math.gcd(*self.arg)
     if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
