@@ -6,7 +6,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.memory import memory_planner
-from tinygrad.engine.realize import lower_schedule, CompiledRunner, ExecItem
+from tinygrad.engine.realize import lower_schedule, CompiledRunner, ExecItem, BufferCopy
 from typing import Callable, Sequence
 import itertools
 
@@ -34,12 +34,15 @@ class GraphRenderer(Renderer):
 
     # render kernels, render buffer names
     # mark which buffers have state
+    ctr = itertools.count()
     self.eis: list[ExecItem] = []
-    self.empty_bufs: dict[Buffer, str] = dict()
+    self.empty_bufs: dict[Buffer, str] = {u.base.buffer: f"buf_{next(ctr)}" for u in self.inputs if u.base.op is Ops.BUFFER}
     self.state_bufs: dict[Buffer, str] = dict()
-    seen, ctr = set([i.base.buffer for i in self.inputs if i.base.op is Ops.BUFFER]), itertools.count()
+    seen = set(self.empty_bufs.keys())
     for si, ei in lower_schedule(memory_planner(schedule)):
-      assert isinstance(ei.prg, CompiledRunner), "BufferCopy not yet supported, ensure all Tensors are on the same device"
+      if isinstance(ei.prg, BufferCopy):
+        ei.run()
+        continue
       self.eis.append(ei)
       for i, buf in enumerate(ei.bufs):
         if buf not in seen and (i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i)): self.state_bufs[buf] = f"buf_{next(ctr)}"

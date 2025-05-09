@@ -178,8 +178,9 @@ class WebGPUProgram:
 def js_create_layout(buf_types:list[str]) -> str: return f"device.createBindGroupLayout({{entries:" + \
   f'[{", ".join(f"{{binding: {i}, visibility: GPUShaderStage.COMPUTE, buffer: {{type: {btype}}} }}" for i, btype in enumerate(buf_types))}]}})'
 
-def js_create_pipeline(layout:str, code:str) -> str: return f"""await device.createComputePipelineAsync(
-  {{layout: {layout}, compute: {{ module: device.createShaderModule({{ code: {code} }}), entryPoint: "main" }}}}\n);"""
+def js_create_pipeline(layout:str, code:str) -> str: return f"""device.createComputePipelineAsync({{
+  layout: device.createPipelineLayout({{bindGroupLayouts: [{layout}]}}),
+  compute: {{ module: device.createShaderModule({{ code: {code} }}), entryPoint: "main" }}\n}})"""
 
 def js_create_bind_group(layout:str, entries:str) -> str: return f"device.createBindGroup({{ layout: {layout}, entries: {entries} }})"
 
@@ -215,7 +216,7 @@ def js_copyout(dest:str, src:str) -> list[str]:
   return [f'await {src}.mapAsync(GPUMapMode.READ);',
     f'{dest}.set(new {dest}.constructor({src}.getMappedRange()));',
     f'{src}.unmap();']
-def js_copy(encoder:str, dest:str, src:str, size:str) -> str: return f"{encoder}.copyBufferToBuffer({src}, 0, {dest}, 0, {size});"
+def js_copy(encoder:str, src:str, dest:str, size:str) -> str: return f"{encoder}.copyBufferToBuffer({src}, 0, {dest}, 0, {size});"
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
