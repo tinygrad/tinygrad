@@ -3,10 +3,10 @@ from tinygrad import Tensor
 from tinygrad.device import Buffer
 from tinygrad.ops import UOp, Variable, Ops
 from tinygrad.renderer import Renderer
-from tinygrad.nn.state import get_parameters
+from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.memory import memory_planner
-from tinygrad.engine.realize import lower_schedule, CompiledRunner, ExecItem, BufferCopy
+from tinygrad.engine.realize import lower_schedule, ExecItem, BufferCopy
 from typing import Callable, Sequence
 import itertools
 
@@ -18,7 +18,9 @@ def is_partial_write(ast:UOp, buf_idx:int) -> bool:
 # Common logic regardless of render target (e.g. JavaScript, C)
 class GraphRenderer(Renderer):
   def __init__(self, fxn:Callable, args:Sequence):
-    # Ensure random seeds are on-device
+    # realize state_dict and use state_dict names for exported state_bufs; TODO: enable more general state_dict handling
+    buf_names = {buf: k for k,v in get_state_dict(getattr(fxn, "__self__", fxn)).items() if (buf:=v.realize().lazydata.base.realized) is not None}
+    # ensure random seeds are on-device
     Tensor.randn(1).realize()
 
     # construct the kernel graph
@@ -48,5 +50,9 @@ class GraphRenderer(Renderer):
         if buf not in seen and (i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i)): self.state_bufs[buf] = f"buf_{next(ctr)}"
         elif buf not in seen: self.empty_bufs[buf] = f"buf_{next(ctr)}"
         seen.add(buf)
+
+    self.state_bufs.update({k: v for k,v in buf_names.items() if k in self.state_bufs})
+    # TODO: we need to ensure the self.state_bufs have been realized with actual data, before now
+    self.state_dict: dict[str, Tensor] = {v: Tensor(bytes(k.as_buffer()), dtype=k.dtype, device=k.device).realize() for k,v in self.state_bufs.items()}
 
   def render_graph(self) -> str: raise NotImplementedError("Implement a language-specific GraphRenderer")

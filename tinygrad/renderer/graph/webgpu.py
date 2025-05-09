@@ -1,11 +1,9 @@
-from tinygrad import Tensor
 from tinygrad.ops import Ops, Variable
 from tinygrad.runtime.ops_webgpu import js_init_device, js_init_encoder, js_alloc, js_copyin, js_copy, js_copyout, js_create_layout, \
   js_create_pipeline, js_create_bind_group, js_begin_compute_pass
 from tinygrad.renderer.graph import GraphRenderer
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import merge_dicts
-from typing import Callable, Sequence
 
 safe_load_state_dict = f"""const safeLoadStateDict = async (modelStateDict, safetensorPath) => {{
   const safetensorBuffer = await fetch(safetensorPath).then(x => x.arrayBuffer()).then(x => new Uint8Array(x));
@@ -94,11 +92,3 @@ class WebGPUJSRenderer(GraphRenderer):
     prg += ["};"]
     prg += ["export { createGraph, safeLoadStateDict, device };"]
     return "\n".join(prg)
-
-def export_webgpu(fxn:Callable, args:Sequence) -> tuple[str, dict[str, Tensor]]:
-  """
-  Generates a kernel graph, renders the graph into JavaScript, and exports the graph's state as a `state_dict`.
-  """
-  renderer = WebGPUJSRenderer(fxn, args)
-  state_dict = {v: Tensor(bytes(k.as_buffer()), dtype=k.dtype, device=k.device).realize() for k,v in renderer.state_bufs.items()}
-  return renderer.render_graph(), state_dict
