@@ -4,7 +4,7 @@ import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType
-from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element
+from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod
 from tinygrad.codegen.transcendental import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
@@ -121,55 +121,59 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
     ret.append(u)
   return functools.reduce(operator.add, ret) if changed else None
 
-def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split_rem: bool=False) -> UOp|None:
+def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], is_positive=False) -> UOp|None:
   # simplify x // y or x % y, None means no change
   # simple cancel div/mod case
-  if y.vmin != 0 != y.vmax and (q:=x.vmin//y.vmin) == x.vmin//y.vmax == x.vmax//y.vmin == x.vmax//y.vmax:
+  if y.vmin*y.vmax > 0 and (q:=cdiv(x.vmin,y.vmin)) == cdiv(x.vmin,y.vmax) == cdiv(x.vmax,y.vmin) == cdiv(x.vmax,y.vmax): # type: ignore
     return x - q*y if which is Ops.MOD else x.const_like(q)
 
   if (y.op is not Ops.CONST) or ((c := y.arg) <= 0) or (x.dtype.count > 1): return None
 
-  svars, factors, quotients, remainders, gcd, div, const, something_changed = [], [], [], [], c, 1, 0, False
+  is_positive = is_positive or x.vmin>=0
+  svars, factors, gcd, div, const, something_changed = [], [], c, 1, 0, False
   for u in split_uop(x, Ops.ADD):
-    if u.op is Ops.MOD and which is Ops.MOD and u.src[1].op is Ops.CONST and u.src[1].arg%c == 0:
+    if u.op is Ops.MOD and which is Ops.MOD and u.src[1].op is Ops.CONST and u.src[1].arg%c == 0 and is_positive:
       u = u.src[0]
       something_changed = True
     v: UOp = u.divides(f:=u.const_factor())
-    q, r = divmod(f, c)
-    if r==0 or ((which is Ops.MOD or split_rem or u.op is Ops.CONST) and r!=f): something_changed = True
+    if f%c==0 or (is_positive and (which is Ops.MOD or u.op is Ops.CONST) and f%c!=f): something_changed = True
     if u.op is Ops.CONST: const += f
     else:  # div is the smallest common divisor of all terms
       if f > 1 and c % f == 0 and (div == 1 or div > f): div = f
-      gcd = math.gcd(r, gcd)
-      factors.append(f); svars.append(v); quotients.append(q); remainders.append(r)  # noqa: E702
+      gcd = math.gcd(f, gcd)
+      factors.append(f); svars.append(v) # noqa: E702
+  if gcd != 1: something_changed = True
 
   # we can fold if the expression has only one non-constant term and this term can only take on two values
   if len(svars)==1 and (v:=svars[0]).vmax-v.vmin == 1:
-    y1 = (factors[0]*v.vmin+const)%c if which is Ops.MOD else (factors[0]*v.vmin+const)//c
-    y2 = (factors[0]*v.vmax+const)%c if which is Ops.MOD else (factors[0]*v.vmax+const)//c
+    y1 = cmod(factors[0]*v.vmin+const, c) if which is Ops.MOD else cdiv(factors[0]*v.vmin+const, c)
+    y2 = cmod(factors[0]*v.vmax+const, c) if which is Ops.MOD else cdiv(factors[0]*v.vmax+const, c)
     return (y2-y1)*(v-v.vmin) + y1
 
-  # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
-  # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
-  rems = [min(r, r-c, key=abs) for r in remainders]
-  if (rem:=sum(r*v for r,v in zip(rems,svars))+const%c).vmin//c==rem.vmax//c and all(f > 0 for f in factors):
-    if which is Ops.MOD: return rem - rem.vmin//c*c
-    return sum((f-r)//c * v for f,r,v in zip(factors,rems,svars)) + (const-const%c+rem.vmin//c*c)//c
+  if is_positive:
+    # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
+    # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
+    rems = [min(f%c, f%c-c, key=abs) for f in factors]
+    if (rem:=sum(r*v for r,v in zip(rems,svars))+const%c).vmin//c==rem.vmax//c:
+      if which is Ops.MOD: return rem - rem.vmin//c*c
+      return sum((f-r)//c * v for f,r,v in zip(factors,rems,svars)) + (const-const%c+rem.vmin//c*c)//c
 
-  if gcd != 1: something_changed = True
   if not something_changed:
     if which is Ops.IDIV and (1 < div < c) and (newx:=div_and_mod_folding(x, x.const_like(div), Ops.IDIV)) is not None: return newx//(c//div)
     return None
-  quo, rem = x.const_like(const//c), x.const_like((const%c)//gcd)
-  for q,r,f,v in zip(quotients, remainders, factors, svars):
-    if which is Ops.IDIV and (not split_rem) and r!=0:
-      rem += f//gcd * v
-    else:
-      rem += r//gcd * v
-      quo += q * v
 
-  # if numerator before/after is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
-  if (x.vmin < 0 or rem.vmin < 0) and remainders: return None
+  if math.gcd(gcd, const)!=1:
+    gcd = math.gcd(gcd, const)
+    ret = UOp(which, x.dtype, src=(sum(f//gcd * v for f,v in zip(factors, svars)) + const//gcd, x.const_like(c//gcd)))
+    return ret*gcd if which is Ops.MOD else ret
+
+  if not is_positive: return None
+  quo = sum(f//c * v for f,v in zip(factors, svars) if f%c==0) + x.const_like(const//c)
+  rem = sum(f//gcd * v for f,v in zip(factors, svars) if f%c!=0) if which is Ops.IDIV else sum((f%c)//gcd * v for f,v in zip(factors, svars))
+  rem += x.const_like((const%c)//gcd)
+
+  # if numerator after is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
+  if rem.vmin < 0 and factors: return None
   if which is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
   return rem//(c//gcd)+quo
 
@@ -255,9 +259,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # c0*x<c1 for negative int c0 and non-positive c1
   ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints))<UPat.cvar("c1", vec=False),
    lambda x,c0,c1: (-x)<(-(math.floor(-c1.arg/-c0.arg))) if c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
-  # x//c0<c1 for positive int c0
-  ((UPat.var("x", dtype=dtypes.ints)//UPat.cvar("c0", vec=False))<UPat.cvar("c1", vec=False),
-   lambda x,c0,c1: x<(c1.arg*c0.arg) if c0.arg > 0 else None),
+  # x//d<c for positive int c
+  ((UPat.var("x", dtype=dtypes.ints)//UPat.cvar("d", vec=False))<UPat.cvar("c", vec=False),
+    lambda x,d,c: (x<(c.arg*d.arg) if c.arg > 0 else x<(c.arg*d.arg-(d.arg-1))) if d.arg > 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
   ((UPat.var("x") + UPat.cvar("c1")) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
@@ -273,10 +277,10 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x", dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # ** div **
   # div folding
-  ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)
-      if x.vmin>=0 or x.vmax<=0 else None),  # (x//c+a)//d -> (x+a*c)//(c*d)
-  (UPat.var("x", dtypes.sints) // UPat.var("y"), lambda x,y: div_and_mod_folding(x,y,Ops.IDIV)),
   (UPat.var("x") // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax <=0 else None),
+  (UPat.var("x", dtypes.sints) // UPat.var("y"), lambda x,y: div_and_mod_folding(x,y,Ops.IDIV)),
+  ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a", vec=False))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)
+      if (x.vmin>=0 and a.arg>=0) or (x.vmax<=0 and a.arg<=0) else None),  # (x//c+a)//d -> (x+a*c)//(c*d)
   (UPat.var("x") // UPat.var("d"), lambda x,d: -((-x)//d) if x.vmax <=0 else None),
   ((UPat.var("x", dtypes.sints)+UPat.cvar("c", vec=False)).named("n")//UPat.cvar("d", vec=False),
     lambda x,c,n,d: (-(-(c.arg%d.arg + x - (d.arg-1))//d) + c.arg//d.arg) if x.vmax<=0 and n.vmin>=0 and d.arg>0 else None),
