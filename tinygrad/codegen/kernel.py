@@ -14,10 +14,9 @@ from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, ro
 from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, AMX, CAPTURE_PROCESS_REPLAY
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
-from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.devectorizer import full_graph_rewrite
-from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
+from tinygrad.codegen.lowerer import get_contraction
 from tinygrad.engine.grouper import view_left
+from tinygrad.codegen import full_rewrite
 
 class KernelOptError(Exception): pass
 
@@ -528,7 +527,7 @@ class Kernel:
       return ret
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
-    return graph_rewrite(fixed_ast, view_left)
+    return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
 
   # **** this is the lowerer ****
 
@@ -554,7 +553,7 @@ class Kernel:
     #if __debug__: type_verify(list(modified_ast.toposort()), shape_spec)
 
     try:
-      self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
+      self.uops:list[UOp] = full_rewrite(modified_ast, self.opts)
     except RuntimeError:
       print("***** LINEARIZE FAILURE *****")
       print(f"ast = {self.ast}")
@@ -578,7 +577,7 @@ class Kernel:
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
-    mem_bytes = sum(max(x.src[0].dtype.itemsize * x.st_arg.real_size() for x in group)
+    mem_bytes = sum(max(x.src[0].dtype.nbytes() for x in group)
       for _, group in itertools.groupby([x for x in self.ast.toposort() if x.op in GroupOp.Buffer and x.src[0].op is Ops.DEFINE_GLOBAL],
                         key=lambda x: (x.op, x.src[0].arg)))
     return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops, self.applied_opts, mem_bytes,

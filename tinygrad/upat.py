@@ -1,6 +1,6 @@
 from typing import Any, Callable
 import itertools, inspect, functools, types
-from tinygrad.helpers import partition, dedup
+from tinygrad.helpers import partition, dedup, Context
 from tinygrad.ops import UPat, UPatAny, UOp, Ops, PatternMatcher, graph_rewrite, deconstruct_function
 
 class UPatCompileError(Exception): pass
@@ -139,10 +139,12 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
 def _get_code(self:UPat, has_ctx:bool):
   ret = _get_clause(self, UOp(Ops.NOOP, arg="uop"))
   try:
-    ret = graph_rewrite(ret, pm_proc, name="process UPat")
-    dyn_lookup: dict[str, Any] = {}
-    out = graph_rewrite(ret, pm_renderer, ctx=dyn_lookup, name="compile UPat")
-    rendered = _final_render(out, has_ctx)
+    # TODO: this should be tracked in a "system" rewrite, not untracked or tracked with kernel
+    with Context(TRACK_MATCH_STATS=0):
+      ret = graph_rewrite(ret, pm_proc, name="process UPat")
+      dyn_lookup: dict[str, Any] = {}
+      out = graph_rewrite(ret, pm_renderer, ctx=dyn_lookup, name="compile UPat")
+      rendered = _final_render(out, has_ctx)
   except UPatCompileError:
     #print("FAILED", self, self.location)
     return None

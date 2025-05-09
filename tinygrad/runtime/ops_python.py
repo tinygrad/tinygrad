@@ -91,20 +91,21 @@ class PythonProgram:
         elif uop is Ops.CAST and isinstance(dtype, PtrDType):
           ul[i] = inp[0]
         elif uop is Ops.RANGE:
-          if i not in ul: ul[i] = [inp[0][0]] * warp_size
+          if i not in ul: ul[i] = [0] * warp_size
           else:
             for j in range(len(ul[i])):
               ul[i][j] += 1
-            if ul[i][0] == inp[1][0]:
+            if ul[i][0] == inp[0][0]:
               del ul[i]
               i = loop_ends[i] + 1
               continue
         elif uop is Ops.VECTORIZE: ul[i] = inp
-        elif uop in {Ops.CAST, Ops.BITCAST}:
+        elif uop is Ops.BITCAST:
           assert dtp[0].fmt and dtype.fmt
           pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
-          if uop is Ops.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
-          else: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
+          ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
+        elif uop is Ops.CAST:
+          ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
         elif uop is Ops.LOAD:
           if dtype.count > 1:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]

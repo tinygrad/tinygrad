@@ -147,34 +147,60 @@ class TestVminVmaxDivMod(unittest.TestCase):
     self.assertEqual(uop.vmin, -3)
     self.assertEqual(uop.vmax, 3)
 
+  def test_vmin_vmax_div_symbolic(self):
+    x = UOp.variable('x', 1, 10)
+    y = UOp.variable('y', 3, 5)
+    self.assertEqual((x//y).vmin, 0)
+    self.assertEqual((x//y).vmax, 3)
+    self.assertEqual(((-x)//y).vmin, -3)
+    self.assertEqual(((-x)//y).vmax, 0)
+    self.assertEqual((x//(-y)).vmin, -3)
+    self.assertEqual((x//(-y)).vmax, 0)
+    self.assertEqual(((-x)//(-y)).vmin, 0)
+    self.assertEqual(((-x)//(-y)).vmax, 3)
+
+    self.assertEqual((100//y).vmin, 20)
+    self.assertEqual((100//y).vmax, 33)
+    self.assertEqual(((-100)//y).vmin, -33)
+    self.assertEqual(((-100)//y).vmax, -20)
+    self.assertEqual((100//(-y)).vmin, -33)
+    self.assertEqual((100//(-y)).vmax, -20)
+    self.assertEqual(((-100)//(-y)).vmin, 20)
+    self.assertEqual(((-100)//(-y)).vmax, 33)
+
   def test_vmin_vmax_mod_positive(self):
     # vmin and vmax for modulo of a variable by a positive constant
-    x = UOp.variable('x', 10, 20)
-    uop = x % 3
+    positive = UOp.variable('positive', 10, 20)
+    uop = positive % 3
     self.assertEqual(uop.vmin, 0)
     self.assertEqual(uop.vmax, 2)
 
-  @unittest.skip("broken")
-  def test_vmin_vmax_mod_negative(self):
-    # vmin and vmax for modulo of a variable by a negative constant
-    x = UOp.variable('x', 10, 20)
-    uop = x % -3
+    negative = UOp.variable('negative', -20, -10)
+    uop = negative % 3
     self.assertEqual(uop.vmin, -2)
     self.assertEqual(uop.vmax, 0)
 
-  def test_vmin_vmax_division_with_mixed_range(self):
-    # vmin and vmax for division of a variable with a range crossing zero
-    x = UOp.variable('x', -10, 10)
-    uop = x // 3
-    self.assertEqual(uop.vmin, -3)  # -10//3 = -3 (in C)
-    self.assertEqual(uop.vmax, 3)   # 10//3 = 3
+    mixed = UOp.variable('mixed', -20, 20)
+    uop = mixed % 3
+    self.assertEqual(uop.vmin, -2)
+    self.assertEqual(uop.vmax, 2)
 
-  def test_vmin_vmax_mod_with_mixed_range(self):
-    # vmin and vmax for modulo of a variable with a range crossing zero
-    x = UOp.variable('x', -10, 10)
-    uop = x % 4
-    self.assertEqual(uop.vmin, -3)
-    self.assertEqual(uop.vmax, 3)
+  def test_vmin_vmax_mod_negative(self):
+    # vmin and vmax for modulo of a variable by a negative constant
+    positive = UOp.variable('positive', 10, 20)
+    uop = positive % -3
+    self.assertEqual(uop.vmin, 0)
+    self.assertEqual(uop.vmax, 2)
+
+    negative = UOp.variable('negative', -20, -10)
+    uop = negative % -3
+    self.assertEqual(uop.vmin, -2)
+    self.assertEqual(uop.vmax, 0)
+
+    mixed = UOp.variable('mixed', -20, 20)
+    uop = mixed % -3
+    self.assertEqual(uop.vmin, -2)
+    self.assertEqual(uop.vmax, 2)
 
 class TestVminVmaxVConst(unittest.TestCase):
   def test_vmin_vmax_vconst_single_element(self):
@@ -209,10 +235,9 @@ class TestVminVmaxVConst(unittest.TestCase):
 
   def test_vmin_vmax_vconst_with_bools(self):
     # vmin and vmax for a vector constant of bool values
-    uop = UOp.const(dtypes.float32.vec(3), (True, False, False))
-    # TODO: these return floats, not bool
-    self.assertEqual(uop.vmin, 0.0)
-    self.assertEqual(uop.vmax, 1.0)
+    uop = UOp.const(dtypes.bool.vec(3), (True, False, False))
+    self.assertIs(uop.vmin, False)
+    self.assertIs(uop.vmax, True)
 
 class TestConstFactor(unittest.TestCase):
   def test_const_factor_constant(self):

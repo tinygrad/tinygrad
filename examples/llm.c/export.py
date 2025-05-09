@@ -25,7 +25,7 @@ if __name__ == "__main__":
   Tensor.training = True
   optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=1e-4)
   warmup_count = getenv("WARMUP", 3)
-  for i in range(warmup_count):  # TODO: why does it take three and not two to stablize
+  for i in range(warmup_count):  # TODO: why does it take three and not two to stabilize
     GlobalCounters.reset()
     X = Tensor.empty(4, 64, dtype=dtypes.int).reshape(B, T)
     Y = Tensor.empty(4, 64, dtype=dtypes.int).reshape(B, T)
