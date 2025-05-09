@@ -3,42 +3,17 @@
 // npm install
 // node --stack-size=65500 ./tinygrad/viz/proxy/index.js
 
-const { createCanvas } = require("canvas");
-const dagre = require("dagre");
+const { Worker } = require('worker_threads');
 
-// ** copied from worker.js
-
-const NODE_PADDING = 10;
-const LINE_HEIGHT = 14;
-const canvas = createCanvas(0, 0);
-const ctx = canvas.getContext("2d");
-ctx.font = `${LINE_HEIGHT}px sans-serif`;
-
-function getTextDims(text) {
-  let [maxWidth, height] = [0, 0];
-  for (line of text.split("\n")) {
-    const { width } = ctx.measureText(line);
-    if (width > maxWidth) maxWidth = width;
-    height += LINE_HEIGHT;
-  }
-  return [maxWidth, height];
-}
-
-function calculateLayout(graph) {
-  const g = new dagre.graphlib.Graph({ compound: true });
-  g.setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-  for (const [k, {label, src, color}] of Object.entries(graph)) {
-    // adjust node dims by label size + add padding
-    const [labelWidth, labelHeight] = getTextDims(label);
-    g.setNode(k, {label, color, width:labelWidth+NODE_PADDING*2, height:labelHeight+NODE_PADDING*2, padding:NODE_PADDING});
-    const edgeCounts = {}
-    for (const s of src) {
-      edgeCounts[s] = (edgeCounts[s] || 0)+1;
-    }
-    for (const s of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? edgeCounts[s] : null });
-  }
-  dagre.layout(g);
-  return dagre.graphlib.json.write(g);
+function runLayout(graph) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker('./tinygrad/viz/proxy/layout-worker.js', { workerData: graph });
+    worker.on('message', resolve);
+    worker.on('error', reject);
+    worker.on('exit', code => {
+      if (code !== 0) reject(new Error(`Worker stopped with code ${code}`));
+    });
+  });
 }
 
 // ** HTTP stuff
@@ -60,14 +35,16 @@ const server = http.createServer((req, res) => {
   console.log(`${new Date()} proxy request`)
   let body = "";
   req.on("data", chunk => body += chunk);
-  req.on("end", () => {
+  req.on("end", async () => {
     try {
       const graph = JSON.parse(body);
+      const layout = await runLayout(graph);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(calculateLayout(graph)));
+      res.end(JSON.stringify(layout));
     } catch (e) {
-      res.writeHead(400);
-      res.end("invalid request body");
+      console.log("ERR", e);
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: "invalid request body" }));
       return;
     }
   });
