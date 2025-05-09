@@ -491,6 +491,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # group into kernels
   realize_map = group_realizes(tensor_map[big_sink])
+  metadata = {v:k.metadata for k,v in tensor_map.items()}
 
   if getenv("VIZ"):
     # VIZ the contiguous graph
@@ -499,11 +500,20 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
       for s in u.src: children.setdefault(s, []).append(u)
     sub: dict[UOp, UOp] = {}
     for r,reason in realize_map.items():
-      if r.op in ALWAYS_CONTIGUOUS: continue
       for child in children.get(r, []):
-        sub[child] = child.replace(src=tuple(UOp(Ops.CONTIGUOUS, x.dtype, (x,), arg=reason) if x is r else x for x in child.src))
+        new_src: list[UOp] = []
+        for x in child.src:
+          if x is not r:
+            new_src.append(x)
+            continue
+          # if it's a contiguous already, track down where it's coming from
+          if x.op is Ops.CONTIGUOUS:
+            m = metadata[x]
+            new_src.append(x.replace(arg=f"user inserted contiguous @ {m.caller}"))
+          else: new_src.append(UOp(Ops.CONTIGUOUS, x.dtype, (x,), arg=reason))
+        sub[child] = child.replace(src=tuple(new_src))
     graph_rewrite(tensor_map[big_sink].substitute(sub), PatternMatcher([]), name="View Contiguous Graph")
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx=KernelContext(realize_map, {v:k.metadata for k,v in tensor_map.items()}),
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx=KernelContext(realize_map, metadata),
                                  bottom_up=True, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
