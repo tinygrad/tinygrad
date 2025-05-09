@@ -1,7 +1,7 @@
 import ctypes, struct, dataclasses, array, itertools
 from typing import Sequence
 from tinygrad.runtime.autogen import libusb
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, to_mv
 from tinygrad.runtime.support.hcq import MMIOInterface
 
 class USB3:
