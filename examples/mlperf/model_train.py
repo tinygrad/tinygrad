@@ -1126,6 +1126,7 @@ def train_bert():
       Tensor.training = True
       BEAM.value = TRAIN_BEAM
       st = time.perf_counter()
+      log_event_start(BenchEvent.STEP)
       GlobalCounters.reset()
       loss, global_norm, lr = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler,
         train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
@@ -1145,6 +1146,7 @@ def train_bert():
       assert not math.isnan(loss)
       lr = lr.item()
 
+      log_event_end(BenchEvent.STEP)
       cl = time.perf_counter()
       if BENCHMARK: step_times.append(cl - st)
 
