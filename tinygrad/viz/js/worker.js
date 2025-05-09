@@ -14,8 +14,15 @@ function getTextDims(text) {
   return [maxWidth, height];
 }
 
-onmessage = (e) => {
+
+onmessage = async (e) => {
   const { graph, additions } = e.data;
+  try {
+    const res = await fetch("http://localhost:8080", { method:"POST", body:JSON.stringify(graph), headers:{"Content-Type":"application/json"}});
+    const layout = await res.json();
+    return postMessage(layout);
+  } catch (e) {}
+
   const g = new dagre.graphlib.Graph({ compound: true });
   g.setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
   if (additions.length !== 0) g.setNode("addition", {label:"", style:"fill: rgba(26, 27, 38, 0.5); stroke: none;", padding:0});
