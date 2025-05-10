@@ -1,5 +1,6 @@
 # https://arxiv.org/pdf/2409.02060
-import time
+import time, os
+if "FUSE_ARANGE" not in os.environ: os.environ["FUSE_ARANGE"] = "1"
 import numpy as np
 np.set_printoptions(suppress=True, linewidth=1000)
 import functools
@@ -22,10 +23,17 @@ class MixtureFeedForward:
     g = g.squeeze() # (BS, length, num_experts) -> (num_experts,)
     probs, sel = g.topk(self.activated_experts)
 
+    selected_gate_projs = self.gate_proj[sel]
+    selected_up_projs = self.up_proj[sel]
+    selected_down_projs = self.down_proj[sel]
+    # fusing indexing kernels with dot kernels might disable dot kernel optimizations, so we split it.
+    selected_gate_projs.kernelize(selected_up_projs, selected_down_projs)
+
     # run MoE
-    x_up_gate = x.dot(self.gate_proj[sel].permute(0,2,1)).silu() * x.dot(self.up_proj[sel].permute(0,2,1))
-    x_down = x_up_gate.dot(self.down_proj[sel].permute(0,2,1))
-    return (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
+    x_up_gate = x.dot(selected_gate_projs.permute(0,2,1)).silu() * x.dot(selected_up_projs.permute(0,2,1))
+    x_down = x_up_gate.dot(selected_down_projs.permute(0,2,1))
+    ret = (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
+    return ret
 
 # model is bf16, 1.3B active, 6.9B total
 # M3 Max is 400 GB/s, so 400/2.6 = ~154 tok/s
@@ -91,4 +99,3 @@ if __name__ == "__main__":
     # Hello, I am a newbie to this forum and I am trying to get a better understanding of the different types of data that can be stored in a
     assert toks == [12092, 13, 309, 717, 247, 747, 17782, 281, 436, 12209, 285, 309, 717, 2820, 281, 755,
                     247, 1805, 4685, 273, 253, 1027, 3510, 273, 941, 326, 476, 320, 7141, 275, 247], "BAD OUTPUT!"
-

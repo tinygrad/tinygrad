@@ -2677,7 +2677,7 @@ class Tensor(SimpleMathTrait):
         crossover_dim = dim + n_stages - stage - 1
         blue_box, green_box = x.split(1, crossover_dim)
         flip_dims = tuple(-i for i in range(1, stage+1+(self.ndim-dim)))
-        x = (blue_box.cat(green_box.flip(flip_dims), dim=crossover_dim)).contiguous()
+        x = blue_box.cat(green_box.flip(flip_dims), dim=crossover_dim)
       for substage in range(stage-1, -1, -1):
         partner_dim = dim + n_stages - substage - 1
         x_top, x_bottom = x.split(1, partner_dim)
