@@ -165,8 +165,15 @@ class AM_SMU(AM_IP):
         self.clcks[clck] = [self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|i, read_back_arg=True)&0x7fffffff for i in range(cnt)]
 
     for clck, vals in self.clcks.items():
+      print(clck, vals)
       self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]))
       self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]))
+
+    if level == -1:
+      custom_freq = {self.smu_mod.PPCLK_GFXCLK:2500} #, self.smu_mod.PPCLK_UCLK:1000, self.smu_mod.PPCLK_FCLK:1600, self.smu_mod.PPCLK_SOCCLK:1000}
+      for k,v in custom_freq.items():
+        self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, k << 16 | v)
+        self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, k << 16 | v)
 
   def _smu_cmn_send_msg(self, msg, param=0, debug=False):
     (self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).write(0) # resp reg

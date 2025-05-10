@@ -20,6 +20,13 @@ def _get_comgr_data(data_set, data_type):
   check(comgr.amd_comgr_release_data(data_exec))
   return bytes(dat)
 
+def to_char_p_p(options_list): return (ctypes.c_char_p * len(options_list))(*options_list)
+
+comgr.amd_comgr_action_info_set_option_list.argtypes = [comgr.amd_comgr_action_info_t, ctypes.POINTER(ctypes.c_char_p), comgr.size_t]
+def set_options(action_info, options:bytes):
+  options_list = options.split(b' ')
+  return comgr.amd_comgr_action_info_set_option_list(action_info, to_char_p_p(options_list), len(options_list))
+
 # AMD_COMGR_SAVE_TEMPS=1 AMD_COMGR_REDIRECT_LOGS=stdout AMD_COMGR_EMIT_VERBOSE_LOGS=1
 def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
   check(comgr.amd_comgr_create_action_info(ctypes.byref(action_info := comgr.amd_comgr_action_info_t())))
@@ -46,15 +53,15 @@ def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
     check(comgr.amd_comgr_set_data_name(data_src, b"<null>"))
     check(comgr.amd_comgr_data_set_add(data_set_src, data_src))
     # -include hiprtc_runtime.h was removed
-    check(comgr.amd_comgr_action_info_set_options(action_info, f"-O3 -mcumode --hip-version=6.0.32830 -DHIP_VERSION_MAJOR=6 -DHIP_VERSION_MINOR=0 -DHIP_VERSION_PATCH=32830 -D__HIPCC_RTC__ -std=c++14 -nogpuinc -Wno-gnu-line-marker -Wno-missing-prototypes --offload-arch={arch} -I/opt/rocm/include -Xclang -disable-llvm-passes".encode())) # noqa: E501
+    check(set_options(action_info, f"-O3 -mcumode --hip-version=6.0.32830 -DHIP_VERSION_MAJOR=6 -DHIP_VERSION_MINOR=0 -DHIP_VERSION_PATCH=32830 -D__HIPCC_RTC__ -std=c++14 -nogpuinc -Wno-gnu-line-marker -Wno-missing-prototypes --offload-arch={arch} -I/opt/rocm/include -Xclang -disable-llvm-passes".encode())) # noqa: E501
     status = comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, action_info, data_set_src, data_set_bc)
     if status != 0:
       print(_get_comgr_data(data_set_bc, comgr.AMD_COMGR_DATA_KIND_LOG).decode())
       raise RuntimeError("compile failed")
-    check(comgr.amd_comgr_action_info_set_options(action_info, b"-O3 -mllvm -amdgpu-internalize-symbols"))
+    check(set_options(action_info, b"-O3 -mllvm -amdgpu-internalize-symbols"))
     check(comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, action_info, data_set_bc, data_set_reloc))
 
-  check(comgr.amd_comgr_action_info_set_options(action_info, b""))
+  check(set_options(action_info, b""))
   check(comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE, action_info, data_set_reloc, data_set_exec))
   ret = _get_comgr_data(data_set_exec, comgr.AMD_COMGR_DATA_KIND_EXECUTABLE)
   check(comgr.amd_comgr_release_data(data_src))
