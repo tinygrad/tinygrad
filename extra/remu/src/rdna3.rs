@@ -218,5 +218,6 @@ mod test_rdna3 {
     fn test_decode_ds() {
         assert_eq!(test_decode("ds_add_u32 v2, v4 offset:16"), Instruction::DS { op: 0, gds: false, offset1: 0, offset0: 0x10, vdst: 0, data1: 0, data0: 4, addr: 2 });
         assert_eq!(test_decode("ds_store_b32 v0, v1, offset: 0x04 gds"), Instruction::DS { op: 13, gds: true, offset1: 0, offset0: 0x04, vdst: 0, data1: 0, data0: 1, addr: 0 });
+        assert_eq!(test_decode("ds_load_u8 v1, v0 offset:16"), Instruction::DS { op: 58, gds: false, offset1: 0, offset0: 16, vdst: 1, data1: 0, data0: 0, addr: 0 });
     }
 }

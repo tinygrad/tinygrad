@@ -14,6 +14,8 @@ from weakref import WeakKeyDictionary
 
 class GraphException(Exception): pass
 
+def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
+
 def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], max_batch_size=0) -> list[ExecItem]:
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
@@ -39,23 +41,24 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
     current_device = None
 
   for ji in jit_cache:
-    if isinstance(ji.prg, ViewOp): continue
-    ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
-    if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.dev
-    elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"CUDA", "NV", "AMD", "NULL"}:
-      ji_graph_dev = Device[ji.bufs[0].device]
+    match ji.prg:
+      case CompiledRunner():
+        ji_graph_dev = ji.prg.dev
+        # All GraphRunners can graph CompiledRunners
+        can_be_graphed = ji_graph_dev.graph is not None
+      case BufferXfer():
+        ji_graph_dev = Device[unwrap(ji.bufs[0]).device]
+        # Whitelist of devices that support graphing BufferXfers
+        can_be_graphed = ji_graph_dev.graph is not None and ji_graph_dev.device.split(":", 1)[0] in {"CUDA", "NV", "AMD", "NULL"}
+      case ViewOp(): continue # ViewOps are just ignored
+      case _: can_be_graphed = False # Everything else is not graphed and flushes existing graph if it's being constructed
 
-    graph_class = (ji_graph_dev.graph.func if isinstance(ji_graph_dev.graph, functools.partial) else ji_graph_dev.graph) if ji_graph_dev else None
-    can_be_graphed = ji_graph_dev and ji_graph_dev.graph
-    can_share_graph = (ji_graph_dev == current_device or (isinstance(graph_class, type) and issubclass(graph_class, MultiGraphRunner)) and
-                       type(ji_graph_dev) is type(current_device))
-    can_extend_graph_batch = can_be_graphed and (max_batch_size == 0 or len(current_batch) < max_batch_size) and can_share_graph
+    is_multigraph = can_be_graphed and issubclass(graph_class(ji_graph_dev), MultiGraphRunner)
+    can_share_graph = can_be_graphed and (type(ji_graph_dev) is type(current_device) if is_multigraph else ji_graph_dev == current_device)
+    can_extend_graph_batch = can_share_graph and (max_batch_size == 0 or len(current_batch) < max_batch_size)
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
-
-    if can_be_graphed: current_batch.append(ji)
-    else: graphed_jit_cache.append(ji)
-
-    current_device = ji_graph_dev
+    (current_batch if can_be_graphed else graphed_jit_cache).append(ji)
+    current_device = ji_graph_dev if can_be_graphed else None
 
   if len(current_batch) > 0: flush_batch()
   return graphed_jit_cache

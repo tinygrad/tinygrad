@@ -126,13 +126,13 @@ def flip_multi(root:UOp, multi:UOp):
 
 def copy_multi(multi:UOp, device:UOp):
   # if we already have a copy on the device, return that
-  if multi.axis is None: return next((lb for lb in multi.real_lbs if lb.device == device.arg), multi.real_lbs[0].copy_to_device(device.arg))
+  if multi.axis is None: return next((lb for lb in multi.real_lbs if lb.device == device.arg), multi.real_lbs[0].copy_to_device(device))
   # copy lbs to device, pad to final shape, and sum
   llbs:list[UOp] = []
   for lb,real,(start,end) in zip(multi.src, multi.real, multi.bounds):
     if not real: continue
     pad_arg = tuple((0,0) if a != multi.axis else (start, multi.bounds[-1][1]-end) for a in range(len(lb.shape)))
-    llbs.append(lb.copy_to_device(device.arg).pad(pad_arg))
+    llbs.append(lb.copy_to_device(device).pad(pad_arg))
   return functools.reduce(operator.add, llbs)
 
 def assign_multi(dest:UOp, src:UOp):
