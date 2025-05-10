@@ -3,6 +3,7 @@ import numpy as np
 from typing import List, Callable
 import torch
 import warnings
+import ml_dtypes
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL, DEVECTORIZE, OSX
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
@@ -3001,6 +3002,33 @@ class TestOpsUint8(unittest.TestCase):
       lambda x: x.type(torch.uint8).min(),
       lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
 
+class TestOpsFp8s(unittest.TestCase):
+  def _fp8_tc_numpy_matmul(self, A, B, dtype):
+    M, K = A.shape
+    K2, N = B.shape
+    assert K == K2, "Shape mismatch"
+
+    C = np.zeros((M, N), dtype=dtype)
+    for i in range(M):
+        for j in range(N):
+            acc = np.float32(0.0)
+            for k in range(K):
+                acc += A[i, k] * B[k, j]
+            C[i, j] = acc
+    return C
+
+  def _compare_to_numpy_gemm(self, shp_a, shp_b, dtype, np_dtype):
+    rng = np.random.default_rng(0)
+    a = Tensor.rand(shp_a, dtype=dtype)
+    b = Tensor.rand(shp_b, dtype=dtype)
+    np_a = a.numpy().astype(np_dtype)
+    np_b = b.numpy().astype(np_dtype)
+    np.testing.assert_equal(self._fp8_tc_numpy_matmul(np_a, np_b, np_dtype), a.matmul(b).numpy())
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3, Device.DEFAULT), f"no fp8e4m3 on {Device.DEFAULT}")
+  def test_gemm_fp8e4m3(self): self._compare_to_numpy_gemm((64, 64), (64, 64), dtypes.fp8e4m3, ml_dtypes.float8_e4m3fn)
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2, Device.DEFAULT), f"no fp8e5m2 on {Device.DEFAULT}")
+  def test_gemm_fp8e5m2(self): self._compare_to_numpy_gemm((64, 64), (64, 64), dtypes.fp8e5m2, ml_dtypes.float8_e5m2)
 @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
 class TestOpsBFloat16(unittest.TestCase):
   def test_cast(self):

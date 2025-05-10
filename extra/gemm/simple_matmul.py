@@ -5,16 +5,17 @@ from tinygrad.dtype import _to_np_dtype
 from tinygrad.codegen.kernel import OptOps
 from tinygrad.engine.realize import lower_schedule
 
-dtype_in = dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else dtypes.float
+dtype_in = (dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else
+            dtypes.fp8e4m3 if getenv("FP8E4M3") else dtypes.fp8e5m2 if getenv("FP8E5M2") else dtypes.float)
 acc_dtype = dtypes.half if getenv("ACC_HALF") else dtypes.bfloat16 if getenv("ACC_BFLOAT16") else None
-if getenv("INT"):  dtype_in, acc_dtype = dtypes.int8, dtypes.int32
+if getenv("INT"): dtype_in = dtypes.int8acc_dtype = dtypes.int32
 if getenv("UINT"): dtype_in, acc_dtype = dtypes.uint8, dtypes.int32
 
 N = getenv("N", 4096)
 M = getenv("M", N)
 K = getenv("K", N)
 CNT = getenv("CNT", 10)
-ATOL = getenv("ATOL", 1e-4)
+ATOL = getenv("ATOL", 1e-4 if dtype_in not in dtypes.fp8s else 1)
 RTOL = getenv("RTOL", 3e-2)
 INT_LOW = getenv("INT_LOW", 0)
 INT_HIGH = getenv("INT_HIGH", 10)
