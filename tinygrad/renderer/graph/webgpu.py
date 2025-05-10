@@ -1,12 +1,49 @@
 from tinygrad import dtypes
 from tinygrad.device import Buffer
 from tinygrad.ops import Ops, Variable
-from tinygrad.runtime.ops_webgpu.js import init_device, init_encoder, alloc, copyin, copy, copyout, create_layout, create_pipeline, \
-  create_bind_group, begin_compute_pass # pylint: disable=import-error
 from tinygrad.renderer.graph import GraphRenderer
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import merge_dicts
 from typing import cast
+
+# render device ops
+init_device = ['if (!navigator.gpu) throw new Error("WebGPU not supported.");',
+  'const adapter = await navigator.gpu.requestAdapter();',
+  'const { maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup } = adapter.limits;',
+  'const device = await adapter.requestDevice({',
+  '  requiredFeatures: adapter.features.has("shader-f16") ? ["shader-f16"] : [], powerPreference: "high-performance",',
+  '  requiredLimits: { maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup }',
+  '});\n']
+
+# render allocator ops
+# TODO: handle 4-byte alignment
+#if src.nbytes % 4: pad_src = f"const padded = new Uint8Array({src}.length + (4 - {src}.length % 4) % 4); padded.set({src});"
+def alloc(size:str, usage:str) -> str: return f"device.createBuffer({{size: {size}, usage: {usage}}})"
+
+# NOTE: dest/src names are resolved by tinygrad.renderer.graph.GraphRenderer
+def copyin(dest:str, src:str) -> str: return f"device.queue.writeBuffer({dest}, 0, {src});"
+
+def copyout(dest:str, src:str) -> list[str]:
+  return [f'await {src}.mapAsync(GPUMapMode.READ);',
+    f'{dest}.set(new {dest}.constructor({src}.getMappedRange()));',
+    f'{src}.unmap();']
+
+def copy(encoder:str, src:str, dest:str, size:str) -> str: return f"{encoder}.copyBufferToBuffer({src}, 0, {dest}, 0, {size});"
+
+# render compute ops
+def create_layout(buf_types:list[str]) -> str: return "device.createBindGroupLayout({entries:" + \
+  f'[{", ".join(f"{{binding: {i}, visibility: GPUShaderStage.COMPUTE, buffer: {{type: {btype}}} }}" for i, btype in enumerate(buf_types))}]}})'
+
+def create_pipeline(layout:str, code:str) -> str: return f"""device.createComputePipelineAsync({{
+  layout: device.createPipelineLayout({{bindGroupLayouts: [{layout}]}}),
+  compute: {{ module: device.createShaderModule({{ code: {code} }}), entryPoint: "main" }}\n}})"""
+
+def create_bind_group(layout:str, entries:str) -> str: return f"device.createBindGroup({{ layout: {layout}, entries: {entries} }})"
+
+init_encoder = "device.createCommandEncoder()"
+def begin_compute_pass(command_encoder:str, pipeline:str, bind_group:str, global_dims:str) -> list[str]:
+  return [f"const passEncoder = {command_encoder}.beginComputePass();", f"passEncoder.setPipeline({pipeline});",
+    f"passEncoder.setBindGroup(0, {bind_group});", f"passEncoder.dispatchWorkgroups(...{global_dims});", "passEncoder.end();"]
 
 safe_load_state_dict = f"""const safeLoadStateDict = async (modelStateDict, safetensorPath) => {{
   const safetensorBuffer = await fetch(safetensorPath).then(x => x.arrayBuffer()).then(x => new Uint8Array(x));
