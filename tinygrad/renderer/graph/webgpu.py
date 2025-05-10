@@ -37,19 +37,19 @@ class WebGPUJSRenderer(GraphRenderer):
         input_copyins.append(copyin(kernel_bufs[uop.base.buffer], f"bufArg_{i}"))
       elif uop.op is Ops.BIND: # from symbolic variable input
         arg_names.append(f"intArg_{i}")
-        kernel_bufs[uop.unbind()[0]] = f"intArg_{i}_buf"
-        sym_var_bufs.append(f'const intArg_{i}_buf = {alloc("4", "uniform")};')
-        input_copyins.append(copyin(f"intArg_{i}_buf", f'new Int32Array([{f"intArg_{i}"}])'))
+        kernel_bufs[uop.unbind()[0]] = f"input_{i}"
+        sym_var_bufs.append(f'const input_{i} = {alloc("4", "uniform")};')
+        input_copyins.append(copyin(f"input_{i}", f'new Int32Array([{f"intArg_{i}"}])'))
 
     # render outputs
     command_encoder = [f"const commandEncoder = {init_encoder};"]
     for i, uop in enumerate(self.outputs):
-      output_read_bufs.append(f'const outputReader_{i} = {alloc(str(uop.base.buffer.nbytes), "map_read")};')
-      output_copies.append(copy("commandEncoder", (out_buf := kernel_bufs[uop.base.buffer]), f"outputReader_{i}", f"{out_buf}.size"))
+      output_read_bufs.append(f'const gpuReadBuffer{i} = {alloc(str(uop.base.buffer.nbytes), "map_read")};')
+      output_copies.append(copy("commandEncoder", (out_buf := kernel_bufs[uop.base.buffer]), f"gpuReadBuffer{i}", f"{out_buf}.size"))
       array_type = f"{'Uint' if (dt:=uop.dtype) in dtypes.uints else 'Int' if dt in (dtypes.sints+(dtypes.bool,)) else 'Float'}{8*dt.itemsize}Array"
-      ret_bufs.append(f"const ret_{i} = new {array_type}({out_buf}.size / {dt.itemsize});")
-      output_copyouts += copyout(f"ret_{i}", f"outputReader_{i}")
-      ret_names.append(f"ret_{i}")
+      ret_bufs.append(f"const resultBuffer{i} = new {array_type}(gpuReadBuffer{i}.size / {dt.itemsize});")
+      output_copyouts += copyout(f"resultBuffer{i}", f"gpuReadBuffer{i}")
+      ret_names.append(f"resultBuffer{i}")
     args, ret = ", ".join(arg_names), ", ".join(ret_names)
 
     # render setup of WebGPU buffers

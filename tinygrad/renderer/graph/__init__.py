@@ -38,7 +38,8 @@ class GraphRenderer(Renderer):
     # mark which buffers have state
     ctr = itertools.count()
     self.eis: list[ExecItem] = []
-    self.empty_bufs: dict[Buffer, str] = {u.base.buffer: f"buf_{next(ctr)}" for u in self.inputs if u.base.op is Ops.BUFFER}
+    self.empty_bufs: dict[Buffer, str] = {u.base.buffer: f"input_{i}" for i, u in enumerate(self.inputs) if u.base.op is Ops.BUFFER}
+    self.empty_bufs.update({u.base.buffer: f"output_{i}" for i, u in enumerate(self.outputs)})
     self.state_bufs: dict[Buffer, str] = dict()
     seen = set(self.empty_bufs.keys())
     for si, ei in lower_schedule(memory_planner(schedule)):
