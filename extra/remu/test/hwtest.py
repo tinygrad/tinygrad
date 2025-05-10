@@ -149,7 +149,8 @@ class TestHW(unittest.TestCase):
     v_mov_b32_e32 v1 {f16_to_bits(2.0)}
     """
     self.assertEqual(get_output(init_state+"\n"+"v_fmac_f16_e64 v1 v11 v10"), f16_to_bits(14.))
-    self.assertEqual(get_output(init_state+"\n"+"v_fmac_f16_e64 v1 -v11 v10"), f16_to_bits(10.))
+    self.assertEqual(get_output(init_state+"\n"+"v_fmac_f16_e64 v1 -v11 v10"), f16_to_bits(-10.))
+    self.assertEqual(get_output(init_state+"\n"+"v_fmac_f16_e64 v1 -v11 -v10"), f16_to_bits(14.))
 
 if __name__ == "__main__":
   unittest.main()
