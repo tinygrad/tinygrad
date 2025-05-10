@@ -58,7 +58,7 @@ class TestValidIdxSimplification(unittest.TestCase):
     load = get_gated_load_uop(gate, idx)
     self.check(load,
       "0",
-      "(((lidx0+(gidx0*4))<19)!=True)")
+      "(18<(lidx0+(gidx0*4)))")
 
   def test_simplify_within_valid1(self):
     ridx0 = Range(0, 4)
@@ -190,7 +190,7 @@ class TestImageSimplification(unittest.TestCase):
     # should match any one of the AND clause and drop the matched statement from valid
     valid = (gidx0<1).ne(True) & (gidx1<1).ne(True)
     load = get_load_image_uop(shape, valid, (gidx0+1, gidx1-1))
-    self.check(load, "((gidx0<1)!=True)", "(gidx0+1)", "(gidx1+-1)")
+    self.check(load, "(0<gidx0)", "(gidx0+1)", "(gidx1+-1)")
 
     valid = (gidx0<1).ne(True) & (gidx1<1).ne(True)
     load = get_load_image_uop(shape, valid, (gidx0, gidx1-1))
@@ -299,7 +299,7 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, valid, idx)
 
     self.check(load,
-               "((((idx2*2)+ridx0)<11)&((((idx1*8)+ridx1)<3)!=True))",
+               "((((idx2*2)+ridx0)<11)&(2<((idx1*8)+ridx1)))",
                "(((idx0+((idx1*512)+(ridx1*64)))+832)%1024)",
                "((((idx2*2)+ridx0)+(((idx1+((ridx1+5)//8))+1)//2))+-4)")
 
