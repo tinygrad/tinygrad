@@ -7,7 +7,6 @@ from tinygrad.nn.state import get_state_dict
 from tinygrad.helpers import Context
 from tinygrad.dtype import dtypes
 from tinygrad.ops import Ops
-from tinygrad.renderer.graph.webgpu import WebGPUJSRenderer
 import json
 from collections import OrderedDict
 
@@ -143,6 +142,7 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
   elif target == "wasm":
     return export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names, weight_names, model_name, symbolic_vars, wasm=True)
   elif target == "webgpu":
+    from tinygrad.renderer.graph.webgpu import WebGPUJSRenderer
     prg = WebGPUJSRenderer(getattr(model, "forward", model), inputs).render_graph()
   else:
     prg = json.dumps({

@@ -2,7 +2,6 @@ from pathlib import Path
 from extra.models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
 from extra.export_model import export_model
-from tinygrad.renderer.graph.webgpu import WebGPUJSRenderer
 from tinygrad.helpers import getenv, fetch
 from tinygrad.nn.state import safe_save
 import ast
@@ -16,6 +15,7 @@ if __name__ == "__main__":
     prg, inp_sizes, out_sizes, state = export_model(model, mode, Tensor.randn(1,3,224,224))
 
   if mode == "webgpu":
+    from tinygrad.renderer.graph.webgpu import WebGPUJSRenderer
     renderer = WebGPUJSRenderer(model.forward, (Tensor.randn(1,3,224,224),))
     with open(dirname / "net.js", "w") as f: f.write(renderer.render_graph())
     safe_save(renderer.state_dict, dirname / "net.js.safetensors")

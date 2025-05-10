@@ -51,7 +51,7 @@ class WebGPUJSRenderer(GraphRenderer):
     args, ret = ", ".join(arg_names), ", ".join(ret_names)
 
     # render setup of WebGPU buffers
-    empty_bufs = [f"const {name} = {alloc(str(buf.nbytes), "empty")};" for buf, name in self.empty_bufs.items()]
+    empty_bufs = [f'const {name} = {alloc(str(buf.nbytes), "empty")};' for buf, name in self.empty_bufs.items()]
     state_dict_kv_pairs = [f'"{name}": {alloc(str(buf.nbytes), "state")},' for buf, name in self.state_bufs.items()]
     state_dict = ["const stateDict = {"] + indent(state_dict_kv_pairs, 1) + ["};"]
     # representing Infinity with a runtime buffer is the most correct way known, see https://github.com/tinygrad/tinygrad/pull/10179
@@ -71,12 +71,12 @@ class WebGPUJSRenderer(GraphRenderer):
       layouts.append(create_layout(['"uniform"'] + ['"storage"'] * len(ei.bufs) + ['"uniform"'] * len(p.vars)))
       kernels[p.function_name] = p.src.replace(p.function_name, "main")
       # kernel_name_sequence becomes pipelines: a JS array of {p.function_name: GPUComputePipeline}
-      kernel_name_sequence.append(f'"{p.function_name}"') 
+      kernel_name_sequence.append(f'"{p.function_name}"')
       buf_names = ", ".join(kernel_bufs[arg] for arg in ei.bufs + p.vars)
       global_size = ', '.join(idx.simplify().render() if isinstance(idx, Variable) else str(idx) for idx in p.global_size)
       # deliberately display p.function_name in every addComputePass for easier debugging/understanding
       compute_passes.append(f'addComputePass(pipelines[{i}]["{p.function_name}"], [{buf_names}], [{global_size}], commandEncoder, layouts[{i}]);')
-    
+
     layouts = [f'const layouts = [{", ".join(layouts)}];']
     kernels = ["const kernels = {"] + indent([f'"{k}": `{v}`,' for k,v in kernels.items()], 1) + ["};\n"]
     make_pipelines = [f'const kernelNameSequence = [{", ".join(kernel_name_sequence)}];',
