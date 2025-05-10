@@ -60,10 +60,10 @@ class TextModelExportWebGPU(unittest.TestCase):
       dt = inputs[i].dtype
       expected_arr_prefix = f"{expected_buffer_type}{dt.itemsize*8}"
       # test input buffers
-      self.assertIn(f"new {expected_arr_prefix}Array(gpuWriteBuffer{i}.getMappedRange()).set(_input{i});", prg)
+      self.assertIn(f"if (bufArg_{i}.byteLength !== input_{i}.size)", prg)
       # test output buffers
-      self.assertIn(f"const resultBuffer{i} = new {expected_arr_prefix}Array(gpuReadBuffer{i}.size/{dt.itemsize});", prg)
-      self.assertIn(f"resultBuffer{i}.set(new {expected_arr_prefix}Array(gpuReadBuffer{i}.getMappedRange()));", prg)
+      self.assertIn(f"const resultBuffer{i} = new {expected_arr_prefix}Array(gpuReadBuffer{i}.size / {dt.itemsize});", prg)
+      self.assertIn(f"resultBuffer{i}.set(new resultBuffer{i}.constructor(gpuReadBuffer{i}.getMappedRange()));", prg)
 
 if __name__ == '__main__':
   unittest.main()
