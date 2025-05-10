@@ -653,7 +653,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, cpu, gpu]
+        backend: [x86, llvm, cpu, gpu]
 
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
@@ -672,10 +672,10 @@ jobs:
           opencl: ${{ matrix.backend == 'gpu' && 'true' }}
           llvm: ${{ matrix.backend == 'llvm' && 'true' }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'gpu' && 'GPU=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'x86' && 'X86=1' || matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'gpu' && 'GPU=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
-          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CPU','GPU'], Device.DEFAULT"
+          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['X86','LLVM','CPU','GPU'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (not cuda)
         run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
