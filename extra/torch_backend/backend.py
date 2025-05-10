@@ -4,16 +4,16 @@
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.ops import Ops
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import getenv, flatten, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib, math, operator, functools, inspect
+import torch, pathlib, math, operator, functools, inspect, weakref
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
-def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
+def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or torch.tiny.current_device()}"
 def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
 
 import torch.utils.cpp_extension
@@ -25,7 +25,7 @@ def unwrap(x:torch.Tensor) -> Tensor:
 class TinyBackend:
   def is_initialized(self): return True
   def is_available(self): return True
-  def current_device(self): return 0
+  def current_device(self): return 0 # TODO:
   def _is_in_bad_fork(self): return False
   def manual_seed_all(self, seed: int): Tensor.manual_seed(seed)
   def device_count(self): return getenv("GPUS", 1) # TODO: device count in tiny?
@@ -593,7 +593,6 @@ if TORCH_DEBUG:
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
-import weakref
 _torch_modules_with_buffers: weakref.WeakSet[torch.nn.Module] = weakref.WeakSet()
 def register_torch_buffer(mod, _name, _buffer): _torch_modules_with_buffers.add(mod)
 def get_real_tinygrad_buffers():
@@ -630,3 +629,47 @@ def _optimizer_patched_init(self, *args, **kwargs):
   _optimizer_init(self, *args, **kwargs)
   self.register_step_post_hook(realize_optimizer_step)
 torch.optim.Optimizer.__init__ = _optimizer_patched_init
+
+# multigpu
+class TinyDistributedWork(torch.distributed.Work):
+  def __init__(self, result):
+    super().__init__()
+    self.result = result
+    self.future = torch.futures.Future()
+    self.future.set_result(self.result)
+  def wait(self, timeout=None): return True
+  def get_future(self): return self.future
+# TODO: move this off CPU
+class ProcessGroupTiny(torch.distributed.ProcessGroup):
+  def __init__(self, store, rank, size):
+    super().__init__(store, rank, size)
+    self.gloo = None
+    self._pending_work = [] # TODO: when can we clean this up?
+  def _ensure_gloo(self):
+    if self.gloo is None: self.gloo = torch.distributed.new_group(backend="gloo")
+  def allreduce(self, tensors, opts):
+    self._ensure_gloo()
+    tensors_cpu = [x.cpu() for x in tensors]
+    self.gloo.allreduce(tensors_cpu, opts).wait()
+    for a,b in zip(tensors, tensors_cpu): a.copy_(b)
+    self._pending_work.append(TinyDistributedWork(tensors))
+    return self._pending_work[-1]
+  def broadcast(self, tensors, opts):
+    self._ensure_gloo()
+    tensors_cpu = [x.cpu() for x in tensors]
+    self.gloo.broadcast(tensors_cpu, opts).wait()
+    for a,b in zip(tensors, tensors_cpu): a.copy_(b)
+    self._pending_work.append(TinyDistributedWork(tensors))
+    return self._pending_work[-1]
+  def allgather(self, outputs, inputs, opts=None):
+    self._ensure_gloo()
+    opts = opts or torch.distributed.distributed_c10d.AllgatherOptions()
+    inputs_cpu = [x.cpu() for x in inputs]
+    outputs_cpu = [[torch.empty_like(x) for _ in range(self.size())] for x in inputs_cpu]
+    self.gloo.allgather(outputs_cpu, inputs_cpu, opts).wait()
+    for a,b in zip(flatten(outputs),flatten(outputs_cpu)): a.copy_(b)
+    self._pending_work.append(TinyDistributedWork(outputs))
+    return self._pending_work[-1]
+
+def create_pg_tiny(store, rank, size, timeout): return ProcessGroupTiny(store, rank, size)
+torch.distributed.Backend.register_backend("tiny", create_pg_tiny, devices="tiny")
