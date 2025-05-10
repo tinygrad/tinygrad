@@ -2,7 +2,7 @@ from tinygrad import dtypes
 from tinygrad.device import Buffer
 from tinygrad.ops import Ops, Variable
 from tinygrad.runtime.ops_webgpu.js import init_device, init_encoder, alloc, copyin, copy, copyout, create_layout, create_pipeline, \
-  create_bind_group, begin_compute_pass
+  create_bind_group, begin_compute_pass # pylint: disable=import-error
 from tinygrad.renderer.graph import GraphRenderer
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import merge_dicts
