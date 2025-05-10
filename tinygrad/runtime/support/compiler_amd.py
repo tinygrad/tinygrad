@@ -2,7 +2,7 @@ import ctypes, subprocess
 import tinygrad.runtime.autogen.comgr as comgr
 from tinygrad.device import Compiler, CompileError
 from tinygrad.runtime.ops_llvm import LLVMCompiler
-from tinygrad.helpers import OSX
+from tinygrad.helpers import OSX, to_char_p_p
 
 def amdgpu_disassemble(lib:bytes):
   asm = subprocess.check_output(["llvm-objdump" if OSX else "/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
@@ -20,11 +20,11 @@ def _get_comgr_data(data_set, data_type):
   check(comgr.amd_comgr_release_data(data_exec))
   return bytes(dat)
 
+# amd_comgr_action_info_set_options was deprecated
 def set_options(action_info, options:bytes):
-  # amd_comgr_action_info_set_options was deprecated
-  options_list = options.split(b' ')
-  comgr.amd_comgr_action_info_set_option_list.argtypes = [comgr.amd_comgr_action_info_t, ctypes.POINTER(ctypes.c_char_p), comgr.size_t]
-  return comgr.amd_comgr_action_info_set_option_list(action_info, (ctypes.c_char_p * len(options_list))(*options_list), len(options_list))
+  # TODO: this type should be correct in the autogen stub
+  comgr.amd_comgr_action_info_set_option_list.argtypes = [comgr.amd_comgr_action_info_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), comgr.size_t]
+  return comgr.amd_comgr_action_info_set_option_list(action_info, to_char_p_p(options_list:=options.split(b' ')), len(options_list))
 
 # AMD_COMGR_SAVE_TEMPS=1 AMD_COMGR_REDIRECT_LOGS=stdout AMD_COMGR_EMIT_VERBOSE_LOGS=1
 def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
