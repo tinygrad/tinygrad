@@ -1,3 +1,4 @@
+from tinygrad import dtypes
 from tinygrad.ops import Ops, Variable
 from tinygrad.runtime.ops_webgpu import js_init_device, js_init_encoder, js_alloc, js_copyin, js_copy, js_copyout, js_create_layout, \
   js_create_pipeline, js_create_bind_group, js_begin_compute_pass
@@ -36,14 +37,15 @@ class WebGPUJSRenderer(GraphRenderer):
         arg_names.append(f"intArg_{i}")
         kernel_bufs[uop.unbind()[0]] = f"intArg_{i}_buf"
         sym_var_bufs.append(f'const intArg_{i}_buf = {js_alloc("4", "uniform")};')
-        input_copyins.append(js_copyin(f"intArg_{i}_buf", f"new Int32Array([{f"intArg_{i}"}])"))
+        input_copyins.append(js_copyin(f"intArg_{i}_buf", f'new Int32Array([{f"intArg_{i}"}])'))
 
     # render outputs
     command_encoder = [f"const commandEncoder = {js_init_encoder};"]
     for i, uop in enumerate(self.outputs):
       output_read_bufs.append(f"const outputReader_{i} = {js_alloc(str(uop.base.buffer.nbytes), "copyout")};")
       output_copies.append(js_copy("commandEncoder", (out_buf := kernel_bufs[uop.base.buffer]), f"outputReader_{i}", f"{out_buf}.size"))
-      ret_bufs.append(f"const ret_{i} = new Uint8Array({out_buf}.size);")
+      array_type = f"{'Uint' if (dt:=uop.dtype) in dtypes.uints else 'Int' if dt in (dtypes.sints+(dtypes.bool,)) else 'Float'}{8*dt.itemsize}Array"
+      ret_bufs.append(f"const ret_{i} = new {array_type}({out_buf}.size / {dt.itemsize});")
       output_copyouts += js_copyout(f"ret_{i}", f"outputReader_{i}")
       ret_names.append(f"ret_{i}")
     args, ret = ", ".join(arg_names), ", ".join(ret_names)
@@ -76,19 +78,20 @@ class WebGPUJSRenderer(GraphRenderer):
       compute_passes.append(f'addComputePass(pipelines[{i}]["{p.function_name}"], [{buf_names}], [{global_size}], commandEncoder, layouts[{i}]);')
     
     layouts = [f'const layouts = [{", ".join(layouts)}];']
-    kernels = ["const kernels = {"] + indent([f'"{k}": `{v}`' for k,v in kernels.items()], 1) + ["};\n"]
+    kernels = ["const kernels = {"] + indent([f'"{k}": `{v}`,' for k,v in kernels.items()], 1) + ["};\n"]
     make_pipelines = [f'const kernelNameSequence = [{", ".join(kernel_name_sequence)}];',
       f'let pipelines = await Promise.all(kernelNameSequence.map((name, i) => {js_create_pipeline("layouts[i]", "kernels[name]")}));',
       'pipelines = pipelines.map((pipeline, i) => { return {[kernelNameSequence[i]] : pipeline} });']
     trigger_gpu = ["const gpuCommands = commandEncoder.finish();", "device.queue.submit([gpuCommands]);"]
+    load = ["const load = async (fn) => { await safeLoadStateDict(stateDict, fn); };"]
 
     prg: list[str] = js_init_device + safe_load_state_dict.split("\n") + buf_usages + kernels
     prg += ["const createGraph = async () => {"]
     prg += indent(sym_var_bufs + empty_bufs + state_dict + output_read_bufs + ret_bufs + [declare_infinity, write_infinity], 1)
-    prg += indent(add_compute_pass + layouts + make_pipelines, 1)
+    prg += indent(add_compute_pass + layouts + make_pipelines + load, 1)
     prg += indent([f"const run = async ({args}) => {{"], 1)
     prg += indent(command_encoder + input_copyins + compute_passes + output_copies + trigger_gpu + output_copyouts + [f"return [{ret}];"], 2)
-    prg += indent(["};", "return { stateDict, run };"], 1)
+    prg += indent(["};", "return { device, stateDict, load, run };"], 1)
     prg += ["};"]
-    prg += ["export { createGraph, safeLoadStateDict, device };"]
+    prg += ["export default createGraph;"]
     return "\n".join(prg)

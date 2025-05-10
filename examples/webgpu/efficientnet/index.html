@@ -88,8 +88,10 @@ canvas {  display: none; }
 		try {
 			resultText.innerHTML = "loading..."
 			labels = await getLabels();
-			const model = (await import("../../net.js")).default;
-			net = await timer(() => model.load('../../net.js.safetensors'), "(compilation)");
+			const createGraph = (await import("../../net.js")).default;
+			const model = await createGraph();
+			await timer(() => model.load('../../net.js.safetensors'), "(compilation)");
+			net = model.run;
 			resultText.innerHTML = "ready"
 		} catch (e) {
 			error(e)
