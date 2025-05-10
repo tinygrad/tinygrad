@@ -124,7 +124,10 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
 def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split_rem: bool=False) -> UOp|None:
   # simplify x // y or x % y, None means no change
   # simple cancel div/mod case
-  if y.vmin*y.vmax > 0 and (q:=cdiv(x.vmin,y.vmin)) == cdiv(x.vmin,y.vmax) == cdiv(x.vmax,y.vmin) == cdiv(x.vmax,y.vmax): # type: ignore
+  x_min, x_max, y_min, y_max = x.vmin, x.vmax, y.vmin, y.vmax
+  assert isinstance(x_min, int) and isinstance(x_max, int) and isinstance(y_min, int) and isinstance(y_max, int)
+
+  if y_min*y_max > 0 and (q:=cdiv(x_min,y_min)) == cdiv(x_min,y_max) == cdiv(x_max,y_min) == cdiv(x_max,y_max):
     return x - q*y if which is Ops.MOD else x.const_like(q)
 
   if (y.op is not Ops.CONST) or ((c := y.arg) <= 0) or (x.dtype.count > 1): return None
@@ -156,10 +159,9 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
     if which is Ops.MOD: return rem - rem.vmin//c*c
     return sum((f-r)//c * v for f,r,v in zip(factors,rems,svars)) + (const-const%c+rem.vmin//c*c)//c
 
-  if math.gcd(gcd, const)!=1:
-    gcd = math.gcd(gcd, const)
-    ret = UOp(which, x.dtype, src=(sum(f//gcd * v for f,v in zip(factors, svars)) + const//gcd, x.const_like(c//gcd)))
-    return ret*gcd if which is Ops.MOD else ret
+  if (g:=math.gcd(gcd, const))!=1:
+    ret = UOp(which, x.dtype, src=(sum(f//g * v for f,v in zip(factors, svars)) + const//g, x.const_like(c//g)))
+    return ret*g if which is Ops.MOD else ret
 
   if gcd != 1: something_changed = True
   if not something_changed:
@@ -174,7 +176,7 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
       quo += q * v
 
   # if numerator before/after is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
-  if (x.vmin < 0 or rem.vmin < 0) and remainders: return None
+  if (x_min < 0 or rem.vmin < 0) and remainders: return None
   if which is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
   return rem//(c//gcd)+quo
 
