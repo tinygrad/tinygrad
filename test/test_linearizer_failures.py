@@ -1620,5 +1620,34 @@ class TestLinearizerFailures(unittest.TestCase):
     # NOTE: this is slow to run, just confirm it can generate the program without Exception
     Kernel(ast, opts=Device[Device.DEFAULT].renderer).apply_opts(opts).to_program()
 
+  # from IGNORE_BEAM_CACHE=1 BEAM=2 python test/test_softmax_fusion.py TestFuse.test_double_gemm
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test needs TC")
+  def test_failure_59(self):
+    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(1024), arg=0, src=()),
+        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(32, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (2,)), src=(
+          UOp(Ops.MUL, dtypes.float, arg=None, src=(
+            UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (3,), True), src=(
+              UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                  UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(1024), arg=1, src=()),
+                  UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(32, 32, 32, 32), strides=(32, 0, 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),
+                UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                  UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(1024), arg=2, src=()),
+                  UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(32, 32, 32, 32), strides=(0, 0, 1, 32), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+            UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+              UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(1024), arg=3, src=()),
+              UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(32, 32, 32, 1), strides=(0, 1, 32, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),))
+    opts = [Opt(op=OptOps.TC, axis=0, arg=(0, 2))]
+    lin = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
+    try:
+      lin.apply_opts(opts)
+    except AssertionError:
+      # AssertionError is from `assert all_same(tensor_core_opts)` in kernel.py
+      # only fails with metal TC
+      assert Device.DEFAULT == "METAL"
+
 if __name__ == '__main__':
   unittest.main()
