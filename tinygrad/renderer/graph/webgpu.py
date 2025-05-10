@@ -28,27 +28,28 @@ def indent(strings:list[str], indents:int) -> list[str]: return [indents*"  " + 
 class WebGPUJSRenderer(GraphRenderer):
   def render_graph(self) -> str:
     # render I/O between host/WebGPU
-    arg_names, input_copyins, sym_var_bufs, output_read_bufs, output_copies, ret_bufs, output_copyouts, ret_names = [], [], [], [], [], [], [], []
+    arg_names, copyins, sym_var_bufs, validators, copyout_bufs, output_copies, ret_bufs, copyouts, ret_names = [], [], [], [], [], [], [], [], []
     kernel_bufs = cast(dict[Buffer|Variable, str], merge_dicts([self.empty_bufs, {k: f'stateDict["{v}"]' for k,v in self.state_bufs.items()}]))
     # render inputs
     for i, uop in enumerate(self.inputs):
       if uop.base.op is Ops.BUFFER: # from Tensor input
         arg_names.append(f"bufArg_{i}")
-        input_copyins.append(copyin(kernel_bufs[uop.base.buffer], f"bufArg_{i}"))
+        copyins.append(copyin((buf:=kernel_bufs[uop.base.buffer]), f"bufArg_{i}"))
+        validators.append(f"if (bufArg_{i}.byteLength !== {buf}.size) throw new Error(`byteLength mismatch between argument and WebGPU buffer`);")
       elif uop.op is Ops.BIND: # from symbolic variable input
         arg_names.append(f"intArg_{i}")
         kernel_bufs[uop.unbind()[0]] = f"input_{i}"
         sym_var_bufs.append(f'const input_{i} = {alloc("4", "uniform")};')
-        input_copyins.append(copyin(f"input_{i}", f'new Int32Array([{f"intArg_{i}"}])'))
+        copyins.append(copyin(f"input_{i}", f'new Int32Array([{f"intArg_{i}"}])'))
 
     # render outputs
     command_encoder = [f"const commandEncoder = {init_encoder};"]
     for i, uop in enumerate(self.outputs):
-      output_read_bufs.append(f'const gpuReadBuffer{i} = {alloc(str(uop.base.buffer.nbytes), "map_read")};')
+      copyout_bufs.append(f'const gpuReadBuffer{i} = {alloc(str(uop.base.buffer.nbytes), "map_read")};')
       output_copies.append(copy("commandEncoder", (out_buf := kernel_bufs[uop.base.buffer]), f"gpuReadBuffer{i}", f"{out_buf}.size"))
       array_type = f"{'Uint' if (dt:=uop.dtype) in dtypes.uints else 'Int' if dt in (dtypes.sints+(dtypes.bool,)) else 'Float'}{8*dt.itemsize}Array"
       ret_bufs.append(f"const resultBuffer{i} = new {array_type}(gpuReadBuffer{i}.size / {dt.itemsize});")
-      output_copyouts += copyout(f"resultBuffer{i}", f"gpuReadBuffer{i}")
+      copyouts += copyout(f"resultBuffer{i}", f"gpuReadBuffer{i}")
       ret_names.append(f"resultBuffer{i}")
     args, ret = ", ".join(arg_names), ", ".join(ret_names)
 
@@ -90,10 +91,10 @@ class WebGPUJSRenderer(GraphRenderer):
 
     prg: list[str] = init_device + safe_load_state_dict.split("\n") + buf_usages + kernel_obj
     prg += ["const createGraph = async () => {"]
-    prg += indent(sym_var_bufs + empty_bufs + state_dict + output_read_bufs + ret_bufs + [declare_infinity, write_infinity], 1)
+    prg += indent(sym_var_bufs + empty_bufs + state_dict + copyout_bufs + ret_bufs + [declare_infinity, write_infinity], 1)
     prg += indent(add_compute_pass + layouts + make_pipelines + load, 1)
     prg += indent([f"const run = async ({args}) => {{"], 1)
-    prg += indent(command_encoder + input_copyins + compute_passes + output_copies + trigger_gpu + output_copyouts + [f"return [{ret}];"], 2)
+    prg += indent(validators + command_encoder + copyins + compute_passes + output_copies + trigger_gpu + copyouts + [f"return [{ret}];"], 2)
     prg += indent(["};", "return { device, stateDict, load, run };"], 1)
     prg += ["};"]
     prg += ["export default createGraph;"]

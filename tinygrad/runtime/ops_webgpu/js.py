@@ -1,5 +1,5 @@
 # Compute ops
-def create_layout(buf_types:list[str]) -> str: return f"device.createBindGroupLayout({{entries:" + \
+def create_layout(buf_types:list[str]) -> str: return "device.createBindGroupLayout({entries:" + \
   f'[{", ".join(f"{{binding: {i}, visibility: GPUShaderStage.COMPUTE, buffer: {{type: {btype}}} }}" for i, btype in enumerate(buf_types))}]}})'
 
 def create_pipeline(layout:str, code:str) -> str: return f"""device.createComputePipelineAsync({{
@@ -31,6 +31,6 @@ init_device = ['if (!navigator.gpu) throw new Error("WebGPU not supported.");',
   'const adapter = await navigator.gpu.requestAdapter();',
   'const { maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup } = adapter.limits;',
   'const device = await adapter.requestDevice({',
-	'  requiredFeatures: adapter.features.has("shader-f16") ? ["shader-f16"] : [], powerPreference: "high-performance",',
+  '  requiredFeatures: adapter.features.has("shader-f16") ? ["shader-f16"] : [], powerPreference: "high-performance",',
   '  requiredLimits: { maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup }',
   '});\n']
