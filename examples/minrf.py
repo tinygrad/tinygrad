@@ -121,11 +121,12 @@ class DiT_Llama:
     dt = Tensor.full((b,)+(1,)*len(z.shape[1:]), fill_value=1.0/sample_steps)
     images = [z]
     for i in range(sample_steps, 0, -1):
-      t = Tensor.full((b,), fill_value=i/sample_steps).realize()
+      t = Tensor.full((b,), fill_value=i/sample_steps).contiguous()
       vc = self(z, t, cond)
       vu = self(z, t, null_cond)
       vc = vu + cfg * (vc - vu)
       z = z - dt * vc
+      z = z.contiguous()
       images.append(z)
     return images
 
