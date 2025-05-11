@@ -32,7 +32,7 @@ class TransformerBlock:
     shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(adaln_input.silu()).chunk(6, dim=1)
     x = x + gate_msa.unsqueeze(1) * self.attention(modulate(self.attention_norm(x), shift_msa, scale_msa), 0, freqs_cis)
     x = x + gate_mlp.unsqueeze(1) * self.feed_forward(modulate(self.ffn_norm(x), shift_mlp, scale_mlp))
-    return x
+    return x.contiguous()
 
 """
 class TransformerBlock:
@@ -117,7 +117,6 @@ class DiT_Llama:
     #adaln_input = self.t_embedder(t) + self.y_embedder(y)
     adaln_input = self.y_embedder(y)
     #x = x + adaln_input.reshape(x.shape[0], 1, -1)
-    adaln_input = adaln_input.contiguous()
     if not DUMB:
       for layer in self.layers:
         x = layer(x, self.freqs_cis[:, :x.size(1)], adaln_input=adaln_input)
