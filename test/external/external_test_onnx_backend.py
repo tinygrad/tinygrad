@@ -175,12 +175,6 @@ backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # anti
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 
-# no support for sequence
-backend_test.exclude('test_identity_opt_cpu')
-backend_test.exclude('test_identity_sequence_cpu')
-backend_test.exclude('test_optional_get_element_optional_sequence_cpu')
-backend_test.exclude('test_optional_get_element_sequence_cpu')
-
 backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
 

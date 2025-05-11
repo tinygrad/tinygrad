@@ -6,29 +6,21 @@ from typing import Optional, Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape, unravel
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context
-from tinygrad.codegen.symbolic import sym, split_uop, symbolic_flat, uop_given_valid, simplify_valid
-
-def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int)
+from tinygrad.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, PatternMatcher, UPat, GroupOp
+from tinygrad.codegen.symbolic import split_uop, symbolic_flat, uop_given_valid, simplify_valid
 
 # If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
 # or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
-def upcast(u: UOp) -> UOp:
-  srcs = tuple(upcast(_src) for _src in u.src)
-  if u.dtype.scalar() is dtypes.int:
-    dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
-    upcasted = u.replace(dtype=dtype, src=tuple([_src.cast(dtype) for _src in srcs]))
-    if overflow(u): return upcasted
-    # Check the original src, new srcs has Ops.CAST whose vmin, vmax change the real bounds
-    # Cast back is required because if the node is in range, siblings would never be upcasted
-    if any((overflow(src) for src in u.src)): return upcasted.cast(u.dtype)
-  return u.replace(src=tuple(srcs))
-
-# pooling op may overflow before folding causing unnecessary upcast
-@functools.cache
-def folded_upcast(u: UOp) -> UOp:
-  with Context(TRACK_MATCH_STATS=0):
-    return upcast(graph_rewrite(u, sym, {}))
+def handle_upcast(u: UOp) -> UOp|None:
+  dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
+  # check for overflow, upcast this to int64
+  if u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int):
+    return u.replace(dtype=dtype, src=tuple([x.cast(dtype) for x in u.src]))
+  # if any inputs are int64 and this *doesn't* overflow, cast back to int
+  if any(x.dtype == dtypes.int64 for x in u.src):
+    return u.replace(dtype=dtype, src=tuple([x.cast(dtype) for x in u.src])).cast(u.dtype)
+  return None
+pm_upcast = PatternMatcher([(UPat(GroupOp.ALU, dtype=dtypes.int, name="u"), handle_upcast),])
 
 @functools.cache
 def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
@@ -36,25 +28,28 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...
   for view in reversed(views[0:-1]):
     view = view.minify()
     idx, valid = view.to_indexed_uops([sint_to_uop(i) for i in unravel(view.shape, idx)], valid)
-  return idx, valid
+  # symbolic
+  idx, valid = graph_rewrite(UOp.sink(idx, valid), symbolic_flat, name="indexing sym @ 1").src
+  # simplify
+  if (newvalid:=simplify_valid(valid)) is not None: valid = newvalid
+  if (newidx:=uop_given_valid(valid, idx)) is not None: idx = newidx
+  # symbolic again, upcast if needed
+  return graph_rewrite(UOp.sink(idx, valid), symbolic_flat+pm_upcast, name="indexing sym @ 2").src
 
 @functools.cache
 def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[Optional[sint], ...]:
   # NOTE: if a stride is not always valid, it will be None
   if len(views) == 1 and views[-1].mask is None: return views[-1].strides
   ret: list[Optional[sint]] = [None] * len(views[-1].shape)
-  idx, valid = (graph_rewrite(u, symbolic_flat) for u in views_to_indexed_uops(views))
-  # TODO: always apply these in to_indexed_uops?
-  if (newvalid:=simplify_valid(valid)) is not None: valid = newvalid
-  if (newidx:=uop_given_valid(valid, idx)) is not None: idx = graph_rewrite(newidx, symbolic_flat)
+  idx, valid = views_to_indexed_uops(views)
   for c in split_uop(idx, Ops.ADD):
     if c.op is Ops.RANGE: ret[c.arg] = 1
     if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg] = c.src[1].arg
     if c.op is Ops.MUL and c.src[1].op is Ops.RANGE and c.src[0].op is Ops.CONST: ret[c.src[1].arg] = c.src[0].arg
-  used_ranges = [x.arg for x in idx.toposort if x.op is Ops.RANGE]
+  used_ranges = [x.arg for x in idx.toposort() if x.op is Ops.RANGE]
   ret = [x if i in used_ranges else 0 for i,x in enumerate(ret)]
   if not ignore_valid:
-    for masked_axis in [x.arg for x in valid.toposort if x.op is Ops.RANGE]: ret[masked_axis] = None
+    for masked_axis in [x.arg for x in valid.toposort() if x.op is Ops.RANGE]: ret[masked_axis] = None
   return tuple(ret)
 
 @dataclass(frozen=True, order=True)
@@ -74,7 +69,7 @@ class ShapeTracker:
     return ShapeTracker(tuple(inverted_views)).reshape(out_shape)
 
   @staticmethod
-  def from_shape(shape:tuple[sint, ...]) -> ShapeTracker: return ShapeTracker((View.create(shape),))
+  def from_shape(shape:tuple[sint, ...], strides:tuple[sint, ...]|None=None) -> ShapeTracker: return ShapeTracker((View.create(shape, strides),))
 
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
@@ -92,8 +87,7 @@ class ShapeTracker:
 
   def to_uop(self) -> UOp: return UOp(Ops.VIEW, dtypes.void, (), self)
   def to_indexed_uops(self, _idxs:Optional[list[UOp]|tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
-    idx, valid = views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
-    return folded_upcast(idx), folded_upcast(valid)
+    return views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
 
   # upper bound on buffer size required to fit this shapetracker
   def real_size(self) -> int:
@@ -120,7 +114,7 @@ class ShapeTracker:
   def axis_is_masked(self, axis:int) -> bool:
     with Context(TRACK_MATCH_STATS=0):
       _, valid = self.to_indexed_uops()
-      return axis in [x.arg for x in graph_rewrite(valid, symbolic_flat).toposort if x.op is Ops.RANGE]
+      return axis in [x.arg for x in graph_rewrite(valid, symbolic_flat).toposort() if x.op is Ops.RANGE]
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:

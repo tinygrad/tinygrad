@@ -5,10 +5,12 @@ from typing import Any, List
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, DEBUG, CI
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16, truncate_bf16, to_dtype
+from tinygrad.dtype import truncate, fp8_to_float, float_to_fp8
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
 from hypothesis import assume, given, settings, strategies as strat
 from test.helpers import rand_for_dtype
+import ml_dtypes
 import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
 
@@ -19,6 +21,8 @@ core_dtypes = list(DTYPES_DICT.values())
 if Device.DEFAULT == "CPU": core_dtypes.remove(dtypes.bfloat16)  # NOTE: this is for teenygrad, don't remove
 dtype_ints = [dt for dt in core_dtypes if dtypes.is_int(dt) and is_dtype_supported(dt)]
 dtype_floats = [dt for dt in core_dtypes if dtypes.is_float(dt) and is_dtype_supported(dt)]
+FP8E4M3_MAX = 448.0
+FP8E5M2_MAX = 57344.0
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
   if not is_dtype_supported(dtype): return []
@@ -109,7 +113,7 @@ class TestDType(unittest.TestCase):
     fields = dtypes.fields()
     self.assertIn("float", fields)
     self.assertIn("float32", fields)
-    self.assertEqual(len(fields), 24)
+    self.assertEqual(len(fields), 26)
     self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
     self.assertTrue(all(issubclass(_to_np_dtype(value), np.generic) for value in fields.values() if _to_np_dtype(value) is not None))
 
@@ -141,6 +145,43 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)*Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [1,4,9,16])
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
+
+class TestFp8s(unittest.TestCase):
+  def test_fp8e4m3_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e4m3).dtype == dtypes.fp8e4m3
+  def test_fp8e5m2_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e5m2).dtype == dtypes.fp8e5m2
+
+class TestFp8sConversions(unittest.TestCase):
+  @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E4M3_MAX, max_value=FP8E4M3_MAX))
+  def test_float_to_fp8e4m3(self, x): np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e4m3), ml_dtypes.float8_e4m3fn(x).tobytes()[0])
+
+  def test_float_to_fp8e4m3_extreme_values(self):
+    np.testing.assert_equal(float_to_fp8(FP8E4M3_MAX, dtypes.fp8e4m3), 126)
+    np.testing.assert_equal(float_to_fp8(FP8E4M3_MAX*1.01, dtypes.fp8e4m3), 126)
+    np.testing.assert_equal(float_to_fp8(math.inf, dtypes.fp8e4m3), 126)
+    np.testing.assert_equal(float_to_fp8(-FP8E4M3_MAX, dtypes.fp8e4m3), 254)
+    np.testing.assert_equal(float_to_fp8(-FP8E4M3_MAX*1.01, dtypes.fp8e4m3), 254)
+    np.testing.assert_equal(float_to_fp8(-math.inf, dtypes.fp8e4m3), 254)
+    np.testing.assert_equal(float_to_fp8(math.nan, dtypes.fp8e4m3), 127)
+    np.testing.assert_equal(float_to_fp8(-math.nan, dtypes.fp8e4m3), 255)
+
+  @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E5M2_MAX, max_value=FP8E5M2_MAX))
+  def test_float_to_fp8e5m2(self, x): np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e5m2), ml_dtypes.float8_e5m2(x).tobytes()[0])
+
+  def test_float_to_fp8e5m2_extreme_values(self):
+    np.testing.assert_equal(float_to_fp8(FP8E5M2_MAX, dtypes.fp8e5m2), 123)
+    np.testing.assert_equal(float_to_fp8(FP8E5M2_MAX*1.01, dtypes.fp8e5m2), 123)
+    np.testing.assert_equal(float_to_fp8(math.inf, dtypes.fp8e5m2), 123)
+    np.testing.assert_equal(float_to_fp8(-FP8E5M2_MAX, dtypes.fp8e5m2), 251)
+    np.testing.assert_equal(float_to_fp8(-FP8E5M2_MAX*1.01, dtypes.fp8e5m2), 251)
+    np.testing.assert_equal(float_to_fp8(-math.inf, dtypes.fp8e5m2), 251)
+    np.testing.assert_equal(float_to_fp8(math.nan, dtypes.fp8e5m2), 126)
+    np.testing.assert_equal(float_to_fp8(-math.nan, dtypes.fp8e5m2), 254)
+
+  @given(strat.integers(min_value=0, max_value=255))
+  def test_fp8e4m3_to_float(self, x): np.testing.assert_equal(fp8_to_float(x, dtypes.fp8e4m3), np.uint8(x).view(ml_dtypes.float8_e4m3fn).item())
+
+  @given(strat.integers(min_value=0, max_value=255))
+  def test_fp8e5m2_to_float(self, x): np.testing.assert_equal(fp8_to_float(x, dtypes.fp8e5m2), np.uint8(x).view(ml_dtypes.float8_e5m2).item())
 
 @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
 class TestBFloat16(unittest.TestCase):
@@ -399,6 +440,10 @@ class TestHelpers(unittest.TestCase):
   def test_bf16_is_float(self):
     assert dtypes.is_float(dtypes.bfloat16)
 
+  def test_fp8s_are_float(self):
+    assert dtypes.is_float(dtypes.fp8e4m3)
+    assert dtypes.is_float(dtypes.fp8e5m2)
+
   @given(strat.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_float(d) or dtypes.is_int(d)]), strat.integers(min_value=2, max_value=8))
   def test_scalar(self, dtype, amt):
     assert dtype.vec(amt).scalar() == dtype
@@ -451,6 +496,18 @@ class TestHelpers(unittest.TestCase):
     self.assertEqual(truncate_bf16(max_bf16 * 1.00001), math.inf)
     self.assertEqual(truncate_bf16(min_bf16 * 1.00001), -math.inf)
 
+  @given(strat.floats(width=32, allow_subnormal=True, allow_nan=True, allow_infinity=True))
+  def test_truncate_fp8e4m3(self, x):
+    if x > FP8E4M3_MAX: np.testing.assert_equal(truncate[dtypes.fp8e4m3](x), FP8E4M3_MAX)
+    elif x < -FP8E4M3_MAX: np.testing.assert_equal(truncate[dtypes.fp8e4m3](x), -FP8E4M3_MAX)
+    else: np.testing.assert_equal(truncate[dtypes.fp8e4m3](x), ml_dtypes.float8_e4m3fn(x))
+
+  @given(strat.floats(width=32, allow_subnormal=True, allow_nan=True, allow_infinity=True))
+  def test_truncate_fp8e5m2(self, x):
+    if x > FP8E5M2_MAX: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), FP8E5M2_MAX)
+    elif x < -FP8E5M2_MAX: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), -FP8E5M2_MAX)
+    else: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), ml_dtypes.float8_e5m2(x))
+
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):
     self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
@@ -462,7 +519,7 @@ class TestTypeSpec(unittest.TestCase):
       dtypes.default_int = default_int
       assert dtypes.default_int == default_int
 
-    for default_float in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+    for default_float in [*dtypes.fp8s, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
       dtypes.default_float = default_float
       assert dtypes.default_float == default_float
 
@@ -636,6 +693,7 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.bool, dtypes.float64) == dtypes.float64
     assert least_upper_dtype(dtypes.float16, dtypes.int64) == dtypes.float16
     assert least_upper_dtype(dtypes.float16, dtypes.uint64) == dtypes.float16
+    assert least_upper_dtype(dtypes.fp8e4m3, dtypes.fp8e5m2) == dtypes.half
 
 class TestAutoCastType(unittest.TestCase):
   def setUp(self):
@@ -748,9 +806,20 @@ class TestAutoCastType(unittest.TestCase):
   def test_matmul(self, dt1, dt2, acc_dt):
     t1 = Tensor([0, 1], dtype=dt1)
     t2 = Tensor([0, 1], dtype=dt2)
-    assert (t1 @ t2).dtype == least_upper_dtype(dt1, dt2)
+    self.assertEqual(t1.matmul(t2).dtype, least_upper_dtype(t1.dtype, t2.dtype))
     # if dtype is specified, return in dtype
-    assert (t1.matmul(t2, dtype=acc_dt).dtype == acc_dt)
+    self.assertEqual(t1.matmul(t2, dtype=acc_dt).dtype, acc_dt)
+
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
+  def test_linear(self, dt1, dt2, dt3, acc_dt):
+    x = Tensor([0, 1], dtype=dt1)
+    w = Tensor([0, 1], dtype=dt2)
+    b = Tensor([0, 1], dtype=dt3)
+    self.assertEqual(x.linear(w).dtype, least_upper_dtype(x.dtype, w.dtype))
+    self.assertEqual(x.linear(w, b).dtype, least_upper_dtype(least_upper_dtype(x.dtype, w.dtype), b.dtype))
+    # if dtype is specified, return in dtype
+    self.assertEqual(x.linear(w, dtype=acc_dt).dtype, acc_dt)
+    self.assertEqual(x.linear(w, b, dtype=acc_dt).dtype, acc_dt)
 
   @staticmethod
   def check_where_alternate_input_other(input_, other, data_type):

@@ -12,16 +12,15 @@ from tinygrad.spec import spec
 from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.grouper import fix_kernel_ops
 from tinygrad.engine.realize import CompiledRunner, get_kernel
-from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.devectorizer import full_graph_rewrite
+from tinygrad.codegen import full_rewrite
 from tinygrad.codegen.symbolic import sym
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 
-def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
+def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
 
 def _uops_to_prg(uops_list):
-  uops = linearize_uop(full_graph_rewrite(ast:=UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))
+  uops = full_rewrite(ast:=UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer)
   src = Device[Device.DEFAULT].renderer.render(uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
   return CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, ast, uops=uops,
@@ -252,7 +251,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     store = UOp(Ops.STORE, dtypes.void, (idx, val))
     uops = to_uops_list([store])
-    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     if_uop = next(u for u in uops if u.op is Ops.IF)
     endif = next(u for u in uops if u.op is Ops.ENDIF)
     assert endif.src[0] is if_uop
@@ -270,7 +269,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
-    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     if_uop = next(u for u in uops if u.op is Ops.IF)
     endif = next(u for u in uops if u.op is Ops.ENDIF)
     assert endif.src[0] is if_uop
@@ -290,7 +289,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
-    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     ifs = [u for u in uops if u.op is Ops.IF]
     endifs = [u for u in uops if u.op is Ops.ENDIF]
     self.assertEqual(len(ifs), 1)
@@ -359,7 +358,7 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.IDIV, ops)
 
-  def test_fast_idiv(self):
+  def test_fast_idiv_and_mod(self):
     g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
     c = UOp(Ops.CONST, dtypes.uint, (), 3)
     l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
@@ -369,6 +368,13 @@ class TestAssembly(unittest.TestCase):
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.IDIV, ops)
+
+    b = UOp(Ops.MOD, dtypes.uint, (l, c))
+    uops = to_uops_list([b], opts=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHR, ops)
+    self.assertNotIn(Ops.MOD, ops)
 
   @unittest.expectedFailure
   def test_fast_idiv_overflow(self):
@@ -496,7 +502,7 @@ class TestIndexingOrdering(unittest.TestCase):
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
     st0 = UOp(Ops.STORE, dtypes.float.vec(4), (buf, gidx0+UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1 = UOp(Ops.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
-    uops = linearize_uop(UOp.sink(st1, st0), skip_check=True)
+    uops = full_rewrite(UOp.sink(st1, st0))
     stores = [st for st in uops if st.op is Ops.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
@@ -539,7 +545,7 @@ class TestShapeSpec(unittest.TestCase):
     a = Tensor.ones((1, 1)).pad(((1, 1), (1, 1)))
     ast = a.contiguous().schedule()[0].ast
     valid_pattern = UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat.cvar(), UPat.cvar()))
-    valid_ternary = [x for x in ast.toposort if valid_pattern.match(x, {})][0]
+    valid_ternary = [x for x in ast.toposort() if valid_pattern.match(x, {})][0]
     # the WHERE outputs a contiguous (3, 3)
     self.assertEqual(valid_ternary.st, ShapeTracker.from_shape((3, 3)))
     valid, x, y = valid_ternary.src

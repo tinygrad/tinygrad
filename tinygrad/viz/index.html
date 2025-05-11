@@ -78,7 +78,7 @@
     position: relative;
     height: 100%;
   }
-  .container > * + *, .rewrite-container > * + *, .kernel-list > * + * {
+  .metadata > * + *, .rewrite-container > * + *, .kernel-list > * + * {
     margin-top: 12px;
   }
   .kernel-list > ul > * + * {
@@ -99,10 +99,14 @@
     height: 100%;
     overflow-y: auto;
   }
-  .metadata {
+  .metadata-parent {
     width: 20%;
     border-left: 1px solid #4a4b56;
     margin-left: auto;
+  }
+  .metadata {
+    width: 100%;
+    height: 100%;
     overflow-y: auto;
   }
   .resize-handle {
@@ -192,6 +196,7 @@
         <g id="render">
           <g id="edges"></g>
           <g id="nodes"></g>
+          <g id="edge-labels"></g> <!-- NOTE: this ensures edge labels are always on top -->
           <g id="bars"></g>
         </g>
         <defs>
@@ -201,7 +206,7 @@
         </defs>
       </svg>
     </div>
-    <div class="container metadata"></div>
+    <div class="container metadata-parent"><div class="metadata"></div></div>
   </div>
   <script src="/js/index.js"></script>
 </body>

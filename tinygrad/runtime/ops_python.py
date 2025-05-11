@@ -40,7 +40,7 @@ class PythonProgram:
       loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.NAME}
+        void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK}
         if uop is Ops.DEFINE_ACC: idp = [idp[0]]
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
@@ -60,7 +60,7 @@ class PythonProgram:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
-        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.NAME):
+        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -91,20 +91,21 @@ class PythonProgram:
         elif uop is Ops.CAST and isinstance(dtype, PtrDType):
           ul[i] = inp[0]
         elif uop is Ops.RANGE:
-          if i not in ul: ul[i] = [inp[0][0]] * warp_size
+          if i not in ul: ul[i] = [0] * warp_size
           else:
             for j in range(len(ul[i])):
               ul[i][j] += 1
-            if ul[i][0] == inp[1][0]:
+            if ul[i][0] == inp[0][0]:
               del ul[i]
               i = loop_ends[i] + 1
               continue
         elif uop is Ops.VECTORIZE: ul[i] = inp
-        elif uop in {Ops.CAST, Ops.BITCAST}:
+        elif uop is Ops.BITCAST:
           assert dtp[0].fmt and dtype.fmt
           pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
-          if uop is Ops.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
-          else: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
+          ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
+        elif uop is Ops.CAST:
+          ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
         elif uop is Ops.LOAD:
           if dtype.count > 1:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
@@ -141,6 +142,11 @@ class PythonProgram:
             def b_elem(x, col, k, goff): return a_elem(x, k, col, goff) # pylint: disable=arguments-out-of-order
             def c_map(lane, elem): return (lane%16, (lane//16)*4 + elem)
             ul[i] = wmma_helper(64, 16, 4, 4, 4, a_elem, b_elem, c_map)
+          elif arg[4] == "AMD" and len(inp[0]) == 8: # RDNA4
+            def a_elem(x, k, row, goff): return x[k - [0, 4, 4, 8][k//4]][goff + row + [0, 16, 0, 16][k//4]]
+            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)
+            def c_map(lane, elem): return (lane%16, (lane//16)*8 + elem)
+            ul[i] = wmma_helper(32, 16, 8, 8, 8, a_elem, b_elem, c_map)
           elif arg[4] == "AMD":
             # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
             def a_elem(x, k, row, goff):
@@ -197,6 +203,7 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
     if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
     if getenv("EMULATE_AMD_MFMA"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores_mfma
+    if getenv("EMULATE_AMD_RDNA4"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores_rdna4
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm80
     if getenv("EMULATE_CUDA_SM75"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm75
     if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores

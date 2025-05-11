@@ -7,7 +7,7 @@ def multidevice_test(fxn):
   exclude_devices = getenv("EXCLUDE_DEVICES", "").split(",")
   def ret(self):
     for device in Device._devices:
-      if device in ["DISK", "NPY", "FAKE", "DSP", "NULL"]: continue
+      if device in ["REMOTE", "DISK", "NPY", "FAKE", "DSP", "NULL"]: continue
       if not CI: print(device)
       if device in exclude_devices:
         if not CI: print(f"WARNING: {device} test is excluded")

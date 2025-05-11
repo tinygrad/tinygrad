@@ -44,6 +44,9 @@ runs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
+    - name: Upgrade pip
+      shell: bash
+      run: python -m pip install --upgrade pip
 
     # **** Caching packages ****
     # TODO: key should include input.deps, but it can't since it can't contain commas
@@ -121,9 +124,8 @@ runs:
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
         sudo apt update || true
         sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev
-        curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
-        jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
-        sudo xargs curl -L -o /usr/local/lib/libremu.so
+        cargo build --release --manifest-path ./extra/remu/Cargo.toml
+        sudo ln -sf ${{ github.workspace }}/extra/remu/target/release/libremu.so /usr/local/lib/libremu.so
         sudo tee --append /etc/ld.so.conf.d/rocm.conf <<'EOF'
           /opt/rocm/lib
           /opt/rocm/lib64
@@ -137,9 +139,7 @@ runs:
         curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
           jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
           sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
-        curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
-          jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
-          sudo xargs curl -L -o /usr/local/lib/libremu.dylib
+        cargo build --release --manifest-path ./extra/remu/Cargo.toml
 
     # **** CUDA ****
 
@@ -221,4 +221,4 @@ runs:
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
       run: |
-        brew install llvm
+        brew install llvm@19

@@ -1,6 +1,6 @@
 import unittest, itertools
 
-from tinygrad.codegen.devectorizer import full_graph_rewrite
+from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Ops
 from tinygrad.codegen.symbolic import simplify_valid
@@ -19,7 +19,7 @@ def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UO
 
 def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.int, (), (expr, nmax))
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
-def Range(n, nmax): return UOp(Ops.RANGE, dtypes.int, arg=n, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, nmax),))
+def Range(n, nmax): return UOp(Ops.RANGE, dtypes.int, arg=n, src=(UOp.const(dtypes.int, nmax),))
 
 class TestHelpers(unittest.TestCase):
   def test_is_increasing(self):
@@ -39,13 +39,13 @@ class TestHelpers(unittest.TestCase):
     self.assertTrue(f2.is_increasing())
     self.assertTrue(f3.is_increasing())
 
-    rng = UOp(Ops.RANGE, dtypes.int, arg=(2, True), src=(UOp(Ops.CONST, dtypes.int, arg=0, src=()), UOp(Ops.CONST, dtypes.int, arg=5, src=()),))
+    rng = UOp(Ops.RANGE, dtypes.int, arg=(2, True), src=(UOp(Ops.CONST, dtypes.int, arg=5, src=()),))
     self.assertTrue(rng.is_increasing())
     self.assertTrue((rng+2).is_increasing())
 
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid):
-    load = full_graph_rewrite(load.sink()).src[0]
+    load = full_rewrite_to_sink(load.sink()).src[0]
     idx, valid = load.src[0].src[1], load.src[0].src[2]
     self.assertEqual(idx.render(simplify=False), sidx)
     self.assertEqual(valid.render(simplify=False), svalid)
@@ -167,7 +167,7 @@ class TestValidIdxSimplification(unittest.TestCase):
 
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
-    load = full_graph_rewrite(load.sink()).src[0]
+    load = full_rewrite_to_sink(load.sink()).src[0]
     idx = load.src[0].src[1]
     self.assertEqual(idx.op, Ops.VECTORIZE)
     self.assertEqual(len(idx.src), 2)
@@ -233,7 +233,7 @@ class TestImageSimplification(unittest.TestCase):
 
     # empty -> invalid
     load = get_load_image_uop(shape, (gidx0<8) & (gidx0<8).ne(True), idx)
-    load = full_graph_rewrite(load.sink()).src[0]
+    load = full_rewrite_to_sink(load.sink()).src[0]
     self.assertEqual(load.op, Ops.VECTORIZE)
     self.assertEqual(load.dtype.count, 4)
 
@@ -301,7 +301,7 @@ class TestImageSimplification(unittest.TestCase):
     self.check(load,
                "((((idx2*2)+ridx0)<11)&((((idx1*8)+ridx1)<3)!=True))",
                "(((idx0+((idx1*512)+(ridx1*64)))+832)%1024)",
-               "(((((idx1+((ridx1+5)//8))+1)//2)+((idx2*2)+ridx0))+-4)")
+               "((((idx2*2)+ridx0)+(((idx1+((ridx1+5)//8))+1)//2))+-4)")
 
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)

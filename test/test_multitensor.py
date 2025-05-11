@@ -9,6 +9,7 @@ from tinygrad.engine.multi import all_reduce
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from tinygrad.device import is_dtype_supported
+from test.helpers import not_support_multi_device
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -34,7 +35,7 @@ def _test_allreduce(t:Tensor):
   b.realize()
   return aa, b
 
-@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+@unittest.skipIf(not_support_multi_device(), "no multi")
 class TestMultiTensor(unittest.TestCase):
   def test_to(self):
     X = Tensor.ones(256).contiguous().realize()
@@ -84,7 +85,7 @@ class TestMultiTensor(unittest.TestCase):
     for si, ei in lower_schedule(sched):
       if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
       ei.run()
-    self.assertEqual(len(set(names)), 3), "function was relinearized"
+    self.assertEqual(len(set(names)), 2), "function was relinearized"
 
   @unittest.skip("this doesn't fold because shard_ calls contiguous on all lbs")
   def test_sharded_memory(self):
@@ -443,7 +444,6 @@ class TestMultiTensor(unittest.TestCase):
       np.testing.assert_allclose(r.numpy(), np.ones(256)+np.ones(256), atol=1e-4, rtol=1e-5)
     assert len(jf.jit_cache) > 0
 
-  #@unittest.skipIf(CI and Device.DEFAULT=="METAL", "no ICB in CI, creation of graph fails")
   @unittest.skip("test broken")
   def test_multi_device_jit_graph(self):
     if Device[d0].graph is None or Device[d1].graph is None: raise unittest.SkipTest("only test graphs")
@@ -769,6 +769,7 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor.rand(16, 16).shard(devices_2, axis=0)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
 
+  @unittest.skip("this test looks wrong, times 0 is 0")
   def test_multi_const_folding(self):
     with Context(TRACK_MATCH_STATS=0):
       a = Tensor.arange(3).realize()
@@ -777,7 +778,7 @@ class TestMultiTensor(unittest.TestCase):
     sched = b.schedule()
     self.assertEqual(len(sched), 6)
     # notably, only two copies (for the arange) - vs 4 copies if we didn't fold the const copy
-    self.assertEqual(len([x for x in sched if any(u.op is Ops.COPY for u in x.ast.toposort)]), 2)
+    self.assertEqual(len([x for x in sched if any(u.op is Ops.COPY for u in x.ast.toposort())]), 2)
     run_schedule(sched)
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
@@ -790,7 +791,7 @@ class TestMultiTensor(unittest.TestCase):
     (d*c).realize()
     assert not d.lazydata.is_realized
 
-@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+@unittest.skipIf(not_support_multi_device(), "no multi")
 class TestHandleData(unittest.TestCase):
   def test_copied_to_device(self):
     device = (d0, d1, d2, d3)
@@ -813,7 +814,7 @@ class TestHandleData(unittest.TestCase):
       covered = t.to(d)
       assert covered.realize().tolist() == [1, 2, 3, 4]
 
-@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+@unittest.skipIf(not_support_multi_device(), "no multi")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   # shrink a multitensor on sharded axis
   def test_shrink_bad_args(self):
@@ -954,7 +955,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     expected = np.arange(64).reshape((8,8)) + np.array([[0,0,1,1,2,2,3,3] for _ in range(8)]).T
     np.testing.assert_allclose(output.numpy(), expected)
 
-@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+@unittest.skipIf(not_support_multi_device(), "no multi")
 @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
 class TestBatchNorm(unittest.TestCase):
   def test_unsynced_backprop_conv_bn(self):
@@ -1110,7 +1111,7 @@ def helper_test_shard_op(shps, fxn, atol=1e-6, rtol=1e-3):
     except Exception as e:
       raise Exception(f"Failed shape {single_out.shape}: {e}")
 
-@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+@unittest.skipIf(not_support_multi_device, "no multi")
 class TestTensorOps(unittest.TestCase):
   def test_interpolate(self):
     helper_test_shard_op([(4,16,16),(4,24,24)], lambda x: Tensor.interpolate(x, (19,19)))

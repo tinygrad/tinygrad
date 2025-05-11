@@ -1,7 +1,11 @@
 from tinygrad.device import Compiled, Compiler, Renderer, Allocator
+from tinygrad.ops import Ops
 from tinygrad.engine.jit import MultiGraphRunner
 
 class NullRenderer(Renderer):
+  device = "NULL"
+  code_for_op = {k:lambda:None for k in [Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT]}
+  has_local = False
   def render(self, uops:list) -> str: return ""
 
 class NullProgram:

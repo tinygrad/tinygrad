@@ -1,10 +1,8 @@
-import atexit, pickle
 from dataclasses import dataclass
-from collections import deque
-from tinygrad.ops import UOp, Variable, Ops, buffers, track_rewrites
+from collections import deque, defaultdict
+from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
 from tinygrad.device import Buffer
-from tinygrad.helpers import Metadata, CAPTURE_PROCESS_REPLAY, DEBUG, Context, ContextVar, diskcache_put, pluralize
-from tinygrad.engine.grouper import get_becomes_map
+from tinygrad.helpers import Metadata, DEBUG, unwrap, merge_dicts
 
 # **** ScheduleItem return type
 
@@ -14,49 +12,63 @@ class ScheduleItem:
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...] = ()
 
-PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
-if CAPTURE_PROCESS_REPLAY:
-  @atexit.register
-  def save_process_replay():
-    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
+# **** unbind Variables
+
+def unbind_view(ctx:list[dict[Variable, int]], x:UOp):
+  st = unwrap(x.st).simplify()
+  if any(x.op is Ops.BIND for x in st.vars()):
+    st, var_vals = st.unbind()
+    ctx.append(var_vals)
+  return x.replace(arg=st) if st != x.st else None
+
+def unbind_bind(ctx:list[dict[Variable, int]], x:UOp):
+  var, val = x.unbind()
+  ctx.append({var.replace(src=()):val})
+  return var
+
+pm_unbind = PatternMatcher([
+  (UPat(Ops.VIEW, name="x"), unbind_view),
+  (UPat(Ops.BIND, name="x"), unbind_bind),
+])
 
 # **** schedule linearizer
 
-
-@track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
-def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  becomes_map, var_vals = get_becomes_map(big_sink)
-  sched_sink = becomes_map.pop(big_sink)
-
-  # bfs toposort
-  children: dict[UOp, list[UOp]] = {}
+def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
+  # construct the KERNEL children graph based on assigns
+  children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree: dict[UOp, int] = {}
-  for u in sched_sink.toposort:
+  for u in (toposort:=sched_sink.toposort()):
     if u.op is not Ops.ASSIGN: continue
-    in_degree[u] = 0
-    for s in u.src[1].src:
+    k = u.src[1]
+    in_degree.setdefault(k, 0)
+    for s in k.src:
       if s.op is not Ops.ASSIGN: continue
-      children.setdefault(s, []).append(u)
-      in_degree[u] += 1
+      children[s.src[1]].append(k)
+      in_degree[k] += 1
 
+  # linearize KERNEL UOps into ScheduleItems in BFS order
   queue = deque(k for k,v in in_degree.items() if v == 0)
   schedule: list[ScheduleItem] = []
+  var_vals: dict[Variable, int] = {}
   while queue:
-    u = queue.popleft()
-    # map the BUFFER UOp to a subbuffer if it's a BUFFER_VIEW
-    if (k:=u.src[1]).arg.ast.op is Ops.BUFFER_VIEW:
-      buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, k.arg.ast.dtype, k.arg.ast.arg[1]*base.dtype.itemsize)
-    schedule.append(ScheduleItem(k.arg.ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
-    for x in children.get(u, []):
+    k = queue.popleft()
+    # unbind var_vals from the kernel
+    local_var_vals: list[dict[Variable, int]] = []
+    ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=local_var_vals, name="unbind vars")
+    var_vals = merge_dicts([var_vals, *local_var_vals])
+    # create subbuffers if needed
+    if ast.op is Ops.BUFFER_VIEW: buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
+    schedule.append(ScheduleItem(ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
+    for x in children[k]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
 
   # confirm everything was scheduled correctly
-  if len(schedule) != len(in_degree): raise RuntimeError(f"created {len(in_degree)} kernels but only scheduled {len(schedule)}")
+  assert len(schedule) == len(in_degree), f"Schedule length mistmatch {len(schedule)} != {len(in_degree)}"
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
-  # capture process replay
-  if CAPTURE_PROCESS_REPLAY:
-    with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(big_sink.key)] = pickle.dumps((big_sink, ContextVar._cache, [x.ast for x in schedule]))
+  # map ASSIGN to BUFFER after ScheduleItems are constructed
+  becomes_map = {u:u.buf_uop for u in toposort if u.op is Ops.ASSIGN}
+  assert all(u.op in {Ops.BUFFER, Ops.BUFFER_VIEW} for u in becomes_map.values()), f"Schedule didn't end with BUFFER {becomes_map.values()}"
 
   return schedule, var_vals, becomes_map

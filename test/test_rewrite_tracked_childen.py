@@ -1,9 +1,10 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.ops import PatternMatcher, Ops, UPat, graph_rewrite, RewriteContext, UOp, merge_views
-from tinygrad.engine.grouper import sym
+from tinygrad.ops import PatternMatcher, Ops, UPat, graph_rewrite, RewriteContext, UOp
+from tinygrad.engine.grouper import sym, merge_views
 
 class TestRewriteTrackedChildren(unittest.TestCase):
+  @unittest.skip("track_children no longer supported")
   def test_children_in_context(self):
     def print_children(ctx:RewriteContext, sink:UOp):
       view_w_child = sink.src[0].src[0].src[0]
@@ -48,7 +49,7 @@ class TestRewriteTrackedChildren(unittest.TestCase):
     print([x.arg for x in sink.get_children_map()[view_w_child]])
     self.assertSetEqual(set([x.arg for x in sink.get_children_map()[view_w_child]]), set((3,4)))
 
-  @unittest.expectedFailure
+  @unittest.skip("track_children no longer supported")
   def test_child_after_parent_update(self):
     def print_children(ctx, r):
       ctx.update_children()

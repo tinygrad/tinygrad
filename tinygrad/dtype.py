@@ -41,6 +41,7 @@ class DType(metaclass=DTypeMetaClass):
   def ptr(self, size=-1, local=False) -> PtrDType:
     return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, None, self, local, 1, size)
   def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
+  def nbytes(self): raise RuntimeError("only ptr types have nbytes")
 
 @dataclass(frozen=True, eq=False)
 class PtrDType(DType):
@@ -58,6 +59,9 @@ class PtrDType(DType):
       return ImageDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz, self.size, self.shape)
     return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz, self.size)
   def ptr(self, size=-1, local=False): raise RuntimeError("can't make a pointer from a pointer")
+  def nbytes(self) -> int:
+    if self.size == -1: return 0  # TODO: this should be an exception
+    return self.size*self.itemsize
   @property
   def vcount(self): return self.v
   def __repr__(self):
@@ -112,7 +116,8 @@ class dtypes:
   def finfo(dtype:DType) -> tuple[int, int]:
     """(exponent, mantissa)"""
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
-    return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
+    return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52),
+            dtypes.fp8e5m2: (5, 2), dtypes.fp8e4m3: (4, 3)}[dtype]
   @staticmethod
   def fields() -> dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
@@ -125,11 +130,13 @@ class dtypes:
   uint32: Final[DType] = DType.new(6, 4, "unsigned int", 'I')
   int64: Final[DType] = DType.new(7, 8, "long", 'q')
   uint64: Final[DType] = DType.new(8, 8, "unsigned long", 'Q')
-  float16: Final[DType] = DType.new(9, 2, "half", 'e')
+  fp8e4m3: Final[DType] = DType.new(9, 1, "float8_e4m3", None)
+  fp8e5m2: Final[DType] = DType.new(10, 1, "float8_e5m2", None)
+  float16: Final[DType] = DType.new(11, 2, "half", 'e')
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
-  bfloat16: Final[DType] = DType.new(10, 2, "__bf16", None)
-  float32: Final[DType] = DType.new(11, 4, "float", 'f')
-  float64: Final[DType] = DType.new(12, 8, "double", 'd')
+  bfloat16: Final[DType] = DType.new(12, 2, "__bf16", None)
+  float32: Final[DType] = DType.new(13, 4, "float", 'f')
+  float64: Final[DType] = DType.new(14, 8, "double", 'd')
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
@@ -145,7 +152,8 @@ class dtypes:
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
 
-  floats = (float16, bfloat16, float32, float64)
+  fp8s = (fp8e4m3, fp8e5m2)
+  floats = fp8s + (float16, bfloat16, float32, float64)
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
@@ -163,6 +171,7 @@ def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType)
 promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
   dtypes.int64: [dtypes.float16, dtypes.bfloat16], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
   dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.float16, dtypes.bfloat16],
+  dtypes.fp8e5m2: [dtypes.float16, dtypes.bfloat16], dtypes.fp8e4m3: [dtypes.float16, dtypes.bfloat16],
   dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
 
 @functools.cache
@@ -193,8 +202,71 @@ def truncate_bf16(x):
   bf = struct.unpack('f', struct.pack('I', f32_int & 0xFFFF0000))[0]
   return bf
 
+# fp8-float conversions based on https://gitlab.com/nvidia/headers/cuda-individual/cudart/-/blob/main/cuda_fp8.hpp
+def float_to_fp8(x: float, dtype: DType) -> int:
+  assert dtype in dtypes.fp8s, "Only for fp8s"
+  config = {
+      dtypes.fp8e4m3: {"EXP_BIAS": 7, "SIGNIFICAND_BITS": 4, "MANTISSA_MASK": 0x7, "MINDENORM_O2": 0x3F50000000000000,
+              "OVERFLOW_THRESHOLD": 0x407D000000000000, "MAXNORM": 0x7E, "MINNORM": 0x3F90000000000000, "INF_VALUE": 0x7F},
+      dtypes.fp8e5m2: {"EXP_BIAS": 15, "SIGNIFICAND_BITS": 3, "MANTISSA_MASK": 0x3, "MINDENORM_O2": 0x3EE0000000000000,
+              "OVERFLOW_THRESHOLD": 0x40EE000000000000 - 1, "MAXNORM": 0x7B, "MINNORM": 0x3F10000000000000, "INF_VALUE": 0x7E}
+  }[dtype]
+  xbits, = struct.unpack('Q', struct.pack('d', x))
+  FP8_DP_HALF_ULP = 1 << (53 - config["SIGNIFICAND_BITS"] - 1)
+  sign = ((xbits >> 63) & 1) << 7
+  exp = (((xbits >> 52) & 0x7FF) - 1023 + config["EXP_BIAS"])
+  mantissa = (xbits >> (53 - config["SIGNIFICAND_BITS"])) & config["MANTISSA_MASK"]
+  absx = xbits & 0x7FFFFFFFFFFFFFFF
+
+  if absx <= config["MINDENORM_O2"]: res = 0
+  elif absx > 0x7FF0000000000000: res = 0x7F if dtype == dtypes.fp8e4m3 else 0x7E | mantissa
+  elif absx > config["OVERFLOW_THRESHOLD"]: res = config["MAXNORM"]
+  elif absx >= config["MINNORM"]:
+    res = ((exp << (config["SIGNIFICAND_BITS"] - 1)) | mantissa)
+    round_bits = xbits & ((FP8_DP_HALF_ULP << 1) - 1)
+    if (round_bits > FP8_DP_HALF_ULP) or (round_bits == FP8_DP_HALF_ULP and (mantissa & 1)): res = res + 1
+  else:
+    shift = 1 - exp
+    mantissa |= 1 << (config["SIGNIFICAND_BITS"] - 1)
+    res = (mantissa >> shift)
+    round_bits = (xbits | (1 << (53 - 1))) & ((FP8_DP_HALF_ULP << (shift + 1)) - 1)
+    if (round_bits > (FP8_DP_HALF_ULP << shift)) or (round_bits == (FP8_DP_HALF_ULP << shift) and (res & 1)):
+      res = res + 1
+
+  res |= sign
+  return int(res)
+
+def fp8_to_float(x: int, dtype: DType) -> float:
+  assert dtype in dtypes.fp8s, "Only for fp8s"
+  ur = x << 8
+
+  if dtype == dtypes.fp8e5m2 and (ur & 0x7FFF) > 0x7C00: ur = 0x7FFF
+  elif dtype == dtypes.fp8e4m3:
+    sign = ur & 0x8000
+    exponent = ((ur & 0x7800) >> 1) + 0x2000
+    mantissa = (ur & 0x0700) >> 1
+    absx = x & 0x7F
+    if absx == 0x7F: ur = 0x7FFF
+    elif exponent == 0x2000:
+      if mantissa != 0:
+        mantissa <<= 1
+        while (mantissa & 0x0400) == 0:
+          mantissa <<= 1
+          exponent -= 0x0400
+        mantissa &= 0x03FF
+      else:
+        exponent = 0
+      ur = (sign | exponent) | mantissa
+    else:
+      ur = (sign | exponent) | mantissa
+
+  half_bytes = struct.pack('<H', ur)
+  float32_val = struct.unpack('e', half_bytes)[0]
+  return float(float32_val)
+
 truncate: dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.float16: truncate_fp16, dtypes.bfloat16: truncate_bf16,
+  **{fp8: (lambda x, dtype=fp8: fp8_to_float(float_to_fp8(x, dtype), dtype)) for fp8 in dtypes.fp8s},
   dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,

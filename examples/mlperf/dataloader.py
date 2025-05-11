@@ -532,7 +532,7 @@ if __name__ == "__main__":
   def load_retinanet(val):
     from extra.datasets.openimages import BASEDIR, download_dataset
     from pycocotools.coco import COCO
-    dataset = COCO(download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), "validation" if val else "train"))
+    dataset = COCO(download_dataset(base_dir:=getenv("BASEDIR", BASEDIR), "validation" if val else "train"))
     with tqdm(total=len(dataset.imgs.keys())) as pbar:
       for x in batch_load_retinanet(dataset, val, base_dir):
         pbar.update(x[0].shape[0])

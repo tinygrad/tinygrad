@@ -1,3 +1,4 @@
+import glob
 import sys
 import json
 import numpy as np
@@ -155,18 +156,6 @@ def prepare_target(annotations, img_id, img_size):
   classes = classes[keep]
   return {"boxes": boxes, "labels": classes, "image_id": img_id, "image_size": img_size}
 
-def iterate(coco, base_dir, bs=8):
-  image_ids = sorted(coco.imgs.keys())
-  for i in range(0, len(image_ids), bs):
-    X, targets  = [], []
-    for img_id in image_ids[i:i+bs]:
-      img_dict = coco.loadImgs(img_id)[0]
-      x, original_size = resize(image_load(base_dir, img_dict['subset'], img_dict["file_name"]))
-      X.append(x)
-      annotations = coco.loadAnns(coco.getAnnIds(img_id))
-      targets.append(prepare_target(annotations, img_id, original_size))
-    yield np.array(X), targets
-
 def download_dataset(base_dir:Path, subset:str) -> Path:
   if (ann_file:=base_dir / f"{subset}/labels/openimages-mlperf.json").is_file(): print(f"{subset} dataset is already available")
   else:
@@ -211,6 +200,10 @@ def normalize(img:Tensor, device:list[str]|None = None):
   img = ((img.permute([0, 3, 1, 2]) / 255.0) - mean) / std
   return img.cast(dtypes.default_float)
 
+def get_dataset_count(base_dir:Path, val:bool) -> int:
+  if not (files:=glob.glob(p:=str(base_dir / f"{'validation' if val else 'train'}/data/*.jpg"))): raise FileNotFoundError(f"No files in {p}")
+  return len(files)
+
 if __name__ == "__main__":
-  download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), "train")
+  download_dataset(base_dir:=getenv("BASEDIR", BASEDIR), "train")
   download_dataset(base_dir, "validation")

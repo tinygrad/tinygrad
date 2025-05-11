@@ -3,10 +3,9 @@ import itertools, operator, math
 from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, least_upper_dtype
-from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, sint_to_uop
+from tinygrad.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint, sint_to_uop
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import all_int, prod, partition, flatten, unwrap, QUANTIZE
-from tinygrad.codegen.expander import expand_rewrite
+from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
 from tinygrad.codegen.symbolic import symbolic
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
@@ -15,6 +14,24 @@ def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> l
   try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
   except ValueError: return None
   return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
+
+def get_contraction_with_reduce(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...], reduce_axis:tuple[int, ...]) -> list[list[int]]|None:
+  if (contraction:=get_contraction(old_shape, new_shape)) is None: return None
+  # contraction returns the 1s as right justified as possible
+  # normally this contraction is good, but sometimes the reduce dim is empty. borrow from the next one, leaving one
+  # this ensures there's always ones available in the reduce dimension. this is also a valid contraction
+  for i in range(len(contraction)):
+    if i in reduce_axis and len(contraction[i]) == 0:
+      take_from = i+1
+      while take_from < len(contraction) and len(contraction[take_from]) == 0:
+        assert new_shape[take_from] == 1
+        take_from += 1
+      if take_from == len(contraction) or new_shape[take_from] != 1: return None # nothing to take
+      for j in range(take_from, i, -1):
+        assert len(contraction[j]) > 0
+        contraction[j-1] = contraction[j][:-1]
+        contraction[j] = contraction[j][-1:]
+  return contraction
 
 # ***** indexing *****
 def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
@@ -74,8 +91,8 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   full_shape = ast.full_shape
   first_upcasted = len(full_shape)-ki.upcasted
   # if there's no reduce, this is first_upcasted. assumes reduces are at the end
-  first_reduce = min([first_upcasted]+flatten(x.axis_arg for x in ast.toposort if x.op is Ops.REDUCE_AXIS))
-  local_loads = [x for x in ast.toposort if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL]
+  first_reduce = min([first_upcasted]+flatten(x.axis_arg for x in ast.toposort() if x.op is Ops.REDUCE_AXIS))
+  local_loads = [x for x in ast.toposort() if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL]
   # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
   group_for_reduces = sum([any(l.st_arg.shape[i]!=ast.src[0].st_arg.shape[i] for l in local_loads) for i in range(first_reduce,first_upcasted)])
   global_dims = first_reduce-ki.local_dims
@@ -90,10 +107,10 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
              get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
   else:
     # all loops are RANGES
-    idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(g)), i) for i,g in enumerate(full_shape[:first_reduce])]
+    idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i) for i,g in enumerate(full_shape[:first_reduce])]
 
   # reduce loops
-  idxs += [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(g)), i)
+  idxs += [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i)
     for i,g in enumerate(full_shape[first_reduce+group_for_reduces:first_upcasted], start=first_reduce+group_for_reduces)]
 
   # upcast loops
@@ -104,7 +121,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   # late indexes (group for reduce)
   ridxs = idxs[:]
   for a in range(first_reduce, first_reduce+group_for_reduces):
-    ridxs[a] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(full_shape[a])), 1000+a)
+    ridxs[a] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(full_shape[a]),), 1000+a)
 
   return IndexContext(idxs, ridxs)
 
@@ -210,14 +227,8 @@ pm_quant = symbolic+PatternMatcher([
     lambda x,v,a0,a1,b0,b1: x + v.where(a0+b0, a1+b1)),
 
   # split REDUCE into multiple reduces (who remembers FOIL?)
-  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.CAST, name="v1")+UPat.var("c1")) * UPat(Ops.CAST, name="v2",), name="r"),
+  (UPat(Ops.REDUCE_AXIS, src=((UPat(Ops.CAST, name="v1")+UPat.var("c1")) * UPat(Ops.CAST, name="v2"),), name="r"),
     lambda v1,v2,c1,r: r.replace(src=(v1*v2,)) + r.replace(src=(c1*v2,))),
-  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.CAST, name="v1")+UPat.var("c1")) * (UPat(Ops.CAST, name="v2",)+UPat.var("c2")), name="r"),
+  (UPat(Ops.REDUCE_AXIS, src=((UPat(Ops.CAST, name="v1")+UPat.var("c1")) * (UPat(Ops.CAST, name="v2",)+UPat.var("c2")),), name="r"),
     lambda v1,v2,c1,c2,r: r.replace(src=(v1*v2,)) + r.replace(src=(c2*v1,)) + r.replace(src=(c1*v2,)) + r.replace(src=(c1*c2,))),
 ])
-
-def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
-  if QUANTIZE and opts.device in {"CPU", "DSP"}: ast = graph_rewrite(ast, pm_quant, name="quantize")
-  sink = graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
-  # expand_rewrite turns this into a vectorized program
-  return expand_rewrite(sink)

@@ -1,12 +1,12 @@
-from typing import Optional, Any, Callable, cast
+from typing import Any, Callable, cast
 import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice
+from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice, DType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve, graph_rewrite, GroupOp, identity_element
-from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat, gep_pushing
-from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
+from tinygrad.codegen.symbolic import split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
+from tinygrad.helpers import getenv, flatten, AMX, prod, partition
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
 
@@ -22,7 +22,8 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
   for stmt in split_uop(valid, Ops.AND):
-    X, is_upper_bound, c = parse_valid(stmt)
+    try: X, is_upper_bound, c = parse_valid(stmt)
+    except ValueError: return None
 
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
     if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in split_uop(X, Ops.ADD)):
@@ -47,7 +48,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   return buf.index(idx, new_valid)
 
 def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
-  if store_gate not in [gate.src[0] for gate in val.toposort if gate.op is Ops.IF]: return None
+  if store_gate not in [gate.src[0] for gate in val.toposort() if gate.op is Ops.IF]: return None
   # remove the gate from the index
   return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val)
 
@@ -151,13 +152,14 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
       return m, s
   assert False
 
-def fast_idiv(x: UOp, d: int) -> UOp|None:
+def fast_idiv(ctx: Renderer|None, x: UOp, d: int) -> UOp|None:
   # idiv is truncated division, but arithmatic shift is floored division, so can only do non-negative numbers!
   if x.vmin<0: return None
   sign = 1 if d > 0 else -1
   m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
   if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
-  if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype):  # promo_lattice needs to return an unsigned type
+  # promo_lattice needs to return an unsigned type
+  if ctx is not None and dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype, ctx.device):
     if m * vmax <= dtypes.max(next_dtype): return sign * ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
   return None
 
@@ -177,9 +179,8 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
     pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
     pat += [(UPat.var("x", dtypes.sints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None)]
     if not getenv("DISABLE_FAST_IDIV"):
-      pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda x, d: fast_idiv(x, d.arg))]
-      # TODO: This breaks validate_index because of the way _min_max is calucalted on uops
-      # pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("d"), lambda x, d: x - d*f if (f:=fast_idiv(x, d.arg)) is not None else None)]
+      pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
+      pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("d"), lambda ctx, x, d: x - d*f if (f:=fast_idiv(ctx, x, d.arg)) is not None else None)]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
@@ -312,33 +313,34 @@ def split_cat(sink, store, load1, load2, lt, idx_l1, idx_s, rng_s, mul_s, rng2_s
               globals_l1, globals_s, globals_l2, idx_l2, rng_l2, rng2_l2, mul_l2, const_s=None, const_l1=None,
               const_l2=None, mul2_s=None, mul2_l1=None, mul2_l2=None, extra=None):
   is_vec = globals_s.op is Ops.VECTORIZE
-  split_rng2 = mul_s != mul_l2
-  full = rng2_s.src[1] if split_rng2 else rng_s.src[1]
+  vec_count = len(globals_s.src) if is_vec else 1
+  split_rng2 = mul_s is not mul_l2
+  full = rng2_s.src[0] if split_rng2 else rng_s.src[0]
   # doesnt work with SWAP OptOp
-  if lt >= full or rng_s.arg > rng2_s.arg or rng_l1.arg > rng2_l1.arg \
+  if lt.op is not Ops.CONST or lt >= full or rng_s.arg > rng2_s.arg or rng_l1.arg > rng2_l1.arg \
      or rng_l2.arg > rng2_l2.arg or (mul2_s.arg > mul_s.arg if mul2_s is not None else False): return None
-  if split_rng2: rng2_s, rng2_l1 = rng2_s.replace(src=(rng2_s.src[0], lt)), rng2_l1.replace(src=(rng2_l1.src[0], lt))
-  else: rng_s, rng_l1 = rng_s.replace(src=(rng_s.src[0], lt)), rng_l1.replace(src=(rng_l1.src[0], lt))
+  if split_rng2: rng2_s, rng2_l1 = rng2_s.replace(src=(lt,)), rng2_l1.replace(src=(lt,))
+  else: rng_s, rng_l1 = rng_s.replace(src=(lt,)), rng_l1.replace(src=(lt,))
 
-  def _make_loop(rng, mul, rng2, mul2, extra, is_vec, const):
+  def _make_loop(rng, mul, rng2, mul2, extra, const):
     loop = rng * mul + rng2 * (mul2 if mul2 is not None else 1) + (extra if extra is not None else 0)
-    if is_vec and const is not None: loop = UOp(Ops.VECTORIZE, const.dtype, src=tuple(loop for _ in range(const.dtype.count)))
+    if is_vec and const is not None: loop = UOp(Ops.VECTORIZE, const.dtype, src=tuple(loop for _ in range(vec_count)))
     return loop + (const if const is not None else 0)
 
-  loop_store1 = _make_loop(rng_s, mul_s, rng2_s, mul2_s, extra, is_vec, const_s)
-  loop_load1 = _make_loop(rng_l1, mul_l1, rng2_l1, mul2_l1, extra, is_vec, const_l1)
+  loop_store1 = _make_loop(rng_s, mul_s, rng2_s, mul2_s, extra, const_s)
+  loop_load1 = _make_loop(rng_l1, mul_l1, rng2_l1, mul2_l1, extra, const_l1)
   store1 = store.replace(src=(idx_s.replace(src=(globals_s, loop_store1)), load1.replace(src=(idx_l1.replace(src=(globals_l1, loop_load1)),))))
 
-  rng_new = UOp.range(dtype=dtypes.int, idx=10001 if split_rng2 else 10000, start=lt.arg, end=full.arg)
+  rng_new = (UOp.range(dtype=dtypes.int, idx=10001 if split_rng2 else 10000, end=full.arg-lt.arg) + lt)
   extra2 = extra.replace(src=(extra.src[0].replace(arg=10002), extra.src[1])) if extra is not None and extra.op is Ops.MUL else \
            extra.replace(arg=10002) if extra is not None and extra.op is Ops.RANGE else extra
 
   if split_rng2:
-    loop_store2 = _make_loop(rng_s.replace(arg=10000), mul_s, rng_new, mul2_s, extra2, is_vec, const_s)
-    loop_load2 = _make_loop(rng_l2.replace(arg=10000), mul_l2, rng_new, mul2_l2, extra2, is_vec, const_l2)
+    loop_store2 = _make_loop(rng_s.replace(arg=10000), mul_s, rng_new, mul2_s, extra2, const_s)
+    loop_load2 = _make_loop(rng_l2.replace(arg=10000), mul_l2, rng_new, mul2_l2, extra2, const_l2)
   else:
-    loop_store2 = _make_loop(rng_new, mul_s, rng2_s.replace(arg=10001), mul2_s, extra2, is_vec, const_s)
-    loop_load2 = _make_loop(rng_new, mul_l2, rng2_l2.replace(arg=10001), mul2_l2, extra2, is_vec, const_l2)
+    loop_store2 = _make_loop(rng_new, mul_s, rng2_s.replace(arg=10001), mul2_s, extra2, const_s)
+    loop_load2 = _make_loop(rng_new, mul_l2, rng2_l2.replace(arg=10001), mul2_l2, extra2, const_l2)
 
   store2 = store.replace(src=(idx_s.replace(src=(globals_s, loop_store2)), load2.replace(src=(idx_l2.replace(src=(globals_l2, loop_load2)),))))
   return sink.replace(src=(store1, store2,))
@@ -369,15 +371,17 @@ pm_split = PatternMatcher([
 class ReduceContext:
   acc_num: int = 0
 
+def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
+  # if this has a horizontal reduction component, do that first
+  if inp.dtype != out_dtype:
+    # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
+    horizontal_amount = inp.dtype.count//out_dtype.count
+    return [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)]
+  return [inp]
+
 def reduce_to_acc(ctx:ReduceContext, red:UOp):
   inp, reduce_range = red.src[0], red.src[1:]
-  # if this has a horizontal reduction component, do that first
-  if inp.dtype != red.dtype:
-    # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
-    horizontal_amount = inp.dtype.count//red.dtype.count
-    lst = [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)]
-  else:
-    lst = [inp]
+  lst = horizontal_reduce(inp, red.dtype)
   assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
   # if we have a range
   if len(reduce_range) != 0:
@@ -387,34 +391,98 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   return acc.assign(ret) if len(reduce_range) != 0 else ret
 
+def no_vectorized_reduce(inp:UOp, red:UOp):
+  if inp.dtype != red.dtype:
+    red = red.replace(src=(functools.reduce(lambda x,y: x.alu(red.arg, y), horizontal_reduce(inp, red.dtype)),)+red.src[1:])
+    if red.dtype.vcount == 1: return red
+  # no_vectorize_alu ignoring ranges
+  if red.dtype.vcount == 1: return None
+  alus = tuple(UOp(red.op, red.dtype.scalar(), (red.src[0].gep(i),)+red.src[1:], red.arg) for i in range(red.dtype.vcount))
+  return UOp(Ops.VECTORIZE, red.dtype, alus)
+
+def reduce_rangeless(red:UOp):
+  # TODO: share code with reduce_unparented
+  if red.arg not in {Ops.ADD, Ops.MAX}: return None
+  if red.src[0].dtype != red.dtype: return None
+  if any(x.op in {Ops.RANGE} for x in red.src[0].toposort()): return None
+  ret = red.src[0]
+  if red.arg is Ops.ADD:
+    for r in red.src[1:]:
+      ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+  return ret
+
+def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
+
+pm_reduce_collapse = PatternMatcher([
+  # lift x+y out of reduce on lt
+  ((UPat.var("x")+UPat.var("y")) < UPat.var("c"), lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
+  # lift x*y out of reduce
+  ((UPat.var("x")*UPat.var("y")) < UPat.var("c"),
+   lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and y.vmin > 0 else None),
+  # lift x+y out of reduce on ne
+  ((UPat.var("x")+UPat.var("y")) != UPat.var("c"), lambda x,y,c: (x != (c-y)) if no_range(y) and no_range(c) else None),
+  # fold the range
+  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(0, UPat.cvar("val")).reduce(arg=Ops.ADD, allow_any_len=True),
+   lambda r,cut,val: (r.src[0]-cut).maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
+  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat.cvar("val"), 0).reduce(arg=Ops.ADD, allow_any_len=True),
+   lambda r,cut,val: cut.maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
+  # REDUCE on ADD
+  ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
+   lambda x,y,r: x.reduce(*r.src[1:], arg=Ops.ADD) + y.reduce(*r.src[1:],arg=Ops.ADD)),
+  # MUL casted bool
+  ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast().or_broadcasted(name="b")),
+   lambda x,gate,b=None: gate.broadcast(x.dtype.count).where(x, 0) if b is not None else gate.where(x, 0)),
+  # WHERE on LOAD (works on max too)
+  (UPat.var("gate").where(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load(), 0).reduce(arg=Ops.ADD, allow_any_len=True),
+   lambda buf,idx,gate: buf.index(idx, gate).load()),
+  (UPat.var("gate").where(0, UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()).reduce(arg=Ops.ADD, allow_any_len=True),
+   lambda buf,idx,gate: buf.index(idx, gate.logical_not()).load()),
+  # INDEX on RANGE / gated RANGE
+  (UPat.var("buf").index(UPat.var("expr"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted())),
+   lambda buf,r,idx,expr: buf.index(expr.substitute({r:idx.cast(r.dtype)}), (idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0]))),
+  # AND on WHERE
+  ((UPat.any(UPat(Ops.DEFINE_VAR, name="x"), UPat(Ops.DEFINE_VAR).gep(name="x")) & UPat.var("y")) \
+   .where(UPat.cvar("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
+    lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
+  # remove REDUCEs that no longer have a RANGE in the src
+  (UPat(Ops.REDUCE, name="red"), reduce_rangeless),
+  # devectorize REDUCE
+  (UPat(Ops.VECTORIZE, name="inp").reduce(name="red", allow_any_len=True), no_vectorized_reduce),
+  # index/load/where. TODO: this is more aggressive than needed
+  (UPat((Ops.INDEX, Ops.LOAD, Ops.WHERE), name="alu"), no_vectorized_alu),
+])+sym
+
+def reduce_collapse(red:UOp):
+  included, not_included = partition(red.parents, lambda x: any(y in x.sparents for y in red.src[1:]))
+  if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
+  replaces: dict[UOp, UOp] = {}
+  for u in included:
+    for s in u.src:
+      if s in not_included and s not in replaces and s.op not in {Ops.CONST, Ops.VCONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}:
+        replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
+  collapse_fxn = red.substitute(replaces)
+  sink = graph_rewrite(collapse_fxn, pm_reduce_collapse, name="reduce_collapse")
+  # TODO: why is REDUCE needed here and just RANGE isn't enough?
+  if any(x.op in {Ops.REDUCE, Ops.RANGE} for x in sink.toposort()): return None
+  return sink.substitute({v:k for k,v in replaces.items()})
+
+def reduce_unparented(red:UOp):
+  if red.arg not in {Ops.ADD, Ops.MAX}: return None
+  reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].sparents)
+  if len(reduce_unparented) == 0: return None
+  ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
+  if red.arg is Ops.ADD:
+    for r in reduce_unparented: ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+  return ret
+
 pm_reduce = PatternMatcher([
+  # remove any ranges from a REDUCE that aren't referenced in the reduce source
+  (UPat(Ops.REDUCE, name="red"), reduce_unparented),
+  # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
+  (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
   # REDUCE -> DEFINE_ACC+ASSIGN
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
   # tensor core built in accumulate
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
-])
-
-# *** uop graph ***
-
-def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
-  assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
-  supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
-  extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
-
-  # cat loop split
-  sink = graph_rewrite(sink, pm_split)
-  # remove reduce
-  sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")
-
-  # devectorize is optional
-  if DEVECTORIZE >= 2: sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)
-  elif DEVECTORIZE: sink = graph_rewrite(sink, sym+devectorize+load_store_folding+correct_load_store+load_store_indexing, ctx=opts)
-  else: sink = graph_rewrite(sink, sym+load_store_folding+correct_load_store+load_store_indexing, ctx=opts)
-
-  # optional pre matcher
-  if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)
-
-  # final rules for the renderer (without sym)
-  sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
-  return sink
+])+sym

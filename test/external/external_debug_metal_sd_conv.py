@@ -32,7 +32,7 @@ ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
 opts = [Opt(op=OptOps.UPCAST, axis=3, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UNROLL, axis=2, arg=0), Opt(op=OptOps.UNROLL, axis=1, arg=0), Opt(op=OptOps.LOCAL, axis=1, arg=8), Opt(op=OptOps.LOCAL, axis=2, arg=8), Opt(op=OptOps.LOCAL, axis=2, arg=2)]
 
 k = Kernel(ast)
-for opt in opts: k.apply_opt(opt)
+k.apply_opts(opts)
 bufs = bufs_from_lin(k)
 
 prg = CompiledRunner(k.to_program())
