@@ -96,7 +96,6 @@ class DiT_Llama:
 
   def __call__(self, x:Tensor, t:Tensor, y:Tensor, dropout_prob=None) -> Tensor:
     if dropout_prob is not None: y = (Tensor.rand(y.shape[0]) < dropout_prob).where(y.full_like(-1), y)
-    print(y.numpy())
     x = x.sequential(self.init_conv_seq)
     x = self.patchify(x)
     if not DUMB:
