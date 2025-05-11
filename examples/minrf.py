@@ -4,6 +4,8 @@ from tinygrad import Tensor, nn, GlobalCounters, TinyJit
 from tinygrad.helpers import getenv, trange
 from extra.models.llama import Attention, FeedForward, precompute_freqs_cis
 
+DUMB = getenv("DUMB")
+
 def modulate(x:Tensor, shift:Tensor, scale:Tensor) -> Tensor: return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
 def timestep_embedding(t:Tensor, dim:int, max_period=10000):
@@ -29,7 +31,7 @@ class TransformerBlock:
   def __call__(self, x:Tensor, freqs_cis:Tensor, adaln_input:Tensor):
     shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(adaln_input.silu()).chunk(6, dim=1)
     x = x + gate_msa.unsqueeze(1) * self.attention(modulate(self.attention_norm(x), shift_msa, scale_msa), 0, freqs_cis)
-    x = x + gate_mlp.unsqueeze(1) * self.feed_forward(modulate(self.feed_forward(x), shift_mlp, scale_mlp))
+    x = x + gate_mlp.unsqueeze(1) * self.feed_forward(modulate(self.ffn_norm(x), shift_mlp, scale_mlp))
     return x
 
 class FinalLayer:
@@ -62,13 +64,22 @@ class DiT_Llama:
       nn.GroupNorm(32, dim//2),
     ]
 
-    self.freqs_cis = precompute_freqs_cis(dim // n_heads, 4096)
+    if not DUMB:
+      self.freqs_cis = precompute_freqs_cis(dim // n_heads, 4096)
 
-    self.x_embedder = nn.Linear(self.patch_size * self.patch_size * dim // 2, dim, bias=True)
-    self.t_embedder = TimestepEmbedder(dim)
-    self.y_embedder = nn.Embedding(num_classes, dim)
-    self.layers = [TransformerBlock(dim, n_heads) for _ in range(n_layers)]
-    self.final_layer = FinalLayer(dim, self.patch_size, self.out_channels)
+      self.x_embedder = nn.Linear(self.patch_size * self.patch_size * dim // 2, dim, bias=True)
+      self.t_embedder = TimestepEmbedder(dim)
+      self.y_embedder = nn.Embedding(num_classes, dim)
+      self.layers = [TransformerBlock(dim, n_heads) for _ in range(n_layers)]
+      self.final_layer = FinalLayer(dim, self.patch_size, self.out_channels)
+    else:
+      self.dumb_model = [
+        nn.Conv2d(130, 128, kernel_size=3, padding='same'),
+        Tensor.relu,
+        nn.Conv2d(128, 128, kernel_size=3, padding='same'),
+        Tensor.relu,
+        nn.Conv2d(128, 4, kernel_size=3, padding='same'),
+      ]
 
   def unpatchify(self, x:Tensor):
     c, p = self.out_channels, self.patch_size
@@ -86,11 +97,16 @@ class DiT_Llama:
   def __call__(self, x:Tensor, t:Tensor, y:Tensor) -> Tensor:
     x = x.sequential(self.init_conv_seq)
     x = self.patchify(x)
-    x = self.x_embedder(x)
-    adaln_input = self.t_embedder(t) + self.y_embedder(y)
-    for layer in self.layers:
-      x = layer(x, self.freqs_cis[:, :x.size(1)], adaln_input=adaln_input)
-    x = self.final_layer(x, adaln_input)
+    if not DUMB:
+      x = self.x_embedder(x)
+      adaln_input = self.t_embedder(t) + self.y_embedder(y)
+      for layer in self.layers: x = layer(x, self.freqs_cis[:, :x.size(1)], adaln_input=adaln_input)
+      x = self.final_layer(x, adaln_input)
+    else:
+      b = x.size(0)
+      dumb = Tensor.cat(x, t.reshape(b,1,1).expand(b,256,1), y.reshape(b,1,1).expand(b,256,1), dim=2).permute(0,2,1).reshape(b,130,16,16)
+      x = dumb.sequential(self.dumb_model)
+      x = x.reshape(b,-1,256).permute(0,2,1)
     return self.unpatchify(x)
 
   def rf(self, x:Tensor, cond:Tensor):
@@ -151,7 +167,7 @@ if __name__ == "__main__":
     return loss
 
   @TinyJit
-  def sample(z:Tensor, cond:Tensor) -> Tensor: return model.sample(z, cond, Tensor([-1]), sample_steps=50)[-1]
+  def sample(z:Tensor, cond:Tensor) -> Tensor: return model.sample(z, cond, Tensor([-1]), sample_steps=20)[-1]
 
   for steps in (t:=trange(1000)):
     if steps%10 == 0: mviz(sample(Tensor.randn(1, 1, 32, 32), Tensor([5])))
