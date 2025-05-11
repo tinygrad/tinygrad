@@ -64,4 +64,4 @@ class LLVMGraph(BatchedGraph[LLVMRenderer]):
     kernels = dedup(tuple(renderer._render_kernel(cast(CompiledRunner, ji.prg).p.uops, ["internal"]) for i,ji in enumerate(jit_cache)))
     kernels += [((), renderer._render_fn("batched", [(f"%{x[0]}", x[1]) for x in targs], out))]
     assert flatten(x[0] for x in kernels) == [] # global definitions are not used in CPU mode right now
-    return "\n".join([x[1] for x in kernels] + [renderer._render_footer()])
+    return "\n".join([x[1] for x in kernels] + [renderer._render_footer(cast(CompiledRunner, ji.prg).p.uops)])

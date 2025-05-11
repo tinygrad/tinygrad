@@ -2,11 +2,12 @@ import unittest
 from typing import List, cast
 import numpy as np
 from tinygrad.device import Buffer, Device, is_dtype_supported
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, ConstType
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import dedup, flatten, prod
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
 from tinygrad.ops import UOp, Ops
 from tinygrad.renderer import ProgramSpec
@@ -26,6 +27,18 @@ def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
   ei = CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, uops[-1], uops=uops, local_size=local_size))
   ei.exec(outbufs+inbufs)
   return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
+
+def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
+  dtype = alu_src_uops[0].dtype
+  a = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 0)
+  b = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 1)
+  idx = UOp.const(dtypes.int, 0)
+  ld = UOp(Ops.LOAD, dtype, (b.index(idx),))
+  alu = ld.alu(alu_op, *alu_src_uops)
+  store = UOp.store(a.index(idx), alu)
+  sink = UOp(Ops.SINK, dtypes.void, (store,))
+  uops = full_rewrite(sink, Device[Device.DEFAULT].renderer)
+  return _test_uop_result([Tensor([input_val])], uops)[0]
 
 class TestRendererFailures(unittest.TestCase):
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
@@ -52,17 +65,17 @@ class TestRendererFailures(unittest.TestCase):
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "uops are for cstyle")
 class TestCStyleFailures(unittest.TestCase):
   def test_inline_const_alu(self):
-    a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    b = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
-    idx = UOp.const(dtypes.int, 0)
-    ld = UOp(Ops.LOAD, dtypes.int, (b.index(idx),))
-    alu = ld.alu(Ops.MAX, UOp.const(dtypes.int, dtypes.min(dtypes.int)+1))
-    store = UOp.store(a.index(idx), alu)
-    sink = UOp(Ops.SINK, dtypes.void, (store,))
-    uops = full_rewrite(sink, Device[Device.DEFAULT].renderer)
     # CPU doesn't use the max function
-    ret = _test_uop_result([Tensor([1])], uops)[0]
+    ret = _setup_and_test_alu(Ops.MAX, 1, UOp.const(dtypes.int, dtypes.min(dtypes.int)+1))
     self.assertEqual(ret[0], 1)
+
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "tests for wgsl renderer")
+class TestWGSLFailures(unittest.TestCase):
+  def test_multiply_infinity(self):
+    # multiplying a positive constant by infinity should return infinity
+    # WGSL pipelines do not handle this reliably, some of which return zero, unless infinity always comes from a read on a dynamic buffer
+    ret = _setup_and_test_alu(Ops.MUL, 5.0, UOp.const(dtypes.float32, float("inf")))
+    self.assertEqual(ret[0], float("inf"))
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "tests for ptx renderer")
 class TestPTXFailures(unittest.TestCase):

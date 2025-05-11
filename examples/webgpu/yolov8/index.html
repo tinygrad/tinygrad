@@ -127,14 +127,22 @@
         const offscreenContext = offscreenCanvas.getContext('2d');
 
 
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            navigator.mediaDevices.getUserMedia({ audio: false,  video: { facingMode: { ideal: "environment" }}}).then(function (stream) {
+        if (navigator.mediaDevices?.getUserMedia) {
+            const tryCamera = facing => navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing } } });
+            const handle = stream => {
                 video.srcObject = stream;
                 video.onloadedmetadata = function() {
                     canvas.width = video.clientWidth;
                     canvas.height = video.clientHeight;
-                }
-            });
+                };
+            };
+            tryCamera("environment").then(handle).catch(() => 
+                tryCamera("user").then(handle).catch(e => {
+                    wgpuError.textContent = "Error: Could not access camera."
+                    wgpuError.style.display = "block";
+                    loadingContainer.style.display = "none";
+                })
+            );
         }
 
         async function processFrame() {
@@ -246,7 +254,6 @@
             if (!navigator.gpu) return false;
             const adapter = await navigator.gpu.requestAdapter();
             return await adapter.requestDevice({
-                requiredFeatures: ["shader-f16"],
                 powerPreference: "high-performance"
 		    });
         };

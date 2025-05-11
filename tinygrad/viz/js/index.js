@@ -35,16 +35,17 @@ async function renderDag(graph, additions, recenter=false) {
     d3.select("#bars").html("");
     const g = dagre.graphlib.json.read(e.data);
     // draw nodes
+    const STROKE_WIDTH = 1.4;
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`);
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => "stroke:#4a4b57; stroke-width:1.4px;"+d.style);
+      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => `stroke:#4a4b57; stroke-width:${STROKE_WIDTH}px; ${d.style}`);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
-      const y = (d.height-d.padding*2)/2;
+      const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
       return `translate(-${x}, -${y})`;
-     }).selectAll("text").data(d => [d.label.split("\n")]).join("text").selectAll("tspan").data(d => d).join("tspan").text(d => d).attr("x", "1")
-       .attr("dy", 14).attr("xml:space", "preserve");
+    }).selectAll("text").data(d => [d.label.split("\n")]).join("text").selectAll("tspan").data(d => d).join("tspan").text(d => d).attr("x", "0")
+      .attr("dy", 14).attr("xml:space", "preserve");
     // draw edges
     const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis);
     d3.select("#edges").selectAll("path.edgePath").data(g.edges()).join("path").attr("class", "edgePath").attr("d", (e) => {
@@ -83,7 +84,7 @@ async function renderDag(graph, additions, recenter=false) {
 DTYPE_SIZE = {"bool": 1, "char": 1, "uchar": 1, "short": 2, "ushort": 2, "int": 4, "uint": 4,
               "long": 8, "ulong": 8, "half": 2, "bfloat": 2, "float": 4, "double": 8}
 function getBuffer(e) {
-  const [_, size, dtype, device, num] = e.label.split("\n");
+  const [_, size, dtype, num, device] = e.label.split("\n");
   return {nbytes:size*DTYPE_SIZE[dtype.split("dtypes.")[1]], dtype, device:device.split(" ")[1], num:parseInt(num.split(" ")[1])};
 }
 
@@ -185,7 +186,7 @@ function renderMemoryGraph(graph) {
     return `${p0.join(' ')} ${p1.join(' ')}`;
   }).attr("fill", d => `#${colors[d.buf.num % colors.length]}`).on("mouseover", (e, { id, buf, x }) => {
     d3.select(e.currentTarget).attr("stroke", "rgba(26, 27, 38, 0.8)").attr("stroke-width", 0.8);
-    const metadata = document.querySelector(".container.metadata");
+    const metadata = document.querySelector(".metadata");
     document.getElementById("current-buf")?.remove();
     const { num, dtype, nbytes, ...rest } = buf;
     let label = `<BUFFER n${num} ${dtype} ${nbytes_format(nbytes)}>\nalive for ${pluralize(x[x.length-1]-x[0], 'timestep')}`;
