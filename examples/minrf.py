@@ -65,21 +65,21 @@ class DiT_Llama:
       nn.GroupNorm(32, dim//2),
     ]
 
+    self.x_embedder = nn.Linear(self.patch_size * self.patch_size * dim // 2, dim, bias=True)
+    self.t_embedder = TimestepEmbedder(dim)
+    self.y_embedder = nn.Embedding(num_classes+1, dim)
+
     if not DUMB:
       self.freqs_cis = precompute_freqs_cis(dim // n_heads, 4096)
-      self.x_embedder = nn.Linear(self.patch_size * self.patch_size * dim // 2, dim, bias=True)
-      self.t_embedder = TimestepEmbedder(dim)
-      self.y_embedder = nn.Embedding(num_classes+1, dim)
       self.layers = [TransformerBlock(dim, n_heads) for _ in range(n_layers)]
       self.final_layer = FinalLayer(dim, self.patch_size, self.out_channels)
     else:
-      N = self.patch_size * self.patch_size * dim // 2
       self.dumb_model = [
-        nn.Conv2d(N+1+11, N, kernel_size=3, padding='same'), Tensor.silu,
-        nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
-        nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
-        nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
-        nn.Conv2d(N, self.patch_size*self.patch_size, kernel_size=3, padding='same'),
+        nn.Conv2d(dim*2, dim, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(dim, dim, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(dim, dim, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(dim, dim, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(dim, self.patch_size*self.patch_size, kernel_size=3, padding='same'),
       ]
 
   def unpatchify(self, x:Tensor):
@@ -99,15 +99,14 @@ class DiT_Llama:
     if dropout_prob is not None: y = (Tensor.rand(y.shape[0]) < dropout_prob).where(y.full_like(self.num_classes), y)
     x = x.sequential(self.init_conv_seq)
     x = self.patchify(x)
+    x = self.x_embedder(x)
+    adaln_input = self.t_embedder(t) + self.y_embedder(y)
     if not DUMB:
-      x = self.x_embedder(x)
-      adaln_input = self.t_embedder(t) + self.y_embedder(y)
       for layer in self.layers: x = layer(x, self.freqs_cis[:, :x.size(1)], adaln_input=adaln_input)
       x = self.final_layer(x, adaln_input)
     else:
-      b = x.size(0)
-      d = x.size(1)
-      dumb = Tensor.cat(x, t.reshape(b,1,1).expand(b,d,1), y.one_hot(11).reshape(b,1,11).expand(b,d,11), dim=2)
+      b,hw,d = x.shape
+      dumb = Tensor.cat(x, adaln_input.reshape(b, 1, d).expand(b,hw,d), dim=2)
       dumb = dumb.permute(0,2,1).reshape(b,-1,32//self.patch_size,32//self.patch_size)
       x = dumb.sequential(self.dumb_model)
       x = x.reshape(b,-1,(32//self.patch_size)*(32//self.patch_size)).permute(0,2,1)
@@ -142,6 +141,7 @@ class DiT_Llama:
     return images
 
 def mviz(t:Tensor):
+  assert len(t.shape) == 4 and t.shape[1] == 1
   ft = t.permute(1,2,0,3).reshape(32, -1)
   assert ft.shape[-1]%32 == 0
   print("")
@@ -159,7 +159,7 @@ if __name__ == "__main__":
 
   Tensor.training = True
 
-  model = DiT_Llama(patch_size=4)
+  model = DiT_Llama(patch_size=4 if DUMB else 2)
   for r in nn.state.get_parameters(model): r.realize()
   optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=5e-4)
 
