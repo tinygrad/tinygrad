@@ -78,8 +78,6 @@ class DiT_Llama:
         nn.Conv2d(128, 128, kernel_size=3, padding='same'), Tensor.relu,
         nn.Conv2d(128, 128, kernel_size=3, padding='same'), Tensor.relu,
         nn.Conv2d(128, 128, kernel_size=3, padding='same'), Tensor.relu,
-        nn.Conv2d(128, 128, kernel_size=3, padding='same'), Tensor.relu,
-        nn.Conv2d(128, 128, kernel_size=3, padding='same'), Tensor.relu,
         nn.Conv2d(128, 4, kernel_size=3, padding='same'),
       ]
 
@@ -96,7 +94,9 @@ class DiT_Llama:
     x = x.permute(0, 2, 4, 1, 3, 5).flatten(-3).flatten(1, 2)
     return x  # B <H*W ish> <C*patch_size*patch_size>
 
-  def __call__(self, x:Tensor, t:Tensor, y:Tensor) -> Tensor:
+  def __call__(self, x:Tensor, t:Tensor, y:Tensor, dropout_prob=None) -> Tensor:
+    if dropout_prob is not None: y = (Tensor.rand(y.shape[0]) < dropout_prob).where(y.full_like(-1), y)
+    print(y.numpy())
     x = x.sequential(self.init_conv_seq)
     x = self.patchify(x)
     if not DUMB:
@@ -121,7 +121,7 @@ class DiT_Llama:
     # this is rectified flow
     z1 = Tensor.randn(x.shape)
     zt = (1 - texp) * x + texp * z1
-    vtheta = self(zt, t, cond)
+    vtheta = self(zt, t, cond, dropout_prob=0.1)
 
     # MSE loss
     return ((z1 - x) - vtheta).square().mean()
@@ -151,6 +151,7 @@ if __name__ == "__main__":
   X_train, Y_train, X_test, Y_test = nn.datasets.mnist()
   X_train = X_train.pad((2,2,2,2))
   X_train = ((X_train.float()/255)-0.5)/0.5
+  Y_train = Y_train.int()
 
   Tensor.training = True
 
