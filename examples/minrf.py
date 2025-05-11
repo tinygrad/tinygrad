@@ -18,7 +18,9 @@ class TimestepEmbedder:
   def __init__(self, hidden_size, frequency_embedding_size=256):
     self.mlp = [nn.Linear(frequency_embedding_size, hidden_size), Tensor.silu, nn.Linear(hidden_size, hidden_size)]
     self.frequency_embedding_size = frequency_embedding_size
-  def __call__(self, t:Tensor): return timestep_embedding(t, self.frequency_embedding_size).sequential(self.mlp)
+  def __call__(self, t:Tensor):
+    if getenv("MASK_T"): t = t * 0
+    return timestep_embedding(t, self.frequency_embedding_size).sequential(self.mlp)
 
 class TransformerBlock:
   def __init__(self, dim, n_heads, norm_eps=1e-5):
@@ -175,13 +177,12 @@ if __name__ == "__main__":
 
   #mviz(X_train[0:3])
 
-  Tensor.training = True
-
   model = DiT_Llama(patch_size=getenv("PATCH_SIZE", 2))
   for r in nn.state.get_parameters(model): r.realize()
   optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=5e-4)
 
   @TinyJit
+  @Tensor.train()
   def train_step():
     if getenv("OVERFIT"): samples = Tensor.zeros(getenv("BS", 256), dtype='int')
     else: samples = Tensor.randint(getenv("BS", 256), high=X_train.shape[0])
@@ -192,6 +193,7 @@ if __name__ == "__main__":
     return loss
 
   @TinyJit
+  @Tensor.test()
   def sample(z:Tensor, cond:Tensor) -> Tensor:
     return model.sample(z, cond, Tensor.full_like(cond, 10), sample_steps=getenv("SAMPLE_STEPS", 20))[-1]
 
