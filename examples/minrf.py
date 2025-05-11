@@ -41,8 +41,8 @@ class FinalLayer:
     self.adaLN_modulation = nn.Linear(dim, 2 * dim, bias=True)
 
     # init weights/bias to 0
-    self.linear.weight.replace(self.linear.weight.zeros_like().contiguous())
-    self.linear.bias.replace(self.linear.bias.zeros_like().contiguous())
+    #self.linear.weight.replace(self.linear.weight.zeros_like().contiguous())
+    #self.linear.bias.replace(self.linear.bias.zeros_like().contiguous())
 
   def __call__(self, x:Tensor, c:Tensor):
     shift, scale = self.adaLN_modulation(c.silu()).chunk(2, dim=1)
@@ -164,9 +164,9 @@ if __name__ == "__main__":
 
   @TinyJit
   def train_step():
-    samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0])
+    samples = Tensor.randint(getenv("BS", 256), high=X_train.shape[0])
     optimizer.zero_grad()
-    X, Y = X_train[samples], Y_train[samples]
+    X, Y = X_train[samples].contiguous(), Y_train[samples].contiguous()
     loss = model.rf(X, Y)
     loss.backward()
     optimizer.step()
