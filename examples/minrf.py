@@ -16,8 +16,10 @@ class TimestepEmbedder:
   def __init__(self, hidden_size, frequency_embedding_size=256):
     self.mlp = [nn.Linear(frequency_embedding_size, hidden_size), Tensor.silu, nn.Linear(hidden_size, hidden_size)]
     self.frequency_embedding_size = frequency_embedding_size
+
   def __call__(self, t:Tensor):
-    if getenv("MASK_T"): t = t * 0
+    # TODO: why is this required!!!
+    if getenv("MASK_T", 1): t = t * 0
     return timestep_embedding(t, self.frequency_embedding_size).sequential(self.mlp)
 
 class TransformerBlock:
@@ -57,12 +59,8 @@ class DiT_Llama:
     self.num_classes = num_classes
 
     self.init_conv_seq = [
-      nn.Conv2d(in_channels, dim // 2, kernel_size=5, padding=2, stride=1),
-      Tensor.silu,
-      nn.GroupNorm(32, dim//2),
-      nn.Conv2d(dim //2, dim // 2, kernel_size=5, padding=2, stride=1),
-      Tensor.silu,
-      nn.GroupNorm(32, dim//2),
+      nn.Conv2d(in_channels, dim // 2, kernel_size=5, padding=2, stride=1), Tensor.silu, nn.GroupNorm(32, dim//2),
+      nn.Conv2d(dim //2, dim // 2, kernel_size=5, padding=2, stride=1), Tensor.silu, nn.GroupNorm(32, dim//2),
     ]
 
     self.x_embedder = nn.Linear(self.patch_size * self.patch_size * dim // 2, dim, bias=True)
@@ -107,9 +105,8 @@ class DiT_Llama:
     dropout_prob = 0.1
     cond = (Tensor.rand(cond.shape[0]) < dropout_prob).where(cond.full_like(self.num_classes), cond)
 
-    # TODO: Tensor.randn_like
     # this is rectified flow
-    z1 = Tensor.randn(x.shape)
+    z1 = Tensor.randn(x.shape)  # TODO: add Tensor.randn_like (and friends) to tinygrad
     zt = (1 - texp) * x + texp * z1
     vtheta = self(zt, t, cond)
 
@@ -144,8 +141,6 @@ if __name__ == "__main__":
   X_train = X_train.pad((2,2,2,2))
   X_train = ((X_train.float()/255)-0.5)/0.5
   Y_train = Y_train.int()
-
-  #mviz(X_train[0:3])
 
   model = DiT_Llama(patch_size=getenv("PATCH_SIZE", 2))
   for r in nn.state.get_parameters(model): r.realize()
