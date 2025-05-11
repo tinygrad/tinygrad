@@ -138,8 +138,8 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
   ])
 
-  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer()))
-  def _render_footer(self) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
+  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
+  def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
   def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # NOTE: MallocAllocator promises 0x20 alignment
     sargs = ", ".join([f"{ldt(dt)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
@@ -225,6 +225,12 @@ class AMDLLVMRenderer(LLVMRenderer):
     (UPat(Ops.WMMA, name="wmma"), render_wmma_amd),
   ]) + base_rewrite
   extra_matcher = LLVMRenderer.extra_matcher
+  def _render_footer(self, uops: list[UOp]) -> str:
+    # TODO: this is copied from cstyle
+    requiredMaxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == "l")
+    attributes = ["alwaysinline", "nounwind", '"no-builtins"',
+                  f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}"', '"no-trapping-math"="true"']
+    return 'attributes #0 = { ' + ' '.join(attributes) + ' }'
   def __init__(self, arch:str):
     self.arch = arch
     self.tensor_cores = AMDRenderer.get_tensor_cores(arch)
