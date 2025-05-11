@@ -54,6 +54,7 @@ class DiT_Llama:
   def __init__(self, in_channels=1, dim=64, n_layers=6, n_heads=4, num_classes=10, patch_size=2):
     self.patch_size = patch_size
     self.out_channels = in_channels
+    self.num_classes = num_classes
 
     self.init_conv_seq = [
       nn.Conv2d(in_channels, dim // 2, kernel_size=5, padding=2, stride=1),
@@ -74,7 +75,7 @@ class DiT_Llama:
     else:
       N = self.patch_size * self.patch_size * dim // 2
       self.dumb_model = [
-        nn.Conv2d(N+11+1, N, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(N+1+11, N, kernel_size=3, padding='same'), Tensor.silu,
         nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
         nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
         nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
@@ -95,7 +96,7 @@ class DiT_Llama:
     return x  # B <H*W ish> <C*patch_size*patch_size>
 
   def __call__(self, x:Tensor, t:Tensor, y:Tensor, dropout_prob=None) -> Tensor:
-    if dropout_prob is not None: y = (Tensor.rand(y.shape[0]) < dropout_prob).where(y.full_like(-1), y)
+    if dropout_prob is not None: y = (Tensor.rand(y.shape[0]) < dropout_prob).where(y.full_like(self.num_classes), y)
     x = x.sequential(self.init_conv_seq)
     x = self.patchify(x)
     if not DUMB:
@@ -173,10 +174,11 @@ if __name__ == "__main__":
     return loss
 
   @TinyJit
-  def sample(z:Tensor, cond:Tensor) -> Tensor: return model.sample(z, cond, Tensor.full_like(cond, 10), sample_steps=20)[-1]
+  def sample(z:Tensor, cond:Tensor) -> Tensor:
+    return model.sample(z, cond, Tensor.full_like(cond, 10), sample_steps=getenv("SAMPLE_STEPS", 20))[-1]
 
   for steps in (t:=trange(getenv("STEPS", 1000))):
-    if steps%10 == 0: mviz(sample(Tensor.randn(3, 1, 32, 32), Tensor([5,0,4])))
+    if steps%10 == 0: mviz(sample(Tensor.randn(3, 1, 32, 32), Tensor([5,0,4], dtype='int')))
     GlobalCounters.reset()
     loss = train_step()
     t.set_description(f"loss: {loss.item():9.2f}")
