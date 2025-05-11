@@ -6,22 +6,10 @@ from extra.models.llama import Attention, FeedForward, precompute_freqs_cis
 
 def modulate(x:Tensor, shift:Tensor, scale:Tensor) -> Tensor: return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
-def timestep_embedding(t:Tensor, dim:int, max_period=10000):
-  half = dim // 2
-  freqs = (-math.log(max_period) * Tensor.arange(half)/half).exp()
-  args = t[:, None] * freqs[None, :]
-  return Tensor.cat(args.cos(), args.sin(), dim=-1)
-
+# TODO: why doesn't the TimestepEmbedder from minRF work?
 class TimestepEmbedder:
-  def __init__(self, hidden_size, frequency_embedding_size=256):
-    self.mlp = [nn.Linear(1, hidden_size), Tensor.silu, nn.Linear(hidden_size, hidden_size)]
-    self.frequency_embedding_size = frequency_embedding_size
-
-  def __call__(self, t:Tensor):
-    # TODO: why is this required!!!
-    return t.reshape(-1, 1).sequential(self.mlp)
-    #if getenv("MASK_T", 1): t = t * 0
-    #return timestep_embedding(t, self.frequency_embedding_size).sequential(self.mlp)
+  def __init__(self, hidden_size): self.mlp = [nn.Linear(1, hidden_size), Tensor.silu, nn.Linear(hidden_size, hidden_size)]
+  def __call__(self, t:Tensor): return t.reshape(-1, 1).sequential(self.mlp)
 
 class TransformerBlock:
   def __init__(self, dim, n_heads, norm_eps=1e-5):
