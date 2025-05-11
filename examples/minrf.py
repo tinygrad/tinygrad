@@ -75,10 +75,10 @@ class DiT_Llama:
       self.layers = [TransformerBlock(dim, n_heads) for _ in range(n_layers)]
     else:
       self.dumb_model = [
-        nn.Conv2d(dim*2, dim, kernel_size=5, padding='same'), Tensor.silu,
-        nn.Conv2d(dim, dim, kernel_size=5, padding='same'), Tensor.silu,
-        nn.Conv2d(dim, dim, kernel_size=5, padding='same'), Tensor.silu,
-        nn.Conv2d(dim, dim, kernel_size=5, padding='same'), Tensor.silu,
+        nn.Conv2d(dim*2, dim, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(dim, dim, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(dim, dim, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(dim, dim, kernel_size=3, padding='same'), Tensor.silu,
         #nn.Conv2d(dim, self.patch_size*self.patch_size*self.out_channels, kernel_size=3, padding='same'),
       ]
 
