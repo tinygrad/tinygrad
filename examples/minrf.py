@@ -72,11 +72,9 @@ class DiT_Llama:
       self.layers = [TransformerBlock(dim, n_heads) for _ in range(n_layers)]
       self.final_layer = FinalLayer(dim, self.patch_size, self.out_channels)
     else:
-      N = 512
+      N = self.patch_size * self.patch_size * dim // 2
       self.dumb_model = [
-        nn.Conv2d(N+2, N, kernel_size=3, padding='same'), Tensor.silu,
-        nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
-        nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(N+11+1, N, kernel_size=3, padding='same'), Tensor.silu,
         nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
         nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
         nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
@@ -108,7 +106,7 @@ class DiT_Llama:
     else:
       b = x.size(0)
       d = x.size(1)
-      dumb = Tensor.cat(x, t.reshape(b,1,1).expand(b,d,1), y.reshape(b,1,1).expand(b,d,1), dim=2)
+      dumb = Tensor.cat(x, t.reshape(b,1,1).expand(b,d,1), y.one_hot(11).reshape(b,1,11).expand(b,d,11), dim=2)
       dumb = dumb.permute(0,2,1).reshape(b,-1,32//self.patch_size,32//self.patch_size)
       x = dumb.sequential(self.dumb_model)
       x = x.reshape(b,-1,(32//self.patch_size)*(32//self.patch_size)).permute(0,2,1)
@@ -175,9 +173,9 @@ if __name__ == "__main__":
     return loss
 
   @TinyJit
-  def sample(z:Tensor, cond:Tensor) -> Tensor: return model.sample(z, cond, Tensor.full_like(cond, -1), sample_steps=20)[-1]
+  def sample(z:Tensor, cond:Tensor) -> Tensor: return model.sample(z, cond, Tensor.full_like(cond, 10), sample_steps=20)[-1]
 
-  for steps in (t:=trange(1000)):
+  for steps in (t:=trange(getenv("STEPS", 1000))):
     if steps%10 == 0: mviz(sample(Tensor.randn(3, 1, 32, 32), Tensor([5,0,4])))
     GlobalCounters.reset()
     loss = train_step()
