@@ -116,7 +116,7 @@ class DiT_Llama:
     #x = x + self.y_embedder(y).reshape(x.shape[0], 1, -1)
     #adaln_input = self.t_embedder(t) + self.y_embedder(y)
     adaln_input = self.y_embedder(y)
-    x = x + adaln_input.reshape(x.shape[0], 1, -1)
+    #x = x + adaln_input.reshape(x.shape[0], 1, -1)
     if not DUMB:
       for layer in self.layers:
         x = layer(x, self.freqs_cis[:, :x.size(1)], adaln_input=adaln_input)
