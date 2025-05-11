@@ -20,7 +20,6 @@ class TimestepEmbedder:
     self.frequency_embedding_size = frequency_embedding_size
   def __call__(self, t:Tensor): return timestep_embedding(t, self.frequency_embedding_size).sequential(self.mlp)
 
-"""
 class TransformerBlock:
   def __init__(self, dim, n_heads, norm_eps=1e-5):
     self.attention = Attention(dim, n_heads)
@@ -34,8 +33,8 @@ class TransformerBlock:
     x = x + gate_msa.unsqueeze(1) * self.attention(modulate(self.attention_norm(x), shift_msa, scale_msa), 0, freqs_cis)
     x = x + gate_mlp.unsqueeze(1) * self.feed_forward(modulate(self.ffn_norm(x), shift_mlp, scale_mlp))
     return x
-"""
 
+"""
 class TransformerBlock:
   def __init__(self, dim:int, n_heads:int):
     self.attention = Attention(dim, n_heads)
@@ -46,6 +45,7 @@ class TransformerBlock:
   def __call__(self, x:Tensor, freqs_cis:Tensor):
     h = x + self.attention(self.attention_norm(x), 0, freqs_cis)
     return (h + self.feed_forward(self.ffn_norm(h))).contiguous()
+"""
 
 class FinalLayer:
   def __init__(self, dim, patch_size, out_channels):
@@ -119,8 +119,8 @@ class DiT_Llama:
     x = x + adaln_input.reshape(x.shape[0], 1, -1)
     if not DUMB:
       for layer in self.layers:
-        #x = layer(x, self.freqs_cis[:, :x.size(1)], adaln_input=adaln_input)
-        x = layer(x, self.freqs_cis[:, :x.size(1)])
+        x = layer(x, self.freqs_cis[:, :x.size(1)], adaln_input=adaln_input)
+        #x = layer(x, self.freqs_cis[:, :x.size(1)])
     else:
       b,hw,d = x.shape
       dumb = Tensor.cat(x, adaln_input.reshape(b, 1, d).expand(b,hw,d), dim=2)
