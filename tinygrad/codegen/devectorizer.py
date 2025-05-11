@@ -345,13 +345,13 @@ def split_cat(sink, store, load1, load2, lt, idx_l1, idx_s, rng_s, mul_s, rng2_s
   store2 = store.replace(src=(idx_s.replace(src=(globals_s, loop_store2)), load2.replace(src=(idx_l2.replace(src=(globals_l2, loop_load2)),))))
   return sink.replace(src=(store1, store2,))
 
-def _loop(id:str):
+def _loop(name:str):
   return UPat.any(
-      loop:=UPat.any((UPat(Ops.RANGE, name="rng_"+id)*UPat.var("mul_"+id))+(UPat(Ops.RANGE, name="rng2_"+id)*UPat.var("mul2_"+id))+UPat.var("extra"),
-                     (UPat(Ops.RANGE, name="rng_"+id)*UPat.var("mul_"+id))+(UPat(Ops.RANGE, name="rng2_"+id)*UPat.var("mul2_"+id)),
-                     (UPat(Ops.RANGE, name="rng_"+id)*UPat.var("mul_"+id))+UPat(Ops.RANGE, name="rng2_"+id),),
-      UPat(Ops.ADD, src=(UPat(Ops.VECTORIZE, src=loop), UPat(Ops.VCONST, name="const_"+id))),
-      loop + UPat(Ops.CONST, name="const_"+id))
+      loop:=UPat.any((UPat(Ops.RANGE, name="rng_"+name)*UPat.var("mul_"+name))+(UPat(Ops.RANGE, name="rng2_"+name)*UPat.var("mul2_"+name))+UPat.var("extra"),
+                     (UPat(Ops.RANGE, name="rng_"+name)*UPat.var("mul_"+name))+(UPat(Ops.RANGE, name="rng2_"+name)*UPat.var("mul2_"+name)),
+                     (UPat(Ops.RANGE, name="rng_"+name)*UPat.var("mul_"+name))+UPat(Ops.RANGE, name="rng2_"+name),),
+      UPat(Ops.ADD, src=(UPat(Ops.VECTORIZE, src=loop), UPat(Ops.VCONST, name="const_"+name))),
+      loop + UPat(Ops.CONST, name="const_"+name))
 
 pm_split = PatternMatcher([
   (UPat(Ops.SINK, name="sink", src=(
