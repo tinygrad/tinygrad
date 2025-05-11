@@ -4,7 +4,7 @@ from tinygrad import Tensor, nn, GlobalCounters, TinyJit
 from tinygrad.helpers import getenv, trange
 from extra.models.llama import Attention, FeedForward, precompute_freqs_cis
 
-DUMB = getenv("DUMB")
+DUMB = bool(getenv("DUMB", 0))
 
 def modulate(x:Tensor, shift:Tensor, scale:Tensor) -> Tensor: return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
@@ -66,7 +66,6 @@ class DiT_Llama:
 
     if not DUMB:
       self.freqs_cis = precompute_freqs_cis(dim // n_heads, 4096)
-
       self.x_embedder = nn.Linear(self.patch_size * self.patch_size * dim // 2, dim, bias=True)
       self.t_embedder = TimestepEmbedder(dim)
       self.y_embedder = nn.Embedding(num_classes+1, dim)
@@ -139,8 +138,8 @@ class DiT_Llama:
     return images
 
 def mviz(t:Tensor):
-  ft = t.flatten(0, -2)
-  assert ft.shape == (32,32)
+  ft = t.permute(1,2,0,3).reshape(32, -1)
+  assert ft.shape[-1]%32 == 0
   print("")
   for y in ((ft+1)/2).clamp(0,1).tolist():
     ln = [f"\033[38;5;{232+int(x*23)}m██" for x in y]
@@ -151,6 +150,8 @@ if __name__ == "__main__":
   X_train = X_train.pad((2,2,2,2))
   X_train = ((X_train.float()/255)-0.5)/0.5
   Y_train = Y_train.int()
+
+  #mviz(X_train[0:3])
 
   Tensor.training = True
 
@@ -169,10 +170,10 @@ if __name__ == "__main__":
     return loss
 
   @TinyJit
-  def sample(z:Tensor, cond:Tensor) -> Tensor: return model.sample(z, cond, Tensor([-1]), sample_steps=20)[-1]
+  def sample(z:Tensor, cond:Tensor) -> Tensor: return model.sample(z, cond, Tensor.full_like(cond, -1), sample_steps=20)[-1]
 
   for steps in (t:=trange(1000)):
-    if steps%10 == 0: mviz(sample(Tensor.randn(1, 1, 32, 32), Tensor([5])))
+    if steps%10 == 0: mviz(sample(Tensor.randn(3, 1, 32, 32), Tensor([5,0,4])))
     GlobalCounters.reset()
     loss = train_step()
     t.set_description(f"loss: {loss.item():9.2f}")
