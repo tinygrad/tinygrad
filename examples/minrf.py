@@ -124,6 +124,7 @@ class DiT_Llama:
 def mviz(t:Tensor):
   ft = t.flatten(0, -2)
   assert ft.shape == (32,32)
+  print("")
   for y in ((ft+1)/2).clamp(0,1).tolist():
     ln = [f"\033[38;5;{232+int(x*23)}m██" for x in y]
     print(''.join(ln) + "\033[0m")
@@ -149,8 +150,11 @@ if __name__ == "__main__":
     optimizer.step()
     return loss
 
+  @TinyJit
+  def sample(z:Tensor, cond:Tensor) -> Tensor: return model.sample(z, cond, Tensor([-1]), sample_steps=50)[-1]
+
   for steps in (t:=trange(1000)):
-    if steps%10 == 0: mviz(model.sample(Tensor.randn(1, 1, 32, 32), Tensor(5), Tensor(-1), sample_steps=5)[-1])
+    if steps%10 == 0: mviz(sample(Tensor.randn(1, 1, 32, 32), Tensor([5])))
     GlobalCounters.reset()
     loss = train_step()
     t.set_description(f"loss: {loss.item():9.2f}")
