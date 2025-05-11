@@ -110,10 +110,10 @@ class DiT_Llama:
 
   def sample(self, z, cond, null_cond, sample_steps=50, cfg=2.0):
     b = z.size(0)
-    dt = Tensor.full((b,)+(1,)*len(z.shape[1:]), fill_value=1.0 / sample_steps)
+    dt = Tensor.full((b,)+(1,)*len(z.shape[1:]), fill_value=1.0/sample_steps)
     images = [z]
     for i in range(sample_steps, 0, -1):
-      t = Tensor.full((b,), fill_value=i/sample_steps)
+      t = Tensor.full((b,), fill_value=i/sample_steps).realize()
       vc = self(z, t, cond)
       vu = self(z, t, null_cond)
       vc = vu + cfg * (vc - vu)
