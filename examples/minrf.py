@@ -18,7 +18,7 @@ class TimestepEmbedder:
   def __init__(self, hidden_size, frequency_embedding_size=256):
     self.mlp = [nn.Linear(frequency_embedding_size, hidden_size), Tensor.silu, nn.Linear(hidden_size, hidden_size)]
     self.frequency_embedding_size = frequency_embedding_size
-  def __call__(self, t:Tensor): return timestep_embedding(t, self.frequency_embedding_size).sequential(self.mlp)
+  def __call__(self, t:Tensor): return timestep_embedding(t, self.frequency_embedding_size).sequential(self.mlp)*0
 
 class TransformerBlock:
   def __init__(self, dim, n_heads, norm_eps=1e-5):
@@ -79,7 +79,7 @@ class DiT_Llama:
     ]
 
     self.x_embedder = nn.Linear(self.patch_size * self.patch_size * dim // 2, dim, bias=True)
-    #self.t_embedder = TimestepEmbedder(dim)
+    self.t_embedder = TimestepEmbedder(dim)
     self.y_embedder = nn.Embedding(num_classes+1, dim)
     self.final_layer = FinalLayer(dim, self.patch_size, self.out_channels)
 
@@ -114,8 +114,7 @@ class DiT_Llama:
     x = self.patchify(x)
     x = self.x_embedder(x)
     #x = x + self.y_embedder(y).reshape(x.shape[0], 1, -1)
-    #adaln_input = self.t_embedder(t) + self.y_embedder(y)
-    adaln_input = self.y_embedder(y)
+    adaln_input = self.t_embedder(t) + self.y_embedder(y)
     #x = x + adaln_input.reshape(x.shape[0], 1, -1)
     adaln_input = adaln_input.contiguous()
     if not DUMB:
