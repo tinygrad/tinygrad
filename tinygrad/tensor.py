@@ -2645,7 +2645,7 @@ class Tensor(SimpleMathTrait):
       return mask.where(src, 0).sum(-1, dtype=self.dtype).add(self if include_self else _inv_mask(self, 0)).div(count)
     raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
-  def sort(self, dim:int=-1, descending:bool=False) -> tuple[Tensor, Tensor]:
+  def sort(self, dim:int=-1, descending:bool=False, unsafe:bool=False) -> tuple[Tensor, Tensor]:
     """
     Performs a bitonic sort on the tensor along the specified dimension.
 
@@ -2698,13 +2698,14 @@ class Tensor(SimpleMathTrait):
     # compute indices for sorted values
     idx = Tensor.arange(orig_len, requires_grad=False, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim)))
     idx = idx.expand(x.shape)
+    if unsafe: return x, ((x.unsqueeze(dim) == self.unsqueeze(dim+1)) * idx.unsqueeze(dim+1)).sum(dim)
     def compute_counts(t:Tensor): return ((idx.unsqueeze(dim) <= idx.unsqueeze(dim+1)) & (t.unsqueeze(dim) == t.unsqueeze(dim+1))).sum(dim+1)
     count_orig, count_sorted = compute_counts(self), compute_counts(x)
     cond = (self.unsqueeze(dim+1) == x.unsqueeze(dim)) & (count_orig.unsqueeze(dim+1) == count_sorted.unsqueeze(dim))
     idx = (cond * idx.unsqueeze(dim+1)).sum(dim)
     return x, idx
 
-  def topk(self, k:int, dim:int=-1, largest:bool=True, sorted_:bool=True) -> tuple[Tensor, Tensor]:
+  def topk(self, k:int, dim:int=-1, largest:bool=True, sorted_:bool=True, unsafe=True) -> tuple[Tensor, Tensor]:
     """
     Computes the top-k elements of the tensor along the specified `dim`.
 
@@ -2722,7 +2723,7 @@ class Tensor(SimpleMathTrait):
     """
     if not sorted_: raise NotImplementedError("topk with sorted_=False is not supported")
     if k > self.shape[dim:=self._resolve_dim(dim)]: raise ValueError(f"selected index {k=} is out of range")
-    x, idx = self.sort(dim, descending=largest)
+    x, idx = self.sort(dim, descending=largest, unsafe=unsafe)
     shrink_to_k = tuple((0, k) if i == dim else None for i in range(self.ndim))
     return x.shrink(shrink_to_k), idx.shrink(shrink_to_k)
 
