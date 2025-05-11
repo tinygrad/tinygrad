@@ -79,7 +79,7 @@ class DiT_Llama:
     ]
 
     self.x_embedder = nn.Linear(self.patch_size * self.patch_size * dim // 2, dim, bias=True)
-    self.t_embedder = TimestepEmbedder(dim)
+    #self.t_embedder = TimestepEmbedder(dim)
     self.y_embedder = nn.Embedding(num_classes+1, dim)
     self.final_layer = FinalLayer(dim, self.patch_size, self.out_channels)
 
@@ -114,7 +114,8 @@ class DiT_Llama:
     x = self.patchify(x)
     x = self.x_embedder(x)
     #x = x + self.y_embedder(y).reshape(x.shape[0], 1, -1)
-    adaln_input = self.t_embedder(t) + self.y_embedder(y)
+    #adaln_input = self.t_embedder(t) + self.y_embedder(y)
+    adaln_input = self.y_embedder(y)
     x = x + adaln_input.reshape(x.shape[0], 1, -1)
     if not DUMB:
       for layer in self.layers:
