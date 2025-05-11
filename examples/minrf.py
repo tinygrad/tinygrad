@@ -108,11 +108,30 @@ class DiT_Llama:
     # MSE loss
     return ((z1 - x) - vtheta).square().mean()
 
+  def sample(self, z, cond, null_cond, sample_steps=50, cfg=2.0):
+    b = z.size(0)
+    dt = Tensor.full((b,)+(1,)*len(z.shape[1:]), fill_value=1.0 / sample_steps)
+    images = [z]
+    for i in range(sample_steps, 0, -1):
+      t = Tensor.full((b,), fill_value=i/sample_steps)
+      vc = self(z, t, cond)
+      vu = self(z, t, null_cond)
+      vc = vu + cfg * (vc - vu)
+      z = z - dt * vc
+      images.append(z)
+    return images
+
+def mviz(t:Tensor):
+  ft = t.flatten(0, -2)
+  assert ft.shape == (32,32)
+  for y in ((ft+1)/2).clamp(0,1).tolist():
+    ln = [f"\033[38;5;{232+int(x*23)}m██" for x in y]
+    print(''.join(ln) + "\033[0m")
+
 if __name__ == "__main__":
   X_train, Y_train, X_test, Y_test = nn.datasets.mnist()
   X_train = X_train.pad((2,2,2,2))
-  X_train = ((X_train.float()/256)-0.5)/0.5
-  print(X_train.shape)
+  X_train = ((X_train.float()/255)-0.5)/0.5
 
   Tensor.training = True
 
@@ -131,7 +150,7 @@ if __name__ == "__main__":
     return loss
 
   for steps in (t:=trange(1000)):
+    if steps%10 == 0: mviz(model.sample(Tensor.randn(1, 1, 32, 32), Tensor(5), Tensor(-1), sample_steps=5)[-1])
     GlobalCounters.reset()
     loss = train_step()
     t.set_description(f"loss: {loss.item():9.2f}")
-
