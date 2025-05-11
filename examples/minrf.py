@@ -51,8 +51,8 @@ class FinalLayer:
 
 # channels=1, input_size=32, dim=64, n_layers=6, n_heads=4, num_classes=10
 class DiT_Llama:
-  def __init__(self, in_channels=1, dim=64, n_layers=6, n_heads=4, num_classes=10):
-    self.patch_size = 2
+  def __init__(self, in_channels=1, dim=64, n_layers=6, n_heads=4, num_classes=10, patch_size=2):
+    self.patch_size = patch_size
     self.out_channels = in_channels
 
     self.init_conv_seq = [
@@ -72,12 +72,15 @@ class DiT_Llama:
       self.layers = [TransformerBlock(dim, n_heads) for _ in range(n_layers)]
       self.final_layer = FinalLayer(dim, self.patch_size, self.out_channels)
     else:
+      N = 512
       self.dumb_model = [
-        nn.Conv2d(130, 128, kernel_size=3, padding='same'), Tensor.relu,
-        nn.Conv2d(128, 128, kernel_size=3, padding='same'), Tensor.relu,
-        nn.Conv2d(128, 128, kernel_size=3, padding='same'), Tensor.relu,
-        nn.Conv2d(128, 128, kernel_size=3, padding='same'), Tensor.relu,
-        nn.Conv2d(128, 4, kernel_size=3, padding='same'),
+        nn.Conv2d(N+2, N, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(N, N, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(N, self.patch_size*self.patch_size, kernel_size=3, padding='same'),
       ]
 
   def unpatchify(self, x:Tensor):
@@ -104,9 +107,11 @@ class DiT_Llama:
       x = self.final_layer(x, adaln_input)
     else:
       b = x.size(0)
-      dumb = Tensor.cat(x, t.reshape(b,1,1).expand(b,256,1), y.reshape(b,1,1).expand(b,256,1), dim=2).permute(0,2,1).reshape(b,130,16,16)
+      d = x.size(1)
+      dumb = Tensor.cat(x, t.reshape(b,1,1).expand(b,d,1), y.reshape(b,1,1).expand(b,d,1), dim=2)
+      dumb = dumb.permute(0,2,1).reshape(b,-1,32//self.patch_size,32//self.patch_size)
       x = dumb.sequential(self.dumb_model)
-      x = x.reshape(b,-1,256).permute(0,2,1)
+      x = x.reshape(b,-1,(32//self.patch_size)*(32//self.patch_size)).permute(0,2,1)
     return self.unpatchify(x)
 
   def rf(self, x:Tensor, cond:Tensor):
@@ -155,7 +160,7 @@ if __name__ == "__main__":
 
   Tensor.training = True
 
-  model = DiT_Llama()
+  model = DiT_Llama(patch_size=4)
   for r in nn.state.get_parameters(model): r.realize()
   optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=5e-4)
 
