@@ -40,9 +40,9 @@ class FinalLayer:
     self.linear = nn.Linear(dim, patch_size*patch_size*out_channels, bias=True)
     self.adaLN_modulation = nn.Linear(dim, 2 * dim, bias=True)
 
-    # TODO: how does real model do this?
-    #self.linear.weight.replace(self.linear.weight.zeros_like())
-    #self.linear.bias.replace(self.linear.bias.zeros_like())
+    # init weights/bias to 0
+    self.linear.weight.replace(self.linear.weight.zeros_like().contiguous())
+    self.linear.bias.replace(self.linear.bias.zeros_like().contiguous())
 
   def __call__(self, x:Tensor, c:Tensor):
     shift, scale = self.adaLN_modulation(c.silu()).chunk(2, dim=1)
@@ -78,7 +78,7 @@ class DiT_Llama:
         nn.Conv2d(dim*2, dim, kernel_size=3, padding='same'), Tensor.silu,
         nn.Conv2d(dim, dim, kernel_size=3, padding='same'), Tensor.silu,
         nn.Conv2d(dim, dim, kernel_size=3, padding='same'), Tensor.silu,
-        nn.Conv2d(dim, dim, kernel_size=3, padding='same'), Tensor.silu,
+        nn.Conv2d(dim, dim, kernel_size=3, padding='same'),
       ]
 
   def unpatchify(self, x:Tensor):
