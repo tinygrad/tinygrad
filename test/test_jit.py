@@ -3,11 +3,11 @@ import unittest, functools
 import numpy as np
 
 from hypothesis import given, settings, strategies as strat
-from test.helpers import assert_jit_cache_len, not_support_multi_device
+from test.helpers import assert_jit_cache_len, not_support_multi_device, REAL_DEV
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.device import Device
-from tinygrad.helpers import CI, Context, JIT, GlobalCounters
+from tinygrad.helpers import Context, JIT, GlobalCounters
 from tinygrad.dtype import dtypes
 from extra.models.unet import ResBlock
 
@@ -22,7 +22,7 @@ def _simple_test(add, extract=lambda x: x, N=10):
 class TestJit(unittest.TestCase):
 
   @settings(deadline=2e4)
-  @unittest.skipUnless(Device.DEFAULT in ["LLVM", "CPU"], f"no support on {Device.DEFAULT}")
+  @unittest.skipUnless(REAL_DEV in ["LLVM", "CPU"], f"no support on {REAL_DEV}")
   @given(strat.sampled_from([Tensor.exp2, Tensor.log2, Tensor.sin]))
   def test_approx_jit_timeout(self, op):
     with Context(TRANSCENDENTAL=2):
@@ -394,7 +394,6 @@ class TestJit(unittest.TestCase):
     np.testing.assert_allclose(result_2.numpy(), [6], atol=1e-4, rtol=1e-5)
     np.testing.assert_allclose(result_3.numpy(), [6], atol=1e-4, rtol=1e-5)
 
-  @unittest.skipIf(CI and Device.DEFAULT=="METAL", "no ICB in CI, creation of graph fails")
   def test_jit_batch_split(self):
     if Device[Device.DEFAULT].graph is None or JIT >= 2: raise unittest.SkipTest("only test graphs")
 
