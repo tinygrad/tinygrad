@@ -165,7 +165,8 @@ if __name__ == "__main__":
 
   @TinyJit
   def train_step():
-    samples = Tensor.randint(getenv("BS", 256), high=X_train.shape[0])
+    if getenv("OVERFIT"): samples = Tensor.zeros(getenv("BS", 256), dtype='int')
+    else: samples = Tensor.randint(getenv("BS", 256), high=X_train.shape[0])
     optimizer.zero_grad()
     loss = model.rf(X_train[samples], Y_train[samples])
     loss.backward()
