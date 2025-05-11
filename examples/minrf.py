@@ -86,8 +86,7 @@ class DiT_Llama:
     x = x.permute(0, 2, 4, 1, 3, 5).flatten(-3).flatten(1, 2)
     return x  # B <H*W ish> <C*patch_size*patch_size>
 
-  def __call__(self, x:Tensor, t:Tensor, y:Tensor, dropout_prob=None) -> Tensor:
-    if dropout_prob is not None: y = (Tensor.rand(y.shape[0]) < dropout_prob).where(y.full_like(self.num_classes), y)
+  def __call__(self, x:Tensor, t:Tensor, y:Tensor) -> Tensor:
     x = x.sequential(self.init_conv_seq)
     x = self.patchify(x)
     x = self.x_embedder(x)
@@ -104,11 +103,15 @@ class DiT_Llama:
     t = Tensor.randn((b,)).sigmoid()
     texp = t.view([b, *([1] * len(x.shape[1:]))])
 
+    # conditional dropout
+    dropout_prob = 0.1
+    cond = (Tensor.rand(cond.shape[0]) < dropout_prob).where(cond.full_like(self.num_classes), cond)
+
     # TODO: Tensor.randn_like
     # this is rectified flow
     z1 = Tensor.randn(x.shape)
     zt = (1 - texp) * x + texp * z1
-    vtheta = self(zt, t, cond, dropout_prob=0.1)
+    vtheta = self(zt, t, cond)
 
     # MSE loss
     return ((z1 - x) - vtheta).square().mean()
