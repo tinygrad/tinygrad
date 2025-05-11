@@ -159,7 +159,7 @@ if __name__ == "__main__":
 
   Tensor.training = True
 
-  model = DiT_Llama(patch_size=2)
+  model = DiT_Llama(patch_size=getenv("PATCH_SIZE", 2))
   for r in nn.state.get_parameters(model): r.realize()
   optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=5e-4)
 
