@@ -16,9 +16,7 @@ class TimestepEmbedder:
   def __init__(self, hidden_size, frequency_embedding_size=256):
     self.mlp = [nn.Linear(frequency_embedding_size, hidden_size), Tensor.silu, nn.Linear(hidden_size, hidden_size)]
     self.frequency_embedding_size = frequency_embedding_size
-  def __call__(self, t:Tensor):
-    if getenv("MASK_T"): t = t * 0
-    return timestep_embedding(t, self.frequency_embedding_size).sequential(self.mlp)
+  def __call__(self, t:Tensor): return timestep_embedding(t, self.frequency_embedding_size).sequential(self.mlp)
 
 class TransformerBlock:
   def __init__(self, dim, n_heads, norm_eps=1e-5):
@@ -118,7 +116,7 @@ class DiT_Llama:
 
   def sample(self, z, cond, null_cond, sample_steps=50, cfg=2.0):
     b = z.size(0)
-    dt = Tensor.full((b,)+(1,)*len(z.shape[1:]), fill_value=1.0/sample_steps)
+    dt = Tensor.full((b,)+(1,)*len(z.shape[1:]), fill_value=1.0/sample_steps).contiguous()
     images = [z]
     for i in range(sample_steps, 0, -1):
       t = Tensor.full((b,), fill_value=i/sample_steps).contiguous()
