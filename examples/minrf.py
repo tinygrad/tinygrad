@@ -69,15 +69,17 @@ class DiT_Llama:
 
       self.x_embedder = nn.Linear(self.patch_size * self.patch_size * dim // 2, dim, bias=True)
       self.t_embedder = TimestepEmbedder(dim)
-      self.y_embedder = nn.Embedding(num_classes, dim)
+      self.y_embedder = nn.Embedding(num_classes+1, dim)
       self.layers = [TransformerBlock(dim, n_heads) for _ in range(n_layers)]
       self.final_layer = FinalLayer(dim, self.patch_size, self.out_channels)
     else:
       self.dumb_model = [
-        nn.Conv2d(130, 128, kernel_size=3, padding='same'),
-        Tensor.relu,
-        nn.Conv2d(128, 128, kernel_size=3, padding='same'),
-        Tensor.relu,
+        nn.Conv2d(130, 128, kernel_size=3, padding='same'), Tensor.relu,
+        nn.Conv2d(128, 128, kernel_size=3, padding='same'), Tensor.relu,
+        nn.Conv2d(128, 128, kernel_size=3, padding='same'), Tensor.relu,
+        nn.Conv2d(128, 128, kernel_size=3, padding='same'), Tensor.relu,
+        nn.Conv2d(128, 128, kernel_size=3, padding='same'), Tensor.relu,
+        nn.Conv2d(128, 128, kernel_size=3, padding='same'), Tensor.relu,
         nn.Conv2d(128, 4, kernel_size=3, padding='same'),
       ]
 
