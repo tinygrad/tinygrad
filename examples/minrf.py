@@ -162,7 +162,7 @@ if __name__ == "__main__":
   def sample(z:Tensor, cond:Tensor) -> Tensor:
     return model.sample(z, cond, Tensor.full_like(cond, 10), sample_steps=getenv("SAMPLE_STEPS", 20))[-1]
 
-  for steps in (t:=trange(getenv("STEPS", 1000))):
+  for steps in (t:=trange(getenv("STEPS", 5000))):
     if steps%10 == 0: mviz(sample(Tensor.randn(3, 1, 32, 32), Tensor([5,0,4], dtype='int')))
     GlobalCounters.reset()
     loss = train_step()
