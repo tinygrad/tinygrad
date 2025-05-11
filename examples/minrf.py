@@ -68,17 +68,17 @@ class DiT_Llama:
     self.x_embedder = nn.Linear(self.patch_size * self.patch_size * dim // 2, dim, bias=True)
     self.t_embedder = TimestepEmbedder(dim)
     self.y_embedder = nn.Embedding(num_classes+1, dim)
-    self.final_layer = FinalLayer(dim, self.patch_size, self.out_channels)
 
     if not DUMB:
       self.freqs_cis = precompute_freqs_cis(dim // n_heads, 4096)
       self.layers = [TransformerBlock(dim, n_heads) for _ in range(n_layers)]
+      self.final_layer = FinalLayer(dim, self.patch_size, self.out_channels)
     else:
       self.dumb_model = [
         nn.Conv2d(dim*2, dim, kernel_size=3, padding='same'), Tensor.silu,
         nn.Conv2d(dim, dim, kernel_size=3, padding='same'), Tensor.silu,
         nn.Conv2d(dim, dim, kernel_size=3, padding='same'), Tensor.silu,
-        nn.Conv2d(dim, dim, kernel_size=3, padding='same'),
+        nn.Conv2d(dim, self.patch_size*self.patch_size*self.out_channels, kernel_size=3, padding='same'),
       ]
 
   def unpatchify(self, x:Tensor):
@@ -102,13 +102,13 @@ class DiT_Llama:
     adaln_input = self.t_embedder(t) + self.y_embedder(y)
     if not DUMB:
       for layer in self.layers: x = layer(x, self.freqs_cis[:, :x.size(1)], adaln_input=adaln_input)
+      x = self.final_layer(x, adaln_input)
     else:
       b,hw,d = x.shape
       dumb = Tensor.cat(x, adaln_input.reshape(b, 1, d).expand(b,hw,d), dim=2)
       dumb = dumb.permute(0,2,1).reshape(b,-1,32//self.patch_size,32//self.patch_size)
       x = dumb.sequential(self.dumb_model)
       x = x.flatten(2).permute(0,2,1)
-    x = self.final_layer(x, adaln_input)
     return self.unpatchify(x)
 
   def rf(self, x:Tensor, cond:Tensor):
