@@ -38,18 +38,16 @@ add_compute_pass = """const addComputePass = (commandEncoder, idx, kernelName, b
 
 trigger_gpu = ["const gpuCommands = commandEncoder.finish();", "device.queue.submit([gpuCommands]);"]
 
-safe_load_state_dict = f"""const safeLoadStateDict = async (modelStateDict, safetensorPath) => {{
+safe_load_state_dict = f"""const load = async (safetensorPath) => {{
   const safetensorBuffer = await fetch(safetensorPath).then(x => x.arrayBuffer()).then(x => new Uint8Array(x));
   const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
   const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
   for (const [key, info] of Object.entries(metadata)) {{
     if (key === "__metadata__") continue;
     const src = safetensorBuffer.subarray(8 + metadataLength + info.data_offsets[0], 8 + metadataLength + info.data_offsets[1]);
-    {copyin("modelStateDict[key]", "src")}
+    {copyin("stateDict[key]", "src")}
   }}
 }};\n""".split("\n")
-
-load = ["const load = async (fn) => { await safeLoadStateDict(stateDict, fn); };"]
 
 def indent(strings:list[str], indents:int) -> list[str]: return [indents*"  " + s for s in strings]
 
@@ -114,7 +112,7 @@ class WebGPUJSRenderer(GraphRenderer):
     prg: list[str] = buf_usages + kernel_obj
     prg += ["const createGraph = async () => {"]
     prg += indent(init_device + sym_uniforms + empty_buf_allocs + state_dict + state_buf_allocs + copyout_bufs + ret_bufs + create_infinity, 1)
-    prg += indent(kernel_sequence + layouts + pipes + add_compute_pass + safe_load_state_dict + load, 1)
+    prg += indent(kernel_sequence + layouts + pipes + add_compute_pass + safe_load_state_dict, 1)
     prg += indent([f"const run = async ({args}) => {{"], 1)
     prg += indent(validators + command_encoder + copyins + compute_passes + output_copies + trigger_gpu + copyouts + [f"return [{ret}];"], 2)
     prg += indent(["};", "return { device, stateDict, load, run };"], 1)
