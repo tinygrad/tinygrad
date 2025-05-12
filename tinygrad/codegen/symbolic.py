@@ -342,9 +342,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
       candidates.append([(Xi, UOp.variable(f"fake{(fnum:=fnum+1)}", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
 
-  newuops: list[UOp] = []
-  for candidate in itertools.product(*candidates):
-    newuops.append(uop.substitute(dict(candidate)).simplify().substitute({newX:X for X,newX in candidate}).simplify())
+  newuops = [uop.substitute(dict(cand)).simplify().substitute({newX:X for X,newX in cand}).simplify() for cand in itertools.product(*candidates)]
   # if every branch in candidate gives the same simplified uop, we can rewrite the uop
   if uop.op is Ops.VECTORIZE and len(uop.src) == 2:
     if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
