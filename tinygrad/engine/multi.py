@@ -65,7 +65,7 @@ def alu_multi(root:UOp):
       bsz, dcount = mlb.shape[mlb.axis]//len(mlb.device), len(mlb.device)
       dnum = UOp.variable("_device_num", 0, len(mlb.device)-1)
       padded = mlb.src[0].pad(tuple((0,0) if a != mlb.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(mlb.shape))))
-      ret = padded.allreduce(Ops.ADD, *tuple(UOp(Ops.DEVICE, arg=d) for d in mlb.device))
+      ret = padded.allreduce(Ops.ADD, mlb.device)
       # TODO: logic from above
       sz = root.shape[axis] // dcount
       srcs.append(ret.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(root.shape))))
@@ -91,7 +91,7 @@ def reduce_multi(root:UOp, multi:UOp):
   if multi.axis is not None and multi.axis in axis:
     # all-reduce on sharded axes
     red = multi.src[0].r(op, axis)
-    ret = red.allreduce(op, *tuple(UOp(Ops.DEVICE, arg=d) for d in red.device))
+    ret = red.allreduce(op, red.device)
     return ret.multi(axis=None)
     """
     reduced_parts = [(x if r else x.const_like(0)).r(op, axis) for x,r in zip(multi.src, multi.real)]
@@ -159,13 +159,13 @@ def copy_multi(multi:UOp, copy:UOp):
     # if we already have a copy on the device, return that
     #if any(d == device.arg for d in multi.device): return multi.src[0].select(device.arg)
     # otherwise select the first one and copy it
-    return UOp(Ops.COPY, multi.dtype, (multi.src[0],)+copy.src[1:], arg=0)
+    return UOp(Ops.COPY, multi.dtype, (multi.src[0], copy.src[1]), arg=0)
     #return multi.src[0].copy_to_device(device.arg, arg=0)
   # this is a multi axis one
   bsz, dcount = multi.shape[multi.axis]//len(multi.device), len(multi.device)
   dnum = UOp.variable("_device_num", 0, len(multi.device)-1)
   padded = multi.src[0].pad(tuple((0,0) if a != multi.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(multi.shape))))
-  ret = padded.allreduce(Ops.ADD, *copy.src[1:])
+  ret = padded.allreduce(Ops.ADD, copy.src[1])
   return ret if len(copy.src) == 2 else ret.multi(axis=None)
 
 def assign_multi(dest:UOp, src:UOp):

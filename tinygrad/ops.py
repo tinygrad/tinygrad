@@ -434,9 +434,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def fuse(self): return self.alu(Ops.FUSE)
-  def allreduce(self, op, *devs):
+  def allreduce(self, op, device:str|tuple[str, ...]|UOp):
     assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
-    return UOp(Ops.ALLREDUCE, self.dtype, (self,)+devs, op)
+    return UOp(Ops.ALLREDUCE, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), op)
 
   # *** from MultiLazyBuffer ***
 
