@@ -277,6 +277,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var("x", dtypes.sints)*-1 < UPat.var("y", dtypes.sints)*-1, lambda x,y: y<x),
   # canonicalize a simplex with positive coefficients > 0
   # not x < 1 -> X > 0
+  (UPat.var("x", dtypes.ints).cast(dtypes.bool).ne(True), lambda x: (x<1) if x.vmin==0 else None),
   ((UPat.var("x", dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # ** div **
   # div folding

@@ -539,6 +539,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a+b+c*2<1).ne(True), 0, 1, ("((((a+b)+c)<1)!=True)", "(((c+(a+b))<1)!=True)", '(((b+(a+c))<1)!=True)'))
     self.helper_test_variable((a+b*2+c*4<1).ne(True), 0, 1, ("((((a+b)+c)<1)!=True)", "(((c+(a+b))<1)!=True)", '(((b+(a+c))<1)!=True)'))
 
+  def test_eq_to_simplex(self):
+    a = Variable("a", 0, 3)
+    self.helper_test_variable((a).eq(0), 0, 1, "(a<1)")
+    self.helper_test_variable((a-1).eq(0), 0, 1, "((bool)((a+-1))!=True)")
+
   def test_where_removal(self):
     cond = Variable("a", 0, 3) < 2
     u1, u0 = cond.ufix(1), cond.ufix(0)
