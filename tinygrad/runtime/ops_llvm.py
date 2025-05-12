@@ -39,7 +39,7 @@ class LLVMCompiler(Compiler):
 
   def compile(self, src:str) -> bytes:
     diag_err: Exception|None = None
-    @ctypes.CFUNCTYPE(None, llvm.LLVMDiagnosticInfoRef, ctypes.POINTER(None))
+    @ctypes.CFUNCTYPE(None, llvm.LLVMDiagnosticInfoRef, ctypes.c_void_p)
     def handle_diag(diag_ref_ptr, _arg):
       nonlocal diag_err
       diag_ref = ctypes.cast(diag_ref_ptr, llvm.LLVMDiagnosticInfoRef)
