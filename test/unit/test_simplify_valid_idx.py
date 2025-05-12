@@ -370,9 +370,9 @@ class TestImageSimplification(unittest.TestCase):
     # the valid implies the numerator of the div/mod is positive and can be simplified with floordiv rules
     idx1 = Special("idx1", 16)
     idx2 = Special("idx2", 64)
-    ridx3 = Range(3, 4)
-    ridx4 = Range(4, 4)
-    ridx5 = Range(5, 4)
+    ridx3 = Range(3, 3)
+    ridx4 = Range(4, 3)
+    ridx5 = Range(5, 3)
     alu0 = ((idx2*1536)+(ridx4*768)+ridx3+(idx1*24)+(ridx5*3)+-771)%768
     alu1 = ((idx2*1536)+(ridx4*768)+ridx3+(idx1*24)+(ridx5*3)+-771)//768
     valid = (((idx2+ridx4)<1)!=1)&(((idx1+ridx5)<1)!=1)
