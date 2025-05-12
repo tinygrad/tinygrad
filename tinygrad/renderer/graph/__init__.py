@@ -4,7 +4,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from tinygrad.ops import UOp, Variable, Ops
 from tinygrad.renderer import Renderer
-from tinygrad.nn.state import get_parameters, get_state_dict
+from tinygrad.nn.state import get_parameters
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner
@@ -17,9 +17,8 @@ def is_partial_write(ast:UOp, i:int) -> bool:
 
 # Common logic regardless of render target (e.g. JavaScript, C)
 class GraphRenderer(Renderer):
-  def __init__(self, fxn:Callable, args:Sequence):
-    # realize state_dict and use state_dict names for exported state_bufs; TODO: enable more general state_dict handling
-    state_names = {buf: k for k,v in get_state_dict(getattr(fxn, "__self__", fxn)).items() if (buf:=v.realize().lazydata.base.realized) is not None}
+  def __init__(self, fxn:Callable, args:Sequence, state_dict:dict[str, Tensor]|None=None):
+    state_names = {buf: k for k,v in state_dict.items() if (buf:=v.realize().lazydata.base.realized) is not None} if state_dict else {}
     # ensure random seeds are on-device
     Tensor.randn(1).realize()
 

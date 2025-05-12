@@ -3,7 +3,7 @@ from extra.models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
 from extra.export_model import export_model
 from tinygrad.helpers import getenv, fetch
-from tinygrad.nn.state import safe_save
+from tinygrad.nn.state import get_state_dict, safe_save
 import ast
 
 if __name__ == "__main__":
@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
   if mode == "webgpu":
     from tinygrad.renderer.graph.webgpu import WebGPUJSRenderer
-    renderer = WebGPUJSRenderer(model.forward, (Tensor.randn(1,3,224,224),))
+    renderer = WebGPUJSRenderer(model.forward, (Tensor.randn(1,3,224,224),), get_state_dict(model))
     with open(dirname / "net.js", "w") as f: f.write(renderer.render_graph())
     safe_save(renderer.state_dict, dirname / "net.js.safetensors")
 
