@@ -156,26 +156,14 @@ class ASM24Controller:
   def write(self, base_addr:int, data:bytes, ignore_cache:bool=True): return self.exec_ops([WriteOp(base_addr, data, ignore_cache)])
 
   def scsi_write(self, buf:bytes, lba:int=0):
-    # parts = round_up(len(buf), 0x4000) // 0x4000
-    # ops = []
-    # for i in range(parts):
-    #   ops += [ScsiWriteOp(buf, lba), WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True), WriteOp(0xce6e, b'\x00\x00', ignore_cache=True),
-    #           WriteOp(0xce42, b'\x00\x00', ignore_cache=True)]
-
-    ops = []
-    # import time
-    # if len(buf) > 0x4000: ops += [WriteOp(0x54e, b'\x04', ignore_cache=True)]
-    # else: extra_ops = []
+    if len(buf) > 0x4000: buf += b'\x00' * (round_up(len(buf), 0x10000) - len(buf))
 
     for i in range(0, len(buf), 0x10000):
       self.exec_ops([ScsiWriteOp(buf[i:i+0x10000], lba), WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True)])
       self.exec_ops([WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
 
     if len(buf) > 0x4000:
-      self.exec_ops([WriteOp(0xce40, b'\x00', ignore_cache=True)])
-      self.exec_ops([WriteOp(0xce41, b'\x00', ignore_cache=True)])
-      self.exec_ops([WriteOp(0xce42, b'\x00', ignore_cache=True)])
-      self.exec_ops([WriteOp(0xce43, b'\x00', ignore_cache=True)])
+      for i in range(4): self.exec_ops([WriteOp(0xce40 + i, b'\x00', ignore_cache=True)])
 
   def read(self, base_addr:int, length:int, stride:int=0xff) -> bytes:
     parts = self.exec_ops([ReadOp(base_addr + off, min(stride, length - off)) for off in range(0, length, stride)])
