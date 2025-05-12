@@ -1075,12 +1075,12 @@ class TestOps(unittest.TestCase):
         helper_test_op([(8,45,65)], lambda x: x.sort(dim, descending).indices.type(torch.int32), lambda x: x.sort(dim, descending)[1],
                        forward_only=True)
     # repeated values
-    helper_test_op(None, lambda x: x.sort(stable=True).values, lambda x: x.sort()[0], forward_only=True, vals=[[0, 1] * 9])
-    helper_test_op(None, lambda x: x.sort(stable=True).indices.type(torch.int32), lambda x: x.sort()[1], forward_only=True, vals=[[0, 1] * 9])
+    helper_test_op(None, lambda x: x.sort(stable=True).values, lambda x: x.sort(stable=True)[0], forward_only=True, vals=[[0, 1] * 9])
+    helper_test_op(None, lambda x: x.sort(stable=True).indices.type(torch.int32), lambda x: x.sort(stable=True)[1], forward_only=True, vals=[[0, 1] * 9])
     helper_test_op(None, lambda x: x.sort(stable=True, descending=True).values,
-                   lambda x: x.sort(descending=True)[0], forward_only=True, vals=[[0, 1] * 9])
+                   lambda x: x.sort(descending=True, stable=True)[0], forward_only=True, vals=[[0, 1] * 9])
     helper_test_op(None, lambda x: x.sort(stable=True, descending=True).indices.type(torch.int32),
-                   lambda x: x.sort(descending=True)[1], forward_only=True, vals=[[0, 1] * 9])
+                   lambda x: x.sort(descending=True, stable=True)[1], forward_only=True, vals=[[0, 1] * 9])
 
   def test_topk(self):
     helper_test_op([(10)], lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True)
@@ -1095,10 +1095,10 @@ class TestOps(unittest.TestCase):
                           lambda x: x.topk(5, dim, largest, sorted_).indices.type(torch.int32),
                           lambda x: x.topk(5, dim, largest, sorted_)[1], forward_only=True)
     # repeated values
-    value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3)
+    value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3, stable=True)
     np.testing.assert_equal(value.numpy(), [1, 1, 1])
     np.testing.assert_equal(indices.numpy(), [0, 1, 3])
-    value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3, largest=False)
+    value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3, largest=False, stable=True)
     np.testing.assert_equal(value.numpy(), [0, 0, 0])
     np.testing.assert_equal(indices.numpy(), [2, 4, 6])
     self.helper_test_exception([(4)], lambda x: x.topk(5), lambda x: x.topk(5), expected=(RuntimeError, ValueError))
