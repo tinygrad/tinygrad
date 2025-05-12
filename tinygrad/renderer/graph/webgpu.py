@@ -3,10 +3,8 @@ from tinygrad.device import Buffer
 from tinygrad.ops import Ops, Variable
 from tinygrad.renderer.graph import GraphRenderer
 from tinygrad.engine.realize import CompiledRunner
-from tinygrad.helpers import merge_dicts
 from typing import cast
 
-# render device ops
 init_device = ['if (!navigator.gpu) throw new Error("WebGPU not supported.");',
   'const adapter = await navigator.gpu.requestAdapter();',
   'const { maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup } = adapter.limits;',
@@ -14,8 +12,6 @@ init_device = ['if (!navigator.gpu) throw new Error("WebGPU not supported.");',
   '  requiredFeatures: adapter.features.has("shader-f16") ? ["shader-f16"] : [], powerPreference: "high-performance",',
   '  requiredLimits: { maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup }',
   '});\n']
-
-# render allocator ops
 
 empty = (state:="GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST") + " | GPUBufferUsage.COPY_SRC"
 uniform, map_read = "GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST", "GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ"
@@ -25,30 +21,22 @@ buf_usages = [f"const {label} = {usage};" for label, usage in zip(("empty", "sta
 #if src.nbytes % 4: pad_src = f"const padded = new Uint8Array({src}.length + (4 - {src}.length % 4) % 4); padded.set({src});"
 def alloc(size:str, usage:str) -> str: return f"device.createBuffer({{size: {size}, usage: {usage}}})"
 
-# NOTE: dest/src names are resolved by tinygrad.renderer.graph.GraphRenderer
 def copyin(dest:str, src:str) -> str: return f"device.queue.writeBuffer({dest}, 0, {src});"
 
-def copyout(dest:str, src:str) -> list[str]:
-  return [f'await {src}.mapAsync(GPUMapMode.READ);',
-    f'{dest}.set(new {dest}.constructor({src}.getMappedRange()));',
-    f'{src}.unmap();']
+pipes = """let pipelines = await Promise.all(kernelSequence.map((name, i) => device.createComputePipelineAsync({layout: device.createPipelineLayout(
+  { bindGroupLayouts: [layouts[i]]}), compute: {module: device.createShaderModule({code: kernels[name]}), entryPoint: "main" }\n})));
+pipelines = pipelines.map((pipeline, i) => { return {[kernelSequence[i]] : pipeline} });""".split("\n")
 
-def copy(encoder:str, src:str, dest:str, size:str) -> str: return f"{encoder}.copyBufferToBuffer({src}, 0, {dest}, 0, {size});"
+add_compute_pass = """const addComputePass = (commandEncoder, idx, kernelName, buffers, workgroupDims) => {
+  const entries = [...[infinityBuf].concat(buffers).map((buffer, index) => ({ binding: index, resource: { buffer } }))];
+  const bindGroup = device.createBindGroup({ layout: layouts[idx], entries });
+  const passEncoder = commandEncoder.beginComputePass();
+  passEncoder.setPipeline(pipelines[idx][kernelName]);
+  passEncoder.setBindGroup(0, bindGroup);
+  passEncoder.dispatchWorkgroups(...workgroupDims);
+  passEncoder.end();\n}\n""".split("\n")
 
-# render compute ops
-def create_layout(buf_types:list[str]) -> str: return "device.createBindGroupLayout({entries:" + \
-  f'[{", ".join(f"{{binding: {i}, visibility: GPUShaderStage.COMPUTE, buffer: {{type: {btype}}} }}" for i, btype in enumerate(buf_types))}]}})'
-
-def create_pipeline(layout:str, code:str) -> str: return f"""device.createComputePipelineAsync({{
-  layout: device.createPipelineLayout({{bindGroupLayouts: [{layout}]}}),
-  compute: {{ module: device.createShaderModule({{ code: {code} }}), entryPoint: "main" }}\n}})"""
-
-def create_bind_group(layout:str, entries:str) -> str: return f"device.createBindGroup({{ layout: {layout}, entries: {entries} }})"
-
-init_encoder = "device.createCommandEncoder()"
-def begin_compute_pass(command_encoder:str, pipeline:str, bind_group:str, global_dims:str) -> list[str]:
-  return [f"const passEncoder = {command_encoder}.beginComputePass();", f"passEncoder.setPipeline({pipeline});",
-    f"passEncoder.setBindGroup(0, {bind_group});", f"passEncoder.dispatchWorkgroups(...{global_dims});", "passEncoder.end();"]
+trigger_gpu = ["const gpuCommands = commandEncoder.finish();", "device.queue.submit([gpuCommands]);"]
 
 safe_load_state_dict = f"""const safeLoadStateDict = async (modelStateDict, safetensorPath) => {{
   const safetensorBuffer = await fetch(safetensorPath).then(x => x.arrayBuffer()).then(x => new Uint8Array(x));
@@ -59,7 +47,9 @@ safe_load_state_dict = f"""const safeLoadStateDict = async (modelStateDict, safe
     const src = safetensorBuffer.subarray(8 + metadataLength + info.data_offsets[0], 8 + metadataLength + info.data_offsets[1]);
     {copyin("modelStateDict[key]", "src")}
   }}
-}};\n"""
+}};\n""".split("\n")
+
+load = ["const load = async (fn) => { await safeLoadStateDict(stateDict, fn); };"]
 
 def indent(strings:list[str], indents:int) -> list[str]: return [indents*"  " + s for s in strings]
 
@@ -81,13 +71,15 @@ class WebGPUJSRenderer(GraphRenderer):
         copyins.append(copyin(f"input_{i}", f'new Int32Array([{f"intArg_{i}"}])'))
 
     # render outputs
-    command_encoder = [f"const commandEncoder = {init_encoder};"]
+    command_encoder = ["const commandEncoder = device.createCommandEncoder();"]
     for i, uop in enumerate(self.outputs):
       copyout_bufs.append(f'const gpuReadBuffer{i} = {alloc(str(uop.base.buffer.nbytes), "map_read")};')
-      output_copies.append(copy("commandEncoder", (out_buf := kernel_bufs[uop.base.buffer]), f"gpuReadBuffer{i}", f"{out_buf}.size"))
+      output_copies.append(f"commandEncoder.copyBufferToBuffer({(out_buf:=kernel_bufs[uop.base.buffer])}, 0, gpuReadBuffer{i}, 0, {out_buf}.size);")
       array_type = f"{'Uint' if (dt:=uop.dtype) in dtypes.uints else 'Int' if dt in (dtypes.sints+(dtypes.bool,)) else 'Float'}{8*dt.itemsize}Array"
       ret_bufs.append(f"const resultBuffer{i} = new {array_type}(gpuReadBuffer{i}.size / {dt.itemsize});")
-      copyouts += copyout(f"resultBuffer{i}", f"gpuReadBuffer{i}")
+      copyouts += [f"await gpuReadBuffer{i}.mapAsync(GPUMapMode.READ);",
+        f"resultBuffer{i}.set(new resultBuffer{i}.constructor(gpuReadBuffer{i}.getMappedRange()));",
+        f'gpuReadBuffer{i}.unmap();']
       ret_names.append(f"resultBuffer{i}")
     args, ret = ", ".join(arg_names), ", ".join(ret_names)
 
@@ -101,38 +93,28 @@ class WebGPUJSRenderer(GraphRenderer):
     create_infinity += [f'{copyin("infinityBuf", "new Float32Array([Infinity])")}']
 
     # render WebGPU compute
-    layouts, kernels, kernel_name_sequence, compute_passes = [], {}, [], []
+    layouts, kernels, kernel_sequence, compute_passes = [], {}, [], []
     for i, (ei, p) in enumerate((ei, ei.prg.p) for ei in self.eis if isinstance(ei.prg, CompiledRunner)):
       # first buf in every kernel is infinityBuf, a uniform buffer
-      layouts.append(create_layout(['"uniform"'] + ['"storage"'] * len(ei.bufs) + ['"uniform"'] * len(p.vars)))
+      layouts.append(f"""device.createBindGroupLayout({{entries: [{",".join(f"{{binding:{i}, visibility:GPUShaderStage.COMPUTE, buffer:{{type:{t}}}}}"
+                     for i, t in enumerate(['"uniform"'] + ['"storage"'] * len(ei.bufs) + ['"uniform"'] * len(p.vars)))}]}})""")
       kernels[p.function_name] = p.src.replace(p.function_name, "main")
-      # kernel_name_sequence becomes pipelines: a JS array of {p.function_name: GPUComputePipeline}
-      kernel_name_sequence.append(f'"{p.function_name}"')
+      # kernel_sequence becomes pipelines: a JS array of {p.function_name: GPUComputePipeline}
+      kernel_sequence.append(f'"{p.function_name}"')
       buf_names = ", ".join(kernel_bufs[cast(Buffer|Variable, arg)] for arg in ei.bufs + p.vars)
       assert p.global_size is not None and len(p.global_size) == 3
       global_size = ', '.join(idx.simplify().render() if isinstance(idx, Variable) else str(idx) for idx in p.global_size)
       # deliberately display p.function_name in every addComputePass for easier debugging/understanding
       compute_passes.append(f'addComputePass(commandEncoder, {i}, "{p.function_name}", [{buf_names}], [{global_size}]);')
 
+    kernel_sequence = [f'const kernelSequence = [{", ".join(kernel_sequence)}];']
     layouts = [f'const layouts = [{", ".join(layouts)}];']
     kernel_obj = ["const kernels = {"] + indent([f'"{k}": `{v}`,' for k,v in kernels.items()], 1) + ["};\n"]
-    make_pipelines = [f'const kernelSequence = [{", ".join(kernel_name_sequence)}];',
-      f'let pipelines = await Promise.all(kernelSequence.map((name, i) => {create_pipeline("layouts[i]", "kernels[name]")}));',
-      'pipelines = pipelines.map((pipeline, i) => { return {[kernelSequence[i]] : pipeline} });']
-
-    add_compute_pass = ["const addComputePass = (commandEncoder, idx, kernelName, buffers, workgroupDims) => {",
-      "  const entries = [...[infinityBuf].concat(buffers).map((buffer, index) => ({ binding: index, resource: { buffer } }))];",
-      f'  const bindGroup = {create_bind_group("layouts[idx]", "entries")};',
-      "  \n".join(begin_compute_pass("commandEncoder", "pipelines[idx][kernelName]", "bindGroup", "workgroupDims")),
-    "};\n"]
-
-    trigger_gpu = ["const gpuCommands = commandEncoder.finish();", "device.queue.submit([gpuCommands]);"]
-    load = ["const load = async (fn) => { await safeLoadStateDict(stateDict, fn); };"]
 
     prg: list[str] = buf_usages + kernel_obj
     prg += ["const createGraph = async () => {"]
     prg += indent(init_device + sym_var_bufs + empty_buf_allocs + state_dict + state_buf_allocs + copyout_bufs + ret_bufs + create_infinity, 1)
-    prg += indent(layouts + make_pipelines + add_compute_pass + safe_load_state_dict.split("\n") + load, 1)
+    prg += indent(kernel_sequence + layouts + pipes + add_compute_pass + safe_load_state_dict + load, 1)
     prg += indent([f"const run = async ({args}) => {{"], 1)
     prg += indent(validators + command_encoder + copyins + compute_passes + output_copies + trigger_gpu + copyouts + [f"return [{ret}];"], 2)
     prg += indent(["};", "return { device, stateDict, load, run };"], 1)
