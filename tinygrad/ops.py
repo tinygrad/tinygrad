@@ -248,9 +248,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
   children:set[weakref.ref[UOp]] = field(default_factory=set)
-  def __post_init__(self):
-    if self.op is Ops.DEVICE:
-      assert isinstance(self.arg, str) or (isinstance(self.arg, tuple) and all(isinstance(s, str) for s in self.arg))
   def __del__(self):
     if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
     if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg))) is not None:
@@ -384,8 +381,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
     if self._device is None: return UOp.const(self.dtype, b)
-    #if isinstance(self.device, tuple):
-    #  return UOp.multi(*[UOp.metaop(Ops.CONST, self.shape, self.dtype, d, b) for d in self.device], axis=None)
+    #if isinstance(self.device, tuple): return UOp.multi(*[UOp.metaop(Ops.CONST, self.shape, self.dtype, d, b) for d in self.device], axis=None)
     return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1

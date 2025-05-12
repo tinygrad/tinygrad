@@ -154,19 +154,19 @@ def flip_multi(root:UOp, multi:UOp):
   return UOp.multi(*[x.flip(root.arg) for x in multi.src], axis=multi.axis, real=multi.real)
 
 # from multiple devices -> one
-def copy_multi(multi:UOp, copy:UOp):
+def copy_multi(multi:UOp, device:UOp):
   if multi.axis is None:
     # if we already have a copy on the device, return that
     #if any(d == device.arg for d in multi.device): return multi.src[0].select(device.arg)
     # otherwise select the first one and copy it
-    return UOp(Ops.COPY, multi.dtype, (multi.src[0], copy.src[1]), arg=0)
+    return UOp(Ops.COPY, multi.dtype, (multi.src[0], device), arg=0)
     #return multi.src[0].copy_to_device(device.arg, arg=0)
   # this is a multi axis one
   bsz, dcount = multi.shape[multi.axis]//len(multi.device), len(multi.device)
   dnum = UOp.variable("_device_num", 0, len(multi.device)-1)
   padded = multi.src[0].pad(tuple((0,0) if a != multi.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(multi.shape))))
-  ret = padded.allreduce(Ops.ADD, copy.src[1])
-  return ret if len(copy.src) == 2 else ret.multi(axis=None)
+  ret = padded.allreduce(Ops.ADD, device)
+  return ret if isinstance(device.arg, str) else ret.multi(axis=None)
 
 def assign_multi(dest:UOp, src:UOp):
   assert dest.axis == src.axis, f"axis must match in assign {dest.axis} != {src.axis}"
@@ -185,7 +185,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.SHRINK, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), shrink_multi),
   (UPat(Ops.FLIP, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), flip_multi),
   (UPat(Ops.ASSIGN, src=(UPat(Ops.MULTI, name="dest"), UPat(Ops.MULTI, name="src"))), assign_multi),
-  (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE)), allow_any_len=True, name="copy"), copy_multi),
+  (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))), copy_multi),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])
