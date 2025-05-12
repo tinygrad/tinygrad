@@ -1,6 +1,6 @@
 # all of symbolic lives here now
 from typing import Any, Literal, cast
-import math, operator, struct, functools
+import math, operator, struct, functools, itertools
 from collections import defaultdict
 from tinygrad.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType
@@ -325,6 +325,9 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     except ValueError: return uop  # give up if we cannot parse the valid
     bounds[expr][int(is_upper)] = c
 
+  # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
+  candidates: list[list[tuple[UOp, UOp]]] = []
+  fnum = 0
   # simplify uop given that valid is True
   for expr,v in bounds.items():
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
@@ -334,21 +337,18 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     if v0 == v1:
       uop = uop.substitute({expr:expr.const_like(v0)}).simplify()
       continue
-    # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
-    candidates = []
+    # try checking the whole clause
+    if expr in uop.toposort(): candidates.append([(expr, UOp.variable(f"fake{(fnum:=fnum+1)}", v0, v1, expr.dtype))])
     if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in split_uop(expr, Ops.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
-    # try checking the whole clause
-    if expr in uop.toposort(): candidates.append([(expr, UOp.variable("fake", v0, v1, expr.dtype))])
+      candidates.append([(Xi, UOp.variable(f"fake{(fnum:=fnum+1)}", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
 
-    for candidate in candidates:
-      # if every branch in candidate gives the same simplified uop, we can rewrite the uop
-      newuops = [uop.substitute({X:newX}).simplify().substitute({newX:X}).simplify() for X,newX in candidate]
-      if uop.op is Ops.VECTORIZE and len(uop.src) == 2:
-        if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
-        if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
-      elif all_same(newuops): uop = newuops[0]
+  newuops = [uop.substitute(dict(cand)).simplify().substitute({newX:X for X,newX in cand}).simplify() for cand in itertools.product(*candidates)]
+  # if every branch in candidate gives the same simplified uop, we can rewrite the uop
+  if uop.op is Ops.VECTORIZE and len(uop.src) == 2:
+    if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
+    if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
+  elif all_same(newuops): uop = newuops[0]
 
   return uop
 
