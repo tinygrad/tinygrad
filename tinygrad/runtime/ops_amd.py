@@ -820,8 +820,8 @@ class USBIface(PCIIface):
     self.usb._pci_cacheable += [self.bars[2]] # doorbell region is cacheable
 
     # special regions
-    self.copy_bufs = [self._new_dma_region(ctrl_addr=0xf000, sys_addr=0x200000, size=0x4000)]
-    self.sys_buf, self.sys_next_off = self._new_dma_region(ctrl_addr=0xa000, sys_addr=0x820000, size=0x1000), 0
+    self.copy_bufs = [self._new_dma_region(ctrl_addr=0xf000, sys_addr=0x200000, size=0x80000)]
+    self.sys_buf, self.sys_next_off = self._new_dma_region(ctrl_addr=0xa000, sys_addr=0x820000, size=0x1000), 0x800
 
   def _new_dma_region(self, ctrl_addr, sys_addr, size):
     region = self.adev.mm.map_range(vaddr:=self.adev.mm.alloc_vaddr(size=size), size, [(sys_addr, size)], system=True, snooped=False, uncached=True)
