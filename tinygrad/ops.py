@@ -667,14 +667,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     sself = self.simplify()
     varnames = tuple(x.arg[0] for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
     # TODO: sanitize varnames, or don't use naked eval while staying fast
-    return eval("lambda "+','.join(varnames)+": "+sself.render()), varnames  # pylint: disable=eval-used
+    return eval("lambda "+','.join(varnames)+": "+sself.render(pm=renderer_infer)), varnames  # pylint: disable=eval-used
 
   def sym_infer(self, var_vals:dict[UOp, int]):
     fxn, varnames = self._sym_fxn
     return fxn(**{k.arg[0]:v for k,v in var_vals.items() if k.arg[0] in varnames})
 
-  def render(self, simplify=True) -> str:
-    ret = graph_rewrite(self.simplify() if simplify else self, renderer)
+  def render(self, simplify=True, pm:Optional[PatternMatcher]=None) -> str:
+    ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
 
 @dataclass(frozen=True)
@@ -1019,6 +1019,11 @@ renderer = PatternMatcher([
   (UPat(Ops.MULACC, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[0].arg}*{x.src[1].arg}+{x.src[2].arg})")),
   (UPat(Ops.WHERE, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[1].arg} if {x.src[0].arg} else {x.src[2].arg})")),
   (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[0].arg}{syms[x.op]}{x.src[1].arg})")),
+])
+renderer_infer = PatternMatcher([
+  (UPat(Ops.MOD, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"cmod({x.src[0].arg}, {x.src[1].arg})")),
+  (UPat(Ops.IDIV, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"cdiv({x.src[0].arg}, {x.src[1].arg})")),
+  *renderer.patterns
 ])
 
 # *** what was symbolic.py ***
