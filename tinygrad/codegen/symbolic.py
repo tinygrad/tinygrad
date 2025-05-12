@@ -325,7 +325,8 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     bounds[expr][int(is_upper)] = c
 
   # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
-  candidates: list[list[tuple[UOp, UOp]]] = []
+  expr_candidates: list[list[tuple[UOp, UOp]]] = []
+  simplex_candidates: list[list[tuple[UOp, UOp]]] = []
   fnum = 0
   # simplify uop given that valid is True
   for expr,v in bounds.items():
@@ -338,14 +339,17 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
       continue
     # try checking the whole clause
     if expr in uop.toposort():
-      uop = uop.substitute({expr: (fake:=UOp.variable("fake", v0, v1, expr.dtype))}).simplify().substitute({fake: expr}).simplify()
+      expr_candidates.append((expr, UOp.variable(f"fake{(fnum:=fnum+1)}", v0, v1, expr.dtype)))
     if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in split_uop(expr, Ops.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      candidates.append([(Xi, UOp.variable(f"fake{fnum}", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
+      simplex_candidates.append([(Xi, UOp.variable(f"fake{fnum}", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
       fnum += 1
 
-  newuops = [uop.substitute(dict(cand)).simplify().substitute({newX:X for X,newX in cand}).simplify() for cand in itertools.product(*candidates)]
+  uop = uop.substitute(dict(expr_candidates)).simplify().substitute({newX:X for X,newX in expr_candidates}).simplify()
+
   # if every branch in candidate gives the same simplified uop, we can rewrite the uop
+  candidates = [[cand] for cand in expr_candidates] + simplex_candidates
+  newuops = [uop.substitute(dict(cand)).simplify().substitute({newX:X for X,newX in cand}).simplify() for cand in itertools.product(*candidates)]
   if uop.op is Ops.VECTORIZE and len(uop.src) == 2:
     if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
     if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
