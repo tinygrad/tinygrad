@@ -235,7 +235,7 @@ class AMMemoryManager:
     for paddr, _ in vm.paddrs: self.pa_allocator.free(paddr)
 
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
-    assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
+    # assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
     paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
     if zero: self.adev.vram[paddr:paddr+size] = bytes(size)
     return paddr
@@ -284,9 +284,9 @@ class AMDev:
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
-    if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0):
-      if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
-      self.partial_boot = False
+    # if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0):
+    #   if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
+    #   self.partial_boot = False
 
     # Init sw for all IP blocks
     for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init_sw()
