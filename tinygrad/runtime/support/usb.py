@@ -118,8 +118,12 @@ class ASM24Controller:
     self._pci_cacheable: list[tuple[int, int]] = []
     self._pci_cache: dict[int, int|None] = {}
 
+    # import pickle
+    # state = pickle.load(open("state.bin", "rb"))
+    # self.write(0x400, state[0x400:0x1000])
+
     # Init controller.
-    self.exec_ops([WriteOp(0x54b, b' '), WriteOp(0x5a8, b'\x02'), WriteOp(0x5f8, b'\x04'), WriteOp(0x7ec, b'\x01\x00\x00\x00'),
+    self.exec_ops([WriteOp(0x54b, b' '), WriteOp(0x54e, b'\x04'), WriteOp(0x5a8, b'\x02'), WriteOp(0x5f8, b'\x04'), WriteOp(0x7ec, b'\x01\x00\x00\x00'),
       WriteOp(0xc422, b'\x02'), WriteOp(0x0, b'\x33')])
 
   def exec_ops(self, ops:Sequence[WriteOp|ReadOp|ScsiWriteOp]):
@@ -152,7 +156,26 @@ class ASM24Controller:
   def write(self, base_addr:int, data:bytes, ignore_cache:bool=True): return self.exec_ops([WriteOp(base_addr, data, ignore_cache)])
 
   def scsi_write(self, buf:bytes, lba:int=0):
-    self.exec_ops([ScsiWriteOp(buf, lba), WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True), WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
+    # parts = round_up(len(buf), 0x4000) // 0x4000
+    # ops = []
+    # for i in range(parts):
+    #   ops += [ScsiWriteOp(buf, lba), WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True), WriteOp(0xce6e, b'\x00\x00', ignore_cache=True),
+    #           WriteOp(0xce42, b'\x00\x00', ignore_cache=True)]
+
+    ops = []
+    # import time
+    # if len(buf) > 0x4000: ops += [WriteOp(0x54e, b'\x04', ignore_cache=True)]
+    # else: extra_ops = []
+
+    for i in range(0, len(buf), 0x10000):
+      self.exec_ops([ScsiWriteOp(buf[i:i+0x10000], lba), WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True)])
+      self.exec_ops([WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
+
+    if len(buf) > 0x4000:
+      self.exec_ops([WriteOp(0xce40, b'\x00', ignore_cache=True)])
+      self.exec_ops([WriteOp(0xce41, b'\x00', ignore_cache=True)])
+      self.exec_ops([WriteOp(0xce42, b'\x00', ignore_cache=True)])
+      self.exec_ops([WriteOp(0xce43, b'\x00', ignore_cache=True)])
 
   def read(self, base_addr:int, length:int, stride:int=0xff) -> bytes:
     parts = self.exec_ops([ReadOp(base_addr + off, min(stride, length - off)) for off in range(0, length, stride)])
@@ -253,7 +276,7 @@ class USBMMIOInterface(MMIOInterface):
 
       if not self.pcimem:
         # Fast path for writing into buffer 0xf000
-        use_cache = 0xa000 <= self.addr <= 0xb200
+        use_cache = 0xa800 <= self.addr <= 0xb000
         return self.usb.scsi_write(bytes(data)) if self.addr == 0xf000 else self.usb.write(self.addr + off, bytes(data), ignore_cache=not use_cache)
 
       _, acc_sz = self._acc_size(len(data) * struct.calcsize(self.fmt))
