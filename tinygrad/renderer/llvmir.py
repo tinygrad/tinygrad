@@ -108,10 +108,6 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.BARRIER), lambda ctx: "")
 ])
 
-def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
-  u16_buf = buf.replace(dtype=dtypes.ushort.ptr(size=cast(PtrDType,buf.dtype).size))
-  return UOp.load(UOp.index(u16_buf, idx), dtype=dtypes.ushort).cast(dtypes.uint).mul(1<<16).bitcast(dtypes.float32).cast(root.dtype)
-
 class LLVMRenderer(Renderer):
   device = "LLVM"
   abi = 'win64cc' if sys.platform == 'win32' else None
