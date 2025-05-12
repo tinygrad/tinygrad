@@ -11,6 +11,11 @@ def expect(x, err, ret=None):
   if x: raise RuntimeError(llvm.string_cast(err.contents) if not isinstance(err, str) else err)
   return ret
 
+def handle_diag(diag_ref_ptr, _arg):
+  diag_ref = ctypes.cast(diag_ref_ptr, llvm.LLVMDiagnosticInfoRef)
+  severity = llvm.LLVMGetDiagInfoSeverity(diag_ref)
+  if severity == llvm.LLVMDSError: raise RuntimeError(f"diagnostic error: {ctypes.string_at(llvm.LLVMGetDiagInfoDescription(diag_ref)).decode()}")
+
 class LLVMCompiler(Compiler):
   jit = True
   target_arch = {'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()]
@@ -38,6 +43,7 @@ class LLVMCompiler(Compiler):
   def __del__(self): llvm.LLVMDisposePassBuilderOptions(self.pbo)
 
   def compile(self, src:str) -> bytes:
+    llvm.LLVMContextSetDiagnosticHandler(llvm.LLVMGetGlobalContext(), llvm.LLVMDiagnosticHandler(handle_diag), None)
     src_buf = llvm.LLVMCreateMemoryBufferWithMemoryRangeCopy(ctypes.create_string_buffer(src_bytes:=src.encode()), len(src_bytes), b'src')
     mod = expect(llvm.LLVMParseIRInContext(llvm.LLVMGetGlobalContext(), src_buf, ctypes.pointer(m:=llvm.LLVMModuleRef()), err:=cerr()), err, m)
     expect(llvm.LLVMVerifyModule(mod, llvm.LLVMReturnStatusAction, err:=cerr()), err)
