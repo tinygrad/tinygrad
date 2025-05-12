@@ -5,13 +5,13 @@ from tinygrad.renderer.graph import GraphRenderer
 from tinygrad.engine.realize import CompiledRunner
 from typing import cast
 
-init_device = ['if (!navigator.gpu) throw new Error("WebGPU not supported.");',
-  'const adapter = await navigator.gpu.requestAdapter();',
-  'const { maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup } = adapter.limits;',
-  'const device = await adapter.requestDevice({',
-  '  requiredFeatures: adapter.features.has("shader-f16") ? ["shader-f16"] : [], powerPreference: "high-performance",',
-  '  requiredLimits: { maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup }',
-  '});\n']
+init_device = """if (!navigator.gpu) throw new Error("WebGPU not supported.");
+const adapter = await navigator.gpu.requestAdapter();
+const { maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup } = adapter.limits;
+const device = await adapter.requestDevice({
+  requiredFeatures: adapter.features.has("shader-f16") ? ["shader-f16"] : [], powerPreference: "high-performance",
+  requiredLimits: { maxStorageBufferBindingSize, maxBufferSize, maxComputeInvocationsPerWorkgroup }
+});\n""".split("\n")
 
 empty = (state:="GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST") + " | GPUBufferUsage.COPY_SRC"
 uniform, map_read = "GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST", "GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ"
