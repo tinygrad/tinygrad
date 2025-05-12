@@ -118,13 +118,9 @@ class ASM24Controller:
     self._pci_cacheable: list[tuple[int, int]] = []
     self._pci_cache: dict[int, int|None] = {}
 
-    # import pickle
-    # state = pickle.load(open("state.bin", "rb"))
-    # self.write(0x400, state[0x400:0x1000])
-
     # Init controller.
-    self.exec_ops([WriteOp(0x54b, b' '), WriteOp(0x54e, b'\x04'), WriteOp(0x5a8, b'\x02'), WriteOp(0x5f8, b'\x04'), WriteOp(0x7ec, b'\x01\x00\x00\x00'),
-      WriteOp(0xc422, b'\x02'), WriteOp(0x0, b'\x33')])
+    self.exec_ops([WriteOp(0x54b, b' '), WriteOp(0x54e, b'\x04'), WriteOp(0x5a8, b'\x02'), WriteOp(0x5f8, b'\x04'),
+      WriteOp(0x7ec, b'\x01\x00\x00\x00'), WriteOp(0xc422, b'\x02'), WriteOp(0x0, b'\x33')])
 
   def exec_ops(self, ops:Sequence[WriteOp|ReadOp|ScsiWriteOp]):
     cdbs:list[bytes] = []
