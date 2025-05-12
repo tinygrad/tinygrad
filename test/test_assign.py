@@ -240,6 +240,48 @@ class TestAssign(unittest.TestCase):
     out = attn.cache_k.flatten().numpy()
     np.testing.assert_allclose(out, [1.,1.,1.,1.,1.,1.,0.,0.,1.,1.,1.,1.,1.,1.,0.,0.])
 
+  # TODO: in addition, or just instead, repeat test_assign_kv_cache with kernelize instead of realize?
+  def test_kernelize_partial_assign(self):
+    results = []
+    for mode in ("kernelize", "realize"):
+      target = Tensor.zeros(2, 2, dtype=dtypes.int32).contiguous().realize()
+      src = Tensor.full((1, 2), 7, dtype=dtypes.int32)
+      if mode == "kernelize":
+        target[1:2, :].assign(src).kernelize()
+      elif mode == "realize":
+        target[1:2, :].assign(src).realize()
+      results.append(bytes(target.realize().lazydata.base.realized.as_buffer()))
+
+    np.testing.assert_equal(results[0], results[1])
+
+  def test_kernelize_whole_assign_sliced(self):
+    results = []
+    for mode in ("kernelize", "realize"):
+      target = Tensor.zeros(2, 2, dtype=dtypes.int32).contiguous().realize()
+      src = Tensor.full((2, 2), 7, dtype=dtypes.int32)
+      if mode == "kernelize":
+        target[:, :].assign(src).kernelize()
+      elif mode == "realize":
+        target[:, :].assign(src).realize()
+      results.append(bytes(target.realize().lazydata.base.realized.as_buffer()))
+
+    np.testing.assert_equal(results[0], results[1])
+
+  def test_kernelize_whole_assign_not_sliced(self):
+    results = []
+    for mode in ("kernelize", "realize"):
+      target = Tensor.zeros(2, 2, dtype=dtypes.int32).contiguous().realize()
+      src = Tensor.full((2, 2), 7, dtype=dtypes.int32)
+      if mode == "kernelize":
+        #target[:, :].assign(src).kernelize()
+        target.assign(src).kernelize()
+      elif mode == "realize":
+        #target[:, :].assign(src).realize()
+        target.assign(src).realize()
+      results.append(bytes(target.realize().lazydata.base.realized.as_buffer()))
+
+    np.testing.assert_equal(results[0], results[1])
+
   def test_assign_contiguous(self):
     b = Tensor.rand(4,4).realize()
     a = (Tensor.rand(4,4).realize() + 1)
