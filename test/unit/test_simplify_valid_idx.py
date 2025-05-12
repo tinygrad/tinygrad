@@ -165,6 +165,19 @@ class TestValidIdxSimplification(unittest.TestCase):
     print("The expressions are not equivalent.")
     print(s.model())
 
+  @unittest.expectedFailure  # TODO: improve uop_given_valid
+  def test_valid_becomes_const2(self):
+    ridx0 = Range(0, 4)
+    ridx1 = Range(1, 4)
+    ridx2 = Range(2, 4)
+    ridx3 = Range(3, 4)
+    idx= ((ridx0+ridx1+ridx2+ridx3+28)//30)
+    valid = ((ridx0+ridx1)<1).ne(True) & ((ridx2+ridx3)<1).ne(True)
+    load = get_gated_load_uop(valid, idx)
+    self.check(load,
+      "1",
+      "((((ridx0+ridx1)<1)!=True)&(((ridx2+ridx3)<1)!=True))")
+
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
     load = full_rewrite_to_sink(load.sink()).src[0]
