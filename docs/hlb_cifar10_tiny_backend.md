@@ -4,38 +4,56 @@ This document outlines how to run the `hlb-cifar10` training script using the `t
 
 ## Approach
 
-The first attempt of integration aims to leverage `tinygrad` for the core model computation while still utilizing PyTorch for data loading and some initial preprocessing steps. The key modifications in `hlb-CIFAR10/main.py` are:
+The current integration with `tinygrad` supports core model computations, data loading, and certain initial preprocessing steps. However, model weight initialization is not yet supported due to the missing `unfold` operation (refer to PR: https://github.com/tinygrad/tinygrad/pull/9919) and issues with the `batch_crop` function. The primary changes made in `hlb-CIFAR10/main.py` are as follows:
 
 1.  **Conditional Import:** The `tinygrad.frontend.torch` module is imported only when the environment variable `TINY_BACKEND` is set to a non-empty value (e.g., `1`).
     ```python
     if getenv("TINY_BACKEND"):
         import tinygrad.frontend.torch
+        hyp["misc"]["device"] = "tiny" # Device set for tinygrad
     ```
-2.  **Model Initialization and Device Transfer:** The `SpeedyConvNet` model is initially constructed using standard PyTorch layers (`nn.Module`, `nn.Conv2d`, etc.). This includes the whitening layer initialization, which performs calculations using PyTorch tensors based on the training data. After the model is fully constructed and initialized (including the fixed whitening layer weights), it's transferred to the `tinygrad` device.
-    ```python
-    net = make_net()
-    # ... (whitening initialization using torch.no_grad() and PyTorch tensors) ...
-    net.to("cpu").to("tiny")
-    ```
-3.  **Data Handling:**
-    *   The dataset is loaded and preprocessed (normalization, padding) using PyTorch and kept as PyTorch tensors initially.
-    *   Inside the training (`main` function) and evaluation loops, batches of input images and target labels are explicitly moved from CPU PyTorch tensors to `tinygrad` tensors just before being fed into the model.
-    ```python
-      # Inside the training loop:
-      for epoch_step, (inputs, targets) in enumerate(get_batches(...)):
-          inputs = inputs.cpu().to("tiny")
-          targets = targets.cpu().to("tiny")
-          outputs = net(inputs)
-          # ... rest of training step ...
 
-      # Inside the evaluation loop:
-      with torch.no_grad():
-          for inputs, targets in get_batches(data, key='eval', ...):
-              inputs = inputs.cpu().to("tiny")
-              targets = targets.cpu().to("tiny")
-              # ... get outputs ...
+2.  **Model Initialization:** Currently, we can switch to the `TINY_BACKEND` without altering any code to build the `SpeedyConvNet` model. However, model weight initialization is not supported yet due to the missing `unfold` operation, which I am actively working on resolving.
+    ```python
+    def make_net():
+        whiten_conv_depth = 3*hyp['net']['whitening']['kernel_size']**2
+        ...
+        with torch.no_grad():
+            # init_whitening_conv(net.net_dict['initial_block']['whiten'],
+            ...
+        net = net.to(hyp['misc']['device'])
     ```
-    This approach allows PyTorch's efficient dataloading and initial transforms to be used while offloading the main network computations to `tinygrad`.
+
+3.  **Data Handling:**
+    Dataset loading and preprocessing steps such as normalization and padding are fully compatible with the tinygrad backend without requiring any code modifications. However, minor adjustments are necessary in the original hlb-cifar10 repository due to hardcoded device specifications in the `batch_cutmix` and `get_batches` functions, which default to "cuda". We have updated these functions to dynamically select the device based on the `TINY_BACKEND` environment variable as shown below:
+
+    ```python
+    def get_batches(data_dict, key, batchsize, epoch_fraction=1., cutmix_size=None):
+        num_epoch_examples = len(data_dict[key]['images'])
+        device = "tiny" if getenv("TINY_BACKEND") else "cuda"
+        shuffled = torch.randperm(num_epoch_examples, device=device)
+        ...
+
+    def batch_cutmix(inputs, targets, patch_size):
+        with torch.no_grad():
+            device = "tiny" if getenv("TINY_BACKEND") else "cuda"
+            batch_permuted = torch.randperm(inputs.shape[0], device=device)
+            ...
+    ```
+
+    Additionally, there is an ongoing issue with the `batch_crop` function causing a maximum recursion depth error, which is currently under investigation. As a temporary workaround, we have modified `batch_crop` to perform a fixed center crop instead of a random crop:
+
+    ```python
+    def batch_crop(inputs, crop_size):
+        with torch.no_grad():
+            center_h = inputs.shape[2] // 2
+            center_w = inputs.shape[3] // 2
+            half_size = crop_size // 2
+            cropped_batch = inputs[:, :,
+                                  center_h - half_size:center_h + half_size,
+                                  center_w - half_size:center_w + half_size]
+            return cropped_batch
+    ```
 
 ## Running the Script
 
@@ -80,19 +98,19 @@ Here are the results obtained using the standard Torch backend and the `tinygrad
 --------------------------------------------------------------------------------------------------------
 |  epoch  |  train_loss  |  val_loss  |  train_acc  |  val_acc  |  ema_val_acc  |  total_time_seconds  |
 --------------------------------------------------------------------------------------------------------
-|      0  |      2.3164  |    1.5548  |     0.0859  |   0.6412  |               |             52.2511  |
-|      1  |      1.4736  |    1.3771  |     0.6719  |   0.7370  |               |            101.6236  |
-|      2  |      1.2939  |    1.4186  |     0.7881  |   0.7146  |       0.8257  |            153.7861  |
-|      3  |      1.2637  |    1.2745  |     0.8027  |   0.7934  |       0.7904  |            276.2520  |
-|      4  |      1.1436  |    1.1898  |     0.8770  |   0.8407  |       0.8407  |            399.6414  |
-|      5  |      1.1406  |    1.1403  |     0.8691  |   0.8725  |       0.8737  |            522.1047  |
-|      6  |      1.0947  |    1.1148  |     0.8984  |   0.8834  |       0.8700  |            646.6541  |
-|      7  |      1.1191  |    1.1038  |     0.8848  |   0.8932  |       0.9029  |            770.2137  |
-|      8  |      1.0732  |    1.0755  |     0.9219  |   0.9019  |       0.9169  |            894.6566  |
-|      9  |      1.0264  |    1.0291  |     0.9502  |   0.9266  |       0.9265  |           1020.3546  |
-|     10  |      0.9878  |    1.0228  |     0.9727  |   0.9281  |       0.9370  |           1145.5348  |
-|     11  |      0.9619  |    1.0020  |     0.9854  |   0.9395  |       0.9393  |           1272.4826  |
-|     12  |      0.9502  |    1.0017  |     0.9893  |   0.9398  |       0.9392  |           1284.9792  |
+|      0  |      2.3145  |    1.8262  |     0.1016  |   0.4531  |               |             27.0005  |
+|      1  |      1.6055  |    1.5401  |     0.5986  |   0.6423  |               |             51.8716  |
+|      2  |      1.3662  |    1.3735  |     0.7490  |   0.7377  |       0.6844  |             78.1916  |
+|      3  |      1.2588  |    1.2815  |     0.8154  |   0.7949  |       0.7746  |            106.3516  |
+|      4  |      1.2070  |    1.2498  |     0.8389  |   0.8070  |       0.8073  |            132.8662  |
+|      5  |      1.1289  |    3.9064  |     0.8779  |   0.1419  |       0.2091  |            160.9472  |
+|      6  |      1.8477  |    1.2162  |     0.4697  |   0.8316  |       0.8409  |            189.1839  |
+|      7  |      1.1602  |    1.2195  |     0.8721  |   0.8281  |       0.8383  |            217.4564  |
+|      8  |      1.1221  |    1.1332  |     0.8916  |   0.8811  |       0.8842  |            245.9936  |
+|      9  |      1.0684  |    1.0850  |     0.9365  |   0.9007  |       0.9022  |            275.9708  |
+|     10  |      0.9878  |    1.0772  |     0.9746  |   0.9069  |       0.9120  |            305.6327  |
+|     11  |      0.9609  |    1.0630  |     0.9883  |   0.9153  |       0.9144  |            334.0995  |
+|     12  |      0.9404  |    1.0629  |     0.9932  |   0.9143  |       0.9147  |            340.1850  |
 --------------------------------------------------------------------------------------------------------
 # Note: Displaying results from a single run with 12 epochs for brevity.
 ```
@@ -126,6 +144,3 @@ Enabling `DEBUG=2` shows the `tinygrad` kernels being compiled and executed, con
 *** CUDA    1720 E_4608_32_4                               arg  2 mem  0.92 GB tm     12.48us/  1730.41ms (     0.00 GFLOPS  189.0|189.0   GB/s)
 # ... (rest of the debug log truncated)
 ```
-
-
-This is just the first step in integrating the `tinygrad` backend. Future improvements will focus on transitioning the model initialization and data preprocessing entirely to `tinygrad`.
