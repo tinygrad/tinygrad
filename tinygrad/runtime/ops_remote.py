@@ -7,7 +7,7 @@
 from __future__ import annotations
 from typing import Callable, Optional, Any, cast
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import multiprocessing, functools, asyncio, http, http.client, hashlib, json, time, os, binascii, struct, ast, contextlib
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
@@ -20,7 +20,8 @@ from tinygrad.runtime.graph.cpu import CPUGraph
 
 # ***** API *****
 
-class RemoteRequest: pass
+@dataclass(frozen=True)
+class RemoteRequest: session: str|None = field(default=None, kw_only=True)
 
 @dataclass(frozen=True)
 class BufferAlloc(RemoteRequest): buffer_num: int; size: int; options: BufferSpec # noqa: E702
@@ -127,11 +128,10 @@ class RemoteHandler:
         key, value = hdr.split(':', 1)
         req_headers[key.lower()] = value.strip()
       req_body = await reader.readexactly(int(req_headers.get("content-length", "0")))
-      res_status, res_body = self.handle(req_method, req_path, req_headers, req_body)
+      res_status, res_body = self.handle(req_method, req_path, req_body)
       writer.write(f"HTTP/1.1 {res_status.value} {res_status.phrase}\r\nContent-Length: {len(res_body)}\r\n\r\n".encode() + res_body)
 
-  def handle(self, method:str, path:str, headers:dict[str, str], body:bytes) -> tuple[http.HTTPStatus, bytes]:
-    session = self.sessions[unwrap(headers.get("cookie")).split("session=")[1]]
+  def handle(self, method:str, path:str, body:bytes) -> tuple[http.HTTPStatus, bytes]:
     status, ret = http.HTTPStatus.OK, b""
     if path == "/batch" and method == "POST":
       # TODO: streaming deserialize?
@@ -139,6 +139,7 @@ class RemoteHandler:
       # the cmds are always last (currently in datahash)
       for c in req._q:
         if DEBUG >= 1: print(c)
+        session = self.sessions[unwrap(c.session)]
         match c:
           case BufferAlloc():
             assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already allocated"
@@ -193,13 +194,13 @@ class RemoteAllocator(Allocator):
   # TODO: ideally we shouldn't have to deal with images here
   def _alloc(self, size:int, options:BufferSpec) -> int:
     self.device.buffer_num += 1
-    self.device.req.q(BufferAlloc(self.device.buffer_num, size, options))
+    self.device.q(BufferAlloc(self.device.buffer_num, size, options))
     return self.device.buffer_num
   # TODO: options should not be here in any Allocator
-  def _free(self, opaque:int, options): self.device.req.q(BufferFree(opaque))
-  def _copyin(self, dest:int, src:memoryview): self.device.req.q(CopyIn(dest, self.device.req.h(bytes(src))))
+  def _free(self, opaque:int, options): self.device.q(BufferFree(opaque))
+  def _copyin(self, dest:int, src:memoryview): self.device.q(CopyIn(dest, self.device.req.h(bytes(src))))
   def _copyout(self, dest:memoryview, src:int):
-    self.device.req.q(CopyOut(src))
+    self.device.q(CopyOut(src))
     resp = self.device.batch_submit()
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
     dest[:] = resp
@@ -208,12 +209,12 @@ class RemoteProgram:
   def __init__(self, dev:RemoteDevice, name:str, lib:bytes):
     self.dev, self.name = dev, name
     self.datahash = self.dev.req.h(lib)
-    self.dev.req.q(ProgramAlloc(self.name, self.datahash))
+    self.dev.q(ProgramAlloc(self.name, self.datahash))
     super().__init__()
-  def __del__(self): self.dev.req.q(ProgramFree(self.name, self.datahash))
+  def __del__(self): self.dev.q(ProgramFree(self.name, self.datahash))
 
   def __call__(self, *bufs, global_size=None, local_size=None, vals:tuple[int, ...]=(), wait=False):
-    self.dev.req.q(ProgramExec(self.name, self.datahash, bufs, vals, global_size, local_size, wait))
+    self.dev.q(ProgramExec(self.name, self.datahash, bufs, vals, global_size, local_size, wait))
     if wait: return float(self.dev.batch_submit())
 
 class RemoteDevice(Compiled):
@@ -251,6 +252,8 @@ class RemoteDevice(Compiled):
     # TODO: should close the whole session
     with contextlib.suppress(ConnectionRefusedError, http.client.CannotSendRequest, http.client.RemoteDisconnected): self.batch_submit()
 
+  def q(self, x:RemoteRequest): self.req.q(replace(x, session=self.session))
+
   def batch_submit(self):
     data = self.req.serialize()
     with Timing(f"*** send {len(self.req._q):-3d} requests {len(self.req._h):-3d} hashes with len {len(data)/1024:.2f} kB in ", enabled=DEBUG>=1):
@@ -260,7 +263,7 @@ class RemoteDevice(Compiled):
 
   def send(self, method, path, data:Optional[bytes]=None) -> bytes:
     # TODO: retry logic
-    self.conn.request(method, "/"+path, data, headers={"Cookie": f"session={self.session}"})
+    self.conn.request(method, "/"+path, data)
     response = self.conn.getresponse()
     assert response.status == 200, f"failed on {method} {path}"
     return response.read()
