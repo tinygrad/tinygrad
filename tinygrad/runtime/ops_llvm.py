@@ -11,12 +11,6 @@ def expect(x, err, ret=None):
   if x: raise RuntimeError(llvm.string_cast(err.contents) if not isinstance(err, str) else err)
   return ret
 
-@ctypes.CFUNCTYPE(None, llvm.LLVMDiagnosticInfoRef, ctypes.POINTER(None))
-def handle_diag(diag_ref_ptr, _arg):
-  diag_ref = ctypes.cast(diag_ref_ptr, llvm.LLVMDiagnosticInfoRef)
-  severity = llvm.LLVMGetDiagInfoSeverity(diag_ref)
-  if severity == llvm.LLVMDSError: raise RuntimeError(f"diagnostic error: {ctypes.string_at(llvm.LLVMGetDiagInfoDescription(diag_ref)).decode()}")
-
 class LLVMCompiler(Compiler):
   jit = True
   target_arch = {'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()]
@@ -44,6 +38,15 @@ class LLVMCompiler(Compiler):
   def __del__(self): llvm.LLVMDisposePassBuilderOptions(self.pbo)
 
   def compile(self, src:str) -> bytes:
+    diag_err: Exception|None = None
+    @ctypes.CFUNCTYPE(None, llvm.LLVMDiagnosticInfoRef, ctypes.POINTER(None))
+    def handle_diag(diag_ref_ptr, _arg):
+      nonlocal diag_err
+      diag_ref = ctypes.cast(diag_ref_ptr, llvm.LLVMDiagnosticInfoRef)
+      severity = llvm.LLVMGetDiagInfoSeverity(diag_ref)
+      if severity == llvm.LLVMDSError:
+        diag_err = RuntimeError(f"diagnostic error: {ctypes.string_at(llvm.LLVMGetDiagInfoDescription(diag_ref)).decode()}")
+
     llvm.LLVMContextSetDiagnosticHandler(llvm.LLVMGetGlobalContext(), handle_diag, None)
     src_buf = llvm.LLVMCreateMemoryBufferWithMemoryRangeCopy(ctypes.create_string_buffer(src_bytes:=src.encode()), len(src_bytes), b'src')
     mod = expect(llvm.LLVMParseIRInContext(llvm.LLVMGetGlobalContext(), src_buf, ctypes.pointer(m:=llvm.LLVMModuleRef()), err:=cerr()), err, m)
@@ -55,6 +58,7 @@ class LLVMCompiler(Compiler):
     llvm.LLVMDisposeModule(mod)
     obj = ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
     llvm.LLVMDisposeMemoryBuffer(obj_buf)
+    if diag_err: raise diag_err
     return jit_loader(obj) if self.jit else obj
 
   def disassemble(self, lib:bytes): capstone_flatdump(lib)
