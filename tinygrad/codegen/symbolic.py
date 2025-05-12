@@ -337,10 +337,12 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
       uop = uop.substitute({expr:expr.const_like(v0)}).simplify()
       continue
     # try checking the whole clause
-    if expr in uop.toposort(): candidates.append([(expr, UOp.variable(f"fake{(fnum:=fnum+1)}", v0, v1, expr.dtype))])
+    if expr in uop.toposort():
+      uop = uop.substitute({expr: (fake:=UOp.variable("fake", v0, v1, expr.dtype))}).simplify().substitute({fake: expr}).simplify()
     if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in split_uop(expr, Ops.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      candidates.append([(Xi, UOp.variable(f"fake{(fnum:=fnum+1)}", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
+      candidates.append([(Xi, UOp.variable(f"fake{fnum}", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
+      fnum += 1
 
   newuops = [uop.substitute(dict(cand)).simplify().substitute({newX:X for X,newX in cand}).simplify() for cand in itertools.product(*candidates)]
   # if every branch in candidate gives the same simplified uop, we can rewrite the uop
