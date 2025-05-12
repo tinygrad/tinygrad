@@ -8,8 +8,7 @@ from __future__ import annotations
 from typing import Callable, Optional, Any, cast
 from collections import defaultdict
 from dataclasses import dataclass, field
-import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct, ast, contextlib
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import multiprocessing, functools, asyncio, http, http.client, hashlib, json, time, os, binascii, struct, ast, contextlib
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
 from tinygrad.ops import UOp, Ops, Variable, sint
@@ -115,34 +114,41 @@ class RemoteSession:
   graphs: dict[int, GraphRunner] = field(default_factory=dict)
   buffers: dict[int, Buffer] = field(default_factory=dict)
 
-class RemoteHandler(BaseHTTPRequestHandler):
-  protocol_version = 'HTTP/1.1'
-  device: str
-  sessions: defaultdict[str, RemoteSession] = defaultdict(RemoteSession)
+class RemoteHandler:
+  def __init__(self, device: str):
+    self.device = device
+    self.sessions: defaultdict[str, RemoteSession] = defaultdict(RemoteSession)
 
-  def setup(self):
-    super().setup()
-    print(f"connection established with {self.client_address}, socket: {self.connection.fileno()}")
+  async def __call__(self, reader:asyncio.StreamReader, writer:asyncio.StreamWriter):
+    while (req_hdr:=(await reader.readline()).decode().strip()):
+      req_method, req_path, _ = req_hdr.split(' ')
+      req_headers = {}
+      while (hdr:=(await reader.readline()).decode().strip()):
+        key, value = hdr.split(':', 1)
+        req_headers[key.lower()] = value.strip()
+      req_body = await reader.readexactly(int(req_headers.get("content-length", "0")))
+      res_status, res_body = self.handle(req_method, req_path, req_headers, req_body)
+      writer.write(f"HTTP/1.1 {res_status.value} {res_status.phrase}\r\nContent-Length: {len(res_body)}\r\n\r\n".encode() + res_body)
 
-  def _do(self, method):
-    session = RemoteHandler.sessions[unwrap(self.headers.get("Cookie")).split("session=")[1]]
-    ret, status_code = b"", 200
-    if self.path == "/batch" and method == "POST":
+  def handle(self, method:str, path:str, headers:dict[str, str], body:bytes) -> tuple[http.HTTPStatus, bytes]:
+    session = self.sessions[unwrap(headers.get("cookie")).split("session=")[1]]
+    status, ret = http.HTTPStatus.OK, b""
+    if path == "/batch" and method == "POST":
       # TODO: streaming deserialize?
-      req = BatchRequest().deserialize(self.rfile.read(int(unwrap(self.headers.get('Content-Length')))))
+      req = BatchRequest().deserialize(body)
       # the cmds are always last (currently in datahash)
       for c in req._q:
         if DEBUG >= 1: print(c)
         match c:
           case BufferAlloc():
             assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already allocated"
-            session.buffers[c.buffer_num] = Buffer(RemoteHandler.device, c.size, dtypes.uint8, options=c.options, preallocate=True)
+            session.buffers[c.buffer_num] = Buffer(self.device, c.size, dtypes.uint8, options=c.options, preallocate=True)
           case BufferFree(): del session.buffers[c.buffer_num]
           case CopyIn(): session.buffers[c.buffer_num].copyin(memoryview(bytearray(req._h[c.datahash])))
           case CopyOut(): session.buffers[c.buffer_num].copyout(memoryview(ret:=bytearray(session.buffers[c.buffer_num].nbytes)))
           case ProgramAlloc():
-            lib = Device[RemoteHandler.device].compiler.compile_cached(req._h[c.datahash].decode())
-            session.programs[(c.name, c.datahash)] = Device[RemoteHandler.device].runtime(c.name, lib)
+            lib = Device[self.device].compiler.compile_cached(req._h[c.datahash].decode())
+            session.programs[(c.name, c.datahash)] = Device[self.device].runtime(c.name, lib)
           case ProgramFree(): del session.programs[(c.name, c.datahash)]
           case ProgramExec():
             bufs = [session.buffers[x]._buf for x in c.bufs]
@@ -150,10 +156,10 @@ class RemoteHandler(BaseHTTPRequestHandler):
             r = session.programs[(c.name, c.datahash)](*bufs, vals=c.vals, wait=c.wait, **extra_args)
             if r is not None: ret = str(r).encode()
           case GraphAlloc():
-            graph_fn: Callable = unwrap(Device[RemoteHandler.device].graph)
+            graph_fn: Callable = unwrap(Device[self.device].graph)
             def _parse_ji(gi: GraphComputeItem):
               prg = session.programs[(gi.name, gi.datahash)]
-              ps = ProgramSpec(gi.name, '', RemoteHandler.device, UOp(Ops.NOOP), vars=list(gi.vars),
+              ps = ProgramSpec(gi.name, '', self.device, UOp(Ops.NOOP), vars=list(gi.vars),
                                global_size=list(cast(tuple[int], gi.global_size)) if gi.global_size is not None else None,
                                local_size=list(cast(tuple[int], gi.local_size)) if gi.local_size is not None else None)
               return ExecItem(CompiledRunner(ps, precompiled=b'', prg=prg), [session.buffers[buf] for buf in gi.bufs])
@@ -163,25 +169,20 @@ class RemoteHandler(BaseHTTPRequestHandler):
           case GraphExec():
             r = session.graphs[c.graph_num]([session.buffers[buf] for buf in c.bufs], c.var_vals, wait=c.wait)
             if r is not None: ret = str(r).encode()
-    elif self.path == "/properties" and method == "GET":
-      cls, args = Device[RemoteHandler.device].renderer.__reduce__()
+    elif path == "/properties" and method == "GET":
+      cls, args = Device[self.device].renderer.__reduce__()
       # CPUGraph re-renders kernel from uops specified in CompiledRunner, this is not supported
-      graph_cls = gt if (gt:=graph_class(Device[RemoteHandler.device])) is not CPUGraph else None
-      ret = json.dumps({'remotedev': RemoteHandler.device, 'renderer': (cls.__module__, cls.__name__, args), 'graph': graph_cls is not None}).encode()
-    else: status_code = 404
-    self.send_response(status_code)
-    self.send_header('Content-Length', str(len(ret)))
-    self.end_headers()
-    return self.wfile.write(ret)
-
-  def do_GET(self): return self._do("GET")
-  def do_POST(self): return self._do("POST")
+      graph_cls = gt if (gt:=graph_class(Device[self.device])) is not CPUGraph else None
+      ret = json.dumps({'remotedev': self.device, 'renderer': (cls.__module__, cls.__name__, args), 'graph': graph_cls is not None}).encode()
+    else: status, ret = http.HTTPStatus.NOT_FOUND, b"Not Found"
+    return status, ret
 
 def remote_server(port:int):
-  RemoteHandler.device = getenv("REMOTEDEV", next(Device.get_available_devices()) if Device.DEFAULT == "REMOTE" else Device.DEFAULT)
-  print(f"start remote server on {port} with device {RemoteHandler.device}")
-  server = HTTPServer(('', port), RemoteHandler)
-  server.serve_forever()
+  device = getenv("REMOTEDEV", next(Device.get_available_devices()) if Device.DEFAULT == "REMOTE" else Device.DEFAULT)
+  async def _inner_async(port:int, device:str):
+    print(f"start remote server on {port} with device {device}")
+    await (await asyncio.start_server(RemoteHandler(device), host='', port=port)).serve_forever()
+  asyncio.run(_inner_async(port, device))
 
 # ***** frontend *****
 
