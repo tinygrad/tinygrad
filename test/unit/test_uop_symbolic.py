@@ -693,6 +693,7 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(a+b+c, var_vals) == 9
     assert sym_infer(a*b, var_vals) == 6
     assert sym_infer(a*b+c, var_vals) == 10
+    assert sym_infer((-a+1)//3, var_vals) == 0
 
 """
 @unittest.skip("not supported on uops yet")

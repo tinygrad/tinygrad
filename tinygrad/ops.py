@@ -662,16 +662,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.CAST: return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
-  @functools.cached_property
-  def _sym_fxn(self):
-    sself = self.simplify()
-    varnames = tuple(x.arg[0] for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
-    # TODO: sanitize varnames, or don't use naked eval while staying fast
-    return eval("lambda "+','.join(varnames)+": "+sself.render()), varnames  # pylint: disable=eval-used
-
-  def sym_infer(self, var_vals:dict[UOp, int]):
-    fxn, varnames = self._sym_fxn
-    return fxn(**{k.arg[0]:v for k,v in var_vals.items() if k.arg[0] in varnames})
+  def sym_infer(self, var_vals:dict[UOp, int]) -> int: return int(self.substitute({k:k.const_like(v) for k,v in var_vals.items()}))
 
   def render(self, simplify=True) -> str:
     ret = graph_rewrite(self.simplify() if simplify else self, renderer)
