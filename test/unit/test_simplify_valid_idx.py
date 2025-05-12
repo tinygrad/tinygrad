@@ -365,5 +365,19 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, valid, idx)
     self.check(load, "(((idx0+(idx1*64))%192)<160)", "((idx0+((idx1//3)*16))+128)", "(((idx0+(idx1*64))%192)//16)")
 
+  def test_simplify6(self):
+    # from openpilot
+    # the valid implies the numerator of the div/mod is positive and can be simplified with floordiv rules
+    idx1 = Special("idx1", 16)
+    idx2 = Special("idx2", 64)
+    ridx3 = Range(3, 4)
+    ridx4 = Range(4, 4)
+    ridx5 = Range(5, 4)
+    alu0 = ((idx2*1536)+(ridx4*768)+ridx3+(idx1*24)+(ridx5*3)+-771)%768
+    alu1 = ((idx2*1536)+(ridx4*768)+ridx3+(idx1*24)+(ridx5*3)+-771)//768
+    valid = (((idx2+ridx4)<1)!=1)&(((idx1+ridx5)<1)!=1)
+    load = get_load_image_uop((128, 768, 4), valid, (alu0, alu1))
+    self.check(load, None, "((((idx1*24)+ridx3)+(ridx5*3))+-3)", "(((idx2*2)+ridx4)+-1)")
+
 if __name__ == '__main__':
   unittest.main()
