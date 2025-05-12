@@ -72,7 +72,6 @@ def alu_multi(root:UOp):
 
   return UOp.multi(srcs[0].alu(root.op, *srcs[1:]), axis=axis)
 
-
   bounds = dedup([x.bounds for x in root.src if x.axis == axis])[-1] if axis is not None else None
   srcs:list[list[UOp]] = []
   not_all_real = not all(all(mlb.real) for mlb in msrcs)

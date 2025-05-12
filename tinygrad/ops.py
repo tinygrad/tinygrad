@@ -249,7 +249,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   arg:Any = None
   children:set[weakref.ref[UOp]] = field(default_factory=set)
   def __post_init__(self):
-    if self.op is Ops.DEVICE: assert isinstance(self.arg, str)
+    if self.op is Ops.DEVICE:
+      assert isinstance(self.arg, str) or (isinstance(self.arg, tuple) and all(isinstance(s, str) for s in self.arg))
   def __del__(self):
     if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
     if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg))) is not None:
@@ -533,15 +534,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop Buffer stuff ***
 
   @staticmethod
-  def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType):
-    if isinstance(device, tuple): return UOp(Ops.BUFFER, dtype, (UOp.unique(), *[UOp(Ops.DEVICE, arg=d) for d in device]), size)
-    return UOp(Ops.BUFFER, dtype, (UOp.unique(), UOp(Ops.DEVICE, arg=device)), size)
+  def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp.unique(), UOp(Ops.DEVICE, arg=device)), size)
   @property
   def device(self) -> str|tuple[str, ...]: return cast(str|tuple[str, ...], unwrap(self._device))
   @functools.cached_property
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
-    if self.op is Ops.MULTI: return tuple(cast(str, x.device) for x in self.src)
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
