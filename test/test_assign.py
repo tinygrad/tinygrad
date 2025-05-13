@@ -216,17 +216,25 @@ class TestAssign(unittest.TestCase):
       np.testing.assert_allclose(a.numpy(), 2+3)
       np.testing.assert_allclose(b.numpy(), 3+2+9)
 
-  def test_assign_kv_cache(self):
+  def test_assign_kv_cache(self, jit=True, kernelize=False, partial_assign=False):
     bsz, max_context = 2, 8
 
     class Attn:
-      @TinyJit
-      def __call__(self, xk:Tensor, start_pos:Variable):
+      def __init__(self): self.run = TinyJit(self._run) if jit else self._run
+
+      def _run(self, xk:Tensor, start_pos:Variable):
         seqlen = xk.shape[1]
         if not hasattr(self, "cache_k"):
           self.cache_k = Tensor.zeros(bsz, max_context, 1, 1).contiguous()
-        keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous() if start_pos > 0 else xk
-        self.cache_k.assign(keys.pad((None,(0,max_context-start_pos-seqlen),None,None)).contiguous()).realize()
+        if partial_assign:
+          (self.cache_k.kernelize()) if kernelize else (self.cache_k.realize())
+          cache_k = self.cache_k[:, start_pos:start_pos+seqlen, :, :].assign(xk)
+        else:
+          keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous() if start_pos > 0 else xk
+          cache_k = self.cache_k.assign(keys.pad((None,(0,max_context-start_pos-seqlen),None,None)).contiguous())
+        (cache_k.kernelize()) if kernelize else (cache_k.realize())
+
+      def __call__(self, xk:Tensor, start_pos:Variable): self.run(xk, start_pos)
 
     attn = Attn()
     xk = Tensor.ones(bsz, 3, 1, 1).contiguous()
@@ -240,47 +248,11 @@ class TestAssign(unittest.TestCase):
     out = attn.cache_k.flatten().numpy()
     np.testing.assert_allclose(out, [1.,1.,1.,1.,1.,1.,0.,0.,1.,1.,1.,1.,1.,1.,0.,0.])
 
-  # TODO: in addition, or just instead, repeat test_assign_kv_cache with kernelize instead of realize?
-  def test_kernelize_partial_assign(self):
-    results = []
-    for mode in ("kernelize", "realize"):
-      target = Tensor.zeros(2, 2, dtype=dtypes.int32).contiguous().realize()
-      src = Tensor.full((1, 2), 7, dtype=dtypes.int32)
-      if mode == "kernelize":
-        target[1:2, :].assign(src).kernelize()
-      elif mode == "realize":
-        target[1:2, :].assign(src).realize()
-      results.append(bytes(target.realize().lazydata.base.realized.as_buffer()))
+  def test_realize_partial_assign_kv_cache(self):
+    self.test_assign_kv_cache(jit=False, kernelize=False, partial_assign=True)
 
-    np.testing.assert_equal(results[0], results[1])
-
-  def test_kernelize_whole_assign_sliced(self):
-    results = []
-    for mode in ("kernelize", "realize"):
-      target = Tensor.zeros(2, 2, dtype=dtypes.int32).contiguous().realize()
-      src = Tensor.full((2, 2), 7, dtype=dtypes.int32)
-      if mode == "kernelize":
-        target[:, :].assign(src).kernelize()
-      elif mode == "realize":
-        target[:, :].assign(src).realize()
-      results.append(bytes(target.realize().lazydata.base.realized.as_buffer()))
-
-    np.testing.assert_equal(results[0], results[1])
-
-  def test_kernelize_whole_assign_not_sliced(self):
-    results = []
-    for mode in ("kernelize", "realize"):
-      target = Tensor.zeros(2, 2, dtype=dtypes.int32).contiguous().realize()
-      src = Tensor.full((2, 2), 7, dtype=dtypes.int32)
-      if mode == "kernelize":
-        #target[:, :].assign(src).kernelize()
-        target.assign(src).kernelize()
-      elif mode == "realize":
-        #target[:, :].assign(src).realize()
-        target.assign(src).realize()
-      results.append(bytes(target.realize().lazydata.base.realized.as_buffer()))
-
-    np.testing.assert_equal(results[0], results[1])
+  def test_kernelize_partial_assign_kv_cache(self):
+    self.test_assign_kv_cache(jit=False, kernelize=True, partial_assign=True)
 
   def test_assign_contiguous(self):
     b = Tensor.rand(4,4).realize()
