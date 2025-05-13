@@ -1404,8 +1404,8 @@ class Tensor(SimpleMathTrait):
     if step <= 0: raise RuntimeError(f'step must be >0 but got {step=}')
     if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
 
-    num_slices = (self.shape[dim] - size) // step + 1
-    slices = [self[(slice(None),)*dim + (slice(i*step, i*step+size),)] for i in range(num_slices)]
+    n_folds = (self.shape[dim] - size) // step + 1
+    slices = [self[(slice(None),)*dim + (slice(i*step, i*step+size),)] for i in range(n_folds)]
     return Tensor.stack(*slices, dim=dim)
 
   def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
