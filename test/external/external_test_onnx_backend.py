@@ -53,17 +53,17 @@ backend_test.exclude('test_dynamicquantizelinear_cpu')
 backend_test.exclude('test_dynamicquantizelinear_expanded_cpu')
 
 # BUG: ORT fails these with numerical error but we match ORT numerically
-# tested in TestMainOnnxOps.test_qlinearmatmul_2D_int8_float16
+# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_qlinearmatmul_2D_int8_float16
 backend_test.exclude('test_qlinearmatmul_2D_int8_float16_cpu')
-# tested in TestMainOnnxOps.test_qlinearmatmul_3D_int8_float16
+# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_qlinearmatmul_3D_int8_float16
 backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
-# tested in TestMainOnnxOps.test_qlinearmatmul_2D_int8_float32
+# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_qlinearmatmul_2D_int8_float32
 backend_test.exclude('test_qlinearmatmul_2D_int8_float32_cpu')
-# tested in TestMainOnnxOps.test_qlinearmatmul_3D_int8_float32
+# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_qlinearmatmul_3D_int8_float32
 backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
-# tested in TestMainOnnxOps.test_maxunpool_export_with_output_shape
+# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_maxunpool_export_with_output_shape
 backend_test.exclude('test_maxunpool_export_with_output_shape_cpu')
-# tested in TestMainOnnxOps.test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True
+# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True
 backend_test.exclude('test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True_cpu')
 
 # about different dtypes
