@@ -187,7 +187,10 @@ class TestImageSimplification(unittest.TestCase):
     idx0, idx1 = idx.src[0], idx.src[1]
     self.assertEqual(idx0.render(simplify=False), sidx0)
     self.assertEqual(idx1.render(simplify=False), sidx1)
-    if svalid is not None: self.assertEqual(load.src[0].src[2].render(simplify=False), svalid)
+    if svalid is not None:
+      self.assertEqual(load.src[0].src[2].render(simplify=False), svalid)
+    else:
+      self.assertEqual(len(load.src[0].src), 2, "svalid is None but load still has a valid")
 
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
@@ -207,7 +210,7 @@ class TestImageSimplification(unittest.TestCase):
 
     valid = (gidx0<1).ne(True) & (gidx1<1).ne(True)
     load = get_load_image_uop(shape, valid, (gidx0, gidx1-1))
-    self.check(load, None, "gidx0", "(gidx1+-1)")
+    self.check(load, "((gidx0<1)!=True)", "gidx0", "(gidx1+-1)")
 
   def test_idx_lt_bound(self):
     # (idx1 < image_bound) ? (..., idx1) : 0 can drop the valid
