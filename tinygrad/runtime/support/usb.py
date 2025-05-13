@@ -167,17 +167,17 @@ class ASM24Controller:
 
   def _is_pci_cacheable(self, addr:int) -> bool: return any(x <= addr <= x + sz for x, sz in self._pci_cacheable)
   def pcie_prep_request(self, fmt_type:int, address:int, value:int|None=None, size:int=4) -> list[WriteOp]:
-    if fmt_type == 0x40 and size == 4 and self._is_pci_cacheable(address) and self._pci_cache.get(address) == value: return []
+    if fmt_type == 0x60 and size == 4 and self._is_pci_cacheable(address) and self._pci_cache.get(address) == value: return []
 
     assert fmt_type >> 8 == 0 and size > 0 and size <= 4, f"Invalid fmt_type {fmt_type} or size {size}"
     if DEBUG >= 3: print("pcie_request", hex(fmt_type), hex(address), value, size)
 
     masked_address, offset = address & 0xFFFFFFFC, address & 0x3
     assert size + offset <= 4 and (value is None or value >> (8 * size) == 0)
-    self._pci_cache[masked_address] = value if size == 4 and fmt_type == 0x40 else None
+    self._pci_cache[masked_address] = value if size == 4 and fmt_type == 0x60 else None
 
     return ([WriteOp(0xB220, struct.pack('>I', value << (8 * offset)), ignore_cache=False)] if value is not None else []) + \
-      [WriteOp(0xB218, struct.pack('>I', masked_address), ignore_cache=False),
+      [WriteOp(0xB218, struct.pack('>I', masked_address), ignore_cache=False), WriteOp(0xB21c, struct.pack('>I', address>>32), ignore_cache=False),
        WriteOp(0xB217, bytes([((1 << size) - 1) << offset]), ignore_cache=False), WriteOp(0xB210, bytes([fmt_type]), ignore_cache=False),
        WriteOp(0xB254, b"\x0f", ignore_cache=True), WriteOp(0xB296, b"\x04", ignore_cache=True)]
 
@@ -206,7 +206,7 @@ class ASM24Controller:
 
     # Handle completion errors or inconsistencies
     if status or ((fmt_type & 0xbe == 0x04) and (((value is None) and (not (b284 & 0x01))) or ((value is not None) and (b284 & 0x01)))):
-      status_map = {0b001: "Unsupported Request: invalid address/function (target might not be reachable)",
+      status_map = {0b001: f"Unsupported Request: invalid address/function (target might not be reachable): {address:#x}",
                     0b100: "Completer Abort: abort due to internal error", 0b010: "Configuration Request Retry Status: configuration space busy"}
       raise RuntimeError(f"TLP status: {status_map.get(status, 'Reserved (0b{:03b})'.format(status))}")
 
@@ -219,10 +219,10 @@ class ASM24Controller:
     address = (bus << 24) | (dev << 19) | (fn << 16) | (byte_addr & 0xfff)
     return self.pcie_request(fmt_type, address, value, size)
 
-  def pcie_mem_req(self, address, value=None, size=4): return self.pcie_request(0x40 if value is not None else 0x0, address, value, size)
+  def pcie_mem_req(self, address, value=None, size=4): return self.pcie_request(0x60 if value is not None else 0x20, address, value, size)
 
   def pcie_mem_write(self, address, values, size):
-    ops = [self.pcie_prep_request(0x40, address + i * size, value, size) for i, value in enumerate(values)]
+    ops = [self.pcie_prep_request(0x60, address + i * size, value, size) for i, value in enumerate(values)]
 
     # Send in batches of 4
     for i in range(0, len(ops), 4): self.exec_ops(list(itertools.chain.from_iterable(ops[i:i+4])))
