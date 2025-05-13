@@ -178,15 +178,16 @@ class TestMainOnnxOps(TestOnnxOps):
     else:
       a = np.array([[[208, 236, 0, 238], [3, 214, 255, 29]], [[208, 236, 0, 238], [3, 214, 255, 29]]])
       b = np.array([[[152, 51, 244], [60, 26, 255], [0, 127, 246], [127, 254, 247]], [[152, 51, 244], [60, 26, 255], [0, 127, 246], [127, 254, 247]]])
+    a_zero_point = np.array([113])
+    b_zero_point = np.array([114])
+    y_zero_point = np.array([118])
     if quant_type == np.int8:
-      a = a - 127
-      b = b - 127
-    a = a.astype(quant_type)
-    b = b.astype(quant_type)
+      a, b, a_zero_point, b_zero_point, y_zero_point = (x - 127 for x in (a, b, a_zero_point, b_zero_point, y_zero_point))
+    a, b, a_zero_point, b_zero_point, y_zero_point = (x.astype(quant_type) for x in (a, b, a_zero_point, b_zero_point, y_zero_point))
     inputs = {
-      "a": a, "a_scale": np.array([0.0066], dtype=dtype), "a_zero_point": np.array([113-127] if quant_type == np.int8 else [113], dtype=quant_type),
-      "b": b, "b_scale": np.array([0.00705], dtype=dtype), "b_zero_point": np.array([114-127] if quant_type == np.int8 else [114], dtype=quant_type),
-      "y_scale": np.array([0.0107], dtype=dtype), "y_zero_point": np.array([118 - 127] if quant_type == np.int8 else [118], dtype=quant_type)
+      "a": a, "a_scale": np.array([0.0066], dtype=dtype), "a_zero_point": a_zero_point,
+      "b": b, "b_scale": np.array([0.00705], dtype=dtype), "b_zero_point": b_zero_point,
+      "y_scale": np.array([0.0107], dtype=dtype), "y_zero_point": y_zero_point
     }
     self.helper_test_single_op("QLinearMatMul", inputs, {}, ["y"],)
   def test_qlinearmatmul_2D_int8_float16(self): self._run_qlinearmatmul_test(np.int8, np.float16, 2)

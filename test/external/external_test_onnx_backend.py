@@ -42,9 +42,8 @@ backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
 # BUG: buggy onnx tests
 backend_test.exclude('test_adam_multiple_cpu')
-backend_test.exclude('test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True_cpu')
 
-# BUG: ORT fails these tests
+# BUG: ORT fails these with runtime error
 backend_test.exclude('test_PReLU_1d_multiparam_cpu')
 backend_test.exclude('test_PReLU_2d_multiparam_cpu')
 backend_test.exclude('test_PReLU_3d_multiparam_cpu')
@@ -53,13 +52,14 @@ backend_test.exclude('test_PReLU_3d_multiparam_cpu')
 backend_test.exclude('test_dynamicquantizelinear_cpu')
 backend_test.exclude('test_dynamicquantizelinear_expanded_cpu')
 
-# tested in TestMainOnnxOps.test_qlinearmatmul_2D_int8_float16, ORT fails
+# BUG: ORT fails these with numerical error but we match ORT numerically
+# tested in TestMainOnnxOps.test_qlinearmatmul_2D_int8_float16
 backend_test.exclude('test_qlinearmatmul_2D_int8_float16_cpu')
-# tested in TestMainOnnxOps.test_qlinearmatmul_3D_int8_float16, ORT fails
+# tested in TestMainOnnxOps.test_qlinearmatmul_3D_int8_float16
 backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
-# tested in TestMainOnnxOps.test_qlinearmatmul_2D_int8_float32, ORT fails
+# tested in TestMainOnnxOps.test_qlinearmatmul_2D_int8_float32
 backend_test.exclude('test_qlinearmatmul_2D_int8_float32_cpu')
-# tested in TestMainOnnxOps.test_qlinearmatmul_3D_int8_float32, ORT fails
+# tested in TestMainOnnxOps.test_qlinearmatmul_3D_int8_float32
 backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
 # tested in TestMainOnnxOps.test_maxunpool_export_with_output_shape
 backend_test.exclude('test_maxunpool_export_with_output_shape_cpu')
