@@ -391,6 +391,7 @@ decomps = [
   aten.hardsigmoid_backward,
   aten.leaky_relu_backward,
   aten.nll_loss2d_forward,
+  aten.unfold_backward,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
