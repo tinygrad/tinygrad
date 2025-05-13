@@ -439,6 +439,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def multi(self, *more:UOp, axis:int|None, real:tuple[bool,...]|None=None):
     parents = (self,)+more
     assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
+    assert axis is not None
     return UOp(Ops.MULTI, self.dtype, parents, (axis, real if real is not None else (True,)*len(self.device)))
 
   @property
@@ -451,6 +452,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.MULTI: return self.arg[0]
     # NOTE: they all have to share an axis, we always choose [-1]
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
+    if len(self.src) == 0: return None
     src_axis = self.src[0].axis
     if self.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
     if self.op is Ops.RESHAPE:
@@ -471,6 +473,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def real_lbs(self): return [lb for lb,r in zip(self.src, self.real) if r]
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
+    assert axis is not None
     lb = self.copy_to_device(devices)
     dnum = UOp.variable("_device_num", 0, len(devices)-1)
     if axis is not None:

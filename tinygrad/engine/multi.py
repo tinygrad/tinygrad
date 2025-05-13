@@ -44,23 +44,28 @@ from tinygrad.ops import PatternMatcher, UPat, GroupOp, graph_rewrite_map, track
 
 def alu_multi(root:UOp):
   msrcs = root.src
-  assert all(x.op is Ops.MULTI for x in msrcs), f"all buffers must be MultiLazyBuffer {[x.op for x in msrcs]}"
+  #assert all(x.op is Ops.MULTI for x in msrcs), f"all buffers must be MultiLazyBuffer {[x.op for x in msrcs]}"
   assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"
   axis = root.axis
+  assert axis is not None
 
   srcs = []
   for mlb in msrcs:
     if mlb.axis == axis:
+      assert mlb.op is Ops.MULTI
       srcs.append(mlb.src[0])
     elif mlb.axis is None:
+      assert mlb.op is not Ops.MULTI
       #if mlb.axis is None: tsrc = mlb.src[0]
       #else: tsrc = mlb.copy_to_device(root.device)
       # TODO: share code with shard
       dcount = len(root.device)
       dnum = UOp.variable("_device_num", 0, dcount-1)
       sz = root.shape[axis] // dcount
-      srcs.append(mlb.src[0].shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(root.shape))))
+      srcs.append(mlb.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(root.shape))))
     else:
+      # axis mismatch
+      assert mlb.op is Ops.MULTI
       # TODO: logic copied from COPY
       bsz, dcount = mlb.shape[mlb.axis]//len(mlb.device), len(mlb.device)
       dnum = UOp.variable("_device_num", 0, len(mlb.device)-1)
@@ -91,8 +96,7 @@ def reduce_multi(root:UOp, multi:UOp):
   if multi.axis is not None and multi.axis in axis:
     # all-reduce on sharded axes
     red = multi.src[0].r(op, axis)
-    ret = red.allreduce(op, red.device)
-    return ret.multi(axis=None)
+    return red.allreduce(op, red.device)
     """
     reduced_parts = [(x if r else x.const_like(0)).r(op, axis) for x,r in zip(multi.src, multi.real)]
     # if all partitions are real, do all_reduce

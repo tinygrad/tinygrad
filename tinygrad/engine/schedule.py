@@ -65,6 +65,9 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
         if isinstance(ubufs[0], MultiBuffer) and isinstance(ubufs[1], MultiBuffer) and ast.arg is None:
           # COPY ALL -> ALL (not ALLREDUCE)
           for b1,b2 in zip(ubufs[0].bufs, ubufs[1].bufs): schedule.append(ScheduleItem(ast, (b1, b2), k.arg.metadata))
+        elif isinstance(ubufs[0], Buffer) and isinstance(ubufs[1], MultiBuffer) and ast.arg is None:
+          # COPY ANY -> ONE (not REDUCE)
+          schedule.append(ScheduleItem(ast, (ubufs[0], ubufs[1].bufs[0]), k.arg.metadata))
         else:
           if isinstance(ubufs[1], MultiBuffer):
             # TODO: support ALLREDUCE here
