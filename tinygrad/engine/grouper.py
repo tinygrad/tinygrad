@@ -308,7 +308,7 @@ view_left = merge_views+PatternMatcher([
 def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub View Left")
 
 def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
-  if (st:=unwrap(view.st)).contiguous: return None
+  if (st:=unwrap(view.st)).contiguous and st.size == r.size: return None
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
   prshape = prod(rshape:=tmp.shape[-len(r.axis_arg):])
