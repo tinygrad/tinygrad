@@ -693,6 +693,12 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(a+b+c, var_vals) == 9
     assert sym_infer(a*b, var_vals) == 6
     assert sym_infer(a*b+c, var_vals) == 10
+  def test_sym_infer_cdiv_cmod(self):
+    a = Variable("a", -1000, 1)
+    b = Variable("b", -1000, 1)
+    var_vals = {a: 1, b: -1000}
+    assert sym_infer(a%b, var_vals) == 1
+    assert sym_infer(a//b, var_vals) == 0
 
 """
 @unittest.skip("not supported on uops yet")
