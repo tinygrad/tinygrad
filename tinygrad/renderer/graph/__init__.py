@@ -29,7 +29,7 @@ class GraphRenderer(Renderer):
     # TODO: assert no realizes happen here in function call, only kernelize is allowed
     out_dict = get_state_dict(fxn(*args, **kwargs))
     assert len(out_dict) > 0, "The function argument must return at least one Tensor so that the kernel graph can be accessed."
-    assert all(k=="" or int(k) for k in out_dict.keys()), "All returned Tensor(s) must be the return value, or elements of a returned list/tuple."
+    assert all(k=="" or k.isdigit() for k in out_dict.keys()), "All returned Tensor(s) must be the return value or elements of a returned list/tuple."
 
     # linearize the kernel graph
     schedule, _, becomes_map = create_schedule_with_vars(UOp.sink(*(out_uops:=[t.kernelize().lazydata for _, t in sorted(out_dict.items())])))

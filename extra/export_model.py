@@ -142,8 +142,7 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
   elif target == "wasm":
     return export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names, weight_names, model_name, symbolic_vars, wasm=True)
   elif target == "webgpu":
-    from tinygrad.renderer.graph.webgpu import WebGPUJSRenderer
-    prg = WebGPUJSRenderer(getattr(model, "forward", model), inputs).render_graph()
+    prg, _ = TinyJit(getattr(model, "forward", model)).export_webgpu(*inputs)
   else:
     prg = json.dumps({
       "backend": Device.DEFAULT,
