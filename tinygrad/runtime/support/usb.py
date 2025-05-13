@@ -167,19 +167,19 @@ class ASM24Controller:
 
   def _is_pci_cacheable(self, addr:int) -> bool: return any(x <= addr <= x + sz for x, sz in self._pci_cacheable)
   def pcie_prep_request(self, fmt_type:int, address:int, value:int|None=None, size:int=4) -> list[WriteOp]:
-    # if fmt_type == 0x40 and size == 4 and self._is_pci_cacheable(address) and self._pci_cache.get(address) == value: return []
+    if fmt_type == 0x60 and size == 4 and self._is_pci_cacheable(address) and self._pci_cache.get(address) == value: return []
 
     assert fmt_type >> 8 == 0 and size > 0 and size <= 4, f"Invalid fmt_type {fmt_type} or size {size}"
     if DEBUG >= 3: print("pcie_request", hex(fmt_type), hex(address), value, size)
 
     masked_address, offset = address & 0xFFFFFFFC, address & 0x3
     assert size + offset <= 4 and (value is None or value >> (8 * size) == 0)
-    # self._pci_cache[masked_address] = value if size == 4 and fmt_type == 0x40 else None
+    self._pci_cache[masked_address] = value if size == 4 and fmt_type == 0x60 else None
 
     return ([WriteOp(0xB220, struct.pack('>I', value << (8 * offset)), ignore_cache=False)] if value is not None else []) + \
       [WriteOp(0xB218, struct.pack('>I', masked_address), ignore_cache=False), WriteOp(0xB21c, struct.pack('>I', address>>32), ignore_cache=False),
-      WriteOp(0xB217, bytes([((1 << size) - 1) << offset]), ignore_cache=False), WriteOp(0xB210, bytes([fmt_type]), ignore_cache=False),
-      WriteOp(0xB254, b"\xff\xff\xff\xff", ignore_cache=True), WriteOp(0xB296, b"\x04", ignore_cache=True)]
+       WriteOp(0xB217, bytes([((1 << size) - 1) << offset]), ignore_cache=False), WriteOp(0xB210, bytes([fmt_type]), ignore_cache=False),
+       WriteOp(0xB254, b"\xff\xff\xff\xff", ignore_cache=True), WriteOp(0xB296, b"\x04", ignore_cache=True)]
 
   def pcie_request(self, fmt_type, address, value=None, size=4, cnt=10):
     self.exec_ops(self.pcie_prep_request(fmt_type, address, value, size))
