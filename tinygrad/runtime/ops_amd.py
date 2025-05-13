@@ -813,7 +813,7 @@ class USBIface(PCIIface):
   def __init__(self, dev, dev_id):
     self.dev = dev
     self.usb = ASM24Controller()
-    self.bars = setup_pci_bars(self.usb, gpu_bus=4, mem_base=0x40000000, pref_mem_base=0x10000000)
+    self.bars = setup_pci_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
 
     self._setup_adev(f"usb:{dev_id}", USBMMIOInterface(self.usb, *self.bars[0], fmt='B'), USBMMIOInterface(self.usb, *self.bars[2], fmt='Q'),
       USBMMIOInterface(self.usb, *self.bars[5], fmt='I'))
