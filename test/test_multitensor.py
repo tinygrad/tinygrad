@@ -40,8 +40,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_to(self):
     X = Tensor.ones(256).contiguous().realize()
     X.to_(devices_2)
-    for lb in X.lazydata.src:
-      assert lb.shape == (256,)
+    assert X.shape == (256,)
     (X + X).realize()
 
   def test_gradient(self):
@@ -618,7 +617,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_mlb_assign_change_axis(self):
     t_none = Tensor.zeros((16, 16)).shard(devices_2).contiguous().realize()
     t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(RuntimeError):
       # don't allow assigns that change axes
       t_none.assign(t_zero)
       t_none.schedule()
