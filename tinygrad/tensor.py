@@ -52,7 +52,7 @@ _METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("
 
 def _metaop(op, shape:tuple[sint,...], dtype:DType, device:str|tuple[str, ...], arg=None) -> UOp:
   if isinstance(device, str): return UOp.metaop(op, shape, dtype, device, arg)
-  return UOp.multi(*[UOp.metaop(op, shape, dtype, d, arg) for d in device], axis=None)
+  return UOp.multi(UOp.metaop(op, shape, dtype, device, arg), axis=None)
 
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))

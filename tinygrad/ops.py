@@ -320,7 +320,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
-    assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
+    assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} SHAPES {[x.shape for x in src_sts]}"
     match self.op:
       case Ops.MULTI: shape = tuple(self.src[0].shape[a]*len(self.device) if a == self.axis else s for a,s in enumerate(self.src[0].shape))
       case Ops.BITCAST:
@@ -438,13 +438,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def multi(self, *more:UOp, axis:int|None, real:tuple[bool,...]|None=None):
     parents = (self,)+more
-    assert all_same([x.dtype for x in parents]), "multi parents must have the same dtype"
-    return UOp(Ops.MULTI, self.dtype, parents, (axis, real if real is not None else (True,)*len(parents)))
+    assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
+    return UOp(Ops.MULTI, self.dtype, parents, (axis, real if real is not None else (True,)*len(self.device)))
 
   @property
   def bounds(self):
     if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
-    return tuple(itertools.pairwise(itertools.accumulate([lb.shape[self.axis] for lb in self.src], initial=0)))
+    return tuple(itertools.pairwise(itertools.accumulate([self.src[0].shape[self.axis] for _ in self.device], initial=0)))
 
   @functools.cached_property
   def axis(self) -> Optional[int]:

@@ -167,7 +167,7 @@ capturing: list = []  # put classes with an add method in here
 def run_schedule(schedule:list[ScheduleItem], var_vals:Optional[dict[Variable, int]]=None, do_update_stats=True):
   for si, ei in lower_schedule(schedule):
     if len(capturing) and CAPTURING: capturing[0].add(ei)
-    lvar_vals = var_vals|si.fixedvars
+    lvar_vals = var_vals|si.fixedvars if var_vals is not None else si.fixedvars
     if VALIDATE_WITH_CPU and si.ast.op is Ops.SINK:
       # copy in allocated buffers from the GPU
       nb: tuple[Buffer, ...] = tuple(Buffer("CPU", b.size, b.dtype) for b in si.bufs)
