@@ -565,7 +565,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.ones_like": lambda self, dtype=None, device=None, **kwargs:
     self.ones_like(**{k: v for k, v in {"dtype": _from_torch_dtype(dtype) if dtype else None,
                                         "device": _from_torch_device(device) if device else None}.items() if v is not None}),
-  "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64))
+  "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64)),
+  "aten.unfold": Tensor.unfold,
 }}
 
 def wrap_fxn(k,f):
