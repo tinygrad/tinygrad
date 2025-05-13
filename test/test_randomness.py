@@ -201,6 +201,13 @@ class TestRandomness(unittest.TestCase):
     assert rand.dtype == empty.dtype
     assert rand.device == empty.device
 
+  def test_randn_like(self):
+    empty = Tensor.empty((80, 44))
+    rand = Tensor.randn_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
   def test_rand_like_zero_shape(self):
     empty = Tensor.empty(0, 20)
     rand = Tensor.rand_like(empty)
@@ -215,7 +222,6 @@ class TestRandomness(unittest.TestCase):
     assert rand.dtype == empty.dtype
     assert rand.device == empty.device
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
   def test_rand_like_dtype(self):
     empty = Tensor.empty((80, 44), dtype=dtypes.float16)
     rand = Tensor.rand_like(empty)
@@ -229,7 +235,21 @@ class TestRandomness(unittest.TestCase):
     assert rand.dtype == dtypes.float16
     assert rand.device == empty.device
 
+  def test_randn_like_dtype(self):
+    empty = Tensor.empty((80, 44), dtype=dtypes.float16)
+    rand = Tensor.randn_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
+    empty = Tensor.empty((80, 44))
+    rand = Tensor.randn_like(empty, dtype=dtypes.float16)
+    assert rand.shape == empty.shape
+    assert rand.dtype == dtypes.float16
+    assert rand.device == empty.device
+
   def test_randn(self):
+    self.assertEqual(Tensor.randn(3,3,dtype=dtypes.half).dtype, dtypes.half)
     self.assertTrue(normal_test(Tensor.randn))
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
 
