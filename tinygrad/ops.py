@@ -550,8 +550,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
     if (cret:=buffers.get(self)) is not None: return cret
     from tinygrad.device import Buffer, MultiBuffer
-    ret = (MultiBuffer if isinstance(self.device, tuple) else Buffer)(self.device, self.size,
-                                                                      self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base).ref(1)
+    rdtype = self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base
+    if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.size, rdtype).ref(1)
+    else: ret = Buffer(self.device, self.size, rdtype).ref(1)
     buffers[self] = ret
     return ret
   @property
