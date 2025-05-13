@@ -281,7 +281,7 @@ class Tensor(SimpleMathTrait):
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      self.contiguous().realize().lazydata.base.buffer.ensure_allocated().copyin(x._data())
+      cast(Buffer, self.contiguous().realize().lazydata.base.buffer).ensure_allocated().copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     if self.lazydata is x.lazydata: return self  # a self assign is a NOOP
@@ -299,7 +299,7 @@ class Tensor(SimpleMathTrait):
     """
     return Tensor(self.lazydata.detach(), device=self.device, requires_grad=False)
 
-  def _buffer(self) -> Buffer: return self.cast(self.dtype.base).contiguous().to("CPU").realize().lazydata.base.buffer
+  def _buffer(self) -> Buffer: return cast(Buffer, self.cast(self.dtype.base).contiguous().to("CPU").realize().lazydata.base.buffer)
   def _data(self) -> memoryview: return self._buffer().as_buffer()
 
   def data(self) -> memoryview:
@@ -447,7 +447,8 @@ class Tensor(SimpleMathTrait):
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
     """
     r = Tensor.empty(*shape, **kwargs)
-    r.lazydata.buffer.allocate(external_ptr=ptr)
+    assert isinstance(r.device, str)
+    cast(Buffer, r.lazydata.buffer).allocate(external_ptr=ptr)
     return r
 
   @staticmethod

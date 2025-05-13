@@ -92,6 +92,7 @@ class BufferSpec:
 class MultiBuffer:
   def __init__(self, device:tuple[str, ...], size:int, dtype:DType):
     self.bufs = [Buffer(d, size, dtype) for d in device]
+    self.dtype = dtype
   def ref(self, cnt):
     for b in self.bufs: b.ref(cnt)
     return self

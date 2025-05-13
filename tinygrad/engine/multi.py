@@ -1,5 +1,5 @@
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
+from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv
 from tinygrad.ops import Ops, UOp, sint
 
 def all_reduce(bop: Ops, lbs: list[UOp]) -> list[UOp]:
@@ -44,7 +44,6 @@ from tinygrad.ops import PatternMatcher, UPat, GroupOp, graph_rewrite_map, track
 
 def alu_multi(root:UOp):
   msrcs = root.src
-  #assert all(x.op is Ops.MULTI for x in msrcs), f"all buffers must be MultiLazyBuffer {[x.op for x in msrcs]}"
   assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"
   axis = root.axis
   assert axis is not None
@@ -52,12 +51,12 @@ def alu_multi(root:UOp):
   srcs = []
   for mlb in msrcs:
     if mlb.axis == axis:
+      # same axis, just copy through
       assert mlb.op is Ops.MULTI
       srcs.append(mlb.src[0])
     elif mlb.axis is None:
+      # no axis, shard it
       assert mlb.op is not Ops.MULTI
-      #if mlb.axis is None: tsrc = mlb.src[0]
-      #else: tsrc = mlb.copy_to_device(root.device)
       # TODO: share code with shard
       dcount = len(root.device)
       dnum = UOp.variable("_device_num", 0, dcount-1)
@@ -77,33 +76,12 @@ def alu_multi(root:UOp):
 
   return UOp.multi(srcs[0].alu(root.op, *srcs[1:]), axis=axis)
 
-  bounds = dedup([x.bounds for x in root.src if x.axis == axis])[-1] if axis is not None else None
-  srcs:list[list[UOp]] = []
-  not_all_real = not all(all(mlb.real) for mlb in msrcs)
-  new_real = tuple(all(transposed) for transposed in zip(*[mlb.real for mlb in msrcs])) if not_all_real else msrcs[0].real
-  for mlb in msrcs:
-    if (mlb.axis == axis and (mlb.axis is None or mlb.bounds == bounds)) or not_all_real: srcs.append(list(mlb.src))
-    else:
-      assert axis is not None and bounds is not None
-      if mlb.axis is None: srcs.append(to_sharded(list(mlb.src), axis, bounds))
-      else: srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.src], axis, bounds))
-  new_lbs = [lsrcs[0].alu(root.op, *lsrcs[1:]) for lsrcs in zip(*srcs)]
-  new_lbs = [x if r else x.const_like(0) for r,x in zip(new_real, new_lbs)] # TODO: is this needed?
-  return UOp.multi(*new_lbs, axis=axis, real=new_real)
-
 def reduce_multi(root:UOp, multi:UOp):
   op, axis = root.arg
   if multi.axis is not None and multi.axis in axis:
     # all-reduce on sharded axes
     red = multi.src[0].r(op, axis)
     return red.allreduce(op, red.device)
-    """
-    reduced_parts = [(x if r else x.const_like(0)).r(op, axis) for x,r in zip(multi.src, multi.real)]
-    # if all partitions are real, do all_reduce
-    if all(multi.real): return UOp.multi(*all_reduce(op, reduced_parts), axis=root.axis)
-    # only one partition is real, keep it
-    return UOp.multi(*reduced_parts, axis=root.axis, real=multi.real)
-    """
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
   return multi.src[0].r(op, axis).multi(axis=multi.axis)
 
