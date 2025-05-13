@@ -142,10 +142,8 @@ def shrink_multi(root:UOp, multi:UOp):
     assert all(root.arg[i] == (0, s) or i == multi.axis for i,s in enumerate(multi.shape)), \
       "cannot shrink sharded and non-sharded axis at the same time"
     # NOTE: shrink on the shard axis is only allowed when result is a single partition, denoted by the new real
-    idx = multi.bounds.index(root.arg[multi.axis])
-    # zero out other lbs to not create lb reference
-    return UOp.multi(*[lb if i==idx else lb.const_like(0) for i,lb in enumerate(multi.src)],
-                      axis=multi.axis, real=tuple(i==idx for i in range(len(multi.src))))
+    # we just copy it to all the devices, no real. this will be optimized out lat
+    return multi.src[0].copy_to_device(multi.device, arg=multi.bounds.index(root.arg[multi.axis])).multi(axis=None)
   return UOp.multi(*[x.shrink(tuple((0, x.shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.arg))) for x in multi.src],
                    axis=multi.axis, real=multi.real)
 
@@ -186,6 +184,8 @@ multi_pm = PatternMatcher([
   (UPat(Ops.FLIP, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), flip_multi),
   (UPat(Ops.ASSIGN, src=(UPat(Ops.MULTI, name="dest"), UPat(Ops.MULTI, name="src"))), assign_multi),
   (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))), copy_multi),
+  (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device")), name="red"),
+    lambda multi,device,red: multi.src[0].allreduce(red.arg, device).multi(axis=multi.axis)),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])
