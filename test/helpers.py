@@ -68,4 +68,4 @@ def not_support_multi_device():
   return CI and REAL_DEV in ("GPU", "CUDA")
 
 # NOTE: This will open REMOTE if it's the default device
-REAL_DEV = (Device.DEFAULT if Device.DEFAULT != "REMOTE" else Device['REMOTE'].properties['remotedev'])
+REAL_DEV = (Device.DEFAULT if Device.DEFAULT != "REMOTE" else Device['REMOTE'].properties.real_device)
