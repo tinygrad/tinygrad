@@ -1400,6 +1400,8 @@ class Tensor(SimpleMathTrait):
     print("\\n".join([repr(x.numpy()) for x in unfolded]))
     ```
     """
+    tmp = self.clone()
+    ic(self.view, self.lazydata.st, self.lazydata.st.views[0], id(self.lazydata.st.views[0]))
     dim = self._resolve_dim(dim)
     if size < 0: raise RuntimeError(f'size must be >= 0 but got {size=}')
     if step <= 0: raise RuntimeError(f'step must be >0 but got {step=}')
@@ -1411,7 +1413,16 @@ class Tensor(SimpleMathTrait):
     idx = Tensor.arange(n_windows).unsqueeze(1) * step + Tensor.arange(size)
 
     idx = idx.reshape([1]*dim + [n_windows * size] + [1]*(self.ndim-dim-1)).expand(self.shape[:dim] + (n_windows * size,) + self.shape[dim+1:])
-    return self.gather(dim, idx).reshape(self.shape[:dim] + (n_windows, size) + self.shape[dim+1:])
+    ret = self.gather(dim, idx).reshape(self.shape[:dim] + (n_windows, size) + self.shape[dim+1:])
+    ic(ret.view, ret.lazydata.st, ret.lazydata.st.views[0], id(ret.lazydata.st.views[0]))
+
+    self = tmp
+    dim_size = self.shape[dim]
+    num_slices = (dim_size - size) // step + 1
+    slices = [self[(slice(None),)*dim + (slice(i*step, i*step+size),)] for i in range(num_slices)]
+    ret = Tensor.stack(*slices, dim=dim)
+    ic(ret.view, ret.lazydata.st, ret.lazydata.st.views[0], id(ret.lazydata.st.views[0]))
+    return ret
 
   def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
     """
