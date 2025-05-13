@@ -1411,6 +1411,30 @@ class Tensor(SimpleMathTrait):
     output_shape = _broadcast_shape(*(t.shape for t in tensors))
     return tuple(t._broadcast_to(output_shape) for t in tensors)
 
+  def unfold(self, dim:int, size:int, step:int):
+    """
+    Split the tensor into `(self.shape[dim] - size) / step + 1` number of blocks along dimension `dim`.
+    Each block is of size `size` and occurs every `step` elements.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    unfolded = Tensor.arange(8).unfold(0,2,2)
+    print("\\n".join([repr(x.numpy()) for x in unfolded]))
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    unfolded = Tensor.arange(27).reshape(3,3,3).unfold(-1,2,3)
+    print("\\n".join([repr(x.numpy()) for x in unfolded]))
+    ```
+    """
+    dim = self._resolve_dim(dim)
+    if size < 0: raise RuntimeError(f'size must be >= 0 but got {size=}')
+    if step <= 0: raise RuntimeError(f'step must be >0 but got {step=}')
+    if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
+
+    dim_size = self.shape[dim]
+    num_slices = (dim_size - size) // step + 1
+    slices = [self[(slice(None),)*dim + (slice(i*step, i*step+size),)] for i in range(num_slices)]
+    return Tensor.stack(*slices, dim=dim)
+
   def squeeze(self, dim:int|None=None) -> Tensor:
     """
     Returns a tensor with specified dimensions of input of size 1 removed.
