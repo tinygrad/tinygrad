@@ -1386,9 +1386,10 @@ class Tensor(SimpleMathTrait):
 
   def unfold(self, dim:int, size:int, step:int):
     """
-    Unfolds the tensor along dimension `dim` into overlapping blocks.
-    Each block has length `size` and starts every `step` elements.
-    Returns a tensor with an extra dimension of size `size`.
+    Unfolds the tensor along dimension `dim` into overlapping windows.
+
+    Each window has length `size` and begins every `step` elements of `self`.
+    Returns the input tensor with dimension `dim` replaced by dims `(n_windows, size)` where `n_windows = (self.shape[dim] - size) // step + 1`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     unfolded = Tensor.arange(8).unfold(0,2,2)
@@ -1404,9 +1405,13 @@ class Tensor(SimpleMathTrait):
     if step <= 0: raise RuntimeError(f'step must be >0 but got {step=}')
     if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
 
-    n_folds = (self.shape[dim] - size) // step + 1
-    slices = [self[(slice(None),)*dim + (slice(i*step, i*step+size),)] for i in range(n_folds)]
-    return Tensor.stack(*slices, dim=dim)
+    # Build 2D sliding window index where each row contains all indices for one window
+    # Ex with size=3, step=2: [[0,1,2], [2,3,4], [4,5,6], ...]
+    n_windows = (self.shape[dim] - size) // step + 1
+    idx = Tensor.arange(n_windows).unsqueeze(1) * step + Tensor.arange(size)
+
+    idx = idx.reshape([1]*dim + [n_windows * size] + [1]*(self.ndim-dim-1)).expand(self.shape[:dim] + (n_windows * size,) + self.shape[dim+1:])
+    return self.gather(dim, idx).reshape(self.shape[:dim] + (n_windows, size) + self.shape[dim+1:])
 
   def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
     """

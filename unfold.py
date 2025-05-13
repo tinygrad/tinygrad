@@ -161,21 +161,45 @@ def unfold3(t, dim:int, size:int, step:int):
     # # gather + final reshape
     # return t.gather(dim, idx).reshape(t.shape[:dim] + (n_folds, size) + t.shape[dim+1:])
 
-    def _replace(lst:list, idx:int, new_val:int|list): return lst[:idx] + [new_val] if isinstance(new_val, int) else new_val + lst[idx+1:]
+
+
+
+
+    # def _shp(lst:list, idx:int, new_val:int|list): return lst[:idx] + [new_val] if isinstance(new_val, int) else new_val + lst[idx+1:]
+
+    # n_folds = (t.shape[dim] - size) // step + 1
+    # shp1 = _shp([1]*t.ndim, dim, n_folds*size)
+    # shp2 = _shp(t.shape, dim, n_folds*size)
+    # shp3 = _shp(t.shape, dim, [n_folds, size])
+
+    # # Create sliding window indices: [[0,1], [step,step+1], [2*step,2*step+1], ...]
+    # idx = Tensor.arange(n_folds).unsqueeze(1) * step + Tensor.arange(size)
+
+    # # Reshape to add singleton dims for broadcasting with input tensor
+    # # Shape: [1, 1, ..., n_folds*size, ..., 1, 1]
+    # idx = idx.reshape([1]*dim + [n_folds * size] + [1]*(t.ndim-dim-1))
+    # idx = idx.expand(t.shape[:dim] + (n_folds * size,) + t.shape[dim+1:])
+
+    # # Gather windows along dim and separate folds from each block
+    # return t.gather(dim, idx).reshape(t.shape[:dim] + (n_folds, size) + t.shape[dim+1:])
+
+
+    # n_folds = (t.shape[dim] - size) // step + 1
+    # def _shp(lst:list, idx:int, new_val:int|list): return lst[:idx] + [new_val] if isinstance(new_val, int) else new_val + lst[idx+1:]
+    # shp1, shp2, shp3 = _shp([1]*t.ndim, dim, n_folds*size), _shp(t.shape, dim, n_folds*size), _shp(t.shape, dim, [n_folds, size])
+
+    # # Create sliding window indices (e.g. [[0,1], [step,step+1], [2*step,2*step+1], ...]) and reshape
+    # idx = Tensor.arange(n_folds).unsqueeze(1) * step + Tensor.arange(size)
+    # idx = idx.reshape(shp1).expand(shp2)
+    # # Gather windows along dim and separate folds from each block
+    # return t.gather(dim, idx).reshape(shp3)
+
+
 
     n_folds = (t.shape[dim] - size) // step + 1
-    shp1 = _replace([1]*t.ndim, dim, n_folds*size)
-    shp2 = _replace(t.shape, dim, n_folds*size)
-    shp3 = _replace(t.shape, dim, [n_folds, size])
-
     # Create sliding window indices: [[0,1], [step,step+1], [2*step,2*step+1], ...]
     idx = Tensor.arange(n_folds).unsqueeze(1) * step + Tensor.arange(size)
-
-    # Reshape to add singleton dims for broadcasting with input tensor
-    # Shape: [1, 1, ..., n_folds*size, ..., 1, 1]
-    idx = idx.reshape([1]*dim + [n_folds * size] + [1]*(t.ndim-dim-1))
-    idx = idx.expand(t.shape[:dim] + (n_folds * size,) + t.shape[dim+1:])
-
+    idx = idx.reshape([1]*dim + [n_folds * size] + [1]*(t.ndim-dim-1)).expand(t.shape[:dim] + (n_folds * size,) + t.shape[dim+1:])
     # Gather windows along dim and separate folds from each block
     return t.gather(dim, idx).reshape(t.shape[:dim] + (n_folds, size) + t.shape[dim+1:])
 
