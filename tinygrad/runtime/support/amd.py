@@ -51,25 +51,22 @@ def setup_pci_bars(usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base
 
       usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
 
-  # resize bar
+  # resize bar 0
   cap_ptr = 0x100
   while cap_ptr:
-    hdr = usb.pcie_cfg_req(cap_ptr, bus=gpu_bus, dev=0, fn=0, size=4)
-
-    if pci.PCI_EXT_CAP_ID(hdr) == pci.PCI_EXT_CAP_ID_REBAR:
-      cap = usb.pcie_cfg_req(cap_ptr + 0x04 + n*8, bus=gpu_bus, dev=0, fn=0, size=4)
-      supported_list = [i for i in range(0, 28) if (cap >> 4) & (1 << i)]
-      new_ctrl = (usb.pcie_cfg_req(cap_ptr + 0x08 + n*8, bus=gpu_bus, dev=0, fn=0, size=4) & ~0x1F00) | (supported_list[-1] << 8)
-      usb.pcie_cfg_req(cap_ptr + 0x08 + n*8, bus=gpu_bus, dev=0, fn=0, value=new_ctrl, size=4)
+    if pci.PCI_EXT_CAP_ID(hdr:=usb.pcie_cfg_req(cap_ptr, bus=gpu_bus, dev=0, fn=0, size=4)) == pci.PCI_EXT_CAP_ID_REBAR:
+      cap = usb.pcie_cfg_req(cap_ptr + 0x04, bus=gpu_bus, dev=0, fn=0, size=4)
+      new_ctrl = (usb.pcie_cfg_req(cap_ptr + 0x08, bus=gpu_bus, dev=0, fn=0, size=4) & ~0x1F00) | ((int(cap >> 4).bit_length() - 1) << 8)
+      usb.pcie_cfg_req(cap_ptr + 0x08, bus=gpu_bus, dev=0, fn=0, value=new_ctrl, size=4)
 
     cap_ptr = pci.PCI_EXT_CAP_NEXT(hdr)
 
   mem_space_addr, bar_off, bars = [mem_base, pref_mem_base], 0, {}
   while bar_off < 24:
     cfg = usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4)
-    bar_mem, bar_space, bar_64 = bool(cfg & pci.PCI_BASE_ADDRESS_MEM_PREFETCH), cfg & pci.PCI_BASE_ADDRESS_SPACE, cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64
+    bar_mem, bar_64 = bool(cfg & pci.PCI_BASE_ADDRESS_MEM_PREFETCH), cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64
 
-    if bar_space == pci.PCI_BASE_ADDRESS_SPACE_MEMORY:
+    if (cfg & pci.PCI_BASE_ADDRESS_SPACE) == pci.PCI_BASE_ADDRESS_SPACE_MEMORY:
       usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=0xffffffff, size=4)
       lo = (usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4) & 0xfffffff0)
 
