@@ -473,7 +473,7 @@ jobs:
         run: CPU=1 PYTHONPATH=. python3 test/test_quantize_onnx.py
       - name: Run REMOTE=1 Test
         run: |
-          REMOTEDEV=CPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_jit.py
+          REMOTEDEV=CPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py
           REMOTEDEV=GPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py test/test_jit.py
           REMOTEDEV=GPU IMAGE=2 REMOTE=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py
       - name: Test Optimization Helpers
@@ -795,7 +795,7 @@ jobs:
           DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run REMOTE=1 Test
         run: |
-          python3 -m pytest test/test_tiny.py test/test_jit.py
+          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py
 
   osxtests:
     strategy:
