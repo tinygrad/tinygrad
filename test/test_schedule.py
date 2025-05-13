@@ -1726,6 +1726,14 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(out, 1)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
+  def test_arange_index_shrink(self):
+    Tensor.manual_seed(0)
+    with Context(TRACK_MATCH_STATS=0):
+      x = Tensor.randn(11).realize()
+    a = Tensor.arange(22)
+    out = (x + a[:11]).sum()
+    self.check_schedule(out, 1)
+
   @unittest.skip("TOOD: FUSE_ARANGE overrules Tensor.arange().contiguous()")
   def test_arange_index_contiguous(self):
     Tensor.manual_seed(0)

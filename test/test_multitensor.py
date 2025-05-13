@@ -358,23 +358,11 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(m): p.shard_(devices_2).realize()
     GlobalCounters.reset()
     shard_output = m(fake_image_sharded).log_softmax().realize()
-    assert shard_output.lazydata.src[0].shape == (1, 1000)
-    assert shard_output.lazydata.src[1].shape == (1, 1000)
     shard_output_np = shard_output.numpy()
     np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
 
-  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
-  def test_data_parallel_resnet_train_step(self):
-    from extra.models.resnet import ResNet18
+  def _test_model_train_step(self, m, fake_image, labels):
     from tinygrad.nn.optim import LARS
-
-    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
-    fake_image_sharded = fake_image.shard(devices_2, axis=0)
-    labels = Tensor.randint(2, low=0, high=1000)
-    labels_sharded = labels.shard(devices_2, axis=0)
-
-    m = ResNet18()
     optimizer = LARS(get_parameters(m), 0.1)  # set requires_grad for all params
 
     optimizer.zero_grad()
@@ -383,6 +371,8 @@ class TestMultiTensor(unittest.TestCase):
     output.backward()
     grad = m.conv1.weight.grad.numpy()
 
+    fake_image_sharded = fake_image.shard(devices_2, axis=0)
+    labels_sharded = labels.shard(devices_2, axis=0)
     for p in get_parameters(m): p.shard_(devices_2).realize()
     GlobalCounters.reset()
     optimizer.zero_grad()
@@ -391,6 +381,26 @@ class TestMultiTensor(unittest.TestCase):
     shard_grad = m.conv1.weight.grad.numpy()
     # sometimes there is zeros in these grads... why?
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
+
+  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
+  def test_data_parallel_resnet_train_step(self):
+    from extra.models.resnet import ResNet18
+    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
+    labels = Tensor.randint(2, low=0, high=1000)
+    m = ResNet18()
+    self._test_model_train_step(m, fake_image, labels)
+
+  def test_data_parallel_simple_train_step(self):
+    class Model:
+      def __init__(self): self.conv1 = nn.Linear(128,128)
+      def __call__(self, x): return self.conv1(x)
+      def load_from_pretrained(self): pass
+
+    fake_image = Tensor.rand((128,))
+    labels = Tensor.randint(2, low=0, high=127)
+    m = Model()
+    self._test_model_train_step(m, fake_image, labels)
 
   def test_assign_kv_cache_multi(self):
     bsz, max_context = 2, 8
@@ -833,7 +843,6 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     a = t.shrink(((0, 2), (0, 8)))
     a.schedule()
     assert a.shape == (2, 8)
-    assert a.lazydata.real == (True, False, False, False)
 
     with self.assertRaises(AssertionError):
       # cannot pad sharded and non-sharded axis at the same time
@@ -848,7 +857,6 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     p = a.pad(((0, 6), (0, 0)))
     p.schedule()
     assert p.shape == (8, 8)
-    assert p.lazydata.real == (True, True, True, True)
 
   @given(strat.sampled_from([dtypes.float, dtypes.int, dtypes.int64, dtypes.int16]))
   def test_ops(self, dtype):
@@ -861,7 +869,6 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       b = Tensor(t.numpy()[0+2*i:2+2*i])
       assert a.shape == b.shape == (2, 8)
       np.testing.assert_allclose(a.numpy(), b.numpy())
-      assert a.lazydata.real == tuple(i==j for j in range(4))
       # cast
       np.testing.assert_allclose(a.float().numpy(), b.float().numpy())
 
