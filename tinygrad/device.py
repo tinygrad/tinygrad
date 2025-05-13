@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import cast, Optional, Any, Generic, TypeVar, Iterator, Generator
+from typing import Optional, Any, Generic, TypeVar, Iterator, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
                              cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE
@@ -241,7 +241,7 @@ class _MallocAllocator(LRUAllocator['Compiled']):
   def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
   def _offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
 
-MallocAllocator = _MallocAllocator(cast('Compiled', None))
+MallocAllocator = _MallocAllocator(None) # type: ignore
 
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
