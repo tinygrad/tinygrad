@@ -1,11 +1,11 @@
-import ctypes, struct, dataclasses, array
+import ctypes, struct, dataclasses, array, itertools
 from typing import Sequence
 from tinygrad.runtime.autogen import libusb
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, to_mv, round_up
 from tinygrad.runtime.support.hcq import MMIOInterface
 
 class USB3:
-  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=16, max_read_len:int=4096):
+  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=31, max_read_len:int=4096):
     self.vendor, self.dev = vendor, dev
     self.ep_data_in, self.ep_stat_in, self.ep_data_out, self.ep_cmd_out = ep_data_in, ep_stat_in, ep_data_out, ep_cmd_out
     self.max_streams, self.max_read_len = max_streams, max_read_len
@@ -46,6 +46,7 @@ class USB3:
     self.buf_stat = [(ctypes.c_uint8 * 64)() for _ in range(self.max_streams)]
     self.buf_data_in = [(ctypes.c_uint8 * 0x1000)() for _ in range(self.max_streams)]
     self.buf_data_out = [(ctypes.c_uint8 * 0x1000)() for _ in range(self.max_streams)]
+    self.buf_data_out_mvs = [to_mv(ctypes.addressof(self.buf_data_out[i]), 0x1000) for i in range(self.max_streams)]
 
   def _prep_transfer(self, tr, ep, stream_id, buf, length):
     tr.contents.dev_handle, tr.contents.endpoint, tr.contents.length, tr.contents.buffer = self.handle, ep, length, buf
@@ -86,8 +87,11 @@ class USB3:
         tr_window.append(self._prep_transfer(self.tr[self.ep_data_in][slot], self.ep_data_in, stream, self.buf_data_in[slot], rlen))
 
       if send_data is not None:
-        if len(send_data) > len(self.buf_data_out[slot]): self.buf_data_out[slot] = (ctypes.c_uint8 * len(send_data))()
-        self.buf_data_out[slot][:len(send_data)] = list(send_data)
+        if len(send_data) > len(self.buf_data_out[slot]):
+          self.buf_data_out[slot] = (ctypes.c_uint8 * len(send_data))()
+          self.buf_data_out_mvs[slot] = to_mv(ctypes.addressof(self.buf_data_out[slot]), len(send_data))
+
+        self.buf_data_out_mvs[slot][:len(send_data)] = bytes(send_data)
         tr_window.append(self._prep_transfer(self.tr[self.ep_data_out][slot], self.ep_data_out, stream, self.buf_data_out[slot], len(send_data)))
 
       op_window.append((idx, slot, rlen))
@@ -111,10 +115,12 @@ class ASM24Controller:
   def __init__(self):
     self.usb = USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04)
     self._cache: dict[int, int|None] = {}
+    self._pci_cacheable: list[tuple[int, int]] = []
+    self._pci_cache: dict[int, int|None] = {}
 
     # Init controller.
-    self.exec_ops([WriteOp(0x54b, b' '), WriteOp(0x5a8, b'\x02'), WriteOp(0x5f8, b'\x04'), WriteOp(0x7ec, b'\x01\x00\x00\x00'),
-      WriteOp(0xc422, b'\x02'), WriteOp(0x0, b'\x33')])
+    self.exec_ops([WriteOp(0x54b, b' '), WriteOp(0x54e, b'\x04'), WriteOp(0x5a8, b'\x02'), WriteOp(0x5f8, b'\x04'),
+      WriteOp(0x7ec, b'\x01\x00\x00\x00'), WriteOp(0xc422, b'\x02'), WriteOp(0x0, b'\x33')])
 
   def exec_ops(self, ops:Sequence[WriteOp|ReadOp|ScsiWriteOp]):
     cdbs:list[bytes] = []
@@ -137,36 +143,46 @@ class ASM24Controller:
         addr = (op.addr & 0x1FFFF) | 0x500000
         _add_req(struct.pack('>BBBHB', 0xE4, op.size, addr >> 16, addr & 0xFFFF, 0), op.size, None)
         for i in range(op.size): self._cache[addr + i] = None
-      elif isinstance(op, ScsiWriteOp): _add_req(struct.pack('>BBQIBB', 0x8A, 0, op.lba, 4096//512, 0, 0), 0, op.data+b'\x00'*(4096-len(op.data)))
+      elif isinstance(op, ScsiWriteOp):
+        sectors = round_up(len(op.data), 512) // 512
+        _add_req(struct.pack('>BBQIBB', 0x8A, 0, op.lba, sectors, 0, 0), 0, op.data+b'\x00'*((sectors*512)-len(op.data)))
 
     return self.usb.send_batch(cdbs, idata, odata)
 
   def write(self, base_addr:int, data:bytes, ignore_cache:bool=True): return self.exec_ops([WriteOp(base_addr, data, ignore_cache)])
 
   def scsi_write(self, buf:bytes, lba:int=0):
-    self.exec_ops([ScsiWriteOp(buf, lba), WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True), WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
+    if len(buf) > 0x4000: buf += b'\x00' * (round_up(len(buf), 0x10000) - len(buf))
+
+    for i in range(0, len(buf), 0x10000):
+      self.exec_ops([ScsiWriteOp(buf[i:i+0x10000], lba), WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True)])
+      self.exec_ops([WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
+
+    if len(buf) > 0x4000:
+      for i in range(4): self.exec_ops([WriteOp(0xce40 + i, b'\x00', ignore_cache=True)])
 
   def read(self, base_addr:int, length:int, stride:int=0xff) -> bytes:
     parts = self.exec_ops([ReadOp(base_addr + off, min(stride, length - off)) for off in range(0, length, stride)])
     return b''.join(p or b'' for p in parts)[:length]
 
-  def pcie_request(self, fmt_type, address, value=None, size=4, cnt=10):
+  def _is_pci_cacheable(self, addr:int) -> bool: return any(x <= addr <= x + sz for x, sz in self._pci_cacheable)
+  def pcie_prep_request(self, fmt_type:int, address:int, value:int|None=None, size:int=4) -> list[WriteOp]:
+    if fmt_type == 0x40 and size == 4 and self._is_pci_cacheable(address) and self._pci_cache.get(address) == value: return []
+
     assert fmt_type >> 8 == 0 and size > 0 and size <= 4, f"Invalid fmt_type {fmt_type} or size {size}"
-    if DEBUG >= 3: print("pcie_request", hex(fmt_type), hex(address), value, size, cnt)
+    if DEBUG >= 3: print("pcie_request", hex(fmt_type), hex(address), value, size)
 
     masked_address, offset = address & 0xFFFFFFFC, address & 0x3
-    assert size + offset <= 4
+    assert size + offset <= 4 and (value is None or value >> (8 * size) == 0)
+    self._pci_cache[masked_address] = value if size == 4 and fmt_type == 0x40 else None
 
-    ops = []
-    if value is not None:
-      assert value >> (8 * size) == 0
-      ops.append(WriteOp(0xB220, struct.pack('>I', value << (8 * offset)), ignore_cache=False))
+    return ([WriteOp(0xB220, struct.pack('>I', value << (8 * offset)), ignore_cache=False)] if value is not None else []) + \
+      [WriteOp(0xB218, struct.pack('>I', masked_address), ignore_cache=False),
+       WriteOp(0xB217, bytes([((1 << size) - 1) << offset]), ignore_cache=False), WriteOp(0xB210, bytes([fmt_type]), ignore_cache=False),
+       WriteOp(0xB254, b"\x0f", ignore_cache=True), WriteOp(0xB296, b"\x04", ignore_cache=True)]
 
-    ops += [WriteOp(0xB218, struct.pack('>I', masked_address), ignore_cache=False),
-      WriteOp(0xB217, bytes([((1 << size) - 1) << offset]), ignore_cache=False),
-      WriteOp(0xB210, bytes([fmt_type]), ignore_cache=False),
-      WriteOp(0xB254, b"\x0f", ignore_cache=True), WriteOp(0xB296, b"\x04", ignore_cache=True)]
-    self.exec_ops(ops)
+  def pcie_request(self, fmt_type, address, value=None, size=4, cnt=10):
+    self.exec_ops(self.pcie_prep_request(fmt_type, address, value, size))
 
     # Fast path for write requests
     if ((fmt_type & 0b11011111) == 0b01000000) or ((fmt_type & 0b10111000) == 0b00110000): return
@@ -190,11 +206,11 @@ class ASM24Controller:
 
     # Handle completion errors or inconsistencies
     if status or ((fmt_type & 0xbe == 0x04) and (((value is None) and (not (b284 & 0x01))) or ((value is not None) and (b284 & 0x01)))):
-      status_map = {0b000: "Successful Completion (SC)", 0b001: "Unsupported Request (UR)",
-                    0b010: "Configuration Request Retry Status (CRS)", 0b100: "Completer Abort (CA)"}
-      raise RuntimeError("Completion status: {}, 0xB284 bit 0: {}".format(status_map.get(status, "Reserved (0b{:03b})".format(status)), b284 & 0x01))
+      status_map = {0b001: "Unsupported Request: invalid address/function (target might not be reachable)",
+                    0b100: "Completer Abort: abort due to internal error", 0b010: "Configuration Request Retry Status: configuration space busy"}
+      raise RuntimeError(f"TLP status: {status_map.get(status, 'Reserved (0b{:03b})'.format(status))}")
 
-    if value is None: return (struct.unpack('>I', self.read(0xB220, 4))[0] >> (8 * offset)) & ((1 << (8 * size)) - 1)
+    if value is None: return (struct.unpack('>I', self.read(0xB220, 4))[0] >> (8 * (address & 0x3))) & ((1 << (8 * size)) - 1)
 
   def pcie_cfg_req(self, byte_addr, bus=1, dev=0, fn=0, value=None, size=4):
     assert byte_addr >> 12 == 0 and bus >> 8 == 0 and dev >> 5 == 0 and fn >> 3 == 0, f"Invalid byte_addr {byte_addr}, bus {bus}, dev {dev}, fn {fn}"
@@ -204,6 +220,12 @@ class ASM24Controller:
     return self.pcie_request(fmt_type, address, value, size)
 
   def pcie_mem_req(self, address, value=None, size=4): return self.pcie_request(0x40 if value is not None else 0x0, address, value, size)
+
+  def pcie_mem_write(self, address, values, size):
+    ops = [self.pcie_prep_request(0x40, address + i * size, value, size) for i, value in enumerate(values)]
+
+    # Send in batches of 4
+    for i in range(0, len(ops), 4): self.exec_ops(list(itertools.chain.from_iterable(ops[i:i+4])))
 
 class USBMMIOInterface(MMIOInterface):
   def __init__(self, usb, addr, size, fmt, pcimem=True):
@@ -228,7 +250,8 @@ class USBMMIOInterface(MMIOInterface):
 
   def _acc(self, off, sz, data=None):
     if data is None: # read op
-      if not self.pcimem: return self.usb.read(self.addr + off, sz)
+      if not self.pcimem:
+        return int.from_bytes(self.usb.read(self.addr + off, sz), "little") if sz == self.el_sz else self.usb.read(self.addr + off, sz)
 
       acc, acc_size = self._acc_size(sz)
       return bytes(array.array(acc, [self._acc_one(off + i * acc_size, acc_size) for i in range(sz // acc_size)]))
@@ -237,7 +260,8 @@ class USBMMIOInterface(MMIOInterface):
 
       if not self.pcimem:
         # Fast path for writing into buffer 0xf000
-        return self.usb.scsi_write(bytes(data)) if self.addr == 0xf000 else self.usb.write(self.addr + off, bytes(data))
+        use_cache = 0xa800 <= self.addr <= 0xb000
+        return self.usb.scsi_write(bytes(data)) if self.addr == 0xf000 else self.usb.write(self.addr + off, bytes(data), ignore_cache=not use_cache)
 
       _, acc_sz = self._acc_size(len(data) * struct.calcsize(self.fmt))
-      for i in range(0, len(data), acc_sz): self._acc_one(off + i, acc_sz, int.from_bytes(data[i:i+acc_sz], "little"))
+      self.usb.pcie_mem_write(self.addr+off, [int.from_bytes(data[i:i+acc_sz], "little") for i in range(0, len(data), acc_sz)], acc_sz)

@@ -62,6 +62,6 @@ print_cfg(3, 0)
 setup_bus(3, gpu_bus=4)
 dmp = print_cfg(4, 0)
 print(dmp[0:4])
-assert dmp[0:4] == b"\x02\x10\x80\x74", "GPU NOT FOUND!"
+assert dmp[0:4] in (b"\x02\x10\x80\x74", b"\x02\x10\x4c\x74", b"\x02\x10\x50\x75"), "GPU NOT FOUND!"
 
 print("GPU FOUND!")
