@@ -207,45 +207,60 @@ class RemoteAllocator(Allocator):
     return self.device.buffer_num
   # TODO: options should not be here in any Allocator
   def _free(self, opaque:int, options): self.device.q(BufferFree(opaque))
-  def _copyin(self, dest:int, src:memoryview): self.device.q(CopyIn(dest, self.device.req.h(bytes(src))))
+  def _copyin(self, dest:int, src:memoryview): self.device.q(CopyIn(dest, self.device.conn.req.h(bytes(src))))
   def _copyout(self, dest:memoryview, src:int):
     self.device.q(CopyOut(src))
-    resp = self.device.batch_submit()
+    resp = self.device.conn.batch_submit()
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
     dest[:] = resp
 
 class RemoteProgram:
   def __init__(self, dev:RemoteDevice, name:str, lib:bytes):
     self.dev, self.name = dev, name
-    self.datahash = self.dev.req.h(lib)
+    self.datahash = self.dev.conn.req.h(lib)
     self.dev.q(ProgramAlloc(self.name, self.datahash))
     super().__init__()
   def __del__(self): self.dev.q(ProgramFree(self.name, self.datahash))
 
   def __call__(self, *bufs, global_size=None, local_size=None, vals:tuple[int, ...]=(), wait=False):
     self.dev.q(ProgramExec(self.name, self.datahash, bufs, vals, global_size, local_size, wait))
-    if wait: return float(self.dev.batch_submit())
+    if wait: return float(self.dev.conn.batch_submit())
+
+@functools.cache
+class RemoteConnection:
+  def __init__(self, host:str):
+    if DEBUG >= 1: print(f"remote with host {host}")
+    while 1:
+      try:
+        self.conn = http.client.HTTPConnection(host, timeout=60.0)
+        self.conn.connect()
+        break
+      except Exception as e:
+        print(e)
+        time.sleep(0.1)
+    self.req: BatchRequest = BatchRequest()
+
+  def batch_submit(self):
+    data = self.req.serialize()
+    with Timing(f"*** send {len(self.req._q):-3d} requests {len(self.req._h):-3d} hashes with len {len(data)/1024:.2f} kB in ", enabled=DEBUG>=1):
+      self.conn.request("POST", "/batch", data)
+      response = self.conn.getresponse()
+      assert response.status == 200, f"POST /batch failed: {response}"
+      ret = response.read()
+    self.req = BatchRequest()
+    return ret
 
 class RemoteDevice(Compiled):
   def __init__(self, device:str):
-    self.host = getenv("HOST", "") or RemoteDevice.local_server()
+    self.conn: RemoteConnection = RemoteConnection(getenv("HOST", "") or RemoteDevice.local_server())
 
     # state for the connection
     self.session = (binascii.hexlify(os.urandom(0x10)).decode(), int(device.split(":")[1]) if ":" in device else 0)
     self.buffer_num: int = 0
     self.graph_num: int = 0
-    self.req: BatchRequest = BatchRequest()
 
-    if DEBUG >= 1: print(f"remote with host {self.host}")
-    while 1:
-      try:
-        self.conn = http.client.HTTPConnection(self.host, timeout=60.0)
-        self.q(GetProperties())
-        self.properties = safe_eval(ast.parse(self.batch_submit(), mode="eval").body)
-        break
-      except Exception as e:
-        print(e)
-        time.sleep(0.1)
+    self.q(GetProperties())
+    self.properties = safe_eval(ast.parse(self.conn.batch_submit(), mode="eval").body)
     if DEBUG >= 1: print(f"remote has device {self.properties.real_device}")
     # TODO: how to we have BEAM be cached on the backend? this should just send a specification of the compute. rethink what goes in Renderer
     renderer = self.properties.renderer
@@ -258,24 +273,14 @@ class RemoteDevice(Compiled):
   def __del__(self):
     # TODO: this is never being called
     # TODO: should close the whole session
-    with contextlib.suppress(ConnectionRefusedError, http.client.CannotSendRequest, http.client.RemoteDisconnected): self.batch_submit()
+    with contextlib.suppress(ConnectionRefusedError, http.client.CannotSendRequest, http.client.RemoteDisconnected): self.conn.batch_submit()
 
-  def q(self, x:RemoteRequest): self.req.q(replace(x, session=self.session))
+  def q(self, x:RemoteRequest): self.conn.req.q(replace(x, session=self.session))
 
   @functools.cache
   @staticmethod
   def local_server():
     multiprocessing.Process(target=remote_server, args=(6667,), name="MainProcess", daemon=True).start()
     return "127.0.0.1:6667"
-
-  def batch_submit(self):
-    data = self.req.serialize()
-    with Timing(f"*** send {len(self.req._q):-3d} requests {len(self.req._h):-3d} hashes with len {len(data)/1024:.2f} kB in ", enabled=DEBUG>=1):
-      self.conn.request("POST", "/batch", data)
-      response = self.conn.getresponse()
-      assert response.status == 200, f"POST /batch failed: {response}"
-      ret = response.read()
-    self.req = BatchRequest()
-    return ret
 
 if __name__ == "__main__": remote_server(getenv("PORT", 6667))
