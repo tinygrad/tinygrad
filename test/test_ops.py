@@ -7,8 +7,6 @@ from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL, 
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
-from icecream import install
-install()
 
 if getenv("TINY_BACKEND"):
   import tinygrad.frontend.torch # noqa: F401 # pylint: disable=unused-import
@@ -230,8 +228,7 @@ class TestOps(unittest.TestCase):
       helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
 
   def test_unfold(self):
-    helper_test_op([(8,)], lambda x: x.unfold(0, 2, 1), forward_only=True)
-    1 / 0
+    helper_test_op([(8,)], lambda x: x.unfold(0, 2, 1))
     helper_test_op([(8,)], lambda x: x.unfold(0, 2, 2))
     helper_test_op([(8,)], lambda x: x.unfold(0, 7, 3))
     helper_test_op([(3,3,3)], lambda x: x.unfold(-1, 2, 8))
