@@ -179,7 +179,7 @@ class ASM24Controller:
     return ([WriteOp(0xB220, struct.pack('>I', value << (8 * offset)), ignore_cache=False)] if value is not None else []) + \
       [WriteOp(0xB218, struct.pack('>I', masked_address), ignore_cache=False), WriteOp(0xB21c, struct.pack('>I', address>>32), ignore_cache=False),
        WriteOp(0xB217, bytes([((1 << size) - 1) << offset]), ignore_cache=False), WriteOp(0xB210, bytes([fmt_type]), ignore_cache=False),
-       WriteOp(0xB254, b"\xff\xff\xff\xff", ignore_cache=True), WriteOp(0xB296, b"\x04", ignore_cache=True)]
+       WriteOp(0xB254, b"\x0f", ignore_cache=True), WriteOp(0xB296, b"\x04", ignore_cache=True)]
 
   def pcie_request(self, fmt_type, address, value=None, size=4, cnt=10):
     self.exec_ops(self.pcie_prep_request(fmt_type, address, value, size))
