@@ -4,11 +4,11 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from tinygrad.ops import UOp, Variable, Ops
 from tinygrad.renderer import Renderer
-from tinygrad.nn.state import get_parameters
+from tinygrad.nn.state import get_state_dict
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner
-from typing import Callable, Sequence, cast
+from typing import Callable, cast
 import itertools
 
 def is_partial_write(ast:UOp, i:int) -> bool:
@@ -17,8 +17,9 @@ def is_partial_write(ast:UOp, i:int) -> bool:
 
 # Common logic regardless of render target (e.g. JavaScript, C)
 class GraphRenderer(Renderer):
-  def __init__(self, fxn:Callable, args:Sequence, state_dict:dict[str, Tensor]|None=None):
-    state_names = {buf: k for k,v in state_dict.items() if (buf:=v.realize().lazydata.base.realized) is not None} if state_dict else {}
+  def __init__(self, fxn:Callable, *args, tensor_names:dict[str, Tensor]|None=None, **kwargs):
+    assert len(get_state_dict(kwargs)) == 0 and all(not isinstance(val, Variable) for val in kwargs.values()), "positional Tensors/Variables only"
+    buf_names = {buf: k for k,v in tensor_names.items() if (buf:=v.realize().lazydata.base.realized) is not None} if tensor_names else {}
     # ensure random seeds are on-device
     Tensor.randn(1).realize()
 
@@ -26,12 +27,13 @@ class GraphRenderer(Renderer):
     # designate the input and output nodes
     self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
     # TODO: assert no realizes happen here in function call, only kernelize is allowed
-    outputs = [t.kernelize().lazydata for t in get_parameters(fxn(*args))]
-    assert len(outputs) > 0, "The function argument must return at least one Tensor so that the kernel graph can be accessed."
+    out_dict = get_state_dict(fxn(*args, **kwargs))
+    assert len(out_dict) > 0, "The function argument must return at least one Tensor so that the kernel graph can be accessed."
+    assert all(k=="" or int(k) for k in out_dict.keys()), "All returned Tensor(s) must be the return value, or elements of a returned list/tuple."
 
     # linearize the kernel graph
-    schedule, _, becomes_map = create_schedule_with_vars(UOp.sink(*outputs))
-    self.outputs: list[UOp] = [becomes_map[uop.base] for uop in outputs]
+    schedule, _, becomes_map = create_schedule_with_vars(UOp.sink(*(out_uops:=[t.kernelize().lazydata for _, t in sorted(out_dict.items())])))
+    self.outputs: list[UOp] = [becomes_map[uop.base] for uop in out_uops]
 
     # render kernels, render buffer names
     # mark which buffers have state
@@ -49,7 +51,7 @@ class GraphRenderer(Renderer):
           self.bufs[buf] = name = f"buf_{next(ctr)}"
           if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
 
-    self.state_bufs.update({k: v for k,v in state_names.items() if k in self.state_bufs})
+    self.state_bufs.update({k: v for k,v in buf_names.items() if k in self.state_bufs})
     # TODO: we need to ensure the self.state_bufs have been realized with actual data, before now
     self.state_dict: dict[str, Tensor] = {v:Tensor(bytes(k.as_buffer()), dtype=k.dtype, device=k.device).realize() for k,v in self.state_bufs.items()}
 
