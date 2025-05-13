@@ -228,15 +228,15 @@ class TestOps(unittest.TestCase):
       helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
 
   def test_unfold(self):
-    helper_test_op([(8,)], lambda x: x.unfold(0, 2, 1), lambda x: x.unfold(0, 2, 1))
-    helper_test_op([(8,)], lambda x: x.unfold(0, 2, 2), lambda x: x.unfold(0, 2, 2))
-    helper_test_op([(8,)], lambda x: x.unfold(0, 7, 3), lambda x: x.unfold(0, 7, 3))
-    helper_test_op([(3,3,3)], lambda x: x.unfold(-1, 2, 8), lambda x: x.unfold(-1, 2, 8))
+    helper_test_op([(8,)], lambda x: x.unfold(0, 2, 1))
+    helper_test_op([(8,)], lambda x: x.unfold(0, 2, 2))
+    helper_test_op([(8,)], lambda x: x.unfold(0, 7, 3))
+    helper_test_op([(3,3,3)], lambda x: x.unfold(-1, 2, 8))
 
-    self.helper_test_exception([(8,)], lambda x: x.unfold(0, 9, 3), lambda x: x.unfold(0, 9, 3), expected=RuntimeError)
-    self.helper_test_exception([(8,)], lambda x: x.unfold(1, 8, 3), lambda x: x.unfold(1, 8, 3), expected=IndexError)
-    self.helper_test_exception([(8,)], lambda x: x.unfold(0, -1, 3), lambda x: x.unfold(0, -1, 3), expected=RuntimeError)
-    self.helper_test_exception([(8,)], lambda x: x.unfold(0, 1, -1), lambda x: x.unfold(0, 1, -1), expected=RuntimeError)
+    self.helper_test_exception([(8,)], lambda x: x.unfold(0, 9, 3), expected=RuntimeError)
+    self.helper_test_exception([(8,)], lambda x: x.unfold(1, 8, 3), expected=IndexError)
+    self.helper_test_exception([(8,)], lambda x: x.unfold(0, -1, 3), expected=RuntimeError)
+    self.helper_test_exception([(8,)], lambda x: x.unfold(0, 1, -1), expected=RuntimeError)
 
   def test_meshgrid(self):
     x, xt = torch.tensor([0.,1.,2.], requires_grad=True), Tensor([0.,1.,2.], requires_grad=True)
