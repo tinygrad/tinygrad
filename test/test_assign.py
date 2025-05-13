@@ -220,7 +220,8 @@ class TestAssign(unittest.TestCase):
     bsz, max_context = 2, 8
 
     class Attn:
-      def __init__(self): self.run = TinyJit(self._run) if jit else self._run
+      def __init__(self):
+        self.run = TinyJit(self._run) if jit else self._run
 
       def _run(self, xk:Tensor, start_pos:Variable):
         seqlen = xk.shape[1]
@@ -234,7 +235,8 @@ class TestAssign(unittest.TestCase):
           cache_k = self.cache_k.assign(keys.pad((None,(0,max_context-start_pos-seqlen),None,None)).contiguous())
         (cache_k.kernelize()) if kernelize else (cache_k.realize())
 
-      def __call__(self, xk:Tensor, start_pos:Variable): self.run(xk, start_pos)
+      def __call__(self, xk:Tensor, start_pos:Variable):
+        self.run(xk, start_pos)
 
     attn = Attn()
     xk = Tensor.ones(bsz, 3, 1, 1).contiguous()
