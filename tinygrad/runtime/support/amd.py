@@ -1,7 +1,7 @@
 import functools, importlib
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.helpers import getbits, round_up, getenv
+from tinygrad.helpers import getbits, round_up
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.usb import ASM24Controller
 
