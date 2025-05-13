@@ -85,7 +85,7 @@ class TestMultiTensor(unittest.TestCase):
     for si, ei in lower_schedule(sched):
       if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
       ei.run()
-    self.assertEqual(len(set(names)), 2), "function was relinearized"
+    self.assertEqual(len(set(names)), 1), "function was relinearized"
 
   @unittest.skip("this doesn't fold because shard_ calls contiguous on all lbs")
   def test_sharded_memory(self):
@@ -363,18 +363,8 @@ class TestMultiTensor(unittest.TestCase):
     shard_output_np = shard_output.numpy()
     np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
 
-  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
-  def test_data_parallel_resnet_train_step(self):
-    from extra.models.resnet import ResNet18
+  def _test_model_train_step(self, m, fake_image, labels):
     from tinygrad.nn.optim import LARS
-
-    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
-    fake_image_sharded = fake_image.shard(devices_2, axis=0)
-    labels = Tensor.randint(2, low=0, high=1000)
-    labels_sharded = labels.shard(devices_2, axis=0)
-
-    m = ResNet18()
     optimizer = LARS(get_parameters(m), 0.1)  # set requires_grad for all params
 
     optimizer.zero_grad()
@@ -383,6 +373,8 @@ class TestMultiTensor(unittest.TestCase):
     output.backward()
     grad = m.conv1.weight.grad.numpy()
 
+    fake_image_sharded = fake_image.shard(devices_2, axis=0)
+    labels_sharded = labels.shard(devices_2, axis=0)
     for p in get_parameters(m): p.shard_(devices_2).realize()
     GlobalCounters.reset()
     optimizer.zero_grad()
@@ -391,6 +383,29 @@ class TestMultiTensor(unittest.TestCase):
     shard_grad = m.conv1.weight.grad.numpy()
     # sometimes there is zeros in these grads... why?
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
+
+  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
+  def test_data_parallel_resnet_train_step(self):
+    from extra.models.resnet import ResNet18
+
+    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
+    labels = Tensor.randint(2, low=0, high=1000)
+    m = ResNet18()
+    self._test_model_train_step(m, fake_image, labels)
+
+  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
+  def test_data_parallel_simple_train_step(self):
+    class Model:
+      def __init__(self): self.conv1 = nn.Linear(128,128)
+      def __call__(self, x): return self.conv1(x)
+      def load_from_pretrained(self): pass
+
+    fake_image = Tensor.rand((128,))
+    labels = Tensor.randint(2, low=0, high=127)
+    m = Model()
+    self._test_model_train_step(m, fake_image, labels)
 
   def test_assign_kv_cache_multi(self):
     bsz, max_context = 2, 8

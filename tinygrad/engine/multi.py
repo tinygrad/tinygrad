@@ -157,7 +157,8 @@ def copy_multi(multi:UOp, device:UOp):
     # if we already have a copy on the device, return that
     #if any(d == device.arg for d in multi.device): return multi.src[0].select(device.arg)
     # otherwise select the first one and copy it
-    return UOp(Ops.COPY, multi.dtype, (multi.src[0], device), arg=0)
+    ret = UOp(Ops.COPY, multi.dtype, (multi.src[0], device), arg=0)
+    return ret if isinstance(device.arg, str) else ret.multi(axis=None)
     #return multi.src[0].copy_to_device(device.arg, arg=0)
   # this is a multi axis one
   bsz, dcount = multi.shape[multi.axis]//len(multi.device), len(multi.device)

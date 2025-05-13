@@ -381,7 +381,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
     if self._device is None: return UOp.const(self.dtype, b)
-    #if isinstance(self.device, tuple): return UOp.multi(*[UOp.metaop(Ops.CONST, self.shape, self.dtype, d, b) for d in self.device], axis=None)
+    #if isinstance(self.device, tuple): return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b).multi(axis=None)
     return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
