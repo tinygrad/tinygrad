@@ -51,9 +51,6 @@ class HIPProgram:
       return ret.value * 1e-3
 
 class HIPAllocator(LRUAllocator):
-  def __init__(self, dev:HIPDevice):
-    self.dev = dev
-    super().__init__()
   def _alloc(self, size:int, options:BufferSpec):
     check(hip.hipSetDevice(self.dev.device_id))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))

@@ -190,9 +190,6 @@ class MetalBuffer:
   def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
 
 class MetalAllocator(LRUAllocator):
-  def __init__(self, dev:MetalDevice):
-    self.dev:MetalDevice = dev
-    super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
     if options.external_ptr: return MetalBuffer(objc_id(options.external_ptr), size)
 

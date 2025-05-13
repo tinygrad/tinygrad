@@ -63,9 +63,6 @@ class CUDAProgram:
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, self.smem, None, None, self.vargs)), enable=wait)
 
 class CUDAAllocator(LRUAllocator):
-  def __init__(self, dev:CUDADevice):
-    self.dev = dev
-    super().__init__()
   def _alloc(self, size, options:BufferSpec):
     check(cuda.cuCtxSetCurrent(self.dev.context))
     if options.external_ptr: return cuda.CUdeviceptr_v2(options.external_ptr)

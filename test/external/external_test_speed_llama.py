@@ -22,7 +22,7 @@ class TestLLaMASpeed(unittest.TestCase):
     backup_allocator = Device[Device.DEFAULT].allocator
     backup_compiler = Device[Device.DEFAULT].compiler
     Device[Device.DEFAULT].runtime = FakeProgram
-    Device[Device.DEFAULT].allocator = FakeAllocator()
+    Device[Device.DEFAULT].allocator = FakeAllocator(Device.default)
 
     print("testing llama python run time")
     model = Transformer(**MODEL_PARAMS["1"]["7B"]["args"])

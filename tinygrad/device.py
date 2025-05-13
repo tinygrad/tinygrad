@@ -186,6 +186,7 @@ class Buffer:
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
+  def __init__(self, dev): self.dev = dev
   # overridden in LRUAllocator
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
@@ -206,7 +207,9 @@ class LRUAllocator(Allocator):
   The LRU Allocator is responsible for caching buffers.
   It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
   """
-  def __init__(self): self.cache: dict[tuple[int, Optional[BufferSpec]], Any] = defaultdict(list)
+  def __init__(self, dev):
+    self.cache: dict[tuple[int, Optional[BufferSpec]], Any] = defaultdict(list)
+    super().__init__(dev)
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
@@ -236,7 +239,7 @@ class _MallocAllocator(LRUAllocator):
   def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
   def _offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
 
-MallocAllocator = _MallocAllocator()
+MallocAllocator = _MallocAllocator(None)
 
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
