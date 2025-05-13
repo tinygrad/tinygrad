@@ -175,7 +175,7 @@ class WebGPUProgram:
       return time
     return None
 
-class WebGpuAllocator(Allocator):
+class WebGpuAllocator(Allocator['WGPUDevPtr']):
   def _alloc(self, size:int, options:BufferSpec) -> WGPUBufPtr:
     # WebGPU buffers have to be 4-byte aligned
     return webgpu.wgpuDeviceCreateBuffer(self.dev, webgpu.WGPUBufferDescriptor(size=round_up(size, 4),

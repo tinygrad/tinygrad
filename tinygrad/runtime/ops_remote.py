@@ -196,7 +196,7 @@ def remote_server(port:int):
 
 # ***** frontend *****
 
-class RemoteAllocator(Allocator):
+class RemoteAllocator(Allocator['RemoteDevice']):
   # TODO: ideally we shouldn't have to deal with images here
   def _alloc(self, size:int, options:BufferSpec) -> int:
     self.dev.buffer_num += 1

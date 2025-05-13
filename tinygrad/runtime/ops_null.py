@@ -13,7 +13,7 @@ class NullProgram:
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     return 1e-4
 
-class NullAllocator(Allocator):
+class NullAllocator(Allocator['NullDevice']):
   def _alloc(self, size, options): pass
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src): pass
