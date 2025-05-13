@@ -19,6 +19,7 @@
 ::: tinygrad.Tensor.split
 ::: tinygrad.Tensor.chunk
 ::: tinygrad.Tensor.meshgrid
+::: tinygrad.Tensor.unfold
 ::: tinygrad.Tensor.squeeze
 ::: tinygrad.Tensor.unsqueeze
 ::: tinygrad.Tensor.T
