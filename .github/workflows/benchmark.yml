@@ -6,8 +6,6 @@ env:
   ASSERT_PROCESS_REPLAY: "0"
   PYTHONPATH: .
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  INFLUXDB_HOST: ${{ secrets.INFLUXDB_HOST }}
-  INFLUXDB_TOKEN: ${{ secrets.INFLUXDB_TOKEN }}
 
 on:
   push:
