@@ -46,7 +46,7 @@ class TestDevCopySpeeds(unittest.TestCase):
     if not cls.dev.is_usb(): raise unittest.SkipTest("only test this on USB devices")
 
   def testCopyCPUtoDefault(self):
-    for _ in range(3):
+    for _ in range(10):
       t = Tensor.ones(self.sz, self.sz, device="CPU").contiguous().realize()
       with Timing(f"copyin of {t.nbytes()/1e6:.2f} MB:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns * 1e3:.2f} MB/s"): # noqa: F821
         t.to(Device.DEFAULT).realize()
@@ -55,7 +55,7 @@ class TestDevCopySpeeds(unittest.TestCase):
 
   def testCopyDefaulttoCPU(self):
     t = Tensor.ones(self.sz, self.sz).contiguous().realize()
-    for _ in range(3):
+    for _ in range(10):
       with Timing(f"copyout of {t.nbytes()/1e6:.2f} MB:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns * 1e3:.2f} MB/s"):
         t.to('CPU').realize()
 
