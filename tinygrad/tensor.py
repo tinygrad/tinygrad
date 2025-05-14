@@ -186,7 +186,6 @@ class Tensor(SimpleMathTrait):
     new_uop: UOp = fxn(*[t.lazydata for t in (self,)+x], **kwargs)
     if (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = metadata
     needs_input_grad = [t.requires_grad for t in (self,)+x]
-   
     req_grad = True if any(needs_input_grad) else None if None in needs_input_grad else False
 
     # only allow requires_grad=True if result is float
@@ -201,7 +200,6 @@ class Tensor(SimpleMathTrait):
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     if requires_grad and not dtypes.is_float(self.dtype):
-      print(f"BAD requires_grad: {requires_grad}, dtype: {self.dtype}")
       raise RuntimeError("Only tensors with floating point dtype can require gradients.")
     self.requires_grad = requires_grad
     return self
