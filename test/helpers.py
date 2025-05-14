@@ -10,7 +10,7 @@ from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import T, unwrap, CI
 from tinygrad.codegen import full_rewrite
-from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler, PythonAllocator
+from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler
 
 def derandomize_model(model):
   for p in get_parameters(model):
@@ -52,7 +52,7 @@ def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
   return ret, (time.perf_counter_ns()-st)*1e-6
 
 def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
-  allocator = PythonAllocator()
+  allocator = Device['PYTHON'].allocator
   bufs = []
   for buf_dt, data in inputs or []:
     bufs.append(buf:=allocator.alloc(len(data) * buf_dt.itemsize))
@@ -64,8 +64,8 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
   return out_buf.cast(uop.dtype.fmt).tolist()[0]
 
 def not_support_multi_device():
-  # REMOTE doesn't support multi device anywhere, GPU and CUDA don't support multi device if in CI
-  return Device.DEFAULT == "REMOTE" or (CI and Device.DEFAULT in ("GPU", "CUDA"))
+  # GPU and CUDA don't support multi device if in CI
+  return CI and REAL_DEV in ("GPU", "CUDA")
 
 # NOTE: This will open REMOTE if it's the default device
-REAL_DEV = (Device.DEFAULT if Device.DEFAULT != "REMOTE" else Device['REMOTE'].properties['remotedev'])
+REAL_DEV = (Device.DEFAULT if Device.DEFAULT != "REMOTE" else Device['REMOTE'].properties.real_device)
