@@ -55,7 +55,7 @@ def render_wmma_amd(ctx, wmma: UOp) -> str:
 # llvm ops, lop[<dtype>][<op>]
 unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor", }
-signed_lop = {**unsigned_lop, Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv", Ops.MOD: "srem"}
+signed_lop = {**unsigned_lop, Ops.ADD: "add nsw", Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv", Ops.MOD: "srem"}
 flags = " nsz arcp contract afn"
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} ult", Ops.CMPNE: f"fcmp{flags} une", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
@@ -108,10 +108,6 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.BARRIER), lambda ctx: "")
 ])
 
-def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
-  u16_buf = buf.replace(dtype=dtypes.ushort.ptr(size=cast(PtrDType,buf.dtype).size))
-  return UOp.load(UOp.index(u16_buf, idx), dtype=dtypes.ushort).cast(dtypes.uint).mul(1<<16).bitcast(dtypes.float32).cast(root.dtype)
-
 class LLVMRenderer(Renderer):
   device = "LLVM"
   abi = 'win64cc' if sys.platform == 'win32' else None
@@ -128,8 +124,6 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
     # rewrite MAX to CMPLT + WHERE
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
-    # rewrite bf16 CAST(LOAD) to CAST(BITCAST)
-    (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
     # copied from cstyle.py, upcast to float32 all the ops that don't support bfloat16
     (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=dtypes.bfloat16, name="x"),
       lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16))),
@@ -138,8 +132,8 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
   ])
 
-  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer()))
-  def _render_footer(self) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
+  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
+  def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
   def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # NOTE: MallocAllocator promises 0x20 alignment
     sargs = ", ".join([f"{ldt(dt)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
@@ -225,6 +219,12 @@ class AMDLLVMRenderer(LLVMRenderer):
     (UPat(Ops.WMMA, name="wmma"), render_wmma_amd),
   ]) + base_rewrite
   extra_matcher = LLVMRenderer.extra_matcher
+  def _render_footer(self, uops: list[UOp]) -> str:
+    # TODO: this is copied from cstyle
+    requiredMaxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == "l")
+    attributes = ["alwaysinline", "nounwind", '"no-builtins"',
+                  f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}"', '"no-trapping-math"="true"']
+    return 'attributes #0 = { ' + ' '.join(attributes) + ' }'
   def __init__(self, arch:str):
     self.arch = arch
     self.tensor_cores = AMDRenderer.get_tensor_cores(arch)

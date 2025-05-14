@@ -24,6 +24,9 @@ on:
 jobs:
   testmacbenchmark:
     name: Mac Benchmark
+    env:
+      # since sudo is required for usbgpu on macos, move the cache to a new location, as some of the files are owned by root
+      PYTHONPYCACHEPREFIX: /tmp/tiny_python_pycache
     runs-on: [self-hosted, macOS]
     timeout-minutes: 20
     defaults:
@@ -111,6 +114,12 @@ jobs:
     #  run: STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3.11 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     - name: Run 10 CIFAR training steps w winograd
       run: BENCHMARK_LOG=cifar_10steps_wino JIT=1 WINO=1 STEPS=10 python3.11 examples/hlb_cifar10.py | tee train_cifar_wino.txt
+    - name: UsbGPU boot time
+      run: sudo -E PYTHONPATH=. DEBUG=2 AM_RESET=1 AMD=1 AMD_IFACE=USB time python3.11 test/test_tiny.py TestTiny.test_plus
+    - name: UsbGPU tiny tests
+      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/test_tiny.py
+    - name: UsbGPU copy speeds
+      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)
@@ -312,7 +321,7 @@ jobs:
       run: BENCHMARK_LOG=resnet_10steps_6gpu NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - name: Run 10 MLPerf Bert training steps (6 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
-      run: BENCHMARK_LOG=bert_10steps_6gpu NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
+      run: BENCHMARK_LOG=bert_10steps_6gpu NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 FUSE_ARANGE=1 FUSE_ARANGE_UINT=0 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA Training)
@@ -392,7 +401,7 @@ jobs:
     #- name: Fuzz Padded Tensor Core GEMM
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Remove amdgpu
-      run: sleep 5 && sudo rmmod amdgpu # sleep a bit to let the driver unload the prev pid.
+      run: sleep 10 && sudo rmmod amdgpu # sleep a bit to let the driver unload the prev pid.
     - name: Test AM cold start time
       run: time AMD=1 AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test AM warm start time
@@ -508,7 +517,7 @@ jobs:
       run: BENCHMARK_LOG=resnet_10steps_6gpu AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - name: Run 10 MLPerf Bert training steps (6 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
-      run: BENCHMARK_LOG=bert_10steps_6gpu AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
+      run: BENCHMARK_LOG=bert_10steps_6gpu AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 FUSE_ARANGE=1 FUSE_ARANGE_UINT=0 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)

@@ -559,21 +559,17 @@ class TestSchedule(unittest.TestCase):
     check_schedule(x, 3)
 
   def test_resnet_block(self):
-    old_training = Tensor.training
-    Tensor.training = False
-
-    in_planes, planes = 64, 64
-    conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
-    bn1 = nn.BatchNorm2d(planes)
-    conv2 = nn.Conv2d(planes, planes, kernel_size=3, padding=1, stride=1, bias=False)
-    bn2 = nn.BatchNorm2d(planes)
-
-    x = Tensor.empty(1, 64, 32, 32)
-    out = bn1(conv1(x)).relu()
-    out = bn2(conv2(out))
-    out = (out + x).relu()
-    check_schedule(out, 2, [conv1.weight, conv2.weight])
-    Tensor.training = old_training
+    with Tensor.train(False):
+      in_planes, planes = 64, 64
+      conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
+      bn1 = nn.BatchNorm2d(planes)
+      conv2 = nn.Conv2d(planes, planes, kernel_size=3, padding=1, stride=1, bias=False)
+      bn2 = nn.BatchNorm2d(planes)
+      x = Tensor.empty(1, 64, 32, 32)
+      out = bn1(conv1(x)).relu()
+      out = bn2(conv2(out))
+      out = (out + x).relu()
+      run_schedule(check_schedule(out, 2, [conv1.weight, conv2.weight]))
 
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
@@ -1730,6 +1726,14 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(out, 1)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
+  def test_arange_index_shrink(self):
+    Tensor.manual_seed(0)
+    with Context(TRACK_MATCH_STATS=0):
+      x = Tensor.randn(11).realize()
+    a = Tensor.arange(22)
+    out = (x + a[:11]).sum()
+    self.check_schedule(out, 1)
+
   @unittest.skip("TOOD: FUSE_ARANGE overrules Tensor.arange().contiguous()")
   def test_arange_index_contiguous(self):
     Tensor.manual_seed(0)
@@ -2252,6 +2256,7 @@ class TestCopyFolding(unittest.TestCase):
     add = schedule_graph_rewrite(add)
     assert all_same([x.device for x in add.src]), f"ALU has different devices! {[x.device for x in add.src]}"
 
+  @unittest.skip("this is just clone now")
   def test_copy_to_same_device(self):
     a = Tensor.empty(4).lazydata
     b = a.copy_to_device(a.device)
@@ -2261,6 +2266,7 @@ class TestCopyFolding(unittest.TestCase):
     # in the scheduler because buffer already has shape (4,)
     self.assertIs(b, a.base)
 
+  @unittest.skip("this is just clone now")
   def test_copy_to_same_device_alt(self):
     a = Tensor.empty(4, 4).lazydata
     b = a.copy_to_device(a.device)
@@ -2277,7 +2283,8 @@ class TestCopyFolding(unittest.TestCase):
     a = Tensor.arange(4)
     view = a.shrink(((0, 2),))
     b = view.clone()
-    run_schedule(check_schedule(b, 2, filter_sink=False))
+    # NOTE: this was sort of a bug making this 2
+    run_schedule(check_schedule(b, 3, filter_sink=False))
     self.assertEqual(b.lazydata.base.buffer.size, 2)
     self.assertEqual(b.lazydata.size, 2)
     self.assertListEqual(b.tolist(), [0, 1])
@@ -2476,12 +2483,20 @@ class TestUOpBecome(unittest.TestCase):
 
   # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
 
+  # NOTE: this expand is not reordered because there's before it to fuse
   def test_reorder_expand(self):
     a = Tensor.empty(4, 1)
     b = a.expand(4, 4).reciprocal()
     check_schedule(b, 1)
-    self.assertEqual(b.lazydata.base.buffer.size, 4)
-    self.assertEqual(b.lazydata.st, ShapeTracker.from_shape((4, 1)).expand((4, 4)))
+    self.assertEqual(b.lazydata.base.buffer.size, 16)
+    self.assertEqual(b.lazydata.st, ShapeTracker.from_shape((4, 4)))
+
+  def test_reorder_expand_alt(self):
+    x = Tensor.empty(4, 1)
+    y = Tensor.empty(4, 1)
+    img = Tensor.empty(4, 4)
+    z = (img*x) / y
+    check_schedule(z, 1)
 
   def test_become_existing_buffer(self):
     a = Tensor.empty(4, 4)
