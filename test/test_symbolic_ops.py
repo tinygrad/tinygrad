@@ -3,6 +3,7 @@ from tinygrad import Variable
 from tinygrad.shape.shapetracker import View
 from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.tensor import Tensor
+from tinygrad.ops import UOp
 from examples.gpt2 import Attention
 import numpy as np
 
@@ -220,6 +221,19 @@ class TestSymbolicOps(unittest.TestCase):
           expected = a.var(axis).numpy()
           symbolic = a.reshape(vi, vj).var(axis).reshape(expected.shape).numpy()
           np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+  @unittest.expectedFailure
+  def test_conv2d_ceildiv_edge_case(self):
+    def eval_uops(a): return a.sym_infer(dict(v.unbind() for v in a.vars()))
+
+    v = Variable('qwe', 11, 50_000).bind(39601)
+    x = Tensor.randn(1, 22, 39601).reshape(1, 22, v)
+    weight = Tensor.randn(256, 22, 12)
+
+    result = x.conv2d(weight=weight, groups=1, stride=6, dilation=1, padding=(3, 3))
+    shape = tuple(eval_uops(i) if isinstance(i, UOp) else i for i in result.shape)
+    self.assertEqual(shape, (1, 256, 6600))  # fails if ceildiv is incorrect
+
 
 if __name__ == '__main__':
   unittest.main()
