@@ -414,6 +414,7 @@ class AM_PSP(AM_IP):
   def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.reg(f"{self.reg_pref}_35"), mask=0x80000000, value=0x80000000)
 
   def _prep_msg1(self, data):
+    assert len(data) <= self.msg1_view.nbytes, f"msg1 buffer is too small {len(data):#x} > {self.msg1_view.nbytes:#x}"
     self.msg1_view[:] = bytes(data) + b'\x00' * 4
     self.adev.gmc.flush_hdp()
 
