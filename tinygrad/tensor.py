@@ -1407,8 +1407,7 @@ class Tensor(SimpleMathTrait):
 
     n_windows = (self.shape[dim] - size) // step + 1
     slices = [self[(slice(None),)*dim + (slice(i*step, i*step+size),)] for i in range(n_windows)]
-    ret = Tensor.stack(*slices, dim=dim)
-    return ret
+    return Tensor.stack(*slices, dim=dim)
 
   def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
     """
