@@ -48,8 +48,8 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
         can_be_graphed = ji_graph_dev.graph is not None
       case BufferXfer():
         ji_graph_dev = Device[unwrap(ji.bufs[0]).device]
-        # Whitelist of devices that support graphing BufferXfers
-        can_be_graphed = ji_graph_dev.graph is not None and ji_graph_dev.device.split(":", 1)[0] in {"CUDA", "NV", "AMD", "NULL"}
+        # All *Multi*GraphRunner support graphing BufferXfers
+        can_be_graphed = ji_graph_dev.graph is not None and issubclass(graph_class(ji_graph_dev), MultiGraphRunner)
       case ViewOp(): continue # ViewOps are just ignored
       case _: can_be_graphed = False # Everything else is not graphed and flushes existing graph if it's being constructed
 
