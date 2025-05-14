@@ -7,7 +7,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.nn.state import get_state_dict
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.memory import memory_planner
-from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner
+from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner, BufferCopy, ViewOp
 from typing import Callable, cast
 import itertools
 
@@ -19,10 +19,7 @@ def is_partial_write(ast:UOp, i:int) -> bool:
 class GraphRenderer(Renderer):
   def __init__(self, fxn:Callable, *args, tensor_names:dict[str, Tensor]|None=None, **kwargs):
     assert len(get_state_dict(args)) == len([x for x in args if isinstance(x, Tensor)]) and len(get_state_dict(kwargs)) == 0, \
-      "All Tensor (and Variable) inputs must be positional arguments, whose order will match the order of the exported function's arguments."
-    buf_names = {buf: k for k,v in tensor_names.items() if (buf:=v.realize().lazydata.base.realized) is not None} if tensor_names else {}
-    # ensure random seeds are on-device
-    Tensor.randn(1).realize()
+      "All Tensor (and Variable) function arguments must be positional, whose order will match the order of the rendered function's arguments."
 
     # construct the kernel graph
     # designate the input and output nodes
@@ -30,6 +27,7 @@ class GraphRenderer(Renderer):
     # TODO: assert no realizes happen here in function call, only kernelize is allowed
     ret_tensors: list[Tensor] = [*filter(lambda t: isinstance(t, Tensor), ret if isinstance(ret := fxn(*args, **kwargs), (list, tuple)) else [ret])]
     assert (l:=len(ret_tensors)) and l == len(get_state_dict(ret)), "One or more Tensors must be returned as a singleton or elements of a list/tuple."
+    compute_device = ret_tensors[0].device
 
     # linearize the kernel graph
     schedule, var_vals, becomes_map = create_schedule_with_vars(UOp.sink(*(out_uops:=[t.kernelize().lazydata for t in ret_tensors])))
@@ -37,23 +35,30 @@ class GraphRenderer(Renderer):
     self.outputs: list[UOp] = [becomes_map[uop.base] for uop in out_uops]
 
     # render kernels, render buffer names
-    # mark which buffers have state
+    # mark which compute buffers have state
     ctr = itertools.count()
     self.eis: list[ExecItem] = []
     self.bufs: dict[Buffer, str] = {u.base.buffer: f"input_{i}" for i, u in enumerate(self.inputs) if u.base.op is Ops.BUFFER}
     self.bufs.update({u.base.buffer: f"output_{i}" for i, u in enumerate(self.outputs)})
     self.state_bufs: dict[Buffer, str] = dict()
     for si, ei in lower_schedule(memory_planner(schedule)):
-      assert isinstance(ei.prg, CompiledRunner), "BufferCopy not yet supported, ensure all data is realized on device."
+      # copyin state buffers
+      if isinstance(ei.prg, (BufferCopy, ViewOp)):
+        assert len(ei.bufs) == 2 and (src:=ei.bufs[1]) and src.is_allocated() and src not in self.bufs, f"Unsupported data transfer: {ei.bufs}"
+        ei.run()
+        continue
+
+      for buf in ei.bufs: assert buf is not None and buf.device == compute_device, "All compute and returned Tensor(s) must be on the same device"
+      assert isinstance(ei.prg, CompiledRunner)
       self.eis.append(ei)
-      for i, buf in enumerate(ei.bufs):
-        assert buf is not None
+      for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
         if buf not in self.bufs:
           self.bufs[buf] = name = f"buf_{next(ctr)}"
           if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
 
-    self.state_bufs.update({k: v for k,v in buf_names.items() if k in self.state_bufs})
-    # TODO: we need to ensure the self.state_bufs have been realized with actual data, before now
+    if tensor_names:
+      buf_names = {u.buffer: k for k,v in tensor_names.items() if (u:=becomes_map.get(ld:=v.lazydata.base, ld)).op is Ops.BUFFER}
+      self.state_bufs.update({buf: name for buf, name in buf_names.items() if buf in self.state_bufs})
     self.state_dict: dict[str, Tensor] = {v:Tensor(bytes(k.as_buffer()), dtype=k.dtype, device=k.device).realize() for k,v in self.state_bufs.items()}
 
   def render_graph(self) -> str: raise NotImplementedError("Implement a language-specific GraphRenderer")
