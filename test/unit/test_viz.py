@@ -202,6 +202,13 @@ class TestViz(unittest.TestCase):
     with self.assertRaises(AssertionError): n.st
     _  = ser[id(n)]["label"] # VIZ should not crash
 
+  def test_default_named(self):
+    test = UOp(Ops.NOOP)
+    @track_rewrites()
+    def test_fxn(): return graph_rewrite(test, l0)
+    assert test_fxn() is test
+    self.assertEqual(keys[0], "test_fxn_1")
+
   @unittest.skip("TODO: doesn't work")
   def test_recursion_err(self):
     inf = TrackedPatternMatcher([

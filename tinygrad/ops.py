@@ -893,12 +893,12 @@ tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, int] = {}
 def track_rewrites(named=False, name_fxn:Callable|None=None):
   def _decorator(func):
-    def __wrapper(self, *args, **kwargs):
+    def __wrapper(*args, **kwargs):
       if TRACK_MATCH_STATS >= 2:
-        if (count_names:=(named or name_fxn)): _name_cnt[func.__name__] = _name_cnt.get(func.__name__, 0)+1
-        tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if count_names else self)
+        if (count_names:=(named or name_fxn or not args)): _name_cnt[func.__name__] = _name_cnt.get(func.__name__, 0)+1
+        tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if count_names else args[0])
         tracked_ctxs.append([])
-      ret = func(self, *args, **kwargs)
+      ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and name_fxn is not None: tracked_keys[-1] = f"{name_fxn(ret)} n{_name_cnt[func.__name__]}"
       return ret
     return __wrapper
