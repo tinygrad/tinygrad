@@ -49,6 +49,13 @@ if BENCHMARK_LOG:
   INFLUXDB_ORG = getenv("INFLUXDB_ORG", "tiny")
   INFLUXDB_TOKEN = getenv("INFLUXDB_TOKEN", "")
 
+  def _create_point(run_id, i, attempt, ref, commit, name, value, run):
+    point = Point(BENCHMARK_LOG.value).tag("id", run_id).tag("index", i)
+    point = point.tag("device", Device.DEFAULT)
+    point = point.tag("attempt", attempt).tag("ref", ref).tag("commit", commit)
+    point = point.field(name, value).field("x", run)
+    return point
+
   @atexit.register
   def write_events():
     # see if there are any events to wite
@@ -76,17 +83,11 @@ if BENCHMARK_LOG:
       if isinstance(event, BenchEvent):
         for event_type, values in _events[event].items():
           for i, value in enumerate(values):
-            point = Point(BENCHMARK_LOG.value).tag("id", run_id).tag("index", i)
-            point = point.tag("device", Device.DEFAULT)
-            point = point.tag("attempt", attempt).tag("ref", ref).tag("commit", commit)
-            point = point.field(f"{event.value}_{event_type}", value).field("x", run)
+            point = _create_point(run_id, i, attempt, ref, commit, f"{event.value}_{event_type}", value, run)
             points.append(point)
       else:
         for i, value in enumerate(_events[event]):
-          point = Point(BENCHMARK_LOG.value).tag("id", run_id).tag("index", i)
-          point = point.tag("device", Device.DEFAULT)
-          point = point.tag("attempt", attempt).tag("ref", ref).tag("commit", commit)
-          point = point.field(event.value, value).field("x", run)
+          point = _create_point(run_id, i, attempt, ref, commit, event.value, value, run)
           points.append(point)
 
     write_options = WriteOptions(write_type=WriteType.synchronous, retry_interval=5000, max_retries=5, max_retry_delay=30000, exponential_base=2)
