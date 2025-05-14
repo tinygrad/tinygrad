@@ -436,11 +436,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** from MultiLazyBuffer ***
 
-  def multi(self, *more:UOp, axis:int|None, real:tuple[bool,...]|None=None):
+  def multi(self, *more:UOp, axis:int|None):
     parents = (self,)+more
     assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
     assert axis is not None
-    return UOp(Ops.MULTI, self.dtype, parents, (axis, real if real is not None else (True,)*len(self.device)))
+    return UOp(Ops.MULTI, self.dtype, parents, axis)
 
   @property
   def bounds(self):
@@ -449,7 +449,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def axis(self) -> Optional[int]:
-    if self.op is Ops.MULTI: return self.arg[0]
+    if self.op is Ops.MULTI: return self.arg
     # NOTE: they all have to share an axis, we always choose [-1]
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
     if len(self.src) == 0: return None
@@ -463,14 +463,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return len(arg_acc) - arg_acc[::-1].index(prod(self.src[0].shape[:src_axis])) - 1
     if self.op is Ops.PERMUTE: return self.arg.index(src_axis) if src_axis is not None else None
     return src_axis
-
-  @property
-  def real(self):
-    assert self.op is Ops.MULTI
-    return self.arg[1]
-
-  @property
-  def real_lbs(self): return [lb for lb,r in zip(self.src, self.real) if r]
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
     assert axis is not None
@@ -562,7 +554,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def realized(self) -> Optional[Buffer|MultiBuffer]: return self.buffer if self.op is Ops.BUFFER and self.buffer.is_allocated() else None
   @property
   def is_realized(self) -> bool:
-    return all(x.base.realized is not None for x in self.base.real_lbs) if self.base.op is Ops.MULTI else self.base.realized is not None
+    return all(x.base.realized is not None for x in self.base.src) if self.base.op is Ops.MULTI else self.base.realized is not None
 
   # *** uop Variable stuff ***
 
@@ -895,12 +887,12 @@ tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, int] = {}
 def track_rewrites(named=False, name_fxn:Callable|None=None):
   def _decorator(func):
-    def __wrapper(self, *args, **kwargs):
+    def __wrapper(*args, **kwargs):
       if TRACK_MATCH_STATS >= 2:
-        if (count_names:=(named or name_fxn)): _name_cnt[func.__name__] = _name_cnt.get(func.__name__, 0)+1
-        tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if count_names else self)
+        if (count_names:=(named or name_fxn or not args)): _name_cnt[func.__name__] = _name_cnt.get(func.__name__, 0)+1
+        tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if count_names else args[0])
         tracked_ctxs.append([])
-      ret = func(self, *args, **kwargs)
+      ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and name_fxn is not None: tracked_keys[-1] = f"{name_fxn(ret)} n{_name_cnt[func.__name__]}"
       return ret
     return __wrapper

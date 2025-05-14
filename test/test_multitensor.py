@@ -844,6 +844,8 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     a.schedule()
     assert a.shape == (2, 8)
 
+    # real is no longer used, so these are on None and we can pad them however
+    """
     with self.assertRaises(AssertionError):
       # cannot pad sharded and non-sharded axis at the same time
       p = a.pad(((0, 6), (0, 1)))
@@ -853,6 +855,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       # can only pad to whole axis
       p = a.pad(((1, 5), (0, 0)))
       p.schedule()
+    """
 
     p = a.pad(((0, 6), (0, 0)))
     p.schedule()

@@ -90,32 +90,25 @@ def _shape_to_single_shard(axis, shape:tuple[sint, ...], lb:UOp) -> tuple[sint, 
 
 def reshape_multi(root:UOp, multi:UOp):
   arg = root.arg
-  if (new_axis:=root.axis) is None: return UOp.multi(*[x.reshape(arg) for x in multi.src], axis=new_axis, real=multi.real)
+  if (new_axis:=root.axis) is None: return UOp.multi(*[x.reshape(arg) for x in multi.src], axis=new_axis)
   assert prod(multi.shape) == prod(arg), "reshape must maintain prod(shape)"
   assert all(prod(lb.shape[multi.axis:])%prod(arg[new_axis+1:])==0 for lb in multi.src), \
     f"reshape cannot move items between shards {multi.shape} -> {root.arg=}"
   lbs = [x.reshape(tuple(s if a!=new_axis else prod(x.shape[multi.axis:])//prod(arg[new_axis+1:]) for a,s in enumerate(arg))) for x in multi.src]
-  return UOp.multi(*lbs, axis=new_axis, real=multi.real)
+  return UOp.multi(*lbs, axis=new_axis)
 
 def expand_multi(root:UOp, multi:UOp):
   # NOTE: this assert isn't needed, sharded axis can have dim 1
   assert multi.axis is None or root.arg[multi.axis] == multi.shape[multi.axis], f"expand not supported on sharded axis {root.arg=}"
-  return UOp.multi(*[x.expand(_shape_to_single_shard(multi.axis, root.arg, x)) for x in multi.src], axis=multi.axis, real=multi.real)
+  return UOp.multi(*[x.expand(_shape_to_single_shard(multi.axis, root.arg, x)) for x in multi.src], axis=multi.axis)
 
 def pad_multi(root:UOp, multi:UOp):
-  assert multi.axis is None or root.arg[multi.axis] == (0,0) or not all(multi.real), f"padding not supported for {root.arg=}"
-  # pad on shard axis -> fill others with zeros and set real to all True
-  if multi.axis is not None and root.arg[multi.axis] != (0,0):
-    # pad back to whole axis, remove real mask
-    assert all(root.arg[i] == (0, 0) for i in range(len(multi.shape)) if i != multi.axis), "cannot pad sharded and non-sharded axis at the same time"
-    dim, bound = sum(lb.shape[multi.axis] for lb in multi.src), multi.bounds[multi.real.index(True)]
-    assert root.arg[multi.axis] == (bound[0], dim-bound[1]), "can only pad to whole axis"
-    return UOp.multi(*[x if r else x.const_like(0) for x,r in zip(multi.src, multi.real)], axis=multi.axis)
-  return UOp.multi(*[x.pad(root.arg) for x in multi.src], axis=multi.axis, real=multi.real)
+  assert multi.axis is None or root.arg[multi.axis] == (0,0), f"padding not supported for {root.arg=}"
+  return UOp.multi(*[x.pad(root.arg) for x in multi.src], axis=multi.axis)
 
 def permute_multi(root:UOp, multi:UOp):
   # all permutes supported!
-  return UOp.multi(*[x.permute(root.arg) for x in multi.src], axis=root.axis, real=multi.real)
+  return UOp.multi(*[x.permute(root.arg) for x in multi.src], axis=root.axis)
 
 def shrink_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.arg[multi.axis] == (0, multi.shape[multi.axis]) or root.arg[multi.axis] in multi.bounds, \
@@ -127,11 +120,11 @@ def shrink_multi(root:UOp, multi:UOp):
     # we just copy it to all the devices, no real. this will be optimized out later
     return multi.src[0].copy_to_device(multi.device, arg=multi.bounds.index(root.arg[multi.axis]))
   return UOp.multi(*[x.shrink(tuple((0, x.shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.arg))) for x in multi.src],
-                   axis=multi.axis, real=multi.real)
+                   axis=multi.axis)
 
 def flip_multi(root:UOp, multi:UOp):
   assert multi.axis is None or not root.arg[multi.axis], "flipping not supported on sharded axis"
-  return UOp.multi(*[x.flip(root.arg) for x in multi.src], axis=multi.axis, real=multi.real)
+  return UOp.multi(*[x.flip(root.arg) for x in multi.src], axis=multi.axis)
 
 # from multiple devices -> one
 def copy_multi(multi:UOp, device:UOp):
@@ -151,9 +144,9 @@ def copy_multi(multi:UOp, device:UOp):
 
 def assign_multi(dest:UOp, src:UOp):
   assert dest.axis == src.axis, f"axis must match in assign {dest.axis} != {src.axis}"
-  return UOp.multi(*[x.assign(y) for x,y in zip(dest.src, src.src)], axis=src.axis, real=src.real)
+  return UOp.multi(*[x.assign(y) for x,y in zip(dest.src, src.src)], axis=src.axis)
 
-def passthrough_multi(root:UOp, multi:UOp): return UOp.multi(*[root.replace(src=(m,)) for m in multi.src], axis=multi.axis, real=multi.real)
+def passthrough_multi(root:UOp, multi:UOp): return UOp.multi(*[root.replace(src=(m,)) for m in multi.src], axis=multi.axis)
 
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([
