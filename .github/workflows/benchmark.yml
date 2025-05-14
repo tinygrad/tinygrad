@@ -121,7 +121,7 @@ jobs:
     - name: UsbGPU copy speeds
       run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     - name: UsbGPU openpilot test
-      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB AMD_LLVM=1 NOLOCALS=0 IMAGE=0 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB AMD_LLVM=1 NOLOCALS=0 IMAGE=0 GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)
