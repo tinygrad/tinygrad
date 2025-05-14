@@ -196,21 +196,18 @@ def remote_server(port:int):
 
 # ***** frontend *****
 
-class RemoteAllocator(Allocator):
-  def __init__(self, dev:RemoteDevice):
-    self.device = dev
-    super().__init__()
+class RemoteAllocator(Allocator['RemoteDevice']):
   # TODO: ideally we shouldn't have to deal with images here
   def _alloc(self, size:int, options:BufferSpec) -> int:
-    self.device.buffer_num += 1
-    self.device.q(BufferAlloc(self.device.buffer_num, size, options))
-    return self.device.buffer_num
+    self.dev.buffer_num += 1
+    self.dev.q(BufferAlloc(self.dev.buffer_num, size, options))
+    return self.dev.buffer_num
   # TODO: options should not be here in any Allocator
-  def _free(self, opaque:int, options): self.device.q(BufferFree(opaque))
-  def _copyin(self, dest:int, src:memoryview): self.device.q(CopyIn(dest, self.device.conn.req.h(bytes(src))))
+  def _free(self, opaque:int, options): self.dev.q(BufferFree(opaque))
+  def _copyin(self, dest:int, src:memoryview): self.dev.q(CopyIn(dest, self.dev.conn.req.h(bytes(src))))
   def _copyout(self, dest:memoryview, src:int):
-    self.device.q(CopyOut(src))
-    resp = self.device.conn.batch_submit()
+    self.dev.q(CopyOut(src))
+    resp = self.dev.conn.batch_submit()
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
     dest[:] = resp
 

@@ -10,7 +10,7 @@ from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import T, unwrap, CI
 from tinygrad.codegen import full_rewrite
-from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler, PythonAllocator
+from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler
 
 def derandomize_model(model):
   for p in get_parameters(model):
@@ -52,7 +52,7 @@ def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
   return ret, (time.perf_counter_ns()-st)*1e-6
 
 def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
-  allocator = PythonAllocator()
+  allocator = Device['PYTHON'].allocator
   bufs = []
   for buf_dt, data in inputs or []:
     bufs.append(buf:=allocator.alloc(len(data) * buf_dt.itemsize))
