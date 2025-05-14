@@ -28,6 +28,7 @@ class RemoteProperties:
   real_device: str
   renderer: tuple[str, str, tuple[Any, ...]]
   graph_supported: bool
+  transfer_supported: bool
 
 @dataclass(frozen=True)
 class GetProperties(RemoteRequest): pass
@@ -43,6 +44,9 @@ class CopyIn(RemoteRequest): buffer_num: int; datahash: str # noqa: E702
 
 @dataclass(frozen=True)
 class CopyOut(RemoteRequest): buffer_num: int
+
+@dataclass(frozen=True)
+class Transfer(RemoteRequest): buffer_num: int; ssession: tuple[str, int]; sbuffer_num: int # noqa: E702
 
 @dataclass(frozen=True)
 class ProgramAlloc(RemoteRequest): name: str; datahash: str # noqa: E702
@@ -83,7 +87,7 @@ class GraphExec(RemoteRequest):
   wait: bool
 
 # for safe deserialization
-eval_globals = {x.__name__:x for x in [RemoteProperties, GetProperties, BufferAlloc, BufferFree, CopyIn, CopyOut, ProgramAlloc, ProgramFree,
+eval_globals = {x.__name__:x for x in [RemoteProperties, GetProperties, BufferAlloc, BufferFree, CopyIn, CopyOut, Transfer, ProgramAlloc, ProgramFree,
                                        ProgramExec, GraphComputeItem, GraphAlloc, GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes]}
 attribute_whitelist: dict[Any, set[str]] = {dtypes: {*DTYPES_DICT.keys(), 'imagef', 'imageh'}, Ops: {x.name for x in Ops}}
 eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
@@ -154,13 +158,20 @@ class RemoteHandler:
             cls, args = dev.renderer.__reduce__()
             # CPUGraph re-renders kernel from uops specified in CompiledRunner, this is not supported
             graph_cls = gt if (gt:=graph_class(Device[self.base_device])) is not CPUGraph else None
-            ret = repr(RemoteProperties(dev.device, (cls.__module__, cls.__name__, args), graph_cls is not None)).encode()
+            rp = RemoteProperties(dev.device, (cls.__module__, cls.__name__, args), graph_cls is not None, hasattr(dev.allocator, '_transfer'))
+            ret = repr(rp).encode()
           case BufferAlloc():
             assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already allocated"
             session.buffers[c.buffer_num] = Buffer(dev.device, c.size, dtypes.uint8, options=c.options, preallocate=True)
           case BufferFree(): del session.buffers[c.buffer_num]
           case CopyIn(): session.buffers[c.buffer_num].copyin(memoryview(bytearray(req._h[c.datahash])))
           case CopyOut(): session.buffers[c.buffer_num].copyout(memoryview(ret:=bytearray(session.buffers[c.buffer_num].nbytes)))
+          case Transfer():
+            ssession, sdev = self.sessions[c.ssession], Device[f"{self.base_device}:{unwrap(c.ssession)[1]}"]
+            dbuf, sbuf = session.buffers[c.buffer_num], ssession.buffers[c.sbuffer_num]
+            assert dbuf.nbytes == sbuf.nbytes, f"{dbuf.nbytes} != {sbuf.nbytes}"
+            assert hasattr(dev.allocator, '_transfer'), f"Device {dev.device} doesn't support transfers"
+            dev.allocator._transfer(dbuf._buf, sbuf._buf, dbuf.nbytes, dest_dev=dev, src_dev=sdev)
           case ProgramAlloc():
             lib = dev.compiler.compile_cached(req._h[c.datahash].decode())
             session.programs[(c.name, c.datahash)] = dev.runtime(c.name, lib)
@@ -210,6 +221,12 @@ class RemoteAllocator(Allocator['RemoteDevice']):
     resp = self.dev.conn.batch_submit()
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
     dest[:] = resp
+  def _transfer(self, dest, src, sz, src_dev, dest_dev):
+    if dest_dev.properties.transfer_supported and src_dev.conn == dest_dev.conn:
+      dest_dev.q(Transfer(dest, src_dev.session, src))
+    else:
+      src_dev.allocator._copyout(tmp:=memoryview(bytearray(sz)), src)
+      dest_dev.allocator._copyin(dest, tmp)
 
 class RemoteProgram:
   def __init__(self, dev:RemoteDevice, name:str, lib:bytes):
