@@ -1,6 +1,6 @@
 from typing import Optional, cast, Generator
 import time, pprint
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU
 from tinygrad.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
@@ -120,8 +120,9 @@ class ExecItem:
   prg: Runner
   bufs: list[Optional[Buffer]]
   metadata: Optional[tuple[Metadata, ...]] = None
+  fixedvars: dict[Variable, int] = field(default_factory=dict)
   def run(self, _var_vals:Optional[dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
-    var_vals = {} if _var_vals is None else _var_vals
+    var_vals = self.fixedvars if _var_vals is None else (_var_vals|self.fixedvars)
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
     et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
     if do_update_stats:
@@ -147,7 +148,8 @@ si_lowerer = PatternMatcher([
       if hasattr(Device[ctx[0].device].allocator, '_transfer') and all_same([x.device.split(":")[0] for x in ctx]) \
       else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device)), list(ctx))),
 ])
-def lower_schedule_item(si:ScheduleItem) -> ExecItem: return ExecItem(*cast(tuple[Runner,list], si_lowerer.rewrite(si.ast, si.bufs)), si.metadata)
+def lower_schedule_item(si:ScheduleItem) -> ExecItem:
+  return ExecItem(*cast(tuple[Runner,list], si_lowerer.rewrite(si.ast, si.bufs)), si.metadata, si.fixedvars)
 
 def lower_schedule(schedule:list[ScheduleItem]) -> Generator[tuple[ScheduleItem, ExecItem], None, None]:
   while len(schedule):
@@ -177,7 +179,7 @@ def run_schedule(schedule:list[ScheduleItem], var_vals:Optional[dict[Variable, i
       ei.run(var_vals, do_update_stats=do_update_stats)
 
       # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
-      lower_schedule_item(ScheduleItem(si.ast, nb, si.metadata)).run(var_vals, do_update_stats=do_update_stats)
+      lower_schedule_item(ScheduleItem(si.ast, nb, si.metadata, si.fixedvars)).run(var_vals, do_update_stats=do_update_stats)
       import numpy as np
       np.testing.assert_allclose(si.bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
     else:

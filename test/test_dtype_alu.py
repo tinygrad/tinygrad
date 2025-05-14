@@ -191,6 +191,7 @@ class TestDTypeALU(unittest.TestCase):
     overflow_strat = float_strat.filter(lambda x: x > dtypes.max(unsigned_dtype) and x <= dtypes.max(dtypes.int32))
     universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
 
+  @settings(suppress_health_check=[HealthCheck.filter_too_much])
   @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
   def test_float_cast_to_unsigned_underflow(self, a, float_dtype, unsigned_dtype):
     if not is_dtype_supported(float_dtype, Device.DEFAULT): float_dtype = dtypes.float32
