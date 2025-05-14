@@ -24,6 +24,9 @@ from tinygrad.runtime.graph.cpu import CPUGraph
 class RemoteRequest: session: tuple[str, int]|None = field(default=None, kw_only=True)
 
 @dataclass(frozen=True)
+class SessionFree(RemoteRequest): pass
+
+@dataclass(frozen=True)
 class RemoteProperties:
   real_device: str
   renderer: tuple[str, str, tuple[Any, ...]]
@@ -91,8 +94,8 @@ class GraphExec(RemoteRequest):
   wait: bool
 
 # for safe deserialization
-eval_globals = {x.__name__:x for x in [RemoteProperties, GetProperties, BufferAlloc, BufferFree, CopyIn, CopyOut, Transfer, ProgramAlloc, ProgramFree,
-                                       ProgramExec, GraphComputeItem, GraphAlloc, GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes]}
+eval_globals = {x.__name__:x for x in [SessionFree, RemoteProperties, GetProperties, BufferAlloc, BufferFree, CopyIn, CopyOut, Transfer, ProgramAlloc,
+                                       ProgramFree, ProgramExec, GraphComputeItem, GraphAlloc, GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes]}
 attribute_whitelist: dict[Any, set[str]] = {dtypes: {*DTYPES_DICT.keys(), 'imagef', 'imageh'}, Ops: {x.name for x in Ops}}
 eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
   ast.Dict: lambda x: {safe_eval(k):safe_eval(v) for k,v in zip(x.keys, x.values)},
@@ -158,6 +161,7 @@ class RemoteHandler:
         if DEBUG >= 1: print(c)
         session, dev = self.sessions[unwrap(c.session)], Device[f"{self.base_device}:{unwrap(c.session)[1]}"]
         match c:
+          case SessionFree(): del self.sessions[unwrap(c.session)]
           case GetProperties():
             cls, args = dev.renderer.__reduce__()
             # CPUGraph re-renders kernel from uops specified in CompiledRunner, this is not supported
@@ -298,10 +302,8 @@ class RemoteDevice(Compiled):
     graph = fromimport('tinygrad.runtime.graph.remote', f"Remote{'Multi' if graph_multi else ''}Graph") if graph_supported else None
     super().__init__(device, RemoteAllocator(self), renderer_class(*renderer[2]), Compiler(), functools.partial(RemoteProgram, self), graph)
 
-  def __del__(self):
-    # TODO: this is never being called
-    # TODO: should close the whole session
-    with contextlib.suppress(ConnectionRefusedError, http.client.CannotSendRequest, http.client.RemoteDisconnected): self.conn.batch_submit()
+  def finalize(self):
+    with contextlib.suppress(ConnectionError, http.client.HTTPException): self.q(SessionFree(), wait=True)
 
   def q(self, x:RemoteRequest, wait:bool=False):
     self.conn.req.q(replace(x, session=self.session))
