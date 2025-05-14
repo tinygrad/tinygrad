@@ -332,11 +332,9 @@ class TestRandomness(unittest.TestCase):
     @TinyJit
     def sample_one(): return Tensor(w).multinomial(1, replacement=False).realize()
 
-    # TODO: fix mockgpu issue
-    if not (CI and Device.DEFAULT == "AMD"):
-      tiny_samples = [sample_one().item() for _ in range(1000)]
-      torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(1000)]
-      self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
+    tiny_samples = [sample_one().item() for _ in range(1000)]
+    torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(1000)]
+    self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
 
   def test_multinomial_counterexample(self):
     tiny_res = Tensor([0.3, 0.6, 0.1]).multinomial(4000, replacement=True)
