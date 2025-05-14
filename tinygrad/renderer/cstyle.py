@@ -290,7 +290,7 @@ class MetalRenderer(CStyleLanguage):
   smem_prefix = "shared "
   arg_int_prefix = "constant int&"
   barrier = "barrier();"
-  code_for_workitem = {"g": lambda x: f"int(gl_GlobalInvocationID.{chr(120+int(x))})", "l": lambda x: f"int(gl_LocalInvocationID.{chr(120+int(x))})"}
+  code_for_workitem = {"g": lambda x: f"int(gl_WorkGroupID.{chr(120+int(x))})", "l": lambda x: f"int(gl_LocalInvocationID.{chr(120+int(x))})"}
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   #type_map = {dtypes.bfloat16: "bfloat"}
