@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
-AM_VERSION = 0xA0000003
+AM_VERSION = 0xA0000004
 
 def bold(s): return f"\033[1m{s}\033[0m"
 
@@ -61,7 +61,7 @@ def get_bar0_size(pcibus):
 class AMSMI(AMDev):
   def __init__(self, pcibus, vram_bar:MMIOInterface, doorbell_bar:MMIOInterface, mmio_bar:MMIOInterface):
     self.pcibus = pcibus
-    self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
+    self.vram, self.doorbell64, self.mmio, self.dma_regions = vram_bar, doorbell_bar, mmio_bar, None
     self.pci_state = self.read_pci_state()
     if self.pci_state == "D0": self._init_from_d0()
 
