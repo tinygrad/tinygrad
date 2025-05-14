@@ -285,7 +285,12 @@ async function load_state_dict (data, progress) {
   let device;
   if (window.BACKEND === "WebGPU") {
     //model = await transformer().setup(device, state_dict, progress);
-    [model, device] = await transformer.setupNet(state_dict);
+    //[model, device] = await transformer.setupNet(state_dict);
+    model = await transformer();
+    for (const [k, v] of Object.entries(model.stateDict)) {
+      state_dict[k].bytes = v;
+    }
+    device = model.device;
     progress(0.15 * progress.total);
 
   }
@@ -506,7 +511,7 @@ document.addEventListener("alpine:init", () => {
         const model = await load_state_dict(data, this.progress);
 
         if (window.BACKEND === "WebGPU") {
-          this.nets = {"transformer": model};
+          this.nets = {"transformer": model.run};
         }
         else if (window.BACKEND === "WASM") {
           const msg = await sendMessageToWorker(model, {header: "load_state_dict", data: "done"});
