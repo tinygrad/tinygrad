@@ -12,13 +12,13 @@ testing_minimal = [
   "torch",
   "pytest",
   "pytest-xdist",
-  "hypothesis==6.131.0",
+  "hypothesis",
   "z3-solver",
   "ml_dtypes"
 ]
 
 setup(name='tinygrad',
-      version='0.10.2',
+      version='0.10.3',
       description='You like pytorch? You like micrograd? You love tinygrad! <3',
       author='George Hotz',
       license='MIT',
