@@ -15,7 +15,6 @@ PAGE_SIZE = getenv("PAGE_SIZE", 100)
 REF = os.getenv("GITHUB_REF_NAME", "")
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 TABLE_NAME = f"process_replay_{VERSION}"
-os.environ["RUN_PROCESS_REPLAY"] = "0"
 os.environ["CAPTURE_PROCESS_REPLAY"] = "0"
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -48,6 +47,7 @@ def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str, _)
 # *** diff a "good" recreation against the generated version
 
 def diff(offset:int, name:str, fxn:Callable) -> None:
+  warnings.filterwarnings("error", category=ProcessReplayWarning)
   if early_stop.is_set(): return None
   conn = db_connection()
   cur = conn.cursor()
