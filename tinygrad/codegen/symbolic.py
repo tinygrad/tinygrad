@@ -324,8 +324,9 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     except ValueError: return uop  # give up if we cannot parse the valid
     bounds[expr][int(is_upper)] = c
 
-  for expr,v in bounds.items():
-    v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
+  for expr,v in bounds.items(): bounds[expr] = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
+
+  for expr,(v0,v1) in bounds.items():
     for e in list(expr.toposort())[:-1]:
       if (sub_expr_bounds:=bounds.get(e)) is None: continue
       new_expr = expr.substitute({e:UOp.variable("fake", *sub_expr_bounds, dtype=e.dtype)}).simplify()
