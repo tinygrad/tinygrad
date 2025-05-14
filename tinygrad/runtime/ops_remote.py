@@ -13,8 +13,8 @@ from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
 from tinygrad.ops import UOp, Ops, Variable, sint
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
-from tinygrad.engine.jit import GraphRunner, ExecItem, graph_class
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
+from tinygrad.engine.realize import CompiledRunner, BufferXfer
 from tinygrad.device import Compiled, Buffer, Allocator, Compiler, Device, BufferSpec
 from tinygrad.runtime.graph.cpu import CPUGraph
 
@@ -28,6 +28,8 @@ class RemoteProperties:
   real_device: str
   renderer: tuple[str, str, tuple[Any, ...]]
   graph_supported: bool
+  graph_supports_multi: bool
+  transfer_supported: bool
 
 @dataclass(frozen=True)
 class GetProperties(RemoteRequest): pass
@@ -45,6 +47,9 @@ class CopyIn(RemoteRequest): buffer_num: int; datahash: str # noqa: E702
 class CopyOut(RemoteRequest): buffer_num: int
 
 @dataclass(frozen=True)
+class Transfer(RemoteRequest): buffer_num: int; ssession: tuple[str, int]; sbuffer_num: int # noqa: E702
+
+@dataclass(frozen=True)
 class ProgramAlloc(RemoteRequest): name: str; datahash: str # noqa: E702
 
 @dataclass(frozen=True)
@@ -57,18 +62,21 @@ class ProgramExec(RemoteRequest):
 
 @dataclass(frozen=True)
 class GraphComputeItem:
+  session: tuple[str, int]
   name: str
   datahash: str
   bufs: tuple[int, ...]
   vars: tuple[Variable, ...]
+  ins: tuple[int, ...]
+  outs: tuple[int, ...]
   global_size: tuple[sint, ...]|None
   local_size: tuple[sint, ...]|None
 
 @dataclass(frozen=True)
 class GraphAlloc(RemoteRequest):
   graph_num: int
-  jit_cache: tuple[GraphComputeItem, ...]
-  bufs: tuple[int, ...]
+  jit_cache: tuple[GraphComputeItem|Transfer, ...]
+  bufs: tuple[tuple[tuple[str, int], int], ...]
   var_vals: dict[Variable, int]
 
 @dataclass(frozen=True)
@@ -78,12 +86,12 @@ class GraphFree(RemoteRequest):
 @dataclass(frozen=True)
 class GraphExec(RemoteRequest):
   graph_num: int
-  bufs: tuple[int, ...]
+  bufs: tuple[tuple[tuple[str, int], int], ...]
   var_vals: dict[Variable, int]
   wait: bool
 
 # for safe deserialization
-eval_globals = {x.__name__:x for x in [RemoteProperties, GetProperties, BufferAlloc, BufferFree, CopyIn, CopyOut, ProgramAlloc, ProgramFree,
+eval_globals = {x.__name__:x for x in [RemoteProperties, GetProperties, BufferAlloc, BufferFree, CopyIn, CopyOut, Transfer, ProgramAlloc, ProgramFree,
                                        ProgramExec, GraphComputeItem, GraphAlloc, GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes]}
 attribute_whitelist: dict[Any, set[str]] = {dtypes: {*DTYPES_DICT.keys(), 'imagef', 'imageh'}, Ops: {x.name for x in Ops}}
 eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
@@ -154,13 +162,24 @@ class RemoteHandler:
             cls, args = dev.renderer.__reduce__()
             # CPUGraph re-renders kernel from uops specified in CompiledRunner, this is not supported
             graph_cls = gt if (gt:=graph_class(Device[self.base_device])) is not CPUGraph else None
-            ret = repr(RemoteProperties(dev.device, (cls.__module__, cls.__name__, args), graph_cls is not None)).encode()
+            rp = RemoteProperties(
+              real_device=dev.device, renderer=(cls.__module__, cls.__name__, args),
+              graph_supported=graph_cls is not None, graph_supports_multi=graph_cls is not None and issubclass(graph_cls, MultiGraphRunner),
+              transfer_supported=hasattr(dev.allocator, '_transfer'),
+            )
+            ret = repr(rp).encode()
           case BufferAlloc():
             assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already allocated"
             session.buffers[c.buffer_num] = Buffer(dev.device, c.size, dtypes.uint8, options=c.options, preallocate=True)
           case BufferFree(): del session.buffers[c.buffer_num]
           case CopyIn(): session.buffers[c.buffer_num].copyin(memoryview(bytearray(req._h[c.datahash])))
           case CopyOut(): session.buffers[c.buffer_num].copyout(memoryview(ret:=bytearray(session.buffers[c.buffer_num].nbytes)))
+          case Transfer():
+            ssession, sdev = self.sessions[c.ssession], Device[f"{self.base_device}:{unwrap(c.ssession)[1]}"]
+            dbuf, sbuf = session.buffers[c.buffer_num], ssession.buffers[c.sbuffer_num]
+            assert dbuf.nbytes == sbuf.nbytes, f"{dbuf.nbytes} != {sbuf.nbytes}"
+            assert hasattr(dev.allocator, '_transfer'), f"Device {dev.device} doesn't support transfers"
+            dev.allocator._transfer(dbuf._buf, sbuf._buf, dbuf.nbytes, dest_dev=dev, src_dev=sdev)
           case ProgramAlloc():
             lib = dev.compiler.compile_cached(req._h[c.datahash].decode())
             session.programs[(c.name, c.datahash)] = dev.runtime(c.name, lib)
@@ -172,17 +191,24 @@ class RemoteHandler:
             if r is not None: ret = str(r).encode()
           case GraphAlloc():
             graph_fn: Callable = unwrap(dev.graph)
-            def _parse_ji(gi: GraphComputeItem):
-              prg = session.programs[(gi.name, gi.datahash)]
-              ps = ProgramSpec(gi.name, '', dev.device, UOp(Ops.NOOP), vars=list(gi.vars),
-                               global_size=list(cast(tuple[int], gi.global_size)) if gi.global_size is not None else None,
-                               local_size=list(cast(tuple[int], gi.local_size)) if gi.local_size is not None else None)
-              return ExecItem(CompiledRunner(ps, precompiled=b'', prg=prg), [session.buffers[buf] for buf in gi.bufs])
+            def _parse_ji(gi: GraphComputeItem|Transfer):
+              match gi:
+                case GraphComputeItem():
+                  prg = self.sessions[gi.session].programs[(gi.name, gi.datahash)]
+                  ps = ProgramSpec(gi.name, '', f"{self.base_device}:{gi.session[1]}", UOp(Ops.NOOP),
+                                   vars=list(gi.vars), ins=list(gi.ins), outs=list(gi.outs),
+                                   global_size=list(cast(tuple[int], gi.global_size)) if gi.global_size is not None else None,
+                                   local_size=list(cast(tuple[int], gi.local_size)) if gi.local_size is not None else None)
+                  return ExecItem(CompiledRunner(ps, precompiled=b'', prg=prg), [self.sessions[gi.session].buffers[buf] for buf in gi.bufs])
+                case Transfer():
+                  dbuf, sbuf = self.sessions[unwrap(gi.session)].buffers[gi.buffer_num], self.sessions[gi.ssession].buffers[gi.sbuffer_num]
+                  assert dbuf.nbytes == sbuf.nbytes, f"{dbuf.nbytes} != {sbuf.nbytes}"
+                  return ExecItem(BufferXfer(dbuf.nbytes, dbuf.device, sbuf.device), [dbuf, sbuf])
             assert c.graph_num not in session.graphs, f"graph {c.graph_num} already allocated"
-            session.graphs[c.graph_num] = graph_fn(list(map(_parse_ji, c.jit_cache)), [session.buffers[buf] for buf in c.bufs], c.var_vals)
+            session.graphs[c.graph_num] = graph_fn(list(map(_parse_ji, c.jit_cache)), [self.sessions[s].buffers[i] for s,i in c.bufs], c.var_vals)
           case GraphFree(): del session.graphs[c.graph_num]
           case GraphExec():
-            r = session.graphs[c.graph_num]([session.buffers[buf] for buf in c.bufs], c.var_vals, wait=c.wait)
+            r = session.graphs[c.graph_num]([self.sessions[s].buffers[i] for s,i in c.bufs], c.var_vals, wait=c.wait)
             if r is not None: ret = str(r).encode()
     else: status, ret = http.HTTPStatus.NOT_FOUND, b"Not Found"
     return status, ret
@@ -196,77 +222,52 @@ def remote_server(port:int):
 
 # ***** frontend *****
 
-class RemoteAllocator(Allocator):
-  def __init__(self, dev:RemoteDevice):
-    self.device = dev
-    super().__init__()
+class RemoteAllocator(Allocator['RemoteDevice']):
   # TODO: ideally we shouldn't have to deal with images here
   def _alloc(self, size:int, options:BufferSpec) -> int:
-    self.device.buffer_num += 1
-    self.device.q(BufferAlloc(self.device.buffer_num, size, options))
-    return self.device.buffer_num
+    self.dev.buffer_num += 1
+    self.dev.q(BufferAlloc(self.dev.buffer_num, size, options))
+    return self.dev.buffer_num
   # TODO: options should not be here in any Allocator
-  def _free(self, opaque:int, options): self.device.q(BufferFree(opaque))
-  def _copyin(self, dest:int, src:memoryview): self.device.q(CopyIn(dest, self.device.req.h(bytes(src))))
+  def _free(self, opaque:int, options): self.dev.q(BufferFree(opaque))
+  def _copyin(self, dest:int, src:memoryview): self.dev.q(CopyIn(dest, self.dev.conn.req.h(bytes(src))))
   def _copyout(self, dest:memoryview, src:int):
-    self.device.q(CopyOut(src))
-    resp = self.device.batch_submit()
+    self.dev.q(CopyOut(src))
+    resp = self.dev.conn.batch_submit()
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
     dest[:] = resp
+  def _transfer(self, dest, src, sz, src_dev, dest_dev):
+    if dest_dev.properties.transfer_supported and src_dev.conn == dest_dev.conn:
+      dest_dev.q(Transfer(dest, src_dev.session, src))
+    else:
+      src_dev.allocator._copyout(tmp:=memoryview(bytearray(sz)), src)
+      dest_dev.allocator._copyin(dest, tmp)
 
 class RemoteProgram:
   def __init__(self, dev:RemoteDevice, name:str, lib:bytes):
     self.dev, self.name = dev, name
-    self.datahash = self.dev.req.h(lib)
+    self.datahash = self.dev.conn.req.h(lib)
     self.dev.q(ProgramAlloc(self.name, self.datahash))
     super().__init__()
   def __del__(self): self.dev.q(ProgramFree(self.name, self.datahash))
 
   def __call__(self, *bufs, global_size=None, local_size=None, vals:tuple[int, ...]=(), wait=False):
     self.dev.q(ProgramExec(self.name, self.datahash, bufs, vals, global_size, local_size, wait))
-    if wait: return float(self.dev.batch_submit())
+    if wait: return float(self.dev.conn.batch_submit())
 
-class RemoteDevice(Compiled):
-  def __init__(self, device:str):
-    self.host = getenv("HOST", "") or RemoteDevice.local_server()
-
-    # state for the connection
-    self.session = (binascii.hexlify(os.urandom(0x10)).decode(), int(device.split(":")[1]) if ":" in device else 0)
-    self.buffer_num: int = 0
-    self.graph_num: int = 0
-    self.req: BatchRequest = BatchRequest()
-
-    if DEBUG >= 1: print(f"remote with host {self.host}")
+@functools.cache
+class RemoteConnection:
+  def __init__(self, host:str):
+    if DEBUG >= 1: print(f"remote with host {host}")
     while 1:
       try:
-        self.conn = http.client.HTTPConnection(self.host, timeout=60.0)
-        self.q(GetProperties())
-        self.properties = safe_eval(ast.parse(self.batch_submit(), mode="eval").body)
+        self.conn = http.client.HTTPConnection(host, timeout=60.0)
+        self.conn.connect()
         break
       except Exception as e:
         print(e)
         time.sleep(0.1)
-    if DEBUG >= 1: print(f"remote has device {self.properties.real_device}")
-    # TODO: how to we have BEAM be cached on the backend? this should just send a specification of the compute. rethink what goes in Renderer
-    renderer = self.properties.renderer
-    if not renderer[0].startswith("tinygrad.renderer.") or not renderer[1].endswith("Renderer"): raise RuntimeError(f"bad renderer {renderer}")
-    renderer_class = fromimport(renderer[0], renderer[1])  # TODO: is this secure?
-    if not issubclass(renderer_class, Renderer): raise RuntimeError(f"renderer isn't a Renderer {renderer}")
-    graph = fromimport('tinygrad.runtime.graph.remote', 'RemoteGraph') if self.properties.graph_supported else None
-    super().__init__(device, RemoteAllocator(self), renderer_class(*renderer[2]), Compiler(), functools.partial(RemoteProgram, self), graph)
-
-  def __del__(self):
-    # TODO: this is never being called
-    # TODO: should close the whole session
-    with contextlib.suppress(ConnectionRefusedError, http.client.CannotSendRequest, http.client.RemoteDisconnected): self.batch_submit()
-
-  def q(self, x:RemoteRequest): self.req.q(replace(x, session=self.session))
-
-  @functools.cache
-  @staticmethod
-  def local_server():
-    multiprocessing.Process(target=remote_server, args=(6667,), name="MainProcess", daemon=True).start()
-    return "127.0.0.1:6667"
+    self.req: BatchRequest = BatchRequest()
 
   def batch_submit(self):
     data = self.req.serialize()
@@ -277,5 +278,39 @@ class RemoteDevice(Compiled):
       ret = response.read()
     self.req = BatchRequest()
     return ret
+
+class RemoteDevice(Compiled):
+  def __init__(self, device:str):
+    self.conn: RemoteConnection = RemoteConnection(getenv("HOST", "") or RemoteDevice.local_server())
+
+    # state for the connection
+    self.session = (binascii.hexlify(os.urandom(0x10)).decode(), int(device.split(":")[1]) if ":" in device else 0)
+    self.buffer_num: int = 0
+    self.graph_num: int = 0
+
+    self.q(GetProperties())
+    self.properties = safe_eval(ast.parse(self.conn.batch_submit(), mode="eval").body)
+    if DEBUG >= 1: print(f"remote has device {self.properties.real_device}")
+    # TODO: how to we have BEAM be cached on the backend? this should just send a specification of the compute. rethink what goes in Renderer
+    renderer = self.properties.renderer
+    if not renderer[0].startswith("tinygrad.renderer.") or not renderer[1].endswith("Renderer"): raise RuntimeError(f"bad renderer {renderer}")
+    renderer_class = fromimport(renderer[0], renderer[1])  # TODO: is this secure?
+    if not issubclass(renderer_class, Renderer): raise RuntimeError(f"renderer isn't a Renderer {renderer}")
+    graph_supported, graph_multi = self.properties.graph_supported, self.properties.graph_supports_multi
+    graph = fromimport('tinygrad.runtime.graph.remote', f"Remote{'Multi' if graph_multi else ''}Graph") if graph_supported else None
+    super().__init__(device, RemoteAllocator(self), renderer_class(*renderer[2]), Compiler(), functools.partial(RemoteProgram, self), graph)
+
+  def __del__(self):
+    # TODO: this is never being called
+    # TODO: should close the whole session
+    with contextlib.suppress(ConnectionRefusedError, http.client.CannotSendRequest, http.client.RemoteDisconnected): self.conn.batch_submit()
+
+  def q(self, x:RemoteRequest): self.conn.req.q(replace(x, session=self.session))
+
+  @functools.cache
+  @staticmethod
+  def local_server():
+    multiprocessing.Process(target=remote_server, args=(6667,), name="MainProcess", daemon=True).start()
+    return "127.0.0.1:6667"
 
 if __name__ == "__main__": remote_server(getenv("PORT", 6667))
