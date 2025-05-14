@@ -105,7 +105,7 @@ class CStyleLanguage(Renderer):
   def get_kernel_modifier(self, uops:list[UOp]) -> str: return ""
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     if self.device == "METAL":
-      prg = "#version 450\nlayout(local_size_x = 1) in;\nlayout(set = 0, binding = 0) buffer DataBuffer {\nint data0[];\n};\nvoid main() {\n" + ''.join(['\n'.join(kernel), "\n}"])
+      prg = "#version 450\nlayout(local_size_x = 1) in;\nlayout(set = 0, binding = 0) buffer DataBuffer {\nfloat data0[];\n};\nvoid main() {\n" + ''.join(['\n'.join(kernel), "\n}"])
       return prg
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
     buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
