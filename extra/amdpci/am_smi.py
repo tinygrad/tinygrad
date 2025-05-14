@@ -182,7 +182,7 @@ class SMICtx:
     self.prev_terminal_width, self.prev_terminal_height = terminal_width, terminal_height
 
     padding = 8
-    col_size = (terminal_width) // 2 - padding
+    col_size = (terminal_width) // 2 - padding - 2
     activity_line_width = 50 if terminal_width > 170 else \
                          (30 if terminal_width > 130 else \
                          (16 if terminal_width > 92 else \
@@ -192,7 +192,7 @@ class SMICtx:
     dev_content = []
     for dev, metrics in dev_metrics.items():
       if dev.pci_state != "D0":
-        dev_content.append([f"{colored('(sleep)', 'yellow')} {bold(dev.pcibus)}: {self.lspci[dev.pcibus[5:]]}"] +
+        dev_content.append([f"{colored('(sleep)', 'yellow')} {bold(dev.pcibus)}: {trim(self.lspci[dev.pcibus[5:]], col_size - 20)}"] +
                            [pad(f"PCI State: {dev.pci_state}", col_size)])
         continue
 
