@@ -324,9 +324,16 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     except ValueError: return uop  # give up if we cannot parse the valid
     bounds[expr][int(is_upper)] = c
 
-  # simplify uop given that valid is True
   for expr,v in bounds.items():
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
+    for e in list(expr.toposort())[:-1]:
+      if (sub_expr_bounds:=bounds.get(e)) is None: continue
+      new_expr = expr.substitute({e:UOp.variable("fake", *sub_expr_bounds, dtype=e.dtype)}).simplify()
+      v0, v1 = (max(v0, new_expr.vmin), min(v1, new_expr.vmax))
+    bounds[expr] = (v0, v1)
+
+  # simplify uop given that valid is True
+  for expr,(v0, v1) in bounds.items():
     # some expr has lower bound > upper bound -> valid is an empty set and we return None
     if v0 > v1: return None
     # whole node became a const

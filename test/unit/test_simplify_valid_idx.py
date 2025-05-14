@@ -79,6 +79,14 @@ class TestValidIdxSimplification(unittest.TestCase):
     valid = (alu0 < 57) & (alu0 >= 1)
     self.assertIsNone(simplify_valid(valid))
 
+  def test_valid_bounds_valid(self):
+    gidx0 = Special("gidx0", 16)
+    ridx0 = Range(0, 16)
+    valid = (5<=gidx0) & ((gidx0+ridx0)<10)
+    idx = (gidx0+ridx0+11)%16
+    load = get_gated_load_uop(valid, idx)
+    self.check(load, "((gidx0+ridx0)+-5)", "(((gidx0<5)!=True)&((gidx0+ridx0)<10))")
+
   def test_valid_order_matters1(self):
     ridx0 = Range(0, 2)
     v0 = ridx0<1
