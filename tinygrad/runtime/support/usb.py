@@ -174,7 +174,7 @@ class ASM24Controller:
 
     masked_address, offset = address & 0xFFFFFFFC, address & 0x3
     assert size + offset <= 4 and (value is None or value >> (8 * size) == 0)
-    self._pci_cache[masked_address] = value if size == 4 and fmt_type == 0x60 else None
+    self._pci_cache[address] = value if size == 4 and fmt_type == 0x60 else None
 
     return ([WriteOp(0xB220, struct.pack('>I', value << (8 * offset)), ignore_cache=False)] if value is not None else []) + \
       [WriteOp(0xB218, struct.pack('>I', masked_address), ignore_cache=False), WriteOp(0xB21c, struct.pack('>I', address>>32), ignore_cache=False),
