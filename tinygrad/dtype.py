@@ -130,7 +130,7 @@ class dtypes:
   uint32: Final[DType] = DType.new(6, 4, "unsigned int", 'I')
   int64: Final[DType] = DType.new(7, 8, "long", 'q')
   uint64: Final[DType] = DType.new(8, 8, "unsigned long", 'Q')
-  fp8e4m3: Final[DType] = DType.new(9, 1, "float8_e4m3", None)
+  fp8e4m3: Final[DType] = DType.new(9, 1, "float8_e4m3fn", None) # fp8e4m3 without infinity is used on CUDA
   fp8e5m2: Final[DType] = DType.new(10, 1, "float8_e5m2", None)
   float16: Final[DType] = DType.new(11, 2, "half", 'e')
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16

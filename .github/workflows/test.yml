@@ -263,6 +263,8 @@ jobs:
         DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
         DEBUG=2 EMULATE_CUDA=1 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
         DEBUG=2 EMULATE_CUDA_SM75=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
+        DEBUG=2 EMULATE_CUDA_SM89=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOpsFp8s.test_gemm_fp8e4m3
+        DEBUG=2 EMULATE_CUDA_SM89=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOpsFp8s.test_gemm_fp8e5m2
         PYTHONPATH="." DEBUG=2 EMULATE_CUDA=1 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
         PYTHONPATH="." DEBUG=2 EMULATE_CUDA=1 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test emulated INTEL OpenCL tensor cores
