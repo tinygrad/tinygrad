@@ -116,7 +116,7 @@ class CStyleLanguage(Renderer):
     print("RORY KERNEL =",kernel)
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
-  def render_cast(self, dt:DType, val: str) -> str: return f"({self.render_dtype(dt)})({val})"
+  def render_cast(self, dt:DType, val: str) -> str: return f"{self.render_dtype(dt)}({val})"
   def render_dtype(self, dt:DType, mutable=True) -> str:
     if isinstance(dt, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     if isinstance(dt, PtrDType):
@@ -294,7 +294,7 @@ class MetalRenderer(CStyleLanguage):
   arg_int_prefix = "constant int&"
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
-  code_for_workitem = {"g": lambda x: f"gid.{chr(120+int(x))}", "l": lambda x: f"lid.{chr(120+int(x))}"}
+  code_for_workitem = {"g": lambda x: f"int(gl_GlobalInvocationID.{chr(120+int(x))})", "l": lambda x: f"lid.{chr(120+int(x))}"}
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   #type_map = {dtypes.bfloat16: "bfloat"}
