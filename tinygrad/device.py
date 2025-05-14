@@ -96,7 +96,7 @@ class MultiBuffer:
   def ref(self, cnt):
     for b in self.bufs: b.ref(cnt)
     return self
-  def is_allocated(self): return all([x.is_allocated() for x in self.bufs])
+  def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,

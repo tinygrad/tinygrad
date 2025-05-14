@@ -2,7 +2,7 @@ from typing import TypeVar, Generic, Callable, Union, cast, Optional, Any
 import functools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap
-from tinygrad.device import Buffer, Compiled, Device
+from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.ops import UOp, Variable, sym_infer, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -211,9 +211,9 @@ def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
   names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
   if len(unrealized_tensors := [x for x in tensors if not x.lazydata.is_realized]): Tensor.realize(*unrealized_tensors)
-  # TODO: should we be unpacking multi here?
+  # TODO: should we be unpacking multi here? should we unpack MultiBuffer?
   lbs: list[UOp] = flatten([t.lazydata.src if t.lazydata.op is Ops.MULTI else [t.lazydata] for t in tensors])
-  input_buffers: list[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
+  input_buffers: list[Buffer|MultiBuffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
   assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
   st_varval_dtype_device = [(*unwrap(lb.st).unbind(), lb.dtype, lb.device) for lb in lbs]
   var_vals = merge_dicts([x[1] for x in st_varval_dtype_device] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
