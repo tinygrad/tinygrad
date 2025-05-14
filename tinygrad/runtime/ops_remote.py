@@ -14,7 +14,7 @@ from tinygrad.dtype import DTYPES_DICT, dtypes
 from tinygrad.ops import UOp, Ops, Variable, sint
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.engine.realize import CompiledRunner, BufferXfer
 from tinygrad.device import Compiled, Buffer, Allocator, Compiler, Device, BufferSpec
 from tinygrad.runtime.graph.cpu import CPUGraph
 
@@ -75,7 +75,7 @@ class GraphComputeItem:
 @dataclass(frozen=True)
 class GraphAlloc(RemoteRequest):
   graph_num: int
-  jit_cache: tuple[GraphComputeItem, ...]
+  jit_cache: tuple[GraphComputeItem|Transfer, ...]
   bufs: tuple[tuple[tuple[str, int], int], ...]
   var_vals: dict[Variable, int]
 
@@ -191,13 +191,19 @@ class RemoteHandler:
             if r is not None: ret = str(r).encode()
           case GraphAlloc():
             graph_fn: Callable = unwrap(dev.graph)
-            def _parse_ji(gi: GraphComputeItem):
-              prg = self.sessions[gi.session].programs[(gi.name, gi.datahash)]
-              ps = ProgramSpec(gi.name, '', f"{self.base_device}:{gi.session[1]}", UOp(Ops.NOOP),
-                               vars=list(gi.vars), ins=list(gi.ins), outs=list(gi.outs),
-                               global_size=list(cast(tuple[int], gi.global_size)) if gi.global_size is not None else None,
-                               local_size=list(cast(tuple[int], gi.local_size)) if gi.local_size is not None else None)
-              return ExecItem(CompiledRunner(ps, precompiled=b'', prg=prg), [self.sessions[gi.session].buffers[buf] for buf in gi.bufs])
+            def _parse_ji(gi: GraphComputeItem|Transfer):
+              match gi:
+                case GraphComputeItem():
+                  prg = self.sessions[gi.session].programs[(gi.name, gi.datahash)]
+                  ps = ProgramSpec(gi.name, '', f"{self.base_device}:{gi.session[1]}", UOp(Ops.NOOP),
+                                   vars=list(gi.vars), ins=list(gi.ins), outs=list(gi.outs),
+                                   global_size=list(cast(tuple[int], gi.global_size)) if gi.global_size is not None else None,
+                                   local_size=list(cast(tuple[int], gi.local_size)) if gi.local_size is not None else None)
+                  return ExecItem(CompiledRunner(ps, precompiled=b'', prg=prg), [self.sessions[gi.session].buffers[buf] for buf in gi.bufs])
+                case Transfer():
+                  dbuf, sbuf = self.sessions[unwrap(gi.session)].buffers[gi.buffer_num], self.sessions[gi.ssession].buffers[gi.sbuffer_num]
+                  assert dbuf.nbytes == sbuf.nbytes, f"{dbuf.nbytes} != {sbuf.nbytes}"
+                  return ExecItem(BufferXfer(dbuf.nbytes, dbuf.device, sbuf.device), [dbuf, sbuf])
             assert c.graph_num not in session.graphs, f"graph {c.graph_num} already allocated"
             session.graphs[c.graph_num] = graph_fn(list(map(_parse_ji, c.jit_cache)), [self.sessions[s].buffers[i] for s,i in c.bufs], c.var_vals)
           case GraphFree(): del session.graphs[c.graph_num]

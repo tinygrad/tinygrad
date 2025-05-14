@@ -1,8 +1,8 @@
 from tinygrad.ops import Variable
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, GraphException
-from tinygrad.engine.realize import CompiledRunner, ExecItem
+from tinygrad.engine.realize import CompiledRunner, BufferXfer, ExecItem
 from tinygrad.device import Device, Buffer
-from tinygrad.runtime.ops_remote import RemoteDevice, GraphComputeItem, GraphAlloc, GraphFree, GraphExec
+from tinygrad.runtime.ops_remote import RemoteDevice, GraphComputeItem, Transfer, GraphAlloc, GraphFree, GraphExec
 from tinygrad.helpers import unwrap, flatten, dedup, all_same
 from typing import cast
 
@@ -13,11 +13,17 @@ class RemoteGraph(GraphRunner):
     if not all_same([d.conn for d in self.devices]): raise GraphException(f"Cross-host remote graph is not supported ({self.devices})")
     self.iids = sorted(self.input_replace.values())
     def _process_ji(ji: ExecItem):
-      assert isinstance(ji.prg, CompiledRunner), f'Only compiled runners are supported: {ji.prg}'
-      return GraphComputeItem(ji.prg.dev.session, ji.prg._prg.name, ji.prg._prg.datahash,
-                              tuple(unwrap(buf)._buf for buf in ji.bufs), tuple(ji.prg.p.vars), tuple(ji.prg.p.ins), tuple(ji.prg.p.outs),
-                              tuple(ji.prg.p.global_size) if ji.prg.p.global_size is not None else None,
-                              tuple(ji.prg.p.local_size) if ji.prg.p.local_size is not None else None)
+      match ji.prg:
+        case CompiledRunner():
+          return GraphComputeItem(ji.prg.dev.session, ji.prg._prg.name, ji.prg._prg.datahash,
+                                  tuple(unwrap(buf)._buf for buf in ji.bufs), tuple(ji.prg.p.vars), tuple(ji.prg.p.ins), tuple(ji.prg.p.outs),
+                                  tuple(ji.prg.p.global_size) if ji.prg.p.global_size is not None else None,
+                                  tuple(ji.prg.p.local_size) if ji.prg.p.local_size is not None else None)
+        case BufferXfer():
+          dest, src = ji.bufs[0:2]
+          assert dest is not None and src is not None, ji
+          return Transfer(session=cast(RemoteDevice, Device[dest.device]).session, buffer_num=dest._buf,
+                          ssession=cast(RemoteDevice, Device[src.device]).session, sbuffer_num=src._buf)
     self.graph_num = self.devices[0].graph_num
     self.devices[0].graph_num += 1
     self.devices[0].q(GraphAlloc(self.graph_num, tuple(_process_ji(ji) for ji in jit_cache), self.map_rawbufs(rawbufs), var_vals))
