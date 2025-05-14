@@ -1405,16 +1405,15 @@ class Tensor(SimpleMathTrait):
     if step <= 0: raise RuntimeError(f'step must be >0 but got {step=}')
     if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
 
-    # n_windows = (self.shape[dim] - size) // step + 1
-    # slices = [self[(slice(None),)*dim + (slice(i*step, i*step+size),)] for i in range(n_windows)]
-    # ret = Tensor.stack(*slices, dim=dim)
-    # return ret
-
     n_windows = (self.shape[dim] - size) // step + 1
-    idx = Tensor.arange(n_windows).unsqueeze(1) * step + Tensor.arange(size)
-    idx = idx.reshape([1]*dim + [n_windows * size] + [1]*(self.ndim-dim-1)).expand(self.shape[:dim] + (n_windows * size,) + self.shape[dim+1:])
-    return self.gather(dim, idx).reshape(self.shape[:dim] + (n_windows, size) + self.shape[dim+1:])
+    slices = [self[(slice(None),)*dim + (slice(i*step, i*step+size),)] for i in range(n_windows)]
+    ret = Tensor.stack(*slices, dim=dim)
+    return ret
 
+    # n_windows = (self.shape[dim] - size) // step + 1
+    # idx_shp1, idx_shp2, final_shp = [1]*dim + [n_windows * size] + [1]*(self.ndim-dim-1), self.shape[:dim] + (n_windows * size,) + self.shape[dim+1:], self.shape[:dim] + (n_windows, size) + self.shape[dim+1:]
+    # idx = Tensor.arange(n_windows).unsqueeze(1) * step + Tensor.arange(size)
+    # return self.gather(dim, idx.reshape(idx_shp1).expand(idx_shp2)).reshape(final_shp)
 
   def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
     """
