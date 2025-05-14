@@ -120,6 +120,8 @@ jobs:
       run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/test_tiny.py
     - name: UsbGPU copy speeds
       run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
+    - name: UsbGPU openpilot test
+      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB AMD_LLVM=1 NOLOCALS=0 IMAGE=0 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)
@@ -321,7 +323,7 @@ jobs:
       run: NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - name: Run 10 MLPerf Bert training steps (6 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
-      run: NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
+      run: NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 FUSE_ARANGE=1 FUSE_ARANGE_UINT=0 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA Training)
@@ -517,7 +519,7 @@ jobs:
       run: AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - name: Run 10 MLPerf Bert training steps (6 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
-      run: AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
+      run: AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 FUSE_ARANGE=1 FUSE_ARANGE_UINT=0 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)

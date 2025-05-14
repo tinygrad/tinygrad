@@ -94,11 +94,7 @@ class DSPBuffer:
   def __init__(self, va_addr:int, size:int, share_info, offset:int=0):
     self.va_addr, self.size, self.share_info, self.offset = va_addr, size, share_info, offset
 
-class DSPAllocator(Allocator):
-  def __init__(self, dev:DSPDevice):
-    self.dev = dev
-    super().__init__()
-
+class DSPAllocator(Allocator['DSPDevice']):
   def _alloc(self, size:int, options:BufferSpec):
     b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
     share_info = qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)
