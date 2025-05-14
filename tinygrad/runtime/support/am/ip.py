@@ -366,7 +366,6 @@ class AM_SDMA(AM_IP):
 
 class AM_PSP(AM_IP):
   def init_sw(self):
-    from tinygrad.runtime.support.usb import USBMMIOInterface
     self.reg_pref = "regMP0_SMN_C2PMSG" if self.adev.ip_ver[am.MP0_HWIP] < (14,0,0) else "regMPASP_SMN_C2PMSG"
 
     msg1_region = next((reg for reg in self.adev.dma_regions or [] if reg[1].nbytes >= (512 << 10)), None)

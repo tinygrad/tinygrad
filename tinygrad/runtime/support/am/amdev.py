@@ -243,9 +243,8 @@ class AMMemoryManager:
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)
 
 class AMDev:
-  def __init__(self, devfmt, vram_bar:MMIOInterface, doorbell_bar:MMIOInterface, mmio_bar:MMIOInterface):
-    self.devfmt = devfmt
-    self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
+  def __init__(self, devfmt, vram:MMIOInterface, doorbell:MMIOInterface, mmio:MMIOInterface, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
+    self.devfmt, self.vram, self.doorbell64, self.mmio, self.dma_regions = devfmt, vram, doorbell, mmio, dma_regions
 
     os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
 
