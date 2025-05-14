@@ -174,6 +174,9 @@ class Tensor(SimpleMathTrait):
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
       self.lazydata = data
 
+    if requires_grad and not dtypes.is_float(self.dtype):
+      raise RuntimeError("Only tensors with floating point dtype can require gradients.")
+
     # add to all_tensors after construction succeeds
     all_tensors.add(weakref.ref(self))
   def __del__(self): all_tensors.discard(weakref.ref(self))
@@ -189,6 +192,8 @@ class Tensor(SimpleMathTrait):
     return lhs._apply_uop(fxn, rhs)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
+    if requires_grad and not dtypes.is_float(self.dtype):
+      raise RuntimeError("Only tensors with floating point dtype can require gradients.")
     self.requires_grad = requires_grad
     return self
 
