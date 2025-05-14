@@ -106,6 +106,21 @@ class CStyleLanguage(Renderer):
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     if self.device == "METAL":
       prg = "#version 450\nlayout(local_size_x = 1) in;\nlayout(set = 0, binding = 0) buffer DataBuffer {\nfloat data0[];\n};\nvoid main() {\n" + ''.join(['\n'.join(kernel), "\n}"])
+
+      #todo ....
+      lines = prg.splitlines()
+      shared_lines = [line for line in lines if line.strip().startswith("shared ")]
+      lines = [line for line in lines if not line.strip().startswith("shared ")]
+      for i, line in enumerate(lines):
+          if line.strip().startswith("void main()"):
+              insert_index = i
+              break
+      for shared_line in reversed(shared_lines):
+          lines.insert(insert_index, shared_line)
+      prg = "\n".join(lines)
+      prg = prg.replace("((bool(lidx0))!=1)","lidx0==0")
+      #
+
       return prg
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
     buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
