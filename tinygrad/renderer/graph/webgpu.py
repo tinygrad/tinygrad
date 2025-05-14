@@ -61,9 +61,9 @@ class WebGPUJSRenderer(GraphRenderer):
         arg_names.append(f"bufArg_{i}")
         copyins.append(copyin((dest_buf:=self.bufs[uop.base.buffer]), f"bufArg_{i}"))
         validators.append(f"if (bufArg_{i}.byteLength !== {dest_buf}.size) throw new Error(`bufArg_{i} does not have expected number of bytes`);")
-      elif uop.op is Ops.BIND: # from symbolic variable input
+      elif uop.op is Ops.DEFINE_VAR: # from symbolic variable input
         arg_names.append(f"intArg_{i}")
-        sym_bufs[uop.unbind()[0]] = f"input_{i}"
+        sym_bufs[uop] = f"input_{i}"
         copyins.append(copyin(f"input_{i}", f'new Int32Array([{f"intArg_{i}"}])'))
 
     # render outputs

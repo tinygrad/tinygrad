@@ -18,21 +18,22 @@ def is_partial_write(ast:UOp, i:int) -> bool:
 # Common logic regardless of render target (e.g. JavaScript, C)
 class GraphRenderer(Renderer):
   def __init__(self, fxn:Callable, *args, tensor_names:dict[str, Tensor]|None=None, **kwargs):
-    assert len(get_state_dict(kwargs)) == 0 and all(not isinstance(val, Variable) for val in kwargs.values()), "positional Tensors/Variables only"
+    assert len(get_state_dict(args)) == len([x for x in args if isinstance(x, Tensor)]) and len(get_state_dict(kwargs)) == 0, \
+      "All Tensor (and Variable) inputs must be positional arguments, whose order will match the order of the exported function's arguments."
     buf_names = {buf: k for k,v in tensor_names.items() if (buf:=v.realize().lazydata.base.realized) is not None} if tensor_names else {}
     # ensure random seeds are on-device
     Tensor.randn(1).realize()
 
     # construct the kernel graph
     # designate the input and output nodes
-    self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
+    self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x.unbind()[0]) for x in args if isinstance(x, (Tensor, Variable))]
     # TODO: assert no realizes happen here in function call, only kernelize is allowed
-    out_dict = get_state_dict(fxn(*args, **kwargs))
-    assert len(out_dict) > 0, "The function argument must return at least one Tensor so that the kernel graph can be accessed."
-    assert all(k=="" or k.isdigit() for k in out_dict.keys()), "All returned Tensor(s) must be the return value or elements of a returned list/tuple."
+    ret_tensors: list[Tensor] = [*filter(lambda t: isinstance(t, Tensor), ret if isinstance(ret := fxn(*args, **kwargs), (list, tuple)) else [ret])]
+    assert (l:=len(ret_tensors)) and l == len(get_state_dict(ret)), "One or more Tensors must be returned as a singleton or elements of a list/tuple."
 
     # linearize the kernel graph
-    schedule, _, becomes_map = create_schedule_with_vars(UOp.sink(*(out_uops:=[t.kernelize().lazydata for _, t in sorted(out_dict.items())])))
+    schedule, var_vals, becomes_map = create_schedule_with_vars(UOp.sink(*(out_uops:=[t.kernelize().lazydata for t in ret_tensors])))
+    assert set(var_vals.keys()) == set(u for u in self.inputs if u.op is Ops.DEFINE_VAR), "Ensure all Variables are provided as positional arguments."
     self.outputs: list[UOp] = [becomes_map[uop.base] for uop in out_uops]
 
     # render kernels, render buffer names
