@@ -18,11 +18,11 @@ class RemoteGraph(GraphRunner):
                               tuple(ji.prg.p.local_size) if ji.prg.p.local_size is not None else None)
     self.graph_num = self.devices[0].graph_num
     self.devices[0].graph_num += 1
-    self.devices[0].req.q(GraphAlloc(self.graph_num, tuple(_process_ji(ji) for ji in jit_cache), tuple(rawbufs[i]._buf for i in self.iids), var_vals))
+    self.devices[0].q(GraphAlloc(self.graph_num, tuple(_process_ji(ji) for ji in jit_cache), tuple(rawbufs[i]._buf for i in self.iids), var_vals))
 
   def __del__(self):
-    self.devices[0].req.q(GraphFree(self.graph_num))
+    self.devices[0].q(GraphFree(self.graph_num))
 
   def __call__(self, rawbufs: list[Buffer], var_vals: dict[Variable, int], wait=False):
-    self.devices[0].req.q(GraphExec(self.graph_num, tuple(rawbufs[i]._buf for i in self.iids), var_vals, wait))
+    self.devices[0].q(GraphExec(self.graph_num, tuple(rawbufs[i]._buf for i in self.iids), var_vals, wait))
     if wait: return float(self.devices[0].batch_submit())

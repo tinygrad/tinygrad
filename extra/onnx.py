@@ -290,13 +290,8 @@ def get_onnx_ops():
   def HardSigmoid(x:Tensor, alpha:float=0.2, beta:float=0.5): return (alpha*x + beta).clip(0, 1)
   def Gelu(x:Tensor, approximate:str|None=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
   def BiasGelu(x: Tensor, bias: Tensor, approximate: str | None = None) -> Tensor: return Gelu(x + bias, approximate)
-  def FastGelu(x:Tensor, bias:Tensor|None=None):
-    # this is tanh approximated
-    return (x + bias).gelu() if bias is not None else x.gelu()
-  # TODO: fix this
-  def PRelu(X:Tensor, slope:Tensor):
-    slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope
-    return (X > 0).where(X, X * slope)
+  def FastGelu(x:Tensor, bias:Tensor|None=None): return (x + bias).gelu() if bias is not None else x.gelu() # this is tanh approximated
+  def PRelu(X:Tensor, slope:Tensor): return (X > 0).where(X, X * slope)
   def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leaky_relu(alpha)
   def ThresholdedRelu(X:Tensor, alpha:float=1.0): return (X > alpha).where(X, 0)
   def LogSoftmax(x: Tensor, axis:int=-1): return x.log_softmax(axis)
@@ -366,7 +361,6 @@ def get_onnx_ops():
   def Shrink(x:Tensor, bias:float=0.0, lambd:float=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
   def Transpose(x:Tensor, perm:list[int]|None=None): return x.permute(order=perm or list(range(x.ndim)[::-1]))
 
-  # TODO: add test for when axes is None
   def Squeeze(data:Tensor, axes:list[int]|None=None):
     return data.squeeze() if axes is None else functools.reduce(lambda d, dim: d.squeeze(dim), sorted(axes, reverse=True), data)
   def Unsqueeze(data:Tensor, axes:list[int]): return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(axes), data)
