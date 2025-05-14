@@ -45,6 +45,15 @@ class SimpleMathTrait:
   def __mul__(self, x): return self.mul(x)
   def __truediv__(self, x): return self.div(x)
   def __floordiv__(self, x): return self.idiv(x)  # TODO: idiv is trunc div, not floordiv
+
+  def floor_divide(self, x, reverse=False):
+    if reverse: num, den = self.ufix(x), self
+    else: num, den = self, self.ufix(x)
+    assert dtypes.is_int(num.dtype) and dtypes.is_int(den.dtype)
+    zero = self.const_like(0)
+    signs_differ = ((num < zero) & (den > zero)) | ((num > zero) & (den < zero))
+    return num.idiv(den).sub(((num.mod(den) != zero) & signs_differ).where(self.const_like(1), zero))
+
   def __mod__(self, x): return self.mod(x)
   def __and__(self, x): return self.bitwise_and(x)
   def __or__(self, x): return self.bitwise_or(x)

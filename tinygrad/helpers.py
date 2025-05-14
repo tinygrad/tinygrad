@@ -41,7 +41,10 @@ def fully_flatten(l):
   return [l]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
-def ceildiv(num, amt): return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
+def ceildiv(num, amt):
+  if hasattr(num, 'op'): return -(num.floor_divide(-amt))  # XXX: isinstance(num, UOp) is circular import
+  if hasattr(amt, 'op'): return -(-amt.floor_divide(num, reverse=True))
+  return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
 # cstyle div and mod
 def cdiv(x:int, y:int) -> int: return abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else 0

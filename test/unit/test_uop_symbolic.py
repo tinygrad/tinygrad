@@ -639,6 +639,7 @@ class TestSymbolicNumeric(unittest.TestCase):
         self.assertLessEqual(v.vmin, min(values))
         self.assertGreaterEqual(v.vmax, max(values))
 
+  # TODO: negative numbers are not tested
   def test_mod_4(self): self.helper_test_numeric(lambda x: (x%4))
   def test_div_4(self): self.helper_test_numeric(lambda x: (x//4))
   def test_plus_1_div_2(self): self.helper_test_numeric(lambda x: (x+1)//2)
@@ -693,12 +694,28 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(a+b+c, var_vals) == 9
     assert sym_infer(a*b, var_vals) == 6
     assert sym_infer(a*b+c, var_vals) == 10
+
   def test_sym_infer_cdiv_cmod(self):
     a = Variable("a", -1000, 1)
     b = Variable("b", -1000, 1)
     var_vals = {a: 1, b: -1000}
     assert sym_infer(a%b, var_vals) == 1
     assert sym_infer(a//b, var_vals) == 0
+
+  def test_floor_divide(self):
+    for n in range(-5, 5):
+      for d in range(-4, 4):
+        if d == 0: continue
+        py_expected = int(n // d)
+
+        var_n = Variable('n', -1000, 1000)
+        var_d = Variable('d', -1000, 1000)
+
+        res_var_fwd = var_n.floor_divide(var_d)
+        self.assertEqual(sym_infer(res_var_fwd, {var_n: n, var_d: d}), py_expected)
+
+        res_var_rev = var_d.floor_divide(var_n, reverse=True)
+        self.assertEqual(sym_infer(res_var_rev, {var_n: n, var_d: d}), py_expected)
 
 """
 @unittest.skip("not supported on uops yet")
