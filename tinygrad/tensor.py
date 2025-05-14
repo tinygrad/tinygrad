@@ -1410,11 +1410,6 @@ class Tensor(SimpleMathTrait):
     ret = Tensor.stack(*slices, dim=dim)
     return ret
 
-    # n_windows = (self.shape[dim] - size) // step + 1
-    # idx_shp1, idx_shp2, final_shp = [1]*dim + [n_windows * size] + [1]*(self.ndim-dim-1), self.shape[:dim] + (n_windows * size,) + self.shape[dim+1:], self.shape[:dim] + (n_windows, size) + self.shape[dim+1:]
-    # idx = Tensor.arange(n_windows).unsqueeze(1) * step + Tensor.arange(size)
-    # return self.gather(dim, idx.reshape(idx_shp1).expand(idx_shp2)).reshape(final_shp)
-
   def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
     """
     Generates coordinate matrices from coordinate vectors.
