@@ -113,7 +113,6 @@ class CStyleLanguage(Renderer):
     prg = ''.join([f"{self.kernel_prefix}void {self.get_kernel_modifier(uops)}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
-    print("RORY KERNEL =",kernel)
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
   def render_cast(self, dt:DType, val: str) -> str: return f"{self.render_dtype(dt)}({val})"
@@ -135,7 +134,6 @@ class CStyleLanguage(Renderer):
     depth = 1
     c: defaultdict[str, int] = defaultdict(int)
     name = "test"
-    print("rory uops =",uops)
     for u in uops:
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.name
@@ -161,7 +159,6 @@ class CStyleLanguage(Renderer):
         r[u] = f"{prefix}{c[prefix]}"
       
       l = cast(str, self.string_rewrite.rewrite(u, ctx=self))
-      print("rory l =",l,u.op)
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {Ops.ENDIF, Ops.ENDRANGE}: depth -= 1
@@ -294,7 +291,7 @@ class MetalRenderer(CStyleLanguage):
   arg_int_prefix = "constant int&"
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
-  code_for_workitem = {"g": lambda x: f"int(gl_GlobalInvocationID.{chr(120+int(x))})", "l": lambda x: f"lid.{chr(120+int(x))}"}
+  code_for_workitem = {"g": lambda x: f"int(gl_GlobalInvocationID.{chr(120+int(x))})", "l": lambda x: f"int(gl_LocalInvocationID.{chr(120+int(x))})"}
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   #type_map = {dtypes.bfloat16: "bfloat"}
