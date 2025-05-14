@@ -287,9 +287,9 @@ class MetalRenderer(CStyleLanguage):
   # language options
   kernel_prefix = "kernel "
   buffer_prefix = "device "
-  smem_prefix = "threadgroup "
+  smem_prefix = "shared "
   arg_int_prefix = "constant int&"
-  barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
+  barrier = "barrier();"
   float4 = "float4"
   code_for_workitem = {"g": lambda x: f"int(gl_GlobalInvocationID.{chr(120+int(x))})", "l": lambda x: f"int(gl_LocalInvocationID.{chr(120+int(x))})"}
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
