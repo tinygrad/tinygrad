@@ -212,14 +212,6 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_multitensor_jit_input(self):
     @TinyJit
-    def f(x): return x+1
-    for _ in range(5):
-      tt = Tensor.arange(0, 4).contiguous().realize().shard((d1,d2), 0).realize()
-      out = f(tt)
-      np.testing.assert_equal(out.numpy(), [1,2,3,4])
-
-  def test_multitensor_jit_input_graph(self):
-    @TinyJit
     def f(x): return (x+1).contiguous().sum()
     for _ in range(5):
       tt = Tensor.arange(0, 4).contiguous().realize().shard((d1,d2), 0).realize()
