@@ -296,9 +296,6 @@ def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
   return None
 
 view_left = merge_views+PatternMatcher([
-  # do not push masked view before unsafe pad ops
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="e"),), name="view"),
-   lambda e,view: e.contiguous().view(view.st) if any(v.mask is not None for v in view.st.views) else None),
   # view before elementwise ops
   (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.BIND}, name="e"),), name="view"),
    lambda e,view: e.replace(src=tuple(s.view(s.st+view.st) if s.op is Ops.VIEW else s.view(view.st) for s in e.src))),
@@ -419,7 +416,11 @@ pm_fuse = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="r").fuse(),
    lambda r: r.replace(src=(r.src[0].fuse(),), arg=r.arg+(True,)) if len(r.arg) == 2 else None),
 
-  # FUSE elementwise. TODO: check for PAD
+  # remove FUSE and insert CONTIGUOUS if it's an unsafe pad
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="alu"),), name="view").fuse(),
+   lambda alu, view: alu.contiguous().view(view.st) if any(v.mask is not None for v in view.st.views) else None),
+
+  # FUSE elementwise.
   (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST}, name="alu"),), name="view").fuse(),
    lambda alu, view: alu.replace(src=tuple(x.view(view.arg).fuse() for x in alu.src))),
 

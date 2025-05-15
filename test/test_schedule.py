@@ -1708,6 +1708,13 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T.sum())
 
+  def test_div_padded_arange(self):
+    x = Tensor.full((2,2), 16)
+    y = x.idiv(Tensor.linspace(2, 8, steps=4, dtype=dtypes.int).reshape(2,2)).pad(((1,1), (1,1)))
+    out = y.sum(axis=1)
+    with Context(FUSE_ARANGE=1): run_schedule(check_schedule(out, 2))
+    self.assertListEqual(out.tolist(), [0, 12, 4, 0])
+
   def test_arange_transposed_descendants(self):
     Tensor.manual_seed(0)
     x = Tensor.randint(4, 1).realize()
@@ -2003,12 +2010,9 @@ class TestSwizzle(unittest.TestCase):
   def test_unsafe_pad(self):
     x = Tensor.full((2,2), 1.0).contiguous()
     y = x*x.sum((1,)).reciprocal()
-    t = y.pad(((0,1),None)).contiguous()
-    swizzled = swizzle_rewrite(t.lazydata)
-    sched = check_schedule(swizzled, 3)
-    output_buffer = sched[-1].bufs[0]
-    run_schedule(sched)
-    self.assertListEqual(output_buffer.as_buffer().cast("f").tolist(), [0.5, 0.5, 0.5, 0.5, 0., 0.])
+    t = y.pad(((0,1),None))
+    run_schedule(check_schedule(t, 3))
+    np.testing.assert_equal(t.numpy(), [[0.5, 0.5], [0.5, 0.5], [0., 0.]])
 
 def store_val(si:ScheduleItem): return si.ast.src[0].src[2]
 zero_pm = UPat(Ops.CONST, arg=0)
