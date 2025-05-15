@@ -40,7 +40,7 @@ class TestBenchLog(unittest.TestCase):
       for event in BenchEvent:
         with KernelTimeEvent(event):
           st = time.perf_counter()
-          Tensor.rand(1024, 1024).sum().realize()
+          Tensor.rand(1024, 1024).sum().realize().item()
           wall_times.append(time.perf_counter() - st)
 
     # check event list
@@ -56,13 +56,13 @@ class TestBenchLog(unittest.TestCase):
       for event in BenchEvent:
         with KernelTimeEvent(event):
           st = time.perf_counter()
-          Tensor.rand(1024, 1024).sum().realize()
+          Tensor.rand(1024, 1024).sum().realize().item()
           wall_times.append(time.perf_counter() - st)
 
       for event in reversed(BenchEvent):
         with KernelTimeEvent(event):
           st = time.perf_counter()
-          Tensor.rand(1024, 1024).sum().realize()
+          Tensor.rand(1024, 1024).sum().realize().item()
           wall_times.append(time.perf_counter() - st)
 
     # check event list
@@ -79,12 +79,12 @@ class TestBenchLog(unittest.TestCase):
       for event in BenchEvent:
         with KernelTimeEvent(event):
           st = time.perf_counter()
-          Tensor.rand(1024, 1024).sum().realize()
+          Tensor.rand(1024, 1024).sum().realize().item()
           wall_times.append(time.perf_counter() - st)
 
         with WallTimeEvent(event):
           st = time.perf_counter()
-          Tensor.rand(1024, 1024).sum().realize()
+          Tensor.rand(1024, 1024).sum().realize().item()
           wall_times.append(time.perf_counter() - st)
 
     # check event list
@@ -99,12 +99,12 @@ class TestBenchLog(unittest.TestCase):
       for event in BenchEvent:
         with KernelTimeEvent(event):
           with WallTimeEvent(event):
-            Tensor.rand(1024, 1024).sum().realize()
+            Tensor.rand(1024, 1024).sum().realize().item()
 
       for event in BenchEvent:
         with WallTimeEvent(event):
           with KernelTimeEvent(event):
-            Tensor.rand(1024, 1024).sum().realize()
+            Tensor.rand(1024, 1024).sum().realize().item()
 
     for event in BenchEvent:
       self.assertEqual(len(_events[event]["wall"]), 2)
