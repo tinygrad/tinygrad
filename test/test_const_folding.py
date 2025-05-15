@@ -250,7 +250,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
 class TestMultiConstFolding(unittest.TestCase):
   def test_multi_const_folding_literal(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    t = Tensor.arange(16).float().realize().to(ds)
+    t = Tensor.arange(16).float().to(ds).realize()
 
     # non const folding case creates one ast on each shard
     _check_ast_count(4, t + 1)
@@ -275,9 +275,9 @@ class TestMultiConstFolding(unittest.TestCase):
 
   def test_multi_const_folding_tensor(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    t = Tensor.arange(16).float().realize().to(ds)
-    zero = Tensor.zeros(16).realize().to(ds)
-    one = Tensor.ones(16).realize().to(ds)
+    t = Tensor.arange(16).float().to(ds).realize()
+    zero = Tensor.zeros(16).to(ds).realize()
+    one = Tensor.ones(16).to(ds).realize()
 
     # const folded
     _check_ast_count(0, t + zero)
@@ -292,9 +292,9 @@ class TestMultiConstFolding(unittest.TestCase):
 
   def test_multi_todo_pow(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    t = Tensor.arange(16).float().realize().to(ds)
-    zero = Tensor.zeros(16).realize().to(ds)
-    one = Tensor.ones(16).realize().to(ds)
+    t = Tensor.arange(16).float().to(ds).realize()
+    zero = Tensor.zeros(16).to(ds).realize()
+    one = Tensor.ones(16).to(ds).realize()
 
     # TODO: fix pow folding
     _check_ast_count(0, t ** zero)
