@@ -93,6 +93,12 @@ impl<'a> Thread<'a> {
                                 sdst | (1 << (s0 & 0x1f))
                             }
                         }
+                        21 => {
+                            let s0 = s0 as i32;
+                            let ret = s0.abs();
+                            *self.scc = (ret != 0) as u32;
+                            ret as u32
+                        }
                         30 => {
                             let ret = !s0;
                             *self.scc = (ret != 0) as u32;
@@ -1686,6 +1692,7 @@ impl<'a> Thread<'a> {
             107 => self.scalar_reg[code as usize],
             EXEC => self.exec.value,
             NULL_SRC | 128 => 0,
+            253 => *self.scc as u32,
             255 => match self.simm {
                 None => {
                     let val = self.stream[self.pc_offset + 1];
