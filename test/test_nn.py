@@ -460,7 +460,6 @@ class TestNN(unittest.TestCase):
         return output if self.weight is None else output * self.weight
 
     B, T, embed_size = 4, 10, 20
-    
     torch_layer = TorchRMSNorm(embed_size)
     layer = RMSNorm(embed_size)
     layer.weight.requires_grad = True
