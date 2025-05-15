@@ -250,7 +250,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
 class TestMultiConstFolding(unittest.TestCase):
   def test_multi_const_folding_literal(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    t = Tensor.arange(16).float().realize().to(ds)
+    t = Tensor.arange(16).float().to(ds).realize()
 
     # non const folding case creates one ast on each shard
     _check_ast_count(4, t + 1)
