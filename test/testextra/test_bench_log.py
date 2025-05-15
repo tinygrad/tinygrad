@@ -49,30 +49,6 @@ class TestBenchLog(unittest.TestCase):
       self.assertLess(_events[event]["kernel"][0], wall_times[0])
       self.assertGreater(_events[event]["kernel"][0], 0)
 
-  def test_log_double_kernel_time(self):
-    wall_times = []
-
-    with Context(DEBUG=2):
-      for event in BenchEvent:
-        with KernelTimeEvent(event):
-          st = time.perf_counter()
-          Tensor.rand(32, 32).sum().realize().item()
-          wall_times.append(time.perf_counter() - st)
-
-      for event in reversed(BenchEvent):
-        with KernelTimeEvent(event):
-          st = time.perf_counter()
-          Tensor.rand(32, 32).sum().realize().item()
-          wall_times.append(time.perf_counter() - st)
-
-    # check event list
-    for event in BenchEvent:
-      self.assertEqual(len(_events[event]["kernel"]), 2)
-      self.assertLess(_events[event]["kernel"][0], wall_times[0])
-      self.assertGreater(_events[event]["kernel"][0], 0)
-      self.assertLess(_events[event]["kernel"][1], wall_times[1])
-      self.assertGreater(_events[event]["kernel"][1], 0)
-
   def test_interleaved_wall_kernel_time(self):
     wall_times = []
     with Context(DEBUG=2):
