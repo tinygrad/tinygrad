@@ -460,15 +460,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return src_axis
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
-    lbs = [self.copy_to_device(d) if self.device != d else self for d in devices]
     if axis is not None:
       if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
       # NOTE: this works for both even shards and uneven shards
       sz = self.shape[axis] // len(devices)
       sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
-      lbs = [lb.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape)))
-        for lb,sz,off in zip(lbs, sizes, itertools.accumulate(sizes, initial=0))]
-    return UOp.multi(*lbs, axis=axis)
+      lbs = [self.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape)))
+        for sz,off in zip(sizes, itertools.accumulate(sizes, initial=0))]
+    else: lbs = [self] * len(devices)
+    return UOp.multi(*[lb.copy_to_device(dev) if lb.device != dev else lb for dev,lb in zip(devices, lbs)], axis=axis)
 
   # *** from LazyBuffer ***
 
