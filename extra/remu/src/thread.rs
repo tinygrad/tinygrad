@@ -1396,9 +1396,10 @@ impl<'a> Thread<'a> {
 
             match op {
                 // load
-                54 | 118 | 255 => {
+                54 | 118 | 254 | 255 => {
                     let dwords = match op {
                         255 => 4,
+                        254 => 3,
                         118 => 2,
                         _ => 1,
                     };
@@ -1419,9 +1420,10 @@ impl<'a> Thread<'a> {
                     self.vec_reg.write64(vdst + 2, self.lds.read64(addr1));
                 }
                 // store
-                13 | 77 | 223 => {
+                13 | 77 | 222 | 223 => {
                     let dwords = match op {
                         223 => 4,
+                        222 => 3,
                         77 => 2,
                         _ => 1,
                     };
