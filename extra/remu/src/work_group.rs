@@ -2,7 +2,6 @@ use crate::helpers::{colored, DEBUG};
 use crate::state::{Register, VecDataStore, WaveValue, VGPR};
 use crate::thread::{Thread, END_PRG, SGPR_COUNT};
 use std::collections::HashMap;
-use std::ptr;
 
 pub const WAVE_SIZE: usize = 32;
 
@@ -242,9 +241,7 @@ mod test_workgroup {
         assert_eq!(ret, 0b11110);
     }
 
-    fn make_wave_slices<const X: usize>(
-        launch_bounds: [u32; 3],
-    ) -> Vec<Vec<[u32; 3]>> {
+    fn make_wave_slices<const X: usize>(launch_bounds: [u32; 3]) -> Vec<Vec<[u32; 3]>> {
         let mut threads = Vec::<[u32; 3]>::new();
         for z in 0..launch_bounds[2] {
             for y in 0..launch_bounds[1] {
@@ -258,7 +255,7 @@ mod test_workgroup {
 
     #[test]
     fn test_multi_barrier_basic() {
-        let kernel = vec![0xBFBD0000, 0xBFBD0000, END_PRG];
+        let kernel = vec![S_BARRIER, S_BARRIER, END_PRG];
         let launch_bounds = [64, 1, 1];
         let mut wg = WorkGroup::new(1, [0, 0, 0], launch_bounds, &kernel, ptr::null());
 
