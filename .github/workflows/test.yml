@@ -368,8 +368,8 @@ jobs:
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
     - name: Run GC tests
       run: PYTHONPATH="." python test/external/external_uop_gc.py
-    - name: Repo line count < 13000 lines
-      run: MAX_LINE_COUNT=13000 python sz.py
+    - name: Repo line count < 13500 lines
+      run: MAX_LINE_COUNT=13500 python sz.py
 
   fuzzing:
     name: Fuzzing
@@ -433,6 +433,7 @@ jobs:
           key: openpilot-compile
           deps: testing
           opencl: 'true'
+          llvm: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
           PYTHONPATH="." ALLOWED_KERNEL_COUNT=209 ALLOWED_READ_IMAGE=2138 ALLOWED_GATED_READ_IMAGE=29 FLOAT16=0 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
@@ -440,6 +441,8 @@ jobs:
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot fastvits model correctness (float32)
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+      - name: Test openpilot LLVM compile
+        run: PYTHONPATH="." LLVM=1 LLVMOPT=1 JIT=2 BEAM=0 IMAGE=0 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -473,7 +476,7 @@ jobs:
         run: CPU=1 PYTHONPATH=. python3 test/test_quantize_onnx.py
       - name: Run REMOTE=1 Test
         run: |
-          REMOTEDEV=CPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_jit.py
+          REMOTEDEV=CPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py
           REMOTEDEV=GPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py test/test_jit.py
           REMOTEDEV=GPU IMAGE=2 REMOTE=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py
       - name: Test Optimization Helpers
@@ -791,11 +794,11 @@ jobs:
       - name: Check Device.DEFAULT and print some source
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
-          python -c "from tinygrad import Device; assert Device.default.properties['remotedev'] == 'METAL', Device.default.properties['remotedev']"
+          python -c "from tinygrad import Device; assert Device.default.properties.real_device == 'METAL', Device.default.properties.real_device"
           DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run REMOTE=1 Test
         run: |
-          python3 -m pytest test/test_tiny.py test/test_jit.py
+          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py
 
   osxtests:
     strategy:
