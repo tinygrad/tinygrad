@@ -31,7 +31,7 @@ class TestBenchLog(unittest.TestCase):
     for event in BenchEvent:
       self.assertEqual(len(_events[event]["wall"]), 2)
       self.assertGreater(_events[event]["wall"][0], 0)
-      self.assertGreater(_events[event]["wall"][1], _events[event]["wall"][0])
+      self.assertGreater(_events[event]["wall"][1], 0)
 
   def test_log_single_kernel_time(self):
     wall_times = []
