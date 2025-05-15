@@ -26,7 +26,7 @@ struct WaveState {
     sds: HashMap<usize, VecDataStore>,
 }
 
-const SYNCS: [u32; 5] = [0xBF89FC07, 0xBFBD0000, 0xBC7C0000, 0xBF890007, 0xbFB60003];
+const SYNCS: [u32; 4] = [0xBF89FC07, 0xBC7C0000, 0xBF890007, 0xbFB60003];
 const S_BARRIER: u32 = 0xBFBD0000;
 impl<'a> WorkGroup<'a> {
     pub fn new(dispatch_dim: u32, id: [u32; 3], launch_bounds: [u32; 3], kernel: &'a Vec<u32>, kernel_args: *const u64) -> Self {
@@ -103,7 +103,7 @@ impl<'a> WorkGroup<'a> {
                 self.wave_state.insert(wave_id, WaveState { scalar_reg, scc, vec_reg, vcc, exec, pc, sds });
                 break Ok(());
             }
-            if SYNCS.contains(&self.kernel[pc]) || self.kernel[pc] >> 20 == 0xbf8 || self.kernel[pc] == 0x7E000000 {
+            if self.kernel[pc] == S_BARRIER || SYNCS.contains(&self.kernel[pc]) || self.kernel[pc] >> 20 == 0xbf8 || self.kernel[pc] == 0x7E000000 {
                 pc += 1;
                 continue;
             }
