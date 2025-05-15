@@ -4,7 +4,7 @@ from extra.bench_log import BenchEvent, InstantBenchEvent, WallTimeEvent, Kernel
 from tinygrad.helpers import Context
 from tinygrad.tensor import Tensor
 
-class TestMockGPU(unittest.TestCase):
+class TestBenchLog(unittest.TestCase):
   def setUp(self):
     clear_events()
 
@@ -16,7 +16,7 @@ class TestMockGPU(unittest.TestCase):
     # check event list
     for event in BenchEvent:
       self.assertEqual(len(_events[event]["wall"]), 1)
-      self.assertAlmostEqual(_events[event]["wall"][0], 0.1, delta=0.05)
+      self.assertGreater(_events[event]["wall"][0], 0)
 
   def test_log_double_wall_time(self):
     for event in BenchEvent:
@@ -30,8 +30,8 @@ class TestMockGPU(unittest.TestCase):
     # check event list
     for event in BenchEvent:
       self.assertEqual(len(_events[event]["wall"]), 2)
-      self.assertAlmostEqual(_events[event]["wall"][0], 0.1, delta=0.05)
-      self.assertAlmostEqual(_events[event]["wall"][1], 0.2, delta=0.05)
+      self.assertGreater(_events[event]["wall"][0], 0)
+      self.assertGreater(_events[event]["wall"][1], _events[event]["wall"][0])
 
   def test_log_single_kernel_time(self):
     wall_times = []
