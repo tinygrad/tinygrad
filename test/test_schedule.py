@@ -1649,9 +1649,8 @@ class TestIndexing(unittest.TestCase):
   def test_simple_indexing_alt(self):
     X = Tensor.arange(16).reshape(4, 4)
     xt = X[[1, 2], [1, 2]]
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      self.check_schedule(xt, 3)
-      np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [1, 2]])
+    self.check_schedule(xt, 5)
+    np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [1, 2]])
 
   def test_advanced_indexing(self):
     X = Tensor.arange(10)+1
@@ -1659,7 +1658,6 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(xt, 2)
     np.testing.assert_equal(xt.numpy(), (np.arange(10)+1)[[0]])
 
-  @unittest.expectedFailure
   def test_advanced_indexing_alt(self):
     X = Tensor.arange(6).reshape(3, 2)+1
     xt = X[[Tensor([2]), Tensor([1])]]
@@ -1669,8 +1667,7 @@ class TestIndexing(unittest.TestCase):
   def test_advanced_simple_indexing_combined(self):
     X = Tensor.arange(16).reshape(4, 4)
     xt = X[1:2, [1, 2]]
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      self.check_schedule(xt, 2)
+    self.check_schedule(xt, 4)
 
   def test_push_through_reshape(self):
     Tensor.manual_seed(0)

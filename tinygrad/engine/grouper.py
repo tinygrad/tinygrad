@@ -453,6 +453,8 @@ def fuse_arange(root:UOp):
   for u in toposort:
     for s in u.src: local_children.setdefault(s, []).append(u)
   fuse_rep: dict[UOp, UOp] = {}
+  # skip if root depends on aranges with different ndims. This can be improved
+  if any(len(set(dims)) > 1 for dims in zip(*[r.src[0].shape for r in local_arange])): return
   for r in local_arange:
     # skip if already fused
     if len(r.arg) > 2: continue
