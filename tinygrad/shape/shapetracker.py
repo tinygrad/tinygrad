@@ -102,8 +102,8 @@ class ShapeTracker:
   @property
   def var_vals(self) -> dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
 
-  def unbind(self, optional=False) -> tuple[ShapeTracker, dict[Variable, int]]:
-    unbound_views, var_vals = zip(*[v.unbind(optional=optional) for v in self.views])
+  def unbind(self) -> tuple[ShapeTracker, dict[Variable, int]]:
+    unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
     if all(len(x) == 0 for x in var_vals): return self, {}
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
 

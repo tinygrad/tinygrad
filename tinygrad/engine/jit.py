@@ -215,7 +215,7 @@ def _prepare_jit_inputs(args, kwargs):
   lbs: list[UOp] = flatten([t.lazydata.src if t.lazydata.op is Ops.MULTI else [t.lazydata] for t in tensors])
   input_buffers: list[Buffer|MultiBuffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
   assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
-  st_varval_dtype_device = [(*unwrap(lb.st).unbind(optional=True), lb.dtype, lb.device) for lb in lbs]
+  st_varval_dtype_device = [(*unwrap(lb.st).unbind(), lb.dtype, lb.device) for lb in lbs]
   var_vals = merge_dicts([x[1] for x in st_varval_dtype_device] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
   st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varval_dtype_device]
   return input_buffers, var_vals, names, st_vars_dtype_device
