@@ -1,5 +1,6 @@
 # render the kernel graph for execution outside tinygrad
 from tinygrad import Tensor, dtype
+from tinygrad.tensor import forbidden_uops
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from tinygrad.ops import UOp, Variable, Ops
@@ -8,6 +9,7 @@ from tinygrad.nn.state import get_state_dict
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner, BufferCopy, ViewOp
+from tinygrad.helpers import Context, LIMIT_REALIZE
 from typing import Callable, cast
 import itertools
 
@@ -23,15 +25,18 @@ class GraphRenderer(Renderer):
 
     # construct the kernel graph
     # designate the input and output nodes
-    self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x.unbind()[0]) for x in args if isinstance(x, (Tensor, Variable))]
-    # TODO: assert no realizes happen here in function call, only kernelize is allowed
-    ret_tensors: list[Tensor] = [*filter(lambda t: isinstance(t, Tensor), ret if isinstance(ret := fxn(*args, **kwargs), (list, tuple)) else [ret])]
-    assert (l:=len(ret_tensors)) and l == len(get_state_dict(ret)), "One or more Tensors must be returned as a singleton or elements of a list/tuple."
+    self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
+    assert len(forbidden_uops) == 0, "having GraphRenderer inside another GraphRenderer is not supported"
+    forbidden_uops.update(self.inputs)
+    with Context(LIMIT_REALIZE=1):
+      ret_tensors: list[Tensor] = [*filter(lambda t: isinstance(t, Tensor), r if isinstance(r := fxn(*args, **kwargs), (list, tuple)) else [r])]
+    forbidden_uops.clear()
+    assert (l:=len(ret_tensors)) and l == len(get_state_dict(r)), "One or more Tensors must be returned as a singleton or elements of a list/tuple."
     compute_device = ret_tensors[0].device
 
     # linearize the kernel graph
     schedule, var_vals, becomes_map = create_schedule_with_vars(UOp.sink(*(out_uops:=[t.kernelize().lazydata for t in ret_tensors])))
-    assert set(var_vals.keys()) == set(u for u in self.inputs if u.op is Ops.DEFINE_VAR), "Ensure all Variables are provided as positional arguments."
+    assert set(var_vals.keys()) == set(u.unbind()[0] for u in self.inputs if u.op is Ops.BIND), "Variables must be positional arguments."
     self.outputs: list[UOp] = [becomes_map[uop.base] for uop in out_uops]
 
     # render kernels, render buffer names
