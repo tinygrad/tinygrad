@@ -129,14 +129,11 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_fir
   q_in, q_out = Queue(), Queue()
 
   sz = (batch_size*BATCH_COUNT, 224, 224, 3)
-  if os.path.exists("/dev/shm/resnet_X"): os.unlink("/dev/shm/resnet_X")
-  shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
+  shm = shared_memory.SharedMemory(name="resnet_X_val" if val else "resnet_X_train", create=True, size=prod(sz))
   procs = []
 
   try:
-    # disk:shm is slower
-    if os.path.exists("/dev/shm/resnet_X"): X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/resnet_X")
-    else: X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
+    X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
     Y = [None] * (batch_size*BATCH_COUNT)
 
     for _ in range(cpu_count()):
