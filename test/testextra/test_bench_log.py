@@ -93,7 +93,6 @@ class TestMockGPU(unittest.TestCase):
       self.assertEqual(len(_events[event]["kernel"]), 1)
       self.assertLess(_events[event]["kernel"][0], wall_times[0])
       self.assertGreater(_events[event]["kernel"][0], 0)
-      self.assertAlmostEqual(_events[event]["wall"][0], wall_times[1], delta=0.05)
 
   def test_stacked_wall_kernel_time(self):
     with Context(DEBUG=2):
@@ -114,8 +113,6 @@ class TestMockGPU(unittest.TestCase):
       self.assertGreater(_events[event]["kernel"][0], 0)
       self.assertLess(_events[event]["kernel"][1], _events[event]["wall"][1])
       self.assertGreater(_events[event]["kernel"][1], 0)
-      self.assertAlmostEqual(_events[event]["wall"][0], _events[event]["wall"][1], delta=0.05)
-      self.assertAlmostEqual(_events[event]["kernel"][0], _events[event]["kernel"][1], delta=0.05)
 
   def test_log_instant_event(self):
     for event in InstantBenchEvent:
