@@ -76,19 +76,20 @@ def split_uop(x:UOp, sep:Ops):
     for s in x.src: yield from split_uop(s, sep)
   else: yield x
 
-def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
+def fold_unrolled_divs(divs:UOp, d: UOp, fac:UOp|None=None) -> UOp|None:
   # div pattern in unrolled arange
   # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
   seen_const, ans = [], None
   for u in split_uop(divs, Ops.ADD):
-    if fac!=1:
-      if u.op is not Ops.MUL or u.src[1].op is not Ops.CONST or u.src[1].arg != fac: return None
+    if fac is not None:
+      if u.op is not Ops.MUL or u.src[1].op is not Ops.CONST or u.src[1] != fac: return None
       u = u.src[0]
+    if u.op is Ops.CAST: u = u.src[0]
     if not (u.op is Ops.IDIV and u.src[1].op is Ops.CONST): return None
-    if denominator != u.src[1].arg: return None
+    if d != u.src[1]: return None
     if (s0:=u.src[0]).vmin < 0: return None
     # assumed CONST is the last of an ADD
-    if s0.op is Ops.ADD and s0.src[1].op is Ops.CONST and s0.src[1].op is Ops.CONST:
+    if s0.op is Ops.ADD and s0.src[1].op is Ops.CONST:
       seen_const.append(s0.src[1].arg)
       s0 = s0.src[0]
     else: seen_const.append(0)
@@ -96,10 +97,10 @@ def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
     if ans is not s0: return None
   if ans is None: return None
   # the first (denominator-len(seen_const)) terms may have been folded to 0 already
-  for i in range(denominator-len(seen_const)):
-    if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
-  if sorted(seen_const)==list(range(denominator)):
-    return fac*ans
+  for i in range(d.arg-len(seen_const)):
+    if ans is not None and 0 <= ans.vmin and ans.vmax + i < d.arg: seen_const.append(i)
+  if sorted(seen_const)==list(range(d.arg)):
+    return fac*(ans.cast(divs.dtype)) if fac is not None else ans.cast(divs.dtype)
   return None
 
 def lt_folding(x:UOp, c:int) -> UOp|None:
@@ -270,8 +271,10 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
   # *** rules from symbolic ***
   # unrolled arange div folding
-  ((UPat() + UPat()//UPat.cvar("d", vec=False)).named("divs"), lambda divs,d: fold_unrolled_divs(divs, d.arg)),
-  ((UPat() + (UPat()//UPat.cvar("d", vec=False))*UPat.cvar("c")).named("divs"), lambda divs,d,c: fold_unrolled_divs(divs, d.arg, c.arg)),
+  ((UPat() + UPat(dtype=dtypes.ints)//UPat.cvar("d", vec=False)).named("divs"), fold_unrolled_divs),
+  ((UPat() + (UPat(dtype=dtypes.ints)//UPat.cvar("d", vec=False))*UPat.cvar("fac")).named("divs"), fold_unrolled_divs),
+  ((UPat() + (UPat(dtype=dtypes.ints)//UPat.cvar("d", vec=False)).cast()).named("divs"), fold_unrolled_divs),
+  ((UPat() + (UPat(dtype=dtypes.ints)//UPat.cvar("d", vec=False)).cast()*UPat.cvar("fac")).named("divs"), fold_unrolled_divs),
   # generic lt folding
   (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   (UPat.var("x", dtypes.sints)*-1 < UPat.var("y", dtypes.sints)*-1, lambda x,y: y<x),
@@ -299,6 +302,8 @@ symbolic_flat = symbolic+PatternMatcher([
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
+  ((UPat.var("x", dtypes.ints) + UPat.var("y")).cast(dtypes.floats) * UPat.cvar("c"),
+    lambda x,y,c: x.cast(c.dtype)*c+y.cast(c.dtype)*c if not (math.isinf(c.vmin) or math.isinf(c.vmax)) else None),
 ])
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
