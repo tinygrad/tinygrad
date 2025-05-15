@@ -556,6 +556,12 @@ jobs:
       run: PYTHONPATH="." LLVM=1 DEVECTORIZE=0 python3 test/models/test_efficientnet.py
     - name: Test CPU=1 DEVECTORIZE=0
       run: CPU=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
+    - name: Run and validate MobilenetV2 for two steps
+      run: |
+        # generate quantized weights
+        PYTHONPATH=. DSP=1 QUANT=1 CNT=0 python3 examples/test_onnx_imagenet.py https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx /tmp/model.quant.onnx
+        # run with VALIDATE=1
+        PYTHONPATH=. DSP=1 DONT_REALIZE_EXPAND=1 NOOPT=1 CNT=2 DEBUG=2 VALIDATE=1 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
 
   testwebgpu:
     name: Linux (WebGPU)
