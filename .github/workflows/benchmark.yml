@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        shell: bash -o pipefail {0}
+        shell: bash -e -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -161,7 +161,7 @@ jobs:
     timeout-minutes: 30
     defaults:
       run:
-        shell: bash -o pipefail {0}
+        shell: bash -e -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -275,7 +275,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        shell: bash -o pipefail {0}
+        shell: bash -e -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -347,7 +347,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        shell: bash -o pipefail {0}
+        shell: bash -e -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -473,7 +473,7 @@ jobs:
     timeout-minutes: 30
     defaults:
       run:
-        shell: bash -o pipefail {0}
+        shell: bash -e -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -543,7 +543,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        shell: bash -o pipefail {0}
+        shell: bash -e -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
