@@ -2,7 +2,7 @@ import time, atexit, uuid
 from enum import Enum
 
 from tinygrad.device import Device
-from tinygrad.helpers import ContextVar, getenv, GlobalCounters
+from tinygrad.helpers import DEBUG, ContextVar, getenv, GlobalCounters
 
 BENCHMARK_LOG = ContextVar("BENCHMARK_LOG", "")
 
@@ -16,10 +16,14 @@ class BenchEvent(Enum):
   FULL = "full"
 class InstantBenchEvent(Enum):
   GFLOPS = "gflops"
-_events = {
-  **{event: {"wall": [], "kernel": []} for event in BenchEvent},
-  **{event: [] for event in InstantBenchEvent},
-}
+
+_events = {}
+def clear_events():
+  for event in BenchEvent:
+    _events[event] = {"wall": [], "kernel": []}
+  for event in InstantBenchEvent:
+    _events[event] = []
+clear_events()
 
 class WallTimeEvent:
   def __init__(self, event:BenchEvent):
@@ -33,6 +37,8 @@ class WallTimeEvent:
 
 class KernelTimeEvent:
   def __init__(self, event:BenchEvent):
+    if DEBUG < 2:
+      raise Exception("KernelTimeEvent should only be used in DEBUG >= 2")
     self.event = event
   def __enter__(self):
     self.start = GlobalCounters.time_sum_s
@@ -58,7 +64,7 @@ if BENCHMARK_LOG:
 
   @atexit.register
   def write_events():
-    # see if there are any events to wite
+    # see if there are any events to write
     have_events = False
     for event in _events:
       if isinstance(event, BenchEvent):
