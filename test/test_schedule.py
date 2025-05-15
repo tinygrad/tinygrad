@@ -1453,6 +1453,14 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(d, 2))
     np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:, None, :], ((0, 0), (1, 1), (0, 0)))*2)
 
+  def test_fuse_arange_pad_replicate_mode(self):
+    x = Tensor.empty(3,3,3,3, requires_grad=True)
+    y = x.pad((-1,2,2,-1), mode="replicate").sum().backward()
+    with Context(FUSE_ARANGE=1):
+      sched = check_schedule(x.grad, 3)
+    run_schedule(sched)
+    np.testing.assert_allclose(x.grad.numpy(), [[[[0.,3.,9.],[0,1.,3.],[0.,0.,0.]]]*3]*3)
+
   # TODO like openpilot with imagef
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_base_change_expand_expand(self):
