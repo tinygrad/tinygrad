@@ -121,7 +121,7 @@ def copy_multi(multi:UOp, device:UOp):
   return functools.reduce(operator.add, llbs)
 
 def assign_multi(dest:UOp, src:UOp):
-  assert dest.axis == src.axis, f"axis must match in assign {dest.axis} != {src.axis}"
+  if dest.axis != src.axis: raise RuntimeError(f"axis must match in assign {dest.axis} != {src.axis}")
   return UOp.multi(*[x.assign(y) for x,y in zip(dest.src, src.src)], axis=src.axis)
 
 def passthrough_multi(root:UOp, multi:UOp): return UOp.multi(*[root.replace(src=(m,)) for m in multi.src], axis=multi.axis)
