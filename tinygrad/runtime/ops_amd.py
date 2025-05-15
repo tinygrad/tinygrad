@@ -463,7 +463,9 @@ class AMDProgram(HCQProgram):
                      base=self.lib_gpu.va_addr)
 
   def __del__(self):
-    if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))
+    if hasattr(self, 'lib_gpu'):
+      x = BufferSpec(cpu_access=True, nolru=True)
+      self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, x)
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
