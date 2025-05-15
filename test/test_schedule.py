@@ -1453,6 +1453,15 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(d, 2))
     np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:, None, :], ((0, 0), (1, 1), (0, 0)))*2)
 
+  def test_fuse_arange_pad_replicate_mode(self):
+    x = Tensor.empty(3,3,3,3, requires_grad=True)
+    y = x.pad((-1,2,2,-1), mode="replicate")
+    dx = y.sum().gradient(x)[0]
+    with Context(FUSE_ARANGE=1):
+      sched = check_schedule(dx, 3)
+    run_schedule(sched)
+    np.testing.assert_allclose(dx.numpy(), [[[[0.,3.,9.],[0,1.,3.],[0.,0.,0.]]]*3]*3)
+
   # TODO like openpilot with imagef
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_base_change_expand_expand(self):
@@ -1649,9 +1658,8 @@ class TestIndexing(unittest.TestCase):
   def test_simple_indexing_alt(self):
     X = Tensor.arange(16).reshape(4, 4)
     xt = X[[1, 2], [1, 2]]
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      self.check_schedule(xt, 3)
-      np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [1, 2]])
+    self.check_schedule(xt, 5)
+    np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [1, 2]])
 
   def test_advanced_indexing(self):
     X = Tensor.arange(10)+1
@@ -1659,7 +1667,6 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(xt, 2)
     np.testing.assert_equal(xt.numpy(), (np.arange(10)+1)[[0]])
 
-  @unittest.expectedFailure
   def test_advanced_indexing_alt(self):
     X = Tensor.arange(6).reshape(3, 2)+1
     xt = X[[Tensor([2]), Tensor([1])]]
@@ -1669,8 +1676,7 @@ class TestIndexing(unittest.TestCase):
   def test_advanced_simple_indexing_combined(self):
     X = Tensor.arange(16).reshape(4, 4)
     xt = X[1:2, [1, 2]]
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      self.check_schedule(xt, 2)
+    self.check_schedule(xt, 4)
 
   def test_push_through_reshape(self):
     Tensor.manual_seed(0)
@@ -1707,6 +1713,13 @@ class TestIndexing(unittest.TestCase):
     a = ((Tensor.arange(4,)*x).T).sum()
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T.sum())
+
+  def test_div_padded_arange(self):
+    x = Tensor.full((2,2), 16)
+    y = x.idiv(Tensor.linspace(2, 8, steps=4, dtype=dtypes.int).reshape(2,2)).pad(((1,1), (1,1)))
+    out = y.sum(axis=1)
+    with Context(FUSE_ARANGE=1): run_schedule(check_schedule(out, 2))
+    self.assertListEqual(out.tolist(), [0, 12, 4, 0])
 
   def test_arange_transposed_descendants(self):
     Tensor.manual_seed(0)
@@ -2003,12 +2016,9 @@ class TestSwizzle(unittest.TestCase):
   def test_unsafe_pad(self):
     x = Tensor.full((2,2), 1.0).contiguous()
     y = x*x.sum((1,)).reciprocal()
-    t = y.pad(((0,1),None)).contiguous()
-    swizzled = swizzle_rewrite(t.lazydata)
-    sched = check_schedule(swizzled, 3)
-    output_buffer = sched[-1].bufs[0]
-    run_schedule(sched)
-    self.assertListEqual(output_buffer.as_buffer().cast("f").tolist(), [0.5, 0.5, 0.5, 0.5, 0., 0.])
+    t = y.pad(((0,1),None))
+    run_schedule(check_schedule(t, 3))
+    np.testing.assert_equal(t.numpy(), [[0.5, 0.5], [0.5, 0.5], [0., 0.]])
 
 def store_val(si:ScheduleItem): return si.ast.src[0].src[2]
 zero_pm = UPat(Ops.CONST, arg=0)
