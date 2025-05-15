@@ -5,7 +5,7 @@ from tinygrad.helpers import DEBUG, to_mv, round_up
 from tinygrad.runtime.support.hcq import MMIOInterface
 
 class USB3:
-  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=31, max_read_len:int=4096):
+  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=31, max_read_len:int=4096*64):
     self.vendor, self.dev = vendor, dev
     self.ep_data_in, self.ep_stat_in, self.ep_data_out, self.ep_cmd_out = ep_data_in, ep_stat_in, ep_data_out, ep_cmd_out
     self.max_streams, self.max_read_len = max_streams, max_read_len
@@ -44,9 +44,9 @@ class USB3:
 
     self.buf_cmd = [(ctypes.c_uint8 * len(cmd_template))(*cmd_template) for _ in range(self.max_streams)]
     self.buf_stat = [(ctypes.c_uint8 * 64)() for _ in range(self.max_streams)]
-    self.buf_data_in = [(ctypes.c_uint8 * 0x1000)() for _ in range(self.max_streams)]
-    self.buf_data_out = [(ctypes.c_uint8 * 0x1000)() for _ in range(self.max_streams)]
-    self.buf_data_out_mvs = [to_mv(ctypes.addressof(self.buf_data_out[i]), 0x1000) for i in range(self.max_streams)]
+    self.buf_data_in = [(ctypes.c_uint8 * self.max_read_len)() for _ in range(self.max_streams)]
+    self.buf_data_out = [(ctypes.c_uint8 * self.max_read_len)() for _ in range(self.max_streams)]
+    self.buf_data_out_mvs = [to_mv(ctypes.addressof(self.buf_data_out[i]), self.max_read_len) for i in range(self.max_streams)]
 
   def _prep_transfer(self, tr, ep, stream_id, buf, length):
     tr.contents.dev_handle, tr.contents.endpoint, tr.contents.length, tr.contents.buffer = self.handle, ep, length, buf
@@ -111,6 +111,9 @@ class ReadOp: addr:int; size:int # noqa: E702
 @dataclasses.dataclass(frozen=True)
 class ScsiWriteOp: data:bytes; lba:int=0 # noqa: E702
 
+@dataclasses.dataclass(frozen=True)
+class ScsiReadOp: size:int; lba:int=0 # noqa: E702
+
 class ASM24Controller:
   def __init__(self):
     self.usb = USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04)
@@ -146,6 +149,9 @@ class ASM24Controller:
       elif isinstance(op, ScsiWriteOp):
         sectors = round_up(len(op.data), 512) // 512
         _add_req(struct.pack('>BBQIBB', 0x8A, 0, op.lba, sectors, 0, 0), 0, op.data+b'\x00'*((sectors*512)-len(op.data)))
+      elif isinstance(op, ScsiReadOp):
+        sectors = round_up(op.size, 512) // 512
+        _add_req(struct.pack('>BBQIBB', 0x88, 0, op.lba, sectors, 0, 0), op.size, None)
 
     return self.usb.send_batch(cdbs, idata, odata)
 
@@ -156,10 +162,17 @@ class ASM24Controller:
 
     for i in range(0, len(buf), 0x10000):
       self.exec_ops([ScsiWriteOp(buf[i:i+0x10000], lba), WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True)])
-      self.exec_ops([WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
+      print(self.read(0xce3a, 2))
+      print(self.read(0xce60, 1))
+      print(self.read(0xce6c, 1))
+      print(self.read(0xce6e, 2))
+      # self.exec_ops([WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
 
     if len(buf) > 0x4000:
       for i in range(4): self.exec_ops([WriteOp(0xce40 + i, b'\x00', ignore_cache=True)])
+
+  def scsi_read(self, sz:int, lba:int=0):
+    return self.exec_ops([ScsiReadOp(sz, lba)])[0]
 
   def read(self, base_addr:int, length:int, stride:int=0xff) -> bytes:
     parts = self.exec_ops([ReadOp(base_addr + off, min(stride, length - off)) for off in range(0, length, stride)])

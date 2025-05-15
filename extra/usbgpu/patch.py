@@ -11,6 +11,12 @@ def patch(input_filepath, file_hash, patches):
   if if_hash != file_hash:
     raise ValueError(f"File hash mismatch: expected {file_hash}, got {if_hash}")
 
+  # find 90 b2 51 in data
+  for i in range(len(data) - 2):
+    if data[i] == 0xb2 and data[i+1] == 0x51:
+      print(f"Found {i:x} {[hex(int(x)) for x in data[i:i+3]]}")
+  # exit(0)
+
   for offset, expected_bytes, new_bytes in patches:
     if len(expected_bytes) != len(new_bytes):
       raise ValueError("Expected bytes and new bytes must be the same length")
@@ -39,9 +45,10 @@ if not os.path.exists(file_path):
   os.system(f'unzip -o "{path}/fw.zip" "Software/AS_USB4_240417_85_00_00.bin" -d "{path}"')
 
 patches = [(0x2a0d + 1 + 4, b'\x0a', b'\x05')]
+patches += [(0x29ad + 1 + 4, b'\x09', b'\x02')]
 patched_fw = patch(file_path, file_hash, patches)
 
-vendor, device = [int(x, base=16) for x in getenv("USBDEV", "174C:2464").split(":")]
+vendor, device = [int(x, base=16) for x in getenv("USBDEV", "ADD1:0001").split(":")]
 try: dev = USB3(vendor, device, 0x81, 0x83, 0x02, 0x04)
 except RuntimeError as e:
   raise RuntimeError(f'{e}. You can set USBDEV environment variable to your device\'s vendor and device ID (e.g., USBDEV="174C:2464")') from e
