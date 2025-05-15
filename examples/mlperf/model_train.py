@@ -9,6 +9,7 @@ from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam
 
 from extra.lr_scheduler import LRSchedulerGroup
 from examples.mlperf.helpers import get_training_state, load_training_state
+from extra.bench_log import BenchEvent, WallTimeEvent
 # TODO: fix benchmark logging and use tinygrad tqdm
 from tqdm import tqdm
 
@@ -205,24 +206,25 @@ def train_resnet():
     st = time.perf_counter()
     while proc is not None:
       GlobalCounters.reset()
-      (loss, top_1), y, proc = train_step(proc[0], proc[1]), proc[2], proc[3]
+      with WallTimeEvent(BenchEvent.STEP):
+        (loss, top_1), y, proc = train_step(proc[0], proc[1]), proc[2], proc[3]
 
-      pt = time.perf_counter()
+        pt = time.perf_counter()
 
-      if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
-      try:
-        if INITMLPERF:
-          next_proc = fake_data_get(BS)
-        else:
-          next_proc = data_get(it)
-      except StopIteration:
-        next_proc = None
+        if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
+        try:
+          if INITMLPERF:
+            next_proc = fake_data_get(BS)
+          else:
+            next_proc = data_get(it)
+        except StopIteration:
+          next_proc = None
 
-      dt = time.perf_counter()
+        dt = time.perf_counter()
 
-      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-      loss, top_1 = loss.numpy().item(), top_1.numpy().item()
-      top_1_acc = top_1 / sum(yi != -1 for yi in y)
+        device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+        loss, top_1 = loss.numpy().item(), top_1.numpy().item()
+        top_1_acc = top_1 / sum(yi != -1 for yi in y)
 
       cl = time.perf_counter()
       if BENCHMARK:
@@ -1124,23 +1126,24 @@ def train_bert():
       BEAM.value = TRAIN_BEAM
       st = time.perf_counter()
       GlobalCounters.reset()
-      loss, global_norm, lr = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler,
-        train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
-        train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"], GPUS)
+      with WallTimeEvent(BenchEvent.STEP):
+        loss, global_norm, lr = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler,
+          train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
+          train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"], GPUS)
 
-      pt = time.perf_counter()
+        pt = time.perf_counter()
 
-      try:
-        next_data = next(train_it)
-      except StopIteration:
-        next_data = None
+        try:
+          next_data = next(train_it)
+        except StopIteration:
+          next_data = None
 
-      dt = time.perf_counter()
+        dt = time.perf_counter()
 
-      device_str = parameters[0].device if isinstance(parameters[0].device, str) else f"{parameters[0].device[0]} * {len(parameters[0].device)}"
-      loss = loss.item()
-      assert not math.isnan(loss)
-      lr = lr.item()
+        device_str = parameters[0].device if isinstance(parameters[0].device, str) else f"{parameters[0].device[0]} * {len(parameters[0].device)}"
+        loss = loss.item()
+        assert not math.isnan(loss)
+        lr = lr.item()
 
       cl = time.perf_counter()
       if BENCHMARK: step_times.append(cl - st)
