@@ -129,11 +129,14 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_fir
   q_in, q_out = Queue(), Queue()
 
   sz = (batch_size*BATCH_COUNT, 224, 224, 3)
-  shm = shared_memory.SharedMemory(name="resnet_X_val" if val else "resnet_X_train", create=True, size=prod(sz))
+  if os.path.exists("/dev/shm/resnet_X"): os.unlink("/dev/shm/resnet_X")
+  shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
   procs = []
 
   try:
-    X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
+    # disk:shm is slower
+    #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
+    X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/resnet_X")
     Y = [None] * (batch_size*BATCH_COUNT)
 
     for _ in range(cpu_count()):
@@ -309,7 +312,7 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
       proc = Process(target=load_unet3d_data, args=(preprocessed_dataset_dir, seed, queue_in, queue_out, X, Y))
       proc.daemon = True
       proc.start()
-
+      
       procs.append(proc)
 
     for bc in range(batch_count):
