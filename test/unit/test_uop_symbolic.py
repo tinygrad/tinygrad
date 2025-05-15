@@ -493,7 +493,8 @@ class TestSymbolic(unittest.TestCase):
 
   def test_arange_unrolled4_float_cast(self):
     ridx0 = Variable("ridx0", 0, 63)
-    expr = ((ridx0+1)//4).cast(dtypes.float)*0.75+((ridx0+2)//4).cast(dtypes.float)*0.75+((ridx0+3)//4).cast(dtypes.float)*0.75+((ridx0//4)+1).cast(dtypes.float)*0.75+-30.95
+    expr = ((ridx0+1)//4).cast(dtypes.float)*0.75+((ridx0+2)//4).cast(dtypes.float)*0.75+\
+      ((ridx0+3)//4).cast(dtypes.float)*0.75+((ridx0//4)+1).cast(dtypes.float)*0.75+-30.95
     self.helper_test_variable(expr, float("-inf"), float("inf"), "((0.75*(float)(ridx0))+-30.2)")
 
   def test_arange_unrolled4_mul(self):
