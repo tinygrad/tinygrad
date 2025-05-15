@@ -82,11 +82,11 @@ def fold_unrolled_divs(divs:UOp, d: UOp, fac:UOp|None=None) -> UOp|None:
   seen_const, ans = [], None
   for u in split_uop(divs, Ops.ADD):
     if fac is not None:
-      if u.op is not Ops.MUL or u.src[1].op is not Ops.CONST or u.src[1] != fac: return None
+      if u.op is not Ops.MUL or u.src[1].op is not Ops.CONST or u.src[1] is not fac: return None
       u = u.src[0]
     if u.op is Ops.CAST: u = u.src[0]
     if not (u.op is Ops.IDIV and u.src[1].op is Ops.CONST): return None
-    if d != u.src[1]: return None
+    if d is not u.src[1]: return None
     if (s0:=u.src[0]).vmin < 0: return None
     # assumed CONST is the last of an ADD
     if s0.op is Ops.ADD and s0.src[1].op is Ops.CONST:
