@@ -31,7 +31,7 @@ The current integration with `tinygrad` supports core model computations, data l
     def get_batches(data_dict, key, batchsize, epoch_fraction=1., cutmix_size=None):
         num_epoch_examples = len(data_dict[key]['images'])
         device = "tiny" if getenv("TINY_BACKEND") else "cuda"
-        shuffled = torch.randperm(num_epoch_examples, device=device)
+        shuffled = torch.from_numpy(np.random.permutation(num_epoch_examples)).to(device=device)
         ...
 
     def batch_cutmix(inputs, targets, patch_size):
@@ -40,6 +40,8 @@ The current integration with `tinygrad` supports core model computations, data l
             batch_permuted = torch.randperm(inputs.shape[0], device=device)
             ...
     ```
+
+    In the `get_batches` function, the `shuffled` tensor is first created on the CPU to ensure eager evaluation and avoid issues with lazy execution on the tinygrad backend. After creation, it is moved to the target device (`tiny` or `cuda`). This prevents potential infinite loops or hangs that can occur if the tensor is created directly on the `tiny` device.
 
     Additionally, there is an ongoing issue with the `batch_crop` function causing a maximum recursion depth error, which is currently under investigation. As a temporary workaround, we have modified `batch_crop` to perform a fixed center crop instead of a random crop:
 
