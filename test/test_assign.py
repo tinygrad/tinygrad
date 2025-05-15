@@ -226,9 +226,8 @@ class TestAssign(unittest.TestCase):
       def _run(self, xk:Tensor, start_pos:Variable):
         seqlen = xk.shape[1]
         if not hasattr(self, "cache_k"):
-          self.cache_k = Tensor.zeros(bsz, max_context, 1, 1).contiguous()
+          self.cache_k = Tensor.zeros(bsz, max_context, 1, 1).contiguous().realize()
         if partial_assign:
-          (self.cache_k.kernelize()) if kernelize else (self.cache_k.realize())
           cache_k = self.cache_k[:, start_pos:start_pos+seqlen, :, :].assign(xk)
         else:
           keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous() if start_pos > 0 else xk
