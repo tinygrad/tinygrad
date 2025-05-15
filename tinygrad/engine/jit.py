@@ -48,8 +48,8 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
         can_be_graphed = ji_graph_dev.graph is not None
       case BufferXfer():
         ji_graph_dev = Device[unwrap(ji.bufs[0]).device]
-        # Whitelist of devices that support graphing BufferXfers
-        can_be_graphed = ji_graph_dev.graph is not None and ji_graph_dev.device.split(":", 1)[0] in {"CUDA", "NV", "AMD", "NULL"}
+        # All *Multi*GraphRunner support graphing BufferXfers
+        can_be_graphed = ji_graph_dev.graph is not None and issubclass(graph_class(ji_graph_dev), MultiGraphRunner)
       case ViewOp(): continue # ViewOps are just ignored
       case _: can_be_graphed = False # Everything else is not graphed and flushes existing graph if it's being constructed
 
@@ -239,7 +239,7 @@ class TinyJit(Generic[ReturnType]):
     return ret
 
   def add(self, ei:ExecItem):
-    self._jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.bufs if buf is not None]))
+    self._jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.bufs if buf is not None], ei.metadata, ei.fixedvars))
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
@@ -310,7 +310,8 @@ class TinyJit(Generic[ReturnType]):
       # Exclude buffers involved in transfer ops to preserve parallelism.
       noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
       assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
-      jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
+      jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None],
+                            item.metadata, item.fixedvars) for item in jit_cache]
 
       input_replace = get_input_replace(jit_cache, input_buffers)
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
