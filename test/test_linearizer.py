@@ -134,7 +134,6 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(4,).realize()
     helper_linearizer_ast(store.sink(), [x], wanna_output=[x.numpy()+1], opts=[])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_multireduce(self):
@@ -166,7 +165,6 @@ class TestLinearizer(unittest.TestCase):
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
     self._test_no_nested_ranges(lins, [0])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_mid_dim_multireduce(self):
@@ -246,7 +244,6 @@ class TestLinearizer(unittest.TestCase):
     lins = helper_linearizer_ast(sink, [x0,x1,x2], wanna_output=[wanna_output])
     self._test_no_nested_ranges(lins, [0])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skip("this is not supported, it worked by luck")
@@ -294,7 +291,6 @@ class TestLinearizer(unittest.TestCase):
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
     self._test_no_nested_ranges(lins, [0, 1])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_partial_opt_multireduce(self):
@@ -321,7 +317,6 @@ class TestLinearizer(unittest.TestCase):
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
     self._test_no_nested_ranges(lins, [0])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_multireduce_with_parallel(self):
@@ -355,7 +350,6 @@ class TestLinearizer(unittest.TestCase):
     lins = helper_linearizer_ast(sink, [x,x_p], wanna_output=[wanna_output], opts=opts)
     self._test_no_nested_ranges(lins, [0])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_multiout_multireduce(self):
     # check how multireduce works with multioutput
     Tensor.manual_seed(0)
@@ -374,7 +368,6 @@ class TestLinearizer(unittest.TestCase):
 
     helper_linearizer_ast(sink, [x], wanna_output=[wanna_output, wanna_output/15])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_multiout_intermediate_multireduce(self):
     # check how it outputing at different stages of the multireduce works
     # TODO: Fails because the stores shapes do not match: store1.shape = (27,15,1,5) != store0.shape = (27,1,1,5)
@@ -397,7 +390,6 @@ class TestLinearizer(unittest.TestCase):
     with self.assertRaises(RuntimeError): # AST is invalid
       helper_linearizer_ast(sink, [x], wanna_output=[wanna_output0, wanna_output1])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_complete_unroll_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 3, 5, dtype=dtypes.float).realize()
@@ -413,7 +405,6 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
     helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_upcast_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(27, 3, 5, dtype=dtypes.float).realize()
@@ -429,7 +420,6 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
     helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skip("can't group with multiple reduces yet")
   def test_early_endif(self):
@@ -448,7 +438,6 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
     helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_mean_std_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
@@ -466,7 +455,6 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = x.numpy().std(axis=2, ddof=0).reshape((15,25,1,1))
     helper_linearizer_ast(sink, [x], wanna_output=[wanna_output])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_mean_std_multireduce_mid_dim(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
@@ -484,7 +472,6 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = x.numpy().std(axis=1, ddof=0).reshape((15,1,1,35))
     helper_linearizer_ast(sink, [x], wanna_output=[wanna_output])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.expectedFailure
   def test_mean_std_multireduce_multiout(self):
     # TODO: Similar error to test_multiout_intermediate_multireduce (implicit expand vs shape mismatch)
@@ -508,7 +495,7 @@ class TestLinearizer(unittest.TestCase):
     for k in lins:
       assert len([u for u in k.uops if u.op is Ops.DEFINE_ACC]) == 2, "got more than two accs (implies the kernel didn't reuse the mean reduce)"
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "ocelot/remu doesn't have multiple wave syncs yet")
+  @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "NV"}, "ocelot doesn't have multiple wave syncs yet")
   def test_var_multireduce(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(3, 27, 32, dtype=dtypes.float).realize()
@@ -531,7 +518,6 @@ class TestLinearizer(unittest.TestCase):
     y_tiny = x.var(axis=2, correction=0).reshape(3,27,1,1)
     np.testing.assert_allclose(y_tiny.numpy(), wanna_output, atol=1e-4, rtol=1e-4)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_softmax_multireduce(self):
     x = Tensor.rand(4, 32).realize()
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
@@ -660,7 +646,6 @@ class TestLinearizer(unittest.TestCase):
           ast_const(dtypes.int, -1, (1, 1)),)),)),))
     helper_linearizer_ast(ast, [t, t_max], wanna_output=[real_argmax])
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_padto_sum_multireduce(self):
     Tensor.manual_seed(0)
     N = 17
@@ -690,7 +675,6 @@ class TestLinearizer(unittest.TestCase):
     sink = UOp(Ops.SINK, src=(store,))
     helper_linearizer_ast(sink, [x], wanna_output=[(x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(N,1,1)], opts=opts)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_padto_max_multireduce(self):
     Tensor.manual_seed(0)
     N = 17
@@ -717,7 +701,6 @@ class TestLinearizer(unittest.TestCase):
     sink = UOp(Ops.SINK, src=(store,))
     helper_linearizer_ast(sink, [x], wanna_output=[(x.numpy()-x.numpy().max(axis=1, keepdims=True)).max(axis=1).reshape(N,1,1)], opts=opts)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_padto_where_multireduce(self):
     # ternary operators try to use both ridxs
 
