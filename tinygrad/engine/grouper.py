@@ -6,7 +6,7 @@ from tinygrad.codegen.lowerer import get_contraction_with_reduce, get_contractio
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY
-from tinygrad.dtype import ImageDType, dtypes
+from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.spec import type_verify, sched_spec
@@ -440,7 +440,7 @@ do_fuse = PatternMatcher([(UPat(Ops.FUSE, name="x"), do_fusion),])
 
 def fuse_arange(root:UOp):
   # skip if root is arange
-  if not FUSE_ARANGE or (dtypes.is_unsigned(root.dtype) and not getenv("FUSE_ARANGE_UINT",1)) or root.src[0].base.op is Ops.CONST: return None
+  if not FUSE_ARANGE or root.src[0].base.op is Ops.CONST: return None
   # gather all local aranges (including any fused ones)
   local_arange: list[UOp] = []
   def gate_reduce(u):
