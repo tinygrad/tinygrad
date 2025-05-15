@@ -105,9 +105,10 @@ class CStyleLanguage(Renderer):
   def get_kernel_modifier(self, uops:list[UOp]) -> str: return ""
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     if self.device == "METAL":
-      prg = "#version 450\nlayout(local_size_x = 1) in;\nlayout(set = 0, binding = 0) buffer DataBuffer {\nfloat data0[];\n};\nvoid main() {\n" + ''.join(['\n'.join(kernel), "\n}"])
+      prg = "#version 450\nlayout(set = 0, binding = 0) buffer DataBuffer {\nfloat data0[];\n};\nvoid main() {\n" + ''.join(['\n'.join(kernel), "\n}"])
 
       #todo ....
+      # moves shared vars
       lines = prg.splitlines()
       shared_lines = [line for line in lines if line.strip().startswith("shared ")]
       lines = [line for line in lines if not line.strip().startswith("shared ")]
@@ -118,7 +119,16 @@ class CStyleLanguage(Renderer):
       for shared_line in reversed(shared_lines):
           lines.insert(insert_index, shared_line)
       prg = "\n".join(lines)
+      #changes lidx0==0 thing
       prg = prg.replace("((bool(lidx0))!=1)","lidx0==0")
+      #local sizes
+      local_size = [1,1,1]
+      for o in uops: 
+        if o.op is Ops.SPECIAL:
+          if o.arg[0].startswith("lidx"):
+            local_size[int(o.arg[0][4])] = int(o.arg[1])
+      local_size_string = f"layout(local_size_x = {local_size[0]}, local_size_y = {local_size[1]}, local_size_z = {local_size[2]}) in;"
+      prg = '\n'.join([prg.splitlines()[0], local_size_string, *prg.splitlines()[1:]])
       #
 
       return prg
