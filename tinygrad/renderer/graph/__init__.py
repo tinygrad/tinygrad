@@ -1,6 +1,6 @@
 # render the kernel graph for execution outside tinygrad
 from tinygrad import Tensor, dtype
-from tinygrad.tensor import forbidden_uops
+from tinygrad.tensor import no_realize_uops
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from tinygrad.ops import UOp, Variable, Ops
@@ -9,7 +9,7 @@ from tinygrad.nn.state import get_state_dict
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner, BufferCopy, ViewOp
-from tinygrad.helpers import Context, LIMIT_REALIZE
+from tinygrad.helpers import Context
 from typing import Callable, cast
 import itertools
 
@@ -26,11 +26,11 @@ class GraphRenderer(Renderer):
     # construct the kernel graph
     # designate the input and output nodes
     self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
-    assert len(forbidden_uops) == 0, "having GraphRenderer inside another GraphRenderer is not supported"
-    forbidden_uops.update(self.inputs)
+    assert len(no_realize_uops) == 0, "having GraphRenderer inside another GraphRenderer is not supported"
+    no_realize_uops.update(self.inputs)
     with Context(LIMIT_REALIZE=1):
-      ret_tensors: list[Tensor] = [*filter(lambda t: isinstance(t, Tensor), r if isinstance(r := fxn(*args, **kwargs), (list, tuple)) else [r])]
-    forbidden_uops.clear()
+      ret_tensors: list[Tensor] = [*filter(lambda t:isinstance(t, Tensor), r if isinstance(r:=fxn(*args, **kwargs), (list, tuple)) else [r])]
+    no_realize_uops.clear()
     assert (l:=len(ret_tensors)) and l == len(get_state_dict(r)), "One or more Tensors must be returned as a singleton or elements of a list/tuple."
     compute_device = ret_tensors[0].device
 

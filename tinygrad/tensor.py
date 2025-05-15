@@ -113,7 +113,7 @@ def _flat_to_grouped(padding:Sequence[sint]) -> tuple[tuple[sint, sint], ...]: r
 
 ReductionStr = Literal["mean", "sum", "none"]
 
-forbidden_uops: set[UOp] = set() # with LIMIT_REALIZE, these UOps are not allowed in lazydata graphs of Tensors being realized
+no_realize_uops: set[UOp] = set() # with LIMIT_REALIZE, these UOps are not allowed in lazydata graphs of Tensors being realized
 
 class Tensor(SimpleMathTrait):
   """
@@ -269,8 +269,8 @@ class Tensor(SimpleMathTrait):
 
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    if LIMIT_REALIZE and forbidden_uops:
-      assert not forbidden_uops.intersection({k for t in (self,)+lst for k in t.lazydata.toposort()}), f"Realize not allowed with these UOps"
+    if LIMIT_REALIZE and no_realize_uops.intersection({u for t in (self,)+lst for u in t.lazydata.toposort()}):
+      raise RuntimeError(f"Realization of Tensor(s) that depend on these UOps is not allowed: {no_realize_uops}")
     run_schedule(*self.schedule_with_vars(*lst), do_update_stats=do_update_stats)
     return self
 
