@@ -185,9 +185,6 @@ class GroupOp:
 
   All = set(Ops)
 
-# some BUFFER ops can be processed with only a view
-view_supported_devices = {"LLVM", "CPU", "CUDA", "NV", "AMD", "METAL", "QCOM", "DSP", "DISK"}
-
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
@@ -228,10 +225,11 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
-  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, _buffer:Buffer|None=None):
+  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, metadata:Metadata|None=None, _buffer:Buffer|None=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
     for s in src: s.children.add(ref)
+    if metadata is not None: all_metadata[created] = metadata
     # NOTE: this value is set by pickle when pickling a realized tensor
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
@@ -257,6 +255,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       del UOpMetaClass.ucache[k]
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg]
+    args.append(self.metadata)
     if self.op is Ops.BUFFER and self.realized is not None and PICKLE_BUFFERS: args.append(self.realized)
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
@@ -323,7 +322,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
-      case Ops.MULTI: shape = tuple(sum(y.shape[a] for y in self.real_lbs) if a == self.axis else s for a,s in enumerate(self.real_lbs[0].shape))
+      case Ops.MULTI: shape = tuple(sum(y.shape[a] for y in self.src) if a == self.axis else s for a,s in enumerate(self.src[0].shape))
       case Ops.BITCAST:
         shape = src_sts[0].shape
         if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
@@ -434,10 +433,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** from MultiLazyBuffer ***
 
-  def multi(self, *more:UOp, axis:int|None, real:tuple[bool,...]|None=None):
+  def multi(self, *more:UOp, axis:int|None):
     parents = (self,)+more
     assert all_same([x.dtype for x in parents]), "multi parents must have the same dtype"
-    return UOp(Ops.MULTI, self.dtype, parents, (axis, real if real is not None else (True,)*len(parents)))
+    return UOp(Ops.MULTI, self.dtype, parents, axis)
 
   @property
   def bounds(self):
@@ -446,7 +445,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def axis(self) -> Optional[int]:
-    if self.op is Ops.MULTI: return self.arg[0]
+    if self.op is Ops.MULTI: return self.arg
     # NOTE: they all have to share an axis, we always choose [-1]
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
     src_axis = self.src[0].axis
@@ -460,16 +459,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.PERMUTE: return self.arg.index(src_axis) if src_axis is not None else None
     return src_axis
 
-  @property
-  def real(self):
-    assert self.op is Ops.MULTI
-    return self.arg[1]
-
-  @property
-  def real_lbs(self): return [lb for lb,r in zip(self.src, self.real) if r]
-
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
-    lbs = [self.copy_to_device(d) for d in devices]
+    lbs = [self.copy_to_device(d) if self.device != d else self for d in devices]
     if axis is not None:
       if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
       # NOTE: this works for both even shards and uneven shards
@@ -493,10 +484,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
     return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
-  def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False): return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device)), clone)
-  def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
+  def copy_to_device(self, device:str|tuple[str, ...]|UOp, arg=None):
+    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), arg)
+  def clone(self) -> UOp: return self.copy_to_device(self.device)
   @property
-  def metadata(self) -> tuple[Metadata, ...]|Metadata|None: return self.arg.metadata if self.op is Ops.KERNEL else all_metadata.get(self, None)
+  def metadata(self) -> Metadata|None: return all_metadata.get(self, None)
 
   # *** uop movement ops ***
 
@@ -528,16 +520,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop Buffer stuff ***
 
   @staticmethod
-  def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device), UOp.unique()), size)
+  def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType):
+    if isinstance(device, tuple): return UOp(Ops.BUFFER, dtype, (UOp.unique(), *[UOp(Ops.DEVICE, arg=d) for d in device]), size)
+    return UOp(Ops.BUFFER, dtype, (UOp.unique(), UOp(Ops.DEVICE, arg=device)), size)
   @property
   def device(self) -> str|tuple[str, ...]: return cast(str|tuple[str, ...], unwrap(self._device))
   @functools.cached_property
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.MULTI: return tuple(cast(str, x.device) for x in self.src)
-    if self.op is Ops.COPY:
-      if len(self.src) > 2: return tuple(cast(str, x.device) for x in self.src[1:])
-      return self.src[1].device
+    if self.op in {Ops.COPY, Ops.BUFFER}: return self.src[1].device
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
@@ -560,7 +552,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def realized(self) -> Optional[Buffer]: return self.buffer if self.op is Ops.BUFFER and self.buffer.is_allocated() else None
   @property
   def is_realized(self) -> bool:
-    return all(x.base.realized is not None for x in self.base.real_lbs) if self.base.op is Ops.MULTI else self.base.realized is not None
+    return all(x.base.realized is not None for x in self.base.src) if self.base.op is Ops.MULTI else self.base.realized is not None
 
   # *** uop Variable stuff ***
 
@@ -600,6 +592,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return False  # False if not sure
   def const_factor(self) -> int:
     """largest known int that divides self"""
+    # TODO: for negatives it's not the largest
     if self.op is Ops.CONST: return self.arg
     if self.op is Ops.VCONST: return math.gcd(*self.arg)
     if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
@@ -629,16 +622,18 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       # SHL/SHR on consts only
       if self.op is Ops.SHL and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] << t[2], t[1] << t[2]
       if self.op is Ops.SHR and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] >> t[2], t[1] >> t[2]
-      if self.op is Ops.MOD and s1_vmin > 0:
-        return (0, s1_vmax-1) if s0_vmin >= 0 else (-(s1_vmax-1), s1_vmax-1)
+      if self.op is Ops.MOD:
+        if s1_vmin > 0: return (0, s1_vmax-1) if s0_vmin >= 0 else (-(s1_vmax-1), 0) if s0_vmax <= 0 else (-(s1_vmax-1), s1_vmax-1)
+        if s1_vmax < 0: return (0, -s1_vmax-1) if s0_vmin >= 0 else (-(-s1_vmax-1), 0) if s0_vmax <= 0 else (-(-s1_vmax-1), -s1_vmax-1)
       if self.op is Ops.IDIV:
         assert isinstance(s0_vmin, int) and isinstance(s0_vmax, int) and isinstance(s1_vmin, int) and isinstance(s1_vmax, int)
         if (c:=s1_vmin) == s1_vmax:  # s1 is a const
           if c > 0: return cdiv(s0_vmin, c), cdiv(s0_vmax, c)
           if c < 0: return cdiv(s0_vmax, c), cdiv(s0_vmin, c)
-        # don't know exact bounds, but know the sign
-        if (s0_vmax <= 0 and s1_vmax < 0) or (s0_vmin >= 0 and s1_vmin > 0): return 0, dtypes.max(self.dtype)
-        if (s0_vmax <= 0 and s1_vmin > 0) or (s0_vmin >= 0 and s1_vmax < 0): return dtypes.min(self.dtype), 0
+        if (s0_vmax <= 0 and s1_vmax < 0): return cdiv(s0_vmax, s1_vmin), cdiv(s0_vmin, s1_vmax)
+        if (s0_vmin >= 0 and s1_vmin > 0): return cdiv(s0_vmin, s1_vmax), cdiv(s0_vmax, s1_vmin)
+        if (s0_vmax <= 0 and s1_vmin > 0): return cdiv(s0_vmin, s1_vmin), cdiv(s0_vmax, s1_vmax)
+        if (s0_vmin >= 0 and s1_vmax < 0): return cdiv(s0_vmax, s1_vmax), cdiv(s0_vmin, s1_vmin)
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
       if self.op is Ops.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
       if self.op is Ops.CMPNE: return ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin), not (s0_vmin == s0_vmax == s1_vmin == s1_vmax))
@@ -664,14 +659,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     sself = self.simplify()
     varnames = tuple(x.arg[0] for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
     # TODO: sanitize varnames, or don't use naked eval while staying fast
-    return eval("lambda "+','.join(varnames)+": "+sself.render()), varnames  # pylint: disable=eval-used
+    return eval("lambda "+','.join(varnames)+": "+sself.render(pm=renderer_infer)), varnames  # pylint: disable=eval-used
 
   def sym_infer(self, var_vals:dict[UOp, int]):
     fxn, varnames = self._sym_fxn
     return fxn(**{k.arg[0]:v for k,v in var_vals.items() if k.arg[0] in varnames})
 
-  def render(self, simplify=True) -> str:
-    ret = graph_rewrite(self.simplify() if simplify else self, renderer)
+  def render(self, simplify=True, pm:Optional[PatternMatcher]=None) -> str:
+    ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
 
 @dataclass(frozen=True)
@@ -890,12 +885,12 @@ tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, int] = {}
 def track_rewrites(named=False, name_fxn:Callable|None=None):
   def _decorator(func):
-    def __wrapper(self, *args, **kwargs):
+    def __wrapper(*args, **kwargs):
       if TRACK_MATCH_STATS >= 2:
-        if (count_names:=(named or name_fxn)): _name_cnt[func.__name__] = _name_cnt.get(func.__name__, 0)+1
-        tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if count_names else self)
+        if (count_names:=(named or name_fxn or not args)): _name_cnt[func.__name__] = _name_cnt.get(func.__name__, 0)+1
+        tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if count_names else args[0])
         tracked_ctxs.append([])
-      ret = func(self, *args, **kwargs)
+      ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and name_fxn is not None: tracked_keys[-1] = f"{name_fxn(ret)} n{_name_cnt[func.__name__]}"
       return ret
     return __wrapper
@@ -990,6 +985,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, input_map:dict[UOp, UOp]|None=None) -> dict[UOp, UOp]:
   rewrite_ctx = RewriteContext(pm, ctx)
   new_map = {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort())[::-1]}
+  all_metadata.update((v, k.metadata) for k,v in new_map.items() if k.metadata is not None)
   if input_map is not None:
     for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
   return new_map
@@ -1015,6 +1011,11 @@ renderer = PatternMatcher([
   (UPat(Ops.MULACC, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[0].arg}*{x.src[1].arg}+{x.src[2].arg})")),
   (UPat(Ops.WHERE, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[1].arg} if {x.src[0].arg} else {x.src[2].arg})")),
   (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[0].arg}{syms[x.op]}{x.src[1].arg})")),
+])
+renderer_infer = PatternMatcher([
+  (UPat(Ops.MOD, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"cmod({x.src[0].arg}, {x.src[1].arg})")),
+  (UPat(Ops.IDIV, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"cdiv({x.src[0].arg}, {x.src[1].arg})")),
+  *renderer.patterns
 ])
 
 # *** what was symbolic.py ***
