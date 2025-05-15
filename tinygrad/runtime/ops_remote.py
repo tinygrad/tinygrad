@@ -232,8 +232,7 @@ class RemoteAllocator(Allocator['RemoteDevice']):
   def _free(self, opaque:int, options): self.dev.q(BufferFree(opaque))
   def _copyin(self, dest:int, src:memoryview): self.dev.q(CopyIn(dest, self.dev.conn.req.h(bytes(src))))
   def _copyout(self, dest:memoryview, src:int):
-    self.dev.q(CopyOut(src))
-    resp = self.dev.conn.batch_submit()
+    resp = self.dev.q(CopyOut(src), wait=True)
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
     dest[:] = resp
   def _transfer(self, dest, src, sz, src_dev, dest_dev):
@@ -252,8 +251,8 @@ class RemoteProgram:
   def __del__(self): self.dev.q(ProgramFree(self.name, self.datahash))
 
   def __call__(self, *bufs, global_size=None, local_size=None, vals:tuple[int, ...]=(), wait=False):
-    self.dev.q(ProgramExec(self.name, self.datahash, bufs, vals, global_size, local_size, wait))
-    if wait: return float(self.dev.conn.batch_submit())
+    ret = self.dev.q(ProgramExec(self.name, self.datahash, bufs, vals, global_size, local_size, wait), wait=wait)
+    if wait: return float(ret)
 
 @functools.cache
 class RemoteConnection:
@@ -288,8 +287,7 @@ class RemoteDevice(Compiled):
     self.buffer_num: int = 0
     self.graph_num: int = 0
 
-    self.q(GetProperties())
-    self.properties = safe_eval(ast.parse(self.conn.batch_submit(), mode="eval").body)
+    self.properties = safe_eval(ast.parse(self.q(GetProperties(), wait=True), mode="eval").body)
     if DEBUG >= 1: print(f"remote has device {self.properties.real_device}")
     # TODO: how to we have BEAM be cached on the backend? this should just send a specification of the compute. rethink what goes in Renderer
     renderer = self.properties.renderer
@@ -305,7 +303,9 @@ class RemoteDevice(Compiled):
     # TODO: should close the whole session
     with contextlib.suppress(ConnectionRefusedError, http.client.CannotSendRequest, http.client.RemoteDisconnected): self.conn.batch_submit()
 
-  def q(self, x:RemoteRequest): self.conn.req.q(replace(x, session=self.session))
+  def q(self, x:RemoteRequest, wait:bool=False):
+    self.conn.req.q(replace(x, session=self.session))
+    if wait: return self.conn.batch_submit()
 
   @functools.cache
   @staticmethod
