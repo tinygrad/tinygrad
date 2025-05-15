@@ -422,7 +422,7 @@ pm_fuse = PatternMatcher([
 
   # FUSE elementwise.
   (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST}, name="alu"),), name="view").fuse(),
-   lambda alu, view: alu.replace(src=tuple(x.view(view.arg).fuse() for x in alu.src))),
+   lambda alu, view: alu.replace(src=tuple(x.view(x.arg+view.arg if x.op is Ops.VIEW else view.arg).fuse() for x in alu.src))),
 
   # push FUSE through to srcs
   (UPat(Ops.FUSE, name="x"), lambda x: x.src[0].replace(src=tuple(y.fuse() for y in x.src[0].src))),
