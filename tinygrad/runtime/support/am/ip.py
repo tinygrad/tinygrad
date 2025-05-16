@@ -1,4 +1,5 @@
 import ctypes, time, contextlib, importlib, functools
+from tinygrad import Tensor, dtypes
 from typing import Literal
 from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG
@@ -44,7 +45,7 @@ class AM_GMC(AM_IP):
 
   def init_hw(self): self.init_hub("MM")
 
-  def flush_hdp(self): self.adev.wreg(self.adev.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read() // 4, 0x0)
+  def flush_hdp(self): self.adev.wreg(self.adev.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read().item() // 4, 0x0)
   def flush_tlb(self, ip:Literal["MM", "GC"], vmid, flush_type=0):
     self.flush_hdp()
 
@@ -144,7 +145,7 @@ class AM_SMU(AM_IP):
 
   def is_smu_alive(self):
     with contextlib.suppress(RuntimeError): self._send_msg(self.smu_mod.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
-    return self.adev.mmMP1_SMN_C2PMSG_90.read() != 0
+    return self.adev.mmMP1_SMN_C2PMSG_90.read().item() != 0
 
   def mode1_reset(self):
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
@@ -374,7 +375,7 @@ class AM_PSP(AM_IP):
       self.adev.mm.map_range(self.msg1_addr, msg1_region[1].nbytes, [(msg1_region[0], msg1_region[1].nbytes)], system=True, uncached=True, boot=True)
     else:
       self.msg1_paddr = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=False, boot=True)
-      self.msg1_addr, self.msg1_view = self.adev.paddr2mc(self.msg1_paddr), self.adev.vram.view(self.msg1_paddr, am.PSP_1_MEG, 'B')
+      self.msg1_addr, self.msg1_view = self.adev.paddr2mc(self.msg1_paddr), self.adev.vram[self.msg1_paddr:self.msg1_paddr+am.PSP_1_MEG]
 
     self.cmd_paddr = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE, zero=False, boot=True)
     self.fence_paddr = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
@@ -408,13 +409,13 @@ class AM_PSP(AM_IP):
     for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(*psp_desc)
     self._rlc_autoload_cmd()
 
-  def is_sos_alive(self): return self.adev.reg(f"{self.reg_pref}_81").read() != 0x0
+  def is_sos_alive(self): return (self.adev.reg(f"{self.reg_pref}_81").read() != 0x0).item()
 
   def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.reg(f"{self.reg_pref}_35"), mask=0x80000000, value=0x80000000)
 
   def _prep_msg1(self, data):
-    assert len(data) <= self.msg1_view.nbytes, f"msg1 buffer is too small {len(data):#x} > {self.msg1_view.nbytes:#x}"
-    self.msg1_view[:len(data)+4] = bytes(data) + b'\x00' * 4
+    assert len(data) <= self.msg1_view.nbytes(), f"msg1 buffer is too small {len(data):#x} > {self.msg1_view.nbytes():#x}"
+    self.msg1_view.contiguous()[:len(data)+4] = Tensor(bytes(data) + b'\x00' * 4, device='CPU', dtype=dtypes.uint8)
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw, compid):
