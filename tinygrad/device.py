@@ -37,7 +37,9 @@ class _Device:
       with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
-    if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
+    from_env = [d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1]
+    assert len(from_env) < 2, f"multiple devices set in env: {from_env}"
+    if len(from_env) == 1: return from_env[0]
     try:
       device = next(self.get_available_devices())
       os.environ[device] = "1"   # we set this in environment for spawned children
