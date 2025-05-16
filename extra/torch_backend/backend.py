@@ -96,16 +96,37 @@ def inplace_fn(outvars: str|list[str]):
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 @inplace_fn("self")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
-  # TODO: move to tinygrad
-  ret = aten._index_put_impl_(self.cpu(), [x.cpu() if isinstance(x, torch.Tensor) else None for x in indices], values.cpu(), accumulate, unsafe).to(self.device)
-  return wrap(unwrap(self).assign(unwrap(ret)))
+  self_t = unwrap(self)
+  values_t = unwrap(values)
+  indices_t = [unwrap(_y) if isinstance(_y, torch.Tensor) else None for _y in indices]
+  
+  if accumulate:
+    # For accumulate=True, we need to add values to existing values
+    existing_values = self_t[[i for i in indices_t]]
+    self_t[[i for i in indices_t]] = existing_values + values_t
+  else:
+    # For accumulate=False, we just set the values
+    self_t[[i for i in indices_t]] = values_t
+    
+  return self
 
 @torch.library.impl("aten::index_put", "privateuseone")
 def index_put(self, indices, values, accumulate=False):
-  return aten.index_put(self.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in indices], values.cpu(), accumulate).tiny()
+  self_t = unwrap(self.clone())
+  values_t = unwrap(values)
+  indices_t = [unwrap(_y) if isinstance(_y, torch.Tensor) else None for _y in indices]
+  
+  if accumulate:
+    existing_values = self_t[[i for i in indices_t]]
+    self_t[[i for i in indices_t]] = existing_values + values_t
+  else:
+    self_t[[i for i in indices_t]] = values_t
+    
+  return wrap(self_t)
 
 @torch.library.impl("aten::isin.Tensor_Tensor_out", "privateuseone")
-def isin_tensor_tensor_out(x, y, *, assume_unique=False, invert=False, out=None): return out.copy_(aten.isin(x.cpu(), y.cpu(), assume_unique=assume_unique, invert=invert).tiny())
+def isin_tensor_tensor_out(x, y, *, assume_unique=False, invert=False, out=None):
+  return out.copy_(aten.isin(x.cpu(), y.cpu(), assume_unique=assume_unique, invert=invert).tiny())
 
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None):
@@ -119,9 +140,11 @@ def cummax(self, dim):
 
 @torch.library.impl("aten::nonzero", "privateuseone")
 # TODO: move to tinygrad
-def nonzero(self): return aten.nonzero(self.cpu()).tiny()
+def nonzero(self):
+  return aten.nonzero(self.cpu()).tiny()
 
-def upsample_backward(grad_out, output_size, input_size, *args, f=None): return f(grad_out.cpu(), output_size, input_size, *args).tiny()
+def upsample_backward(grad_out, output_size, input_size, *args, f=None):
+  return f(grad_out.cpu(), output_size, input_size, *args).tiny()
 
 for i in [
   "upsample_linear1d_backward", "upsample_nearest1d_backward", "_upsample_nearest_exact1d_backward",
