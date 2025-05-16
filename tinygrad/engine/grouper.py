@@ -1,12 +1,12 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
-import functools
+import functools, itertools, operator
 from tinygrad.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
 from tinygrad.ops import can_pad, sint, track_rewrites, _substitute
 from tinygrad.codegen.lowerer import get_contraction_with_reduce, get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY, RING
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -485,13 +485,53 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
   assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
   return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
 
-# TODO: support ring allreduce
-replace_allreduce = PatternMatcher([
-  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), lambda buf, red:
-   # TODO: why is this contiguous needed?
-   functools.reduce(lambda x,y: x.alu(red.arg, y),
-    [UOp(Ops.COPY, buf.dtype, (buf.contiguous(), red.src[1]), arg=i) for i in range(len(buf.device))]) if isinstance(buf.device, tuple) else None),
-])
+def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
+  if not isinstance(buf.device, tuple): return None
+  assert all_int(buf.shape), f"does not support symbolic shape {buf.shape}"
+  n_lbs, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
+  # ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
+  # fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
+  use_ring = (RING >= 2 or (n_lbs > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
+  if DEBUG >= 2: print(f"{'RING ALLREDUCE' if use_ring else 'NAIVE ALLREDUCE'} {n_lbs}x{numel} | {buf.dtype}")
+
+  # contiguous before we copy it
+  buf = buf.contiguous()
+
+  # copy to all devices. if you shrink later, that'll be handled
+  if not use_ring: return functools.reduce(lambda x,y: x.alu(red.arg, y),
+                                           [UOp(Ops.COPY, buf.dtype, (buf, red.src[1]), arg=i) for i in range(len(buf.device))])
+
+  factor = next((f for f in [32, 16, 8, 4, 2] if numel % f == 0), 1)
+  base, left = (numel // factor) // n_lbs, (numel // factor) % n_lbs
+  chunk_sizes = [(base + 1) * factor] * left + [base * factor] * (n_lbs - left)
+  chunks = list(itertools.pairwise(itertools.accumulate(chunk_sizes, initial=0)))
+
+  # extract chunks
+  chunked = [[buf.reshape((numel,)).shrink(((s,e),)).copy_to_device(buf.device[i], arg=i) for s,e in chunks] for i in range(len(buf.device))]
+
+  # scatter-reduce
+  for step in range(n_lbs-1):
+    for i in range(len(chunks)):
+      src, dest = (i+step)%n_lbs, (i+step+1)%n_lbs
+      chunked[dest][i] = chunked[dest][i].alu(red.arg, chunked[src][i].copy_to_device(chunked[dest][i].device))
+
+  # allgather
+  for step in range(n_lbs-1):
+    for i in range(len(chunks)):
+      src, dest = (i+step-1)%n_lbs, (i+step)%n_lbs
+      chunked[dest][i] = chunked[src][i].copy_to_device(chunked[dest][i].device)
+
+  # assemble chunks back
+  pads = [((s,numel-e),) for s,e in chunks]
+  assembled = [functools.reduce(operator.add, [c.pad(pad) for pad,c in zip(pads,lb_c)]) for lb_c in chunked]
+
+  # combine them into one buffer (clunky)
+  dnum = UOp.variable("_device_num", 0, n_lbs-1)
+  ret = functools.reduce(operator.add, [a.pad(((i*numel, (n_lbs-i-1)*numel),)).copy_to_device(buf.device) for i,a in enumerate(assembled)])
+  ret = ret.shrink(((dnum*numel, dnum*numel+numel),))
+  return ret.reshape(shape)
+
+replace_allreduce = PatternMatcher([(UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),])
 
 @track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
