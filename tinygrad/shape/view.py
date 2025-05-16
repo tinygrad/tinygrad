@@ -141,12 +141,15 @@ class View:
   def unbind(self) -> tuple[View, dict[Variable, int]]:
     var_unboundvar_val = [(v, v.unbind()) for v in self.vars() if v.op is Ops.BIND]
     unbound_vars = {v:uv for v,(uv,_) in var_unboundvar_val}
-    def substitute(x:sint): return x if isinstance(x, int) else x.substitute(unbound_vars)
-    new_shape = tuple(map(substitute, self.shape))
-    new_strides = tuple(map(substitute, self.strides))
-    new_offset = substitute(self.offset)
-    new_mask = tuple((substitute(x[0]), substitute(x[1])) for x in self.mask) if self.mask is not None else None
-    return View.create(new_shape, new_strides, new_offset, new_mask), dict(x[1] for x in var_unboundvar_val)
+    return self.substitute(unbound_vars), dict(x[1] for x in var_unboundvar_val)
+
+  def substitute(self, dvars:dict[UOp, UOp]):
+    def _substitute(x:sint): return x if isinstance(x, int) else x.substitute(dvars)
+    new_shape = tuple(map(_substitute, self.shape))
+    new_strides = tuple(map(_substitute, self.strides))
+    new_offset = _substitute(self.offset)
+    new_mask = tuple((_substitute(x[0]), _substitute(x[1])) for x in self.mask) if self.mask is not None else None
+    return View.create(new_shape, new_strides, new_offset, new_mask)
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, vm1:View) -> Optional[View]:
