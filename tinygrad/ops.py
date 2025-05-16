@@ -116,9 +116,6 @@ class Ops(FastEnum):
   # reduce
   REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto() # noqa: E702
 
-  # multi
-  MCAT = auto(); MSELECT = auto()
-
   # helper ops
   GEP = auto(); VECTORIZE = auto(); CAT = auto(); PTRCAT = auto() # noqa: E702
 
@@ -433,7 +430,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def fuse(self): return self.alu(Ops.FUSE)
-  def allreduce(self, op:Ops): return UOp(Ops.ALLREDUCE, self.dtype, (self,), op)
+  def allreduce(self, op, device:str|tuple[str, ...]|UOp):
+    assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
+    return UOp(Ops.ALLREDUCE, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), op)
 
   # *** from MultiLazyBuffer ***
 
@@ -489,10 +488,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
     return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
-  def copy_to_device(self, device:str|tuple[str, ...]|UOp):
-    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device))
-  def mselect(self, idx:int) -> UOp: return UOp(Ops.MSELECT, self.dtype, (self,), idx)
-  def device_num(self): return UOp.variable("_device_num", 0, len(self.device)-1)
+  def copy_to_device(self, device:str|tuple[str, ...]|UOp, arg=None):
+    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), arg)
   def clone(self) -> UOp: return self.copy_to_device(self.device)
   @property
   def metadata(self) -> Metadata|None: return all_metadata.get(self, None)
@@ -533,13 +530,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
-    if self.op is Ops.MSELECT: return self.src[0].device[self.arg]
-    if self.op in {Ops.COPY, Ops.BUFFER}: return self.src[1].device
+    if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
-    if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     assert self.op is Ops.ASSIGN, f"must be ASSIGN {self.op}"
     return self.src[0].base
   @property
@@ -575,7 +570,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.op is Ops.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
     assert self.arg[1] <= val and val <= self.arg[2], f"bind {val} not in range [{self.arg[1]}, {self.arg[2]}]"
     return UOp(Ops.BIND, self.dtype, (self, self.const_like(val)))
-  def unbind(self) -> tuple[Variable, int]:
+  def unbind(self, optional=False) -> tuple[Variable, int]:
+    if optional and self.op is Ops.DEFINE_VAR: return (self, -1)
     assert self.op is Ops.BIND and self.src[0].op is Ops.DEFINE_VAR and self.src[1].op is Ops.CONST, f"can't unbind {self}"
     return self.src[0], self.src[1].arg
   @property

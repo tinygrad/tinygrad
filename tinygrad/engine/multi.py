@@ -118,7 +118,7 @@ def shrink_multi(root:UOp, multi:UOp):
       "cannot shrink sharded and non-sharded axis at the same time"
     # NOTE: shrink on the shard axis is only allowed when result is a single partition, denoted by the new real
     # we just copy it to all the devices, no real. this will be optimized out later
-    return multi.src[0].mselect(multi.bounds.index(root.arg[multi.axis])).copy_to_device(multi.device)
+    return multi.src[0].copy_to_device(multi.device, arg=multi.bounds.index(root.arg[multi.axis]))
   return UOp.multi(*[x.shrink(tuple((0, x.shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.arg))) for x in multi.src],
                    axis=multi.axis)
 
@@ -139,7 +139,7 @@ def copy_multi(multi:UOp, device:UOp):
   bsz, dcount = multi.shape[multi.axis]//len(multi.device), len(multi.device)
   dnum = UOp.variable("_device_num", 0, len(multi.device)-1)
   padded = multi.src[0].pad(tuple((0,0) if a != multi.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(multi.shape))))
-  ret = padded.allreduce(Ops.ADD)
+  ret = padded.allreduce(Ops.ADD, device)
   return ret if isinstance(device.arg, str) else ret.multi(axis=None)
 
 def assign_multi(dest:UOp, src:UOp):
@@ -160,7 +160,8 @@ multi_pm = PatternMatcher([
   (UPat(Ops.FLIP, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), flip_multi),
   (UPat(Ops.ASSIGN, src=(UPat(Ops.MULTI, name="dest"), UPat(Ops.MULTI, name="src"))), assign_multi),
   (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))), copy_multi),
-  (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"),), name="red"), lambda multi,red: multi.src[0].allreduce(red.arg).multi(axis=multi.axis)),
+  (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device")), name="red"),
+    lambda multi,device,red: multi.src[0].allreduce(red.arg, device).multi(axis=multi.axis)),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])

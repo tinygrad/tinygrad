@@ -7,7 +7,7 @@ from tinygrad.codegen.lowerer import get_contraction_with_reduce, get_contractio
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY, RING
-from tinygrad.dtype import ImageDType, dtypes
+from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.spec import type_verify, sched_spec
@@ -86,7 +86,8 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.COPY, name="root", src=(UPat.cvar("x"), UPat(Ops.DEVICE))), lambda root,x: root.const_like(x.arg)),
   # store a shrink before COPY, otherwise view after the COPY
   (UPat(Ops.COPY, src=(UPat(Ops.VIEW, name="v"), UPat(Ops.DEVICE)), name="copy"), lambda copy,v:
-    v.contiguous().copy_to_device(copy.device) if prod(v.shape) < prod(v.base.shape) else v.base.copy_to_device(copy.device).view(v.st)),
+    v.contiguous().copy_to_device(copy.device, arg=copy.arg) if prod(v.shape) < prod(v.base.shape) else \
+    v.base.copy_to_device(copy.device, arg=copy.arg).view(v.st)),
   # remove cast to image when it's already a contiguous image
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(Ops.CONTIGUOUS, name="base"),)),)),
    lambda cast,base,vm: base.view(vm.st) if isinstance(cast.dtype, ImageDType) and isinstance(base.dtype, ImageDType) else None),
@@ -243,7 +244,7 @@ def create_kernel(x:UOp, b:UOp|None=None):
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return buffer.assign(kernel).reshape(x.shape)
 
-DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.MSELECT}
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
 def append_to_kernel(ctx:dict[UOp, None], x:UOp):
   new_srcs: list[UOp] = []
   metadata = dict.fromkeys(x.arg.metadata)
@@ -392,9 +393,6 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
     if s.op is Ops.ASSIGN:
       for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
       parents_rep[s] = s.buf_uop
-    if s.op is Ops.MSELECT:
-      for out in s.src[0].src[1].arg.ast.src: parents_rep[out] = s.src[0].buf_uop.view(unwrap(out.st))
-      parents_rep[s] = s.buf_uop
   ast = k.arg.ast.substitute(parents_rep, name="replace realized")
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
@@ -498,9 +496,8 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   buf = buf.contiguous()
 
   # copy to all devices. if you shrink later, that'll be handled
-  use_ring = False
-  if not use_ring:
-    return functools.reduce(lambda x,y: x.alu(red.arg, y), [buf.mselect(i).copy_to_device(buf.device) for i in range(len(buf.device))])
+  if not use_ring: return functools.reduce(lambda x,y: x.alu(red.arg, y),
+                                           [UOp(Ops.COPY, buf.dtype, (buf, red.src[1]), arg=i) for i in range(len(buf.device))])
 
   # new ring reduce
   factor = next((f for f in [32, 16, 8, 4, 2] if numel % f == 0), 1)
@@ -524,12 +521,10 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   return functools.reduce(operator.add, [c.copy_to_device(buf.device).pad(pad) for pad,c in zip(pads, reduced_chunks)]).reshape(shape)
 
 replace_allreduce = PatternMatcher([
-  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), handle_allreduce),
-])
-
-view_mselect = PatternMatcher([
-  (UPat(Ops.MSELECT, src=(UPat(Ops.VIEW, name="v")), name="m"), lambda m,v:
-   v.src[0].mselect(m.arg).view(v.arg.substitute({v.device_num():UOp.const(dtypes.int, m.arg)}))),
+  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
+  # copy on specific copy
+  (UPat(Ops.COPY, src=(UPat(Ops.COPY, name="c1"), UPat(Ops.DEVICE, name="out_device")), name="c2"),
+   lambda c1,c2,out_device: c1.src[0].copy_to_device(out_device, arg=c1.arg) if c2.arg is None else None),
 ])
 
 @track_rewrites(name_fxn=get_name)
@@ -538,7 +533,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(big_sink, replace_allreduce, name="replace_allreduce")
 
   # merge_views + simplify
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], insert_fuse+do_fuse+merge_views+sym+replace_contiguous+view_mselect, ctx={},
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], insert_fuse+do_fuse+merge_views+sym+replace_contiguous, ctx={},
                                  input_map=tensor_map, name="merge_views")
 
   # display the cleaned up tensor graph
