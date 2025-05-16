@@ -41,11 +41,11 @@ class _Device:
     if (env_device:=getenv("DEVICE", '')) in self._devices: from_env.append(env_device)
     from_env = [d for d in from_env if d not in ["DISK", "NPY"]]
     assert len(from_env) < 2, f"multiple devices set in env: {from_env}"
-    if len(from_env) == 0:
+    if len(from_env) > 0:
+       device = from_env[0]
+    else:
       try: device = next(self.get_available_devices())
       except StopIteration as exc: raise RuntimeError("no usable devices") from exc
-    else:
-      device = from_env[0]
     os.environ[device] = "1"   # we set this in environment for spawned children
     return device
 Device = _Device()
