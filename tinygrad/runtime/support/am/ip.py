@@ -415,7 +415,7 @@ class AM_PSP(AM_IP):
 
   def _prep_msg1(self, data):
     assert len(data) <= self.msg1_view.nbytes(), f"msg1 buffer is too small {len(data):#x} > {self.msg1_view.nbytes():#x}"
-    self.msg1_view.contiguous()[:len(data)+4] = Tensor(bytes(data) + b'\x00' * 4, device='CPU', dtype=dtypes.uint8)
+    self.msg1_view[:len(data)+4] = Tensor(bytes(data) + b'\x00' * 4, device='CPU', dtype=dtypes.uint8)
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw, compid):
