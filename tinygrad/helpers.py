@@ -228,7 +228,7 @@ def diskcache(func):
 
 # *** process replay ***
 
-CAPTURE_PROCESS_REPLAY = getenv("RUN_PROCESS_REPLAY") or getenv("CAPTURE_PROCESS_REPLAY")
+CAPTURE_PROCESS_REPLAY = getenv("CAPTURE_PROCESS_REPLAY")
 
 # *** http support ***
 

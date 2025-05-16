@@ -5,10 +5,10 @@ from tinygrad.helpers import DEBUG, to_mv, round_up
 from tinygrad.runtime.support.hcq import MMIOInterface
 
 class USB3:
-  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=31, max_read_len:int=4096):
+  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=31):
     self.vendor, self.dev = vendor, dev
     self.ep_data_in, self.ep_stat_in, self.ep_data_out, self.ep_cmd_out = ep_data_in, ep_stat_in, ep_data_out, ep_cmd_out
-    self.max_streams, self.max_read_len = max_streams, max_read_len
+    self.max_streams = max_streams
     self.ctx = ctypes.POINTER(libusb.struct_libusb_context)()
 
     if libusb.libusb_init(ctypes.byref(self.ctx)): raise RuntimeError("libusb_init failed")
@@ -45,8 +45,8 @@ class USB3:
     self.buf_cmd = [(ctypes.c_uint8 * len(cmd_template))(*cmd_template) for _ in range(self.max_streams)]
     self.buf_stat = [(ctypes.c_uint8 * 64)() for _ in range(self.max_streams)]
     self.buf_data_in = [(ctypes.c_uint8 * 0x1000)() for _ in range(self.max_streams)]
-    self.buf_data_out = [(ctypes.c_uint8 * 0x1000)() for _ in range(self.max_streams)]
-    self.buf_data_out_mvs = [to_mv(ctypes.addressof(self.buf_data_out[i]), 0x1000) for i in range(self.max_streams)]
+    self.buf_data_out = [(ctypes.c_uint8 * 0x80000)() for _ in range(self.max_streams)]
+    self.buf_data_out_mvs = [to_mv(ctypes.addressof(self.buf_data_out[i]), 0x80000) for i in range(self.max_streams)]
 
   def _prep_transfer(self, tr, ep, stream_id, buf, length):
     tr.contents.dev_handle, tr.contents.endpoint, tr.contents.length, tr.contents.buffer = self.handle, ep, length, buf
@@ -83,7 +83,7 @@ class USB3:
       tr_window.append(self._prep_transfer(self.tr[self.ep_stat_in][slot], self.ep_stat_in, stream, self.buf_stat[slot], 64))
 
       if rlen:
-        if rlen > self.max_read_len: raise ValueError("read length > max_read_len per CDB")
+        if rlen > len(self.buf_data_in[slot]): self.buf_data_in[slot] = (ctypes.c_uint8 * round_up(rlen, 0x1000))()
         tr_window.append(self._prep_transfer(self.tr[self.ep_data_in][slot], self.ep_data_in, stream, self.buf_data_in[slot], rlen))
 
       if send_data is not None:
@@ -174,7 +174,7 @@ class ASM24Controller:
 
     masked_address, offset = address & 0xFFFFFFFC, address & 0x3
     assert size + offset <= 4 and (value is None or value >> (8 * size) == 0)
-    self._pci_cache[masked_address] = value if size == 4 and fmt_type == 0x60 else None
+    self._pci_cache[address] = value if size == 4 and fmt_type == 0x60 else None
 
     return ([WriteOp(0xB220, struct.pack('>I', value << (8 * offset)), ignore_cache=False)] if value is not None else []) + \
       [WriteOp(0xB218, struct.pack('>I', masked_address), ignore_cache=False), WriteOp(0xB21c, struct.pack('>I', address>>32), ignore_cache=False),

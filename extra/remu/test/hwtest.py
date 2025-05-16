@@ -152,5 +152,21 @@ class TestHW(unittest.TestCase):
     self.assertEqual(get_output(init_state+"\n"+"v_fmac_f16_e64 v1 -v11 v10"), f16_to_bits(-10.))
     self.assertEqual(get_output(init_state+"\n"+"v_fmac_f16_e64 v1 -v11 -v10"), f16_to_bits(14.))
 
+  def test_s_abs_i32(self):
+    def s_abs_i32(x, y, dst="s10", scc=0):
+      for reg,val in [(dst, y), ("scc", scc)]:
+        self.assertEqual(get_output(f"""
+        s_mov_b32_e32 {dst} {x}
+        s_abs_i32 {dst} {dst}
+        v_mov_b32_e32 v1 {reg}
+        """)[0], val)
+    s_abs_i32(0x00000001, 0x00000001, scc=1)
+    s_abs_i32(0x7fffffff, 0x7fffffff, scc=1)
+    s_abs_i32(0x80000000, 0x80000000, scc=1)
+    s_abs_i32(0x80000001, 0x7fffffff, scc=1)
+    s_abs_i32(0x80000002, 0x7ffffffe, scc=1)
+    s_abs_i32(0xffffffff, 0x00000001, scc=1)
+    s_abs_i32(0, 0, scc=0)
+
 if __name__ == "__main__":
   unittest.main()

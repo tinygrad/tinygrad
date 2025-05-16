@@ -100,7 +100,7 @@ def cuEventSynchronize(hEvent) -> int:
 def cuEventElapsedTime(pMilliseconds, hStart, hEnd) -> int:
   if hStart.value not in cuda_state.events or hEnd.value not in cuda_state.events:
     return orig_cuda.CUDA_ERROR_INVALID_VALUE
-  elapsed = (cuda_state.events[hEnd.value] - cuda_state.events[hStart.value]) * 1000
+  elapsed = (cuda_state.events[hEnd.value] - cuda_state.events[hStart.value]) * 1e-6
   pMilliseconds._obj.value = elapsed
   return orig_cuda.CUDA_SUCCESS
 
