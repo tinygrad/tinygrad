@@ -10,7 +10,7 @@ from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.codegen.heuristic import hand_coded_optimizations
 import numpy as np
 
-def move_jit_captured_to_dev(captured, device="DSP"):
+def move_jit_captured_to_dev(captured, device=Device.DEFAULT):
   captured.expected_st_vars_dtype_device = [x[:3] + (device,) for x in captured.expected_st_vars_dtype_device]
 
   assign = {}
@@ -39,7 +39,7 @@ if __name__ == "__main__":
     print(type(fxn))
 
   # Move all buffers to DSP device.
-  fxn.captured = move_jit_captured_to_dev(fxn.captured, "DSP")
+  fxn.captured = move_jit_captured_to_dev(fxn.captured, Device.DEFAULT)
   new_jit = []
 
   knum = 1
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     if isinstance(ei.prg, CompiledRunner) and all(x is not None for x in ei.bufs):
       if knum == (pknum:=getenv("KNUM", 0)) or pknum == 0:
         p: ProgramSpec = ei.prg.p
-        k = Kernel(p.ast, Device["DSP"].renderer)
+        k = Kernel(p.ast, Device[Device.DEFAULT].renderer)
 
         if getenv("VALIDATE"):
           with Context(NOOPT=1):
@@ -72,4 +72,4 @@ if __name__ == "__main__":
   if getenv("RUN_JIT", 0):
     fxn.captured.free_intermediates()
     fxn.captured.jit_cache = new_jit
-    fxn(input=Tensor(np.zeros((1, 3, 224, 224), dtype=np.float32), device="DSP"))
+    fxn(input=Tensor(np.zeros((1, 3, 224, 224), dtype=np.float32), device=Device.DEFAULT))

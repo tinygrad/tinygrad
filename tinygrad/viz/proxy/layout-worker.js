@@ -1,7 +1,10 @@
+const { createCanvas } = require("canvas");
+const dagre = require("dagre");
+
 const NODE_PADDING = 10;
 const LINE_HEIGHT = 14;
-const canvas = new OffscreenCanvas(0, 0);
-const ctx = canvas.getContext('2d');
+const canvas = createCanvas(0, 0);
+const ctx = canvas.getContext("2d");
 ctx.font = `${LINE_HEIGHT}px sans-serif`;
 
 function getTextDims(text) {
@@ -14,20 +17,9 @@ function getTextDims(text) {
   return [maxWidth, height];
 }
 
-
-onmessage = async (e) => {
-  const { graph, additions } = e.data;
-  try {
-    const res = await fetch("http://localhost:8080", { method:"POST", body:JSON.stringify(graph), headers:{"Content-Type":"application/json"}});
-    const layout = await res.json();
-    return postMessage(layout);
-    self.close();
-  } catch (e) {
-    console.log("PROXY ERR", e);
-  }
+function calculateLayout(graph) {
   const g = new dagre.graphlib.Graph({ compound: true });
   g.setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-  if (additions.length !== 0) g.setNode("addition", {label:"", style:"fill: rgba(26, 27, 38, 0.5); stroke: none;", padding:0});
   for (const [k, {label, src, color}] of Object.entries(graph)) {
     // adjust node dims by label size + add padding
     const [labelWidth, labelHeight] = getTextDims(label);
@@ -37,9 +29,10 @@ onmessage = async (e) => {
       edgeCounts[s] = (edgeCounts[s] || 0)+1;
     }
     for (const s of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? edgeCounts[s] : null });
-    if (additions.includes(parseInt(k))) g.setParent(k, "addition");
   }
   dagre.layout(g);
-  postMessage(dagre.graphlib.json.write(g));
-  self.close();
+  return dagre.graphlib.json.write(g);
 }
+
+const { parentPort, workerData } = require('worker_threads');
+parentPort.postMessage(calculateLayout(workerData));

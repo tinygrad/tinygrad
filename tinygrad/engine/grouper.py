@@ -125,20 +125,20 @@ replace_contiguous = PatternMatcher([
 
 # **** Grouper decides which of the UOps realize
 
-def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
+def realize(ctx:dict[UOp, str], tr:UOp, reason:str="default") -> None: ctx[tr] = reason
 
-def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
+def realize_before_view(ctx:dict[UOp, str], view:UOp, tr:UOp) -> None:
   st = unwrap(view.st)
   # always realize unsafe pad ops before masked view
-  if any(v.mask is not None for v in st.views) and not can_pad(tr, ctx, cache=dict()): return realize(ctx, tr)
+  if any(v.mask is not None for v in st.views) and not can_pad(tr, ctx, cache=dict()): return realize(ctx, tr, reason="unsafe_pad")
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(tr.shape) and resolve(prod(tr.shape) >= prod([y-x for x,y in m])): return
   # realize before expand
-  if resolve(prod(tr.shape) < prod(st.shape)) and not DONT_REALIZE_EXPAND: return realize(ctx, tr)
+  if resolve(prod(tr.shape) < prod(st.shape)) and not DONT_REALIZE_EXPAND: return realize(ctx, tr, reason="realize_before_expand")
 
 do_realize = PatternMatcher([
   # always realize SINK parents
-  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
+  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, "sink") for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
   # always realize ASSIGN/CONTIGUOUS/GroupOp.Meta
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}, name="tr"), realize),
   # realize before expand or unsafe pad ops
@@ -164,7 +164,7 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
     if len(st_childs:=dedup(unwrap(x.st) for x in tr_next.src if x.base == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, realizes, reduce_for_op, group, cache)
 
-def group_realizes(sink:UOp) -> dict[UOp, None]:
+def group_realizes(sink:UOp) -> dict[UOp, str]:
   # start by adding uops that always realize
   realizes: dict[UOp, None] = {}
   sink = graph_rewrite(sink, do_realize, ctx=realizes, name="do_realize")
@@ -219,7 +219,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
         if tr.op is Ops.CAST and tr.dtype.itemsize > tr.src[0].dtype.itemsize:
           tr = tr.src[0].base
       group = {tr: None}
-      realizes[tr] = None
+      realizes[tr] = "empty children" if not group else "forced_realize"
     reduce_for_op.update((tr, r) for tr in group)
   # fuse double reduces with no other child
   for reduceop in double_reduces:
@@ -494,6 +494,25 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # group into kernels
   realize_map = group_realizes(tensor_map[big_sink])
+  if getenv("VIZ"):
+    # VIZ the contiguous graph
+    children: dict[UOp, list[UOp]] = {}
+    for u in tensor_map[big_sink].toposort():
+      for s in u.src: children.setdefault(s, []).append(u)
+    sub: dict[UOp, UOp] = {}
+    for r,reason in realize_map.items():
+      for child in children.get(r, []):
+        new_src: list[UOp] = []
+        for x in child.src:
+          if x is not r:
+            new_src.append(x)
+            continue
+          # if it's a contiguous already, track down where it's coming from
+          if x.op is Ops.CONTIGUOUS:
+            new_src.append(x.replace(arg=f"user inserted contiguous @ {repr(x.metadata)}"))
+          else: new_src.append(UOp(Ops.CONTIGUOUS, x.dtype, (x,), arg=reason))
+        sub[child] = child.replace(src=tuple(new_src))
+    graph_rewrite(tensor_map[big_sink].substitute(sub), PatternMatcher([]), name="View Contiguous Graph")
   tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
