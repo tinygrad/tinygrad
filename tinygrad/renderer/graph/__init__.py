@@ -1,6 +1,6 @@
 # render the kernel graph for execution outside tinygrad
 from tinygrad import Tensor, dtype
-from tinygrad.tensor import no_realize_uops
+from tinygrad.tensor import no_realize_uops, all_tensors
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from tinygrad.ops import UOp, Variable, Ops
@@ -8,7 +8,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.nn.state import get_state_dict
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.memory import memory_planner
-from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner, BufferCopy, ViewOp
+from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner
 from tinygrad.helpers import Context
 from typing import Callable, cast
 import itertools
@@ -47,23 +47,17 @@ class GraphRenderer(Renderer):
     self.bufs.update({u.base.buffer: f"output_{i}" for i, u in enumerate(self.outputs)})
     self.state_bufs: dict[Buffer, str] = dict()
     for si, ei in lower_schedule(memory_planner(schedule)):
-      # copyin state buffers
-      if isinstance(ei.prg, (BufferCopy, ViewOp)):
-        assert len(ei.bufs) == 2 and (src:=ei.bufs[1]) and src.is_allocated() and src not in self.bufs, f"Unsupported data transfer: {ei.bufs}"
-        ei.run()
-        continue
+      if isinstance(ei.prg, CompiledRunner):
+        for buf in ei.bufs: assert buf is not None and buf.device == compute_device, "All compute and returned Tensor(s) must be on the same device"
+        self.eis.append(ei)
+        for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
+          if buf not in self.bufs:
+            self.bufs[buf] = name = f"buf_{next(ctr)}"
+            if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
 
-      for buf in ei.bufs: assert buf is not None and buf.device == compute_device, "All compute and returned Tensor(s) must be on the same device"
-      assert isinstance(ei.prg, CompiledRunner)
-      self.eis.append(ei)
-      for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
-        if buf not in self.bufs:
-          self.bufs[buf] = name = f"buf_{next(ctr)}"
-          if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
-
-    if tensor_names:
-      buf_names = {u.buffer: k for k,v in tensor_names.items() if (u:=becomes_map.get(ld:=v.lazydata.base, ld)).op is Ops.BUFFER}
-      self.state_bufs.update({buf: name for buf, name in buf_names.items() if buf in self.state_bufs})
+    Tensor.realize(*[t for tref in all_tensors if (t:=tref()) is not None and (new_uop:=becomes_map.get(t.lazydata.base)) is not None \
+                     and new_uop.op is Ops.BUFFER and new_uop.buffer in self.state_bufs])
+    if tensor_names: self.state_bufs.update({b:k for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs})
     self.state_dict: dict[str, Tensor] = {v:Tensor(bytes(k.as_buffer()), dtype=k.dtype, device=k.device).realize() for k,v in self.state_bufs.items()}
 
   def render_graph(self) -> str: raise NotImplementedError("Implement a language-specific GraphRenderer")
