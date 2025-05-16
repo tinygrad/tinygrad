@@ -63,8 +63,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       base = k.src[1].buf_uop.buffer
       assert isinstance(base, Buffer), "base can't be MultiBuffer"
       buffers[k.src[0]] = base.view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-    ubufs = tuple(s.buf_uop.buffer.bufs[s.arg] if s.op is Ops.MSELECT else s.buf_uop.buffer for s in k.src)
-    print(ubufs)
+    ubufs = tuple(s.buf_uop.buffer for s in k.src)
     if any(isinstance(x, MultiBuffer) for x in ubufs):
       if ast.op is Ops.COPY:
         if isinstance(ubufs[0], MultiBuffer) and isinstance(ubufs[1], MultiBuffer) and ast.arg is None:

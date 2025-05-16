@@ -140,14 +140,7 @@ def copy_multi(multi:UOp, device:UOp):
   dnum = UOp.variable("_device_num", 0, len(multi.device)-1)
   padded = multi.src[0].pad(tuple((0,0) if a != multi.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(multi.shape))))
   ret = padded.allreduce(Ops.ADD)
-  if isinstance(device.arg, str):
-    # copying to single device
-    if device.arg in multi.device: return ret.mselect(multi.device.index(device.arg))
-    return ret.mselect(0).copy_to_device(device)
-  else:
-    # copying to multi device
-    if device.arg == multi.device: return ret.multi(axis=None)
-    return ret.mselect(0).copy_to_device(device).multi(axis=None)
+  return ret if isinstance(device.arg, str) else ret.multi(axis=None)
 
 def assign_multi(dest:UOp, src:UOp):
   if dest.axis != src.axis: raise RuntimeError(f"axis must match in assign {dest.axis} != {src.axis}")

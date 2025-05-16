@@ -389,11 +389,11 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # replace assign sources with a view of the target buffer
   parents_rep: dict[UOp, UOp] = {}
   for s in k.src:
-    if s.op is Ops.MSELECT:
-      assert s.src[0].op is Ops.ASSIGN
-      s = s.src[0]
     if s.op is Ops.ASSIGN:
       for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
+      parents_rep[s] = s.buf_uop
+    if s.op is Ops.MSELECT:
+      for out in s.src[0].src[1].arg.ast.src: parents_rep[out] = s.src[0].buf_uop.view(unwrap(out.st))
       parents_rep[s] = s.buf_uop
   ast = k.arg.ast.substitute(parents_rep, name="replace realized")
   # push views to edges
