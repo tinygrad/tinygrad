@@ -55,8 +55,9 @@ class GraphRenderer(Renderer):
             self.bufs[buf] = name = f"buf_{next(ctr)}"
             if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
 
-    Tensor.realize(*[t for tref in all_tensors if (t:=tref()) is not None and (new_uop:=becomes_map.get(t.lazydata.base)) is not None \
-                     and new_uop.op is Ops.BUFFER and new_uop.buffer in self.state_bufs])
+    state_makers = [t for tref in all_tensors if (t:=tref()) is not None and (new_uop:=becomes_map.get(t.lazydata.base)) is not None \
+                    and new_uop.op is Ops.BUFFER and new_uop.buffer in self.state_bufs]
+    if state_makers: Tensor.realize(*state_makers)
     if tensor_names: self.state_bufs.update({b:k for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs})
     self.state_dict: dict[str, Tensor] = {v:Tensor(bytes(k.as_buffer()), dtype=k.dtype, device=k.device).realize() for k,v in self.state_bufs.items()}
 
