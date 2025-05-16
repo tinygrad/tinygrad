@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib, array
+import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib
 from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -104,8 +104,8 @@ class AMPageTableEntry:
     self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, system, snooped, valid) | (paddr & 0x0000FFFFFFFFF000)
 
 class AMPageTableTraverseContext:
-  def __init__(self, adev, pt, vaddr, create_pts=False, free_pts=False):
-    self.adev, self.vaddr, self.create_pts, self.free_pts = adev, vaddr - adev.gmc.vm_base, create_pts, free_pts
+  def __init__(self, adev, pt, vaddr, create_pts=False, free_pts=False, boot=False):
+    self.adev, self.vaddr, self.create_pts, self.free_pts, self.boot = adev, vaddr - adev.gmc.vm_base, create_pts, free_pts, boot
     self.pt_stack:list[tuple[AMPageTableEntry, int, int]] = [(pt, self._pt_pte_idx(pt, vaddr), self._pt_pte_size(pt))]
 
   def _pt_pte_size(self, pt): return (1 << ((9 * (3-pt.lv)) + 12))
@@ -115,7 +115,7 @@ class AMPageTableTraverseContext:
     pt, pte_idx, _ = self.pt_stack[-1]
     if (entry:=pt.entries[pte_idx]) & am.AMDGPU_PTE_VALID == 0:
       assert self.create_pts, "Not allowed to create new page table"
-      pt.set_entry(pte_idx, self.adev.mm.palloc(0x1000, zero=True), table=True, valid=True)
+      pt.set_entry(pte_idx, self.adev.mm.palloc(0x1000, zero=True, boot=self.boot), table=True, valid=True)
       entry = pt.entries[pte_idx]
 
     assert not self.adev.gmc.is_pte_huge_page(entry), f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
@@ -172,12 +172,12 @@ class AMMemoryManager:
     va_pwr2_div, sz_pwr2_div, sz_pwr2_max = va & -(va) if va > 0 else (1 << 63), sz & -(sz), (1 << (sz.bit_length() - 1))
     return (min(va_pwr2_div, sz_pwr2_div) if must_cover else min(va_pwr2_div, sz_pwr2_max)).bit_length() - 1 - 12
 
-  def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False) -> AMMapping:
+  def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False) -> AMMapping:
     if AM_DEBUG >= 2: print(f"am {self.adev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
 
     assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
 
-    ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, create_pts=True)
+    ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, create_pts=True, boot=boot)
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
@@ -243,9 +243,8 @@ class AMMemoryManager:
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)
 
 class AMDev:
-  def __init__(self, devfmt, vram_bar:MMIOInterface, doorbell_bar:MMIOInterface, mmio_bar:MMIOInterface):
-    self.devfmt = devfmt
-    self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
+  def __init__(self, devfmt, vram:MMIOInterface, doorbell:MMIOInterface, mmio:MMIOInterface, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
+    self.devfmt, self.vram, self.doorbell64, self.mmio, self.dma_regions = devfmt, vram, doorbell, mmio, dma_regions
 
     os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
 
@@ -269,7 +268,7 @@ class AMDev:
     # all blocks that are initialized only during the initial AM boot.
     # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
     self.is_booting, self.smi_dev = True, False # During boot only boot memory can be allocated. This flag is to validate this.
-    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000003)) and (getenv("AM_RESET", 0) != 1)
+    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000004)) and (getenv("AM_RESET", 0) != 1)
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
@@ -350,15 +349,6 @@ class AMDev:
       if ((rval:=reg.read()) & mask) == value: return rval
     raise RuntimeError(f'wait_reg timeout reg=0x{reg.addr:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
 
-  def _read_vram(self, addr, size) -> bytes:
-    assert addr % 4 == 0 and size % 4 == 0, f"Invalid address {addr:#x} or size {size:#x}"
-    res = []
-    for caddr in range(addr, addr + size, 4):
-      self.wreg(0x06, caddr >> 31)
-      self.wreg(0x00, (caddr & 0x7FFFFFFF) | 0x80000000)
-      res.append(self.rreg(0x01))
-    return bytes(array.array('I', res))
-
   def _run_discovery(self):
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.
     #       The table is located at the end of VRAM - 64KB and is 10KB in size.
@@ -366,8 +356,7 @@ class AMDev:
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
     tmr_offset, tmr_size = self.vram_size - (64 << 10), (10 << 10)
 
-    disc_tbl = self._read_vram(tmr_offset, tmr_size) if self.vram.nbytes < self.vram_size else self.vram.view(tmr_offset, tmr_size)[:]
-    self.bhdr = am.struct_binary_header.from_buffer(bytearray(disc_tbl))
+    self.bhdr = am.struct_binary_header.from_buffer(bytearray(self.vram.view(tmr_offset, tmr_size)[:]))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE and not ihdr.base_addr_64_bit, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
 
