@@ -66,24 +66,19 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     ubufs = tuple(s.buf_uop.buffer for s in k.src)
     if any(isinstance(x, MultiBuffer) for x in ubufs):
       if ast.op is Ops.COPY:
-        if isinstance(ubufs[0], MultiBuffer) and isinstance(ubufs[1], MultiBuffer) and ast.arg is None:
-          # COPY ALL -> ALL (not ALLREDUCE)
-          for b1,b2 in zip(ubufs[0].bufs, ubufs[1].bufs): schedule.append(ScheduleItem(ast, (b1, b2), k.arg.metadata))
-        elif isinstance(ubufs[0], Buffer) and isinstance(ubufs[1], MultiBuffer) and ast.arg is None:
-          # COPY ANY -> ONE (not REDUCE)
-          schedule.append(ScheduleItem(ast, (ubufs[0], ubufs[1].bufs[0]), k.arg.metadata))
-        else:
-          if isinstance(ubufs[1], MultiBuffer):
-            # TODO: support ALLREDUCE here
-            src_buf = ubufs[1].bufs[ast.arg]
-          else:
-            src_buf = ubufs[1]
+        if isinstance(ubufs[1], MultiBuffer) and ast.arg is None:  # src is multiple buffers, none selected
           if isinstance(ubufs[0], MultiBuffer):
-            # BROADCAST
-            for b in ubufs[0].bufs: schedule.append(ScheduleItem(ast, (b, src_buf), k.arg.metadata))
+            # COPY ALL -> ALL
+            for b1,b2 in zip(ubufs[0].bufs, ubufs[1].bufs): schedule.append(ScheduleItem(ast, (b1, b2), k.arg.metadata))
           else:
-            # COPY
-            schedule.append(ScheduleItem(ast, (ubufs[0], src_buf), k.arg.metadata))
+            # COPY ANY -> ONE. Currently we just select the first
+            schedule.append(ScheduleItem(ast, (ubufs[0], ubufs[1].bufs[0]), k.arg.metadata))
+        else:
+          src_buf = ubufs[1].bufs[ast.arg] if isinstance(ubufs[1], MultiBuffer) else ubufs[1]
+          if isinstance(ubufs[0], MultiBuffer):
+            # COPY ONE -> ALL (BROADCAST)
+            for b in ubufs[0].bufs: schedule.append(ScheduleItem(ast, (b, src_buf), k.arg.metadata))
+          else: schedule.append(ScheduleItem(ast, (ubufs[0], src_buf), k.arg.metadata)) # COPY ONE -> ONE
       else:
         assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
         dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
@@ -95,8 +90,6 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
 
-  # confirm everything was scheduled correctly
-  #assert len(schedule) == len(in_degree), f"Schedule length mistmatch {len(schedule)} != {len(in_degree)}"
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
   # map ASSIGN to BUFFER after ScheduleItems are constructed

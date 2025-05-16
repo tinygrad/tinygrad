@@ -1,46 +1,6 @@
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv
-from tinygrad.ops import Ops, UOp, sint
-
-def all_reduce(bop: Ops, lbs: list[UOp]) -> list[UOp]:
-  assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
-  assert all_same([lb.shape[0] for lb in lbs]), "allreduce with uneven shards is undefined"
-  n_lbs, shape, numel = len(lbs), lbs[0].shape, prod(lbs[0].shape)
-  # ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
-  # fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
-  use_ring = (RING >= 2 or (n_lbs > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
-  if DEBUG >= 2: print(f"{'RING ALLREDUCE' if use_ring else 'NAIVE ALLREDUCE'} {n_lbs}x{numel} | {lbs[0].dtype}")
-  if not use_ring: return [functools.reduce(lambda x,y: x.alu(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
-
-  factor = next((f for f in [32, 16, 8, 4, 2] if numel % f == 0), 1)
-  base, left = (numel // factor) // n_lbs, (numel // factor) % n_lbs
-  chunk_sizes = [(base + 1) * factor] * left + [base * factor] * (n_lbs - left)
-  chunks = list(itertools.pairwise(itertools.accumulate(chunk_sizes, initial=0)))
-  chunked = [[lb.reshape((numel,)).shrink(((s,e),)) for s,e in chunks] for lb in lbs]
-
-  # scatter-reduce
-  for step in range(n_lbs-1):
-    for i in range(len(chunks)):
-      src, dest = (i+step)%n_lbs, (i+step+1)%n_lbs
-      chunked[dest][i] = chunked[dest][i].alu(bop, chunked[src][i].copy_to_device(chunked[dest][i].device))
-
-  # allgather
-  for step in range(n_lbs-1):
-    for i in range(len(chunks)):
-      src, dest = (i+step-1)%n_lbs, (i+step)%n_lbs
-      chunked[dest][i] = chunked[src][i].copy_to_device(chunked[dest][i].device)
-
-  # assemble chunks back
-  pads = [((s,numel-e),) for s,e in chunks]
-  return [functools.reduce(operator.add, [c.pad(pad) for pad,c in zip(pads,lb_c)]).reshape(shape) for lb_c in chunked]
-
-def to_sharded(lbs:list[UOp], axis:int, bounds: tuple[tuple[int, int], ...]) -> list[UOp]:
-  if lbs[0].shape[axis] % len(lbs) != 0: raise RuntimeError(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
-  return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(bounds, lbs))]
-
-# ***** multi functions *****
-
-from tinygrad.ops import PatternMatcher, UPat, GroupOp, graph_rewrite_map, track_rewrites
+from tinygrad.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, track_rewrites
 
 def alu_multi(root:UOp):
   msrcs = root.src
@@ -168,3 +128,44 @@ multi_pm = PatternMatcher([
 
 @track_rewrites(named=True)
 def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]: return {k:v for k,v in graph_rewrite_map(big_sink, multi_pm).items() if k is not v}
+
+# *** allreduce implementation ***
+
+def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
+  if not isinstance(buf.device, tuple): return None
+  assert all_int(buf.shape), f"does not support symbolic shape {buf.shape}"
+  n_lbs, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
+  # ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
+  # fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
+  use_ring = (RING >= 2 or (n_lbs > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
+  if DEBUG >= 2: print(f"{'RING ALLREDUCE' if use_ring else 'NAIVE ALLREDUCE'} {n_lbs}x{numel} | {buf.dtype}")
+
+  # contiguous before we copy it
+  buf = buf.contiguous()
+
+  # copy to all devices. if you shrink later, that'll be handled
+  if not use_ring: return functools.reduce(lambda x,y: x.alu(red.arg, y),
+                                           [UOp(Ops.COPY, buf.dtype, (buf, red.src[1]), arg=i) for i in range(len(buf.device))])
+
+  # new ring reduce
+  factor = next((f for f in [32, 16, 8, 4, 2] if numel % f == 0), 1)
+  base, left = (numel // factor) // n_lbs, (numel // factor) % n_lbs
+  chunk_sizes = [(base + 1) * factor] * left + [base * factor] * (n_lbs - left)
+  chunks = list(itertools.pairwise(itertools.accumulate(chunk_sizes, initial=0)))
+
+  # extract chunks and scatter-reduce
+  reduced_chunks = []
+  for i,(s,e) in enumerate(chunks):
+    chunk = buf.reshape((numel,)).shrink(((s,e),))
+    reduced_chunk = chunk
+    for step in range(n_lbs-1):
+      src, dest = (i+step)%n_lbs, (i+step+1)%n_lbs
+      # copy the chunk from the src device to the dest (operating device), and select the chunk on the dest device
+      reduced_chunk = reduced_chunk.copy_to_device(buf.device[dest], src).alu(red.arg, chunk.copy_to_device(buf.device[dest], dest))
+    reduced_chunks.append(reduced_chunk)
+
+  # allgather + reassemble
+  pads = [((s,numel-e),) for s,e in chunks]
+  return functools.reduce(operator.add, [c.copy_to_device(buf.device).pad(pad) for pad,c in zip(pads, reduced_chunks)]).reshape(shape)
+
+replace_allreduce = PatternMatcher([(UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),])
