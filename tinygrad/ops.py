@@ -539,7 +539,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
-    if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
+    if self.op is Ops.MSELECT: return self.src[0].buf_uop
     assert self.op is Ops.ASSIGN, f"must be ASSIGN {self.op}"
     return self.src[0].base
   @property

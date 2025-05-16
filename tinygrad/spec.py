@@ -47,10 +47,13 @@ def validate_kernel(k:UOp):
 
 assign_spec = PatternMatcher([
   # KERNEL can attach to an ASSIGN to describe the compute required to realize a BUFFER
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN)), name="k"), validate_kernel),
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.MSELECT)), name="k"), validate_kernel),
 
   # ASSIGN has a target and a value. It can also optionally depend on other assigns
   (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
+
+  # MSELECT picks a multi buffer
+  (UPat(Ops.MSELECT, name="m"), lambda m: m.arg >= 0 and m.arg < len(m.src[0].device))
 ])
 
 # *** this is the spec of a Tensor in UOp ***
@@ -79,7 +82,6 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
   # COPY/ALLREDUCE
   (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda copy,x: copy.dtype == x.dtype),
   (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"),)), lambda red,x: red.dtype == x.dtype and isinstance(red.arg, Ops)),
-  (UPat(Ops.MSELECT, name="m"), lambda m: m.arg >= 0 and m.arg < len(m.src[0].device))
 ])
 
 # ***** uop type spec *****
