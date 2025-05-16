@@ -520,21 +520,12 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   pads = [((s,numel-e),) for s,e in chunks]
   return functools.reduce(operator.add, [c.copy_to_device(buf.device).pad(pad) for pad,c in zip(pads, reduced_chunks)]).reshape(shape)
 
-replace_allreduce = PatternMatcher([
-  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
-  # copy on specific copy
-  (UPat(Ops.COPY, src=(UPat(Ops.COPY, name="c1"), UPat(Ops.DEVICE, name="out_device")), name="c2"),
-   lambda c1,c2,out_device: c1.src[0].copy_to_device(out_device, arg=c1.arg) if c2.arg is None else None),
-])
+replace_allreduce = PatternMatcher([(UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),])
 
 @track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
-  # replace allreduce
-  tensor_map = graph_rewrite_map(big_sink, replace_allreduce, name="replace_allreduce")
-
   # merge_views + simplify
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], insert_fuse+do_fuse+merge_views+sym+replace_contiguous, ctx={},
-                                 input_map=tensor_map, name="merge_views")
+  tensor_map = graph_rewrite_map(big_sink, replace_allreduce+insert_fuse+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
