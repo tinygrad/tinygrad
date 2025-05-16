@@ -99,15 +99,15 @@ def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   self_t = unwrap(self)
   values_t = unwrap(values)
   indices_t = [unwrap(_y) if isinstance(_y, torch.Tensor) else None for _y in indices]
-  
+
   if accumulate:
     # For accumulate=True, we need to add values to existing values
-    existing_values = self_t[[i for i in indices_t]]
-    self_t[[i for i in indices_t]] = existing_values + values_t
+    existing_values = self_t[list(indices_t)]
+    self_t[list(indices_t)] = existing_values + values_t
   else:
     # For accumulate=False, we just set the values
-    self_t[[i for i in indices_t]] = values_t
-    
+    self_t[list(indices_t)] = values_t
+
   return self
 
 @torch.library.impl("aten::index_put", "privateuseone")
@@ -115,13 +115,13 @@ def index_put(self, indices, values, accumulate=False):
   self_t = unwrap(self.clone())
   values_t = unwrap(values)
   indices_t = [unwrap(_y) if isinstance(_y, torch.Tensor) else None for _y in indices]
-  
+
   if accumulate:
-    existing_values = self_t[[i for i in indices_t]]
-    self_t[[i for i in indices_t]] = existing_values + values_t
+    existing_values = self_t[list(indices_t)]
+    self_t[list(indices_t)] = existing_values + values_t
   else:
-    self_t[[i for i in indices_t]] = values_t
-    
+    self_t[list(indices_t)] = values_t
+
   return wrap(self_t)
 
 @torch.library.impl("aten::isin.Tensor_Tensor_out", "privateuseone")
