@@ -27,13 +27,7 @@ struct WaveState {
 }
 
 const SYNCS: [u32; 5] = [0xBF89FC07, 0xBFBD0000, 0xBC7C0000, 0xBF890007, 0xbFB60003];
-const BARRIERS: [[u32; 2]; 5] = [
-    [SYNCS[0], SYNCS[0]],
-    [SYNCS[0], SYNCS[1]],
-    [SYNCS[0], SYNCS[2]],
-    [SYNCS[3], SYNCS[1]],
-    [SYNCS[1], SYNCS[0]],
-];
+const S_BARRIER: u32 = 0xBFBD0000;
 impl<'a> WorkGroup<'a> {
     pub fn new(dispatch_dim: u32, id: [u32; 3], launch_bounds: [u32; 3], kernel: &'a Vec<u32>, kernel_args: *const u64) -> Self {
         Self { dispatch_dim, id, kernel, launch_bounds, kernel_args, lds: VecDataStore::new(), wave_state: HashMap::new() }
@@ -50,23 +44,25 @@ impl<'a> WorkGroup<'a> {
         }
         let waves = threads.chunks(WAVE_SIZE).collect::<Vec<_>>();
 
-        let mut sync = false;
-        for (i, x) in self.kernel.iter().enumerate() {
-            if i != 0 && BARRIERS.contains(&[*x, self.kernel[i - 1]]) {
-                sync = true;
-                break;
-            }
-        }
+        // Lock-step wave scheduling: Drive waves forward in cooperative-multitasking fashion,
+        // where each wave yields control when encountering a barrier or finishing the program
+        loop {
+            let mut all_done = true;
 
-        for _ in 0..=(sync as usize) {
-            for w in waves.iter().enumerate() {
-                self.exec_wave(w)?
+            for (idx, wave) in waves.iter().enumerate() {
+                if !self.exec_wave((idx, wave))? {
+                    all_done = false;
+                }
+            }
+
+            if all_done {
+                break;
             }
         }
         Ok(())
     }
 
-    fn exec_wave(&mut self, (wave_id, threads): (usize, &&[[u32; 3]])) -> Result<(), i32> {
+    fn exec_wave(&mut self, (wave_id, threads): (usize, &&[[u32; 3]])) -> Result<bool, i32> {
         let (mut scalar_reg, mut scc, mut pc, mut vec_reg, mut vcc, mut exec, mut sds) = match self.wave_state.get(&wave_id) {
           None => {
             let mut scalar_reg = [0; SGPR_COUNT];
@@ -102,12 +98,20 @@ impl<'a> WorkGroup<'a> {
         };
 
         loop {
+            let [id0, id1, id2] = self.id;
             if self.kernel[pc] == END_PRG {
-                break Ok(());
+                if *DEBUG {
+                    println!("[{id0:<3} {id1:<3} {id2:<3}] [_   _   _  ] __ BFB00000 SOPP {{ wave: {wave_id} }}");
+                }
+                break Ok(true);
             }
-            if BARRIERS.contains(&[self.kernel[pc], self.kernel[pc + 1]]) && self.wave_state.get(&wave_id).is_none() {
+            if self.kernel[pc] == S_BARRIER {
+                if *DEBUG {
+                    println!("[{id0:<3} {id1:<3} {id2:<3}] [_   _   _  ] __ BFBD0000 SOPP {{ wave: {wave_id}, pc: {pc} }}");
+                }
+                pc += 1;
                 self.wave_state.insert(wave_id, WaveState { scalar_reg, scc, vec_reg, vcc, exec, pc, sds });
-                break Ok(());
+                break Ok(false);
             }
             if SYNCS.contains(&self.kernel[pc]) || self.kernel[pc] >> 20 == 0xbf8 || self.kernel[pc] == 0x7E000000 {
                 pc += 1;
@@ -235,5 +239,33 @@ mod test_workgroup {
         let mut wg = WorkGroup::new(1, [0, 0, 0], [5, 1, 1], &kernel, [addr].as_ptr());
         wg.exec_waves().unwrap();
         assert_eq!(ret, 0b11110);
+    }
+
+    fn make_wave_slices<const X: usize>(launch_bounds: [u32; 3]) -> Vec<Vec<[u32; 3]>> {
+        let mut threads = Vec::<[u32; 3]>::new();
+        for z in 0..launch_bounds[2] {
+            for y in 0..launch_bounds[1] {
+                for x in 0..launch_bounds[0] {
+                    threads.push([x, y, z]);
+                }
+            }
+        }
+        threads.chunks(WAVE_SIZE).map(|c| c.to_vec()).collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn test_multi_barrier_basic() {
+        let kernel = vec![S_BARRIER, S_BARRIER, END_PRG];
+        let launch_bounds = [64, 1, 1];
+        let mut wg = WorkGroup::new(1, [0, 0, 0], launch_bounds, &kernel, ptr::null());
+
+        let waves = make_wave_slices::<64>(launch_bounds);
+
+        assert_eq!(wg.exec_wave((0, &waves[0].as_slice())).unwrap(), false); // Wave 0 stops at the barrier 1.
+        assert_eq!(wg.exec_wave((1, &waves[1].as_slice())).unwrap(), false); // Wave 1 now reaches the barrier 1 and stops.
+        assert_eq!(wg.exec_wave((0, &waves[0].as_slice())).unwrap(), false); // Wave 0 stops at the barrier 2.
+        assert_eq!(wg.exec_wave((1, &waves[1].as_slice())).unwrap(), false); // Wave 1 now reaches the barrier 2 and stops.
+        assert_eq!(wg.exec_wave((0, &waves[0].as_slice())).unwrap(), true);  // All waves have arrived so wave 0 should be able to finish.
+        assert_eq!(wg.exec_wave((1, &waves[1].as_slice())).unwrap(), true);  // Wave 1 should also be able to finish now.
     }
 }
