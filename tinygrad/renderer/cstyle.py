@@ -7,6 +7,9 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.codegen.devectorizer import no_vectorized_alu
 
+import subprocess
+import tempfile
+
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: ctx[x.src[0]]),
   (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{ctx[x.src[0]]} = {ctx[x.src[1]]};"),
@@ -130,6 +133,8 @@ class CStyleLanguage(Renderer):
       local_size_string = f"layout(local_size_x = {local_size[0]}, local_size_y = {local_size[1]}, local_size_z = {local_size[2]}) in;"
       prg = '\n'.join([prg.splitlines()[0], local_size_string, *prg.splitlines()[1:]])
       #
+      #compile
+      prg = compile_shader_to_spv(prg)
 
       return prg
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
@@ -534,3 +539,46 @@ class AMDRenderer(CStyleLanguage):
 class NVRenderer(CUDARenderer): device = "NV"
 class HIPRenderer(AMDRenderer): device = "HIP"
 class QCOMRenderer(OpenCLRenderer): device = "QCOM"
+
+def compile_shader_to_spv(glsl_source: str) -> bytes:
+    with tempfile.NamedTemporaryFile(suffix=".comp", delete=False, mode="w") as temp_file:
+        temp_file.write(glsl_source)
+        temp_file_path = temp_file.name
+
+    output_spv_path = tempfile.NamedTemporaryFile(suffix=".spv", delete=False).name
+
+    try:
+        result = subprocess.run(
+            ["glslangValidator", "-V", temp_file_path, "-o", output_spv_path],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+
+        if result.stderr:
+            print("Compiler warnings:")
+            print(result.stderr)
+
+        with open(output_spv_path, "rb") as f:
+            return f.read()
+
+    except subprocess.CalledProcessError as e:
+        print("Error compiling shader:")
+        print("Exit code:", e.returncode)
+        print("Error output:")
+        print(e.stderr)
+        print("Standard output:")
+        print(e.stdout)
+        raise
+    except FileNotFoundError:
+        print("Error: glslangValidator not found. Please ensure it is installed and in your PATH.")
+        raise
+    finally:
+        try:
+            os.unlink(temp_file_path)
+        except OSError as e:
+            print(f"Warning: Could not delete temporary file {temp_file_path}: {e}")
+        try:
+            os.unlink(output_spv_path)
+        except OSError as e:
+            print(f"Warning: Could not delete temporary file {output_spv_path}: {e}")
