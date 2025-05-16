@@ -37,14 +37,16 @@ class _Device:
       with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
-    from_env = [d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1]
+    from_env = [d for d in ALL_DEVICES if getenv(d) == 1]
+    if (env_device:=getenv("DEVICE", '')) in ALL_DEVICES: from_env.append(env_device)
     assert len(from_env) < 2, f"multiple devices set in env: {from_env}"
-    if len(from_env) == 1: return from_env[0]
-    try:
-      device = next(self.get_available_devices())
-      os.environ[device] = "1"   # we set this in environment for spawned children
-      return device
-    except StopIteration as exc: raise RuntimeError("no usable devices") from exc
+    if len(from_env) == 0:
+      try: device = next(self.get_available_devices())
+      except StopIteration as exc: raise RuntimeError("no usable devices") from exc
+    else:
+      device = from_env[0]
+    os.environ[device] = "1"   # we set this in environment for spawned children
+    return device
 Device = _Device()
 atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices])
 
