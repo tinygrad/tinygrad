@@ -7,6 +7,7 @@ from tinygrad.codegen.lowerer import get_contraction_with_reduce, get_contractio
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY, RING
+from tinygrad.helpers import round_up, flatten
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -501,37 +502,36 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   if not use_ring: return functools.reduce(lambda x,y: x.alu(red.arg, y),
                                            [UOp(Ops.COPY, buf.dtype, (buf, red.src[1]), arg=i) for i in range(len(buf.device))])
 
+  # new ring reduce
   factor = next((f for f in [32, 16, 8, 4, 2] if numel % f == 0), 1)
   base, left = (numel // factor) // n_lbs, (numel // factor) % n_lbs
   chunk_sizes = [(base + 1) * factor] * left + [base * factor] * (n_lbs - left)
   chunks = list(itertools.pairwise(itertools.accumulate(chunk_sizes, initial=0)))
 
   # extract chunks
-  chunked = [[buf.reshape((numel,)).shrink(((s,e),)).copy_to_device(buf.device[i], arg=i) for s,e in chunks] for i in range(len(buf.device))]
+  chunked = [buf.reshape((numel,)).shrink(((s,e),)) for s,e in chunks]
 
   # scatter-reduce
-  for step in range(n_lbs-1):
-    for i in range(len(chunks)):
+  reduced_chunks = []
+  for i,chunk in enumerate(chunked):
+    reduced_chunk = chunk
+    for step in range(n_lbs-1):
       src, dest = (i+step)%n_lbs, (i+step+1)%n_lbs
-      chunked[dest][i] = chunked[dest][i].alu(red.arg, chunked[src][i].copy_to_device(chunked[dest][i].device))
+      # copy the chunk from the src device to the dest (operating device)
+      # and select the chunk on the dest device
+      reduced_chunk = reduced_chunk.copy_to_device(buf.device[dest], src).alu(red.arg, chunk.copy_to_device(buf.device[dest], dest))
+    reduced_chunks.append(reduced_chunk)
 
-  # allgather
-  for step in range(n_lbs-1):
-    for i in range(len(chunks)):
-      src, dest = (i+step-1)%n_lbs, (i+step)%n_lbs
-      chunked[dest][i] = chunked[src][i].copy_to_device(chunked[dest][i].device)
-
-  # assemble chunks back
+  # allgather + reassemble
   pads = [((s,numel-e),) for s,e in chunks]
-  assembled = [functools.reduce(operator.add, [c.pad(pad) for pad,c in zip(pads,lb_c)]) for lb_c in chunked]
+  return functools.reduce(operator.add, [c.copy_to_device(buf.device).pad(pad) for pad,c in zip(pads, reduced_chunks)])
 
-  # combine them into one buffer (clunky)
-  dnum = UOp.variable("_device_num", 0, n_lbs-1)
-  ret = functools.reduce(operator.add, [a.pad(((i*numel, (n_lbs-i-1)*numel),)).copy_to_device(buf.device) for i,a in enumerate(assembled)])
-  ret = ret.shrink(((dnum*numel, dnum*numel+numel),))
-  return ret.reshape(shape)
-
-replace_allreduce = PatternMatcher([(UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),])
+replace_allreduce = PatternMatcher([
+  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
+  # copy on specific copy
+  (UPat(Ops.COPY, src=(UPat(Ops.COPY, name="c1"), UPat(Ops.DEVICE, name="out_device")), name="c2"),
+   lambda c1,c2,out_device: c1.src[0].copy_to_device(out_device, arg=c1.arg) if c2.arg is None else None),
+])
 
 @track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
