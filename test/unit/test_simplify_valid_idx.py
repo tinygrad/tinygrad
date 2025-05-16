@@ -165,7 +165,6 @@ class TestValidIdxSimplification(unittest.TestCase):
     print("The expressions are not equivalent.")
     print(s.model())
 
-  @unittest.expectedFailure  # TODO: improve uop_given_valid
   def test_valid_becomes_const2(self):
     ridx0 = Range(0, 4)
     ridx1 = Range(1, 4)
@@ -177,6 +176,18 @@ class TestValidIdxSimplification(unittest.TestCase):
     self.check(load,
       "1",
       "((((ridx0+ridx1)<1)!=True)&(((ridx2+ridx3)<1)!=True))")
+
+  def test_valid_becomes_const3(self):
+    ridx0 = Range(0, 4)
+    ridx1 = Range(1, 4)
+    ridx2 = Range(2, 4)
+    ridx3 = Range(3, 4)
+    idx= ((ridx0+ridx1+ridx2+ridx3+27)//30)
+    valid = (ridx0<1).ne(True) & (ridx1<2).ne(True) & ((ridx2+ridx3)<1).ne(True)
+    load = get_gated_load_uop(valid, idx)
+    self.check(load,
+      "1",
+      "((((ridx0<1)!=True)&((ridx1<2)!=True))&(((ridx2+ridx3)<1)!=True))")
 
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
@@ -394,6 +405,15 @@ class TestImageSimplification(unittest.TestCase):
     valid = (((idx2+ridx4)<1)!=1)&(((idx1+ridx5)<1)!=1)
     load = get_load_image_uop((128, 768, 4), valid, (alu0, alu1))
     self.check(load, None, "((((idx1*24)+ridx3)+(ridx5*3))+-3)", "(((idx2*2)+ridx4)+-1)")
+
+  def test_simplify7(self):
+    idx0 = Special("idx0", 4)
+    idx1 = Special("idx1", 32)
+    idx2 = Special("idx2", 64)
+    valid = (((idx2<1).ne(True))&((idx1<1).ne(True)))
+    alu = (idx0+(idx2*(2**9))+(idx1*(2**4))+-516)
+    load = get_load_image_uop((128, 768, 4), valid, (alu//512, alu%512))
+    self.check(load, None, "(idx2+-1)", "((idx0+(idx1*16))+-4)")
 
 if __name__ == '__main__':
   unittest.main()
