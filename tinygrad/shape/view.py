@@ -3,7 +3,7 @@ import functools, operator, itertools
 from dataclasses import dataclass
 from typing import Optional, cast, Sequence
 from tinygrad.dtype import dtypes
-from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop
+from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop, Ops
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
 
 @functools.cache
@@ -107,7 +107,8 @@ class View:
   @staticmethod
   @functools.cache
   def create(shape:tuple[sint, ...], strides:Optional[tuple[sint, ...]]=None, offset:sint=0, mask:Optional[tuple[tuple[sint, sint], ...]]=None):
-    if not all(s >= 0 for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
+    # TODO: resolve shouldn't be needed here
+    if not all(resolve(s >= 0) for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
     # canonicalize 0 in shape
     if 0 in shape: return View(shape, (0,) * len(shape), offset=0, mask=None, contiguous=True)
@@ -138,7 +139,7 @@ class View:
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def unbind(self) -> tuple[View, dict[Variable, int]]:
-    var_unboundvar_val = [(v, v.unbind()) for v in self.vars()]
+    var_unboundvar_val = [(v, v.unbind()) for v in self.vars() if v.op is Ops.BIND]
     unbound_vars = {v:uv for v,(uv,_) in var_unboundvar_val}
     def substitute(x:sint): return x if isinstance(x, int) else x.substitute(unbound_vars)
     new_shape = tuple(map(substitute, self.shape))
@@ -196,8 +197,8 @@ class View:
           else: bad = True
           continue
         d1, s1 = term[0]
-        newb[d1] = max(newb[d1], ceildiv(b - o if s1 > 0 else e - o - 1, s1))
-        newe[d1] = min(newe[d1], (b - o if s1 < 0 else e - o - 1) // s1 + 1)
+        newb[d1] = smax(newb[d1], ceildiv(b - o if s1 > 0 else e - o - 1, s1))
+        newe[d1] = smin(newe[d1], (b - o if s1 < 0 else e - o - 1) // s1 + 1)
 
       # If any of vm1 was masked off, try again with that mask in place.
       if any((b, e) != (0, s) for b, e, s in zip(newb, newe, vm1.shape)):

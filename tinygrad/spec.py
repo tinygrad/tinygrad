@@ -32,7 +32,8 @@ except (ImportError, AttributeError): z3_imported = False
 
 buffer_spec = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
-  (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
+  (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
+   isinstance(d.arg, str) or (isinstance(d.arg, tuple) and all(isinstance(s, str) for s in d.arg))),
   (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), allow_any_len=True, name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),), name="buf_view"),
@@ -75,8 +76,9 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
   (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="root", src=(UPat.var("x"),), arg=None),
    lambda root,x: root.dtype == x.dtype),
 
-  # COPY
+  # COPY/ALLREDUCE
   (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda copy,x: copy.dtype == x.dtype),
+  (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda red,x: red.dtype == x.dtype and isinstance(red.arg, Ops)),
 ])
 
 # ***** uop type spec *****
