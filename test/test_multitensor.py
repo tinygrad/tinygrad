@@ -210,6 +210,14 @@ class TestMultiTensor(unittest.TestCase):
         a,b = jit_allreduce(Tensor.rand(256, 256))
         np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
+  def test_multitensor_jit_input(self):
+    @TinyJit
+    def f(x): return (x+1).contiguous().sum()
+    for _ in range(5):
+      tt = Tensor.arange(0, 4).contiguous().realize().shard((d1,d2), 0).realize()
+      out = f(tt)
+      assert out.item() == 1+2+3+4
+
   @unittest.skip("slow")
   def test_fuzz_allreduce(self):
     random.seed(41)
