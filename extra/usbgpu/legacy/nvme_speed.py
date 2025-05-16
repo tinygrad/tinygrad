@@ -5,17 +5,32 @@ from tinygrad.runtime.autogen import pci
 from tinygrad.helpers import Timing
 from tinygrad import Device
 
+from extra.usbgpu.patch import traps
+
 usb = ASM24Controller()
 
 import pickle
 # pickle.dump(usb.read(0x0, 0xf000), open("rstate_2.bin", "wb"))
+# exit(0)
 rstate = pickle.load(open("rstate_2.bin", "rb"))
-# usb.write(0x0, rstate[:0x3000])
+# usb.write(0x0, rstate[:0x2000])
+# usb.write(0xc500, rstate[0xc500:0xc580])
+# usb.write(0xc600, rstate[0xc600:0xc680])
 # print("done")
 # usb.write(0x0, rstate[:0xf000])
 
+def dump_stats():
+  for i,(x,x,name) in enumerate(traps):
+    print(f"{i}: {name}: {usb.read(0x3000 + i, 1)}")
+
+def reset_stats():
+  for i,(x,x,name) in enumerate(traps):
+    usb.write(0x3000 + i, b'\x00')
+
 def real_scsi_write():
   self.exec_ops([ScsiWriteOp(buf, lba)])
+
+# dump_stats()
 
 # usb.read(0xf000, 0x1000)
 # usb.write(0xce00, b'\x00\n\x01\x00\x00\xff\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 \x00\x00\x00\x00\x00\x00\x03 \x10\x00\x00\x00\x00\x00P\xce\x00\x00\x00\x00\x00\x00\x00\x00\x7f\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x03\x00\x04\x00\x00\x00\x00@\x04UP\x05U\x00\x00\x00\x8f\x00\x00\x00\x05\x00\x00\x00\x02\x00\x00\x00\x00\x7f\x10\x03\x0f\x00\xff\x00\x00\x00\xff\xff\x00\x00\x00\x00\x00\x00\x8f $\x00\x00\x01\x02\x00 \x00\x00:8`0\x00\x00\x00\x00\x00\x00')
@@ -23,20 +38,26 @@ def real_scsi_write():
 
 for i in range(4):
   # usb.read(0x1, 0x1000)
-  sz = 4096 * 16
+  sz = 4096 * 4
   xxx = (ctypes.c_uint8 * sz)()
   dfg = random.randint(0, 255)
   for i in range(len(xxx)): xxx[i] = dfg
   # print(dfg, usb.read(0xf000, 0x10))
   st = time.perf_counter_ns()
-  usb.scsi_write(bytes(xxx), lba=0x1000 + i)
+  # usb.scsi_write(bytes(xxx), lba=0x1000 + i)
 
-  # map_x = {0x9: 0x1,0x2d:0x0,0x51:0x0,0xc2:0x1, 0xa80: 0x20, 0xaf5: 0x0, 0x9111: 0x0, 0x9113: 0x0, 0xc478: 0x8, 0xc479: 0x7, 0xc47a: 0x1, 0xc487: 0x1, 0xc489: 0x1, 0xc4f7: 0x1, 0xce02: 0x1,
-  #   0xce88: 0x0, 0xce8d: 0x0, 0xcf02: 0x1, 0xcf88: 0x0, 0xcf8d: 0x0, 0xd010: 0x88, 0xd011: 0x0, 0xd012: 0x0, 0xd013: 0x0}
-  # for k, v in map_x.items():
-  #   usb.write(k, bytes([v]))
+  # usb.read(0x10, 0xf0)
+  # exit(0)
 
-  print(usb.scsi_read(sz, lba=0x1000 + i)[:0x100])
+  reset_stats()
+  print(hex(dfg), usb.scsi_read(sz, lba=0x1000 + i)[:100])
+  print(usb.read(0x9091, 4))
+  dump_stats()
+
+  print(usb.read(0xb800, 0x10))
+
+  # print("ok")
+  exit(0)
 
   # for i in range(0x0000, 0xf000, 0x80):
   #   usb.scsi_read(sz, lba=0x1000 + i)
