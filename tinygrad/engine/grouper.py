@@ -525,7 +525,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
       import pickle
       PROCESS_REPLAY_CAPTURE[id(big_sink)] = pickle.dumps((big_sink, ContextVar._cache, [u.arg.ast for u in toposort if u.op is Ops.KERNEL]))
 
-  # map tensors to buffer/assign/const, optionally apply a VIEW on top
+  # map tensors to buffer/assign/const
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
     if k is v: continue
