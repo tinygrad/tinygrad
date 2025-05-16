@@ -115,6 +115,15 @@ migrate_indexing = PatternMatcher([
   (UPat(Ops.STORE, name="root"), create_gate),
 ])
 
+def split_loop(store: UOp, pivot: UOp, prange: UOp):
+  pivot_point = prange.src[0].minimum(pivot)
+  nrange_lower = UOp.range(prange.dtype, pivot_point, prange.arg + 0x8000)
+  nrange_upper = UOp.range(prange.dtype, prange.src[0] - pivot_point, prange.arg + 0x4000) + pivot_point
+  return UOp.sink(store.substitute({ prange: nrange_lower }), store.substitute({ prange: nrange_upper }))
+
+pm_split_loop = PatternMatcher([ (UPat(Ops.STORE, src=(UPat(), UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(Ops.CMPLT,
+  src=(UPat(Ops.RANGE, name="prange"), UPat.var("pivot"))))).load() + UPat()), name="store"), split_loop) ])
+
 # **** IGNORE support ****
 
 pm_store_ignore = PatternMatcher([
