@@ -415,7 +415,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
   def valid(self, st:ShapeTracker):
-    assert self.op in {Ops.CONST, Ops.DEFINE_VAR}, f"can only create VALID from a constant, got {self.op}"
+    assert self.op in {Ops.CONST, Ops.DEFINE_VAR} and any(v.mask is not None for v in st.views), f"attempting to create VALID with {self.op} {st}"
     from tinygrad.shape.shapetracker import ShapeTracker
     # NOTE: only VALID has a masked ShapeTracker, the CONST operands are unmasked
     unmasked_st = ShapeTracker.from_shape(()).reshape((1,)*len(st.shape)).expand(st.shape).to_uop()
