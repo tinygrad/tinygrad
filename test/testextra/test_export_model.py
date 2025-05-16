@@ -47,7 +47,7 @@ class TextModelExport(unittest.TestCase):
       assert outputs[i].dtype.name == exported_output["dtype"], f"Model and exported output dtype don't match: mdl={outputs[i].dtype.name}, prg={exported_output['dtype']}"  # noqa: E501
 
 @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Testing WebGPU specific model export behavior")
-class TextModelExportWebGPU(unittest.TestCase):
+class TestModelExportWebGPU(unittest.TestCase):
   def test_exported_input_output_dtypes(self):
     class MyModel:
       def forward(self, *inputs): return tuple([(inp+2).cast(inp.dtype) for inp in inputs])
