@@ -43,19 +43,33 @@ The current integration with `tinygrad` supports core model computations, data l
 
     In the `get_batches` function, the `shuffled` tensor is first created on the CPU to ensure eager evaluation and avoid issues with lazy execution on the tinygrad backend. After creation, it is moved to the target device (`tiny` or `cuda`). This prevents potential infinite loops or hangs that can occur if the tensor is created directly on the `tiny` device.
 
-    Additionally, there is an ongoing issue with the `batch_crop` function causing a maximum recursion depth error, which is currently under investigation. As a temporary workaround, we have modified `batch_crop` to perform a fixed center crop instead of a random crop:
+    The `batch_crop` function has been modified to work around a recursion depth issue in the tinygrad backend. The key changes are:
 
+    1. Moving mask generation and selection operations to CPU/numpy to avoid tinygrad backend issues
+    2. Maintaining the same random crop behavior (not switching to center crop)
+    3. Ensuring proper device handling by moving the final result back to the original device
+
+    Original implementation:
     ```python
     def batch_crop(inputs, crop_size):
         with torch.no_grad():
-            center_h = inputs.shape[2] // 2
-            center_w = inputs.shape[3] // 2
-            half_size = crop_size // 2
-            cropped_batch = inputs[:, :,
-                                  center_h - half_size:center_h + half_size,
-                                  center_w - half_size:center_w + half_size]
+            crop_mask_batch = make_random_square_masks(inputs, crop_size)
+            crop_mask_batch = crop_mask_batch.expand((-1, 3, -1, -1))
+            cropped_batch = torch.masked_select(inputs, crop_mask_batch).view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
             return cropped_batch
     ```
+
+    Modified version:
+    ```python
+    def batch_crop(inputs, crop_size):
+        with torch.no_grad():
+            crop_mask_batch = make_random_square_masks(inputs, crop_size)
+            crop_mask_batch = crop_mask_batch.expand((-1, 3, -1, -1)).cpu().numpy()
+            cropped_batch = torch.from_numpy(inputs.cpu().numpy()[crop_mask_batch]).view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
+            return cropped_batch.to(inputs.device)
+    ```
+
+    The modification maintains the same functionality while working around current tinygrad limitations.
 
 ## Running the Script
 
