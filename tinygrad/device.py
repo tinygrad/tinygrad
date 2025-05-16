@@ -42,7 +42,7 @@ class _Device:
     from_env = [d for d in from_env if d not in ["DISK", "NPY"]]
     assert len(from_env) < 2, f"multiple devices set in env: {from_env}"
     if len(from_env) > 0:
-       device = from_env[0]
+      device = from_env[0]
     else:
       try: device = next(self.get_available_devices())
       except StopIteration as exc: raise RuntimeError("no usable devices") from exc
