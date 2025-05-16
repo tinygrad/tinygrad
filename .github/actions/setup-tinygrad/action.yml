@@ -156,7 +156,7 @@ runs:
       shell: bash
       run: |
         brew update
-        brew install cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
+        brew install --quiet cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
     - name: Cache gpuocelot
       if: inputs.cuda == 'true'
       id: cache-build
