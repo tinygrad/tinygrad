@@ -256,6 +256,7 @@ def slice_backward(grad_out, input_sizes, dim, start, end, step):
   grad_input[slices] = unwrap(grad_out)
   return wrap(grad_input)
 
+
 @torch.library.impl("aten::select_backward", "privateuseone")
 def select_backward(grad_out, input_sizes, dim, index):
   grad_input = Tensor.zeros(input_sizes).contiguous()
@@ -263,6 +264,25 @@ def select_backward(grad_out, input_sizes, dim, index):
   slices[dim] = index
   grad_input[slices] = unwrap(grad_out)
   return wrap(grad_input)
+
+# Helper function: sliding window unfold
+def _tensor_unfold(self: Tensor, dimension: int, size: int, step: int) -> Tensor:
+  # Sliding‑window view implemented with slicing + stack
+  if size <= 0 or step <= 0:
+    raise ValueError("size and step must be positive")
+  if dimension < 0:
+    dimension += self.ndim
+  if not (0 <= dimension < self.ndim):
+    raise IndexError("dimension out of range")
+  if size > self.shape[dimension]:
+    raise ValueError("size must be ≤ tensor.shape[dimension]")
+  num_slices = (self.shape[dimension] - size) // step + 1
+  slices = []
+  for start in range(0, num_slices * step, step):
+    idx = [slice(None)] * self.ndim
+    idx[dimension] = slice(start, start + size)
+    slices.append(self[tuple(idx)])
+  return Tensor.stack(*slices, dim=dimension)
 
 def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
   return wrap(unwrap(self).avg_pool2d(kernel_size, stride if stride != [] else None, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
@@ -565,7 +585,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.ones_like": lambda self, dtype=None, device=None, **kwargs:
     self.ones_like(**{k: v for k, v in {"dtype": _from_torch_dtype(dtype) if dtype else None,
                                         "device": _from_torch_device(device) if device else None}.items() if v is not None}),
-  "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64))
+  "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64)),
+  "aten.unfold": _tensor_unfold,
 }}
 
 def wrap_fxn(k,f):
