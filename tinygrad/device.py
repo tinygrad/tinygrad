@@ -10,7 +10,7 @@ from tinygrad.renderer import Renderer
 
 # **************** Device ****************
 
-ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CPU", "LLVM", "DSP", "WEBGPU"]
+ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CPU", "LLVM", "DSP", "WEBGPU", "NULL"]
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
@@ -37,8 +37,9 @@ class _Device:
       with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
-    from_env = [d for d in ALL_DEVICES if getenv(d) == 1]
-    if (env_device:=getenv("DEVICE", '')) in ALL_DEVICES: from_env.append(env_device)
+    from_env = [d for d in self._devices if getenv(d) == 1]
+    if (env_device:=getenv("DEVICE", '')) in self._devices: from_env.append(env_device)
+    from_env = [d for d in from_env if d not in ["DISK", "NPY"]]
     assert len(from_env) < 2, f"multiple devices set in env: {from_env}"
     if len(from_env) == 0:
       try: device = next(self.get_available_devices())
