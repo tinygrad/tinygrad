@@ -9,6 +9,7 @@ from tinygrad.nn.state import get_state_dict
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner
+from tinygrad.engine.grouper import Kernel
 from tinygrad.helpers import Context
 from typing import Callable, cast
 import itertools
@@ -16,6 +17,8 @@ import itertools
 def is_partial_write(ast:UOp, i:int) -> bool:
   stores = [u for u in ast.toposort() if u.op is Ops.STORE and isinstance(u.src[0].dtype, dtype.PtrDType) and isinstance(u.src[1].arg, ShapeTracker)]
   return True if any((b:=u.src[0]).arg == i and cast(dtype.PtrDType, b.dtype).size > cast(ShapeTracker, u.src[1].arg).size for u in stores) else False
+
+def is_store_kernel(u:UOp) -> bool: return True if u.op is Ops.KERNEL and any(v.op is Ops.STORE for v in cast(Kernel,u.arg).ast.toposort()) else False
 
 # Common logic regardless of render target (e.g. JavaScript, C)
 class GraphRenderer(Renderer):
@@ -27,6 +30,7 @@ class GraphRenderer(Renderer):
     # designate the input and output nodes
     self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
     assert len(no_realize_uops) == 0, "having GraphRenderer inside another GraphRenderer is not supported"
+    # disallow realization of Tensors whose lazydata contains inputs, to preserve all dependence of compute on input in the constructed graph
     no_realize_uops.update(self.inputs)
     with Context(LIMIT_REALIZE=1):
       ret_tensors: list[Tensor] = [*filter(lambda t:isinstance(t, Tensor), r if isinstance(r:=fxn(*args, **kwargs), (list, tuple)) else [r])]
@@ -40,7 +44,7 @@ class GraphRenderer(Renderer):
     self.outputs: list[UOp] = [becomes_map[uop.base] for uop in out_uops]
 
     # render kernels, render buffer names
-    # mark which compute buffers have state
+    # mark which buffers used in computation have state
     ctr = itertools.count()
     self.eis: list[ExecItem] = []
     self.bufs: dict[Buffer, str] = {u.base.buffer: f"input_{i}" for i, u in enumerate(self.inputs) if u.base.op is Ops.BUFFER}
@@ -55,9 +59,12 @@ class GraphRenderer(Renderer):
             self.bufs[buf] = name = f"buf_{next(ctr)}"
             if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
 
-    state_makers = [t for tref in all_tensors if (t:=tref()) is not None and (new_uop:=becomes_map.get(t.lazydata.base)) is not None \
-                    and new_uop.op is Ops.BUFFER and new_uop.buffer in self.state_bufs]
-    if state_makers: Tensor.realize(*state_makers)
+    # realize transfers of state (BufferCopy, ViewOp operations) into buffers read by compute kernels
+    # NOTE: compute is not realized, by excluding all Tensors that have any kernel with a store
+    state_loaders = [t for tref in all_tensors if (t:=tref()) is not None and (new_uop:=becomes_map.get(t.lazydata.base)) is not None \
+                    and new_uop.buffer in self.state_bufs and not any(is_store_kernel(u) for u in t.lazydata.toposort())]
+    if state_loaders: Tensor.realize(*state_loaders)
+
     if tensor_names: self.state_bufs.update({b:k for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs})
     self.state_dict: dict[str, Tensor] = {v:Tensor(bytes(k.as_buffer()), dtype=k.dtype, device=k.device).realize() for k,v in self.state_bufs.items()}
 
