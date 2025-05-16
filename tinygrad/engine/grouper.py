@@ -7,7 +7,6 @@ from tinygrad.codegen.lowerer import get_contraction_with_reduce, get_contractio
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY, RING
-from tinygrad.helpers import round_up, flatten
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -508,23 +507,20 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   chunk_sizes = [(base + 1) * factor] * left + [base * factor] * (n_lbs - left)
   chunks = list(itertools.pairwise(itertools.accumulate(chunk_sizes, initial=0)))
 
-  # extract chunks
-  chunked = [buf.reshape((numel,)).shrink(((s,e),)) for s,e in chunks]
-
-  # scatter-reduce
+  # extract chunks and scatter-reduce
   reduced_chunks = []
-  for i,chunk in enumerate(chunked):
+  for i,(s,e) in enumerate(chunks):
+    chunk = buf.reshape((numel,)).shrink(((s,e),))
     reduced_chunk = chunk
     for step in range(n_lbs-1):
       src, dest = (i+step)%n_lbs, (i+step+1)%n_lbs
-      # copy the chunk from the src device to the dest (operating device)
-      # and select the chunk on the dest device
+      # copy the chunk from the src device to the dest (operating device), and select the chunk on the dest device
       reduced_chunk = reduced_chunk.copy_to_device(buf.device[dest], src).alu(red.arg, chunk.copy_to_device(buf.device[dest], dest))
     reduced_chunks.append(reduced_chunk)
 
   # allgather + reassemble
   pads = [((s,numel-e),) for s,e in chunks]
-  return functools.reduce(operator.add, [c.copy_to_device(buf.device).pad(pad) for pad,c in zip(pads, reduced_chunks)])
+  return functools.reduce(operator.add, [c.copy_to_device(buf.device).pad(pad) for pad,c in zip(pads, reduced_chunks)]).reshape(shape)
 
 replace_allreduce = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
