@@ -82,10 +82,9 @@ def reshape_multi(root:UOp, multi:UOp):
   arg = root.arg
   if (new_axis:=root.axis) is None: return multi.src[0].reshape(arg).multi(new_axis)
   assert prod(multi.shape) == prod(arg), "reshape must maintain prod(shape)"
-  assert all(prod(lb.shape[multi.axis:])%prod(arg[new_axis+1:])==0 for lb in multi.src), \
-    f"reshape cannot move items between shards {multi.shape} -> {root.arg=}"
-  after_axis = prod(multi.src[0].shape[multi.axis:])
-  return multi.src[0].reshape(tuple(s if a!=new_axis else after_axis//prod(arg[new_axis+1:]) for a,s in enumerate(arg))).multi(new_axis)
+  assert prod(multi.src[0].shape[multi.axis:])%prod(arg[new_axis+1:]) == 0, f"reshape cannot move items between shards {multi.shape} -> {root.arg=}"
+  new_shape_axis = prod(multi.src[0].shape[multi.axis:]) // prod(arg[new_axis+1:])
+  return multi.src[0].reshape(tuple(s if a!=new_axis else new_shape_axis for a,s in enumerate(arg))).multi(new_axis)
 
 def expand_multi(root:UOp, multi:UOp):
   # NOTE: this assert isn't needed, sharded axis can have dim 1
