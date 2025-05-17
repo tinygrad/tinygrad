@@ -2,6 +2,49 @@ import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv
 from tinygrad.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, track_rewrites
 
+# *** allreduce implementation ***
+
+def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
+  if not isinstance(buf.device, tuple): return None
+  assert all_int(buf.shape), f"does not support symbolic shape {buf.shape}"
+  n_lbs, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
+  # ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
+  # fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
+  use_ring = (RING >= 2 or (n_lbs > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
+  if DEBUG >= 2: print(f"{'RING ALLREDUCE' if use_ring else 'NAIVE ALLREDUCE'} {n_lbs}x{numel} | {buf.dtype}")
+
+  # contiguous before we copy it
+  buf = buf.contiguous()
+
+  # copy to all devices. if you shrink later, that'll be handled
+  if not use_ring: return functools.reduce(lambda x,y: x.alu(red.arg, y),
+                                           [UOp(Ops.COPY, buf.dtype, (buf, red.src[1]), arg=i) for i in range(len(buf.device))])
+
+  # new ring reduce
+  factor = next((f for f in [32, 16, 8, 4, 2] if numel % f == 0), 1)
+  base, left = (numel // factor) // n_lbs, (numel // factor) % n_lbs
+  chunk_sizes = [(base + 1) * factor] * left + [base * factor] * (n_lbs - left)
+  chunks = list(itertools.pairwise(itertools.accumulate(chunk_sizes, initial=0)))
+
+  # extract chunks and scatter-reduce
+  reduced_chunks = []
+  for i,(s,e) in enumerate(chunks):
+    chunk = buf.reshape((numel,)).shrink(((s,e),))
+    reduced_chunk = chunk
+    for step in range(n_lbs-1):
+      src, dest = (i+step)%n_lbs, (i+step+1)%n_lbs
+      # copy the chunk from the src device to the dest (operating device), and select the chunk on the dest device
+      reduced_chunk = reduced_chunk.copy_to_device(buf.device[dest], src).alu(red.arg, chunk.copy_to_device(buf.device[dest], dest))
+    reduced_chunks.append(reduced_chunk)
+
+  # allgather + reassemble
+  pads = [((s,numel-e),) for s,e in chunks]
+  return functools.reduce(operator.add, [c.copy_to_device(buf.device).pad(pad) for pad,c in zip(pads, reduced_chunks)]).reshape(shape)
+
+replace_allreduce = PatternMatcher([(UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),])
+
+# ***** multi functions *****
+
 def alu_multi(root:UOp):
   msrcs = root.src
   assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"
@@ -89,12 +132,9 @@ def flip_multi(root:UOp, multi:UOp):
 # from multiple devices -> one
 def copy_multi(multi:UOp, device:UOp):
   if multi.axis is None:
-    # if we already have a copy on the device, return that
-    #if any(d == device.arg for d in multi.device): return multi.src[0].select(device.arg)
     # otherwise select the first one and copy it
     ret = UOp(Ops.COPY, multi.dtype, (multi.src[0], device), arg=0)
     return ret if isinstance(device.arg, str) else ret.multi(axis=None)
-    #return multi.src[0].copy_to_device(device.arg, arg=0)
   # this is a multi axis one
   bsz, dcount = multi.shape[multi.axis]//len(multi.device), len(multi.device)
   dnum = UOp.variable("_device_num", 0, len(multi.device)-1)
@@ -128,44 +168,3 @@ multi_pm = PatternMatcher([
 
 @track_rewrites(named=True)
 def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]: return {k:v for k,v in graph_rewrite_map(big_sink, multi_pm).items() if k is not v}
-
-# *** allreduce implementation ***
-
-def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
-  if not isinstance(buf.device, tuple): return None
-  assert all_int(buf.shape), f"does not support symbolic shape {buf.shape}"
-  n_lbs, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
-  # ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
-  # fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
-  use_ring = (RING >= 2 or (n_lbs > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
-  if DEBUG >= 2: print(f"{'RING ALLREDUCE' if use_ring else 'NAIVE ALLREDUCE'} {n_lbs}x{numel} | {buf.dtype}")
-
-  # contiguous before we copy it
-  buf = buf.contiguous()
-
-  # copy to all devices. if you shrink later, that'll be handled
-  if not use_ring: return functools.reduce(lambda x,y: x.alu(red.arg, y),
-                                           [UOp(Ops.COPY, buf.dtype, (buf, red.src[1]), arg=i) for i in range(len(buf.device))])
-
-  # new ring reduce
-  factor = next((f for f in [32, 16, 8, 4, 2] if numel % f == 0), 1)
-  base, left = (numel // factor) // n_lbs, (numel // factor) % n_lbs
-  chunk_sizes = [(base + 1) * factor] * left + [base * factor] * (n_lbs - left)
-  chunks = list(itertools.pairwise(itertools.accumulate(chunk_sizes, initial=0)))
-
-  # extract chunks and scatter-reduce
-  reduced_chunks = []
-  for i,(s,e) in enumerate(chunks):
-    chunk = buf.reshape((numel,)).shrink(((s,e),))
-    reduced_chunk = chunk
-    for step in range(n_lbs-1):
-      src, dest = (i+step)%n_lbs, (i+step+1)%n_lbs
-      # copy the chunk from the src device to the dest (operating device), and select the chunk on the dest device
-      reduced_chunk = reduced_chunk.copy_to_device(buf.device[dest], src).alu(red.arg, chunk.copy_to_device(buf.device[dest], dest))
-    reduced_chunks.append(reduced_chunk)
-
-  # allgather + reassemble
-  pads = [((s,numel-e),) for s,e in chunks]
-  return functools.reduce(operator.add, [c.copy_to_device(buf.device).pad(pad) for pad,c in zip(pads, reduced_chunks)]).reshape(shape)
-
-replace_allreduce = PatternMatcher([(UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),])
