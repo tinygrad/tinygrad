@@ -188,11 +188,8 @@ class GroupOp:
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
-def can_pad(u:UOp, edges:dict[UOp, None], cache:dict[UOp, None]) -> bool:
-  if u.op in GroupOp.UnsafePad: return False
-  if u in edges or u in cache: return True
-  cache[u] = None
-  return all(can_pad(x.base, edges, cache) for x in u.src)
+def can_pad(root:UOp, edges:dict[UOp, None]) -> bool:
+  return all(u.op not in GroupOp.UnsafePad for u in root.toposort(gate=lambda x:x not in edges))
 
 # With True as the default, this matches the old symbolic behavior
 def resolve(x:UOp|bool, default:bool=True):
