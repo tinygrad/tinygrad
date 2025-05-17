@@ -279,7 +279,7 @@ class RemoteConnection:
     if DEBUG >= 1: print(f"remote with host {host}")
     while 1:
       try:
-        self.conn = http.client.HTTPConnection(host, timeout=60.0)
+        self.conn = http.client.HTTPConnection(host, timeout=getenv("REMOTE_TIMEOUT", 300.0))
         self.conn.connect()
         break
       except Exception as e:
