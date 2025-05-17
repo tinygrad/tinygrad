@@ -728,8 +728,14 @@ class PCIIface:
     bar_info = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
     self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
+    # from tinygrad import Tensor
+    # vbar = self._map_pci_range(0)
+    # dbell = self._map_pci_range(2, fmt='Q')
+    # mmio = self._map_pci_range(5, fmt='I')
+    
     self._setup_adev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2, fmt='Q'), self._map_pci_range(5, fmt='I'))
     self.doorbell_cpu_addr = dbell.addr
+    # exit(0)
 
     pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
     self.cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=pci.PCI_COMMAND)
@@ -747,10 +753,14 @@ class PCIIface:
       'simd_arrays_per_engine': self.adev.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.adev.gc_info.gc_lds_size}
 
   def _map_pci_range(self, bar, off=0, addr=0, size=None, fmt='B'):
+    from tinygrad import Tensor, dtypes
+    
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     assert loc != 0xffffffffffffffff, f"Failed to mmap {size} bytes at {hex(addr)}"
-    return MMIOInterface(loc, sz, fmt=fmt)
+    dtyp_map = {'B': dtypes.uint8, 'H': dtypes.uint16, 'I': dtypes.uint32, 'Q': dtypes.uint64}
+    return Tensor.from_blob(loc, (sz,), dtype=dtyp_map[fmt], device="CPU")
+    # return MMIOInterface(loc, sz, fmt=fmt), 
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     if host or (not getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1) and uncached and cpu_access): # host or gtt-like memory.
