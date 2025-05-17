@@ -91,6 +91,15 @@ class BufferSpec:
   nolru: bool = False
   external_ptr: Optional[int] = None
 
+class MultiBuffer:
+  def __init__(self, device:tuple[str, ...], size:int, dtype:DType):
+    self.bufs = [Buffer(d, size, dtype) for d in device]
+    self.dtype = dtype
+  def ref(self, cnt):
+    for b in self.bufs: b.ref(cnt)
+    return self
+  def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
+
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,
                lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):

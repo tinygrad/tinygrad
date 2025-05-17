@@ -50,9 +50,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
 # this tracks the tensor.py METADATA
 _METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
 
-def _metaop(op, shape:tuple[sint,...], dtype:DType, device:str|tuple[str, ...], arg=None) -> UOp:
-  if isinstance(device, str): return UOp.metaop(op, shape, dtype, device, arg)
-  return UOp.multi(*[UOp.metaop(op, shape, dtype, d, arg) for d in device], axis=None)
+def _metaop(op, shape:tuple[sint,...], dtype:DType, device:str|tuple[str, ...], arg=None) -> UOp: return UOp.metaop(op, shape, dtype, device, arg)
 
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
@@ -286,7 +284,7 @@ class Tensor(SimpleMathTrait):
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      self.contiguous().realize().lazydata.base.buffer.ensure_allocated().copyin(x._data())
+      cast(Buffer, self.contiguous().realize().lazydata.base.buffer).ensure_allocated().copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     if self.lazydata is x.lazydata: return self  # a self assign is a NOOP
@@ -304,7 +302,7 @@ class Tensor(SimpleMathTrait):
     """
     return Tensor(self.lazydata.detach(), device=self.device, requires_grad=False)
 
-  def _buffer(self) -> Buffer: return self.cast(self.dtype.base).contiguous().to("CPU").realize().lazydata.base.buffer
+  def _buffer(self) -> Buffer: return cast(Buffer, self.cast(self.dtype.base).contiguous().to("CPU").realize().lazydata.base.buffer)
   def _data(self) -> memoryview: return self._buffer().as_buffer()
 
   def data(self) -> memoryview:
@@ -403,7 +401,7 @@ class Tensor(SimpleMathTrait):
     """
     assert isinstance(self.device, str), "can't shard a MultiLazyBuffer"
     devices = tuple(Device.canonicalize(x) for x in devices)
-    mlb = self.lazydata.shard(devices, self._resolve_dim(axis) if axis is not None else None)
+    mlb = self.lazydata.shard(devices, self._resolve_dim(axis)) if axis is not None else self.lazydata.copy_to_device(devices)
     return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:tuple[str, ...], axis:int|None=None) -> Tensor:
@@ -437,10 +435,9 @@ class Tensor(SimpleMathTrait):
     """
     dtype, shape = to_dtype(dtype) if dtype is not None else dtypes.default_float, argfix(*shape)
     if not isinstance(size:=prod([x.vmax if isinstance(x, UOp) else x for x in shape]), int): raise ValueError(f"size must be int {size}")
-    if isinstance(device, tuple):
-      return Tensor(UOp.multi(*[UOp.new_buffer(Device.canonicalize(d), size, dtype).reshape(shape) for d in device], axis=None),
-                    device, dtype, **kwargs)
-    return Tensor(UOp.new_buffer(Device.canonicalize(device), size, dtype), device, dtype, **kwargs).reshape(shape)
+    # TODO: add test for multidevice tensor
+    device = tuple(Device.canonicalize(d) for d in device) if isinstance(device, tuple) else Device.canonicalize(device)
+    return Tensor(UOp.new_buffer(device, size, dtype), device, dtype, **kwargs).reshape(shape)
 
   @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:
@@ -452,7 +449,8 @@ class Tensor(SimpleMathTrait):
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
     """
     r = Tensor.empty(*shape, **kwargs)
-    r.lazydata.buffer.allocate(external_ptr=ptr)
+    assert isinstance(r.device, str)
+    cast(Buffer, r.lazydata.buffer).allocate(external_ptr=ptr)
     return r
 
   @staticmethod
