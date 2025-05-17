@@ -1,15 +1,17 @@
-import os, json, hashlib, math
-from extra.export_model import export_model
+import os, json, hashlib, math, sys
+#from extra.export_model import export_model
 from examples.llama3 import build_transformer, Tokenizer
 from tinygrad.nn.state import get_state_dict, load_state_dict
 from tinygrad import Device, Variable, Tensor, dtypes, TinyJit
 from tinygrad.helpers import fetch, Context
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
 
-def prepare_browser_chunks(model):
+def prepare_browser_chunks(state_dict: dict[str, Tensor]):
   # split weights into browser-friendly chunks
-  state_dict = get_state_dict(model)
-  del state_dict['output.weight'], state_dict['output.scale'] # same as tok_embeddings; ensures consistency with model export
+  # ensure consistency with model export; these bufs are the same
+  if 'output.weight' in state_dict:
+    state_dict['tok_embeddings.weight'] = state_dict.pop('output.weight')
+    state_dict['tok_embeddings.scale'] = state_dict.pop('output.scale')
   chunk_size = 16 * 1024 * 1024 # small chunks based on iphone browser constraints
   metadata = {}
   # We won't export cache_kv bytes (because we start inference on client at start_pos=0), but we will tell the client how big cache_kv needs to be
@@ -38,7 +40,7 @@ def prepare_browser_chunks(model):
     if not placed:
       files.append([info])
 
-  tinygrad_dtypes = {dtypes.float32: "float32", dtypes.float16: "float16", dtypes.int8: "int8", dtypes.int32: "int32"}
+  tinygrad_dtypes = {dtypes.float32: "float32", dtypes.float16: "float16", dtypes.int8: "int8", dtypes.int32: "int32", dtypes.uint32: "uint32"}
   for i, file in enumerate(files):
     cursor = 0
     with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.chunk'), "wb+") as writer:
@@ -86,15 +88,16 @@ def validate_model(model, tokenizer):
   toks += tokenizer.encode(prompt) + [tokenizer.special_tokens["<|eot_id|>"]]
   toks += [tokenizer.special_tokens["<|start_header_id|>"]] + tokenizer.encode("assistant") + [tokenizer.special_tokens["<|end_header_id|>"]] + tokenizer.encode("\n\n")
   start_pos = 0
-  run = TinyJit(model.forward)
+  #run = TinyJit(model.forward)
+  run = model.forward
   for tok in toks[:-1]:
-    run(Tensor([[tok]]), Variable("start_pos", 0, model.max_context).bind(start_pos), 0.0, 0, 0.0, 0.0, 0.0).realize()
+    run(Tensor([[tok]]), Variable("start_pos", 0, model.max_context - 1).bind(start_pos), 0.0, 0, 0.0, 0.0, 0.0).realize()
     start_pos += 1
   tok = toks[-1]
   result = ""
   expected = "How's it going?"
   while True:
-    tok = run(Tensor([[tok]]), Variable("start_pos", 0, model.max_context).bind(start_pos), 0.0, 0, 0.0, 0.0, 0.0).item()
+    tok = run(Tensor([[tok]]), Variable("start_pos", 0, model.max_context - 1).bind(start_pos), 0.0, 0, 0.0, 0.0, 0.0).item()
     start_pos += 1
     if tok in tokenizer.stop_tokens or len(result) > len(expected): break
     result += tokenizer.decode([tok])
@@ -119,9 +122,10 @@ if __name__=="__main__":
   Device.DEFAULT="CPU"
   model = build_transformer(model_path, model_size="1B", quantize="int8", scale_dtype=dtypes.float32, device=Device.DEFAULT, max_context=max_context)
   state_dict = get_state_dict(model)
-  validate_model(model, tokenizer)
+  #validate_model(model, tokenizer)
   model_name = "transformer"
 
+  """
   with Context(BEAM=3):
     cprog, js_wrapper = export_model(model, "wasm", *model_input(), model_name=model_name)
     # ensure consistency with exported weights
@@ -129,6 +133,7 @@ if __name__=="__main__":
 
   with open(os.path.join(os.path.dirname(__file__), f"{model_name}.c"), "w") as f: f.write(cprog)
   with open(os.path.join(os.path.dirname(__file__), "net_clang.js"), "w") as f: f.write(js_wrapper)
+  """
 
   Device.DEFAULT="WEBGPU"
   # float16 is not yet supported for dawn/Vulkan/NVIDIA stack, see: https://issues.chromium.org/issues/42251215
@@ -138,12 +143,19 @@ if __name__=="__main__":
   # these were the same before load_state_dict
   model.output.weight, model.output.scale = model.tok_embeddings.weight, model.tok_embeddings.scale
 
-  validate_model(model, tokenizer)
-  metadata = prepare_browser_chunks(model) # export weights to disk
+  #validate_model(model, tokenizer)
+  #model.forward(Tensor([[tok]]), Variable("start_pos", 0, model.max_context - 1).bind(0), 0.0, 0, 0.0, 0.0, 0.0).realize()
+  #r = export_webgpu(model.forward, [Tensor([[123]]), Variable("start_pos", 0, model.max_context - 1).bind(1), 0.95, 0, 0.0, 0.0, 0.0])
+  #metadata = prepare_browser_chunks(model) # export weights to disk
 
   with Context(BEAM=3):
-    prg, input_sizes, output_sizes, state = export_model(model, "webgpu", *model_input(), model_name=model_name, stream_weights=True)
+    prg, state = TinyJit(model.forward).export_webgpu(
+      Tensor([[123]]), Variable("start_pos", 0, model.max_context - 1).bind(0), 0.95, 0, 0.0, 0.0, 0.0, tensor_names=get_state_dict(model)
+    )
+    #prg, input_sizes, output_sizes, state = export_model(model, "webgpu", *model_input(), model_name=model_name, stream_weights=True)
     # ensure consistency with exported weights
     prg = prg.replace("output.weight", "tok_embeddings.weight").replace("output.scale", "tok_embeddings.scale")
+
+  metadata = prepare_browser_chunks(state) # export weights to disk
 
   with open(os.path.join(os.path.dirname(__file__), "net.js"), "w") as f: f.write(prg)
