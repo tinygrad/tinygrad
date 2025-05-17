@@ -1287,7 +1287,9 @@ class Tensor(SimpleMathTrait):
     ```
     """
     dim = self._resolve_dim(dim)
-    for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
+    for arg in args:
+        assert arg.ndim==self.ndim, f"number of dimensions must agree, got {arg.ndim}, expected {self.ndim}"
+        assert all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim), f"tensor shapes mismatch: {self.shape}, {arg.shape}"
     tensors = [self, *args]
     dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
     for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
