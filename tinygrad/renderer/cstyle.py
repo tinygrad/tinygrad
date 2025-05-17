@@ -366,6 +366,30 @@ class MetalRenderer(CStyleLanguage):
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_type<{ctx.render_dtype(x.dtype)}>({ctx[x.src[0]]})"),
   ]) + base_rewrite
 
+  string_rewrite = PatternMatcher([
+      (UPat(Ops.BITCAST, name="x"), lambda ctx,x: (
+          # Float from signed/unsigned int
+          f"intBitsToFloat(int({ctx[x.src[0]]}))" if x.dtype == dtypes.float and x.src[0].dtype == dtypes.uint else
+          f"intBitsToFloat({ctx[x.src[0]]})" if x.dtype == dtypes.float and x.src[0].dtype == dtypes.int else
+          f"uintBitsToFloat({ctx[x.src[0]]})" if x.dtype == dtypes.float and x.src[0].dtype == dtypes.uint else
+          
+          # Int/uint from float
+          f"floatBitsToInt({ctx[x.src[0]]})" if x.dtype == dtypes.int else
+          f"floatBitsToUint({ctx[x.src[0]]})" if x.dtype == dtypes.uint else
+          
+          # Double precision
+          f"doubleBitsToInt64({ctx[x.src[0]]})" if x.dtype == dtypes.double else
+          f"int64BitsToDouble({ctx[x.src[0]]})" if x.dtype == dtypes.long else
+          
+          # Pack/unpack variants
+          f"packHalf2x16({ctx[x.src[0]]})" if x.dtype == dtypes.uint and x.src[0].dtype == dtypes.float2 else
+          f"unpackHalf2x16({ctx[x.src[0]]})" if x.dtype == dtypes.float2 and x.src[0].dtype == dtypes.uint else
+          
+          # Fallback (should never hit if all cases covered)
+          f"as_type<{ctx.render_dtype(x.dtype)}>({ctx[x.src[0]]})"
+      )),
+  ]) + base_rewrite
+
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix, wmma_args = ["#include <metal_stdlib>","using namespace metal;"], set([uop.arg for uop in uops if uop.op is Ops.WMMA])
     wmma_args = set()
