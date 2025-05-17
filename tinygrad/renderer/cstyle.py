@@ -141,6 +141,9 @@ class CStyleLanguage(Renderer):
         if o.op is Ops.DEFINE_GLOBAL:
           line = f"layout(set = 0, binding = {o.arg}) buffer DataBuffer{o.arg} {{{self.render_dtype(o.dtype)} data{o.arg}[];}};"
           global_vars.append(line)
+        if o.op is Ops.DEFINE_VAR:
+          line = f"layout(constant_id = {o.arg[1]}) const int {o.arg[0]} = {o.arg[2]};"
+          global_vars.append(line)
 
       #todo mess that adds global vars
       lines = prg.splitlines()
