@@ -93,6 +93,7 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(z, 2))
     self.assertEqual(z.item(), 32)
 
+  # TODO: same issue in precompute_freqs_cis
   def test_push_pads_contiguous(self):
     x = Tensor.full((4,1), 2.).contiguous()
     y = Tensor.full((4,4), 4.).contiguous()
