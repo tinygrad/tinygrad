@@ -33,8 +33,8 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
     sched, _, __ = create_schedule_with_vars(sink.substitute(becomes_map))
   # test lowering all the ScheduleItems to ExecItems
   lowered = [x[1] for x in lower_schedule(sched.copy())]
-  if filter_sink: sched = [s for s,ei in zip(sched, lowered) if isinstance(ei.prg, CompiledRunner)]
-  if len(sched) != allowed:
+  cnt = len([s for s,ei in zip(sched, lowered) if isinstance(ei.prg, CompiledRunner) or not filter_sink])
+  if cnt != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
     if DEBUG >= 3:
       for i,s in enumerate(sched):
@@ -86,6 +86,18 @@ class TestSchedule(unittest.TestCase):
     b = a.cast(dtypes.half).expand((2, 4, 4))+2
     run_schedule(check_schedule(b, 1))
     np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2)
+
+  def test_dont_push_pads(self):
+    x, y, z = Tensor([4.]), Tensor([2.]), Tensor([6.])
+    out = ((x/y)*z).pad(((0,1),)).sum()
+    run_schedule(check_schedule(out, 2))
+    self.assertEqual(out.item(), 12.)
+
+  def test_push_pads_contiguous(self):
+    x, y, z = Tensor([4.]), Tensor([2.]), Tensor([6.])
+    out = ((x/y).contiguous()*z).pad(((0,1),)).sum()
+    run_schedule(check_schedule(out, 2))
+    self.assertEqual(out.item(), 12.)
 
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
