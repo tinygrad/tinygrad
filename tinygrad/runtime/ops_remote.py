@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Callable, Optional, Any, cast
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
-import multiprocessing, functools, asyncio, http, http.client, hashlib, time, os, binascii, struct, ast, contextlib
+import multiprocessing, functools, asyncio, http, http.client, hashlib, time, os, binascii, struct, ast, contextlib, weakref
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
 from tinygrad.ops import UOp, Ops, Variable, sint
@@ -267,7 +267,10 @@ class RemoteProgram:
     self.datahash = self.dev.conn.req.h(lib)
     self.dev.q(ProgramAlloc(self.name, self.datahash))
     super().__init__()
-  def __del__(self): self.dev.q(ProgramFree(self.name, self.datahash))
+    weakref.finalize(self, self._fini, self.dev, self.name, self.datahash)
+
+  @staticmethod
+  def _fini(dev:RemoteDevice, name:str, datahash:str): dev.q(ProgramFree(name, datahash))
 
   def __call__(self, *bufs, global_size=None, local_size=None, vals:tuple[int, ...]=(), wait=False):
     ret = self.dev.q(ProgramExec(self.name, self.datahash, bufs, vals, global_size, local_size, wait), wait=wait)
