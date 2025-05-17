@@ -98,10 +98,17 @@ def add_if_ret(addr, sec):
 
 traps = [
   (0x10e7, b'\x90\xce\xf3', "LAB_CODE_10e0"),
-
+  (0x110a, b'\x12\x3a\xdb', "call FUN_CODE_3adb"),
   (0x2608, b'\x12\x16\x87', "in FUN_CODE_2608"),
   (0x2641, b'\x90\xc8\xd6', "call FUN_CODE_2608 in rp"),
-  # (0x1114, b'\x75\x37\x00', "call DAT_EXTMEM_c80 2"),
+  (0x1114, b'\x75\x37\x00', "call (DAT_EXTMEM_c802 >> 2 & 1) != 0"),
+
+  (0x1148, b'\x12\x3e\x81', "call FUN_CODE_3e81"),
+  (0x1152, b'\x12\x48\x8f', "call FUN_CODE_488f"),
+  (0x1172, b'\x12\x47\x84', "call FUN_CODE_4784"),
+
+  (0x1045, b'\x12\x11\x96', "scsi call 1 in main loop"),
+  (0x112e, b'\x12\x11\x96', "scsi call 2 in main loop"),
 
   (0x0e82, b'\x90\x91\x01', "in (DAT_EXTMEM_c802 & 1) == 1 (not fast path?)"),
   (0x0e8c, b'\x90\x90\x00', "in (DAT_EXTMEM_9101 >> 5 & 1) == 1"),
@@ -115,7 +122,8 @@ if __name__ == "__main__":
   for addr, sec, name in traps:
     print(f"Adding {name} at {addr:x}")
     add_traphandler(addr, sec)
-  # add_if(0x1141, b'\x90\xc5\x20', 0x114b)
+  add_if(0x1141, b'\x90\xc5\x20', 0x114b) # enable back
+  add_if(0x0e78, b'\x90\xc8\x02', 0x10e0) # fast path
   # add_if(0x10e0, b'\x90\xc8\x06', 0x110d)
   # add_if(0x0fcd, b'\x90\x90\x93', 0x113a)
 

@@ -162,10 +162,10 @@ class ASM24Controller:
 
     for i in range(0, len(buf), 0x10000):
       self.exec_ops([ScsiWriteOp(buf[i:i+0x10000], lba), WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True)])
-      print(self.read(0xce3a, 2))
-      print(self.read(0xce60, 1))
-      print(self.read(0xce6c, 1))
-      print(self.read(0xce6e, 2))
+      # print(self.read(0xce3a, 2))
+      # print(self.read(0xce60, 1))
+      # print(self.read(0xce6c, 1))
+      # print(self.read(0xce6e, 2))
       # self.exec_ops([WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
 
     if len(buf) > 0x4000:

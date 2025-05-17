@@ -38,20 +38,24 @@ def real_scsi_write():
 
 for i in range(4):
   # usb.read(0x1, 0x1000)
-  sz = 4096 * 4
+  sz = 4096
   xxx = (ctypes.c_uint8 * sz)()
   dfg = random.randint(0, 255)
   for i in range(len(xxx)): xxx[i] = dfg
   # print(dfg, usb.read(0xf000, 0x10))
   st = time.perf_counter_ns()
-  # usb.scsi_write(bytes(xxx), lba=0x1000 + i)
+  usb.scsi_write(bytes(xxx), lba=0x1000 + i)
 
   # usb.read(0x10, 0xf0)
   # exit(0)
 
+  usb.write(0x3800, b'\x00\x01')
+
   reset_stats()
+  # usb.scsi_write(bytes(xxx), lba=0x1000 + i)
   print(hex(dfg), usb.scsi_read(sz, lba=0x1000 + i)[:100])
-  print(usb.read(0x9091, 4))
+  # usb.read(0xb800, 0x10)
+  usb.write(0x3800, b'\x00\x00')
   dump_stats()
 
   print(usb.read(0xb800, 0x10))
