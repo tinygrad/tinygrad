@@ -1823,10 +1823,10 @@ class TestIndexing(unittest.TestCase):
     args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000}
     fused = precompute_freqs_cis(**args)
     with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(fused, 5)) # TODO: this is too many
+      run_schedule(check_schedule(fused, 3)) # TODO: this is too many
     if getenv("CHECK", 1):
       ref = precompute_freqs_cis(**args)
-      run_schedule(check_schedule(ref, 5))
+      run_schedule(check_schedule(ref, 3))
       np.testing.assert_equal(fused.numpy(), ref.numpy())
 
   def test_fuse_assign_contiguous(self):
