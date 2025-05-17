@@ -94,11 +94,12 @@ class BufferSpec:
 class MultiBuffer:
   def __init__(self, device:tuple[str, ...], size:int, dtype:DType):
     self.bufs = [Buffer(d, size, dtype) for d in device]
-    self.dtype = dtype
+    self.size, self.dtype = size, dtype
   def ref(self, cnt):
     for b in self.bufs: b.ref(cnt)
     return self
   def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
+  def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} size:{self.size} dtype:{self.dtype}>"
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,
