@@ -34,6 +34,7 @@ class MetalGraph(GraphRunner):
     icb_label = bytes(msg("UTF8String", ctypes.c_char_p)(msg("description", objc_instance)(self.icb))).decode()
     self.needs_icb_fix = int("AGXG15XFamilyIndirectCommandBuffer" not in icb_label)    # not required on M3
 
+    self.fixedvars = merge_dicts([ji.fixedvars for ji in jit_cache])
     self.varlist = self.vars + list(self.fixedvars.keys())
     if len(self.varlist): self.int_buf = self.dev.allocator.alloc(len(self.varlist)*dtypes.int32.itemsize)
 
