@@ -50,7 +50,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx')), allow_any_len=True),
    lambda ctx,buf,idx: f"({ctx[buf]}[{strip_parens(ctx[idx]) if idx.arg == Ops.ADD else ctx[idx]}])"),
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat.var("gate"))).or_casted("bidx"), UPat.var("var")), allow_any_len=True),
-   lambda ctx,bidx,var,gate: f"({ctx[gate]}?{ctx[bidx]}:{ctx[var]})"),
+   lambda ctx,bidx,var,gate: f"({ctx[gate]}?*{ctx[bidx]}:{ctx[var]})"),
   (UPat(Ops.LOAD, src=(UPat.var('bidx'),), allow_any_len=True), lambda ctx,bidx: f"{ctx[bidx]}"),
   (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var")), allow_any_len=True), lambda ctx,bidx,var: f"{ctx[bidx]} = {ctx[var]};"),
   # alu/gep
@@ -109,7 +109,6 @@ class CStyleLanguage(Renderer):
   def get_kernel_modifier(self, uops:list[UOp]) -> str: return ""
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     if self.device == "METAL":
-      print("rory rendering")
       prg = "#version 450\nvoid main() {\n" + ''.join(['\n'.join(kernel), "\n}"])
 
       #todo ....
@@ -149,34 +148,19 @@ class CStyleLanguage(Renderer):
           lines.insert(insert_index, gv)
       prg = "\n".join(lines)
 
-      
       #hacks
-      prg = re.sub(r'\(\(([a-zA-Z0-9_]+)\s*([<>!=]=?)\s*([a-zA-Z0-9_]+)\)\s*!=\s*1\)', r'(int(\1 \2 \3) == 0)', prg)
-      prg = re.sub(r'\(\((int\([^)]+\) == 0)\)\s*&\s*\((int\([^)]+\) == 0)\)\)', r'(\1 && \2)', prg)
-      prg = prg.replace(') & (', ') && (')
-      prg = prg.replace("((bool(lidx0))!=1)", "lidx0==0")
+      #changes lidx0==0 thing
+      prg = prg.replace("((bool(lidx0))!=1)","lidx0==0")
       prg = re.sub(r'\(float\(\(\(([a-zA-Z0-9_]+)\s*!=\s*([a-zA-Z0-9_]+)\)\s*!=\s*1\)\)\)', 
-                  r'float(int(\1!=\2)!=1)', 
-                  prg)
-      prg = re.sub(
-          r'\(\s*\(\s*((?:[^()]+|\([^()]*\))*)\s*\)\s*!=\s*1\s*\)',
-          r'!(\1)',
-          prg)
-      prg = re.sub(
-          r'int\(\(\(([^;]+?)\)\s*!=\s*1\)\)',
-          r'int(!(\1))',
-          prg)
-      prg = prg.replace("unsigned ", "u")
-      prg = re.sub(r'as_type<float>\s*\(\s*([^)]+)\s*\)', r'uintBitsToFloat(\1)', prg)
-      
+                   r'float(int(\1 != \2) != 1)', 
+                   prg)
+      prg = prg.replace("unsigned ","u")
 
       local_size_string = f"layout(local_size_x = {local_size[0]}, local_size_y = {local_size[1]}, local_size_z = {local_size[2]}) in;"
       prg = '\n'.join([prg.splitlines()[0], local_size_string, *prg.splitlines()[1:]])
       #
       #compile
-      print("RORY COMPILING")
       prg = compile_shader_to_spv(prg)
-      print("RORY COMPILED")
 
       return prg
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
