@@ -33,11 +33,21 @@ class LLVMCompiler(Compiler):
     else:
       self.passes = b'default<O0>'
 
+    self.diag_msgs: list[str] = []
+    @ctypes.CFUNCTYPE(None, llvm.LLVMDiagnosticInfoRef, ctypes.c_void_p)
+    def handle_diag(diag_ref, _arg):
+      severity = llvm.LLVMGetDiagInfoSeverity(diag_ref)
+      msg = ctypes.string_at(llvm.LLVMGetDiagInfoDescription(diag_ref)).decode()
+      if severity == llvm.LLVMDSError:
+        self.diag_msgs.append(msg)
+    self.handle_diag = handle_diag
+    llvm.LLVMContextSetDiagnosticHandler(llvm.LLVMGetGlobalContext(), handle_diag, None)
     super().__init__(f"compile_llvm_{self.target_arch}{'_jit' if self.jit else ''}{'_opt' if opt else ''}")
 
   def __del__(self): llvm.LLVMDisposePassBuilderOptions(self.pbo)
 
   def compile(self, src:str) -> bytes:
+    self.diag_msgs.clear()
     src_buf = llvm.LLVMCreateMemoryBufferWithMemoryRangeCopy(ctypes.create_string_buffer(src_bytes:=src.encode()), len(src_bytes), b'src')
     mod = expect(llvm.LLVMParseIRInContext(llvm.LLVMGetGlobalContext(), src_buf, ctypes.pointer(m:=llvm.LLVMModuleRef()), err:=cerr()), err, m)
     expect(llvm.LLVMVerifyModule(mod, llvm.LLVMReturnStatusAction, err:=cerr()), err)
@@ -48,6 +58,7 @@ class LLVMCompiler(Compiler):
     llvm.LLVMDisposeModule(mod)
     obj = ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
     llvm.LLVMDisposeMemoryBuffer(obj_buf)
+    if self.diag_msgs: raise RuntimeError("llvm diagnostic: " + "\n".join(self.diag_msgs))
     return jit_loader(obj) if self.jit else obj
 
   def disassemble(self, lib:bytes): capstone_flatdump(lib)
