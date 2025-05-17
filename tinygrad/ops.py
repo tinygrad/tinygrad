@@ -436,11 +436,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** from MultiLazyBuffer ***
 
-  def multi(self, *more:UOp, axis:int|None):
-    parents = (self,)+more
+  def multi(self, axis:int|None):
     assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
-    assert axis is not None
-    return UOp(Ops.MULTI, self.dtype, parents, axis)
+    assert axis is not None, "multi None is no longer supported"
+    return UOp(Ops.MULTI, self.dtype, (self,), axis)
 
   @property
   def bounds(self):
