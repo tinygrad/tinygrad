@@ -9,6 +9,7 @@ from tinygrad.codegen.devectorizer import no_vectorized_alu
 
 import subprocess
 import tempfile
+import re
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: ctx[x.src[0]]),
@@ -122,8 +123,14 @@ class CStyleLanguage(Renderer):
       for shared_line in reversed(shared_lines):
           lines.insert(insert_index, shared_line)
       prg = "\n".join(lines)
+      
+      #hacks
       #changes lidx0==0 thing
       prg = prg.replace("((bool(lidx0))!=1)","lidx0==0")
+      prg = re.sub(r'\(float\(\(\(([a-zA-Z0-9_]+)\s*!=\s*([a-zA-Z0-9_]+)\)\s*!=\s*1\)\)\)', 
+                   r'float(int(\1 != \2) != 1)', 
+                   prg)
+      
       #local sizes
       local_size = [1,1,1]
       global_vars = []
