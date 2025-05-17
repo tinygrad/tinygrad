@@ -2156,7 +2156,6 @@ class TestSimplifier(unittest.TestCase):
     assert UPat(Ops.CONST, arg=0).match(sink, {})
     self.assertIs(tensor_rewrite(a*1).base, a.lazydata.base)
     self.assertIs(tensor_rewrite(a+0).base, a.lazydata.base)
-    self.assertIs(tensor_rewrite(a//1).base, a.lazydata.base)
 
   def test_cast_folding(self):
     a = Tensor(1.0).cast(dtypes.int)

@@ -361,6 +361,8 @@ def simplify_valid(valid:UOp) -> UOp|None:
   something_changed = False
   valids = list(split_uop(valid, Ops.AND))
   for stmt in sorted(valids, key=lambda v: _valid_priority(v, valids)):
+    # TODO: root cause this and test_simplify_valid_from_div
+    if stmt.op is Ops.CAST: return None
     ret.append(newstmt if ret and (newstmt:=uop_given_valid(functools.reduce(operator.and_, ret), stmt)) is not None else stmt)
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
