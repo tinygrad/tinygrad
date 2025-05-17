@@ -15,7 +15,7 @@ from tinygrad.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite,
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.engine.grouper import view_left, view_right, sym, get_becomes_map, Kernel, create_ast, merge_views
+from tinygrad.engine.grouper import view_left, view_right, sym, get_becomes_map, Kernel, create_ast, merge_views, create_kernels
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 
@@ -101,13 +101,24 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(z.item(), 32)
 
   def test_rand(self):
-    x = Tensor.randn(32)
-    check_schedule(x, 4)
+    x = Tensor.rand(32)
+    check_schedule(x, 3)
 
   def test_rand_recompute_arange(self):
-    x = Tensor.randn(32)
+    x = Tensor.rand(32)
     with Context(DONT_GROUP_REDUCES=1):
-      check_schedule(x, 3)
+      check_schedule(x, 2)
+
+  @track_rewrites(named=True)
+  def test_rand_handcoded(self):
+    Tensor.manual_seed(0)
+    x = Tensor.rand(32)
+    sched_sink = graph_rewrite(x.lazydata, create_kernels, ctx={u:None for u in x.lazydata.toposort() if u.op is Ops.COPY}, bottom_up=True)
+    y = Tensor(graph_rewrite(sched_sink, create_ast, bottom_up=True))
+    run_schedule(check_schedule(y, 1))
+    # compare against reference
+    run_schedule(check_schedule(x, 3))
+    np.testing.assert_allclose(y.numpy(), x.numpy())
 
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
