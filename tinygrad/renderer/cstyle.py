@@ -92,7 +92,7 @@ class CStyleLanguage(Renderer):
   extra_args: list[str] = []
   float4: str|None = None
   type_map: dict[DType, str] = {}
-  infinity: str = "INFINITY"
+  infinity: str = "1.0f / 0.0f"
   nan: str = "NAN"
   code_for_op: dict = {
     Ops.SQRT: lambda x,dtype: f"sqrt({x})", Ops.RECIP: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
