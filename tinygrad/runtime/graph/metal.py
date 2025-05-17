@@ -1,7 +1,7 @@
 from typing import Any, cast
 import ctypes
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import dedup, getenv
+from tinygrad.helpers import dedup, getenv, merge_dicts
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
