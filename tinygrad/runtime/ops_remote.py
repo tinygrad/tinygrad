@@ -289,6 +289,7 @@ class RemoteConnection:
 
   def batch_submit(self):
     data = self.req.serialize()
+    print(data)
     with Timing(f"*** send {len(self.req._q):-3d} requests {len(self.req._h):-3d} hashes with len {len(data)/1024:.2f} kB in ", enabled=DEBUG>=1):
       self.conn.request("POST", "/batch", data)
       response = self.conn.getresponse()

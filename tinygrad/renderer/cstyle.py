@@ -108,7 +108,7 @@ class CStyleLanguage(Renderer):
   def get_kernel_modifier(self, uops:list[UOp]) -> str: return ""
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     if self.device == "METAL":
-      prg = "#version 450\nlayout(set = 0, binding = 0) buffer DataBuffer {\nfloat data0[];\n};\nvoid main() {\n" + ''.join(['\n'.join(kernel), "\n}"])
+      prg = "#version 450\nvoid main() {\n" + ''.join(['\n'.join(kernel), "\n}"])
 
       #todo ....
       # moves shared vars
@@ -126,10 +126,25 @@ class CStyleLanguage(Renderer):
       prg = prg.replace("((bool(lidx0))!=1)","lidx0==0")
       #local sizes
       local_size = [1,1,1]
+      global_vars = []
       for o in uops: 
         if o.op is Ops.SPECIAL:
           if o.arg[0].startswith("lidx"):
             local_size[int(o.arg[0][4])] = int(o.arg[1])
+        if o.op is Ops.DEFINE_GLOBAL:
+          line = f"layout(set = 0, binding = {o.arg}) buffer DataBuffer{o.arg} {{{self.render_dtype(o.dtype)} data{o.arg}[];}};"
+          global_vars.append(line)
+
+      #todo mess that adds global vars
+      lines = prg.splitlines()
+      for i, line in enumerate(lines):
+          if line.strip() == "#version 450":
+              insert_index = i + 1
+              break
+      for gv in reversed(global_vars):
+          lines.insert(insert_index, gv)
+      prg = "\n".join(lines)
+
       local_size_string = f"layout(local_size_x = {local_size[0]}, local_size_y = {local_size[1]}, local_size_z = {local_size[2]}) in;"
       prg = '\n'.join([prg.splitlines()[0], local_size_string, *prg.splitlines()[1:]])
       #
@@ -149,7 +164,7 @@ class CStyleLanguage(Renderer):
   def render_dtype(self, dt:DType, mutable=True) -> str:
     if isinstance(dt, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     if isinstance(dt, PtrDType):
-      return (self.smem_prefix if dt.local and self.smem_prefix_for_cast else self.buffer_prefix) + self.render_dtype(dt.base) + "*"
+      return (self.smem_prefix if dt.local and self.smem_prefix_for_cast else self.buffer_prefix) + self.render_dtype(dt.base)#no star vulkan no pointers
     if dt.count > 1: return self.type_map.get(scalar:=dt.scalar(), scalar.name).replace(" ", "_") + str(dt.count)
     return self.type_map.get(scalar:=dt.scalar(), scalar.name)
 
@@ -316,7 +331,7 @@ class MetalRenderer(CStyleLanguage):
 
   # language options
   kernel_prefix = "kernel "
-  buffer_prefix = "device "
+  buffer_prefix = ""
   smem_prefix = "shared "
   arg_int_prefix = "constant int&"
   barrier = "barrier();"
@@ -541,6 +556,7 @@ class HIPRenderer(AMDRenderer): device = "HIP"
 class QCOMRenderer(OpenCLRenderer): device = "QCOM"
 
 def compile_shader_to_spv(glsl_source: str) -> bytes:
+    print(glsl_source)
     with tempfile.NamedTemporaryFile(suffix=".comp", delete=False, mode="w") as temp_file:
         temp_file.write(glsl_source)
         temp_file_path = temp_file.name
