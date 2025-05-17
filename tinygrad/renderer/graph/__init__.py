@@ -67,6 +67,7 @@ class GraphRenderer(Renderer):
 
     self.state_dict = {k:v for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs} if tensor_names else {}
     self.state_bufs.update({cast(Tensor, v).lazydata.base.realized:k for k,v in self.state_dict.items()})
-    self.state_dict.update({k:Tensor(bytes(b.as_buffer()), dtype=b.dtype, device=b.device).realize() for b,k in self.state_bufs.items() if k not in self.state_dict})
+    self.state_dict.update({k:Tensor(bytes(b.as_buffer()), dtype=b.dtype, device=b.device).realize()
+                            for b,k in self.state_bufs.items() if k not in self.state_dict})
 
   def render_graph(self) -> str: raise NotImplementedError("Implement a language-specific GraphRenderer")

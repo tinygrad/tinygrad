@@ -1,10 +1,11 @@
 import json, pathlib, zipfile, pickle, tarfile, struct, functools, io
 from collections import OrderedDict
-from typing import Union, Optional, Any, Callable, BinaryIO, Iterable
+from typing import Union, Optional, Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up, T
 from tinygrad.shape.view import strides_for_shape
+from tinygrad.device import Buffer
 
 class TensorIO(io.RawIOBase, BinaryIO):
   def __init__(self, t: Tensor):
@@ -81,7 +82,7 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:Optional[dict[str, Any
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
   t[0:8].bitcast(dtypes.int64).assign([len(j)])
   t[8:8+len(j)].assign(list(j.encode('utf-8')))
-  for k,v in safe_load(t).items(): v.assign(tensors[k])
+  for k,v in safe_load(t).items(): v.assign(Tensor(cast(Buffer, (tk:=tensors[k]).realize().lazydata.base.buffer).as_buffer(), tk.device, tk.dtype))
 
 # state dict
 
