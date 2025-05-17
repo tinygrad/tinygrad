@@ -4,6 +4,33 @@ from tinygrad import Tensor, TinyJit, nn, GlobalCounters
 from tinygrad.helpers import getenv, colored, trange
 from tinygrad.nn.datasets import mnist
 
+import itertools
+from tinygrad.nn.optim import Optimizer
+from tinygrad.dtype import dtypes
+class FusedAdam(Optimizer):
+  def __init__(self, params: list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0):
+    super().__init__(params, lr)
+    self.b1, self.b2, self.eps, self.wd = b1, b2, eps, weight_decay
+    self.b1_t, self.b2_t = (Tensor.ones((1,), dtype=dtypes.float32, device=self.device, requires_grad=False).contiguous() for _ in [b1, b2])
+    self.pos_params = list(itertools.accumulate(self.params, lambda x,y: x+y.flatten().shape[0], initial=0))
+    self.m = Tensor.zeros(self.pos_params[-1], dtype=dtypes.float32, device=self.device, requires_grad=False).contiguous()
+    self.v = Tensor.zeros(self.pos_params[-1], dtype=dtypes.float32, device=self.device, requires_grad=False).contiguous()
+
+  def schedule_step_with_grads(self, grads:list[Tensor]) -> list[Tensor]:
+    self.b1_t *= self.b1
+    self.b2_t *= self.b2
+    t = Tensor.cat(*[x.flatten() for x in self.params], dim=0)
+    g = Tensor.cat(*[x.flatten() for x in grads], dim=0)
+    self.m.assign(self.b1 * self.m + (1.0 - self.b1) * g)
+    self.v.assign(self.b2 * self.v + (1.0 - self.b2) * (g * g))
+    m_hat = self.m / (1.0 - self.b1_t)
+    v_hat = self.v / (1.0 - self.b2_t)
+    up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
+    out = (t.detach() - self.lr * up).cast(t.dtype)
+    # right where it belongs
+    for i, tt in enumerate(self.params): tt.assign(out[self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape))
+    return [self.b1_t, self.b2_t, self.m, self.v]
+
 class Model:
   def __init__(self):
     self.layers: List[Callable[[Tensor], Tensor]] = [
@@ -20,8 +47,13 @@ class Model:
 if __name__ == "__main__":
   X_train, Y_train, X_test, Y_test = mnist(fashion=getenv("FASHION"))
 
+  # TODO: these should not be needed
+  X_train.realize()
+  Y_train.realize()
+
   model = Model()
-  opt = nn.optim.Adam(nn.state.get_parameters(model))
+  if getenv("FUSE_ADAM"): opt = FusedAdam(nn.state.get_parameters(model))
+  else: opt = nn.optim.Adam(nn.state.get_parameters(model))
 
   @TinyJit
   @Tensor.train()
