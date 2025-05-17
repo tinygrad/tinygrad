@@ -103,17 +103,20 @@ class TestSchedule(unittest.TestCase):
 
   def test_rand(self):
     x = Tensor.rand(32)
-    check_schedule(x, 3)
+    check_schedule(x, 3, [Tensor._device_rng_counters[x.device]])
 
   def test_rand_recompute_arange(self):
     x = Tensor.rand(32)
     with Context(DONT_GROUP_REDUCES=1):
-      check_schedule(x, 2)
+      check_schedule(x, 2, [Tensor._device_rng_counters[x.device]])
 
   @track_rewrites(named=True)
   def test_rand_handcoded(self):
     Tensor.manual_seed(0)
     x = Tensor.rand(32)
+    # pre-realize shared seed
+    Tensor._device_rng_counters[x.device].realize()
+    # run custom kernelized kernel
     sched_sink = graph_rewrite(x.lazydata, create_kernels, ctx={u:None for u in x.lazydata.toposort() if u.op is Ops.COPY}, bottom_up=True)
     y = Tensor(graph_rewrite(sched_sink, create_ast, bottom_up=True))
     run_schedule(check_schedule(y, 1))
