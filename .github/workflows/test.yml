@@ -777,7 +777,7 @@ jobs:
       run: node test/web/test_webgpu.js
 
   osxremote:
-    name: MacOS (remote)
+    name: MacOS (remote metal)
     runs-on: macos-15
     timeout-minutes: 10
     env:
@@ -798,7 +798,34 @@ jobs:
           DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run REMOTE=1 Test
         run: |
-          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py
+          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_tensor_variable.py
+
+  amdremote:
+    name: Linux (remote amd)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      REMOTE: 1
+      REMOTEDEV: 'AMD'
+      PYTHONPATH: ${{ github.workspace }}
+      MOCKGPU: 1
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: linux-remote-amd
+          deps: testing_minimal
+          amd: 'true'
+      - name: Check Device.DEFAULT and print some source
+        run: |
+          python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.default.properties.real_device == 'AMD', Device.default.properties.real_device"
+          DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
+      - name: Run REMOTE=1 Test
+        run: |
+          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_tensor_variable.py
 
   osxtests:
     strategy:
