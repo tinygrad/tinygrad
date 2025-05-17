@@ -187,8 +187,8 @@ class HCQGraph(MultiGraphRunner):
     for (j,i),input_idx in self.input_replace.items(): hcq_var_vals[self.input_replace_to_var.get((j,i))] = input_rawbuffers[input_idx]._buf.va_addr
 
     for dev in self.devices:
-      self.comp_queues[dev].submit(dev, hcq_var_vals|self.fixedvars[dev])
-      if (copy_queue:=self.copy_queues.get(dev, None)) is not None: copy_queue.submit(dev, hcq_var_vals)
+      self.comp_queues[dev].submit(dev, hcq_var_vals_local:=hcq_var_vals|self.fixedvars.get(dev, {}))
+      if (copy_queue:=self.copy_queues.get(dev, None)) is not None: copy_queue.submit(dev, hcq_var_vals_local)
 
       self.last_timeline[dev] = (dev.timeline_signal, dev.next_timeline())
 
