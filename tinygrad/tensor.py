@@ -2370,9 +2370,9 @@ class Tensor(SimpleMathTrait):
     if any(s>1 for s in stride):
       # handle strides: (k) -> reshape -> (k,1) -> pad -> (k,s) -> reshape -> (k*s) -> shrink (k-(s-1))
       x = x.reshape(None, None, *flatten((k,1) for k in x.shape[2:]))
-      x = x.pad((None, None, *flatten((None,(0,s-1)) for s in stride)))
+      x = x.pad(tuple((None, None, *flatten((None,(0,s-1)) for s in stride))))
       x = x.reshape(None, None, *[k*s for k,s in zip(x.shape[2::2], stride)])
-      x = x.shrink((None, None, *[(0,k-(s-1)) for k,s in zip(x.shape[2:], stride)]))
+      x = x.shrink(tuple((None, None, *[(0,k-(s-1)) for k,s in zip(x.shape[2:], stride)])))
     padding = flatten((((k-1)*d-pB,(k-1)*d-pA+op) for k,d,(pB,pA),op in reversed(list(zip(HW, dilation, padding, output_padding)))))
     return x.conv2d(w.flatten(end_dim=1), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
@@ -4202,7 +4202,10 @@ class Tensor(SimpleMathTrait):
     w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *cout_expand, rcin_hi, rcin_lo, H, W))
 
     # the conv!
-    ret = (x*w).cast(base_image_type((bs*oy, ox*cout//4, 4)) if IMAGE >= 2 else dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
+    # Preserve the input dtype when IMAGE >= 2, otherwise use float32
+    cast_type = base_image_type((bs*oy, ox*cout//4, 4)) if IMAGE >= 2 else dtypes.float32
+    sum_dtype = dtype or (dtypes.float16 if IMAGE >= 2 and getenv("FLOAT16", 0) else None)
+    ret = (x*w).cast(cast_type).sum((-4, -3, -2, -1), dtype=sum_dtype)
 
     # undo hack for non multiples of 4 on C.rcout
     if added_output_channels != 0:
