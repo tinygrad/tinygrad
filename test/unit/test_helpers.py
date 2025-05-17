@@ -1,7 +1,7 @@
 import gzip, unittest
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar
-from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod
+from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, argsort
 from tinygrad.tensor import get_shape
 from tinygrad.codegen.lowerer import get_contraction, get_contraction_with_reduce
 import numpy as np
@@ -331,6 +331,12 @@ class TestCStyleDivMod(unittest.TestCase):
     self.assertEqual(cmod(0, -5), 0)
     self.assertEqual(cmod(4, -5), 4)
     self.assertEqual(cmod(9, -5), 4)
+
+class TestArgsort(unittest.TestCase):
+  def test_range(self):
+    self.assertEqual(argsort(range(5)), [0,1,2,3,4])
+  def test_descending(self):
+    self.assertEqual(argsort([5,4,3,2,1]), [4,3,2,1,0])
 
 if __name__ == '__main__':
   unittest.main()
