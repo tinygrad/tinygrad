@@ -1,5 +1,7 @@
 import unittest
 import pickle
+import os, tempfile
+import tinygrad.helpers as helpers
 from tinygrad.helpers import diskcache_get, diskcache_put, diskcache, diskcache_clear
 
 def remote_get(table,q,k): q.put(diskcache_get(table, k))
@@ -81,28 +83,41 @@ class DiskCache(unittest.TestCase):
     diskcache_put(table, "key", "test")
     self.assertEqual(diskcache_get(table, "key"), "test")
 
-  @unittest.skip("disabled by default because this drops cache table")
   def test_clear_cache(self):
-    # clear cache to start
-    diskcache_clear()
-    tables = [f"test_clear_cache:{i}" for i in range(3)]
-    for table in tables:
-      # check no entries
-      self.assertIsNone(diskcache_get(table, "k"))
-    for table in tables:
-      diskcache_put(table, "k", "test")
-      # check insertion
-      self.assertEqual(diskcache_get(table, "k"), "test")
+    old_cachedb = os.environ.get("CACHEDB")
+    if helpers._db_connection is not None:
+      helpers._db_connection.close()
+      helpers._db_connection = None
+    with tempfile.TemporaryDirectory() as td:
+      os.environ["CACHEDB"] = os.path.join(td, "cache.db")
+      helpers._db_connection = None
+      diskcache_clear()
+      tables = [f"test_clear_cache:{i}" for i in range(3)]
+      for table in tables:
+        # check no entries
+        self.assertIsNone(diskcache_get(table, "k"))
+      for table in tables:
+        diskcache_put(table, "k", "test")
+        # check insertion
+        self.assertEqual(diskcache_get(table, "k"), "test")
 
-    diskcache_clear()
-    for table in tables:
-      # check no entries again
-      self.assertIsNone(diskcache_get(table, "k"))
+      diskcache_clear()
+      for table in tables:
+        # check no entries again
+        self.assertIsNone(diskcache_get(table, "k"))
 
-    # calling multiple times is fine
-    diskcache_clear()
-    diskcache_clear()
-    diskcache_clear()
+      # calling multiple times is fine
+      diskcache_clear()
+      diskcache_clear()
+      diskcache_clear()
+
+    if helpers._db_connection is not None:
+      helpers._db_connection.close()
+    helpers._db_connection = None
+    if old_cachedb is not None:
+      os.environ["CACHEDB"] = old_cachedb
+    else:
+      os.environ.pop("CACHEDB", None)
 
 if __name__ == "__main__":
   unittest.main()
