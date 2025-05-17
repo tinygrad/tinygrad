@@ -106,6 +106,7 @@ class ShapeTracker:
     unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
     if all(len(x) == 0 for x in var_vals): return self, {}
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
+  def substitute(self, dvars:dict[UOp, UOp]): return ShapeTracker(tuple(x.substitute(dvars) for x in self.views))
 
   def real_strides(self, ignore_valid=False) -> tuple[Optional[sint], ...]:
     with Context(TRACK_MATCH_STATS=0): return views_to_real_strides(self.views, ignore_valid)

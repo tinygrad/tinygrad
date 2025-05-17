@@ -62,22 +62,24 @@ def universal_test(a, b, dtype, op):
   # The 'nan' cases only fail with Vulkan WebGPU backend (CI)
   if (math.isnan(a) or math.isnan(b)) and Device.DEFAULT == "WEBGPU" and CI: return
   if not isinstance(op, tuple): op = (op, op)
-  tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
-  numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)), np.array([b]).astype(_to_np_dtype(dtype)))
-  if dtype is dtypes.bfloat16: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
+  ta, tb = Tensor([a], dtype=dtype), Tensor([b], dtype=dtype)
+  tensor_value = (op[0](ta, tb)).numpy()
+  numpy_value = op[1](ta.numpy(), tb.numpy())
+  if dtype == dtypes.bfloat16: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   elif dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
-  out: Tensor = op[0](Tensor([a], dtype=dtype))
+  ta = Tensor([a], dtype=dtype)
+  out: Tensor = op[0](ta)
   sched = out.schedule()
   ast = sched[-1].ast
   run_schedule(sched)
   tensor_value = out.numpy()
-  numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
-  if dtype in (*dtypes_float, dtypes.bfloat16):
-    np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
+  numpy_value = op[1](ta.numpy())
+  if dtype in (dtypes.float16, dtypes.bfloat16): np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
+  elif dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-6, rtol=1e-5)
   else: np.testing.assert_equal(tensor_value, numpy_value)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
     op = [x for x in ast.toposort() if x.op in GroupOp.Unary][0]
@@ -123,7 +125,7 @@ class TestDTypeALU(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16, Device.DEFAULT), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, strat.sampled_from(unary_operations))
-  @unittest.skipIf(Device.DEFAULT in ["METAL", "AMD"], "broken on AMD and METAL")
+  @unittest.skipIf(Device.DEFAULT in ["AMD"], "broken on AMD?")
   def test_bfloat16_unary(self, a, op): universal_test_unary(a, dtypes.bfloat16, op)
 
   @given(ht.uint8, ht.uint8, strat.sampled_from(integer_binary_operations))
@@ -191,6 +193,7 @@ class TestDTypeALU(unittest.TestCase):
     overflow_strat = float_strat.filter(lambda x: x > dtypes.max(unsigned_dtype) and x <= dtypes.max(dtypes.int32))
     universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
 
+  @settings(suppress_health_check=[HealthCheck.filter_too_much])
   @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
   def test_float_cast_to_unsigned_underflow(self, a, float_dtype, unsigned_dtype):
     if not is_dtype_supported(float_dtype, Device.DEFAULT): float_dtype = dtypes.float32

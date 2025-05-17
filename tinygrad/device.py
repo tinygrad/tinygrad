@@ -37,7 +37,9 @@ class _Device:
       with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
-    if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
+    from_env = [d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1]
+    assert len(from_env) < 2, f"multiple devices set in env: {from_env}"
+    if len(from_env) == 1: return from_env[0]
     try:
       device = next(self.get_available_devices())
       os.environ[device] = "1"   # we set this in environment for spawned children
@@ -88,6 +90,15 @@ class BufferSpec:
   host: bool = False
   nolru: bool = False
   external_ptr: Optional[int] = None
+
+class MultiBuffer:
+  def __init__(self, device:tuple[str, ...], size:int, dtype:DType):
+    self.bufs = [Buffer(d, size, dtype) for d in device]
+    self.dtype = dtype
+  def ref(self, cnt):
+    for b in self.bufs: b.ref(cnt)
+    return self
+  def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,
@@ -152,7 +163,7 @@ class Buffer:
   def __del__(self): (not self.is_allocated()) or self.deallocate()
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
-           (f" offset:{self.offset}" if hasattr(self, "base") else "") + (f" {self.options=}" if self.options is not None else "") + ">"
+           (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer') and (self.options is None or self.options.image is None):
