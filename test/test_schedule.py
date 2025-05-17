@@ -111,7 +111,6 @@ class TestSchedule(unittest.TestCase):
       check_schedule(x, 2, [Tensor._device_rng_counters[x.device]])
 
   @unittest.skip("TODO: do not divide by zero given x.idiv(VALID)")
-  @track_rewrites(named=True)
   def test_rand_handcoded(self):
     Tensor.manual_seed(0)
     x = Tensor.rand(32)
