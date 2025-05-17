@@ -74,6 +74,7 @@ class GraphComputeItem:
   datahash: str
   bufs: tuple[int, ...]
   vars: tuple[Variable, ...]
+  fixedvars: dict[Variable, int]
   ins: tuple[int, ...]
   outs: tuple[int, ...]
   global_size: tuple[sint, ...]|None
@@ -211,7 +212,8 @@ class RemoteHandler:
                                    vars=list(gi.vars), ins=list(gi.ins), outs=list(gi.outs),
                                    global_size=list(cast(tuple[int], gi.global_size)) if gi.global_size is not None else None,
                                    local_size=list(cast(tuple[int], gi.local_size)) if gi.local_size is not None else None)
-                  return ExecItem(CompiledRunner(ps, precompiled=b'', prg=prg), [self.sessions[gi.session].buffers[buf] for buf in gi.bufs])
+                  return ExecItem(CompiledRunner(ps, precompiled=b'', prg=prg), [self.sessions[gi.session].buffers[buf] for buf in gi.bufs],
+                                  fixedvars=gi.fixedvars)
                 case Transfer():
                   dbuf, sbuf = self.sessions[unwrap(gi.session)].buffers[gi.buffer_num], self.sessions[gi.ssession].buffers[gi.sbuffer_num]
                   assert dbuf.nbytes == sbuf.nbytes, f"{dbuf.nbytes} != {sbuf.nbytes}"

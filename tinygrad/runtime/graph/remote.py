@@ -15,8 +15,8 @@ class RemoteGraph(GraphRunner):
     def _process_ji(ji: ExecItem):
       match ji.prg:
         case CompiledRunner():
-          return GraphComputeItem(ji.prg.dev.session, ji.prg._prg.name, ji.prg._prg.datahash,
-                                  tuple(unwrap(buf)._buf for buf in ji.bufs), tuple(ji.prg.p.vars), tuple(ji.prg.p.ins), tuple(ji.prg.p.outs),
+          return GraphComputeItem(ji.prg.dev.session, ji.prg._prg.name, ji.prg._prg.datahash, tuple(unwrap(buf)._buf for buf in ji.bufs),
+                                  tuple(ji.prg.p.vars), ji.fixedvars, tuple(ji.prg.p.ins), tuple(ji.prg.p.outs),
                                   tuple(ji.prg.p.global_size) if ji.prg.p.global_size is not None else None,
                                   tuple(ji.prg.p.local_size) if ji.prg.p.local_size is not None else None)
         case BufferXfer():
