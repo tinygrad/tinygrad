@@ -224,7 +224,7 @@ class AMMemoryManager:
           if paddr is not None: paddrs += [(paddr, cont_seg_sz)]
           else:
             for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-            raise MemoryError(f"Failed to allocate contigous a page. (allocation size={size:#x})")
+            raise MemoryError(f"Failed to allocate a contiguous page. (allocation size={size:#x})")
           rem_len, off = rem_len - cont_seg_sz, off + cont_seg_sz
 
     return self.map_range(va, size, paddrs, uncached=uncached)
