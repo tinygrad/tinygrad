@@ -1,5 +1,5 @@
 from typing import Any, cast
-import ctypes
+import ctypes, re
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv
 from tinygrad.device import Buffer
@@ -32,7 +32,7 @@ class MetalGraph(GraphRunner):
       icb_descriptor, len(jit_cache), MTLResourceOptions.MTLResourceCPUCacheModeDefaultCache)
     if self.icb.value is None: raise GraphException("create indirect command buffer failed, does your system support this?")
     icb_label = bytes(msg("UTF8String", ctypes.c_char_p)(msg("description", objc_instance)(self.icb))).decode()
-    self.needs_icb_fix = int("AGXG15XFamilyIndirectCommandBuffer" not in icb_label)    # not required on M3
+    self.needs_icb_fix = int((m := re.search(r'AGXG(\d+)XFamily', icb_label)) is None or int(m.group(1)) < 15) # not required on M3+
 
     if len(self.vars): self.int_buf = self.dev.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
     all_resources = [self.int_buf.buf] if len(self.vars) else []
