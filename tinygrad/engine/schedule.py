@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from collections import deque, defaultdict
 from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import Metadata, DEBUG, unwrap, merge_dicts
+from tinygrad.helpers import Metadata, unwrap, merge_dicts
 
 # **** ScheduleItem return type
 
@@ -89,8 +89,6 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     for x in children[k]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
-
-  if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
   # map ASSIGN to BUFFER after ScheduleItems are constructed
   becomes_map = {u:u.buf_uop for u in toposort if u.op is Ops.ASSIGN}

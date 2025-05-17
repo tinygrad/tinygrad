@@ -313,9 +313,11 @@ class RemoteDevice(Compiled):
     if not renderer[0].startswith("tinygrad.renderer.") or not renderer[1].endswith("Renderer"): raise RuntimeError(f"bad renderer {renderer}")
     renderer_class = fromimport(renderer[0], renderer[1])  # TODO: is this secure?
     if not issubclass(renderer_class, Renderer): raise RuntimeError(f"renderer isn't a Renderer {renderer}")
+    renderer_instance = renderer_class(*renderer[2])
+    renderer_instance.device = device
     graph_supported, graph_multi = self.properties.graph_supported, self.properties.graph_supports_multi
     graph = fromimport('tinygrad.runtime.graph.remote', f"Remote{'Multi' if graph_multi else ''}Graph") if graph_supported else None
-    super().__init__(device, RemoteAllocator(self), renderer_class(*renderer[2]), Compiler(), functools.partial(RemoteProgram, self), graph)
+    super().__init__(device, RemoteAllocator(self), renderer_instance, Compiler(), functools.partial(RemoteProgram, self), graph)
 
   def finalize(self):
     with contextlib.suppress(ConnectionError, http.client.HTTPException): self.q(SessionFree(), wait=True)
