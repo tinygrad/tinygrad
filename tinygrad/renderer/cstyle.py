@@ -123,14 +123,7 @@ class CStyleLanguage(Renderer):
       for shared_line in reversed(shared_lines):
           lines.insert(insert_index, shared_line)
       prg = "\n".join(lines)
-      
-      #hacks
-      #changes lidx0==0 thing
-      prg = prg.replace("((bool(lidx0))!=1)","lidx0==0")
-      prg = re.sub(r'\(float\(\(\(([a-zA-Z0-9_]+)\s*!=\s*([a-zA-Z0-9_]+)\)\s*!=\s*1\)\)\)', 
-                   r'float(int(\1 != \2) != 1)', 
-                   prg)
-      
+            
       #local sizes
       local_size = [1,1,1]
       global_vars = []
@@ -154,6 +147,14 @@ class CStyleLanguage(Renderer):
       for gv in reversed(global_vars):
           lines.insert(insert_index, gv)
       prg = "\n".join(lines)
+
+      #hacks
+      #changes lidx0==0 thing
+      prg = prg.replace("((bool(lidx0))!=1)","lidx0==0")
+      prg = re.sub(r'\(float\(\(\(([a-zA-Z0-9_]+)\s*!=\s*([a-zA-Z0-9_]+)\)\s*!=\s*1\)\)\)', 
+                   r'float(int(\1 != \2) != 1)', 
+                   prg)
+      prg = prg.replace("unsigned ","u")
 
       local_size_string = f"layout(local_size_x = {local_size[0]}, local_size_y = {local_size[1]}, local_size_z = {local_size[2]}) in;"
       prg = '\n'.join([prg.splitlines()[0], local_size_string, *prg.splitlines()[1:]])
