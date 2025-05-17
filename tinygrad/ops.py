@@ -463,15 +463,18 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.PERMUTE: return self.arg.index(src_axis) if src_axis is not None else None
     return src_axis
 
-  def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
-    assert axis is not None
-    lb = self.copy_to_device(devices)
-    dnum = UOp.variable("_device_num", 0, len(devices)-1)
-    if axis is not None:
-      if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
-      sz = self.shape[axis] // len(devices)
-      lb = lb.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
-    return UOp.multi(lb, axis=axis)
+  def _unshard(self, axis:int) -> UOp:
+    bsz, dcount = self.shape[axis], len(self.device)
+    dnum = UOp.variable("_device_num", 0, dcount-1)
+    return self.pad(tuple((0,0) if a != axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(self.shape))))
+
+  def _shard(self, axis:int) -> UOp:
+    dcount = len(self.device)
+    dnum = UOp.variable("_device_num", 0, dcount-1)
+    if self.shape[axis] % dcount != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {dcount=}")
+    sz = self.shape[axis] // dcount
+    return self.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
+  def shard(self, devices:tuple[str, ...], axis:int) -> UOp: return self.copy_to_device(devices)._shard(axis).multi(axis)
 
   # *** from LazyBuffer ***
 

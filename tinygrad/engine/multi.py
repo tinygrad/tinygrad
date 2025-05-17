@@ -60,23 +60,11 @@ def alu_multi(root:UOp):
     elif mlb.axis is None:
       # no axis, shard it
       assert mlb.op is not Ops.MULTI
-      # TODO: share code with shard
-      dcount = len(root.device)
-      dnum = UOp.variable("_device_num", 0, dcount-1)
-      sz = root.shape[axis] // dcount
-      srcs.append(mlb.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(root.shape))))
+      srcs.append(mlb._shard(axis))
     else:
-      # axis mismatch
+      # axis mismatch, unshard it, send it to all devices, and shard it correctly
       assert mlb.op is Ops.MULTI
-      # TODO: logic copied from COPY
-      bsz, dcount = mlb.shape[mlb.axis]//len(mlb.device), len(mlb.device)
-      dnum = UOp.variable("_device_num", 0, len(mlb.device)-1)
-      padded = mlb.src[0].pad(tuple((0,0) if a != mlb.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(mlb.shape))))
-      ret = padded.allreduce(Ops.ADD, mlb.device)
-      # TODO: logic from above
-      sz = root.shape[axis] // dcount
-      srcs.append(ret.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(root.shape))))
-
+      srcs.append(mlb.src[0]._unshard(mlb.axis).allreduce(Ops.ADD, mlb.device)._shard(axis))
   return srcs[0].alu(root.op, *srcs[1:]).multi(axis)
 
 def reduce_multi(root:UOp, multi:UOp):
@@ -129,16 +117,8 @@ def flip_multi(root:UOp, multi:UOp):
 
 # from multiple devices -> one
 def copy_multi(multi:UOp, device:UOp):
-  if multi.axis is None:
-    # otherwise select the first one and copy it
-    ret = UOp(Ops.COPY, multi.dtype, (multi.src[0], device), arg=0)
-    return ret if isinstance(device.arg, str) else ret.multi(axis=None)
-  # this is a multi axis one
-  bsz, dcount = multi.shape[multi.axis]//len(multi.device), len(multi.device)
-  dnum = UOp.variable("_device_num", 0, len(multi.device)-1)
-  padded = multi.src[0].pad(tuple((0,0) if a != multi.axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(multi.shape))))
-  ret = padded.allreduce(Ops.ADD, device)
-  return ret if isinstance(device.arg, str) else ret.multi(axis=None)
+  assert multi.axis is not None, "all multi ops have axis"
+  return multi.src[0]._unshard(multi.axis).allreduce(Ops.ADD, device)
 
 def assign_multi(dest:UOp, src:UOp):
   if dest.axis != src.axis: raise RuntimeError(f"axis must match in assign {dest.axis} != {src.axis}")
