@@ -24,8 +24,7 @@ class RemoteGraph(GraphRunner):
           assert dest is not None and src is not None, ji
           return Transfer(session=cast(RemoteDevice, Device[dest.device]).session, buffer_num=dest._buf,
                           ssession=cast(RemoteDevice, Device[src.device]).session, sbuffer_num=src._buf)
-    self.graph_num = self.devices[0].graph_num
-    self.devices[0].graph_num += 1
+    self.graph_num = next(self.devices[0].graph_num)
     self.devices[0].q(GraphAlloc(self.graph_num, tuple(_process_ji(ji) for ji in jit_cache), self.map_rawbufs(rawbufs), var_vals))
 
   def __del__(self):
