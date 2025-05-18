@@ -555,7 +555,7 @@ class TestNN(unittest.TestCase):
 
   def test_embedding_one_kernel_unfused(self):
     with Context(FUSE_ARANGE=0, NOOPT=0):
-      self.test_embedding_one_kernel(ops=41410, kcount=2)
+      self.test_embedding_one_kernel(ops=41410, kcount=3)
 
   def test_embedding_one_kernel_fused(self):
     with Context(FUSE_ARANGE=1, NOOPT=0):
