@@ -1,6 +1,6 @@
 import numpy as np
 import unittest
-import subprocess, struct
+import subprocess, struct, math
 from typing import cast
 from tinygrad.runtime.ops_amd import AMDProgram, AMDDevice
 from tinygrad import Tensor, dtypes, Device
@@ -95,6 +95,8 @@ def get_output(s:str, n_threads:int=1):
   return test.numpy()
 
 def f16_to_bits(x:float) -> int: return struct.unpack('<H', struct.pack('<e', x))[0]
+def f32_from_bits(x:int) -> float: return struct.unpack('<f', struct.pack('<I', x))[0]
+def f32_to_bits(x:float) -> int: return struct.unpack('<I', struct.pack('<f', x))[0]
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "tests RDNA3")
 class TestHW(unittest.TestCase):
@@ -169,16 +171,18 @@ class TestHW(unittest.TestCase):
     s_abs_i32(0, 0, scc=0)
 
   def test_v_rcp_f32_neg_vop3(self):
-    def v_neg_rcp_f32(x, y):
-      self.assertEqual(get_output(f"""
-      v_mov_b32_e32 v1 {x}
+    def v_neg_rcp_f32(x:float, y:float):
+      out = get_output(f"""
+      v_mov_b32_e32 v1 {f32_to_bits(x)}
       v_rcp_f32_e64 v1, -v1
-      """)[0], y)
-    v_neg_rcp_f32(0x7f800000, 0x80000000) # -INF => -0.0
-    v_neg_rcp_f32(0xff800000, 0) # INF => 0.0
-    v_neg_rcp_f32(0, 0xff800000) # -0.0 => -INF
-    v_neg_rcp_f32(0x80000000, 0x7f800000) # 0.0 => INF
-    v_neg_rcp_f32(0xc0000000, 0x3f000000) # -2.0 => 0.5
+      """)[0]
+      assert out == f32_to_bits(y), f"{f32_from_bits(out)} != {y} / {out} != {f32_to_bits(y)}"
+    v_neg_rcp_f32(math.inf, -0.0)
+    v_neg_rcp_f32(-math.inf, 0.0)
+    v_neg_rcp_f32(0.0, -math.inf)
+    v_neg_rcp_f32(-0.0, math.inf)
+    v_neg_rcp_f32(-2.0, 0.5)
+    v_neg_rcp_f32(2.0, -0.5)
 
 if __name__ == "__main__":
   unittest.main()
