@@ -93,12 +93,11 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(z, 2))
     self.assertEqual(z.item(), 32)
 
-  # TODO: same issue in precompute_freqs_cis
   def test_push_pads_contiguous(self):
     x = Tensor.full((4,1), 2.).contiguous()
     y = Tensor.full((4,4), 4.).contiguous()
     z = (x.reciprocal().expand(4,4)*y).pad((None, (0,1),)).sum()
-    run_schedule(check_schedule(z, 3, [x,y]))
+    run_schedule(check_schedule(z, 2, [x,y]))
     self.assertEqual(z.item(), 32)
 
   def test_rand(self):
@@ -1860,10 +1859,10 @@ class TestIndexing(unittest.TestCase):
     args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000}
     fused = precompute_freqs_cis(**args)
     with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(fused, 5)) # TODO: this is too many
+      run_schedule(check_schedule(fused, 3))
     if getenv("CHECK", 1):
       ref = precompute_freqs_cis(**args)
-      run_schedule(check_schedule(ref, 5))
+      run_schedule(check_schedule(ref, 3))
       np.testing.assert_equal(fused.numpy(), ref.numpy())
 
   def test_fuse_assign_contiguous(self):
