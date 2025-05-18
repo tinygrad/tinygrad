@@ -168,5 +168,15 @@ class TestHW(unittest.TestCase):
     s_abs_i32(0xffffffff, 0x00000001, scc=1)
     s_abs_i32(0, 0, scc=0)
 
+  def test_v_rcp_f32_neg_vop3(self):
+    def v_rcp_f32_e64(x, y):
+      self.assertEqual(get_output(f"""
+      v_mov_b32_e32 v1 {x}
+      v_rcp_f32_e64 v1, -v1
+      """)[0], y)
+    v_rcp_f32_e64(0x7f800000, 0x80000000) # +INF -> -0
+    v_rcp_f32_e64(0x40000000, 0xbf000000) # +2.0 -> -0.5
+    v_rcp_f32_e64(0x00000000, 0xff800000) # +0.0 -> -INF
+
 if __name__ == "__main__":
   unittest.main()
