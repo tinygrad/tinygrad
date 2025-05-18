@@ -16,8 +16,8 @@ def gen_stats(base_path="."):
   table = []
   for path, _, files in os.walk(os.path.join(base_path, "tinygrad")):
     for name in files:
-      if not (name.endswith(".py") or (name.endswith(".js") and "assets" not in path)): continue
-      if 'tinygrad/runtime/autogen' in path.replace('\\', '/'): continue
+      if not (name.endswith(".py") or name.endswith(".js")): continue
+      if any(s in path.replace('\\', '/') for s in ['tinygrad/runtime/autogen', 'tinygrad/viz/assets']): continue
       filepath = os.path.join(path, name)
       relfilepath = os.path.relpath(filepath, base_path).replace('\\', '/')
       if name.endswith(".js"):
