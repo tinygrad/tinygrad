@@ -845,7 +845,7 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
 
 class PatternMatcher:
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
-    if compiled: from tinygrad.upat import upat_compile
+    if compiled: from tinygrad.uop.upat import upat_compile
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!

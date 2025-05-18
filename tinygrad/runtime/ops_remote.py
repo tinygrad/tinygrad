@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, replace
 import multiprocessing, functools, itertools, asyncio, http, http.client, hashlib, time, os, binascii, struct, ast, contextlib, weakref
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
-from tinygrad.ops import UOp, Ops, Variable, sint
+from tinygrad.uop.ops import UOp, Ops, Variable, sint
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferXfer

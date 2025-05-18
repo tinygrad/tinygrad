@@ -9,7 +9,7 @@ from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.renderer import ProgramSpec
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.codegen import full_rewrite
