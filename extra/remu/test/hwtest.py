@@ -184,5 +184,19 @@ class TestHW(unittest.TestCase):
     v_neg_rcp_f32(-2.0, 0.5)
     v_neg_rcp_f32(2.0, -0.5)
 
+  def test_v_cndmask_b32_neg(self):
+    def v_neg(x:int|float, y:float):
+      out = get_output(f"""
+      v_mov_b32_e32 v1 {f32_to_bits(x)}
+      s_mov_b32_e32 s10 1 // always pick -v1
+      v_cndmask_b32 v1, v1, -v1 s10
+      """)[0]
+      assert out == f32_to_bits(y), f"{f32_from_bits(out)} != {y} / {out} != {f32_to_bits(y)}"
+    v_neg(-0.0, 0.0)
+    v_neg(0.0, -0.0)
+    v_neg(2.0, -2.0)
+    v_neg(math.inf, -math.inf)
+    v_neg(-math.inf, math.inf)
+
 if __name__ == "__main__":
   unittest.main()
