@@ -1049,7 +1049,6 @@ class TestIndexing(unittest.TestCase):
     self.assertEqual(a[0,1].item(), 2)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.int64), "need dtypes.int64")
-  @unittest.expectedFailure # TODO: fix this
   def test_getitem_scalars(self):
     zero = Tensor(0, dtype=dtypes.int64)
     one = Tensor(1, dtype=dtypes.int64)
