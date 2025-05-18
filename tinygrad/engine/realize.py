@@ -63,7 +63,6 @@ class CompiledRunner(Runner):
     if local_size:
       lra['local_size'] = tuple(local_size)
       assert len(local_size) == 3, "local size must have len 3"
-    print("rory local =",local_size,"global =",global_size)
     return self._prg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
 
 class ViewOp(Runner):

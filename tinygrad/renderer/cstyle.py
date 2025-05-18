@@ -93,7 +93,7 @@ class CStyleLanguage(Renderer):
   float4: str|None = None
   type_map: dict[DType, str] = {}
   infinity: str = "1.0f / 0.0f"
-  nan: str = "NAN"
+  nan: str = "0.0/0.0"
   code_for_op: dict = {
     Ops.SQRT: lambda x,dtype: f"sqrt({x})", Ops.RECIP: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
     Ops.EXP2: lambda x,dtype: f"exp2({x})", Ops.LOG2: lambda x,dtype: f"log2({x})", Ops.SIN: lambda x,dtype: f"sin({x})",
@@ -154,10 +154,14 @@ class CStyleLanguage(Renderer):
       prg = re.sub(r'\(float\(\(\(([a-zA-Z0-9_]+)\s*!=\s*([a-zA-Z0-9_]+)\)\s*!=\s*1\)\)\)', 
                    r'float(int(\1 != \2) != 1)', 
                    prg)
-      prg = prg.replace("unsigned ","u")
+      prg = prg.replace("unsigned int","uint")
+      prg = prg.replace("unsigned char","uint8_t")
+      prg = prg.replace("signed char","int8_t")
+
 
       local_size_string = f"layout(local_size_x = {local_size[0]}, local_size_y = {local_size[1]}, local_size_z = {local_size[2]}) in;"
       prg = '\n'.join([prg.splitlines()[0], local_size_string, *prg.splitlines()[1:]])
+      prg = prg.replace("#version 450", "#version 450\n#extension GL_EXT_shader_8bit_storage : require\n#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require", 1)
       #
       #compile
       prg = compile_shader_to_spv(prg)
@@ -591,7 +595,7 @@ class HIPRenderer(AMDRenderer): device = "HIP"
 class QCOMRenderer(OpenCLRenderer): device = "QCOM"
 
 def compile_shader_to_spv(glsl_source: str) -> bytes:
-    print(glsl_source)
+    #print(glsl_source)
     with tempfile.NamedTemporaryFile(suffix=".comp", delete=False, mode="w") as temp_file:
         temp_file.write(glsl_source)
         temp_file_path = temp_file.name

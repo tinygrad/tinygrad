@@ -338,6 +338,8 @@ class Compiled:
 # TODO: move this to each Device
 def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
   if device is None: device = Device.DEFAULT
+  if dtype == dtypes.long: return False #not in vulkan?
+  if dtype == dtypes.uchar: return False #not in vulkan?
   if dtype == dtypes.bfloat16:
     if device == "METAL": return not CI
     if device in {"CUDA", "NV"}: return not CI and not getenv("PTX")

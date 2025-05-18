@@ -245,7 +245,7 @@ class RemoteAllocator(Allocator['RemoteDevice']):
     return self.dev.buffer_num
   # TODO: options should not be here in any Allocator
   def _free(self, opaque:int, options): self.dev.q(BufferFree(opaque))
-  def _copyin(self, dest:int, src:memoryview): self.dev.q(CopyIn(dest, self.dev.conn.req.h(bytes(src))))
+  def _copyin(self, dest:int, src:memoryview): self.dev.q(CopyIn(dest, self.dev.conn.req.h(bytes(src))),wait=True)
   def _copyout(self, dest:memoryview, src:int):
     resp = self.dev.q(CopyOut(src), wait=True)
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
@@ -279,7 +279,7 @@ class RemoteConnection:
     if DEBUG >= 1: print(f"remote with host {host}")
     while 1:
       try:
-        self.conn = http.client.HTTPConnection(host, timeout=60.0)
+        self.conn = http.client.HTTPConnection(host, timeout=600.0)
         self.conn.connect()
         break
       except Exception as e:
@@ -289,7 +289,7 @@ class RemoteConnection:
 
   def batch_submit(self):
     data = self.req.serialize()
-    print(data)
+    #print(data)
     with Timing(f"*** send {len(self.req._q):-3d} requests {len(self.req._h):-3d} hashes with len {len(data)/1024:.2f} kB in ", enabled=DEBUG>=1):
       self.conn.request("POST", "/batch", data)
       response = self.conn.getresponse()
