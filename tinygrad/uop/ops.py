@@ -954,7 +954,7 @@ def launch_viz(env_str:str, data:str):
   if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")):
     args = ['--kernels', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
     args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
-    os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py")] + args)
+    os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), "../", "viz", "serve.py")] + args)
 
 # *** simple graph rewrite engine ***
 
