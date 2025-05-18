@@ -10,7 +10,7 @@ TOKEN_WHITELIST = [token.OP, token.NAME, token.NUMBER, token.STRING]
 def is_docstring(t):
   return t.type == token.STRING and t.string.startswith('"""') and t.line.strip().startswith('"""')
 
-def is_js_token(s): return len(s) and not s.startswith('//')
+def is_js_token(s): return len(s) and not s.startswith('//') and s != "}"
 
 def gen_stats(base_path="."):
   table = []
