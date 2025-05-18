@@ -117,5 +117,7 @@ if __name__ == "__main__":
     logging.info(f"***** {name} diff")
     try: _pmap(name, fxn)
     except Exception as e:
-      if ASSERT_DIFF: raise e
+      if ASSERT_DIFF:
+        print(e)
+        exit(1)
       logging.error(f"{name} diff err {e}")
