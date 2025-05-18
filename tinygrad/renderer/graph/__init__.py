@@ -69,6 +69,6 @@ class GraphRenderer(Renderer):
     self.state_dict = {k:v for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs} if tensor_names else {}
     for k,v in self.state_dict.items(): v.lazydata = v.lazydata.base # non-contiguous views cause data permutation in safe_save
     self.state_bufs.update({cast(Buffer, v.lazydata.base.realized):k for k,v in self.state_dict.items()})
-    self.state_dict.update({k:Tensor(bytes(b.as_buffer()),b.device,b.dtype).realize() for b,k in self.state_bufs.items() if k not in self.state_dict})
+    self.state_dict.update({k:Tensor(bytes(b.as_buffer()), "CPU", b.dtype).realize() for b,k in self.state_bufs.items() if k not in self.state_dict})
 
   def render_graph(self) -> str: raise NotImplementedError("Implement a language-specific GraphRenderer")
