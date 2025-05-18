@@ -485,13 +485,12 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_ast(sink, [x], wanna_output=[wanna_output])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
-  @unittest.expectedFailure
   def test_mean_std_multireduce_multiout(self):
-    # TODO: Similar error to test_multiout_intermediate_multireduce (implicit expand vs shape mismatch)
     Tensor.manual_seed(0)
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
     g0, g1, g2 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(3)]
-    first_x = UOp(Ops.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((15, 25, 1, 35)).expand((15, 25, 35, 35)).to_uop()))
+    x_expand = x.lazydata.st.reshape((15, 25, 1, 35)).expand((15, 25, 35, 35))
+    first_x = UOp(Ops.LOAD, dtypes.float, (g2, x_expand.to_uop()))
     first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (3,)))
     neg_mean = first_reduce * ast_const(dtypes.float, -1/35, (15, 25, 35, 1))
     second_x = UOp(Ops.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((15, 25, 35, 1)).to_uop()))
@@ -499,7 +498,9 @@ class TestLinearizer(unittest.TestCase):
     squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (Ops.ADD, (2,)))
     variance = squares_sum * ast_const(dtypes.float, 1/35, (15, 25, 1, 1))
     std = variance.alu(Ops.SQRT)
-    store_mean = UOp(Ops.STORE, src=(g1, ShapeTracker.from_shape((15, 25, 1, 1)).to_uop(), neg_mean))
+    mean_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (neg_mean,), (Ops.ADD, (2,)))
+    mean = mean_reduce * ast_const(dtypes.float, -1/35, (15, 25, 1, 1)) 
+    store_mean = UOp(Ops.STORE, src=(g1, ShapeTracker.from_shape((15, 25, 1, 1)).to_uop(), mean))
     store_std = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((15, 25, 1, 1)).to_uop(), std))
     sink = UOp(Ops.SINK, src=(store_std, store_mean))
     wanna_output = [x.numpy().std(axis=2, ddof=0).reshape(15,25,1,1), x.numpy().mean(axis=2).reshape(15,25,1,1)]
