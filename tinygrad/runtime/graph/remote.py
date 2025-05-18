@@ -1,4 +1,4 @@
-from tinygrad.ops import Variable
+from tinygrad.uop.ops import Variable
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, GraphException
 from tinygrad.engine.realize import CompiledRunner, BufferXfer, ExecItem
 from tinygrad.device import Device, Buffer

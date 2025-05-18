@@ -1,7 +1,7 @@
 from typing import cast
 from dataclasses import dataclass, field
 from collections import deque, defaultdict
-from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
+from tinygrad.uop.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import Metadata, unwrap, merge_dicts
 

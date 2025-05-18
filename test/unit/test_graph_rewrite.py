@@ -1,7 +1,7 @@
 import unittest, math
 from tinygrad import dtypes
 from tinygrad.helpers import all_same
-from tinygrad.ops import GroupOp, UOp, Ops, exec_alu
+from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu
 from tinygrad.codegen import full_rewrite_to_sink
 
 # Helper function to apply the graph rewrite
@@ -203,7 +203,7 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
 
 
 import inspect
-from tinygrad.ops import graph_rewrite, _substitute, track_rewrites
+from tinygrad.uop.ops import graph_rewrite, _substitute, track_rewrites
 from tinygrad.codegen.symbolic import symbolic_simple
 
 class TestBottomUpRewrite(unittest.TestCase):
