@@ -59,7 +59,7 @@ class WebGPUJSRenderer(GraphRenderer):
     for i, uop in enumerate(self.inputs):
       if uop.base.op is Ops.BUFFER: # from Tensor input
         arg_names.append(f"bufArg_{i}")
-        copyins.append(copyin((dest_buf:=self.bufs[uop.base.buffer]), f"bufArg_{i}"))
+        copyins.append(copyin((dest_buf:=self.bufs[cast(Buffer, uop.base.buffer)]), f"bufArg_{i}"))
         validators.append(f"if (bufArg_{i}.byteLength !== {dest_buf}.size) throw new Error(`bufArg_{i} does not have expected number of bytes`);")
       elif uop.op is Ops.BIND: # from symbolic variable input
         arg_names.append(var_name:=uop.unbind()[0].simplify().render())
@@ -69,8 +69,8 @@ class WebGPUJSRenderer(GraphRenderer):
     # render outputs
     command_encoder = ["const commandEncoder = device.createCommandEncoder();"]
     for i, uop in enumerate(self.outputs):
-      copyout_bufs.append(f'const gpuReadBuffer{i} = {alloc(str(uop.base.buffer.nbytes), "map_read")};')
-      output_copies.append(f"commandEncoder.copyBufferToBuffer({(out_buf:=self.bufs[uop.base.buffer])}, 0, gpuReadBuffer{i}, 0, {out_buf}.size);")
+      copyout_bufs.append(f'const gpuReadBuffer{i} = {alloc(str((buf:=cast(Buffer, uop.base.buffer)).nbytes), "map_read")};')
+      output_copies.append(f"commandEncoder.copyBufferToBuffer({(out_buf:=self.bufs[buf])}, 0, gpuReadBuffer{i}, 0, {out_buf}.size);")
       array_type = f"{'Uint' if (dt:=uop.dtype) in dtypes.uints else 'Int' if dt in (dtypes.sints+(dtypes.bool,)) else 'Float'}{8*dt.itemsize}Array"
       ret_bufs.append(f"const resultBuffer{i} = new {array_type}(gpuReadBuffer{i}.size / {dt.itemsize});")
       copyouts += [f"await gpuReadBuffer{i}.mapAsync(GPUMapMode.READ);",

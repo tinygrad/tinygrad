@@ -47,8 +47,8 @@ class GraphRenderer(Renderer):
     # mark which buffers used in computation have state
     ctr = itertools.count()
     self.eis: list[ExecItem] = []
-    self.bufs: dict[Buffer, str] = {u.base.buffer: f"input_{i}" for i, u in enumerate(self.inputs) if u.base.op is Ops.BUFFER}
-    self.bufs.update({u.base.buffer: f"output_{i}" for i, u in enumerate(self.outputs)})
+    self.bufs: dict[Buffer, str] = {cast(Buffer, u.base.buffer): f"input_{i}" for i, u in enumerate(self.inputs) if u.base.op is Ops.BUFFER}
+    self.bufs.update({cast(Buffer, u.base.buffer): f"output_{i}" for i, u in enumerate(self.outputs)})
     self.state_bufs: dict[Buffer, str] = dict()
     for si, ei in lower_schedule(memory_planner(schedule)):
       if isinstance(ei.prg, CompiledRunner):
@@ -65,9 +65,10 @@ class GraphRenderer(Renderer):
                     and new_uop.buffer in self.state_bufs and not any(is_store_kernel(u) for u in t.lazydata.toposort())]
     if state_loaders: Tensor.realize(*state_loaders)
 
+    # build complete state_dict, rename state bufs with meaningful names from tensor_names
     self.state_dict = {k:v for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs} if tensor_names else {}
-    self.state_bufs.update({cast(Tensor, v).lazydata.base.realized:k for k,v in self.state_dict.items()})
-    self.state_dict.update({k:Tensor(bytes(b.as_buffer()), dtype=b.dtype, device=b.device).realize()
-                            for b,k in self.state_bufs.items() if k not in self.state_dict})
+    for k,v in self.state_dict.items(): v.lazydata = v.lazydata.base # non-contiguous views cause data permutation in safe_save
+    self.state_bufs.update({cast(Buffer, v.lazydata.base.realized):k for k,v in self.state_dict.items()})
+    self.state_dict.update({k:Tensor(bytes(b.as_buffer()),b.device,b.dtype).realize() for b,k in self.state_bufs.items() if k not in self.state_dict})
 
   def render_graph(self) -> str: raise NotImplementedError("Implement a language-specific GraphRenderer")
