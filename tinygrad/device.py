@@ -94,11 +94,12 @@ class BufferSpec:
 class MultiBuffer:
   def __init__(self, device:tuple[str, ...], size:int, dtype:DType):
     self.bufs = [Buffer(d, size, dtype) for d in device]
-    self.dtype = dtype
+    self.size, self.dtype = size, dtype
   def ref(self, cnt):
     for b in self.bufs: b.ref(cnt)
     return self
   def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
+  def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} size:{self.size} dtype:{self.dtype}>"
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,
@@ -130,6 +131,7 @@ class Buffer:
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
     assert not self.is_allocated(), "can't allocate already allocated buffer"
+    if DEBUG >= 7: print(f"buffer: allocate {self.nbytes} bytes on {self.device}")
     self.allocator:Allocator = Device[self.device].allocator
     if external_ptr is not None:
       self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferSpec(external_ptr=external_ptr)
@@ -144,6 +146,7 @@ class Buffer:
     return self
   def deallocate(self):
     assert self.is_allocated(), "buffer must be allocated to deallocate"
+    if DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
