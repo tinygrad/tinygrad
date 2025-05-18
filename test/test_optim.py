@@ -132,5 +132,15 @@ class TestOptim(unittest.TestCase):
     optimizer.step()
     Tensor.training = old_state
 
+  def test_requires_grad_non_float(self):
+    # Test that optimizer raises an error when a non-float tensor with requires_grad=None is passed
+    x = Tensor([1, 2, 3], dtype=dtypes.int32)  # Non-float tensor with default requires_grad=None
+    with self.assertRaises(RuntimeError):
+      Adam([x])
+    with self.assertRaises(RuntimeError):
+      SGD([x])
+    with self.assertRaises(RuntimeError):
+      AdamW([x])
+
 if __name__ == '__main__':
   unittest.main()

@@ -350,6 +350,25 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32 # check if ndarray correctly casts to Tensor dtype
     assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64 # check that it works for something else
 
+  def test_requires_grad_non_float(self):
+    # Test that requires_grad=True raises error for non-float tensors at init
+    with self.assertRaises(RuntimeError):
+      Tensor([1, 2, 3], dtype=dtypes.int32, requires_grad=True)
+    with self.assertRaises(RuntimeError):
+      Tensor([True, False], dtype=dtypes.bool, requires_grad=True)
+
+    # Test that requires_grad_() raises error for non-float tensors
+    t1 = Tensor([1, 2, 3], dtype=dtypes.int32)
+    with self.assertRaises(RuntimeError):
+      t1.requires_grad_(True)
+
+    # Verify that float tensors still work fine
+    t2 = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float32, requires_grad=True)
+    assert t2.requires_grad == True
+    t3 = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float32)
+    t3.requires_grad_(True)
+    assert t3.requires_grad == True
+
   def test_tensor_from_blob(self):
     x = memoryview(bytearray(16)).cast('I')
 

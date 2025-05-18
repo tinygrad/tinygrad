@@ -139,6 +139,9 @@ class Tensor(SimpleMathTrait):
     # None (the default) will be updated to True if it's put in an optimizer
     self.requires_grad:bool|None = requires_grad
 
+    if requires_grad and not dtypes.is_float(dtype or (data.dtype if isinstance(data, UOp) else dtypes.from_py(data))):
+      raise RuntimeError("only Tensors of floating point dtype can require gradients")
+
     # create a UOp from the different types of inputs
     if isinstance(data, UOp):
       assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
@@ -187,6 +190,8 @@ class Tensor(SimpleMathTrait):
     return lhs._apply_uop(fxn, rhs)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
+    if requires_grad and not dtypes.is_float(self.dtype):
+      raise RuntimeError("only Tensors of floating point dtype can require gradients")
     self.requires_grad = requires_grad
     return self
 
