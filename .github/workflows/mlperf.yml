@@ -12,6 +12,10 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: Symlink datasets
+      run: |
+        mkdir -p extra/datasets
+        ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: Run resnet
       run: |
         examples/mlperf/training_submission_v5.0/tinycorp/benchmarks/resnet/implementations/tinybox_green/dev_beam.sh
