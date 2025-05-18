@@ -73,7 +73,8 @@ setup(name='tinygrad',
             "capstone",
             "pycocotools",
             "boto3",
-            "pandas"
+            "pandas",
+            "influxdb3-python"
         ],
         'docs': [
             "mkdocs",

@@ -583,6 +583,9 @@ def wrap_fxn(k,f):
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
+@torch.library.impl("aten::equal", "privateuseone")
+def equal(x: torch.Tensor, y: torch.Tensor): return (x==y).all().item()
+
 if TORCH_DEBUG:
   from torch.utils._python_dispatch import TorchDispatchMode
   class DispatchLog(TorchDispatchMode):

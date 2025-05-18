@@ -9,6 +9,7 @@ from tinygrad.nn.state import safe_load, load_state_dict, get_state_dict
 from tinygrad.helpers import fetch, trange, colored, Timing
 from extra.models.clip import Embedder, FrozenClosedClipEmbedder, FrozenOpenClipEmbedder
 from extra.models.unet import UNetModel, Upsample, Downsample, timestep_embedding
+from extra.bench_log import BenchEvent, WallTimeEvent
 from examples.stable_diffusion import ResnetBlock, Mid
 import numpy as np
 
@@ -346,17 +347,18 @@ class DPMPP2MSampler:
     for i in trange(num_sigmas - 1):
       with Timing("step in ", enabled=timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
         GlobalCounters.reset()
-        x, old_denoised = self.sampler_step(
-          old_denoised=old_denoised,
-          prev_sigma=(None if i==0 else sigmas[i-1].expand(x.shape[0])),
-          sigma=sigmas[i].expand(x.shape[0]),
-          next_sigma=sigmas[i+1].expand(x.shape[0]),
-          denoiser=denoiser,
-          x=x,
-          c=c,
-          uc=uc,
-        )
-        x.realize(old_denoised)
+        with WallTimeEvent(BenchEvent.STEP):
+          x, old_denoised = self.sampler_step(
+            old_denoised=old_denoised,
+            prev_sigma=(None if i==0 else sigmas[i-1].expand(x.shape[0])),
+            sigma=sigmas[i].expand(x.shape[0]),
+            next_sigma=sigmas[i+1].expand(x.shape[0]),
+            denoiser=denoiser,
+            x=x,
+            c=c,
+            uc=uc,
+          )
+          x.realize(old_denoised)
 
     return x
 
@@ -388,7 +390,8 @@ if __name__ == "__main__":
 
   start_mem_used = GlobalCounters.mem_used
   with Timing("loaded weights in ", lambda et_ns: f", {(B:=(GlobalCounters.mem_used-start_mem_used))/1e9:.2f} GB loaded at {B/et_ns:.2f} GB/s"):
-    Tensor.realize(*loaded_weights)
+    with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
+      Tensor.realize(*loaded_weights)
     del loaded_weights
 
   N = 1

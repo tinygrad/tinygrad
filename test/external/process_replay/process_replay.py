@@ -2,7 +2,7 @@
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, functools, warnings, itertools
 from typing import Callable, cast
-from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm, dedup
+from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 from tinygrad.engine.grouper import get_becomes_map
 from tinygrad.codegen.kernel import Kernel, Opt
 from tinygrad.renderer import Renderer
@@ -36,7 +36,7 @@ def recreate_sched(big_sink:UOp) -> list[UOp]:
   UOp.unique_num = itertools.count(max([u.arg for u in big_sink.toposort() if u.op is Ops.UNIQUE], default=0)+1)
   becomes_map = get_becomes_map(big_sink)
   sched_sink = big_sink.substitute(becomes_map)
-  return dedup(u.arg.ast for u in sched_sink.toposort() if u.op is Ops.KERNEL)
+  return [u.arg.ast for u in sched_sink.toposort() if u.op is Ops.KERNEL]
 
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str, _) -> str:
   k = Kernel(ast, opts=opts)
