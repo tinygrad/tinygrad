@@ -1,3 +1,0 @@
-*.s
-*.ll
-fp32_sgemm_amd
