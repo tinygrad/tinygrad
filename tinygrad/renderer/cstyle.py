@@ -152,12 +152,6 @@ class CStyleLanguage(Renderer):
 
       #hacks
       #changes lidx0==0 thing
-      prg = re.sub(r'\(float\(\(\(([a-zA-Z0-9_]+)\s*!=\s*([a-zA-Z0-9_]+)\)\s*!=\s*1\)\)\)', 
-                   r'float(int(\1 != \2) != 1)', 
-                   prg)
-      prg = prg.replace("unsigned int","uint")
-      prg = prg.replace("unsigned char","uint8_t")
-      prg = prg.replace("signed char","int8_t")
 
 
       local_size_string = f"layout(local_size_x = {local_size[0]}, local_size_y = {local_size[1]}, local_size_z = {local_size[2]}) in;"
