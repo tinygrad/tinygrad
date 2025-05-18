@@ -152,7 +152,6 @@ class CStyleLanguage(Renderer):
 
       #hacks
       #changes lidx0==0 thing
-      prg = prg.replace("((bool(lidx0))!=1)","lidx0==0")
       prg = re.sub(r'\(float\(\(\(([a-zA-Z0-9_]+)\s*!=\s*([a-zA-Z0-9_]+)\)\s*!=\s*1\)\)\)', 
                    r'float(int(\1 != \2) != 1)', 
                    prg)
