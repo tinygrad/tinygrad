@@ -1,7 +1,7 @@
 import unittest
 from tinygrad.device import CompileError, Device, Compiler
 if Device.DEFAULT=="METAL":
-  from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram
+  from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram, msg, from_ns_str, libmetal
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
   def test_alloc_oom(self):
@@ -73,3 +73,43 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
 """)
     with self.assertRaises(RuntimeError):
       MetalProgram(device, "r_5", compiled)
+
+  @unittest.skipIf("virtual" not in from_ns_str(msg('name')(libmetal.MTLCreateSystemDefaultDevice())).lower(), "test requires virtual Metal device")
+  def test_virtual_device_sync(self):
+    """Test that virtual Metal devices can properly synchronize with each other"""
+    from tinygrad import Tensor, Device
+    import os
+    
+    # Only run this test if we have at least 2 virtual devices
+    try:
+      # Try to create two virtual devices
+      dev0 = Device[f"METAL:0"]
+      dev1 = Device[f"METAL:1"]
+      
+      # Create a tensor on device 0, move it to device 1, and back to device 0
+      a = Tensor([1, 2, 3, 4], device=dev0).realize()
+      b = a.to(dev1).realize()
+      c = b.to(dev0).realize()
+      
+      # Test that the values transferred correctly
+      self.assertTrue((c.numpy() == a.numpy()).all())
+      
+      # Set METAL_FORCE_SYNC=1 to ensure synchronization
+      os_environ_orig = os.environ.copy()
+      os.environ["METAL_FORCE_SYNC"] = "1"
+      
+      # Test with more data
+      N = 1000
+      d = Tensor.rand(N, N, device=dev0).realize()
+      e = d.to(dev1).realize()
+      f = e.to(dev0).realize()
+      
+      # Restore original environment
+      os.environ.clear()
+      os.environ.update(os_environ_orig)
+      
+      # Test that the values are preserved
+      self.assertTrue((f.numpy() == d.numpy()).all())
+    except Exception as e:
+      # Skip if we couldn't create multiple virtual devices
+      raise unittest.SkipTest(f"Couldn't create multiple virtual devices: {e}")

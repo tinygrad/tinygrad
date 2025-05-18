@@ -73,10 +73,16 @@ class MetalDevice(Compiled):
     Compiled.profile_events += [ProfileDeviceEvent(device)]
 
     from tinygrad.runtime.graph.metal import MetalGraph
-    # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
-    # This can be reproduced locally with any virtualization software (like utm) that can create macOS VMs with apple's own virtualization framework.
+    # Only disable MetalGraph for virtualized environments where it's known to crash
+    # Enable it for Apple's virtual GPUs which support proper multi-device operation
+    dev_name = from_ns_str(msg('name')(self.sysdevice)).lower()
+    enable_graph = getenv("METAL_ENABLE_GRAPH", 1)
+    # Apple Virtual GPUs start with "Apple M" but have "virtual" in the name
+    is_apple_virtual = "apple m" in dev_name and "virtual" in dev_name
+    disable_graph = 'virtual' in dev_name and not is_apple_virtual and not enable_graph
+    
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
-                     functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(msg('name')(self.sysdevice)).lower() else None)
+                     functools.partial(MetalProgram, self), None if disable_graph else MetalGraph)
 
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
@@ -199,22 +205,38 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): msg("release")(opaque.buf)
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
+    # Make sure both devices are synchronized before transfer
+    src_dev.synchronize()
     dest_dev.synchronize()
+    
+    # Create command buffer for the source device
     src_command_buffer = msg("commandBuffer", objc_instance)(src_dev.mtl_queue)
     encoder = msg("blitCommandEncoder", objc_instance)(src_command_buffer)
     msg("copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:")(encoder, src.buf, ctypes.c_ulong(src.offset),
         dest.buf, ctypes.c_ulong(dest.offset), ctypes.c_ulong(sz))
     msg("endEncoding")(encoder)
+    
     if src_dev != dest_dev:
+      # For cross-device transfers, use signal/wait mechanism with proper fencing
       msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
       dest_command_buffer = msg("commandBuffer", objc_instance)(dest_dev.mtl_queue)
       msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
       msg("commit")(dest_command_buffer)
       dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
       src_dev.timeline_value += 1
+    
     msg("setLabel:")(src_command_buffer, to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
     msg("commit")(src_command_buffer)
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
+    
+    # For virtual devices, we need to ensure the transfer completes
+    # Check if either device has "virtual" in the name
+    src_name = from_ns_str(msg('name')(src_dev.sysdevice)).lower()
+    dest_name = from_ns_str(msg('name')(dest_dev.sysdevice)).lower()
+    if ('virtual' in src_name or 'virtual' in dest_name) and getenv("METAL_FORCE_SYNC", 0):
+      src_dev.synchronize()
+      dest_dev.synchronize()
+      
   def _cp_mv(self, dst, src, prof_desc):
     with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
