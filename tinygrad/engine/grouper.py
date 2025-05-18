@@ -1,7 +1,7 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from tinygrad.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
-from tinygrad.ops import can_pad, sint, track_rewrites, _substitute
+from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
+from tinygrad.uop.ops import can_pad, sint, track_rewrites, _substitute
 from tinygrad.codegen.lowerer import get_contraction_with_reduce, get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
@@ -10,7 +10,7 @@ from tinygrad.dtype import ImageDType
 from tinygrad.engine.multi import replace_allreduce
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
-from tinygrad.spec import type_verify, sched_spec
+from tinygrad.uop.spec import type_verify, sched_spec
 
 # creation can recurse a lot
 import sys

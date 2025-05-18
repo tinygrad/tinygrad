@@ -1,5 +1,5 @@
 from typing import cast, Callable
-from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, resolve
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, resolve
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
 from tinygrad.helpers import all_same, prod, DEBUG, IGNORE_OOB, Context
 try:

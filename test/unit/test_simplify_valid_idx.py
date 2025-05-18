@@ -2,7 +2,7 @@ import unittest, itertools
 
 from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen.symbolic import simplify_valid
 
 def get_gated_load_uop(valid:UOp, idx:UOp):

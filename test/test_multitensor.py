@@ -1,7 +1,7 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
-from tinygrad.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import CI, getenv, prod, Context, OSX
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule

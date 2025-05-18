@@ -1,6 +1,6 @@
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv
-from tinygrad.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, track_rewrites
+from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, track_rewrites
 
 # *** allreduce implementation ***
 

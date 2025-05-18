@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.ops import Ops
+from tinygrad.uop.ops import Ops
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.shape.shapetracker import ShapeTracker, View

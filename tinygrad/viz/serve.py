@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, Callable, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
-from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
+from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
 from tinygrad.dtype import dtypes
