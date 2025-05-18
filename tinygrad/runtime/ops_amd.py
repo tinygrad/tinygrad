@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, cast, ClassVar
-import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select
+import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select, weakref
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
@@ -425,7 +425,7 @@ class AMDProgram(HCQProgram):
     self.dev, self.name, self.lib = dev, name, lib
 
     image, sections, _ = elf_loader(self.lib)
-    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), BufferSpec(cpu_access=True, nolru=True))
+    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(cpu_access=True, nolru=True))
     self.dev.allocator._copyin(self.lib_gpu, image)
     self.dev.synchronize()
 
@@ -461,9 +461,7 @@ class AMDProgram(HCQProgram):
 
     super().__init__(CLikeArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, lib=self.lib,
                      base=self.lib_gpu.va_addr)
-
-  def __del__(self):
-    if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))
+    weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
