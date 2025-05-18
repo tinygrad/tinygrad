@@ -40,6 +40,7 @@ METAL_XCODE         | [1]        | enable Metal using macOS Xcode SDK
 CPU                 | [1]        | enable CPU (Clang) backend
 LLVM                | [1]        | enable LLVM backend
 BEAM                | [#]        | number of beams in kernel beam search
+FUSE_ARANGE         | [0-1]      | fuse arange operations into upstream kernels (default 1)
 DEFAULT_FLOAT       | [HALF, ...]| specify the default float dtype (FLOAT32, HALF, BFLOAT16, FLOAT64, ...), default to FLOAT32
 IMAGE               | [1-2]      | enable 2d specific optimizations
 FLOAT16             | [1]        | use float16 for images instead of float32
