@@ -95,7 +95,7 @@ class CStyleLanguage(Renderer):
   infinity: str = "1.0f / 0.0f"
   nan: str = "0.0/0.0"
   code_for_op: dict = {
-    Ops.SQRT: lambda x,dtype: f"sqrt({x})", Ops.RECIP: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
+    Ops.SQRT: lambda x,dtype: f"v_sqrt({x})", Ops.RECIP: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
     Ops.EXP2: lambda x,dtype: f"exp2({x})", Ops.LOG2: lambda x,dtype: f"log2({x})", Ops.SIN: lambda x,dtype: f"sin({x})",
     Ops.AND: lambda a,b,dtype: f"({a}&{b})" if dtype in [dtypes.int, dtypes.uint] else f"({a}&&{b})", Ops.XOR: lambda a,b,dtype: f"({a}^{b})", Ops.OR: lambda a,b,dtype: f"({a}|{b})",
     Ops.ADD: lambda a,b,dtype: f"({a}+{b})", Ops.SUB: lambda a,b,dtype: f"({a}-{b})", Ops.MUL: lambda a,b,dtype: f"({a}*{b})",
@@ -109,7 +109,8 @@ class CStyleLanguage(Renderer):
   def get_kernel_modifier(self, uops:list[UOp]) -> str: return ""
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     if self.device == "METAL":
-      prg = "#version 450\nvoid main() {\n" + ''.join(['\n'.join(kernel), "\n}"])
+      custom_sqrt = "float v_sqrt(float x) {\nif (x < 0.0f) { const uint nan_bits = 0x7FC00000u; return uintBitsToFloat(nan_bits); }\nreturn sqrt(x);\n}"
+      prg = "#version 450\n"+custom_sqrt+"\nvoid main() {\n" + ''.join(['\n'.join(kernel), "\n}"])
 
       #todo ....
       # moves shared vars
@@ -595,7 +596,7 @@ class HIPRenderer(AMDRenderer): device = "HIP"
 class QCOMRenderer(OpenCLRenderer): device = "QCOM"
 
 def compile_shader_to_spv(glsl_source: str) -> bytes:
-    #print(glsl_source)
+    print(glsl_source)
     with tempfile.NamedTemporaryFile(suffix=".comp", delete=False, mode="w") as temp_file:
         temp_file.write(glsl_source)
         temp_file_path = temp_file.name
