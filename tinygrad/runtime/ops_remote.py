@@ -247,19 +247,41 @@ class RemoteAllocator(Allocator['RemoteDevice']):
   # TODO: options should not be here in any Allocator
   def _free(self, opaque:int, options): self.dev.q(BufferFree(opaque))
   def _copyin(self, dest:int, src:memoryview, dtype=None):
-    if dtype in [dtypes.bool,dtypes.int8,dtypes.uint8]:
-      print("RORY BOOL / uint8")
+    if dtype in [dtypes.bool,dtypes.int8,dtypes.uint8,dtypes.uchar]:
       x = bytes(src)
       vx = b''.join(struct.pack('<I', bool(b)) for b in x)
       self.dev.q(CopyIn(dest, self.dev.conn.req.h(vx)),wait=True)
       return
+    if dtype in [dtypes.int16, dtypes.uint16, dtypes.float16, dtypes.bfloat16]:
+      x = bytes(src)
+      vx_chunks = [x[i:i+2] for i in range(0, len(x), 2)]
+      
+      def interpret_as_bool(chunk):
+        # Interpret as uint16 (preserves bits regardless of signed/float/bfloat)
+        val = struct.unpack('<H', chunk)[0]
+        return struct.pack('<I', int(bool(val)))  # 0 or 1 packed as uint32
+      vx = b''.join(interpret_as_bool(chunk) for chunk in vx_chunks)
+      self.dev.q(CopyIn(dest, self.dev.conn.req.h(vx)), wait=True)
+      return
+
     self.dev.q(CopyIn(dest, self.dev.conn.req.h(bytes(src))),wait=True)
   def _copyout(self, dest:memoryview, src:int,dtype=None):
     resp = self.dev.q(CopyOut(src), wait=True)
-    if dtype in [dtypes.bool,dtypes.int8,dtypes.uint8]:
-      print("RORY BOOL OUT",resp,src,len(resp),len(dest))
+    if dtype in [dtypes.bool,dtypes.int8,dtypes.uint8,dtypes.uchar]:
       vx_chunks = [resp[i:i+4] for i in range(0, len(resp), 4)]
       resp = bytes(struct.unpack('<I', chunk)[0] for chunk in vx_chunks)
+    if dtype in [dtypes.int16, dtypes.uint16, dtypes.float16, dtypes.bfloat16]:
+      vx_chunks = [resp[i:i+2] for i in range(0, len(resp), 2)]
+      def to_uint32(chunk):
+        val = struct.unpack({
+          dtypes.uint16: '<H',
+          dtypes.int16:  '<h',
+          dtypes.float16: '<H',     # Just preserve bits
+          dtypes.bfloat16: '<H'     # Also preserve bits
+        }[dtype], chunk)[0]
+        return struct.pack('<I', val & 0xFFFF)  # Mask ensures it's within uint32 range
+      resp = b''.join(to_uint32(chunk) for chunk in vx_chunks)
+
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
     dest[:] = resp
   def _transfer(self, dest, src, sz, src_dev, dest_dev):

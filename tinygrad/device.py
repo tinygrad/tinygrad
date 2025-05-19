@@ -192,8 +192,10 @@ class Allocator(Generic[DeviceType]):
   # overridden in LRUAllocator
   def alloc(self, size:int, options:Optional[BufferSpec]=None,dtype=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
-    if dtype in [dtypes.bool,dtypes.int8,dtypes.uint8]:
+    if dtype in [dtypes.bool,dtypes.int8,dtypes.uint8,dtypes.uchar]:
       size *= 4
+    if dtype in [dtypes.int16,dtypes.uint16,dtypes.float16,dtypes.bfloat16]:
+      size *= 2
     return self._alloc(size, options if options is not None else BufferSpec())
   def free(self, opaque, size:int, options:Optional[BufferSpec]=None): self._free(opaque, options if options is not None else BufferSpec())
 

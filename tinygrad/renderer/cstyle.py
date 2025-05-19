@@ -110,7 +110,7 @@ class CStyleLanguage(Renderer):
   def get_kernel_modifier(self, uops:list[UOp]) -> str: return ""
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     if self.device == "METAL":
-      custom_log2 = "float v_log2(float x) {\nif (x <= 0.0f) { const uint nan_bits = 0x7FC00000u; return uintBitsToFloat(nan_bits); }\nreturn log2(x);\n}"
+      custom_log2 = "float v_log2(float x) {\nif (x < 0.0f) { const uint nan_bits = 0x7FC00000u; return uintBitsToFloat(nan_bits); }\nreturn log2(x);\n}"
       custom_sqrt = "float v_sqrt(float x) {\nif (x < 0.0f) { const uint nan_bits = 0x7FC00000u; return uintBitsToFloat(nan_bits); }\nreturn sqrt(x);\n}"
       prg = "#version 450\n"+custom_sqrt+"\n"+custom_log2+"\nvoid main() {\n" + ''.join(['\n'.join(kernel), "\n}"])
 
