@@ -21,18 +21,18 @@ FILES = ["codegen/__init__.py", "codegen/devectorizer.py", "codegen/expander.py"
 FILES = ["shape/shapetracker.py", "shape/view.py"]
 
 # runtime
-FILES = ["runtime/ops_cpu.py", "runtime/ops_python.py", "runtime/ops_disk.py", "runtime/ops_metal.py", "runtime/support/elf.py"]
+FILES = ["runtime/ops_cpu.py", "runtime/ops_disk.py", "runtime/ops_metal.py", "runtime/autogen/libc.py", "runtime/support/elf.py"]
 
 # runtime (to remove)
 # TODO: ops_python shouldn't be needed, remove from tensor.py
 # TODO: llvm shouldn't be needed, allow no import in metal
-FILES = ["runtime/autogen/libc.py", "runtime/autogen/llvm.py", "runtime/support/llvm.py"]
+FILES = ["runtime/ops_python.py", "runtime/autogen/llvm.py", "runtime/support/llvm.py"]
 
 # these are all in tinygrad/ folder
 FILES = ["tinygrad/"+x for x in FILES]
 
 # basic utils
-FILES += ["ruff.toml", "sz.py"]
+FILES += ["ruff.toml", "sz.py", "examples/beautiful_mnist.py"]
 
 os.system("git checkout master "+' '.join(FILES))
 

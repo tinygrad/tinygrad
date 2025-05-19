@@ -1,6 +1,6 @@
 # model based off https://medium.com/data-science/going-beyond-99-mnist-handwritten-digits-recognition-cfff96337392
 from typing import List, Callable
-from tinygrad import Tensor, nn, GlobalCounters
+from tinygrad import Tensor, TinyJit, nn, GlobalCounters
 from tinygrad.helpers import getenv, colored, trange
 from tinygrad.nn.datasets import mnist
 
@@ -23,7 +23,7 @@ if __name__ == "__main__":
   model = Model()
   opt = nn.optim.Adam(nn.state.get_parameters(model))
 
-  #@TinyJit
+  @TinyJit
   @Tensor.train()
   def train_step() -> Tensor:
     opt.zero_grad()
@@ -33,7 +33,7 @@ if __name__ == "__main__":
     opt.step()
     return loss
 
-  #@TinyJit
+  @TinyJit
   @Tensor.test()
   def get_test_acc() -> Tensor: return (model(X_test).argmax(axis=1) == Y_test).mean()*100
 
