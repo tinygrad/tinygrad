@@ -798,7 +798,7 @@ class PCIIface:
       write_ptrs=[MMIOInterface(gart.va_addr+0x10, 8, fmt='Q')], doorbells=[MMIOInterface(self.doorbell_cpu_addr + doorbell_index * 8, 8, fmt='Q')])
 
   def sleep(self, timeout):
-    if PCIIface.vfio and (events_cnt:=len(self.irq_poller.poll(timeout))):
+    if PCIIface.vfio_fd is not None and (events_cnt:=len(self.irq_poller.poll(timeout))):
       self.irq_fd.read(8 * events_cnt)
       self.adev.ih.interrupt_handler()
 
