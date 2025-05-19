@@ -1,8 +1,9 @@
+from typing import cast
 from dataclasses import dataclass, field
 from collections import deque, defaultdict
-from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
-from tinygrad.device import Buffer
-from tinygrad.helpers import Metadata, DEBUG, unwrap, merge_dicts
+from tinygrad.uop.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
+from tinygrad.device import Buffer, MultiBuffer
+from tinygrad.helpers import Metadata, unwrap, merge_dicts
 
 # **** ScheduleItem return type
 
@@ -58,15 +59,36 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=local_var_vals, name="unbind vars")
     var_vals = merge_dicts([var_vals, *local_var_vals])
     # create subbuffers if needed
-    if ast.op is Ops.BUFFER_VIEW: buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-    schedule.append(ScheduleItem(ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
+    if ast.op is Ops.BUFFER_VIEW:
+      base = k.src[1].buf_uop.buffer
+      assert isinstance(base, Buffer), "base can't be MultiBuffer"
+      buffers[k.src[0]] = base.view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
+    ubufs = tuple(s.buf_uop.buffer for s in k.src)
+    if any(isinstance(x, MultiBuffer) for x in ubufs):
+      if ast.op is Ops.COPY:
+        if isinstance(ubufs[1], MultiBuffer) and ast.arg is None:  # src is multiple buffers, none selected
+          if isinstance(ubufs[0], MultiBuffer):
+            # COPY ALL -> ALL
+            for b1,b2 in zip(ubufs[0].bufs, ubufs[1].bufs): schedule.append(ScheduleItem(ast, (b1, b2), k.arg.metadata))
+          else:
+            # COPY ANY -> ONE. Currently we just select the first
+            schedule.append(ScheduleItem(ast, (ubufs[0], ubufs[1].bufs[0]), k.arg.metadata))
+        else:
+          src_buf = ubufs[1].bufs[ast.arg] if isinstance(ubufs[1], MultiBuffer) else ubufs[1]
+          if isinstance(ubufs[0], MultiBuffer):
+            # COPY ONE -> ALL (BROADCAST)
+            for b in ubufs[0].bufs: schedule.append(ScheduleItem(ast, (b, src_buf), k.arg.metadata))
+          else: schedule.append(ScheduleItem(ast, (ubufs[0], src_buf), k.arg.metadata)) # COPY ONE -> ONE
+      else:
+        assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
+        dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
+        for i,bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
+          schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0]:i} if len(dnums) else {}))
+    else:
+      schedule.append(ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata))
     for x in children[k]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
-
-  # confirm everything was scheduled correctly
-  assert len(schedule) == len(in_degree), f"Schedule length mistmatch {len(schedule)} != {len(in_degree)}"
-  if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
   # map ASSIGN to BUFFER after ScheduleItems are constructed
   becomes_map = {u:u.buf_uop for u in toposort if u.op is Ops.ASSIGN}

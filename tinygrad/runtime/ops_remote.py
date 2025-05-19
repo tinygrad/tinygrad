@@ -5,13 +5,13 @@
 # it should be a secure (example: no use of pickle) boundary. HTTP is used for RPC
 
 from __future__ import annotations
-from typing import Callable, Optional, Any, cast
+from typing import Callable, Iterator, Optional, Any, cast
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
-import multiprocessing, functools, asyncio, http, http.client, hashlib, time, os, binascii, struct, ast, contextlib
+import multiprocessing, functools, itertools, asyncio, http, http.client, hashlib, time, os, binascii, struct, ast, contextlib, weakref
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
-from tinygrad.ops import UOp, Ops, Variable, sint
+from tinygrad.uop.ops import UOp, Ops, Variable, sint
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferXfer
@@ -74,6 +74,7 @@ class GraphComputeItem:
   datahash: str
   bufs: tuple[int, ...]
   vars: tuple[Variable, ...]
+  fixedvars: dict[Variable, int]
   ins: tuple[int, ...]
   outs: tuple[int, ...]
   global_size: tuple[sint, ...]|None
@@ -115,9 +116,10 @@ class BatchRequest:
   def __init__(self):
     self._q: list[RemoteRequest] = []
     self._h: dict[str, bytes] = {}
-  def h(self, d:bytes) -> str:
-    binhash = hashlib.sha256(d).digest()
-    self._h[datahash:=binascii.hexlify(binhash).decode()] = binhash+struct.pack("<Q", len(d))+d
+  def h(self, d:bytes|memoryview) -> str:
+    datahash = hashlib.sha256(d).hexdigest() # NOTE: this is very slow, should use blake3 on gpu instead
+    if datahash not in self._h:
+      self._h[datahash] = bytes.fromhex(datahash)+struct.pack("<Q", len(d))+bytes(d)
     return datahash
   def q(self, x:RemoteRequest): self._q.append(x)
   def serialize(self) -> bytes:
@@ -211,7 +213,8 @@ class RemoteHandler:
                                    vars=list(gi.vars), ins=list(gi.ins), outs=list(gi.outs),
                                    global_size=list(cast(tuple[int], gi.global_size)) if gi.global_size is not None else None,
                                    local_size=list(cast(tuple[int], gi.local_size)) if gi.local_size is not None else None)
-                  return ExecItem(CompiledRunner(ps, precompiled=b'', prg=prg), [self.sessions[gi.session].buffers[buf] for buf in gi.bufs])
+                  return ExecItem(CompiledRunner(ps, precompiled=b'', prg=prg), [self.sessions[gi.session].buffers[buf] for buf in gi.bufs],
+                                  fixedvars=gi.fixedvars)
                 case Transfer():
                   dbuf, sbuf = self.sessions[unwrap(gi.session)].buffers[gi.buffer_num], self.sessions[gi.ssession].buffers[gi.sbuffer_num]
                   assert dbuf.nbytes == sbuf.nbytes, f"{dbuf.nbytes} != {sbuf.nbytes}"
@@ -240,12 +243,11 @@ class RemoteAllocator(Allocator['RemoteDevice']):
     super().__init__(dev)
   # TODO: ideally we shouldn't have to deal with images here
   def _alloc(self, size:int, options:BufferSpec) -> int:
-    self.dev.buffer_num += 1
-    self.dev.q(BufferAlloc(self.dev.buffer_num, size, options))
-    return self.dev.buffer_num
+    self.dev.q(BufferAlloc(buffer_num:=next(self.dev.buffer_num), size, options))
+    return buffer_num
   # TODO: options should not be here in any Allocator
   def _free(self, opaque:int, options): self.dev.q(BufferFree(opaque))
-  def _copyin(self, dest:int, src:memoryview): self.dev.q(CopyIn(dest, self.dev.conn.req.h(bytes(src))))
+  def _copyin(self, dest:int, src:memoryview): self.dev.q(CopyIn(dest, self.dev.conn.req.h(src)))
   def _copyout(self, dest:memoryview, src:int):
     resp = self.dev.q(CopyOut(src), wait=True)
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
@@ -257,9 +259,8 @@ class RemoteAllocator(Allocator['RemoteDevice']):
       src_dev.allocator._copyout(tmp:=memoryview(bytearray(sz)), src)
       dest_dev.allocator._copyin(dest, tmp)
   def _dyn_offset(self, opaque:int, size:int, offset:int) -> int:
-    self.dev.buffer_num += 1
-    self.dev.q(BufferOffset(self.dev.buffer_num, size, offset, opaque))
-    return self.dev.buffer_num
+    self.dev.q(BufferOffset(buffer_num:=next(self.dev.buffer_num), size, offset, opaque))
+    return buffer_num
 
 class RemoteProgram:
   def __init__(self, dev:RemoteDevice, name:str, lib:bytes):
@@ -267,7 +268,10 @@ class RemoteProgram:
     self.datahash = self.dev.conn.req.h(lib)
     self.dev.q(ProgramAlloc(self.name, self.datahash))
     super().__init__()
-  def __del__(self): self.dev.q(ProgramFree(self.name, self.datahash))
+    weakref.finalize(self, self._fini, self.dev, self.name, self.datahash)
+
+  @staticmethod
+  def _fini(dev:RemoteDevice, name:str, datahash:str): dev.q(ProgramFree(name, datahash))
 
   def __call__(self, *bufs, global_size=None, local_size=None, vals:tuple[int, ...]=(), wait=False):
     ret = self.dev.q(ProgramExec(self.name, self.datahash, bufs, vals, global_size, local_size, wait), wait=wait)
@@ -279,7 +283,7 @@ class RemoteConnection:
     if DEBUG >= 1: print(f"remote with host {host}")
     while 1:
       try:
-        self.conn = http.client.HTTPConnection(host, timeout=60.0)
+        self.conn = http.client.HTTPConnection(host, timeout=getenv("REMOTE_TIMEOUT", 300.0))
         self.conn.connect()
         break
       except Exception as e:
@@ -289,7 +293,7 @@ class RemoteConnection:
 
   def batch_submit(self):
     data = self.req.serialize()
-    with Timing(f"*** send {len(self.req._q):-3d} requests {len(self.req._h):-3d} hashes with len {len(data)/1024:.2f} kB in ", enabled=DEBUG>=1):
+    with Timing(f"*** send {len(self.req._q):-3d} requests {len(self.req._h):-3d} hashes with len {len(data)/1024:.2f} kB in ", enabled=DEBUG>=3):
       self.conn.request("POST", "/batch", data)
       response = self.conn.getresponse()
       assert response.status == 200, f"POST /batch failed: {response}"
@@ -303,8 +307,8 @@ class RemoteDevice(Compiled):
 
     # state for the connection
     self.session = (binascii.hexlify(os.urandom(0x10)).decode(), int(device.split(":")[1]) if ":" in device else 0)
-    self.buffer_num: int = 0
-    self.graph_num: int = 0
+    self.buffer_num: Iterator[int] = itertools.count(0)
+    self.graph_num: Iterator[int] = itertools.count(0)
 
     self.properties: RemoteProperties = safe_eval(ast.parse(self.q(GetProperties(), wait=True), mode="eval").body)
     if DEBUG >= 1: print(f"remote has device {self.properties.real_device}")
@@ -313,9 +317,11 @@ class RemoteDevice(Compiled):
     if not renderer[0].startswith("tinygrad.renderer.") or not renderer[1].endswith("Renderer"): raise RuntimeError(f"bad renderer {renderer}")
     renderer_class = fromimport(renderer[0], renderer[1])  # TODO: is this secure?
     if not issubclass(renderer_class, Renderer): raise RuntimeError(f"renderer isn't a Renderer {renderer}")
+    renderer_instance = renderer_class(*renderer[2])
+    renderer_instance.device = device
     graph_supported, graph_multi = self.properties.graph_supported, self.properties.graph_supports_multi
     graph = fromimport('tinygrad.runtime.graph.remote', f"Remote{'Multi' if graph_multi else ''}Graph") if graph_supported else None
-    super().__init__(device, RemoteAllocator(self), renderer_class(*renderer[2]), Compiler(), functools.partial(RemoteProgram, self), graph)
+    super().__init__(device, RemoteAllocator(self), renderer_instance, Compiler(), functools.partial(RemoteProgram, self), graph)
 
   def finalize(self):
     with contextlib.suppress(ConnectionError, http.client.HTTPException): self.q(SessionFree(), wait=True)

@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from dataclasses import replace
 from tinygrad import Tensor, Context, Device, dtypes
-from tinygrad.ops import Ops, UOp # noqa: F401 # pylint: disable=unused-import
+from tinygrad.uop.ops import Ops, UOp # noqa: F401 # pylint: disable=unused-import
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, lower_schedule_item
 from tinygrad.engine.search import bufs_from_lin

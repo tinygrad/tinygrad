@@ -3,13 +3,13 @@ import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, context
 assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
-from tinygrad.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
-from tinygrad.ops import PatternMatcher, UPat
+from tinygrad.uop.ops import PatternMatcher, UPat
 
 dsp_pm = PatternMatcher([
   (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),

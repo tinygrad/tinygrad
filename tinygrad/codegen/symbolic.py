@@ -2,7 +2,7 @@
 from typing import Any, Literal, cast
 import math, operator, struct, functools
 from collections import defaultdict
-from tinygrad.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
+from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod
 from tinygrad.codegen.transcendental import xpow

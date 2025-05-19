@@ -1,15 +1,16 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from tinygrad.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
-from tinygrad.ops import can_pad, sint, track_rewrites, _substitute
+from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
+from tinygrad.uop.ops import can_pad, sint, track_rewrites, _substitute
 from tinygrad.codegen.lowerer import get_contraction_with_reduce, get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put, flatten
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY
 from tinygrad.dtype import ImageDType
+from tinygrad.engine.multi import multi_pm, replace_allreduce
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
-from tinygrad.spec import type_verify, sched_spec
+from tinygrad.uop.spec import type_verify, sched_spec
 
 # creation can recurse a lot
 import sys
@@ -74,6 +75,9 @@ sym = symbolic_simple+PatternMatcher([
     and not (root.base.op is Ops.CONST and root.base.arg == 0) else None),
   # DETACH and CONTIGUOUS_BACKWARD are NOOPs here
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
+  # MULTI in SINK just flattens srcs
+  (UPat(Ops.SINK, name="x"),
+   lambda x: UOp.sink(*new_src) if (new_src:=tuple(flatten([s.src if s.op is Ops.MULTI else [s] for s in x.src]))) != x.src else None),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
@@ -130,7 +134,7 @@ def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
   st = unwrap(view.st)
   # always realize unsafe pad ops before masked view
-  if any(v.mask is not None for v in st.views) and not can_pad(tr, ctx, cache=dict()): return realize(ctx, tr)
+  if any(v.mask is not None for v in st.views) and not can_pad(tr, ctx): return realize(ctx, tr)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(tr.shape) and resolve(prod(tr.shape) >= prod([y-x for x,y in m])): return
   # realize before expand
@@ -397,7 +401,8 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
   ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs:=tuple(s.buf_uop for s in k.src), bottom_up=True, name="replace buffer")
-  if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
+  if ast.op is Ops.SINK and not all_same([x.device for x in bufs]):
+    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buffer for b in bufs)}")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
@@ -434,7 +439,6 @@ def do_fusion(x:UOp):
   x.toposort(gate=gate_contiguous)
   del gate_contiguous
   return graph_rewrite(x.substitute(found_contiguous), pm_fuse, name="local fusion").substitute({v:k for k,v in found_contiguous.items()})
-do_fuse = PatternMatcher([(UPat(Ops.FUSE, name="x"), do_fusion),])
 
 def fuse_arange(root:UOp):
   # skip if root is arange
@@ -467,7 +471,9 @@ def fuse_arange(root:UOp):
       else: q.extend(curr_children)
   return root.substitute(fuse_rep, name="fuse_arange") if fuse_rep else None
 
-insert_fuse = PatternMatcher([
+
+do_fuse = PatternMatcher([
+  (UPat(Ops.FUSE, name="x"), do_fusion),
   (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
 ])
 
@@ -484,8 +490,8 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
 
 @track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
-  # merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, insert_fuse+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
+  # multi + merge_views + simplify
+  tensor_map = graph_rewrite_map(big_sink, multi_pm+replace_allreduce+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
@@ -532,5 +538,6 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
     op = v.base.op
     if op in {Ops.BUFFER, Ops.ASSIGN}: becomes_map[k] = v
     if op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
+    if op is Ops.MULTI and all(x.base in becomes_map for x in v.base.src): becomes_map[k] = v
 
   return becomes_map

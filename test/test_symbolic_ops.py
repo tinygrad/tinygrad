@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, Variable
 from tinygrad.shape.shapetracker import View
 from tinygrad.helpers import Context, GlobalCounters
-from tinygrad.ops import sym_infer
+from tinygrad.uop.ops import sym_infer
 from examples.gpt2 import Attention
 import numpy as np
 

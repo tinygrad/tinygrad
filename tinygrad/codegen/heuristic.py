@@ -2,7 +2,7 @@ import itertools
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv, DEBUG, all_int, prod
 from tinygrad.dtype import ImageDType
-from tinygrad.ops import Ops, resolve
+from tinygrad.uop.ops import Ops, resolve
 
 def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # make a copy so it does not mutate the input

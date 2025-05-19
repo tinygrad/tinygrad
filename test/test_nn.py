@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit
-from tinygrad.ops import Ops
+from tinygrad.uop.ops import Ops
 from tinygrad.helpers import GlobalCounters, CI, Context, OSX
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
@@ -446,17 +446,18 @@ class TestNN(unittest.TestCase):
   def test_rmsnorm(self):
     class TorchRMSNorm(torch.nn.Module):
       # https://github.com/meta-llama/llama/blob/be327c427cc5e89cc1d3ab3d3fec4484df771245/llama/model.py#L34C1-L77C36
-      def __init__(self, dim: int, eps: float = 1e-6):
+      def __init__(self, dim: int, eps: float = 1e-6, elementwise_affine: bool = True):
         super().__init__()
         self.eps = eps
-        self.weight = torch.nn.Parameter(torch.ones(dim))
+        self.elementwise_affine = elementwise_affine
+        self.weight = torch.nn.Parameter(torch.ones(dim)) if elementwise_affine else None
 
       def _norm(self, x):
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
 
       def forward(self, x):
         output = self._norm(x.float()).type_as(x)
-        return output * self.weight
+        return output if self.weight is None else output * self.weight
 
     B, T, embed_size = 4, 10, 20
     torch_layer = TorchRMSNorm(embed_size)
@@ -476,6 +477,22 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=2e-3, rtol=1e-3)
+
+    torch_layer = TorchRMSNorm(embed_size, elementwise_affine=False)
+    layer = RMSNorm(embed_size, elementwise_affine=False)
+
+    for _ in range(10):
+      # forward
+      x = Tensor.randn(B, T, embed_size, requires_grad=True)
+      z = layer(x)
+      z.sum().backward()
+
+      torch_x = torch.tensor(x.numpy(), requires_grad=True)
+      torch_z = torch_layer(torch_x)
+      torch_z.sum().backward()
+
+      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
+      np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
 
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28

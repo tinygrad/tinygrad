@@ -2,7 +2,7 @@ from typing import Any, Callable
 import functools
 from dataclasses import dataclass
 from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL
-from tinygrad.ops import PatternMatcher, graph_rewrite, UOp
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp
 from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
