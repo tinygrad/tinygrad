@@ -72,7 +72,7 @@ class RetinaNet:
                               orig_image_sizes:list[tuple[int, int]]|None=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
     anchors = generate_anchors2(input_size)
     grid_sizes = self.backbone.compute_grid_sizes2(input_size)
-    split_idx = [self.num_anchors * sz[0] * sz[1] for sz in grid_sizes[:-1]]
+    split_idx = Tensor.stack(*[(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]]).cumsum()
     return split_idx
     # split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
 

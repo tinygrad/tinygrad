@@ -118,9 +118,9 @@ def eval_retinanet():
     except StopIteration: next_proc = None
     nd = time.perf_counter()
     split_idx = mdl.postprocess_detections2(proc[0], orig_image_sizes=proc[2]), proc[1]
-    print(f"--act: {split_idx=}")
+    print(f"--act: {split_idx[0].numpy()=}")
     exp_split_idx = mdl.postprocess_detections(proc[0].numpy(), orig_image_sizes=proc[2]), proc[1]
-    print(f"--exp: {exp_split_idx=}")
+    print(f"--exp: {exp_split_idx[0]=}")
   #   coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
   #     for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
   #   with redirect_stdout(None):
