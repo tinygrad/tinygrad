@@ -324,8 +324,8 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     except ValueError: return uop  # give up if we cannot parse the valid
     bounds[expr][int(is_upper)] = c
 
-  # don't simplify loads
-  uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX }))
+  # don't simplify any other gates, we substitute them back later
+  uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
 
   # simplify uop given that valid is True
   for expr,v in bounds.items():
