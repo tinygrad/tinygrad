@@ -123,7 +123,7 @@ class dtypes:
   void: Final[DType] = DType.new(-1, 0, "void", None)
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 1, "int8_t", 'b')
-  uint8: Final[DType] = DType.new(2, 1, "uint", 'B')
+  uint8: Final[DType] = DType.new(2, 1, "uint", 'B') #todo, breaks it
   int16: Final[DType] = DType.new(3, 2, "short", 'h')
   uint16: Final[DType] = DType.new(4, 2, "unsigned short", 'H')
   int32: Final[DType] = DType.new(5, 4, "int", 'i')

@@ -246,16 +246,17 @@ class RemoteAllocator(Allocator['RemoteDevice']):
     return self.dev.buffer_num
   # TODO: options should not be here in any Allocator
   def _free(self, opaque:int, options): self.dev.q(BufferFree(opaque))
-  def _copyin(self, dest:int, src:memoryview, dtype=None):
-    if dtype in [dtypes.bool,dtypes.int8,dtypes.uint8,dtypes.uchar]:
+  def _copyin(self, dest:int, src:memoryview, dtype=None, size=None):
+    print("rory copyin type =",dtype,bytes(src),size,len(bytes(src)))
+    if len(bytes(src)) == size: #1 byte per item
+      print("CONVERT")
       x = bytes(src)
-      vx = b''.join(struct.pack('<I', bool(b)) for b in x)
-      self.dev.q(CopyIn(dest, self.dev.conn.req.h(vx)),wait=True)
+      vx = b''.join(struct.pack('<I', int(b)) for b in x)
+      self.dev.q(CopyIn(dest, self.dev.conn.req.h(vx)), wait=True)
       return
-    if dtype in [dtypes.int16, dtypes.uint16, dtypes.float16, dtypes.bfloat16]:
+    if len(bytes(src)) == size*2:
       x = bytes(src)
       vx_chunks = [x[i:i+2] for i in range(0, len(x), 2)]
-      
       def interpret_as_bool(chunk):
         # Interpret as uint16 (preserves bits regardless of signed/float/bfloat)
         val = struct.unpack('<H', chunk)[0]
