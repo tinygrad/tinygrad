@@ -2,12 +2,13 @@ import unittest
 from tinygrad import Device
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, CI
+from tinygrad.device import STORAGE_DEVICES
 
 def multidevice_test(fxn):
   exclude_devices = getenv("EXCLUDE_DEVICES", "").split(",")
   def ret(self):
     for device in Device._devices:
-      if device in ["REMOTE", "DISK", "NPY", "DSP", "NULL"]: continue
+      if device in STORAGE_DEVICES+["REMOTE", "DSP", "NULL"]: continue
       if not CI: print(device)
       if device in exclude_devices:
         if not CI: print(f"WARNING: {device} test is excluded")
