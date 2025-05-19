@@ -96,16 +96,22 @@ def inplace_fn(outvars: str|list[str]):
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 @inplace_fn("self")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
-  # TODO: move to tinygrad
-  ret = aten._index_put_impl_(self.cpu(), [x.cpu() if isinstance(x, torch.Tensor) else None for x in indices], values.cpu(), accumulate, unsafe).to(self.device)
-  return wrap(unwrap(self).assign(unwrap(ret)))
+  # Use device-agnostic implementation
+  indices = [x.to(self.device) if isinstance(x, torch.Tensor) else None for x in indices]
+  values = values.to(self.device)
+  ret = Tensor.scatter_reduce(unwrap(self), 0, unwrap(indices[0]), unwrap(values), reduce='sum' if accumulate else 'assign')
+  return wrap(unwrap(self).assign(ret))
 
 @torch.library.impl("aten::index_put", "privateuseone")
 def index_put(self, indices, values, accumulate=False):
-  return aten.index_put(self.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in indices], values.cpu(), accumulate).tiny()
+  indices = [x.to(self.device) if isinstance(x, torch.Tensor) else None for x in indices]
+  values = values.to(self.device)
+  return wrap(Tensor.scatter_reduce(unwrap(self), 0, unwrap(indices[0]), unwrap(values), reduce='sum' if accumulate else 'assign'))
 
 @torch.library.impl("aten::isin.Tensor_Tensor_out", "privateuseone")
-def isin_tensor_tensor_out(x, y, *, assume_unique=False, invert=False, out=None): return out.copy_(aten.isin(x.cpu(), y.cpu(), assume_unique=assume_unique, invert=invert).tiny())
+def isin_tensor_tensor_out(x, y, *, assume_unique=False, invert=False, out=None):
+  x, y = x.to(out.device), y.to(out.device)
+  return wrap(Tensor.isin(unwrap(x), unwrap(y), assume_unique=assume_unique, invert=invert))
 
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None):
@@ -113,15 +119,19 @@ def randperm_generator(n, generator=None, out=None):
 
 @torch.library.impl("aten::cummax", "privateuseone")
 def cummax(self, dim):
-  # TODO: support cummax with indices to match torch
-  cummax, indices = aten.cummax(self.cpu(), dim)
-  return (cummax.tiny(), indices.tiny())
+  # Use device-agnostic implementation
+  values, indices = unwrap(self).cummax(dim)
+  return wrap(values), wrap(indices.cast(dtypes.int64))
 
 @torch.library.impl("aten::nonzero", "privateuseone")
-# TODO: move to tinygrad
-def nonzero(self): return aten.nonzero(self.cpu()).tiny()
+def nonzero(self):
+  # Use device-agnostic implementation
+  return wrap(unwrap(self).nonzero())
 
-def upsample_backward(grad_out, output_size, input_size, *args, f=None): return f(grad_out.cpu(), output_size, input_size, *args).tiny()
+def upsample_backward(grad_out, output_size, input_size, *args, f=None):
+  # Use device-agnostic implementation
+  grad_out = grad_out.to(grad_out.device)
+  return wrap(f(unwrap(grad_out), output_size, input_size, *args))
 
 for i in [
   "upsample_linear1d_backward", "upsample_nearest1d_backward", "_upsample_nearest_exact1d_backward",
