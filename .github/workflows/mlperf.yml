@@ -18,4 +18,4 @@ jobs:
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: Run resnet
       run: |
-        examples/mlperf/training_submission_v5.0/tinycorp/benchmarks/resnet/implementations/tinybox_green/dev_beam.sh
+        LOGMLPERF=0 examples/mlperf/training_submission_v5.0/tinycorp/benchmarks/resnet/implementations/tinybox_green/run_and_time.sh
