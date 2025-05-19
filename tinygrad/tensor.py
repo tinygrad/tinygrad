@@ -1420,11 +1420,10 @@ class Tensor(SimpleMathTrait):
     if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
 
     n_windows = (self.shape[dim] - size) // step + 1
-    prep_shp, expand_shp, final_shp = [1]*dim + [n_windows * size] + [1]*(self.ndim-dim-1), self.shape[:dim] + (n_windows * size,) + self.shape[dim+1:], self.shape[:dim] + (n_windows, size) + self.shape[dim+1:]
+    prep_shp, expand_shp = [1]*dim + [n_windows * size] + [1]*(self.ndim-dim-1), self.shape[:dim] + (n_windows * size,) + self.shape[dim+1:]
     idx = Tensor.arange(n_windows).unsqueeze(1) * step + Tensor.arange(size)
     idx = idx.reshape(prep_shp).expand(expand_shp)
-    return self.gather(dim, idx).reshape(final_shp)
-
+    return self.gather(dim, idx).reshape(self.shape[:dim] + (n_windows, size) + self.shape[dim+1:])
 
   def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
     """
