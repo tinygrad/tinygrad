@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, replace
 import multiprocessing, functools, itertools, asyncio, http, http.client, hashlib, time, os, binascii, struct, ast, contextlib, weakref
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
-from tinygrad.ops import UOp, Ops, Variable, sint
+from tinygrad.uop.ops import UOp, Ops, Variable, sint
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferXfer
@@ -116,9 +116,10 @@ class BatchRequest:
   def __init__(self):
     self._q: list[RemoteRequest] = []
     self._h: dict[str, bytes] = {}
-  def h(self, d:bytes) -> str:
-    binhash = hashlib.sha256(d).digest()
-    self._h[datahash:=binascii.hexlify(binhash).decode()] = binhash+struct.pack("<Q", len(d))+d
+  def h(self, d:bytes|memoryview) -> str:
+    datahash = hashlib.sha256(d).hexdigest() # NOTE: this is very slow, should use blake3 on gpu instead
+    if datahash not in self._h:
+      self._h[datahash] = bytes.fromhex(datahash)+struct.pack("<Q", len(d))+bytes(d)
     return datahash
   def q(self, x:RemoteRequest): self._q.append(x)
   def serialize(self) -> bytes:
@@ -246,7 +247,7 @@ class RemoteAllocator(Allocator['RemoteDevice']):
     return buffer_num
   # TODO: options should not be here in any Allocator
   def _free(self, opaque:int, options): self.dev.q(BufferFree(opaque))
-  def _copyin(self, dest:int, src:memoryview): self.dev.q(CopyIn(dest, self.dev.conn.req.h(bytes(src))))
+  def _copyin(self, dest:int, src:memoryview): self.dev.q(CopyIn(dest, self.dev.conn.req.h(src)))
   def _copyout(self, dest:memoryview, src:int):
     resp = self.dev.q(CopyOut(src), wait=True)
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
