@@ -171,13 +171,13 @@ class Buffer:
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
     assert self.is_allocated(), "can't copyin to unallocated buffer"
-    self.allocator._copyin(self._buf, mv)
+    self.allocator._copyin(self._buf, mv, self.dtype)
     return self
   def copyout(self, mv:memoryview) -> memoryview:
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
     assert self.is_allocated(), "can't copyout unallocated buffer"
-    self.allocator._copyout(mv, self._buf)
+    self.allocator._copyout(mv, self._buf, self.dtype)
     return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
@@ -237,8 +237,8 @@ class _MallocAllocator(LRUAllocator['Compiled']):
     offset = round_up(ctypes.addressof(buffer), alignment) - ctypes.addressof(buffer)
     return (ctypes.c_uint8 * size).from_buffer(buffer, offset)
   def _as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
-  def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
-  def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
+  def _copyin(self, dest, src:memoryview, dtype=None): ctypes.memmove(dest, from_mv(src), len(src))
+  def _copyout(self, dest:memoryview, src, dtype=None): ctypes.memmove(from_mv(dest), src, len(dest))
   def _offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
 
 MallocAllocator = _MallocAllocator(None) # type: ignore

@@ -245,9 +245,17 @@ class RemoteAllocator(Allocator['RemoteDevice']):
     return self.dev.buffer_num
   # TODO: options should not be here in any Allocator
   def _free(self, opaque:int, options): self.dev.q(BufferFree(opaque))
-  def _copyin(self, dest:int, src:memoryview): self.dev.q(CopyIn(dest, self.dev.conn.req.h(bytes(src))),wait=True)
-  def _copyout(self, dest:memoryview, src:int):
+  def _copyin(self, dest:int, src:memoryview, dtype=None):
+    if dtype == dtypes.bool:
+      x = bytes(src)
+      vx = b''.join(struct.pack('<I', bool(b)) for b in x)
+      self.dev.q(CopyIn(dest, self.dev.conn.req.h(vx)),wait=True)
+      return
+    self.dev.q(CopyIn(dest, self.dev.conn.req.h(bytes(src))),wait=True)
+  def _copyout(self, dest:memoryview, src:int,dtype=None):
     resp = self.dev.q(CopyOut(src), wait=True)
+    if dtype == dtypes.bool:
+      print("RORY BOOL OUT",resp)
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
     dest[:] = resp
   def _transfer(self, dest, src, sz, src_dev, dest_dev):

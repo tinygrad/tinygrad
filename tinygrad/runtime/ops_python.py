@@ -219,7 +219,10 @@ class PythonCompiler(Compiler):
 class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))
   def _copyin(self, dest, src:memoryview): dest[:] = src
-  def _copyout(self, dest:memoryview, src): dest[:] = src
+  def _copyout(self, dest:memoryview, src, dtype=None):
+    if dtype == dtypes.bool:
+      print("RORY BOOL OUT (PYTHON)") 
+    dest[:] = src
 
 class PythonDevice(Compiled):
   def __init__(self, device:str): super().__init__(device, PythonAllocator(self), PythonRenderer(), PythonCompiler(), PythonProgram)
