@@ -93,7 +93,6 @@ class TestSchedule(unittest.TestCase):
       run_schedule(check_schedule(xt, 2))
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
 
-  @unittest.expectedFailure # TODO: failing because of can_chase
   def test_indexing_scalars_multiple_dims(self):
     X = Tensor.randn(2, 3).realize()
     xt = X[Tensor(0)][Tensor(1)]
