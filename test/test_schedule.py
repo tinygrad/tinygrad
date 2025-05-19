@@ -11,9 +11,9 @@ from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.spec import type_verify, shape_spec
+from tinygrad.uop.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.grouper import view_left, view_right, sym, get_becomes_map, Kernel, create_ast, merge_views, create_kernels
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
@@ -86,6 +86,21 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(b, 1))
     np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2)
 
+  def test_indexing_scalars_simple(self):
+    X = Tensor.randn(2, 2).realize()
+    xt = X[Tensor(1)][Tensor(0)]
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(xt, 2))
+    np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
+
+  @unittest.expectedFailure # TODO: failing because of can_chase
+  def test_indexing_scalars_multiple_dims(self):
+    X = Tensor.randn(2, 3).realize()
+    xt = X[Tensor(0)][Tensor(1)]
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(xt, 2))
+    np.testing.assert_equal(xt.numpy(), X.numpy()[0][1])
+
   def test_push_pads_elementwise(self):
     x = Tensor.full((4,4), 2.).contiguous().realize()
     y = Tensor.full((4,4), 4.).contiguous().realize()
@@ -93,12 +108,11 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(z, 2))
     self.assertEqual(z.item(), 32)
 
-  # TODO: same issue in precompute_freqs_cis
   def test_push_pads_contiguous(self):
     x = Tensor.full((4,1), 2.).contiguous()
     y = Tensor.full((4,4), 4.).contiguous()
     z = (x.reciprocal().expand(4,4)*y).pad((None, (0,1),)).sum()
-    run_schedule(check_schedule(z, 3, [x,y]))
+    run_schedule(check_schedule(z, 2, [x,y]))
     self.assertEqual(z.item(), 32)
 
   def test_rand(self):
@@ -1860,10 +1874,10 @@ class TestIndexing(unittest.TestCase):
     args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000}
     fused = precompute_freqs_cis(**args)
     with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(fused, 5)) # TODO: this is too many
+      run_schedule(check_schedule(fused, 3))
     if getenv("CHECK", 1):
       ref = precompute_freqs_cis(**args)
-      run_schedule(check_schedule(ref, 5))
+      run_schedule(check_schedule(ref, 3))
       np.testing.assert_equal(fused.numpy(), ref.numpy())
 
   def test_fuse_assign_contiguous(self):

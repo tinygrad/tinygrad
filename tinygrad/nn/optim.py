@@ -75,7 +75,8 @@ class LARS(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True, tcoef=0.001):
     super().__init__(params, lr)
     self.momentum, self.wd, self.nesterov, self.classic, self.tcoef = momentum, weight_decay, nesterov, classic, tcoef
-    self.b = [Tensor.zeros(*t.shape, dtype=t.dtype, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
+    self.b = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params] \
+      if self.momentum else []
 
   def schedule_step_with_grads(self, grads:list[Tensor]) -> list[Tensor]:
     for i, (t, g) in enumerate(zip(self.params, grads)):
