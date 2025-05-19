@@ -1,6 +1,6 @@
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv
-from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, track_rewrites
+from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp
 
 # *** allreduce implementation ***
 
@@ -143,6 +143,3 @@ multi_pm = PatternMatcher([
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])
-
-@track_rewrites(named=True)
-def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]: return {k:v for k,v in graph_rewrite_map(big_sink, multi_pm).items() if k is not v}

@@ -4,10 +4,10 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewr
 from tinygrad.uop.ops import can_pad, sint, track_rewrites, _substitute
 from tinygrad.codegen.lowerer import get_contraction_with_reduce, get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put, flatten
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY
 from tinygrad.dtype import ImageDType
-from tinygrad.engine.multi import replace_allreduce
+from tinygrad.engine.multi import multi_pm, replace_allreduce
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.uop.spec import type_verify, sched_spec
@@ -75,6 +75,9 @@ sym = symbolic_simple+PatternMatcher([
     and not (root.base.op is Ops.CONST and root.base.arg == 0) else None),
   # DETACH and CONTIGUOUS_BACKWARD are NOOPs here
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
+  # MULTI in SINK just flattens srcs
+  (UPat(Ops.SINK, name="x"),
+   lambda x: UOp.sink(*new_src) if (new_src:=tuple(flatten([s.src if s.op is Ops.MULTI else [s] for s in x.src]))) != x.src else None),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
@@ -487,8 +490,8 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
 
 @track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
-  # merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, replace_allreduce+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
+  # multi + merge_views + simplify
+  tensor_map = graph_rewrite_map(big_sink, multi_pm+replace_allreduce+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
@@ -535,5 +538,6 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
     op = v.base.op
     if op in {Ops.BUFFER, Ops.ASSIGN}: becomes_map[k] = v
     if op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
+    if op is Ops.MULTI and all(x.base in becomes_map for x in v.base.src): becomes_map[k] = v
 
   return becomes_map
