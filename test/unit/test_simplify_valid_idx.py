@@ -124,6 +124,18 @@ class TestValidIdxSimplification(unittest.TestCase):
       "(((ridx0*2)+(ridx3*-1))+1)",
       "(ridx2<1)")
 
+  def test_load_in_valid(self):
+    # from FUSE_ARANGE=1 python test/test_ops.py TestOps.test_scatter_add
+    # can lead to OOB
+    ridx2 = Range(2, 4)
+    lidx0 = Special("lidx0", 3)
+    gidx0 = Special("gidx0", 2)
+    idx=(((lidx0+(gidx0*3))+(ridx2*5))+40)
+    valid = (lidx0+(gidx0*3)) < 5
+    val7 = get_gated_load_uop(valid, idx)
+    valid2 = valid & val7.cast(dtypes.bool).logical_not()
+    self.assertIsNone(simplify_valid(valid2))
+
   def test_valid_becomes_const1(self):
     # from DSP mobilenetv2
     ridx0 = Range(0, 30)
