@@ -36,32 +36,61 @@ def real_scsi_write():
 # usb.write(0xce00, b'\x00\n\x01\x00\x00\xff\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 \x00\x00\x00\x00\x00\x00\x03 \x10\x00\x00\x00\x00\x00P\xce\x00\x00\x00\x00\x00\x00\x00\x00\x7f\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x03\x00\x04\x00\x00\x00\x00@\x04UP\x05U\x00\x00\x00\x8f\x00\x00\x00\x05\x00\x00\x00\x02\x00\x00\x00\x00\x7f\x10\x03\x0f\x00\xff\x00\x00\x00\xff\xff\x00\x00\x00\x00\x00\x00\x8f $\x00\x00\x01\x02\x00 \x00\x00:8`0\x00\x00\x00\x00\x00\x00')
 # usb.write(0xafa, b'\x10\x00')
 
-for i in range(4):
+sz = 4096 * 1
+xxx = (ctypes.c_uint8 * sz)()
+dfg = random.randint(0, 255)
+for i in range(len(xxx)): xxx[i] = dfg
+usb.scsi_write(bytes(xxx), lba=0x1000 + i)
+print(dfg, bytes([dfg]))
+
+print(usb.read(0xf000, 0x1))
+
+for i in range(1):
   # usb.read(0x1, 0x1000)
-  sz = 4096
-  xxx = (ctypes.c_uint8 * sz)()
-  dfg = random.randint(0, 255)
-  for i in range(len(xxx)): xxx[i] = dfg
+  sz = 0x400
+  # xxx = (ctypes.c_uint8 * sz)()
+  # dfg = random.randint(0, 255)
+  # for i in range(len(xxx)): xxx[i] = dfg
+  # usb.scsi_write(bytes(xxx), lba=0x1000 + i)
   # print(dfg, usb.read(0xf000, 0x10))
   st = time.perf_counter_ns()
-  usb.scsi_write(bytes(xxx), lba=0x1000 + i)
 
   # usb.read(0x10, 0xf0)
   # exit(0)
-
-  usb.write(0x3800, b'\x00\x01')
-
-  reset_stats()
+  
   # usb.scsi_write(bytes(xxx), lba=0x1000 + i)
-  print(hex(dfg), usb.scsi_read(sz, lba=0x1000 + i)[:100])
-  # usb.read(0xb800, 0x10)
-  usb.write(0x3800, b'\x00\x00')
-  dump_stats()
+  
+  
+  # usb.write(0x380, b'\x01')
+  # print(usb.read(0xf000, 0xff)[:0x10])
+  # reset_stats()
+  # # usb.scsi_write(bytes(xxx), lba=0x1000 + i)
 
-  print(usb.read(0xb800, 0x10))
+  # # usb.write(0x3800, b'\x01\x00\x01\x00')
+  # usb.write(0x9007, b'\xf0\x00')
+  # usb.write(0x9007, b'\x00\x02')
+  # print(usb.read(0xf000, 0x10))
+  # print(hex(dfg), usb.scsi_read(sz, lba=0x1000 + i)[0x300:0x500])
+  # print(hex(dfg), usb.scsi_read(sz, lba=0x1000 + i)[0x300:0x500])
+  # print(usb.read(0x8200, 0x10))
+  # # usb.read(0xb800, 0x10)
+  # dump_stats()
+  # usb.write(0x3800, b'\x00\x00\x00\x00')
+
+  # sz = 0x1000
+  z = [None]  * 4
+  for i in range(4):
+    with Timing(f"copyout of {0x1000/1e6:.2f} MB:  ", on_exit=lambda ns: f" @ {0x1000/ns * 1e3:.2f} MB/s"):
+      pass
+      usb.scsi_read(sz, lba=0x1000 + i)
+      # print(usb.scsi_read(sz, lba=0x1000 + i))
+      # print(usb.read(0x8000, 0x1000))
+
+    for i in range(0x400):
+      pass
 
   # print("ok")
-  exit(0)
+  # exit(0)
 
   # for i in range(0x0000, 0xf000, 0x80):
   #   usb.scsi_read(sz, lba=0x1000 + i)

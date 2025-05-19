@@ -58,6 +58,7 @@ class USB3:
   def _submit_and_wait(self, cmds):
     for tr in cmds: libusb.libusb_submit_transfer(tr)
 
+    # cmds = [cmd for cmd in cmds if cmd.contents.endpoint != 0x83]
     running = len(cmds)
     while running:
       libusb.libusb_handle_events(self.ctx)
@@ -65,6 +66,8 @@ class USB3:
       for tr in cmds:
         if tr.contents.status == libusb.LIBUSB_TRANSFER_COMPLETED: running -= 1
         elif tr.contents.status != 0xFF: raise RuntimeError(f"EP 0x{tr.contents.endpoint:02X} error: {tr.contents.status}")
+      #   else: print(f"waiting, {tr.contents.endpoint:02X}")
+      # print()
 
   def send_batch(self, cdbs:list[bytes], idata:list[int]|None=None, odata:list[bytes|None]|None=None) -> list[bytes|None]:
     idata, odata = idata or [0] * len(cdbs), odata or [None] * len(cdbs)
@@ -142,7 +145,6 @@ class ASM24Controller:
           _add_req(struct.pack('>BBBHB', 0xE5, value, addr >> 16, addr & 0xFFFF, 0), 0, None)
           self._cache[addr] = value
       elif isinstance(op, ReadOp):
-        assert op.size <= 0xff
         addr = (op.addr & 0x1FFFF) | 0x500000
         _add_req(struct.pack('>BBBHB', 0xE4, op.size, addr >> 16, addr & 0xFFFF, 0), op.size, None)
         for i in range(op.size): self._cache[addr + i] = None
@@ -166,13 +168,26 @@ class ASM24Controller:
       # print(self.read(0xce60, 1))
       # print(self.read(0xce6c, 1))
       # print(self.read(0xce6e, 2))
-      # self.exec_ops([WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
+      self.exec_ops([WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
 
     if len(buf) > 0x4000:
       for i in range(4): self.exec_ops([WriteOp(0xce40 + i, b'\x00', ignore_cache=True)])
 
   def scsi_read(self, sz:int, lba:int=0):
-    return self.exec_ops([ScsiReadOp(sz, lba)])[0]
+    self.exec_ops([ReadOp(0xf000, 0x1)])
+    self.exec_ops([ScsiReadOp(sz, lba)])
+    self.exec_ops([ScsiReadOp(sz, lba)])
+    self.exec_ops([ScsiReadOp(sz, lba)])
+    x = self.exec_ops([ScsiReadOp(sz, lba)])[0]
+    # self.exec_ops([WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
+    # self.exec_ops([WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True)])
+    return x
+    # return self.exec_ops([
+    #   # ReadOp(0x3100, 0xff),
+    #   # ScsiReadOp(sz, lba), 
+    #   # ScsiReadOp(sz, lba),
+    #   # ScsiReadOp(sz, lba),
+    #   ScsiReadOp(sz, lba)])[0]
 
   def read(self, base_addr:int, length:int, stride:int=0xff) -> bytes:
     parts = self.exec_ops([ReadOp(base_addr + off, min(stride, length - off)) for off in range(0, length, stride)])
