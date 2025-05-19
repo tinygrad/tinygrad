@@ -128,7 +128,7 @@ class Buffer:
       assert hasattr(self.allocator, "_offset"), "offset function required for view"
       self._buf: Any = self.allocator._offset(self.base._buf, self.nbytes, self.offset)
     else:
-      self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
+      self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options, self.dtype)
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
     return self
   def deallocate(self):
@@ -190,8 +190,12 @@ DeviceType = TypeVar('DeviceType', bound='Compiled')
 class Allocator(Generic[DeviceType]):
   def __init__(self, dev:DeviceType): self.dev: DeviceType = dev
   # overridden in LRUAllocator
-  def alloc(self, size:int, options:Optional[BufferSpec]=None):
+  def alloc(self, size:int, options:Optional[BufferSpec]=None,dtype=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
+    print("rory allocing?")
+    if dtype == dtypes.bool:
+      print("RORY ALLOCING BOOL")
+      size *= 4
     return self._alloc(size, options if options is not None else BufferSpec())
   def free(self, opaque, size:int, options:Optional[BufferSpec]=None): self._free(opaque, options if options is not None else BufferSpec())
 
@@ -212,7 +216,7 @@ class LRUAllocator(Allocator, Generic[DeviceType]):
   def __init__(self, dev:DeviceType):
     self.cache: dict[tuple[int, Optional[BufferSpec]], Any] = defaultdict(list)
     super().__init__(dev)
-  def alloc(self, size:int, options:Optional[BufferSpec]=None):
+  def alloc(self, size:int, options:Optional[BufferSpec]=None, dtype=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
     except (RuntimeError, MemoryError):

@@ -241,6 +241,7 @@ class RemoteAllocator(Allocator['RemoteDevice']):
   # TODO: ideally we shouldn't have to deal with images here
   def _alloc(self, size:int, options:BufferSpec) -> int:
     self.dev.buffer_num += 1
+    print("rory alloc size =",size)
     self.dev.q(BufferAlloc(self.dev.buffer_num, size, options))
     return self.dev.buffer_num
   # TODO: options should not be here in any Allocator
@@ -255,7 +256,9 @@ class RemoteAllocator(Allocator['RemoteDevice']):
   def _copyout(self, dest:memoryview, src:int,dtype=None):
     resp = self.dev.q(CopyOut(src), wait=True)
     if dtype == dtypes.bool:
-      print("RORY BOOL OUT",resp)
+      print("RORY BOOL OUT",resp,src,len(resp),len(dest))
+      vx_chunks = [resp[i:i+4] for i in range(0, len(resp), 4)]
+      resp = bytes(struct.unpack('<I', chunk)[0] for chunk in vx_chunks)
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
     dest[:] = resp
   def _transfer(self, dest, src, sz, src_dev, dest_dev):
