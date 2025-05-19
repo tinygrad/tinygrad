@@ -3,7 +3,7 @@ import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib
 from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.hcq import MMIOInterface
-from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module
+from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module, import_asic_regs
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
@@ -385,9 +385,16 @@ class AMDev:
   def _ip_module(self, prefix:str, hwip, prever_prefix:str=""): return import_module(prefix, self.ip_ver[hwip], prever_prefix)
 
   def _build_regs(self):
-    mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("HDP", self._ip_module("hdp", am.HDP_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
-      ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP)),
-      ("NBIO", self._ip_module("nbio" if self.ip_ver[am.GC_HWIP] < (12,0,0) else "nbif", am.NBIO_HWIP))]
+    # mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("HDP", self._ip_module("hdp", am.HDP_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
+    #   ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP)),
+    #   ("NBIO", self._ip_module("nbio" if self.ip_ver[am.GC_HWIP] < (12,0,0) else "nbif", am.NBIO_HWIP))]
 
-    for ip, module in mods:
-      self.__dict__.update(collect_registers(module, cls=functools.partial(AMRegister, adev=self, hwip=getattr(am, f"{ip}_HWIP"))))
+    # print(import_asic_regs("gc", self.ip_ver[am.GC_HWIP]))
+
+    mods2 = [("mp", am.MP0_HWIP), ("hdp", am.HDP_HWIP), ("gc", am.GC_HWIP),
+      ("mmhub", am.MMHUB_HWIP), ("osssys", am.OSSSYS_HWIP),
+      ("nbio" if self.ip_ver[am.GC_HWIP] < (12,0,0) else "nbif", am.NBIO_HWIP)]
+
+    for prefix, hwip in mods2:
+      self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, hwip=hwip)))
+    self.__dict__.update(collect_registers(mp_11_0, cls=functools.partial(AMRegister, adev=self, hwip=am.MP1_HWIP)))

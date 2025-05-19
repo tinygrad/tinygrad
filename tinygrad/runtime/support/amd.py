@@ -1,7 +1,7 @@
-import functools, importlib
+import functools, importlib, re, sys
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.helpers import getbits, round_up
+from tinygrad.helpers import getbits, round_up, fetch
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.usb import ASM24Controller
 
@@ -31,6 +31,19 @@ def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
     try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{name}_{version_prefix}{'_'.join(map(str, ver))}")
     except ImportError: pass
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")
+
+def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDRegBase) -> dict[str, AMDRegBase]:
+  def _extract_regs(txt):
+    return {m.group(1): int(m.group(2), 0) for line in txt.splitlines() if (m:=re.match(r'#define\s+(\S+)\s+(0x[\da-fA-F]+|\d+)', line))}
+
+  dir_pref = {"osssys": "oss"}.get(prefix, prefix)
+  base_url = "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd/include/asic_reg"
+  for ver in [version, version[:2]+(0,), version[:1]+(0, 0)]:
+    offs = fetch(f"{base_url}/{dir_pref}/{prefix}_{'_'.join(map(str, ver))}_offset.h", subdir="asic_regs")
+    sh_mask = fetch(f"{base_url}/{dir_pref}/{prefix}_{'_'.join(map(str, ver))}_sh_mask.h", subdir="asic_regs")
+
+    # TODO: prob cache it and refactor
+    return collect_registers(type(prefix, (object,), {**_extract_regs(offs.read_text()), **_extract_regs(sh_mask.read_text())}), cls=cls)
 
 def setup_pci_bars(usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
   for bus in range(gpu_bus):
