@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.ops import PatternMatcher, Ops, UPat, graph_rewrite, RewriteContext, UOp
+from tinygrad.uop.ops import PatternMatcher, Ops, UPat, graph_rewrite, RewriteContext, UOp
 from tinygrad.engine.grouper import sym, merge_views
 
 class TestRewriteTrackedChildren(unittest.TestCase):

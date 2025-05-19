@@ -6,7 +6,7 @@ import unittest
 from test.helpers import ast_const
 from tinygrad import Device, dtypes
 from tinygrad.device import is_dtype_supported
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import getenv
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.search import Opt, OptOps
