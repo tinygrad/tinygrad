@@ -436,7 +436,6 @@ def do_fusion(x:UOp):
   x.toposort(gate=gate_contiguous)
   del gate_contiguous
   return graph_rewrite(x.substitute(found_contiguous), pm_fuse, name="local fusion").substitute({v:k for k,v in found_contiguous.items()})
-do_fuse = PatternMatcher([(UPat(Ops.FUSE, name="x"), do_fusion),])
 
 def fuse_arange(root:UOp):
   # skip if root is arange
@@ -469,7 +468,9 @@ def fuse_arange(root:UOp):
       else: q.extend(curr_children)
   return root.substitute(fuse_rep, name="fuse_arange") if fuse_rep else None
 
-insert_fuse = PatternMatcher([
+
+do_fuse = PatternMatcher([
+  (UPat(Ops.FUSE, name="x"), do_fusion),
   (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
 ])
 
@@ -487,7 +488,7 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
 @track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, replace_allreduce+insert_fuse+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
+  tensor_map = graph_rewrite_map(big_sink, replace_allreduce+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
