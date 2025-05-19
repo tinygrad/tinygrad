@@ -21,8 +21,6 @@ if getenv("MNISTMOCK"):
 
     if not (files:=glob.glob(p:=str(BASEDIR / "train/*/*"))): raise FileNotFoundError(f"No training files in {p}")
     return files
-  
-  get_val_files = get_train_files
 else:
   BASEDIR = pathlib.Path(__file__).parent / "imagenet"
 
@@ -31,10 +29,10 @@ else:
     if not (files:=glob.glob(p:=str(BASEDIR / "train/*/*"))): raise FileNotFoundError(f"No training files in {p}")
     return files
 
-  @functools.cache
-  def get_val_files():
-    if not (files:=glob.glob(p:=str(BASEDIR / "val/*/*"))): raise FileNotFoundError(f"No validation files in {p}")
-    return files
+@functools.cache
+def get_val_files():
+  if not (files:=glob.glob(p:=str(BASEDIR / "val/*/*"))): raise FileNotFoundError(f"No validation files in {p}")
+  return files
 
 def image_resize(img, size, interpolation):
   w, h = img.size
