@@ -3,7 +3,7 @@ from tinygrad import Tensor, dtype
 from tinygrad.tensor import no_realize_uops
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
-from tinygrad.ops import UOp, Variable, Ops
+from tinygrad.uop.ops import UOp, Variable, Ops
 from tinygrad.renderer import Renderer
 from tinygrad.nn.state import get_state_dict
 from tinygrad.engine.schedule import create_schedule_with_vars

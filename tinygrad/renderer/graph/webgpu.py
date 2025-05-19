@@ -1,6 +1,6 @@
 from tinygrad import dtypes
 from tinygrad.device import Buffer
-from tinygrad.ops import Ops, Variable
+from tinygrad.uop.ops import Ops, Variable
 from tinygrad.renderer.graph import GraphRenderer
 from tinygrad.engine.realize import CompiledRunner
 from typing import cast
