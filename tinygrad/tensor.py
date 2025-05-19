@@ -7,18 +7,15 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap, DEBUG
-from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element, all_metadata
-from tinygrad.device import Device, Buffer
-from tinygrad.gradient import compute_gradient
-from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.grouper import get_becomes_map
-from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
-
-"""
 from tinygrad.engine.multi import get_multi_map
-from tinygrad.spec import tensor_uop_spec, type_verify
+from tinygrad.gradient import compute_gradient
+from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element, all_metadata
+from tinygrad.uop.spec import tensor_uop_spec, type_verify
+from tinygrad.device import Device, Buffer
+from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
-"""
+from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
+from tinygrad.engine.grouper import get_becomes_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -68,15 +65,14 @@ def get_shape(x) -> tuple[int, ...]:
   return (len(subs),) + (subs[0] if subs else ())
 
 def _frompy(x:list|tuple|bytes, dtype:DType) -> UOp:
-  if isinstance(x, bytes): ret, data = UOp.new_buffer("CPU", len(x)//dtype.itemsize, dtype), x
+  if isinstance(x, bytes): ret, data = UOp.new_buffer("PYTHON", len(x)//dtype.itemsize, dtype), x
   else:
-    ret = UOp.new_buffer("CPU", prod(shape:=get_shape(x)), dtype).reshape(shape)
+    ret = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), dtype).reshape(shape)
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
     data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
   # fake realize
-  ret.buffer.allocate()
-  ret.buffer.copyin(memoryview(bytearray(data)))
+  ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
   return ret
 
 def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:str|tuple[str, ...], dtype:DType) -> list[list[Tensor]]:
@@ -244,7 +240,7 @@ class Tensor(SimpleMathTrait):
       big_sink = UOp.sink(*flatten([x.lazydata.src if x.lazydata.op is Ops.MULTI else [x.lazydata] for x in (self,)+lst]))
 
     # verify Tensors match the spec
-    #if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
+    if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
 
     becomes_map = get_becomes_map(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
@@ -260,7 +256,7 @@ class Tensor(SimpleMathTrait):
     self.kernelize(*lst)
     schedule, var_vals, becomes_map = create_schedule_with_vars(UOp.sink(*[x.lazydata for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
-    #schedule = memory_planner(schedule)
+    schedule = memory_planner(schedule)
     if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms")
     return schedule, var_vals
 

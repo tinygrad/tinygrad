@@ -20,6 +20,7 @@ class ClangJITCompiler(Compiler):
 
 class ClangDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(device, MallocAllocator, ClangRenderer(), ClangJITCompiler(), CPUProgram)
+    from tinygrad.runtime.graph.cpu import CPUGraph
+    super().__init__(device, MallocAllocator, ClangRenderer(), ClangJITCompiler(), CPUProgram, functools.partial(CPUGraph, self))
 
 CPUDevice = ClangDevice

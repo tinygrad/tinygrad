@@ -1,17 +1,16 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from tinygrad.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
-from tinygrad.ops import can_pad, sint, track_rewrites, _substitute
+from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
+from tinygrad.uop.ops import can_pad, sint, track_rewrites, _substitute
 from tinygrad.codegen.lowerer import get_contraction_with_reduce, get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY
 from tinygrad.dtype import ImageDType
+from tinygrad.engine.multi import replace_allreduce
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
-#from tinygrad.engine.multi import replace_allreduce
-#from tinygrad.spec import type_verify, sched_spec
-replace_allreduce = PatternMatcher([])
+from tinygrad.uop.spec import type_verify, sched_spec
 
 # creation can recurse a lot
 import sys
@@ -437,7 +436,6 @@ def do_fusion(x:UOp):
   x.toposort(gate=gate_contiguous)
   del gate_contiguous
   return graph_rewrite(x.substitute(found_contiguous), pm_fuse, name="local fusion").substitute({v:k for k,v in found_contiguous.items()})
-do_fuse = PatternMatcher([(UPat(Ops.FUSE, name="x"), do_fusion),])
 
 def fuse_arange(root:UOp):
   # skip if root is arange
@@ -470,7 +468,9 @@ def fuse_arange(root:UOp):
       else: q.extend(curr_children)
   return root.substitute(fuse_rep, name="fuse_arange") if fuse_rep else None
 
-insert_fuse = PatternMatcher([
+
+do_fuse = PatternMatcher([
+  (UPat(Ops.FUSE, name="x"), do_fusion),
   (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
 ])
 
@@ -488,7 +488,7 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
 @track_rewrites(name_fxn=get_name)
 def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   # merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, replace_allreduce+insert_fuse+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
+  tensor_map = graph_rewrite_map(big_sink, replace_allreduce+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
@@ -520,7 +520,7 @@ def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
 
   # verify Kernels match the spec
-  #type_verify(list(toposort:=sched_sink.toposort()), sched_spec)
+  type_verify(list(toposort:=sched_sink.toposort()), sched_spec)
 
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:

@@ -72,10 +72,11 @@ class MetalDevice(Compiled):
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
 
+    from tinygrad.runtime.graph.metal import MetalGraph
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
     # This can be reproduced locally with any virtualization software (like utm) that can create macOS VMs with apple's own virtualization framework.
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
-                     functools.partial(MetalProgram, self))
+                     functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(msg('name')(self.sysdevice)).lower() else None)
 
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
@@ -98,7 +99,7 @@ class MetalCompiler(Compiler):
   # This means that MTLCompiler's llvm will create it's own instances of global state because RTLD_LOCAL doesn't export symbols, but if RTLD_GLOBAL
   # library is loaded first then RTLD_LOCAL library will just use it's symbols. On linux there is RTLD_DEEPBIND to prevent that, but on macos there
   # doesn't seem to be anything we can do.
-  with contextlib.suppress(ModuleNotFoundError, FileNotFoundError):
+  with contextlib.suppress(FileNotFoundError):
     import tinygrad.runtime.autogen.llvm # noqa: F401
   support = ctypes.CDLL("/System/Library/PrivateFrameworks/MTLCompiler.framework/MTLCompiler")
   support.MTLCodeGenServiceCreate.restype = ctypes.c_void_p

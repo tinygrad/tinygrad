@@ -845,6 +845,7 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
 
 class PatternMatcher:
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
+    if compiled: from tinygrad.uop.upat import upat_compile
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
@@ -852,7 +853,8 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      match = upat_interpret(p, fxn)
+      if compiled and (match:=upat_compile(p, fxn)) is not None: pass # pylint: disable=E0606
+      else: match = upat_interpret(p, fxn)
       for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, p.early_reject))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
@@ -952,7 +954,7 @@ def launch_viz(env_str:str, data:str):
   if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")):
     args = ['--kernels', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
     args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
-    os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py")] + args)
+    os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), "../", "viz", "serve.py")] + args)
 
 # *** simple graph rewrite engine ***
 
