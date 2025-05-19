@@ -2,7 +2,7 @@
 import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from typing import Any, Callable, TypedDict, Generator
+from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
 from tinygrad.codegen.kernel import Kernel
