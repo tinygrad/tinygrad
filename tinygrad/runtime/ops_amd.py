@@ -660,8 +660,7 @@ class AMAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:AM
 
 class PCIIface:
   supported_devs:list[int] = [0x744c, 0x7480, 0x7550]
-  vfio:bool = getenv("VFIO", 1) and FileIOInterface.exists("/dev/vfio/vfio")
-  vfio_fd:FileIOInterface
+  vfio_fd:FileIOInterface|None = None
   gpus:list[Any] = []
 
   def __init__(self, dev, dev_id):
@@ -689,23 +688,25 @@ class PCIIface:
     except OSError as e: raise RuntimeError(f"Cannot resize BAR: {e}. Ensure the resizable BAR option is enabled on your system.") from e
 
     # Try to init vfio. Use it if success.
-    if PCIIface.vfio:
+    if getenv("VFIO", 1):
       try:
         if first_dev:
+          if not FileIOInterface.exists("/sys/module/vfio"): os.system("sudo modprobe vfio-pci")
+
           FileIOInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
           PCIIface.vfio_fd = FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
-        vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
+          vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
 
         FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
         FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
 
         iommu_group = FileIOInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
-      except OSError:
-        if DEBUG >= 1: print(f"am {self.pcibus}: failed to init vfio-pci module (run `sudo modprobe vfio-pci`).")
-        PCIIface.vfio = False
+      except OSError as e:
+        if DEBUG >= 1: print(f"am {self.pcibus}: failed to init vfio-pci module (run `sudo modprobe vfio-pci`): {e}.")
+        PCIIface.vfio_fd = None
 
     # Init vfio for the device
-    if PCIIface.vfio:
+    if PCIIface.vfio_fd is not None:
       self.vfio_group = FileIOInterface(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
       vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(PCIIface.vfio_fd.fd))
 
@@ -797,7 +798,7 @@ class PCIIface:
       write_ptrs=[MMIOInterface(gart.va_addr+0x10, 8, fmt='Q')], doorbells=[MMIOInterface(self.doorbell_cpu_addr + doorbell_index * 8, 8, fmt='Q')])
 
   def sleep(self, timeout):
-    if PCIIface.vfio and (events_cnt:=len(self.irq_poller.poll(timeout))):
+    if PCIIface.vfio_fd is not None and (events_cnt:=len(self.irq_poller.poll(timeout))):
       self.irq_fd.read(8 * events_cnt)
       self.adev.ih.interrupt_handler()
 
