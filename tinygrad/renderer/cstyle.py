@@ -99,7 +99,7 @@ class CStyleLanguage(Renderer):
     Ops.EXP2: lambda x,dtype: f"exp2({x})", Ops.LOG2: lambda x,dtype: f"v_log2({x})", Ops.SIN: lambda x,dtype: f"sin({x})",
     Ops.AND: lambda a,b,dtype: f"({a}&{b})" if dtype in [dtypes.int, dtypes.uint] else f"({a}&&{b})", Ops.XOR: lambda a,b,dtype: f"({a}^{b})", Ops.OR: lambda a,b,dtype: f"({a}||{b})",
     Ops.ADD: lambda a,b,dtype: f"({a}+{b})", Ops.SUB: lambda a,b,dtype: f"({a}-{b})", Ops.MUL: lambda a,b,dtype: f"({a}*{b})",
-    Ops.MOD: lambda a,b,dtype: f"({a}%{b})", Ops.IDIV: lambda a,b,dtype: f"({a}/{b})", Ops.CMPNE: lambda a,b,dtype: f"({a}!={b})",
+    Ops.MOD: lambda a,b,dtype: f"({a}%{b})", Ops.IDIV: lambda a,b,dtype: f"({a}/{b})", Ops.CMPNE: lambda a,b,dtype: f"(float({a})!=float({b}))",
     Ops.SHR: lambda a,b,dtype: f"({a}>>{b})", Ops.SHL: lambda a,b,dtype: f"({a}<<{b})", Ops.CMPLT: lambda a, b, dtype: f"(float({a})<float({b}))"
 ,
     Ops.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})" }
@@ -157,7 +157,7 @@ class CStyleLanguage(Renderer):
 
       local_size_string = f"layout(local_size_x = {local_size[0]}, local_size_y = {local_size[1]}, local_size_z = {local_size[2]}) in;"
       prg = '\n'.join([prg.splitlines()[0], local_size_string, *prg.splitlines()[1:]])
-      prg = prg.replace("#version 450", "#version 450\n#extension GL_EXT_shader_8bit_storage : require\n#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require", 1)
+      prg = prg.replace("#version 450", "#version 450\n#extension GL_EXT_shader_8bit_storage : require\n#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require\n#extension GL_EXT_scalar_block_layout : require", 1)
       #
       #compile
       prg = compile_shader_to_spv(prg)

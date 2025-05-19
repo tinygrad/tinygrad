@@ -247,7 +247,8 @@ class RemoteAllocator(Allocator['RemoteDevice']):
   # TODO: options should not be here in any Allocator
   def _free(self, opaque:int, options): self.dev.q(BufferFree(opaque))
   def _copyin(self, dest:int, src:memoryview, dtype=None):
-    if dtype == dtypes.bool:
+    if dtype in [dtypes.bool,dtypes.int8,dtypes.uint8]:
+      print("RORY BOOL / uint8")
       x = bytes(src)
       vx = b''.join(struct.pack('<I', bool(b)) for b in x)
       self.dev.q(CopyIn(dest, self.dev.conn.req.h(vx)),wait=True)
@@ -255,7 +256,7 @@ class RemoteAllocator(Allocator['RemoteDevice']):
     self.dev.q(CopyIn(dest, self.dev.conn.req.h(bytes(src))),wait=True)
   def _copyout(self, dest:memoryview, src:int,dtype=None):
     resp = self.dev.q(CopyOut(src), wait=True)
-    if dtype == dtypes.bool:
+    if dtype in [dtypes.bool,dtypes.int8,dtypes.uint8]:
       print("RORY BOOL OUT",resp,src,len(resp),len(dest))
       vx_chunks = [resp[i:i+4] for i in range(0, len(resp), 4)]
       resp = bytes(struct.unpack('<I', chunk)[0] for chunk in vx_chunks)
