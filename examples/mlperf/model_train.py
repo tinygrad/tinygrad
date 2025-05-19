@@ -368,6 +368,9 @@ def train_retinanet():
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
 
+  if INITMLPERF:
+    diskcache_clear()
+
   if getenv("LOGMLPERF"):
     from mlperf_logging import mllog
     import mlperf_logging.mllog.constants as mllog_constants
@@ -386,7 +389,6 @@ def train_retinanet():
 
       MLLOGGER.event(key=mllog_constants.SUBMISSION_BENCHMARK, value=mllog_constants.RETINANET)
 
-      diskcache_clear()
       MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
       MLLOGGER.start(key=mllog_constants.INIT_START)
 
