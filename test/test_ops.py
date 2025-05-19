@@ -2779,8 +2779,6 @@ class TestOps(unittest.TestCase):
       lambda x,src: x.scatter(0, a, src), forward_only=True,
       vals=[[1.,2.,3.,4.], [1.,0.]])
 
-  # NOTE: we can't just IGNORE_OOB=1 because Python backend fails at runtime.
-  @unittest.skipIf(FUSE_ARANGE, "FUSE_ARANGE=1 causes out of bounds memory access because of a gated LOAD")
   def test_scatter_add(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
