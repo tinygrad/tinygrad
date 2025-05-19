@@ -1698,6 +1698,13 @@ class TestIndexing(unittest.TestCase):
       for ei in lowered: ei.run(do_update_stats=True)
     return s
 
+  # TODO: fix this
+  @unittest.expectedFailure
+  def test_realize_arange(self):
+    t = Tensor.arange(6).reshape(2, 3)
+    with Context(FUSE_ARANGE=1):
+      self.assertEqual(t.sum(axis=1).tolist(), [3, 12])
+
   def test_simple_indexing(self):
     X = Tensor.randn(10, 10).realize()
     idxs = Tensor([0, 2]).realize()
