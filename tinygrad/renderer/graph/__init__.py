@@ -8,8 +8,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.nn.state import get_state_dict
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.memory import memory_planner
-from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner, BufferCopy, ViewOp
-from tinygrad.engine.grouper import Kernel
+from tinygrad.engine.realize import lower_schedule, run_schedule, ExecItem, CompiledRunner
 from tinygrad.helpers import Context
 from typing import Callable, cast
 import itertools
@@ -18,17 +17,14 @@ def is_partial_write(ast:UOp, i:int) -> bool:
   stores = [u for u in ast.toposort() if u.op is Ops.STORE and isinstance(u.src[0].dtype, dtype.PtrDType) and isinstance(u.src[1].arg, ShapeTracker)]
   return True if any((b:=u.src[0]).arg == i and cast(dtype.PtrDType, b.dtype).size > cast(ShapeTracker, u.src[1].arg).size for u in stores) else False
 
-def is_store_kernel(u:UOp) -> bool: return True if u.op is Ops.KERNEL and any(v.op is Ops.STORE for v in cast(Kernel,u.arg).ast.toposort()) else False
-
 # Common logic regardless of render target (e.g. JavaScript, C)
 class GraphRenderer(Renderer):
   def __init__(self, fxn:Callable, *args, tensor_names:dict[str, Tensor]|None=None, **kwargs):
     assert len(get_state_dict(args)) == len([x for x in args if isinstance(x, Tensor)]) and len(get_state_dict(kwargs)) == 0, \
       "All Tensor (and Variable) function arguments must be positional, whose order will match the order of the rendered function's arguments."
 
-    # construct the kernel graph
-    # designate the input and output nodes
-    self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
+    # construct the graph
+    self.inputs: list[UOp] = [(x.realize().lazydata.base if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
     assert len(no_realize_uops) == 0, "having GraphRenderer inside another GraphRenderer is not supported"
     # disallow realization of Tensors whose lazydata contains inputs, to preserve all dependence of compute on input in the constructed graph
     no_realize_uops.update(self.inputs)
@@ -38,10 +34,27 @@ class GraphRenderer(Renderer):
     assert (l:=len(ret_tensors)) and l == len(get_state_dict(r)), "One or more Tensors must be returned as a singleton or elements of a list/tuple."
     compute_device = ret_tensors[0].device
 
-    # linearize the kernel graph
-    schedule, var_vals, becomes_map = create_schedule_with_vars(UOp.sink(*(out_uops:=[t.kernelize().lazydata for t in ret_tensors])))
+    # execute subgraphs not dependent on input
+    root = UOp.sink(*(out_uops:=[t.kernelize().lazydata for t in ret_tensors]))
+    in_target_path: dict[UOp, bool] = {}
+    for u in root.toposort():
+      in_target_path[u] = any(x in self.inputs or in_target_path[x] for x in u.src)
+    independent_set: dict[UOp, None] = {}
+    for u in root.toposort():
+      if in_target_path[u]:
+        for s in u.src:
+          if not in_target_path[s]:
+            independent_set[s] = None
+    becomes_map: dict[UOp, UOp] = {}
+    if independent_set:
+      independent = UOp.sink(*(_:=list(independent_set.keys()))) # pylint complains without walrus assignment
+      schedule, var_vals, becomes_map = create_schedule_with_vars(independent)
+      run_schedule(schedule, var_vals)
+
+    # get linearized kernel graph containing only nodes dependent on input
+    schedule, var_vals, becomes_map_2 = create_schedule_with_vars(root.substitute(becomes_map))
     assert set(var_vals.keys()) == set(u.unbind()[0] for u in self.inputs if u.op is Ops.BIND), "Variables must be positional arguments."
-    self.outputs: list[UOp] = [becomes_map[uop.base] for uop in out_uops]
+    self.outputs: list[UOp] = [becomes_map_2[uop.substitute(becomes_map).base] for uop in out_uops]
 
     # render kernels, render buffer names
     # mark which buffers used in computation have state
@@ -51,19 +64,13 @@ class GraphRenderer(Renderer):
     self.bufs.update({cast(Buffer, u.base.buffer): f"output_{i}" for i, u in enumerate(self.outputs)})
     self.state_bufs: dict[Buffer, str] = dict()
     for si, ei in lower_schedule(memory_planner(schedule)):
-      # copyin state to buffers that are read by compute
-      if isinstance(ei.prg, (BufferCopy, ViewOp)):
-        assert len(ei.bufs) == 2 and (src:=ei.bufs[1]) and src.is_allocated() and src not in self.bufs, f"Unsupported data transfer: {ei.bufs}"
-        ei.run()
-
-      else:
-        assert isinstance(ei.prg, CompiledRunner)
-        for buf in ei.bufs: assert buf is not None and buf.device == compute_device, "All compute and returned Tensor(s) must be on the same device"
-        self.eis.append(ei)
-        for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
-          if buf not in self.bufs:
-            self.bufs[buf] = name = f"buf_{next(ctr)}"
-            if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
+      assert isinstance(ei.prg, CompiledRunner), "only CompiledRunner is supported currently"
+      for buf in ei.bufs: assert buf is not None and buf.device == compute_device, "All compute and returned Tensor(s) must be on the same device"
+      self.eis.append(ei)
+      for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
+        if buf not in self.bufs:
+          self.bufs[buf] = name = f"buf_{next(ctr)}"
+          if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
 
     # build complete state_dict, rename state bufs with meaningful names from tensor_names
     self.state_dict = {k:v for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs} if tensor_names else {}
