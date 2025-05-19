@@ -25,8 +25,7 @@ FILES = ["runtime/ops_cpu.py", "runtime/ops_disk.py", "runtime/ops_metal.py", "r
 
 # runtime (to remove)
 # TODO: ops_python shouldn't be needed, remove from tensor.py
-# TODO: llvm shouldn't be needed, allow no import in metal
-#FILES = ["runtime/ops_python.py", "runtime/autogen/llvm.py", "runtime/support/llvm.py"]
+FILES = ["runtime/ops_python.py"]
 
 # these are all in tinygrad/ folder
 FILES = ["tinygrad/"+x for x in FILES]
