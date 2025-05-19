@@ -5,7 +5,7 @@ from tinygrad.helpers import dedup, getenv, merge_dicts
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
-from tinygrad.ops import Variable
+from tinygrad.uop.ops import Variable
 from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, to_struct, objc_instance,\
   MTLResourceOptions, cmdbuf_st_time, cmdbuf_en_time, objc_id, to_ns_str
 

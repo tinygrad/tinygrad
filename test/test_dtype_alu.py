@@ -7,7 +7,7 @@ from hypothesis import given, strategies as strat, settings, HealthCheck
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.realize import run_schedule
-from tinygrad.ops import GroupOp
+from tinygrad.uop.ops import GroupOp
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 import pytest, math

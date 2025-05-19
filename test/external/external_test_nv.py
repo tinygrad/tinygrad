@@ -8,7 +8,7 @@ from tinygrad.engine.realize import get_runner, CompiledRunner
 from test.external.fuzz_linearizer import get_fuzz_rawbufs
 
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.ops import LazyOp, Ops, ReduceOps, BufferOps, MemBuffer
+from tinygrad.uop.ops import LazyOp, Ops, ReduceOps, BufferOps, MemBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 

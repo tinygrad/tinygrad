@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import Context
-from tinygrad.ops import Ops
+from tinygrad.uop.ops import Ops
 
 class TestRingAllReduce(unittest.TestCase):
   @unittest.skip("still broken")

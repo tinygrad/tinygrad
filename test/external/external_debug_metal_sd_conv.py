@@ -3,7 +3,7 @@ from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.dtype import dtypes
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.engine.search import bufs_from_lin
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 

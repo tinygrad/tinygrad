@@ -2,7 +2,7 @@
 import unittest
 
 from tinygrad import Device
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker

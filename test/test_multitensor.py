@@ -1,7 +1,7 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
-from tinygrad.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import CI, getenv, prod, Context, OSX
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
@@ -628,6 +628,9 @@ class TestMultiTensor(unittest.TestCase):
     # assert for cannot maintain axis
     with self.assertRaises(AssertionError): t0.reshape(4, 3, 2, 7, 15)
 
+  # it doesn't work like this anymore
+  # NOTE: this never failed in assign_multi, it failed tensor spec because MULTI was never pushed in the graph
+  @unittest.expectedFailure
   def test_mlb_assign_change_axis(self):
     t_none = Tensor.zeros((16, 16)).shard(devices_2).contiguous().realize()
     t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)

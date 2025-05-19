@@ -6,7 +6,7 @@ from tinygrad import Tensor, Device, Context
 from tinygrad.helpers import getenv
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem
-from tinygrad.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp
+from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp
 
 # TODO: on METAL for `DEBUG=4 python3 extra/gemm/amd_matmul.py`
 #  * fix load grouping (like float4). idk why it's not working, need new devectorizer (this is a Monday project)

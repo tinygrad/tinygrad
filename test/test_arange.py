@@ -6,7 +6,7 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.codegen.kernel import Opt, OptOps, Kernel, KernelOptError
 from tinygrad.engine.realize import CompiledRunner, ExecItem
 from tinygrad.engine.search import get_kernel_actions
-from tinygrad.ops import Ops
+from tinygrad.uop.ops import Ops
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, N, opts=None):

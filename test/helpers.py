@@ -2,7 +2,7 @@ import time, struct
 from typing import Any, Callable, Optional
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.ops import UOp, Ops, sint
+from tinygrad.uop.ops import UOp, Ops, sint
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner

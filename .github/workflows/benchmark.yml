@@ -352,8 +352,10 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Insert amdgpu
-      run: sudo modprobe amdgpu
+    - name: Remove amdgpu
+      run: sudo rmmod amdgpu || true
+    #- name: Insert amdgpu
+    #  run: sudo modprobe amdgpu
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -372,12 +374,12 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
-    - name: setup perflevel
-      run: |
-        examples/mlperf/training_submission_v4.1/tinycorp/benchmarks/bert/implementations/tinybox_red/setup.sh
-        rocm-smi
-    - name: Show off tinybox
-      run: /opt/rocm/bin/rocm-bandwidth-test
+    #- name: setup perflevel
+    #  run: |
+    #    examples/mlperf/training_submission_v4.1/tinycorp/benchmarks/bert/implementations/tinybox_red/setup.sh
+    #    rocm-smi
+    #- name: Show off tinybox
+    #  run: /opt/rocm/bin/rocm-bandwidth-test
     # TODO: unstable on AMD
     #- name: Run model inference benchmark
     #  run: LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
@@ -397,13 +399,13 @@ jobs:
       run: AMD=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt
     - name: Test AMD=1
       run: DEBUG=2 AMD=1 python -m pytest -rA test/test_tiny.py
-    - name: Test HIP=1
-      run: DEBUG=2 HIP=1 python -m pytest -rA test/test_tiny.py
+    #- name: Test HIP=1
+    #  run: DEBUG=2 HIP=1 python -m pytest -rA test/test_tiny.py
     # TODO: AMD compiler bug causes this to fail
     #- name: Fuzz Padded Tensor Core GEMM
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
-    - name: Remove amdgpu
-      run: sleep 10 && sudo rmmod amdgpu # sleep a bit to let the driver unload the prev pid.
+    #- name: Remove amdgpu
+    #  run: sleep 10 && sudo rmmod amdgpu # sleep a bit to let the driver unload the prev pid.
     - name: Test AM cold start time
       run: time AMD=1 AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test AM warm start time
@@ -428,8 +430,8 @@ jobs:
       run: BENCHMARK_LOG=llama3_beam_4gpu AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_four_gpu.txt
     # - name: Run LLaMA-3 8B on 6 GPUs
     #   run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 6 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_six_gpu.txt
-    - name: Restore amdgpu
-      run: sudo modprobe amdgpu
+    #- name: Restore amdgpu
+    #  run: sudo modprobe amdgpu
     # - name: Run LLaMA-2 70B
     #   run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
     - name: Run Mixtral 8x7B

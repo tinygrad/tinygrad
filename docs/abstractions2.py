@@ -39,7 +39,7 @@ DEVICE = "CPU"   # NOTE: you can change this!
 import struct
 from tinygrad.dtype import dtypes
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # allocate some buffers + load in values

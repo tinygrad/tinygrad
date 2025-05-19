@@ -2,7 +2,7 @@ import unittest, itertools, math
 from typing import Any
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
-from tinygrad.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.codegen import full_rewrite_to_sink
 import numpy as np
 from tinygrad.device import is_dtype_supported

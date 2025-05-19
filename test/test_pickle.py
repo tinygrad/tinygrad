@@ -2,7 +2,7 @@ import unittest, pickle, types
 import numpy as np
 from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.helpers import GlobalCounters, ContextVar, Context
-from tinygrad.ops import PatternMatcher, UPat, UOp, Ops
+from tinygrad.uop.ops import PatternMatcher, UPat, UOp, Ops
 
 class TestPickle(unittest.TestCase):
   def test_pickle_code_object(self):

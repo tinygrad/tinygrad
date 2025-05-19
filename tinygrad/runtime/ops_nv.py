@@ -5,7 +5,7 @@ from typing import Any, cast, Union, Type, ClassVar
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU
-from tinygrad.ops import sint
+from tinygrad.uop.ops import sint
 from tinygrad.device import BufferSpec, CPUProgram
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, round_up, data64, data64_le, DEBUG, prod, OSX
 from tinygrad.renderer.ptx import PTXRenderer

@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit
-from tinygrad.ops import Ops
+from tinygrad.uop.ops import Ops
 from tinygrad.helpers import GlobalCounters, CI, Context, OSX
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell

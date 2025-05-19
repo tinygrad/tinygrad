@@ -2,7 +2,7 @@ from typing import cast, Optional, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal, atexit
 from collections import defaultdict
 from dataclasses import replace
-from tinygrad.ops import UOp, Ops, Variable, sym_infer
+from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE, TC_SEARCH_OVER_SHAPE

@@ -4,7 +4,7 @@ from tinygrad.helpers import getenv, GlobalCounters
 from tinygrad.engine.realize import lower_schedule_item, ProgramSpec
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import full_rewrite
-from tinygrad.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.device import Device

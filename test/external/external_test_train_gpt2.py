@@ -1,7 +1,7 @@
 # ruff: noqa: E501
 import unittest
 
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker

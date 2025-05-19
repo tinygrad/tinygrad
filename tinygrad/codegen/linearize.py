@@ -2,9 +2,9 @@ from __future__ import annotations
 import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from tinygrad.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
 from tinygrad.helpers import dedup, partition, all_same, flatten
-from tinygrad.spec import type_verify
+from tinygrad.uop.spec import type_verify
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(lst:list[UOp]) -> list[UOp]:

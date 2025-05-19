@@ -6,7 +6,7 @@ from typing import Optional, Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape, unravel
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, PatternMatcher, UPat, GroupOp
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, PatternMatcher, UPat, GroupOp
 from tinygrad.codegen.symbolic import split_uop, symbolic_flat, uop_given_valid, simplify_valid
 
 # If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,

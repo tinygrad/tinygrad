@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.realize import run_schedule
-from tinygrad.ops import Ops, UOp, UPat
+from tinygrad.uop.ops import Ops, UOp, UPat
 
 class TestTensorUOp(unittest.TestCase):
   def test_fromcpu_shape_tracker(self):

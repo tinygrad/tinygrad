@@ -3,7 +3,7 @@ import functools, operator, itertools
 from dataclasses import dataclass
 from typing import Optional, cast, Sequence
 from tinygrad.dtype import dtypes
-from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop, Ops
+from tinygrad.uop.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop, Ops
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
 
 @functools.cache

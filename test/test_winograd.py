@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, GlobalCounters, dtypes
-from tinygrad.ops import Ops
+from tinygrad.uop.ops import Ops
 from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG, getenv
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.heuristic import hand_coded_optimizations

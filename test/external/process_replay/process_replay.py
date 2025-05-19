@@ -6,7 +6,7 @@ from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connectio
 from tinygrad.engine.grouper import get_becomes_map
 from tinygrad.codegen.kernel import Kernel, Opt
 from tinygrad.renderer import Renderer
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 
 # *** process replay settings
 

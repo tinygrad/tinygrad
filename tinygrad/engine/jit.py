@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
-from tinygrad.ops import UOp, Variable, sym_infer, Ops
+from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import _internal_memory_planner

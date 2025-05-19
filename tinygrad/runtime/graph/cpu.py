@@ -4,7 +4,7 @@ from tinygrad.helpers import dedup, flatten, DEBUG, to_function_name
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
-from tinygrad.ops import Variable
+from tinygrad.uop.ops import Variable
 from tinygrad.dtype import DType, dtypes
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import LLVMRenderer, ldt

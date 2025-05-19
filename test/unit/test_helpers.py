@@ -290,7 +290,7 @@ class TestPolyN(unittest.TestCase):
 
   def test_uop(self):
     from tinygrad.dtype import dtypes
-    from tinygrad.ops import UOp
+    from tinygrad.uop.ops import UOp
     from test.helpers import eval_uop
     np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 1.0), [1.0, -2.0, 1.0])), 0.0)
     np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 2.0), [1.0, -2.0, 1.0])), 1.0)

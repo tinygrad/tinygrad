@@ -4,7 +4,7 @@ import unittest, pickle, functools
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen import full_rewrite
 from tinygrad.codegen.devectorizer import sym
-from tinygrad.ops import UOp, Ops, graph_rewrite, sym_infer
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
 
 def render(self) -> tuple[str, ConstType, ConstType]:

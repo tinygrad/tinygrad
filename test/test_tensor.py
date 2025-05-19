@@ -8,7 +8,7 @@ from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
-from tinygrad.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.runtime.support.compiler_cuda import PTX
 from tinygrad.codegen import full_rewrite
 from tinygrad.dtype import DType
