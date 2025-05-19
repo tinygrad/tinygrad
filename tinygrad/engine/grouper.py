@@ -78,7 +78,6 @@ sym = symbolic_simple+PatternMatcher([
   # MULTI in SINK just flattens srcs
   (UPat(Ops.SINK, name="x"),
    lambda x: UOp.sink(*new_src) if (new_src:=tuple(flatten([s.src if s.op is Ops.MULTI else [s] for s in x.src]))) != x.src else None),
-  (UPat(Ops.SINK, src=(UPat(Ops.MULTI, name="x"),)), lambda x:UOp.sink(*x.src)),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
