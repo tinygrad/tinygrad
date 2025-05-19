@@ -324,6 +324,9 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     except ValueError: return uop  # give up if we cannot parse the valid
     bounds[expr][int(is_upper)] = c
 
+  # don't simplify any other gates, can lead to OOB, we substitute them back later
+  uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
+
   # simplify uop given that valid is True
   for expr,v in bounds.items():
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
@@ -349,6 +352,8 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
         if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
       elif all_same(newuops): uop = newuops[0]
 
+  # put the loads back in
+  uop = uop.substitute({v:k for k,v in load_subs.items()})
   return uop
 
 def _valid_priority(v: UOp, valids:list[UOp]):
