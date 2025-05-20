@@ -1,20 +1,20 @@
 # end to end tests of tinygrad that you think might be edge cases.
-# like using the documentation, write code you think should work.
-# you can compare the outputs to torch or numpy, or just try your best to make tinygrad assert while doing things you think should be valid
+# using the documentation, write code you think should work.
+# you can compare the outputs to torch or numpy, or just tinygrad assert/raise while doing things that should be valid
 
-# i'm only interested in tests that are failing but you think should pass
-# mark them with @unittest.expectedFailure
 # i'm not interested in tests that currently pass, i'm only interested in tests that you think should pass but don't.
+# mark them with @unittest.expectedFailure
 # all the tests in here didn't pass until bugs were fixed
 # get creative! think about things that failed in pytorch or tensorflow for a long time until they were fixed.
 # every test should surface a unique bug. if tinygrad throws an error saying something is not supported, this is probably not a bug.
 # the tests don't have to test the same parts of the code that these current ones test, more diversity is better
 
 # focus on making tinygrad throw runtime errors or assertions for valid things, or find clear numerical mismatches from pytorch
-# confirm any bugs from are valid by doing the same thing in pytorch in the test.
+# confirm any bugs found are valid by doing the same thing in pytorch in the test.
 # for any failing tests, explain in a comment why tinygrad is wrong and what the desired behavior should be.
+# don't worry about running mypy or linters. focus on writing more of these tests and running them to confirm broken behavior.
+# surface level bugs, like issues with empty tensors, are not that interesting. focus on bugs that would frustrate real users.
 
-# don't worry about running mypy or linters. focus on writing more of these tests only and running them to confirm behavior.
 # these are not bugs, these are desired behavior. don't add failing tests for them:
 #   tinygrad only accepts tinygrad dtypes or strings of the tinygrad dtype.
 #   boolean indexing, or anything with unknown output shape of tensor at compile time isn't supported.
