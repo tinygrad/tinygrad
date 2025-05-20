@@ -8,12 +8,13 @@
 # all the tests in here didn't pass until bugs were fixed
 # get creative! think about things that failed in pytorch or tensorflow for a long time until they were fixed.
 # the tests don't have to test the same parts of the code that these current ones test
+# every test should surface a unique bug. if tinygrad throws an error saying something is not supported, this is probably not a bug.
 
-# focus on making tinygrad throw runtime errors or assertions for valid things.
-# confirm they are valid by doing the same thing in pytorch in the test.
-# for any failing tests, explain why tinygrad is wrong and what the desired behavior should be.
+# focus on making tinygrad throw runtime errors or assertions for valid things, or find clear numerical mismatches from pytorch
+# confirm any bugs from are valid by doing the same thing in pytorch in the test.
+# for any failing tests, explain in a comment why tinygrad is wrong and what the desired behavior should be.
 
-# don't worry about running mypy for types, it's slow. focus on your tests only
+# don't worry about running mypy or linters. focus on writing more of these tests only and running them to confirm behavior.
 
 import unittest
 import numpy as np
@@ -36,6 +37,13 @@ class TestEdgeCases(unittest.TestCase):
     with Tensor.train():
       out = Tensor.ones(100).dropout(1.0)
       np.testing.assert_allclose(out.numpy(), np.zeros(100))
+
+  @unittest.expectedFailure
+  def test_roll_mismatched_dims(self):
+    with self.assertRaises(RuntimeError):
+      torch.roll(torch.arange(9).reshape(3, 3), 1, dims=(0, 1))
+    with self.assertRaises(RuntimeError):
+      Tensor.arange(9).reshape(3, 3).roll(1, dims=(0, 1))
 
 if __name__ == "__main__":
   unittest.main()
