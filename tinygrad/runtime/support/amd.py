@@ -6,15 +6,42 @@ from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.usb import ASM24Controller
 
 @dataclass(frozen=True)
-class AMDRegBase:
-  name: str
-  offset: int
-  segment: int
-  fields: dict[str, tuple[int, int]]
+class AMDReg:
+  name:str; offset:int; segment:int; fields:dict[str, tuple[int, int]]; bases:tuple[int, ...] # noqa: E702
+
   def encode(self, **kwargs) -> int: return functools.reduce(int.__or__, (value << self.fields[name][0] for name,value in kwargs.items()), 0)
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
 
-def collect_registers(module, cls=AMDRegBase) -> dict[str, AMDRegBase]:
+  @property
+  def addr(self): return self.bases[self.segment] + self.offset
+
+@dataclass(frozen=True)
+class AMDIP:
+  name:str; version:tuple[int, ...]; bases:tuple[int, ...] # noqa: E702
+
+  @functools.cached_property
+  def module(self): return import_module(self.name, self.version)
+
+  @functools.cached_property
+  def regs(self): return collect_registers(self.module, cls=functools.partial(AMDReg, bases=self.bases))
+
+  def __getattr__(self, name:str):
+    if name in self.regs: return self.regs[name]
+    # NOTE: gfx10 gc registers always start with mm, no reg prefix
+    if (mmname:=name.replace('reg', 'mm')) in self.regs: return self.regs[mmname]
+    return getattr(self.module, name)
+
+def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
+  # override versions
+  def _apply_ovrd(ovrd:dict[tuple[int, ...], tuple[int, ...]]) -> tuple[int, ...]:
+    for ver, ovrd_ver in ovrd.items():
+      if version[:len(ver)] == ver: return ovrd_ver
+    return version
+
+  if ip in ['nbio', 'nbif']: version = _apply_ovrd({(3,3): (2,3,0)})
+  return [version, version[:2]+(0,), version[:1]+(0, 0)]
+
+def collect_registers(module, cls=AMDReg) -> dict[str, AMDReg]:
   def _split_name(name): return name[:(pos:=next((i for i,c in enumerate(name) if c.isupper()), len(name)))], name[pos:]
   offsets = {k:v for k,v in module.__dict__.items() if _split_name(k)[0] in {'reg', 'mm'} and not k.endswith('_BASE_IDX')}
   bases = {k[:-len('_BASE_IDX')]:v for k,v in module.__dict__.items() if _split_name(k)[0] in {'reg', 'mm'} and k.endswith('_BASE_IDX')}
@@ -27,7 +54,7 @@ def collect_registers(module, cls=AMDRegBase) -> dict[str, AMDRegBase]:
   return {reg:cls(name=reg, offset=off, segment=bases[reg], fields=fields[_split_name(reg)[1]]) for reg,off in offsets.items() if reg in bases}
 
 def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
-  for ver in [version, version[:2]+(0,), version[:1]+(0, 0)]:
+  for ver in fixup_ip_version(name, version):
     try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{name}_{version_prefix}{'_'.join(map(str, ver))}")
     except ImportError: pass
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")

@@ -3,18 +3,15 @@ import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib
 from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.hcq import MMIOInterface
-from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module
+from tinygrad.runtime.support.amd import AMDReg, collect_registers, import_module
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
 @dataclasses.dataclass(frozen=True)
-class AMRegister(AMDRegBase):
-  adev:AMDev; hwip:int # noqa: E702
-
-  @property
-  def addr(self): return self.adev.regs_offset[self.hwip][0][self.segment] + self.offset
+class AMRegister(AMDReg):
+  adev:AMDev
 
   def read(self): return self.adev.rreg(self.addr)
   def read_bitfields(self) -> dict[str, int]: return self.decode(self.read())
@@ -363,7 +360,7 @@ class AMDev:
 
     # Mapping of HW IP to Discovery HW IP
     hw_id_map = {am.__dict__[x]: int(y) for x,y in am.hw_id_map}
-    self.regs_offset:dict[int, dict[int, list]] = collections.defaultdict(dict)
+    self.regs_offset:dict[int, dict[int, tuple]] = collections.defaultdict(dict)
     self.ip_ver:dict[int, tuple[int, int, int]] = {}
 
     for num_die in range(ihdr.num_dies):
@@ -375,7 +372,7 @@ class AMDev:
         ba = (ctypes.c_uint32 * ip.num_base_address).from_address(ip_offset + 8)
         for hw_ip in range(1, am.MAX_HWIP):
           if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id:
-            self.regs_offset[hw_ip][ip.instance_number] = list(ba)
+            self.regs_offset[hw_ip][ip.instance_number] = tuple(list(ba))
             self.ip_ver[hw_ip] = (ip.major, ip.minor, ip.revision)
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
@@ -390,5 +387,5 @@ class AMDev:
       ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP)),
       ("NBIO", self._ip_module("nbio" if self.ip_ver[am.GC_HWIP] < (12,0,0) else "nbif", am.NBIO_HWIP))]
 
-    for ip, module in mods:
-      self.__dict__.update(collect_registers(module, cls=functools.partial(AMRegister, adev=self, hwip=getattr(am, f"{ip}_HWIP"))))
+    for ip, mod in mods:
+      self.__dict__.update(collect_registers(mod, cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[getattr(am, f"{ip}_HWIP")][0])))
