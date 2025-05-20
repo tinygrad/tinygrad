@@ -359,7 +359,7 @@ class AMDev:
 
     # Mapping of HW IP to Discovery HW IP
     hw_id_map = {am.__dict__[x]: int(y) for x,y in am.hw_id_map}
-    self.regs_offset:dict[int, dict[int, list]] = collections.defaultdict(dict)
+    self.regs_offset:dict[int, dict[int, tuple]] = collections.defaultdict(dict)
     self.ip_ver:dict[int, tuple[int, int, int]] = {}
 
     for num_die in range(ihdr.num_dies):
@@ -371,7 +371,7 @@ class AMDev:
         ba = (ctypes.c_uint32 * ip.num_base_address).from_address(ip_offset + 8)
         for hw_ip in range(1, am.MAX_HWIP):
           if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id:
-            self.regs_offset[hw_ip][ip.instance_number] = list(ba)
+            self.regs_offset[hw_ip][ip.instance_number] = tuple(list(ba))
             self.ip_ver[hw_ip] = (ip.major, ip.minor, ip.revision)
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address

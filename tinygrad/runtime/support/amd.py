@@ -7,7 +7,7 @@ from tinygrad.runtime.support.usb import ASM24Controller
 
 @dataclass(frozen=True)
 class AMDReg:
-  name:str; offset:int; segment:int; fields:dict[str, tuple[int, int]]; bases:dict[int, ...] # noqa: E702
+  name:str; offset:int; segment:int; fields:dict[str, tuple[int, int]]; bases:tuple[int, ...] # noqa: E702
 
   def encode(self, **kwargs) -> int: return functools.reduce(int.__or__, (value << self.fields[name][0] for name,value in kwargs.items()), 0)
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
