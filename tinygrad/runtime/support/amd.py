@@ -50,13 +50,13 @@ def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[st
   def _split_name(name): return name[:(pos:=next((i for i,c in enumerate(name) if c.isupper()), len(name)))], name[pos:]
   def _extract_regs(txt):
     return {m.group(1): int(m.group(2), 0) for line in txt.splitlines() if (m:=re.match(r'#define\s+(\S+)\s+(0x[\da-fA-F]+|\d+)', line))}
+  def _download_file(suff) -> str:
+    name, dir_pref = f"{prefix}_{'_'.join(map(str, version))}_{suff}.h", {"osssys": "oss"}.get(prefix, prefix)
+    url = f"https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd/include/asic_reg"
+    return fetch(f"{url}/{dir_pref}/{name}", name=name, subdir="asic_regs").read_text()
 
-  dir_pref = {"osssys": "oss"}.get(prefix, prefix)
-  base_url = "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd/include/asic_reg"
   for ver in fixup_ip_version(prefix, version):
-    try:
-      offs = _extract_regs(fetch(f"{base_url}/{dir_pref}/{prefix}_{'_'.join(map(str, ver))}_offset.h", subdir="asic_regs").read_text())
-      sh_masks = _extract_regs(fetch(f"{base_url}/{dir_pref}/{prefix}_{'_'.join(map(str, ver))}_sh_mask.h", subdir="asic_regs").read_text())
+    try: offs, sh_masks = _extract_regs(_download_file("offset")), _extract_regs(_download_file("sh_mask"))
     except urllib.error.HTTPError as e:
       if e.code == 404: continue
       raise
