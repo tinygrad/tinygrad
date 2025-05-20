@@ -3819,55 +3819,55 @@ class Tensor(MathTrait):
     if not dtypes.is_int(self.dtype): raise RuntimeError(f"expect integer dtype, getting {self.dtype=}")
     if num_classes == -1: num_classes = (self.max()+1).item()
     return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
-  
-  
+
+
   def flash_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0) -> Tensor:
-      if attn_mask is not None:
-        if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
-      
-      M = 96*1024 # TODO: make device specific
+    if attn_mask is not None:
+      if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
 
-      Bc = round_up(M // (4*self.shape[-1]*self.dtype.itemsize), 1)
-      Br = min(Bc, self.shape[-1])
+    M = 96*1024 # TODO: make device specific
 
-      full_output = []
-      for ri in range(0, self.shape[-2], Br):
-        qi = self[..., ri:ri+Br, :]
-        m = Tensor.full(ml_shape:=qi.shape[:-1]+(1,), -float('inf'), dtype=self.dtype, device=self.device)
-        l = Tensor.zeros(ml_shape, dtype=self.dtype, device=self.device)
-        O = qi.zeros_like()
-        #O = UOp.new_buffer(self.device, qi.numel(), self.dtype)
-        for ci in range(0, key.shape[-2], Bc):
-          k_chunk = key[..., ci:ci+Bc, :]
-          v_chunk = value[..., ci:ci+Bc, :]
+    Bc = round_up(M // (4*self.shape[-1]*self.dtype.itemsize), 1)
+    Br = min(Bc, self.shape[-1])
 
-          S_chunk = (qi.matmul(k_chunk.transpose(-2, -1), dtype=least_upper_dtype(self.dtype, k_chunk.dtype, dtypes.float32)) / math.sqrt(self.shape[-1]))
+    full_output = []
+    for ri in range(0, self.shape[-2], Br):
+      qi = self[..., ri:ri+Br, :]
+      m = Tensor.full(ml_shape:=qi.shape[:-1]+(1,), -float('inf'), dtype=self.dtype, device=self.device)
+      l = Tensor.zeros(ml_shape, dtype=self.dtype, device=self.device)
+      O = qi.zeros_like()
+      #O = UOp.new_buffer(self.device, qi.numel(), self.dtype)
+      for ci in range(0, key.shape[-2], Bc):
+        k_chunk = key[..., ci:ci+Bc, :]
+        v_chunk = value[..., ci:ci+Bc, :]
 
-          if attn_mask is not None:
-            S_chunk = S_chunk + (attn_mask[..., ri:ri+Br, ci:ci+Bc] if attn_mask.shape[-2]!=1 else attn_mask[..., ci:ci+Bc])
-          S_chunk = S_chunk.cast(self.dtype)
-          m_chunk = S_chunk.max(-1, keepdim=True).detach()
-          e_chunk = (S_chunk - m_chunk).exp().dropout(dropout_p)
+        S_chunk = (qi.matmul(k_chunk.transpose(-2, -1), dtype=least_upper_dtype(self.dtype, k_chunk.dtype, dtypes.float32)) / math.sqrt(self.shape[-1]))
 
-          l_chunk = e_chunk.sum(-1, keepdim=True)
-          o_chunk = e_chunk @ v_chunk
+        if attn_mask is not None:
+          S_chunk = S_chunk + (attn_mask[..., ri:ri+Br, ci:ci+Bc] if attn_mask.shape[-2]!=1 else attn_mask[..., ci:ci+Bc])
+        S_chunk = S_chunk.cast(self.dtype)
+        m_chunk = S_chunk.max(-1, keepdim=True).detach()
+        e_chunk = (S_chunk - m_chunk).exp().dropout(dropout_p)
 
-          m_new = Tensor.maximum(m, m_chunk)
-          exp_m_diff = (m - m_new).exp()
-          exp_mc_diff = (m_chunk - m_new).exp()
+        l_chunk = e_chunk.sum(-1, keepdim=True)
+        o_chunk = e_chunk @ v_chunk
 
-          m = m_new
-          l = l * exp_m_diff + l_chunk * exp_mc_diff
-          # TODO: this should be an in-place edit of O
-          O = O * exp_m_diff + o_chunk * exp_mc_diff
-          #O.assign(O * exp_m_diff.lazydata + o_chunk.lazydata * exp_mc_diff.lazydata)
+        m_new = Tensor.maximum(m, m_chunk)
+        exp_m_diff = (m - m_new).exp()
+        exp_mc_diff = (m_chunk - m_new).exp()
 
-          # TODO: Get a bunch of the above to fuse
-          #O = O.fuse()
-        #full_output.append(Tensor(O/l.lazydata))
-        full_output.append(O/l)
+        m = m_new
+        l = l * exp_m_diff + l_chunk * exp_mc_diff
+        # TODO: this should be an in-place edit of O
+        O = O * exp_m_diff + o_chunk * exp_mc_diff
+        #O.assign(O * exp_m_diff.lazydata + o_chunk.lazydata * exp_mc_diff.lazydata)
 
-      return Tensor.cat(*full_output, dim=-2)
+        # TODO: Get a bunch of the above to fuse
+        #O = O.fuse()
+      #full_output.append(Tensor(O/l.lazydata))
+      full_output.append(O/l)
+
+    return Tensor.cat(*full_output, dim=-2)
 
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0, is_causal:bool=False, _flash_att=getenv("FLASH_ATTENTION", 1)) -> Tensor:
     """
