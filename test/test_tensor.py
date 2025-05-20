@@ -903,5 +903,20 @@ class TestIdxUpcast(unittest.TestCase):
     a = Tensor.empty(2**11, 2**11, 1, dtype=dtypes.int8).permute((2, 0, 1)).expand((2**9+10, -1, -1)).contiguous()
     a.realize()
 
+class TestTensorRequiresGrad(unittest.TestCase):
+  # only float tensors caan require gradients
+  def test_requires_grad_float_data(self):
+    a = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+    self.assertTrue(a.requires_grad)
+
+  def test_requires_grad_non_float_data(self):
+    with self.assertRaises(TypeError):
+      Tensor([1, 2, 3], requires_grad=True)
+
+  def test_requires_grad_method(self):
+    a = Tensor([1, 2, 3])
+    with self.assertRaises(TypeError):
+      a.requires_grad_(True)
+
 if __name__ == '__main__':
   unittest.main()
