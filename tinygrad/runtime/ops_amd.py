@@ -691,7 +691,7 @@ class PCIIface:
     if getenv("VFIO", 1):
       try:
         if first_dev:
-          if not FileIOInterface.exists("/sys/module/vfio"): os.system("sudo modprobe vfio-pci")
+          if not FileIOInterface.exists("/sys/module/vfio"): os.system("sudo modprobe vfio-pci disable_idle_d3=1")
 
           FileIOInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
           PCIIface.vfio_fd = FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
