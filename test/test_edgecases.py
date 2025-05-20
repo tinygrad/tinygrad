@@ -138,6 +138,16 @@ class TestDropoutProbabilityEdgeCases(unittest.TestCase):
       out = Tensor.ones(10).dropout(-0.1)
       np.testing.assert_allclose(out.numpy(), np.ones(10))
 
+class TestInputValidation(unittest.TestCase):
+  # input validation bugs are not very interesting
+
+  @unittest.expectedFailure
+  def test_repeat_negative(self):
+    # repeating with a negative value should error like PyTorch
+    with self.assertRaises(RuntimeError):
+      torch.tensor([1, 2, 3]).repeat(-1, 2)
+    with self.assertRaises(RuntimeError):
+      Tensor([1, 2, 3]).repeat(-1, 2)
 
 class TestEdgeCases(unittest.TestCase):
   # add tests exposing new and diverse kinds of bugs that might impact real users here
@@ -156,6 +166,14 @@ class TestEdgeCases(unittest.TestCase):
     torch_out = torch.arange(0, 2, 0.3).numpy()
     out = Tensor.arange(0, 2, 0.3).numpy()
     np.testing.assert_allclose(out, torch_out)
+
+  @unittest.expectedFailure
+  def test_topk_ties_indices(self):
+    # topk should match PyTorch tie-breaking behavior when values are equal
+    arr = [1.0, 1.0, 1.0, 1.0]
+    tv, ti = torch.tensor(arr).topk(2)
+    v, i = Tensor(arr).topk(2)
+    np.testing.assert_equal(i.numpy(), ti.numpy().astype(np.int32))
 
 if __name__ == "__main__":
   unittest.main()
