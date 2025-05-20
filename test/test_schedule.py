@@ -11,9 +11,9 @@ from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.spec import type_verify, shape_spec
+from tinygrad.uop.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.grouper import view_left, view_right, sym, get_becomes_map, Kernel, create_ast, merge_views, create_kernels
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
@@ -85,6 +85,21 @@ class TestSchedule(unittest.TestCase):
     b = a.cast(dtypes.half).expand((2, 4, 4))+2
     run_schedule(check_schedule(b, 1))
     np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2)
+
+  def test_indexing_scalars_simple(self):
+    X = Tensor.randn(2, 2).realize()
+    xt = X[Tensor(1)][Tensor(0)]
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(xt, 2))
+    np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
+
+  @unittest.expectedFailure # TODO: failing because of can_chase
+  def test_indexing_scalars_multiple_dims(self):
+    X = Tensor.randn(2, 3).realize()
+    xt = X[Tensor(0)][Tensor(1)]
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(xt, 2))
+    np.testing.assert_equal(xt.numpy(), X.numpy()[0][1])
 
   def test_push_pads_elementwise(self):
     x = Tensor.full((4,4), 2.).contiguous().realize()

@@ -2,7 +2,7 @@ from typing import List
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor, nn
 from tinygrad.helpers import Profiling, Timing, getenv, BEAM, NOOPT, DEBUG, Context, ansilen
-from tinygrad.ops import Ops
+from tinygrad.uop.ops import Ops
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.heuristic import hand_coded_optimizations
 from tinygrad.codegen import get_rewrites_for_renderer, apply_rewrites

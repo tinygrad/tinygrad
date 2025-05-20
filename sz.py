@@ -10,18 +10,24 @@ TOKEN_WHITELIST = [token.OP, token.NAME, token.NUMBER, token.STRING]
 def is_docstring(t):
   return t.type == token.STRING and t.string.startswith('"""') and t.line.strip().startswith('"""')
 
+def is_js_token(s): return len(s) and not s.startswith('//')
+
 def gen_stats(base_path="."):
   table = []
   for path, _, files in os.walk(os.path.join(base_path, "tinygrad")):
     for name in files:
-      if not name.endswith(".py"): continue
-      if 'tinygrad/runtime/autogen' in path.replace('\\', '/'): continue
+      if not (name.endswith(".py") or name.endswith(".js")): continue
+      if any(s in path.replace('\\', '/') for s in ['tinygrad/runtime/autogen', 'tinygrad/viz/assets']): continue
       filepath = os.path.join(path, name)
       relfilepath = os.path.relpath(filepath, base_path).replace('\\', '/')
-      with tokenize.open(filepath) as file_:
-        tokens = [t for t in tokenize.generate_tokens(file_.readline) if t.type in TOKEN_WHITELIST and not is_docstring(t)]
-        token_count, line_count = len(tokens), len(set([x for t in tokens for x in range(t.start[0], t.end[0]+1)]))
-        if line_count > 0: table.append([relfilepath, line_count, token_count/line_count])
+      if name.endswith(".js"):
+        with open(filepath) as file_: lines = [line.strip() for line in file_.readlines()]
+        token_count, line_count = sum(len(line.split()) for line in lines if is_js_token(line)), sum(1 for line in lines if is_js_token(line))
+      else:
+        with tokenize.open(filepath) as file_:
+          tokens = [t for t in tokenize.generate_tokens(file_.readline) if t.type in TOKEN_WHITELIST and not is_docstring(t)]
+          token_count, line_count = len(tokens), len(set([x for t in tokens for x in range(t.start[0], t.end[0]+1)]))
+      if line_count > 0: table.append([relfilepath, line_count, token_count/line_count])
   return table
 
 def gen_diff(table_old, table_new):

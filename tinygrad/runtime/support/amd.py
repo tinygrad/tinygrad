@@ -40,7 +40,7 @@ def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
 
   return [version, version[:2]+(0,), version[:1]+(0, 0)]
 
-def import_hwip_module(name:str, version:tuple[int, ...], version_prefix:str=""):
+def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
   for ver in fixup_ip_version(name, version):
     try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{name}_{version_prefix}{'_'.join(map(str, ver))}")
     except ImportError: pass
