@@ -3886,7 +3886,7 @@ class Tensor(MathTrait):
     """
     # NOTE: it also works when `key` and `value` have symbolic shape.
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
-    if _flash_att:
+    if _flash_att and not is_causal:
       assert not is_causal
       assert all_int(key.shape), f"does not support symbolic shape {key.shape}"
       assert all_int(value.shape), f"does not support symbolic shape {value.shape}"
