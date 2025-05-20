@@ -190,7 +190,7 @@ class OnnxParser:
     }
   def parse_tensor_proto(self, data_bytes, offset=0):
     obj, final_offset = self._parse_message(data_bytes, offset, self._tensor_proto_handlers(),
-      lambda: {'dims': [], 'float_data': [], 'int32_data': [], 'string_data':[], 'int64_data':[]})
+      lambda: {'dims': [], 'float_data': [], 'int32_data': [], 'string_data':[], 'int64_data':[], 'double_data':[], 'uint64_data':[]})
     return obj, final_offset
 
   # TensorShapeProto.Dimension

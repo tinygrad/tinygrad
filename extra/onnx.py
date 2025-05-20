@@ -1,13 +1,17 @@
 from typing import Any, Sequence, cast, Literal, Callable
 import dataclasses, functools, io, math, types
+from types import SimpleNamespace
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported
-
 # ***** protobuf parsing ******
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, helper
 import numpy as np
+
+def has_field(onnx_type: TypeProto|SimpleNamespace, field):
+  if isinstance(onnx_type, TypeProto): return onnx_type.HasField(field)
+  return hasattr(onnx_type, field)
 
 def dtype_parse(onnx_dtype: int) -> DType:
   supported: dict[int, DType] = {
@@ -25,41 +29,41 @@ def dtype_parse(onnx_dtype: int) -> DType:
 
 def attribute_parse(onnx_attribute: AttributeProto):
   supported: dict[AttributeProto.AttributeType, Callable[[AttributeProto], Any]] = {
-    AttributeProto.FLOAT: lambda a: float(a["f"]), AttributeProto.INT: lambda a: int(a["i"]),
-    AttributeProto.STRING: lambda a: a["s"].decode("utf-8"), AttributeProto.TENSOR: lambda a: buffer_parse(a["t"]),
-    AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a["floats"]), AttributeProto.INTS: lambda a: tuple(-1 if x==0xffffffffffffffff else int(x) for x in a["ints"]),
-    AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a["strings"])
+    AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i),
+    AttributeProto.STRING: lambda a: a.s.decode("utf-8"), AttributeProto.TENSOR: lambda a: buffer_parse(a.t),
+    AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats), AttributeProto.INTS: lambda a: tuple(-1 if x==0xffffffffffffffff else int(x) for x in a.ints),
+    AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)
   }
   unsupported = {
     AttributeProto.UNDEFINED, AttributeProto.GRAPH, AttributeProto.SPARSE_TENSOR, AttributeProto.TYPE_PROTO, AttributeProto.TENSORS,
     AttributeProto.GRAPHS, AttributeProto.SPARSE_TENSORS, AttributeProto.TYPE_PROTOS
   }
-  if onnx_attribute["type"] in unsupported:
-    raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(onnx_attribute['type'])} is not supported")
-  return supported[onnx_attribute["type"]](onnx_attribute)
+  if onnx_attribute.type in unsupported:
+    raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(onnx_attribute.type)} is not supported")
+  return supported[onnx_attribute.type](onnx_attribute)
 
 def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
-  if onnx_tensor["string_data"]: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
-  dtype, shape = dtype_parse(onnx_tensor["data_type"]), tuple(onnx_tensor["dims"])
-  if data := onnx_tensor["float_data"] or onnx_tensor["int32_data"] or onnx_tensor["int64_data"] or \
-   onnx_tensor.get("double_data", []) or onnx_tensor.get("uint64_data", []):
+  if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
+  dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
+  if data := list(onnx_tensor.float_data) or list(onnx_tensor.int32_data) or list(onnx_tensor.int64_data) or list(onnx_tensor.double_data) or \
+             list(onnx_tensor.uint64_data):
     if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
     return Tensor(data, dtype=dtype).reshape(shape).realize()
-  if "raw_data" in onnx_tensor:
-    np_buffer = np.frombuffer(onnx_tensor["raw_data"], dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor["data_type"])).copy().reshape(shape)
+  if has_field(onnx_tensor, "raw_data"):
+    np_buffer = np.frombuffer(onnx_tensor.raw_data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
     if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
     return Tensor(np_buffer, dtype=dtype)
   return Tensor(None)
 
 def type_parse(onnx_type: TypeProto):
   elem_type = onnx_type
-  if elem_type.get("map_type") or elem_type.get("sparse_tensor_type") or elem_type.get("opaque_type"):
+  if has_field(elem_type, "map_type") or has_field(elem_type, "sparse_tensor_type") or has_field(elem_type, "opaque_type"):
     raise NotImplementedError("parsing for map_type, sparse_tensor_type and opaque_type are not implemented")
-  if is_optional := elem_type.get("optional_type"): elem_type = elem_type.optional_type.elem_type
-  if is_sequence := elem_type.get("sequence_type"): elem_type = elem_type.sequence_type.elem_type
-  if elem_type.get("tensor_type"):
-    shape = tuple(d.get("dim_param") or d["dim_value"] for d in elem_type["tensor_type"]["shape"]["dim"])
-    dtype = dtype_parse(elem_type["tensor_type"]["elem_type"])
+  if is_optional := has_field(elem_type, "optional_type"): elem_type = elem_type.optional_type.elem_type
+  if is_sequence := has_field(elem_type, "sequence_type"): elem_type = elem_type.sequence_type.elem_type
+  if has_field(elem_type, "tensor_type"):
+    shape = tuple(getattr(d, "dim_param", None) or getattr(d, "dim_value", None) for d in elem_type.tensor_type.shape.dim)
+    dtype = dtype_parse(elem_type.tensor_type.elem_type)
     return OnnxValue(shape, dtype, is_optional, is_sequence)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 
@@ -105,22 +109,28 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
     cache_misses = info.misses
   return ret
 
+def dict_to_namespace(d):
+  if isinstance(d, dict): return SimpleNamespace(**{k: dict_to_namespace(v) for k, v in d.items()})
+  elif isinstance(d, list): return [dict_to_namespace(i) for i in d]
+  else: return d
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
 limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
-  def __init__(self, model: ModelProto):
+  def __init__(self, model: ModelProto|dict):
+    if isinstance(model, dict):
+      model = dict_to_namespace(model)
     # parse model protobuf
-    self.is_training = any(n.get("domain", None) in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model["graph"]["node"])
+    self.is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model.graph.node if has_field(n, "domain"))
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
     Tensor.training = True if self.is_training else False
     Tensor.no_grad = False if self.is_training else True
-    self.graph_values = {"": None, **{x["name"]:buffer_parse(x) for x in model["graph"]["initializer"]}}
-    self.graph_inputs = {x["name"]:type_parse(x["type"]) for x in model["graph"]["input"] if x["name"] not in self.graph_values}
-    self.graph_outputs = tuple(x["name"] for x in model["graph"]["output"])
-    self.graph_nodes = tuple(OnnxNode(num, n["op_type"], tuple(n["input"]), tuple(n["output"]), {x["name"]:attribute_parse(x) for x in n["attribute"]})
-                       for num,n in enumerate(model["graph"]["node"]))
-    self.opset_version = model["opset_import"][0]["version"]
+    self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
+    self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
+    self.graph_outputs = tuple(x.name for x in model.graph.output)
+    self.graph_nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
+                       for num,n in enumerate(model.graph.node))
+    self.opset_version = model.opset_import[0].version
     self.variable_dims: dict[str, int] = {}
 
     self.onnx_ops = onnx_ops
