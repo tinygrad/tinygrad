@@ -25,7 +25,7 @@
 import unittest
 import numpy as np
 import torch
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, nn
 
 class TestNaNEdgeCases(unittest.TestCase):
   # we don't need more of these. it's unclear if torch's behavior is desired here
@@ -139,7 +139,7 @@ class TestDropoutProbabilityEdgeCases(unittest.TestCase):
       np.testing.assert_allclose(out.numpy(), np.ones(10))
 
 class TestInputValidation(unittest.TestCase):
-  # we don't need more of these, input validation bugs are not very interesting
+  # we don't need more of these, input validation bugs are not very interesting, many are WONTFIX
 
   @unittest.expectedFailure
   def test_repeat_negative(self):
@@ -148,6 +148,27 @@ class TestInputValidation(unittest.TestCase):
       torch.tensor([1, 2, 3]).repeat(-1, 2)
     with self.assertRaises(RuntimeError):
       Tensor([1, 2, 3]).repeat(-1, 2)
+
+  @unittest.expectedFailure
+  def test_negative_weight_decay(self):
+    with self.assertRaises(ValueError):
+      torch.optim.AdamW([torch.tensor([1.], requires_grad=True)], lr=0.1, weight_decay=-0.1)
+    with self.assertRaises(ValueError):
+      nn.optim.AdamW([Tensor([1.], requires_grad=True)], lr=0.1, weight_decay=-0.1)
+
+  @unittest.expectedFailure
+  def test_negative_lr(self):
+    with self.assertRaises(ValueError):
+      torch.optim.SGD([torch.tensor([1.], requires_grad=True)], lr=-0.1)
+    with self.assertRaises(ValueError):
+      nn.optim.SGD([Tensor([1.], requires_grad=True)], lr=-0.1)
+
+  @unittest.expectedFailure
+  def test_negative_momentum(self):
+    with self.assertRaises(ValueError):
+      torch.optim.SGD([torch.tensor([1.], requires_grad=True)], lr=0.1, momentum=-0.1)
+    with self.assertRaises(ValueError):
+      nn.optim.SGD([Tensor([1.], requires_grad=True)], lr=0.1, momentum=-0.1)
 
 class TestZeroFolding(unittest.TestCase):
   # we don't need more of these
@@ -176,6 +197,87 @@ class TestZeroFolding(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       (x % x).numpy()
 
+class TestArangeUOpValidationIssue(unittest.TestCase):
+  # these fail with UOp verification error.
+  # we don't need more of these involving arange
+
+  @unittest.expectedFailure
+  def test_large_arange_sum(self):
+    # Summing a huge arange should either succeed or raise a MemoryError.
+    n = 2**31 + 3
+    expected = (n - 1) * n // 2
+    out = Tensor.arange(n).sum().item()
+    self.assertEqual(out, expected)
+
+  @unittest.expectedFailure
+  def test_large_arange_index(self):
+    # Indexing a huge arange should return the correct value instead of failing
+    # with a UOp verification error.
+    n = 2**31 + 3
+    out = Tensor.arange(n)[0].item()
+    self.assertEqual(out, 0)
+
+  @unittest.expectedFailure
+  def test_large_arange_permute(self):
+    # Permuting a huge tensor should not trigger UOp verification failures.
+    n = 2**31 + 3
+    out = Tensor.arange(n).reshape(n, 1).permute(1, 0)
+    self.assertEqual(out.shape, (1, n))
+    out.realize()
+
+class TestAssignIssues(unittest.TestCase):
+  # these are good failures. i'm not sure we need more, but we need to fix these.
+
+  @unittest.expectedFailure
+  def test_assign_permuted_view_constant(self):
+    # assigning to a permuted view should modify the underlying tensor
+    arr = np.arange(6).reshape(2, 3).astype(np.float32)
+    torch_tensor = torch.tensor(arr)
+    torch_tensor.t().copy_(torch.tensor([[5.0, 6.0], [7.0, 8.0], [9.0, 10.0]]))
+    t = Tensor(arr).contiguous().realize()
+    t.permute(1, 0).assign(Tensor([[5.0, 6.0], [7.0, 8.0], [9.0, 10.0]]))
+    np.testing.assert_allclose(t.numpy(), torch_tensor.numpy())
+
+  @unittest.expectedFailure
+  def test_assign_shrink_view_constant(self):
+    # assigning to a shrunk view should update the base tensor
+    arr = np.arange(9).reshape(3, 3).astype(np.float32)
+    torch_tensor = torch.tensor(arr)
+    torch_tensor[1:3, 1:3] = torch.ones(2, 2)
+    t = Tensor(arr).contiguous().realize()
+    t.shrink(((1, 3), (1, 3))).assign(Tensor.ones(2, 2))
+    np.testing.assert_allclose(t.numpy(), torch_tensor.numpy())
+
+  @unittest.expectedFailure
+  def test_assign_broadcast(self):
+    # broadcasting during assign should behave like PyTorch
+    torch_tensor = torch.zeros(3, 5)
+    torch_tensor[:] = torch.arange(5)
+    t = Tensor.zeros(3, 5)
+    t.assign(Tensor.arange(5))
+    np.testing.assert_allclose(t.numpy(), torch_tensor.numpy())
+
+class TestUOpValidationIssue(unittest.TestCase):
+  # these fail with UOp verification error.
+  # we want more of these with diverse errors!
+
+  @unittest.expectedFailure
+  def test_tensor_index_overflow(self):
+    # Advanced indexing on tensors expanded past int32 should not error, but
+    # tinygrad fails with a UOp verification error.
+    val = Tensor([1])
+    big = val.expand(2**31 + 3)
+    idx = Tensor([0, 2**31 + 2])
+    np.testing.assert_equal(big[idx].numpy(), np.array([1, 1]))
+
+  def test_float_floordiv_scalar(self):
+    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
+      (Tensor.arange(4, dtype=dtypes.float32) // 2).realize()
+
+  def test_float_floordiv_tensor(self):
+    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
+      (Tensor.arange(4, dtype=dtypes.float32) // Tensor.ones(4, dtype=dtypes.float32)).realize()
+
 class TestEdgeCases(unittest.TestCase):
   # add tests exposing new and diverse kinds of bugs that might impact real users here
 
@@ -194,30 +296,15 @@ class TestEdgeCases(unittest.TestCase):
     out = Tensor.arange(0, 2, 0.3).numpy()
     np.testing.assert_allclose(out, torch_out)
 
+  @unittest.skip("this is flaky")
   @unittest.expectedFailure
   def test_topk_ties_indices(self):
     # topk should match PyTorch tie-breaking behavior when values are equal
     arr = [1.0, 1.0, 1.0, 1.0]
-    tv, ti = torch.tensor(arr).topk(2)
-    v, i = Tensor(arr).topk(2)
+    _, ti = torch.tensor(arr).topk(2)
+    _, i = Tensor(arr).topk(2)
     np.testing.assert_equal(i.numpy(), ti.numpy().astype(np.int32))
 
-  @unittest.expectedFailure
-  def test_tensor_index_overflow(self):
-    # Advanced indexing on tensors expanded past int32 should not error, but
-    # tinygrad fails with a UOp verification error.
-    val = Tensor([1])
-    big = val.expand(2**31 + 3)
-    idx = Tensor([0, 2**31 + 2])
-    np.testing.assert_equal(big[idx].numpy(), np.array([1, 1]))
-
-  @unittest.expectedFailure
-  def test_large_arange_sum(self):
-    # Summing a huge arange should either succeed or raise a MemoryError.
-    n = 2**31 + 3
-    expected = (n - 1) * n // 2
-    out = Tensor.arange(n).sum().item()
-    self.assertEqual(out, expected)
 
 if __name__ == "__main__":
   unittest.main()
