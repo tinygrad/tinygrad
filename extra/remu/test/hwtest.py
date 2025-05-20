@@ -1,6 +1,6 @@
 import numpy as np
 import unittest
-import subprocess
+import subprocess, struct, math
 from typing import cast
 from tinygrad.runtime.ops_amd import AMDProgram, AMDDevice
 from tinygrad import Tensor, dtypes, Device
@@ -83,7 +83,7 @@ amdhsa.version:
       + "\n" + code_start + code + f"\n.size {function_name}, .-{function_name}"
   return AMDProgram(cast(AMDDevice, Device["AMD"]), function_name, assemble(ret))
 
-def get_output(s:str, n_threads:int):
+def get_output(s:str, n_threads:int=1):
   assert n_threads <= 32
   code = "\n".join(["s_load_b64 s[0:1], s[0:1], null", "v_lshlrev_b32_e32 v0, 2, v0", s,
     "s_waitcnt 0",
@@ -93,6 +93,10 @@ def get_output(s:str, n_threads:int):
   prg = get_prg(code, 32, 32)
   prg(test._buf, global_size=(1, 1, 1), local_size=(n_threads, 1, 1), wait=True)
   return test.numpy()
+
+def f16_to_bits(x:float) -> int: return struct.unpack('<H', struct.pack('<e', x))[0]
+def f32_from_bits(x:int) -> float: return struct.unpack('<f', struct.pack('<I', x))[0]
+def f32_to_bits(x:float) -> int: return struct.unpack('<I', struct.pack('<f', x))[0]
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "tests RDNA3")
 class TestHW(unittest.TestCase):
@@ -139,6 +143,60 @@ class TestHW(unittest.TestCase):
     v_mov_b32_e32 v1 s10
     """, n_threads=2)
     np.testing.assert_equal(out, 0b01)
+
+  def test_fmac_vop3_modifier(self):
+    init_state = f"""
+    v_mov_b32_e32 v10 {f16_to_bits(4.0)}
+    v_mov_b32_e32 v11 {f16_to_bits(3.0)}
+    v_mov_b32_e32 v1 {f16_to_bits(2.0)}
+    """
+    self.assertEqual(get_output(init_state+"\n"+"v_fmac_f16_e64 v1 v11 v10"), f16_to_bits(14.))
+    self.assertEqual(get_output(init_state+"\n"+"v_fmac_f16_e64 v1 -v11 v10"), f16_to_bits(-10.))
+    self.assertEqual(get_output(init_state+"\n"+"v_fmac_f16_e64 v1 -v11 -v10"), f16_to_bits(14.))
+
+  def test_s_abs_i32(self):
+    def s_abs_i32(x, y, dst="s10", scc=0):
+      for reg,val in [(dst, y), ("scc", scc)]:
+        self.assertEqual(get_output(f"""
+        s_mov_b32_e32 {dst} {x}
+        s_abs_i32 {dst} {dst}
+        v_mov_b32_e32 v1 {reg}
+        """)[0], val)
+    s_abs_i32(0x00000001, 0x00000001, scc=1)
+    s_abs_i32(0x7fffffff, 0x7fffffff, scc=1)
+    s_abs_i32(0x80000000, 0x80000000, scc=1)
+    s_abs_i32(0x80000001, 0x7fffffff, scc=1)
+    s_abs_i32(0x80000002, 0x7ffffffe, scc=1)
+    s_abs_i32(0xffffffff, 0x00000001, scc=1)
+    s_abs_i32(0, 0, scc=0)
+
+  def test_v_rcp_f32_neg_vop3(self):
+    def v_neg_rcp_f32(x:float, y:float):
+      out = get_output(f"""
+      v_mov_b32_e32 v1 {f32_to_bits(x)}
+      v_rcp_f32_e64 v1, -v1
+      """)[0]
+      assert out == f32_to_bits(y), f"{f32_from_bits(out)} != {y} / {out} != {f32_to_bits(y)}"
+    v_neg_rcp_f32(math.inf, -0.0)
+    v_neg_rcp_f32(-math.inf, 0.0)
+    v_neg_rcp_f32(0.0, -math.inf)
+    v_neg_rcp_f32(-0.0, math.inf)
+    v_neg_rcp_f32(-2.0, 0.5)
+    v_neg_rcp_f32(2.0, -0.5)
+
+  def test_v_cndmask_b32_neg(self):
+    def v_neg(x:int|float, y:float):
+      out = get_output(f"""
+      v_mov_b32_e32 v1 {f32_to_bits(x)}
+      s_mov_b32_e32 s10 1 // always pick -v1
+      v_cndmask_b32 v1, v1, -v1 s10
+      """)[0]
+      assert out == f32_to_bits(y), f"{f32_from_bits(out)} != {y} / {out} != {f32_to_bits(y)}"
+    v_neg(-0.0, 0.0)
+    v_neg(0.0, -0.0)
+    v_neg(2.0, -2.0)
+    v_neg(math.inf, -math.inf)
+    v_neg(-math.inf, math.inf)
 
 if __name__ == "__main__":
   unittest.main()

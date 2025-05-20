@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
-AM_VERSION = 0xA0000003
+AM_VERSION = 0xA0000004
 
 def bold(s): return f"\033[1m{s}\033[0m"
 
@@ -61,7 +61,7 @@ def get_bar0_size(pcibus):
 class AMSMI(AMDev):
   def __init__(self, pcibus, vram_bar:MMIOInterface, doorbell_bar:MMIOInterface, mmio_bar:MMIOInterface):
     self.pcibus = pcibus
-    self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
+    self.vram, self.doorbell64, self.mmio, self.dma_regions = vram_bar, doorbell_bar, mmio_bar, None
     self.pci_state = self.read_pci_state()
     if self.pci_state == "D0": self._init_from_d0()
 
@@ -182,7 +182,7 @@ class SMICtx:
     self.prev_terminal_width, self.prev_terminal_height = terminal_width, terminal_height
 
     padding = 8
-    col_size = (terminal_width) // 2 - padding
+    col_size = (terminal_width) // 2 - padding - 2
     activity_line_width = 50 if terminal_width > 170 else \
                          (30 if terminal_width > 130 else \
                          (16 if terminal_width > 92 else \
@@ -192,7 +192,7 @@ class SMICtx:
     dev_content = []
     for dev, metrics in dev_metrics.items():
       if dev.pci_state != "D0":
-        dev_content.append([f"{colored('(sleep)', 'yellow')} {bold(dev.pcibus)}: {self.lspci[dev.pcibus[5:]]}"] +
+        dev_content.append([f"{colored('(sleep)', 'yellow')} {bold(dev.pcibus)}: {trim(self.lspci[dev.pcibus[5:]], col_size - 20)}"] +
                            [pad(f"PCI State: {dev.pci_state}", col_size)])
         continue
 

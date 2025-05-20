@@ -2,9 +2,9 @@ from __future__ import annotations
 import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from tinygrad.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat, GroupOp
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
 from tinygrad.helpers import dedup, partition, all_same, flatten
-from tinygrad.spec import type_verify
+from tinygrad.uop.spec import type_verify
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(lst:list[UOp]) -> list[UOp]:
@@ -52,7 +52,7 @@ def disp(y:UOp) -> str:
 @dataclass(frozen=True, eq=False)
 class BasicBlock2:
   lst: tuple[UOp, ...]
-  ctx: tuple[UOp, ...]
+  ctx: tuple[UOp, ...] = ()
   end: UOp|None = None
   cnt: int = 0
   child_ctx: tuple[UOp, ...]|None = None
@@ -162,9 +162,31 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
   bb = BasicBlock2(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
-block_create = PatternMatcher([(
-  UPat(GroupOp.All-DONT_PLACE_IN_BLOCK.union({Ops.BLOCK, Ops.BLOCKEND}), name="x"), make_block_bottom_up)
+block_create = PatternMatcher([
+  (UPat(GroupOp.All-DONT_PLACE_IN_BLOCK.union({Ops.BLOCK, Ops.BLOCKEND}), name="x"), make_block_bottom_up),
 ])
+
+# ***** blockend merging ****
+
+def merge_blockends(sink:UOp) -> UOp|None:
+  # only run on the final BLOCK with the SINK in it
+  if sink.arg.lst[-1].op is not Ops.SINK: return None
+  # combine matching BLOCKENDS, the keys of this dictionary are the RANGE UOps, values are the BLOCKENDs
+  blockends_to_arg: dict[UOp, list[UOp]] = {}
+  for be in sink.toposort():
+    if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg.end, []).append(be)
+  new_forks = {}
+  for k,v in blockends_to_arg.items():
+    # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
+    if len(v) > 1:
+      bb = BasicBlock2(v[0].arg.lst, _sort_ctx(flatten([y.arg.ctx for y in v])), k, cnt=sum(y.arg.cnt for y in v))
+      out = UOp(Ops.BLOCKEND, src=tuple(flatten([x.src for x in v])), arg=bb)
+      # NOTE: bb.ctx != u.arg.ctx can cause problems here
+      for u in v: new_forks[u] = out
+  if len(new_forks) == 0: return None
+  return sink.substitute(new_forks)
+
+pm_blockend_merge = PatternMatcher([(UPat(Ops.BLOCK, name="sink"), merge_blockends)])
 
 # ***** block merging ****
 
@@ -209,37 +231,15 @@ block_merge = PatternMatcher([
 
 # ****** finalize ******
 
-def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
-  assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
-
-  # get block context
-  ctx = BlockContext.from_sink(sink)
-
-  # wrap all uops in blocks, already reordered
-  sink = graph_rewrite(sink, block_create, ctx=ctx, name="Linearizer: Create Blocks", bottom_up=True)
-
-  # combine matching BLOCKENDS, the keys of this dictionary are the RANGE UOps, values are the BLOCKENDs
-  blockends_to_arg: dict[UOp, list[UOp]] = {}
-  for be in sink.toposort():
-    if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg.end, []).append(be)
-  new_forks = {}
-  for k,v in blockends_to_arg.items():
-    # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
-    if len(v) > 1:
-      bb = BasicBlock2(v[0].arg.lst, _sort_ctx(flatten([y.arg.ctx for y in v])), k, cnt=sum(y.arg.cnt for y in v))
-      out = UOp(Ops.BLOCKEND, src=tuple(flatten([x.src for x in v])), arg=bb)
-      # NOTE: bb.ctx != u.arg.ctx can cause problems here
-      for u in v: new_forks[u] = out
-  sink = sink.substitute(new_forks)
-
-  # merge blockends
-  sink = graph_rewrite(sink, block_merge, name="Linearizer: Merge Blocks")
-  if sink.op is not Ops.BLOCK or not all(x.op in DONT_PLACE_IN_BLOCK for x in sink.src): raise RuntimeError("linearize failure")
+def finalize(sink:UOp) -> UOp:
+  if sink.op is not Ops.BLOCK or not all(x.op in DONT_PLACE_IN_BLOCK for x in sink.src):
+    raise RuntimeError("linearize failure")
 
   # place the early things
   lst = sorted(dedup(sink.src), key=lambda x: x.tuplize) + list(sink.arg.lst)
 
-  # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-  if not skip_check: type_verify(lst)
+  if __debug__: type_verify(lst)
 
-  return lst
+  return UOp(Ops.BLOCKFINAL, arg=BasicBlock2(tuple(lst)))
+
+pm_finalize = PatternMatcher([(UPat(Ops.BLOCK, name="sink"), finalize)])
