@@ -281,8 +281,6 @@ class OnnxParser:
   def parse_attribute_proto(self, data_bytes, offset=0):
     obj, final_offset = self._parse_message(data_bytes, offset, self._attribute_proto_handlers(), lambda: {
       'floats': [], 'ints': [], 'strings': [], 'tensors': [], 'graphs': []})
-    if 's' in obj and isinstance(obj['s'], bytes): obj['s'] = obj['s'].decode('utf-8')
-    if 'strings' in obj: obj['strings'] = [s.decode('utf-8') if isinstance(s, bytes) else s for s in obj['strings']]
     if 't' in obj and obj['t']: self.interpret_tensor_raw_data(obj['t'])
     if 'tensors' in obj:
       for tensor in obj['tensors']:
