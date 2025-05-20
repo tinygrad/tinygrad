@@ -688,7 +688,7 @@ class PCIIface:
     except OSError as e: raise RuntimeError(f"Cannot resize BAR: {e}. Ensure the resizable BAR option is enabled on your system.") from e
 
     # Try to init vfio. Use it if success.
-    if getenv("VFIO", 1):
+    if getenv("VFIO", 0):
       try:
         if first_dev:
           if not FileIOInterface.exists("/sys/module/vfio"): os.system("sudo modprobe vfio-pci disable_idle_d3=1")
@@ -862,7 +862,7 @@ class AMDDevice(HCQCompiled):
     errs:str = ""
     for iface_t in (KFDIface, PCIIface, USBIface):
       try: return iface_t(self, self.device_id)
-      except Exception as e: errs += f"\n{iface_t.__name__}: {type(e).__name__}: {e}"
+      except (RuntimeError, FileNotFoundError, BlockingIOError) as e: errs += f"\n{iface_t.__name__}: {type(e).__name__}: {e}"
     raise RuntimeError(f"Cannot find a usable interface for AMD:{self.device_id}:{errs}")
 
   def __init__(self, device:str=""):
