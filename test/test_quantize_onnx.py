@@ -70,9 +70,9 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
       import onnx
     except ImportError:
       raise unittest.SkipTest()
-    from tinygrad.frontend.onnx import OnnxRunner
+    from tinygrad.frontend.onnx import OnnxRunner, onnx_load
     out_file = get_quantized_model(sz)
-    onnx_model = onnx.load(out_file)
+    onnx_model = onnx_load(out_file)
     run_onnx = OnnxRunner(onnx_model)
     inp = Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32))
     with Context(DONT_REALIZE_EXPAND=1, QUANTIZE=1):
