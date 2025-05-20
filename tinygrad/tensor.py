@@ -179,7 +179,7 @@ class Tensor(SimpleMathTrait):
     new_uop: UOp = fxn(*[t.lazydata for t in (self,)+x], **kwargs)
     if (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = metadata
     needs_input_grad = [t.requires_grad for t in (self,)+x]
-    requires_grad = True if any(needs_input_grad) and dtypes.is_float(new_uop.dtype) else None if None in needs_input_grad else False 
+    requires_grad = True if any(needs_input_grad) and dtypes.is_float(new_uop.dtype) else None if None in needs_input_grad else False
     return Tensor(new_uop, device=new_uop.device, requires_grad=requires_grad)
 
   def _apply_broadcasted_uop(self, fxn:Callable, x:Tensor|ConstType, reverse=False) -> Tensor:
@@ -189,7 +189,7 @@ class Tensor(SimpleMathTrait):
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
     return self
-  
+
   @property
   def requires_grad(self):
     return self._requires_grad
