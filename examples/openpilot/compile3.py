@@ -22,8 +22,8 @@ def compile(onnx_file):
   run_onnx = OnnxRunner(onnx_model)
   print("loaded model")
 
-  input_shapes = {inp["name"]:tuple(x["dim_value"] for x in inp["type"]["tensor_type"]["shape"]["dim"]) for inp in onnx_model["graph"]["input"]}
-  input_types = {inp["name"]: tensor_dtype_to_np_dtype(inp["type"]["tensor_type"]["elem_type"]) for inp in onnx_model["graph"]["input"]}
+  input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
+  input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input}
   # Float inputs and outputs to tinyjits for openpilot are always float32
   input_types = {k:(np.float32 if v==np.float16 else v) for k,v in input_types.items()}
   Tensor.manual_seed(100)

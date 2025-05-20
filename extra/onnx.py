@@ -1,10 +1,11 @@
+from types import SimpleNamespace
 from typing import Any, Sequence, cast, Literal, Callable
 import dataclasses, functools, io, math, types
-from types import SimpleNamespace
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported
+
 # ***** protobuf parsing ******
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, helper
 import numpy as np
@@ -31,7 +32,7 @@ def attribute_parse(onnx_attribute: AttributeProto):
   supported: dict[AttributeProto.AttributeType, Callable[[AttributeProto], Any]] = {
     AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i),
     AttributeProto.STRING: lambda a: a.s.decode("utf-8"), AttributeProto.TENSOR: lambda a: buffer_parse(a.t),
-    AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats), AttributeProto.INTS: lambda a: tuple(-1 if x==0xffffffffffffffff else int(x) for x in a.ints),
+    AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats), AttributeProto.INTS: lambda a: tuple(-1 if x==0xffffffffffffffff else int(x) for x in a.ints), # TODO
     AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)
   }
   unsupported = {
@@ -109,17 +110,11 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
     cache_misses = info.misses
   return ret
 
-def dict_to_namespace(d):
-  if isinstance(d, dict): return SimpleNamespace(**{k: dict_to_namespace(v) for k, v in d.items()})
-  elif isinstance(d, list): return [dict_to_namespace(i) for i in d]
-  else: return d
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
 limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
-  def __init__(self, model: ModelProto|dict):
-    if isinstance(model, dict):
-      model = dict_to_namespace(model)
+  def __init__(self, model: ModelProto|SimpleNamespace):
     # parse model protobuf
     self.is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model.graph.node if has_field(n, "domain"))
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad

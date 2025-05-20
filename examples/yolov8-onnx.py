@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import os
 from ultralytics import YOLO
-import onnx
 from pathlib import Path
 from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 from extra.onnx_helpers import get_example_inputs

@@ -1,4 +1,5 @@
 import struct
+from types import SimpleNamespace
 
 # Protobuf Wire Types
 WIRETYPE_VARINT = 0
@@ -72,11 +73,17 @@ def skip_field_value(data, offset, wire_type):
   if new_offset > len(data): raise EOFError("Buffer short while skipping field")
   return new_offset
 
+def dict_to_namespace(d):
+  if isinstance(d, dict): return SimpleNamespace(**{k: dict_to_namespace(v) for k, v in d.items()})
+  elif isinstance(d, list): return [dict_to_namespace(i) for i in d]
+  else: return d
+
 def onnx_load(model_path):
   parser = OnnxParser()
   with open(model_path, "rb") as f:
     onnx_model = parser.parse_model_proto_from_bytes(f.read())
-  return onnx_model
+  model = dict_to_namespace(onnx_model)
+  return model
 
 class OnnxParser:
   def _parse_message(self, data, offset, message_field_handlers, initial_obj_factory=lambda: {}):
