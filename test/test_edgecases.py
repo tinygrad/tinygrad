@@ -139,7 +139,7 @@ class TestDropoutProbabilityEdgeCases(unittest.TestCase):
       np.testing.assert_allclose(out.numpy(), np.ones(10))
 
 class TestInputValidation(unittest.TestCase):
-  # input validation bugs are not very interesting
+  # we don't need more of these, input validation bugs are not very interesting
 
   @unittest.expectedFailure
   def test_repeat_negative(self):
@@ -148,6 +148,33 @@ class TestInputValidation(unittest.TestCase):
       torch.tensor([1, 2, 3]).repeat(-1, 2)
     with self.assertRaises(RuntimeError):
       Tensor([1, 2, 3]).repeat(-1, 2)
+
+class TestZeroFolding(unittest.TestCase):
+  # we don't need more of these
+
+  # folding rules treat x/x, x//x and x%x as constants even when x can be zero
+  @unittest.expectedFailure
+  def test_divide_by_self_with_zero(self):
+    x = Tensor([0.0, 1.0])
+    torch_out = torch.tensor([0.0, 1.0]) / torch.tensor([0.0, 1.0])
+    out = (x / x).numpy()
+    np.testing.assert_allclose(out, torch_out.numpy(), equal_nan=True)
+
+  @unittest.expectedFailure
+  def test_floordiv_by_self_with_zero(self):
+    x = Tensor([0])
+    with self.assertRaises(RuntimeError):
+      torch.tensor([0]) // torch.tensor([0])
+    with self.assertRaises(RuntimeError):
+      (x // x).numpy()
+
+  @unittest.expectedFailure
+  def test_mod_by_self_with_zero(self):
+    x = Tensor([0])
+    with self.assertRaises(RuntimeError):
+      torch.tensor([0]) % torch.tensor([0])
+    with self.assertRaises(RuntimeError):
+      (x % x).numpy()
 
 class TestEdgeCases(unittest.TestCase):
   # add tests exposing new and diverse kinds of bugs that might impact real users here
