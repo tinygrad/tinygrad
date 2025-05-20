@@ -7,19 +7,22 @@
 # i'm not interested in tests that currently pass, i'm only interested in tests that you think should pass but don't.
 # all the tests in here didn't pass until bugs were fixed
 # get creative! think about things that failed in pytorch or tensorflow for a long time until they were fixed.
-# the tests don't have to test the same parts of the code that these current ones test
 # every test should surface a unique bug. if tinygrad throws an error saying something is not supported, this is probably not a bug.
+# the tests don't have to test the same parts of the code that these current ones test, more diversity is better
 
 # focus on making tinygrad throw runtime errors or assertions for valid things, or find clear numerical mismatches from pytorch
 # confirm any bugs from are valid by doing the same thing in pytorch in the test.
 # for any failing tests, explain in a comment why tinygrad is wrong and what the desired behavior should be.
 
 # don't worry about running mypy or linters. focus on writing more of these tests only and running them to confirm behavior.
+# these are not bugs, these are desired behavior. don't add failing tests for them:
+#   tinygrad only accepts tinygrad dtypes or strings of the tinygrad dtype.
+#   boolean indexing, or anything with unknown output shape of tensor at compile time isn't supported.
 
 import unittest
 import numpy as np
 import torch
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
 
 class TestEdgeCases(unittest.TestCase):
   @unittest.expectedFailure
@@ -44,6 +47,21 @@ class TestEdgeCases(unittest.TestCase):
       torch.roll(torch.arange(9).reshape(3, 3), 1, dims=(0, 1))
     with self.assertRaises(RuntimeError):
       Tensor.arange(9).reshape(3, 3).roll(1, dims=(0, 1))
+
+  @unittest.expectedFailure
+  def test_max_empty(self):
+    # Max on an empty tensor should also raise an error.
+    with self.assertRaises(RuntimeError):
+      torch.tensor([]).max()
+    with self.assertRaises(RuntimeError):
+      Tensor([]).max()
+
+  @unittest.expectedFailure
+  def test_masked_select_empty(self):
+    # Masked select on empty tensors should return an empty tensor.
+    torch_out = torch.tensor([], dtype=torch.float32).masked_select(torch.tensor([], dtype=torch.bool))
+    out = Tensor([], dtype=dtypes.float32).masked_select(Tensor([], dtype=dtypes.bool))
+    np.testing.assert_equal(out.numpy(), torch_out.numpy())
 
 if __name__ == "__main__":
   unittest.main()
