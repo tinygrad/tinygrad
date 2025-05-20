@@ -7,8 +7,7 @@ from tinygrad.device import is_dtype_supported
 
 # ***** onnx protobuf parsing ******
 # NOTE: everything that directly use onnx import is in this block
-try: from onnx import load, AttributeProto, ModelProto, TensorProto, TypeProto, helper
-except ImportError: raise ImportError("ONNX is not installed. Please install it with 'pip install onnx'.")
+from onnx import load, AttributeProto, ModelProto, TensorProto, TypeProto, helper
 import numpy as np
 
 def dtype_parse(onnx_dtype: int) -> DType:
@@ -65,8 +64,7 @@ def type_parse(onnx_type: TypeProto):
     return OnnxValue(shape, dtype, is_optional, is_sequence)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 
-def model_load(model:Tensor | str | os.PathLike | bytes | IO[bytes]):
-  if isinstance(model, Tensor): raise NotImplementedError("ONNX model loading from a Tensor is not implemented")
+def model_load(model:str | os.PathLike | bytes | IO[bytes]):
   return load(io.BytesIO(model) if isinstance(model, bytes) else model)
 
 def model_parse(onnx_model: ModelProto):
@@ -132,6 +130,7 @@ class OnnxRunner:
     model: The ONNX model, provided either as a file path (a string or path-like object), a file-like object, or as raw bytes.
   """
   def __init__(self, model:Tensor | str | os.PathLike | bytes | IO[bytes]):
+    if isinstance(model, Tensor): raise NotImplementedError("ONNX model provided as Tensor is not supported.")
     self.is_training, self.graph_values, self.graph_inputs, self.graph_outputs, self.graph_nodes, self.opset_version = model_parse(model_load(model))
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
     Tensor.training = True if self.is_training else False

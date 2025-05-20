@@ -1,7 +1,7 @@
-import functools, importlib
+import functools, importlib, re, urllib
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.helpers import getbits, round_up
+from tinygrad.helpers import getbits, round_up, fetch
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.usb import ASM24Controller
 
@@ -20,16 +20,13 @@ class AMDIP:
   name:str; version:tuple[int, ...]; bases:tuple[int, ...] # noqa: E702
 
   @functools.cached_property
-  def module(self): return import_module(self.name, self.version)
-
-  @functools.cached_property
-  def regs(self): return collect_registers(self.module, cls=functools.partial(AMDReg, bases=self.bases))
+  def regs(self): return import_asic_regs(self.name, self.version, cls=functools.partial(AMDReg, bases=self.bases))
 
   def __getattr__(self, name:str):
     if name in self.regs: return self.regs[name]
+
     # NOTE: gfx10 gc registers always start with mm, no reg prefix
-    if (mmname:=name.replace('reg', 'mm')) in self.regs: return self.regs[mmname]
-    return getattr(self.module, name)
+    return self.regs[name.replace('reg', 'mm')]
 
 def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
   # override versions
@@ -39,25 +36,44 @@ def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
     return version
 
   if ip in ['nbio', 'nbif']: version = _apply_ovrd({(3,3): (2,3,0)})
-  return [version, version[:2]+(0,), version[:1]+(0, 0)]
+  elif ip == 'mp': version = _apply_ovrd({(14,0,3): (14,0,2)})
 
-def collect_registers(module, cls=AMDReg) -> dict[str, AMDReg]:
-  def _split_name(name): return name[:(pos:=next((i for i,c in enumerate(name) if c.isupper()), len(name)))], name[pos:]
-  offsets = {k:v for k,v in module.__dict__.items() if _split_name(k)[0] in {'reg', 'mm'} and not k.endswith('_BASE_IDX')}
-  bases = {k[:-len('_BASE_IDX')]:v for k,v in module.__dict__.items() if _split_name(k)[0] in {'reg', 'mm'} and k.endswith('_BASE_IDX')}
-  fields: defaultdict[str, dict[str, tuple[int, int]]] = defaultdict(dict)
-  for field_name,field_mask in module.__dict__.items():
-    if not ('__' in field_name and field_name.endswith('_MASK')): continue
-    reg_name, reg_field_name = field_name[:-len('_MASK')].split('__')
-    fields[reg_name][reg_field_name.lower()] = ((field_mask & -field_mask).bit_length()-1, field_mask.bit_length()-1)
-  # NOTE: Some registers like regGFX_IMU_FUSESTRAP in gc_11_0_0 are missing base idx, just skip them
-  return {reg:cls(name=reg, offset=off, segment=bases[reg], fields=fields[_split_name(reg)[1]]) for reg,off in offsets.items() if reg in bases}
+  return [version, version[:2]+(0,), version[:1]+(0, 0)]
 
 def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
   for ver in fixup_ip_version(name, version):
     try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{name}_{version_prefix}{'_'.join(map(str, ver))}")
     except ImportError: pass
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")
+
+def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
+  def _split_name(name): return name[:(pos:=next((i for i,c in enumerate(name) if c.isupper()), len(name)))], name[pos:]
+  def _extract_regs(txt):
+    return {m.group(1): int(m.group(2), 0) for line in txt.splitlines() if (m:=re.match(r'#define\s+(\S+)\s+(0x[\da-fA-F]+|\d+)', line))}
+  def _download_file(ver, suff) -> str:
+    dir_prefix = {"osssys": "oss"}.get(prefix, prefix)
+    fetch_name, file_name = f"{prefix}_{'_'.join(map(str, ver))}_{suff}.h", f"{prefix}_{'_'.join(map(str, version))}_{suff}.h"
+    url = "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd/include/asic_reg"
+    return fetch(f"{url}/{dir_prefix}/{fetch_name}", name=file_name, subdir="asic_regs").read_text()
+
+  for ver in fixup_ip_version(prefix, version):
+    try: offs, sh_masks = _extract_regs(_download_file(ver, "offset")), _extract_regs(_download_file(ver, "sh_mask"))
+    except urllib.error.HTTPError as e:
+      if e.code == 404: continue
+      raise
+
+    offsets = {k:v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and not k.endswith('_BASE_IDX')}
+    bases = {k[:-len('_BASE_IDX')]:v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and k.endswith('_BASE_IDX')}
+
+    fields: defaultdict[str, dict[str, tuple[int, int]]] = defaultdict(dict)
+    for field_name, field_mask in sh_masks.items():
+      if not ('__' in field_name and field_name.endswith('_MASK')): continue
+      reg_name, reg_field_name = field_name[:-len('_MASK')].split('__')
+      fields[reg_name][reg_field_name.lower()] = ((field_mask & -field_mask).bit_length()-1, field_mask.bit_length()-1)
+
+    # NOTE: Some registers like regGFX_IMU_FUSESTRAP in gc_11_0_0 are missing base idx, just skip them
+    return {reg:cls(name=reg, offset=off, segment=bases[reg], fields=fields[_split_name(reg)[1]]) for reg,off in offsets.items() if reg in bases}
+  raise ImportError(f"Failed to load ASIC registers for {prefix.upper()} {'.'.join(map(str, version))}")
 
 def setup_pci_bars(usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
   for bus in range(gpu_bus):

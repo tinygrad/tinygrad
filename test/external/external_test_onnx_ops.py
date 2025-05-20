@@ -86,7 +86,7 @@ class TestMainOnnxOps(TestOnnxOps):
     attributes = {"detect_negative":1, "detect_positive":1}
     outputs = ["y"]
     model = self.helper_build_model("IsInf", inputs, attributes, outputs)
-    outputs = OnnxRunner(model)(inputs)
+    outputs = OnnxRunner(model.SerializeToString())(inputs)
     assert outputs["y"].dtype is dtypes.bool
 
   def test_quantize_linear(self):
