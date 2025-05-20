@@ -34,7 +34,7 @@ class TestSymbolic(unittest.TestCase):
     else: self.assertEqual(rendered, s)
     self.assertEqual(nmin, n)
     self.assertEqual(nmax, m)
-    solver = z3.Solver(ctx=z3.Context())
+    solver = z3.Solver()
     z3_sink = graph_rewrite(v.sink(v.simplify()), z3_renderer, ctx=(solver, {}))
     expr, epxr_simplified = z3_sink.src[0].arg, z3_sink.src[1].arg
     self.assertEqual(solver.check(expr != epxr_simplified), z3.unsat, "simplified expression not equal to original")
