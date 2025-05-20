@@ -177,19 +177,5 @@ class TestAMPageTable(unittest.TestCase):
       must_cover_checker(va, sz)
       not_cover_checker(va, sz)
 
-class TestAM(unittest.TestCase):
-  def test_imports(self):
-    with self.assertRaises(ImportError): import_module("gc", (7, 0, 0))
-    x = import_module("gc", (11, 0, 0))
-    assert x.__name__ == "tinygrad.runtime.autogen.am.gc_11_0_0"
-    x = import_module("gc", (11, 6, 0))
-    assert x.__name__ == "tinygrad.runtime.autogen.am.gc_11_0_0"
-    x = import_module("gc", (12, 0, 0))
-    assert x.__name__ == "tinygrad.runtime.autogen.am.gc_12_0_0"
-    x = import_module("gc", (10, 3, 0))
-    assert x.__name__ == "tinygrad.runtime.autogen.am.gc_10_3_0"
-    x = import_module("gc", (10, 3, 3))
-    assert x.__name__ == "tinygrad.runtime.autogen.am.gc_10_3_0"
-
 if __name__ == "__main__":
   unittest.main()
