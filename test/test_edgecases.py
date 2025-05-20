@@ -202,5 +202,22 @@ class TestEdgeCases(unittest.TestCase):
     v, i = Tensor(arr).topk(2)
     np.testing.assert_equal(i.numpy(), ti.numpy().astype(np.int32))
 
+  @unittest.expectedFailure
+  def test_tensor_index_overflow(self):
+    # Advanced indexing on tensors expanded past int32 should not error, but
+    # tinygrad fails with a UOp verification error.
+    val = Tensor([1])
+    big = val.expand(2**31 + 3)
+    idx = Tensor([0, 2**31 + 2])
+    np.testing.assert_equal(big[idx].numpy(), np.array([1, 1]))
+
+  @unittest.expectedFailure
+  def test_large_arange_sum(self):
+    # Summing a huge arange should either succeed or raise a MemoryError.
+    n = 2**31 + 3
+    expected = (n - 1) * n // 2
+    out = Tensor.arange(n).sum().item()
+    self.assertEqual(out, expected)
+
 if __name__ == "__main__":
   unittest.main()
