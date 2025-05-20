@@ -3471,7 +3471,11 @@ class Tensor(SimpleMathTrait):
     ```
     """
     numerator, denominator = self._broadcasted(x, reverse)
-    d = numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
+    if dtypes.is_int(numerator.dtype) or dtypes.is_int(denominator.dtype):
+      d = numerator.cast(dtypes.float64) * denominator.cast(dtypes.float64).reciprocal()
+      d = d.cast(dtypes.float32)
+    else:
+      d = numerator * denominator.reciprocal() 
     output_dtype = numerator.dtype if dtypes.is_int(numerator.dtype) else d.dtype
     if rounding_mode == "trunc": return d.trunc().cast(output_dtype)
     if rounding_mode == "floor": return d.floor().cast(output_dtype)
