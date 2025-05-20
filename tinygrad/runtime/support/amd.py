@@ -1,4 +1,4 @@
-import functools, importlib, re
+import functools, importlib, re, urllib
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, round_up, fetch
@@ -54,8 +54,12 @@ def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[st
   dir_pref = {"osssys": "oss"}.get(prefix, prefix)
   base_url = "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd/include/asic_reg"
   for ver in fixup_ip_version(prefix, version):
-    offs = _extract_regs(fetch(f"{base_url}/{dir_pref}/{prefix}_{'_'.join(map(str, ver))}_offset.h", subdir="asic_regs").read_text())
-    sh_masks = _extract_regs(fetch(f"{base_url}/{dir_pref}/{prefix}_{'_'.join(map(str, ver))}_sh_mask.h", subdir="asic_regs").read_text())
+    try:
+      offs = _extract_regs(fetch(f"{base_url}/{dir_pref}/{prefix}_{'_'.join(map(str, ver))}_offset.h", subdir="asic_regs").read_text())
+      sh_masks = _extract_regs(fetch(f"{base_url}/{dir_pref}/{prefix}_{'_'.join(map(str, ver))}_sh_mask.h", subdir="asic_regs").read_text())
+    except urllib.error.HTTPError as e:
+      if e.code == 404: continue
+      raise
 
     offsets = {k:v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and not k.endswith('_BASE_IDX')}
     bases = {k[:-len('_BASE_IDX')]:v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and k.endswith('_BASE_IDX')}
@@ -68,6 +72,7 @@ def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[st
 
     # NOTE: Some registers like regGFX_IMU_FUSESTRAP in gc_11_0_0 are missing base idx, just skip them
     return {reg:cls(name=reg, offset=off, segment=bases[reg], fields=fields[_split_name(reg)[1]]) for reg,off in offsets.items() if reg in bases}
+  raise ImportError(f"Failed to load ASIC registers for {prefix.upper()} {'.'.join(map(str, version))}")
 
 def setup_pci_bars(usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
   for bus in range(gpu_bus):
