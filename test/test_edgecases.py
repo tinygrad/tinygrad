@@ -18,7 +18,7 @@
 # these are not bugs, these are desired behavior. don't add failing tests for them:
 #   tinygrad only accepts tinygrad dtypes or strings of the tinygrad dtype.
 #   boolean indexing, or anything with unknown output shape of tensor at compile time isn't supported.
-#   invalid indexing in things like gather is not an error in tinygrad
+#   invalid indexing in things like gather and one_hot is not an error in tinygrad. nothing that depends on the value is
 #   repeat_interleave doesn't support a tensor as the dim. check tinygrad type signature before claiming something is a bug
 
 import unittest
@@ -100,6 +100,24 @@ class TestEmptyTensorEdgeCases(unittest.TestCase):
     out = Tensor([], dtype=dtypes.float32).masked_select(Tensor([], dtype=dtypes.bool))
     np.testing.assert_equal(out.numpy(), torch_out.numpy())
 
+class TestRollEdgeCases(unittest.TestCase):
+  # we don't need more of these
+
+  @unittest.expectedFailure
+  def test_roll_mismatched_dims(self):
+    with self.assertRaises(RuntimeError):
+      torch.roll(torch.arange(9).reshape(3, 3), 1, dims=(0, 1))
+    with self.assertRaises(RuntimeError):
+      Tensor.arange(9).reshape(3, 3).roll(1, dims=(0, 1))
+
+  @unittest.expectedFailure
+  def test_roll_extra_shift(self):
+    # tinygrad ignores extra shift values instead of raising
+    with self.assertRaises(RuntimeError):
+      torch.roll(torch.arange(10), (1, 2), dims=0)
+    with self.assertRaises(RuntimeError):
+      Tensor.arange(10).roll((1, 2), dims=0)
+
 class TestEdgeCases(unittest.TestCase):
   # we want more like these! add tests here
 
@@ -109,13 +127,6 @@ class TestEdgeCases(unittest.TestCase):
     with Tensor.train():
       out = Tensor.ones(100).dropout(1.0)
       np.testing.assert_allclose(out.numpy(), np.zeros(100))
-
-  @unittest.expectedFailure
-  def test_roll_mismatched_dims(self):
-    with self.assertRaises(RuntimeError):
-      torch.roll(torch.arange(9).reshape(3, 3), 1, dims=(0, 1))
-    with self.assertRaises(RuntimeError):
-      Tensor.arange(9).reshape(3, 3).roll(1, dims=(0, 1))
 
 if __name__ == "__main__":
   unittest.main()
