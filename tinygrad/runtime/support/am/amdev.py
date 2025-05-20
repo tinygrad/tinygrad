@@ -1,20 +1,17 @@
 from __future__ import annotations
 import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib
 from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
-from tinygrad.runtime.autogen.am import am, mp_11_0
+from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
-from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module, import_asic_regs
+from tinygrad.runtime.support.amd import AMDReg, import_hwip_module, import_asic_regs
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
 @dataclasses.dataclass(frozen=True)
-class AMRegister(AMDRegBase):
-  adev:AMDev; hwip:int # noqa: E702
-
-  @property
-  def addr(self): return self.adev.regs_offset[self.hwip][0][self.segment] + self.offset
+class AMRegister(AMDReg):
+  adev:AMDev
 
   def read(self): return self.adev.rreg(self.addr)
   def read_bitfields(self) -> dict[str, int]: return self.decode(self.read())
@@ -382,19 +379,12 @@ class AMDev:
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
 
-  def _ip_module(self, prefix:str, hwip, prever_prefix:str=""): return import_module(prefix, self.ip_ver[hwip], prever_prefix)
+  def _ip_module(self, prefix:str, hwip, prever_prefix:str=""): return import_hwip_module(prefix, self.ip_ver[hwip], prever_prefix)
 
   def _build_regs(self):
-    # mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("HDP", self._ip_module("hdp", am.HDP_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
-    #   ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP)),
-    #   ("NBIO", self._ip_module("nbio" if self.ip_ver[am.GC_HWIP] < (12,0,0) else "nbif", am.NBIO_HWIP))]
-
-    # print(import_asic_regs("gc", self.ip_ver[am.GC_HWIP]))
-
-    mods2 = [("mp", am.MP0_HWIP), ("hdp", am.HDP_HWIP), ("gc", am.GC_HWIP),
-      ("mmhub", am.MMHUB_HWIP), ("osssys", am.OSSSYS_HWIP),
+    mods = [("mp", am.MP0_HWIP), ("hdp", am.HDP_HWIP), ("gc", am.GC_HWIP), ("mmhub", am.MMHUB_HWIP), ("osssys", am.OSSSYS_HWIP),
       ("nbio" if self.ip_ver[am.GC_HWIP] < (12,0,0) else "nbif", am.NBIO_HWIP)]
 
-    for prefix, hwip in mods2:
-      self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, hwip=hwip)))
-    self.__dict__.update(collect_registers(mp_11_0, cls=functools.partial(AMRegister, adev=self, hwip=am.MP1_HWIP)))
+    for prefix, hwip in mods:
+      self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip][0])))
+    self.__dict__.update(import_asic_regs('mp', (11, 0), cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[am.MP1_HWIP][0])))
