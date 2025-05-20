@@ -18,13 +18,17 @@
 # these are not bugs, these are desired behavior. don't add failing tests for them:
 #   tinygrad only accepts tinygrad dtypes or strings of the tinygrad dtype.
 #   boolean indexing, or anything with unknown output shape of tensor at compile time isn't supported.
+#   invalid indexing in things like gather is not an error in tinygrad
+#   repeat_interleave doesn't support a tensor as the dim. check tinygrad type signature before claiming something is a bug
 
 import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, dtypes
 
-class TestEdgeCases(unittest.TestCase):
+class TestEmptyTensorEdgeCases(unittest.TestCase):
+  # we don't need more of these
+
   @unittest.expectedFailure
   def test_sort_empty(self):
     # Sorting an empty tensor works in PyTorch and should return empty
@@ -33,20 +37,6 @@ class TestEdgeCases(unittest.TestCase):
     values, indices = Tensor([]).sort()
     np.testing.assert_equal(values.numpy(), torch_vals.numpy())
     np.testing.assert_equal(indices.numpy(), torch_idxs.numpy().astype(np.int32))
-
-  @unittest.expectedFailure
-  def test_dropout_rate_one(self):
-    # out is full of NaNs it should be 0s
-    with Tensor.train():
-      out = Tensor.ones(100).dropout(1.0)
-      np.testing.assert_allclose(out.numpy(), np.zeros(100))
-
-  @unittest.expectedFailure
-  def test_roll_mismatched_dims(self):
-    with self.assertRaises(RuntimeError):
-      torch.roll(torch.arange(9).reshape(3, 3), 1, dims=(0, 1))
-    with self.assertRaises(RuntimeError):
-      Tensor.arange(9).reshape(3, 3).roll(1, dims=(0, 1))
 
   @unittest.expectedFailure
   def test_max_empty(self):
@@ -62,6 +52,23 @@ class TestEdgeCases(unittest.TestCase):
     torch_out = torch.tensor([], dtype=torch.float32).masked_select(torch.tensor([], dtype=torch.bool))
     out = Tensor([], dtype=dtypes.float32).masked_select(Tensor([], dtype=dtypes.bool))
     np.testing.assert_equal(out.numpy(), torch_out.numpy())
+
+class TestEdgeCases(unittest.TestCase):
+  # we want more like these
+
+  @unittest.expectedFailure
+  def test_dropout_rate_one(self):
+    # out is full of NaNs it should be 0s
+    with Tensor.train():
+      out = Tensor.ones(100).dropout(1.0)
+      np.testing.assert_allclose(out.numpy(), np.zeros(100))
+
+  @unittest.expectedFailure
+  def test_roll_mismatched_dims(self):
+    with self.assertRaises(RuntimeError):
+      torch.roll(torch.arange(9).reshape(3, 3), 1, dims=(0, 1))
+    with self.assertRaises(RuntimeError):
+      Tensor.arange(9).reshape(3, 3).roll(1, dims=(0, 1))
 
 if __name__ == "__main__":
   unittest.main()
