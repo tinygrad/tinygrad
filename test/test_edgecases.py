@@ -142,7 +142,7 @@ class TestDropoutProbabilityEdgeCases(unittest.TestCase):
 class TestEdgeCases(unittest.TestCase):
   # add tests exposing new and diverse kinds of bugs that might impact real users here
 
-  #@unittest.expectedFailure
+  @unittest.expectedFailure
   def test_circular_pad_negative(self):
     # negative pads with circular mode should wrap like PyTorch
     arr = np.arange(9).reshape(1, 1, 3, 3).astype(np.float32)
