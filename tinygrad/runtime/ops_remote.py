@@ -248,6 +248,11 @@ class RemoteAllocator(Allocator['RemoteDevice']):
   def _free(self, opaque:int, options): self.dev.q(BufferFree(opaque))
   def _copyin(self, dest:int, src:memoryview, dtype=None, size=None):
     print("rory copyin type =",dtype,bytes(src),size,len(bytes(src)))
+    if dtype == dtypes.float64:
+      x = b''.join(struct.pack('<f', float(v)) for v in struct.unpack('<' + 'd'*(len(src)//8), src))
+      print("rory x =",x)
+      self.dev.q(CopyIn(dest, self.dev.conn.req.h(x)), wait=True)
+      return
     if len(bytes(src)) == size: #1 byte per item
       print("CONVERT")
       x = bytes(src)
@@ -266,8 +271,19 @@ class RemoteAllocator(Allocator['RemoteDevice']):
       return
 
     self.dev.q(CopyIn(dest, self.dev.conn.req.h(bytes(src))),wait=True)
+
+  def float32_bytes_to_float64_bytes(self,input_bytes):
+      num_floats = len(input_bytes) // 4
+      float32_values = struct.unpack(f'<{num_floats}f', input_bytes)
+      float64_values = [float(x) for x in float32_values]
+      return struct.pack(f'<{num_floats}d', *float64_values)
+
   def _copyout(self, dest:memoryview, src:int,dtype=None):
     resp = self.dev.q(CopyOut(src), wait=True)
+    print("rory resp type =",dtype)
+    if dtype == dtypes.float64:
+      resp = resp[:int(len(resp)/2)]
+      resp = self.float32_bytes_to_float64_bytes(resp)
     if dtype in [dtypes.bool,dtypes.int8,dtypes.uint8,dtypes.uchar]:
       vx_chunks = [resp[i:i+4] for i in range(0, len(resp), 4)]
       resp = bytes(struct.unpack('<I', chunk)[0] for chunk in vx_chunks)

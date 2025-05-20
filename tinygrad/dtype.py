@@ -136,7 +136,7 @@ class dtypes:
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
   bfloat16: Final[DType] = DType.new(12, 2, "__bf16", None)
   float32: Final[DType] = DType.new(13, 4, "float", 'f')
-  float64: Final[DType] = DType.new(14, 8, "double", 'd')
+  float64: Final[DType] = DType.new(14, 8, "float", 'd')
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
