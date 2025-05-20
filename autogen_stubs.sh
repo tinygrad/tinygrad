@@ -350,50 +350,6 @@ generate_am() {
   fixup $BASE/am/soc24.py
 
   clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/mp/mp_13_0_0_offset.h \
-    $AMKERN_INC/asic_reg/mp/mp_13_0_0_sh_mask.h \
-    -o $BASE/am/mp_13_0_0.py
-  fixup $BASE/am/mp_13_0_0.py
-
-  # 14_0_3 reuses 14_0_2
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/mp/mp_14_0_2_offset.h \
-    $AMKERN_INC/asic_reg/mp/mp_14_0_2_sh_mask.h \
-    -o $BASE/am/mp_14_0_3.py
-  fixup $BASE/am/mp_14_0_3.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/mp/mp_11_0_offset.h \
-    $AMKERN_INC/asic_reg/mp/mp_11_0_sh_mask.h \
-    -o $BASE/am/mp_11_0.py
-  fixup $BASE/am/mp_11_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/gc/gc_9_4_3_offset.h \
-    $AMKERN_INC/asic_reg/gc/gc_9_4_3_sh_mask.h \
-    extra/amdpci/overlay/gc_9_4_3.h \
-    -o $BASE/am/gc_9_4_3.py
-  fixup $BASE/am/gc_9_4_3.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/gc/gc_10_3_0_offset.h \
-    $AMKERN_INC/asic_reg/gc/gc_10_3_0_sh_mask.h \
-    -o $BASE/am/gc_10_3_0.py
-  fixup $BASE/am/gc_10_3_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/gc/gc_11_0_0_offset.h \
-    $AMKERN_INC/asic_reg/gc/gc_11_0_0_sh_mask.h \
-    -o $BASE/am/gc_11_0_0.py
-  fixup $BASE/am/gc_11_0_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/gc/gc_12_0_0_offset.h \
-    $AMKERN_INC/asic_reg/gc/gc_12_0_0_sh_mask.h \
-    -o $BASE/am/gc_12_0_0.py
-  fixup $BASE/am/gc_12_0_0.py
-
-  clang2py -k cdefstum \
     extra/hip_gpu_driver/sdma_registers.h \
     $AMKERN_AMD/amdgpu/vega10_sdma_pkt_open.h \
     --clang-args="-I/opt/rocm/include -x c++" \
@@ -415,72 +371,6 @@ generate_am() {
   fixup $BASE/am/sdma_6_0_0.py
 
   clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/mmhub/mmhub_3_0_0_offset.h \
-    $AMKERN_INC/asic_reg/mmhub/mmhub_3_0_0_sh_mask.h \
-    -o $BASE/am/mmhub_3_0_0.py
-  fixup $BASE/am/mmhub_3_0_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/mmhub/mmhub_3_0_2_offset.h \
-    $AMKERN_INC/asic_reg/mmhub/mmhub_3_0_2_sh_mask.h \
-    -o $BASE/am/mmhub_3_0_2.py
-  fixup $BASE/am/mmhub_3_0_2.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/nbio/nbio_2_3_offset.h \
-    $AMKERN_INC/asic_reg/nbio/nbio_2_3_sh_mask.h \
-    -o $BASE/am/nbio_2_3_0.py
-  fixup $BASE/am/nbio_2_3_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/nbio/nbio_7_2_0_offset.h \
-    $AMKERN_INC/asic_reg/nbio/nbio_7_2_0_sh_mask.h \
-    -o $BASE/am/nbio_7_2_0.py
-  fixup $BASE/am/nbio_7_2_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/mmhub/mmhub_4_1_0_offset.h \
-    $AMKERN_INC/asic_reg/mmhub/mmhub_4_1_0_sh_mask.h \
-    -o $BASE/am/mmhub_4_1_0.py
-  fixup $BASE/am/mmhub_4_1_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/nbio/nbio_4_3_0_offset.h \
-    $AMKERN_INC/asic_reg/nbio/nbio_4_3_0_sh_mask.h \
-    -o $BASE/am/nbio_4_3_0.py
-  fixup $BASE/am/nbio_4_3_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/nbif/nbif_6_3_1_offset.h \
-    $AMKERN_INC/asic_reg/nbif/nbif_6_3_1_sh_mask.h \
-    -o $BASE/am/nbif_6_3_1.py
-  fixup $BASE/am/nbif_6_3_1.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/nbio/nbio_7_9_0_offset.h \
-    $AMKERN_INC/asic_reg/nbio/nbio_7_9_0_sh_mask.h \
-    -o $BASE/am/nbio_7_9_0.py
-  fixup $BASE/am/nbio_7_9_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/nbio/nbio_7_11_0_offset.h \
-    $AMKERN_INC/asic_reg/nbio/nbio_7_11_0_sh_mask.h \
-    -o $BASE/am/nbio_7_11_0.py
-  fixup $BASE/am/nbio_7_11_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/oss/osssys_6_0_0_offset.h \
-    $AMKERN_INC/asic_reg/oss/osssys_6_0_0_sh_mask.h \
-    -o $BASE/am/osssys_6_0_0.py
-  fixup $BASE/am/osssys_6_0_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/oss/osssys_7_0_0_offset.h \
-    $AMKERN_INC/asic_reg/oss/osssys_7_0_0_sh_mask.h \
-    -o $BASE/am/osssys_7_0_0.py
-  fixup $BASE/am/osssys_7_0_0.py
-
-  clang2py -k cdefstum \
     $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu_v13_0_0_ppsmc.h \
     $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu13_driver_if_v13_0_0.h \
     extra/amdpci/headers/amdgpu_smu.h \
@@ -495,18 +385,6 @@ generate_am() {
     --clang-args="-include stdint.h" \
     -o $BASE/am/smu_v14_0_3.py
   fixup $BASE/am/smu_v14_0_3.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/hdp/hdp_6_0_0_offset.h \
-    $AMKERN_INC/asic_reg/hdp/hdp_6_0_0_sh_mask.h \
-    -o $BASE/am/hdp_6_0_0.py
-  fixup $BASE/am/hdp_6_0_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/hdp/hdp_7_0_0_offset.h \
-    $AMKERN_INC/asic_reg/hdp/hdp_7_0_0_sh_mask.h \
-    -o $BASE/am/hdp_7_0_0.py
-  fixup $BASE/am/hdp_7_0_0.py
 }
 
 generate_sqtt() {
