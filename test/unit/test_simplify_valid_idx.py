@@ -222,7 +222,7 @@ class TestImageSimplification(unittest.TestCase):
 
     valid = (gidx0<1).ne(True) & (gidx1<1).ne(True)
     load = get_load_image_uop(shape, valid, (gidx0, gidx1-1))
-    self.check(load, "((gidx0<1)!=True)", "gidx0", "(gidx1+-1)")
+    self.check(load, "(0<gidx0)", "gidx0", "(gidx1+-1)")
 
   def test_idx_lt_bound(self):
     # (idx1 < image_bound) ? (..., idx1) : 0 can drop the valid
