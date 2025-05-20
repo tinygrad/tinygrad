@@ -79,6 +79,16 @@ extra_pm = PatternMatcher([
 
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
 
+MAX_UINT32 = 2**32
+def metal_wrap_if_literal(s):
+    import re
+    match = re.fullmatch(r'(\d+)[uU]?', s)
+    if match:
+        value = int(match.group(1))
+        wrapped = value % MAX_UINT32
+        return str(wrapped)
+    return s  # not a literal, leave as-is
+
 class CStyleLanguage(Renderer):
   kernel_prefix: str = ""
   buffer_prefix: str = ""
@@ -98,7 +108,7 @@ class CStyleLanguage(Renderer):
     Ops.SQRT: lambda x,dtype: f"v_sqrt({x})", Ops.RECIP: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
     Ops.EXP2: lambda x,dtype: f"exp2({x})", Ops.LOG2: lambda x,dtype: f"v_log2({x})", Ops.SIN: lambda x,dtype: f"sin({x})",
     Ops.AND: lambda a,b,dtype: f"({a}&{b})" if dtype in [dtypes.int, dtypes.uint] else f"({a}&&{b})", Ops.XOR: lambda a,b,dtype: f"({a}^{b})", Ops.OR: lambda a, b, dtype: f"({a}||{b})" if dtype == dtypes.bool else f"({a}|{b})",
-    Ops.ADD: lambda a,b,dtype: f"({a}+{b})", Ops.SUB: lambda a,b,dtype: f"({a}-{b})", Ops.MUL: lambda a,b,dtype: f"({a}*{b})",
+    Ops.ADD: lambda a, b, dtype: f"({a}+{metal_wrap_if_literal(b)})", Ops.SUB: lambda a,b,dtype: f"({a}-{b})", Ops.MUL: lambda a,b,dtype: f"({a}*{b})",
     Ops.MOD: lambda a,b,dtype: f"({a}%{b})", Ops.IDIV: lambda a,b,dtype: f"({a}/{b})", Ops.CMPNE: lambda a,b,dtype: f"(float({a})!=float({b}))",
     Ops.SHR: lambda a,b,dtype: f"({a}>>{b})", Ops.SHL: lambda a,b,dtype: f"({a}<<{b})", Ops.CMPLT: lambda a, b, dtype: f"(float({a})<float({b}))"
 ,
