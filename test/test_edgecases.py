@@ -13,7 +13,8 @@
 # confirm any bugs found are valid by doing the same thing in pytorch in the test.
 # for any failing tests, explain in a comment why tinygrad is wrong and what the desired behavior should be.
 # don't worry about running mypy or linters. focus on writing more of these tests and running them to confirm broken behavior.
-# surface level bugs, like issues with empty tensors or nans, are not that interesting. focus on bugs that would frustrate real users.
+# surface level bugs, like issues with empty tensors, input validation, or nans, are not that interesting.
+# focus on bugs that would frustrate real users.
 
 # these are not bugs, these are desired behavior. don't add failing tests for them:
 #   tinygrad only accepts tinygrad dtypes or strings of the tinygrad dtype.
@@ -118,8 +119,8 @@ class TestRollEdgeCases(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       Tensor.arange(10).roll((1, 2), dims=0)
 
-class TestEdgeCases(unittest.TestCase):
-  # we want more like these! add tests here
+class TestDropoutProbabilityEdgeCases(unittest.TestCase):
+  # we don't need more of these
 
   @unittest.expectedFailure
   def test_dropout_rate_one(self):
@@ -127,6 +128,21 @@ class TestEdgeCases(unittest.TestCase):
     with Tensor.train():
       out = Tensor.ones(100).dropout(1.0)
       np.testing.assert_allclose(out.numpy(), np.zeros(100))
+
+  @unittest.expectedFailure
+  def test_dropout_invalid_prob(self):
+    # negative dropout probability should raise an error
+    with self.assertRaises(ValueError):
+      torch.nn.functional.dropout(torch.ones(10), -0.1, True)
+    with Tensor.train():
+      out = Tensor.ones(10).dropout(-0.1)
+      np.testing.assert_allclose(out.numpy(), np.ones(10))
+
+
+class TestEdgeCases(unittest.TestCase):
+  # add tests exposing new and diverse kinds of bugs that might impact real users here
+
+  pass
 
 if __name__ == "__main__":
   unittest.main()
