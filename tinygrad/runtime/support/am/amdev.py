@@ -250,7 +250,7 @@ class AMDev:
 
     # Avoid O_CREAT because we don’t want to re-create/replace an existing file (triggers extra perms checks) when opening as non-owner.
     if os.path.exists(lock_name:=temp(f"am_{self.devfmt}.lock")): self.lock_fd = os.open(lock_name, os.O_RDWR)
-    else: self.lock_fd = os.open(lock_name, os.O_RDWR | os.O_CREAT, 0o666)
+    else: self.lock_fd = os.open(lock_name, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o666)
 
     try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError: raise RuntimeError(f"Failed to open AM device {self.devfmt}. It's already in use.")
@@ -315,6 +315,7 @@ class AMDev:
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
+    os.close(self.lock_fd)
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
 
