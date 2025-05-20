@@ -1,7 +1,6 @@
 import unittest
 from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableTraverseContext
 from tinygrad.runtime.support.am.ip import AM_GMC
-from tinygrad.runtime.support.amd import import_module
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import mv_address
