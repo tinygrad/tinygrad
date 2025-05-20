@@ -3,7 +3,7 @@
     .p2align 8 
     .type matmul,@function
 matmul:
-    s_mov_b32 s1, 1000000000
+    s_mov_b32 s1, 1000000
     inner_loop:
         INSTRUCTION
         s_sub_u32 s1, s1, 1
