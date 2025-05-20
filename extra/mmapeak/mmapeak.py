@@ -23,7 +23,7 @@ def launchBenchmark(instruction, vgprCount):
   end = time.perf_counter()
   elapsed = end-start
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP
-  print(instruction, " : ", round(FLOPs/elapsed/10**12, 2), "T(FL)OPS")
+  print("{:<25} : {} T(FL)OPS".format(instruction, round(FLOPs/elapsed/10**12, 2)))
 
 if __name__=="__main__":
   launchBenchmark("v_wmma_bf16_16x16x16_bf16", 8)
