@@ -8,7 +8,7 @@ from tinygrad.engine.search import Opt, OptOps, bufs_from_lin
 from extra.optimization.helpers import time_linearizer
 
 # stuff needed to unpack a kernel
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 

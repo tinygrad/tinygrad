@@ -4,7 +4,7 @@ import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, struct
 from tinygrad.helpers import PROFILE, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent, ProfileProgramEvent
-from tinygrad.ops import sym_infer, sint, Variable, UOp
+from tinygrad.uop.ops import sym_infer, sint, Variable, UOp
 from tinygrad.runtime.autogen import libc
 
 class MMIOInterface:

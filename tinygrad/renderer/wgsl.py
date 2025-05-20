@@ -1,5 +1,5 @@
 from tinygrad.dtype import DType, PtrDType, dtypes
-from tinygrad.ops import UOp, Ops, PatternMatcher, UPat
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, extra_pm
 from tinygrad.helpers import strip_parens
 import math

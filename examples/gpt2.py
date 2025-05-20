@@ -3,7 +3,7 @@ import os, argparse, contextlib
 from typing import Optional, Union
 with contextlib.suppress(ImportError): import tiktoken
 from tinygrad import Tensor, TinyJit, Device, GlobalCounters, Variable, dtypes
-from tinygrad.ops import UOp
+from tinygrad.uop.ops import UOp
 from tinygrad.helpers import Timing, DEBUG, JIT, getenv, fetch, colored, trange
 from tinygrad.nn import Embedding, Linear, LayerNorm
 from tinygrad.nn.state import gguf_load, torch_load, load_state_dict, get_state_dict
