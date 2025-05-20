@@ -5,7 +5,7 @@
 matmul:
     s_mov_b32 s1, 1000000000
     inner_loop:
-        v_wmma_bf16_16x16x16_bf16 v[0:7], v[8:15], v[16:23], v[24:31]
+        INSTRUCTION
         s_sub_u32 s1, s1, 1
         s_cmpk_lg_i32 s1, 0
         s_cbranch_scc1 inner_loop
