@@ -60,6 +60,10 @@ def decode_varint(data, offset):
     shift += 7
     if shift >= 64: raise ValueError("Varint too long")
 
+def unsigned_to_signed_64(uval):
+  if uval & (1 << 63): return uval - (2**64)
+  return uval
+
 def skip_field_value(data, offset, wire_type):
   new_offset = offset
   if wire_type == WIRETYPE_VARINT: _, new_offset = decode_varint(data, new_offset)
@@ -101,8 +105,9 @@ class OnnxParser:
   def _handle_int64_field(self, obj, key_name, data, offset, wire_type, is_repeated=False):
     if wire_type != WIRETYPE_VARINT: raise ValueError(f"Expected varint for int64 field '{key_name}'")
     val, new_offset = decode_varint(data, offset)
-    if is_repeated: obj.setdefault(key_name, []).append(val)
-    else: obj[key_name] = val
+    signed_val = unsigned_to_signed_64(val)
+    if is_repeated: obj.setdefault(key_name, []).append(signed_val)
+    else: obj[key_name] = signed_val
     return new_offset
 
   def _handle_int32_field(self, obj, key_name, data, offset, wire_type, is_repeated=False):
@@ -153,7 +158,8 @@ class OnnxParser:
     current_packed_offset = new_offset
     while current_packed_offset < packed_data_end:
       val, current_packed_offset = decode_varint(data, current_packed_offset)
-      values.append(val)
+      signed_val = unsigned_to_signed_64(val)
+      values.append(signed_val)
     obj.setdefault(key_name, []).extend(values)
     return packed_data_end
 
