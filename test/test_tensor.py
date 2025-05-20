@@ -493,12 +493,11 @@ class TestTinygrad(unittest.TestCase):
     with self.assertRaises(TypeError):
       _a = Tensor([3]) in [Tensor([3]), Tensor([4]), Tensor([5])]
 
-  def test_repr_with_grad(self):
-    a = Tensor([1], requires_grad=True)
-    b = Tensor([1])
-    c = (a + b).sum().backward()
-    print(a)
-    print(c)
+  def test_int_with_grad(self):
+    with self.assertRaises(RuntimeError,msg='Only Tensors of floating point and complex dtype can require gradients.'):
+      a = Tensor([1], requires_grad=True)
+    with self.assertRaises(RuntimeError,msg='Only Tensors of floating point and complex dtype can require gradients.'):
+      b= Tensor([1], requires_grad=True, dtype=dtypes.int)
 
   def test_env_overwrite_default_device(self):
     subprocess.run(['DISK=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT != \\"DISK\\""'],
