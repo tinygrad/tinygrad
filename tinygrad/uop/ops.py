@@ -159,7 +159,7 @@ class Ops(FastEnum):
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
   Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY,
-            Ops.SUB, Ops.FDIV, Ops.POW}
+            Ops.SUB, Ops.FDIV, Ops.POW, Ops.EQ}
   Ternary = {Ops.WHERE, Ops.MULACC}
   ALU = set.union(Unary, Binary, Ternary)
 
