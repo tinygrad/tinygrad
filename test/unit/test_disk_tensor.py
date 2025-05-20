@@ -164,7 +164,7 @@ class TestSafetensors(unittest.TestCase):
   def test_save_all_dtypes(self):
     for dtype in dtypes.fields().values():
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
-      if dtype in [dtypes.double] and Device.DEFAULT == "METAL": continue # not supported on METAL
+      if dtype in [dtypes.double, *dtypes.fp8s] and Device.DEFAULT == "METAL": continue # not supported on METAL
       path = temp(f"ones.{dtype}.safetensors")
       ones = Tensor(np.random.rand(10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
@@ -265,6 +265,14 @@ class TestDiskTensor(unittest.TestCase):
     # test load alt
     reloaded = Tensor.empty(10, 10, device=f"disk:{temp('dt_write_ones')}")
     np.testing.assert_almost_equal(reloaded.numpy(), np.ones((10, 10)))
+
+  def test_simple_setitem(self):
+    pathlib.Path(temp(fn:="dt_simple_setitem")).unlink(missing_ok=True)
+    data = [[1],[2]]
+    src = Tensor(data)
+    dt = src.to(f"disk:{temp(fn)}")
+    dt[1] = [3]
+    self.assertEqual(dt.tolist(), [[1], [3]])
 
   def test_assign_slice(self):
     def assign(x,s,y): x[s] = y

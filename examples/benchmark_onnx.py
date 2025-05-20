@@ -1,5 +1,5 @@
 import sys, time
-from tinygrad import TinyJit, Device, GlobalCounters, fetch, getenv
+from tinygrad import TinyJit, GlobalCounters, fetch, getenv
 from tinygrad.frontend.onnx import OnnxRunner
 from extra.onnx_helpers import get_example_inputs, validate
 

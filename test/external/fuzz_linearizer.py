@@ -25,7 +25,7 @@ from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG, Timing
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.device import is_dtype_supported
 
 def on_linearizer_will_run(): pass
@@ -52,8 +52,6 @@ if getenv("VALIDATE_HCQ"):
 
 def tuplize_uops(uops:list[UOp]) -> tuple:
   return tuple([(x.op, x.dtype, tuple(uops.index(x) for x in x.src), x.arg) for x in uops])
-
-device = Device[Device.DEFAULT]
 
 def get_fuzz_rawbufs(lin):
   rawbufs = bufs_from_lin(lin)
@@ -134,7 +132,6 @@ def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=No
 
   if ground_truth is None and not has_bf16:
     unoptimized = Kernel(lin.ast)
-    unoptimized.required_optimizations()
     if run_linearizer(unoptimized, rawbufs, var_vals)[0] != "PASS":
       return ("BASELINE_ERROR", rawbufs, var_vals, ground_truth, None)
     ground_truth = np.frombuffer(rawbufs[0].as_buffer(), _to_np_dtype(rawbufs[0].dtype)).copy()

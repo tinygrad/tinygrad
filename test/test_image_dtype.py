@@ -1,17 +1,23 @@
 import unittest
 import numpy as np
 from tinygrad import Device, dtypes, Tensor, Context
+from tinygrad.device import LRUAllocator, is_dtype_supported
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.realize import lower_schedule
 from tinygrad.helpers import prod, unwrap
+from test.helpers import REAL_DEV
 
-@unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
+IMAGE_SUPPORTED_DEVICES = ("QCOM", "GPU")
+
+@unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageCopy(unittest.TestCase):
   def test_image_copyout_1x1(self, img_type=dtypes.imagef):
     it = Tensor.arange(4).cast(img_type((1,1,4))).realize()
     buf = it.lazydata.buffer
     out = buf.as_buffer()
     np.testing.assert_equal(out.cast(it.dtype.fmt).tolist(), np.arange(4))
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half, device="PYTHON"), "need half")
   def test_imageh_copyout_1x1(self): self.test_image_copyout_1x1(img_type=dtypes.imageh)
 
   def test_image_numpy_1x1(self, img_type=dtypes.imagef):
@@ -37,7 +43,7 @@ class TestImageCopy(unittest.TestCase):
 
     assert (it == it2).sum().item() == prod(sz)
 
-@unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
+@unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageDType(unittest.TestCase):
   def test_image_and_back(self):
     data = Tensor.randn(9*27*4).realize()
@@ -88,6 +94,7 @@ class TestImageDType(unittest.TestCase):
     imgv = it.numpy()
     np.testing.assert_equal(np.maximum(imgv[:, 0], 0), it[:, 0].relu().numpy())
 
+  @unittest.skipUnless(isinstance(Device.default.allocator, LRUAllocator), "Requires LRU")
   def test_lru_alloc(self):
     data = Tensor.randn(9*27*4).realize()
     it = data.cast(dtypes.imagef((9,27,4))).realize()
@@ -134,7 +141,7 @@ class TestImageDType(unittest.TestCase):
       self.assertEqual(w1.grad.lazydata.base.buffer.dtype, dtypes.float32)
       self.assertEqual(len(sched), 10)
 
-@unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
+@unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageRealization(unittest.TestCase):
   def test_image_dtype_expand(self):
     data = Tensor.randn(9*27*4).realize()

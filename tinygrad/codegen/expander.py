@@ -2,8 +2,7 @@
 
 import functools, itertools, operator
 from tinygrad.helpers import AMX, dedup, flatten, all_same, prod
-from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, graph_rewrite
-from tinygrad.codegen.symbolic import sym
+from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp
 
 def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> int:
   idx, mul = 0, 1
@@ -15,7 +14,7 @@ def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> 
 def _choices_from_args(args:tuple[tuple[int, int], ...]) -> list[dict[int, int]]:
   return [dict(x) for x in itertools.product(*[zip(itertools.repeat(axis), range(m)) for axis,m in args])]
 
-@functools.lru_cache(None)
+@functools.cache
 def _swizzle_args(cargs:tuple[tuple[int, int], ...], eargs:tuple[tuple[int, int], ...], exclude_args:tuple[int, ...]) -> list[int]:
   return [_expand_arg_to_idx(eargs, {**rpk, **{x:0 for x in exclude_args}} if exclude_args else rpk) for rpk in _choices_from_args(cargs)]
 
@@ -50,6 +49,9 @@ def do_expand(root:UOp):
       if root.op is Ops.IF:
         # for the first arg of IF, just pass them through ignoring UNROLLS
         new_srcs.append(src)
+      elif root.op is Ops.REDUCE and src.op is Ops.RANGE:
+        # for any range args of REDUCE, pass them through
+        new_srcs.append(src)
       elif src.dtype.count > 1:
         # put any input dtype > 1 grouped together
         new_srcs.append(UOp(Ops.CAT, src.dtype.scalar().vec(expand_sz*src.dtype.count), (src,)*expand_sz))
@@ -82,7 +84,7 @@ expander = PatternMatcher([
    lambda outer, inner: UOp(Ops.UNROLL, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
   # do expansion
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.GEP, Ops.WMMA, Ops.LOAD, Ops.STORE, Ops.INDEX, Ops.ASSIGN,
-         Ops.VECTORIZE, Ops.IF), name="root", custom_early_reject=set([Ops.UNROLL])), do_expand),
+         Ops.VECTORIZE, Ops.IF, Ops.REDUCE), name="root", custom_early_reject=set([Ops.UNROLL])), do_expand),
   (UPat(Ops.CONTRACT, name="con"), do_contract),
   # vectorize DEFINE_ACC
   (UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_ACC, name="acc"), name="v"),
@@ -98,7 +100,7 @@ expander = PatternMatcher([
 ])
 
 def create_gate(root:UOp) -> UOp|None:
-  @functools.lru_cache(None)
+  @functools.cache
   def _gate_srcs(u:UOp, gate:UOp) -> UOp:
     if u.op is Ops.BARRIER: return u
     if u.op is Ops.LOAD and u.src[-1].op is Ops.BARRIER:
@@ -113,9 +115,24 @@ migrate_indexing = PatternMatcher([
   (UPat(Ops.STORE, name="root"), create_gate),
 ])
 
-def expand_rewrite(sink:UOp) -> UOp:
-  # initial symbolic + migrate indexing (remove this)
-  sink = graph_rewrite(sink, sym+migrate_indexing)
+# **** IGNORE support ****
 
-  # expand
-  return graph_rewrite(sink, sym+expander)
+pm_store_ignore = PatternMatcher([
+  (UPat().index(UPat(), UPat(name="mask")).store(UPat()).named("store"),
+   lambda store,mask: store.replace(src=(store.src[0], UOp(Ops.IGNORE, src=(store.src[1], mask)))) if store.src[1].op is not Ops.IGNORE else None),
+])
+
+pm_move_ignore = PatternMatcher([
+  # IGNORE on SELF is nothing
+  (UPat(Ops.IGNORE, src=(UPat(name="x"), UPat(name="x"))), lambda x: x.const_like(True)),
+  # IGNORE on a CONST is nothing
+  (UPat(Ops.IGNORE, src=(UPat((Ops.CONST, Ops.VCONST), name="c"), UPat())), lambda c: c),
+  # move the IGNOREs
+  (UPat(Ops.IGNORE, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.VECTORIZE), name="alu"), UPat.var("mask")), name="ig"),
+   lambda ig,alu,mask: alu.replace(src=tuple(UOp(Ops.IGNORE, x.dtype, (x, mask)) for x in alu.src))),
+])
+
+pm_delete_ignore = PatternMatcher([
+  # IGNORE on SELF is nothing
+  (UPat(Ops.IGNORE, src=(UPat(name="x"), UPat())), lambda x: x),
+])

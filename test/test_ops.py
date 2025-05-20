@@ -534,6 +534,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y)
     helper_test_op([(), ()], lambda x,y: x/y)
 
+  @unittest.skipIf(getenv("AMD_LLVM", 0), "AMD with LLVM backend generate rcp in FP division causes trunc/floor errors")
   def test_div_rounding_mode(self):
     for denominator in [-10, -5, -3, -2, -1, 1, 2, 3, 5, 10]:
       # int numerator
@@ -570,7 +571,7 @@ class TestOps(unittest.TestCase):
       np.testing.assert_equal(x.numpy(), 2**64 - 1)
     # 1 // 0 is device dependent, but it should not raise
     Tensor([1]).idiv(1).realize()
-    if not (CI and (Device.DEFAULT=="LLVM" or getenv("PTX"))):  # TODO: crashed in CI
+    if not (CI and getenv("PTX")):  # TODO: crashed in PTX CI
       # ... because if might be in a where branch that the output is well defined
       t = Tensor([-1, 0, 1, 2])
       np.testing.assert_equal((t > 0).where(1//t, t).numpy(), [-1, 0, 1, 0])
@@ -585,8 +586,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: 2/x)
 
   def test_mod(self):
-    a = [-4, 7, 5, 4, -7, 8]
-    b = [2, -3, 8, -2, 3, 5]
+    a = [-4, 7, 5, 4, -7, 8, -9]
+    b = [2, -3, 8, -2, 3, 5, -5]
     for float_a in [True, False]:
       for float_b in [True, False]:
         va = [float(ai) for ai in a] if float_a else a
@@ -989,6 +990,26 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,0,4)], lambda x: torch.cumsum(x, dim=1), lambda x: Tensor.cumsum(x, axis=1))
     helper_test_op([(0,3)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
     helper_test_op([(2,3,0)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2))
+
+  def test_small_cumprod(self):
+    helper_test_op([(10)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+  def test_simple_cumprod(self):
+    helper_test_op([(512)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+    helper_test_op([(1022)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+  def test_cumprod(self):
+    helper_test_op([()],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+    self.helper_test_exception([()],lambda x: torch.cumprod(x, dim=1),lambda x: Tensor.cumprod(x, axis=1),expected=IndexError)
+    helper_test_op([(20,)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+    self.helper_test_exception([(20,)],lambda x: torch.cumprod(x, dim=1),lambda x: Tensor.cumprod(x, axis=1),expected=IndexError)
+    self.helper_test_exception([(20,)],lambda x: torch.cumprod(x, dim=-2),lambda x: Tensor.cumprod(x, axis=-2),expected=IndexError)
+    helper_test_op([(20, 30)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+    helper_test_op([(20, 30)],lambda x: torch.cumprod(x, dim=1),lambda x: Tensor.cumprod(x, axis=1))
+    helper_test_op([(20, 30, 40)],lambda x: torch.cumprod(x, dim=2),lambda x: Tensor.cumprod(x, axis=2))
+    helper_test_op([(20, 30, 40)],lambda x: torch.cumprod(x, dim=-1),lambda x: Tensor.cumprod(x, axis=-1))
+  def test_cumprod_zero_axis(self):
+    helper_test_op([(2, 0, 4)],lambda x: torch.cumprod(x, dim=1),lambda x: Tensor.cumprod(x, axis=1))
+    helper_test_op([(0, 3)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
+    helper_test_op([(2, 3, 0)],lambda x: torch.cumprod(x, dim=2),lambda x: Tensor.cumprod(x, axis=2))
 
   def test_small_cummax(self):
     helper_test_op([(10)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
@@ -2452,8 +2473,6 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
 
-  # TODO: linearizer block error
-  @unittest.expectedFailure
   def test_avg_pool3d_failure(self):
     with Context(NOOPT=0):
       helper_test_op([(1,1,16,16,16)],
@@ -2981,6 +3000,14 @@ class TestOpsUint8(unittest.TestCase):
     helper_test_op(None,
       lambda x: x.type(torch.uint8).min(),
       lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
+
+@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
+class TestOpsBFloat16(unittest.TestCase):
+  def test_cast(self):
+    # TODO: helper_test_op breaks in unrelated part
+    # TODO: wrong output with GPU=1 / PYTHON=1 on mac
+    data = [60000.0, 70000.0, 80000.0]
+    np.testing.assert_allclose(Tensor(data).cast("bfloat16").numpy(), torch.tensor(data).type(torch.bfloat16).float().numpy())
 
 if __name__ == '__main__':
   np.random.seed(1337)

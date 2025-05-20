@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import os, multiprocessing, logging, pickle, sqlite3, difflib, functools, warnings
+import os, multiprocessing, logging, pickle, sqlite3, difflib, functools, warnings, itertools
 from typing import Callable, cast
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
-from tinygrad.engine.schedule import create_schedule_with_vars
+from tinygrad.engine.grouper import get_becomes_map
 from tinygrad.codegen.kernel import Kernel, Opt
 from tinygrad.renderer import Renderer
-from tinygrad.ops import UOp
+from tinygrad.uop.ops import UOp, Ops
 
 # *** process replay settings
 
@@ -15,7 +15,6 @@ PAGE_SIZE = getenv("PAGE_SIZE", 100)
 REF = os.getenv("GITHUB_REF_NAME", "")
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 TABLE_NAME = f"process_replay_{VERSION}"
-os.environ["RUN_PROCESS_REPLAY"] = "0"
 os.environ["CAPTURE_PROCESS_REPLAY"] = "0"
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -34,9 +33,12 @@ class ProcessReplayWarning(Warning): pass
 # *** recreators
 
 def recreate_sched(big_sink:UOp) -> list[UOp]:
-  sched, _, __ = create_schedule_with_vars(big_sink)
-  return [x.ast for x in sched]
-def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str) -> str:
+  UOp.unique_num = itertools.count(max([u.arg for u in big_sink.toposort() if u.op is Ops.UNIQUE], default=0)+1)
+  becomes_map = get_becomes_map(big_sink)
+  sched_sink = big_sink.substitute(becomes_map)
+  return [u.arg.ast for u in sched_sink.toposort() if u.op is Ops.KERNEL]
+
+def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str, _) -> str:
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)
   # NOTE: replay with the captured renderer, not the one in master
@@ -45,8 +47,7 @@ def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str) ->
 # *** diff a "good" recreation against the generated version
 
 def diff(offset:int, name:str, fxn:Callable) -> None:
-  # TODO: add this assert back for schedule
-  if ASSERT_DIFF and name != "schedule": warnings.filterwarnings("error", category=ProcessReplayWarning)
+  if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
   if early_stop.is_set(): return None
   conn = db_connection()
   cur = conn.cursor()
@@ -70,9 +71,9 @@ def diff(offset:int, name:str, fxn:Callable) -> None:
       if good is None: continue
     except Exception as e:
       changed += 1
-      warnings.warn(f"FAILED TO RECREATE KERNEL {e}", ProcessReplayWarning)
       if ctx_vars: logging.info(ctx_vars)
       for x in args[:-2]: trunc_log(x)
+      warnings.warn(f"FAILED TO RECREATE KERNEL {e}", ProcessReplayWarning)
       continue
     # diff kernels
     try: assert str(args[-1]) == str(good)
@@ -115,6 +116,7 @@ if __name__ == "__main__":
   for name,fxn in [("schedule", recreate_sched), ("kernel", recreate_kernel)]:
     logging.info(f"***** {name} diff")
     try: _pmap(name, fxn)
+    except ProcessReplayWarning: exit(1)
     except Exception as e:
       if ASSERT_DIFF: raise e
       logging.error(f"{name} diff err {e}")

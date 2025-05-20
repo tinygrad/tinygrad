@@ -19,7 +19,7 @@ def _try_dlopen_amd_comgr():
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
     except OSError: pass
-  raise RuntimeError("library amd_comgr not found")
+  return None
 
 
 def string_cast(char_pointer, encoding='utf-8', errors='strict'):

@@ -3,12 +3,13 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit
-from tinygrad.ops import Ops
-from tinygrad.helpers import CI, Context, OSX
+from tinygrad.uop.ops import Ops
+from tinygrad.helpers import GlobalCounters, CI, Context, OSX
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
 from tinygrad.engine.realize import run_schedule
+from test.helpers import not_support_multi_device
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestNN(unittest.TestCase):
@@ -445,17 +446,18 @@ class TestNN(unittest.TestCase):
   def test_rmsnorm(self):
     class TorchRMSNorm(torch.nn.Module):
       # https://github.com/meta-llama/llama/blob/be327c427cc5e89cc1d3ab3d3fec4484df771245/llama/model.py#L34C1-L77C36
-      def __init__(self, dim: int, eps: float = 1e-6):
+      def __init__(self, dim: int, eps: float = 1e-6, elementwise_affine: bool = True):
         super().__init__()
         self.eps = eps
-        self.weight = torch.nn.Parameter(torch.ones(dim))
+        self.elementwise_affine = elementwise_affine
+        self.weight = torch.nn.Parameter(torch.ones(dim)) if elementwise_affine else None
 
       def _norm(self, x):
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
 
       def forward(self, x):
         output = self._norm(x.float()).type_as(x)
-        return output * self.weight
+        return output if self.weight is None else output * self.weight
 
     B, T, embed_size = 4, 10, 20
     torch_layer = TorchRMSNorm(embed_size)
@@ -475,6 +477,22 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=2e-3, rtol=1e-3)
+
+    torch_layer = TorchRMSNorm(embed_size, elementwise_affine=False)
+    layer = RMSNorm(embed_size, elementwise_affine=False)
+
+    for _ in range(10):
+      # forward
+      x = Tensor.randn(B, T, embed_size, requires_grad=True)
+      z = layer(x)
+      z.sum().backward()
+
+      torch_x = torch.tensor(x.numpy(), requires_grad=True)
+      torch_z = torch_layer(torch_x)
+      torch_z.sum().backward()
+
+      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
+      np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
 
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
@@ -512,14 +530,15 @@ class TestNN(unittest.TestCase):
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
-  def test_embedding_one_kernel(self):
+  def test_embedding_one_kernel(self, ops=41410, kcount=3):
+    GlobalCounters.reset()
     layer = Embedding(20, 30)
     layer.weight = Tensor.zeros_like(layer.weight).contiguous()
     a = Tensor([[1, 5, 9, 11],
                 [12, 19, 8, 1]])
     result = layer(a)
     schedule = result.schedule()
-    self.assertEqual(3, len([item for item in schedule if item.ast.op is Ops.SINK]), "first run realizes arange, weight, and embedding")
+    self.assertEqual(kcount, len([item for item in schedule if item.ast.op is Ops.SINK]), "first run realizes weight and embedding")
     run_schedule(schedule)
 
     b = Tensor([[1, 2, 3],
@@ -529,6 +548,17 @@ class TestNN(unittest.TestCase):
     schedule = result.schedule()
     self.assertEqual(1, len([item for item in schedule if item.ast.op is Ops.SINK]), "second run realizes embedding only")
     run_schedule(schedule)
+    print(f"Embedding used {GlobalCounters.global_ops} ops")
+    self.assertLessEqual(GlobalCounters.global_ops, ops)
+
+  # TODO: fused with opts uses more ops
+  def test_embedding_one_kernel_fused(self):
+    with Context(FUSE_ARANGE=1, NOOPT=0):
+      self.test_embedding_one_kernel(ops=612_000, kcount=2)
+
+  def test_embedding_one_kernel_fused_noopt(self):
+    with Context(FUSE_ARANGE=1, NOOPT=1):
+      self.test_embedding_one_kernel(ops=0, kcount=2)
 
   def test_embedding_shape(self):
     vocab_size, embed_size = 10, 16
@@ -551,7 +581,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_load_state_dict_sharded_model(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
@@ -572,7 +602,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  @unittest.skipIf(not_support_multi_device, "no multi")
   def test_load_state_dict_sharded_dict(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
@@ -589,7 +619,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_load_state_dict_sharded_model_dict_same_axis(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
@@ -610,7 +640,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  @unittest.skipIf(not_support_multi_device, "no multi")
   def test_load_state_dict_sharded_model_dict_different_axis(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
     devices5 = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3", f"{Device.DEFAULT}:4", f"{Device.DEFAULT}:5")

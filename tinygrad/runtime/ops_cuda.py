@@ -34,7 +34,7 @@ class CUDAProgram:
   def __init__(self, dev:CUDADevice, name:str, lib:bytes, smem:int=0):
     self.dev, self.name, self.lib, self.smem = dev, name, lib, smem
     if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
-    if DEBUG >= 6: cuda_disassemble(lib, dev.arch)
+    if DEBUG >= 7: cuda_disassemble(lib, dev.arch)
 
     check(cuda.cuCtxSetCurrent(self.dev.context))
     self.module = cuda.CUmodule()
@@ -62,10 +62,7 @@ class CUDAProgram:
       for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, self.smem, None, None, self.vargs)), enable=wait)
 
-class CUDAAllocator(LRUAllocator):
-  def __init__(self, dev:CUDADevice):
-    self.dev = dev
-    super().__init__()
+class CUDAAllocator(LRUAllocator['CUDADevice']):
   def _alloc(self, size, options:BufferSpec):
     check(cuda.cuCtxSetCurrent(self.dev.context))
     if options.external_ptr: return cuda.CUdeviceptr_v2(options.external_ptr)

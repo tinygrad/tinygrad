@@ -4,8 +4,8 @@ import unittest
 from tinygrad import Tensor
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import UOp, Ops, print_uops
-from tinygrad.spec import type_verify, shape_spec
+from tinygrad.uop.ops import UOp, Ops, print_uops
+from tinygrad.uop.spec import type_verify, shape_spec
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad import dtypes
 from tinygrad.shape.view import View
@@ -15,7 +15,7 @@ def helper_test_verify_ast(*stores:UOp) -> Kernel:
   sink = UOp(Ops.SINK, dtypes.void, stores)
   if DEBUG >= 3:
     for op in stores: print(op)
-  try: type_verify(list(sink.toposort), shape_spec)
+  try: type_verify(list(sink.toposort()), shape_spec)
   except RuntimeError as e: raise InvalidASTException(e.args)
   k = Kernel(sink)
   k.linearize()
@@ -76,9 +76,9 @@ class TestVerifyAST(unittest.TestCase):
   def test_buffer_uops_st(self):
     a = Tensor.randn(4, 4)+2
     helper_test_verify_ast(ast:=a.schedule()[-1].ast)
-    store_st = [u.st for u in ast.toposort if u.op is Ops.STORE][0]
+    store_st = [u.st for u in ast.toposort() if u.op is Ops.STORE][0]
     self.assertEqual(store_st, ShapeTracker.from_shape((4, 4)))
-    const_st = [u.st for u in ast.toposort if u.op is Ops.CONST][0]
+    const_st = [u.st for u in ast.toposort() if u.op is Ops.CONST][0]
     self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
 
   @unittest.skip("questionable if we want this")

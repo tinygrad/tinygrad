@@ -3,20 +3,20 @@ import functools, operator, itertools
 from dataclasses import dataclass
 from typing import Optional, cast, Sequence
 from tinygrad.dtype import dtypes
-from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop
+from tinygrad.uop.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop, Ops
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def canonicalize_strides(shape:tuple[sint, ...], strides:tuple[sint, ...]) -> tuple[sint, ...]:
   return tuple(0 if s == 1 else st for s, st in zip(shape, strides))
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def strides_for_shape(shape:tuple[sint, ...]) -> tuple[sint, ...]:
   if not shape: return ()
   strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
   return canonicalize_strides(shape, strides)
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def merge_dims(shape:tuple[int, ...], strides:tuple[int, ...], mask:Optional[tuple[tuple[int, int], ...]]=None) -> tuple[tuple[int, int, int], ...]:
   # merge contiguous sub-parts or zero strided dims
   # any stride 0, masked from dim=1, or contiguous part is merged into next dim.
@@ -38,7 +38,7 @@ def merge_dims(shape:tuple[int, ...], strides:tuple[int, ...], mask:Optional[tup
     merging = (mask[i][1] - mask[i][0] == 1) if mask is not None else s == 1
   return tuple(ret)
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _reshape_mask(_mask:Optional[tuple[tuple[sint, sint], ...]], old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) \
   -> Optional[tuple[tuple[sint, sint], ...]]:
   """Returns the new mask if reshape is possible, and None if not possible."""
@@ -89,7 +89,7 @@ class View:
 
   def to_indexed_uops(self:View, idxs:Optional[Sequence[UOp]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> tuple[UOp, UOp]:
     """(idx, valid)"""
-    if idxs is None: idxs = [UOp.range(dtypes.int, 0, s, i) for i,s in enumerate(self.shape)]
+    if idxs is None: idxs = [UOp.range(dtypes.int, s, i) for i,s in enumerate(self.shape)]
     iexpr = sint_to_uop(self.offset)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
       if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
@@ -98,16 +98,17 @@ class View:
         if resolve(m[1] != sh): vexpr = vexpr * (idx < m[1])
     return iexpr, vexpr
 
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def size(self) -> int:
     ret = prod([x.vmax if isinstance(x, UOp) else x for x in self.shape])
     assert isinstance(ret, int), f"{ret=} is not int"
     return ret
 
   @staticmethod
-  @functools.lru_cache(maxsize=None)
+  @functools.cache
   def create(shape:tuple[sint, ...], strides:Optional[tuple[sint, ...]]=None, offset:sint=0, mask:Optional[tuple[tuple[sint, sint], ...]]=None):
-    if not all(s >= 0 for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
+    # TODO: resolve shouldn't be needed here
+    if not all(resolve(s >= 0) for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
     # canonicalize 0 in shape
     if 0 in shape: return View(shape, (0,) * len(shape), offset=0, mask=None, contiguous=True)
@@ -131,23 +132,26 @@ class View:
     contiguous = offset == 0 and mask is None and strides == strides_for_shape(shape)
     return View(shape, strides, offset, mask, contiguous)
 
-  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def vars(self) -> set[Variable]:
     flatten_mask = tuple(x for m in self.mask for x in m) if self.mask is not None else tuple()
     return functools.reduce(operator.or_, [x.vars() for x in self.shape+self.strides+(self.offset,)+flatten_mask if isinstance(x, UOp)], set())
 
-  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def unbind(self) -> tuple[View, dict[Variable, int]]:
-    var_unboundvar_val = [(v, v.unbind()) for v in self.vars()]
+    var_unboundvar_val = [(v, v.unbind()) for v in self.vars() if v.op is Ops.BIND]
     unbound_vars = {v:uv for v,(uv,_) in var_unboundvar_val}
-    def substitute(x:sint): return x if isinstance(x, int) else x.substitute(unbound_vars)
-    new_shape = tuple(map(substitute, self.shape))
-    new_strides = tuple(map(substitute, self.strides))
-    new_offset = substitute(self.offset)
-    new_mask = tuple((substitute(x[0]), substitute(x[1])) for x in self.mask) if self.mask is not None else None
-    return View.create(new_shape, new_strides, new_offset, new_mask), dict(x[1] for x in var_unboundvar_val)
+    return self.substitute(unbound_vars), dict(x[1] for x in var_unboundvar_val)
 
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  def substitute(self, dvars:dict[UOp, UOp]):
+    def _substitute(x:sint): return x if isinstance(x, int) else x.substitute(dvars)
+    new_shape = tuple(map(_substitute, self.shape))
+    new_strides = tuple(map(_substitute, self.strides))
+    new_offset = _substitute(self.offset)
+    new_mask = tuple((_substitute(x[0]), _substitute(x[1])) for x in self.mask) if self.mask is not None else None
+    return View.create(new_shape, new_strides, new_offset, new_mask)
+
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, vm1:View) -> Optional[View]:
     vm2 = self
     if vm2.contiguous: return vm1
@@ -196,8 +200,8 @@ class View:
           else: bad = True
           continue
         d1, s1 = term[0]
-        newb[d1] = max(newb[d1], ceildiv(b - o if s1 > 0 else e - o - 1, s1))
-        newe[d1] = min(newe[d1], (b - o if s1 < 0 else e - o - 1) // s1 + 1)
+        newb[d1] = smax(newb[d1], ceildiv(b - o if s1 > 0 else e - o - 1, s1))
+        newe[d1] = smin(newe[d1], (b - o if s1 < 0 else e - o - 1) // s1 + 1)
 
       # If any of vm1 was masked off, try again with that mask in place.
       if any((b, e) != (0, s) for b, e, s in zip(newb, newe, vm1.shape)):
@@ -207,14 +211,14 @@ class View:
 
     return View.create(vm1.shape, tuple(strides), sum(o * s for o, s in zip(origin, vm2.strides)) + vm2.offset)
 
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def invert(self, out_shape:tuple[sint, ...]) -> Optional[View]:
     ret = View.create(self.shape)
     if self.mask: ret = ret.shrink(self.mask)
     ret = ret.flip(tuple(x < 0 for x in self.strides)).permute(argsort(tuple(-x if x > 0 else x for x in self.strides)))
     return ret if prod(ret.shape) == prod(out_shape) else None   # don't support shrink, expand, or stride != (-1, 1)
 
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def minify(self):
     min_shape = tuple(x[0] for x in merge_dims(self.shape, self.strides, self.mask))
     return nv if (nv := self.reshape(min_shape)) else self
@@ -228,7 +232,7 @@ class View:
       mask = tuple([(smax(mx1, mx2), smin(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     return View.create(tuple([y-x for x,y in arg]), self.strides, self.offset+offset, mask)
 
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: tuple[tuple[sint, sint], ...]) -> View:
     assert len(arg) == len(self.shape), f"invalid pad {arg} for {self.shape}"
     # NOTE: not checking for symbolic arg
@@ -239,14 +243,14 @@ class View:
       return self.__unsafe_resize(zvarg, mask=mask)
     return self
 
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def shrink(self, arg: tuple[tuple[sint, sint], ...]) -> View:
     assert len(arg) == len(self.shape), f"invalid shrink {arg} for {self.shape}"
     # NOTE: not checking for symbolic arg
     for s,(b,e) in zip(self.shape,arg): assert not all_int([s,b,e]) or (0<=b<=e<=s), f"invalid shrink {arg} for {self.shape}"
     return self.__unsafe_resize(arg)
 
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def expand(self, new_shape: tuple[sint, ...]) -> View:
     if len(new_shape) != len(self.shape): raise ValueError(f"expand arg {new_shape=} must have same number of dimensions as shape {self.shape=}")
     # NOTE: does not check multiple of symbolic shape
@@ -257,19 +261,19 @@ class View:
                   for m,s,ns in zip(self.mask, self.shape, new_shape)]) if self.mask else None
     return View.create(new_shape, self.strides, self.offset, mask)
 
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def permute(self, axis: tuple[int, ...]) -> View:
     assert sorted(axis) == list(range(len(self.shape))), f"invalid permutation {axis} of len {len(self.shape)}"
     return View.create(tuple(self.shape[a] for a in axis), tuple(self.strides[a] for a in axis), self.offset,
                        tuple(self.mask[a] for a in axis) if self.mask is not None else None)
 
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def flip(self, arg: tuple[bool, ...]) -> View:
     offset = sum((s-1)*z for s,z,f in zip(self.shape, self.strides, arg) if f)
     mask = tuple((s-my,s-mx) if f else (mx,my) for (mx,my),s,f in zip(self.mask, self.shape, arg)) if self.mask is not None else None
     return View.create(self.shape, tuple(-z if f else z for z,f in zip(self.strides, arg)), self.offset+offset, mask)
 
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def reshape(self, new_shape: tuple[sint, ...]) -> Optional[View]:
     if self.shape == new_shape: return self
 

@@ -2,7 +2,7 @@
 import unittest
 import torch
 import numpy as np
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context, GlobalCounters
 if getenv("TINY_BACKEND2"):
   import extra.torch_backend.backend2
   device = "cpu"
@@ -11,6 +11,16 @@ else:
   device = "tiny"
 
 class TestTorchBackend(unittest.TestCase):
+  def test_randperm_generator_out(self):
+    n = 10
+    out = torch.empty(n, dtype=torch.long, device=device)
+    res = torch.randperm(n, out=out).cpu().numpy()
+    np.testing.assert_equal(set(res), set(range(n)))
+    np.testing.assert_equal(out.cpu().numpy(), res)
+
+    res2 = torch.randperm(n).cpu().numpy()
+    np.testing.assert_equal(set(res2), set(range(n)))
+
   def test_numpy_ones(self):
     a = torch.ones(4, device=device)
     np.testing.assert_equal(a.cpu().numpy(), [1,1,1,1])
@@ -55,6 +65,12 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_equal(a[:3].cpu().numpy(), [1,2,3])
     np.testing.assert_equal(a[1:].cpu().numpy(), [2,3,4])
 
+  def test_as_strided(self):
+    a = torch.arange(70, device=device).reshape(1,1,10,7)
+    a = a.as_strided((1,1,10,5), (0,0,7,1), storage_offset=0)
+    a = a.as_strided((1,1,5,5), (50,50,7,1), storage_offset=21)
+    np.testing.assert_equal(a.cpu().numpy().sum(-1), [[[115,150,185,220,255]]])
+
   def test_plus_inplace(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
@@ -66,6 +82,26 @@ class TestTorchBackend(unittest.TestCase):
     a = torch.ones(4, device=device)
     b = a.exp2()
     np.testing.assert_equal(b.cpu().numpy(), [2,2,2,2])
+
+  def test_amax(self):
+    x = torch.tensor([[[ 1.5,  2.3,  3.1,  4.7],
+                       [ 5.2,  6.8,  7.4,  12.9],
+                       [ 9.0, 12.3, 11.6, 10.1]],
+                      [[13.2, 16.9, 15.5, 14.1],
+                       [17.1, 24.9, 19.8, 20.2],
+                       [21.0, 22.3, 23.6, 18.4]]], device=device)
+
+    y1 = torch.amax(x)
+    expected = np.array([24.9], dtype=np.float32)
+    np.testing.assert_equal(y1.cpu().numpy(), expected)
+
+    y2 = torch.amax(x, dim=(1,2))
+    expected = np.array([12.9, 24.9], dtype=np.float32)
+    np.testing.assert_equal(y2.cpu().numpy(), expected)
+
+    y3 = torch.amax(x, dim=2)
+    expected = np.array([[4.7, 12.9, 12.3], [16.9, 24.9, 23.6]], dtype=np.float32)
+    np.testing.assert_equal(y3.cpu().numpy(), expected)
 
   def test_isfinite(self):
     a = torch.ones(4, device=device)
@@ -107,6 +143,33 @@ class TestTorchBackend(unittest.TestCase):
     out = torch.masked_select(a, mask)
     np.testing.assert_equal(out.cpu().numpy(), [4, 3, 2, 1])
 
+  def test_isin_tensor_tensor_out(self):
+    a = torch.tensor([1, 2, 3], device=device)
+    b = torch.tensor([2, 4], device=device)
+    expected_base = torch.tensor([False, True, False], device=device)
+    for assume_unique in [False, True]:
+      for invert, expected in [(False, expected_base), (True, ~expected_base)]:
+        out = torch.empty_like(a, dtype=torch.bool)
+        res = torch.ops.aten.isin.Tensor_Tensor_out(a, b, invert=invert, assume_unique=assume_unique, out=out)
+        np.testing.assert_equal(out.cpu().numpy(), expected.cpu().numpy())
+
+  def test_uniform(self):
+    for torch_dtype in [torch.float32, torch.float16]:
+      a = torch.rand(10, 10, device=device, dtype=torch_dtype)
+      self.assertEqual(a.dtype, torch_dtype)
+
+  def test_normal(self):
+    for torch_dtype in [torch.float32, torch.float16]:
+      a = torch.randn(10, 10, device=device, dtype=torch_dtype)
+      self.assertEqual(a.dtype, torch_dtype)
+
+  def test_equal(self):
+    tensor_a = torch.tensor([[1, 2], [3, 4]], device=device)
+    tensor_b = torch.tensor([[1, 2], [3, 4]], device=device)
+    tensor_c = torch.tensor([[1, 2], [1, 2]], device=device)
+    assert torch.equal(tensor_a, tensor_b)
+    assert not torch.equal(tensor_a, tensor_c)
+
   @unittest.skip("meh")
   def test_str(self):
     a = torch.ones(4, device=device)
@@ -118,6 +181,18 @@ class TestTorchBackend(unittest.TestCase):
     b = torch.tensor([3., 2., 2.], device=device)
     result = a // b
     np.testing.assert_equal(result.cpu().numpy(), [3., 3., 2.])
+
+  def test_mnist_index(self):
+    with Context(FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
+      GlobalCounters.reset()
+      from tinygrad.nn.datasets import mnist
+      X_train, Y_train, _, _ = mnist()
+      X_train = torch.tensor(X_train.float().numpy(), device=device)
+      Y_train = torch.tensor(Y_train.cast('int64').numpy(), device=device)
+      samples = torch.randint(0, X_train.shape[0], (32,))
+      X,Y = X_train[samples], Y_train[samples]
+      X.cpu(), Y.cpu()
+      self.assertLessEqual(GlobalCounters.global_ops, 10_000_000)
 
 if __name__ == "__main__":
   unittest.main()

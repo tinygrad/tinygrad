@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from dataclasses import replace
 from tinygrad import Tensor, Context, Device, dtypes
-from tinygrad.ops import Ops, UOp # noqa: F401 # pylint: disable=unused-import
+from tinygrad.uop.ops import Ops, UOp # noqa: F401 # pylint: disable=unused-import
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, lower_schedule_item
 from tinygrad.engine.search import bufs_from_lin
@@ -40,7 +40,7 @@ def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
   si = out.schedule()[-1]
   k = Kernel(si.ast, opts=Device[Device.DEFAULT].renderer)
   #opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128)] #, Opt(op=OptOps.UNROLL, axis=0, arg=4)]
-  for opt in opts: k.apply_opt(opt)
+  k.apply_opts(opts)
   prg = k.to_program()
   if replace_src is not None:
     old_name = prg.src.split("__attribute__((noinline)) void ")[1].split("(")[0]
@@ -295,7 +295,7 @@ class TestDSPCache(unittest.TestCase):
     opts = [Opt(op=OptOps.UNROLL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=1, arg=32), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
     with Context(DEVECTORIZE=0, QUANTIZE=1):
       k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-      for opt in opts: k.apply_opt(opt)
+      k.apply_opts(opts)
       prg = k.to_program()
       #print(prg.src)
 
