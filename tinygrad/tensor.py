@@ -121,7 +121,7 @@ class Tensor(SimpleMathTrait):
   np.set_printoptions(precision=4)
   ```
   """
-  __slots__ = "lazydata", "requires_grad", "grad"
+  __slots__ = "lazydata", "_requires_grad", "grad"
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
@@ -133,10 +133,6 @@ class Tensor(SimpleMathTrait):
 
     # tensors can have gradients if you have called .backward
     self.grad:Tensor|None = None
-
-    # NOTE: this can be in three states. False and None: no gradient, True: gradient
-    # None (the default) will be updated to True if it's put in an optimizer
-    self.requires_grad:bool|None = requires_grad
 
     # create a UOp from the different types of inputs
     if isinstance(data, UOp):
@@ -171,6 +167,10 @@ class Tensor(SimpleMathTrait):
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
       self.lazydata = data
 
+    # NOTE: this can be in three states. False and None: no gradient, True: gradient
+    # None (the default) will be updated to True if it's put in an optimizer
+    self.requires_grad:bool|None = requires_grad # this is setter method now
+
     # add to all_tensors after construction succeeds
     all_tensors.add(weakref.ref(self))
   def __del__(self): all_tensors.discard(weakref.ref(self))
@@ -179,7 +179,8 @@ class Tensor(SimpleMathTrait):
     new_uop: UOp = fxn(*[t.lazydata for t in (self,)+x], **kwargs)
     if (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = metadata
     needs_input_grad = [t.requires_grad for t in (self,)+x]
-    return Tensor(new_uop, device=new_uop.device, requires_grad=True if any(needs_input_grad) else None if None in needs_input_grad else False)
+    requires_grad = True if any(needs_input_grad) and dtypes.is_float(new_uop.dtype) else None if None in needs_input_grad else False 
+    return Tensor(new_uop, device=new_uop.device, requires_grad=requires_grad)
 
   def _apply_broadcasted_uop(self, fxn:Callable, x:Tensor|ConstType, reverse=False) -> Tensor:
     lhs,rhs = self._broadcasted(x, reverse)
@@ -188,6 +189,14 @@ class Tensor(SimpleMathTrait):
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
     return self
+  
+  @property
+  def requires_grad(self):
+    return self._requires_grad
+  @requires_grad.setter
+  def requires_grad(self, value:bool|None):
+    if value and not dtypes.is_float(self.dtype): raise TypeError("Only Tensors of floating point dtype can require gradients")
+    self._requires_grad = value
 
   class train(ContextDecorator):
     def __init__(self, mode:bool = True): self.mode = mode
