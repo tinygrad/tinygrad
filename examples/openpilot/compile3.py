@@ -12,18 +12,18 @@ from tinygrad.engine.realize import CompiledRunner
 
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
 OUTPUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/openpilot.pkl"
 
 def compile(onnx_file):
-  onnx_model = onnx.load(onnx_file)
+  onnx_model = onnx_load(onnx_file)
   run_onnx = OnnxRunner(onnx_model)
   print("loaded model")
 
-  input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
-  input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input}
+  input_shapes = {inp["name"]:tuple(x["dim_value"] for x in inp["type"]["tensor_type"]["shape"]["dim"]) for inp in onnx_model["graph"]["input"]}
+  input_types = {inp["name"]: tensor_dtype_to_np_dtype(inp["type"]["tensor_type"]["elem_type"]) for inp in onnx_model["graph"]["input"]}
   # Float inputs and outputs to tinyjits for openpilot are always float32
   input_types = {k:(np.float32 if v==np.float16 else v) for k,v in input_types.items()}
   Tensor.manual_seed(100)
