@@ -14,8 +14,8 @@ assemblyTemplate = (pathlib.Path(__file__).parent / "template.s").read_text()
 
 def launchBenchmark(instruction, vgprCount):
   src = assemblyTemplate.replace("INSTRUCTION",
-                                  instruction + " v[0:7], v[8:{}], v[{}:{}], v[{}:{}]"
-                                  .format(8+vgprCount-1, 8+vgprCount, 8+2*vgprCount-1, 8+2*vgprCount, 8+2*vgprCount+8-1))
+                                  instruction + " v[0:7], v[8:{}], v[8:{}], 1"
+                                  .format(8+vgprCount-1, 8+vgprCount-1))
   lib = HIPCompiler("gfx1100").compile(src)
   fxn = AMDProgram(DEV, "matmul", lib)
   start = time.perf_counter()
