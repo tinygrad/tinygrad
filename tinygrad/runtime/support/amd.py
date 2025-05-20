@@ -54,18 +54,18 @@ def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[st
   dir_pref = {"osssys": "oss"}.get(prefix, prefix)
   base_url = "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd/include/asic_reg"
   for ver in fixup_ip_version(prefix, version):
-    offs = fetch(f"{base_url}/{dir_pref}/{prefix}_{'_'.join(map(str, ver))}_offset.h", subdir="asic_regs")
-    sh_mask = fetch(f"{base_url}/{dir_pref}/{prefix}_{'_'.join(map(str, ver))}_sh_mask.h", subdir="asic_regs")
+    offs = _extract_regs(fetch(f"{base_url}/{dir_pref}/{prefix}_{'_'.join(map(str, ver))}_offset.h", subdir="asic_regs").read_text())
+    sh_masks = _extract_regs(fetch(f"{base_url}/{dir_pref}/{prefix}_{'_'.join(map(str, ver))}_sh_mask.h", subdir="asic_regs").read_text())
 
-    offsets_f = _extract_regs(offs.read_text())
-    offsets = {k:v for k,v in offsets_f.items() if _split_name(k)[0] in {'reg', 'mm'} and not k.endswith('_BASE_IDX')}
-    bases = {k[:-len('_BASE_IDX')]:v for k,v in offsets_f.items() if _split_name(k)[0] in {'reg', 'mm'} and k.endswith('_BASE_IDX')}
+    offsets = {k:v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and not k.endswith('_BASE_IDX')}
+    bases = {k[:-len('_BASE_IDX')]:v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and k.endswith('_BASE_IDX')}
 
     fields: defaultdict[str, dict[str, tuple[int, int]]] = defaultdict(dict)
-    for field_name,field_mask in _extract_regs(sh_mask.read_text()).items():
+    for field_name, field_mask in sh_masks.items():
       if not ('__' in field_name and field_name.endswith('_MASK')): continue
       reg_name, reg_field_name = field_name[:-len('_MASK')].split('__')
       fields[reg_name][reg_field_name.lower()] = ((field_mask & -field_mask).bit_length()-1, field_mask.bit_length()-1)
+
     # NOTE: Some registers like regGFX_IMU_FUSESTRAP in gc_11_0_0 are missing base idx, just skip them
     return {reg:cls(name=reg, offset=off, segment=bases[reg], fields=fields[_split_name(reg)[1]]) for reg,off in offsets.items() if reg in bases}
 

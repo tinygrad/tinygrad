@@ -1,7 +1,7 @@
 import unittest
 from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableTraverseContext
 from tinygrad.runtime.support.am.ip import AM_GMC
-from tinygrad.runtime.support.amd import import_hwip_module
+from tinygrad.runtime.support.amd import import_module
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import mv_address
@@ -179,16 +179,16 @@ class TestAMPageTable(unittest.TestCase):
 
 class TestAM(unittest.TestCase):
   def test_imports(self):
-    with self.assertRaises(ImportError): import_hwip_module("gc", (7, 0, 0))
-    x = import_hwip_module("gc", (11, 0, 0))
+    with self.assertRaises(ImportError): import_module("gc", (7, 0, 0))
+    x = import_module("gc", (11, 0, 0))
     assert x.__name__ == "tinygrad.runtime.autogen.am.gc_11_0_0"
-    x = import_hwip_module("gc", (11, 6, 0))
+    x = import_module("gc", (11, 6, 0))
     assert x.__name__ == "tinygrad.runtime.autogen.am.gc_11_0_0"
-    x = import_hwip_module("gc", (12, 0, 0))
+    x = import_module("gc", (12, 0, 0))
     assert x.__name__ == "tinygrad.runtime.autogen.am.gc_12_0_0"
-    x = import_hwip_module("gc", (10, 3, 0))
+    x = import_module("gc", (10, 3, 0))
     assert x.__name__ == "tinygrad.runtime.autogen.am.gc_10_3_0"
-    x = import_hwip_module("gc", (10, 3, 3))
+    x = import_module("gc", (10, 3, 3))
     assert x.__name__ == "tinygrad.runtime.autogen.am.gc_10_3_0"
 
 if __name__ == "__main__":

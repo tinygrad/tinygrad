@@ -870,7 +870,7 @@ class AMDDevice(HCQCompiled):
 
     self.soc = importlib.import_module(f"tinygrad.runtime.autogen.am.{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[self.target[0]])}")
     self.pm4 = importlib.import_module(f"tinygrad.runtime.autogen.am.pm4_{'nv' if self.target[0] >= 10 else 'soc15'}")
-    self.sdma = import_hwip_module('sdma', min(self.dev_iface.ip_versions[am.SDMA0_HWIP], (6, 0, 0)))
+    self.sdma = import_module('sdma', min(self.dev_iface.ip_versions[am.SDMA0_HWIP], (6, 0, 0)))
     self.gc = AMDIP('gc', self.dev_iface.ip_versions[am.GC_HWIP], self.dev_iface.ip_offsets[am.GC_HWIP])
 
     nbio_name = 'nbio' if self.target[0] < 12 else 'nbif'
