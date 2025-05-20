@@ -2,9 +2,9 @@
 from typing import Any, Literal, cast
 import math, operator, struct, functools
 from collections import defaultdict
-from tinygrad.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
+from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType
-from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element
+from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod
 from tinygrad.codegen.transcendental import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
@@ -124,7 +124,10 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
 def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split_rem: bool=False) -> UOp|None:
   # simplify x // y or x % y, None means no change
   # simple cancel div/mod case
-  if y.vmin != 0 != y.vmax and (q:=x.vmin//y.vmin) == x.vmin//y.vmax == x.vmax//y.vmin == x.vmax//y.vmax:
+  x_min, x_max, y_min, y_max = x.vmin, x.vmax, y.vmin, y.vmax
+  assert isinstance(x_min, int) and isinstance(x_max, int) and isinstance(y_min, int) and isinstance(y_max, int)
+
+  if y_min*y_max > 0 and (q:=cdiv(x_min,y_min)) == cdiv(x_min,y_max) == cdiv(x_max,y_min) == cdiv(x_max,y_max):
     return x - q*y if which is Ops.MOD else x.const_like(q)
 
   if (y.op is not Ops.CONST) or ((c := y.arg) <= 0) or (x.dtype.count > 1): return None
@@ -145,8 +148,8 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
 
   # we can fold if the expression has only one non-constant term and this term can only take on two values
   if len(svars)==1 and (v:=svars[0]).vmax-v.vmin == 1:
-    y1 = (factors[0]*v.vmin+const)%c if which is Ops.MOD else (factors[0]*v.vmin+const)//c
-    y2 = (factors[0]*v.vmax+const)%c if which is Ops.MOD else (factors[0]*v.vmax+const)//c
+    y1 = cmod(factors[0]*v.vmin+const, c) if which is Ops.MOD else cdiv(factors[0]*v.vmin+const, c)
+    y2 = cmod(factors[0]*v.vmax+const, c) if which is Ops.MOD else cdiv(factors[0]*v.vmax+const, c)
     return (y2-y1)*(v-v.vmin) + y1
 
   # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
@@ -156,10 +159,9 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
     if which is Ops.MOD: return rem - rem.vmin//c*c
     return sum((f-r)//c * v for f,r,v in zip(factors,rems,svars)) + (const-const%c+rem.vmin//c*c)//c
 
-  if math.gcd(gcd, const)!=1:
-    gcd = math.gcd(gcd, const)
-    ret = UOp(which, x.dtype, src=(sum(f//gcd * v for f,v in zip(factors, svars)) + const//gcd, x.const_like(c//gcd)))
-    return ret*gcd if which is Ops.MOD else ret
+  if (g:=math.gcd(gcd, const))!=1:
+    ret = UOp(which, x.dtype, src=(sum(f//g * v for f,v in zip(factors, svars)) + const//g, x.const_like(c//g)))
+    return ret*g if which is Ops.MOD else ret
 
   if gcd != 1: something_changed = True
   if not something_changed:
@@ -174,7 +176,7 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
       quo += q * v
 
   # if numerator before/after is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
-  if (x.vmin < 0 or rem.vmin < 0) and remainders: return None
+  if (x_min < 0 or rem.vmin < 0) and remainders: return None
   if which is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
   return rem//(c//gcd)+quo
 
@@ -321,6 +323,9 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     except ValueError: return uop  # give up if we cannot parse the valid
     bounds[expr][int(is_upper)] = c
 
+  # don't simplify any other gates, can lead to OOB, we substitute them back later
+  uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
+
   # simplify uop given that valid is True
   for expr,v in bounds.items():
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
@@ -346,6 +351,8 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
         if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
       elif all_same(newuops): uop = newuops[0]
 
+  # put the loads back in
+  uop = uop.substitute({v:k for k,v in load_subs.items()})
   return uop
 
 def _valid_priority(v: UOp, valids:list[UOp]):

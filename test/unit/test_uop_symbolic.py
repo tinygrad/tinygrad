@@ -4,7 +4,7 @@ import unittest, pickle, functools
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen import full_rewrite
 from tinygrad.codegen.devectorizer import sym
-from tinygrad.ops import UOp, Ops, graph_rewrite, sym_infer
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
 
 def render(self) -> tuple[str, ConstType, ConstType]:
@@ -363,6 +363,14 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_partial_remove(self):
     self.helper_test_variable(usum([Variable("idx0", 0, 127)*4, Variable("idx2", 0, 3)])//4, 0, 127, "idx0")
 
+  def test_cdiv_const_evaluation(self):
+    self.helper_test_variable((Variable("a", 0, 2)-12)//8, -1, -1, "-1")
+    self.helper_test_variable((-Variable("a", 0, 2))//7, 0, 0, "0")
+
+  def test_cmod_const_evaluation(self):
+    self.helper_test_variable((Variable("a", 1, 1)*-3)%8, -3, -3, "-3")
+    self.helper_test_variable((-Variable("a", 10, 10))%7, -3, -3, "-3")
+
   def test_div_numerator_negative(self):
     self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -8, 0, "(((idx*10)//11)*-1)")
 
@@ -691,6 +699,12 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(a+b+c, var_vals) == 9
     assert sym_infer(a*b, var_vals) == 6
     assert sym_infer(a*b+c, var_vals) == 10
+  def test_sym_infer_cdiv_cmod(self):
+    a = Variable("a", -1000, 1)
+    b = Variable("b", -1000, 1)
+    var_vals = {a: 1, b: -1000}
+    assert sym_infer(a%b, var_vals) == 1
+    assert sym_infer(a//b, var_vals) == 0
 
 """
 @unittest.skip("not supported on uops yet")

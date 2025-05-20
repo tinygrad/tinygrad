@@ -3,7 +3,7 @@ import itertools, operator, math
 from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, least_upper_dtype
-from tinygrad.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint, sint_to_uop
+from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint, sint_to_uop
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
 from tinygrad.codegen.symbolic import symbolic
