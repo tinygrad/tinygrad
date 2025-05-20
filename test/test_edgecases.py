@@ -142,7 +142,20 @@ class TestDropoutProbabilityEdgeCases(unittest.TestCase):
 class TestEdgeCases(unittest.TestCase):
   # add tests exposing new and diverse kinds of bugs that might impact real users here
 
-  pass
+  #@unittest.expectedFailure
+  def test_circular_pad_negative(self):
+    # negative pads with circular mode should wrap like PyTorch
+    arr = np.arange(9).reshape(1, 1, 3, 3).astype(np.float32)
+    torch_out = torch.nn.functional.pad(torch.tensor(arr), (1, -1, 1, -1), mode='circular')
+    out = Tensor(arr).pad((1, -1, 1, -1), mode='circular')
+    np.testing.assert_equal(out.numpy(), torch_out.numpy())
+
+  @unittest.expectedFailure
+  def test_arange_float_step(self):
+    # float steps should match PyTorch exactly
+    torch_out = torch.arange(0, 2, 0.3).numpy()
+    out = Tensor.arange(0, 2, 0.3).numpy()
+    np.testing.assert_allclose(out, torch_out)
 
 if __name__ == "__main__":
   unittest.main()
