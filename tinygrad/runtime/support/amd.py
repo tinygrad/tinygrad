@@ -11,7 +11,13 @@ class AMDRegBase:
   offset: int
   segment: int
   fields: dict[str, tuple[int, int]]
-  def encode(self, **kwargs) -> int: return functools.reduce(int.__or__, (value << self.fields[name][0] for name,value in kwargs.items()), 0)
+  def encode(self, **kwargs) -> int:
+    from tinygrad import Tensor
+    res = Tensor.zeros((1,), dtype="uint32", device="CPU")
+    for name,value in kwargs.items():
+      res |= (value << self.fields[name][0])
+    return res
+    # return functools.reduce(int.__or__, (value << self.fields[name][0] for name,value in kwargs.items()), 0)
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
 
 def collect_registers(module, cls=AMDRegBase) -> dict[str, AMDRegBase]:

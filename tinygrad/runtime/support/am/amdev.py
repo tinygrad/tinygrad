@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tinygrad import Tensor, dtypes
 import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib
 from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am, mp_11_0
@@ -21,7 +22,9 @@ class AMRegister(AMDRegBase):
 
   def write(self, _am_val:int=0, **kwargs): self.adev.wreg(self.addr, _am_val | self.encode(**kwargs))
 
-  def update(self, **kwargs): self.write(self.encode(**{**self.read_bitfields(), **kwargs}))
+  def update(self, **kwargs):
+    # nkw = {key: Tensor.const(val) if val is int else val for key,val in kwargs.items() if key in self.fields}
+    self.write(self.encode(**{**self.read_bitfields(), **kwargs}))
 
 class AMFirmware:
   def __init__(self, adev):
@@ -97,7 +100,7 @@ class AMFirmware:
 class AMMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
 
 class AMPageTableEntry:
-  def __init__(self, adev, paddr, lv): self.adev, self.paddr, self.lv, self.entries = adev, paddr, lv, adev.vram.view(paddr, 0x1000, fmt='Q')
+  def __init__(self, adev, paddr, lv): self.adev, self.paddr, self.lv, self.entries = adev, paddr, lv, adev.vram[paddr:paddr+0x1000].cast(dtypes.uint64)
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
@@ -237,7 +240,7 @@ class AMMemoryManager:
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
     assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
     paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
-    if zero: self.adev.vram[paddr:paddr+size] = bytes(size)
+    if zero: self.adev.vram[paddr:paddr+size] = Tensor.zeros(size, device="CPU")
     return paddr
 
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)
@@ -268,7 +271,7 @@ class AMDev:
     # all blocks that are initialized only during the initial AM boot.
     # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
     self.is_booting, self.smi_dev = True, False # During boot only boot memory can be allocated. This flag is to validate this.
-    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000004)) and (getenv("AM_RESET", 0) != 1)
+    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000004)).item() and (getenv("AM_RESET", 0) != 1)
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
@@ -310,6 +313,8 @@ class AMDev:
     self.reg("regSCRATCH_REG7").write(am_version)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
+    exit(0)
+
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
@@ -329,7 +334,7 @@ class AMDev:
   def wreg(self, reg:int, val:int):
     if AM_DEBUG >= 4: print(f"am {self.devfmt}: Writing register {reg:#x} with value {val:#x}")
     if reg > len(self.mmio): self.indirect_wreg(reg * 4, val)
-    else: self.mmio[reg] = val
+    else: self.mmio[reg:reg] = val
 
   def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int):
     self.reg(f"{reg_base}{lo_suffix}").write(val & 0xffffffff)
@@ -346,17 +351,17 @@ class AMDev:
   def wait_reg(self, reg:AMRegister, value:int, mask=0xffffffff, timeout=10000) -> int:
     start_time = int(time.perf_counter() * 1000)
     while int(time.perf_counter() * 1000) - start_time < timeout:
-      if ((rval:=reg.read()) & mask) == value: return rval
+      if ((rval:=reg.read().item()) & mask) == value: return rval
     raise RuntimeError(f'wait_reg timeout reg=0x{reg.addr:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
 
   def _run_discovery(self):
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.
     #       The table is located at the end of VRAM - 64KB and is 10KB in size.
     mmRCC_CONFIG_MEMSIZE = 0xde3
-    self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
+    self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE).item() << 20
     tmr_offset, tmr_size = self.vram_size - (64 << 10), (10 << 10)
 
-    self.bhdr = am.struct_binary_header.from_buffer(bytearray(self.vram.view(tmr_offset, tmr_size)[:]))
+    self.bhdr = am.struct_binary_header.from_buffer(bytearray(self.vram[tmr_offset:tmr_offset+tmr_size].numpy()))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE and not ihdr.base_addr_64_bit, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
 
