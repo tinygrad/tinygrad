@@ -41,6 +41,8 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # ignore (for masked stores)
   ret.append(RewriteStep(pm_store_ignore, name="store_ignore"))
   ret.append(RewriteStep(pm_move_ignore, name="move_ignore"))
+  
+  # ret statement for loop splitting here
 
   # expand + remove surviving ignores
   ret.append(RewriteStep(pm_delete_ignore+sym+expander, name="expander"))

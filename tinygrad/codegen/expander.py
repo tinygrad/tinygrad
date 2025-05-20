@@ -115,6 +115,16 @@ migrate_indexing = PatternMatcher([
   (UPat(Ops.STORE, name="root"), create_gate),
 ])
 
+def loop_split(u: UOp) -> UOp | None:
+    #check if needs split
+    #get original store 
+    #loop: 
+        #slice and add
+        # also check here if the dtype matches
+
+    pass
+
+# write pattern matcher following git 
 # **** IGNORE support ****
 
 pm_store_ignore = PatternMatcher([
