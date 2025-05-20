@@ -47,6 +47,14 @@ class TestEmptyTensorEdgeCases(unittest.TestCase):
       Tensor([]).max()
 
   @unittest.expectedFailure
+  def test_argmax_empty(self):
+    # Argmax on an empty tensor should raise an error like torch does.
+    with self.assertRaises(RuntimeError):
+      torch.tensor([]).argmax()
+    with self.assertRaises(RuntimeError):
+      Tensor([]).argmax()
+
+  @unittest.expectedFailure
   def test_masked_select_empty(self):
     # Masked select on empty tensors should return an empty tensor.
     torch_out = torch.tensor([], dtype=torch.float32).masked_select(torch.tensor([], dtype=torch.bool))
