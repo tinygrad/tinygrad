@@ -15,7 +15,7 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
-from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module, setup_pci_bars
+from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, setup_pci_bars
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -508,27 +508,6 @@ class AMDQueueDesc:
     if dev.is_am() and not dev.is_usb() and getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1): dev.dev_iface.adev.gmc.flush_hdp()
     for doorbell in self.doorbells: doorbell[0] = self.put_value
 
-@dataclass(frozen=True)
-class AMDReg(AMDRegBase):
-  ip: AMDIP
-  @property
-  def addr(self): return self.ip.bases[self.segment] + self.offset
-
-@dataclass(frozen=True)
-class AMDIP:
-  name: str
-  version: tuple[int, ...]
-  bases: tuple[int, ...]
-  @functools.cached_property
-  def module(self): return import_module(self.name, self.version)
-  @functools.cached_property
-  def regs(self): return collect_registers(self.module, cls=functools.partial(AMDReg, ip=self))
-  def __getattr__(self, name:str):
-    if name in self.regs: return self.regs[name]
-    # NOTE: gfx10 gc registers always start with mm, no reg prefix
-    if (mmname:=name.replace('reg', 'mm')) in self.regs: return self.regs[mmname]
-    return getattr(self.module, name)
-
 class KFDIface:
   kfd:FileIOInterface|None = None
   event_page:HCQBuffer|None = None
@@ -893,11 +872,10 @@ class AMDDevice(HCQCompiled):
     self.pm4 = importlib.import_module(f"tinygrad.runtime.autogen.am.pm4_{'nv' if self.target[0] >= 10 else 'soc15'}")
     self.sdma = import_module('sdma', min(self.dev_iface.ip_versions[am.SDMA0_HWIP], (6, 0, 0)))
     self.gc = AMDIP('gc', self.dev_iface.ip_versions[am.GC_HWIP], self.dev_iface.ip_offsets[am.GC_HWIP])
-    nbio_ver = self.dev_iface.ip_versions[am.NBIF_HWIP]
-    if nbio_ver[:2] == (3, 3):
-      nbio_ver = (2, 3, 0)
+
+    nbio_name = 'nbio' if self.target[0] < 12 else 'nbif'
     nbio_pad = (0,) if self.target[0] == 9 else ()
-    self.nbio = AMDIP('nbio' if self.target[0]<12 else 'nbif', nbio_ver, nbio_pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
+    self.nbio = AMDIP(nbio_name, self.dev_iface.ip_versions[am.NBIF_HWIP], nbio_pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
 
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x2000 if self.is_usb() else 0x800000, eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
