@@ -1,4 +1,4 @@
-import functools, importlib, re, sys
+import functools, importlib, re
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, round_up, fetch
@@ -17,7 +17,7 @@ class AMDReg:
 
 @dataclass(frozen=True)
 class AMDIP:
-  name:str; version:tuple[int, ...]; bases:tuple[int, ...]; # noqa: E702
+  name:str; version:tuple[int, ...]; bases:tuple[int, ...] # noqa: E702
 
   @functools.cached_property
   def regs(self): return import_asic_regs(self.name, self.version, cls=functools.partial(AMDReg, bases=self.bases))
