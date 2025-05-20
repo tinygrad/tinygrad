@@ -13,7 +13,7 @@
 # confirm any bugs found are valid by doing the same thing in pytorch in the test.
 # for any failing tests, explain in a comment why tinygrad is wrong and what the desired behavior should be.
 # don't worry about running mypy or linters. focus on writing more of these tests and running them to confirm broken behavior.
-# surface level bugs, like issues with empty tensors, are not that interesting. focus on bugs that would frustrate real users.
+# surface level bugs, like issues with empty tensors or nans, are not that interesting. focus on bugs that would frustrate real users.
 
 # these are not bugs, these are desired behavior. don't add failing tests for them:
 #   tinygrad only accepts tinygrad dtypes or strings of the tinygrad dtype.
@@ -25,6 +25,45 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, dtypes
+
+class TestNaNEdgeCases(unittest.TestCase):
+  # we don't need more of these. it's unclear if torch's behavior is desired here
+
+  @unittest.expectedFailure
+  def test_max_nan(self):
+    # Reductions with NaN should propagate NaN like PyTorch.
+    arr = [1.0, float('nan'), 3.0]
+    torch_out = torch.tensor(arr).max().item()
+    out = Tensor(arr).max().numpy()
+    if np.isnan(torch_out):
+      self.assertTrue(np.isnan(out))
+    else:
+      np.testing.assert_equal(out, torch_out)
+
+  @unittest.expectedFailure
+  def test_argmax_nan(self):
+    # PyTorch returns the index of the NaN, tinygrad returns the index of the maximum value.
+    arr = [1.0, float('nan'), 3.0]
+    torch_idx = torch.tensor(arr).argmax().item()
+    idx = Tensor(arr).argmax().item()
+    self.assertEqual(idx, torch_idx)
+
+  @unittest.expectedFailure
+  def test_argmin_nan(self):
+    # Similar to argmax, argmin should return the index of the NaN.
+    arr = [1.0, float('nan'), 0.0]
+    torch_idx = torch.tensor(arr).argmin().item()
+    idx = Tensor(arr).argmin().item()
+    self.assertEqual(idx, torch_idx)
+
+  @unittest.expectedFailure
+  def test_sort_with_nan(self):
+    # Sorting a tensor containing NaN should keep NaN at the end like PyTorch.
+    arr = [1.0, float('nan'), 3.0]
+    torch_vals, torch_idxs = torch.tensor(arr).sort()
+    vals, idxs = Tensor(arr).sort()
+    np.testing.assert_equal(vals.numpy(), torch_vals.numpy())
+    np.testing.assert_equal(idxs.numpy(), torch_idxs.numpy().astype(np.int32))
 
 class TestEmptyTensorEdgeCases(unittest.TestCase):
   # we don't need more of these
@@ -62,7 +101,7 @@ class TestEmptyTensorEdgeCases(unittest.TestCase):
     np.testing.assert_equal(out.numpy(), torch_out.numpy())
 
 class TestEdgeCases(unittest.TestCase):
-  # we want more like these
+  # we want more like these! add tests here
 
   @unittest.expectedFailure
   def test_dropout_rate_one(self):
