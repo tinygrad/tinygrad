@@ -1,29 +1,27 @@
 from typing import Any, Sequence, cast, Literal, Callable, IO
-import dataclasses, functools, io, math, types, os, base64
+import dataclasses, functools, io, math, types, os
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported
 
+# UNDEFINED = 0 FLOAT = 1 UINT8 = 2 INT8 = 3 UINT16 = 4 INT16 = 5 INT32 = 6 INT64 = 7 STRING = 8 BOOL = 9 FLOAT16 = 10 DOUBLE = 11 UINT32 = 12
+# UINT64 = 13 COMPLEX64 = 14 COMPLEX128 = 15 BFLOAT16 = 16
 _DTYPE_ENUM_TO_TINYGRAD_DTYPE_MAP: dict[str, DType] = {
   1: dtypes.float32, 2: dtypes.uint8, 3: dtypes.int8, 4: dtypes.uint16, 5: dtypes.int16, 6: dtypes.int32, 7: dtypes.int64, 9: dtypes.bool,
-  10: dtypes.float32, 11: dtypes.double, 12: dtypes.uint32, 13: dtypes.uint64, 16: dtypes.bfloat16}
+  10: dtypes.float32, 11: dtypes.double, 12: dtypes.uint32, 13: dtypes.uint64, 16: dtypes.bfloat16
+}
 
-_ATTR_TYPE_STR_TO_HANDLER_MAP: dict[str, Callable[[dict], Any]] = {
-  "TENSOR": lambda a: buffer_parse(a['t']),
-  "FLOAT": lambda a: float(a['f']),
-  "FLOATS": lambda a: tuple(float(x) for x in a.get('floats', [])),
-  "INT": lambda a: int(a['i']),
-  "INTS": lambda a: tuple(int(x) for x in a.get('ints', [])),
-  # NOTE: STRING/STRINGS values from MessageToDict are base64 encoded
-  "STRING": lambda a: base64.b64decode(a['s']).decode('utf-8'),
-  "STRINGS": lambda a: tuple(base64.b64decode(s_b64).decode('utf-8') for s_b64 in a.get('strings', []))
+# UNDEFINED = 0 FLOAT = 1 INT = 2 STRING = 3 TENSOR = 4 GRAPH = 5 SPARSE_TENSOR = 11 TYPE_PROTO = 13 FLOATS = 6 INTS = 7 STRINGS = 8
+# TENSORS = 9 GRAPHS = 10 SPARSE_TENSORS = 12 TYPE_PROTOS = 14
+_ATTR_TYPE_ENUM_TO_HANDLER_MAP: dict[str, Callable[[dict], Any]] = {
+  1: lambda a: float(a['f']), 2: lambda a: int(a['i']), 3: lambda a: a['s'].decode('utf-8'), 4: lambda a: buffer_parse(a['t']),
+  6: lambda a: tuple(float(x) for x in a.get('floats', [])), 7: lambda a: tuple(int(x) for x in a.get('ints', [])),
+  8: lambda a: tuple(s.decode('utf-8') for s in a.get('strings', []))
 }
 
 # ***** onnx protobuf parsing ******
-# NOTE: everything that directly use onnx import is in this block
-from onnx import load, helper
-from google.protobuf.json_format import MessageToDict
+from onnx import helper
 import numpy as np
 
 def buffer_parse(onnx_tensor: dict) -> Tensor:
@@ -31,16 +29,11 @@ def buffer_parse(onnx_tensor: dict) -> Tensor:
   dtype, shape = onnx_tensor['data_type'], tuple(int(d) for d in onnx_tensor.get('dims', ()))
   np_dtype = helper.tensor_dtype_to_np_dtype(dtype)
   dtype = dtype_parse(dtype)
-  if data := onnx_tensor.get('float_data') or onnx_tensor.get('double_data') or onnx_tensor.get('int32_data') :
-    if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
-    return Tensor(data, dtype=dtype).reshape(shape).realize()
-  if data := onnx_tensor.get('int64_data') or onnx_tensor.get('uint64_data'):
-    # NOTE: int64 and uint64 are apparently not json compatible? So MessageToDict gives str
-    data = [int(x) for x in data]
+  if data := onnx_tensor.get('float_data') or onnx_tensor.get('double_data') or onnx_tensor.get('int32_data') or onnx_tensor.get('int64_data') \
+     or onnx_tensor.get('uint64_data'):
     if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
     return Tensor(data, dtype=dtype).reshape(shape).realize()
   if data := onnx_tensor.get('raw_data'):
-    data = base64.b64decode(data)
     np_buffer = np.frombuffer(data, dtype=np_dtype).copy().reshape(shape)
     if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
     return Tensor(np_buffer, dtype=dtype)
@@ -53,7 +46,7 @@ def dtype_parse(onnx_dtype: int) -> DType:
 
 def attribute_parse(onnx_attribute: dict):
   attr_type = onnx_attribute['type']
-  handler = _ATTR_TYPE_STR_TO_HANDLER_MAP.get(attr_type)
+  handler = _ATTR_TYPE_ENUM_TO_HANDLER_MAP.get(attr_type)
   if not handler: raise NotImplementedError(f"handler for attribute type {attr_type} is not implemented.")
   return handler(onnx_attribute)
 
@@ -88,14 +81,25 @@ def model_parse(onnx_model: dict):
   nodes = tuple(nodes_list)
   return is_training, values, inputs, outputs, nodes, opset_version
 
+# TODO: del with custom parser
+# This code block is to apply a patch for MessageToDict pecularities with json
+import base64
+from onnx import load
+from google.protobuf.json_format import MessageToDict
+_ATTR_TYPE_ENUM_TO_HANDLER_MAP[3] = lambda d: base64.b64decode(d['s']).decode('utf-8')
+_ATTR_TYPE_ENUM_TO_HANDLER_MAP[8] = lambda d: tuple(base64.b64decode(s) for s in d.get('strings', []))
+def _pre_process(onnx_tensor: dict) -> Tensor:
+  if 'int64_data' in onnx_tensor: return {**onnx_tensor, 'int64_data': [int(d) for d in onnx_tensor['int64_data']]}
+  if 'uint64_data' in onnx_tensor: return {**onnx_tensor, 'uint64_data': [int(d) for d in onnx_tensor['int64_data']]}
+  if 'raw_data' in onnx_tensor: return {**onnx_tensor, 'raw_data': base64.b64decode(onnx_tensor['raw_data'])}
+  return onnx_tensor
+orig_buffer_parse = buffer_parse
+buffer_parse = lambda d: orig_buffer_parse(_pre_process(d))
+
 def model_load(model:str | os.PathLike | bytes | IO[bytes]) -> dict :
   if isinstance(model, bytes): model = io.BytesIO(model)
-  # TODO: remove this load and MessageToDict with new non-onnx parser
-  # the names for the keys should be consistent with b1tg's parser already
-  onnx_model_proto = load(model)
-  # TODO: move the base64 and int() that hack around json string here?
-  # b1tg's parser does not convert it to json string
-  return MessageToDict(onnx_model_proto, preserving_proto_field_name=True)
+  # TODO: replace with custom parser
+  return MessageToDict(load(model), preserving_proto_field_name=True, use_integers_for_enums=True)
 
 # ***** onnx spec *****
 @dataclasses.dataclass(frozen=True)
