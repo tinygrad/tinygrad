@@ -4,10 +4,11 @@
     .type matmul,@function
 matmul:
     s_mov_b32 s1, 1000000
+    s_mov_b32 s2, 0
     inner_loop:
         INSTRUCTION
         s_sub_u32 s1, s1, 1
-        s_cmpk_lg_i32 s1, 0
+        s_cmp_lg_i32 s1, s2
         s_cbranch_scc1 inner_loop
     s_endpgm
 
