@@ -1,81 +1,101 @@
 from typing import Any, Sequence, cast, Literal, Callable, IO
-import dataclasses, functools, io, math, types, os
+import dataclasses, functools, io, math, types, os, base64
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported
 
+_DTYPE_ENUM_TO_TINYGRAD_DTYPE_MAP: dict[str, DType] = {
+  1: dtypes.float32, 2: dtypes.uint8, 3: dtypes.int8, 4: dtypes.uint16, 5: dtypes.int16, 6: dtypes.int32, 7: dtypes.int64, 9: dtypes.bool,
+  10: dtypes.float32, 11: dtypes.double, 12: dtypes.uint32, 13: dtypes.uint64, 16: dtypes.bfloat16}
+
+_ATTR_TYPE_STR_TO_HANDLER_MAP: dict[str, Callable[[dict], Any]] = {
+  "TENSOR": lambda a: buffer_parse(a['t']),
+  "FLOAT": lambda a: float(a['f']),
+  "FLOATS": lambda a: tuple(float(x) for x in a.get('floats', [])),
+  "INT": lambda a: int(a['i']),
+  "INTS": lambda a: tuple(int(x) for x in a.get('ints', [])),
+  # NOTE: STRING/STRINGS values from MessageToDict are base64 encoded
+  "STRING": lambda a: base64.b64decode(a['s']).decode('utf-8'),
+  "STRINGS": lambda a: tuple(base64.b64decode(s_b64).decode('utf-8') for s_b64 in a.get('strings', []))
+}
+
 # ***** onnx protobuf parsing ******
 # NOTE: everything that directly use onnx import is in this block
-from onnx import load, AttributeProto, ModelProto, TensorProto, TypeProto, helper
+from onnx import load, helper
+from google.protobuf.json_format import MessageToDict
 import numpy as np
 
-def dtype_parse(onnx_dtype: int) -> DType:
-  supported: dict[int, DType] = {
-    TensorProto.FLOAT:dtypes.float32, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8,
-    TensorProto.UINT16:dtypes.uint16, TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64,
-    TensorProto.BOOL:dtypes.bool, TensorProto.FLOAT16:dtypes.float32, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32,
-    TensorProto.UINT64:dtypes.uint64, TensorProto.BFLOAT16:dtypes.bfloat16,
-  }
-  unsupported = {
-    TensorProto.UNDEFINED, TensorProto.STRING, TensorProto.COMPLEX64, TensorProto.COMPLEX128, TensorProto.FLOAT8E4M3FN, TensorProto.FLOAT8E4M3FNUZ,
-    TensorProto.FLOAT8E5M2, TensorProto.FLOAT8E5M2FNUZ, TensorProto.UINT4, TensorProto.INT4
-  }
-  if onnx_dtype in unsupported: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
-  return supported[onnx_dtype] if is_dtype_supported(supported[onnx_dtype]) else dtypes.float
-
-def attribute_parse(onnx_attribute: AttributeProto):
-  supported: dict[AttributeProto.AttributeType, Callable[[AttributeProto], Any]] = {
-    AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i),
-    AttributeProto.STRING: lambda a: a.s.decode("utf-8"), AttributeProto.TENSOR: lambda a: buffer_parse(a.t),
-    AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats), AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints),
-    AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)
-  }
-  unsupported = {
-    AttributeProto.UNDEFINED, AttributeProto.GRAPH, AttributeProto.SPARSE_TENSOR, AttributeProto.TYPE_PROTO, AttributeProto.TENSORS,
-    AttributeProto.GRAPHS, AttributeProto.SPARSE_TENSORS, AttributeProto.TYPE_PROTOS
-  }
-  if onnx_attribute.type in unsupported:
-    raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(onnx_attribute.type)} is not supported")
-  return supported[onnx_attribute.type](onnx_attribute)
-
-def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
-  if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
-  dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
-  if data := list(onnx_tensor.float_data) or list(onnx_tensor.int32_data) or list(onnx_tensor.int64_data) or list(onnx_tensor.double_data) or \
-             list(onnx_tensor.uint64_data):
+def buffer_parse(onnx_tensor: dict) -> Tensor:
+  if onnx_tensor.get('string_data'): raise NotImplementedError("Parsing for buffer with string data is not implemented.")
+  dtype, shape = onnx_tensor['data_type'], tuple(int(d) for d in onnx_tensor.get('dims', ()))
+  np_dtype = helper.tensor_dtype_to_np_dtype(dtype)
+  dtype = dtype_parse(dtype)
+  if data := onnx_tensor.get('float_data') or onnx_tensor.get('double_data') or onnx_tensor.get('int32_data') :
     if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
     return Tensor(data, dtype=dtype).reshape(shape).realize()
-  if onnx_tensor.HasField("raw_data"):
-    np_buffer = np.frombuffer(onnx_tensor.raw_data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
+  if data := onnx_tensor.get('int64_data') or onnx_tensor.get('uint64_data'):
+    # NOTE: int64 and uint64 are apparently not json compatible? So MessageToDict gives str
+    data = [int(x) for x in data]
+    if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
+    return Tensor(data, dtype=dtype).reshape(shape).realize()
+  if data := onnx_tensor.get('raw_data'):
+    data = base64.b64decode(data)
+    np_buffer = np.frombuffer(data, dtype=np_dtype).copy().reshape(shape)
     if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
     return Tensor(np_buffer, dtype=dtype)
   return Tensor(None)
 
-def type_parse(onnx_type: TypeProto):
-  elem_type = onnx_type
-  if elem_type.HasField("map_type") or elem_type.HasField("sparse_tensor_type") or elem_type.HasField("opaque_type"):
-    raise NotImplementedError("parsing for map_type, sparse_tensor_type and opaque_type are not implemented")
-  if is_optional := elem_type.HasField("optional_type"): elem_type = elem_type.optional_type.elem_type
-  if is_sequence := elem_type.HasField("sequence_type"): elem_type = elem_type.sequence_type.elem_type
-  if elem_type.HasField("tensor_type"):
-    shape = tuple(d.dim_param or d.dim_value for d in elem_type.tensor_type.shape.dim)
-    dtype = dtype_parse(elem_type.tensor_type.elem_type)
-    return OnnxValue(shape, dtype, is_optional, is_sequence)
-  raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
+def dtype_parse(onnx_dtype: int) -> DType:
+  dtype = _DTYPE_ENUM_TO_TINYGRAD_DTYPE_MAP.get(onnx_dtype)
+  if dtype is None: raise NotImplementedError(f"onnx dtype {onnx_dtype} is not in the supported tinygrad mapping.")
+  return dtype if is_dtype_supported(dtype) else dtypes.float32
 
-def model_load(model:str | os.PathLike | bytes | IO[bytes]):
-  return load(io.BytesIO(model) if isinstance(model, bytes) else model)
+def attribute_parse(onnx_attribute: dict):
+  attr_type = onnx_attribute['type']
+  handler = _ATTR_TYPE_STR_TO_HANDLER_MAP.get(attr_type)
+  if not handler: raise NotImplementedError(f"handler for attribute type {attr_type} is not implemented.")
+  return handler(onnx_attribute)
 
-def model_parse(onnx_model: ModelProto):
-  is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in onnx_model.graph.node)
-  opset_version = onnx_model.opset_import[0].version
-  values = {"": None, **{x.name:buffer_parse(x) for x in onnx_model.graph.initializer}}
-  inputs = {inp.name: type_parse(inp.type) for inp in onnx_model.graph.input if inp.name not in values}
-  outputs = tuple(x.name for x in onnx_model.graph.output)
-  nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
-                for num,n in enumerate(onnx_model.graph.node))
+def type_parse(onnx_type: dict):
+  elem_type_dict = onnx_type
+  if 'map_type' in elem_type_dict or 'sparse_tensor_type' in elem_type_dict or 'opaque_type' in elem_type_dict:
+    raise NotImplementedError("Parsing for map_type, sparse_tensor_type, and opaque_type is not implemented.")
+  if is_optional := 'optional_type' in elem_type_dict: elem_type_dict = elem_type_dict['optional_type']['elem_type']
+  if is_sequence := 'sequence_type' in elem_type_dict: elem_type_dict = elem_type_dict['sequence_type']['elem_type']
+  if 'tensor_type' in elem_type_dict:
+    tensor_type_info = elem_type_dict['tensor_type']
+    shape_dims = tensor_type_info.get('shape', {}).get('dim', [])
+    parsed_shape = tuple(d.get('dim_param') or d.get('dim_value') for d in shape_dims)
+    dtype = dtype_parse(tensor_type_info['elem_type'])
+    return OnnxValue(parsed_shape, dtype, is_optional, is_sequence)
+  raise RuntimeError(f"TypeProto dictionary was not parsed properly: {onnx_type=}")
+
+def model_parse(onnx_model: dict):
+  opset_version = int(onnx_model['opset_import'][0]['version'])
+  graph = onnx_model['graph']
+  initializers, nodes, inputs, outputs = [graph.get(key, []) for key in ('initializer', 'node', 'input', 'output')]
+  is_training = any(n.get("domain") in {"ai.onnx.training", "ai.onnx.preview.training"} for n in nodes)
+  values = {"": None, **{x['name']:buffer_parse(x) for x in initializers}}
+  inputs = {inp['name']: type_parse(inp['type']) for inp in inputs if inp['name'] not in values}
+  outputs = tuple(out['name'] for out in outputs)
+  nodes_list = []
+  for i, node_dict in enumerate(nodes):
+    attributes = {attr_dict['name']: attribute_parse(attr_dict) for attr_dict in node_dict.get('attribute', [])}
+    node_inputs = tuple(node_dict.get('input', []))
+    node_outputs = tuple(node_dict.get('output', []))
+    nodes_list.append(OnnxNode(num=i, op=node_dict['op_type'], inputs=node_inputs, outputs=node_outputs, opts=attributes))
+  nodes = tuple(nodes_list)
   return is_training, values, inputs, outputs, nodes, opset_version
+
+def model_load(model:str | os.PathLike | bytes | IO[bytes]) -> dict :
+  if isinstance(model, bytes): model = io.BytesIO(model)
+  # TODO: remove this load and MessageToDict with new non-onnx parser
+  # the names for the keys should be consistent with b1tg's parser already
+  onnx_model_proto = load(model)
+  # TODO: move the base64 and int() that hack around json string here?
+  # b1tg's parser does not convert it to json string
+  return MessageToDict(onnx_model_proto, preserving_proto_field_name=True)
 
 # ***** onnx spec *****
 @dataclasses.dataclass(frozen=True)
