@@ -772,7 +772,7 @@ jobs:
     - name: Install playwright
       run: python -m pip install playwright && playwright install
     - name: Run WEBGPU Efficientnet
-      run: python -m pytest -n=auto test/web/test_browser_apps.py::TestBrowserModels::test_efficientnet
+      run: BROWSER_TESTS=1 python -m pytest -n=auto test/web/test_browser_apps.py::TestBrowserModels::test_efficientnet
 
   osxremote:
     name: MacOS (remote metal)

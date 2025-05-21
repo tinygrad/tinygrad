@@ -19,6 +19,7 @@ class HTTPServerThread:
     self._server.server_close()
     self._thread.join()
 
+@unittest.skipUnless("BROWSER_TESTS" in os.environ, "browser tests need playwright dependency")
 class TestBrowserModels(unittest.IsolatedAsyncioTestCase):
   @classmethod
   def setUpClass(cls):
