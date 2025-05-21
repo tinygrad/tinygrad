@@ -4,6 +4,7 @@ import unittest, pickle, functools
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen import full_rewrite
 from tinygrad.codegen.devectorizer import sym
+from tinygrad.helpers import Context
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
 
@@ -322,8 +323,16 @@ class TestSymbolic(unittest.TestCase):
   def test_div_cancel(self):
     self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(b+-1)")
 
+  def test_div_cancel_correct(self):
+    with Context(CORRECT_DIVMOD_FOLDING=1):
+      self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(((a+(b*20))+-20)//20)")
+
   def test_mod_cancel(self):
     self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, 0, 20, "(a*2)")
+
+  def test_mod_cancel_correct(self):
+    with Context(CORRECT_DIVMOD_FOLDING=1):
+      self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, -38, 38, "((((a+(b*20))+-20)%20)*2)")
 
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
