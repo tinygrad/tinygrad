@@ -190,7 +190,7 @@
             drawBoxes(offscreenCanvas, validBoxes, targetWidth, targetHeight, offsetX, offsetY);
             requestAnimationFrame(processFrame);
         }
-        requestAnimationFrame(processFrame);
+        //requestAnimationFrame(processFrame);
 
         function drawBoxes(offscreenCanvas, boxes, targetWidth, targetHeight, offsetX, offsetY) {
             const ctx = document.querySelector("canvas").getContext("2d");
@@ -250,6 +250,44 @@
             })
         }
 
+        async function validateModel() {
+            try {
+                if (!net) {
+                    let device = await getDevice();
+                    if (!device) throw new Error("WebGPU not supported");
+                    net = await yolov8.load(device, "./net.safetensors");
+                    loadingContainer.style.display = "none";
+                }
+
+                const response = await fetch("https://upload.wikimedia.org/wikipedia/commons/d/da/Norwegian_hen.jpg");
+                const blob = await response.blob();
+
+                const img = new Image();
+                img.crossOrigin = "anonymous";
+                img.onload = async () => {
+                    canvas.width  = img.width;
+                    canvas.height = img.height;
+                    context.clearRect(0, 0, canvas.width, canvas.height);
+                    context.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    offscreenContext.clearRect(0, 0, modelInputSize, modelInputSize);
+                    offscreenContext.drawImage(img, 0, 0, modelInputSize, modelInputSize);
+                    const input = await prepareInput(offscreenContext);
+                    const output = await net(new Float32Array(input));
+                    console.log("YOLOv8 output:", output);
+                    const raw = output[0];
+                    const validBoxes = [];
+                    for (let i = 0; i < raw.length; i += 6)
+                        if (raw[i + 4] > 0) validBoxes.push([raw[i], raw[i + 1], raw[i + 2], raw[i + 3], raw[i + 5]]);
+                    drawBoxes(offscreenCanvas, validBoxes, modelInputSize, modelInputSize, 0, 0);
+                };
+                img.src = URL.createObjectURL(blob);
+            } catch (e) {
+                wgpuError.textContent = `Validation failed: ${e.message}`;
+                wgpuError.style.display = "block";
+                loadingContainer.style.display = "none";
+            }
+        }
+
         const getDevice = async () => {
             if (!navigator.gpu) return false;
             const adapter = await navigator.gpu.requestAdapter();
@@ -279,6 +317,13 @@
         }
 
         const classColors = generateColors(yolo_classes.length);
+
+        const params = new URLSearchParams(window.location.search);
+        if (params.has("VALIDATE")) {
+            validateModel();
+        } else {
+            requestAnimationFrame(processFrame);
+        }
     </script>
 </body>
 </html>
