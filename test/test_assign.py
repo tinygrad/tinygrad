@@ -26,6 +26,7 @@ class TestAssign(unittest.TestCase):
     a.assign(Tensor.ones(10,10))
     b = Tensor.zeros(10,10).contiguous()
     a.realize()
+    np.testing.assert_allclose(a.numpy(), 1)
     np.testing.assert_allclose(b.numpy(), 0)
 
   def test_assign_zeros(self):
