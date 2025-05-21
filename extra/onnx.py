@@ -63,7 +63,8 @@ def type_parse(onnx_type: TypeProto):
   if is_optional := has_field(elem_type, "optional_type"): elem_type = elem_type.optional_type.elem_type
   if is_sequence := has_field(elem_type, "sequence_type"): elem_type = elem_type.sequence_type.elem_type
   if has_field(elem_type, "tensor_type"):
-    shape = tuple(getattr(d, "dim_param", None) or getattr(d, "dim_value") for d in elem_type.tensor_type.shape.dim) # oneof type, raise if both miss
+    shape = tuple(getattr(d, "dim_param", None) or getattr(d, "dim_value") for d in elem_type.tensor_type.shape.dim) \
+      if has_field(elem_type.tensor_type, "shape") else None # test_identity_sequence_cpu
     dtype = dtype_parse(elem_type.tensor_type.elem_type)
     return OnnxValue(shape, dtype, is_optional, is_sequence)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")

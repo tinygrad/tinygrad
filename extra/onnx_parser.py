@@ -63,7 +63,7 @@ def onnx_load(model_path):
   return model
 
 class OnnxParser:
-  def _parse_message(self, data, offset, message_field_handlers, initial_obj_factory=lambda: {}):
+  def _parse_message(self, data, offset, message_field_handlers, initial_obj_factory=lambda: {}, debug=False):
     obj = initial_obj_factory()
     current_offset = offset
     end_offset = len(data)
@@ -71,6 +71,7 @@ class OnnxParser:
       tag_val, after_tag_offset = decode_varint(data, current_offset)
       field_number = tag_val >> 3
       wire_type = tag_val & 0x07
+      if debug: print(f"DEBUG _parse_message: {field_number=}, {wire_type=}")
       if handler := message_field_handlers.get(field_number): current_offset = handler(obj, data, after_tag_offset, wire_type)
       else: current_offset = skip_field_value(data, after_tag_offset, wire_type)
     return obj, current_offset
@@ -102,6 +103,7 @@ class OnnxParser:
         elif len(config) == 4: fid, name, repeated, parser_fn = config
         res[fid] = lambda obj, data, off, wt, h=handler_fn, n=name, p=parser_fn, r=repeated: h(obj, n, data, off, wt, parser_func=p, is_repeated=r)
     return res
+
   # WIRETYPE_LENGTH_DELIMITED
   def _handle_delimited(self, data, offset):
     str_len, after_len_offset = decode_varint(data, offset)
@@ -109,17 +111,20 @@ class OnnxParser:
     if new_offset + str_len > len(data): raise EOFError("Buffer too short")
     value = data[new_offset : new_offset + str_len]
     return value, new_offset + str_len
+
   def _handle_string_field(self, obj, key_name, data, offset, wire_type, parser_func=None, is_repeated=False):
     if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for string field '{key_name}'")
     value, off = self._handle_delimited(data, offset)
     value = value.decode('utf-8')
     gen_result(obj, key_name, value, is_repeated)
     return off
+
   def _handle_bytes_field(self, obj, key_name, data, offset, wire_type, parser_func=None, is_repeated=False):
     if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for bytes field '{key_name}'")
     value, off = self._handle_delimited(data, offset)
     gen_result(obj, key_name, value, is_repeated)
     return off
+
   def _handle_packed_repeated_floats(self, obj, key_name, data, offset, wire_type, parser_func=None, is_repeated=False):
     if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError("Packed floats expected length_delimited")
     value, off = self._handle_delimited(data, offset)
@@ -130,15 +135,12 @@ class OnnxParser:
 
   def _handle_packed_repeated_int64s(self, obj, key_name, data, offset, wire_type, parser_func=None, is_repeated=False):
     if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError("Packed int64s expected length_delimited")
-    total_bytes_len, after_len_offset = decode_varint(data, offset)
-    new_offset = after_len_offset
-    packed_data_end = new_offset + total_bytes_len
+    total_bytes_len, current_packed_offset = decode_varint(data, offset)
+    packed_data_end = current_packed_offset + total_bytes_len
     values = []
-    current_packed_offset = new_offset
     while current_packed_offset < packed_data_end:
       val, current_packed_offset = decode_varint(data, current_packed_offset)
-      signed_val = unsigned_to_signed_64(val)
-      values.append(signed_val)
+      values.append(unsigned_to_signed_64(val))
     obj.setdefault(key_name, []).extend(values)
     return packed_data_end
 
@@ -188,12 +190,18 @@ class OnnxParser:
   def parse_type_proto_optional(self, data_bytes, offset=0): return self._parse_message(data_bytes, offset, self.gen_handlers({
     self._handle_sub_message_field: ((1, 'elem_type', False, self.parse_type_proto),)}))
 
+  # TypeProto.Sequence
+  def parse_type_proto_sequence(self, data_bytes, offset=0): return self._parse_message(data_bytes, offset, self.gen_handlers({
+    self._handle_sub_message_field: ((1, 'elem_type', False, self.parse_type_proto),)}))
+
   # TypeProto: Types, The standard ONNX data types.
   def parse_type_proto(self, data_bytes, offset=0):
     return self._parse_message(data_bytes, offset, self.gen_handlers({
       self._handle_sub_message_field: ((1, 'tensor_type', False, self.parse_type_proto_tensor),
+                                       (4, 'sequence_type', False, self.parse_type_proto_sequence),
                                        (9, 'optional_type', False, self.parse_type_proto_optional)),
       self._handle_string_field: ((6, 'denotation'),)}))
+
   # ValueInfoProto
   def parse_value_info_proto(self, data_bytes, offset=0):
     handlers = self.gen_handlers({
