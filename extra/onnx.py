@@ -63,7 +63,7 @@ def type_parse(onnx_type: TypeProto):
   if is_optional := has_field(elem_type, "optional_type"): elem_type = elem_type.optional_type.elem_type
   if is_sequence := has_field(elem_type, "sequence_type"): elem_type = elem_type.sequence_type.elem_type
   if has_field(elem_type, "tensor_type"):
-    shape = tuple(getattr(d, "dim_param", None) or getattr(d, "dim_value", None) for d in elem_type.tensor_type.shape.dim)
+    shape = tuple(getattr(d, "dim_param", None) or getattr(d, "dim_value") for d in elem_type.tensor_type.shape.dim) # oneof type, raise if both miss
     dtype = dtype_parse(elem_type.tensor_type.elem_type)
     return OnnxValue(shape, dtype, is_optional, is_sequence)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
@@ -116,7 +116,7 @@ limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
   def __init__(self, model: ModelProto|SimpleNamespace):
     # parse model protobuf
-    self.is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model.graph.node if has_field(n, "domain"))
+    self.is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model.graph.node)
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
     Tensor.training = True if self.is_training else False
     Tensor.no_grad = False if self.is_training else True
