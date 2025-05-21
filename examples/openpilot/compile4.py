@@ -17,8 +17,8 @@ if __name__ == "__main__":
   onnx_model = onnx.load(onnx_file)
   run_onnx = OnnxRunner(onnx_model)
 
-  inputs = run_onnx.get_empty_input_data()
-  out: Tensor = next(iter(run_onnx(inputs).values()))
+  inputs = run_onnx.get_empty_input_data("npy")
+  out: Tensor = next(iter(run_onnx({k:v.to(None) for k,v in inputs.items()}).values())).to('cpu')
   root = out.lazydata
   targets = [x.lazydata for x in inputs.values()]
   print(targets)
@@ -38,14 +38,15 @@ if __name__ == "__main__":
   kernelized = get_becomes_map(independent)
   independent = independent.substitute(kernelized)
   schedule, var_vals, becomes_map = create_schedule_with_vars(independent)
-  #run_schedule(schedule)
-
+  run_schedule(schedule)
 
   print("**** real ****")
   GlobalCounters.reset()
   out.lazydata = root.substitute(kernelized).substitute(becomes_map)
-  out.realize()
+  out.kernelize()
 
+  # realize
+  out.realize()
 
   #_apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
 
