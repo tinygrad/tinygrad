@@ -45,6 +45,20 @@ class TestBrowserModels(unittest.IsolatedAsyncioTestCase):
       await page.wait_for_function("() => document.querySelector('#result').textContent.trim() === 'hen'", timeout=60_000)
       await browser.close()
 
+  async def test_yolov8(self):
+    async with async_playwright() as p:
+      browser = await p.chromium.launch(headless=False, args=["--enable-unsafe-webgpu"])
+      page = await browser.new_page()
+      url = f"http://{self.http.host}:{self.http.port}/examples/webgpu/yolov8/?VALIDATE=1"
+      resp = await page.goto(url)
+      self.assertIsNotNone(resp)
+      self.assertEqual(resp.status, 200)
+      await page.wait_for_selector("#validate-output:not(:empty)", timeout=30_000)
+      raw = await page.text_content("#validate-output")
+      text = raw.replace("\r\n", "\n").strip()
+      self.assertEqual(text, "label: bird")
+      await browser.close()
+
   async def test_tinychat(self):
     async with async_playwright() as p:
       browser = await p.chromium.launch(headless=False, args=["--enable-features=Vulkan", "--enable-unsafe-webgpu"])

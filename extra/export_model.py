@@ -111,7 +111,7 @@ const {model_name}_name_to_id = Object.fromEntries(weightNames.map((name, index)
 def dtype_to_js_type(dtype: DType) -> str:
   return f"{'Uint' if dtype in dtypes.uints else 'Int' if (dtype in dtypes.sints or dtype == dtypes.bool) else 'Float'}{8*dtype.itemsize}Array"
 
-def export_model(model, target:str, *inputs, model_name: Optional[str] = "model", stream_weights=False):
+def export_model(model, target:str, *inputs, model_name: Optional[str] = "model", tensor_names=None):
   assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, f"only {', '.join(EXPORT_SUPPORTED_DEVICE)} are supported"
   with Context(JIT=2): run,special_names = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
@@ -142,7 +142,7 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
   elif target == "wasm":
     return export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names, weight_names, model_name, symbolic_vars, wasm=True)
   elif target == "webgpu":
-    prg, _ = TinyJit(getattr(model, "forward", model)).export_webgpu(*inputs)
+    prg, _ = TinyJit(getattr(model, "forward", model)).export_webgpu(*inputs, tensor_names=tensor_names)
   else:
     prg = json.dumps({
       "backend": Device.DEFAULT,

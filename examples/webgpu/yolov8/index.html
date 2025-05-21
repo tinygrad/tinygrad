@@ -94,6 +94,25 @@
             color: white;
             margin-bottom: 20px;
         }
+
+        /* hide by default */
+        #validate-output {
+            display: none;
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: #fff;
+            padding: 8px;
+            max-width: 90vw;
+            max-height: 30vh;
+            overflow: auto;
+            font-size: 14px;
+        }
+        /* show whenever it’s not empty */
+        #validate-output:not(:empty) {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -109,6 +128,7 @@
             <span class="loader"></span>
         </div>
     </div>
+    <pre id="validate-output"></pre>
     <script>
         let net = null;
         const modelInputSize = 640;
@@ -190,7 +210,6 @@
             drawBoxes(offscreenCanvas, validBoxes, targetWidth, targetHeight, offsetX, offsetY);
             requestAnimationFrame(processFrame);
         }
-        //requestAnimationFrame(processFrame);
 
         function drawBoxes(offscreenCanvas, boxes, targetWidth, targetHeight, offsetX, offsetY) {
             const ctx = document.querySelector("canvas").getContext("2d");
@@ -226,11 +245,12 @@
                     wgpuError.style.display = "block";
                     loadingContainer.style.display = "none";
                 }
-                net = await yolov8.load(device, "./net.safetensors");
+                net = await yolov8();
+                net.load("./net.safetensors");
                 loadingContainer.style.display = "none";
             }
             const input = await prepareInput(offscreenContext);
-            const output = await net(new Float32Array(input));
+            const output = await net.run(new Float32Array(input));
             return output[0];
         }
 
@@ -255,7 +275,8 @@
                 if (!net) {
                     let device = await getDevice();
                     if (!device) throw new Error("WebGPU not supported");
-                    net = await yolov8.load(device, "./net.safetensors");
+                    net = await yolov8();
+                    await net.load("./net.safetensors");
                     loadingContainer.style.display = "none";
                 }
 
@@ -276,7 +297,7 @@
                     offscreenContext.clearRect(0, 0, modelInputSize, modelInputSize);
                     offscreenContext.drawImage(img, 0, 0, modelInputSize, modelInputSize);
                     const input = await prepareInput(offscreenContext);
-                    const output = await net(new Float32Array(input));
+                    const output = await net.run(new Float32Array(input));
                     console.log("YOLOv8 output:", output);
                     const raw = output[0];
                     const validBoxes = [];
@@ -286,6 +307,7 @@
                     const scaleY = canvas.height / modelInputSize;
                     context.lineWidth = 3;
                     context.font      = "30px serif";
+                    var out = document.getElementById('validate-output');
                     validBoxes.forEach(([x1, y1, x2, y2, classIndex]) => {
                         const label = yolo_classes[classIndex];
                         const color = classColors[classIndex];
@@ -300,10 +322,12 @@
                         context.fillRect(ax, ay - 25, textWidth + 10, 25);
                         context.fillStyle = "#000000";
                         context.fillText(label, ax + 5, ay - 7);
-                        if (label !== "bird") throw new Error(`Validation failed: expected 'bird', got ${label}`);
-                        else console.log("Validation succeeded: got 'bird'");
+                        out.textContent += `label: ${label}`;
+                        //if (label !== "bird") throw new Error(`Validation failed: expected 'bird', got ${label}`);
+                        //else console.log("Validation succeeded: got 'bird'");
                     });
-                    if (validBoxes.length !== 1) throw new Error(`Validation failed: expected 1 box, got ${validBoxes.length} box(es)`)
+                    //out.textContent += `validBoxes.length: ${validBoxes.length}`;
+                    //if (validBoxes.length !== 1) throw new Error(`Validation failed: expected 1 box, got ${validBoxes.length} box(es)`)
                 };
                 img.src = URL.createObjectURL(blob);
             } catch (e) {
