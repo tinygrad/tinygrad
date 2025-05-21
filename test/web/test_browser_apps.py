@@ -5,9 +5,9 @@ from playwright.async_api import async_playwright
 
 class HTTPServerThread:
   def __init__(self, host="localhost", port=0, directory=None):
-    handler = SimpleHTTPRequestHandler
     if directory:
-      handler = lambda *args, **kwargs: SimpleHTTPRequestHandler(*args, directory=directory, **kwargs)
+      def handler(*args, **kwargs): SimpleHTTPRequestHandler(*args, directory=directory, **kwargs)
+    else: handler = SimpleHTTPRequestHandler
     self._server = TCPServer((host, port), handler)
     self.host, self.port = self._server.server_address
     self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -34,7 +34,8 @@ class TestBrowserModels(unittest.IsolatedAsyncioTestCase):
       page = await browser.new_page()
       url = f"http://{self.http.host}:{self.http.port}/examples/webgpu/efficientnet/index.html"
       resp = await page.goto(url)
-      self.assertIsNotNone(resp); self.assertEqual(resp.status, 200)
+      self.assertIsNotNone(resp)
+      self.assertEqual(resp.status, 200)
       await page.wait_for_function("() => document.querySelector('#result').textContent.trim() === 'ready'", timeout=30_000)
       await page.click("input[type=button]")
       await page.wait_for_function("() => document.querySelector('#result').textContent.trim() === 'hen'", timeout=60_000)
