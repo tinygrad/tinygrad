@@ -841,7 +841,7 @@ class AMDDevice(HCQCompiled):
     errs:str = ""
     for iface_t in (KFDIface, PCIIface, USBIface):
       try: return iface_t(self, self.device_id)
-      except Exception as e: errs += f"\n{iface_t.__name__}: {traceback.format_exc()}"
+      except Exception: errs += f"\n{iface_t.__name__}: {traceback.format_exc()}"
     raise RuntimeError(f"Cannot find a usable interface for AMD:{self.device_id}:\n{errs}")
 
   def __init__(self, device:str=""):
