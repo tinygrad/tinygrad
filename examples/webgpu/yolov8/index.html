@@ -267,6 +267,10 @@
                 img.onload = async () => {
                     canvas.width  = img.width;
                     canvas.height = img.height;
+                    canvas.style.maxWidth  = "100vw";
+                    canvas.style.maxHeight = "100vh";
+                    canvas.style.width     = "auto";
+                    canvas.style.height    = "auto";
                     context.clearRect(0, 0, canvas.width, canvas.height);
                     context.drawImage(img, 0, 0, canvas.width, canvas.height);
                     offscreenContext.clearRect(0, 0, modelInputSize, modelInputSize);
@@ -294,9 +298,12 @@
                         context.strokeRect(ax, ay, aw, ah);
                         const textWidth = context.measureText(label).width;
                         context.fillRect(ax, ay - 25, textWidth + 10, 25);
-                        context.fillStyle = "#FFFFFF";
+                        context.fillStyle = "#000000";
                         context.fillText(label, ax + 5, ay - 7);
+                        if (label !== "bird") throw new Error(`Validation failed: expected 'bird', got ${label}`);
+                        else console.log("Validation succeeded: got 'bird'");
                     });
+                    if (validBoxes.length !== 1) throw new Error(`Validation failed: expected 1 box, got ${validBoxes.length} box(es)`)
                 };
                 img.src = URL.createObjectURL(blob);
             } catch (e) {
