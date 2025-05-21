@@ -179,8 +179,8 @@
 #define AEE_EFTELL                    (AEE_EOFFSET + 0x060)     ///<  file tell position failed
 #define AEE_EFSEEK                    (AEE_EOFFSET + 0x061)     ///<  file seek failed
 #define AEE_EFLEN                     (AEE_EOFFSET + 0x062)     ///<  file len greater than expected
-#define AEE_EGETENV                   (AEE_EOFFSET + 0x063)     ///<  apps_std get enviroment failed
-#define AEE_ESETENV                   (AEE_EOFFSET + 0x064)     ///<  apps_std set enviroment failed
+#define AEE_EGETENV                   (AEE_EOFFSET + 0x063)     ///<  apps_std get environment failed
+#define AEE_ESETENV                   (AEE_EOFFSET + 0x064)     ///<  apps_std set environment failed
 #define AEE_EMMAP                     (AEE_EOFFSET + 0x065)     ///<  mmap failed
 #define AEE_EIONMAP                   (AEE_EOFFSET + 0x066)     ///<  ion map failed
 #define AEE_EIONALLOC                 (AEE_EOFFSET + 0x067)     ///<  ion alloc failed

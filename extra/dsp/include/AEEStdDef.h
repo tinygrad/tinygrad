@@ -59,7 +59,7 @@ DESCRIPTION:  definition of basic types, constants,
 ** Standard Types
 ** ----------------------------------------------------------------------- */
 
-/* The following definitions are the same accross platforms.  This first
+/* The following definitions are the same across platforms.  This first
 ** group are the sanctioned types.
 */
 #ifndef _BOOLEAN_DEFINED

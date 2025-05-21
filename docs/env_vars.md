@@ -22,7 +22,7 @@ with Context(DEBUG=0):
 ```
 
 ## Global Variables
-The columns of this list are are: Variable, Possible Value(s) and Description.
+The columns of this list are: Variable, Possible Value(s) and Description.
 
 - A `#` means that the variable can take any integer value.
 

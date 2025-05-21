@@ -1375,7 +1375,7 @@ struct kgsl_command_syncpoint {
  * @synclist: List of kgsl_command_syncpoints
  * @sync_size: Size of kgsl_command_syncpoint structure
  * @numsyncs: Number of kgsl_command_syncpoints in syncpoint list
- * @context_id: Context ID submittin ghte kgsl_gpu_command
+ * @context_id: Context ID submitting the kgsl_gpu_command
  * @timestamp: Timestamp for the submitted commands
  */
 struct kgsl_gpu_command {
@@ -1425,7 +1425,7 @@ struct kgsl_preemption_counters_query {
 
 /**
  * struct kgsl_gpuobj_set_info - argument for IOCTL_KGSL_GPUOBJ_SET_INFO
- * @flags: Flags to indicate which paramaters to change
+ * @flags: Flags to indicate which parameters to change
  * @metadata:  If KGSL_GPUOBJ_SET_INFO_METADATA is set, a pointer to the new
  * metadata
  * @id: GPU memory object ID to change

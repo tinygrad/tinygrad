@@ -38,7 +38,7 @@ class TestYOLOv8(unittest.TestCase):
     weights_location_pt = fetch(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{variant}.pt', name=f"yolov8{variant}.pt")   # it needs the pt extension  # noqa: E501
     weights_location_onnx = weights_location_pt.parent / f"yolov8{variant}.onnx"
 
-    # the ultralytics export prints a lot of unneccesary things
+    # the ultralytics export prints a lot of unnecessary things
     if not weights_location_onnx.is_file():
       model = ultralytics.YOLO(model=weights_location_pt, task='Detect')
       model.export(format="onnx",imgsz=[640, 480])
