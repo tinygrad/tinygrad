@@ -10,7 +10,7 @@ from tinygrad.device import is_dtype_supported
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
 
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 
 class TinygradModel(BackendRep):
   def __init__(self, run_onnx, input_names):
@@ -25,12 +25,20 @@ class TinygradModel(BackendRep):
 
 class TinygradBackend(Backend):
   @classmethod
-  def prepare(cls, model, device):
+  def prepare(cls, model:onnx.ModelProto, device):
     input_all = [x.name for x in model.graph.input]
     input_initializer = [x.name for x in model.graph.initializer]
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
-    run_onnx = OnnxRunner(model)
+    import sys, tempfile
+    if sys.platform == "win32":
+      onnx.save(model, "a.onnx")
+      x = onnx_load("a.onnx")
+    else:
+      with tempfile.NamedTemporaryFile(suffix='.onnx') as tmp:
+        onnx.save(model, tmp.name)
+        x = onnx_load(tmp.name)
+    run_onnx = OnnxRunner(x)
     return TinygradModel(run_onnx, net_feed_input)
 
   @classmethod

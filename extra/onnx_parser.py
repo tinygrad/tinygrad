@@ -184,10 +184,16 @@ class OnnxParser:
   def parse_type_proto_tensor(self, data_bytes, offset=0): return self._parse_message(data_bytes, offset, self.gen_handlers({
     self._handle_int32_field: ((1, 'elem_type'),), self._handle_sub_message_field: ((2, 'shape', False, self.parse_tensor_shape_proto),)}))
 
+  # TypeProto.Optional
+  def parse_type_proto_optional(self, data_bytes, offset=0): return self._parse_message(data_bytes, offset, self.gen_handlers({
+    self._handle_sub_message_field: ((1, 'elem_type', False, self.parse_type_proto),)}))
+
   # TypeProto: Types, The standard ONNX data types.
   def parse_type_proto(self, data_bytes, offset=0):
     return self._parse_message(data_bytes, offset, self.gen_handlers({
-      self._handle_sub_message_field: ((1, 'tensor_type', False, self.parse_type_proto_tensor),), self._handle_string_field: ((6, 'denotation'),)}))
+      self._handle_sub_message_field: ((1, 'tensor_type', False, self.parse_type_proto_tensor),
+                                       (9, 'optional_type', False, self.parse_type_proto_optional)),
+      self._handle_string_field: ((6, 'denotation'),)}))
   # ValueInfoProto
   def parse_value_info_proto(self, data_bytes, offset=0):
     handlers = self.gen_handlers({
