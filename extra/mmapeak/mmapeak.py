@@ -7,7 +7,7 @@ import os
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
 NUM_WAVES = 2
-FLOPS_PER_MATMUL =  16*16*16*2 + 16*16
+FLOPS_PER_MATMUL =  16*16*16*2
 INTERNAL_LOOP  = 1_000_000
 INSTRUCTIONS_PER_LOOP = 1_000
 
@@ -57,3 +57,5 @@ if __name__=="__main__":
     launchBenchmark("v_wmma_f32_16X16X16_fp8_bf8", (7,8,9))
     launchBenchmark("v_wmma_f32_16X16X16_bf8_fp8", (7,8,9))
     launchBenchmark("v_wmma_f32_16X16X16_bf8_bf8", (7,8,9))
+    FLOPS_PER_MATMUL = 16*16*32*2
+    launchBenchmark("v_wmma_i32_16X16X32_iu4", (7,8,9))
