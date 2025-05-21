@@ -769,12 +769,10 @@ jobs:
       run: WEBGPU=1 python -m pytest -n=auto test/test_renderer_failures.py::TestWGSLFailures::test_multiply_infinity --durations=20
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Metal" python3 -m examples.compile_efficientnet
-    - name: Clean npm cache
-      run: npm cache clean --force
-    - name: Install Puppeteer
-      run: npm install puppeteer
+    - name: Install playwright
+      run: python -m pip install playwright
     - name: Run WEBGPU Efficientnet
-      run: node test/web/test_webgpu.js
+      run: python -m pytest -n=auto test/web/test_browser_apps.py::TestBrowserModels::test_efficientnet
 
   osxremote:
     name: MacOS (remote metal)
