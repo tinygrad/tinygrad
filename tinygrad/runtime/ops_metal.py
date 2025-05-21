@@ -180,6 +180,8 @@ class MetalProgram:
     msg("dispatchThreadgroups:threadsPerThreadgroup:")(encoder, to_struct(*global_size), to_struct(*local_size))
     msg("endEncoding")(encoder)
     msg("setLabel:")(command_buffer, to_ns_str(self.name)) # TODO: is this always needed?
+    if hasattr(self.dev.sysdevice, 'newSharedEvent'):
+      msg("encodeSignalEvent:value:")(command_buffer, self.dev.timeline_signal, self.dev.timeline_value)
     msg("commit")(command_buffer)
     self.dev.mtl_buffers_in_flight.append(command_buffer)
     if wait:
@@ -206,12 +208,13 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
         dest.buf, ctypes.c_ulong(dest.offset), ctypes.c_ulong(sz))
     msg("endEncoding")(encoder)
     if src_dev != dest_dev:
-      msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
+      src_dev.timeline_value += 1
+      current_value = src_dev.timeline_value
+      msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, current_value)
       dest_command_buffer = msg("commandBuffer", objc_instance)(dest_dev.mtl_queue)
-      msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
+      msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, current_value)
       msg("commit")(dest_command_buffer)
       dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
-      src_dev.timeline_value += 1
     msg("setLabel:")(src_command_buffer, to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
     msg("commit")(src_command_buffer)
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
