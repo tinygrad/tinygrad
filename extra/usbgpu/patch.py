@@ -45,6 +45,8 @@ if not os.path.exists(file_path):
   os.system(f'unzip -o "{path}/fw.zip" "Software/AS_USB4_240417_85_00_00.bin" -d "{path}"')
 
 patches = [(0x2a0d + 1 + 4, b'\x0a', b'\x05')]
+# patches += [(0x58a1 + 4, b'\x08\x06\x62', b'\xff\xff\xff')]
+# patches += [(0x590e + 4, b'\x08\x06\x62', b'\xff\xff\xff')]
 patches += [(0x40e1 + 4, b'\x90\x06\xe6\x04\xf0\x78\x0d\xe6\xfe\x24\x71\x12\x1b\x0b\x60\x0b\x74\x08\x2e\x12',
                          b'\x90\x90\x07\x74\x04\xf0\xa3\x74\x00\xf0\x74\x01\xa6\xe0\x12\x60\x00\x02\x41\x7a')] # \x12\x60\x00
 
@@ -52,14 +54,14 @@ asm = bytes([
     0x90, 0xF0, 0x00,  # 6000: MOV  DPTR,#0xF000   ; source = 0xF000
     0x75, 0xA0, 0x80,  # 6003: MOV  P2,#0x80       ; dest-hi = 0x80 (→ 0x8000)
     0x78, 0x00,        # 6006: MOV  R0,#0x00       ; dest-lo = 0x00
-    0x7E, 0x04,        # 6008: MOV  R6,#0x10       ; 16 × 256-byte pages
+    0x7E, 0x04,        # 6008: MOV  R6,#0x04       ; 4 × 256-byte pages
     0x7F, 0x00,        # 600A: MOV  R7,#0x00       ; inner-loop counter (256)
                        # ----- inner loop (256 bytes) -----
-    0xE0,              # 600C: MOVX A,@DPTR        ; read  byte  [DPTR]
-    0xA3,              # 600D: INC  DPTR           ; ++source
-    0xF2,              # 600E: MOVX @R0,A          ; write byte  [(P2:R0)]
-    0x08,              # 600F: INC  R0             ; ++dest-lo
-    0xDF, 0xFA,        # 6010: DJNZ R7,600C        ; 256-byte loop
+    0xE0,              # 600C: MOVX A,@DPTR        ; read  byte  [DPTR] 2
+    0xA3,              # 600D: INC  DPTR           ; ++source 1
+    0xF2,              # 600E: MOVX @R0,A          ; write byte  [(P2:R0)] 2
+    0x08,              # 600F: INC  R0             ; ++dest-lo 1
+    0xDF, 0xFA,        # 6010: DJNZ R7,600C        ; 256-byte loop 2
                        # ----- end inner loop -----
     0x78, 0x00,        # 6012: MOV  R0,#0x00       ; reset dest-lo
     0x05, 0xA0,        # 6014: INC  P2             ; next 256-byte page
@@ -121,36 +123,36 @@ def add_if_ret(addr, sec):
 
 
 traps = [
-  (0x10e7, b'\x90\xce\xf3', "LAB_CODE_10e0"),
-  (0x110a, b'\x12\x3a\xdb', "call FUN_CODE_3adb"),
-  (0x2608, b'\x12\x16\x87', "in FUN_CODE_2608"),
-  (0x2641, b'\x90\xc8\xd6', "call FUN_CODE_2608 in rp"),
-  (0x1114, b'\x75\x37\x00', "call (DAT_EXTMEM_c802 >> 2 & 1) != 0"),
+  # (0x10e7, b'\x90\xce\xf3', "LAB_CODE_10e0"),
+  # (0x110a, b'\x12\x3a\xdb', "call FUN_CODE_3adb"),
+  # (0x2608, b'\x12\x16\x87', "in FUN_CODE_2608"),
+  # (0x2641, b'\x90\xc8\xd6', "call FUN_CODE_2608 in rp"),
+  # (0x1114, b'\x75\x37\x00', "call (DAT_EXTMEM_c802 >> 2 & 1) != 0"),
 
-  (0x1148, b'\x12\x3e\x81', "call FUN_CODE_3e81"),
-  (0x1152, b'\x12\x48\x8f', "call FUN_CODE_488f"),
-  (0x1172, b'\x12\x47\x84', "call FUN_CODE_4784"),
+  # (0x1148, b'\x12\x3e\x81', "call FUN_CODE_3e81"),
+  # (0x1152, b'\x12\x48\x8f', "call FUN_CODE_488f"),
+  # (0x1172, b'\x12\x47\x84', "call FUN_CODE_4784"),
 
-  (0x1045, b'\x12\x11\x96', "scsi call 1 in main loop"),
-  (0x112e, b'\x12\x11\x96', "scsi call 2 in main loop"),
+  # (0x1045, b'\x12\x11\x96', "scsi call 1 in main loop"),
+  # (0x112e, b'\x12\x11\x96', "scsi call 2 in main loop"),
 
-  (0x0e82, b'\x90\x91\x01', "in (DAT_EXTMEM_c802 & 1) == 1 (not fast path?)"),
-  (0x0e8c, b'\x90\x90\x00', "in (DAT_EXTMEM_9101 >> 5 & 1) == 1"),
-  (0x0f36, b'\x90\x93\x01', "in (DAT_EXTMEM_9101 >> 3 & 1) != 0"),
-  (0x0fc0, b'\x12\x03\x3b', "in (DAT_EXTMEM_9101 >> 1 & 1) != 0"),
-  (0x0fcd, b'\x90\x90\x93', "in (DAT_EXTMEM_9101 >> 2 & 1) == 1"),
-  (0x100f, b'\x90\x91\x01', "in (DAT_EXTMEM_9101 >> 2 & 1) == 0"),
-  (0x0fd7, b'\x12\x32\xa5', "call to FUN_CODE_32a5"),
-  (0x0fe4, b'\x12\x4d\x44', "call to FUN_CODE_4d44"),
-  (0x0ff4, b'\x12\x54\x55', "call to FUN_CODE_5455"),
+  # (0x0e82, b'\x90\x91\x01', "in (DAT_EXTMEM_c802 & 1) == 1 (not fast path?)"),
+  # (0x0e8c, b'\x90\x90\x00', "in (DAT_EXTMEM_9101 >> 5 & 1) == 1"),
+  # (0x0f36, b'\x90\x93\x01', "in (DAT_EXTMEM_9101 >> 3 & 1) != 0"),
+  # (0x0fc0, b'\x12\x03\x3b', "in (DAT_EXTMEM_9101 >> 1 & 1) != 0"),
+  # (0x0fcd, b'\x90\x90\x93', "in (DAT_EXTMEM_9101 >> 2 & 1) == 1"),
+  # (0x100f, b'\x90\x91\x01', "in (DAT_EXTMEM_9101 >> 2 & 1) == 0"),
+  # (0x0fd7, b'\x12\x32\xa5', "call to FUN_CODE_32a5"),
+  # (0x0fe4, b'\x12\x4d\x44', "call to FUN_CODE_4d44"),
+  # (0x0ff4, b'\x12\x54\x55', "call to FUN_CODE_5455"),
 
-  (0x3ede, b'\x90\xce\xf3', "precall FUN_CODE_2608 in FUN_CODE_3e81"),
-  (0x3eb9, b'\x12\x31\x79', "call to FUN_CODE_3179 in FUN_CODE_3e81"),
-  (0x3f36, b'\x12\x45\xd0', "call to FUN_CODE_45d0 in FUN_CODE_3e81"),
-  (0x3ee9, b'\x12\x03\x95', "call to FUN_CODE_0395 in FUN_CODE_3e81"),
+  # (0x3ede, b'\x90\xce\xf3', "precall FUN_CODE_2608 in FUN_CODE_3e81"),
+  # (0x3eb9, b'\x12\x31\x79', "call to FUN_CODE_3179 in FUN_CODE_3e81"),
+  # (0x3f36, b'\x12\x45\xd0', "call to FUN_CODE_45d0 in FUN_CODE_3e81"),
+  # (0x3ee9, b'\x12\x03\x95', "call to FUN_CODE_0395 in FUN_CODE_3e81"),
 
-  (0x4013, b'\x12\x32\x98', "in FUN_CODE_4013"),
-  (0x4d78, b'\x12\x31\x2a', "FUN_CODE_4d44: set_af2_to_1_and_9006|=1"),
+  # (0x4013, b'\x12\x32\x98', "in FUN_CODE_4013"),
+  # (0x4d78, b'\x12\x31\x2a', "FUN_CODE_4d44: set_af2_to_1_and_9006|=1"),
 
   # (0x4082, b'\x90\x0a\x7d', "choose path DAT_EXTMEM_0a7d = 0x80"),
   # (0x4089, b'\x90\x0a\x7d', "choose path DAT_EXTMEM_0a7d = 0xf0"),
@@ -161,10 +163,13 @@ if __name__ == "__main__":
   for addr, sec, name in traps:
     print(f"Adding {name} at {addr:x}")
     add_traphandler(addr, sec)
-  add_if(0x1141, b'\x90\xc5\x20', 0x1148) # force jump into FUN_CODE_3e81
-  add_if(0x0e78, b'\x90\xc8\x02', 0x10e0) # fast path
-  add_if(0x3eaf, b'\xf5\x83\xe0', 0x3eb5) # skip while in FUN_CODE_3e81
-  add_if(0x3e9c, b'\xf5\x83\xe0', 0x3ea6) # skip if in FUN_CODE_3e81
+  # add_if(0x4d54, b'\x90\x00\x01', 0x4d78)
+  # add_if(0x4d8e, b'\x12\x31\x33', 0x4d68)
+
+  # add_if(0x1141, b'\x90\xc5\x20', 0x1148) # force jump into FUN_CODE_3e81
+  # add_if(0x0e78, b'\x90\xc8\x02', 0x10e0) # fast path
+  # add_if(0x3eaf, b'\xf5\x83\xe0', 0x3eb5) # skip while in FUN_CODE_3e81
+  # add_if(0x3e9c, b'\xf5\x83\xe0', 0x3ea6) # skip if in FUN_CODE_3e81
 
   # add_if(0x10e0, b'\x90\xc8\x06', 0x110d)
   # add_if(0x0fcd, b'\x90\x90\x93', 0x113a)

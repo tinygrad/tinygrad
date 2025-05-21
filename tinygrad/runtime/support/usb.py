@@ -174,7 +174,6 @@ class ASM24Controller:
       for i in range(4): self.exec_ops([WriteOp(0xce40 + i, b'\x00', ignore_cache=True)])
 
   def scsi_read(self, sz:int, lba:int=0):
-    self.exec_ops([ReadOp(0xf000, 0x1)])
     self.exec_ops([ScsiReadOp(sz, lba)])
     self.exec_ops([ScsiReadOp(sz, lba)])
     self.exec_ops([ScsiReadOp(sz, lba)])
@@ -188,6 +187,7 @@ class ASM24Controller:
     #   # ScsiReadOp(sz, lba),
     #   # ScsiReadOp(sz, lba),
     #   ScsiReadOp(sz, lba)])[0]
+    return [None]
 
   def read(self, base_addr:int, length:int, stride:int=0xff) -> bytes:
     parts = self.exec_ops([ReadOp(base_addr + off, min(stride, length - off)) for off in range(0, length, stride)])

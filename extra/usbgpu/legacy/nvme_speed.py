@@ -78,16 +78,21 @@ for i in range(1):
   # usb.write(0x3800, b'\x00\x00\x00\x00')
 
   # sz = 0x1000
-  z = [None]  * 4
-  for i in range(4):
+  # usb.read(0xf000, 0x1)
+  z = [None] * 4
+  for i in range(8):
+    usb.read(0xf000, 0x1)
     with Timing(f"copyout of {0x1000/1e6:.2f} MB:  ", on_exit=lambda ns: f" @ {0x1000/ns * 1e3:.2f} MB/s"):
       pass
-      usb.scsi_read(sz, lba=0x1000 + i)
+      print(usb.scsi_read(sz, lba=0x1000 + i)[:0x100])
       # print(usb.scsi_read(sz, lba=0x1000 + i))
       # print(usb.read(0x8000, 0x1000))
+    # usb.write(0xc600, rstate[0xc600:0xc680])
+    usb.write(0xce00, rstate[0xce00:0xcef0])
+    print("fesh")
 
-    for i in range(0x400):
-      pass
+    # for i in range(0x400):
+    #   pass
 
   # print("ok")
   # exit(0)
