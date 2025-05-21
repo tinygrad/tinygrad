@@ -37,6 +37,9 @@ class SimpleMathTrait:
   def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
   def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
   def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
+  def floordiv(self, x, reverse=False): return (
+    q := (a := (self, self.ufix(x))[reverse]).idiv(b := (self.ufix(x), self)[reverse])
+  ) - ((a - q*b).ne(0) & ((a < 0) ^ (b < 0))).cast(q.dtype)
 
   def __neg__(self): return self.neg()
 
@@ -44,7 +47,7 @@ class SimpleMathTrait:
   def __sub__(self, x): return self.sub(x)
   def __mul__(self, x): return self.mul(x)
   def __truediv__(self, x): return self.div(x)
-  def __floordiv__(self, x): return self.idiv(x)  # TODO: idiv is trunc div, not floordiv
+  def __floordiv__(self, x): return self.floordiv(x)
   def __mod__(self, x): return self.mod(x)
   def __and__(self, x): return self.bitwise_and(x)
   def __or__(self, x): return self.bitwise_or(x)
@@ -54,7 +57,7 @@ class SimpleMathTrait:
   def __rsub__(self, x): return self.sub(x, True)
   def __rmul__(self, x): return self.mul(x, True)
   def __rtruediv__(self, x): return self.div(x, True)
-  def __rfloordiv__(self, x): return self.idiv(x, True)
+  def __rfloordiv__(self, x): return self.floordiv(x, True)
   def __rand__(self, x): return self.bitwise_and(x, True)
   def __ror__(self, x): return self.bitwise_or(x, True)
   def __rxor__(self, x): return self.bitwise_xor(x, True)
