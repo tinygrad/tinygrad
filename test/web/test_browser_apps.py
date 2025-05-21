@@ -1,7 +1,10 @@
 import os, threading, unittest
 from http.server import SimpleHTTPRequestHandler
 from socketserver import TCPServer
-from playwright.async_api import async_playwright
+if "BROWSER_TESTS" in os.environ:
+  from playwright.async_api import async_playwright
+else:
+  async_playwright = None
 
 class HTTPServerThread:
   def __init__(self, host="localhost", port=0, directory=None):
