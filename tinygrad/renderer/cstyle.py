@@ -162,6 +162,9 @@ class CStyleLanguage(Renderer):
           lines.insert(insert_index, gv)
       prg = "\n".join(lines)
 
+      #if "float val0 = (alu7?(data1[clamp((alu5+1),0,data1.length()-1)]):0.0f);" in prg:
+      #  prg = prg[:prg.index("float val0 = (alu7?(data1[clamp((alu5+1),0,data1.length()-1)]):0.0f);")] + "float val0 = 0.0;\nif(alu7){\ndata0[1] = 420.0f;\n}\ndata0[0] = 420.0f;\n}"
+
       local_size_string = f"layout(local_size_x = {local_size[0]}, local_size_y = {local_size[1]}, local_size_z = {local_size[2]}) in;"
       prg = '\n'.join([prg.splitlines()[0], local_size_string, *prg.splitlines()[1:]])
       prg = prg.replace("#version 450", "#version 450\n#extension GL_EXT_shader_8bit_storage : require\n#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require\n#extension GL_EXT_scalar_block_layout : require", 1)
@@ -195,6 +198,7 @@ class CStyleLanguage(Renderer):
     bufs: dict[UOp, tuple[str, tuple[DType, bool]]] = {}
     kernel = []
     depth = 1
+    arg_num = 0 # todo hack because 1,3,5 buffers breaks it
     c: defaultdict[str, int] = defaultdict(int)
     name = "test"
     for u in uops:
@@ -202,6 +206,8 @@ class CStyleLanguage(Renderer):
         if u.arg is not None: name = u.arg.name
         continue
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
+        u.arg = arg_num
+        arg_num+=1
         r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]
         bufs[u] = (r[u], (u.dtype, False))
         continue
