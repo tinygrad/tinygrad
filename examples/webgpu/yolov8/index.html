@@ -278,7 +278,25 @@
                     const validBoxes = [];
                     for (let i = 0; i < raw.length; i += 6)
                         if (raw[i + 4] > 0) validBoxes.push([raw[i], raw[i + 1], raw[i + 2], raw[i + 3], raw[i + 5]]);
-                    drawBoxes(offscreenCanvas, validBoxes, modelInputSize, modelInputSize, 0, 0);
+                    const scaleX = canvas.width / modelInputSize;
+                    const scaleY = canvas.height / modelInputSize;
+                    context.lineWidth = 3;
+                    context.font      = "30px serif";
+                    validBoxes.forEach(([x1, y1, x2, y2, classIndex]) => {
+                        const label = yolo_classes[classIndex];
+                        const color = classColors[classIndex];
+                        context.strokeStyle = color;
+                        context.fillStyle   = color;
+                        const ax = x1 * scaleX;
+                        const ay = y1 * scaleY;
+                        const aw = (x2 - x1) * scaleX;
+                        const ah = (y2 - y1) * scaleY;
+                        context.strokeRect(ax, ay, aw, ah);
+                        const textWidth = context.measureText(label).width;
+                        context.fillRect(ax, ay - 25, textWidth + 10, 25);
+                        context.fillStyle = "#FFFFFF";
+                        context.fillText(label, ax + 5, ay - 7);
+                    });
                 };
                 img.src = URL.createObjectURL(blob);
             } catch (e) {
