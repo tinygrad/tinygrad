@@ -153,8 +153,7 @@ class OnnxRunner:
   Args:
     model: The ONNX model, provided either as a file path (a string or path-like object), a file-like object, or as raw bytes.
   """
-  def __init__(self, model:Tensor | str | os.PathLike | bytes | IO[bytes]):
-    if isinstance(model, Tensor): raise NotImplementedError("ONNX model provided as Tensor is not supported.")
+  def __init__(self, model:str | os.PathLike | bytes | IO[bytes]):
     self.is_training, self.graph_values, self.graph_inputs, self.graph_outputs, self.graph_nodes, self.opset_version = model_parse(model_load(model))
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
     Tensor.training = True if self.is_training else False
