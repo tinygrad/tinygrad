@@ -27,15 +27,12 @@ if Device.DEFAULT == "LLVM" or getenv("AMD_LLVM", 0):
   binary_operations.remove(operator.lt)
 
 integer_binary_operations = binary_operations + [(Tensor.bitwise_xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
-                                                 (Tensor.bitwise_or, np.bitwise_or)]
+                                                 (Tensor.bitwise_or, np.bitwise_or), operator.mod]
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin),
                     (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
 
 # TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
-
-# TODO: enable mod on Tensor
-#binary_operations.append(operator.mod)
 
 # TODO: (a+b)/2 in tensor.py's maximum can overflow. This requires a new implementation of maximum that can be backpropagated
 #binary_operations += [(Tensor.maximum, np.maximum)]
@@ -62,6 +59,7 @@ def universal_test(a, b, dtype, op):
   # The 'nan' cases only fail with Vulkan WebGPU backend (CI)
   if (math.isnan(a) or math.isnan(b)) and Device.DEFAULT == "WEBGPU" and CI: return
   if not isinstance(op, tuple): op = (op, op)
+  if op[0] == operator.mod and b == 0: return
   ta, tb = Tensor([a], dtype=dtype), Tensor([b], dtype=dtype)
   tensor_value = (op[0](ta, tb)).numpy()
   numpy_value = op[1](ta.numpy(), tb.numpy())
