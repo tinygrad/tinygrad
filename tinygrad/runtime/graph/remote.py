@@ -1,4 +1,4 @@
-from tinygrad.ops import Variable
+from tinygrad.uop.ops import Variable
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, GraphException
 from tinygrad.engine.realize import CompiledRunner, BufferXfer, ExecItem
 from tinygrad.device import Device, Buffer
@@ -15,8 +15,8 @@ class RemoteGraph(GraphRunner):
     def _process_ji(ji: ExecItem):
       match ji.prg:
         case CompiledRunner():
-          return GraphComputeItem(ji.prg.dev.session, ji.prg._prg.name, ji.prg._prg.datahash,
-                                  tuple(unwrap(buf)._buf for buf in ji.bufs), tuple(ji.prg.p.vars), tuple(ji.prg.p.ins), tuple(ji.prg.p.outs),
+          return GraphComputeItem(ji.prg.dev.session, ji.prg._prg.name, ji.prg._prg.datahash, tuple(unwrap(buf)._buf for buf in ji.bufs),
+                                  tuple(ji.prg.p.vars), ji.fixedvars, tuple(ji.prg.p.ins), tuple(ji.prg.p.outs),
                                   tuple(ji.prg.p.global_size) if ji.prg.p.global_size is not None else None,
                                   tuple(ji.prg.p.local_size) if ji.prg.p.local_size is not None else None)
         case BufferXfer():
@@ -24,8 +24,7 @@ class RemoteGraph(GraphRunner):
           assert dest is not None and src is not None, ji
           return Transfer(session=cast(RemoteDevice, Device[dest.device]).session, buffer_num=dest._buf,
                           ssession=cast(RemoteDevice, Device[src.device]).session, sbuffer_num=src._buf)
-    self.graph_num = self.devices[0].graph_num
-    self.devices[0].graph_num += 1
+    self.graph_num = next(self.devices[0].graph_num)
     self.devices[0].q(GraphAlloc(self.graph_num, tuple(_process_ji(ji) for ji in jit_cache), self.map_rawbufs(rawbufs), var_vals))
 
   def __del__(self):

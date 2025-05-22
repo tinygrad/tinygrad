@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from dataclasses import replace
 from tinygrad import Tensor, Context, Device, dtypes
-from tinygrad.ops import Ops, UOp # noqa: F401 # pylint: disable=unused-import
+from tinygrad.uop.ops import Ops, UOp # noqa: F401 # pylint: disable=unused-import
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, lower_schedule_item
 from tinygrad.engine.search import bufs_from_lin
@@ -215,7 +215,7 @@ class TestQuantizeOnnx(unittest.TestCase):
       opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)] if opts is None else opts
       sexec(out, opts, replace_src, run_count=1)
     tout = out.numpy()
-    mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) / 1000)
+    mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) // 1000)
     if clip: mout = mout.clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype))
     mout = mout.astype(xi)
     print(tout)

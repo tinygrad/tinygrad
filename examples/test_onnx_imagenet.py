@@ -27,7 +27,7 @@ def imagenet_dataloader(cnt=0):
   input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
   files = get_val_files()
   random.shuffle(files)
-  if cnt != 0: files = files[:cnt]
+  files = files[:cnt]
   cir = get_imagenet_categories()
   for fn in files:
     img = Image.open(fn)
@@ -66,7 +66,7 @@ if __name__ == "__main__":
   assert t_spec.shape[1:] == (3,224,224), f"shape is {t_spec.shape}"
 
   hit = 0
-  for i,(img,y) in enumerate(imagenet_dataloader(cnt=getenv("CNT", 100))):
+  for i,(img,y) in enumerate(imagenet_dataloader(cnt:=getenv("CNT", 100))):
     GlobalCounters.reset()
     p = run_onnx_jit(**{t_name:img})
     assert p.shape == (1,1000)
@@ -77,5 +77,6 @@ if __name__ == "__main__":
   MS_TARGET = 13.4
   print(f"need {GlobalCounters.global_ops/1e9*(1000/MS_TARGET):.2f} GFLOPS for {MS_TARGET:.2f} ms")
 
-  import pickle
-  with open("/tmp/im.pkl", "wb") as f: pickle.dump(run_onnx_jit, f)
+  if cnt >= 2:
+    import pickle
+    with open("/tmp/im.pkl", "wb") as f: pickle.dump(run_onnx_jit, f)

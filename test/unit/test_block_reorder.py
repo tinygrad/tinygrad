@@ -1,6 +1,6 @@
 import unittest, random
 from tinygrad.dtype import dtypes
-from tinygrad.ops import print_uops, UOp, Ops
+from tinygrad.uop.ops import print_uops, UOp, Ops
 from tinygrad.codegen.linearize import block_reorder
 from tinygrad.renderer.cstyle import OpenCLRenderer
 

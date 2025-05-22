@@ -3,7 +3,7 @@ import unittest
 from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.search import bufs_from_lin, actions, beam_search
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor

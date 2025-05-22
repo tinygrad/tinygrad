@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.ops import UPat, Ops, UOp
+from tinygrad.uop.ops import UPat, Ops, UOp
 
 # NOTE: unlike before base for a realized tensor is always a BUFFER
 realized_pattern = UPat(Ops.BUFFER)

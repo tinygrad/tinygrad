@@ -6,7 +6,7 @@ from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
 from tinygrad.helpers import Context
 from tinygrad.dtype import dtypes
-from tinygrad.ops import Ops
+from tinygrad.uop.ops import Ops
 import json
 from collections import OrderedDict
 

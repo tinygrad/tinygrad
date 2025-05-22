@@ -2,7 +2,7 @@ from typing import cast
 import math, struct, sys
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import ClangRenderer, AMDRenderer
-from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 from tinygrad.helpers import prod, AMX
 

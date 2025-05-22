@@ -1,7 +1,7 @@
 from typing import cast
 import math, dataclasses
 from tinygrad.dtype import dtypes, sum_acc_dtype
-from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
 from tinygrad.helpers import argsort
 
 def reduce_gradient(ctx:UOp, ret:UOp):

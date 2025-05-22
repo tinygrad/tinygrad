@@ -6,7 +6,7 @@ from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connectio
 from tinygrad.engine.grouper import get_becomes_map
 from tinygrad.codegen.kernel import Kernel, Opt
 from tinygrad.renderer import Renderer
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 
 # *** process replay settings
 
@@ -47,7 +47,7 @@ def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str, _)
 # *** diff a "good" recreation against the generated version
 
 def diff(offset:int, name:str, fxn:Callable) -> None:
-  warnings.filterwarnings("error", category=ProcessReplayWarning)
+  if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
   if early_stop.is_set(): return None
   conn = db_connection()
   cur = conn.cursor()
@@ -116,6 +116,7 @@ if __name__ == "__main__":
   for name,fxn in [("schedule", recreate_sched), ("kernel", recreate_kernel)]:
     logging.info(f"***** {name} diff")
     try: _pmap(name, fxn)
+    except ProcessReplayWarning: exit(1)
     except Exception as e:
       if ASSERT_DIFF: raise e
       logging.error(f"{name} diff err {e}")

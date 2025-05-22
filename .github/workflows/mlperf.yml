@@ -1,0 +1,24 @@
+name: Run MLPerf Training
+
+on:
+  # schedule:
+  #   - cron: '0 */1 * * *'
+  push:
+    branches:
+      - update_mlperf
+  workflow_dispatch:
+
+jobs:
+  run_script_job:
+    runs-on: [self-hosted, Linux, tinybox]
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Symlink datasets
+      run: |
+        mkdir -p extra/datasets
+        ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: Run resnet
+      run: |
+        LOGMLPERF=0 examples/mlperf/training_submission_v5.0/tinycorp/benchmarks/resnet/implementations/tinybox_red/run_and_time.sh
