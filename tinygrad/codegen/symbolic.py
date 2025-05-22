@@ -302,7 +302,7 @@ symbolic_flat = symbolic+PatternMatcher([
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
-  ((UPat.var("x", dtypes.ints) + UPat.cvar("y")).cast(dtypes.floats) * UPat.cvar("c"),
+  ((UPat.var("x", dtypes.sints) + UPat.cvar("y")).cast(dtypes.floats) * UPat.cvar("c"),
     lambda x,y,c: x.cast(c.dtype)*c+y.cast(c.dtype)*c if not (math.isinf(c.vmin) or math.isinf(c.vmax)) else None),
 ])
 
