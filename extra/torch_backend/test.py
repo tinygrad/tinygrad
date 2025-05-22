@@ -170,6 +170,11 @@ class TestTorchBackend(unittest.TestCase):
     assert torch.equal(tensor_a, tensor_b)
     assert not torch.equal(tensor_a, tensor_c)
 
+  def test_scalar_assign(self):
+    a = torch.tensor([1, 2, 3], device=device)
+    a[1] = 4
+    np.testing.assert_equal(a.cpu().numpy(), [1, 4, 3])
+
   @unittest.skip("meh")
   def test_str(self):
     a = torch.ones(4, device=device)
