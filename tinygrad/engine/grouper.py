@@ -503,7 +503,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # NOTE: we have to insert *before* the children, otherwise it infinite loops
   contiguous_map = {}
   for x in realize_map:
-    if x.op is not Ops.CONTIGUOUS:
+    if x.op not in {Ops.CONTIGUOUS, Ops.COPY}:
       for c in [cc for c in x.children if (cc:=c()) is not None]:
         if c is not None: contiguous_map[c] = c.replace(src=tuple([xx.contiguous() if xx is x else xx for xx in c.src]))
   tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, contiguous_map, bottom_up=True, input_map=tensor_map, name="insert_contiguous")
