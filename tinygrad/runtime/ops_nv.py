@@ -58,7 +58,7 @@ def make_uvm_type():
 uvm = make_uvm_type()
 
 class QMD:
-  fields: dict[str, dict[str: tuple[int, int]]] = {}
+  fields: dict[str, dict[str, tuple[int, int]]] = {}
 
   def __init__(self, addr=None, pref="NVC6C0_QMDV03_00", **kwargs):
     if pref not in QMD.fields:
@@ -67,7 +67,7 @@ class QMD:
     self.mv, self.pref = (memoryview(bytearray(0x40 * 4)) if addr is None else to_mv(addr, 0x40 * 4)), pref
     if kwargs: self.write(**kwargs)
 
-  def _rw_bits(self, hi:int, lo:int, value:int|None=None) -> int|None:
+  def _rw_bits(self, hi:int, lo:int, value:int|None=None):
     mask = ((1 << (width:=hi - lo + 1)) - 1) << (lo % 8)
     num = int.from_bytes(self.mv[lo//8:hi//8+1], "little")
 
@@ -245,7 +245,7 @@ class NVProgram(HCQProgram):
     self.constbuffer_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
 
     smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
-    self.qmd = QMD(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
+    self.qmd:QMD = QMD(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
       invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
       cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3, constant_buffer_invalidate_0=1,
       shared_memory_size=self.shmem_usage, min_sm_config_shared_mem_size=smem_cfg, target_sm_config_shared_mem_size=smem_cfg,
