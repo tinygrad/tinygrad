@@ -90,7 +90,9 @@ runs:
     - name: Install dependencies (with extra)
       if: inputs.deps != ''
       shell: bash
-      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+            env:
+        SAFE_GITHUB_VAR: ${{inputs.pydeps}}
+      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e ".[${{ inputs.deps }}]" "$SAFE_GITHUB_VAR" --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies (without extra)
       if: inputs.deps == ''
       shell: bash
