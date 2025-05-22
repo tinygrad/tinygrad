@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, cast, ClassVar
-import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select, weakref
+import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select, weakref, traceback
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
@@ -841,8 +841,8 @@ class AMDDevice(HCQCompiled):
     errs:str = ""
     for iface_t in (KFDIface, PCIIface, USBIface):
       try: return iface_t(self, self.device_id)
-      except (RuntimeError, FileNotFoundError, BlockingIOError) as e: errs += f"\n{iface_t.__name__}: {type(e).__name__}: {e}"
-    raise RuntimeError(f"Cannot find a usable interface for AMD:{self.device_id}:{errs}")
+      except Exception: errs += f"\n{iface_t.__name__}: {traceback.format_exc()}"
+    raise RuntimeError(f"Cannot find a usable interface for AMD:{self.device_id}:\n{errs}")
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
