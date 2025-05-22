@@ -496,9 +496,20 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
-  # group into kernels
+  # determine where to insert contiguous
   realize_map = group_realizes(tensor_map[big_sink])
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="create_kernels")
+
+  # insert contiguous after all realize map
+  # NOTE: we have to insert *before* the children, otherwise it infinite loops
+  contiguous_map = {}
+  for x in realize_map:
+    if x.op is not Ops.CONTIGUOUS:
+      for c in [cc for c in x.children if (cc:=c()) is not None]:
+        if c is not None: contiguous_map[c] = c.replace(src=tuple([xx.contiguous() if xx is x else xx for xx in c.src]))
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, contiguous_map, bottom_up=True, input_map=tensor_map, name="insert_contiguous")
+
+  # group into kernels
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx={}, bottom_up=True, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
