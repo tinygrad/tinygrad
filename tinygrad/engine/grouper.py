@@ -496,7 +496,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
-  # determine where to insert contiguous
+  # determine where to insert gbarriers
   realize_map = group_realizes(tensor_map[big_sink])
 
   # insert contiguous after all realize map
