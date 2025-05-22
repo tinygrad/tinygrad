@@ -3,7 +3,7 @@ import itertools, operator, math
 from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, least_upper_dtype
-from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint, sint_to_uop
+from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint, sint_to_uop, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
 from tinygrad.codegen.symbolic import symbolic
@@ -231,4 +231,34 @@ pm_quant = symbolic+PatternMatcher([
     lambda v1,v2,c1,r: r.replace(src=(v1*v2,)) + r.replace(src=(c1*v2,))),
   (UPat(Ops.REDUCE_AXIS, src=((UPat(Ops.CAST, name="v1")+UPat.var("c1")) * (UPat(Ops.CAST, name="v2",)+UPat.var("c2")),), name="r"),
     lambda v1,v2,c1,c2,r: r.replace(src=(v1*v2,)) + r.replace(src=(c2*v1,)) + r.replace(src=(c1*v2,)) + r.replace(src=(c1*c2,))),
+])
+
+# **** this pushes intermediate down-casts from float through ALUs, may help with numeric stability ****
+
+# TODO: does not treat where triangles
+# TODO: there still are redundant casts in graph
+f32_input_cast_to_half = lambda name: UPat.var(name, dtype=dtypes.float32).cast(dtypes.half)
+native_half_input = lambda name: UPat.any(UPat.var(name, dtype=dtypes.half), UPat.cvar(name, dtype=dtypes.half))
+pm_push_cast = PatternMatcher([
+  (UPat(GroupOp.Unary, src=(f32_input_cast_to_half("val_f32"),), name="unary_op"),
+   lambda unary_op, val_f32: UOp(unary_op.op, dtypes.float32, (val_f32,), unary_op.arg).cast(dtypes.half)),
+
+  (UPat(GroupOp.Binary, src=(f32_input_cast_to_half("lhs_f32"), f32_input_cast_to_half("rhs_f32")), dtype=dtypes.half, name="binary_op"),
+   lambda binary_op, lhs_f32, rhs_f32: lhs_f32.alu(binary_op.op, rhs_f32).cast(dtypes.half)),
+  (UPat(GroupOp.Binary, src=(f32_input_cast_to_half("lhs_f32"), native_half_input("rhs_h")), dtype=dtypes.half, name="binary_op"),
+   lambda binary_op, lhs_f32, rhs_h: lhs_f32.alu(binary_op.op, rhs_h.cast(dtypes.float32)).cast(dtypes.half)),
+  (UPat(GroupOp.Binary, src=(native_half_input("lhs_h"), f32_input_cast_to_half("rhs_f32")), dtype=dtypes.half, name="binary_op"),
+   lambda binary_op, lhs_h, rhs_f32: lhs_h.cast(dtypes.float32).alu(binary_op.op, rhs_f32).cast(dtypes.half)),
+
+  (UPat.var("cond", dtype=dtypes.bool).where(f32_input_cast_to_half("true_val_f32"), f32_input_cast_to_half("false_val_f32")),
+   lambda cond, true_val_f32, false_val_f32: cond.where(true_val_f32, false_val_f32).cast(dtypes.half)),
+  (UPat.var("cond", dtype=dtypes.bool).where(f32_input_cast_to_half("true_val_f32"), native_half_input("false_val_h")),
+   lambda cond, true_val_f32, false_val_h: cond.where(true_val_f32, false_val_h.cast(dtypes.float32)).cast(dtypes.half)),
+  (UPat.var("cond", dtype=dtypes.bool).where(native_half_input("true_val_h"), f32_input_cast_to_half("false_val_f32")),
+   lambda cond, true_val_h, false_val_f32: cond.where(true_val_h.cast(dtypes.float32), false_val_f32).cast(dtypes.half)),
+
+  (f32_input_cast_to_half("val_f32").cast(dtypes.float32), lambda val_f32: val_f32),
+  # (native_half_input("val_h").cast(dtypes.float32).cast(dtypes.half), lambda val_h: val_h),
+  # (UPat(GroupOp.Binary, src=(f32_input_cast_to_half("lhs_f32"), native_half_input("rhs_h")), dtype=dtypes.ints + (dtypes.bool,), name="binary_op"),
+   # lambda binary_op, lhs_f32, rhs_h: lhs_f32.alu(binary_op.op, rhs_h.cast(dtypes.float32))),
 ])
