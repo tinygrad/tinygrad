@@ -1,4 +1,4 @@
-import gzip, unittest
+import gzip, unittest, urllib.error, urllib.request
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
@@ -116,7 +116,7 @@ class TestRoundUp(unittest.TestCase):
     self.assertEqual(round_up(232, 24984), 24984)
     self.assertEqual(round_up(24984, 232), 25056)
 
-@unittest.skip("no fetch tests because they need internet")
+# @unittest.skip("no fetch tests because they need internet")
 class TestFetch(unittest.TestCase):
   def test_fetch_bad_http(self):
     self.assertRaises(Exception, fetch, 'http://www.google.com/404', allow_caching=False)
@@ -154,6 +154,18 @@ class TestFetch(unittest.TestCase):
     no_gzip_url: str = 'https://ftp.gnu.org/gnu/gzip/gzip-1.13.zip'
     with self.assertRaises(gzip.BadGzipFile):
       fetch(no_gzip_url, gunzip=True)
+
+  def test_fetch_request(self):
+    req = urllib.request.Request(
+      "https://csrc.nist.gov/CSRC/media/Projects/lightweight-cryptography/documents/finalist-round/updated-submissions/sparkle.zip",
+      headers={"User-Agent": "tinygrad"},
+    )
+    fetch(req, allow_caching=False)
+
+  def test_fetch_no_request_fail(self):
+    with self.assertRaises(urllib.error.HTTPError):
+      fetch("https://csrc.nist.gov/CSRC/media/Projects/lightweight-cryptography/documents/finalist-round/updated-submissions/sparkle.zip",
+            allow_caching=False)
 
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
