@@ -67,7 +67,13 @@ class PTXCompiler(Compiler):
   def __init__(self, arch:str, cache_key="ptx"):
     self.arch = arch
     super().__init__(f"compile_{cache_key}_{self.arch}")
-  def compile(self, src:str) -> bytes: return src.replace("TARGET", self.arch).replace("VERSION", "7.8" if self.arch >= "sm_89" else "7.5").encode()
+  def compile(self, src:str) -> bytes:
+    # Extract numeric part for proper comparison
+    arch_num = int(self.arch.split('_')[1]) if '_' in self.arch else 0
+    if arch_num >= 120: version = "8.7"  # RTX 5090+ (Blackwell)
+    elif arch_num >= 89: version = "7.8"  # RTX 4090 (Ada Lovelace)
+    else: version = "7.5"  # Older architectures
+    return src.replace("TARGET", self.arch).replace("VERSION", version).encode()
 
 class NVPTXCompiler(PTXCompiler):
   def __init__(self, arch:str): super().__init__(arch, cache_key="nv_ptx")
