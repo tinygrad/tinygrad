@@ -247,7 +247,7 @@ def create_kernel(x:UOp, b:UOp|None=None):
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return buffer.assign(kernel).reshape(x.shape)
 
-DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.CONTIGUOUS, Ops.COPY}
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.GBARRIER}
 def append_to_kernel(ctx:dict[UOp, None], x:UOp):
   new_srcs: list[UOp] = []
   metadata = dict.fromkeys(x.arg.metadata)
@@ -505,7 +505,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   for x in realize_map:
     if x.op not in {Ops.CONTIGUOUS, Ops.COPY}:
       for c in [cc for c in x.children if (cc:=c()) is not None]:
-        if c is not None: contiguous_map[c] = c.replace(src=tuple([xx.contiguous() if xx is x else xx for xx in c.src]))
+        if c is not None: contiguous_map[c] = c.replace(src=tuple([xx.gbarrier() if xx is x else xx for xx in c.src]))
   tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, contiguous_map, bottom_up=True, input_map=tensor_map, name="insert_contiguous")
 
   # group into kernels
