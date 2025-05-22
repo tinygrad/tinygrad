@@ -44,9 +44,12 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     k = u.src[1]
     in_degree.setdefault(k, 0)
     for s in k.src:
-      if s.op is not Ops.ASSIGN: continue
-      children[s.src[1]].append(k)
-      in_degree[k] += 1
+      if s.op is Ops.ASSIGN:
+        children[s.src[1]].append(k)
+        in_degree[k] += 1
+      if s.op is Ops.MSELECT:
+        children[s.src[0].src[1]].append(k)
+        in_degree[k] += 1
 
   # linearize KERNEL UOps into ScheduleItems in BFS order
   queue = deque(k for k,v in in_degree.items() if v == 0)
