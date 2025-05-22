@@ -24,8 +24,7 @@ class TestRingAllReduce(unittest.TestCase):
       ds = tuple(f"CPU:{i}" for i in range(N))
       t = Tensor.ones(N, N*100).contiguous().shard(ds, axis=0).realize()
       out = t.sum(0)
-      out.kernelize()
-      #self.assertListEqual(out.tolist(), [4]*N*100)
+      self.assertListEqual(out.tolist(), [4]*N*100)
 
 if __name__ == '__main__':
   unittest.main()
