@@ -494,7 +494,7 @@ class TestTinygrad(unittest.TestCase):
       _a = Tensor([3]) in [Tensor([3]), Tensor([4]), Tensor([5])]
 
   def test_repr_with_grad(self):
-    a = Tensor([1], requires_grad=True)
+    a = Tensor([1.0], requires_grad=True)
     b = Tensor([1])
     c = (a + b).sum().backward()
     print(a)
