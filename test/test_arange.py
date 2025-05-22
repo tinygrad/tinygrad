@@ -9,9 +9,9 @@ from tinygrad.engine.search import get_kernel_actions
 from tinygrad.ops import Ops
 
 class TestArange(unittest.TestCase):
-  def _get_flops(self, N, opts=None):
+  def _get_flops(self, start, stop=None, step=1, opts=None):
     GlobalCounters.reset()
-    tt = Tensor.arange(N)
+    tt = Tensor.arange(start, stop, step)
     sched = tt.schedule()
     self.assertEqual(len(sched), 1)
     k = Kernel(sched[-1].ast)
@@ -21,12 +21,12 @@ class TestArange(unittest.TestCase):
     print(p.name)
     #print(p.src)
     ExecItem(CompiledRunner(p), [tt.lazydata.buffer]).run()
-    np.testing.assert_equal(tt.numpy(), np.arange(N))
+    np.testing.assert_equal(tt.numpy(), np.arange(start, stop, step))
     return p.estimates.ops
 
-  def test_complexity(self, opts=None, limit=None):
-    f1 = self._get_flops(256, opts)
-    f2 = self._get_flops(2560, opts)
+  def test_complexity(self, opts=None, limit=None, step=1):
+    f1 = self._get_flops(256, step=step, opts=opts)
+    f2 = self._get_flops(2560, step=step, opts=opts)
     print(f"{f1=}, {f2=}")
     # add 1 to avoid divide by 0. arange is 0 flops now!
     assert (f1 < 6000 and f2 < 6000) or ((f2+1) / (f1+1) < 16), f"bad complexity, flops {(f2+1) / (f1+1):.1f}X while inputs 10X"
@@ -39,6 +39,9 @@ class TestArange(unittest.TestCase):
   def test_complexity_w_unroll4(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 4)], limit=0)
   def test_complexity_w_unroll8(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 8)], limit=0)
   def test_complexity_w_upcast_and_unroll(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], limit=0)
+
+  def test_complexity_float_w_upcast(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4)], limit=1536, step=0.5)
+  def test_complexity__float_w_unroll4(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 4)], limit=1536, step=0.5)
 
   if Device.default.renderer.has_local:
     # TODO: fix limit

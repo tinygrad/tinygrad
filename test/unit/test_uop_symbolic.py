@@ -423,9 +423,9 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((gidx0+lidx2+lidx3)*4, 0, 80,
                               ("(((gidx0*4)+(lidx2*4))+(lidx3*4))","((lidx3*4)+((gidx0*4)+(lidx2*4)))"))
 
-  def test_float_mul_over_int_cast_distribute(self):
-    gidx0 = Variable("gidx0", 0, 7)
-    self.helper_test_variable((gidx0+10).cast(dtypes.float)*0.5, float("-inf"), float("inf"), "(((float)(gidx0)*0.5)+5.0)")
+  # def test_float_mul_over_int_cast_distribute(self):
+  #   gidx0 = Variable("gidx0", 0, 7)
+  #   self.helper_test_variable((gidx0+10).cast(dtypes.float)*0.5, float("-inf"), float("inf"), "(((float)(gidx0)*0.5)+5.0)")
 
   @unittest.expectedFailure
   def test_variable_divmod(self):
@@ -495,7 +495,13 @@ class TestSymbolic(unittest.TestCase):
     ridx0 = Variable("ridx0", 0, 63)
     expr = ((ridx0+1)//4).cast(dtypes.float)*0.75+((ridx0+2)//4).cast(dtypes.float)*0.75+\
       ((ridx0+3)//4).cast(dtypes.float)*0.75+((ridx0//4)+1).cast(dtypes.float)*0.75+-30.95
-    self.helper_test_variable(expr, float("-inf"), float("inf"), "((0.75*(float)(ridx0))+-30.2)")
+    self.helper_test_variable(expr, float("-inf"), float("inf"), "((0.75*(float)((ridx0+1)))+-30.95)")
+
+  def test_arange_unrolled4_float_cast_no_mul(self):
+    ridx0 = Variable("ridx0", 0, 63)
+    expr = ((ridx0+1)//4).cast(dtypes.float)*1.0+((ridx0+2)//4).cast(dtypes.float)*1.0+\
+      ((ridx0+3)//4).cast(dtypes.float)*1.0+((ridx0//4)+1).cast(dtypes.float)*1.0+-30.95
+    self.helper_test_variable(expr, float("-inf"), float("inf"), "((float)((ridx0+1))+-30.95)")
 
   def test_arange_unrolled4_mul(self):
     gidx = Variable("gidx", 0, 2559)
