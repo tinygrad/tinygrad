@@ -47,20 +47,3 @@ if __name__ == "__main__":
 
   # realize
   out.realize()
-
-  #_apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
-
-  #fixed_tensors = _find_all_tensors_for_uops(set([u for u in root.toposort() if not in_target_path[u]]))
-  #print(len(fixed_tensors))
-  #Tensor.realize(*fixed_tensors)
-
-  #for k in boundaries:
-  #  print(k.shape, k.op)
-
-
-
-  # don't flow through DETACH/ASSIGN or anything not in target path
-  #return list(root.toposort(lambda node: node.op not in {Ops.DETACH, Ops.ASSIGN} and in_target_path[node]))
-
-  #print(out)
-
