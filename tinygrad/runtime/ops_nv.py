@@ -251,7 +251,7 @@ class NVProgram(HCQProgram):
       shared_memory_size=self.shmem_usage, min_sm_config_shared_mem_size=smem_cfg, target_sm_config_shared_mem_size=smem_cfg,
       max_sm_config_shared_mem_size=0x1a, register_count_v=self.regs_usage, sass_version=0x89,
       program_address_upper=hi32(self.prog_addr), program_address_lower=lo32(self.prog_addr),
-      barrier_count=1, shader_local_memory_high_size=self.dev.slm_per_thread, program_prefetch_size=self.prog_sz>>8,
+      barrier_count=1, shader_local_memory_high_size=self.dev.slm_per_thread, program_prefetch_size=min(self.prog_sz>>8, 0x1ff),
       program_prefetch_addr_lower_shifted=self.prog_addr>>8, program_prefetch_addr_upper_shifted=self.prog_addr>>40)
 
     for i,(addr,sz) in self.constbufs.items():
