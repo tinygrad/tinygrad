@@ -355,6 +355,10 @@ view_right = merge_views+PatternMatcher([
 
 # **** fix kernel AST
 
+remove_gbarrier = PatternMatcher([
+  (UPat(Ops.GBARRIER, src=(UPat.var("x"),)), lambda x: x)
+])
+
 add_buffer_ops = PatternMatcher([
   # LOAD
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), x.st.to_uop())),
@@ -380,7 +384,7 @@ def check_load_st(glbl:UOp, view:UOp):
 
 fix_kernel_ops = PatternMatcher([
   # remove CONTIGUOUS/DEVICE from kernel AST
-  (UPat((Ops.CONTIGUOUS, Ops.GBARRIER), src=(UPat.var("x"),)), lambda x: x),
+  (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
   # no ImageDType after load
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
@@ -397,6 +401,8 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
       for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
       parents_rep[s] = s.buf_uop
   ast = k.arg.ast.substitute(parents_rep, name="replace realized")
+  # remove gbarrier
+  ast = graph_rewrite(ast, remove_gbarrier, name="remove gbarrier")
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
