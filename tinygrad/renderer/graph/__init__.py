@@ -7,10 +7,10 @@ from tinygrad.uop.ops import UOp, Variable, Ops
 from tinygrad.renderer import Renderer
 from tinygrad.nn.state import get_state_dict
 from tinygrad.engine.schedule import create_schedule_with_vars
-from tinygrad.engine.memory import memory_planner
+from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner
 from tinygrad.engine.grouper import Kernel
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, merge_dicts
 from typing import Callable, cast
 import itertools
 
@@ -53,14 +53,28 @@ class GraphRenderer(Renderer):
     self.bufs: dict[Buffer, str] = {cast(Buffer, u.base.buffer): f"input_{i}" for i, u in enumerate(self.inputs) if u.base.op is Ops.BUFFER}
     self.bufs.update({cast(Buffer, u.base.buffer): f"output_{i}" for i, u in enumerate(self.outputs)})
     self.state_bufs: dict[Buffer, str] = dict()
-    for si, ei in lower_schedule(memory_planner(schedule)):
+    for si, ei in lower_schedule(schedule):
       assert isinstance(ei.prg, CompiledRunner), f"Unsupported data transfer between bufs:\n{ei.bufs}\n\nEnsure all state is realized"
       for buf in ei.bufs: assert buf is not None and buf.device == compute_device, "All compute and returned Tensor(s) must be on the same device"
       self.eis.append(ei)
       for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
         if buf not in self.bufs:
-          self.bufs[buf] = name = f"buf_{next(ctr)}"
-          if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
+          #self.bufs[buf] = name = f"buf_{next(ctr)}"
+          #if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
+          if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name = f"buf_{next(ctr)}"
+          self.bufs[buf] = name if buf in self.state_bufs else ""
+    
+    for buf in self.bufs:
+      if buf.lb_refcount > 0: buf.ref(-1)
+    noopt = set(self.state_bufs.keys()).union(set(u.buffer for u in self.inputs if u.op is Ops.BUFFER)).union(set(u.buffer for u in self.outputs))
+    assigned = _internal_memory_planner(cast(list[list[Buffer]], [ei.bufs for ei in self.eis]), noopt_buffers=noopt)
+    for old, new in assigned.items():
+      del self.bufs[old]
+      if self.bufs[new] == "": self.bufs[new] = f"buf_{next(ctr)}"
+    for buf,name in self.bufs.items():
+      if name == "": self.bufs[buf] = f"buf_{next(ctr)}"
+
+    for i, ei in enumerate(self.eis): self.eis[i] = ExecItem(ei.prg, [assigned.get(b, b) for b in ei.bufs])
 
     assert all(b.is_allocated() for b in self.state_bufs)
     # build complete state_dict, rename state bufs with meaningful names from tensor_names
