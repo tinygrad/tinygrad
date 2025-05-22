@@ -158,7 +158,6 @@ def upat_compile(self:UPat, fxn) -> Callable|None:
   code_str, dyn_lookup = code
   globs = dyn_lookup.copy()
   globs["_fxn"] = real_fxn
-    restricted_globals = {"__builtins__": {k: __builtins__[k] for k in ["len", "range", "zip", "enumerate", "min", "max", "sum", "abs", "all", "any"] if k in __builtins__}}
   namespace: dict = {}
-  code_obj = compile(code_str, globs, namespace)  # pylint: disable=W0122
+  exec(code_str, globs, namespace)  # pylint: disable=W0122
   return namespace["compiled_match"]
