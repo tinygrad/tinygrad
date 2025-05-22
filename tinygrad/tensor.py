@@ -247,8 +247,14 @@ class Tensor(MathTrait):
     """
     st = time.perf_counter()
     self.kernelize(*lst)
-    schedule, var_vals, becomes_map = create_schedule_with_vars(UOp.sink(*[x.lazydata for x in (self,)+lst]))
-    _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
+    sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
+
+    # remove all ASSIGNs, after scheduling, the tensors are just buffers
+    remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.ASSIGN}
+    _apply_map_to_tensors(remove_assign_map, name="Remove Assigns")
+
+    # create the schedule
+    schedule, var_vals = create_schedule_with_vars(sink)
     schedule = memory_planner(schedule)
     if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms")
     return schedule, var_vals

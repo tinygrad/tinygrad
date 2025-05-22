@@ -35,11 +35,11 @@ pm_unbind = PatternMatcher([
 
 # **** schedule linearizer
 
-def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
+def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int]]:
   # construct the KERNEL children graph based on assigns
   children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree: dict[UOp, int] = {}
-  for u in (toposort:=sched_sink.toposort()):
+  for u in sched_sink.toposort():
     if u.op is not Ops.ASSIGN: continue  # anything that's not an ASSIGN doesn't write a kernel, so we can skip
     k = u.src[1]
     in_degree.setdefault(k, 0)
@@ -94,8 +94,4 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
 
-  # map ASSIGN to BUFFER after ScheduleItems are constructed
-  becomes_map = {u:u.buf_uop for u in toposort if u.op is Ops.ASSIGN}
-  assert all(u.op in {Ops.BUFFER, Ops.BUFFER_VIEW} for u in becomes_map.values()), f"Schedule didn't end with BUFFER {becomes_map.values()}"
-
-  return schedule, var_vals, becomes_map
+  return schedule, var_vals

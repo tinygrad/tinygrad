@@ -30,7 +30,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
     assert isinstance(t, UOp), f"can't schedule {t}"
     sink = UOp.sink(t) if t.op is not Ops.SINK else t
     becomes_map = get_kernelize_map(sink)
-    sched, _, __ = create_schedule_with_vars(sink.substitute(becomes_map))
+    sched, _ = create_schedule_with_vars(sink.substitute(becomes_map))
   # test lowering all the ScheduleItems to ExecItems
   kernel_cnt = len([si for si,ei in lower_schedule(sched.copy()) if isinstance(ei.prg, CompiledRunner) or not filter_sink])
   if kernel_cnt != allowed:

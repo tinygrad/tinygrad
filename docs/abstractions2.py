@@ -103,7 +103,7 @@ assert assign.src[1].op is Ops.KERNEL
 
 # schedule the kernel graph in a linear list
 s = UOp(Ops.SINK, dtypes.void, (assign,))
-sched, _, becomes_map = create_schedule_with_vars(s)
+sched, _ = create_schedule_with_vars(s)
 assert len(sched) == 1
 
 # DEBUGGING: print the compute ast
@@ -111,7 +111,7 @@ print(sched[-1].ast)
 # NOTE: sched[-1].ast is the same as st_0 above
 
 # the output will be stored in a new buffer
-out = becomes_map[assign]
+out = assign.buf_uop
 assert out.op is Ops.BUFFER and not out.buffer.is_allocated()
 print(out)
 
