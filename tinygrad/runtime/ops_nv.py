@@ -67,21 +67,19 @@ class QMD:
     self.mv, self.pref = (memoryview(bytearray(0x40 * 4)) if addr is None else to_mv(addr, 0x40 * 4)), pref
     if kwargs: self.write(**kwargs)
 
-  def write(self, **kwargs):
-    for k,val in kwargs.items():
-      en, st = QMD.fields[self.pref][k.upper()]
-      while st < en + 1:
-        if aligned:=(en - st + 1 >= 8 and st % 8 == 0): self.mv[st // 8] = val & 0xff
-        else: self.mv[st//8] = (self.mv[st//8] | (1 << (st%8))) if val & 1 else (self.mv[st//8] & ~(1 << (st%8)))
-        st, val = (st + 8, val >> 8) if aligned else (st + 1, val >> 1)
+  def _rw_bits(self, hi:int, lo:int, value:int|None=None) -> int|None:
+    mask = ((1 << (width:=hi - lo + 1)) - 1) << (lo % 8)
+    num = int.from_bytes(self.mv[lo//8:hi//8+1], "little")
 
-  def read(self, k, val=0):
-    (en, st), off = QMD.fields[self.pref][k.upper()], 0
-    while st < en + 1:
-      if aligned:=(en - st + 1 >= 8 and st % 8 == 0): val = (val | (self.mv[st // 8] << off))
-      else: val |= ((self.mv[st//8] >> (st%8)) & 1) << off
-      st, off = (st + 8, off + 1) if aligned else (st + 1, off + 1)
-    return val
+    if value is None: return (num & mask) >> (lo % 8)
+
+    if value >= (1 << width): raise ValueError(f"{value:#x} does not fit.")
+    self.mv[lo//8:hi//8+1] = int((num & ~mask) | ((value << (lo % 8)) & mask)).to_bytes((hi//8 - lo//8 + 1), "little")
+
+  def write(self, **kwargs):
+    for k,val in kwargs.items(): self._rw_bits(*QMD.fields[self.pref][k.upper()], value=val)
+
+  def read(self, k, val=0): return self._rw_bits(*QMD.fields[self.pref][k.upper()])
 
   def field_offset(self, k): return QMD.fields[self.pref][k.upper()][1] // 8
 
