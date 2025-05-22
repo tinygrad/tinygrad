@@ -501,10 +501,11 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # insert contiguous after all realize map
   # NOTE: we have to insert *before* the children, otherwise it infinite loops
-  contiguous_map = {}
+  realized_children = {}
   for x in realize_map:
-    for c in [cc for c in x.children if (cc:=c()) is not None]:
-      contiguous_map[c] = c.replace(src=tuple([xx.gbarrier() if xx is x else xx for xx in c.src]))
+    for c in [cc for c in x.children if (cc:=c()) is not None]: realized_children[c] = None
+  contiguous_map = {}
+  for c in realized_children: contiguous_map[c] = c.replace(src=tuple([xx.gbarrier() if xx in realize_map else xx for xx in c.src]))
   tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, contiguous_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
 
   # group into kernels
