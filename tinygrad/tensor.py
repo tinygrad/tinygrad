@@ -189,6 +189,14 @@ class Tensor(MathTrait):
     self.requires_grad = requires_grad
     return self
 
+  # helpers for MathTrait
+  def const_like(self, x:ConstType) -> Tensor: return Tensor(dtypes.as_const(x, self.dtype), self.device, self.dtype, requires_grad=False)
+  def alu(self, arg:Ops, *src) -> Tensor:
+    assert len(src) == 1
+    lhs,rhs = self._broadcasted(src[0])
+    fxn = {Ops.ADD: UOp.add, Ops.MUL: UOp.mul}
+    return lhs._apply_uop(fxn[arg], rhs)
+
   class train(ContextDecorator):
     def __init__(self, mode:bool = True): self.mode = mode
     def __enter__(self): self.prev, Tensor.training = Tensor.training, self.mode
@@ -3378,26 +3386,6 @@ class Tensor(MathTrait):
     # broadcast
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
 
-  def add(self, x:Tensor|ConstType, reverse=False) -> Tensor:
-    """
-    Adds `self` and `x`.
-    Equivalent to `self + x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.add(20).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.add(Tensor([[2.0], [3.5]])).numpy())
-    ```
-    """
-    return self._apply_broadcasted_uop(UOp.add, x, reverse)
-
   def sub(self, x:Tensor|ConstType, reverse=False) -> Tensor:
     """
     Subtracts `x` from `self`.
@@ -3418,26 +3406,6 @@ class Tensor(MathTrait):
     """
     a, b = self._broadcasted(x, reverse)
     return a + (-b)
-
-  def mul(self, x:Tensor|ConstType, reverse=False) -> Tensor:
-    """
-    Multiplies `self` and `x`.
-    Equivalent to `self * x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.mul(3).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.mul(Tensor([[-1.0], [2.0]])).numpy())
-    ```
-    """
-    return self._apply_broadcasted_uop(UOp.mul, x, reverse)
 
   def idiv(self, x:Tensor|ConstType, reverse=False) -> Tensor:
     """
