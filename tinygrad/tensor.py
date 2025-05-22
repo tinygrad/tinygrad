@@ -19,6 +19,8 @@ from tinygrad.engine.grouper import get_becomes_map
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: set[weakref.ref[Tensor]] = set()
+def _find_all_tensors_for_uops(all_uops: set[UOp]) -> list[Tensor]:
+  return [t for tref in all_tensors if (t:=tref()) is not None and t.lazydata in all_uops]
 
 def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> None:
   # get all children of keys in applied_map
@@ -32,9 +34,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
 
   # link the found UOps back to Tensors. exit early if there's no Tensors to realize
   # NOTE: this uses all_tensors, but it's fast
-  fixed_tensors: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and t.lazydata in all_uops]
-
-  if len(fixed_tensors):
+  if len(fixed_tensors := _find_all_tensors_for_uops(all_uops)):
     # potentially rewrite all the discovered Tensors
     sink = UOp.sink(*[t.lazydata for t in fixed_tensors])
     new_sink = sink.substitute(applied_map, name=name)
