@@ -494,6 +494,10 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
   assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
   return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
 
+add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER}, name="x"),
+                                lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
+remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
+
 @track_rewrites(name_fxn=get_name)
 def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # multi + merge_views + simplify
@@ -505,15 +509,9 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # determine where to insert gbarriers
   realize_map = group_realizes(tensor_map[big_sink])
 
-  # insert contiguous after all realize map
-  # NOTE: we have to insert *before* the children, otherwise it infinite loops
-  realized_children = {}
-  for x in realize_map:
-    for c in [cc for c in x.children if (cc:=c()) is not None]: realized_children[c] = None
-  contiguous_map = {}
-  for c in realized_children: contiguous_map[c] = c.replace(src=tuple([xx.gbarrier() if xx in realize_map else xx for xx in c.src]))
-  del realized_children
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, contiguous_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
+  # insert gbarrier after all realize map
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map)
 
   # group into kernels
   tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx={}, bottom_up=True, input_map=tensor_map, name="create_kernels")
