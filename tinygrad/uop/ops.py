@@ -541,17 +541,21 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
-    if self.op is Ops.MSELECT: return self.src[0].buf_uop
+    if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     assert self.op is Ops.ASSIGN, f"must be ASSIGN {self.op}"
     return self.src[0].base
   @property
   def buffer(self) -> Buffer|MultiBuffer:
+    from tinygrad.device import Buffer, MultiBuffer
     if self is not self.base:
       assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
       return self.src[0].buffer
+    if self.op is Ops.MSELECT:
+      ret = self.src[0].buffer
+      assert isinstance(ret, MultiBuffer)
+      return ret.bufs[self.arg]
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
     if (cret:=buffers.get(self)) is not None: return cret
-    from tinygrad.device import Buffer, MultiBuffer
     rdtype = self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base
     if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.size, rdtype).ref(1)
     else: ret = Buffer(self.device, self.size, rdtype).ref(1)
