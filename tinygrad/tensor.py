@@ -3473,6 +3473,13 @@ class Tensor(SimpleMathTrait):
     numerator, denominator = self._broadcasted(x, reverse)
     d = numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
     output_dtype = numerator.dtype if dtypes.is_int(numerator.dtype) else d.dtype
+    if dtypes.is_int(dt:=least_upper_dtype(numerator.dtype, denominator.dtype)) and rounding_mode is not None:
+      numerator, denominator = numerator.cast(dt), denominator.cast(dt)
+      if rounding_mode == "trunc": return numerator.idiv(denominator)
+      if rounding_mode == "floor":
+        truncate_div, truncate_mod = numerator.idiv(denominator), numerator._apply_broadcasted_uop(UOp.mod, denominator)
+        opposite_sign = ((numerator>0)&(denominator<0)) | ((numerator<0)&(denominator>0))
+        return (opposite_sign&(truncate_mod!=0)).where(truncate_div-1, truncate_div)
     if rounding_mode == "trunc": return d.trunc().cast(output_dtype)
     if rounding_mode == "floor": return d.floor().cast(output_dtype)
     if rounding_mode is not None: raise RuntimeError(f"{rounding_mode=} is not supported")
@@ -3664,6 +3671,10 @@ class Tensor(SimpleMathTrait):
 
   def __invert__(self) -> Tensor: return self.bitwise_not()
 
+  # TODO: combine with UOps __floordiv__
+  def __floordiv__(self, x): return self.div(x, rounding_mode="floor")
+  def __rfloordiv__(self, x): return self.div(x, rounding_mode="floor", reverse=True)
+
   def __lshift__(self, x:int) -> Tensor: return self.lshift(x)
   def __rshift__(self, x:int) -> Tensor: return self.rshift(x)
 
@@ -3678,7 +3689,7 @@ class Tensor(SimpleMathTrait):
   def __imul__(self, x) -> Tensor: return self.assign(self.mul(x))
   def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x))
-  def __ifloordiv__(self, x) -> Tensor: return self.assign(self.idiv(x))
+  def __ifloordiv__(self, x) -> Tensor: return self.assign(self.__floordiv__(x))
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
   def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x))
   def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x))
