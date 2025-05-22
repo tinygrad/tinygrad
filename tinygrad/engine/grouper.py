@@ -489,7 +489,7 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
   return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
 
 @track_rewrites(name_fxn=get_name)
-def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
+def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # multi + merge_views + simplify
   tensor_map = graph_rewrite_map(big_sink, multi_pm+replace_allreduce+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
 

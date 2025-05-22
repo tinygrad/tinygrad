@@ -78,7 +78,7 @@ print("******** third, the UOp ***********")
 
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule_with_vars
-from tinygrad.engine.grouper import get_becomes_map
+from tinygrad.engine.grouper import get_kernelize_map
 
 # allocate some values + load in values
 a = UOp.new_buffer(DEVICE, 1, dtypes.int32)
@@ -91,7 +91,7 @@ out = a + b
 s = UOp(Ops.SINK, dtypes.void, (out,))
 
 # group the computation into kernels
-becomes_map = get_becomes_map(s)
+becomes_map = get_kernelize_map(s)
 
 # the compute maps to an assign
 assign = becomes_map[a+b]
