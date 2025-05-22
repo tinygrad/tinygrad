@@ -517,10 +517,12 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # make contiguous and src[0] the same thing
   # NOTE: this has to exist becase graph_rewrite_map does not map src[0] -> contiguous directly, if you do, it's an infinite loop!
   for k,v in tensor_map.copy().items():
-    if k.op is not v.op: continue # TODO: this is a fragile check for if we should looks for contigs in this op for contig parents
+    if k.op is not v.op: continue # TODO: this is a fragile check for if we should look for contig srcs in this op
     assert len(k.src) == len(v.src), "source length changed while inserting contiguous?"
     for s0,s1 in zip(k.src, v.src):
-      if s1.op is Ops.CONTIGUOUS: tensor_map[s0] = s1
+      if s1.op is Ops.CONTIGUOUS:
+        # map src0 to contiguous
+        tensor_map[s0] = s1
   tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels+create_ast, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
