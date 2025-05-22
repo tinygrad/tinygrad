@@ -2824,6 +2824,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).relu().numpy())
     ```
     """
+    # NOTE: if you write this as self.maximum(0) the gradient is wrong, passing through half when self is 0
     return (self>0).where(self, 0)
 
   def sigmoid(self) -> Tensor:
