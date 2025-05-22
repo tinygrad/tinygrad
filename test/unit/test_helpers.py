@@ -116,7 +116,7 @@ class TestRoundUp(unittest.TestCase):
     self.assertEqual(round_up(232, 24984), 24984)
     self.assertEqual(round_up(24984, 232), 25056)
 
-# @unittest.skip("no fetch tests because they need internet")
+@unittest.skip("no fetch tests because they need internet")
 class TestFetch(unittest.TestCase):
   def test_fetch_bad_http(self):
     self.assertRaises(Exception, fetch, 'http://www.google.com/404', allow_caching=False)
