@@ -13,15 +13,20 @@ The current integration with `tinygrad` supports core model computations, data l
         hyp["misc"]["device"] = "tiny" # Device set for tinygrad
     ```
 
-2.  **Model Initialization:** Currently, we can switch to the `TINY_BACKEND` without altering any code to build the `SpeedyConvNet` model. However, model weight initialization is not supported yet due to the missing `unfold` operation, which I am actively working on resolving.
+2.  **Model Initialization:**
+    Currently, we can switch to the `TINY_BACKEND` without altering any code to build the `SpeedyConvNet` model. However, model weight initialization is not fully supported yet due to the missing `unfold` operation in tinygrad, which I am actively working on resolving.
+
+    For eigenvalue decomposition, tinygrad doesn't yet implement `linalg.eigh`, so we had to use NumPy's implementation as a workaround:
+
     ```python
-    def make_net():
-        whiten_conv_depth = 3*hyp['net']['whitening']['kernel_size']**2
+    def get_whitening_parameters(patches):
         ...
-        with torch.no_grad():
-            # init_whitening_conv(net.net_dict['initial_block']['whiten'],
-            ...
-        net = net.to(hyp['misc']['device'])
+        est_covariance = torch.cov(patches.view(n, c*h*w).t())
+        # eigenvalues, eigenvectors = torch.linalg.eigh(est_covariance, UPLO='U') # this is the same as saying we want our eigenvectors, with the specification that the matrix be an upper triangular matrix (instead of a lower-triangular matrix)
+        eigenvalues,eigenvectors = np.linalg.eigh(est_covariance.cpu().numpy(), UPLO="U")
+        eigenvalues = torch.from_numpy(eigenvalues).to(patches.device)
+        eigenvectors = torch.from_numpy(eigenvectors).to(patches.device)
+        return eigenvalues.flip(0).view(-1, 1, 1, 1), eigenvectors.t().reshape(c*h*w,c,h,w).flip(0)
     ```
 
 3.  **Data Handling:**
