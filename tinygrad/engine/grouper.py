@@ -512,6 +512,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
     for c in [cc for c in x.children if (cc:=c()) is not None]: realized_children[c] = None
   contiguous_map = {}
   for c in realized_children: contiguous_map[c] = c.replace(src=tuple([xx.gbarrier() if xx in realize_map else xx for xx in c.src]))
+  del realized_children
   tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, contiguous_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
 
   # group into kernels
