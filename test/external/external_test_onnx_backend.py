@@ -87,13 +87,6 @@ backend_test.exclude('FLOAT8')
 backend_test.exclude('INT4')
 backend_test.exclude('UINT4')
 backend_test.exclude('BFLOAT16')  # not supported in numpy
-# TODO: fix these with true onnx float16
-backend_test.exclude('to_FLOAT16')
-backend_test.exclude('cast_no_saturate')
-backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
-backend_test.exclude('test_max_float16_cpu')
-backend_test.exclude('test_min_float16_cpu')
-backend_test.exclude('test_mod_mixed_sign_float16_cpu')
 
 backend_test.exclude('test_dequantizelinear_int4_cpu')
 backend_test.exclude('test_dequantizelinear_uint4_cpu')
