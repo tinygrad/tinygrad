@@ -151,6 +151,17 @@ class TestSchedule(unittest.TestCase):
     a.realize()
     assert not a.lazydata.is_realized
 
+  def test_realize_means_realize(self):
+    a = Tensor.empty(10)
+    a.kernelize()
+    # no allocation in kernelize
+    assert not a.lazydata.buffer.is_allocated()
+    self.assertIs(a.lazydata.op, Ops.BUFFER)
+    a.realize()
+    # after realize, even if there aren't ExecItems the sinked buffers should be allocated
+    with self.assertRaises(AssertionError):
+      assert a.lazydata.buffer.is_allocated()
+
   def test_simplify_padded_const(self):
     a = Tensor.empty(1022).cummax(axis=0)
     sched = check_schedule(a, 5)
