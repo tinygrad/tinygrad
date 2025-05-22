@@ -252,7 +252,7 @@ def append_to_kernel(ctx:dict[UOp, None], x:UOp):
   new_srcs: list[UOp] = []
   metadata = dict.fromkeys(x.arg.metadata)
   for s in x.src:
-    if s.op in DONT_PLACE_IN_KERNEL or s in ctx: new_srcs.append(s)
+    if s.op in DONT_PLACE_IN_KERNEL: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
       if s.base.op not in {Ops.CONST, Ops.DEVICE} and (m:=s.metadata): metadata[m] = None
@@ -264,8 +264,6 @@ create_kernels = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="x"), create_kernel),
   # create a buffer for COPY on the new device
   (UPat(Ops.COPY, src=(UPat(), UPat(Ops.DEVICE)), name="x"), create_kernel),
-  # otherwise check the context if we're realizing this UOp
-  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: create_kernel(x) if x in ctx else None),
   # walk back the local graph until we reach a realized source
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # remove extra views and constants from SINK
@@ -477,6 +475,24 @@ do_fuse = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
 ])
 
+# ctx says which UOps should be made contiguous
+def make_srcs_contiguous(ctx:dict[UOp, None], root:UOp):
+  new_srcs:list[UOp] = []
+  for s in root.src:
+    if s in ctx:
+      # don't double realize if it's contiguous
+      if s.op in ALWAYS_CONTIGUOUS: new_srcs.append(s)
+      # if it's a VIEW, realize the base and apply VIEW on the buffer
+      elif s.op is Ops.VIEW: new_srcs.append(s.base.contiguous().view(s.arg))
+      else: new_srcs.append(s.contiguous())
+    else: # fuse this op!
+      new_srcs.append(s)
+  if tuple(new_srcs) != root.src: return root.replace(src=tuple(new_srcs))
+
+add_contiguous = PatternMatcher([
+  (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="root"), make_srcs_contiguous),
+])
+
 PROCESS_REPLAY_CAPTURE:dict[int,bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
   import atexit
@@ -498,7 +514,8 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # group into kernels
   realize_map = group_realizes(tensor_map[big_sink])
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="create_kernels")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], add_contiguous, input_map=tensor_map, ctx=realize_map, bottom_up=True, name="add_contiguous")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
@@ -513,9 +530,6 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep:
     tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, ctx=assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
-
-  # finally, create the AST for kernels
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map, name="create_ast")
 
   # display the final graph
   sched_sink = tensor_map[big_sink]
