@@ -394,7 +394,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   parents_rep: dict[UOp, UOp] = {}
   for s in k.src:
     if s.op is Ops.MSELECT:
-      assert s.src[0].op is Ops.ASSIGN
+      assert s.src[0].op is Ops.ASSIGN, f"{s.src[0].op} isn't ASSIGN"
       for out in s.src[0].src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
       parents_rep[s] = s.buf_uop
     if s.op is Ops.ASSIGN:
