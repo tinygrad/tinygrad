@@ -14,7 +14,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
-from tinygrad.engine.grouper import get_becomes_map
+from tinygrad.engine.grouper import get_kernelize_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -235,7 +235,7 @@ class Tensor(SimpleMathTrait):
     # verify Tensors match the spec
     if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
 
-    becomes_map = get_becomes_map(big_sink)
+    becomes_map = get_kernelize_map(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
     return self
 
