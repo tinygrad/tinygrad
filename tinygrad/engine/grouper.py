@@ -386,16 +386,15 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
+replace_with_buffer = PatternMatcher([
+  (UPat(Ops.ASSIGN, src=(UPat.var("buffer"), UPat(Ops.KERNEL))), lambda buffer: buffer),
+])
+
 def fix_kernel_ast(k:UOp) -> UOp|None:
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
-  # replace assign sources with a view of the target buffer
-  parents_rep: dict[UOp, UOp] = {}
-  for s in k.src:
-    if s.op is Ops.ASSIGN:
-      for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
-      parents_rep[s] = s.buf_uop
-  ast = k.arg.ast.substitute(parents_rep, name="replace realized")
+  ast = graph_rewrite(k.arg.ast, replace_with_buffer, name="replace_with_buffer")
   # push views to edges
+  # TODO: move this to before the kernel creation pass
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
   ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs:=tuple(s.buf_uop for s in k.src), bottom_up=True, name="replace buffer")
@@ -515,7 +514,14 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # group into kernels
   realize_map = group_realizes(tensor_map[big_sink])
   tensor_map = graph_rewrite_map(tensor_map[big_sink], add_contiguous, input_map=tensor_map, ctx=realize_map, bottom_up=True, name="add_contiguous")
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, input_map=tensor_map, name="create_kernels")
+  # make contiguous and src[0] the same thing
+  # NOTE: this has to exist becase graph_rewrite_map does not map src[0] -> contiguous directly, if you do, it's an infinite loop!
+  for k,v in tensor_map.copy().items():
+    if k.op is not v.op: continue # TODO: this is a fragile check for if we should looks for contigs in this op for contig parents
+    assert len(k.src) == len(v.src), "source length changed while inserting contiguous?"
+    for s0,s1 in zip(k.src, v.src):
+      if s1.op is Ops.CONTIGUOUS: tensor_map[s0] = s1
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels+create_ast, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
