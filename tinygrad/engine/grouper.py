@@ -388,13 +388,6 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
-move_mselect_left = PatternMatcher([
-  # just remove CONTIGUOUS, no need to move mselect through it
-  (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
-  # move mselect through VIEW
-  (UPat(Ops.MSELECT, name="msel", src=(UPat(Ops.VIEW, name="x"),)), lambda x,msel: x.src[0].mselect(msel.arg).view(x.arg)),
-])
-
 def fix_kernel_ast(k:UOp) -> UOp|None:
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
   # replace assign sources with a view of the target buffer
@@ -406,8 +399,6 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   ast = k.arg.ast.substitute(parents_rep, name="replace realized")
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
-  # move mselect to the buffer
-  #ast = graph_rewrite(ast, move_mselect_left, name="move mselect")
   # replace buffer with define_global + add load/store last
   ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs:=tuple(s.buf_uop for s in k.src), bottom_up=True, name="replace buffer")
   if ast.op is Ops.SINK and not all_same([x.device for x in bufs]):
