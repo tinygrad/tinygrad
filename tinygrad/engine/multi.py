@@ -1,5 +1,5 @@
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv
+from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, unwrap
 from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp
 
 # *** allreduce implementation ***
@@ -92,14 +92,6 @@ def expand_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.arg[multi.axis] == multi.shape[multi.axis], f"expand not supported on sharded axis {root.arg=}"
   return multi.src[0].expand(_shape_to_single_shard(multi.axis, root.arg, multi.src[0])).multi(multi.axis)
 
-def pad_multi(root:UOp, multi:UOp):
-  assert multi.axis is None or root.arg[multi.axis] == (0,0), f"padding not supported for {root.arg=}"
-  return multi.src[0].pad(root.arg).multi(multi.axis)
-
-def permute_multi(root:UOp, multi:UOp):
-  # all permutes supported!
-  return multi.src[0].permute(root.arg).multi(root.axis)
-
 def shrink_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.arg[multi.axis] == (0, multi.shape[multi.axis]) or root.arg[multi.axis] in multi.bounds, \
     f"shrinking not supported for {root.arg=}"
@@ -111,21 +103,19 @@ def shrink_multi(root:UOp, multi:UOp):
     return multi.src[0].copy_to_device(multi.device, arg=multi.bounds.index(root.arg[multi.axis]))
   return multi.src[0].shrink(tuple((0, multi.src[0].shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.arg))).multi(multi.axis)
 
+# pad and flip are passthrough with an assert
+
+def pad_multi(root:UOp, multi:UOp):
+  assert multi.axis is None or root.arg[multi.axis] == (0,0), f"padding not supported for {root.arg=}"
+  return multi.src[0].pad(root.arg).multi(multi.axis)
+
 def flip_multi(root:UOp, multi:UOp):
   assert multi.axis is None or not root.arg[multi.axis], "flipping not supported on sharded axis"
   return multi.src[0].flip(root.arg).multi(multi.axis)
 
-# from multiple devices -> one
-def copy_multi(multi:UOp, device:UOp):
-  assert multi.axis is not None, "all multi ops have axis"
-  return multi.src[0]._unshard(multi.axis).allreduce(Ops.ADD, device)
-
 def assign_multi(dest:UOp, src:UOp):
   if dest.axis != src.axis: raise RuntimeError(f"axis must match in assign {dest.axis} != {src.axis}")
   return dest.src[0].assign(src.src[0]).multi(src.axis)
-
-def passthrough_multi(root:UOp, multi:UOp):
-  return root.replace(src=(multi.src[0],)).multi(multi.axis)
 
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([
@@ -133,14 +123,15 @@ multi_pm = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reduce_multi),
   (UPat(Ops.RESHAPE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reshape_multi),
   (UPat(Ops.EXPAND, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), expand_multi),
-  (UPat(Ops.PAD, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), pad_multi),
-  (UPat(Ops.PERMUTE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), permute_multi),
   (UPat(Ops.SHRINK, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), shrink_multi),
+  (UPat(Ops.PAD, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), pad_multi),
   (UPat(Ops.FLIP, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), flip_multi),
   (UPat(Ops.ASSIGN, src=(UPat(Ops.MULTI, name="dest"), UPat(Ops.MULTI, name="src"))), assign_multi),
-  (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))), copy_multi),
+  (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))),
+    lambda multi,device: multi.src[0]._unshard(unwrap(multi.axis)).allreduce(Ops.ADD, device)),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device")), name="red"),
     lambda multi,device,red: multi.src[0].allreduce(red.arg, device).multi(axis=multi.axis)),
-  (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE),
-        src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
+  # all PERMUTEs are supported
+  (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE, Ops.PERMUTE),
+        src=(UPat(Ops.MULTI, name="multi"), ), name="root"), lambda root, multi: root.replace(src=(multi.src[0],)).multi(multi.axis)),
 ])
