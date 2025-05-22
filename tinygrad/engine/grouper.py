@@ -505,7 +505,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   for x in realize_map:
     for c in [cc for c in x.children if (cc:=c()) is not None]:
       contiguous_map[c] = c.replace(src=tuple([xx.gbarrier() if xx is x else xx for xx in c.src]))
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, contiguous_map, bottom_up=True, input_map=tensor_map, name="insert_contiguous")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, contiguous_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
 
   # group into kernels
   tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx={}, bottom_up=True, input_map=tensor_map, name="create_kernels")
