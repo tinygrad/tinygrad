@@ -100,6 +100,7 @@ backend_test.exclude('test_quantizelinear_e4m3fn_cpu')
 backend_test.exclude('test_quantizelinear_e5m2_cpu')
 backend_test.exclude('test_dequantizelinear_e4m3fn_cpu')
 backend_test.exclude('test_dequantizelinear_e4m3fn_zero_point_cpu')
+backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 backend_test.exclude('test_dequantizelinear_e5m2_cpu')
 
 # we don't support indexes

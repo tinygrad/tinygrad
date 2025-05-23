@@ -274,6 +274,9 @@ pm_push_cast = PatternMatcher([
   # I think it's because inaccuracy arises from REDUCE and so only ops after reduce exacerbate inaccuracy??
   # IDK
 
+  # TODO: this is not complete
+  # TODO: push through fixup optimized AST?
+
   # (UPat(GroupOp.Unary, src=(UPat.var("b", dtype=dtypes.half),), name="op", dtype=dtypes.half).cast(dtypes.float32),
   #  lambda op, b: UOp(op.op, dtypes.float32, (b.cast(dtypes.float32),), op.arg)),
   # (UPat(GroupOp.Binary, src=(UPat.var("b1", dtype=dtypes.half), UPat.var("b2", dtypes.half)), name="op", dtype=dtypes.half).cast(dtypes.float32),

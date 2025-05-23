@@ -1,4 +1,3 @@
-# external_test_onnx_numerical_accuracy.py
 import unittest
 import onnx
 from onnx import TensorProto, helper, checker
@@ -6,14 +5,16 @@ import numpy as np
 import os
 from extra.onnx_helpers import validate
 from tinygrad import Context
-from tinygrad.helpers import NUMERICAL_STABILITY
 
 def create_onnx_model_half_precision_sum_reduce(input_shape, model_path="test_sum_reduce_half.onnx"):
   X = helper.make_tensor_value_info('input', TensorProto.FLOAT16, input_shape)
+
   sin_node = helper.make_node('Sin', ['input'], ['sin_out'])
+
   const1_val_fp16 = np.array(0.5, dtype=np.float16)
   const1_tensor = helper.make_tensor('const1_fp16', TensorProto.FLOAT16, [], const1_val_fp16.tobytes(), raw=True)
   mul_node = helper.make_node('Mul', ['sin_out', 'const1_fp16'], ['mul_out_fp16'])
+
   reduce_axes_tensor = helper.make_tensor('reduce_axes', TensorProto.INT64, [1], [1])
   reduce_sum_node = helper.make_node(
     'ReduceSum',
@@ -21,13 +22,17 @@ def create_onnx_model_half_precision_sum_reduce(input_shape, model_path="test_su
     ['reduce_sum_out_fp32'],
     keepdims=0
   )
+
   exp_node = helper.make_node('Exp', ['reduce_sum_out_fp32'], ['exp_out'])
+
   const2_val_fp16 = np.array(1.5, dtype=np.float16)
   const2_tensor = helper.make_tensor('const2_fp16', TensorProto.FLOAT16, [], const2_val_fp16.tobytes(), raw=True)
   add_node = helper.make_node('Add', ['exp_out', 'const2_fp16'], ['add_out'])
+
   const3_val_fp16 = np.array(50.0, dtype=np.float16)
   const3_tensor = helper.make_tensor('const3_fp16', TensorProto.FLOAT16, [], const3_val_fp16.tobytes(), raw=True)
   div_node = helper.make_node('Div', ['add_out', 'const3_fp16'], ['output'])
+
   output_shape = [input_shape[0], input_shape[2]]
   Y = helper.make_tensor_value_info('output', TensorProto.FLOAT16, output_shape)
   graph_def = helper.make_graph(
@@ -58,6 +63,7 @@ class TestOnnxNumericalAccuracy(unittest.TestCase):
       os.remove(cls.model_path)
 
   def test_half_precision_sum_reduction_stable(self):
+    # test fails with NUMERICAL_STABILITY=0
     # how do I disable cache so I can NUMERICAL_STABILITY=0 expected failure?
     with Context(NUMERICAL_STABILITY=1):
       validate(self.model_path, self.inputs, rtol=2e-3, atol=2e-3)

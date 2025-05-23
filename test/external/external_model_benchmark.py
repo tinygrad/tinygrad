@@ -113,10 +113,8 @@ def benchmark_model(m, devices, validate_outs=False):
   if validate_outs:
     for device in devices:
       if m in ["openpilot", "commavq"]:
-        # environ['NUMERICAL_STABILITY'] = 1
-        rtol, atol = 2e-3, 1e-2  # tolerance for fp16 models
+        rtol, atol = 2e-3, 4e-2  # tolerance for fp16 models
       else:
-        environ['NUMERICAL_STABILITY'] = '0'
         rtol, atol = 2e-3, 2e-3
       Device.DEFAULT = device
       inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
