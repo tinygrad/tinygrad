@@ -650,6 +650,14 @@ class TestSchedule(unittest.TestCase):
     c = b.kernelize()+Tensor.empty(4,4)
     check_schedule(c, 2)
 
+  def test_kernelize_diamond(self):
+    a = Tensor([0]).realize()
+    prev_a = (a+1).contiguous()
+    a.assign(Tensor([2]))
+    a.kernelize(prev_a)
+    assert prev_a.lazydata in a.lazydata.src, "contiguous usage must run before assign"
+    self.assertEqual((prev_a+a*3).item(), 1+2*3)
+
   def test_multioutput_ast(self):
     a = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().lazydata
     b = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().lazydata

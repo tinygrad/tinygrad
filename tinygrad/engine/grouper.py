@@ -255,6 +255,7 @@ def append_to_kernel(x:UOp):
     if s.op in DONT_PLACE_IN_KERNEL or s.op is Ops.GBARRIER: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
+      # NOTE: because const and device are shared UOps they don't change metadata
       if s.base.op not in {Ops.CONST, Ops.DEVICE} and (m:=s.metadata): metadata += m
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(dedup(metadata))))
 
@@ -472,7 +473,6 @@ def fuse_arange(root:UOp):
         if other_paths: break
       else: q.extend(curr_children)
   return root.substitute(fuse_rep, name="fuse_arange") if fuse_rep else None
-
 
 do_fuse = PatternMatcher([
   (UPat(Ops.FUSE, name="x"), do_fusion),
