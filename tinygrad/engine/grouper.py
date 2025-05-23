@@ -385,7 +385,7 @@ fix_kernel_ops = PatternMatcher([
 ])
 
 replace_realized = PatternMatcher([
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat(Ops.KERNEL)), name="assign"), lambda assign: assign.src[0])
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat(Ops.KERNEL)), name="assign", allow_any_len=True), lambda assign: assign.src[0])
 ])
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
