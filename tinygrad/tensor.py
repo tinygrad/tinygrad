@@ -3886,7 +3886,7 @@ class Tensor(MathTrait):
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     if is_causal:
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
-      attn_mask = qk.ones_like(requires_grad=False, device=self.device, dtype=dtypes.bool).tril()
+      attn_mask = Tensor.ones(self.shape[:-1]+(key.shape[-2],), requires_grad=False, device=self.device, dtype=dtypes.bool).tril()
     if _flash_att:
       assert isinstance(key.shape[-2], int), f"does not support symbolic shape {key.shape}"
       assert isinstance(value.shape[-2], int), f"does not support symbolic shape {value.shape}"
