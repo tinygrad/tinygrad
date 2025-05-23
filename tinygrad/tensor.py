@@ -3839,7 +3839,6 @@ class Tensor(MathTrait):
       #O = UOp.new_buffer(self.device, qi.numel(), self.dtype)
       for ci in range(0, key.shape[-2], Bc):
         k_chunk = key[..., ci:ci+Bc, :]
-        v_chunk = value[..., ci:ci+Bc, :]
 
         S_chunk = (qi.matmul(k_chunk.transpose(-2, -1), dtype=least_upper_dtype(self.dtype, k_chunk.dtype, dtypes.float32)) / math.sqrt(self.shape[-1]))
 
@@ -3850,7 +3849,6 @@ class Tensor(MathTrait):
         e_chunk = (S_chunk - m_chunk).exp().dropout(dropout_p)
 
         l_chunk = e_chunk.sum(-1, keepdim=True)
-        o_chunk = e_chunk @ v_chunk
 
         m_new = Tensor.maximum(m, m_chunk)
         exp_m_diff = (m - m_new).exp()
@@ -3859,8 +3857,8 @@ class Tensor(MathTrait):
         m = m_new
         l = l * exp_m_diff + l_chunk * exp_mc_diff
         # TODO: this should be an in-place edit of O
-        O = O * exp_m_diff + o_chunk * exp_mc_diff
-        #O.assign(O * exp_m_diff.lazydata + o_chunk.lazydata * exp_mc_diff.lazydata)
+        O = O * exp_m_diff + (e_chunk @ value[..., ci:ci+Bc, :]) * exp_mc_diff
+        #O.assign(O * exp_m_diff.lazydata + ((e_chunk @ value[..., ci:ci+Bc, :]) * exp_mc_diff).lazydata)
 
         # TODO: Get a bunch of the above to fuse
         #O = O.fuse()
