@@ -510,10 +510,13 @@
                 let inpSize = 4*64*64;
                 latent = new Float32Array(inpSize);
 
-                for (let i = 0; i < inpSize; i++) {
-                    latent[i] = Math.sqrt(-2.0 * Math.log(Math.random())) * Math.cos(2.0 * Math.PI * Math.random());
-                }
-                
+                // RNG with seed
+                function LCG(seed) {const m=2147483647, a=16807; return () => ((seed = seed * a % m) / m);}
+                const rand_seed = Math.floor(Math.random() * 2147483647);
+                const randn = LCG(rand_seed);
+                for(let i=0; i<inpSize; i++)
+                    latent[i] = Math.sqrt(-2 * Math.log(randn())) * Math.cos(2 * Math.PI * randn());
+
                 for (let i = timesteps.length - 1; i >= 0; i--) {
                     let timestep = new Float32Array([timesteps[i]]);
                     let start = performance.now()
