@@ -52,6 +52,7 @@ def _keccak_round(state: list[Tensor], rndc: int) -> list[Tensor]:
 
   # iota
   state[0] = state[0] ^ rndc
+  state = [s.contiguous() for s in state]
 
   return state
 def _keccakf1600(state: list[Tensor]) -> list[Tensor]:
@@ -66,13 +67,14 @@ def kaccak(capacity: int, msg: Tensor, delim: int, output_len: int) -> Tensor:
 
   # pad up to multiple of brate
   msg = msg.pad((None, (0, 1)), value=delim)
-  msg = msg.pad((None, (0, brate - (msg.shape[1] % brate) - 1)), value=0)
-  msg = msg.pad((None, (0, 1)), value=0x80)
-  chunks = msg.bitcast(dtypes.uint64).split(wrate, dim=1)
+  if msg.shape[1] % 168 != 0: msg = msg.pad((None, (0, brate - (msg.shape[1] % brate))), value=0)
+  chunks = msg.contiguous().bitcast(dtypes.uint64).split(wrate, dim=1)
 
-  for chunk in chunks:
+  for i,chunk in enumerate(chunks):
     for j in range(chunk.shape[1]):
       state[j] = state[j] ^ chunk[:, j]
+    if i == len(chunks) - 1:
+      state[j] = state[j] ^ 0x8000000000000000
     state = _keccakf1600(state)
 
   obsize = min(brate, output_len)
@@ -93,22 +95,24 @@ def string_to_uint8_tensor(s: str) -> Tensor:
   return Tensor([b], dtype=dtypes.uint8)
 
 def test_kat(kat, i):
-  kat = kat.split("\n")
+  print(f"running KAT {i}")
+  kat = kat.split("\r\n")
+  mlen = int(kat[0].split(" = ")[1])
   msg = kat[1].split(" = ")[1]
   md = kat[2].split(" = ")[1].lower()
-  msg_hex = Tensor([bytes.fromhex(msg)], dtype=dtypes.uint8)
-  mdc = shake128(msg_hex).data().tobytes().hex()
+  msgt = Tensor([bytes.fromhex(msg)], dtype=dtypes.uint8)[:, :mlen]
+  mdc = shake128(msgt).data().tobytes().hex()
   assert md == mdc, f"failed on KAT {i}, {md} != {mdc}"
 
 if __name__ == "__main__":
   import zipfile
   kats_zip = fetch("https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/sha3/shakebytetestvectors.zip")
   kats = zipfile.ZipFile(kats_zip).open("SHAKE128ShortMsg.rsp").read().decode()
-  kats = kats.split("\n\n")[1:]
+  kats = kats.split("\r\n\r\n")[2:-1]
 
   if kat_idx := getenv("KAT", 0):
     test_kat(kats[kat_idx], kat_idx)
   else:
-    for i, kat in enumerate(kats):
+    for i, kat in enumerate(kats[getenv("KAT_START", 0):getenv("KAT_END", len(kats))]):
       if not kat: continue
       test_kat(kat, i)
