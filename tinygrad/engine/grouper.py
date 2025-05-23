@@ -511,7 +511,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # insert gbarrier after all realize map
   tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map)
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
 
   # group into kernels
   tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx={}, bottom_up=True, input_map=tensor_map, name="create_kernels")

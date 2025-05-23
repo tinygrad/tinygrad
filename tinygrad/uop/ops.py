@@ -251,7 +251,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       for s in self.src: s.children.discard(ref)
       del UOpMetaClass.ucache[k]
   def __reduce__(self):
-    args = [self.op, self.dtype, self.src, self.arg]
+    args = [self.op, self.dtype, self.src, self.arg, self.tag]
     args.append(self.metadata)
     if self.op is Ops.BUFFER and self.realized is not None and PICKLE_BUFFERS: args.append(self.realized)
     return UOp, tuple(args)
