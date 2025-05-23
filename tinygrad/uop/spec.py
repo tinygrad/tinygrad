@@ -191,7 +191,7 @@ sched_spec = buffer_spec+assign_spec+PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK}), lambda: False),
 ])
 
-# *** this is the UOp shape spec ***
+# *** this is the UOp AST spec ***
 
 def verify_sink_dims(sink:UOp):
   if not all_same([s.shape for s in sink.src]): return False
@@ -200,7 +200,7 @@ def verify_sink_dims(sink:UOp):
       print(f"# INVALID KERNEL DIMS: can only have 1 or n in each dimension: {n_dims}")
       return False
 
-shape_spec = PatternMatcher([
+ast_spec = PatternMatcher([
   # shapes must have either 1 or n in each dimension
   (UPat(Ops.SINK, src=UPat(Ops.STORE), name="sink"), verify_sink_dims),
   # VIEW can only exist in the edges

@@ -5,7 +5,7 @@ from tinygrad import Tensor
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import DEBUG
 from tinygrad.uop.ops import UOp, Ops, print_uops
-from tinygrad.uop.spec import type_verify, shape_spec
+from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad import dtypes
 from tinygrad.shape.view import View
@@ -15,7 +15,7 @@ def helper_test_verify_ast(*stores:UOp) -> Kernel:
   sink = UOp(Ops.SINK, dtypes.void, stores)
   if DEBUG >= 3:
     for op in stores: print(op)
-  try: type_verify(list(sink.toposort()), shape_spec)
+  try: type_verify(list(sink.toposort()), ast_spec)
   except RuntimeError as e: raise InvalidASTException(e.args)
   k = Kernel(sink)
   k.linearize()
