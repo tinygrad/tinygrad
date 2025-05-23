@@ -18,7 +18,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
   # copy to all devices. if you shrink later, that'll be handled
   if not use_ring: return functools.reduce(lambda x,y: x.alu(red.arg, y),
-                                           [UOp(Ops.COPY, buf.dtype, (buf, red.src[1]), arg=i) for i in range(len(buf.device))])
+                                           [UOp(Ops.COPY, buf.dtype, (buf.mselect(i), red.src[1])) for i in range(len(buf.device))])
 
   # new ring reduce
   factor = next((f for f in [32, 16, 8, 4, 2] if numel % f == 0), 1)
