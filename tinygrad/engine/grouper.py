@@ -263,7 +263,7 @@ def append_to_kernel(x:UOp):
 create_kernels = PatternMatcher([
   # always give assign/gbarrier a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
-  (UPat(Ops.GBARRIER, name="x"), create_kernel),
+  (UPat(Ops.GBARRIER, src=(UPat.var("x"),)), create_kernel),
   # walk back the local graph until we reach a realized source
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # remove extra views and constants from SINK
@@ -353,10 +353,6 @@ view_right = merge_views+PatternMatcher([
 
 # **** fix kernel AST
 
-remove_gbarrier = PatternMatcher([
-  (UPat(Ops.GBARRIER, src=(UPat.var("x"),)), lambda x: x)
-])
-
 add_buffer_ops = PatternMatcher([
   # LOAD
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), x.st.to_uop())),
@@ -398,8 +394,6 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
   # replace realized sources with the BUFFER they write to
   ast = graph_rewrite(k.arg.ast, replace_realized, bottom_up=True, name="replace realized")
-  # remove gbarrier
-  ast = graph_rewrite(ast, remove_gbarrier, name="remove gbarrier")
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
