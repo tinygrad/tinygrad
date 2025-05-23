@@ -255,7 +255,9 @@ def append_to_kernel(x:UOp):
     if s.op in DONT_PLACE_IN_KERNEL: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
-      if s.base.op not in {Ops.CONST, Ops.DEVICE, *DONT_PLACE_IN_KERNEL} and (m:=s.metadata): metadata += m
+      # NOTE: the metadata for CONST/DEVICE can be wrong if there's more than 1 child because it is shared between all UOps
+      # NOTE: we don't add the metadata for views of realized sources (BUFFER/ASSIGN)
+      if s.base.op not in {Ops.CONST, Ops.DEVICE, Ops.BUFFER, Ops.ASSIGN} and (m:=s.metadata): metadata += m
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(dedup(metadata))))
 
 create_kernels = PatternMatcher([
