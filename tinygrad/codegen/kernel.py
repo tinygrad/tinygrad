@@ -206,8 +206,8 @@ class Kernel:
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
-    if isinstance(self.membufs[self.output_buf_index].dtype, ImageDType):
-      base_shape = self.membufs[self.output_buf_index].dtype.shape
+    if isinstance(self.membufs[-1].dtype, ImageDType):
+      base_shape = self.membufs[-1].dtype.shape
       if shape_idx_groups := get_contraction(self.output_shape, base_shape):
         special_strides: tuple[sint, ...] = tuple()
         for i,g in enumerate(shape_idx_groups):
