@@ -248,7 +248,7 @@ def create_kernel(x:UOp, b:UOp|None=None):
   return buffer.assign(kernel).reshape(x.shape)
 
 DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
-def append_to_kernel(ctx:dict[UOp, None], x:UOp):
+def append_to_kernel(x:UOp):
   new_srcs: list[UOp] = []
   metadata = dict.fromkeys(x.arg.metadata)
   for s in x.src:
@@ -265,7 +265,7 @@ create_kernels = PatternMatcher([
   # create a buffer for COPY on the new device
   (UPat(Ops.COPY, src=(UPat(), UPat(Ops.DEVICE)), name="x"), create_kernel),
   # otherwise check the context if we're realizing this UOp
-  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: create_kernel(x) if x.op is Ops.GBARRIER else None),
+  (UPat(Ops.GBARRIER, name="x"), create_kernel),
   # walk back the local graph until we reach a realized source
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # remove extra views and constants from SINK
@@ -514,7 +514,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
 
   # group into kernels
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx={}, bottom_up=True, input_map=tensor_map, name="create_kernels")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, bottom_up=True, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
