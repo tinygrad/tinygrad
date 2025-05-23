@@ -233,32 +233,49 @@ pm_quant = symbolic+PatternMatcher([
     lambda v1,v2,c1,c2,r: r.replace(src=(v1*v2,)) + r.replace(src=(c2*v1,)) + r.replace(src=(c1*v2,)) + r.replace(src=(c1*c2,))),
 ])
 
-# **** this pushes intermediate down-casts from float through ALUs, may help with numeric stability ****
+# **** this pushes cast through alus, may help with numeric stability ****
 
-# TODO: does not treat where triangles
-# TODO: there still are redundant casts in graph
-f32_input_cast_to_half = lambda name: UPat.var(name, dtype=dtypes.float32).cast(dtypes.half)
-native_half_input = lambda name: UPat.any(UPat.var(name, dtype=dtypes.half), UPat.cvar(name, dtype=dtypes.half))
+# TODO this probably doesn't cover all cases yet
+# TODO CLEAN UP
+f32_to_f16 = lambda name: UPat.var(name, dtype=dtypes.float32).cast(dtypes.half)
+f16 = lambda name: UPat.any(UPat.var(name, dtype=dtypes.half), UPat.cvar(name, dtype=dtypes.half))
+
 pm_push_cast = PatternMatcher([
-  (UPat(GroupOp.Unary, src=(f32_input_cast_to_half("val_f32"),), name="unary_op"),
-   lambda unary_op, val_f32: UOp(unary_op.op, dtypes.float32, (val_f32,), unary_op.arg).cast(dtypes.half)),
+  #  --- pushes cast to half right through alus ---
+  (UPat(GroupOp.Unary, src=(f32_to_f16("f32"),), name="op"),
+   lambda op, f32: UOp(op.op, dtypes.float32, (f32,), op.arg).cast(dtypes.half)),
 
-  (UPat(GroupOp.Binary, src=(f32_input_cast_to_half("lhs_f32"), f32_input_cast_to_half("rhs_f32")), dtype=dtypes.half, name="binary_op"),
-   lambda binary_op, lhs_f32, rhs_f32: lhs_f32.alu(binary_op.op, rhs_f32).cast(dtypes.half)),
-  (UPat(GroupOp.Binary, src=(f32_input_cast_to_half("lhs_f32"), native_half_input("rhs_h")), dtype=dtypes.half, name="binary_op"),
-   lambda binary_op, lhs_f32, rhs_h: lhs_f32.alu(binary_op.op, rhs_h.cast(dtypes.float32)).cast(dtypes.half)),
-  (UPat(GroupOp.Binary, src=(native_half_input("lhs_h"), f32_input_cast_to_half("rhs_f32")), dtype=dtypes.half, name="binary_op"),
-   lambda binary_op, lhs_h, rhs_f32: lhs_h.cast(dtypes.float32).alu(binary_op.op, rhs_f32).cast(dtypes.half)),
+  (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f32_to_f16("rhs_f32")), dtype=dtypes.half, name="op"),
+   lambda op, lhs_f32, rhs_f32: lhs_f32.alu(op.op, rhs_f32).cast(dtypes.half)),
+  (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f16("rhs_f16")), dtype=dtypes.half, name="op"),
+   lambda op, lhs_f32, rhs_f16: lhs_f32.alu(op.op, rhs_f16.cast(dtypes.float32)).cast(dtypes.half)),
+  (UPat(GroupOp.Binary, src=(f16("lhs_f16"), f32_to_f16("rhs_f32")), dtype=dtypes.half, name="op"),
+   lambda op, lhs_f16, rhs_f32: lhs_f16.cast(dtypes.float32).alu(op.op, rhs_f32).cast(dtypes.half)),
 
-  (UPat.var("cond", dtype=dtypes.bool).where(f32_input_cast_to_half("true_val_f32"), f32_input_cast_to_half("false_val_f32")),
-   lambda cond, true_val_f32, false_val_f32: cond.where(true_val_f32, false_val_f32).cast(dtypes.half)),
-  (UPat.var("cond", dtype=dtypes.bool).where(f32_input_cast_to_half("true_val_f32"), native_half_input("false_val_h")),
-   lambda cond, true_val_f32, false_val_h: cond.where(true_val_f32, false_val_h.cast(dtypes.float32)).cast(dtypes.half)),
-  (UPat.var("cond", dtype=dtypes.bool).where(native_half_input("true_val_h"), f32_input_cast_to_half("false_val_f32")),
-   lambda cond, true_val_h, false_val_f32: cond.where(true_val_h.cast(dtypes.float32), false_val_f32).cast(dtypes.half)),
+  (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f32_to_f16("rhs_f32")), dtype=dtypes.bool, name="op"),
+   lambda op, lhs_f32, rhs_f32: lhs_f32.alu(op.op, rhs_f32)),
+  (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f16("rhs_f16")), dtype=dtypes.bool, name="op"),
+   lambda op, lhs_f32, rhs_f16: lhs_f32.alu(op.op, rhs_f16.cast(dtypes.float32))),
+  (UPat(GroupOp.Binary, src=(f16("lhs_f16"), f32_to_f16("rhs_f32")), dtype=dtypes.bool, name="op"),
+   lambda op, lhs_f16, rhs_f32: lhs_f16.cast(dtypes.float32).alu(op.op, rhs_f32)),
 
-  (f32_input_cast_to_half("val_f32").cast(dtypes.float32), lambda val_f32: val_f32),
-  # (native_half_input("val_h").cast(dtypes.float32).cast(dtypes.half), lambda val_h: val_h),
-  # (UPat(GroupOp.Binary, src=(f32_input_cast_to_half("lhs_f32"), native_half_input("rhs_h")), dtype=dtypes.ints + (dtypes.bool,), name="binary_op"),
-   # lambda binary_op, lhs_f32, rhs_h: lhs_f32.alu(binary_op.op, rhs_h.cast(dtypes.float32))),
+  (UPat.var("cond", dtype=dtypes.bool).where(f32_to_f16("true_f32"), f32_to_f16("false_f32")),
+   lambda cond, true_f32, false_f32: cond.where(true_f32, false_f32).cast(dtypes.half)),
+  (UPat.var("cond", dtype=dtypes.bool).where(f32_to_f16("true_f32"), f16("false_f16")),
+   lambda cond, true_f32, false_f16: cond.where(true_f32, false_f16.cast(dtypes.float32)).cast(dtypes.half)),
+  (UPat.var("cond", dtype=dtypes.bool).where(f16("true_f32"), f32_to_f16("false_f32")),
+   lambda cond, true_f16, false_f32: cond.where(true_f16.cast(dtypes.float32), false_f32).cast(dtypes.half)),
+
+  #  --- cast folding ---
+  (f32_to_f16("f32").cast(dtypes.float32), lambda f32: f32),
+
+  #  --- pushes cast to float left through alus branches ---
+  # TODO: this doesn't actually do much for w/e reason, and makes openpilot WORSE... fml
+  # I think it's because inaccuracy arises from REDUCE and so only ops after reduce exacerbate inaccuracy??
+  # IDK
+
+  # (UPat(GroupOp.Unary, src=(UPat.var("b", dtype=dtypes.half),), name="op", dtype=dtypes.half).cast(dtypes.float32),
+  #  lambda op, b: UOp(op.op, dtypes.float32, (b.cast(dtypes.float32),), op.arg)),
+  # (UPat(GroupOp.Binary, src=(UPat.var("b1", dtype=dtypes.half), UPat.var("b2", dtypes.half)), name="op", dtype=dtypes.half).cast(dtypes.float32),
+  #  lambda op, b1, b2: UOp(op.op, dtypes.float32, (b1.cast(dtypes.float32), b2.cast(dtypes.float32)), op.arg)),
 ])

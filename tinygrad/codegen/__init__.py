@@ -1,7 +1,7 @@
 from typing import Any, Callable
 import functools
 from dataclasses import dataclass
-from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, PUSH_CAST
+from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, NUMERICAL_STABILITY
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp
 from tinygrad.renderer import Renderer
 
@@ -26,13 +26,13 @@ def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduc
 
 def get_rewrites_for_renderer(opts:Renderer, linearizer:bool=True) -> list[RewriteStep]:
   # cache with the values of the context vars
-  return _get_rewrites_for_renderer(opts, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value, PUSH_CAST.value)
+  return _get_rewrites_for_renderer(opts, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value, NUMERICAL_STABILITY.value)
 
 @functools.cache
-def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL, _PUSH_CAST) -> list[RewriteStep]:
+def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL, _NUMERICAL_STABILITY) -> list[RewriteStep]:
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
-  if _PUSH_CAST: ret.append(RewriteStep(pm_push_cast, name="push_cast"))
+  if _NUMERICAL_STABILITY: ret.append(RewriteStep(pm_push_cast, name="push_cast"))
   if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
   ret.append(RewriteStep(pm_lowerer, lambda ast: get_index(ast, opts), name="lowerer"))
 
