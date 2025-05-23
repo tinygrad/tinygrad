@@ -26,12 +26,12 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
           if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
           return k.applied_opts
 
-  if k.opts.has_local and k.opts.has_shared and all_int(k.sts[0].shape[:k.first_reduce]):
+  if k.opts.has_local and k.opts.has_shared and all_int(k.sts[len(k.bufs)-1].shape[:k.first_reduce]):
     # are we grouping? (requires local shape support)
-    if not [x for x in k.sts[0].unit_stride_axes() if x >= k.first_upcast and k.sts[0].shape[x]%4 == 0] and \
-      k.first_reduce <= 2 and k.first_reduce < k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
+    if not [x for x in k.sts[len(k.bufs)-1].unit_stride_axes() if x >= k.first_upcast and k.sts[len(k.bufs)-1].shape[x]%4 == 0] and \
+      k.first_reduce <= 2 and k.first_reduce < k.shape_len and prod(k.sts[len(k.bufs)-1].shape[:k.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
-      for sz in ([256, 16] if prod(k.sts[0].shape[:k.first_reduce]) <= 32 else [16]):
+      for sz in ([256, 16] if prod(k.sts[len(k.bufs)-1].shape[:k.first_reduce]) <= 32 else [16]):
         if all(st.shape[k.first_reduce] % sz == 0 or st.shape[k.first_reduce] == 1 for st in k.sts):
           try: # may fail due to excessive smem usage
             k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
@@ -73,7 +73,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.opts is not None and k.opts.device == "DSP"
   upcasted_axis: set[int] = set()
-  while resolve(prod(k.sts[0].shape[:k.first_reduce]) >= 1024):
+  while resolve(prod(k.sts[len(k.bufs)-1].shape[:k.first_reduce]) >= 1024):
     xb_choices = []
     # consider all the non reduce axes, and a 3 or 4 reduce. (128 on the DSP)
     for axis, upcast_amount in itertools.product(range(k.first_reduce), ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
@@ -91,7 +91,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
 
   # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast.
   if k.first_reduce < k.first_upcast and (prod(k.full_shape[k.first_upcast:]) <= 4 or \
-    not any(x!=y for x,y in zip(k.sts[0].shape[k.first_upcast:], k.full_shape[k.first_upcast:]))) and \
+    not any(x!=y for x,y in zip(k.sts[len(k.bufs)-1].shape[k.first_upcast:], k.full_shape[k.first_upcast:]))) and \
       (k.upcasted == 0 or prod(k.full_shape[-k.upcasted:]) < 64):
     if isinstance(s:=k.full_unupcasted_shape[-1], int) and s <= 32:  # NOTE: cannot loop unroll symbolic axis
       k.apply_opt(Opt(OptOps.UNROLL, len(k.full_unupcasted_shape)-1-k.first_reduce, 0))
