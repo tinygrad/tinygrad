@@ -10,7 +10,7 @@ from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner
 from tinygrad.engine.grouper import Kernel
-from tinygrad.helpers import Context, merge_dicts
+from tinygrad.helpers import Context
 from typing import Callable, cast
 import itertools
 
@@ -63,7 +63,7 @@ class GraphRenderer(Renderer):
           #if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
           if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name = f"buf_{next(ctr)}"
           self.bufs[buf] = name if buf in self.state_bufs else ""
-    
+
     for buf in self.bufs:
       if buf.lb_refcount > 0: buf.ref(-1)
     noopt = set(self.state_bufs.keys()).union(set(u.buffer for u in self.inputs if u.op is Ops.BUFFER)).union(set(u.buffer for u in self.outputs))
@@ -74,7 +74,7 @@ class GraphRenderer(Renderer):
     for buf,name in self.bufs.items():
       if name == "": self.bufs[buf] = f"buf_{next(ctr)}"
 
-    for i, ei in enumerate(self.eis): self.eis[i] = ExecItem(ei.prg, [assigned.get(b, b) for b in ei.bufs])
+    for i, ei in enumerate(self.eis): self.eis[i] = ExecItem(ei.prg, [assigned.get(cast(Buffer, b), b) for b in ei.bufs])
 
     assert all(b.is_allocated() for b in self.state_bufs)
     # build complete state_dict, rename state bufs with meaningful names from tensor_names
