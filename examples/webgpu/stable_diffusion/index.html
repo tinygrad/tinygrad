@@ -383,25 +383,24 @@
             // buffers[0:4] have f16 bytes
             // buffers[4] has f32 bytes
             const metadataByteLength = Number(new DataView(buffers[0].buffer).getBigUint64(0, true));
-            const metadata = JSON.parse(new TextDecoder("utf8").decode(buffers[0].subarray(8, 8 + metadataByteLength)));
-            const f16ByteLength = buffers.slice(0, 4).reduce((sum, buf) => sum + buf.length, 0) - 8 - metadataByteLength;
+            const dataStart = 8 + metadataByteLength;
+            const metadata = JSON.parse(new TextDecoder("utf8").decode(buffers[0].subarray(8, dataStart)));
+            const f16ByteLength = buffers.slice(0, 4).reduce((sum, buf) => sum + buf.length, 0) - dataStart;
 
             // WASM memory is said to have less constraints than vanilla JS arrayBuffers, which matters for big allocations
-            const f32ByteLength = 8 + metadataByteLength + (f16ByteLength * 2) + buffers[4].byteLength;
+            const f32ByteLength = dataStart + (f16ByteLength * 2) + buffers[4].byteLength;
             const numPages = Math.ceil(f32ByteLength / (64 * 1024));
             const wasmMemory = new WebAssembly.Memory({initial: numPages});
             const f32bytes = new Uint8Array(wasmMemory.buffer);
-            // set metadataLength (uint64: 8 bytes)
-            f32bytes.set(buffers[0].slice(0, 8), 0);
             // set metadata
-            f32bytes.set(buffers[0].slice(8, 8 + metadataByteLength), 8);
+            f32bytes.set(buffers[0].slice(0, dataStart), 0);
             // remove metadata info from first buffer, the rest of the bytes are f16 bytes for decoding
-            buffers[0] = buffers[0].slice(8 + metadataByteLength);
+            buffers[0] = buffers[0].slice(dataStart);
             // set textModel
-            f32bytes.set(buffers[4], 8 + metadataByteLength + f16ByteLength * 2);
+            f32bytes.set(buffers[4], dataStart + f16ByteLength * 2);
             buffers[4] = null;
 
-            const decodeChunkSize = 8388480;
+            const decodeChunkSize = 8388608;
             const numChunks = Math.ceil(f16ByteLength/decodeChunkSize);
             console.log(f16ByteLength + " bytes to decompress");
             console.log("Will be decompressed in " + numChunks+ " chunks");
@@ -409,7 +408,7 @@
             let start = Date.now();
 
             // Iterate over buffers: Array[Uint8Array], every 2 bytes of which will be decompressed to 4 bytes (f16 -> f32)
-            let decodedBytes = 0;
+            let decodedBytes = dataStart;
             for (let i = 0; i < 4; i++) {
                 for (let c = 0; c < buffers[i].length; c += decodeChunkSize) {
                     progress(decodedBytes / 2 / decodeChunkSize, numChunks);
@@ -429,8 +428,6 @@
             console.log("Decoding took: " + ((end - start) / 1000) + " s");
             console.log("Avarage " + ((end - start) / numChunks) + " ms per chunk");
 
-            //return f32bytes;
-            const dataStart = 8 + metadataByteLength;
             const stateDict = Object.fromEntries(
                 Object.entries(metadata).filter(([k, v]) => k !== "__metadata__")
                 .map(([k, v]) => [k, f32bytes.subarray(dataStart + v.data_offsets[0], dataStart + v.data_offsets[1])])
@@ -465,14 +462,6 @@
                         console.warn(`Tensor with this key is not in target stateDict: "${k}"`);
                 }
             }
-
-            /*
-            await timer(() => Promise.all([
-                textModel.load(safetensors),
-                diffusor.load(safetensors),
-                decoder.load(safetensors)
-            ]), "(loading)")
-            */
 
             nets = {"textModel": textModel.run, "diffusor": diffusor.run, "decoder": decoder.run}
 
@@ -576,7 +565,7 @@
                 // Decode at each step
                 null
             ).then((image) => {
-                renderImage(image);
+                renderImage(image[0]);
             }).finally(() => {
                 document.getElementById("modelDlTitle").innerHTML = prevTitleValue;
                 document.getElementById("btnRunNet").disabled = false;
