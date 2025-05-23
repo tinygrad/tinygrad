@@ -6,8 +6,6 @@ from tinygrad.helpers import flat_mv
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "Runs only on AMD")
 class TestAMDLLVM(unittest.TestCase):
-  
-  
   def test_compiler(self):
     from tinygrad.runtime.ops_amd import AMDAllocator, AMDDevice, AMDProgram
     from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
