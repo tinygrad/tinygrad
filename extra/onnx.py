@@ -151,6 +151,9 @@ class OnnxRunner:
       return real_fxn(*inps, **opts)
     raise NotImplementedError(f"{op=} not supported")
 
+  def get_empty_input_data(self, device:str|None=None) -> dict[str, Tensor]:
+    return {name:Tensor.empty(*spec.shape, device=device, dtype=spec.dtype) for name, spec in self.graph_inputs.items()}
+
   def __call__(self, inputs:dict[str, Any], debug=debug):
     for name, input_spec in self.graph_inputs.items():
       if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")

@@ -13,13 +13,11 @@ from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.uop.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.engine.grouper import view_left, view_right, sym, get_becomes_map, Kernel, create_ast, merge_views, create_kernels
+from tinygrad.engine.grouper import view_left, view_right, sym, get_kernelize_map, Kernel, create_ast, merge_views, create_kernels
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 
-def verify_ast(sink:UOp): return type_verify(list(sink.toposort()), shape_spec)
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
   if to_prerealize:
@@ -29,8 +27,8 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     sink = UOp.sink(t) if t.op is not Ops.SINK else t
-    becomes_map = get_becomes_map(sink)
-    sched, _, __ = create_schedule_with_vars(sink.substitute(becomes_map))
+    becomes_map = get_kernelize_map(sink)
+    sched, _ = create_schedule_with_vars(sink.substitute(becomes_map))
   # test lowering all the ScheduleItems to ExecItems
   kernel_cnt = len([si for si,ei in lower_schedule(sched.copy()) if isinstance(ei.prg, CompiledRunner) or not filter_sink])
   if kernel_cnt != allowed:
@@ -650,11 +648,20 @@ class TestSchedule(unittest.TestCase):
     c = b.kernelize()+Tensor.empty(4,4)
     check_schedule(c, 2)
 
+  def test_kernelize_diamond(self):
+    a = Tensor([0]).realize()
+    prev_a = (a+1).contiguous()
+    a.assign(Tensor([2]))
+    a.kernelize(prev_a)
+    assert prev_a.lazydata in a.lazydata.src, "contiguous usage must run before assign"
+    self.assertEqual((prev_a+a*3).item(), 1+2*3)
+
   def test_multioutput_ast(self):
     a = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().lazydata
     b = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().lazydata
     c = Tensor.arange(4).realize().lazydata
-    kernel = UOp(Ops.KERNEL, src=(a, b, c), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
+    kernel = UOp(Ops.KERNEL, src=(a, b, c.base), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
+    assert all(s.op is Ops.BUFFER for s in kernel.src), f"views are not allowed here {kernel}"
     kernel = graph_rewrite(kernel, create_ast)
     run_schedule(check_schedule(UOp.sink(a.assign(kernel), b.assign(kernel)), 1))
     self.assertEqual(a.buffer.numpy(), [7])
