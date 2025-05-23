@@ -1,8 +1,8 @@
 name: Run MLPerf Training
 
 on:
-  # schedule:
-  #   - cron: '0 */1 * * *'
+  schedule:
+    - cron: '5 8 * * *'  # Runs at 08:05 UTC (12:05 AM Pacific Time)
   push:
     branches:
       - update_mlperf

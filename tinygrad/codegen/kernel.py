@@ -6,7 +6,7 @@ from typing import Optional, cast, Final, Callable, Sequence
 
 from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, print_uops
 from tinygrad.uop.ops import PatternMatcher, smax
-from tinygrad.uop.spec import type_verify, shape_spec
+from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
 from tinygrad.dtype import ImageDType
@@ -42,7 +42,7 @@ class Kernel:
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     # verify AST matches the spec
-    if __debug__: type_verify(list(self.ast.toposort()), shape_spec)
+    if __debug__: type_verify(list(self.ast.toposort()), ast_spec)
 
     self.reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE_AXIS]
 
@@ -550,7 +550,7 @@ class Kernel:
     # verify AST matches the spec after applying opts
     if __debug__: type_verify(list(modified_ast.toposort()))
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
-    #if __debug__: type_verify(list(modified_ast.toposort()), shape_spec)
+    #if __debug__: type_verify(list(modified_ast.toposort()), ast_spec)
 
     try:
       self.uops:list[UOp] = full_rewrite(modified_ast, self.opts)

@@ -1,13 +1,13 @@
 from __future__ import annotations
 import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, weakref
 assert sys.platform != 'win32'
-from typing import Any, cast, Union, Type, ClassVar
+from typing import cast, Union, ClassVar
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferSpec, CPUProgram
-from tinygrad.helpers import getenv, mv_address, init_c_struct_t, round_up, data64, data64_le, DEBUG, prod, OSX
+from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, DEBUG, prod, OSX, to_mv, hi32, lo32
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
@@ -57,19 +57,31 @@ def make_uvm_type():
                                    for name,dt in nv_gpu.__dict__.items() if name.startswith("UVM_") and nv_gpu.__dict__.get(name+"_PARAMS")})
 uvm = make_uvm_type()
 
-def make_qmd_struct_type():
-  fields: list[tuple[str, Union[Type[ctypes.c_uint64], Type[ctypes.c_uint32]], Any]] = []
-  bits = [(name,dt) for name,dt in nv_gpu.__dict__.items() if name.startswith("NVC6C0_QMDV03_00") and isinstance(dt, tuple)]
-  bits += [(name+f"_{i}",dt(i)) for name,dt in nv_gpu.__dict__.items() for i in range(8) if name.startswith("NVC6C0_QMDV03_00") and callable(dt)]
-  bits = sorted(bits, key=lambda x: x[1][1])
-  for i,(name, data) in enumerate(bits):
-    if i > 0 and (gap:=(data[1] - bits[i-1][1][0] - 1)) != 0: fields.append((f"_reserved{i}", ctypes.c_uint32, gap))
-    fields.append((name.replace("NVC6C0_QMDV03_00_", "").lower(), ctypes.c_uint32, data[0]-data[1]+1))
-    if len(fields) >= 2 and fields[-2][0].endswith('_lower') and fields[-1][0].endswith('_upper') and fields[-1][0][:-6] == fields[-2][0][:-6]:
-      fields = fields[:-2] + [(fields[-1][0][:-6], ctypes.c_uint64, fields[-1][2] + fields[-2][2])]
-  return init_c_struct_t(tuple(fields))
-qmd_struct_t = make_qmd_struct_type()
-assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
+class QMD:
+  fields: dict[str, dict[str, tuple[int, int]]] = {}
+
+  def __init__(self, addr=None, pref="NVC6C0_QMDV03_00", **kwargs):
+    if pref not in QMD.fields:
+      QMD.fields[pref] = {**{name[len(pref)+1:]: dt for name,dt in nv_gpu.__dict__.items() if name.startswith(pref) and isinstance(dt, tuple)},
+        **{name[len(pref)+1:]+f"_{i}": dt(i) for name,dt in nv_gpu.__dict__.items() for i in range(8) if name.startswith(pref) and callable(dt)}}
+    self.mv, self.pref = (memoryview(bytearray(0x40 * 4)) if addr is None else to_mv(addr, 0x40 * 4)), pref
+    if kwargs: self.write(**kwargs)
+
+  def _rw_bits(self, hi:int, lo:int, value:int|None=None):
+    mask = ((1 << (width:=hi - lo + 1)) - 1) << (lo % 8)
+    num = int.from_bytes(self.mv[lo//8:hi//8+1], "little")
+
+    if value is None: return (num & mask) >> (lo % 8)
+
+    if value >= (1 << width): raise ValueError(f"{value:#x} does not fit.")
+    self.mv[lo//8:hi//8+1] = int((num & ~mask) | ((value << (lo % 8)) & mask)).to_bytes((hi//8 - lo//8 + 1), "little")
+
+  def write(self, **kwargs):
+    for k,val in kwargs.items(): self._rw_bits(*QMD.fields[self.pref][k.upper()], value=val)
+
+  def read(self, k, val=0): return self._rw_bits(*QMD.fields[self.pref][k.upper()])
+
+  def field_offset(self, k): return QMD.fields[self.pref][k.upper()][1] // 8
 
 class NVSignal(HCQSignal):
   def __init__(self, base_buf:HCQBuffer|None=None, **kwargs):
@@ -127,31 +139,28 @@ class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
 class NVComputeQueue(NVCommandQueue):
   def memory_barrier(self):
     self.nvm(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, (1 << 12) | (1 << 4) | (1 << 0))
-    self.active_qmd = None
+    self.active_qmd:QMD|None = None
     return self
 
   def exec(self, prg:NVProgram, args_state:NVArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
     self.bind_args_state(args_state)
 
     qmd_buf = args_state.buf.offset(round_up(prg.constbufs[0][1], 1 << 8))
-    qmd_buf.cpu_view().view(size=0x40 * 4, fmt='B')[:] = bytes(prg.qmd)
+    qmd_buf.cpu_view().view(size=0x40 * 4, fmt='B')[:] = prg.qmd.mv
     assert qmd_buf.va_addr < (1 << 40), f"large qmd addr {qmd_buf.va_addr:x}"
 
-    qmd = qmd_struct_t.from_address(qmd_buf.va_addr) # Save qmd for later update
+    qmd = QMD(addr=qmd_buf.va_addr) # Save qmd for later update
 
     self.bind_sints_to_mem(*global_size, mem=qmd_buf.cpu_view(), fmt='I', offset=nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8)
     self.bind_sints_to_mem(*local_size, mem=qmd_buf.cpu_view(), fmt='H', offset=nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8)
     self.bind_sints_to_mem(*local_size, *global_size, mem=args_state.buf.cpu_view(), fmt='I')
-    qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = data64(args_state.buf.va_addr)
+    qmd.write(constant_buffer_addr_upper_0=hi32(args_state.buf.va_addr), constant_buffer_addr_lower_0=lo32(args_state.buf.va_addr))
 
     if self.active_qmd is None:
       self.nvm(1, nv_gpu.NVC6C0_SEND_PCAS_A, qmd_buf.va_addr >> 8)
       self.nvm(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 9)
     else:
-      self.active_qmd.dependent_qmd0_pointer = qmd_buf.va_addr >> 8
-      self.active_qmd.dependent_qmd0_action = 1
-      self.active_qmd.dependent_qmd0_prefetch = 1
-      self.active_qmd.dependent_qmd0_enable = 1
+      self.active_qmd.write(dependent_qmd0_pointer=qmd_buf.va_addr >> 8, dependent_qmd0_action=1, dependent_qmd0_prefetch=1, dependent_qmd0_enable=1)
 
     self.active_qmd, self.active_qmd_buf = qmd, qmd_buf
     return self
@@ -159,11 +168,11 @@ class NVComputeQueue(NVCommandQueue):
   def signal(self, signal:NVSignal, value:sint=0):
     if self.active_qmd is not None:
       for i in range(2):
-        if getattr(self.active_qmd, f'release{i}_enable') == 0:
-          setattr(self.active_qmd, f'release{i}_enable', 1)
-          self.bind_sints(signal.value_addr, mem=self.active_qmd_buf.cpu_view(), struct_t=qmd_struct_t, start_field=f'release{i}_address',
-            fmt='Q', mask=0xfffffffff)
-          self.bind_sints(value, mem=self.active_qmd_buf.cpu_view(), struct_t=qmd_struct_t, start_field=f'release{i}_payload', fmt='Q')
+        if self.active_qmd.read(f'release{i}_enable') == 0:
+          self.active_qmd.write(**{f'release{i}_enable': 1})
+          self.bind_sints_to_mem(signal.value_addr, mem=self.active_qmd_buf.cpu_view(), fmt='Q', mask=0xfffffffff,
+            offset=self.active_qmd.field_offset(f'release{i}_address_lower'))
+          self.bind_sints_to_mem(value, mem=self.active_qmd_buf.cpu_view(), fmt='Q', offset=self.active_qmd.field_offset(f'release{i}_payload_lower'))
           return self
 
     self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(signal.value_addr), *data64_le(value),
@@ -236,20 +245,18 @@ class NVProgram(HCQProgram):
     self.constbuffer_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
 
     smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
-    self.qmd: ctypes.Structure = \
-               qmd_struct_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
-                            invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
-                            cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3, constant_buffer_invalidate_0=1,
-                            shared_memory_size=self.shmem_usage, min_sm_config_shared_mem_size=smem_cfg, target_sm_config_shared_mem_size=smem_cfg,
-                            max_sm_config_shared_mem_size=0x1a, register_count_v=self.regs_usage, program_address=self.prog_addr, sass_version=0x89,
-                            barrier_count=1, shader_local_memory_high_size=self.dev.slm_per_thread, program_prefetch_size=self.prog_sz>>8,
-                            program_prefetch_addr_lower_shifted=self.prog_addr>>8, program_prefetch_addr_upper_shifted=self.prog_addr>>40)
+    self.qmd:QMD = QMD(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
+      invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
+      cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3, constant_buffer_invalidate_0=1,
+      shared_memory_size=self.shmem_usage, min_sm_config_shared_mem_size=smem_cfg, target_sm_config_shared_mem_size=smem_cfg,
+      max_sm_config_shared_mem_size=0x1a, register_count_v=self.regs_usage, sass_version=0x89,
+      program_address_upper=hi32(self.prog_addr), program_address_lower=lo32(self.prog_addr),
+      barrier_count=1, shader_local_memory_high_size=self.dev.slm_per_thread, program_prefetch_size=min(self.prog_sz>>8, 0x1ff),
+      program_prefetch_addr_lower_shifted=self.prog_addr>>8, program_prefetch_addr_upper_shifted=self.prog_addr>>40)
 
     for i,(addr,sz) in self.constbufs.items():
-      self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', (addr) >> 32)
-      self.qmd.__setattr__(f'constant_buffer_addr_lower_{i}', (addr) & 0xffffffff)
-      self.qmd.__setattr__(f'constant_buffer_size_shifted4_{i}', sz)
-      self.qmd.__setattr__(f'constant_buffer_valid_{i}', 1)
+      self.qmd.write(**{f'constant_buffer_addr_upper_{i}': hi32(addr), f'constant_buffer_addr_lower_{i}': lo32(addr),
+        f'constant_buffer_size_shifted4_{i}': sz, f'constant_buffer_valid_{i}': 1})
 
     # Registers allocation granularity per warp is 256, warp allocation granularity is 4. Register file size is 65536.
     self.max_threads = ((65536 // round_up(max(1, self.regs_usage) * 32, 256)) // 4) * 4 * 32

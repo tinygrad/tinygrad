@@ -16,7 +16,7 @@ class FastEnum(IntEnum):
   @staticmethod
   def _generate_next_value_(_, __, ___, last_values): return 1 + max([0, *last_values, *[max(c) for c in FastEnum.__subclasses__()]])
 
-class SimpleMathTrait:
+class MathTrait:
   # required to implement
   def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
   def const_like(self:T, b:ConstLike) -> T: raise NotImplementedError
@@ -70,8 +70,6 @@ class SimpleMathTrait:
   def __ne__(self, x): return self.ne(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
-class MathTrait(SimpleMathTrait):
-  # TODO: move to Tensor when new backward is done
   def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
   def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)
   def __lshift__(self, x): return self.lshift(x)
@@ -99,7 +97,7 @@ class Ops(FastEnum):
   SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto(); UNIQUE = auto() # noqa: E702
 
   # MetaOps
-  COPY = auto(); BUFFER_VIEW = auto() # noqa: E702
+  COPY = auto(); BUFFER_VIEW = auto(); MSELECT = auto() # noqa: E702
 
   # blocks in linearizer
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKEND = auto(); BLOCKFINAL = auto() # noqa: E702
@@ -143,7 +141,7 @@ class Ops(FastEnum):
   BIND = auto()
 
   # control flow ops
-  BARRIER = auto(); RANGE = auto(); IF = auto(); ENDRANGE = auto(); ENDIF = auto() # noqa: E702
+  BARRIER = auto(); RANGE = auto(); IF = auto(); ENDRANGE = auto(); ENDIF = auto(); GBARRIER = auto() # noqa: E702
 
   # consts last!
   VCONST = auto(); CONST = auto() # noqa: E702
@@ -222,8 +220,9 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
-  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, metadata:Metadata|None=None, _buffer:Buffer|None=None):
-    if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
+  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
+               metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
+    if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
     for s in src: s.children.add(ref)
     if metadata is not None: all_metadata[created] = metadata
@@ -234,8 +233,8 @@ class UOpMetaClass(type):
     return created
 
 # some uops map to other stuff
-buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
-all_metadata:weakref.WeakKeyDictionary[UOp, Metadata] = weakref.WeakKeyDictionary() # TODO: should this be here?
+buffers:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
+all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
@@ -244,21 +243,22 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   dtype:DType = dtypes.void
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
+  tag:Any = None
   children:set[weakref.ref[UOp]] = field(default_factory=set)
   def __del__(self):
     if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
-    if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg))) is not None:
+    if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg, self.tag))) is not None:
       for s in self.src: s.children.discard(ref)
       del UOpMetaClass.ucache[k]
   def __reduce__(self):
-    args = [self.op, self.dtype, self.src, self.arg]
-    args.append(self.metadata)
+    args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
     if self.op is Ops.BUFFER and self.realized is not None and PICKLE_BUFFERS: args.append(self.realized)
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
-    new_args = (kwargs.pop("op", self.op), kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg))
+    new_args = (kwargs.pop("op", self.op), kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src),
+                kwargs.pop("arg", self.arg), kwargs.pop("tag", self.tag))
     assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
-    if (self.op, self.dtype, self.src, self.arg) == new_args: return self
+    if (self.op, self.dtype, self.src, self.arg, self.tag) == new_args: return self
     return UOp(*new_args)
   @functools.cached_property
   def key(self) -> bytes:
@@ -427,6 +427,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def fuse(self): return self.alu(Ops.FUSE)
+  def gbarrier(self): return self.alu(Ops.GBARRIER)
   def allreduce(self, op, device:str|tuple[str, ...]|UOp):
     assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
     return UOp(Ops.ALLREDUCE, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), op)
@@ -488,10 +489,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     var, val = arg.unbind()
     return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
   def copy_to_device(self, device:str|tuple[str, ...]|UOp, arg=None):
-    return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), arg)
+    assert arg is None or isinstance(self.device, tuple)
+    # TODO: this contiguous should not be required!!!
+    inp = self if arg is None else UOp(Ops.MSELECT, self.dtype, src=(self.contiguous(),), arg=arg)
+    return UOp(Ops.COPY, self.dtype, (inp, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device))
+    #return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), arg)
   def clone(self) -> UOp: return self.copy_to_device(self.device)
+  def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, self.dtype, (self,), arg)
   @property
-  def metadata(self) -> Metadata|None: return all_metadata.get(self, None)
+  def metadata(self) -> tuple[Metadata, ...]|None: return all_metadata.get(self, None)
 
   # *** uop movement ops ***
 
@@ -529,21 +535,29 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
+    if self.op is Ops.MSELECT:
+      assert isinstance(self.src[0].device, tuple), "mselect must be on tuple device"
+      return self.src[0].device[self.arg]
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
+    if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     assert self.op is Ops.ASSIGN, f"must be ASSIGN {self.op}"
     return self.src[0].base
   @property
   def buffer(self) -> Buffer|MultiBuffer:
+    from tinygrad.device import Buffer, MultiBuffer
     if self is not self.base:
       assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
       return self.src[0].buffer
+    if self.op is Ops.MSELECT:
+      ret = self.src[0].buffer
+      assert isinstance(ret, MultiBuffer)
+      return ret.bufs[self.arg]
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
     if (cret:=buffers.get(self)) is not None: return cret
-    from tinygrad.device import Buffer, MultiBuffer
     rdtype = self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base
     if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.size, rdtype).ref(1)
     else: ret = Buffer(self.device, self.size, rdtype).ref(1)
@@ -581,7 +595,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return bound_vars.union(set([x for x in all_vars if x not in bound_var_base]))
   def variables(self) -> list[Variable]:
     st_vars: list[set[Variable]] = [x.st_arg.vars() for x in self.toposort() if x.op in GroupOp.Buffer]
-    return sorted(set.union(*st_vars, [x.unbind()[0] if x.op is not Ops.DEFINE_VAR else x for x in self.vars()]), key=lambda v: v.arg)
+    return sorted(set.union(*st_vars, set([x.unbind()[0] if x.op is not Ops.DEFINE_VAR else x for x in self.vars()])), key=lambda v: v.arg)
 
   # *** uop symbolic stuff ***
 
@@ -652,6 +666,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else self.arg[1].vmax
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
+    # TODO: incorrect for bool and unsigned because CAST is not monotone
     if self.op is Ops.CAST: return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
@@ -985,8 +1000,8 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 @track_matches
 def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, input_map:dict[UOp, UOp]|None=None) -> dict[UOp, UOp]:
   rewrite_ctx = RewriteContext(pm, ctx)
-  new_map = {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort())[::-1]}
-  all_metadata.update((v, k.metadata) for k,v in new_map.items() if k.metadata is not None)
+  new_map = {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in sink.toposort()}
+  all_metadata.update((v, tuple(dedup(all_metadata.get(v, ())+k.metadata))) for k,v in new_map.items() if k.metadata is not None)
   if input_map is not None:
     for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
   return new_map
