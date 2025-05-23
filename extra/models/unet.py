@@ -1,7 +1,6 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.nn import Linear, Conv2d, GroupNorm, LayerNorm
-from tinygrad.device import is_dtype_supported
-from typing import Optional, Union, List, Any, Tuple
+from typing import Optional, Union, List, Any, Tuple, cast
 import math
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/util.py#L207
@@ -10,7 +9,7 @@ def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
   freqs = (-math.log(max_period) * Tensor.arange(half, device=timesteps.device) / half).exp()
   args = timesteps.unsqueeze(1) * freqs.unsqueeze(0)
   out = Tensor.cat(args.cos(), args.sin(), dim=-1)
-  return out.cast(dtypes.float16) if is_dtype_supported(dtypes.float16) else out
+  return out
 
 class ResBlock:
   def __init__(self, channels:int, emb_channels:int, out_channels:int):
@@ -223,17 +222,19 @@ class UNetModel:
     ]
 
   def __call__(self, x:Tensor, tms:Tensor, ctx:Tensor, y:Optional[Tensor]=None) -> Tensor:
-    t_emb = timestep_embedding(tms, self.model_ch)
+    # the UNet weights can all be cast to float16 behind a flag, in examples/stable_diffusion.py
+    dtype = cast(Linear, self.time_embed[0]).weight.dtype
+
+    t_emb = timestep_embedding(tms, self.model_ch).cast(dtype)
     emb   = t_emb.sequential(self.time_embed)
 
     if y is not None:
       assert y.shape[0] == x.shape[0]
       emb = emb + y.sequential(self.label_emb[0])
 
-    if is_dtype_supported(dtypes.float16):
-      emb = emb.cast(dtypes.float16)
-      ctx = ctx.cast(dtypes.float16)
-      x   = x  .cast(dtypes.float16)
+    emb = emb.cast(dtype)
+    ctx = ctx.cast(dtype)
+    x   = x  .cast(dtype)
 
     def run(x:Tensor, bb) -> Tensor:
       if isinstance(bb, ResBlock): x = bb(x, emb)
