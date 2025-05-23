@@ -907,6 +907,7 @@ class Tensor(MathTrait):
     ```
     """
     assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
+    if not (self.is_floating_point() and all(t.is_floating_point() for t in targets)): raise RuntimeError("only float Tensors have gradient")
     if gradient is None: gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
     rets = []
     target_uops = [x.lazydata for x in targets]

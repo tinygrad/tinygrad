@@ -104,6 +104,11 @@ class TestTensorGradient(unittest.TestCase):
     x_casted = x_reshaped.cast(dtypes.float16)
     x_casted.mean().gradient(x_reshaped)
 
+  def test_non_float_tensor_raise(self):
+    x = Tensor([1, 2, 3])
+    with self.assertRaises(RuntimeError): x.sum().gradient(x)
+    with self.assertRaises(RuntimeError): x.float().sum().gradient(x)
+
 class TestRealizeMeansRealize(unittest.TestCase):
   def test_randn_realizes(self):
     x = Tensor.randn(2, 3, 64, 64, requires_grad=True).realize()
