@@ -479,8 +479,10 @@
         function runStableDiffusion(prompt, steps, guidance, showStep) {
             return new Promise(async (resolve, reject) => {
                 
-                let context = await timer(() => nets["textModel"](new Float32Array(clipTokenizer.encodeForCLIP(prompt))));
-                let unconditional_context = await timer(() => nets["textModel"](new Float32Array(clipTokenizer.encodeForCLIP(""))));
+                let context = await timer(() => nets["textModel"](new Int32Array(clipTokenizer.encodeForCLIP(prompt))));
+                context = context[0].slice();
+                let unconditional_context = await timer(() => nets["textModel"](new Int32Array(clipTokenizer.encodeForCLIP(""))));
+                unconditional_context = unconditional_context[0].slice();
 
                 let timesteps = [];
 
@@ -516,7 +518,7 @@
                     let timestep = new Float32Array([timesteps[i]]);
                     let start = performance.now()
                     console.log(`i = ${i}`);
-                    let x_prev = await nets["diffusor"](unconditional_context[0], context[0], latent, timestep, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]]), new Float32Array([guidance]));
+                    let x_prev = await nets["diffusor"](unconditional_context, context, latent, timestep, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]]), new Float32Array([guidance]));
                     document.getElementById("divStepTime").style.display = "block";
                     document.getElementById("stepTimeValue").innerText = `${(performance.now() - start).toFixed(1)} ms / step`
                     latent = x_prev[0];
