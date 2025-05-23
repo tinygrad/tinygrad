@@ -1,6 +1,6 @@
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv
-from tinygrad.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, track_rewrites
+from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp
 
 # *** allreduce implementation ***
 
@@ -34,7 +34,8 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
     for step in range(n_lbs-1):
       src, dest = (i+step)%n_lbs, (i+step+1)%n_lbs
       # copy the chunk from the src device to the dest (operating device), and select the chunk on the dest device
-      reduced_chunk = reduced_chunk.copy_to_device(buf.device[dest], src).alu(red.arg, chunk.copy_to_device(buf.device[dest], dest))
+      reduced_chunk = reduced_chunk.copy_to_device(buf.device[dest], src if isinstance(reduced_chunk.device, tuple) else None) \
+        .alu(red.arg, chunk.copy_to_device(buf.device[dest], dest))
     reduced_chunks.append(reduced_chunk)
 
   # allgather + reassemble
@@ -143,6 +144,3 @@ multi_pm = PatternMatcher([
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])
-
-@track_rewrites(named=True)
-def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]: return {k:v for k,v in graph_rewrite_map(big_sink, multi_pm).items() if k is not v}

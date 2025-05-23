@@ -4,7 +4,7 @@ import functools, math
 from enum import Enum, auto
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
+from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
 from tinygrad.dtype import DType
 
 class OptOps(Enum):

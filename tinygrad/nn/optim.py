@@ -80,7 +80,8 @@ class LARS(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True, tcoef=0.001):
     super().__init__(params, lr)
     self.momentum, self.wd, self.nesterov, self.classic, self.tcoef = momentum, weight_decay, nesterov, classic, tcoef
-    self.b = Tensor.zeros(self.pos_params[-1], dtype=dtypes.float32, device=self.device, requires_grad=False).contiguous()
+    self.b = Tensor.zeros(self.pos_params[-1], dtype=dtypes.float32, device=self.device, requires_grad=False).contiguous() \
+      if self.momentum else []
 
   def fused_step(self, t:Tensor, g:Tensor) -> tuple[Tensor, list[Tensor]]:
     if self.tcoef != 0:

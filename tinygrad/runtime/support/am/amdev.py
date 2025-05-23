@@ -1,20 +1,17 @@
 from __future__ import annotations
 import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib
 from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
-from tinygrad.runtime.autogen.am import am, mp_11_0
+from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
-from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module
+from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
 @dataclasses.dataclass(frozen=True)
-class AMRegister(AMDRegBase):
-  adev:AMDev; hwip:int # noqa: E702
-
-  @property
-  def addr(self): return self.adev.regs_offset[self.hwip][0][self.segment] + self.offset
+class AMRegister(AMDReg):
+  adev:AMDev
 
   def read(self): return self.adev.rreg(self.addr)
   def read_bitfields(self) -> dict[str, int]: return self.decode(self.read())
@@ -250,7 +247,7 @@ class AMDev:
 
     # Avoid O_CREAT because we don’t want to re-create/replace an existing file (triggers extra perms checks) when opening as non-owner.
     if os.path.exists(lock_name:=temp(f"am_{self.devfmt}.lock")): self.lock_fd = os.open(lock_name, os.O_RDWR)
-    else: self.lock_fd = os.open(lock_name, os.O_RDWR | os.O_CREAT, 0o666)
+    else: self.lock_fd = os.open(lock_name, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o666)
 
     try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError: raise RuntimeError(f"Failed to open AM device {self.devfmt}. It's already in use.")
@@ -315,6 +312,7 @@ class AMDev:
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
+    os.close(self.lock_fd)
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
 
@@ -362,7 +360,7 @@ class AMDev:
 
     # Mapping of HW IP to Discovery HW IP
     hw_id_map = {am.__dict__[x]: int(y) for x,y in am.hw_id_map}
-    self.regs_offset:dict[int, dict[int, list]] = collections.defaultdict(dict)
+    self.regs_offset:dict[int, dict[int, tuple]] = collections.defaultdict(dict)
     self.ip_ver:dict[int, tuple[int, int, int]] = {}
 
     for num_die in range(ihdr.num_dies):
@@ -374,7 +372,7 @@ class AMDev:
         ba = (ctypes.c_uint32 * ip.num_base_address).from_address(ip_offset + 8)
         for hw_ip in range(1, am.MAX_HWIP):
           if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id:
-            self.regs_offset[hw_ip][ip.instance_number] = list(ba)
+            self.regs_offset[hw_ip][ip.instance_number] = tuple(list(ba))
             self.ip_ver[hw_ip] = (ip.major, ip.minor, ip.revision)
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
@@ -385,9 +383,10 @@ class AMDev:
   def _ip_module(self, prefix:str, hwip, prever_prefix:str=""): return import_module(prefix, self.ip_ver[hwip], prever_prefix)
 
   def _build_regs(self):
-    mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("HDP", self._ip_module("hdp", am.HDP_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
-      ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP)),
-      ("NBIO", self._ip_module("nbio" if self.ip_ver[am.GC_HWIP] < (12,0,0) else "nbif", am.NBIO_HWIP))]
+    mods = [("mp", am.MP0_HWIP), ("hdp", am.HDP_HWIP), ("gc", am.GC_HWIP), ("mmhub", am.MMHUB_HWIP), ("osssys", am.OSSSYS_HWIP),
+      ("nbio" if self.ip_ver[am.GC_HWIP] < (12,0,0) else "nbif", am.NBIO_HWIP)]
 
-    for ip, module in mods:
-      self.__dict__.update(collect_registers(module, cls=functools.partial(AMRegister, adev=self, hwip=getattr(am, f"{ip}_HWIP"))))
+    for prefix, hwip in mods:
+      self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip][0])))
+    self.__dict__.update(import_asic_regs('mp', (11, 0), cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[am.MP1_HWIP][0])))
+
