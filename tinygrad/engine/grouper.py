@@ -513,7 +513,9 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
   tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
 
-  # group into kernels
+  # TODO: move view_left/view_right here
+
+  # group into kernels (this is context-free)
   tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, bottom_up=True, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
