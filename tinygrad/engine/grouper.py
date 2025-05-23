@@ -268,6 +268,8 @@ create_kernels = PatternMatcher([
   # remove extra views and constants from SINK
   (UPat(Ops.SINK, name="x"),
    lambda x: x.replace(src=new_src) if (new_src:=tuple(dedup(s.base for s in x.src if s.base.op not in {Ops.CONST, Ops.BIND}))) != x.src else None),
+  # push RESHAPE through MSELECT
+  (UPat(Ops.MSELECT, src=(UPat(Ops.RESHAPE, name="r"),), name="ms"), lambda ms,r: r.src[0].mselect(ms.arg).reshape(r.arg)),
 ])
 
 # **** swizzler
