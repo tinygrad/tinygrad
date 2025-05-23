@@ -161,11 +161,6 @@
         }
     </style>
 
-    <script type="module">
-        import ClipTokenizer from './clip_tokenizer.js';
-        window.clipTokenizer = new ClipTokenizer();
-    </script>
-    <script src="./net.js"></script>
 </head>
 <body>
     <h1 id="wgpuError" style="display: none;">WebGPU is not supported in this browser</h1>
@@ -213,6 +208,7 @@
 
 <script>
     let f16decomp = null;
+    window.MODEL_BASE_URL = ".";
 
     function initDb() {
         return new Promise((resolve, reject) => {
@@ -309,24 +305,17 @@
             return;
         }
 
+        const f16tof32Graph = (await import("./f16tof32.js")).default;
+        const textModelGraph = (await import("./textModel.js")).default;
+        const diffusorGraph = (await import("./diffusor.js")).default;
+        const decoderGraph = (await import("./decoder.js")).default;
+        const clipTokenizerImport = (await import("./clip_tokenizer.js")).default;
+        const clipTokenizer = new clipTokenizerImport();
+
         let db = await initDb();
 
         const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
         let labels, nets, safetensorParts;
-
-        const getDevice = async () => {
-            const adapter = await navigator.gpu.requestAdapter();
-            const requiredLimits = {};
-            const maxBufferSizeInSDModel = 1073741824;
-            requiredLimits.maxStorageBufferBindingSize = maxBufferSizeInSDModel;
-            requiredLimits.maxBufferSize = maxBufferSizeInSDModel;
-            
-            return await adapter.requestDevice({
-                requiredLimits,
-                requiredFeatures: ["shader-f16"],
-                powerPreference: "high-performance"
-            });
-        };
 
         const timer = async (func, label = "") => {
             const start = performance.now();
@@ -358,7 +347,7 @@
             return res.arrayBuffer();
         };
   
-        const getAndDecompressF16Safetensors = async (device, progress) => {
+        const getAndDecompressF16Safetensors = async (progress) => {
             let totalLoaded = 0;
             let totalSize = 0;
             let partSize = {};
@@ -387,94 +376,66 @@
             };
 
             let netKeys = ["net_part0", "net_part1", "net_part2", "net_part3", "net_textmodel"];
-            let buffers = await Promise.all(netKeys.map(key => getPart(key)));
+            let buffers = await Promise.all(netKeys.map(key => getPart(key).then(arrayBuf => new Uint8Array(arrayBuf))));
+            for (let i=0; i<netKeys.length; i++) saveTensorToDb(db, netKeys[i], buffers[i]);
 
-            // Combine everything except for text model, since that's already f32
-            const totalLength = buffers.reduce((acc, buffer, index, array) => {
-                if (index < 4) {
-                    return acc + buffer.byteLength;
-                } else {
-                    return acc;
-                }
-                }, 0
-            );
+            // buffers[0] has metadata, then f16 bytes
+            // buffers[0:4] have f16 bytes
+            // buffers[4] has f32 bytes
+            const metadataByteLength = Number(new DataView(buffers[0].buffer).getBigUint64(0, true));
+            const metadata = JSON.parse(new TextDecoder("utf8").decode(buffers[0].subarray(8, 8 + metadataByteLength)));
+            const f16ByteLength = buffers.slice(0, 4).reduce((sum, buf) => sum + buf.length, 0) - 8 - metadataByteLength;
 
-            combinedBuffer = new Uint8Array(totalLength);
-            let offset = 0;
-            buffers.forEach((buffer, index) => {
-                saveTensorToDb(db, netKeys[index], new Uint8Array(buffer));
-                if (index < 4) {
-                    combinedBuffer.set(new Uint8Array(buffer), offset);
-                    offset += buffer.byteLength;
-                    buffer = null;
-                }
-            });
+            // WASM memory is said to have less constraints than vanilla JS arrayBuffers, which matters for big allocations
+            const f32ByteLength = 8 + metadataByteLength + (f16ByteLength * 2) + buffers[4].byteLength;
+            const numPages = Math.ceil(f32ByteLength / (64 * 1024));
+            const wasmMemory = new WebAssembly.Memory({initial: numPages});
+            const f32bytes = new Uint8Array(wasmMemory.buffer);
+            // set metadataLength (uint64: 8 bytes)
+            f32bytes.set(buffers[0].slice(0, 8), 0);
+            // set metadata
+            f32bytes.set(buffers[0].slice(8, 8 + metadataByteLength), 8);
+            // remove metadata info from first buffer, the rest of the bytes are f16 bytes for decoding
+            buffers[0] = buffers[0].slice(8 + metadataByteLength);
+            // set textModel
+            f32bytes.set(buffers[4], 8 + metadataByteLength + f16ByteLength * 2);
+            buffers[4] = null;
 
-            let textModelU8 = new Uint8Array(buffers[4]);
-            document.getElementById("modelDlTitle").innerHTML = "Decompressing model";
-
-            const textModelOffset = 3772703308;
-            const metadataLength = Number(new DataView(combinedBuffer.buffer).getBigUint64(0, true));
-            const metadata = JSON.parse(new TextDecoder("utf8").decode(combinedBuffer.subarray(8, 8 + metadataLength)));
-
-            const allToDecomp = combinedBuffer.byteLength - (8 + metadataLength);
             const decodeChunkSize = 8388480;
-            const numChunks = Math.ceil(allToDecomp/decodeChunkSize);
-
-            console.log(allToDecomp + " bytes to decompress");
+            const numChunks = Math.ceil(f16ByteLength/decodeChunkSize);
+            console.log(f16ByteLength + " bytes to decompress");
             console.log("Will be decompressed in " + numChunks+ " chunks");
 
-            let partOffsets = [{start: 0, end: 1131408336}, {start: 1131408336, end: 2227518416}, {start: 2227518416, end: 3308987856}, {start: 3308987856, end: 4265298864}];
-            let parts = [];
-
-            for (let offsets of partOffsets) {
-                parts.push(new Uint8Array(offsets.end-offsets.start));
-            }
-            parts[0].set(new Uint8Array(new BigUint64Array([BigInt(metadataLength)]).buffer), 0);
-            parts[0].set(combinedBuffer.subarray(8, 8 + metadataLength), 8);
-            parts[3].set(textModelU8, textModelOffset+8+metadataLength - partOffsets[3].start);
-
             let start = Date.now();
-            let cursor = 0;
 
-            for (let i = 0; i < numChunks; i++) {
-                progress(i, numChunks);
-                let chunkStartF16 = 8 + metadataLength + (decodeChunkSize * i);
-                let chunkEndF16 = chunkStartF16 + decodeChunkSize;
-                let chunk = combinedBuffer.subarray(chunkStartF16, chunkEndF16);
-                let uint32Chunk = new Uint32Array(chunk.buffer, chunk.byteOffset, chunk.byteLength / 4);
-                let result = await f16decomp(uint32Chunk);
-                let resultUint8 = new Uint8Array(result.buffer);
-                let chunkStartF32 = 8 + metadataLength + (decodeChunkSize * i * 2);
-                let chunkEndF32 = chunkStartF32 + resultUint8.byteLength;
-                let offsetInPart = chunkStartF32 - partOffsets[cursor].start;
-
-                if (chunkEndF32 < partOffsets[cursor].end || cursor === parts.length - 1) {
-                    parts[cursor].set(resultUint8, offsetInPart);
-                } else {
-                    let spaceLeftInCurrentPart = partOffsets[cursor].end - chunkStartF32;
-                    parts[cursor].set(resultUint8.subarray(0, spaceLeftInCurrentPart), offsetInPart);
-
-                    cursor++;
-
-                    if (cursor < parts.length) {
-                        let nextPartOffset = spaceLeftInCurrentPart;
-                        let nextPartLength = resultUint8.length - nextPartOffset;
-                        parts[cursor].set(resultUint8.subarray(nextPartOffset, nextPartOffset + nextPartLength), 0);
-                    }
+            // Iterate over buffers: Array[Uint8Array], every 2 bytes of which will be decompressed to 4 bytes (f16 -> f32)
+            let decodedBytes = 0;
+            for (let i = 0; i < 4; i++) {
+                for (let c = 0; c < buffers[i].length; c += decodeChunkSize) {
+                    progress(decodedBytes / 2 / decodeChunkSize, numChunks);
+                    let chunk = new Uint8Array(decodeChunkSize);
+                    const realByteLength = Math.min(decodeChunkSize, buffers[i].length - c);
+                    chunk.set(buffers[i].slice(c, c + realByteLength), 0);
+                    let uint32Chunk = new Uint32Array(chunk.buffer, chunk.byteOffset, chunk.byteLength / 4);
+                    let result = await f16decomp(uint32Chunk);
+                    let resultUint8 = new Uint8Array(result[0].buffer);
+                    f32bytes.set(resultUint8.slice(0, realByteLength * 2), decodedBytes);
+                    decodedBytes += realByteLength * 2;
                 }
-
-                resultUint8 = null;
-                result = null;
+                buffers[i] = null;
             }
-
-            combinedBuffer = null;
 
             let end = Date.now();
             console.log("Decoding took: " + ((end - start) / 1000) + " s");
             console.log("Avarage " + ((end - start) / numChunks) + " ms per chunk");
 
-            return parts;
+            //return f32bytes;
+            const dataStart = 8 + metadataByteLength;
+            const stateDict = Object.fromEntries(
+                Object.entries(metadata).filter(([k, v]) => k !== "__metadata__")
+                .map(([k, v]) => [k, f32bytes.subarray(dataStart + v.data_offsets[0], dataStart + v.data_offsets[1])])
+            );
+            return stateDict;
         };
 
         const loadNet = async () => {
@@ -485,19 +446,35 @@
                 document.getElementById("modelDlProgressValue").innerHTML = Math.trunc((loaded/total) * 100) + "%"
             }
 
-            const device = await getDevice();
-            f16decomp =  await f16tof32().setup(device, safetensorParts),
-            safetensorParts = await getAndDecompressF16Safetensors(device, progress);
+            const f16tof32 = await f16tof32Graph();
+            f16decomp = f16tof32.run;
 
-            modelDlTitle.innerHTML = "Compiling model"
+            stateDict = await getAndDecompressF16Safetensors(progress);
 
-            let models = ["textModel", "diffusor", "decoder"];
+            modelDlTitle.innerHTML = "Loading model"
 
-            nets = await timer(() => Promise.all([
-                textModel().setup(device, safetensorParts),
-                diffusor().setup(device, safetensorParts),
-                decoder().setup(device, safetensorParts)
-            ]).then((loadedModels) => loadedModels.reduce((acc, model, index) => { acc[models[index]] = model; return acc; }, {})), "(compilation)")
+            const textModel = await textModelGraph();
+            const diffusor = await diffusorGraph();
+            const decoder = await decoderGraph();
+
+            for (const model of [textModel, diffusor, decoder]) {
+                for (const [k,v] of Object.entries(stateDict)) {
+                    if (k in model.stateDict)
+                        model.device.queue.writeBuffer(model.stateDict[k], 0, stateDict[k]);
+                    else
+                        console.warn(`Tensor with this key is not in target stateDict: "${k}"`);
+                }
+            }
+
+            /*
+            await timer(() => Promise.all([
+                textModel.load(safetensors),
+                diffusor.load(safetensors),
+                decoder.load(safetensors)
+            ]), "(loading)")
+            */
+
+            nets = {"textModel": textModel.run, "diffusor": diffusor.run, "decoder": decoder.run}
 
             progress(1, 1);
 
@@ -512,8 +489,9 @@
 
         function runStableDiffusion(prompt, steps, guidance, showStep) {
             return new Promise(async (resolve, reject) => {
-                let context = await timer(() => nets["textModel"](clipTokenizer.encodeForCLIP(prompt)));
-                let unconditional_context = await timer(() => nets["textModel"](clipTokenizer.encodeForCLIP("")));
+                
+                let context = await timer(() => nets["textModel"](new Float32Array(clipTokenizer.encodeForCLIP(prompt))));
+                let unconditional_context = await timer(() => nets["textModel"](new Float32Array(clipTokenizer.encodeForCLIP(""))));
 
                 let timesteps = [];
 
@@ -523,7 +501,9 @@
 
                 console.log("Timesteps: " + timesteps);
 
-                let alphasCumprod = getWeight(safetensorParts,"alphas_cumprod");
+                //let alphasCumprod = getWeight(safetensorParts,"alphas_cumprod");
+                const uint8Data = stateDict["alphas_cumprod"];
+                let alphasCumprod = new Float32Array(uint8Data.buffer, uint8Data.byteOffset, uint8Data.byteLength / Float32Array.BYTES_PER_ELEMENT);
                 let alphas = [];
 
                 for (t of timesteps) {
@@ -546,10 +526,11 @@
                 for (let i = timesteps.length - 1; i >= 0; i--) {
                     let timestep = new Float32Array([timesteps[i]]);
                     let start = performance.now()
-                    let x_prev = await nets["diffusor"](unconditional_context, context, latent, timestep, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]]), new Float32Array([guidance]));
+                    console.log(`i = ${i}`);
+                    let x_prev = await nets["diffusor"](unconditional_context[0], context[0], latent, timestep, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]]), new Float32Array([guidance]));
                     document.getElementById("divStepTime").style.display = "block";
                     document.getElementById("stepTimeValue").innerText = `${(performance.now() - start).toFixed(1)} ms / step`
-                    latent = x_prev;
+                    latent = x_prev[0];
 
                     if (showStep != null) {
                         showStep(await nets["decoder"](latent));
