@@ -8,7 +8,8 @@ try:
   # IDIV is truncated division but z3 does floored division; mod by power of two sometimes uses Ops.AND
   def z3_cdiv(a,b): return z3.If(a<0, (a+(b-1))/b, a/b)
   z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.SHR: lambda a,b: a/(2**b.as_long()),
-    Ops.SHL: lambda a,b: a*(2**b.as_long()), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b, Ops.WHERE: z3.If}
+    Ops.SHL: lambda a,b: a*(2**b.as_long()), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b, Ops.WHERE: z3.If,
+    Ops.MAX: lambda a,b: z3.If(a<b, b, a)}
   def create_bounded(name:str, vmin, vmax, solver:z3.Solver) -> z3.ArithRef:
     s = z3.Int(name, ctx=solver.ctx)
     solver.add(vmin <= s, s <= vmax)
@@ -190,7 +191,7 @@ sched_spec = buffer_spec+assign_spec+PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK}), lambda: False),
 ])
 
-# *** this is the UOp shape spec ***
+# *** this is the UOp AST spec ***
 
 def verify_sink_dims(sink:UOp):
   if not all_same([s.shape for s in sink.src]): return False
@@ -199,9 +200,11 @@ def verify_sink_dims(sink:UOp):
       print(f"# INVALID KERNEL DIMS: can only have 1 or n in each dimension: {n_dims}")
       return False
 
-shape_spec = PatternMatcher([
+ast_spec = PatternMatcher([
   # shapes must have either 1 or n in each dimension
   (UPat(Ops.SINK, src=UPat(Ops.STORE), name="sink"), verify_sink_dims),
+  # VIEW can only exist in the edges
+  (UPat(Ops.VIEW, name="view"), lambda view: len(view.src) == 0),
   # all parent UOps must have the same shape
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: all_same([x.shape for x in root.src if x.st is not None])),
 ])

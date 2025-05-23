@@ -255,16 +255,13 @@ def append_to_kernel(x:UOp):
     if s.op in DONT_PLACE_IN_KERNEL or s.op is Ops.GBARRIER: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
+      # NOTE: because const and device are shared UOps they don't change metadata
       if s.base.op not in {Ops.CONST, Ops.DEVICE} and (m:=s.metadata): metadata += m
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(dedup(metadata))))
 
 create_kernels = PatternMatcher([
-  # always give assign/contiguous a kernel
+  # always give assign/gbarrier a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
-  (UPat(Ops.CONTIGUOUS, name="x"), create_kernel),
-  # create a buffer for COPY on the new device
-  (UPat(Ops.COPY, src=(UPat(), UPat(Ops.DEVICE)), name="x"), create_kernel),
-  # otherwise check the context if we're realizing this UOp
   (UPat(Ops.GBARRIER, name="x"), create_kernel),
   # walk back the local graph until we reach a realized source
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
@@ -476,7 +473,6 @@ def fuse_arange(root:UOp):
         if other_paths: break
       else: q.extend(curr_children)
   return root.substitute(fuse_rep, name="fuse_arange") if fuse_rep else None
-
 
 do_fuse = PatternMatcher([
   (UPat(Ops.FUSE, name="x"), do_fusion),
