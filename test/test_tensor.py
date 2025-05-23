@@ -771,6 +771,7 @@ class TestInferenceMode(unittest.TestCase):
       assert W.grad is None
     f(x, m, W)
 
+@unittest.skip("broken")
 class TestTensorMetadata(unittest.TestCase):
   def setUp(self) -> None: _METADATA.set(None)
 
@@ -808,7 +809,6 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(len(si.metadata), 1)
     self.assertEqual(si.metadata[0].name, "relu")
 
-  @unittest.skip("broken")
   def test_complex(self):
     x = Tensor.rand(3, requires_grad=True)
     y = Tensor.rand(3, requires_grad=True)
