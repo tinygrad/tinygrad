@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import unittest, pickle, functools
+import z3
 
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen import full_rewrite
@@ -7,6 +8,7 @@ from tinygrad.codegen.devectorizer import sym
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
+from tinygrad.uop.spec import z3_renderer
 
 def render(self) -> tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
@@ -33,6 +35,10 @@ class TestSymbolic(unittest.TestCase):
     else: self.assertEqual(rendered, s)
     self.assertEqual(nmin, n)
     self.assertEqual(nmax, m)
+    solver = z3.Solver()
+    z3_sink = graph_rewrite(v.sink(v.simplify()), z3_renderer, ctx=(solver, {}))
+    expr, epxr_simplified = z3_sink.src[0].arg, z3_sink.src[1].arg
+    self.assertEqual(solver.check(expr != epxr_simplified), z3.unsat, "simplified expression not equal to original")
 
   def test_cmp_simple(self):
     self.helper_test_variable(Variable("a", 3, 8) < 4, 0, 1, "(a<4)")
@@ -320,6 +326,7 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_num_hoisted_and_factors_cancel_out(self):
     self.helper_test_variable(usum([Variable("a", 0, 1) * -4 + 1, Variable("a", 0, 1) * 4]), 1, 1, "1")
 
+  @unittest.expectedFailure  # only correct for floordiv, not truncdiv
   def test_div_cancel(self):
     self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(b+-1)")
 
@@ -327,6 +334,7 @@ class TestSymbolic(unittest.TestCase):
     with Context(CORRECT_DIVMOD_FOLDING=1):
       self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(((a+(b*20))+-20)//20)")
 
+  @unittest.expectedFailure  # only correct for floordiv, not truncdiv
   def test_mod_cancel(self):
     self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, 0, 20, "(a*2)")
 
