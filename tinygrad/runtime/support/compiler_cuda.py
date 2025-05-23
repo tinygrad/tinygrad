@@ -30,11 +30,11 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
 
-def cuda_disassemble(lib, arch):
+def cuda_disassemble(lib:bytes, arch:str):
   try:
     fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
-    with open(fn + ".ptx", "wb") as f: f.write(lib)
-    subprocess.run(["ptxas", f"-arch={arch}", "-o", fn, fn+".ptx"], check=True)
+    with open(fn, "wb") as f: f.write(lib)
+    subprocess.run(["ptxas", f"-arch={arch}", "-o", fn, fn], check=False, stderr=subprocess.DEVNULL) # optional ptx -> sass step for CUDA=1
     print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
   except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains ptxas/nvdisasm binary of compatible version.")
 
@@ -52,12 +52,7 @@ class CUDACompiler(Compiler):
     nvrtc_check(nvrtc.nvrtcDestroyProgram(ctypes.byref(prog)))
     return data
   def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetPTX, nvrtc.nvrtcGetPTXSize)
-  def disassemble(self, lib:bytes):
-    try:
-      fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
-      with open(fn + ".cubin", "wb") as f: f.write(lib)
-      print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
-    except Exception as e: print("Failed to disasm cubin:", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
+  def disassemble(self, lib:bytes): cuda_disassemble(lib, self.arch)
 
 class NVCompiler(CUDACompiler):
   def __init__(self, arch:str): super().__init__(arch, cache_key="nv")
@@ -68,6 +63,7 @@ class PTXCompiler(Compiler):
     self.arch = arch
     super().__init__(f"compile_{cache_key}_{self.arch}")
   def compile(self, src:str) -> bytes: return src.replace("TARGET", self.arch).replace("VERSION", "7.8" if self.arch >= "sm_89" else "7.5").encode()
+  def disassemble(self, lib:bytes): cuda_disassemble(lib, self.arch)
 
 class NVPTXCompiler(PTXCompiler):
   def __init__(self, arch:str): super().__init__(arch, cache_key="nv_ptx")
