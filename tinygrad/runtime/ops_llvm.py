@@ -1,4 +1,4 @@
-import ctypes, platform
+import functools, ctypes, platform
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -12,15 +12,15 @@ def expect(x, err, ret=None):
   return ret
 
 class LLVMCompiler(Compiler):
-  def __init__(self, host_arch:str):
-    for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmParser', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{host_arch}{component}')()
+  jit = True
+  target_arch = {'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()]
+  def __init__(self, processor:str, feats:str):
+    for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmParser', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{self.target_arch}{component}')()
 
-    triple = {'AArch64': b'aarch64', 'X86': b'x86_64'}[host_arch] + b'-none-unknown-elf'
+    triple = {'AArch64': b'aarch64-none-unknown-elf', 'X86': b'x86_64-none-unknown-elf', 'AMDGPU': b'amdgcn-amd-amdhsa'}[self.target_arch]
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
-    # +reserve-x18 here does the same thing as -ffixed-x18 in ops_cpu.py, see comments there for why it's needed on arm osx
-    cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
-    if DEBUG >= 2: print(f"LLVM init for {cpu!r} with {feats!r}")
-    self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, cpu, feats,
+    if DEBUG >= 3: print(f"LLVM init for {processor!r} with {feats!r}")
+    self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, processor.encode(), feats.encode(),
                                                        llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
@@ -33,11 +33,21 @@ class LLVMCompiler(Compiler):
     else:
       self.passes = b'default<O0>'
 
-    super().__init__(f"compile_llvm_jit{'_opt' if opt else ''}")
+    self.diag_msgs: list[str] = []
+    @ctypes.CFUNCTYPE(None, llvm.LLVMDiagnosticInfoRef, ctypes.c_void_p)
+    def handle_diag(diag_ref, _arg):
+      severity = llvm.LLVMGetDiagInfoSeverity(diag_ref)
+      msg = ctypes.string_at(llvm.LLVMGetDiagInfoDescription(diag_ref)).decode()
+      if severity == llvm.LLVMDSError:
+        self.diag_msgs.append(msg)
+    self.handle_diag = handle_diag
+    llvm.LLVMContextSetDiagnosticHandler(llvm.LLVMGetGlobalContext(), handle_diag, None)
+    super().__init__(f"compile_llvm_{self.target_arch}{'_jit' if self.jit else ''}{'_opt' if opt else ''}")
 
   def __del__(self): llvm.LLVMDisposePassBuilderOptions(self.pbo)
 
   def compile(self, src:str) -> bytes:
+    self.diag_msgs.clear()
     src_buf = llvm.LLVMCreateMemoryBufferWithMemoryRangeCopy(ctypes.create_string_buffer(src_bytes:=src.encode()), len(src_bytes), b'src')
     mod = expect(llvm.LLVMParseIRInContext(llvm.LLVMGetGlobalContext(), src_buf, ctypes.pointer(m:=llvm.LLVMModuleRef()), err:=cerr()), err, m)
     expect(llvm.LLVMVerifyModule(mod, llvm.LLVMReturnStatusAction, err:=cerr()), err)
@@ -48,11 +58,18 @@ class LLVMCompiler(Compiler):
     llvm.LLVMDisposeModule(mod)
     obj = ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
     llvm.LLVMDisposeMemoryBuffer(obj_buf)
-    return jit_loader(obj)
+    if self.diag_msgs: raise RuntimeError("llvm diagnostic: " + "\n".join(self.diag_msgs))
+    return jit_loader(obj) if self.jit else obj
 
   def disassemble(self, lib:bytes): capstone_flatdump(lib)
 
+class HostLLVMCompiler(LLVMCompiler):
+  def __init__(self):
+    # +reserve-x18 here does the same thing as -ffixed-x18 in ops_cpu.py, see comments there for why it's needed on arm osx
+    cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
+    super().__init__(cpu.decode(), feats.decode())
+
 class LLVMDevice(Compiled):
   def __init__(self, device:str):
-    compiler = LLVMCompiler({'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()])
-    super().__init__(device, MallocAllocator, LLVMRenderer(), compiler, CPUProgram)
+    from tinygrad.runtime.graph.cpu import LLVMGraph
+    super().__init__(device, MallocAllocator, LLVMRenderer(), HostLLVMCompiler(), CPUProgram, functools.partial(LLVMGraph, self))

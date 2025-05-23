@@ -1,13 +1,12 @@
 import ctypes, time
 from test.mockgpu.gpu import VirtGPU
-from tinygrad.helpers import to_mv, init_c_struct_t, mv_address
+from tinygrad.helpers import to_mv, init_c_struct_t
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 
 SDMA_MAX_COPY_SIZE = 0x400000
 
-BASE_ADDR = 0x00001260
 PACKET3_SET_SH_REG_START = 0x2c00
-SUB = PACKET3_SET_SH_REG_START - BASE_ADDR
+SUB = PACKET3_SET_SH_REG_START - amd_gpu.GC_BASE__INST0_SEG0
 
 regCOMPUTE_PGM_LO = 0x1bac - SUB
 regCOMPUTE_USER_DATA_0 = 0x1be0 - SUB
@@ -19,7 +18,8 @@ WAIT_REG_MEM_FUNCTION_ALWAYS = 0
 WAIT_REG_MEM_FUNCTION_EQ = 3 # ==
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
-REMU_PATHS = ["libremu.so", "/usr/local/lib/libremu.so", "libremu.dylib", "/usr/local/lib/libremu.dylib", "/opt/homebrew/lib/libremu.dylib"]
+REMU_PATHS = ["extra/remu/target/release/libremu.so", "libremu.so", "/usr/local/lib/libremu.so",
+              "extra/remu/target/release/libremu.dylib", "libremu.dylib", "/usr/local/lib/libremu.dylib", "/opt/homebrew/lib/libremu.dylib"]
 def _try_dlopen_remu():
   for path in REMU_PATHS:
     try:
@@ -59,12 +59,16 @@ sdma_pkts = create_sdma_packets()
 class AMDQueue:
   def __init__(self, base, size, rptr, wptr):
     self.queue, self.size = to_mv(base, size).cast("I"), size
-    self.rptr = to_mv(rptr, 8).cast("Q")
-    self.wptr = to_mv(wptr, 8).cast("Q")
+    self.rptr = to_mv(rptr, 8).cast("Q") if isinstance(rptr, int) else rptr
+    self.wptr = to_mv(wptr, 8).cast("Q") if isinstance(wptr, int) else wptr
+
+  @property
+  def executing(self): return self.rptr[0] < self.wptr[0]
 
 class PM4Executor(AMDQueue):
   def __init__(self, gpu, base, size, rptr, wptr):
     self.gpu = gpu
+    self.ib_executor: PM4Executor|None = None
     super().__init__(base, size, rptr, wptr)
 
   def _next_dword(self):
@@ -72,9 +76,17 @@ class PM4Executor(AMDQueue):
     self.rptr[0] += 1
     return x
 
+  @property
+  def executing(self): return self.rptr[0] < self.wptr[0] or self.ib_executor is not None
+
   def execute(self):
-    while self.rptr[0] < self.wptr[0]:
-      cont = True
+    prev_rptr, executed_in_ib, cont = self.rptr[0], 0, True
+    while self.executing and cont:
+      if self.ib_executor is not None:
+        executed_in_ib += self.ib_executor.execute()
+        if self.ib_executor.executing: break
+        self.ib_executor = None
+        continue # this continue is needed if PACKET3_INDIRECT_BUFFER is the last packet and rptr == wptr
       header = self._next_dword()
       packet_type = header >> 30
       op = (header >> 8) & 0xFF
@@ -88,7 +100,7 @@ class PM4Executor(AMDQueue):
       elif op == amd_gpu.PACKET3_INDIRECT_BUFFER: self._exec_indirect_buffer(n)
       elif op == amd_gpu.PACKET3_EVENT_WRITE: self._exec_event_write(n)
       else: raise RuntimeError(f"PM4: Unknown opcode: {op}")
-      if not cont: return
+    return (self.rptr[0] - prev_rptr) + executed_in_ib
 
   def _exec_acquire_mem(self, n):
     assert n == 6
@@ -156,7 +168,7 @@ class PM4Executor(AMDQueue):
 
     prg_sz = 0
     for st,sz in self.gpu.mapped_ranges:
-      if st <= prg_addr <= st+sz: prg_sz = sz - (prg_addr - st)
+      if st <= prg_addr < st+sz: prg_sz = sz - (prg_addr - st)
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
     err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
@@ -171,8 +183,7 @@ class PM4Executor(AMDQueue):
     wptr = memoryview(bytearray(8)).cast('Q')
     rptr[0] = 0
     wptr[0] = buf_sz
-    PM4Executor(self.gpu, (addr_hi << 32) | addr_lo, buf_sz * 4, mv_address(rptr), mv_address(wptr)).execute()
-    assert rptr[0] == wptr[0], "not everything executed in amdgpu"
+    self.ib_executor = PM4Executor(self.gpu, (addr_hi << 32) | addr_lo, buf_sz * 4, rptr, wptr)
 
   def _exec_event_write(self, n):
     assert n == 0
@@ -184,8 +195,8 @@ class SDMAExecutor(AMDQueue):
     super().__init__(base, size, rptr, wptr)
 
   def execute(self):
-    while self.rptr[0] < self.wptr[0]:
-      cont = True
+    prev_rptr, cont = self.rptr[0], True
+    while self.executing and cont:
       header = self.queue[(self.rptr[0] // 4) % (self.size // 4)]
       op = (header >> 0) & 0xff
       if op == 0: self.rptr[0] += 4
@@ -196,7 +207,7 @@ class SDMAExecutor(AMDQueue):
       elif op == amd_gpu.SDMA_OP_COPY: self._execute_copy()
       elif op == amd_gpu.SDMA_OP_TIMESTAMP: self._execute_timestamp()
       else: raise RuntimeError(f"Unknown SDMA op {op}")
-      if not cont: return
+    return self.rptr[0] - prev_rptr
 
   def _execute_fence(self):
     struct = sdma_pkts.fence.from_address(self.base + self.rptr[0] % self.size)

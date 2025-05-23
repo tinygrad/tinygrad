@@ -16,7 +16,7 @@ def gen_prg(device, inputs_cnt):
   with Context(DEBUG=0):
     fst = [Tensor.randn(BUF_LEN, dtype=dtypes.int).realize() for i in range(inputs_cnt)]
     s = fst[0]
-    for i in range(1, inputs_cnt): s = s.xor(fst[i])
+    for i in range(1, inputs_cnt): s = s.bitwise_xor(fst[i])
 
     si = s.schedule()[-1]
     prg = get_runner(device, si.ast)
@@ -121,7 +121,7 @@ if __name__ == "__main__":
   np.random.seed(SEED)
 
   next_graph_id = 0
-  while True:
+  for i in range(getenv("ITERS", 1000)):
     print("Running graph", next_graph_id)
     jis, all_buffers, input_buffers = gen_graph()
     fuzz_graph(jis, all_buffers, input_buffers)

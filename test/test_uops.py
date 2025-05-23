@@ -7,21 +7,20 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context, Timing
 from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
-from tinygrad.spec import spec
+from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
+from tinygrad.uop.spec import spec
 from tinygrad.renderer import ProgramSpec
-from tinygrad.engine.schedule import fix_kernel_ops
+from tinygrad.engine.grouper import fix_kernel_ops
 from tinygrad.engine.realize import CompiledRunner, get_kernel
-from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.devectorizer import full_graph_rewrite
+from tinygrad.codegen import full_rewrite
 from tinygrad.codegen.symbolic import sym
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 
-def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
+def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
 
 def _uops_to_prg(uops_list):
-  uops = linearize_uop(full_graph_rewrite(ast:=UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))
+  uops = full_rewrite(ast:=UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer)
   src = Device[Device.DEFAULT].renderer.render(uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
   return CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, ast, uops=uops,
@@ -247,12 +246,12 @@ class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
     gmem = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
-    idx = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem, gidx0 * UOp.const(dtypes.int, 2)))
-    val = UOp.const(dtypes.float, 42.0)
     gate = gidx0<UOp.const(dtypes.int, 1)
-    store = UOp(Ops.STORE, dtypes.void, (idx, val, gate))
+    idx = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem, gidx0 * UOp.const(dtypes.int, 2), gate))
+    val = UOp.const(dtypes.float, 42.0)
+    store = UOp(Ops.STORE, dtypes.void, (idx, val))
     uops = to_uops_list([store])
-    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     if_uop = next(u for u in uops if u.op is Ops.IF)
     endif = next(u for u in uops if u.op is Ops.ENDIF)
     assert endif.src[0] is if_uop
@@ -265,13 +264,12 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gmem1 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
     idx = gidx0 * UOp.const(dtypes.int, 2)
-    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx))
+    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx, gidx0<UOp.const(dtypes.int, 1)))
     idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx))
     val = UOp.const(dtypes.float, 42.0)
-    gate = gidx0<UOp.const(dtypes.int, 1)
-    stores = [UOp.store(idx0, val, gate), UOp.store(idx1, val)]
+    stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
-    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     if_uop = next(u for u in uops if u.op is Ops.IF)
     endif = next(u for u in uops if u.op is Ops.ENDIF)
     assert endif.src[0] is if_uop
@@ -285,13 +283,13 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gmem1 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
     idx = gidx0*UOp.const(dtypes.int, 2)
-    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx))
-    idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx))
-    val = UOp.const(dtypes.float, 42.0)
     gate = gidx0<UOp.const(dtypes.int, 1)
-    stores = [UOp.store(idx0, val, gate), UOp.store(idx1, val, gate)]
+    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx, gate))
+    idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx, gate))
+    val = UOp.const(dtypes.float, 42.0)
+    stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
-    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
+    if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     ifs = [u for u in uops if u.op is Ops.IF]
     endifs = [u for u in uops if u.op is Ops.ENDIF]
     self.assertEqual(len(ifs), 1)
@@ -323,6 +321,7 @@ class TestLocalAccess(unittest.TestCase):
     self.assertEqual(_test_uops_result(dtypes.uint8, uops, sres), 42)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
+  @unittest.skip("tinygrad doesn't support this behavior")
   def test_local_indirect(self):
     uops = []
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.int32.ptr(size=16, local=True), (), 'smem')
@@ -348,18 +347,47 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.SHL, ops)
     self.assertIn(Ops.MUL, ops)
 
-  def test_bitshift_right(self):
-    g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
-    c1 = UOp(Ops.CONST, dtypes.uint, (), 2)
-    c2 = UOp(Ops.CONST, dtypes.uint, (), 3)
-    l1 = UOp(Ops.LOAD, dtypes.uint, (g1.index(c1),))
-    a1 = UOp(Ops.IDIV, dtypes.uint, (l1, c1))
-    a2 = UOp(Ops.IDIV, dtypes.uint, (l1, c2))
-    uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
+  def test_division_power_of_two(self):
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c = UOp(Ops.CONST, dtypes.uint, (), 2)
+    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
+    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
-    self.assertIn(Ops.IDIV, ops)
+    self.assertNotIn(Ops.IDIV, ops)
+
+  def test_fast_idiv_and_mod(self):
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c = UOp(Ops.CONST, dtypes.uint, (), 3)
+    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
+    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHR, ops)
+    self.assertNotIn(Ops.IDIV, ops)
+
+    b = UOp(Ops.MOD, dtypes.uint, (l, c))
+    uops = to_uops_list([b], opts=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHR, ops)
+    self.assertNotIn(Ops.MOD, ops)
+
+  @unittest.expectedFailure
+  def test_fast_idiv_overflow(self):
+    # This will be possible with a slightly different method for fast_idiv
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c = UOp(Ops.CONST, dtypes.uint, (), 7)
+    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
+    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHR, ops)
+    self.assertNotIn(Ops.IDIV, ops)
 
   def test_mulacc_unrolled(self):
     # test that     acc = acc + a0*b0 + a1*b1 + a2*b2 + a3*b3
@@ -474,18 +502,20 @@ class TestIndexingOrdering(unittest.TestCase):
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
     st0 = UOp(Ops.STORE, dtypes.float.vec(4), (buf, gidx0+UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1 = UOp(Ops.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
-    uops = linearize_uop(UOp.sink(st1, st0), skip_check=True)
+    uops = full_rewrite(UOp.sink(st1, st0))
     stores = [st for st in uops if st.op is Ops.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
     self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "symbolic.py")
-    self.assertEqual(fix_kernel_ops.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "schedule.py")
-    self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "ops.py")
-    with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?
-      test_upat = UPat(Ops.CONST, dtypes.bool)
-      self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])
+    self.assertEqual(fix_kernel_ops.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "grouper.py")
+    self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "spec.py")
+    test_upat = UPat(Ops.CONST, dtypes.bool)
+    self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])
+    test_upat_named = test_upat.named("test_name")
+    self.assertEqual(test_upat.location[0], test_upat_named.location[0])
+    self.assertNotEqual(test_upat.location[1], test_upat_named.location[1])
 
 class TestUopsObject(unittest.TestCase):
   # LOL, running this test breaks all instances of "4"
@@ -515,7 +545,7 @@ class TestShapeSpec(unittest.TestCase):
     a = Tensor.ones((1, 1)).pad(((1, 1), (1, 1)))
     ast = a.contiguous().schedule()[0].ast
     valid_pattern = UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat.cvar(), UPat.cvar()))
-    valid_ternary = [x for x in ast.toposort if valid_pattern.match(x, {})][0]
+    valid_ternary = [x for x in ast.toposort() if valid_pattern.match(x, {})][0]
     # the WHERE outputs a contiguous (3, 3)
     self.assertEqual(valid_ternary.st, ShapeTracker.from_shape((3, 3)))
     valid, x, y = valid_ternary.src

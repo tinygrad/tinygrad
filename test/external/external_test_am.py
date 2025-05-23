@@ -1,11 +1,16 @@
 import unittest
 from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableTraverseContext
+from tinygrad.runtime.support.am.ip import AM_GMC
+from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import mv_address
 
-class FakeGMC:
-  def __init__(self):
+class FakeGMC(AM_GMC):
+  def __init__(self, adev):
+    self.adev = adev
     self.vm_base = 0x0
     self.address_space_mask = (1 << 44) - 1
+  def init_hw(self): pass
   def flush_tlb(self, *args, **kwargs): pass
 
 class FakePCIDev:
@@ -15,10 +20,12 @@ class FakeAM:
   def __init__(self):
     self.is_booting, self.smi_dev = True, False
     self.pcidev = FakePCIDev()
-    self.vram = memoryview(bytearray(4 << 30))
-    self.gmc = FakeGMC()
+    self.vram_mv = memoryview(bytearray(4 << 30))
+    self.vram = MMIOInterface(mv_address(self.vram_mv), self.vram_mv.nbytes)
+    self.gmc = FakeGMC(self)
     self.mm = AMMemoryManager(self, vram_size=4 << 30)
     self.is_booting = False
+    self.ip_ver = {am.GC_HWIP: (11, 0, 0)}
   def paddr2cpu(self, paddr:int) -> int: return paddr + mv_address(self.vram)
   def paddr2mc(self, paddr:int) -> int: return paddr
 
@@ -152,6 +159,22 @@ class TestAMPageTable(unittest.TestCase):
       mm0.unmap_range(0x1000000, (2 << 20) - off)
       mm0.map_range(0x1000000, 2 << 20, paddrs=[(0x10000, 2 << 20)])
       mm0.unmap_range(0x1000000, 2 << 20)
+
+  def test_frag_size(self):
+    mm0 = self.d[0].mm
+
+    def must_cover_checker(va, sz):
+      ans = (1 << (mm0._frag_size(va=va, sz=sz, must_cover=True) + 12))
+      assert va % ans == 0 and sz % ans == 0 and (va % (2 * ans) != 0 or sz % (2 * ans) != 0), f"va {va:#x} sz {sz:#x} ans {ans:#x}"
+
+    def not_cover_checker(va, sz):
+      ans = (1 << (mm0._frag_size(va=va, sz=sz, must_cover=False) + 12))
+      assert va % ans == 0 and ans <= sz and (va % (2 * ans) != 0 or (2 * ans) > sz), f"va {va:#x} sz {sz:#x} ans {ans:#x}"
+
+    for va, sz in [(0x0, 0x1000), (0x1000, 0x2000), (0x1000, 0x3000), (0x2000, 0x2000), (0x4000, 0x8000), (0x8000, 0x4000), (0x10000, 0x4000),
+                   (0x0, 0x4000), (0x10000, 0x4000), (0x10000, 0x40000), (0x10001000, 0x40000), (0x100001000, 0x3000)]:
+      must_cover_checker(va, sz)
+      not_cover_checker(va, sz)
 
 if __name__ == "__main__":
   unittest.main()

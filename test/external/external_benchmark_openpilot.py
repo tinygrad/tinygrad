@@ -2,11 +2,12 @@ import time, sys, hashlib
 from pathlib import Path
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
-from extra.onnx import OnnxRunner
+from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import IMAGE, GlobalCounters, fetch, colored, getenv, trange
 from tinygrad.tensor import _from_np_dtype
 import numpy as np
+from extra.bench_log import BenchEvent, WallTimeEvent
 
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
@@ -33,10 +34,11 @@ if __name__ == "__main__":
   for _ in range(20):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
-    # Need to cast non-image inputs from numpy, this is only realistic way to run model
-    inputs = {**{k:v for k,v in new_inputs_junk.items() if 'img' in k},
-              **{k:Tensor(v) for k,v in new_inputs_junk_numpy.items() if 'img' not in k}}
-    ret = next(iter(run_onnx_jit(**inputs).values())).cast(dtypes.float32).numpy()
+    with WallTimeEvent(BenchEvent.STEP):
+      # Need to cast non-image inputs from numpy, this is only realistic way to run model
+      inputs = {**{k:v for k,v in new_inputs_junk.items() if 'img' in k},
+                **{k:Tensor(v) for k,v in new_inputs_junk_numpy.items() if 'img' not in k}}
+      ret = next(iter(run_onnx_jit(**inputs).values())).cast(dtypes.float32).numpy()
     print(f"jitted:  {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
 
   suffix = ""

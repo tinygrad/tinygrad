@@ -44,6 +44,9 @@ runs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
+    - name: Upgrade pip
+      shell: bash
+      run: python -m pip install --upgrade pip
 
     # **** Caching packages ****
     # TODO: key should include input.deps, but it can't since it can't contain commas
@@ -121,9 +124,8 @@ runs:
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
         sudo apt update || true
         sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev
-        curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
-        jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
-        sudo xargs curl -L -o /usr/local/lib/libremu.so
+        cargo build --release --manifest-path ./extra/remu/Cargo.toml
+        sudo ln -sf ${{ github.workspace }}/extra/remu/target/release/libremu.so /usr/local/lib/libremu.so
         sudo tee --append /etc/ld.so.conf.d/rocm.conf <<'EOF'
           /opt/rocm/lib
           /opt/rocm/lib64
@@ -137,9 +139,7 @@ runs:
         curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
           jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
           sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
-        curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
-          jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
-          sudo xargs curl -L -o /usr/local/lib/libremu.dylib
+        cargo build --release --manifest-path ./extra/remu/Cargo.toml
 
     # **** CUDA ****
 
@@ -156,7 +156,7 @@ runs:
       shell: bash
       run: |
         brew update
-        brew install cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
+        brew install --quiet cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
     - name: Cache gpuocelot
       if: inputs.cuda == 'true'
       id: cache-build
@@ -175,7 +175,7 @@ runs:
         git checkout b16039dc940dc6bc4ea0a98380495769ff35ed99
         mkdir build
         cd build
-        cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF
+        cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         ninja
     - name: Install gpuocelot
       if: inputs.cuda == 'true'
@@ -202,8 +202,8 @@ runs:
       if: inputs.webgpu == 'true' && runner.os == 'macOS'
       shell: bash
       run: |
-        sudo mkdir -p /usr/local/lib
-        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.dylib -o /usr/local/lib/libwebgpu_dawn.dylib
+        brew tap wpmed92/dawn
+        brew install dawn
 
     # **** LLVM ****
 
@@ -212,11 +212,13 @@ runs:
       shell: bash
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+        echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-19 main" | sudo tee /etc/apt/sources.list.d/llvm.list
         sudo apt update -y || true
-        sudo apt install -y --no-install-recommends llvm-dev
+        sudo apt install -y --no-install-recommends libllvm19 clang-19 lld-19
 
     - name: Install LLVM (macOS)
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
       run: |
-        brew install llvm
+        brew install llvm@19

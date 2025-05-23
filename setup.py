@@ -13,10 +13,12 @@ testing_minimal = [
   "pytest",
   "pytest-xdist",
   "hypothesis",
+  "z3-solver",
+  "ml_dtypes"
 ]
 
 setup(name='tinygrad',
-      version='0.10.2',
+      version='0.10.3',
       description='You like pytorch? You like micrograd? You love tinygrad! <3',
       author='George Hotz',
       license='MIT',
@@ -24,7 +26,7 @@ setup(name='tinygrad',
       long_description_content_type='text/markdown',
       packages = ['tinygrad', 'tinygrad.runtime.autogen', 'tinygrad.runtime.autogen.am', 'tinygrad.codegen', 'tinygrad.nn',
                   'tinygrad.renderer', 'tinygrad.engine', 'tinygrad.viz', 'tinygrad.runtime', 'tinygrad.runtime.support',
-                  'tinygrad.runtime.support.am', 'tinygrad.runtime.graph', 'tinygrad.shape'],
+                  'tinygrad.runtime.support.am', 'tinygrad.runtime.graph', 'tinygrad.shape', 'tinygrad.uop'],
       package_data = {'tinygrad': ['py.typed'], 'tinygrad.viz': ['index.html', 'perfetto.html', 'assets/**/*', 'lib/**/*']},
       classifiers=[
         "Programming Language :: Python :: 3",
@@ -41,18 +43,18 @@ setup(name='tinygrad',
             "typing-extensions",
             "pre-commit",
             "ruff",
-            "types-tqdm",
+            "numpy",
         ],
-        #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@4.1.0-rc3"],
+        #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@5.0.0-rc3"],
         'testing_minimal': testing_minimal,
         'testing_unit': testing_minimal + [
             "tqdm",
             "safetensors",
-            "tabulate"  # for sz.py
+            "tabulate",  # for sz.py
         ],
         'testing': testing_minimal + [
             "pillow",
-            "onnx==1.16.0",
+            "onnx==1.17.0",
             "onnx2torch",
             "onnxruntime",
             "opencv-python",
@@ -68,7 +70,11 @@ setup(name='tinygrad',
             "nibabel",
             "bottle",
             "ggml-python",
-            "capstone"
+            "capstone",
+            "pycocotools",
+            "boto3",
+            "pandas",
+            "influxdb3-python"
         ],
         'docs': [
             "mkdocs",

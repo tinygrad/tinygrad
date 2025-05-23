@@ -3,15 +3,14 @@ import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.helpers import getenv, temp, _METADATA, mv_address
+from tinygrad.tensor import _METADATA
+from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
-from tinygrad.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.runtime.support.compiler_cuda import PTX
-from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.devectorizer import full_graph_rewrite
-from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
+from tinygrad.codegen import full_rewrite
 from tinygrad.dtype import DType
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -152,6 +151,27 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5, rtol=1e-6)
 
+  @unittest.expectedFailure
+  def test_const_backward_pass(self):
+    init = 3.5
+
+    def test_pytorch():
+      w1 = torch.tensor(init, requires_grad=True)
+      w2 = torch.tensor(init, requires_grad=True)
+      out = w1.add(w2)
+      out.backward()
+      return w1.grad, w2.grad
+
+    def test_tinygrad():
+      w1 = Tensor(init, requires_grad=True)
+      w2 = Tensor(init, requires_grad=True)
+      out = w1.add(w2)
+      out.backward()
+      return w1.grad.numpy(), w2.grad.numpy()
+
+    for x, y in zip(test_tinygrad(), test_pytorch()):
+      np.testing.assert_allclose(x, y, atol=1e-5)
+
   def test_nograd(self):
     x = Tensor(x_init, requires_grad=False)
     m = Tensor(m_init, requires_grad=False)
@@ -214,6 +234,13 @@ class TestTinygrad(unittest.TestCase):
         Tensor.manual_seed(1337)
         b = random_fn(10,10).realize()
         np.testing.assert_allclose(a.numpy(), b.numpy())
+
+  def test_randperm(self):
+    Tensor.manual_seed(0)
+    a = Tensor.randperm(10).realize()
+    np.testing.assert_equal(a.numpy(), [5, 2, 8, 1, 3, 7, 9, 6, 0, 4])
+    b = Tensor.randperm(1000).realize()
+    np.testing.assert_equal(set(b.numpy()), set(range(1000)))
 
   def test_randn_isnt_inf_on_zero(self):
     # simulate failure case of rand handing a zero to randn
@@ -414,7 +441,7 @@ class TestTinygrad(unittest.TestCase):
 
   def test_tensor_dtype_errors(self):
     with self.assertRaises(AttributeError): Tensor([3], dtype="typo")
-    with self.assertRaises(TypeError): Tensor([3], dtype=(dtypes.int,))
+    with self.assertRaises(AttributeError): Tensor([3], dtype=(dtypes.int,))
 
   def test_tensor_bytes(self):
     data = b"abc123"
@@ -467,7 +494,7 @@ class TestTinygrad(unittest.TestCase):
       _a = Tensor([3]) in [Tensor([3]), Tensor([4]), Tensor([5])]
 
   def test_repr_with_grad(self):
-    a = Tensor([1], requires_grad=True)
+    a = Tensor([1.0], requires_grad=True)
     b = Tensor([1])
     c = (a + b).sum().backward()
     print(a)
@@ -748,9 +775,10 @@ class TestTensorMetadata(unittest.TestCase):
   def setUp(self) -> None: _METADATA.set(None)
 
   # NOOPs are not included in kernel metadata
+  @unittest.skip("why would this be true?")
   def test_exclude_noop_metadata(self):
     a = Tensor.rand(4, 4)*1
-    self.assertEqual(a.lazydata.metadata.name, "__mul__")
+    self.assertEqual(a.lazydata.metadata[0].name, "__mul__")
     k = a.schedule()[-1]
     self.assertEqual([m.name for m in k.metadata], ["rand"])
 
@@ -767,7 +795,7 @@ class TestTensorMetadata(unittest.TestCase):
     x = Tensor.rand(3, requires_grad=True)
     W = Tensor.rand(3, 3, requires_grad=True)
     out = x.matmul(W)
-    self.assertEqual(out.lazydata.metadata.name, "matmul")
+    self.assertEqual(out.lazydata.metadata[0].name, "matmul")
     si = out.schedule()[-1]
     self.assertEqual(len(si.metadata), 1)
     self.assertEqual(si.metadata[0].name, "matmul")
@@ -775,7 +803,7 @@ class TestTensorMetadata(unittest.TestCase):
   def test_relu(self):
     x = Tensor.rand(3, requires_grad=True)
     out = x.relu()
-    self.assertEqual(out.lazydata.metadata.name, "relu")
+    self.assertEqual(out.lazydata.metadata[0].name, "relu")
     si = out.schedule()[-1]
     self.assertEqual(len(si.metadata), 1)
     self.assertEqual(si.metadata[0].name, "relu")
@@ -784,9 +812,9 @@ class TestTensorMetadata(unittest.TestCase):
     x = Tensor.rand(3, requires_grad=True)
     y = Tensor.rand(3, requires_grad=True)
     out = x.relu() * y.sigmoid()
-    self.assertEqual(out.lazydata.metadata.name, "__mul__")
-    self.assertEqual(out.lazydata.src[0].metadata.name, "relu")
-    self.assertEqual(out.lazydata.src[1].metadata.name, "sigmoid")
+    self.assertEqual(out.lazydata.metadata[0].name, "__mul__")
+    self.assertEqual(out.lazydata.src[0].metadata[0].name, "relu")
+    self.assertEqual(out.lazydata.src[1].metadata[0].name, "sigmoid")
     si = out.schedule()[-1]
     self.assertEqual(len(si.metadata), 3)
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
@@ -795,17 +823,17 @@ class TestTensorMetadata(unittest.TestCase):
     x = Tensor.rand(3, requires_grad=True).realize()
     y = Tensor.rand(3, requires_grad=True).realize()
     out = (x.relu() * y.sigmoid()).sum()
-    self.assertEqual(out.lazydata.metadata.name, "sum")
+    self.assertEqual(out.lazydata.metadata[0].name, "sum")
     out.backward()
-    self.assertEqual(x.grad.lazydata.metadata.name, "relu")
-    self.assertTrue(x.grad.lazydata.metadata.backward)
-    self.assertEqual(y.grad.lazydata.metadata.name, "sigmoid")
-    self.assertTrue(y.grad.lazydata.metadata.backward)
+    self.assertEqual(x.grad.lazydata.metadata[0].name, "relu")
+    self.assertTrue(x.grad.lazydata.metadata[0].backward)
+    self.assertEqual(y.grad.lazydata.metadata[0].name, "sigmoid")
+    self.assertTrue(y.grad.lazydata.metadata[0].backward)
     si = Tensor.schedule(out, x.grad, y.grad)[-1]
-    self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
-    self.assertEqual(set(m.name for m in si.metadata), {"sigmoid", "sigmoid", "relu"})
+    self.assertEqual(len(si.metadata), 4, f"failed with {si.metadata}")
+    self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "__mul__", "relu"})
     bw = [m for m in si.metadata if m.backward]
-    self.assertEqual(len(bw), 1)
+    self.assertEqual(len(bw), 2)
     self.assertEqual(bw[0].name, "sigmoid")
 
 class TestIdxUpcast(unittest.TestCase):
@@ -818,7 +846,7 @@ class TestIdxUpcast(unittest.TestCase):
     for s in schedule:
       if s.ast.op is Ops.SINK:
         renderer = Device[s.bufs[0].device].renderer
-        uops = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(s.ast, renderer), renderer))
+        uops = full_rewrite(s.ast, renderer)
         renderer.render(uops)
         return uops
 

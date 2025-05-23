@@ -8,13 +8,13 @@ from tinygrad.engine.search import Opt, OptOps, bufs_from_lin
 from extra.optimization.helpers import time_linearizer
 
 # stuff needed to unpack a kernel
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 
 def _test_overflow(ast, opts):
   lin = Kernel(ast)
-  for opt in opts: lin.apply_opt(opt)
+  lin.apply_opts(opts)
   lin.linearize()
   bufs = bufs_from_lin(lin)
   print(bufs)

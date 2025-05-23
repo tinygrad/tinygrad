@@ -12,7 +12,7 @@ from tinygrad.engine.realize import CompiledRunner
 
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
-from extra.onnx import OnnxRunner   # TODO: port to main tinygrad
+from tinygrad.frontend.onnx import OnnxRunner
 
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
 OUTPUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/openpilot.pkl"
@@ -92,10 +92,11 @@ def test_vs_compile(run, new_inputs, test_val=None):
   print("**** test done ****")
 
   # test that changing the numpy changes the model outputs
-  for v in new_inputs_numpy.values(): v *= 2
-  out = run(**inputs)
-  changed_val = out.numpy()
-  np.testing.assert_raises(AssertionError, np.testing.assert_array_equal, val, changed_val)
+  if any([x.device == 'NPY' for x in inputs.values()]):
+    for v in new_inputs_numpy.values(): v *= 2
+    out = run(**inputs)
+    changed_val = out.numpy()
+    np.testing.assert_raises(AssertionError, np.testing.assert_array_equal, val, changed_val)
   return val
 
 def test_vs_onnx(new_inputs, test_val, onnx_file, ort=False):

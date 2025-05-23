@@ -27,7 +27,7 @@ def imagenet_dataloader(cnt=0):
   input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
   files = get_val_files()
   random.shuffle(files)
-  if cnt != 0: files = files[:cnt]
+  files = files[:cnt]
   cir = get_imagenet_categories()
   for fn in files:
     img = Image.open(fn)
@@ -58,7 +58,7 @@ if __name__ == "__main__":
             return None
           return {"input": img.numpy()}
       quantize_static(model_fp32, fn, ImagenetReader(), quant_format=QuantFormat.QDQ, per_channel=False,
-                      activation_type=QuantType.QUInt8, weight_type=QuantType.QInt8,
+                      activation_type=QuantType.QUInt8, weight_type=QuantType.QUInt8,
                       extra_options={"ActivationSymmetric": False})
 
   run_onnx_jit, input_specs = load_onnx_model(fetch(fn))
@@ -66,13 +66,17 @@ if __name__ == "__main__":
   assert t_spec.shape[1:] == (3,224,224), f"shape is {t_spec.shape}"
 
   hit = 0
-  for i,(img,y) in enumerate(imagenet_dataloader(cnt=getenv("CNT", 100))):
+  for i,(img,y) in enumerate(imagenet_dataloader(cnt:=getenv("CNT", 100))):
     GlobalCounters.reset()
     p = run_onnx_jit(**{t_name:img})
     assert p.shape == (1,1000)
-    t = p.argmax().item()
+    t = p.to('cpu').argmax().item()
     hit += y==t
     print(f"target: {y:3d}  pred: {t:3d}  acc: {hit/(i+1)*100:.2f}%")
 
-  import pickle
-  with open("/tmp/im.pkl", "wb") as f: pickle.dump(run_onnx_jit, f)
+  MS_TARGET = 13.4
+  print(f"need {GlobalCounters.global_ops/1e9*(1000/MS_TARGET):.2f} GFLOPS for {MS_TARGET:.2f} ms")
+
+  if cnt >= 2:
+    import pickle
+    with open("/tmp/im.pkl", "wb") as f: pickle.dump(run_onnx_jit, f)
