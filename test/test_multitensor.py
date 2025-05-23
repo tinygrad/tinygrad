@@ -1,15 +1,14 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
-from tinygrad.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import CI, getenv, prod, Context, OSX
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
-from tinygrad.engine.multi import all_reduce
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from tinygrad.device import is_dtype_supported
-from test.helpers import not_support_multi_device
+from test.helpers import REAL_DEV, not_support_multi_device
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -31,7 +30,7 @@ N = 128
 def _test_allreduce(t:Tensor):
   aa = (t[0:64] + t[64:128] + t[128:192] + t[192:256]).repeat([4,1]).realize()
   ts = t.shard(devices_4, 0).realize()
-  b = Tensor(UOp.multi(*all_reduce(Ops.ADD, ts.lazydata.src), axis=0))
+  b = Tensor(UOp.allreduce(ts.lazydata, Ops.ADD, ts.device))
   b.realize()
   return aa, b
 
@@ -84,7 +83,7 @@ class TestMultiTensor(unittest.TestCase):
     for si, ei in lower_schedule(sched):
       if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
       ei.run()
-    self.assertEqual(len(set(names)), 2), "function was relinearized"
+    self.assertEqual(len(set(names)), 1), "function was relinearized"
 
   @unittest.skip("this doesn't fold because shard_ calls contiguous on all lbs")
   def test_sharded_memory(self):
@@ -210,17 +209,32 @@ class TestMultiTensor(unittest.TestCase):
         a,b = jit_allreduce(Tensor.rand(256, 256))
         np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
-  @unittest.skip("slow")
+  def test_multitensor_jit_input(self):
+    @TinyJit
+    def f(x): return (x+1).contiguous().sum()
+    for _ in range(5):
+      tt = Tensor.arange(0, 4).contiguous().realize().shard((d1,d2), 0).realize()
+      out = f(tt)
+      assert out.item() == 1+2+3+4
+
+  def test_multitensor_inside_jit(self):
+    @TinyJit
+    def f(x): return (x.shard((d1,d2), 0)+1).contiguous().sum()
+    for _ in range(5):
+      tt = Tensor.arange(0, 4).contiguous().realize()
+      out = f(tt)
+      assert out.item() == 1+2+3+4
+
   def test_fuzz_allreduce(self):
     random.seed(41)
-    for it in range(100):
+    for it in range(2):
       for n in range(2, 4+1):
         shape = tuple([(n if i == 0 else 1) * random.randint(1, 10) for i in range(random.randint(1, 4))])
         t = Tensor.rand(shape).shard_(tuple([d0, d1, d2, d3][:n]), 0)
         with Context(RING=0):
-          a = Tensor(UOp.multi(*all_reduce(Ops.ADD, t.lazydata.src), axis=0))
+          a = Tensor(UOp.allreduce(t.lazydata, Ops.ADD, t.device))
         with Context(RING=2):
-          b = Tensor(UOp.multi(*all_reduce(Ops.ADD, t.lazydata.src), axis=0))
+          b = Tensor(UOp.allreduce(t.lazydata, Ops.ADD, t.device))
         diff = a - b
         mean_err = diff.reshape((prod(diff.shape),)).abs().mean().numpy()
         max_err = diff.reshape((prod(diff.shape),)).abs().max().numpy()
@@ -344,8 +358,8 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
-  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM"), "slow")
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
+  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "LLVM"), "slow")
+  @unittest.skipIf(REAL_DEV == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_data_parallel_resnet(self):
     from extra.models.resnet import ResNet18
 
@@ -381,8 +395,8 @@ class TestMultiTensor(unittest.TestCase):
     # sometimes there is zeros in these grads... why?
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
 
-  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
+  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
+  @unittest.skipIf(REAL_DEV == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18
     fake_image = Tensor.rand((2, 3, 224//8, 224//8))
@@ -614,6 +628,9 @@ class TestMultiTensor(unittest.TestCase):
     # assert for cannot maintain axis
     with self.assertRaises(AssertionError): t0.reshape(4, 3, 2, 7, 15)
 
+  # it doesn't work like this anymore
+  # NOTE: this never failed in assign_multi, it failed tensor spec because MULTI was never pushed in the graph
+  @unittest.expectedFailure
   def test_mlb_assign_change_axis(self):
     t_none = Tensor.zeros((16, 16)).shard(devices_2).contiguous().realize()
     t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)
@@ -966,7 +983,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     np.testing.assert_allclose(output.numpy(), expected)
 
 @unittest.skipIf(not_support_multi_device(), "no multi")
-@unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
+@unittest.skipIf(REAL_DEV == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
 class TestBatchNorm(unittest.TestCase):
   def test_unsynced_backprop_conv_bn(self):
     with Tensor.train():
@@ -994,7 +1011,7 @@ class TestBatchNorm(unittest.TestCase):
       optim.step()
       out.numpy()
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
+  @unittest.skipIf(REAL_DEV == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_unsynced_backprop_standalone_bn(self):
     from extra.lr_scheduler import OneCycleLR
     GPUS = (d1, d2)
@@ -1121,13 +1138,48 @@ def helper_test_shard_op(shps, fxn, atol=1e-6, rtol=1e-3):
     except Exception as e:
       raise Exception(f"Failed shape {single_out.shape}: {e}")
 
-@unittest.skipIf(not_support_multi_device, "no multi")
+@unittest.skipIf(not_support_multi_device(), "no multi")
 class TestTensorOps(unittest.TestCase):
   def test_interpolate(self):
     helper_test_shard_op([(4,16,16),(4,24,24)], lambda x: Tensor.interpolate(x, (19,19)))
 
   def test_bitcast(self):
     helper_test_shard_op([(256,), (256,)], lambda x: x.bitcast(dtypes.int))
+
+# TODO: make these tests pass with VIZ=1
+@unittest.skipIf(not_support_multi_device(), "no multi")
+class TestMultiRamUsage(unittest.TestCase):
+  def setUp(self):
+    self.baseline = GlobalCounters.mem_used
+    self.N = 100
+  def assertUsed(self, amt, strict=True):
+    used = GlobalCounters.mem_used - self.baseline
+    print(f"used {used} bytes")
+    if strict: self.assertEqual(used, amt)
+    else: self.assertLessEqual(used, amt)
+
+  def test_zeros(self):
+    _ = Tensor.zeros(self.N, self.N).contiguous().realize()
+    self.assertUsed(self.N*self.N*4)
+
+  def test_zeros_del(self):
+    _ = Tensor.zeros(self.N, self.N).contiguous().realize()
+    del _
+    self.assertUsed(0)
+
+  def test_zeros_copy(self):
+    _ = Tensor.zeros(self.N, self.N).contiguous().to(devices_2).realize()
+    # NOTE: the first one on the DEFAULT device should be freed
+    self.assertUsed(self.N*self.N*4*2)
+
+  @unittest.skip("TODO: this is broken")
+  def test_zeros_shard(self):
+    _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).realize()
+    self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
+
+  def test_zeros_contiguous_shard(self):
+    _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).contiguous().realize()
+    self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
 
 if __name__ == '__main__':
   unittest.main()

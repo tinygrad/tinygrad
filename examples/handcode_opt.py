@@ -4,7 +4,7 @@ from examples.mlperf.helpers import get_mlperf_bert_model
 from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.heuristic import hand_coded_optimizations
-from tinygrad.ops import Ops, sym_infer
+from tinygrad.uop.ops import Ops, sym_infer
 from tinygrad.device import Compiled
 from tinygrad.engine.search import beam_search, bufs_from_lin
 from tinygrad.helpers import DEBUG, ansilen, getenv, colored, TRACEMETA

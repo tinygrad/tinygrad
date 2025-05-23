@@ -11,11 +11,11 @@ from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.spec import type_verify, shape_spec
+from tinygrad.uop.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.engine.grouper import view_left, view_right, sym, get_becomes_map, Kernel, create_ast, merge_views
+from tinygrad.engine.grouper import view_left, view_right, sym, get_kernelize_map, Kernel, create_ast, merge_views, create_kernels
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 
@@ -23,24 +23,23 @@ def verify_ast(sink:UOp): return type_verify(list(sink.toposort()), shape_spec)
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
   if to_prerealize:
-    for pre in to_prerealize: pre.schedule()
+    with Context(DEBUG=0, TRACK_MATCH_STATS=0): Tensor.realize(*to_prerealize)
   if isinstance(t, Tensor): sched = t.schedule()
   elif isinstance(t, List) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     sink = UOp.sink(t) if t.op is not Ops.SINK else t
-    becomes_map = get_becomes_map(sink)
-    sched, _, __ = create_schedule_with_vars(sink.substitute(becomes_map))
+    becomes_map = get_kernelize_map(sink)
+    sched, _ = create_schedule_with_vars(sink.substitute(becomes_map))
   # test lowering all the ScheduleItems to ExecItems
-  lowered = [x[1] for x in lower_schedule(sched.copy())]
-  if filter_sink: sched = [s for s,ei in zip(sched, lowered) if isinstance(ei.prg, CompiledRunner)]
-  if len(sched) != allowed:
+  kernel_cnt = len([si for si,ei in lower_schedule(sched.copy()) if isinstance(ei.prg, CompiledRunner) or not filter_sink])
+  if kernel_cnt != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
     if DEBUG >= 3:
       for i,s in enumerate(sched):
         print("kernel", i+1)
         print(s.ast)
-    raise KernelCountException(f"{len(sched)=} != {allowed}")
+    raise KernelCountException(f"{kernel_cnt} != {allowed}")
   return sched
 
 def _realize_weights(m):
@@ -86,6 +85,58 @@ class TestSchedule(unittest.TestCase):
     b = a.cast(dtypes.half).expand((2, 4, 4))+2
     run_schedule(check_schedule(b, 1))
     np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2)
+
+  def test_indexing_scalars_simple(self):
+    X = Tensor.randn(2, 2).realize()
+    xt = X[Tensor(1)][Tensor(0)]
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(xt, 2))
+    np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
+
+  @unittest.expectedFailure # TODO: failing because of can_chase
+  def test_indexing_scalars_multiple_dims(self):
+    X = Tensor.randn(2, 3).realize()
+    xt = X[Tensor(0)][Tensor(1)]
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(xt, 2))
+    np.testing.assert_equal(xt.numpy(), X.numpy()[0][1])
+
+  def test_push_pads_elementwise(self):
+    x = Tensor.full((4,4), 2.).contiguous().realize()
+    y = Tensor.full((4,4), 4.).contiguous().realize()
+    z = (x.reciprocal()*y).pad((None, (0,1),)).sum()
+    run_schedule(check_schedule(z, 2))
+    self.assertEqual(z.item(), 32)
+
+  def test_push_pads_contiguous(self):
+    x = Tensor.full((4,1), 2.).contiguous()
+    y = Tensor.full((4,4), 4.).contiguous()
+    z = (x.reciprocal().expand(4,4)*y).pad((None, (0,1),)).sum()
+    run_schedule(check_schedule(z, 2, [x,y]))
+    self.assertEqual(z.item(), 32)
+
+  def test_rand(self):
+    x = Tensor.rand(32)
+    check_schedule(x, 3, [Tensor._device_rng_counters[x.device]])
+
+  def test_rand_recompute_arange(self):
+    x = Tensor.rand(32)
+    with Context(DONT_GROUP_REDUCES=1):
+      check_schedule(x, 2, [Tensor._device_rng_counters[x.device]])
+
+  @unittest.skip("TODO: do not divide by zero given x.idiv(VALID)")
+  def test_rand_handcoded(self):
+    Tensor.manual_seed(0)
+    x = Tensor.rand(32)
+    # pre-realize shared seed
+    Tensor._device_rng_counters[x.device].realize()
+    # run custom kernelized kernel
+    sched_sink = graph_rewrite(x.lazydata, create_kernels, ctx={u:None for u in x.lazydata.toposort() if u.op is Ops.COPY}, bottom_up=True)
+    y = Tensor(graph_rewrite(sched_sink, create_ast, bottom_up=True))
+    run_schedule(check_schedule(y, 1))
+    # compare against reference
+    run_schedule(check_schedule(x, 3))
+    np.testing.assert_allclose(y.numpy(), x.numpy())
 
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
@@ -598,6 +649,14 @@ class TestSchedule(unittest.TestCase):
     b = a*2
     c = b.kernelize()+Tensor.empty(4,4)
     check_schedule(c, 2)
+
+  def test_kernelize_diamond(self):
+    a = Tensor([0]).realize()
+    prev_a = (a+1).contiguous()
+    a.assign(Tensor([2]))
+    a.kernelize(prev_a)
+    assert prev_a.lazydata in a.lazydata.src, "contiguous usage must run before assign"
+    self.assertEqual((prev_a+a*3).item(), 1+2*3)
 
   def test_multioutput_ast(self):
     a = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().lazydata
@@ -1453,6 +1512,15 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(d, 2))
     np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:, None, :], ((0, 0), (1, 1), (0, 0)))*2)
 
+  def test_fuse_arange_pad_replicate_mode(self):
+    x = Tensor.empty(3,3,3,3, requires_grad=True)
+    y = x.pad((-1,2,2,-1), mode="replicate")
+    dx = y.sum().gradient(x)[0]
+    with Context(FUSE_ARANGE=1):
+      sched = check_schedule(dx, 3)
+    run_schedule(sched)
+    np.testing.assert_allclose(dx.numpy(), [[[[0.,3.,9.],[0,1.,3.],[0.,0.,0.]]]*3]*3)
+
   # TODO like openpilot with imagef
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_base_change_expand_expand(self):
@@ -1814,10 +1882,10 @@ class TestIndexing(unittest.TestCase):
     args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000}
     fused = precompute_freqs_cis(**args)
     with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(fused, 5)) # TODO: this is too many
+      run_schedule(check_schedule(fused, 3))
     if getenv("CHECK", 1):
       ref = precompute_freqs_cis(**args)
-      run_schedule(check_schedule(ref, 5))
+      run_schedule(check_schedule(ref, 3))
       np.testing.assert_equal(fused.numpy(), ref.numpy())
 
   def test_fuse_assign_contiguous(self):
@@ -2110,7 +2178,6 @@ class TestSimplifier(unittest.TestCase):
     assert UPat(Ops.CONST, arg=0).match(sink, {})
     self.assertIs(tensor_rewrite(a*1).base, a.lazydata.base)
     self.assertIs(tensor_rewrite(a+0).base, a.lazydata.base)
-    self.assertIs(tensor_rewrite(a//1).base, a.lazydata.base)
 
   def test_cast_folding(self):
     a = Tensor(1.0).cast(dtypes.int)
