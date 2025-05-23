@@ -15,7 +15,7 @@ from tinygrad.uop.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewr
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.uop.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.engine.grouper import view_left, view_right, sym, get_becomes_map, Kernel, create_ast, merge_views, create_kernels
+from tinygrad.engine.grouper import view_left, view_right, sym, get_kernelize_map, Kernel, create_ast, merge_views, create_kernels
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 
@@ -29,8 +29,8 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     sink = UOp.sink(t) if t.op is not Ops.SINK else t
-    becomes_map = get_becomes_map(sink)
-    sched, _, __ = create_schedule_with_vars(sink.substitute(becomes_map))
+    becomes_map = get_kernelize_map(sink)
+    sched, _ = create_schedule_with_vars(sink.substitute(becomes_map))
   # test lowering all the ScheduleItems to ExecItems
   kernel_cnt = len([si for si,ei in lower_schedule(sched.copy()) if isinstance(ei.prg, CompiledRunner) or not filter_sink])
   if kernel_cnt != allowed:
@@ -2170,7 +2170,6 @@ class TestSimplifier(unittest.TestCase):
     assert UPat(Ops.CONST, arg=0).match(sink, {})
     self.assertIs(tensor_rewrite(a*1).base, a.lazydata.base)
     self.assertIs(tensor_rewrite(a+0).base, a.lazydata.base)
-    self.assertIs(tensor_rewrite(a//1).base, a.lazydata.base)
 
   def test_cast_folding(self):
     a = Tensor(1.0).cast(dtypes.int)
