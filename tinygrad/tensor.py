@@ -177,7 +177,7 @@ class Tensor(MathTrait):
 
   def _apply_uop(self, fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
     new_uop: UOp = fxn(*[t.lazydata for t in (self,)+x], **kwargs)
-    if (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = metadata
+    if (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = (metadata,)
     needs_input_grad = [t.requires_grad for t in (self,)+x]
     return Tensor(new_uop, device=new_uop.device, requires_grad=True if any(needs_input_grad) else None if None in needs_input_grad else False)
 
