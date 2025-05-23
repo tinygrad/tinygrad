@@ -1,10 +1,9 @@
-import os
+import os, sys
 from extra.export_model import compile_net, jit_model, dtype_to_js_type
 from extra.f16_decompress import u32_to_f16
 from examples.stable_diffusion import StableDiffusion
 from tinygrad.nn.state import get_state_dict, safe_save, safe_load_metadata, torch_load, load_state_dict
-from tinygrad.tensor import Tensor
-from tinygrad import Device, dtypes
+from tinygrad import Device, dtypes, Tensor, TinyJit
 from tinygrad.helpers import fetch
 from typing import NamedTuple, Any, List
 import requests
@@ -101,6 +100,26 @@ if __name__ == "__main__":
   ]
 
   prg = ""
+  state_dict = get_state_dict(model)
+  #base_url = "."
+  #if args.remoteweights:
+    #base_url = "https://huggingface.co/wpmed/stable-diffusion-f16-new/resolve/main"
+
+  """
+  safe_save(state_dict, os.path.join(os.path.dirname(__file__), "net.safetensors"))
+  convert_f32_to_f16(os.path.join(os.path.dirname(__file__), "./net.safetensors"), os.path.join(os.path.dirname(__file__), "./net_conv.safetensors"))
+  split_safetensor(os.path.join(os.path.dirname(__file__), "./net_conv.safetensors"))
+  os.remove(os.path.join(os.path.dirname(__file__), "net.safetensors"))
+  os.remove(os.path.join(os.path.dirname(__file__), "net_conv.safetensors"))
+  """
+
+  for step in sub_steps:
+    print(f'Executing step={step.name}')
+    prg, state = TinyJit(step.forward).export_webgpu(*step.input, tensor_names=state_dict)
+    with open(os.path.join(os.path.dirname(__file__), f"{step.name}.js"), "w") as f: f.write(prg)
+
+  sys.exit()
+
 
   def fixup_code(code, key):
     code = code.replace(key, 'main')\
