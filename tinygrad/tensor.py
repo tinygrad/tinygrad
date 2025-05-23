@@ -3865,7 +3865,7 @@ class Tensor(MathTrait):
       #full_output.append(Tensor(O/l.lazydata))
       full_output.append(O/l)
 
-    return Tensor.cat(*full_output, dim=-2)
+    return Tensor.cat(*full_output, dim=-2) if full_output else Tensor.zeros_like(self)
 
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0, is_causal:bool=False, _flash_att=getenv("FLASH_ATTENTION", 1)) -> Tensor:
     """
@@ -3884,16 +3884,15 @@ class Tensor(MathTrait):
     """
     # NOTE: it also works when `key` and `value` have symbolic shape.
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
-    if _flash_att and not is_causal:
-      assert not is_causal
+    if is_causal:
+      if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
+      attn_mask = qk.ones_like(requires_grad=False, device=self.device, dtype=dtypes.bool).tril()
+    if _flash_att:
       assert isinstance(key.shape[-2], int), f"does not support symbolic shape {key.shape}"
       assert isinstance(value.shape[-2], int), f"does not support symbolic shape {value.shape}"
       return self.flash_attention(key, value, attn_mask=attn_mask, dropout_p=dropout_p)
     qk = self.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(self.dtype, key.dtype, dtypes.float32)) / math.sqrt(self.shape[-1])
     # handle attention mask
-    if is_causal:
-      if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
-      attn_mask = qk.ones_like(requires_grad=False, device=self.device, dtype=dtypes.bool).tril()
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
