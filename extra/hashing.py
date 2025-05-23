@@ -1,3 +1,4 @@
+import math
 from tinygrad import Variable
 from tinygrad.helpers import fetch, getenv
 from tinygrad.tensor import Tensor
@@ -91,8 +92,23 @@ def string_to_uint8_tensor(s: str) -> Tensor:
   b = s.encode()
   return Tensor([b], dtype=dtypes.uint8)
 
+def test_kat(kat, i):
+  kat = kat.split("\n")
+  msg = kat[1].split(" = ")[1]
+  md = kat[2].split(" = ")[1].lower()
+  msg_hex = Tensor([bytes.fromhex(msg)], dtype=dtypes.uint8)
+  mdc = shake128(msg_hex).data().tobytes().hex()
+  assert md == mdc, f"failed on KAT {i}, {md} != {mdc}"
+
 if __name__ == "__main__":
-  s = string_to_uint8_tensor("00")
-  print(s.data().tobytes().hex())
-  a = shake128(s)
-  print(a.data().tobytes().hex())
+  import zipfile
+  kats_zip = fetch("https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/sha3/shakebytetestvectors.zip")
+  kats = zipfile.ZipFile(kats_zip).open("SHAKE128ShortMsg.rsp").read().decode()
+  kats = kats.split("\n\n")[1:]
+
+  if kat_idx := getenv("KAT", 0):
+    test_kat(kats[kat_idx], kat_idx)
+  else:
+    for i, kat in enumerate(kats):
+      if not kat: continue
+      test_kat(kat, i)
