@@ -227,9 +227,9 @@ def _dump_qmd(address, packets):
       if getenv("IOCTL", 0) >= 2:
         print("qmd:")
         dump_struct(qmds[-1], end="\n")
-        print(qmds[-1].qmd_major_version)
-        print(qmds[-1].constant_buffer_addr_lower_1)
-        print(qmds[-1].constant_buffer_addr_upper_1)
+        # print(qmds[-1].qmd_major_version)
+        # print(qmds[-1].constant_buffer_addr_lower_1)
+        # print(qmds[-1].constant_buffer_addr_upper_1)
         xx = to_mv(address + 12 + i * 4, 0x180)
         hexdump(xx)
         
@@ -239,7 +239,7 @@ def _dump_qmd(address, packets):
 
         prg_cb1 = xx.cast('Q')[0x30//8] & ((1 << 48)-1)
         print(hex(prg_cb1 << 8))
-        # hexdump(to_mv(prg_cb1 << 8, 0x40))
+        # hexdump(to_mv(prg_cb1 << 8, 0x180))
         print(hex(address))
         # if prg_cb1 > 0:
         #   hexdump(to_mv(prg_cb1, 0x40))

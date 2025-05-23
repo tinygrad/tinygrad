@@ -116,6 +116,7 @@ generate_nv() {
 
   clang2py -k cdefstum \
     extra/nv_gpu_driver/clc6c0qmd.h \
+    extra/nv_gpu_driver/clcec0qmd.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl0080.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl2080_notification.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
