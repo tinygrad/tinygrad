@@ -261,9 +261,8 @@ def append_to_kernel(x:UOp):
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(dedup(metadata))))
 
 create_kernels = PatternMatcher([
-  # always give assign a kernel
+  # always give assign/gbarrier a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
-  # GBARRIER creates a kernel
   (UPat(Ops.GBARRIER, name="x"), create_kernel),
   # walk back the local graph until we reach a realized source
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
