@@ -76,7 +76,7 @@ class TestGC(unittest.TestCase):
     x.lazydata.toposort()
     del x
     if bufs_allocated()-init != 0:
-      print(inspect.getclosurevars(UOp.toposort().fget))
+      print(inspect.getclosurevars(UOp.toposort.fget(x)))
       raise AssertionError(f"never gced {[x for x in gc.get_objects() if isinstance(x, Buffer)]}")
 
   def test_buffer_refcount(self):

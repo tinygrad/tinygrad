@@ -11,7 +11,7 @@ class TestCLError(unittest.TestCase):
   def test_oom(self):
     with self.assertRaises(RuntimeError) as err:
       allocator = CLAllocator(CLDevice())
-      for i in range(1_000_000):
+      for _ in range(1_000_000):
         allocator.alloc(1_000_000_000)
     assert str(err.exception) == "OpenCL Error -6: CL_OUT_OF_HOST_MEMORY"
 

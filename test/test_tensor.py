@@ -246,7 +246,6 @@ class TestTinygrad(unittest.TestCase):
     # simulate failure case of rand handing a zero to randn
     original_rand, Tensor.rand = Tensor.rand, Tensor.zeros
     try: self.assertNotIn(np.inf, Tensor.randn(16).numpy())
-    except: raise
     finally: Tensor.rand = original_rand
 
   def test_zeros_like_has_same_dtype_and_shape(self):

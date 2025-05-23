@@ -1770,7 +1770,7 @@ class TestHandCodedOpts(unittest.TestCase):
       upcasts = []
       wino_schedule = out.schedule()
       # collect upcasts of tile transform kernels
-      for i, si in enumerate(wino_schedule):
+      for _, si in enumerate(wino_schedule):
         k = Kernel(si.ast)
         k.apply_opts(hand_coded_optimizations(k))
         if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel)

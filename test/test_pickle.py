@@ -8,7 +8,11 @@ class TestPickle(unittest.TestCase):
   def test_pickle_code_object(self):
     y = lambda x: x*2  # noqa: E731
     code_str = pickle.dumps(y.__code__)
-    fxn = types.FunctionType(pickle.loads(code_str), globals())
+    fxn = lambda *args, **kwargs: None
+    code_obj = pickle.loads(code_str)
+    temp_f = types.FunctionType(code_obj, globals())
+    if callable(temp_f):
+      fxn = temp_f
     self.assertEqual(fxn(2), 4)
 
   def test_pickle_pattern_matcher(self):
