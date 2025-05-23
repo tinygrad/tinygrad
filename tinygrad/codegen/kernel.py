@@ -154,7 +154,8 @@ class Kernel:
     # between first_reduce + group_for_reduces and upcasted, they are reduce (red)
     colors += ["red"] * (self.first_upcast - (self.first_reduce + self.group_for_reduces))
     # upcasted dimensions are reduce (magenta) or normal (yellow)
-    colors += ["magenta" if self.full_shape[i] != self.sts[self.output_buf_index].shape[i] else "yellow" for i in range(self.first_upcast, self.shape_len)]
+    colors += ["magenta" if self.full_shape[i] != self.sts[self.output_buf_index].shape[i] else "yellow"
+               for i in range(self.first_upcast, self.shape_len)]
     assert len(colors) == self.shape_len, "colors size mismatch"
     return colors
 
