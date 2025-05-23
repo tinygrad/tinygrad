@@ -1,5 +1,9 @@
 import ctypes, subprocess
 import tinygrad.runtime.autogen.comgr as comgr
+comgr.amd_comgr_get_version(ctypes.byref(major:=ctypes.c_uint64()), ctypes.byref(minor:=ctypes.c_uint64()))
+if major.value >= 3:
+  # in comgr 3 the values of enums in headers were changed: https://github.com/ROCm/llvm-project/issues/272
+  import tinygrad.runtime.autogen.comgr_3 as comgr # type: ignore[no-redef]
 from tinygrad.device import Compiler, CompileError
 from tinygrad.runtime.ops_llvm import LLVMCompiler
 from tinygrad.helpers import OSX, to_char_p_p
