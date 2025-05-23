@@ -1,4 +1,4 @@
-import gzip, unittest
+import gzip, unittest, urllib.error, urllib.request
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
@@ -154,6 +154,18 @@ class TestFetch(unittest.TestCase):
     no_gzip_url: str = 'https://ftp.gnu.org/gnu/gzip/gzip-1.13.zip'
     with self.assertRaises(gzip.BadGzipFile):
       fetch(no_gzip_url, gunzip=True)
+
+  def test_fetch_request(self):
+    req = urllib.request.Request(
+      "https://csrc.nist.gov/CSRC/media/Projects/lightweight-cryptography/documents/finalist-round/updated-submissions/sparkle.zip",
+      headers={"User-Agent": "tinygrad"},
+    )
+    fetch(req, allow_caching=False)
+
+  def test_fetch_no_request_fail(self):
+    with self.assertRaises(urllib.error.HTTPError):
+      fetch("https://csrc.nist.gov/CSRC/media/Projects/lightweight-cryptography/documents/finalist-round/updated-submissions/sparkle.zip",
+            allow_caching=False)
 
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
