@@ -3886,8 +3886,8 @@ class Tensor(MathTrait):
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     if _flash_att and not is_causal:
       assert not is_causal
-      assert all_int(key.shape), f"does not support symbolic shape {key.shape}"
-      assert all_int(value.shape), f"does not support symbolic shape {value.shape}"
+      assert isinstance(key.shape[-2], int), f"does not support symbolic shape {key.shape}"
+      assert isinstance(value.shape[-2], int), f"does not support symbolic shape {value.shape}"
       return self.flash_attention(key, value, attn_mask=attn_mask, dropout_p=dropout_p)
     qk = self.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(self.dtype, key.dtype, dtypes.float32)) / math.sqrt(self.shape[-1])
     # handle attention mask
