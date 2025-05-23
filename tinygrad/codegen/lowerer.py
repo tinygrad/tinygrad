@@ -237,8 +237,8 @@ pm_quant = symbolic+PatternMatcher([
 
 # TODO this probably doesn't cover all cases yet
 # TODO CLEAN UP
-f32_to_f16 = lambda name: UPat.var(name, dtype=dtypes.float32).cast(dtypes.half)
-f16 = lambda name: UPat.any(UPat.var(name, dtype=dtypes.half), UPat.cvar(name, dtype=dtypes.half))
+def f32_to_f16(name): return UPat.var(name, dtype=dtypes.float32).cast(dtypes.half)
+def f16(name): return UPat.any(UPat.var(name, dtype=dtypes.half), UPat.cvar(name, dtype=dtypes.half))
 
 pm_push_cast = PatternMatcher([
   #  --- pushes cast to half right through alus ---

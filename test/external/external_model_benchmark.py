@@ -1,5 +1,5 @@
 import csv, pathlib, time, numpy as np
-from os import getenv, environ
+from os import getenv
 import torch
 torch.set_num_threads(1)
 import onnx
