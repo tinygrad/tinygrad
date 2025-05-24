@@ -315,7 +315,7 @@
         let db = await initDb();
 
         const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
-        let labels, nets, safetensorParts;
+        let labels, nets, safetensorParts, alphasCumprodUint8;
 
         const timer = async (func, label = "") => {
             const start = performance.now();
@@ -446,20 +446,19 @@
             const f16tof32 = await f16tof32Graph();
             f16decomp = f16tof32.run;
 
-            stateDict = await getAndDecompressF16Safetensors(progress);
+            const stateDict = await getAndDecompressF16Safetensors(progress);
 
             modelDlTitle.innerHTML = "Loading model"
 
             const textModel = await textModelGraph();
             const diffusor = await diffusorGraph();
+            alphasCumprodUint8 = stateDict["alphas_cumprod"].slice(); // don't ref the big arrayBuffer behind stateDict
             const decoder = await decoderGraph();
 
             for (const model of [textModel, diffusor, decoder]) {
                 for (const [k,v] of Object.entries(stateDict)) {
                     if (k in model.stateDict)
                         model.device.queue.writeBuffer(model.stateDict[k], 0, stateDict[k]);
-                    else
-                        console.warn(`Tensor with this key is not in target stateDict: "${k}"`);
                 }
             }
 
@@ -492,8 +491,9 @@
 
                 console.log("Timesteps: " + timesteps);
 
-                const uint8Data = stateDict["alphas_cumprod"];
-                let alphasCumprod = new Float32Array(uint8Data.buffer, uint8Data.byteOffset, uint8Data.byteLength / Float32Array.BYTES_PER_ELEMENT);
+                let alphasCumprod = new Float32Array(
+                    alphasCumprodUint8.buffer, alphasCumprodUint8.byteOffset, alphasCumprodUint8.byteLength / Float32Array.BYTES_PER_ELEMENT
+                );
                 let alphas = [];
 
                 for (t of timesteps) {
@@ -511,7 +511,7 @@
 
                 // RNG with seed
                 function LCG(seed) {const m=2147483647, a=16807; return () => ((seed = seed * a % m) / m);}
-                const randn = LCG(rand_seed);
+                const randn = LCG(randSeed);
                 for(let i=0; i<inpSize; i++)
                     latent[i] = Math.sqrt(-2 * Math.log(randn())) * Math.cos(2 * Math.PI * randn());
 
