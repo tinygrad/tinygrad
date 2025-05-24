@@ -74,7 +74,14 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(10)
     b = Tensor.empty(10, device="CPU")
     c = a+b
-    with self.assertRaises(RuntimeError): check_schedule(c, 1)
+    with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
+
+  @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
+  def test_error_on_device_mismatch_alt(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty((1,), device="CPU").expand(10).contiguous()
+    c = a+b
+    with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and getenv("CAST_AFTER_EXPAND"), "need half and CAST_AFTER_EXPAND=1")
   @unittest.skip("CAST_AFTER_EXPAND is not supported")
