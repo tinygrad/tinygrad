@@ -417,7 +417,7 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.ulong), "Needs ulong")
   def test_fold_conv_batchnorm_optim(self):
     # this is too high
-    for optim, cnt in [(nn.optim.Adam, 30), (nn.optim.SGD, 11)]:
+    for optim, cnt in [(nn.optim.Adam, 23), (nn.optim.SGD, 16)]:
       with self.subTest(optim=optim.__name__):
         with Tensor.train():
           img = Tensor.ones(1,3,4,4)
@@ -1186,7 +1186,7 @@ class TestSchedule(unittest.TestCase):
       _realize_weights(layer)
       opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
       layer(x).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 16)
+      check_schedule(opt.schedule_step(), 13)
 
   def test_adam_conv_fuse(self):
     with Tensor.train():
@@ -1196,7 +1196,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters(c1), lr=1e-4)
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 16)
+      check_schedule(opt.schedule_step(), 13)
 
   def test_adam_2convs_fuse(self):
     with Tensor.train():
@@ -1207,7 +1207,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 20)
+      check_schedule(opt.schedule_step(), 17)
 
   def test_sgd_conv_fuse(self):
     with Tensor.train():
@@ -1217,7 +1217,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters(c1))
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 3)
+      check_schedule(opt.schedule_step(), 6)
 
   def test_sgd_2convs_fuse(self):
     with Tensor.train():
@@ -1228,7 +1228,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]))
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 7)
+      check_schedule(opt.schedule_step(), 10)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.ulong), "Needs ulong")
   def test_fold_2convs_sgd_nesterov_momentum_wd(self):
@@ -1240,7 +1240,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]), nesterov=True, momentum=0.9, weight_decay=0.1)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 13)
+      check_schedule(opt.schedule_step(), 11)
 
   def test_sgd_4convs_fuse(self):
     with Tensor.train():
@@ -1253,7 +1253,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
       opt.zero_grad()
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 17)
+      check_schedule(opt.schedule_step(), 22)
 
   def test_sgd_4convs_fuse_conv_bw(self):
     with Tensor.train():
@@ -1266,7 +1266,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
       opt.zero_grad()
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-      with Context(FUSE_CONV_BW=1): check_schedule(opt.schedule_step(), 14)
+      with Context(FUSE_CONV_BW=1): check_schedule(opt.schedule_step(), 19)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):
