@@ -53,21 +53,25 @@ class GraphRenderer(Renderer):
     self.bufs: dict[Buffer, str] = {cast(Buffer, u.base.buffer): f"input_{i}" for i, u in enumerate(self.inputs) if u.base.op is Ops.BUFFER}
     self.bufs.update({cast(Buffer, u.base.buffer): f"output_{i}" for i, u in enumerate(self.outputs)})
     self.state_bufs: dict[Buffer, str] = dict()
+
+    # TODO: this is a modified version of stuff in the jit, deduplicate this stuff when the jit is refactored
+    buffer_replace: dict[Buffer, Buffer] = {b:b for b in self.bufs}
+    def add_buffer(b:Buffer, stateful:bool=False) -> Buffer:
+      if found:=buffer_replace.get(b, None): return found
+      buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options) if not stateful else b
+      return ret
+
     for si, ei in lower_schedule(schedule):
       assert isinstance(ei.prg, CompiledRunner), f"Unsupported data transfer between bufs:\n{ei.bufs}\n\nEnsure all state is realized"
       for buf in ei.bufs: assert buf is not None and buf.device == compute_device, "All compute and returned Tensor(s) must be on the same device"
-      self.eis.append(ei)
       for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
-        if buf not in self.bufs:
-          #self.bufs[buf] = name = f"buf_{next(ctr)}"
-          #if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
-          if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name = f"buf_{next(ctr)}"
-          self.bufs[buf] = name if buf in self.state_bufs else ""
+        if buf not in buffer_replace:
+          if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[add_buffer(buf, True)] = f"buf_{next(ctr)}"
+          else: self.bufs[add_buffer(buf)] = ""
+      self.eis.append(ExecItem(ei.prg, [add_buffer(buf) for buf in ei.bufs if buf is not None], ei.metadata, ei.fixedvars))
+    self.bufs.update(self.state_bufs)
 
-    for buf in self.bufs:
-      if buf.lb_refcount > 0: buf.ref(-1)
-    noopt = set(self.state_bufs.keys()).union(set(u.buffer for u in self.inputs if u.op is Ops.BUFFER)).union(set(u.buffer for u in self.outputs))
-    assigned = _internal_memory_planner(cast(list[list[Buffer]], [ei.bufs for ei in self.eis]), noopt_buffers=noopt)
+    assigned = _internal_memory_planner(cast(list[list[Buffer]], [ei.bufs for ei in self.eis]))
     for old, new in assigned.items():
       del self.bufs[old]
       if self.bufs[new] == "": self.bufs[new] = f"buf_{next(ctr)}"
