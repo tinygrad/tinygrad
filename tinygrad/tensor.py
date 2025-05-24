@@ -3887,8 +3887,8 @@ class Tensor(MathTrait):
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
       attn_mask = Tensor.ones(self.shape[:-1]+(key.shape[-2],), requires_grad=False, device=self.device, dtype=dtypes.bool).tril()
     if _flash_att:
-      assert isinstance(key.shape[-2], int), f"does not support symbolic shape {key.shape}"
-      assert isinstance(value.shape[-2], int), f"does not support symbolic shape {value.shape}"
+      assert isinstance(key.shape[-1], int), f"does not support symbolic shape {key.shape}"
+      assert isinstance(value.shape[-1], int), f"does not support symbolic shape {value.shape}"
       return self.flash_attention(key, value, attn_mask=attn_mask, dropout_p=dropout_p)
     qk = self.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(self.dtype, key.dtype, dtypes.float32)) / math.sqrt(self.shape[-1])
     # handle attention mask
