@@ -409,11 +409,13 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 
-# ** append root metadata to KERNEL
-def append_metadata(assign:UOp, k:UOp):
-  if assign.metadata is None or (new_metadata:=tuple(dedup(k.arg.metadata+assign.metadata))) == k.arg.metadata: return
-  return assign.replace(src=(assign.src[0], k.replace(arg=Kernel(k.arg.ast, new_metadata))))
-metadata_fixup = PatternMatcher([(UPat.assign(UPat(), UPat(Ops.KERNEL, name="k"), name="assign"), append_metadata),])
+# ** add metadata of KERNEL outputs
+
+def append_metadata(root:UOp, k:UOp):
+  if root.metadata is None or (new_metadata:=tuple(dedup(k.arg.metadata+root.metadata))) == k.arg.metadata: return
+  return root.replace(src=(root.src[0], k.replace(arg=Kernel(k.arg.ast, new_metadata)))+root.src[2:])
+
+replace_metadata = PatternMatcher([(UPat(Ops.ASSIGN, src=(UPat(), UPat(Ops.KERNEL, name="k")), name="root", allow_any_len=True), append_metadata),])
 
 pm_fuse = PatternMatcher([
   # FUSE on CONTIGUOUS removes FUSE
@@ -532,7 +534,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
     tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, ctx=assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
 
   # finally, create the AST for kernels
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast+metadata_fixup, bottom_up=True, input_map=tensor_map, name="create_ast")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast+replace_metadata, bottom_up=True, input_map=tensor_map, name="create_ast")
 
   # display the final graph
   sched_sink = tensor_map[big_sink]
