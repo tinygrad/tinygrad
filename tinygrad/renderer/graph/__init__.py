@@ -54,7 +54,7 @@ class GraphRenderer(Renderer):
     self.bufs.update({cast(Buffer, u.base.buffer): f"output_{i}" for i, u in enumerate(self.outputs)})
     self.state_bufs: dict[Buffer, str] = dict()
 
-    # TODO: this is a modified version of stuff in the jit, deduplicate this stuff when the jit is refactored
+    # TODO: consolidate this with the jit, when the jit is refactored to disallow realize
     buffer_replace: dict[Buffer, Buffer] = {b:b for b in self.bufs}
     def add_buffer(b:Buffer, stateful:bool=False) -> Buffer:
       if found:=buffer_replace.get(b, None): return found
@@ -67,17 +67,12 @@ class GraphRenderer(Renderer):
       for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
         if buf not in buffer_replace:
           if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[add_buffer(buf, True)] = f"buf_{next(ctr)}"
-          else: self.bufs[add_buffer(buf)] = ""
+          else: add_buffer(buf)
       self.eis.append(ExecItem(ei.prg, [add_buffer(buf) for buf in ei.bufs if buf is not None], ei.metadata, ei.fixedvars))
-    self.bufs.update(self.state_bufs)
 
     assigned = _internal_memory_planner(cast(list[list[Buffer]], [ei.bufs for ei in self.eis]))
-    for old, new in assigned.items():
-      del self.bufs[old]
-      if self.bufs[new] == "": self.bufs[new] = f"buf_{next(ctr)}"
-    for buf,name in self.bufs.items():
-      if name == "": self.bufs[buf] = f"buf_{next(ctr)}"
-
+    self.bufs.update(self.state_bufs)
+    self.bufs.update({assigned.get(b, b): self.bufs.get(b, f"buf_{next(ctr)}") for b in buffer_replace.values()})
     for i, ei in enumerate(self.eis): self.eis[i] = ExecItem(ei.prg, [assigned.get(cast(Buffer, b), b) for b in ei.bufs])
 
     assert all(b.is_allocated() for b in self.state_bufs)
