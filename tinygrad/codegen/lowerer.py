@@ -3,7 +3,7 @@ import itertools, operator, math
 from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, least_upper_dtype
-from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint, sint_to_uop
+from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint, sint_to_uop, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
 from tinygrad.codegen.symbolic import symbolic
@@ -231,4 +231,54 @@ pm_quant = symbolic+PatternMatcher([
     lambda v1,v2,c1,r: r.replace(src=(v1*v2,)) + r.replace(src=(c1*v2,))),
   (UPat(Ops.REDUCE_AXIS, src=((UPat(Ops.CAST, name="v1")+UPat.var("c1")) * (UPat(Ops.CAST, name="v2",)+UPat.var("c2")),), name="r"),
     lambda v1,v2,c1,c2,r: r.replace(src=(v1*v2,)) + r.replace(src=(c2*v1,)) + r.replace(src=(c1*v2,)) + r.replace(src=(c1*c2,))),
+])
+
+# **** this pushes cast through alus, may help with numeric stability ****
+
+# TODO this probably doesn't cover all cases yet
+# TODO CLEAN UP
+def f32_to_f16(name): return UPat.var(name, dtype=dtypes.float32).cast(dtypes.half)
+def f16(name): return UPat.any(UPat.var(name, dtype=dtypes.half), UPat.cvar(name, dtype=dtypes.half))
+
+pm_push_cast = PatternMatcher([
+  #  --- pushes cast to half right through alus ---
+  (UPat(GroupOp.Unary, src=(f32_to_f16("f32"),), name="op"),
+   lambda op, f32: UOp(op.op, dtypes.float32, (f32,), op.arg).cast(dtypes.half)),
+
+  (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f32_to_f16("rhs_f32")), dtype=dtypes.half, name="op"),
+   lambda op, lhs_f32, rhs_f32: lhs_f32.alu(op.op, rhs_f32).cast(dtypes.half)),
+  (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f16("rhs_f16")), dtype=dtypes.half, name="op"),
+   lambda op, lhs_f32, rhs_f16: lhs_f32.alu(op.op, rhs_f16.cast(dtypes.float32)).cast(dtypes.half)),
+  (UPat(GroupOp.Binary, src=(f16("lhs_f16"), f32_to_f16("rhs_f32")), dtype=dtypes.half, name="op"),
+   lambda op, lhs_f16, rhs_f32: lhs_f16.cast(dtypes.float32).alu(op.op, rhs_f32).cast(dtypes.half)),
+
+  (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f32_to_f16("rhs_f32")), dtype=dtypes.bool, name="op"),
+   lambda op, lhs_f32, rhs_f32: lhs_f32.alu(op.op, rhs_f32)),
+  (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f16("rhs_f16")), dtype=dtypes.bool, name="op"),
+   lambda op, lhs_f32, rhs_f16: lhs_f32.alu(op.op, rhs_f16.cast(dtypes.float32))),
+  (UPat(GroupOp.Binary, src=(f16("lhs_f16"), f32_to_f16("rhs_f32")), dtype=dtypes.bool, name="op"),
+   lambda op, lhs_f16, rhs_f32: lhs_f16.cast(dtypes.float32).alu(op.op, rhs_f32)),
+
+  (UPat.var("cond", dtype=dtypes.bool).where(f32_to_f16("true_f32"), f32_to_f16("false_f32")),
+   lambda cond, true_f32, false_f32: cond.where(true_f32, false_f32).cast(dtypes.half)),
+  (UPat.var("cond", dtype=dtypes.bool).where(f32_to_f16("true_f32"), f16("false_f16")),
+   lambda cond, true_f32, false_f16: cond.where(true_f32, false_f16.cast(dtypes.float32)).cast(dtypes.half)),
+  (UPat.var("cond", dtype=dtypes.bool).where(f16("true_f32"), f32_to_f16("false_f32")),
+   lambda cond, true_f16, false_f32: cond.where(true_f16.cast(dtypes.float32), false_f32).cast(dtypes.half)),
+
+  #  --- cast folding ---
+  (f32_to_f16("f32").cast(dtypes.float32), lambda f32: f32),
+
+  #  --- pushes cast to float left through alus branches ---
+  # TODO: this doesn't actually do much for w/e reason, and makes openpilot WORSE... fml
+  # I think it's because inaccuracy arises from REDUCE and so only ops after reduce exacerbate inaccuracy??
+  # IDK
+
+  # TODO: this is not complete
+  # TODO: push through fixup optimized AST?
+
+  # (UPat(GroupOp.Unary, src=(UPat.var("b", dtype=dtypes.half),), name="op", dtype=dtypes.half).cast(dtypes.float32),
+  #  lambda op, b: UOp(op.op, dtypes.float32, (b.cast(dtypes.float32),), op.arg)),
+  # (UPat(GroupOp.Binary, src=(UPat.var("b1", dtype=dtypes.half), UPat.var("b2", dtypes.half)), name="op", dtype=dtypes.half).cast(dtypes.float32),
+  #  lambda op, b1, b2: UOp(op.op, dtypes.float32, (b1.cast(dtypes.float32), b2.cast(dtypes.float32)), op.arg)),
 ])
