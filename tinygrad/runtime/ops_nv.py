@@ -88,9 +88,8 @@ class QMD:
   def field_offset(self, k): return QMD.fields[self.pref][k.upper()][1] // 8
 
   def set_constant_buf_addr(self, i, addr):
-    if self.ver == 5:
-      self.write(**{f'constant_buffer_addr_upper_shifted6_{i}':hi32(addr >> 6), f'constant_buffer_addr_lower_shifted6_{i}':lo32(addr >> 6)})
-    else: self.write(**{f'constant_buffer_addr_upper_{i}':hi32(addr), f'constant_buffer_addr_lower_{i}':lo32(addr)})
+    if self.ver < 4: self.write(**{f'constant_buffer_addr_upper_{i}':hi32(addr), f'constant_buffer_addr_lower_{i}':lo32(addr)})
+    else: self.write(**{f'constant_buffer_addr_upper_shifted6_{i}':hi32(addr >> 6), f'constant_buffer_addr_lower_shifted6_{i}':lo32(addr >> 6)})
 
 class NVSignal(HCQSignal):
   def __init__(self, base_buf:HCQBuffer|None=None, **kwargs):
@@ -160,7 +159,6 @@ class NVComputeQueue(NVCommandQueue):
 
     qmd = QMD(dev=prg.dev, addr=qmd_buf.va_addr) # Save qmd for later update
 
-    # TODO: investigate
     self.bind_sints_to_mem(*global_size, mem=qmd_buf.cpu_view(), fmt='I', offset=qmd.field_offset('cta_raster_width'))
     self.bind_sints_to_mem(*(local_size[:2]), mem=qmd_buf.cpu_view(), fmt='H', offset=qmd.field_offset('cta_thread_dimension0'))
     self.bind_sints_to_mem(local_size[2], mem=qmd_buf.cpu_view(), fmt='B', offset=qmd.field_offset('cta_thread_dimension2'))
@@ -231,7 +229,7 @@ class NVProgram(HCQProgram):
     for sh in sections:
       if sh.name == f".nv.shared.{self.name}": self.shmem_usage = round_up(0x400 + sh.header.sh_size, 128)
       if sh.name == f".text.{self.name}":
-        self.prog_addr, self.prog_sz, self.regs_usage = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size, max(sh.header.sh_info>>24, 16)
+        self.prog_addr, self.prog_sz = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size
       elif m:=re.match(r'\.nv\.constant(\d+)', sh.name): self.constbufs[int(m.group(1))] = (self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size)
       elif sh.name.startswith(".nv.info"):
         for typ, param, data in self._parse_elf_info(sh):
@@ -253,22 +251,24 @@ class NVProgram(HCQProgram):
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
     self.constbuffer_0 = [0] * (cbuf0_size // 4)
-    self.constbuffer_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
 
     if dev.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A:
-      qmd = {'qmd_major_version':5, 'unknown_13':0x1, 'unknown_38':0xA4, 'unknown_90':0x10, 'unknown_91':0x48, 'unknown_92':0xB4, 'unknown_93':0x4,
-             'program_address_upper':hi32(self.prog_addr>>4), 'program_address_lower':lo32(self.prog_addr>>4)}
+      self.constbuffer_0[188:192], self.constbuffer_0[223] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window)], 0xfffdc0
+      qmd = {'qmd_major_version':5, 'unknown_13':0x1, 'program_address_upper':hi32(self.prog_addr>>4), 'program_address_lower':lo32(self.prog_addr>>4),
+             'sass_version':0xA4}
     else:
-      smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
-      qmd = {'qmd_major_version':3, 'sm_global_caching_enable':1, 'program_prefetch_size': min(self.prog_sz>>8, 0x1ff),
-             'program_prefetch_addr_upper_shifted': self.prog_addr>>40, 'program_prefetch_addr_lower_shifted': self.prog_addr>>8,
-             'cwd_membar_type':nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, 'sass_version':0x89,
-             'min_sm_config_shared_mem_size':smem_cfg, 'target_sm_config_shared_mem_size':smem_cfg, 'max_sm_config_shared_mem_size':0x1a,
-             'program_address_upper':hi32(self.prog_addr), 'program_address_lower':lo32(self.prog_addr)}
+      self.constbuffer_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
+      qmd = {'qmd_major_version':3, 'sm_global_caching_enable':1, 'cwd_membar_type':nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR,
+             'program_address_upper':hi32(self.prog_addr), 'program_address_lower':lo32(self.prog_addr), 'sass_version':0x89}
+
+    smem_cfg = max(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
 
     self.qmd:QMD = QMD(dev, **qmd, qmd_group_id=0x3f, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
       invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1, barrier_count=1,
-      constant_buffer_invalidate_0=1, register_count_v=self.regs_usage, shader_local_memory_high_size=self.dev.slm_per_thread)
+      constant_buffer_invalidate_0=1, register_count_v=self.regs_usage, shader_local_memory_high_size=self.dev.slm_per_thread,
+      min_sm_config_shared_mem_size=smem_cfg, target_sm_config_shared_mem_size=smem_cfg, max_sm_config_shared_mem_size=0x1a,
+      shared_memory_size=self.shmem_usage, program_prefetch_size=min(self.prog_sz>>8, 0x1ff),
+      program_prefetch_addr_upper_shifted=self.prog_addr>>40, program_prefetch_addr_lower_shifted=self.prog_addr>>8)
 
     for i,(addr,sz) in self.constbufs.items():
       self.qmd.set_constant_buf_addr(i, addr)
@@ -532,7 +532,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.slm_per_thread, self.shader_local_mem = 0, None
 
     # Set windows addresses to not collide with other allocated buffers.
-    self.shared_mem_window = 0x729400000000 if self.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else 0xff000000
+    self.shared_mem_window = 0x729400000000 if self.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else 0xfe000000
     self.local_mem_window = 0x729300000000 if self.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else 0xff000000
 
     NVComputeQueue().setup(compute_class=self.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
