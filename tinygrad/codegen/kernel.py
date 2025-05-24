@@ -47,8 +47,7 @@ class Kernel:
     self.reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE_AXIS]
 
     self.vars: list[Variable] = self.ast.variables()
-    # NOTE: this requires a specific order with the [::-1], this is likely a bug
-    self.bufs: list[UOp] = [x for x in self.ast.toposort() if x.op in GroupOp.Buffer][::-1]
+    self.bufs: list[UOp] = [x for x in self.ast.toposort() if x.op in GroupOp.Buffer]
 
     # create new shapetrackers inside this kernel, we will permute them
     self.sts: list[ShapeTracker] = [x.st_arg for x in self.bufs]
@@ -101,15 +100,19 @@ class Kernel:
   @property
   def membufs(self) -> list[UOp]: return dedup([x.src[0] for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
 
+  @property
+  def output_buf_index(self) -> int: return len(self.bufs) - 1
+
   def upcasted_axis(self, i:int) -> list[tuple[int, Optional[sint], bool]]:
     upcasted_shape, upcasted_stride = self.sts[i].shape[self.first_upcast:], self.sts[i].real_strides()[self.first_upcast:]
     assert all_int(upcasted_shape), f"cannot upcast a symbolic amount {upcasted_shape=}"
     return list(zip(upcasted_shape, upcasted_stride,
-                    [x!=y for x,y in zip(self.sts[0].shape[self.first_upcast:], self.full_shape[self.first_upcast:])]))
+                    [x!=y for x,y in zip(self.sts[self.output_buf_index].shape[self.first_upcast:], self.full_shape[self.first_upcast:])]))
 
   @property
   def first_reduce(self) -> int:
-    return [resolve(x!=y) for x,y in zip(self.sts[0].shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
+    return [resolve(x!=y) for x,y in zip(self.sts[self.output_buf_index].shape[:self.first_upcast]+(0,),
+                                         self.full_shape[:self.first_upcast]+(1,))].index(True)
 
   @property
   def first_upcast(self) -> int: return self.shape_len-self.upcasted
@@ -118,7 +121,7 @@ class Kernel:
   def reduceop(self) -> UOp|None: return self.reduceops[0] if len(self.reduceops) > 0 else None
 
   @property
-  def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
+  def output_shape(self) -> tuple[sint, ...]: return self.sts[self.output_buf_index].shape
 
   @property
   def full_shape(self) -> tuple[sint, ...]: return self.sts[-1].shape
@@ -127,7 +130,7 @@ class Kernel:
   def full_unupcasted_shape(self) -> tuple[sint, ...]: return self.full_shape[:self.first_upcast]
 
   @property
-  def shape_len(self) -> int: return len(self.sts[0].shape)
+  def shape_len(self) -> int: return len(self.sts[self.output_buf_index].shape)
 
   @property
   def global_dims(self) -> int: return self.first_reduce-self.local_dims
@@ -151,7 +154,8 @@ class Kernel:
     # between first_reduce + group_for_reduces and upcasted, they are reduce (red)
     colors += ["red"] * (self.first_upcast - (self.first_reduce + self.group_for_reduces))
     # upcasted dimensions are reduce (magenta) or normal (yellow)
-    colors += ["magenta" if self.full_shape[i] != self.sts[0].shape[i] else "yellow" for i in range(self.first_upcast, self.shape_len)]
+    colors += ["magenta" if self.full_shape[i] != self.sts[self.output_buf_index].shape[i] else "yellow"
+               for i in range(self.first_upcast, self.shape_len)]
     assert len(colors) == self.shape_len, "colors size mismatch"
     return colors
 
@@ -203,8 +207,8 @@ class Kernel:
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
-    if isinstance(self.membufs[0].dtype, ImageDType):
-      base_shape = self.membufs[0].dtype.shape
+    if isinstance(self.membufs[-1].dtype, ImageDType):
+      base_shape = self.membufs[-1].dtype.shape
       if shape_idx_groups := get_contraction(self.output_shape, base_shape):
         special_strides: tuple[sint, ...] = tuple()
         for i,g in enumerate(shape_idx_groups):
@@ -365,7 +369,7 @@ class Kernel:
     if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
                                       (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
       acc_sz = self.reduceop.dtype.itemsize
-      upcast_sz = prod([a for a,b in zip(self.full_shape[self.first_upcast:], self.sts[0].shape[self.first_upcast:]) if a == b])
+      upcast_sz = prod([a for a,b in zip(self.full_shape[self.first_upcast:], self.sts[self.output_buf_index].shape[self.first_upcast:]) if a == b])
       local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce+self.group_for_reduces])
       smem_sz = amt*acc_sz*upcast_sz*local_sz
       check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
@@ -514,7 +518,8 @@ class Kernel:
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
               for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
-            (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
+            (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + \
+              tuple([x[0] for x in self.upcasted_axis(self.output_buf_index)])
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
           local_size = st_uop.arg.real_size()
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), f"temp{self.reduceops.index(op)}")
