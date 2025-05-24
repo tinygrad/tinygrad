@@ -48,10 +48,13 @@ def validate_kernel(k:UOp):
 
 assign_spec = PatternMatcher([
   # KERNEL can attach to an ASSIGN to describe the compute required to realize a BUFFER
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN)), name="k"), validate_kernel),
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.MSELECT)), name="k"), validate_kernel),
 
   # ASSIGN has a target and a value. It can also optionally depend on other assigns
   (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
+
+  # MSELECT chooses one of the multi buffers
+  (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
 ])
 
 # *** this is the spec of a Tensor in UOp ***
@@ -191,7 +194,7 @@ sched_spec = buffer_spec+assign_spec+PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK}), lambda: False),
 ])
 
-# *** this is the UOp shape spec ***
+# *** this is the UOp AST spec ***
 
 def verify_sink_dims(sink:UOp):
   if not all_same([s.shape for s in sink.src]): return False
@@ -200,7 +203,7 @@ def verify_sink_dims(sink:UOp):
       print(f"# INVALID KERNEL DIMS: can only have 1 or n in each dimension: {n_dims}")
       return False
 
-shape_spec = PatternMatcher([
+ast_spec = PatternMatcher([
   # shapes must have either 1 or n in each dimension
   (UPat(Ops.SINK, src=UPat(Ops.STORE), name="sink"), verify_sink_dims),
   # VIEW can only exist in the edges

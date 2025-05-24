@@ -13,13 +13,11 @@ from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.uop.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.grouper import view_left, view_right, sym, get_kernelize_map, Kernel, create_ast, merge_views, create_kernels
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 
-def verify_ast(sink:UOp): return type_verify(list(sink.toposort()), shape_spec)
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
   if to_prerealize:
@@ -349,14 +347,14 @@ class TestSchedule(unittest.TestCase):
     # a and b share the same underlying device memory
     self.assertIs(a.lazydata.realized, b.lazydata.realized)
 
-  def test_copy_dedups(self):
+  def test_clone_doesnt_dedup(self):
     src = Tensor.ones(4).contiguous().realize()
     a = src.clone()
     b = src.clone()
-    sched = check_schedule([a, b], 1, filter_sink=False)
+    sched = check_schedule([a, b], 2, filter_sink=False)
     run_schedule(sched)
     # a and b are assigned to the same device Buffer
-    self.assertIs(a.lazydata.realized, b.lazydata.realized)
+    self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
 
   # EMPTY is assigned to a unique device Buffer
 
@@ -2339,7 +2337,7 @@ class TestCopyFolding(unittest.TestCase):
     self.assertIs(b.base, a.base)
 
   def test_clone(self):
-    a = Tensor.empty(4).lazydata
+    a = Tensor.empty(4)
     check_schedule(a.clone(), 1, filter_sink=False)
 
   # NOTE: moving copy before view might change this
@@ -2348,7 +2346,7 @@ class TestCopyFolding(unittest.TestCase):
     view = a.shrink(((0, 2),))
     b = view.clone()
     # NOTE: this was sort of a bug making this 2
-    run_schedule(check_schedule(b, 3, filter_sink=False))
+    run_schedule(check_schedule(b, 2, filter_sink=False))
     self.assertEqual(b.lazydata.base.buffer.size, 2)
     self.assertEqual(b.lazydata.size, 2)
     self.assertListEqual(b.tolist(), [0, 1])
@@ -2358,7 +2356,7 @@ class TestCopyFolding(unittest.TestCase):
     view = a.reshape(2, 1).expand(2, 2)
     b = view.clone()
     run_schedule(check_schedule(b, 2, filter_sink=False))
-    self.assertEqual(b.lazydata.base.buffer.size, 2)
+    self.assertEqual(b.lazydata.base.buffer.size, 4)
     self.assertEqual(b.lazydata.size, 4)
     self.assertListEqual(b.tolist(), [[0, 0], [1, 1]])
 
