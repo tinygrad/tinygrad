@@ -405,7 +405,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   bufs = tuple(s.buf_uop if s.op is not Ops.MSELECT else s.src[0].buf_uop for s in k.src)
   ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
   if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
-    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buffer for b in k.src)}")
+    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
