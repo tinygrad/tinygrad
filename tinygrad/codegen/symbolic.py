@@ -55,6 +55,8 @@ symbolic_simple = PatternMatcher([
    lambda a: a.const_like(exec_alu(a.op, a.dtype, [a.src[0].arg, a.src[1].arg], False))),
   (UPat(GroupOp.Ternary, src=(UPat((Ops.VCONST, Ops.CONST)),)*3, name="a"),
    lambda a: a.const_like(exec_alu(a.op, a.dtype, [a.src[0].arg, a.src[1].arg, a.src[2].arg], False))),
+  (UPat(Ops.MAX, src=[UPat.var("x"), UPat.cvar("y", vec=False)], dtype=dtypes.floats), lambda x,y: x if y.arg == float("-inf") else None),
+  (UPat.var("x") + UPat.var("x") * -1, lambda x: x.const_like(0)),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
