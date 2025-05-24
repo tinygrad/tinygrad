@@ -80,23 +80,29 @@ def unravel(shape:tuple[sint, ...], offset:sint) -> list[sint]:
   return idxs[::-1]
 
 view_memoized: dict[tuple[View, UOp, Any], View|None] = {}
-view_reverse: dict[View, tuple[View, UOp, Any]] = {}   # NOTE: this only saves one possible reverse path to the View
+view_reverse: dict[View, list[tuple[View, tuple[UOp, Any]]]] = {}
 def view_cache(op):
   def _view_cache(fxn):
     def __view_cache(self, arg):
       if (fret:=view_memoized.get(key:=(self, op, arg), False)) is not False: return fret
       view_memoized[key] = ret = fxn(self, arg)
-      if ret is not None: view_reverse[ret] = key
+      if ret is not None: view_reverse.setdefault(ret, []).append((self, (op, arg)))
       return ret
     return __view_cache
   return _view_cache
 
-def invert_view(v) -> tuple[View, list[tuple[UOp, Any]]]:
-  ret = []
-  while (rev:=view_reverse.get(v, None)) is not None:
-    v = rev[0]
-    ret.append(rev[1:])
-  return v, ret[::-1]
+def invert_view(v):
+  search = [(v,[])]
+  seen = set()
+  while len(search):
+    nv, hist = search.pop(0)
+    if nv in seen: continue
+    seen.add(nv)
+    # TODO: add shrink here
+    if nv.contiguous:
+      return [(Ops.RESHAPE, nv.shape)]+hist
+    for rv,his in view_reverse[nv]: search.append((rv,hist+[his]))
+  return None
 
 @dataclass(frozen=True)
 class View:

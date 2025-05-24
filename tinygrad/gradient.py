@@ -3,6 +3,7 @@ import math, dataclasses
 from tinygrad.dtype import dtypes, sum_acc_dtype
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
 from tinygrad.helpers import argsort
+from tinygrad.shape.view import invert_view
 
 def reduce_gradient(ctx:UOp, ret:UOp):
   if ret.arg[0] == Ops.ADD: return (ctx.expand(ret.src[0].shape),)
@@ -43,6 +44,25 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda ctx: (None,)),
+])
+
+def view_gradient(ctx:UOp, view:UOp):
+  if view.arg.contiguous: return (ctx.reshape(view.src[0].shape),)
+  ret = inret = view.src[0]
+  print("***", view.arg)
+  for v in view.arg.views:
+    print(v)
+    print(" -->", invert_view(v))
+    for op, arg in invert_view(v):
+      ret = UOp(op, ret.dtype, (ret,), arg)
+  assert ret.shape == view.shape
+  while ret is not inret:
+    ctx = pm_gradient.rewrite(ret, ctx=ctx)[0]
+    ret = ret.src[0]
+  return (ctx,)
+
+pm_gradient = pm_gradient+PatternMatcher([
+  (UPat(Ops.VIEW, name="view"), view_gradient),
 ])
 
 def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
