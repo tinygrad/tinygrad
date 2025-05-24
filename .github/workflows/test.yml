@@ -111,11 +111,7 @@ jobs:
         cp tinygrad/runtime/autogen/nv_gpu.py /tmp/nv_gpu.py.bak
         ./autogen_stubs.sh cuda
         ./autogen_stubs.sh nv
-    - uses: actions/upload-artifact@v4
-      with:
-        name: w
-        path: |
-          tinygrad/runtime/autogen/nv_gpu.py
+        cat tinygrad/runtime/autogen/nv_gpu.py
     - name: Verify AMD autogen
       run: |
         cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
