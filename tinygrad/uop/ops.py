@@ -493,8 +493,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # TODO: this contiguous should not be required!!!
     inp = self if arg is None else UOp(Ops.MSELECT, self.dtype, src=(self.contiguous(),), arg=arg)
     return UOp(Ops.COPY, self.dtype, (inp, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device))
-    #return UOp(Ops.COPY, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), arg)
-  def clone(self) -> UOp: return self.copy_to_device(self.device)
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, self.dtype, (self,), arg)
   @property
   def metadata(self) -> tuple[Metadata, ...]|None: return all_metadata.get(self, None)

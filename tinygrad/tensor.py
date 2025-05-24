@@ -291,7 +291,6 @@ class Tensor(MathTrait):
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
-    assert not x.requires_grad  # self requires_grad is okay?
     self.lazydata = self.lazydata.assign(x.lazydata)
     return self
 
@@ -366,9 +365,9 @@ class Tensor(MathTrait):
     """
     Creates a clone of this tensor allocating a separate buffer for the data.
     """
-    ret = Tensor(self.lazydata.clone(), self.device, requires_grad=self.requires_grad)
+    ret = Tensor.empty(self.shape, device=self.device, dtype=self.dtype)
     if self.grad is not None: ret.grad = self.grad.clone()
-    return ret
+    return ret.assign(self)
 
   def to(self, device:str|tuple[str, ...]|None) -> Tensor:
     """

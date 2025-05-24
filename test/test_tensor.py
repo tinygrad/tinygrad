@@ -688,7 +688,7 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_allclose(a.numpy(), b.numpy())
     self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
-    a = Tensor.rand(16, 16).mul(5.0).add(5.0)
+    a = Tensor.rand(16, 16).mul(5.0).add(5.0).realize()
     b = a.clone()
     np.testing.assert_allclose(a.numpy(), b.numpy())
     self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
