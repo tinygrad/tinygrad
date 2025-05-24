@@ -69,7 +69,7 @@ def split_reduceop(reduce:UOp, x:UOp):
 
 def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
   if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
-  return base.copy_to_device(copy.device, arg=copy.arg).view(view.arg)
+  return base.copy_to_device(copy.device).view(view.arg)
 
 ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT}
 
