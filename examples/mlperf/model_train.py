@@ -9,6 +9,7 @@ from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam
 
 from extra.lr_scheduler import LRSchedulerGroup
 from examples.mlperf.helpers import get_training_state, load_training_state
+from extra.bench_log import BenchEvent, WallTimeEvent
 # TODO: fix benchmark logging and use tinygrad tqdm
 from tqdm import tqdm
 
@@ -205,24 +206,25 @@ def train_resnet():
     st = time.perf_counter()
     while proc is not None:
       GlobalCounters.reset()
-      (loss, top_1), y, proc = train_step(proc[0], proc[1]), proc[2], proc[3]
+      with WallTimeEvent(BenchEvent.STEP):
+        (loss, top_1), y, proc = train_step(proc[0], proc[1]), proc[2], proc[3]
 
-      pt = time.perf_counter()
+        pt = time.perf_counter()
 
-      if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
-      try:
-        if INITMLPERF:
-          next_proc = fake_data_get(BS)
-        else:
-          next_proc = data_get(it)
-      except StopIteration:
-        next_proc = None
+        if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
+        try:
+          if INITMLPERF:
+            next_proc = fake_data_get(BS)
+          else:
+            next_proc = data_get(it)
+        except StopIteration:
+          next_proc = None
 
-      dt = time.perf_counter()
+        dt = time.perf_counter()
 
-      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-      loss, top_1 = loss.numpy().item(), top_1.numpy().item()
-      top_1_acc = top_1 / sum(yi != -1 for yi in y)
+        device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+        loss, top_1 = loss.numpy().item(), top_1.numpy().item()
+        top_1_acc = top_1 / sum(yi != -1 for yi in y)
 
       cl = time.perf_counter()
       if BENCHMARK:
@@ -357,11 +359,45 @@ def train_retinanet():
 
   config, target_metric = {}, 0.34
 
+  config["SEED"] = SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
+  Tensor.manual_seed(SEED)
+
   NUM_CLASSES = len(MLPERF_CLASSES)
   BASEDIR = getenv("BASEDIR", BASEDIR)
   BENCHMARK = getenv("BENCHMARK")
-  # INITMLPERF = getenv("INITMLPERF")
+  INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
+
+  if INITMLPERF:
+    diskcache_clear()
+
+  if getenv("LOGMLPERF"):
+    from mlperf_logging import mllog
+    import mlperf_logging.mllog.constants as mllog_constants
+
+    mllog.config(filename=f"result_retinanet_{SEED}.log")
+    mllog.config(root_dir=Path(__file__).parents[3].as_posix())
+    MLLOGGER = mllog.get_mllogger()
+    MLLOGGER.logger.propagate = False
+
+    if INITMLPERF:
+      assert BENCHMARK, "BENCHMARK must be set for INITMLPERF"
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_ORG, value="tinycorp")
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_DIVISION, value=mllog_constants.CLOSED)
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_STATUS, value=mllog_constants.ONPREM)
+
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_BENCHMARK, value=mllog_constants.RETINANET)
+
+      MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
+      MLLOGGER.start(key=mllog_constants.INIT_START)
+
+    if RUNMLPERF:
+      MLLOGGER.start(key=mllog_constants.RUN_START)
+      MLLOGGER.event(key=mllog_constants.SEED, value=SEED)
+  else:
+    MLLOGGER = None
+
   config["gpus"] = GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 6))]
 
   for x in GPUS: Device[x]
@@ -414,23 +450,20 @@ def train_retinanet():
     return out.to(GPUS[0]).realize()
 
   # ** hyperparameters **
-  config["seed"] = SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
-  config["bs"] = BS = getenv("BS", 16 * len(GPUS) if dtypes.default_float == dtypes.float16 else 12 * len(GPUS))
-  config["eval_bs"] = EVAL_BS = getenv("EVAL_BS", BS)
-  config["epochs"] = EPOCHS = getenv("EPOCHS", 4)
-  config["train_beam"] = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
-  config["eval_beam"] = EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
-  config["lr"] = lr = getenv("LR", 9.5e-5 * (BS / 96))
-  config["loss_scaler"] = loss_scaler = getenv("LOSS_SCALER", 2**11 if dtypes.default_float == dtypes.float16 else 1.0)
-  config["default_float"] = dtypes.default_float.name
-  config["eval_freq"] = eval_freq = getenv("EVAL_FREQ", 1)
+  config["BS"] = BS = getenv("BS", 16 * len(GPUS) if dtypes.default_float == dtypes.float16 else 12 * len(GPUS))
+  config["EVAL_BS"] = EVAL_BS = getenv("EVAL_BS", BS)
+  config["EPOCHS"] = EPOCHS = getenv("EPOCHS", 4)
+  config["TRAIN_BEAM"] = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
+  config["EVAL_BEAM"] = EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
+  config["LR"] = lr = getenv("LR", 9.5e-5 * (BS / 96))
+  config["LOSS_SCALER"] = loss_scaler = getenv("LOSS_SCALER", 2**11 if dtypes.default_float == dtypes.float16 else 1.0)
+  config["DEFAULT_FLOAT"] = dtypes.default_float.name
+  config["EVAL_FREQ"] = eval_freq = getenv("EVAL_FREQ", 1)
 
   # ** initialize wandb **
   if (WANDB:=getenv("WANDB")):
     import wandb
     wandb.init(config=config, project="MLPerf-RetinaNet")
-
-  if SEED: Tensor.manual_seed(SEED)
 
   # ** model initializers **
   resnet.BatchNorm = FrozenBatchNorm2dRetinaNet
@@ -464,8 +497,24 @@ def train_retinanet():
   optim = Adam(params, lr=lr)
 
   # ** dataset **
-  config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(get_dataset_count((base_dir_path:=Path(BASEDIR)), False), BS) // BS
-  config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(get_dataset_count(base_dir_path, True), EVAL_BS) // EVAL_BS)
+  config["STEPS_IN_TRAIN_EPOCH"] = steps_in_train_epoch = round_up(get_dataset_count((base_dir_path:=Path(BASEDIR)), False), BS) // BS
+  config["STEPS_IN_VAL_EPOCH"] = steps_in_val_epoch = (round_up(get_dataset_count(base_dir_path, True), EVAL_BS) // EVAL_BS)
+
+  # log mlperf hparams
+  if MLLOGGER:
+    if RUNMLPERF:
+      MLLOGGER.event(key=mllog_constants.GLOBAL_BATCH_SIZE, value=config["BS"])
+      MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=config["STEPS_IN_TRAIN_EPOCH"])
+      MLLOGGER.event(key=mllog_constants.EVAL_SAMPLES, value=config["STEPS_IN_VAL_EPOCH"])
+      MLLOGGER.event(key=mllog_constants.EPOCH_COUNT, value=config["EPOCHS"])
+      MLLOGGER.event(key=mllog_constants.FIRST_EPOCH_NUM, value=start_epoch)
+
+      MLLOGGER.event(key=mllog_constants.OPT_NAME, value=mllog_constants.ADAM)
+      MLLOGGER.event(key=mllog_constants.OPT_BASE_LR, value=config["LR"])
+      MLLOGGER.event(key=mllog_constants.OPT_WEIGHT_DECAY, value=0)
+      MLLOGGER.event(key=mllog_constants.OPT_LR_WARMUP_EPOCHS, value=0)
+      MLLOGGER.event(key=mllog_constants.OPT_LR_WARMUP_FACTOR, value=0)
+      MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
 
   if RUNMLPERF:
     train_dataset = COCO(download_dataset(BASEDIR, "train"))
@@ -476,13 +525,16 @@ def train_retinanet():
 
   for e in range(start_epoch, EPOCHS):
     # ** training loop **
+    if MLLOGGER and RUNMLPERF:
+      MLLOGGER.start(key=mllog_constants.EPOCH_START, value=e + 1, metadata={"epoch_num": e + 1})
+
     BEAM.value = TRAIN_BEAM
 
     if not RUNMLPERF:
       i, proc = 0, _fake_data_get(BS)
     else:
       train_dataloader = batch_load_retinanet(train_dataset, False, base_dir_path, batch_size=BS, seed=SEED)
-      it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
+      it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e + 1}", disable=BENCHMARK))
       i, proc = 0, _data_get(it)
 
     prev_cookies = []
@@ -544,8 +596,14 @@ def train_retinanet():
         if (TRAIN_BEAM or EVAL_BEAM) and e == start_epoch: break
         return
 
+    if MLLOGGER and RUNMLPERF:
+      MLLOGGER.event(key=mllog_constants.EPOCH_STOP, value=e + 1, metadata={"epoch_num": e + 1})
+
     # ** eval loop **
     if (e + 1) % eval_freq == 0:
+      if MLLOGGER and RUNMLPERF:
+        MLLOGGER.start(key=mllog_constants.EVAL_START, value=e + 1, metadata={"epoch_num": e + 1})
+
       BEAM.value = EVAL_BEAM
 
       if getenv("RESET_STEP", 1): _train_step.reset()
@@ -593,11 +651,14 @@ def train_retinanet():
           proc, next_proc = next_proc, None
           i += 1
 
-          if i == BENCHMARK:
-            return
-
           et = time.time()
           eval_times.append(et - st)
+
+          if i == BENCHMARK:
+            # assume INITMLPERF has BENCHMARK set
+            if MLLOGGER and INITMLPERF:
+              MLLOGGER.event(key=mllog_constants.INIT_STOP)
+            return
 
         if getenv("RESET_STEP", 1): _eval_step.reset()
         total_fw_time = sum(eval_times) / len(eval_times)
@@ -616,8 +677,16 @@ def train_retinanet():
           if WANDB:
             wandb.log({"eval/forward_time": total_fw_time, "eval/metric": val_metric, "epoch": e + 1})
 
+          if MLLOGGER:
+            MLLOGGER.event(key=mllog_constants.EVAL_ACCURACY, value=val_metric, metadata={"epoch_num": e + 1}, clear_line=True)
+            MLLOGGER.end(key=mllog_constants.EVAL_STOP, value=e + 1, metadata={"epoch_num": e + 1})
+
           if val_metric >= target_metric:
             print(colored(f"target metric reached: {val_metric:.2f}/{target_metric:.2f}", color="green"))
+
+            if MLLOGGER:
+              MLLOGGER.end(key=mllog_constants.RUN_STOP, metadata={"status": mllog_constants.SUCCESS})
+
             break
 
 def train_unet3d():
@@ -1059,23 +1128,24 @@ def train_bert():
       BEAM.value = TRAIN_BEAM
       st = time.perf_counter()
       GlobalCounters.reset()
-      loss, global_norm, lr = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler,
-        train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
-        train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"], GPUS)
+      with WallTimeEvent(BenchEvent.STEP):
+        loss, global_norm, lr = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler,
+          train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
+          train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"], GPUS)
 
-      pt = time.perf_counter()
+        pt = time.perf_counter()
 
-      try:
-        next_data = next(train_it)
-      except StopIteration:
-        next_data = None
+        try:
+          next_data = next(train_it)
+        except StopIteration:
+          next_data = None
 
-      dt = time.perf_counter()
+        dt = time.perf_counter()
 
-      device_str = parameters[0].device if isinstance(parameters[0].device, str) else f"{parameters[0].device[0]} * {len(parameters[0].device)}"
-      loss = loss.item()
-      assert not math.isnan(loss)
-      lr = lr.item()
+        device_str = parameters[0].device if isinstance(parameters[0].device, str) else f"{parameters[0].device[0]} * {len(parameters[0].device)}"
+        loss = loss.item()
+        assert not math.isnan(loss)
+        lr = lr.item()
 
       cl = time.perf_counter()
       if BENCHMARK: step_times.append(cl - st)

@@ -54,7 +54,7 @@ class OptimizerGroup(Optimizer):
   def zero_grad(self): [o.zero_grad() for o in self.optimizers]
   def schedule_step(self) -> list[Tensor]: return [x for o in self.optimizers for x in o.schedule_step()]
 
-# LARS is essentially just trust ratio to SGD so if we just set the trust coeff 0.0 its just standard SGD.
+# LARS is essentially just trust ratio to SGD so if we just set the trust coeff 0.0 it's just standard SGD.
 def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov=False, classic=False):
   """
   Stochastic Gradient Descent (SGD) optimizer with optional momentum and weight decay.
@@ -75,7 +75,8 @@ class LARS(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True, tcoef=0.001):
     super().__init__(params, lr)
     self.momentum, self.wd, self.nesterov, self.classic, self.tcoef = momentum, weight_decay, nesterov, classic, tcoef
-    self.b = [Tensor.zeros(*t.shape, dtype=t.dtype, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
+    self.b = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params] \
+      if self.momentum else []
 
   def schedule_step_with_grads(self, grads:list[Tensor]) -> list[Tensor]:
     for i, (t, g) in enumerate(zip(self.params, grads)):
@@ -88,7 +89,7 @@ class LARS(Optimizer):
       # classic momentum does post learning rate update
       if self.classic: g = g * r * self.lr
       if self.momentum:
-        # TODO: this contiguous is required for correctness becuase self.b[i] becomes a non contiguous view
+        # TODO: this contiguous is required for correctness because self.b[i] becomes a non contiguous view
         # the scheduler should detect this and just insert contiguous
         self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
@@ -97,7 +98,7 @@ class LARS(Optimizer):
       t.assign((t.detach() - g).cast(t.dtype))
     return self.b
 
-# LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
+# LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 it's just Adam/W.
 def AdamW(params: list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, weight_decay=0.01):
   """
   AdamW optimizer with optional weight decay.

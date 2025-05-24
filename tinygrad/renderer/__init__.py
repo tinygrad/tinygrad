@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import Optional, Callable
+from typing import Optional, Callable, cast
 import functools, math
 from enum import Enum, auto
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
+from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
 from tinygrad.dtype import DType
 
 class OptOps(Enum):
@@ -69,7 +69,7 @@ class Estimates:
     for u in uops:
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
-        mults *= (u.src[1] - u.src[0]).ssimplify()
+        mults *= cast(sint, u.src[0].ssimplify())
         # SPECIAL are already counted in mults
         mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op is Ops.ENDRANGE: mults = mult_stack.pop(-1)

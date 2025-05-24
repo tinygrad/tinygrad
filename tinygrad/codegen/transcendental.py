@@ -1,7 +1,7 @@
 import math
 from tinygrad.dtype import dtypes, DType
 from tinygrad.helpers import polyN
-from tinygrad.ops import UOp
+from tinygrad.uop.ops import UOp
 
 TRANSCENDENTAL_SUPPORTED_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
 

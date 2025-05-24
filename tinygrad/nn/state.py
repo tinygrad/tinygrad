@@ -124,9 +124,9 @@ def get_parameters(obj) -> list[Tensor]:
   """
   return list(get_state_dict(obj).values())
 
-def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=True, consume=False, realize=True) -> None:
+def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=True, consume=False, realize=True) -> list[Tensor]:
   """
-  Loads a `state_dict` into a model.
+  Loads a `state_dict` into a model. Return the loaded Tensors.
 
   ```python
   class Net:
@@ -140,6 +140,7 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
   ```
   """
   start_mem_used = GlobalCounters.mem_used
+  ret = []
   with Timing("loaded weights in ",
               lambda et_ns: f", {(B:=(GlobalCounters.mem_used-start_mem_used))/1e9:.2f} GB loaded at {B/et_ns:.2f} GB/s", enabled=verbose):
     model_state_dict = get_state_dict(model)
@@ -158,6 +159,8 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
       else: v.replace(state_dict[k].to(v.device))
       if realize: v.realize()
       if consume: del state_dict[k]
+      ret.append(v)
+  return ret
 
 @accept_filename
 def tar_extract(t: Tensor) -> dict[str, Tensor]:

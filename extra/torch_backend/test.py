@@ -2,7 +2,7 @@
 import unittest
 import torch
 import numpy as np
-from tinygrad.helpers import getenv, Context
+from tinygrad.helpers import getenv, Context, GlobalCounters
 if getenv("TINY_BACKEND2"):
   import extra.torch_backend.backend2
   device = "cpu"
@@ -153,6 +153,28 @@ class TestTorchBackend(unittest.TestCase):
         res = torch.ops.aten.isin.Tensor_Tensor_out(a, b, invert=invert, assume_unique=assume_unique, out=out)
         np.testing.assert_equal(out.cpu().numpy(), expected.cpu().numpy())
 
+  def test_uniform(self):
+    for torch_dtype in [torch.float32, torch.float16]:
+      a = torch.rand(10, 10, device=device, dtype=torch_dtype)
+      self.assertEqual(a.dtype, torch_dtype)
+
+  def test_normal(self):
+    for torch_dtype in [torch.float32, torch.float16]:
+      a = torch.randn(10, 10, device=device, dtype=torch_dtype)
+      self.assertEqual(a.dtype, torch_dtype)
+
+  def test_equal(self):
+    tensor_a = torch.tensor([[1, 2], [3, 4]], device=device)
+    tensor_b = torch.tensor([[1, 2], [3, 4]], device=device)
+    tensor_c = torch.tensor([[1, 2], [1, 2]], device=device)
+    assert torch.equal(tensor_a, tensor_b)
+    assert not torch.equal(tensor_a, tensor_c)
+
+  def test_scalar_assign(self):
+    a = torch.tensor([1, 2, 3], device=device)
+    a[1] = 4
+    np.testing.assert_equal(a.cpu().numpy(), [1, 4, 3])
+
   @unittest.skip("meh")
   def test_str(self):
     a = torch.ones(4, device=device)
@@ -167,6 +189,7 @@ class TestTorchBackend(unittest.TestCase):
 
   def test_mnist_index(self):
     with Context(FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
+      GlobalCounters.reset()
       from tinygrad.nn.datasets import mnist
       X_train, Y_train, _, _ = mnist()
       X_train = torch.tensor(X_train.float().numpy(), device=device)
@@ -174,6 +197,7 @@ class TestTorchBackend(unittest.TestCase):
       samples = torch.randint(0, X_train.shape[0], (32,))
       X,Y = X_train[samples], Y_train[samples]
       X.cpu(), Y.cpu()
+      self.assertLessEqual(GlobalCounters.global_ops, 10_000_000)
 
 if __name__ == "__main__":
   unittest.main()

@@ -44,6 +44,9 @@ runs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
+    - name: Upgrade pip
+      shell: bash
+      run: python -m pip install --upgrade pip
 
     # **** Caching packages ****
     # TODO: key should include input.deps, but it can't since it can't contain commas
@@ -153,7 +156,7 @@ runs:
       shell: bash
       run: |
         brew update
-        brew install cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
+        brew install --quiet cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
     - name: Cache gpuocelot
       if: inputs.cuda == 'true'
       id: cache-build
@@ -218,4 +221,4 @@ runs:
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
       run: |
-        brew install llvm
+        brew install llvm@19
