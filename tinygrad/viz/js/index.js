@@ -362,11 +362,13 @@ async function main() {
       if (s > 0 && s === currentRewrite) {
         const { upat, diff } = ret[s];
         metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
-        const diffCode = metadata.appendChild(document.createElement("pre"));
-        diffCode.innerHTML = `<code>`+diff.map((line) => {
-          const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
-          return `<span style="color: ${color};">${line}</span>`;
-        }).join("<br>")+`</code>`;
+        const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
+        for (const line of diff) {
+          const span = diffCode.appendChild(document.createElement("span"));
+          span.style.color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
+          span.innerText = line;
+          diffCode.appendChild(document.createElement("br"));
+        }
         diffCode.className = "wrap";
       }
     }

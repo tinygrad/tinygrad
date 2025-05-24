@@ -13,13 +13,11 @@ from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.uop.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.grouper import view_left, view_right, sym, get_kernelize_map, Kernel, create_ast, merge_views, create_kernels
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 
-def verify_ast(sink:UOp): return type_verify(list(sink.toposort()), shape_spec)
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
   if to_prerealize:
@@ -76,7 +74,14 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(10)
     b = Tensor.empty(10, device="CPU")
     c = a+b
-    with self.assertRaises(RuntimeError): check_schedule(c, 1)
+    with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
+
+  @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
+  def test_error_on_device_mismatch_alt(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty((1,), device="CPU").expand(10).contiguous()
+    c = a+b
+    with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and getenv("CAST_AFTER_EXPAND"), "need half and CAST_AFTER_EXPAND=1")
   @unittest.skip("CAST_AFTER_EXPAND is not supported")
@@ -349,14 +354,14 @@ class TestSchedule(unittest.TestCase):
     # a and b share the same underlying device memory
     self.assertIs(a.lazydata.realized, b.lazydata.realized)
 
-  def test_copy_dedups(self):
+  def test_clone_doesnt_dedup(self):
     src = Tensor.ones(4).contiguous().realize()
     a = src.clone()
     b = src.clone()
-    sched = check_schedule([a, b], 1, filter_sink=False)
+    sched = check_schedule([a, b], 2, filter_sink=False)
     run_schedule(sched)
     # a and b are assigned to the same device Buffer
-    self.assertIs(a.lazydata.realized, b.lazydata.realized)
+    self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
 
   # EMPTY is assigned to a unique device Buffer
 
@@ -650,11 +655,20 @@ class TestSchedule(unittest.TestCase):
     c = b.kernelize()+Tensor.empty(4,4)
     check_schedule(c, 2)
 
+  def test_kernelize_diamond(self):
+    a = Tensor([0]).realize()
+    prev_a = (a+1).contiguous()
+    a.assign(Tensor([2]))
+    a.kernelize(prev_a)
+    assert prev_a.lazydata in a.lazydata.src, "contiguous usage must run before assign"
+    self.assertEqual((prev_a+a*3).item(), 1+2*3)
+
   def test_multioutput_ast(self):
     a = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().lazydata
     b = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().lazydata
     c = Tensor.arange(4).realize().lazydata
-    kernel = UOp(Ops.KERNEL, src=(a, b, c), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
+    kernel = UOp(Ops.KERNEL, src=(a, b, c.base), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
+    assert all(s.op is Ops.BUFFER for s in kernel.src), f"views are not allowed here {kernel}"
     kernel = graph_rewrite(kernel, create_ast)
     run_schedule(check_schedule(UOp.sink(a.assign(kernel), b.assign(kernel)), 1))
     self.assertEqual(a.buffer.numpy(), [7])
@@ -2330,7 +2344,7 @@ class TestCopyFolding(unittest.TestCase):
     self.assertIs(b.base, a.base)
 
   def test_clone(self):
-    a = Tensor.empty(4).lazydata
+    a = Tensor.empty(4)
     check_schedule(a.clone(), 1, filter_sink=False)
 
   # NOTE: moving copy before view might change this
@@ -2339,7 +2353,7 @@ class TestCopyFolding(unittest.TestCase):
     view = a.shrink(((0, 2),))
     b = view.clone()
     # NOTE: this was sort of a bug making this 2
-    run_schedule(check_schedule(b, 3, filter_sink=False))
+    run_schedule(check_schedule(b, 2, filter_sink=False))
     self.assertEqual(b.lazydata.base.buffer.size, 2)
     self.assertEqual(b.lazydata.size, 2)
     self.assertListEqual(b.tolist(), [0, 1])
@@ -2349,7 +2363,7 @@ class TestCopyFolding(unittest.TestCase):
     view = a.reshape(2, 1).expand(2, 2)
     b = view.clone()
     run_schedule(check_schedule(b, 2, filter_sink=False))
-    self.assertEqual(b.lazydata.base.buffer.size, 2)
+    self.assertEqual(b.lazydata.base.buffer.size, 4)
     self.assertEqual(b.lazydata.size, 4)
     self.assertListEqual(b.tolist(), [[0, 0], [1, 1]])
 
