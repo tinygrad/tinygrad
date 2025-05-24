@@ -254,17 +254,18 @@ def append_to_kernel(x:UOp):
   new_srcs: list[UOp] = []
   metadata = x.arg.metadata
   for s in x.src:
-    if s.op in DONT_PLACE_IN_KERNEL or s.op is Ops.GBARRIER: new_srcs.append(s)
+    if s.op in DONT_PLACE_IN_KERNEL: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
       # NOTE: because const and device are shared UOps they don't change metadata
-      if s.base.op not in {Ops.CONST, Ops.DEVICE} and (m:=s.metadata): metadata += m
+      # NOTE: if it's a reshape after ASSIGN we're not fusing that parent kernel
+      if s.base.op not in {Ops.CONST, Ops.DEVICE} and (not (s.op is Ops.RESHAPE and s.base.op is Ops.ASSIGN)) and (m:=s.metadata): metadata += m
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(dedup(metadata))))
 
 create_kernels = PatternMatcher([
   # always give assign/gbarrier a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
-  (UPat(Ops.GBARRIER, name="x"), create_kernel),
+  (UPat(Ops.GBARRIER, src=(UPat.var("x"),)), create_kernel),
   # walk back the local graph until we reach a realized source
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # remove extra views and constants from SINK
@@ -356,10 +357,6 @@ view_right = merge_views+PatternMatcher([
 
 # **** fix kernel AST
 
-remove_gbarrier = PatternMatcher([
-  (UPat(Ops.GBARRIER, src=(UPat.var("x"),)), lambda x: x)
-])
-
 add_buffer_ops = PatternMatcher([
   # LOAD
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), x.st.to_uop())),
@@ -393,21 +390,15 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
+replace_globals = PatternMatcher([
+  # replace ASSIGN with the target BUFFER
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat(Ops.KERNEL)), name="assign", allow_any_len=True), lambda assign: assign.src[0]),
+])
+
 def fix_kernel_ast(k:UOp) -> UOp|None:
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
-  # replace assign sources with a view of the target buffer
-  parents_rep: dict[UOp, UOp] = {}
-  for s in k.src:
-    if s.op is Ops.MSELECT:
-      assert s.src[0].op is Ops.ASSIGN, f"{s.src[0].op} isn't ASSIGN"
-      for out in s.src[0].src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
-      parents_rep[s] = s.buf_uop
-    if s.op is Ops.ASSIGN:
-      for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
-      parents_rep[s] = s.buf_uop
-  ast = k.arg.ast.substitute(parents_rep, name="replace realized")
-  # remove gbarrier
-  ast = graph_rewrite(ast, remove_gbarrier, name="remove gbarrier")
+  # replace global memory ops with the BUFFER they write to
+  ast = graph_rewrite(k.arg.ast, replace_globals, bottom_up=True, name="replace globals")
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
@@ -418,6 +409,14 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
+
+# ** add metadata of KERNEL outputs
+
+def append_metadata(root:UOp, k:UOp):
+  if not root.metadata or (new_metadata:=tuple(dedup(k.arg.metadata+root.metadata))) == k.arg.metadata: return None
+  return root.replace(src=(root.src[0], k.replace(arg=Kernel(k.arg.ast, new_metadata)))+root.src[2:])
+
+replace_metadata = PatternMatcher([(UPat(Ops.ASSIGN, src=(UPat(), UPat(Ops.KERNEL, name="k")), name="root", allow_any_len=True), append_metadata),])
 
 pm_fuse = PatternMatcher([
   # FUSE on CONTIGUOUS removes FUSE
@@ -519,7 +518,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # TODO: move view_left/view_right here
 
   # group into kernels (this is context-free)
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, bottom_up=True, input_map=tensor_map, name="create_kernels")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
@@ -536,7 +535,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
     tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, ctx=assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
 
   # finally, create the AST for kernels
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map, name="create_ast")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast+replace_metadata, bottom_up=True, input_map=tensor_map, name="create_ast")
 
   # display the final graph
   sched_sink = tensor_map[big_sink]
