@@ -75,7 +75,7 @@ class GraphRenderer(Renderer):
     self.bufs.update({assigned.get(b, b): self.bufs.get(b, f"buf_{next(ctr)}") for b in buffer_replace.values()})
     for i, ei in enumerate(self.eis): self.eis[i] = ExecItem(ei.prg, [assigned.get(cast(Buffer, b), b) for b in ei.bufs])
 
-    assert all(b.is_allocated() for b in self.state_bufs), "Realize all Tensors with state before export"
+    assert not any(missing:=[not b.is_allocated() for b in self.state_bufs]), f"Unrealized bufs: {missing}\nDid you realize all tensors with state?"
     # build complete state_dict, rename state bufs with meaningful names from tensor_names
     self.state_dict = {k:v for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs} if tensor_names else {}
     for k,v in self.state_dict.items(): v.lazydata = v.lazydata.base # non-contiguous views cause data permutation in safe_save
