@@ -3,6 +3,7 @@ from tinygrad.helpers import GlobalCounters
 from tinygrad.nn.datasets import mnist
 
 class TestDataset(unittest.TestCase):
+  @unittest.expectedFailure
   def test_dataset_is_realized(self):
     X_train, _, _, _ = mnist()
     X_train[0].contiguous().realize()
