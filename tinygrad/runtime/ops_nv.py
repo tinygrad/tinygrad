@@ -64,7 +64,7 @@ class QMD:
     self.ver, self.sz = (5, 0x60) if dev.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else (3, 0x40)
 
     # Init fields from module
-    if (pref:=f"NVCEC0_QMDV05_00" if self.ver == 5 else "NVC6C0_QMDV03_00") not in QMD.fields:
+    if (pref:="NVCEC0_QMDV05_00" if self.ver == 5 else "NVC6C0_QMDV03_00") not in QMD.fields:
       QMD.fields[pref] = {**{name[len(pref)+1:]: dt for name,dt in nv_gpu.__dict__.items() if name.startswith(pref) and isinstance(dt, tuple)},
         **{name[len(pref)+1:]+f"_{i}": dt(i) for name,dt in nv_gpu.__dict__.items() for i in range(8) if name.startswith(pref) and callable(dt)}}
 
@@ -254,7 +254,7 @@ class NVProgram(HCQProgram):
 
     if dev.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A:
       self.constbuffer_0[188:192], self.constbuffer_0[223] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window)], 0xfffdc0
-      qmd = {'qmd_major_version':5, 'unknown_13':0x1, 'program_address_upper':hi32(self.prog_addr>>4), 'program_address_lower':lo32(self.prog_addr>>4),
+      qmd = {'qmd_major_version':5, 'unknown_13':0x1, 'program_address_upper':hi32(self.prog_addr>>4),'program_address_lower':lo32(self.prog_addr>>4),
              'sass_version':0xA4}
     else:
       self.constbuffer_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
