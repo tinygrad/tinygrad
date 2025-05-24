@@ -111,6 +111,8 @@ jobs:
         cp tinygrad/runtime/autogen/nv_gpu.py /tmp/nv_gpu.py.bak
         ./autogen_stubs.sh cuda
         ./autogen_stubs.sh nv
+        diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
+        diff /tmp/nv_gpu.py.bak tinygrad/runtime/autogen/nv_gpu.py
     - name: Verify AMD autogen
       run: |
         cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
@@ -146,11 +148,6 @@ jobs:
         cp tinygrad/runtime/autogen/llvm.py /tmp/llvm.py.bak
         ./autogen_stubs.sh llvm
         diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
-    - uses: actions/upload-artifact@v4
-      with:
-        name: wwww
-        path: |
-          tinygrad/runtime/autogen/nv_gpu.py
 
   torchbackend:
     name: Torch Backend Tests
