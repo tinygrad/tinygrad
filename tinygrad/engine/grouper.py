@@ -195,7 +195,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
     group: dict[UOp, None] = {}
     recursive_group(r, unwrap(r.st), r, children, realizes, reduce_for_op, group, cache={})
     # max one reduceop per kernel
-    can_chase = all(tr not in reduce_for_op for tr in group)
+    can_chase = all(tr not in reduce_for_op for tr in group) and len(r.arg) == 2
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = r in group
     # can only have one output
@@ -481,7 +481,7 @@ def fuse_arange(root:UOp):
         fuse_rep[child] = child.replace(src=tuple(s.fuse() if s is u else s for s in child.src))
         if other_paths: break
       else: q.extend(curr_children)
-  return root.substitute(fuse_rep, name="fuse_arange") if fuse_rep else None
+  return root.substitute(fuse_rep, name="fuse_arange").replace(arg=(root.arg[0], root.arg[1], False)) if fuse_rep else None
 
 do_fuse = PatternMatcher([
   (UPat(Ops.FUSE, name="x"), do_fusion),
