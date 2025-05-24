@@ -258,7 +258,8 @@ def append_to_kernel(x:UOp):
     else:
       new_srcs.extend(s.src)
       # NOTE: because const and device are shared UOps they don't change metadata
-      if s.base.op not in {Ops.CONST, Ops.DEVICE} and (m:=s.metadata): metadata += m
+      # NOTE: if it's a reshape after ASSIGN we're not fusing that parent kernel
+      if s.base.op not in {Ops.CONST, Ops.DEVICE} and (not (s.op is Ops.RESHAPE and s.base.op is Ops.ASSIGN)) and (m:=s.metadata): metadata += m
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(dedup(metadata))))
 
 create_kernels = PatternMatcher([
