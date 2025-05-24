@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, operator, itertools
 from dataclasses import dataclass
-from typing import Optional, cast, Sequence
+from typing import Optional, cast, Sequence, Any
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop, Ops
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
@@ -79,6 +79,25 @@ def unravel(shape:tuple[sint, ...], offset:sint) -> list[sint]:
     acc *= d
   return idxs[::-1]
 
+view_memoized: dict[tuple[View, UOp, Any], View|None] = {}
+view_reverse: dict[View, tuple[View, UOp, Any]] = {}   # NOTE: this only saves one possible reverse path to the View
+def view_cache(op):
+  def _view_cache(fxn):
+    def __view_cache(self, arg):
+      if (fret:=view_memoized.get(key:=(self, op, arg), False)) is not False: return fret
+      view_memoized[key] = ret = fxn(self, arg)
+      if ret is not None: view_reverse[ret] = key
+      return ret
+    return __view_cache
+  return _view_cache
+
+def invert_view(v) -> tuple[View, list[tuple[UOp, Any]]]:
+  ret = []
+  while (rev:=view_reverse.get(v, None)) is not None:
+    v = rev[0]
+    ret.append(rev[1:])
+  return v, ret[::-1]
+
 @dataclass(frozen=True)
 class View:
   shape:tuple[sint, ...]
@@ -151,7 +170,7 @@ class View:
     new_mask = tuple((_substitute(x[0]), _substitute(x[1])) for x in self.mask) if self.mask is not None else None
     return View.create(new_shape, new_strides, new_offset, new_mask)
 
-  @functools.cache  # pylint: disable=method-cache-max-size-none
+  @view_cache(Ops.ADD)
   def __add__(self, vm1:View) -> Optional[View]:
     vm2 = self
     if vm2.contiguous: return vm1
@@ -232,7 +251,7 @@ class View:
       mask = tuple([(smax(mx1, mx2), smin(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     return View.create(tuple([y-x for x,y in arg]), self.strides, self.offset+offset, mask)
 
-  @functools.cache  # pylint: disable=method-cache-max-size-none
+  @view_cache(Ops.PAD)
   def pad(self, arg: tuple[tuple[sint, sint], ...]) -> View:
     assert len(arg) == len(self.shape), f"invalid pad {arg} for {self.shape}"
     # NOTE: not checking for symbolic arg
@@ -243,14 +262,14 @@ class View:
       return self.__unsafe_resize(zvarg, mask=mask)
     return self
 
-  @functools.cache  # pylint: disable=method-cache-max-size-none
+  @view_cache(Ops.SHRINK)
   def shrink(self, arg: tuple[tuple[sint, sint], ...]) -> View:
     assert len(arg) == len(self.shape), f"invalid shrink {arg} for {self.shape}"
     # NOTE: not checking for symbolic arg
     for s,(b,e) in zip(self.shape,arg): assert not all_int([s,b,e]) or (0<=b<=e<=s), f"invalid shrink {arg} for {self.shape}"
     return self.__unsafe_resize(arg)
 
-  @functools.cache  # pylint: disable=method-cache-max-size-none
+  @view_cache(Ops.EXPAND)
   def expand(self, new_shape: tuple[sint, ...]) -> View:
     if len(new_shape) != len(self.shape): raise ValueError(f"expand arg {new_shape=} must have same number of dimensions as shape {self.shape=}")
     # NOTE: does not check multiple of symbolic shape
@@ -261,19 +280,19 @@ class View:
                   for m,s,ns in zip(self.mask, self.shape, new_shape)]) if self.mask else None
     return View.create(new_shape, self.strides, self.offset, mask)
 
-  @functools.cache  # pylint: disable=method-cache-max-size-none
+  @view_cache(Ops.PERMUTE)
   def permute(self, axis: tuple[int, ...]) -> View:
     assert sorted(axis) == list(range(len(self.shape))), f"invalid permutation {axis} of len {len(self.shape)}"
     return View.create(tuple(self.shape[a] for a in axis), tuple(self.strides[a] for a in axis), self.offset,
                        tuple(self.mask[a] for a in axis) if self.mask is not None else None)
 
-  @functools.cache  # pylint: disable=method-cache-max-size-none
+  @view_cache(Ops.FLIP)
   def flip(self, arg: tuple[bool, ...]) -> View:
     offset = sum((s-1)*z for s,z,f in zip(self.shape, self.strides, arg) if f)
     mask = tuple((s-my,s-mx) if f else (mx,my) for (mx,my),s,f in zip(self.mask, self.shape, arg)) if self.mask is not None else None
     return View.create(self.shape, tuple(-z if f else z for z,f in zip(self.strides, arg)), self.offset+offset, mask)
 
-  @functools.cache  # pylint: disable=method-cache-max-size-none
+  @view_cache(Ops.RESHAPE)
   def reshape(self, new_shape: tuple[sint, ...]) -> Optional[View]:
     if self.shape == new_shape: return self
 
