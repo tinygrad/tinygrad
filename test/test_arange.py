@@ -164,7 +164,7 @@ class TestIndexing(unittest.TestCase):
       np.testing.assert_equal(X.numpy(), 0)
 
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
-  def test_index_mnist(self, noopt=1, op_limit=512*784*13, split_reduceop=0):
+  def test_index_mnist(self, noopt=1, op_limit=512*784*190, split_reduceop=0):
     from tinygrad.nn.datasets import mnist
     X_train, Y_train, _, _ = mnist()
     with Context(NOOPT=noopt, FUSE_ARANGE=1, SPLIT_REDUCEOP=split_reduceop):
@@ -179,9 +179,7 @@ class TestIndexing(unittest.TestCase):
   # TODO: fix these on WEBGPU, it looks like it has to do with packed stuff
   @unittest.skipIf(getenv("WEBGPU"), "broken on webgpu for some reason")
   def test_index_mnist_opt(self): self.test_index_mnist(0)
-  @unittest.skipIf(getenv("WEBGPU"), "broken on webgpu for some reason")
   def test_index_mnist_split(self): self.test_index_mnist(1, split_reduceop=1)
-  @unittest.skipIf(getenv("WEBGPU"), "broken on webgpu for some reason")
   def test_index_mnist_opt_split(self): self.test_index_mnist(0, split_reduceop=1)
 
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
