@@ -87,6 +87,8 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
   # COPY(CONST) creates a new CONST on the destination device
   (UPat(Ops.COPY, name="root", src=(UPat.cvar("x"), UPat(Ops.DEVICE))), lambda root,x: root.const_like(x.arg)),
+  # non device changing COPY is a NOOP
+  (UPat(Ops.COPY, name="c", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda c,x: x if c.device == x.device else None),
   # store a shrink before COPY, otherwise view after the COPY
   (UPat(Ops.COPY, src=(UPat(Ops.VIEW, name="v"), UPat(Ops.DEVICE)), name="copy"), lambda copy,v:
     v.contiguous().copy_to_device(copy.device, arg=copy.arg) if prod(v.shape) < prod(v.base.shape) else \
@@ -411,8 +413,8 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # replace buffer with define_global + add load/store last
   bufs = tuple(s.buf_uop if s.op is not Ops.MSELECT else s.src[0].buf_uop for s in k.src)
   ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
-  if ast.op is Ops.SINK and not all_same([x.device for x in bufs]):
-    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buffer for b in bufs)}")
+  if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
+    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buffer for b in k.src)}")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
