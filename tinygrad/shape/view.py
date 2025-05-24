@@ -101,7 +101,7 @@ def invert_view(v):
     # TODO: add shrink here
     if nv.contiguous:
       return [(Ops.RESHAPE, nv.shape)]+hist
-    for rv,his in view_reverse[nv]: search.append((rv,hist+[his]))
+    for rv,his in view_reverse[nv]: search.append((rv,[his]+hist))
   return None
 
 @dataclass(frozen=True)
