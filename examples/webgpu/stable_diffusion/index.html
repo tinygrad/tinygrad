@@ -476,7 +476,7 @@
             document.getElementById("btnRunNet").disabled = false;
         }
 
-        function runStableDiffusion(prompt, steps, guidance, showStep) {
+        function runStableDiffusion(prompt, steps, guidance, showStep, randSeed=Math.floor(Math.random()*2147483647)) {
             return new Promise(async (resolve, reject) => {
                 
                 let context = await timer(() => nets["textModel"](new Int32Array(clipTokenizer.encodeForCLIP(prompt))));
@@ -492,7 +492,6 @@
 
                 console.log("Timesteps: " + timesteps);
 
-                //let alphasCumprod = getWeight(safetensorParts,"alphas_cumprod");
                 const uint8Data = stateDict["alphas_cumprod"];
                 let alphasCumprod = new Float32Array(uint8Data.buffer, uint8Data.byteOffset, uint8Data.byteLength / Float32Array.BYTES_PER_ELEMENT);
                 let alphas = [];
@@ -512,7 +511,6 @@
 
                 // RNG with seed
                 function LCG(seed) {const m=2147483647, a=16807; return () => ((seed = seed * a % m) / m);}
-                const rand_seed = Math.floor(Math.random() * 2147483647);
                 const randn = LCG(rand_seed);
                 for(let i=0; i<inpSize; i++)
                     latent[i] = Math.sqrt(-2 * Math.log(randn())) * Math.cos(2 * Math.PI * randn());
