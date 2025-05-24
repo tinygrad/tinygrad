@@ -260,7 +260,7 @@ class NVProgram(HCQProgram):
       qmd = {'qmd_major_version':3, 'sm_global_caching_enable':1, 'cwd_membar_type':nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR,
              'program_address_upper':hi32(self.prog_addr), 'program_address_lower':lo32(self.prog_addr), 'sass_version':0x89}
 
-    smem_cfg = max(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
+    smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
 
     self.qmd:QMD = QMD(dev, **qmd, qmd_group_id=0x3f, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
       invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1, barrier_count=1,
