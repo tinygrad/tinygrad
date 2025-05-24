@@ -68,6 +68,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   return splitted.r(*reduce.arg).r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
 def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
+  assert copy.arg is None, "copy arg is not allowed here"
   if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
   return base.copy_to_device(copy.device, arg=copy.arg).view(view.arg)
 
