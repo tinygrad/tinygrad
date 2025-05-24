@@ -401,13 +401,18 @@ fix_kernel_ops = PatternMatcher([
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
-  # replace assign sources with a view of the target buffer
+  # replace assign sources with a view of the target buffer. TODO: fix this!!
   parents_rep: dict[UOp, UOp] = {}
   for s in k.src:
     if s.op is Ops.MSELECT:
       assert s.src[0].op is Ops.ASSIGN, f"{s.src[0].op} isn't ASSIGN"
       for out in s.src[0].src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
       parents_rep[s] = s.buf_uop
+    if s.op is Ops.MSTACK:
+      for x in s.src:
+        assert x.op is Ops.ASSIGN, f"{x.op} isn't ASSIGN"
+        for out in x.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
+        parents_rep[s] = s.buf_uop
     if s.op is Ops.ASSIGN:
       for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
       parents_rep[s] = s.buf_uop
@@ -417,7 +422,11 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
-  bufs = tuple(s.buf_uop if s.op is not Ops.MSELECT else s.src[0].buf_uop for s in k.src)
+  bufs = []
+  for s in k.src:
+    if s.op is Ops.MSELECT: bufs.append(s.src[0].buf_uop)
+    elif s.op is Ops.MSTACK: bufs.extend([x.buf_uop for x in s.src])
+    else: bufs.append(s.buf_uop)
   ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
   if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buffer for b in k.src)}")
