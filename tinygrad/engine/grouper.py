@@ -412,7 +412,7 @@ create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 # ** add metadata of KERNEL outputs
 
 def append_metadata(root:UOp, k:UOp):
-  if root.metadata is None or (new_metadata:=tuple(dedup(k.arg.metadata+root.metadata))) == k.arg.metadata: return
+  if not root.metadata or (new_metadata:=tuple(dedup(k.arg.metadata+root.metadata))) == k.arg.metadata: return None
   return root.replace(src=(root.src[0], k.replace(arg=Kernel(k.arg.ast, new_metadata)))+root.src[2:])
 
 replace_metadata = PatternMatcher([(UPat(Ops.ASSIGN, src=(UPat(), UPat(Ops.KERNEL, name="k")), name="root", allow_any_len=True), append_metadata),])
