@@ -175,7 +175,9 @@ class TestIndexing(unittest.TestCase):
       np.testing.assert_equal(X.numpy(), 0)
 
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
-  def test_index_mnist(self, noopt=1, op_limit=512*784*190, split_reduceop=0):
+  def test_index_mnist(self, noopt=1, op_limit=512*784*13, split_reduceop=0):
+    # WEBGPU generates more ops due to bitpacking of < 4-byte dtypes
+    if Device.DEFAULT == "WEBGPU": op_limit *= 15
     from tinygrad.nn.datasets import mnist
     X_train, Y_train, _, _ = mnist()
     with Context(NOOPT=noopt, FUSE_ARANGE=1, SPLIT_REDUCEOP=split_reduceop):
