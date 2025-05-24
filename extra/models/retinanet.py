@@ -49,8 +49,12 @@ class RetinaNet:
   def __call__(self, x:Tensor, **kwargs):
     return self.forward(x, **kwargs)
 
-  def forward(self, x:Tensor, **kwargs):
-    return self.head(self.backbone(x), **kwargs)
+  def forward(self, x:Tensor, **kwargs) -> Tensor|tuple[Tensor, list[tuple[int, int]]]:
+    x = self.backbone(x)
+    if Tensor.training:
+      return self.head(x, **kwargs)
+    else:
+      return self.head(x, **kwargs), [xs.shape[-2:] for xs in x]
 
   def load_from_pretrained(self):
     model_urls = {
@@ -68,20 +72,23 @@ class RetinaNet:
       obj.assign(dat)
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
-  def postprocess_detections2(self, predictions:Tensor, input_size:tuple[int, int]=(800, 800), image_sizes:list[tuple[int, int]]|None=None,
-                              orig_image_sizes:list[tuple[int, int]]|None=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
-    anchors = generate_anchors2(input_size)
-    grid_sizes = self.backbone.compute_grid_sizes2(input_size)
-    split_idx = Tensor.stack(*[(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]]).cumsum()
-    return split_idx
+  def postprocess_detections2(self, predictions:Tensor, grid_sizes:list[tuple[int, int]],
+                              input_size:tuple[int, int]=(800, 800), image_sizes:list[tuple[int, int]]|None=None,
+                              orig_image_sizes:list[tuple[int, int]]|None=None, score_thresh=0.05,
+                              topk_candidates=1000, nms_thresh=0.5):
+    anchors = generate_anchors2(input_size, grid_sizes)
+    return anchors
+    # split_idx = Tensor.stack(*[(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]]).cumsum()
+    # return split_idx
     # split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
   def postprocess_detections(self, predictions, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
     anchors = generate_anchors(input_size)
-    grid_sizes = self.backbone.compute_grid_sizes(input_size)
-    split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
-    return split_idx
+    return anchors
+    # grid_sizes = self.backbone.compute_grid_sizes(input_size)
+    # split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
+    # return split_idx
     # detections = []
     # for i, predictions_per_image in enumerate(predictions):
     #   h, w = input_size if image_sizes is None else image_sizes[i]
@@ -213,14 +220,6 @@ class ResNetFPN:
     self.body = resnet
     in_channels_list = [(self.body.in_planes // 8) * 2 ** (i - 1) for i in returned_layers]
     self.fpn = FPN(in_channels_list, out_channels)
-
-  # this is needed to decouple inference from postprocessing (anchors generation)
-  def compute_grid_sizes(self, input_size):
-    return np.ceil(np.array(input_size)[None, :] / 2 ** np.arange(3, 8)[:, None])
-  
-  # this is needed to decouple inference from postprocessing (anchors generation)
-  def compute_grid_sizes2(self, input_size:tuple[int, int]) -> Tensor:
-    return (Tensor(input_size)[None, :] / 2.0 ** Tensor.arange(3, 8)[:, None]).ceil()
 
   def __call__(self, x:Tensor):
     out = self.body.bn1(self.body.conv1(x)).relu()

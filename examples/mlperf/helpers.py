@@ -269,14 +269,10 @@ def box_iou(boxes1:np.ndarray, boxes2:np.ndarray) -> np.ndarray:
   inter, union = _box_inter_union(boxes1, boxes2)
   return inter / union
 
-def generate_anchors2(input_size:tuple[int, int], scales:Optional[tuple[Tensor, ...]]=None, aspect_ratios:Optional[tuple[Tensor, ...]]=None) -> list[Tensor]:
-  def _compute_grid_sizes(input_size:tuple[int, int]) -> np.ndarray:
-    return (Tensor(input_size)[None, :] / 2.0 ** Tensor.arange(3, 8)[:, None]).ceil().numpy()
-  
-  scales = tuple(Tensor((i, int(i * 2 ** (1/3)), int(i * 2 ** (2/3)))) for i in 2 ** np.arange(5, 10)) if scales is None else scales
+def generate_anchors2(input_size:tuple[int, int], grid_sizes:list[tuple[int, int]], scales:Optional[tuple[Tensor, ...]]=None, aspect_ratios:Optional[tuple[Tensor, ...]]=None) -> list[Tensor]:
+  scales = tuple(Tensor((i, int(i * 2 ** (1/3)), int(i * 2 ** (2/3)))) for i in [32, 64, 128, 256, 512]) if scales is None else scales
   aspect_ratios = (Tensor([0.5, 1.0, 2.0]),) * len(scales) if aspect_ratios is None else aspect_ratios
   aspect_ratios = tuple(ar for ar in aspect_ratios)
-  grid_sizes = _compute_grid_sizes(input_size)
 
   assert len(scales) == len(aspect_ratios) == len(grid_sizes), "scales, aspect_ratios, and grid_sizes must have the same length"
 
@@ -287,8 +283,8 @@ def generate_anchors2(input_size:tuple[int, int], scales:Optional[tuple[Tensor, 
     ws = (w_ratios[:, None] * s[None, :]).reshape(-1)
     hs = (h_ratios[:, None] * s[None, :]).reshape(-1)
     base_anchors = (Tensor.stack(-ws, -hs, ws, hs, dim=1) / 2).round()
-    stride_h, stride_w = Tensor(input_size[0] // gs[0].item()), Tensor(input_size[1] // gs[1].item())
-    shifts_x, shifts_y = (Tensor.arange(gs[1].item()) * stride_w).meshgrid(Tensor.arange(gs[0].item()) * stride_h, indexing="xy")
+    stride_h, stride_w = Tensor(input_size[0] // gs[0]), Tensor(input_size[1] // gs[1])
+    shifts_x, shifts_y = (Tensor.arange(gs[1]) * stride_w).meshgrid(Tensor.arange(gs[0]) * stride_h, indexing="xy")
     shifts_x, shifts_y = shifts_x.reshape(-1), shifts_y.reshape(-1)
     shifts = Tensor.stack(shifts_x, shifts_y, shifts_x, shifts_y, dim=1)
     anchors.append((shifts[:, None] + base_anchors[None, :]).reshape(-1, 4))
