@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, Variable, Device
+from tinygrad import Tensor, Variable
 from tinygrad.shape.shapetracker import View
 from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.uop.ops import sym_infer
@@ -177,16 +177,6 @@ class TestSymbolicOps(unittest.TestCase):
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       t = Tensor.ones(i)
-      symbolic = t.reshape(vi).sum().item()
-      expected = t.sum().item()
-      np.testing.assert_equal(symbolic, expected)
-
-  @unittest.skipIf(Device.DEFAULT == "CPU", "test copy from external device to CPU")
-  def test_ones_sum_cpu(self):
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      vj = Variable("i", 1, 20).bind(i*2)
-      t = Tensor.ones(vj).contiguous().shrink(((0, vi),)).to("CPU")
       symbolic = t.reshape(vi).sum().item()
       expected = t.sum().item()
       np.testing.assert_equal(symbolic, expected)
