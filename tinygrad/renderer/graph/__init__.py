@@ -62,7 +62,7 @@ class GraphRenderer(Renderer):
       return ret
 
     for si, ei in lower_schedule(schedule):
-      assert isinstance(ei.prg, CompiledRunner), f"Unsupported data transfer between bufs:\n{ei.bufs}\n\nEnsure all state is realized"
+      assert isinstance(ei.prg, CompiledRunner), f"Unsupported data xfer between bufs:\n{ei.bufs}\n\nDid you realize all state Tensors before export?"
       for buf in ei.bufs: assert buf is not None and buf.device == compute_device, "All compute and returned Tensor(s) must be on the same device"
       for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
         if buf not in buffer_replace:
@@ -75,7 +75,7 @@ class GraphRenderer(Renderer):
     self.bufs.update({assigned.get(b, b): self.bufs.get(b, f"buf_{next(ctr)}") for b in buffer_replace.values()})
     for i, ei in enumerate(self.eis): self.eis[i] = ExecItem(ei.prg, [assigned.get(cast(Buffer, b), b) for b in ei.bufs])
 
-    assert all(b.is_allocated() for b in self.state_bufs)
+    assert all(b.is_allocated() for b in self.state_bufs), "Realize all Tensors with state before export"
     # build complete state_dict, rename state bufs with meaningful names from tensor_names
     self.state_dict = {k:v for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs} if tensor_names else {}
     for k,v in self.state_dict.items(): v.lazydata = v.lazydata.base # non-contiguous views cause data permutation in safe_save
