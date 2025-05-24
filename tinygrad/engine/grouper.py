@@ -67,7 +67,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   # reduce original axes, then split
   return splitted.r(*reduce.arg).r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
-ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE}
+ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT}
 
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
@@ -87,6 +87,8 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
   # COPY(CONST) creates a new CONST on the destination device
   (UPat(Ops.COPY, name="root", src=(UPat.cvar("x"), UPat(Ops.DEVICE))), lambda root,x: root.const_like(x.arg)),
+  # non device changing COPY is a NOOP
+  (UPat(Ops.COPY, name="c", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda c,x: x if c.device == x.device else None),
   # store a shrink before COPY, otherwise view after the COPY
   (UPat(Ops.COPY, src=(UPat(Ops.VIEW, name="v"), UPat(Ops.DEVICE)), name="copy"), lambda copy,v:
     v.contiguous().copy_to_device(copy.device, arg=copy.arg) if prod(v.shape) < prod(v.base.shape) else \
@@ -147,8 +149,8 @@ do_realize = PatternMatcher([
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}, name="tr"), realize),
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), name="view"), realize_before_view),
-  # realize before COPY
-  (UPat(Ops.COPY, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), allow_any_len=True), realize),
+  # realize before COPY and MSELECT
+  (UPat((Ops.COPY, Ops.MSELECT), src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), allow_any_len=True), realize),
 ])
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
@@ -247,27 +249,30 @@ def create_kernel(x:UOp, b:UOp|None=None):
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return buffer.assign(kernel).reshape(x.shape)
 
-DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.MSELECT}
 def append_to_kernel(x:UOp):
   new_srcs: list[UOp] = []
   metadata = x.arg.metadata
   for s in x.src:
-    if s.op in DONT_PLACE_IN_KERNEL or s.op is Ops.GBARRIER: new_srcs.append(s)
+    if s.op in DONT_PLACE_IN_KERNEL: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
       # NOTE: because const and device are shared UOps they don't change metadata
-      if s.base.op not in {Ops.CONST, Ops.DEVICE} and (m:=s.metadata): metadata += m
+      # NOTE: if it's a reshape after ASSIGN we're not fusing that parent kernel
+      if s.base.op not in {Ops.CONST, Ops.DEVICE} and (not (s.op is Ops.RESHAPE and s.base.op is Ops.ASSIGN)) and (m:=s.metadata): metadata += m
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(dedup(metadata))))
 
 create_kernels = PatternMatcher([
   # always give assign/gbarrier a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
-  (UPat(Ops.GBARRIER, name="x"), create_kernel),
+  (UPat(Ops.GBARRIER, src=(UPat.var("x"),)), create_kernel),
   # walk back the local graph until we reach a realized source
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # remove extra views and constants from SINK
   (UPat(Ops.SINK, name="x"),
    lambda x: x.replace(src=new_src) if (new_src:=tuple(dedup(s.base for s in x.src if s.base.op not in {Ops.CONST, Ops.BIND}))) != x.src else None),
+  # push RESHAPE through MSELECT
+  (UPat(Ops.MSELECT, src=(UPat(Ops.RESHAPE, name="r"),), name="ms"), lambda ms,r: r.src[0].mselect(ms.arg).reshape(r.arg)),
 ])
 
 # **** swizzler
@@ -352,10 +357,6 @@ view_right = merge_views+PatternMatcher([
 
 # **** fix kernel AST
 
-remove_gbarrier = PatternMatcher([
-  (UPat(Ops.GBARRIER, src=(UPat.var("x"),)), lambda x: x)
-])
-
 add_buffer_ops = PatternMatcher([
   # LOAD
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), x.st.to_uop())),
@@ -381,7 +382,7 @@ def check_load_st(glbl:UOp, view:UOp):
 
 fix_kernel_ops = PatternMatcher([
   # remove CONTIGUOUS/DEVICE from kernel AST
-  (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
+  (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
   # no ImageDType after load
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
@@ -389,26 +390,33 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
+replace_globals = PatternMatcher([
+  # replace ASSIGN with the target BUFFER
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat(Ops.KERNEL)), name="assign", allow_any_len=True), lambda assign: assign.src[0]),
+])
+
 def fix_kernel_ast(k:UOp) -> UOp|None:
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
-  # replace assign sources with a view of the target buffer
-  parents_rep: dict[UOp, UOp] = {}
-  for s in k.src:
-    if s.op is Ops.ASSIGN:
-      for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
-      parents_rep[s] = s.buf_uop
-  ast = k.arg.ast.substitute(parents_rep, name="replace realized")
-  # remove gbarrier
-  ast = graph_rewrite(ast, remove_gbarrier, name="remove gbarrier")
+  # replace global memory ops with the BUFFER they write to
+  ast = graph_rewrite(k.arg.ast, replace_globals, bottom_up=True, name="replace globals")
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
-  ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs:=tuple(s.buf_uop for s in k.src), bottom_up=True, name="replace buffer")
-  if ast.op is Ops.SINK and not all_same([x.device for x in bufs]):
-    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buffer for b in bufs)}")
+  bufs = tuple(s.buf_uop if s.op is not Ops.MSELECT else s.src[0].buf_uop for s in k.src)
+  ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
+  if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
+    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
+
+# ** add metadata of KERNEL outputs
+
+def append_metadata(root:UOp, k:UOp):
+  if not root.metadata or (new_metadata:=tuple(dedup(k.arg.metadata+root.metadata))) == k.arg.metadata: return None
+  return root.replace(src=(root.src[0], k.replace(arg=Kernel(k.arg.ast, new_metadata)))+root.src[2:])
+
+replace_metadata = PatternMatcher([(UPat(Ops.ASSIGN, src=(UPat(), UPat(Ops.KERNEL, name="k")), name="root", allow_any_len=True), append_metadata),])
 
 pm_fuse = PatternMatcher([
   # FUSE on CONTIGUOUS removes FUSE
@@ -502,17 +510,15 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
-  # determine where to insert gbarriers
+  # insert gbarriers in places determined by the realize map
   realize_map = group_realizes(tensor_map[big_sink])
-
-  # insert gbarrier after all realize map
   tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
   tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
 
   # TODO: move view_left/view_right here
 
   # group into kernels (this is context-free)
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, bottom_up=True, input_map=tensor_map, name="create_kernels")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
@@ -529,7 +535,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
     tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, ctx=assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
 
   # finally, create the AST for kernels
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast, bottom_up=True, input_map=tensor_map, name="create_ast")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast+replace_metadata, bottom_up=True, input_map=tensor_map, name="create_ast")
 
   # display the final graph
   sched_sink = tensor_map[big_sink]
@@ -546,6 +552,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
       PROCESS_REPLAY_CAPTURE[id(big_sink)] = pickle.dumps((big_sink, ContextVar._cache, [u.arg.ast for u in toposort if u.op is Ops.KERNEL]))
 
   # map tensors to buffer/assign/const
+  # TODO: this is not right, and causes TestDataset.test_dataset_is_realized to fail unless I unprincipledly add Ops.COPY, which breaks others
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
     if k is v: continue
