@@ -69,17 +69,18 @@ class TestBrowserModels(unittest.IsolatedAsyncioTestCase):
 
   async def test_tinychat(self):
     async with self.browser_page(extra_args=["--enable-features=Vulkan", "--enable-unsafe-webgpu"]) as page:
-      resp = await page.goto(f"http://{self.http.host}:{self.http.port}/examples/tinychat/tinychat-browser/index.html")
+      # VALIDATE=1 fixes the random seeds and counter to 0
+      resp = await page.goto(f"http://{self.http.host}:{self.http.port}/examples/tinychat/tinychat-browser/index.html?VALIDATE=1")
       self.assertIsNotNone(resp)
       self.assertEqual(resp.status, 200)
       await page.wait_for_selector("textarea#input-form", timeout=30_000)
-      await page.fill("textarea#input-form", "hi")
+      await page.fill("textarea#input-form", "yo")
       await page.press("textarea#input-form", "Enter")
       await page.wait_for_function("() => document.querySelectorAll('.message-role-assistant').length > 0", timeout=10_000)
       await page.wait_for_selector("textarea#input-form:enabled", timeout=10_000)
       last = await page.inner_text(".message-role-assistant:last-child")
       # NOTE: relies on random seeds staying constant; TODO: set random seeds manually
-      self.assertEqual(last.strip(), "How can I help you today?")
+      self.assertEqual(last.strip(), "What's up?")
 
 if __name__ == "__main__":
   unittest.main()

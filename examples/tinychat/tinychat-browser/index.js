@@ -390,6 +390,12 @@ async function load_state_dict (data, progress) {
       await loadFileToStateDict(file);
     }
   }
+  
+  if (queryParams.has("VALIDATE")) {
+    // make output deterministic
+    device.queue.writeBuffer(state_dict["random_seeds"].bytes, 0, new Uint32Array([0,0]));
+    device.queue.writeBuffer(state_dict["random_counter"].bytes, 0, new Uint32Array([0]));
+  }
 
   return model;
 };
