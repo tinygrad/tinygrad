@@ -4,6 +4,8 @@ from tinygrad import Variable, dtypes
 from tinygrad.uop.ops import UOp, graph_rewrite
 from tinygrad.uop.spec import z3_renderer
 from tinygrad.helpers import DEBUG, Context
+
+seed = 42
 seed = random.randint(0, 100)
 print(f"Seed: {seed}")
 random.seed(seed)
@@ -81,9 +83,9 @@ if __name__ == "__main__":
             f"v3=Variable(\"{u3.arg[0]}\", {u3.arg[1]}, {u3.arg[2]})\n" +\
             f"expr = {expr}\n" +\
             f"v1_val, v2_val, v3_val = UOp.const(dtypes.int, {n1.as_long()}), UOp.const(dtypes.int, {n2.as_long()})," +\
-                "UOp.const(dtypes.int, {n3.as_long()})\n" +\
+                f"UOp.const(dtypes.int, {n3.as_long()})\n" +\
             "num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()\n" +\
             "rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()\n" +\
-            "assert num==rn, f\"{{num}} != {{rn}}\"\n"
+            "assert num==rn, f\"{num} != {rn}\"\n"
 
     if DEBUG >= 2: print(f"validated {expr.render()}")
