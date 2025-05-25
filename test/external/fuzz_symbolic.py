@@ -51,7 +51,6 @@ if __name__ == "__main__":
     u3 = Variable("v3", 0, random.choice(upper_bounds))
     v = [u1,u2,u3]
     expr = random_int_expr(6)
-    # if DEBUG>=2: print(expr.render(simplify=False))
 
     with Context(CORRECT_DIVMOD_FOLDING=1):
       simplified_expr = expr.simplify()
