@@ -857,6 +857,5 @@ class TestBounds(unittest.TestCase):
     assert ((alu0+2559)//-4).vmin == -639 and ((alu0+2559)//-4).vmax == 0
     assert (((alu0+2559)//-4)*(-1)).vmin == 0 and (((alu0+2559)//-4)*(-1)).vmax == 639
 
-
 if __name__ == '__main__':
   unittest.main()
