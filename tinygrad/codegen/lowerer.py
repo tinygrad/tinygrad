@@ -242,29 +242,27 @@ def f16(name): return UPat.any(UPat.var(name, dtype=dtypes.half), UPat.cvar(name
 
 pm_push_cast = PatternMatcher([
   #  --- pushes cast to half right through alus ---
-  (UPat(GroupOp.Unary, src=(f32_to_f16("f32"),), name="op"),
-   lambda op, f32: UOp(op.op, dtypes.float32, (f32,), op.arg).cast(dtypes.half)),
+  (UPat(GroupOp.Unary, src=(f32_to_f16("f32"),), name="op"), lambda op, f32: op.replace(dtype=dtypes.float32, src=(f32,)).cast(dtypes.half)),
 
   (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f32_to_f16("rhs_f32")), dtype=dtypes.half, name="op"),
-   lambda op, lhs_f32, rhs_f32: lhs_f32.alu(op.op, rhs_f32).cast(dtypes.half)),
+   lambda op, lhs_f32, rhs_f32: op.replace(dtype=dtypes.float32, src=(lhs_f32, rhs_f32)).cast(dtypes.half)),
   (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f16("rhs_f16")), dtype=dtypes.half, name="op"),
-   lambda op, lhs_f32, rhs_f16: lhs_f32.alu(op.op, rhs_f16.cast(dtypes.float32)).cast(dtypes.half)),
+   lambda op, lhs_f32, rhs_f16: op.replace(dtype=dtypes.float32, src=(lhs_f32, rhs_f16.cast(dtypes.float32))).cast(dtypes.half)),
   (UPat(GroupOp.Binary, src=(f16("lhs_f16"), f32_to_f16("rhs_f32")), dtype=dtypes.half, name="op"),
-   lambda op, lhs_f16, rhs_f32: lhs_f16.cast(dtypes.float32).alu(op.op, rhs_f32).cast(dtypes.half)),
-
+   lambda op, lhs_f16, rhs_f32: op.replace(dtype=dtypes.float32, src=(lhs_f16.cast(dtypes.float32), rhs_f32)).cast(dtypes.half)),
   (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f32_to_f16("rhs_f32")), dtype=dtypes.bool, name="op"),
-   lambda op, lhs_f32, rhs_f32: lhs_f32.alu(op.op, rhs_f32)),
+   lambda op, lhs_f32, rhs_f32: op.replace(src=(lhs_f32, rhs_f32))),
   (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f16("rhs_f16")), dtype=dtypes.bool, name="op"),
-   lambda op, lhs_f32, rhs_f16: lhs_f32.alu(op.op, rhs_f16.cast(dtypes.float32))),
+   lambda op, lhs_f32, rhs_f16: op.replace(src=(lhs_f32, rhs_f16.cast(dtypes.float32)))),
   (UPat(GroupOp.Binary, src=(f16("lhs_f16"), f32_to_f16("rhs_f32")), dtype=dtypes.bool, name="op"),
-   lambda op, lhs_f16, rhs_f32: lhs_f16.cast(dtypes.float32).alu(op.op, rhs_f32)),
+   lambda op, lhs_f16, rhs_f32: op.replace(src=(lhs_f16.cast(dtypes.float32), rhs_f32))),
 
-  (UPat.var("cond", dtype=dtypes.bool).where(f32_to_f16("true_f32"), f32_to_f16("false_f32")),
-   lambda cond, true_f32, false_f32: cond.where(true_f32, false_f32).cast(dtypes.half)),
-  (UPat.var("cond", dtype=dtypes.bool).where(f32_to_f16("true_f32"), f16("false_f16")),
-   lambda cond, true_f32, false_f16: cond.where(true_f32, false_f16.cast(dtypes.float32)).cast(dtypes.half)),
-  (UPat.var("cond", dtype=dtypes.bool).where(f16("true_f32"), f32_to_f16("false_f32")),
-   lambda cond, true_f16, false_f32: cond.where(true_f16.cast(dtypes.float32), false_f32).cast(dtypes.half)),
+  (UPat.var("cond", dtype=dtypes.bool).where(f32_to_f16("true_f32"), f32_to_f16("false_f32")).named("op"),
+   lambda op, cond, true_f32, false_f32: op.replace(dtype=dtypes.float32, src=(cond, true_f32, false_f32)).cast(dtypes.half)),
+  (UPat.var("cond", dtype=dtypes.bool).where(f32_to_f16("true_f32"), f16("false_f16")).named("op"),
+   lambda op, cond, true_f32, false_f16: op.replace(dtype=dtypes.float32, src=(cond, true_f32, false_f16.cast(dtypes.float32))).cast(dtypes.half)),
+  (UPat.var("cond", dtype=dtypes.bool).where(f16("true_f16"), f32_to_f16("false_f32")).named("op"),
+   lambda op, cond, true_f16, false_f32: op.replace(dtype=dtypes.float32, src=(cond, true_f16.cast(dtypes.float32), false_f32)).cast(dtypes.half)),
 
   #  --- cast folding ---
   (f32_to_f16("f32").cast(dtypes.float32), lambda f32: f32),
