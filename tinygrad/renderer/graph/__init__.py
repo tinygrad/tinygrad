@@ -9,7 +9,6 @@ from tinygrad.nn.state import get_state_dict
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner
-from tinygrad.engine.grouper import Kernel
 from tinygrad.helpers import Context
 from typing import Callable, cast
 import itertools
@@ -24,9 +23,6 @@ class GraphRenderer(Renderer):
     assert len(get_state_dict(args)) == len([x for x in args if isinstance(x, Tensor)]) and len(get_state_dict(kwargs)) == 0, \
       "All Tensor (and Variable) function arguments must be positional, whose order will match the order of the rendered function's arguments."
 
-    # Ensure random seeds are realized and in device memory
-    Tensor.randn(1).realize()
-
     # construct the kernel graph
     # designate the input and output nodes
     self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
@@ -37,7 +33,9 @@ class GraphRenderer(Renderer):
       ret_tensors: list[Tensor] = [*filter(lambda t:isinstance(t, Tensor), r if isinstance(r:=fxn(*args, **kwargs), (list, tuple)) else [r])]
     no_realize_uops.clear()
     assert (l:=len(ret_tensors)) and l == len(get_state_dict(r)), "One or more Tensors must be returned as a singleton or elements of a list/tuple."
-    compute_device = ret_tensors[0].device
+    if not isinstance(compute_device:=ret_tensors[0].device, str): raise RuntimeError(f"Multiple devices not supported: {compute_device}")
+    # Ensure random seeds/counter are realized and in device memory
+    Tensor.realize(Tensor._device_seeds[compute_device], Tensor._device_rng_counters[compute_device])
 
     # linearize the kernel graph
     schedule, var_vals = create_schedule_with_vars(sink:=UOp.sink(*[t.kernelize().lazydata for t in ret_tensors]))
@@ -53,6 +51,7 @@ class GraphRenderer(Renderer):
     self.bufs.update({cast(Buffer, u.base.buffer): f"output_{i}" for i, u in enumerate(self.outputs)})
     self.state_bufs: dict[Buffer, str] = dict()
 
+    # isolate buffers that aren't IO or stateful, for memory planning
     # TODO: consolidate this with the jit, when the jit is refactored to disallow realize
     buffer_replace: dict[Buffer, Buffer] = {b:b for b in self.bufs}
     def add_buffer(b:Buffer, stateful:bool=False) -> Buffer:
@@ -77,6 +76,7 @@ class GraphRenderer(Renderer):
     assert not any(missing:=[not b.is_allocated() for b in self.state_bufs]), f"Unrealized bufs: {missing}\nDid you realize all tensors with state?"
     # build complete state_dict, rename state bufs with meaningful names from tensor_names
     self.state_dict = {k:v for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs} if tensor_names else {}
+    self.state_dict.update({"random_seeds": Tensor._device_seeds[compute_device], "random_counter": Tensor._device_rng_counters[compute_device]})
     for k,v in self.state_dict.items(): v.lazydata = v.lazydata.base # non-contiguous views cause data permutation in safe_save
     self.state_bufs.update({cast(Buffer, v.lazydata.base.realized):k for k,v in self.state_dict.items()})
     self.state_dict.update({k:Tensor(bytes(b.as_buffer()), "CPU", b.dtype).realize() for b,k in self.state_bufs.items() if k not in self.state_dict})

@@ -43,7 +43,7 @@ safe_load_state_dict = f"""const load = async (safetensorPath) => {{
   const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
   const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
   for (const [key, info] of Object.entries(metadata)) {{
-    if (key === "__metadata__") continue;
+    if (key === "__metadata__" || !(key in stateDict)) continue;
     const src = safetensorBuffer.subarray(8 + metadataLength + info.data_offsets[0], 8 + metadataLength + info.data_offsets[1]);
     {copyin("stateDict[key]", "src")}
   }}
