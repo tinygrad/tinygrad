@@ -87,7 +87,7 @@ class Decoder:
         bs,c,py,px = x.shape
         x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
         x = l['upsample']['conv'](x)
-      x.realize()
+      x.kernelize()
 
     return self.conv_out(self.norm_out(x).swish())
 
@@ -198,7 +198,7 @@ class StableDiffusion:
     #e_t_next = get_model_output(x_prev)
     #e_t_prime = (e_t + e_t_next) / 2
     #x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t_prime, index)
-    return x_prev.realize()
+    return x_prev.kernelize()
 
 # ** ldm.models.autoencoder.AutoencoderKL (done!)
 # 3x512x512 <--> 4x64x64 (16384)

@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 EMSCRIPTEN_PATH=~/emsdk/emsdk_env.sh
 source $EMSCRIPTEN_PATH
 step="transformer"
-initial_memory=6553600
+initial_memory=72089600
 max_memory=1500053504
 exported_functions='["_net", "_malloc", "_free", "_set_buf"]'
 
