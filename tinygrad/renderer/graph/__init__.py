@@ -42,9 +42,10 @@ class GraphRenderer(Renderer):
     compute_device = ret_tensors[0].device
 
     # linearize the kernel graph
-    schedule, var_vals, becomes_map = create_schedule_with_vars(UOp.sink(*(out_uops:=[t.kernelize().lazydata for t in ret_tensors])))
+    schedule, var_vals = create_schedule_with_vars(sink:=UOp.sink(*[t.kernelize().lazydata for t in ret_tensors]))
     assert set(var_vals.keys()) == set(u.unbind()[0] for u in self.inputs if u.op is Ops.BIND), "Variables must be positional arguments."
-    self.outputs: list[UOp] = [becomes_map[uop.base] for uop in out_uops]
+    remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.ASSIGN}
+    self.outputs: list[UOp] = [remove_assign_map[uop.base] for uop in sink.src]
 
     # render kernels, render buffer names
     # mark which buffers used in computation have state
