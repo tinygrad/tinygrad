@@ -11,6 +11,10 @@ class AMDReg:
 
   def encode(self, **kwargs) -> int: return functools.reduce(int.__or__, (value << self.fields[name][0] for name,value in kwargs.items()), 0)
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
+  def field_mask(self, field_name) -> int:
+    start, end = self.fields[field_name]
+    num_bits = end - start + 1
+    return ((1 << num_bits) - 1) << start
 
   @property
   def addr(self): return self.bases[self.segment] + self.offset
