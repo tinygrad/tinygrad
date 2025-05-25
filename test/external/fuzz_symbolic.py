@@ -40,8 +40,8 @@ def random_bool_expr(depth=10, expr1=None):
 
 
 if __name__ == "__main__":
-  for i in range(50000):
-    if i % 100 == 0:
+  for i in range(10000):
+    if i % 1000 == 0:
       print(f"Running test {i}")
     upper_bounds = [*list(range(1, 10)), 16, 32, 64, 128, 256]
     u1 = Variable("v1", 0, random.choice(upper_bounds))
@@ -49,7 +49,7 @@ if __name__ == "__main__":
     u3 = Variable("v3", 0, random.choice(upper_bounds))
     v = [u1,u2,u3]
     expr = random_int_expr(6)
-    # print(expr.render(simplify=False))
+    # if DEBUG>=2: print(expr.render(simplify=False))
 
     with Context(CORRECT_DIVMOD_FOLDING=1):
       simplified_expr = expr.simplify()
@@ -74,15 +74,16 @@ if __name__ == "__main__":
         num = expr.simplify().substitute({u1:u1_val, u2:u2_val, u3:u3_val}).ssimplify()
         rn = expr.substitute({u1:u1_val, u2:u2_val, u3:u3_val}).ssimplify()
         if num==rn: print("z3 found a mismatch but the expressions are equal!!")
-      print(f"mismatched {expr.render()} at v1={m[v1]}; v2={m[v2]}; v3={m[v3]} = {num} != {rn}\n" +
-            "Reproduce with:\n" +
-            f"v1=Variable(\"{u1.arg[0]}\", {u1.arg[1]}, {u1.arg[2]})\n" +
-            f"v2=Variable(\"{u2.arg[0]}\", {u2.arg[1]}, {u2.arg[2]})\n" +
-            f"v3=Variable(\"{u3.arg[0]}\", {u3.arg[1]}, {u3.arg[2]})\n" +
-            f"expr = {expr}\n" +
-            f"v1_val, v2_val, v3_val = UOp.const(dtypes.int, {n1.as_long()}), UOp.const(dtypes.int, {n2.as_long()}), UOp.const(dtypes.int, {n3.as_long()})\n" +
-            "num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()\n" +
-            "rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()\n" +
-            "assert num==rn, f\"{{num}} != {{rn}}\"\n")
+      assert False, f"mismatched {expr.render()} at v1={m[v1]}; v2={m[v2]}; v3={m[v3]} = {num} != {rn}\n" +\
+            "Reproduce with:\n" +\
+            f"v1=Variable(\"{u1.arg[0]}\", {u1.arg[1]}, {u1.arg[2]})\n" +\
+            f"v2=Variable(\"{u2.arg[0]}\", {u2.arg[1]}, {u2.arg[2]})\n" +\
+            f"v3=Variable(\"{u3.arg[0]}\", {u3.arg[1]}, {u3.arg[2]})\n" +\
+            f"expr = {expr}\n" +\
+            f"v1_val, v2_val, v3_val = UOp.const(dtypes.int, {n1.as_long()}), UOp.const(dtypes.int, {n2.as_long()})," +\
+                "UOp.const(dtypes.int, {n3.as_long()})\n" +\
+            "num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()\n" +\
+            "rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()\n" +\
+            "assert num==rn, f\"{{num}} != {{rn}}\"\n"
 
     if DEBUG >= 2: print(f"validated {expr.render()}")
