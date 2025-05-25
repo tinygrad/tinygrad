@@ -511,13 +511,13 @@ def limit_inputs(x:UOp):
   if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS",{"METAL":32, "WEBGPU":8}.get(device, 0))): return None
   assert MAX_BUFS > 2, "MAX_KERNEL_BUFFERS must be greater than 2"
   # count number of buffers in this op, including the output buffer
-  cnt = 1
+  bufs: set[UOp] = set()
   def gate_buffer(u:UOp):
-    nonlocal cnt
-    if (is_buffer:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): cnt += 1
+    # TODO: why isn't toposort deduping this?
+    if (is_buffer:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): bufs.add(u)
     return not is_buffer
   x.toposort(gate=gate_buffer)
-  if cnt >= MAX_BUFS-1: return x.replace(tag=1).gbarrier()
+  if len(bufs) >= MAX_BUFS-1: return x.replace(tag=1).gbarrier()
 
 split_kernels = PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK, Ops.GBARRIER, Ops.ASSIGN, Ops.UNIQUE}, name="x"), limit_inputs),
