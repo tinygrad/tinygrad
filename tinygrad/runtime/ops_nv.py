@@ -253,12 +253,11 @@ class NVProgram(HCQProgram):
 
     if dev.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A:
       self.constbuffer_0[188:192], self.constbuffer_0[223] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window)], 0xfffdc0
-      qmd = {'qmd_major_version':5, 'unknown_13':0x1, 'program_address_upper':hi32(self.prog_addr>>4),'program_address_lower':lo32(self.prog_addr>>4),
-             'sass_version':0xA4}
+      qmd = {'qmd_major_version':5, 'unknown_13':0x1, 'program_address_upper':hi32(self.prog_addr>>4),'program_address_lower':lo32(self.prog_addr>>4)}
     else:
       self.constbuffer_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
       qmd = {'qmd_major_version':3, 'sm_global_caching_enable':1, 'cwd_membar_type':nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR,
-             'program_address_upper':hi32(self.prog_addr), 'program_address_lower':lo32(self.prog_addr), 'sass_version':0x89}
+             'program_address_upper':hi32(self.prog_addr), 'program_address_lower':lo32(self.prog_addr)}
 
     smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
 
@@ -266,7 +265,7 @@ class NVProgram(HCQProgram):
       invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1, barrier_count=1,
       constant_buffer_invalidate_0=1, register_count_v=self.regs_usage, shader_local_memory_high_size=self.dev.slm_per_thread,
       min_sm_config_shared_mem_size=smem_cfg, target_sm_config_shared_mem_size=smem_cfg, max_sm_config_shared_mem_size=0x1a,
-      shared_memory_size=self.shmem_usage, program_prefetch_size=min(self.prog_sz>>8, 0x1ff),
+      shared_memory_size=self.shmem_usage, program_prefetch_size=min(self.prog_sz>>8, 0x1ff), sass_version=dev.sass_version,
       program_prefetch_addr_upper_shifted=self.prog_addr>>40, program_prefetch_addr_lower_shifted=self.prog_addr>>8)
 
     for i,(addr,sz) in self.constbufs.items():
@@ -491,6 +490,7 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     # FIXME: no idea how to convert this for blackwells
     self.arch: str = "sm_120" if self.sm_version==0xa04 else f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
+    self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
     compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
     super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
