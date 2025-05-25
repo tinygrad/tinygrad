@@ -504,7 +504,7 @@ add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, nam
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
 
 def _limit_inputs(x:UOp):
-  if x.tag is not None or not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS",{"METAL":32}.get(x.device,0))): return None
+  if x.tag is not None or not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS",{"METAL":32}.get(x._device,0))): return None
   assert MAX_BUFS > 2, "MAX_KERNEL_BUFFERS must be greater than 2"
   cnt = 1
   def gate_buffer(u:UOp):
@@ -514,7 +514,7 @@ def _limit_inputs(x:UOp):
   x.toposort(gate=gate_buffer)
   if cnt >= MAX_BUFS-1: return x.replace(tag=1).gbarrier()
 
-limit_inputs = PatternMatcher([(UPat(GroupOp.All-{Ops.SINK, Ops.GBARRIER, Ops.ASSIGN, Ops.UNIQUE}, name="x"), _limit_inputs),])
+limit_inputs = PatternMatcher([(UPat(GroupOp.All-{Ops.SINK, Ops.GBARRIER, Ops.ASSIGN}, name="x"), _limit_inputs),])
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
