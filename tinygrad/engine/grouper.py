@@ -504,9 +504,13 @@ add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, nam
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
 
 def limit_inputs(x:UOp):
-  # TODO: webgpu is actually 10 on a mac
-  if x.tag is not None or not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS",{"METAL":32, "WEBGPU":8}.get(x._device,0))): return None
+  # skip if this is already tagged
+  if x.tag is not None: return None
+  # check if backend has a buffer limit
+  device = x.device if isinstance(x.device, str) else x.device[0].split(":")[0]
+  if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS",{"METAL":32, "WEBGPU":8}.get(device, 0))): return None
   assert MAX_BUFS > 2, "MAX_KERNEL_BUFFERS must be greater than 2"
+  # count number of buffers in this op, including the output buffer
   cnt = 1
   def gate_buffer(u:UOp):
     nonlocal cnt
@@ -516,7 +520,7 @@ def limit_inputs(x:UOp):
   if cnt >= MAX_BUFS-1: return x.replace(tag=1).gbarrier()
 
 split_kernels = PatternMatcher([
-  (UPat(GroupOp.All-{Ops.SINK, Ops.GBARRIER, Ops.ASSIGN}, name="x"), limit_inputs),
+  (UPat(GroupOp.All-{Ops.SINK, Ops.GBARRIER, Ops.ASSIGN, Ops.UNIQUE}, name="x"), limit_inputs),
   (UPat(Ops.GBARRIER, src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
 ])
 
