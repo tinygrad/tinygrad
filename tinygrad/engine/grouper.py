@@ -517,11 +517,11 @@ def limit_inputs(x:UOp):
     if (is_buffer:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): bufs.add(u)
     return not is_buffer
   x.toposort(gate=gate_buffer)
-  if len(bufs) >= MAX_BUFS-1: return x.replace(tag=1).gbarrier()
+  if len(bufs) >= MAX_BUFS-2: return x.replace(tag=1).gbarrier()
 
 split_kernels = PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK, Ops.GBARRIER, Ops.ASSIGN, Ops.UNIQUE}, name="x"), limit_inputs),
-  (UPat(Ops.GBARRIER, src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
+  (UPat((Ops.GBARRIER, Ops.CONTIGUOUS), src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
 ])
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
