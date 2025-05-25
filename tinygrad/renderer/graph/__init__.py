@@ -18,8 +18,6 @@ def is_partial_write(ast:UOp, i:int) -> bool:
   stores = [u for u in ast.toposort() if u.op is Ops.STORE and isinstance(u.src[0].dtype, dtype.PtrDType) and isinstance(u.src[1].arg, ShapeTracker)]
   return True if any((b:=u.src[0]).arg == i and cast(dtype.PtrDType, b.dtype).size > cast(ShapeTracker, u.src[1].arg).size for u in stores) else False
 
-def is_store_kernel(u:UOp) -> bool: return True if u.op is Ops.KERNEL and any(v.op is Ops.STORE for v in cast(Kernel,u.arg).ast.toposort()) else False
-
 # Common logic regardless of render target (e.g. JavaScript, C)
 class GraphRenderer(Renderer):
   def __init__(self, fxn:Callable, *args, tensor_names:dict[str, Tensor]|None=None, **kwargs):
