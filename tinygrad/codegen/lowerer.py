@@ -235,48 +235,15 @@ pm_quant = symbolic+PatternMatcher([
 
 # **** this pushes cast through alus, may help with numeric stability ****
 
-# TODO this probably doesn't cover all cases yet
-# TODO CLEAN UP
-def f32_to_f16(name): return UPat.var(name, dtype=dtypes.float32).cast(dtypes.half)
-def f16(name): return UPat.any(UPat.var(name, dtype=dtypes.half), UPat.cvar(name, dtype=dtypes.half))
+def push_cast_half_right(alu:UOp):
+  def _is_f32_to_f16(s:UOp): return s.op is Ops.CAST and s.dtype is dtypes.half and s.src[0].dtype is dtypes.float32
+  if not any(_is_f32_to_f16(s) for s in alu.src): return None
+  new_src = tuple(s.src[0] if _is_f32_to_f16(s) else s.cast(dtypes.float32) if s.dtype is dtypes.half else s for s in alu.src)
+  return alu.replace(dtype=dtypes.float32, src=new_src).cast(dtypes.half) if alu.dtype is dtypes.half else alu.replace(src=new_src)
 
 pm_push_cast = PatternMatcher([
-  #  --- pushes cast to half right through alus ---
-  (UPat(GroupOp.Unary, src=(f32_to_f16("f32"),), name="op"), lambda op, f32: op.replace(dtype=dtypes.float32, src=(f32,)).cast(dtypes.half)),
-
-  (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f32_to_f16("rhs_f32")), dtype=dtypes.half, name="op"),
-   lambda op, lhs_f32, rhs_f32: op.replace(dtype=dtypes.float32, src=(lhs_f32, rhs_f32)).cast(dtypes.half)),
-  (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f16("rhs_f16")), dtype=dtypes.half, name="op"),
-   lambda op, lhs_f32, rhs_f16: op.replace(dtype=dtypes.float32, src=(lhs_f32, rhs_f16.cast(dtypes.float32))).cast(dtypes.half)),
-  (UPat(GroupOp.Binary, src=(f16("lhs_f16"), f32_to_f16("rhs_f32")), dtype=dtypes.half, name="op"),
-   lambda op, lhs_f16, rhs_f32: op.replace(dtype=dtypes.float32, src=(lhs_f16.cast(dtypes.float32), rhs_f32)).cast(dtypes.half)),
-  (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f32_to_f16("rhs_f32")), dtype=dtypes.bool, name="op"),
-   lambda op, lhs_f32, rhs_f32: op.replace(src=(lhs_f32, rhs_f32))),
-  (UPat(GroupOp.Binary, src=(f32_to_f16("lhs_f32"), f16("rhs_f16")), dtype=dtypes.bool, name="op"),
-   lambda op, lhs_f32, rhs_f16: op.replace(src=(lhs_f32, rhs_f16.cast(dtypes.float32)))),
-  (UPat(GroupOp.Binary, src=(f16("lhs_f16"), f32_to_f16("rhs_f32")), dtype=dtypes.bool, name="op"),
-   lambda op, lhs_f16, rhs_f32: op.replace(src=(lhs_f16.cast(dtypes.float32), rhs_f32))),
-
-  (UPat.var("cond", dtype=dtypes.bool).where(f32_to_f16("true_f32"), f32_to_f16("false_f32")).named("op"),
-   lambda op, cond, true_f32, false_f32: op.replace(dtype=dtypes.float32, src=(cond, true_f32, false_f32)).cast(dtypes.half)),
-  (UPat.var("cond", dtype=dtypes.bool).where(f32_to_f16("true_f32"), f16("false_f16")).named("op"),
-   lambda op, cond, true_f32, false_f16: op.replace(dtype=dtypes.float32, src=(cond, true_f32, false_f16.cast(dtypes.float32))).cast(dtypes.half)),
-  (UPat.var("cond", dtype=dtypes.bool).where(f16("true_f16"), f32_to_f16("false_f32")).named("op"),
-   lambda op, cond, true_f16, false_f32: op.replace(dtype=dtypes.float32, src=(cond, true_f16.cast(dtypes.float32), false_f32)).cast(dtypes.half)),
-
   #  --- cast folding ---
-  (f32_to_f16("f32").cast(dtypes.float32), lambda f32: f32),
-
-  #  --- pushes cast to float left through alus branches ---
-  # TODO: this doesn't actually do much for w/e reason, and makes openpilot WORSE... fml
-  # I think it's because inaccuracy arises from REDUCE and so only ops after reduce exacerbate inaccuracy??
-  # IDK
-
-  # TODO: this is not complete
-  # TODO: push through fixup optimized AST?
-
-  # (UPat(GroupOp.Unary, src=(UPat.var("b", dtype=dtypes.half),), name="op", dtype=dtypes.half).cast(dtypes.float32),
-  #  lambda op, b: UOp(op.op, dtypes.float32, (b.cast(dtypes.float32),), op.arg)),
-  # (UPat(GroupOp.Binary, src=(UPat.var("b1", dtype=dtypes.half), UPat.var("b2", dtypes.half)), name="op", dtype=dtypes.half).cast(dtypes.float32),
-  #  lambda op, b1, b2: UOp(op.op, dtypes.float32, (b1.cast(dtypes.float32), b2.cast(dtypes.float32)), op.arg)),
+  (UPat.var("f32", dtype=dtypes.float32).cast(dtypes.half), lambda f32: f32),
+  #  --- pushes cast to half right through alus ---
+  (UPat(GroupOp.ALU, name="alu"), push_cast_half_right),
 ])
