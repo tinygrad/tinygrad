@@ -544,6 +544,8 @@ jobs:
         tags: qemu-hexagon:latest
         cache-from: type=gha
         cache-to: type=gha,mode=min
+    - name: Set MOCKDSP env
+      run: printf "MOCKDSP=1" >> $GITHUB_ENV
     - name: Run test_tiny on DSP
       run: DEBUG=2 DSP=1 python test/test_tiny.py
     - name: Test transcendentals
