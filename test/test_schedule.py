@@ -100,7 +100,7 @@ class TestSchedule(unittest.TestCase):
   def test_limit_buffers_prerealized(self):
     a = Tensor(0).contiguous().realize()
     N = 31
-    with Context(TRACK_MATCH_STATS=0):
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
       bufs = [Tensor(i).contiguous().realize() for i in range(1,N)]
     for b in bufs:
       a = a + b
