@@ -2608,6 +2608,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.clip(0, None))
     self.helper_test_exception([(45,65)], lambda x: x.clip(None, None), lambda x: x.clip(None, None), RuntimeError)
 
+  def test_unfold(self):
+    # test num_slices <= 0
+    helper_test_op([(4)], lambda x,: x.unfold(0, size=4, step=1))
+
   def test_matvecmat(self):
     helper_test_op([(1,128), (128,128), (128,128)], lambda x,y,z: (x@y).relu()@z)
 
