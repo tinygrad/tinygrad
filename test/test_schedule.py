@@ -90,10 +90,18 @@ class TestSchedule(unittest.TestCase):
       a = a + Tensor(i).contiguous()
     self.assertEqual(a.item(), sum(range(N)))
 
+  def test_limit_buffers_double(self):
+    a = Tensor(0).contiguous().realize()
+    N = 31
+    for i in range(1,N*2):
+      a = a + Tensor(i).contiguous()
+    self.assertEqual(a.item(), sum(range(N*2)))
+
   def test_limit_buffers_prerealized(self):
     a = Tensor(0).contiguous().realize()
     N = 31
-    bufs = [Tensor(i).contiguous().realize() for i in range(1,N)]
+    with Context(TRACK_MATCH_STATS=0):
+      bufs = [Tensor(i).contiguous().realize() for i in range(1,N)]
     for b in bufs:
       a = a + b
     self.assertEqual(a.item(), sum(range(N)))

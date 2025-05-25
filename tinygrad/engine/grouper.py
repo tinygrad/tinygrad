@@ -1,4 +1,3 @@
-import itertools
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
@@ -501,17 +500,22 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
   assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
   return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
 
-def insert_gbarrier(ctx:dict[UOp, None], x:UOp):
-  if x.tag is not None: return None
-  if x in ctx: return x.replace(tag=1).gbarrier()
-  cnt = itertools.count(1)
-  def found_global(u:UOp):
-    if (is_global:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): next(cnt)
-    return not is_global
-  x.toposort(gate=found_global)
-  if next(cnt)>=31: return x.replace(tag=1).gbarrier()
+add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"),
+                                lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
 
-add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"), insert_gbarrier),])
+def _limit_inputs(x:UOp):
+  if x.tag is not None or not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS",{"METAL":32}.get(x.device,0))): return None
+  assert MAX_BUFS > 2, "MAX_KERNEL_BUFFERS must be greater than 2"
+  cnt = 1
+  def gate_buffer(u:UOp):
+    nonlocal cnt
+    if (is_buffer:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): cnt += 1
+    return not is_buffer
+  x.toposort(gate=gate_buffer)
+  if cnt >= MAX_BUFS-1: return x.replace(tag=1).gbarrier()
+
+limit_inputs = PatternMatcher([(UPat(GroupOp.All-{Ops.SINK, Ops.GBARRIER, Ops.ASSIGN, Ops.UNIQUE}, name="x"), _limit_inputs),])
+
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 @track_rewrites(name_fxn=get_name)
@@ -525,6 +529,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # insert gbarriers in places determined by the realize map
   realize_map = group_realizes(tensor_map[big_sink])
   tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], limit_inputs, input_map=tensor_map, name="limit_input_buffers")
   tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
 
   # TODO: move view_left/view_right here
