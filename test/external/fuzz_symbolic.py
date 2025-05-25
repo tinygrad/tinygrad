@@ -1,4 +1,4 @@
-import random
+import random, operator
 import z3
 from tinygrad import Variable, dtypes
 from tinygrad.uop.ops import UOp, graph_rewrite
@@ -8,65 +8,54 @@ seed = random.randint(0, 100)
 print(f"Seed: {seed}")
 random.seed(seed)
 
-def add_v(expr, rng=None):
-  if rng is None: rng = random.randint(0,2)
-  return expr + v[rng], rng
+unary_op = [lambda a:a+random.randint(-4, 4), lambda a: a*random.randint(-4, 4),
+            lambda a: a//random.randint(1, 9), lambda a: a%random.randint(1, 9),
+            lambda a:a.maximum(random.randint(-10, 10)), lambda a:a.minimum(random.randint(-10, 10))]
+binary_op = [lambda a,b: a+b, lambda a,b: a*b, lambda a,b:a.maximum(b), lambda a,b:a.minimum(b)]
+comp_ops = [operator.lt, operator.le, operator.gt, operator.ge]
 
-def div(expr, rng=None):
-  if rng is None: rng = random.randint(1,9)
-  return expr // rng, rng
+def random_or_sub_expression_int(depth, expr):
+  sub_expr = random.choice([e for e in expr.toposort() if e.dtype is not dtypes.bool])
+  return random.choice([random_int_expr(depth-1), sub_expr, expr])
 
-def mul(expr, rng=None):
-  if rng is None: rng = random.randint(-4,4)
-  return expr * rng, rng
+def random_int_expr(depth=10):
+  if depth <= 0: return random.choice(v)
+  expr1 = random_int_expr(depth-1)
 
-def mod(expr, rng=None):
-  if rng is None: rng = random.randint(1,9)
-  return expr % rng, rng
+  # we give less weight to minimum and maximum than to arithmatic ops
+  ops = [
+    lambda: random.choices(unary_op, weights=[4, 4, 4, 4, 1, 1])[0](expr1),
+    # for the second operand its either another random exprssion or some subexpression of the first operand
+    lambda: random.choices(binary_op, [8, 1, 1, 1])[0](expr1, random_or_sub_expression_int(depth-1, expr1)),
+    lambda: random_bool_expr(3, random_or_sub_expression_int(depth-1, expr1)).where(expr1, random_or_sub_expression_int(depth-1, expr1)),
+  ]
+  # we give weight proportional to the amount of ops of
+  return random.choices(ops, weights=[6, 4, 1])[0]()
 
-def add_num(expr, rng=None):
-  if rng is None: rng = random.randint(-4,4)
-  return expr + rng, rng
+def random_bool_expr(depth=10, expr1=None):
+  if depth == 0: return True
+  if expr1 is None: expr1 = random_int_expr(depth-1)
+  expr2 = random.choice([random_or_sub_expression_int(depth-1, expr1), UOp.const(dtypes.int, random.randint(-10, 10))])
+  return random.choice(comp_ops)(expr1, expr2)
 
-def lt(expr, rng=None):
-  if rng is None: rng = random.randint(-4,4)
-  return expr < rng, rng
-
-def ge(expr, rng=None):
-  if rng is None: rng = random.randint(-4,4)
-  return expr >= rng, rng
-
-def le(expr, rng=None):
-  if rng is None: rng = random.randint(-4,4)
-  return expr <= rng, rng
-
-def gt(expr, rng=None):
-  if rng is None: rng = random.randint(-4,4)
-  return expr > rng, rng
 
 if __name__ == "__main__":
-  ops = [add_v, mul, add_num, div, mod]
   for i in range(50000):
-    if i % 10 == 0:
+    if i % 100 == 0:
       print(f"Running test {i}")
     upper_bounds = [*list(range(1, 10)), 16, 32, 64, 128, 256]
     u1 = Variable("v1", 0, random.choice(upper_bounds))
     u2 = Variable("v2", 0, random.choice(upper_bounds))
     u3 = Variable("v3", 0, random.choice(upper_bounds))
     v = [u1,u2,u3]
-    tape = [random.choice(ops) for _ in range(random.randint(2, 30))]
-    # 10% of the time, add one of lt, le, gt, ge
-    if random.random() < 0.1: tape.append(random.choice([lt, le, gt, ge]))
-    expr = UOp.const(dtypes.int, 0)
-    for t in tape:
-      expr, rng = t[0](expr)
-      if DEBUG >= 3: print(t[0].__name__, rng)
-    if DEBUG >=3: print(expr)
+    expr = random_int_expr(6)
+    # print(expr.render(simplify=False))
+
     with Context(CORRECT_DIVMOD_FOLDING=1):
       simplified_expr = expr.simplify()
 
     solver = z3.Solver()
-    solver.set(timeout=1000)  # some expressions take very long verify, but its very unlikely they actually return sat
+    solver.set(timeout=5000)  # some expressions take very long verify, but its very unlikely they actually return sat
     z3_sink = graph_rewrite(expr.sink(simplified_expr, u1, u2, u3), z3_renderer, ctx=(solver, {}))
     z3_expr, z3_simplified_expr = z3_sink.src[0].arg, z3_sink.src[1].arg
     check = solver.check(z3_simplified_expr != z3_expr)
@@ -85,7 +74,7 @@ if __name__ == "__main__":
         num = expr.simplify().substitute({u1:u1_val, u2:u2_val, u3:u3_val}).ssimplify()
         rn = expr.substitute({u1:u1_val, u2:u2_val, u3:u3_val}).ssimplify()
         if num==rn: print("z3 found a mismatch but the expressions are equal!!")
-      print("mismatched {expr.render()} at v1={m[v1]}; v2={m[v2]}; v3={m[v3]} = {num} != {rn}\n" +
+      print(f"mismatched {expr.render()} at v1={m[v1]}; v2={m[v2]}; v3={m[v3]} = {num} != {rn}\n" +
             "Reproduce with:\n" +
             f"v1=Variable(\"{u1.arg[0]}\", {u1.arg[1]}, {u1.arg[2]})\n" +
             f"v2=Variable(\"{u2.arg[0]}\", {u2.arg[1]}, {u2.arg[2]})\n" +
