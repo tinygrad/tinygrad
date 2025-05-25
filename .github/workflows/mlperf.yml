@@ -11,6 +11,7 @@ on:
 jobs:
   run_script_job:
     runs-on: [self-hosted, Linux, tinybox]
+    if: github.repository_owner == 'tinygrad'
 
     steps:
     - name: Checkout Code
