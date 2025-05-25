@@ -52,7 +52,7 @@ def _keccak_round(state: list[Tensor], rndc: int) -> list[Tensor]:
 
   # iota
   state[0] = state[0] ^ rndc
-  # state = [s.contiguous() for s in state]
+  state = [s.contiguous() for s in state]
 
   return state
 def _keccakf1600(state: list[Tensor]) -> list[Tensor]:
@@ -93,17 +93,18 @@ def kaccak(capacity: int, msg: Tensor, delim: int, output_len: int) -> Tensor:
 def shake128(msg: Tensor, output_len: int = 16) -> Tensor:
   return kaccak(256, msg, 0x1f, output_len)
 
-shake128_4kb = TinyJit(shake128)
+@TinyJit
+def shake128_4kb(msg: Tensor, bs) -> Tensor:
+  return shake128(msg.reshape(bs, 4096))
 
 def tree_hash(msg: Tensor) -> Tensor:
   vb = Variable("bs", 1, 4096).bind(msg.shape[1] // 4096)
-  chunks = msg.reshape(vb, 4096)
-  one_hashes = shake128_4kb(chunks).contiguous()
+  one_hashes = shake128_4kb(msg, vb).contiguous()
 
   print(one_hashes.shape)
 
   vb = Variable("bs", 1, 4096).bind(one_hashes.shape[0].unbind()[1] // 256)
-  two_hashes = shake128_4kb(one_hashes.reshape(vb, 4096))
+  two_hashes = shake128_4kb(one_hashes, vb)
 
   print(two_hashes.shape)
 
@@ -116,6 +117,8 @@ def string_to_uint8_tensor(s: str) -> Tensor:
   return Tensor([s.encode()], dtype=dtypes.uint8)
 
 if __name__ == "__main__":
+  shake128_4kb(Tensor.zeros(1, 4096), 1)
+
   a = Tensor.randint((1, 4 * 1024 * 1024), dtype=dtypes.uint8)
   b = tree_hash(a)
 
