@@ -10,10 +10,10 @@ seed = random.randint(0, 100)
 print(f"Seed: {seed}")
 random.seed(seed)
 
-unary_op = [lambda a:a+random.randint(-4, 4), lambda a: a*random.randint(-4, 4),
+unary_ops = [lambda a:a+random.randint(-4, 4), lambda a: a*random.randint(-4, 4),
             lambda a: a//random.randint(1, 9), lambda a: a%random.randint(1, 9),
             lambda a:a.maximum(random.randint(-10, 10)), lambda a:a.minimum(random.randint(-10, 10))]
-binary_op = [lambda a,b: a+b, lambda a,b: a*b, lambda a,b:a.maximum(b), lambda a,b:a.minimum(b)]
+binary_ops = [lambda a,b: a+b, lambda a,b: a*b, lambda a,b:a.maximum(b), lambda a,b:a.minimum(b)]
 comp_ops = [operator.lt, operator.le, operator.gt, operator.ge]
 
 def random_or_sub_expression_int(depth, expr):
@@ -26,9 +26,9 @@ def random_int_expr(depth=10):
 
   # we give more weight to arithmatic ops than to minimum and maximum
   ops = [
-    lambda: random.choices(unary_op, weights=[4, 4, 4, 4, 1, 1])[0](expr1),
+    lambda: random.choices(unary_ops, weights=[4, 4, 4, 4, 1, 1])[0](expr1),
     # for the second operand its either another random exprssion or some subexpression of the first operand
-    lambda: random.choices(binary_op, [8, 1, 1, 1])[0](expr1, random_or_sub_expression_int(depth-1, expr1)),
+    lambda: random.choices(binary_ops, [8, 1, 1, 1])[0](expr1, random_or_sub_expression_int(depth-1, expr1)),
     lambda: random_bool_expr(3, random_or_sub_expression_int(depth-1, expr1)).where(expr1, random_or_sub_expression_int(depth-1, expr1)),
   ]
   # we give weight proportional to the amount of ops in each branch
