@@ -504,7 +504,8 @@ add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, nam
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
 
 def _limit_inputs(x:UOp):
-  if x.tag is not None or not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS",{"METAL":32}.get(x._device,0))): return None
+  # TODO: webgpu is actually 10 on a mac
+  if x.tag is not None or not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS",{"METAL":32, "WEBGPU":8}.get(x._device,0))): return None
   assert MAX_BUFS > 2, "MAX_KERNEL_BUFFERS must be greater than 2"
   cnt = 1
   def gate_buffer(u:UOp):
