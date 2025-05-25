@@ -74,7 +74,14 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(10)
     b = Tensor.empty(10, device="CPU")
     c = a+b
-    with self.assertRaises(RuntimeError): check_schedule(c, 1)
+    with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
+
+  @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
+  def test_error_on_device_mismatch_alt(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty((1,), device="CPU").expand(10).contiguous()
+    c = a+b
+    with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and getenv("CAST_AFTER_EXPAND"), "need half and CAST_AFTER_EXPAND=1")
   @unittest.skip("CAST_AFTER_EXPAND is not supported")
@@ -347,14 +354,14 @@ class TestSchedule(unittest.TestCase):
     # a and b share the same underlying device memory
     self.assertIs(a.lazydata.realized, b.lazydata.realized)
 
-  def test_copy_dedups(self):
+  def test_clone_doesnt_dedup(self):
     src = Tensor.ones(4).contiguous().realize()
     a = src.clone()
     b = src.clone()
-    sched = check_schedule([a, b], 1, filter_sink=False)
+    sched = check_schedule([a, b], 2, filter_sink=False)
     run_schedule(sched)
     # a and b are assigned to the same device Buffer
-    self.assertIs(a.lazydata.realized, b.lazydata.realized)
+    self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
 
   # EMPTY is assigned to a unique device Buffer
 
@@ -2337,7 +2344,7 @@ class TestCopyFolding(unittest.TestCase):
     self.assertIs(b.base, a.base)
 
   def test_clone(self):
-    a = Tensor.empty(4).lazydata
+    a = Tensor.empty(4)
     check_schedule(a.clone(), 1, filter_sink=False)
 
   # NOTE: moving copy before view might change this
@@ -2346,7 +2353,7 @@ class TestCopyFolding(unittest.TestCase):
     view = a.shrink(((0, 2),))
     b = view.clone()
     # NOTE: this was sort of a bug making this 2
-    run_schedule(check_schedule(b, 3, filter_sink=False))
+    run_schedule(check_schedule(b, 2, filter_sink=False))
     self.assertEqual(b.lazydata.base.buffer.size, 2)
     self.assertEqual(b.lazydata.size, 2)
     self.assertListEqual(b.tolist(), [0, 1])
@@ -2356,7 +2363,7 @@ class TestCopyFolding(unittest.TestCase):
     view = a.reshape(2, 1).expand(2, 2)
     b = view.clone()
     run_schedule(check_schedule(b, 2, filter_sink=False))
-    self.assertEqual(b.lazydata.base.buffer.size, 2)
+    self.assertEqual(b.lazydata.base.buffer.size, 4)
     self.assertEqual(b.lazydata.size, 4)
     self.assertListEqual(b.tolist(), [[0, 0], [1, 1]])
 
