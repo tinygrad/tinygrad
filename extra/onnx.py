@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import Any, Sequence, cast, Literal, Callable
 import dataclasses, functools, io, math, types
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
@@ -8,6 +9,10 @@ from tinygrad.device import is_dtype_supported
 # ***** protobuf parsing ******
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, helper
 import numpy as np
+
+def has_field(onnx_type: TypeProto|SimpleNamespace, field):
+  if isinstance(onnx_type, TypeProto): return onnx_type.HasField(field)
+  return hasattr(onnx_type, field)
 
 def dtype_parse(onnx_dtype: int) -> DType:
   supported: dict[int, DType] = {
@@ -45,7 +50,7 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
              list(onnx_tensor.uint64_data):
     if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
     return Tensor(data, dtype=dtype).reshape(shape).realize()
-  if onnx_tensor.HasField("raw_data"):
+  if has_field(onnx_tensor, "raw_data"):
     np_buffer = np.frombuffer(onnx_tensor.raw_data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
     if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
     return Tensor(np_buffer, dtype=dtype)
@@ -53,12 +58,13 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
 
 def type_parse(onnx_type: TypeProto):
   elem_type = onnx_type
-  if elem_type.HasField("map_type") or elem_type.HasField("sparse_tensor_type") or elem_type.HasField("opaque_type"):
+  if has_field(elem_type, "map_type") or has_field(elem_type, "sparse_tensor_type") or has_field(elem_type, "opaque_type"):
     raise NotImplementedError("parsing for map_type, sparse_tensor_type and opaque_type are not implemented")
-  if is_optional := elem_type.HasField("optional_type"): elem_type = elem_type.optional_type.elem_type
-  if is_sequence := elem_type.HasField("sequence_type"): elem_type = elem_type.sequence_type.elem_type
-  if elem_type.HasField("tensor_type"):
-    shape = tuple(d.dim_param or d.dim_value for d in elem_type.tensor_type.shape.dim)
+  if is_optional := has_field(elem_type, "optional_type"): elem_type = elem_type.optional_type.elem_type
+  if is_sequence := has_field(elem_type, "sequence_type"): elem_type = elem_type.sequence_type.elem_type
+  if has_field(elem_type, "tensor_type"):
+    shape = tuple(getattr(d, "dim_param", None) or getattr(d, "dim_value") for d in elem_type.tensor_type.shape.dim) \
+      if has_field(elem_type.tensor_type, "shape") else None # test_identity_sequence_cpu
     dtype = dtype_parse(elem_type.tensor_type.elem_type)
     return OnnxValue(shape, dtype, is_optional, is_sequence)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
@@ -109,7 +115,7 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
 debug = int(getenv("DEBUGONNX", "0"))
 limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
-  def __init__(self, model: ModelProto):
+  def __init__(self, model: ModelProto|SimpleNamespace):
     # parse model protobuf
     self.is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model.graph.node)
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
