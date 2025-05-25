@@ -16,20 +16,20 @@ comp_ops = [operator.lt, operator.le, operator.gt, operator.ge]
 
 def random_or_sub_expression_int(depth, expr):
   sub_expr = random.choice([e for e in expr.toposort() if e.dtype is not dtypes.bool])
-  return random.choice([random_int_expr(depth-1), sub_expr, expr])
+  return random.choice([random_int_expr(depth-1), sub_expr])
 
 def random_int_expr(depth=10):
   if depth <= 0: return random.choice(v)
   expr1 = random_int_expr(depth-1)
 
-  # we give less weight to minimum and maximum than to arithmatic ops
+  # we give more weight to arithmatic ops than to minimum and maximum
   ops = [
     lambda: random.choices(unary_op, weights=[4, 4, 4, 4, 1, 1])[0](expr1),
     # for the second operand its either another random exprssion or some subexpression of the first operand
     lambda: random.choices(binary_op, [8, 1, 1, 1])[0](expr1, random_or_sub_expression_int(depth-1, expr1)),
     lambda: random_bool_expr(3, random_or_sub_expression_int(depth-1, expr1)).where(expr1, random_or_sub_expression_int(depth-1, expr1)),
   ]
-  # we give weight proportional to the amount of ops of
+  # we give weight proportional to the amount of ops in each branch
   return random.choices(ops, weights=[6, 4, 1])[0]()
 
 def random_bool_expr(depth=10, expr1=None):
@@ -60,7 +60,7 @@ if __name__ == "__main__":
     z3_expr, z3_simplified_expr = z3_sink.src[0].arg, z3_sink.src[1].arg
     check = solver.check(z3_simplified_expr != z3_expr)
     if check == z3.unknown and DEBUG>=1:
-      print("Skipped due to timeout:\n" +
+      print("Skipped due to timeout or interrupt:\n" +
             f"v1=Variable(\"{u1.arg[0]}\", {u1.arg[1]}, {u1.arg[2]})\n" +
             f"v2=Variable(\"{u2.arg[0]}\", {u2.arg[1]}, {u2.arg[2]})\n" +
             f"v3=Variable(\"{u3.arg[0]}\", {u3.arg[1]}, {u3.arg[2]})\n" +
@@ -79,10 +79,10 @@ if __name__ == "__main__":
             f"v1=Variable(\"{u1.arg[0]}\", {u1.arg[1]}, {u1.arg[2]})\n" +
             f"v2=Variable(\"{u2.arg[0]}\", {u2.arg[1]}, {u2.arg[2]})\n" +
             f"v3=Variable(\"{u3.arg[0]}\", {u3.arg[1]}, {u3.arg[2]})\n" +
-            f"expr = {expr.render(simplify=False)}\n" +
-            f"v1_val, v2_val, v3_val = v1.const_like({n1.as_long()}), v2.const_like({n2.as_long()}), v3.const_like({n3.as_long()})\n" +
+            f"expr = {expr}\n" +
+            f"v1_val, v2_val, v3_val = UOp.const(dtypes.int, {n1.as_long()}), UOp.const(dtypes.int, {n2.as_long()}), UOp.const(dtypes.int, {n3.as_long()})\n" +
             "num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()\n" +
             "rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()\n" +
-            f"assert num==rn, {num} != {rn}\n")
+            "assert num==rn, f\"{{num}} != {{rn}}\"\n")
 
     if DEBUG >= 2: print(f"validated {expr.render()}")
