@@ -1,7 +1,7 @@
 import random
 from z3 import IntVal, Solver, unsat, sat, ArithRef, Ints, If
 from tinygrad import Variable, dtypes
-from tinygrad.ops import UOp
+from tinygrad.uop.ops import UOp
 from tinygrad.helpers import DEBUG
 random.seed(42)
 

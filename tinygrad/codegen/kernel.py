@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
-from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, print_uops, PatternMatcher
-from tinygrad.ops import smax
-from tinygrad.spec import type_verify, shape_spec
+from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, print_uops
+from tinygrad.uop.ops import PatternMatcher, smax
+from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
 from tinygrad.dtype import ImageDType
@@ -42,7 +42,7 @@ class Kernel:
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     # verify AST matches the spec
-    if __debug__: type_verify(list(self.ast.toposort()), shape_spec)
+    if __debug__: type_verify(list(self.ast.toposort()), ast_spec)
 
     self.reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE_AXIS]
 
@@ -413,7 +413,7 @@ class Kernel:
       check(not self.vars, "does not work with symbolic shape")
       check(axis < self.first_upcast, "cannot pad upcasted")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
-      if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}, cache={}), f"cannot pad {r}")
+      if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")
       padded = False
       for i,st in enumerate(self.sts):
         if (s:=st.shape[axis]) == 1: continue  # reduced
@@ -550,7 +550,7 @@ class Kernel:
     # verify AST matches the spec after applying opts
     if __debug__: type_verify(list(modified_ast.toposort()))
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
-    #if __debug__: type_verify(list(modified_ast.toposort()), shape_spec)
+    #if __debug__: type_verify(list(modified_ast.toposort()), ast_spec)
 
     try:
       self.uops:list[UOp] = full_rewrite(modified_ast, self.opts)
