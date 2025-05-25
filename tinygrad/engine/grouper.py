@@ -1,3 +1,4 @@
+import itertools
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
@@ -500,8 +501,17 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
   assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
   return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
 
-add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"),
-                                lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
+def insert_gbarrier(ctx:dict[UOp, None], x:UOp):
+  if x.tag is not None: return None
+  if x in ctx: return x.replace(tag=1).gbarrier()
+  cnt = itertools.count(1)
+  def found_global(u:UOp):
+    if (is_global:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): next(cnt)
+    return not is_global
+  x.toposort(gate=found_global)
+  if next(cnt)>=31: return x.replace(tag=1).gbarrier()
+
+add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"), insert_gbarrier),])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 @track_rewrites(name_fxn=get_name)

@@ -83,6 +83,31 @@ class TestSchedule(unittest.TestCase):
     c = a+b
     with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
 
+  def test_limit_buffers(self):
+    a = Tensor(0).contiguous().realize()
+    N = 31
+    for i in range(1,N):
+      a = a + Tensor(i).contiguous()
+    self.assertEqual(a.item(), sum(range(N)))
+
+  def test_limit_buffers_prerealized(self):
+    a = Tensor(0).contiguous().realize()
+    N = 31
+    bufs = [Tensor(i).contiguous().realize() for i in range(1,N)]
+    for b in bufs:
+      a = a + b
+    self.assertEqual(a.item(), sum(range(N)))
+
+  def test_limit_buffers_split(self):
+    a = Tensor(0).contiguous().realize()
+    N = 31
+    bufs = [Tensor(i).contiguous().realize() for i in range(1,N//2)]
+    for i in range(N//2,N):
+      a = a + Tensor(i).contiguous()
+    for b in bufs:
+      a = a + b
+    self.assertEqual(a.item(), sum(range(N)))
+
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and getenv("CAST_AFTER_EXPAND"), "need half and CAST_AFTER_EXPAND=1")
   @unittest.skip("CAST_AFTER_EXPAND is not supported")
   def test_expand_buffer_before_cast(self):
