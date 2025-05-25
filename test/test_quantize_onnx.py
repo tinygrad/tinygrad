@@ -67,13 +67,12 @@ def get_quantized_model(sz):
 class TestQuantizeOnnxCPU(unittest.TestCase):
   def test_quant_128(self, sz=128):
     try:
-      import onnx
+      import onnx # noqa: F401 # pylint: disable=unused-import
     except ImportError:
       raise unittest.SkipTest()
     from tinygrad.frontend.onnx import OnnxRunner
     out_file = get_quantized_model(sz)
-    onnx_model = onnx.load(out_file)
-    run_onnx = OnnxRunner(onnx_model)
+    run_onnx = OnnxRunner(out_file)
     inp = Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32))
     with Context(DONT_REALIZE_EXPAND=1, QUANTIZE=1):
       sched = run_onnx({"input":inp})["output"].schedule()
