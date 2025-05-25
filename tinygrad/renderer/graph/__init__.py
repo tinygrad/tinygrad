@@ -26,16 +26,16 @@ class GraphRenderer(Renderer):
     # construct the kernel graph
     # designate the input and output nodes
     self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
-    assert len(no_realize_uops) == 0, "having GraphRenderer inside another GraphRenderer is not supported"
+
     # disallow realization of Tensors whose lazydata contains inputs, to preserve all dependence of compute on input in the constructed graph
+    assert len(no_realize_uops) == 0, "having GraphRenderer inside another GraphRenderer is not supported"
     no_realize_uops.update(self.inputs)
     with Context(LIMIT_REALIZE=1):
       ret_tensors: list[Tensor] = [*filter(lambda t:isinstance(t, Tensor), r if isinstance(r:=fxn(*args, **kwargs), (list, tuple)) else [r])]
     no_realize_uops.clear()
     assert (l:=len(ret_tensors)) and l == len(get_state_dict(r)), "One or more Tensors must be returned as a singleton or elements of a list/tuple."
-    if not isinstance(compute_device:=ret_tensors[0].device, str): raise RuntimeError(f"Multiple devices not supported: {compute_device}")
-    # Ensure random seeds/counter are realized and in device memory
-    Tensor.realize(Tensor._device_seeds[compute_device], Tensor._device_rng_counters[compute_device])
+    if not isinstance(device:=ret_tensors[0].device, str): raise RuntimeError(f"Multiple devices not supported: {device}")
+    rng_tensors = [Tensor._device_seeds[device].realize(), Tensor._device_rng_counters[device].realize()] if device in Tensor._device_seeds else []
 
     # linearize the kernel graph
     schedule, var_vals = create_schedule_with_vars(sink:=UOp.sink(*[t.kernelize().lazydata for t in ret_tensors]))
@@ -61,7 +61,7 @@ class GraphRenderer(Renderer):
 
     for si, ei in lower_schedule(schedule):
       assert isinstance(ei.prg, CompiledRunner), f"Unsupported data xfer between bufs:\n{ei.bufs}\n\nDid you realize all state Tensors before export?"
-      for buf in ei.bufs: assert buf is not None and buf.device == compute_device, "All compute and returned Tensor(s) must be on the same device"
+      for buf in ei.bufs: assert buf is not None and buf.device == device, "All compute and returned Tensor(s) must be on the same device"
       for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
         if buf not in buffer_replace:
           if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[add_buffer(buf, True)] = f"buf_{next(ctr)}"
@@ -73,10 +73,11 @@ class GraphRenderer(Renderer):
     self.bufs.update({assigned.get(b, b): self.bufs.get(b, f"buf_{next(ctr)}") for b in buffer_replace.values()})
     for i, ei in enumerate(self.eis): self.eis[i] = ExecItem(ei.prg, [assigned.get(cast(Buffer, b), b) for b in ei.bufs])
 
-    assert not any(missing:=[not b.is_allocated() for b in self.state_bufs]), f"Unrealized bufs: {missing}\nDid you realize all tensors with state?"
     # build complete state_dict, rename state bufs with meaningful names from tensor_names
+    assert not any(missing:=[not b.is_allocated() for b in self.state_bufs]), f"Unrealized bufs: {missing}\nDid you realize all tensors with state?"
     self.state_dict = {k:v for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs} if tensor_names else {}
-    self.state_dict.update({"random_seeds": Tensor._device_seeds[compute_device], "random_counter": Tensor._device_rng_counters[compute_device]})
+    if rng_tensors and all((b:=t.lazydata.base.realized) and b in self.state_bufs for t in rng_tensors):
+      self.state_dict.update({"random_seeds": rng_tensors[0], "random_counter": rng_tensors[1]})
     for k,v in self.state_dict.items(): v.lazydata = v.lazydata.base # non-contiguous views cause data permutation in safe_save
     self.state_bufs.update({cast(Buffer, v.lazydata.base.realized):k for k,v in self.state_dict.items()})
     self.state_dict.update({k:Tensor(bytes(b.as_buffer()), "CPU", b.dtype).realize() for b,k in self.state_bufs.items() if k not in self.state_dict})

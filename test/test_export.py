@@ -17,3 +17,6 @@ class TestExportWebGPU(unittest.TestCase):
     for t in get_parameters(model): t.realize()
     _, state_dict = TinyJit(model.mutate_weight).export_webgpu(Tensor([7]))
     assert len(state_dict) == 1 and list(state_dict.values())[0].tolist() == [1,2,3]
+
+if __name__ == "__main__":
+  unittest.main()
