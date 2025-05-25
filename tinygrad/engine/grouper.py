@@ -503,7 +503,7 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
 add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"),
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
 
-def _limit_inputs(x:UOp):
+def limit_inputs(x:UOp):
   # TODO: webgpu is actually 10 on a mac
   if x.tag is not None or not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS",{"METAL":32, "WEBGPU":8}.get(x._device,0))): return None
   assert MAX_BUFS > 2, "MAX_KERNEL_BUFFERS must be greater than 2"
@@ -515,7 +515,10 @@ def _limit_inputs(x:UOp):
   x.toposort(gate=gate_buffer)
   if cnt >= MAX_BUFS-1: return x.replace(tag=1).gbarrier()
 
-limit_inputs = PatternMatcher([(UPat(GroupOp.All-{Ops.SINK, Ops.GBARRIER, Ops.ASSIGN}, name="x"), _limit_inputs),])
+split_kernels = PatternMatcher([
+  (UPat(GroupOp.All-{Ops.SINK, Ops.GBARRIER, Ops.ASSIGN}, name="x"), limit_inputs),
+  (UPat(Ops.GBARRIER, src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
+])
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
@@ -530,7 +533,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # insert gbarriers in places determined by the realize map
   realize_map = group_realizes(tensor_map[big_sink])
   tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], limit_inputs, input_map=tensor_map, name="limit_input_buffers")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], split_kernels, input_map=tensor_map, name="split_kernels")
   tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
 
   # TODO: move view_left/view_right here
