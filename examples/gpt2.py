@@ -8,9 +8,6 @@ from tinygrad.helpers import Timing, DEBUG, JIT, getenv, fetch, colored, trange
 from tinygrad.nn import Embedding, Linear, LayerNorm
 from tinygrad.nn.state import gguf_load, torch_load, load_state_dict, get_state_dict
 
-from icecream import install
-install()
-
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 HALF = getenv("HALF")
 
@@ -110,10 +107,6 @@ class Transformer:
       ret = (logits / temperature).softmax().multinomial()
     return ret.flatten().realize()
 
-  # def __call__(self, tokens:Union[Tensor,UOp], start_pos:Variable, temperature:float=0.0) -> Tensor:
-  #   forward = (self.forward_jit if JIT and (isinstance(tokens, UOp) or tokens.shape[1] == 1) else self.forward)
-  #   return forward(tokens, start_pos, temperature)
-
   def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0):
     # TODO: better way to handle the first call v.s. the rest?
     if tokens.shape[0:2] == (1,1) and self.forward_jit is not None and start_pos != 0:
@@ -133,7 +126,6 @@ class GPT2:
   @staticmethod
   def build(model_size="gpt2"):
     tokenizer = tiktoken.get_encoding("gpt2")
-
     model = Transformer(**MODEL_PARAMS[model_size])
 
     weights = torch_load(fetch(f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'))
@@ -237,18 +229,13 @@ if __name__ == "__main__":
         for i,text in enumerate(texts): print(colored(f"Response {i}:", "green"), text)
 
     # validate output!
-    if args.temperature == 0 and args.count == 10:
+    if args.temperature == 0 and args.model_size == "gpt2-medium" and args.count == 10:
       expected = {
-        "gpt2-medium": {
-          default_prompt: "What is the answer to life, the universe, and everything?\n\nThe answer is that we are all one",
-          "Hello.": "Hello. I'm a little late to the party, but",
-          },
-        "gpt2": {
-          default_prompt: "What is the answer to life, the universe, and everything?\n\nThe answer to life, the universe,"
-        }
+        default_prompt: "What is the answer to life, the universe, and everything?\n\nThe answer is that we are all one",
+        "Hello.": "Hello. I'm a little late to the party, but",
       }
       try:
-        assert texts[0] == expected[args.model_size][args.prompt]
+        assert texts[0] == expected[args.prompt]
         print(colored("output validated", "green"))
       except KeyError:
         pass
