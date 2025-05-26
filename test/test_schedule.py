@@ -98,7 +98,6 @@ class TestSchedule(unittest.TestCase):
       run_schedule(check_schedule(xt, 2))
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
 
-  @unittest.expectedFailure # TODO: failing because of can_chase
   def test_indexing_scalars_multiple_dims(self):
     X = Tensor.randn(2, 3).realize()
     xt = X[Tensor(0)][Tensor(1)]
@@ -989,14 +988,14 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmin(-1)
-    run_schedule(check_schedule(out, 3))
+    run_schedule(check_schedule(out, 2))
     np.testing.assert_equal(out.numpy(), x.numpy().argmin(axis=-1))
 
   def test_argmax_multireduce_fusion(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmax(-1)
-    run_schedule(check_schedule(out, 3))
+    run_schedule(check_schedule(out, 2))
     np.testing.assert_equal(out.numpy(), x.numpy().argmax(axis=-1))
 
   def test_scaled_dot_product_attention_multireduce_fusion(self):
@@ -1581,7 +1580,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(10, 20).realize()
     out = x.argmax(1)
-    run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
+    run_schedule(check_schedule(out, 2))
 
   def test_conv2d(self): _test_conv2d(7)
   def test_conv2d_fused(self): _test_conv2d(6, FUSE_CONV_BW=1)
@@ -1712,6 +1711,13 @@ class TestIndexing(unittest.TestCase):
       if FUSE_ARANGE: self.assertEqual(len(kernels), cnt)
       for ei in lowered: ei.run(do_update_stats=True)
     return s
+
+  # TODO: fix this
+  @unittest.expectedFailure
+  def test_realize_arange(self):
+    t = Tensor.arange(6).reshape(2, 3)
+    with Context(FUSE_ARANGE=1):
+      self.assertEqual(t.sum(axis=1).tolist(), [3, 12])
 
   def test_simple_indexing(self):
     X = Tensor.randn(10, 10).realize()

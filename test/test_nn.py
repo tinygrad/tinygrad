@@ -530,7 +530,7 @@ class TestNN(unittest.TestCase):
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
-  def test_embedding_one_kernel(self, ops=41410, kcount=3):
+  def test_embedding_one_kernel(self, ops=612_000, kcount=2):
     GlobalCounters.reset()
     layer = Embedding(20, 30)
     layer.weight = Tensor.zeros_like(layer.weight).contiguous()
@@ -551,7 +551,12 @@ class TestNN(unittest.TestCase):
     print(f"Embedding used {GlobalCounters.global_ops} ops")
     self.assertLessEqual(GlobalCounters.global_ops, ops)
 
-  # TODO: fused with opts uses more ops
+# TODO: fused with opts uses more ops
+
+  def test_embedding_one_kernel_unfused(self):
+    with Context(FUSE_ARANGE=0, NOOPT=0):
+      self.test_embedding_one_kernel(ops=41410, kcount=3)
+
   def test_embedding_one_kernel_fused(self):
     with Context(FUSE_ARANGE=1, NOOPT=0):
       self.test_embedding_one_kernel(ops=612_000, kcount=2)
