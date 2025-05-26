@@ -216,7 +216,7 @@ if __name__ == "__main__":
   gpt2 = GPT2.build_gguf(args.model_size) if args.model_size.startswith("gpt2_gguf_") else GPT2.build(args.model_size)
 
   if args.benchmark != -1:
-    gpt2.model(Tensor.rand(args.batch_size, args.benchmark), Variable("a", 0, MAX_CONTEXT).bind(0)).realize()
+    gpt2.model(Tensor.rand(args.batch_size, args.benchmark), 0).realize()
   else:
     texts = gpt2.generate(args.prompt, args.count, args.temperature, timing=args.timing, batch_size=args.batch_size)
     if not args.noshow:
