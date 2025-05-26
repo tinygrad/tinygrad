@@ -21,7 +21,6 @@ class Attention:
     self.head_dim = dim // n_heads
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], mask:Optional[Tensor]) -> Tensor:
-    if mask is not None or start_pos == 0:
 
     if HALF: x = x.half()
     xqkv = self.c_attn(x)
