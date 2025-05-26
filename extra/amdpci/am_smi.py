@@ -252,8 +252,8 @@ class SMICtx:
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument("--pids", action="store_true", help="Print process IDs for all AM devices")
-  parser.add_argument("--kill", action="store_true", help="Kill all AM devices")
+  parser.add_argument("--pids", action="store_true", help="Print pids for all AM devices")
+  parser.add_argument("--kill", action="store_true", help="Kill all pids associated with AM devices. Valid only with --pids")
   parser.add_argument("--dev", type=str, default=None, help="PCI bus ID of the AM device to monitor (e.g., 0000:01:00.0)")
   args = parser.parse_args()
 
