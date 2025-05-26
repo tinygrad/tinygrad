@@ -761,7 +761,6 @@ def get_onnx_ops():
     return _op_integer(Tensor.matmul, [A,B], [a_zero_point,b_zero_point])
 
   # ***** Training Ops *****
-  # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
   # NOTE: onnx training ops actually don't need the state for optim, all the ops work in a functional way, but we still can reuse optim.py code
   @_onnx_training(3)
   def Adagrad(R:Tensor, T:int, *inputs:Tensor, decay_factor:float=0.0, epsilon:float=0.0, norm_coefficient:float=0.0):
@@ -778,7 +777,7 @@ def get_onnx_ops():
           norm_coefficient_post:float=0.0):
     from tinygrad.nn.optim import Adam as TinyAdam
     X, G, V, H = inputs
-    G, V, H = G.detach(), V.detach(), H.detach()  # TODO we shouldn't need these detaches
+    G, V, H = G.detach(), V.detach(), H.detach()
     X.grad = norm_coefficient * X.detach() + G
     opt = TinyAdam([X], b1=alpha, b2=beta, eps=epsilon)
     opt.m, opt.v, opt.lr = [V], [H], R
@@ -794,13 +793,12 @@ def get_onnx_ops():
 
   @_onnx_training(3)
   def Momentum(R:Tensor, T:int, *inputs:Tensor, alpha:float, beta:float, mode:str, norm_coefficient:float):
-    from tinygrad.nn.optim import SGD
-    X, G, V = inputs
-    G, V = G.detach(), V.detach()
-    X.grad = (norm_coefficient * X.detach() + G) * (beta if T > 0 else 1)
-    opt = SGD([X], momentum=alpha, nesterov=(mode=="nesterov"))
-    opt.b, opt.lr = [V], R
-    opt.step()
+    X, G, V = (i.detach() for i in inputs)
+    grad = norm_coefficient * X + G
+    # NOTE: this beta_adjusted term makes it so we can't use SGD for nesterov
+    beta_adjusted = beta if T > 0 else 1
+    V.assign(alpha * V + grad * beta_adjusted)
+    X.assign(X - R * (V if mode == "standard" else (grad + alpha * V)))
     return [X, V]
 
   def Gradient(*inputs:Tensor, y:str, intermediate_tensors:dict[str, Tensor], **_):
