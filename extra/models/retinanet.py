@@ -94,12 +94,18 @@ class RetinaNet:
       for offsets_level, scores_level, anchors_level in zip(offsets_img, scores_img, anchors):
         # remove low scoring boxes
         scores_level = scores_level.flatten()
-        keep_idxs = scores_level > score_thresh
-        scores_level = scores_level.masked_select(keep_idxs)
+        topk_idxs_cumsum = (scores_level > score_thresh).cumsum()
+        topk_idxs = Tensor.zeros(topk_idxs_cumsum[-1].item(), dtype=dtypes.int32)
+        topk_idxs = topk_idxs.scatter(0, topk_idxs_cumsum, 1, reduce="add").cumsum()
+        scores_level = scores_level[topk_idxs]
 
         # keep topk
-        num_topk = min(scores_level.shape[0], topk_candidates)
-        detections.append(num_topk)
+        if scores_level.numel() > 0:
+          num_topk = min(scores_level.shape[0], topk_candidates)
+          scores_level, idxs = scores_level.topk(num_topk)
+          topk_idxs = topk_idxs[idxs]
+
+        detections.append(scores_level)
 
     return detections
 
@@ -125,11 +131,11 @@ class RetinaNet:
         # keep topk
         topk_idxs = np.where(keep_idxs)[0]
         num_topk = min(len(topk_idxs), topk_candidates)
-        detections.append(num_topk)
-        # sort_idxs = scores_per_level.argsort()[-num_topk:][::-1]
-        # topk_idxs, scores_per_level = topk_idxs[sort_idxs], scores_per_level[sort_idxs]
+        sort_idxs = scores_per_level.argsort()[-num_topk:][::-1]
+        topk_idxs, scores_per_level = topk_idxs[sort_idxs], scores_per_level[sort_idxs]
+        detections.append(scores_per_level)
 
-    #     # bbox coords from offsets
+        # bbox coords from offsets
     #     anchor_idxs = topk_idxs // self.num_classes
     #     labels_per_level = topk_idxs % self.num_classes
     #     boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level[anchor_idxs])
