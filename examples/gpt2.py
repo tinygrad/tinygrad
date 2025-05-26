@@ -47,7 +47,7 @@ class Attention:
     return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, self.dim))
 
 class FeedForward:
-def __init__(self, dim, hidden_dim):
+  def __init__(self, dim, hidden_dim):
     self.c_fc = Linear(dim, hidden_dim, bias=True)
     self.c_proj = Linear(hidden_dim, dim, bias=True)
 
