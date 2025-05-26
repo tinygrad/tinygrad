@@ -8,7 +8,8 @@ try:
 except ModuleNotFoundError:
   raise unittest.SkipTest("onnx not installed, skipping onnx test")
 from tinygrad.frontend.onnx import OnnxRunner
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, dtypes
+from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import CI, fetch, temp, Context
 
 def run_onnx_torch(onnx_model, inputs):
@@ -24,6 +25,7 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/mod
 np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "openpilot uses float16")
   def test_benchmark_openpilot_model(self):
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
     run_onnx = OnnxRunner(onnx_model)
@@ -36,7 +38,7 @@ class TestOnnxModel(unittest.TestCase):
         "nav_features": np.zeros((1, 256)),
         "features_buffer": np.zeros((1, 99, 128)),
     }
-      inputs = {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in np_inputs.items()}
+      inputs = {k:Tensor(v.astype(np.float16), requires_grad=False) for k,v in np_inputs.items()}
       return inputs
 
     for _ in range(7):
@@ -68,6 +70,7 @@ class TestOnnxModel(unittest.TestCase):
       ps = stats.sort_stats(pstats.SortKey.TIME)
       ps.print_stats(30)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "openpilot uses float16")
   def test_openpilot_model(self):
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
     run_onnx = OnnxRunner(onnx_model)
