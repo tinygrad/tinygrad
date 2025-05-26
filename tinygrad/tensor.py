@@ -1416,7 +1416,7 @@ class Tensor(MathTrait):
     if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
     dim = self._resolve_dim(dim)
     perm_to_last = tuple(i for i in range(self.ndim) if i != dim) + (dim,)
-    return self.permute(perm_to_last)._pool((size,), step).permute(*argsort(perm_to_last), self.ndim)
+    return self.permute(perm_to_last)._pool((size,), step).permute(argsort(perm_to_last) + (self.ndim,))
 
   def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
     """
