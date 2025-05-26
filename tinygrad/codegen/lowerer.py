@@ -243,7 +243,7 @@ def push_cast_half_right(alu:UOp):
 
 pm_push_cast = PatternMatcher([
   #  --- cast folding ---
-  (UPat.var("f32", dtype=dtypes.float32).cast(dtypes.half), lambda f32: f32),
+  (UPat.var("f32", dtype=dtypes.float32).cast(dtypes.half).cast(dtypes.float32), lambda f32: f32),
   #  --- pushes cast to half right through alus ---
   (UPat(GroupOp.ALU, name="alu"), push_cast_half_right),
 ])
