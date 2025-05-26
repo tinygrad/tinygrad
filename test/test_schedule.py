@@ -99,12 +99,13 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
 
   def test_add_chain_buffers(self):
-    N = 36
-    with Context(DEBUG=0, TRACK_MATCH_STATS=0):
-      bufs = [Tensor((i,)).contiguous().realize() for i in range(N)]
+    N = 31
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+      bufs = [Tensor(i).reshape((1,)).contiguous().realize() for i in range(N)]
     for X in range(1,N):
+      print("--------")
       root = bufs[0]
-      for i in range(0,N,X):
+      for i in range(1,N,X):
         root = root + functools.reduce(lambda a,b:a+b, bufs[i:i+X])
       self.assertEqual(root.item(), sum(range(N)))
 

@@ -503,23 +503,25 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
 add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"),
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
 
+# TODO: verify webgpu
 DEVICE_MAX_BUFS = {"METAL":32, "WEBGPU":8}
 def limit_bufs(root:UOp):
-  # skip if this is already tagged
   if root.tag is not None: return None
   # check if backend has a buffer limit
   device = root.device if isinstance(root.device, str) else root.device[0].split(":")[0]
   if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return None
-  # count number of unique buffers in this op (including self)
+  # count number of unique buffers flowing into this op
   bufs: set[UOp] = set()
   def gate_input(u:UOp):
     if (is_buffer:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): bufs.add(u)
     return u is root or not is_buffer
   root.toposort(gate=gate_input)
-  if len(bufs)<=MAX_BUFS: return None
+  # NOTE: this -1 is for the output buffer
+  if len(bufs)>=MAX_BUFS-1:
+    return root.replace(src=tuple(s if s.base in bufs else s.replace(tag=1).gbarrier() for s in root.src))
 
 split_kernels = PatternMatcher([
-  (UPat((Ops.GBARRIER, Ops.ASSIGN), name="root"), limit_bufs),
+  (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs),
   (UPat((Ops.GBARRIER, Ops.CONTIGUOUS), src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
 ])
 
