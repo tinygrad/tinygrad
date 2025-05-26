@@ -1398,9 +1398,9 @@ class Tensor(MathTrait):
     """
     Unfolds the tensor along dimension `dim` into overlapping windows.
 
-    Each window has length `size` and begins every `step` elements of `t`.
+    Each window has length `size` and begins every `step` elements of `self`.
     Returns the input tensor with dimension `dim` replaced by dims `(n_windows, size)`
-    where `n_windows = (t.shape[dim] - size) // step + 1`.
+    where `n_windows = (self.shape[dim] - size) // step + 1`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     unfolded = Tensor.arange(8).unfold(0,2,2)
@@ -1416,7 +1416,7 @@ class Tensor(MathTrait):
     if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
     dim = self._resolve_dim(dim)
     perm_to_last = tuple(i for i in range(self.ndim) if i != dim) + (dim,)
-    return self.permute(perm_to_last)._pool(k_=(size,), stride=step, dilation=1).permute(*argsort(perm_to_last), self.ndim)
+    return self.permute(perm_to_last)._pool((size,), step).permute(*argsort(perm_to_last), self.ndim)
 
   def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
     """
