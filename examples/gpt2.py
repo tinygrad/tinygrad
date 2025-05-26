@@ -178,7 +178,7 @@ class GPT2:
 
   def generate(self, prompt:str, max_length:int, temperature:float, timing:bool=False, batch_size:int=1):
     prompt_tokens = self.tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})
-    tokens = [prompt_tokens[:] for _ in range(batch_size)]
+    toks = [prompt_tokens[:] for _ in range(batch_size)]
     start_pos = 0
     for _ in trange(max_length, disable=(timing==True)):
       GlobalCounters.reset()
@@ -187,10 +187,10 @@ class GPT2:
       with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                   f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                   (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
-        toks = self.model(Tensor([t[start_pos:] for t in tokens]), start_pos, temperature).tolist()
-      for i,t in enumerate(toks): tokens[i].append(t)
-      start_pos = len(tokens[0]) - 1
-    return [self.tokenizer.decode(t) for t in tokens]
+        new_toks = self.model(Tensor([t[start_pos:] for t in toks]), start_pos, temperature).tolist()
+      for i,t in enumerate(new_toks): toks[i].append(t)
+      start_pos = len(toks[0]) - 1
+    return [self.tokenizer.decode(t) for t in toks]
 
 # **** main code ****
 
