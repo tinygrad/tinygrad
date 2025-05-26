@@ -53,8 +53,8 @@ class FeedForward:
   def __call__(self, x:Tensor) -> Tensor: return self.c_proj(self.c_fc(x).gelu())
 
 class TransformerBlock:
-  def __init__(self, dim, n_heads, norm_eps, max_context):
-    self.attn = Attention(dim, n_heads, max_context)
+  def __init__(self, dim, n_heads, norm_eps):
+    self.attn = Attention(dim, n_heads)
     self.mlp = FeedForward(dim, 4*dim)
     self.ln_1 = LayerNorm(dim, norm_eps)
     self.ln_2 = LayerNorm(dim, norm_eps)
@@ -64,11 +64,11 @@ class TransformerBlock:
     return (h + self.mlp(self.ln_2(h)))
 
 class Transformer:
-  def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, max_seq_len=1024, jit=True, max_context=128):
+  def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, max_seq_len=1024):
     self.vocab_size = vocab_size
     self.wte = Embedding(vocab_size, dim)
     self.wpe = Embedding(max_seq_len, dim)
-    self.h = [TransformerBlock(dim, n_heads, norm_eps, max_context) for _ in range(n_layers)]
+    self.h = [TransformerBlock(dim, n_heads, norm_eps) for _ in range(n_layers)]
     self.ln_f = LayerNorm(dim, norm_eps)
     self.lm_head = Linear(dim, vocab_size, bias=False)
     self.forward_jit = TinyJit(self.forward) if JIT else None
