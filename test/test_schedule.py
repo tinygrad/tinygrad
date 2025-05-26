@@ -74,7 +74,14 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(10)
     b = Tensor.empty(10, device="CPU")
     c = a+b
-    with self.assertRaises(RuntimeError): check_schedule(c, 1)
+    with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
+
+  @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
+  def test_error_on_device_mismatch_alt(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty((1,), device="CPU").expand(10).contiguous()
+    c = a+b
+    with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and getenv("CAST_AFTER_EXPAND"), "need half and CAST_AFTER_EXPAND=1")
   @unittest.skip("CAST_AFTER_EXPAND is not supported")
@@ -90,6 +97,17 @@ class TestSchedule(unittest.TestCase):
     with Context(FUSE_ARANGE=1):
       run_schedule(check_schedule(xt, 2))
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
+
+  @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
+  def test_add_chain_buffers(self):
+    N = 31
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+      bufs = [Tensor(i).reshape((1,)).contiguous().realize() for i in range(N)]
+    for X in range(1,N):
+      root = bufs[0]
+      for i in range(1,N,X):
+        root = root + functools.reduce(lambda a,b:a+b, bufs[i:i+X])
+      self.assertEqual(root.item(), sum(range(N)))
 
   @unittest.expectedFailure # TODO: failing because of can_chase
   def test_indexing_scalars_multiple_dims(self):
