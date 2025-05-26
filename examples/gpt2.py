@@ -126,7 +126,7 @@ class GPT2:
   def build(model_size="gpt2"):
     tokenizer = tiktoken.get_encoding("gpt2")
 
-    model = Transformer(**MODEL_PARAMS[model_size])
+    model = Transformer(**MODEL_PARAMS[model_size], max_context=MAX_CONTEXT, jit=bool(JIT))
     weights = torch_load(fetch(f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'))
     # special treatment for the Conv1D weights we need to transpose
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
@@ -168,7 +168,7 @@ class GPT2:
       for ostr, ns in replaces: key = key.replace(ostr, ns)
       return key
     state_dict = { _remap_gguf_key(k): v for k, v in state_dict.items() }
-    model = Transformer(**gpt2_params)
+    model = Transformer(**gpt2_params, max_context=MAX_CONTEXT, jit=bool(JIT))
     load_state_dict(model, state_dict)
     return GPT2(model, tiktoken.get_encoding("gpt2"))
 
