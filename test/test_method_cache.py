@@ -36,10 +36,10 @@ class TestMethodCache(unittest.TestCase):
     model = Transformer(**args_tiny)
     for v in get_state_dict(model).values(): v.assign(Tensor.empty(*v.shape, dtype=v.dtype).realize())
     # NOTE: you have to do this twice due to the k-v cache
-    for i in range(3): model(Tensor([[1,2,3,4]]), Variable("start_pos", 0, 10).bind(i)).realize()
-    for i in range(3): model(Tensor([[1,2,3,4]]), Variable("start_pos", 0, 10).bind(i)).realize()
+    for i in range(3): model(Tensor([[1,2,3,4]]), i).realize()
+    for i in range(3): model(Tensor([[1,2,3,4]]), i).realize()
     Device[Device.DEFAULT].compiler = None
-    for i in range(3): model(Tensor([[1,2,3,4]]), Variable("start_pos", 0, 10).bind(i)).realize()
+    for i in range(3): model(Tensor([[1,2,3,4]]), i).realize()
 
 if __name__ == '__main__':
   unittest.main()
