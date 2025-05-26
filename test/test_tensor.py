@@ -904,5 +904,43 @@ class TestIdxUpcast(unittest.TestCase):
     a = Tensor.empty(2**11, 2**11, 1, dtype=dtypes.int8).permute((2, 0, 1)).expand((2**9+10, -1, -1)).contiguous()
     a.realize()
 
+class TestIndexPut(unittest.TestCase):
+  def test_index_put_basic(self):
+    tgt = Tensor.zeros((3, 3))
+    tgt = tgt.index_put(Tensor([[0, 0], [1, 2]]), Tensor([5.0, 9.0]))
+    np.testing.assert_equal(tgt.numpy(), [[5, 0, 0], [0, 0, 9], [0, 0, 0]])
+
+  def test_index_put_scalar(self):
+    tgt = Tensor.zeros((2, 2))
+    tgt = tgt.index_put(Tensor([[0, 0], [1, 1]]), Tensor([7.0]))
+    np.testing.assert_equal(tgt.numpy(), [[7, 0], [0, 7]])
+
+  def test_index_put_fill(self):
+    tgt = Tensor.zeros((2, 2, 2))
+    tgt = tgt.index_put(Tensor([[0, 0, 0], [0, 1, 1]]), Tensor([1.0, 2.0]))
+    np.testing.assert_equal(tgt.numpy(), [[[1.,0.],[0.,2.]],[[0.,0.],[0.,0.]]])
+
+  def test_single_dim(self):
+    tgt = Tensor.zeros(4)
+    tgt = tgt.index_put(Tensor([2,3]), Tensor([1.0, 2.0]))
+    np.testing.assert_equal(tgt.numpy(), [0,0,1.0,2.0])
+
+  def test_index_put_shape_error(self):
+    tgt = Tensor.zeros((2, 2))
+    try:
+      tgt = tgt.index_put(Tensor([[0, 0], [1, 1]]), Tensor([[1.0], [2.0]]))
+      assert False
+    except Exception:
+      pass
+
+  def test_index_put_accumulate(self):
+    tgt = Tensor.zeros((2, 2))
+    indices = Tensor([[0, 1], [1, 1]])
+    values = Tensor([10.0, 20.0])
+    out = tgt.index_put(indices, values, accumulate=True)
+    out2 = out.index_put(indices, values, accumulate=True)
+    np.testing.assert_array_equal(out.numpy(), [[0, 10.], [0, 20.]])
+    np.testing.assert_array_equal(out2.numpy(), [[0, 20.], [0, 40.]])
+
 if __name__ == '__main__':
   unittest.main()

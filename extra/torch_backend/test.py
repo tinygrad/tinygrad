@@ -11,6 +11,13 @@ else:
   device = "tiny"
 
 class TestTorchBackend(unittest.TestCase):
+  def test_index_put(self):
+    y = torch.index_put(torch.zeros(5, device=device), (torch.tensor([1,3,0]),), torch.tensor([10.0, 20.0, 30.0])).cpu().numpy()
+    np.testing.assert_array_equal(y, torch.tensor([30.0, 10.0, 0, 20.0, 0]).numpy())
+
+    y2 = torch.index_put(torch.zeros([2,2], device=device), (torch.tensor([0,1]),torch.tensor([1,1])), torch.tensor([10.0, 20.0])).cpu().numpy()
+    np.testing.assert_equal(y2, torch.tensor([[0.,10.],[0.,20.]]).numpy())
+
   def test_randperm_generator_out(self):
     n = 10
     out = torch.empty(n, dtype=torch.long, device=device)

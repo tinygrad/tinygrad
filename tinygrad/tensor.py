@@ -294,6 +294,24 @@ class Tensor(MathTrait):
     self.lazydata = self.lazydata.assign(x.lazydata)
     return self
 
+  def index_put(self, indices: Tensor, values: Tensor, accumulate: bool = False) -> Tensor:
+    if indices.ndim == 1: indices = indices.reshape((-1, 1))
+    assert indices.ndim == 2, "indices should be a single dimensional tensor of tensor-coordinates"
+    assert indices.shape[1] == self.ndim
+    assert values.numel() == 1 or values.shape == (indices.shape[0],), "values tensor should have as many elements as indices"
+    out = self
+    for i in range(int(indices.shape[0])):
+      val = values[0] if values.numel() == 1 else values[i]
+      val = Tensor([val.item()], device=self.device, dtype=self.dtype)
+      mask = Tensor.ones(self.shape, device=self.device, dtype=self.dtype)
+      for dim in range(int(self.ndim)):
+        idx_val = indices[i][dim]
+        sel = Tensor.arange(self.shape[dim], device=self.device)
+        mask = mask * (sel == idx_val).reshape([-1 if j == dim else 1 for j in range(int(self.ndim))])
+      val_broadcasted = val.reshape([1] * self.ndim).expand(mask.shape)
+      out = out + val_broadcasted * mask if accumulate else out * (1 - mask) + val_broadcasted * mask
+    return out
+
   def detach(self) -> Tensor:
     """
     Returns a new tensor with the same data as this tensor, but detached from the autograd graph.
