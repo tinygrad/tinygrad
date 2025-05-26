@@ -12,13 +12,12 @@ MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 HALF = getenv("HALF")
 
 class Attention:
-  def __init__(self, dim, n_heads, max_context):
+  def __init__(self, dim, n_heads):
     self.c_attn = Linear(dim, 3*dim, bias=True)
     self.c_proj = Linear(dim, dim, bias=True)
     self.n_heads = n_heads
     self.dim = dim
     self.head_dim = dim // n_heads
-    self.max_context = max_context
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], mask:Optional[Tensor]) -> Tensor:
     if mask is not None or start_pos == 0:
@@ -32,7 +31,7 @@ class Attention:
 
     # create kv cache
     if not hasattr(self, "cache_kv"):
-      self.cache_kv = Tensor.zeros(2, bsz, self.max_context, self.n_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
+      self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
 
     # update the cache
     self.cache_kv.shrink((None, None,(start_pos,start_pos+seqlen),None,None)).assign(Tensor.stack(xk, xv)).realize()
@@ -73,10 +72,9 @@ class Transformer:
     self.ln_f = LayerNorm(dim, norm_eps)
     self.lm_head = Linear(dim, vocab_size, bias=False)
     self.forward_jit =TinyJit(self.forward) if jit else None
-    self.max_context = max_context
 
   def forward(self, tokens:Union[Tensor,UOp], start_pos:Union[Variable,int], temperature:float=0.0):
-    if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, self.max_context).reshape(1, -1).realize()
+    if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
     if isinstance(tokens, UOp):
       seqlen = 1
       tok_emb = self.wte.weight.shrink(((tokens, tokens+1), None))
@@ -110,7 +108,7 @@ class Transformer:
   def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0):
     # TODO: better way to handle the first call v.s. the rest?
     if tokens.shape[0:2] == (1,1) and self.forward_jit is not None and start_pos != 0:
-      return self.forward_jit(tokens, Variable("start_pos", 1, self.max_context).bind(start_pos), temperature)
+      return self.forward_jit(tokens, Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos), temperature)
     return self.forward(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
@@ -126,7 +124,7 @@ class GPT2:
   def build(model_size="gpt2"):
     tokenizer = tiktoken.get_encoding("gpt2")
 
-    model = Transformer(**MODEL_PARAMS[model_size], max_context=MAX_CONTEXT, jit=bool(JIT))
+    model = Transformer(**MODEL_PARAMS[model_size])
     weights = torch_load(fetch(f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'))
     # special treatment for the Conv1D weights we need to transpose
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
@@ -168,7 +166,7 @@ class GPT2:
       for ostr, ns in replaces: key = key.replace(ostr, ns)
       return key
     state_dict = { _remap_gguf_key(k): v for k, v in state_dict.items() }
-    model = Transformer(**gpt2_params, max_context=MAX_CONTEXT, jit=bool(JIT))
+    model = Transformer(**gpt2_params)
     load_state_dict(model, state_dict)
     return GPT2(model, tiktoken.get_encoding("gpt2"))
 
