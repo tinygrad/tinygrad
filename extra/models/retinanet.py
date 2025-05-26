@@ -77,38 +77,57 @@ class RetinaNet:
                               orig_image_sizes:list[tuple[int, int]]|None=None, score_thresh=0.05,
                               topk_candidates=1000, nms_thresh=0.5):
     anchors = generate_anchors2(input_size, grid_sizes)
-    return anchors
-    # split_idx = Tensor.stack(*[(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]]).cumsum()
-    # return split_idx
-    # split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
+    num_anchors_per_level = [h * w for h, w in grid_sizes]
+    HW = 0
+    for v in num_anchors_per_level:
+      HW += v
+    HWA = predictions.shape[1]
+    A = HWA // HW
+    num_anchors_per_level = [hw * A for hw in num_anchors_per_level]
+
+    detections = []
+    for i, pred_img in enumerate(predictions):
+      pred_img = pred_img.split(num_anchors_per_level)
+      offsets_img, scores_img = [br[:, :4] for br in pred_img], [cl[:, 4:] for cl in pred_img]
+      img_boxes, img_scores, img_labels = [], [], []
+
+      for offsets_level, scores_level, anchors_level in zip(offsets_img, scores_img, anchors):
+        # remove low scoring boxes
+        scores_level = scores_level.flatten()
+        keep_idxs = scores_level > score_thresh
+        scores_level = scores_level.masked_select(keep_idxs)
+
+        # keep topk
+        num_topk = min(scores_level.shape[0], topk_candidates)
+        detections.append(num_topk)
+
+    return detections
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
-  def postprocess_detections(self, predictions, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
+  def postprocess_detections(self, predictions, grid_sizes, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
     anchors = generate_anchors(input_size)
-    return anchors
-    # grid_sizes = self.backbone.compute_grid_sizes(input_size)
-    # split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
-    # return split_idx
-    # detections = []
-    # for i, predictions_per_image in enumerate(predictions):
-    #   h, w = input_size if image_sizes is None else image_sizes[i]
+    split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
+    detections = []
+    for i, predictions_per_image in enumerate(predictions):
+      h, w = input_size if image_sizes is None else image_sizes[i]
 
-    #   predictions_per_image = np.split(predictions_per_image, split_idx)
-    #   offsets_per_image = [br[:, :4] for br in predictions_per_image]
-    #   scores_per_image = [cl[:, 4:] for cl in predictions_per_image]
+      predictions_per_image = np.split(predictions_per_image, split_idx)
+      offsets_per_image = [br[:, :4] for br in predictions_per_image]
+      scores_per_image = [cl[:, 4:] for cl in predictions_per_image]
 
-    #   image_boxes, image_scores, image_labels = [], [], []
-    #   for offsets_per_level, scores_per_level, anchors_per_level in zip(offsets_per_image, scores_per_image, anchors):
-    #     # remove low scoring boxes
-    #     scores_per_level = scores_per_level.flatten()
-    #     keep_idxs = scores_per_level > score_thresh
-    #     scores_per_level = scores_per_level[keep_idxs]
+      image_boxes, image_scores, image_labels = [], [], []
+      for offsets_per_level, scores_per_level, anchors_per_level in zip(offsets_per_image, scores_per_image, anchors):
+        # remove low scoring boxes
+        scores_per_level = scores_per_level.flatten()
+        keep_idxs = scores_per_level > score_thresh
+        scores_per_level = scores_per_level[keep_idxs]
 
-    #     # keep topk
-    #     topk_idxs = np.where(keep_idxs)[0]
-    #     num_topk = min(len(topk_idxs), topk_candidates)
-    #     sort_idxs = scores_per_level.argsort()[-num_topk:][::-1]
-    #     topk_idxs, scores_per_level = topk_idxs[sort_idxs], scores_per_level[sort_idxs]
+        # keep topk
+        topk_idxs = np.where(keep_idxs)[0]
+        num_topk = min(len(topk_idxs), topk_candidates)
+        detections.append(num_topk)
+        # sort_idxs = scores_per_level.argsort()[-num_topk:][::-1]
+        # topk_idxs, scores_per_level = topk_idxs[sort_idxs], scores_per_level[sort_idxs]
 
     #     # bbox coords from offsets
     #     anchor_idxs = topk_idxs // self.num_classes
@@ -146,7 +165,7 @@ class RetinaNet:
     #   image_boxes = np.concatenate([image_boxes[:, :2], image_boxes[:, 2:] - image_boxes[:, :2]], axis=1)
 
     #   detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
-    # return detections
+    return detections
 
 class ClassificationHead:
   def __init__(self, in_channels:int, num_anchors:int, num_classes:int):
