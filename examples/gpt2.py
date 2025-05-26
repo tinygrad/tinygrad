@@ -108,7 +108,7 @@ class Transformer:
       ret = (logits / temperature).softmax().multinomial()
     return ret.flatten().realize()
 
-  def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0):
+  def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0):
     # TODO: better way to handle the first call v.s. the rest?
     if tokens.shape[0:2] == (1,1) and JIT and start_pos != 0:
       return self.forward_jit(tokens, Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos), temperature)
