@@ -75,12 +75,9 @@ class Transformer:
 
   def forward(self, tokens:Union[Tensor,UOp], start_pos:Union[Variable,int], temperature:float=0.0):
     if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
-    if isinstance(tokens, UOp):
-      seqlen = 1
-      tok_emb = self.wte.weight.shrink(((tokens, tokens+1), None))
-    else:
-      seqlen = tokens.shape[1]
-      tok_emb = self.wte(tokens)
+
+    seqlen = tokens.shape[1]
+    tok_emb = self.wte(tokens)
 
     pos_emb = self.wpe(self.allpos.shrink((None, (start_pos, start_pos+seqlen))))
     h = tok_emb + pos_emb
@@ -107,6 +104,8 @@ class Transformer:
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0):
     # TODO: better way to handle the first call v.s. the rest?
+    print(f'{type(tokens)=}')
+    print(f'{type(start_pos)=}')
     if tokens.shape[0:2] == (1,1) and JIT and start_pos != 0:
       return self.forward_jit(tokens, Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos), temperature)
     return self.forward(tokens, start_pos, temperature)
