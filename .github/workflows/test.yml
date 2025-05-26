@@ -820,6 +820,7 @@ jobs:
           key: linux-remote-amd
           deps: testing_minimal
           amd: 'true'
+          llvm: 'true'
       - name: Check Device.DEFAULT and print some source
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
