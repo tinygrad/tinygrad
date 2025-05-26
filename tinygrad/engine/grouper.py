@@ -503,24 +503,23 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
 add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"),
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
 
-def limit_inputs(x:UOp):
+DEVICE_MAX_BUFS = {"METAL":32, "WEBGPU":8}
+def limit_bufs(root:UOp):
   # skip if this is already tagged
-  if x.tag is not None: return None
+  if root.tag is not None: return None
   # check if backend has a buffer limit
-  device = x.device if isinstance(x.device, str) else x.device[0].split(":")[0]
-  if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS",{"METAL":32, "WEBGPU":8}.get(device, 0))): return None
-  assert MAX_BUFS > 2, "MAX_KERNEL_BUFFERS must be greater than 2"
-  # count number of buffers in this op, including the output buffer
+  device = root.device if isinstance(root.device, str) else root.device[0].split(":")[0]
+  if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return None
+  # count number of unique buffers in this op (including self)
   bufs: set[UOp] = set()
-  def gate_buffer(u:UOp):
-    # TODO: why isn't toposort deduping this?
+  def gate_input(u:UOp):
     if (is_buffer:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): bufs.add(u)
-    return not is_buffer
-  x.toposort(gate=gate_buffer)
-  if len(bufs) >= MAX_BUFS-2: return x.replace(tag=1).gbarrier()
+    return u is root or not is_buffer
+  root.toposort(gate=gate_input)
+  if len(bufs)<=MAX_BUFS: return None
 
 split_kernels = PatternMatcher([
-  (UPat(GroupOp.All-{Ops.SINK, Ops.GBARRIER, Ops.ASSIGN, Ops.UNIQUE}, name="x"), limit_inputs),
+  (UPat((Ops.GBARRIER, Ops.ASSIGN), name="root"), limit_bufs),
   (UPat((Ops.GBARRIER, Ops.CONTIGUOUS), src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
 ])
 

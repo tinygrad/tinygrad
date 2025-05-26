@@ -83,39 +83,6 @@ class TestSchedule(unittest.TestCase):
     c = a+b
     with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
 
-  def test_limit_buffers(self):
-    a = Tensor(0).contiguous().realize()
-    N = 31
-    for i in range(1,N):
-      a = a + Tensor(i).contiguous()
-    self.assertEqual(a.item(), sum(range(N)))
-
-  def test_limit_buffers_double(self):
-    a = Tensor(0).contiguous().realize()
-    N = 31
-    for i in range(1,N*2):
-      a = a + Tensor(i).contiguous()
-    self.assertEqual(a.item(), sum(range(N*2)))
-
-  def test_limit_buffers_prerealized(self):
-    a = Tensor(0).contiguous().realize()
-    N = 31
-    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
-      bufs = [Tensor(i).contiguous().realize() for i in range(1,N)]
-    for b in bufs:
-      a = a + b
-    self.assertEqual(a.item(), sum(range(N)))
-
-  def test_limit_buffers_split(self):
-    a = Tensor(0).contiguous().realize()
-    N = 31
-    bufs = [Tensor(i).contiguous().realize() for i in range(1,N//2)]
-    for i in range(N//2,N):
-      a = a + Tensor(i).contiguous()
-    for b in bufs:
-      a = a + b
-    self.assertEqual(a.item(), sum(range(N)))
-
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and getenv("CAST_AFTER_EXPAND"), "need half and CAST_AFTER_EXPAND=1")
   @unittest.skip("CAST_AFTER_EXPAND is not supported")
   def test_expand_buffer_before_cast(self):
@@ -130,6 +97,16 @@ class TestSchedule(unittest.TestCase):
     with Context(FUSE_ARANGE=1):
       run_schedule(check_schedule(xt, 2))
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
+
+  def test_add_chain_buffers(self):
+    N = 36
+    with Context(DEBUG=0, TRACK_MATCH_STATS=0):
+      bufs = [Tensor((i,)).contiguous().realize() for i in range(N)]
+    for X in range(1,N):
+      root = bufs[0]
+      for i in range(0,N,X):
+        root = root + functools.reduce(lambda a,b:a+b, bufs[i:i+X])
+      self.assertEqual(root.item(), sum(range(N)))
 
   @unittest.expectedFailure # TODO: failing because of can_chase
   def test_indexing_scalars_multiple_dims(self):
