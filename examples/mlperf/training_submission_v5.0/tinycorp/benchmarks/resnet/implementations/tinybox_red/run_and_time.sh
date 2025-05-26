@@ -18,6 +18,7 @@ DATETIME=$(date "+%m%d%H%M")
 LOGFILE="resnet_red_${DATETIME}_${SEED}.log"
 
 # init
+sleep 5 && sudo rmmod amdgpu || true
 BENCHMARK=10 INITMLPERF=1 python3 examples/mlperf/model_train.py | tee $LOGFILE
 
 # run
