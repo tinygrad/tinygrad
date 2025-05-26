@@ -857,5 +857,16 @@ class TestBounds(unittest.TestCase):
     assert ((alu0+2559)//-4).vmin == -639 and ((alu0+2559)//-4).vmax == 0
     assert (((alu0+2559)//-4)*(-1)).vmin == 0 and (((alu0+2559)//-4)*(-1)).vmax == 639
 
+class TestFuzzFailure(unittest.TestCase):
+  def test_fuzz_failure1(self):
+    v1=Variable('v1', 0, 8)
+    v2=Variable('v2', 0, 2)
+    v3=Variable('v3', 0, 1)
+    expr = (((((((((((((((((((((((0//4)%2)//8)+-2)+-4)+-3)+v1)+-4)+v2)+-2)+v3)+v2)//3)%7)*1)//2)+v2)*-1)+2)+1)+0)+-3)+v3)
+    v1_val, v2_val, v3_val = v1.const_like(8), v2.const_like(0), v3.const_like(0)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    assert num==rn, f"{num} != {rn}"
+
 if __name__ == '__main__':
   unittest.main()
