@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import time, mmap, sys, shutil, os, glob, subprocess
+import time, mmap, sys, shutil, os, glob, subprocess, argparse
 from tinygrad.helpers import DEBUG, colored, ansilen
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.am import am
@@ -251,6 +251,30 @@ class SMICtx:
     self.prev_lines_cnt = len(raw_text.splitlines()) + 2
 
 if __name__ == "__main__":
+  parser = argparse.ArgumentParser()
+  parser.add_argument("--pids", action="store_true", help="Print pids for all AM devices")
+  parser.add_argument("--kill", action="store_true", help="Kill all pids associated with AM devices. Valid only with --pids")
+  parser.add_argument("--dev", type=str, default=None, help="PCI bus ID of the AM device to monitor (e.g., 0000:01:00.0)")
+  args = parser.parse_args()
+
+  if args.pids:
+    for dev in glob.glob('/tmp/am_*.lock'):
+      if args.dev and not dev.endswith(f"{args.dev}.lock"):
+        print(f"{dev[8:-5]}: skipping")
+        continue
+
+      try:
+        if args.kill:
+          pid = subprocess.check_output(['sudo', 'lsof', '-t', dev]).decode('utf-8').split('\n')[0]
+          os.system(f'sudo kill -9 {pid}')
+          print(f"{dev[8:-5]}: killed process {pid}")
+        else:
+          pid = subprocess.check_output(['sudo', 'lsof', dev]).decode('utf-8').strip().split('\n')[1].split()[1]
+          print(f"{dev[8:-5]}: {pid}")
+      except subprocess.CalledProcessError:
+        print(f"{dev[8:-5]}: no process found")
+    sys.exit(0)
+
   try:
     os.system('clear')
     smi_ctx = SMICtx()
