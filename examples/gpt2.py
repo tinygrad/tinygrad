@@ -113,7 +113,6 @@ class Transformer:
       return self.forward_jit(tokens, Variable("start_pos", 1, self.max_context).bind(start_pos), temperature)
     return self.forward(tokens, start_pos, temperature)
 
-
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
   'gpt2':         dict(n_layers=12, n_heads=12, dim=768, norm_eps=1e-5, vocab_size=VOCAB_SIZE),   # 124M params
@@ -126,8 +125,8 @@ class GPT2:
   @staticmethod
   def build(model_size="gpt2"):
     tokenizer = tiktoken.get_encoding("gpt2")
-    model = Transformer(**MODEL_PARAMS[model_size])
 
+    model = Transformer(**MODEL_PARAMS[model_size])
     weights = torch_load(fetch(f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'))
     # special treatment for the Conv1D weights we need to transpose
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
