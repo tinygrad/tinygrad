@@ -1,7 +1,7 @@
 # https://github.com/onnx/onnx/blob/main/onnx/onnx.proto3
 
 import os, struct
-from io import BufferedReader, BytesIO
+from io import BytesIO
 from types import SimpleNamespace
 from tinygrad.nn.state import TensorIO, accept_filename
 from tinygrad.tensor import Tensor
@@ -18,7 +18,7 @@ class AttributeType:
   UNDEFINED = 0; FLOAT = 1; INT = 2; STRING = 3; TENSOR = 4; GRAPH = 5; SPARSE_TENSOR = 11; TYPE_PROTO = 13; FLOATS = 6; INTS = 7 # noqa: E702
   STRINGS = 8; TENSORS = 9; GRAPHS = 10; SPARSE_TENSORS = 12; TYPE_PROTOS = 14 # noqa: E702
 
-def decode_varint(reader: BufferedReader) -> int:
+def decode_varint(reader) -> int:
   result = 0
   shift = 0
   while True:
@@ -34,7 +34,7 @@ def unsigned_to_signed_64(uval):
   if uval & (1 << 63): return uval - (2**64)
   return uval
 
-def skip_field_value(reader: BufferedReader, wire_type):
+def skip_field_value(reader, wire_type):
   if wire_type == WIRETYPE_VARINT: decode_varint(reader)
   elif wire_type == WIRETYPE_FIXED64: reader.seek(os.SEEK_CUR, 8)
   elif wire_type == WIRETYPE_FIXED32: reader.seek(os.SEEK_CUR, 4)
@@ -54,14 +54,14 @@ def dict_to_namespace(d):
 
 @accept_filename
 def onnx_load(tensor: Tensor):
-  reader = BufferedReader(TensorIO(tensor), 1_000_000)
+  reader = TensorIO(tensor)
   parser = OnnxParser()
   onnx_model = parser.parse_model_proto_from_buffer(reader)
   model = dict_to_namespace(onnx_model)
   return model
 
 class OnnxParser:
-  def _parse_message(self, reader: BufferedReader, message_field_handlers, initial_obj_factory=lambda: {}, debug=False):
+  def _parse_message(self, reader, message_field_handlers, initial_obj_factory=lambda: {}, debug=False):
     obj = initial_obj_factory()
     while True:
       try:
@@ -104,7 +104,7 @@ class OnnxParser:
     return res
 
   # WIRETYPE_LENGTH_DELIMITED
-  def _handle_delimited(self, reader: BufferedReader):
+  def _handle_delimited(self, reader):
     str_len = decode_varint(reader)
     return reader.read(str_len)
 
@@ -126,7 +126,7 @@ class OnnxParser:
     values = list(struct.unpack(f"<{len(value) // 4}f", value))
     obj.setdefault(key_name, []).extend(values)
 
-  def _handle_packed_repeated_int64s(self, obj, key_name, reader: BufferedReader, wire_type, parser_func=None, repeated=False):
+  def _handle_packed_repeated_int64s(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
     if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError("Packed int64s expected length_delimited")
     total_bytes_len = decode_varint(reader)
     old_pos = reader.tell()
@@ -142,7 +142,7 @@ class OnnxParser:
   def _handle_sub_message_field(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
     if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for sub-message field '{key_name}'")
     value = self._handle_delimited(reader)
-    parsed_sub_obj = parser_func(BufferedReader(BytesIO(value)))
+    parsed_sub_obj = parser_func(BytesIO(value))
     gen_result(obj, key_name, parsed_sub_obj, repeated)
 
   # OperatorSetIdProto
@@ -261,6 +261,6 @@ class OnnxParser:
       self._handle_sub_message_field: ((8, "opset_import", True,  self.parse_opset_id_proto), (7, "graph", False, self.parse_graph_proto),
                                        (14, "metadata_props", True, self.parse_string_string_entry_proto))})
 
-  def parse_model_proto_from_buffer(self, reader: BufferedReader):
+  def parse_model_proto_from_buffer(self, reader):
     parsed_model = self._parse_message(reader, self._model_proto_handlers(), lambda: {'opset_import': [], 'metadata_props': [], 'domain': None})
     return parsed_model
