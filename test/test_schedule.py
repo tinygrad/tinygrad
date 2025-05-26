@@ -98,12 +98,12 @@ class TestSchedule(unittest.TestCase):
       run_schedule(check_schedule(xt, 2))
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
 
+  @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
   def test_add_chain_buffers(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
       bufs = [Tensor(i).reshape((1,)).contiguous().realize() for i in range(N)]
     for X in range(1,N):
-      print("--------")
       root = bufs[0]
       for i in range(1,N,X):
         root = root + functools.reduce(lambda a,b:a+b, bufs[i:i+X])

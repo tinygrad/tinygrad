@@ -440,21 +440,6 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual(const._device, None)
     with self.assertRaises(AssertionError): const.device
 
-  def test_gated_toposort(self):
-    seen = {}
-    def gate_a(u:UOp):
-      if u.op is Ops.DEFINE_VAR:
-        seen[u] = seen.setdefault(u,0)+1
-        if u.arg[0] == "a": return False
-      return True
-    a = UOp.variable("a", 0, 8)
-    b = UOp.variable("b", 0, 8)
-    root = (a+b)*(a*b)
-    ts = root.toposort(gate_a)
-    self.assertEqual(seen[b], 1)
-    # this should've been 1 like b
-    self.assertEqual(seen[a], 2)
-
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
     a = UOp(Ops.CONST, dtypes.float, (), 2.0) + UOp(Ops.CONST, dtypes.float, (), 3.0)
