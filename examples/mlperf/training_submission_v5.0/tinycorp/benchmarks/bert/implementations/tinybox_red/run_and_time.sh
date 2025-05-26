@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e  # Exit on any error
 
 export PYTHONPATH="." AMD=1
 export MODEL="bert"
