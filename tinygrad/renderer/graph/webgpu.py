@@ -111,10 +111,10 @@ class WebGPUJSRenderer(GraphRenderer):
 
     prg: list[str] = buf_usages + kernel_obj
     prg += ["const createGraph = async () => {"]
-    prg += indent(init_device + sym_uniforms + empty_buf_allocs + state_dict + state_buf_allocs + copyout_bufs + ret_bufs + create_infinity, 1)
+    prg += indent(init_device + sym_uniforms + empty_buf_allocs + state_dict + state_buf_allocs + copyout_bufs + create_infinity, 1)
     prg += indent(kernel_sequence + layouts + pipes + add_compute_pass + safe_load_state_dict, 1)
     prg += indent([f"const run = async ({args}) => {{"], 1)
-    prg += indent(validators + command_encoder + copyins + compute_passes + output_copies + trigger_gpu + copyouts + [f"return [{ret}];"], 2)
+    prg += indent(validators + command_encoder + copyins + compute_passes + output_copies + trigger_gpu + ret_bufs + copyouts +[f"return [{ret}];"],2)
     prg += indent(["};", "return { device, stateDict, load, run };"], 1)
     prg += ["};"]
     prg += ["export default createGraph;"]
