@@ -14,6 +14,8 @@ class BenchEvent(Enum):
   LOAD_WEIGHTS = "load_weights"
   STEP = "step"
   FULL = "full"
+  MLPERF_INIT = "mlperf_init"
+  MLPERF_RUN = "mlperf_setup"
 class InstantBenchEvent(Enum):
   GFLOPS = "gflops"
 
