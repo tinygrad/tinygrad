@@ -104,8 +104,6 @@ class Transformer:
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0):
     # TODO: better way to handle the first call v.s. the rest?
-    print(f'{type(tokens)=}')
-    print(f'{type(start_pos)=}')
     if tokens.shape[0:2] == (1,1) and JIT and start_pos != 0:
       return self.forward_jit(tokens, Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos), temperature)
     return self.forward(tokens, start_pos, temperature)
