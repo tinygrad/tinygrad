@@ -78,13 +78,13 @@ class TestSymbolicOps(unittest.TestCase):
         self.test_attention(dropout_p=0.5)
 
   def test_attention_pos_0_sz_0(self):
-    Attention(128, 8)(Tensor.ones(1, 0, 128), Variable("start_pos", 0, 128).bind(0), None)
+    Attention(128, 8)(Tensor.ones(1, 0, 128), 0, None)
 
   def test_attention_pos_0_sz_1(self):
-    Attention(128, 8)(Tensor.ones(1, 1, 128), Variable("start_pos", 0, 128).bind(0), None)
+    Attention(128, 8)(Tensor.ones(1, 1, 128), 0, None)
 
   def test_attention_pos_0_sz_2(self):
-    Attention(128, 8)(Tensor.ones(1, 2, 128), Variable("start_pos", 0, 128).bind(0), None)
+    Attention(128, 8)(Tensor.ones(1, 2, 128), 0, None)
 
   def test_cat_dim0(self):
     def f(a, b): return a.cat(b, dim=0).realize()
