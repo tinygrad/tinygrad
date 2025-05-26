@@ -62,7 +62,7 @@ class GraphRenderer(Renderer):
           if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
 
     # build complete state_dict, rename state bufs with meaningful names from tensor_names
-    assert not any(missing:=[not b.is_allocated() for b in self.state_bufs]), f"Unrealized bufs: {missing}\nDid you realize all tensors with state?"
+    assert not any(unreal:=[b for b in self.state_bufs if not b.is_allocated()]), f"Are all state Tensors realized? Unrealized state bufs:\n{unreal}"
     self.state_dict = {k:v for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs} if tensor_names else {}
     if rng_tensors and all((b:=t.lazydata.base.realized) and b in self.state_bufs for t in rng_tensors):
       self.state_dict.update({"random_seeds": rng_tensors[0], "random_counter": rng_tensors[1]})
