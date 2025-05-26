@@ -1394,7 +1394,7 @@ class Tensor(MathTrait):
     dim = self._resolve_dim(dim)
     return list(self.split(ceildiv(self.shape[dim], chunks) if self.shape[dim] else [0]*chunks, dim=dim))
 
-  def unfold(self, dim:int, size:int, step:int) -> Tensor:
+  def unfold(self, dim:int, size:sint, step:int) -> Tensor:
     """
     Unfolds the tensor along dimension `dim` into overlapping windows.
 
@@ -1412,7 +1412,7 @@ class Tensor(MathTrait):
     ```
     """
     if size < 0: raise RuntimeError(f'size must be >= 0 but got {size=}')
-    if step <= 0: raise RuntimeError(f'step must be >0 but got {step=}')
+    if step <= 0: raise RuntimeError(f'step must be > 0 but got {step=}')
     if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
     dim = self._resolve_dim(dim)
     perm_to_last = tuple(i for i in range(self.ndim) if i != dim) + (dim,)
