@@ -76,7 +76,7 @@ def mselect_reorder_view(ms:UOp, view:UOp, base:UOp):
   # replace dnum in ShapeTracker with literal const for this mselect
   if (dnums:=[x for x in st.vars() if x.arg[0] == '_device_num']):
     assert len(dnums) == 1, f"view must have exactly 0 or 1 dnum, got {dnums}"
-    st = st.substitute({dnums[0]:dnums[0].const_like(ms.arg)}))
+    st = st.substitute({dnums[0]:dnums[0].const_like(ms.arg)})
   return base.mselect(ms.arg).view(st)
 
 ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT}
