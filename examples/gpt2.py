@@ -7,7 +7,6 @@ from tinygrad.ops import UOp
 from tinygrad.helpers import Timing, DEBUG, JIT, getenv, fetch, colored, trange
 from tinygrad.nn import Embedding, Linear, LayerNorm
 from tinygrad.nn.state import gguf_load, torch_load, load_state_dict, get_state_dict
-from extra.models.llama import Transformer
 
 from icecream import install
 install()
@@ -67,7 +66,7 @@ class TransformerBlock:
     h = x + self.attn(self.ln_1(x), start_pos, mask).float()
     return (h + self.mlp(self.ln_2(h)))
 
-class OldTransformer:
+class Transformer:
   def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, max_seq_len=1024):
     self.vocab_size = vocab_size
     self.wte = Embedding(vocab_size, dim)
@@ -115,10 +114,10 @@ class OldTransformer:
 
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
-  'gpt2':         dict(n_layers=12, n_heads=12, dim=768, hidden_dim=768*4, norm_eps=1e-5, vocab_size=VOCAB_SIZE),   # 124M params
-  'gpt2-medium':  dict(n_layers=24, n_heads=16, dim=1024, hidden_dim=1024*4, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 350M params
-  'gpt2-large':   dict(n_layers=36, n_heads=20, dim=1280, hidden_dim=1280*4, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 774M params
-  'gpt2-xl':      dict(n_layers=48, n_heads=25, dim=1600, hidden_dim=1600*4, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 1558M params
+  'gpt2':         dict(n_layers=12, n_heads=12, dim=768, norm_eps=1e-5, vocab_size=VOCAB_SIZE),   # 124M params
+  'gpt2-medium':  dict(n_layers=24, n_heads=16, dim=1024, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 350M params
+  'gpt2-large':   dict(n_layers=36, n_heads=20, dim=1280, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 774M params
+  'gpt2-xl':      dict(n_layers=48, n_heads=25, dim=1600, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 1558M params
 }
 
 class GPT2:
@@ -126,23 +125,11 @@ class GPT2:
   def build(model_size="gpt2"):
     tokenizer = tiktoken.get_encoding("gpt2")
 
-    model = Transformer(**MODEL_PARAMS[model_size], feed_forward=FeedForward)
-
-    # replace RMSNorm with LayerNorm
-    dim, norm_eps = MODEL_PARAMS[model_size]['dim'], MODEL_PARAMS[model_size]['norm_eps']
-    model.norm = LayerNorm(dim, norm_eps)
-    new_layers = []
-    for layer in model.layers:
-      layer.attention_norm = LayerNorm(dim, norm_eps)
-      new_layers.append(layer)
-    model.layers = new_layers
-
-    ic(get_state_dict(model).keys())
+    model = Transformer(**MODEL_PARAMS[model_size])
 
     weights = torch_load(fetch(f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'))
     # special treatment for the Conv1D weights we need to transpose
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
-    ic(weights.keys())
     for k in weights:
       if k.endswith(transposed):
         weights[k] = weights[k].T
