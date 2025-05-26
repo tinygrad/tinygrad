@@ -503,7 +503,7 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
 add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"),
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
 
-def limit_buffer_inputs(x:UOp):
+def limit_inputs(x:UOp):
   # skip if this is already tagged
   if x.tag is not None: return None
   # check if backend has a buffer limit
@@ -520,7 +520,7 @@ def limit_buffer_inputs(x:UOp):
   if len(bufs) >= MAX_BUFS-2: return x.replace(tag=1).gbarrier()
 
 split_kernels = PatternMatcher([
-  (UPat(GroupOp.Binary, name="x"), limit_buffer_inputs),
+  (UPat(GroupOp.All-{Ops.SINK, Ops.GBARRIER, Ops.ASSIGN, Ops.UNIQUE}, name="x"), limit_inputs),
   (UPat((Ops.GBARRIER, Ops.CONTIGUOUS), src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
 ])
 
