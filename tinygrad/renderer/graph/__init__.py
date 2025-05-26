@@ -1,13 +1,13 @@
 # render the kernel graph for execution outside tinygrad
 from tinygrad import Tensor, dtype
-from tinygrad.tensor import no_realize_uops, all_tensors
+from tinygrad.tensor import no_realize_uops
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from tinygrad.uop.ops import UOp, Variable, Ops
 from tinygrad.renderer import Renderer
 from tinygrad.nn.state import get_state_dict
 from tinygrad.engine.schedule import create_schedule_with_vars
-from tinygrad.engine.memory import _internal_memory_planner
+from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner
 from tinygrad.helpers import Context
 from typing import Callable, cast
@@ -49,22 +49,17 @@ class GraphRenderer(Renderer):
     self.bufs: dict[Buffer, str] = {cast(Buffer, u.base.buffer): f"input_{i}" for i, u in enumerate(self.inputs) if u.base.op is Ops.BUFFER}
     self.bufs.update({cast(Buffer, u.base.buffer): f"output_{i}" for i, u in enumerate(self.outputs)})
     self.state_bufs: dict[Buffer, str] = dict()
-    seen, ctr = set(self.bufs), itertools.count()
+    ctr = itertools.count()
 
-    for si, ei in lower_schedule(schedule):
+    del r, ret_tensors, sink, remove_assign_map # GC the UOps indirectly referencing our buffers so memory planning works
+    for si, ei in lower_schedule(memory_planner(schedule)):
       assert isinstance(ei.prg, CompiledRunner), f"Unsupported data xfer between bufs:\n{ei.bufs}\n\nDid you realize all state Tensors before export?"
       for buf in ei.bufs: assert buf is not None and buf.device == device, "All compute and returned Tensor(s) must be on the same device"
       self.eis.append(ei)
       for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
-        if buf not in seen:
-          seen.add(buf)
-          if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = f"buf_{next(ctr)}"
-    
-    del r, ret_tensors, sink, remove_assign_map
-    assigned = _internal_memory_planner(cast(list[list[Buffer]], [ei.bufs for ei in self.eis]))
-    self.bufs.update(self.state_bufs)
-    self.bufs.update({assigned.get(b, b): self.bufs.get(b, f"buf_{next(ctr)}") for b in seen})
-    for i, ei in enumerate(self.eis): self.eis[i] = ExecItem(ei.prg, [assigned.get(cast(Buffer, b), b) for b in ei.bufs])
+        if buf not in self.bufs:
+          self.bufs[buf] = name = f"buf_{next(ctr)}"
+          if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
 
     # build complete state_dict, rename state bufs with meaningful names from tensor_names
     assert not any(missing:=[not b.is_allocated() for b in self.state_bufs]), f"Unrealized bufs: {missing}\nDid you realize all tensors with state?"
