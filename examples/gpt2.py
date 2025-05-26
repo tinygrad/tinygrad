@@ -15,17 +15,18 @@ MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 HALF = getenv("HALF")
 
 class Attention:
-  def __init__(self, dim, n_heads):
+  def __init__(self, dim, n_heads, max_context):
     self.c_attn = Linear(dim, 3*dim, bias=True)
     self.c_proj = Linear(dim, dim, bias=True)
     self.n_heads = n_heads
     self.dim = dim
     self.head_dim = dim // n_heads
+    self.max_context = max_context
 
-  def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]) -> Tensor:
-    if mask is not None or start_pos.val == 0:
+  def __call__(self, x:Tensor, start_pos:Union[Variable,int], mask:Optional[Tensor]) -> Tensor:
+    if mask is not None or start_pos == 0:
       # no symbolic shape qkv when consuming prompts
-      start_pos = start_pos.val
+      start_pos = start_pos
 
     if HALF: x = x.half()
     xqkv = self.c_attn(x)
@@ -34,7 +35,7 @@ class Attention:
 
     # create kv cache
     if not hasattr(self, "cache_kv"):
-      self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
+      self.cache_kv = Tensor.zeros(2, bsz, self.max_context, self.n_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
 
     # update the cache
     self.cache_kv.shrink((None, None,(start_pos,start_pos+seqlen),None,None)).assign(Tensor.stack(xk, xv)).realize()
@@ -56,8 +57,8 @@ class FeedForward:
   def __call__(self, x:Tensor) -> Tensor: return self.c_proj(self.c_fc(x).gelu())
 
 class TransformerBlock:
-  def __init__(self, dim, n_heads, norm_eps):
-    self.attn = Attention(dim, n_heads)
+  def __init__(self, dim, n_heads, norm_eps, max_context):
+    self.attn = Attention(dim, n_heads, max_context)
     self.mlp = FeedForward(dim, 4*dim)
     self.ln_1 = LayerNorm(dim, norm_eps)
     self.ln_2 = LayerNorm(dim, norm_eps)
@@ -67,17 +68,18 @@ class TransformerBlock:
     return (h + self.mlp(self.ln_2(h)))
 
 class Transformer:
-  def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, max_seq_len=1024):
+  def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, max_seq_len=1024, jit=True, max_context=128):
     self.vocab_size = vocab_size
     self.wte = Embedding(vocab_size, dim)
     self.wpe = Embedding(max_seq_len, dim)
-    self.h = [TransformerBlock(dim, n_heads, norm_eps) for _ in range(n_layers)]
+    self.h = [TransformerBlock(dim, n_heads, norm_eps, max_context) for _ in range(n_layers)]
     self.ln_f = LayerNorm(dim, norm_eps)
     self.lm_head = Linear(dim, vocab_size, bias=False)
-    self.forward_jit = TinyJit(self.forward)
+    self.forward_jit =TinyJit(self.forward) if jit else None
+    self.max_context = max_context
 
-  def forward(self, tokens:Union[Tensor,UOp], start_pos:Variable, temperature:float=0.0):
-    if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
+  def forward(self, tokens:Union[Tensor,UOp], start_pos:Union[Variable,int], temperature:float=0.0):
+    if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, self.max_context).reshape(1, -1).realize()
     if isinstance(tokens, UOp):
       seqlen = 1
       tok_emb = self.wte.weight.shrink(((tokens, tokens+1), None))
@@ -90,7 +92,7 @@ class Transformer:
 
     if HALF: h = h.half()
 
-    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos.val+1) if seqlen > 1 else None
+    mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos+1) if seqlen > 1 else None
 
     for hi in self.h: h = hi(h, start_pos, mask)
 
@@ -108,9 +110,16 @@ class Transformer:
       ret = (logits / temperature).softmax().multinomial()
     return ret.flatten().realize()
 
-  def __call__(self, tokens:Union[Tensor,UOp], start_pos:Variable, temperature:float=0.0) -> Tensor:
-    forward = (self.forward_jit if JIT and (isinstance(tokens, UOp) or tokens.shape[1] == 1) else self.forward)
-    return forward(tokens, start_pos, temperature)
+  # def __call__(self, tokens:Union[Tensor,UOp], start_pos:Variable, temperature:float=0.0) -> Tensor:
+  #   forward = (self.forward_jit if JIT and (isinstance(tokens, UOp) or tokens.shape[1] == 1) else self.forward)
+  #   return forward(tokens, start_pos, temperature)
+
+  def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0):
+    # TODO: better way to handle the first call v.s. the rest?
+    if tokens.shape[0:2] == (1,1) and self.forward_jit is not None and start_pos != 0:
+      return self.forward_jit(tokens, Variable("start_pos", 1, self.max_context).bind(start_pos), temperature)
+    return self.forward(tokens, start_pos, temperature)
+
 
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
@@ -178,7 +187,7 @@ class GPT2:
 
   def generate(self, prompt:str, max_length:int, temperature:float, timing:bool=False, batch_size:int=1):
     prompt_tokens = self.tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})
-    toks = [prompt_tokens[:] for _ in range(batch_size)]
+    tokens = [prompt_tokens[:] for _ in range(batch_size)]
     start_pos = 0
     for _ in trange(max_length, disable=(timing==True)):
       GlobalCounters.reset()
@@ -187,14 +196,10 @@ class GPT2:
       with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                   f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                   (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
-        if batch_size == 1 and len(toks[0][start_pos:]) == 1:
-          tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
-        else:
-          tokens = Tensor([x[start_pos:] for x in toks])
-        tok = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT-1).bind(start_pos), temperature).tolist()
-      start_pos = len(toks[0])
-      for i,t in enumerate(tok): toks[i].append(t)
-    return [self.tokenizer.decode(x) for x in toks]
+        toks = self.model(Tensor([t[start_pos:] for t in tokens]), start_pos, temperature).tolist()
+      for i,t in enumerate(toks): tokens[i].append(t)
+      start_pos = len(tokens[0]) - 1
+    return [self.tokenizer.decode(t) for t in tokens]
 
 # **** main code ****
 
