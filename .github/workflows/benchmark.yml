@@ -513,15 +513,8 @@ jobs:
       run: time BENCHMARK_LOG=cifar AMD=1 DEFAULT_FLOAT=HALF LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
     - name: Run full CIFAR training steps w 6 GPUS
       run: time BENCHMARK_LOG=cifar_6gpu AMD=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
-    - name: Run MLPerf resnet eval
-      run: time BENCHMARK_LOG=resnet_eval AMD=1 MODEL=resnet python3 examples/mlperf/model_eval.py
-    - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
-      run: BENCHMARK_LOG=resnet_10steps AMD=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
-    - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
-      run: BENCHMARK_LOG=resnet_10steps_6gpu AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
-    - name: Run 10 MLPerf Bert training steps (6 gpu)
-      # TODO: remove BERT_LAYERS once scheduler is fast
-      run: BENCHMARK_LOG=bert_10steps_6gpu AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 FUSE_ARANGE=1 FUSE_ARANGE_UINT=0 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
+    - name: Run full CIFAR training steps w 6 GPUS (REMOTE)
+      run: time BENCHMARK_LOG=cifar_6gpu_remote REMOTE=1 REMOTEDEV=AMD DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu_remote.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)
@@ -533,6 +526,53 @@ jobs:
           train_cifar_wino.txt
           train_cifar_one_gpu.txt
           train_cifar_six_gpu.txt
+          train_cifar_six_gpu_remote.txt
+    - name: Run process replay tests
+      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+
+  testmlperfamdbenchmark:
+    name: tinybox red MLPerf Benchmark
+    runs-on: [self-hosted, Linux, tinybox]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Remove amdgpu
+      run: sudo rmmod amdgpu || true
+    - name: Symlink models and datasets
+      run: |
+        mkdir -p weights
+        ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
+        ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
+        ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+        ln -s /raid/weights/mixtral-8x7b-32kseqlen weights/mixtral-8x7b-32kseqlen
+        ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
+        mkdir -p extra/datasets
+        ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: setup staging db
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
+        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: reset process replay
+      run: test/external/process_replay/reset.py
+    - name: Run MLPerf resnet eval
+      run: time BENCHMARK_LOG=resnet_eval AMD=1 MODEL=resnet python3 examples/mlperf/model_eval.py
+    - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
+      run: BENCHMARK_LOG=resnet_10steps AMD=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
+    - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
+      run: BENCHMARK_LOG=resnet_10steps_6gpu AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
+    - name: Run 10 MLPerf Bert training steps (6 gpu)
+      # TODO: remove BERT_LAYERS once scheduler is fast
+      run: BENCHMARK_LOG=bert_10steps_6gpu AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 FUSE_ARANGE=1 FUSE_ARANGE_UINT=0 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Speed (AMD MLPerf)
+        path: |
           train_resnet.txt
           train_resnet_one_gpu.txt
           train_bert.txt
