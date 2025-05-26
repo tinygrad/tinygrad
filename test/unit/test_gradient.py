@@ -3,7 +3,7 @@ import unittest, math
 import torch
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp
+from tinygrad.uop.ops import UOp
 from tinygrad.gradient import compute_gradient
 
 class TestGradient(unittest.TestCase):
@@ -103,6 +103,11 @@ class TestTensorGradient(unittest.TestCase):
     x_reshaped = x.reshape(2,2)
     x_casted = x_reshaped.cast(dtypes.float16)
     x_casted.mean().gradient(x_reshaped)
+
+  def test_non_float_tensor_raise(self):
+    x = Tensor([1, 2, 3])
+    with self.assertRaises(RuntimeError): x.sum().gradient(x)
+    with self.assertRaises(RuntimeError): x.float().sum().gradient(x)
 
 class TestRealizeMeansRealize(unittest.TestCase):
   def test_randn_realizes(self):

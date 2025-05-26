@@ -1,7 +1,7 @@
 import gzip, unittest
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar
-from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod
+from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
 from tinygrad.tensor import get_shape
 from tinygrad.codegen.lowerer import get_contraction, get_contraction_with_reduce
 import numpy as np
@@ -155,6 +155,10 @@ class TestFetch(unittest.TestCase):
     with self.assertRaises(gzip.BadGzipFile):
       fetch(no_gzip_url, gunzip=True)
 
+  def test_fetch_user_agent(self):
+    fetch("https://csrc.nist.gov/CSRC/media/Projects/lightweight-cryptography/documents/finalist-round/updated-submissions/sparkle.zip",
+          allow_caching=False)
+
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
     self.assertEqual(fully_flatten([[1, 3], [1, 2]]), [1, 3, 1, 2])
@@ -290,7 +294,7 @@ class TestPolyN(unittest.TestCase):
 
   def test_uop(self):
     from tinygrad.dtype import dtypes
-    from tinygrad.ops import UOp
+    from tinygrad.uop.ops import UOp
     from test.helpers import eval_uop
     np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 1.0), [1.0, -2.0, 1.0])), 0.0)
     np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 2.0), [1.0, -2.0, 1.0])), 1.0)
@@ -331,6 +335,22 @@ class TestCStyleDivMod(unittest.TestCase):
     self.assertEqual(cmod(0, -5), 0)
     self.assertEqual(cmod(4, -5), 4)
     self.assertEqual(cmod(9, -5), 4)
+
+class TestGetBits(unittest.TestCase):
+  def test_low_bits(self):
+    self.assertEqual(getbits(0b11010110, 0, 3), 0b0110)
+
+  def test_high_bits(self):
+    self.assertEqual(getbits(0b11010110, 4, 7), 0b1101)
+
+  def test_middle_bits(self):
+    self.assertEqual(getbits(0b11010110, 3, 5), 0b010)
+
+  def test_full_range(self):
+    self.assertEqual(getbits(0b11010110, 0, 7), 0b11010110)
+
+  def test_single_bit(self):
+    self.assertEqual(getbits(0b100000000, 8, 8), 1)
 
 if __name__ == '__main__':
   unittest.main()
