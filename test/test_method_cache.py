@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, Device, Variable
+from tinygrad import Tensor, Device
 from examples.gpt2 import Transformer
 from tinygrad.nn.state import get_state_dict
 
