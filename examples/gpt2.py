@@ -7,6 +7,10 @@ from tinygrad.ops import UOp
 from tinygrad.helpers import Timing, DEBUG, JIT, getenv, fetch, colored, trange
 from tinygrad.nn import Embedding, Linear, LayerNorm
 from tinygrad.nn.state import gguf_load, torch_load, load_state_dict, get_state_dict
+from extra.models.llama import Transformer
+
+from icecream import install
+install()
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 HALF = getenv("HALF")
@@ -47,12 +51,10 @@ class Attention:
     return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, self.dim))
 
 class FeedForward:
-  def __init__(self, dim, hidden_dim):
-    self.c_fc = Linear(dim, hidden_dim, bias=True)
-    self.c_proj = Linear(hidden_dim, dim, bias=True)
-
-  def __call__(self, x:Tensor) -> Tensor:
-    return self.c_proj(self.c_fc(x).gelu())
+  def __init__(self, dim, hidden_dim, linear=Linear):
+    self.c_fc = linear(dim, hidden_dim, bias=True)
+    self.c_proj = linear(hidden_dim, dim, bias=True)
+  def __call__(self, x:Tensor) -> Tensor: return self.c_proj(self.c_fc(x).gelu())
 
 class TransformerBlock:
   def __init__(self, dim, n_heads, norm_eps):
@@ -65,7 +67,7 @@ class TransformerBlock:
     h = x + self.attn(self.ln_1(x), start_pos, mask).float()
     return (h + self.mlp(self.ln_2(h)))
 
-class Transformer:
+class OldTransformer:
   def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, max_seq_len=1024):
     self.vocab_size = vocab_size
     self.wte = Embedding(vocab_size, dim)
@@ -113,10 +115,10 @@ class Transformer:
 
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
-  'gpt2':         dict(n_layers=12, n_heads=12, dim=768, norm_eps=1e-5, vocab_size=VOCAB_SIZE),   # 124M params
-  'gpt2-medium':  dict(n_layers=24, n_heads=16, dim=1024, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 350M params
-  'gpt2-large':   dict(n_layers=36, n_heads=20, dim=1280, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 774M params
-  'gpt2-xl':      dict(n_layers=48, n_heads=25, dim=1600, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 1558M params
+  'gpt2':         dict(n_layers=12, n_heads=12, dim=768, hidden_dim=768*4, norm_eps=1e-5, vocab_size=VOCAB_SIZE),   # 124M params
+  'gpt2-medium':  dict(n_layers=24, n_heads=16, dim=1024, hidden_dim=1024*4, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 350M params
+  'gpt2-large':   dict(n_layers=36, n_heads=20, dim=1280, hidden_dim=1280*4, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 774M params
+  'gpt2-xl':      dict(n_layers=48, n_heads=25, dim=1600, hidden_dim=1600*4, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 1558M params
 }
 
 class GPT2:
@@ -124,10 +126,23 @@ class GPT2:
   def build(model_size="gpt2"):
     tokenizer = tiktoken.get_encoding("gpt2")
 
-    model = Transformer(**MODEL_PARAMS[model_size])
+    model = Transformer(**MODEL_PARAMS[model_size], feed_forward=FeedForward)
+
+    # replace RMSNorm with LayerNorm
+    dim, norm_eps = MODEL_PARAMS[model_size]['dim'], MODEL_PARAMS[model_size]['norm_eps']
+    model.norm = LayerNorm(dim, norm_eps)
+    new_layers = []
+    for layer in model.layers:
+      layer.attention_norm = LayerNorm(dim, norm_eps)
+      new_layers.append(layer)
+    model.layers = new_layers
+
+    ic(get_state_dict(model).keys())
+
     weights = torch_load(fetch(f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'))
     # special treatment for the Conv1D weights we need to transpose
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
+    ic(weights.keys())
     for k in weights:
       if k.endswith(transposed):
         weights[k] = weights[k].T
@@ -230,13 +245,18 @@ if __name__ == "__main__":
         for i,text in enumerate(texts): print(colored(f"Response {i}:", "green"), text)
 
     # validate output!
-    if args.temperature == 0 and args.model_size == "gpt2-medium" and args.count == 10:
+    if args.temperature == 0 and args.count == 10:
       expected = {
-        default_prompt: "What is the answer to life, the universe, and everything?\n\nThe answer is that we are all one",
-        "Hello.": "Hello. I'm a little late to the party, but",
+        "gpt2-medium": {
+          default_prompt: "What is the answer to life, the universe, and everything?\n\nThe answer is that we are all one",
+          "Hello.": "Hello. I'm a little late to the party, but",
+          },
+        "gpt2": {
+          default_prompt: "What is the answer to life, the universe, and everything?\n\nThe answer to life, the universe,"
+        }
       }
       try:
-        assert texts[0] == expected[args.prompt]
+        assert texts[0] == expected[args.model_size][args.prompt]
         print(colored("output validated", "green"))
       except KeyError:
         pass
