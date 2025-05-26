@@ -191,11 +191,11 @@ class GPT2:
                   f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                   (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
         with WallTimeEvent(BenchEvent.STEP):
-          new_toks = self.model(Tensor([t[start_pos:] for t in toks]), start_pos, temperature).tolist()
-      for i,t in enumerate(new_toks): toks[i].append(t)
+          new_toks = self.model(Tensor([x[start_pos:] for x in toks]), start_pos, temperature).tolist()
+      for i,x in enumerate(new_toks): toks[i].append(x)
       start_pos = len(toks[0]) - 1
-    return [self.tokenizer.decode(t) for t in toks]
-  
+    return [self.tokenizer.decode(x) for x in toks]
+
 # **** main code ****
 
 if __name__ == "__main__":
