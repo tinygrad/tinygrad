@@ -16,26 +16,6 @@ from tinygrad.uop.spec import type_verify, sched_spec
 import sys
 sys.setrecursionlimit(10000)
 
-# **** UOp merge views
-
-merge_views = PatternMatcher([
-  # merge adjacent views
-  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="v1"),), name="v2"), lambda v1,v2: v1.replace(arg=v1.arg+v2.arg)),
-  # merge view on load/store/valid
-  (UPat(Ops.VIEW, src=(UPat((Ops.LOAD, Ops.STORE, Ops.VALID), name="x"),), name="view"),
-   lambda x,view: x.replace(src=tuple((s.st+view.st).to_uop() if s.op is Ops.VIEW else s for s in x.src))),
-  # merge view on const if it's not masked
-  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="x").view(name="view"),
-   lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
-  # replace view with base if it's contiguous and the shapes match
-  (UPat(GroupOp.All-{Ops.DEVICE}, name="x").view(name="view"), lambda x,view: x if view.st.contiguous and x.shape == view.shape else None),
-  # replace masked view with zero if it can collapse
-  (UPat(Ops.VIEW, src=(UPat(),), name="view"),
-   lambda view: view.const_like(0) if (mask:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
-  # movement ops apply a new view on the base
-  (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
-])
-
 # **** schedule simplifier
 
 def simplify_stride0_reduce(reduce:UOp, x:UOp):
@@ -288,6 +268,23 @@ create_kernels = PatternMatcher([
 ])
 
 # **** swizzler
+
+merge_views = PatternMatcher([
+  # merge adjacent views
+  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="v1"),), name="v2"), lambda v1,v2: v1.replace(arg=v1.arg+v2.arg)),
+  # replace MovementOps with VIEW
+  (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
+  # remove NOOP views
+  (UPat.var("x").view(name="view"), lambda x,view: x if x.st is not None and view.st.contiguous and view.shape == x.shape else None),
+  (UPat().view(name="view"),
+   lambda view: view.const_like(0) if (mask:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
+  # VIEW on BufferOps replaces the ShapeTracker
+  (UPat(Ops.VIEW, src=(UPat((Ops.LOAD, Ops.STORE, Ops.VALID), name="x"),), name="view"),
+   lambda x,view: x.replace(src=tuple((s.st+view.st).to_uop() if s.op is Ops.VIEW else s for s in x.src))),
+  # only unmaksed VIEW on CONST replaces the ShapeTracker
+  (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),), name="view"),
+   lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
+])
 
 def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
   # contiguous, expand, and the same with ones removed
