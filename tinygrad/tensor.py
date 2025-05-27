@@ -3670,13 +3670,13 @@ class Tensor(MathTrait):
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3, 4, 5])
     mask = Tensor([True, False, True, False, False])
-    print(t.masked_fill(-12))
+    print(t.masked_fill(mask, -12).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3, 4, 5])
     mask = Tensor([True, False, True, False, False])
     value = Tensor([-1, -2, -3, -4, -5])
-    print(t.masked_fill(value))
+    print(t.masked_fill(mask, value).numpy())
     """
     return mask.where(value, self)
 
