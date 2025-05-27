@@ -188,12 +188,6 @@ spec = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
 ])
 
-# *** schedule spec only allows buffers, assigns and kernels in the graph ***
-
-sched_spec = buffer_spec+assign_spec+PatternMatcher([
-  (UPat(GroupOp.All-{Ops.SINK}), lambda: False),
-])
-
 # *** this is the UOp AST spec ***
 
 def verify_sink_dims(sink:UOp):
