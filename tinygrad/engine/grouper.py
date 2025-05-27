@@ -573,13 +573,14 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
 
   # verify Kernels match the spec
-  type_verify(list(toposort:=sched_sink.toposort()), tensor_uop_spec)
+  if __debug__: type_verify(list(sched_sink.toposort()), tensor_uop_spec)
 
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0):
       import pickle
-      PROCESS_REPLAY_CAPTURE[id(big_sink)] = pickle.dumps((big_sink, ContextVar._cache, [u.arg.ast for u in toposort if u.op is Ops.KERNEL]))
+      kernel_asts = [u.arg.ast for u in sched_sink.toposort() if u.op is Ops.KERNEL]
+      PROCESS_REPLAY_CAPTURE[id(big_sink)] = pickle.dumps((big_sink, ContextVar._cache, [u.arg.ast for u in kernel_asts if u.op is Ops.KERNEL]))
 
   # map tensors to buffer/assign/const
   # TODO: this is not right, and causes TestDataset.test_dataset_is_realized to fail unless I unprincipledly add Ops.COPY, which breaks others
