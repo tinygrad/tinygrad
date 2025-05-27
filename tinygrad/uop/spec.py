@@ -2,6 +2,7 @@ from typing import cast, Callable
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, resolve
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
 from tinygrad.helpers import all_same, prod, DEBUG, IGNORE_OOB, Context
+from tinygrad.shape.view import invert_view
 try:
   import z3
 
@@ -66,7 +67,8 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
    # "make things that can't be images not images" can change the buffer dtype
    # this is fine as long as it's a realized buffer and base dtypes match.
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.base.op is Ops.BUFFER)),
-  (UPat(Ops.VIEW, src=(UPat.var("x"),)), lambda x: x.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.CONST, Ops.DEVICE}),
+  #(UPat(Ops.VIEW, src=(UPat.var("x"),)), lambda x: x.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.CONST, Ops.DEVICE}),
+  (UPat(Ops.VIEW, src=(UPat.var("x"),)), lambda x: True),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),

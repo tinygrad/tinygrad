@@ -49,13 +49,14 @@ pm_gradient = PatternMatcher([
 def view_gradient(ctx:UOp, view:UOp):
   if view.arg.contiguous: return (ctx.reshape(view.src[0].shape),)
   ret = inret = view.src[0]
-  print("***", view.arg)
+  #print()
+  #print("search", len(view.arg.views))
   for v in view.arg.views:
-    print(v)
-    print(" -->", invert_view(v))
-    for op, arg in invert_view(v):
+    #print(ret.shape, v, "->")
+    #for iv in invert_view(v, ret.shape): print("  ", iv)
+    for op, arg in invert_view(v, ret.shape):
       ret = UOp(op, ret.dtype, (ret,), arg)
-  assert ret.shape == view.shape
+  assert ret.shape == view.shape, f"shape mismatch {ret.shape} != {view.shape}"
   while ret is not inret:
     ctx = pm_gradient.rewrite(ret, ctx=ctx)[0]
     ret = ret.src[0]

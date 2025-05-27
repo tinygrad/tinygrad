@@ -91,17 +91,25 @@ def view_cache(op):
     return __view_cache
   return _view_cache
 
-def invert_view(v):
+# this finds the shortest path
+def invert_view(v:View, target_shape:tuple[sint, ...]) -> list[tuple[UOp, Any]]:
   search = [(v,[])]
   seen = set()
   while len(search):
     nv, hist = search.pop(0)
     if nv in seen: continue
     seen.add(nv)
-    # TODO: add shrink here
-    if nv.contiguous:
-      return [(Ops.RESHAPE, nv.shape)]+hist
-    for rv,his in view_reverse[nv]: search.append((rv,[his]+hist))
+    if nv.contiguous and nv.shape == target_shape: return hist
+    #if nv.contiguous:
+      #print(nv, hist)
+      #print(view_reverse[nv])
+      #return [(Ops.RESHAPE, target_shape)]+hist
+    for rv,his in view_reverse.get(nv, []):
+      if his[0] is Ops.ADD:
+        #print("   ADD")
+        #print(rv, his)
+        continue
+      else: search.append((rv,[his]+hist))
   return None
 
 @dataclass(frozen=True)
