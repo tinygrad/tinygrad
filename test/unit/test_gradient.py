@@ -1,6 +1,7 @@
 from typing import Callable
 import unittest, math
 import torch
+import numpy as np
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp
@@ -128,6 +129,15 @@ class TestRealizeMeansRealize(unittest.TestCase):
     x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
     y = x * 2
     y.sum().gradient(x)[0].realize()
+
+class TestViewGradient(unittest.TestCase):
+  def test_expand(self):
+    # NOTE: aex.grad is *not* a.grad.expand(10)!
+    x = Tensor.randn(10)
+    a = Tensor([3.], requires_grad=True)
+    aex = a.expand(10)
+    (aex * x).sum().backward()
+    np.testing.assert_allclose(aex.grad.numpy(), x.numpy())
 
 if __name__ == '__main__':
   unittest.main()
