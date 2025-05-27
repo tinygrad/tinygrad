@@ -105,11 +105,9 @@ def invert_view(v:View, target_shape:tuple[sint, ...]) -> list[tuple[UOp, Any]]:
       #print(view_reverse[nv])
       #return [(Ops.RESHAPE, target_shape)]+hist
     for rv,his in view_reverse.get(nv, []):
-      if his[0] is Ops.ADD:
-        #print("   ADD")
-        #print(rv, his)
-        continue
-      else: search.append((rv,[his]+hist))
+      # TODO: do we need to handle ADD?
+      if his[0] is Ops.ADD: continue
+      search.append((rv,[his]+hist))
   raise RuntimeError(f"unable to invert view {v} -> {target_shape}")
 
 @dataclass(frozen=True)
