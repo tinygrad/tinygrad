@@ -583,15 +583,3 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
       PROCESS_REPLAY_CAPTURE[id(big_sink)] = pickle.dumps((big_sink, ContextVar._cache, kernel_asts))
 
   return tensor_map
-
-  # map tensors to buffer/assign/const
-  # TODO: this is not right, and causes TestDataset.test_dataset_is_realized to fail unless I unprincipledly add Ops.COPY, which breaks others
-  becomes_map: dict[UOp, UOp] = {}
-  for k,v in tensor_map.items():
-    if k is v: continue
-    op = v.base.op
-    if op in {Ops.BUFFER, Ops.ASSIGN}: becomes_map[k] = v
-    if op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
-    if op is Ops.MULTI and all(x.base in becomes_map for x in v.base.src): becomes_map[k] = v
-
-  return becomes_map
