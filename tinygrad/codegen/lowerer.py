@@ -138,20 +138,19 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   # REDUCE supports both "horizonal" reduction and range reduction. the horizonal elements are taken in the nearest group
   return UOp(Ops.REDUCE, x.dtype, (ret,)+tuple(reduce_range), alu_op)
 
-def lower_load_store(ctx: IndexContext, x: UOp):
-  idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
-  buf = x.src[0]
+def lower_load_store(ctx: IndexContext, x: UOp, buf: UOp):
+  idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and buf.op is Ops.DEFINE_LOCAL else ctx.idxs)
   if x.op is Ops.LOAD:
-    barrier = (UOp(Ops.BARRIER, dtypes.void, (x.src[2],)),) if x.src[0].op is Ops.DEFINE_LOCAL else ()
+    barrier = (UOp(Ops.BARRIER, dtypes.void, (x.src[2],)),) if buf.op is Ops.DEFINE_LOCAL else ()
     return UOp(Ops.LOAD, x.dtype, (buf.index(idx, valid),) + barrier)
   # NOTE: only store the local reduceop in the threads that are actually doing the reduce
-  if cast(PtrDType, x.src[0].dtype).local and x.src[2].op is Ops.REDUCE:
+  if cast(PtrDType, buf.dtype).local and x.src[2].op is Ops.REDUCE:
     reduce_input = x.src[2].src[0]
     store_back = reduce_input.op is Ops.LOAD and cast(PtrDType, reduce_input.src[0].dtype).local
   else: store_back = False
   # NOTE: If we're storing the reduced value back into each thread, need to zero-out the reduced axes
   if store_back: idx, _ = x.st_arg.to_indexed_uops([u.const_like(0) if u in x.src[2].src else u for u in ctx.idxs])
-  if (not cast(PtrDType, x.src[0].dtype).local) or store_back:
+  if (not cast(PtrDType, buf.dtype).local) or store_back:
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
       if oidx is not ridx: valid = valid * oidx.eq(0)
   return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[2]))
@@ -165,7 +164,7 @@ pm_lowerer = PatternMatcher([
   (UPat((Ops.CONST, Ops.DEFINE_VAR), src=(UPat(Ops.VIEW),), name="x"), lower_const),
   (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
   # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat.var("buf"), UPat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),
   (UPat(Ops.IGNORE, name="x"), lambda x: x.src[0]),
 ])
