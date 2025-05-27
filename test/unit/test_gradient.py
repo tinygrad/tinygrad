@@ -132,12 +132,16 @@ class TestRealizeMeansRealize(unittest.TestCase):
 
 class TestViewGradient(unittest.TestCase):
   def test_expand(self):
-    # NOTE: aex.grad is *not* a.grad.expand(10)!
-    x = Tensor.randn(10)
+    # this test shows that if Tensors collapse to the views and create a disconnected graph
+    # there's no way to recover the proper gradient
+    x = Tensor.randn(5,2)
     a = Tensor([3.], requires_grad=True)
     aex = a.expand(10)
-    (aex * x).sum().backward()
-    np.testing.assert_allclose(aex.grad.numpy(), x.numpy())
+    (aex.reshape(5,2) * x).sum().backward()
+    np.testing.assert_allclose(aex.grad.numpy(), x.reshape(10).numpy())
+    # NOTE: aex.grad is *not* a.grad.expand(10)!
+    with self.assertRaises(AssertionError):
+      np.testing.assert_allclose(aex.grad.numpy(), a.grad.expand(10).numpy())
 
 if __name__ == '__main__':
   unittest.main()
