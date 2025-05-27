@@ -118,6 +118,7 @@ CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), Contex
 DISABLE_COMPILER_CACHE = ContextVar("DISABLE_COMPILER_CACHE", 0)
 DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES = ContextVar("DONT_REALIZE_EXPAND", 0), ContextVar("DONT_GROUP_REDUCES", 0)
 QUANTIZE, VALIDATE_WITH_CPU, IGNORE_OOB = ContextVar("QUANTIZE", 0), ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("IGNORE_OOB", 1)
+CORRECT_DIVMOD_FOLDING = ContextVar("CORRECT_DIVMOD_FOLDING", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -219,8 +220,8 @@ def diskcache_put(table:str, key:Union[dict, str, int], val:Any, prepickled=Fals
   cur.close()
   return val
 
-def diskcache(func):
-  def wrapper(*args, **kwargs) -> bytes:
+def diskcache(func:Callable[..., T]):
+  def wrapper(*args, **kwargs) -> T:
     table, key = f"cache_{func.__name__}", hashlib.sha256(pickle.dumps((args, kwargs))).hexdigest()
     if (ret:=diskcache_get(table, key)) is not None: return ret
     return diskcache_put(table, key, func(*args, **kwargs))
@@ -250,7 +251,7 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional
   else: fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + (".gunzip" if gunzip else ""))
   if not fp.is_file() or not allow_caching:
     (_dir := fp.parent).mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url, timeout=10) as r:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.10.3"}), timeout=10) as r:
       assert r.status == 200, r.status
       length = int(r.headers.get('content-length', 0)) if not gunzip else None
       readfile = gzip.GzipFile(fileobj=r) if gunzip else r

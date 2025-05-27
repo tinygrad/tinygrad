@@ -17,6 +17,6 @@ curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
     xargs curl -L -o $INSTALL_PATH/libremu.dylib
 
 # Download libamd_comgr.dylib
-curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
+curl -s https://api.github.com/repos/tinygrad/amdcomgr_dylib/releases/latest | \
     jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
     xargs curl -L -o $INSTALL_PATH/libamd_comgr.dylib
