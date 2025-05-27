@@ -113,7 +113,7 @@ def hash_1mb(msg: Tensor) -> Tensor:
   block_hashes = Tensor(shake128_4kb(msg).reshape(blocks, 16).numpy())
 
   block_hashes = block_hashes.reshape(vb.bind(bs), 4096)
-  root_hash = Tensor(shake128_4kb(block_hashes).reshape(bs, 16).numpy())
+  root_hash = shake128_4kb(block_hashes).reshape(bs, 16)
   return root_hash
 
 def tree_hash(msg: Tensor) -> Tensor:
