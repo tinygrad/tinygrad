@@ -3663,7 +3663,22 @@ class Tensor(MathTrait):
     cond, y = cond._broadcasted(y, match_dtype=False)
     return cond.cast(dtypes.bool)._apply_uop(UOp.where, *x._broadcasted(y))
 
-  def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor: return mask.where(value, self)
+  def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor:
+    """
+    Replace the elements of `self` with `value` wherever `mask` is True.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4, 5])
+    mask = Tensor([True, False, True, False, False])
+    print(t.masked_fill(-12))
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4, 5])
+    mask = Tensor([True, False, True, False, False])
+    value = Tensor([-1, -2, -3, -4, -5])
+    print(t.masked_fill(value))
+    """
+    return mask.where(value, self)
 
   def copysign(self, other) -> Tensor:
     """
