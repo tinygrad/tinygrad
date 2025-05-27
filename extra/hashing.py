@@ -1,4 +1,4 @@
-import math, functools
+import math, functools, time
 from tinygrad import Variable
 from tinygrad.helpers import fetch, getenv
 from tinygrad.tensor import Tensor
@@ -60,6 +60,7 @@ def _keccakf1600(state: list[Tensor]) -> list[Tensor]:
     state = _keccak_round(state, RNDC[round])
   return state
 def kaccak(capacity: int, msg: Tensor, delim: int, output_len: int) -> Tensor:
+  assert msg.dtype == dtypes.uint8, "message must be a uint8 tensor"
   rate = 1600 - capacity
   brate, wrate = rate // 8, rate // 64
 
@@ -94,35 +95,43 @@ def shake128(msg: Tensor, output_len: int = 16) -> Tensor:
   return kaccak(256, msg, 0x1f, output_len)
 
 @TinyJit
-def shake128_4kb(msg: Tensor, bs) -> Tensor:
-  return shake128(msg.reshape(bs, 4096))
+def shake128_4kb(msg: Tensor) -> Tensor:
+  assert msg.shape[1] == 4096, "shake128_4kb only supports messages of 4096 bytes"
+  return shake128(msg)
+
+def hash_1mb(msg: Tensor) -> Tensor:
+  assert msg.shape[1] <= 1024 * 1024, "hash_1mb only supports messages up to 1MB"
+
+  if msg.shape[1] != 1024 * 1024:
+    msg = msg.pad((None, (0, 1024 * 1024 - msg.shape[1])), value=0)
+
+  bs = msg.shape[0]
+  blocks = bs * msg.shape[1] // 4096
+  vb = Variable("blocks", 1, 65534)
+
+  msg = msg.reshape(vb.bind(blocks), 4096)
+  block_hashes = Tensor(shake128_4kb(msg).reshape(blocks, 16).numpy())
+
+  block_hashes = block_hashes.reshape(vb.bind(bs), 4096)
+  root_hash = Tensor(shake128_4kb(block_hashes).reshape(bs, 16).numpy())
+  return root_hash
 
 def tree_hash(msg: Tensor) -> Tensor:
-  vb = Variable("bs", 1, 4096).bind(msg.shape[1] // 4096)
-  one_hashes = shake128_4kb(msg, vb).contiguous()
-
-  print(one_hashes.shape)
-
-  vb = Variable("bs", 1, 4096).bind(one_hashes.shape[0].unbind()[1] // 256)
-  two_hashes = shake128_4kb(one_hashes, vb)
-
-  print(two_hashes.shape)
-
-  # vb = Variable("bs", 1, 4096).bind(two_hashes.shape[0].unbind() // 256)
-  # root_hash = shake128_4kb(two_hashes.reshape(vb, 4096))
-
-  # print(root_hash.reshape(1, 16).data().tobytes().hex())
+  a = hash_1mb(msg)
+  print(a.numpy())
 
 def string_to_uint8_tensor(s: str) -> Tensor:
   return Tensor([s.encode()], dtype=dtypes.uint8)
 
 if __name__ == "__main__":
-  shake128_4kb(Tensor.zeros(1, 4096), 1)
+  st = time.perf_counter()
+  shake128_4kb(Tensor.zeros(1, 4096, dtype=dtypes.uint8)).contiguous()
+  print(f"shake128_4kb took {time.perf_counter() - st:.3f}s")
 
-  a = Tensor.randint((1, 4 * 1024 * 1024), dtype=dtypes.uint8)
+  a = Tensor.randint((1, 1 * 1024 * 1024), dtype=dtypes.uint8)
   b = tree_hash(a)
 
-  a = Tensor.randint((1, 4 * 1024 * 1024), dtype=dtypes.uint8)
+  a = Tensor.randint((1, 1 * 1024 * 1024), dtype=dtypes.uint8)
   b = tree_hash(a)
 
 # def test_kat(kat, i):
