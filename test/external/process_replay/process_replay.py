@@ -32,7 +32,7 @@ class ProcessReplayWarning(Warning): pass
 
 # *** recreators
 
-def recreate_sched(big_sink:UOp) -> list[UOp]:
+def recreate_sched(big_sink:UOp, _) -> list[UOp]:
   UOp.unique_num = itertools.count(max([u.arg for u in big_sink.toposort() if u.op is Ops.UNIQUE], default=0)+1)
   becomes_map = get_kernelize_map(big_sink)
   sched_sink = big_sink.substitute(becomes_map)
