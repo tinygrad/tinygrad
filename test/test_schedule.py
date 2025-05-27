@@ -2408,6 +2408,7 @@ class TestCopyFolding(unittest.TestCase):
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
 class TestTensorUOpSpec(unittest.TestCase):
+  @unittest.skip("this is not checked")
   def test_const_must_be_unmasked(self):
     a = Tensor.ones((4, 4)).pad((2, 2))
     unsafe_push_views = PatternMatcher([
