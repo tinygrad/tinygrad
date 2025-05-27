@@ -68,7 +68,7 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
    # this is fine as long as it's a realized buffer and base dtypes match.
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.base.op is Ops.BUFFER)),
   #(UPat(Ops.VIEW, src=(UPat.var("x"),)), lambda x: x.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.CONST, Ops.DEVICE}),
-  (UPat(Ops.VIEW, src=(UPat.var("x"),)), lambda x: True),
+  (UPat(Ops.VIEW, src=(UPat.var("x"),), name="v"), lambda x,v: x.dtype == v.dtype), # and invert_view(v.arg, x.shape)),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),

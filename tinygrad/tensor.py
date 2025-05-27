@@ -908,7 +908,7 @@ class Tensor(MathTrait):
     assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
     if not (self.is_floating_point() and all(t.is_floating_point() for t in targets)): raise RuntimeError("only float Tensors have gradient")
     if gradient is None: gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
-    target_uops = [x.lazydata for x in targets]
+    target_uops = [t.lazydata.base for t in targets]
     grads = compute_gradient(self.lazydata, gradient.lazydata, set(target_uops))
     ret = []
     for x in target_uops:
@@ -917,7 +917,7 @@ class Tensor(MathTrait):
         else: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}")
       ret.append(y)
     # create returned Tensors
-    return [Tensor(u, device=t.device) for t,u in zip(targets, ret)]
+    return [Tensor(u.view(t.lazydata.st), device=t.device) for t,u in zip(targets, ret)]
 
   def backward(self, gradient:Tensor|None=None) -> Tensor:
     """
