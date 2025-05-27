@@ -47,7 +47,6 @@ pm_gradient = PatternMatcher([
 ])
 
 def view_gradient(ctx:UOp, view:UOp):
-  if view.arg.contiguous: return (ctx.reshape(view.src[0].shape),)
   ret = inret = view.src[0]
   #print()
   #print("search", len(view.arg.views))

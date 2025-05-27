@@ -110,7 +110,7 @@ def invert_view(v:View, target_shape:tuple[sint, ...]) -> list[tuple[UOp, Any]]:
         #print(rv, his)
         continue
       else: search.append((rv,[his]+hist))
-  return None
+  raise RuntimeError(f"unable to invert view {v} -> {target_shape}")
 
 @dataclass(frozen=True)
 class View:
