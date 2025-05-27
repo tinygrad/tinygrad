@@ -35,6 +35,16 @@ def decode_bbox(offsets, anchors):
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 
+def decode_bbox2(offsets, anchors):
+  dx, dy, dw, dh = np.rollaxis(offsets, 1)
+  widths, heights = anchors[:, 2] - anchors[:, 0], anchors[:, 3] - anchors[:, 1]
+  cx, cy = anchors[:, 0] + 0.5 * widths, anchors[:, 1] + 0.5 * heights
+  pred_cx, pred_cy = dx * widths + cx, dy * heights + cy
+  pred_w, pred_h = np.exp(dw) * widths, np.exp(dh) * heights
+  pred_x1, pred_y1 = pred_cx - 0.5 * pred_w, pred_cy - 0.5 * pred_h
+  pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
+  return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
+
 class RetinaNet:
   def __init__(self, backbone:ResNet, num_classes:int=264, num_anchors:int=9, scales:list[int]|None=None, aspect_ratios:list[float]|None=None):
     assert isinstance(backbone, ResNet)
@@ -105,7 +115,10 @@ class RetinaNet:
           scores_level, idxs = scores_level.topk(num_topk)
           topk_idxs = topk_idxs[idxs]
 
-        detections.append(scores_level)
+        # bbox coords from offsets
+        anchor_idxs = topk_idxs.div(self.num_classes, rounding_mode="floor")
+        lbls_level = topk_idxs % self.num_classes
+        detections.append(anchor_idxs)
 
     return detections
 
@@ -133,11 +146,10 @@ class RetinaNet:
         num_topk = min(len(topk_idxs), topk_candidates)
         sort_idxs = scores_per_level.argsort()[-num_topk:][::-1]
         topk_idxs, scores_per_level = topk_idxs[sort_idxs], scores_per_level[sort_idxs]
-        detections.append(scores_per_level)
 
         # bbox coords from offsets
-    #     anchor_idxs = topk_idxs // self.num_classes
-    #     labels_per_level = topk_idxs % self.num_classes
+        anchor_idxs = topk_idxs // self.num_classes
+        labels_per_level = topk_idxs % self.num_classes
     #     boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level[anchor_idxs])
     #     # clip to image size
     #     clipped_x = boxes_per_level[:, 0::2].clip(0, w)
