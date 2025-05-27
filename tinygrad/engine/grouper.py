@@ -582,7 +582,12 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0):
       import pickle
-      PROCESS_REPLAY_CAPTURE[id(big_sink)] = pickle.dumps((big_sink, ContextVar._cache, [u.arg.ast for u in toposort if u.op is Ops.KERNEL]))
+      # TODO: make a helper for this
+      import sys
+      frm = sys._getframe(1)
+      while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
+      loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
+      PROCESS_REPLAY_CAPTURE[id(big_sink)] = pickle.dumps((big_sink, loc, ContextVar._cache, [u.arg.ast for u in toposort if u.op is Ops.KERNEL]))
 
   # map tensors to buffer/assign/const
   # TODO: this is not right, and causes TestDataset.test_dataset_is_realized to fail unless I unprincipledly add Ops.COPY, which breaks others
