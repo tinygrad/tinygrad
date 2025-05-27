@@ -73,7 +73,8 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
 
   # Tensor const has a device and an unmasked ShapeTracker of stride 0
   # NOTE: variables in shape can cause multiple views in this ShapeTracker and other issues, see TestSymbolicJit.test_ones_sum
-  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)), lambda st: all(v.mask is None for v in st.st.views)),
+  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)),
+   lambda st: len(st.st.views) == 1 and all(v.mask is None for v in st.st.views)),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
