@@ -1594,7 +1594,7 @@ class Tensor(MathTrait):
 
   def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor:
     """
-    Replace `self` with `value` wherever the elemnts of `mask` are True.
+    Replace `self` with `value` wherever the elements of `mask` are True.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3, 4, 5])
