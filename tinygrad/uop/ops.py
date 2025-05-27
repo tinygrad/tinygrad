@@ -144,7 +144,7 @@ class Ops(FastEnum):
   BARRIER = auto(); RANGE = auto(); IF = auto(); ENDRANGE = auto(); ENDIF = auto(); GBARRIER = auto() # noqa: E702
 
   # consts last!
-  VCONST = auto(); CONST = auto() # noqa: E702
+  VCONST = auto(); FCONST = auto(); CONST = auto() # noqa: E702
 
   # device
   DEVICE = auto()
@@ -164,7 +164,7 @@ class GroupOp:
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
-  Buffer = {Ops.LOAD, Ops.STORE, Ops.VALID, Ops.CONST, Ops.DEFINE_VAR}
+  Buffer = {Ops.LOAD, Ops.STORE, Ops.VALID, Ops.CONST, Ops.FCONST, Ops.DEFINE_VAR}
   Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKSTART}
 
   # BinaryOps that can be flipped
@@ -412,10 +412,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
   def valid(self, st:ShapeTracker):
-    assert self.op in {Ops.CONST, Ops.DEFINE_VAR} and any(v.mask is not None for v in st.views), f"attempting to create VALID with {self.op} {st}"
+    assert self.op in {Ops.CONST, Ops.DEFINE_VAR, Ops.FCONST} and any(v.mask is not None for v in st.views),\
+      f"attempting to create VALID with {self.op} {st}"
     from tinygrad.shape.shapetracker import ShapeTracker
     # NOTE: only VALID has a masked ShapeTracker, the CONST operands are unmasked
-    unmasked_st = ShapeTracker.from_shape(()).reshape((1,)*len(st.shape)).expand(st.shape).to_uop()
+    unmasked_st = st.remove_mask().to_uop()
+    # unmasked_st = (st if self.op is Ops.FCONST else ShapeTracker.from_shape(()).reshape((1,)*len(st.shape)).expand(st.shape)).to_uop()
     return UOp(Ops.VALID, dtypes.bool, (st.to_uop(),)).where(self.replace(src=(unmasked_st,)), UOp.const(self.dtype, 0).replace(src=(unmasked_st,)))
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
@@ -484,6 +486,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       assert isinstance(arg, get_args(ConstType)), f"trying to create CONST with {arg=}"
       return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),),
                  ShapeTracker.from_shape(())),)).reshape((1,)*len(shape)).expand(shape)
+    if op is Ops.FCONST:
+       return UOp(op, dtype, arg=arg).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),))
     # Tensor variable binding is BIND(VAR(VIEW(DEVICE)), CONST(VIEW(DEVICE)))
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()

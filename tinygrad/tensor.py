@@ -594,6 +594,20 @@ class Tensor(MathTrait):
     return Tensor.full(argfix(*shape), 1.0, **kwargs)
 
   @staticmethod
+  def fromfunction(function, shape, **kwargs) -> Tensor:
+    """
+    Create a tensor from a symbolic function over each index coordinate.
+    """
+    # we can't pickle a function so we need to evaluate it with dumy arguments and turn it into a uop, we also need to get the dtype
+    args = [UOp.variable(f"arg{i}", 0, d-1) for i,d in enumerate(shape)]
+    sym_fn_op = function(*args)
+    device = kwargs.pop("device", None)
+    assert not isinstance(device, tuple), device
+    assert kwargs.pop("dtype", sym_fn_op.dtype)==sym_fn_op.dtype, "dtype doesn't match, and casting isn't supported"
+    op = _metaop(Ops.FCONST, shape, sym_fn_op.dtype, Device.canonicalize(device), (sym_fn_op, shape))
+    return Tensor(op, device, **kwargs)
+
+  @staticmethod
   def arange(start, stop=None, step=1, **kwargs) -> Tensor:
     """
     Returns a 1-D tensor of size `ceil((stop - start) / step)` with values from `[start, stop)`, with spacing between values given by `step`.
