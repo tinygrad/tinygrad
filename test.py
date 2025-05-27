@@ -1,9 +1,12 @@
 from tinygrad import Tensor, dtypes
+from icecream import install
+install()
 
-t = Tensor.rand(4096, 4096)
-idx_size = 324
+tensor_size, idx_size = 50257, 324
+mask = Tensor.rand(1, tensor_size) > 0.5
 idx1 = Tensor.zeros(idx_size, dtype=dtypes.int)
-idx2 = Tensor.randint(idx_size, dtype=dtypes.int)
+idx2 = Tensor.randint(idx_size, low=0, high=tensor_size, dtype=dtypes.int)
+ic(mask, idx1, idx1.numpy(), idx2, idx2.numpy())
 
-out = t[idx1, idx2]
-print(out.numpy())
+out = mask[idx1, idx2]
+ic(out.numpy())
