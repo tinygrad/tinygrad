@@ -3,7 +3,7 @@ import itertools, operator, math
 from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, least_upper_dtype
-from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint, sint_to_uop
+from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint, sint_to_uop, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
 from tinygrad.codegen.symbolic import symbolic
@@ -230,4 +230,19 @@ pm_quant = symbolic+PatternMatcher([
     lambda v1,v2,c1,r: r.replace(src=(v1*v2,)) + r.replace(src=(c1*v2,))),
   (UPat(Ops.REDUCE_AXIS, src=((UPat(Ops.CAST, name="v1")+UPat.var("c1")) * (UPat(Ops.CAST, name="v2",)+UPat.var("c2")),), name="r"),
     lambda v1,v2,c1,c2,r: r.replace(src=(v1*v2,)) + r.replace(src=(c2*v1,)) + r.replace(src=(c1*v2,)) + r.replace(src=(c1*c2,))),
+])
+
+# **** this pushes cast through alus, may help with numeric stability ****
+
+def push_cast_half_right(alu:UOp):
+  def _is_f32_to_f16(s:UOp): return s.op is Ops.CAST and s.dtype is dtypes.half and s.src[0].dtype is dtypes.float32
+  if not any(_is_f32_to_f16(s) for s in alu.src): return None
+  new_src = tuple(s.src[0] if _is_f32_to_f16(s) else s.cast(dtypes.float32) if s.dtype is dtypes.half else s for s in alu.src)
+  return alu.replace(dtype=dtypes.float32, src=new_src).cast(dtypes.half) if alu.dtype is dtypes.half else alu.replace(src=new_src)
+
+pm_push_cast = PatternMatcher([
+  #  --- cast folding ---
+  (UPat.var("f32", dtype=dtypes.float32).cast(dtypes.half).cast(dtypes.float32), lambda f32: f32),
+  #  --- pushes cast to half right through alus ---
+  (UPat(GroupOp.ALU, name="alu"), push_cast_half_right),
 ])
