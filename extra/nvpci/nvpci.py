@@ -1,8 +1,26 @@
-import os, mmap, re
-from tinygrad.helpers import fetch
+import os, mmap, re, array, gzip, struct, ctypes
+from tinygrad.helpers import fetch, to_mv, round_up
+from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.nv import nv
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
+
+pagemap = FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
+
+MAP_LOCKED = 0x2000
+def alloc_sysmem(size, contigous=False):
+  size = round_up(size, mmap.PAGESIZE)
+  
+  assert not contigous or size <= (2 << 20), "Contiguous allocation is only supported for sizes <= 2 MiB"
+  flags = mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED
+
+  if contigous and size > 0x1000: flags |= libc.MAP_HUGETLB
+  va = FileIOInterface.anon_mmap(0, size, mmap.PROT_READ | mmap.PROT_WRITE, flags, 0)
+  assert va != 0xffffffffffffffff, f"Failed to mmap {size} bytes at {hex(va)}"
+
+  # Read pagemap to get the physical address of each page. The pages are locked.
+  pagemap.seek(va // mmap.PAGESIZE * 8)
+  return va, [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
 dev = None
 for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
@@ -36,33 +54,147 @@ class NVDev():
     self.defs, self.scanned_files = {}, set()
 
     self.include("src/nvidia/arch/nvalloc/common/inc/fsp/fsp_nvdm_format.h")
+    self.init_gsp()
 
-    self.kfsp_send_msg(self.NVDM_TYPE_CAPS_QUERY, bytes([self.NVDM_TYPE_CLOCK_BOOST]))
+    # self.kfsp_send_msg(self.NVDM_TYPE_CAPS_QUERY, bytes([self.NVDM_TYPE_CLOCK_BOOST]))
+
+    # print([hex(x) for x in alloc_sysmem(0x0000000000031000, contigous=True)])  # Allocate 0x31000 bytes of contiguous system memory
 
     # gb100+ are cot v2.
-    cot = nv.NVDM_PAYLOAD_COT(version=2, size=ctypes.sizeof(nv.NVDM_PAYLOAD_COT), frtsSysmemOffset=0x0, frtsSysmemSize=0x0,
-                             frtsVidmemOffset=0x1c00000, frtsVidmemSize=0x100000, gspBootArgsSysmemOffset=0xfffff000)
+    # cot = nv.NVDM_PAYLOAD_COT(version=2, size=ctypes.sizeof(nv.NVDM_PAYLOAD_COT), frtsSysmemOffset=0x0, frtsSysmemSize=0x0,
+    #                          frtsVidmemOffset=0x1c00000, frtsVidmemSize=0x100000, gspBootArgsSysmemOffset=0xfffff000)
 
 
   def wreg(self, addr, value): self.mmio[addr // 4] = value
   def rreg(self, addr): return self.mmio[addr // 4]
 
-  def gsp_image_setup(self):
+  def _alloc_boot_struct(self, typ):
+    va, paddrs = alloc_sysmem(ctypes.sizeof(typ), contigous=True)
+    return typ.from_address(va), paddrs[0]
+
+  def init_boot_binary_image(self):
+    text = self._download("src/nvidia/generated/g_bindata_kgspGetBinArchiveGspRmBoot_GB202.c")
+
+    def _find_section(name):
+      sl = text[text.find(name) + len(name) + 7:]
+      return bytes.fromhex(sl[:sl.find("};")].strip().replace("0x", "").replace(",", "").replace(" ", "").replace("\n", ""))
+
+    image = _find_section("kgspBinArchiveGspRmBoot_GB202_ucode_image_prod_data")
+    desc = _find_section("kgspBinArchiveGspRmBoot_GB202_ucode_desc_prod_data")
+    desc = gzip.decompress(struct.pack("<4BL2B", 0x1f, 0x8b, 8, 0, 0, 0, 3) + desc)
+
+    image_va, image_sysmem = alloc_sysmem(len(image), contigous=True)
+    to_mv(image_va, len(image))[:] = image
+
+    assert len(image) == 0x31000
+    return image_sysmem[0], len(image), nv.RM_RISCV_UCODE_DESC.from_buffer_copy(desc)
+
+  def init_gsp_image(self):
     fwpath = "/lib/firmware/nvidia/570.133.20/gsp_ga10x.bin"
     fwbytes = FileIOInterface(fwpath, os.O_RDONLY).read(binary=True)
     assert len(fwbytes) == 63534832
 
-    pass
+    _, sections, _ = elf_loader(fwbytes)
+    image = next((sh.content for sh in sections if sh.name == ".fwimage"))
+    signature = next((sh.content for sh in sections if sh.name == ".fwsignature_gb20x"))
+
+    # radix3
+    npages = [0] * 4
+    offsets = [0] * 4
+    npages[3] = (len(image) + nv.LIBOS_MEMORY_REGION_RADIX_PAGE_SIZE - 1) >> nv.LIBOS_MEMORY_REGION_RADIX_PAGE_LOG2
+    for i in range(3, 0, -1): npages[i-1] = ((npages[i] - 1) >> (nv.LIBOS_MEMORY_REGION_RADIX_PAGE_LOG2 - 3)) + 1
+    
+    total_pages = 0
+    for i in range(1, 4):
+      total_pages += npages[i-1]
+      offsets[i] = total_pages << nv.LIBOS_MEMORY_REGION_RADIX_PAGE_LOG2
+    print(npages, offsets)
+
+    alloc_size = total_pages << nv.LIBOS_MEMORY_REGION_RADIX_PAGE_LOG2
+    sysmem_va, sysmem_paddrs = alloc_sysmem(alloc_size, contigous=False)
+
+    page_off = 0
+    for i in range(0, 2):
+      page_off += npages[i]
+      to_mv(sysmem_va + offsets[i], npages[i+1] * 8).cast('Q')[:] = array.array('Q', sysmem_paddrs[page_off:page_off + npages[i+1]])
+
+    image_va, image_paddrs = alloc_sysmem(len(image), contigous=False)
+    to_mv(image_va, len(image))[:] = image
+    to_mv(sysmem_va + offsets[2], npages[3] * 8).cast('Q')[:] = array.array('Q', image_paddrs)
+
+    radix3_head = sysmem_paddrs[0]
+
+    sign_va, sign_sysmem = alloc_sysmem(len(signature), contigous=True)
+    to_mv(sign_va, len(signature))[:] = signature
+
+    return radix3_head, sign_sysmem, len(image)
+
+  def init_gsp(self):
+    bootload_ucode_sysmem, bootload_ucode_size, bootload_desc = self.init_boot_binary_image()
+    radix3_sysmem, signature_sysmem, radix3_elf_size = self.init_gsp_image()
+
+    print(hex(radix3_sysmem))
+
+    fmc_boot, fmc_boot_sysmem = self._alloc_boot_struct(nv.GSP_FMC_BOOT_PARAMS)
+    wpr_meta, wpr_meta_sysmem = self._alloc_boot_struct(nv.GspFwWprMeta)
+    # libos_init, libos_init_sysmem = self._alloc_boot_struct(nv.GspFwLibosInit)
+
+    
+    # wpr meta fillup
+    wpr_meta.vgaWorkspaceSize = 128 * 1024
+    wpr_meta.pmuReservedSize = 0x1820000
+    wpr_meta.sizeOfBootloader = bootload_ucode_size
+    wpr_meta.sysmemAddrOfBootloader = bootload_ucode_sysmem
+
+    wpr_meta.sizeOfRadix3Elf = radix3_elf_size
+    wpr_meta.sysmemAddrOfRadix3Elf = radix3_sysmem
+
+    wpr_meta.bootloaderCodeOffset = bootload_desc.monitorCodeOffset
+    wpr_meta.bootloaderDataOffset = bootload_desc.monitorDataOffset
+    wpr_meta.bootloaderManifestOffset = bootload_desc.manifestOffset
+    print(hex(wpr_meta.bootloaderCodeOffset), hex(wpr_meta.bootloaderDataOffset), hex(wpr_meta.bootloaderManifestOffset))
+
+    wpr_meta.sysmemAddrOfSignature = sign_sysmem
+    wpr_meta.sizeOfSignature = 0x1000
+
+    wpr_meta.nonWprHeapSize = 0x220000
+    wpr_meta.gspFwHeapSize = 0x8700000
+    wpr_meta.frtsSize = 0x100000
+    wpr_meta.gspFwHeapVfPartitionCount = 0x0
+    wpr_meta.revision = nv.GSP_FW_WPR_META_REVISION
+    wpr_meta.magic = nv.GSP_FW_WPR_META_MAGIC
+
+    fmc_boot.bootGspRmParams.gspRmDescOffset = wpr_meta_sysmem
+    fmc_boot.bootGspRmParams.gspRmDescSize = ctypes.sizeof(nv.GspFwWprMeta)
+    fmc_boot.bootGspRmParams.target = nv.GSP_DMA_TARGET_COHERENT_SYSTEM
+    fmc_boot.bootGspRmParams.bIsGspRmBoot = True
+
+    fmc_boot.gspRmParams.bootArgsOffset
+
+
+    cot_payload = nv.NVDM_PAYLOAD_COT()
+
 
 
     
+    
+    pass
+  
+  def kgspCalculateFbLayout(self):
+    pass
+  
+  def kfspSetupGspImages(self):
+    pass
+
+  def _download(self, file) -> str:
+    url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/e8113f665d936d9f30a6d508f3bacd1e148539be/{file}"
+    return fetch(url, subdir="defines").read_text()
 
   def include(self, file) -> str:
     if file in self.scanned_files: return
     self.scanned_files.add(file)
 
-    url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/e8113f665d936d9f30a6d508f3bacd1e148539be/{file}"
-    txt = fetch(url, subdir="defines").read_text()
+    txt = self._download(file)
 
     PARAM = re.compile(r'#define\s+(\w+)\s*\(\s*(\w+)\s*\)\s*(.+)')
     CONST = re.compile(r'#define\s+(\w+)\s+([0-9A-Fa-fx]+)')
