@@ -5,7 +5,7 @@
   "system_name": "tinybox green",
   "number_of_nodes": "1",
   "host_processors_per_node": "1",
-  "host_processor_model_name": "AMD EPYC 7532 32-Core Processor",
+  "host_processor_model_name": "AMD EPYC 7532",
   "host_processor_core_count": "32",
   "host_processor_vcpu_count": "64",
   "host_processor_frequency": "",
