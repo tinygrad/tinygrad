@@ -30,6 +30,7 @@ class SessionFree(RemoteRequest): pass
 class RemoteProperties:
   real_device: str
   renderer: tuple[str, str, tuple[Any, ...]]
+  compiler: tuple[str, str, tuple[Any, ...]]
   graph_supported: bool
   graph_supports_multi: bool
   transfer_supported: bool
@@ -57,7 +58,7 @@ class CopyOut(RemoteRequest): buffer_num: int
 class Transfer(RemoteRequest): buffer_num: int; ssession: tuple[str, int]; sbuffer_num: int # noqa: E702
 
 @dataclass(frozen=True)
-class ProgramAlloc(RemoteRequest): name: str; datahash: str # noqa: E702
+class ProgramAlloc(RemoteRequest): name: str; datahash: str; precompiled: bool # noqa: E702
 
 @dataclass(frozen=True)
 class ProgramFree(RemoteRequest): name: str; datahash: str # noqa: E702
@@ -170,11 +171,13 @@ class RemoteHandler:
         match c:
           case SessionFree(): del self.sessions[unwrap(c.session)]
           case GetProperties():
-            cls, args = dev.renderer.__reduce__()
+            renderer_cls, renderer_args = dev.renderer.__reduce__()
+            compiler_cls, compiler_args = dev.compiler.__reduce__()
             # CPUGraph re-renders kernel from uops specified in CompiledRunner, this is not supported
             graph_cls = gt if (gt:=graph_class(Device[self.base_device])) is not CPUGraph else None
             rp = RemoteProperties(
-              real_device=dev.device, renderer=(cls.__module__, cls.__name__, args),
+              real_device=dev.device, renderer=(renderer_cls.__module__, renderer_cls.__name__, renderer_args),
+              compiler=(compiler_cls.__module__, compiler_cls.__name__, compiler_args),
               graph_supported=graph_cls is not None, graph_supports_multi=graph_cls is not None and issubclass(graph_cls, MultiGraphRunner),
               transfer_supported=hasattr(dev.allocator, '_transfer'), offset_supported=hasattr(dev.allocator, '_offset'),
             )
@@ -195,7 +198,8 @@ class RemoteHandler:
             assert hasattr(dev.allocator, '_transfer'), f"Device {dev.device} doesn't support transfers"
             dev.allocator._transfer(dbuf._buf, sbuf._buf, dbuf.nbytes, dest_dev=dev, src_dev=sdev)
           case ProgramAlloc():
-            lib = dev.compiler.compile_cached(req._h[c.datahash].decode())
+            if not c.precompiled: lib = dev.compiler.compile_cached(req._h[c.datahash].decode())
+            else: lib = req._h[c.datahash]
             session.programs[(c.name, c.datahash)] = dev.runtime(c.name, lib)
           case ProgramFree(): del session.programs[(c.name, c.datahash)]
           case ProgramExec():
@@ -321,7 +325,16 @@ class RemoteDevice(Compiled):
     renderer_instance.device = device
     graph_supported, graph_multi = self.properties.graph_supported, self.properties.graph_supports_multi
     graph = fromimport('tinygrad.runtime.graph.remote', f"Remote{'Multi' if graph_multi else ''}Graph") if graph_supported else None
-    super().__init__(device, RemoteAllocator(self), renderer_instance, Compiler(), functools.partial(RemoteProgram, self), graph)
+
+    if getenv("LOCAL_COMPILE", 0):
+      compiler = self.properties.compiler
+      if not compiler[0].startswith("tinygrad.runtime.support.") or not compiler[1].endswith("Compiler"):
+        raise RuntimeError(f"bad compiler {compiler}")
+      compiler_class = fromimport(compiler[0], compiler[1])
+      compiler_instance = compiler_class(*compiler[2])
+    else: compiler_instance = None
+
+    super().__init__(device, RemoteAllocator(self), renderer_instance, compiler_instance, functools.partial(RemoteProgram, self), graph)
 
   def finalize(self):
     with contextlib.suppress(ConnectionError, http.client.HTTPException): self.q(SessionFree(), wait=True)

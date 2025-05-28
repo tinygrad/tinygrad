@@ -80,6 +80,7 @@ class HIPCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
+  def __reduce__(self): return self.__class__, (self.arch,)
   def compile(self, src:str) -> bytes:
     try: return compile_hip(src, self.arch, src.split('\n', 1)[0].strip() == '.text')
     except RuntimeError as e: raise CompileError(e) from e
@@ -91,7 +92,7 @@ class AMDLLVMCompiler(LLVMCompiler):
   def __init__(self, arch: str):
     self.arch = arch
     super().__init__(self.arch, "+cumode")
-  def __reduce__(self): return (AMDLLVMCompiler, (self.arch,))
+  def __reduce__(self): return self.__class__, (self.arch,)
   def compile(self, src:str) -> bytes:
     try: return super().compile(src)
     except RuntimeError as e:
