@@ -160,7 +160,11 @@ class View:
     if vm1.mask:
       if (new_vm1 := vm1.shrink(vm1.mask)) == vm1 or (merged := vm2 + new_vm1) is None: return None
       return merged.pad(tuple((b,s-e) for (b,e),s in zip(vm1.mask, vm1.shape)))
-    if not all_int(vm1.shape): return None
+    if not all_int(vm1.shape):
+      # if all strides are 0 and vm2 is unmasked, return vm1
+      if all(x == 0 for x in vm2.strides+vm1.strides) and vm2.mask is None: return vm1
+      # TODO: handle more cases
+      return None
 
     # Project vm1's offset and strides on to vm2.
     origin = unravel(vm2.shape, vm1.offset)

@@ -15,7 +15,7 @@ class BenchEvent(Enum):
   STEP = "step"
   FULL = "full"
   MLPERF_INIT = "mlperf_init"
-  MLPERF_RUN = "mlperf_setup"
+  MLPERF_RUN = "mlperf_run"
 class InstantBenchEvent(Enum):
   GFLOPS = "gflops"
 
