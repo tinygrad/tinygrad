@@ -7,6 +7,7 @@ from tinygrad import Tensor, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.helpers import partition, trange, getenv, Context
 from extra.lr_scheduler import OneCycleLR
 
+# override tinygrad defaults
 dtypes.default_float = dtypes.half
 Context(FUSE_ARANGE=1, FUSE_OPTIM=1).__enter__()
 
@@ -68,7 +69,7 @@ class ConvGroup:
     cast(Tensor, self.norm2.weight).requires_grad = False
   def __call__(self, x:Tensor) -> Tensor:
     x =    self.norm1(self.conv1(x).max_pool2d().float()).cast(dtypes.default_float).quick_gelu()
-    return self.norm2(self.conv2(x).float()).cast(dtypes.default_float).quick_gelu()
+    return self.norm2(self.conv2(x).float()).cast(dtypes.default_float).quick_gelu() + x
 
 class SpeedyConvNet:
   def __init__(self):
@@ -79,6 +80,9 @@ class SpeedyConvNet:
     self.linear = nn.Linear(depths['block3'], depths['num_classes'], bias=False)
   def __call__(self, x:Tensor) -> Tensor:
     x = self.whiten(x).quick_gelu()
+    # ************* HACKS *************
+    x = x.pad((1,0,0,1)) # TODO: this pad should not be here! copied from hlb_cifar10 for speed
+    # ************* HACKS *************
     x = x.sequential([self.conv_group_1, self.conv_group_2, self.conv_group_3])
     return self.linear(x.max(axis=(2,3))) * hyp['opt']['scaling_factor']
 
