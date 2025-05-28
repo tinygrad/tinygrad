@@ -31,5 +31,10 @@ class TestKeccak(unittest.TestCase):
       self.assertEqual(ha_ref, Tensor(a).keccak(name).data())
       self.assertEqual(hb_ref, hb)
 
+  def test_abc(self):
+    # https://www.di-mgt.com.au/sha_testvectors.html
+    out = Tensor(b"abc").keccak()
+    self.assertEqual(bytes(out.tolist()), bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
+
 if __name__ == "__main__":
   unittest.main()
