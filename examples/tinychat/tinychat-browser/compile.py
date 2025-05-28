@@ -142,6 +142,10 @@ if __name__=="__main__":
   load_state_dict(model, state_dict)
   # these were the same before load_state_dict
   model.output.weight, model.output.scale = model.tok_embeddings.weight, model.tok_embeddings.scale
+  # Realize is banned during export, so we need to initialize cache_kv here
+  for layer in model.layers:
+    if not hasattr(attn:=layer.attention, "cache_kv"): 
+      attn.cache_kv = Tensor.zeros(2, 1, max_context, attn.n_kv_heads, attn.head_dim, dtype=dtypes.float32).contiguous().realize()
 
   #validate_model(model, tokenizer)
   #model.forward(Tensor([[tok]]), Variable("start_pos", 0, model.max_context - 1).bind(0), 0.0, 0, 0.0, 0.0, 0.0).realize()
