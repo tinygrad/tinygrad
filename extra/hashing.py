@@ -52,13 +52,15 @@ def _keccak_round(state: list[Tensor], rndc: int) -> list[Tensor]:
 
   # iota
   state[0] = state[0] ^ rndc
-  state = [s.contiguous() for s in state]
+  #state = [s.contiguous() for s in state]
 
   return state
+
 def _keccakf1600(state: list[Tensor]) -> list[Tensor]:
-  for round in range(24):
+  for round in range(getenv("ROUNDS", 24)):
     state = _keccak_round(state, RNDC[round])
   return state
+
 def kaccak(capacity: int, msg: Tensor, delim: int, output_len: int) -> Tensor:
   assert msg.dtype == dtypes.uint8, "message must be a uint8 tensor"
   rate = 1600 - capacity
@@ -124,9 +126,21 @@ def string_to_uint8_tensor(s: str) -> Tensor:
   return Tensor([s.encode()], dtype=dtypes.uint8)
 
 if __name__ == "__main__":
+
+  statet = Tensor.zeros((1, 25), dtype=dtypes.uint64).contiguous()
+  state = [statet.shrink((None, (i, i+1))) for i in range(25)]
+  state = _keccak_round(state, RNDC[0])
+  out = Tensor.cat(*state, dim=1)
+  out.realize()
+
+  exit(0)
+
+
   st = time.perf_counter()
   shake128_4kb(Tensor.zeros(1, 4096, dtype=dtypes.uint8)).contiguous()
   print(f"shake128_4kb took {time.perf_counter() - st:.3f}s")
+
+  exit(0)
 
   a = Tensor.randint((1, 1 * 1024 * 1024), dtype=dtypes.uint8)
   b = tree_hash(a)
