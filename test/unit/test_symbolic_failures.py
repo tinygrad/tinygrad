@@ -20,7 +20,7 @@ class TestFuzzFailure(unittest.TestCase):
     v1_val, v2_val, v3_val = v1.const_like(8), v2.const_like(0), v3.const_like(0)
     num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
-    assert num==rn, f"{num} != {rn}"
+    self.assertEqual(num, rn)
 
   def test_fuzz_failure2(self):
     v1=Variable('v1', 0, 16)
@@ -31,7 +31,7 @@ class TestFuzzFailure(unittest.TestCase):
     v1_val, v2_val, v3_val = v1.const_like(6), v2.const_like(0), v3.const_like(0)
     num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
-    assert num==rn, f"{num} != {rn}"
+    self.assertEqual(num, rn)
 
   def test_fuzz_failure3(self):
     v1=Variable('v1', 0, 2)
@@ -41,7 +41,7 @@ class TestFuzzFailure(unittest.TestCase):
     v1_val, v2_val, v3_val = v1.const_like(0), v2.const_like(0), v3.const_like(0)
     num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
-    assert num==rn, f"{num} != {rn}"
+    self.assertEqual(num, rn)
 
   def test_fuzz_failure4(self):
     v1=Variable('v1', 0, 2)
@@ -51,7 +51,7 @@ class TestFuzzFailure(unittest.TestCase):
     v1_val, v2_val, v3_val = v1.const_like(2), v2.const_like(0), v3.const_like(2)
     num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
-    assert num==rn, f"{num} != {rn}"
+    self.assertEqual(num, rn)
 
   def test_fuzz_failure5(self):
     v1=Variable('v1', 0, 1)
@@ -61,7 +61,7 @@ class TestFuzzFailure(unittest.TestCase):
     v1_val, v2_val, v3_val = v1.const_like(0), v2.const_like(0), v3.const_like(0)
     num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
-    assert num==rn, f"{num} != {rn}"
+    self.assertEqual(num, rn)
 
   def test_fuzz_failure6(self):
     v1=Variable('v1', 0, 8)
@@ -72,7 +72,7 @@ class TestFuzzFailure(unittest.TestCase):
     v1_val, v2_val, v3_val = v1.const_like(8), v2.const_like(3), v3.const_like(2)
     num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
-    assert num==rn, f"{num} != {rn}"
+    self.assertEqual(num, rn)
 
   def test_fuzz_failure7(self):
     v1=Variable('v1', 0, 64)
@@ -82,7 +82,7 @@ class TestFuzzFailure(unittest.TestCase):
     v1_val, v2_val, v3_val = v1.const_like(0), v2.const_like(2), v3.const_like(65)
     num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
-    assert num==rn, f"{num} != {rn}"
+    self.assertEqual(num, rn)
 
   def test_fuzz_failure8(self):
     v1=Variable('v1', 0, 2)
@@ -92,7 +92,7 @@ class TestFuzzFailure(unittest.TestCase):
     v1_val, v2_val, v3_val = v1.const_like(0), v2.const_like(0), v3.const_like(0)
     num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
-    assert num==rn, f"{num} != {rn}"
+    self.assertEqual(num, rn)
 
   def test_fuzz_failure9(self):
     v1=Variable('v1', 0, 256)
@@ -102,7 +102,7 @@ class TestFuzzFailure(unittest.TestCase):
     v1_val, v2_val, v3_val = v1.const_like(0), v2.const_like(1), v3.const_like(0)
     num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
-    assert num==rn, f"{num} != {rn}"
+    self.assertEqual(num, rn)
 
   def test_fuzz_failure10(self):
     v1=Variable("v1", 0, 256)
@@ -158,4 +158,4 @@ class TestFuzzFailure(unittest.TestCase):
     v1_val, v2_val, v3_val = UOp.const(dtypes.int, 9), UOp.const(dtypes.int, 0),UOp.const(dtypes.int, 0)
     num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
-    assert num==rn, f"{num} != {rn}"
+    self.assertEqual(num, rn)
