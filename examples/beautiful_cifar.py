@@ -126,10 +126,8 @@ if __name__ == "__main__":
     loss = loss_fn(out, Y_train[idxs])
     opt.zero_grad()
     loss.backward()
-    opt.step()
-    lr_sched_bias.step()
-    lr_sched_non_bias.step()
-    return loss / (batchsize*loss_batchsize_scaler)
+    return (loss / (batchsize*loss_batchsize_scaler)).realize(*opt.schedule_step(),
+                                                              *lr_sched_bias.schedule_step(), *lr_sched_non_bias.schedule_step())
 
   eval_batchsize = 2500
   @TinyJit
@@ -141,9 +139,7 @@ if __name__ == "__main__":
       out = model(preprocess(X_test[i:i+eval_batchsize]))
       loss.append(loss_fn(out, Y))
       acc.append((out.argmax(-1) == Y).sum() / eval_batchsize)
-    ret = Tensor.stack(*loss).mean() / (batchsize*loss_batchsize_scaler), Tensor.stack(*acc).mean()
-    Tensor.no_grad = False
-    return ret
+    return Tensor.stack(*loss).mean() / (batchsize*loss_batchsize_scaler), Tensor.stack(*acc).mean()
 
   np.random.seed(1337)
   for epoch in range(math.ceil(hyp['misc']['train_epochs'])):
