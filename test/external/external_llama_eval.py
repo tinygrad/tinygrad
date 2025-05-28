@@ -1,12 +1,13 @@
-from lm_eval.base import BaseLM
-from lm_eval import evaluator, tasks
+from lm_eval.api.model import LM
+from lm_eval.evaluator import simple_evaluate
 import torch, json, argparse
 
 from examples.llama import LLaMa
 from tinygrad.tensor import Tensor
 from tinygrad import Device
 
-class LLaMaAdaptor(BaseLM):
+# https://github.com/EleutherAI/lm-evaluation-harness/blob/main/docs/model_guide.md
+class LLaMaAdaptor(LM):
   def __init__(
     self,
     model_size="7B",
@@ -72,7 +73,7 @@ class LLaMaAdaptor(BaseLM):
     Tensor.no_grad = True
     return torch.Tensor(self.llama.model(Tensor(inps.numpy()), 0).numpy())
 
-  def greedy_until(self, requests):
+  def generate_until(self, requests: list[Instance]) -> list[str]:
     continuations = []
     for request in requests:
       prompt, until = request[0], request[1]['until']
@@ -80,7 +81,10 @@ class LLaMaAdaptor(BaseLM):
       continuations.append(output[len(prompt):])
     return continuations
 
-  def _model_generate(self, context, max_length, eos_token_id):
+  def loglikelihood(self, requests: list[Instance]) -> list[tuple[float, bool]]:
+    raise NotImplementedError()
+
+  def loglikelihood_rolling(self, requests: list[Instance]) -> list[tuple[float, bool]]:
     raise NotImplementedError()
 
 if __name__ == '__main__':
@@ -99,5 +103,6 @@ if __name__ == '__main__':
   # run eval and exit
   adaptor = LLaMaAdaptor(model_gen=args.gen, model_size=args.size, quantize=args.quantize,
                          checkpoint_path=args.weights, tokenizer_path=args.tokenizer, device="cpu")
-  results = evaluator.evaluate(adaptor, tasks.get_task_dict(args.eval.split(",")), False, 0, args.limit)
+  #results = evaluator.evaluate(adaptor, tasks.get_task_dict(args.eval.split(",")), False, 0, args.limit)
+  results = evaluator.simple_evaluate(model, tasks='gsm8k', device='cuda:0', batch_size=1, limit=2)
   print(json.dumps(results, indent=2))
