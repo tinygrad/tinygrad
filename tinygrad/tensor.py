@@ -602,9 +602,9 @@ class Tensor(MathTrait):
     args = [UOp.variable(f"arg{i}", 0, d-1) for i,d in enumerate(shape)]
     sym_fn_op = function(*args)
     device = kwargs.pop("device", None)
-    assert not isinstance(device, tuple), device
+    device = tuple(Device.canonicalize(x) for x in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
     assert kwargs.pop("dtype", sym_fn_op.dtype)==sym_fn_op.dtype, "dtype doesn't match, and casting isn't supported"
-    op = _metaop(Ops.FCONST, shape, sym_fn_op.dtype, Device.canonicalize(device), (sym_fn_op, shape))
+    op = _metaop(Ops.FCONST, shape, sym_fn_op.dtype, device, (sym_fn_op, shape))
     return Tensor(op, device, **kwargs)
 
   @staticmethod
