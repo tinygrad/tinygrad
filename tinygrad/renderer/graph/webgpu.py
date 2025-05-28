@@ -104,6 +104,8 @@ class WebGPUJSRenderer(GraphRenderer):
       global_size = ', '.join(idx.simplify().render() if isinstance(idx, Variable) else str(idx) for idx in p.global_size)
       # deliberately display p.function_name in every addComputePass for easier debugging/understanding
       compute_passes.append(f'addComputePass(commandEncoder, {i}, "{p.function_name}", [{buf_names}], [{global_size}]);')
+    for bufs in self.extra_copies:
+      compute_passes.append(f"commandEncoder.copyBufferToBuffer({self.bufs[bufs[1]]}, 0, {self.bufs[bufs[0]]}, 0, {self.bufs[bufs[0]]}.size);")
 
     kernel_sequence = [f'const kernelSequence = [{", ".join(kernel_sequence)}];']
     layouts = [f'const layouts = [{", ".join(layouts)}];']

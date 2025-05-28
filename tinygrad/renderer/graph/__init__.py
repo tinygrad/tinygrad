@@ -68,18 +68,31 @@ class GraphRenderer(Renderer):
           self.bufs[buf] = name = f"buf_{next(ctr)}"
           if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
 
-    run_after: set[UOp] = set()
-    for t in original_uops:
-      if t.lazydata not in sink.toposort():
-        for u in t.kernelize().lazydata.toposort():
-          # TODO: test if assigns happen into new buffers
-          # TODO: is u always not in sink.toposort()?
-          if u.op is Ops.ASSIGN and u.src[0].base.buffer in self.state_bufs and u not in sink.toposort():
-            run_after.add(u)
+    # TODO: clean this all up
+    self.extra_copies = []
+    seen_toposorts = set((tuple(sink.toposort()),))
+    def get_run_after():
+      print("get_run_after")
+      run_after: set[UOp] = set()
+      for t, original_u in original_uops.items():
+        #t.kernelize()
+        actual = t.kernelize().lazydata.substitute(remove_assign_map)
+        #if all(t.lazydata not in toposort for toposort in seen_toposorts):
+        if all(actual not in toposort for toposort in seen_toposorts):
+          if (original_b:=original_u.buf_uop.buffer) in self.state_bufs:
+            for u in actual.toposort():
+              # TODO: is second condition necessary?
+              if u.op is Ops.ASSIGN and all(u not in toposort for toposort in seen_toposorts):
+                run_after.add(u)
+                seen_toposorts.add(tuple(u.toposort()))
+                if (current_b:=t.lazydata.base.buf_uop.buffer) != original_b:
+                  self.extra_copies.append((original_b, current_b))
+      return run_after
 
     # TODO: deduplicate code, and check for detection of new implicit inputs
     # TODO: memory planning
-    if run_after:
+    while(run_after:=get_run_after()):
+      print("processing run_after")
       schedule, var_vals = create_schedule_with_vars(UOp.sink(*run_after))
       for si, ei in lower_schedule(schedule):
         assert isinstance(ei.prg, CompiledRunner), f"Export only supported for CompiledRunner\nei.prg: {ei.prg}\n\nei.bufs: {ei.bufs}"
