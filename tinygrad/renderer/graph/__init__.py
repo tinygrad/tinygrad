@@ -57,8 +57,9 @@ class GraphRenderer(Renderer):
     self.state_bufs: dict[Buffer, str] = dict()
     ctr = itertools.count()
 
-    del original_uops, sink_toposort, realizer_dummy, u, r, ret_tensors, sink, remove_assign_map
-    for si, ei in lower_schedule(memory_planner(schedule)):
+    #del original_uops, sink_toposort, realizer_dummy, u, r, ret_tensors, sink, remove_assign_map
+    #for si, ei in lower_schedule(memory_planner(schedule)):
+    for si, ei in lower_schedule(schedule):
       assert isinstance(ei.prg, CompiledRunner), f"Export only supported for CompiledRunner\nei.prg: {ei.prg}\n\nei.bufs: {ei.bufs}"
       for buf in ei.bufs: assert buf is not None and buf.device == device, "All compute and returned Tensor(s) must be on the same device"
       self.eis.append(ei)
@@ -67,23 +68,34 @@ class GraphRenderer(Renderer):
           self.bufs[buf] = name = f"buf_{next(ctr)}"
           if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
 
+    run_after: set[UOp] = set()
+    for t in original_uops:
+      if t.lazydata not in sink.toposort():
+        for u in t.kernelize().lazydata.toposort():
+          # TODO: test if assigns happen into new buffers
+          # TODO: is u always not in sink.toposort()?
+          if u.op is Ops.ASSIGN and u.src[0].base.buffer in self.state_bufs and u not in sink.toposort():
+            run_after.add(u)
+
+    # TODO: deduplicate code, and check for detection of new implicit inputs
+    # TODO: memory planning
+    if run_after:
+      schedule, var_vals = create_schedule_with_vars(UOp.sink(*run_after))
+      for si, ei in lower_schedule(schedule):
+        assert isinstance(ei.prg, CompiledRunner), f"Export only supported for CompiledRunner\nei.prg: {ei.prg}\n\nei.bufs: {ei.bufs}"
+        for buf in ei.bufs: assert buf is not None and buf.device == device, "All compute and returned Tensor(s) must be on the same device"
+        self.eis.append(ei)
+        for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
+          if buf not in self.bufs:
+            self.bufs[buf] = name = f"buf_{next(ctr)}"
+            if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
+
     self.state_dict = {k:v for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs} if tensor_names else {}
     if rng_tensors and all((b:=t.lazydata.base.realized) and b in self.state_bufs for t in rng_tensors):
       self.state_dict.update({"random_seeds": rng_tensors[0], "random_counter": rng_tensors[1]})
     for k,v in self.state_dict.items(): v.lazydata = v.lazydata.base # non-contiguous views cause data permutation in safe_save
     self.state_bufs.update({cast(Buffer, v.lazydata.base.realized):k for k,v in self.state_dict.items()})
 
-    """
-    run_after: set[UOp] = set()
-    for t in all_tensors:
-      if (tref:=t()) is not None:
-        if tref.lazydata not in sink.toposort():
-          for u in tref.kernelize().lazydata.toposort():
-            if u.op is Ops.ASSIGN:
-              if (b:=u.src[0].base).op is Ops.BUFFER and b.buffer in self.state_bufs:
-                if u not in sink.toposort():
-                  run_after.add(u)
-    """
     self.state_dict.update({k:Tensor(bytes(b.as_buffer()), "CPU", b.dtype).realize() for b,k in self.state_bufs.items() if k not in self.state_dict})
 
   def render_graph(self) -> str: raise NotImplementedError("Implement a language-specific GraphRenderer")
