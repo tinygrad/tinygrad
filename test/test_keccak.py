@@ -1,3 +1,4 @@
+from typing_extensions import Callable
 import hashlib, random, unittest
 from tinygrad import Tensor, Device, getenv, dtypes
 from tinygrad.device import is_dtype_supported
@@ -17,13 +18,16 @@ class TestKeccak(unittest.TestCase):
   def test_sha3_256(self): self._test_preset("sha3_256", [135, 136])
   def test_sha3_384(self): self._test_preset("sha3_384", [103, 104])
   def test_sha3_512(self): self._test_preset("sha3_512", [71, 72])
-  def _test_preset(self, name: str, special_sizes: list[int]):
-    hasher: type[hashlib._Hash] = getattr(hashlib, name)
+  def test_shake_128(self): self._test_preset("shake_128", [167, 168], lambda d: hashlib.shake_128(d).digest(16))
+
+  def _test_preset(self, name: str, special_sizes: list[int], hasher: Callable[[bytes], bytes] | None = None):
+    def default_hasher(d: bytes) -> bytes: return getattr(hashlib, name)(d).digest()
+    if hasher is None: hasher = default_hasher
 
     for n in (special_sizes + [special_sizes[0] - 1]):
       a, b = random.randbytes(n), random.randbytes(n)
 
-      ha_ref, hb_ref = hasher(a).digest(), hasher(b).digest()
+      ha_ref, hb_ref = hasher(a), hasher(b)
       tres = Tensor.stack(*(Tensor(d) for d in (a, b))).keccak(name)
       ha, hb = tres[0].data(), tres[1].data()
 
