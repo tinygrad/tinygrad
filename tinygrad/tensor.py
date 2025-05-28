@@ -908,7 +908,6 @@ class Tensor(MathTrait):
     assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
     if not (self.is_floating_point() and all(t.is_floating_point() for t in targets)): raise RuntimeError("only float Tensors have gradient")
     if gradient is None: gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
-    rets = []
     target_uops = [x.lazydata for x in targets]
     grads = compute_gradient(self.lazydata, gradient.lazydata, set(target_uops))
     ret = []
@@ -917,9 +916,8 @@ class Tensor(MathTrait):
         if materialize_grads: y = x.const_like(0)
         else: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}")
       ret.append(y)
-    rets.append(ret)
     # create returned Tensors
-    return [Tensor(u, device=t.device) for t,u in zip(targets, rets[0])]
+    return [Tensor(u, device=t.device) for t,u in zip(targets, ret)]
 
   def backward(self, gradient:Tensor|None=None) -> Tensor:
     """
@@ -1393,6 +1391,30 @@ class Tensor(MathTrait):
     assert chunks > 0, f"expect chunks to be greater than 0, got: {chunks}"
     dim = self._resolve_dim(dim)
     return list(self.split(ceildiv(self.shape[dim], chunks) if self.shape[dim] else [0]*chunks, dim=dim))
+
+  def unfold(self, dim:int, size:sint, step:int) -> Tensor:
+    """
+    Unfolds the tensor along dimension `dim` into overlapping windows.
+
+    Each window has length `size` and begins every `step` elements of `self`.
+    Returns the input tensor with dimension `dim` replaced by dims `(n_windows, size)`
+    where `n_windows = (self.shape[dim] - size) // step + 1`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    unfolded = Tensor.arange(8).unfold(0,2,2)
+    print("\\n".join([repr(x.numpy()) for x in unfolded]))
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    unfolded = Tensor.arange(27).reshape(3,3,3).unfold(-1,2,3)
+    print("\\n".join([repr(x.numpy()) for x in unfolded]))
+    ```
+    """
+    if size < 0: raise RuntimeError(f'size must be >= 0 but got {size=}')
+    if step <= 0: raise RuntimeError(f'step must be > 0 but got {step=}')
+    if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
+    dim = self._resolve_dim(dim)
+    perm_to_last = tuple(i for i in range(self.ndim) if i != dim) + (dim,)
+    return self.permute(perm_to_last)._pool((size,), step).permute(argsort(perm_to_last) + (self.ndim,))
 
   def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
     """
