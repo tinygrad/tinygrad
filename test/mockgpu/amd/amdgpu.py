@@ -1,21 +1,24 @@
 import ctypes, time
 from test.mockgpu.gpu import VirtGPU
-from tinygrad.helpers import to_mv, init_c_struct_t
-import tinygrad.runtime.autogen.amd_gpu as amd_gpu
+from tinygrad.helpers import getbits, to_mv, init_c_struct_t
+import tinygrad.runtime.autogen.amd_gpu as amd_gpu, tinygrad.runtime.autogen.am.pm4_nv as pm4, tinygrad.runtime.autogen.am.soc21 as soc21
 
 SDMA_MAX_COPY_SIZE = 0x400000
 
-PACKET3_SET_SH_REG_START = 0x2c00
-SUB = PACKET3_SET_SH_REG_START - amd_gpu.GC_BASE__INST0_SEG0
-
-regCOMPUTE_PGM_LO = 0x1bac - SUB
-regCOMPUTE_USER_DATA_0 = 0x1be0 - SUB
-regCOMPUTE_NUM_THREAD_X = 0x1ba7 - SUB
+regCOMPUTE_PGM_LO = 0x1bac + amd_gpu.GC_BASE__INST0_SEG0
+regCOMPUTE_USER_DATA_0 = 0x1be0 + amd_gpu.GC_BASE__INST0_SEG0
+regCOMPUTE_NUM_THREAD_X = 0x1ba7 + amd_gpu.GC_BASE__INST0_SEG0
+regGRBM_GFX_INDEX = 0x2200 + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_BUF0_BASE = 0x39e8 + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_BUF0_SIZE = 0x39e9 + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_WPTR = 0x39ef + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_STATUS = 0x39f4 + amd_gpu.GC_BASE__INST0_SEG1
 
 CACHE_FLUSH_AND_INV_TS_EVENT = 0x14
 
 WAIT_REG_MEM_FUNCTION_ALWAYS = 0
-WAIT_REG_MEM_FUNCTION_EQ = 3 # ==
+WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
+WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
 REMU_PATHS = ["extra/remu/target/release/libremu.so", "libremu.so", "/usr/local/lib/libremu.so",
@@ -92,9 +95,11 @@ class PM4Executor(AMDQueue):
       op = (header >> 8) & 0xFF
       n = (header >> 16) & 0x3FFF
       assert packet_type == 3, "Can parse only packet3"
-      if op == amd_gpu.PACKET3_SET_SH_REG: self._exec_set_sh_reg(n)
+      if op == amd_gpu.PACKET3_SET_SH_REG: self._exec_set_reg(n, pm4.PACKET3_SET_SH_REG_START)
+      elif op == amd_gpu.PACKET3_SET_UCONFIG_REG: self._exec_set_reg(n, pm4.PACKET3_SET_UCONFIG_REG_START)
       elif op == amd_gpu.PACKET3_ACQUIRE_MEM: self._exec_acquire_mem(n)
       elif op == amd_gpu.PACKET3_RELEASE_MEM: self._exec_release_mem(n)
+      elif op == amd_gpu.PACKET3_COPY_DATA: self._exec_copy_data(n)
       elif op == amd_gpu.PACKET3_WAIT_REG_MEM: cont = self._exec_wait_reg_mem(n)
       elif op == amd_gpu.PACKET3_DISPATCH_DIRECT: self._exec_dispatch_direct(n)
       elif op == amd_gpu.PACKET3_INDIRECT_BUFFER: self._exec_indirect_buffer(n)
@@ -127,32 +132,46 @@ class PM4Executor(AMDQueue):
       else: raise RuntimeError(f"Unknown {mem_data_sel=} {mem_event_type=}")
     else: raise RuntimeError(f"Unknown {mem_data_sel=}")
 
+  def _exec_copy_data(self, n):
+    assert n == 4
+    copy_data_flags = self._next_dword()
+    src_addr_lo = self._next_dword()
+    _src_addr_hi = self._next_dword()
+    dst_addr_lo = self._next_dword()
+    dst_addr_hi = self._next_dword()
+    assert copy_data_flags == 0x100204, hex(copy_data_flags) # better fail than silently do the wrong thing
+    to_mv(dst_addr_hi<<32|dst_addr_lo, 4).cast('I')[0] = self.gpu.regs[src_addr_lo]
+
   def _exec_wait_reg_mem(self, n):
     assert n == 5
     info = self._next_dword()
     addr_lo = self._next_dword()
     addr_hi = self._next_dword()
     val = self._next_dword()
-    _ = self._next_dword() # mask
+    mask = self._next_dword()
     _ = self._next_dword() # timeout
 
     mem_function = (info >> 0) & 0b111
     mem_space = (info >> 4) & 0b1
-    _ = (info >> 6) & 0b1 # memop
+    mem_op = (info >> 6) & 0b1
     _ = (info >> 8) & 0b1 # mem_engine
 
-    if mem_space == 0: mval = val
+    if mem_space == 0 and mem_op == 1: mval = val # hack for memory barrier, should properly handle (req_req, reg_done)
+    elif mem_space == 0: mval = self.gpu.regs[addr_hi<<32|addr_lo]
     elif mem_space == 1: mval = to_mv(addr_lo + (addr_hi << 32), 4).cast('I')[0]
 
+    mval &= mask
+
     if mem_function == WAIT_REG_MEM_FUNCTION_GEQ: can_cont = bool(mval >= val)
+    elif mem_function == WAIT_REG_MEM_FUNCTION_NEQ: can_cont = bool(mval != val)
     elif mem_function == WAIT_REG_MEM_FUNCTION_EQ: can_cont = bool(mval == val)
     else: raise RuntimeError(f"Do not support {mem_function=}")
 
     if not can_cont: self.rptr[0] = self.rptr[0] - 7 # revert this packet, need to wait again
     return can_cont
 
-  def _exec_set_sh_reg(self, n):
-    reg = self._next_dword()
+  def _exec_set_reg(self, n, off):
+    reg = off + self._next_dword()
     for i in range(n):
       self.gpu.regs[reg] = self._next_dword()
       reg += 1
@@ -187,7 +206,18 @@ class PM4Executor(AMDQueue):
 
   def _exec_event_write(self, n):
     assert n == 0
-    _ = self._next_dword() # do not emulate events for now
+    event_dw = self._next_dword()
+    match (event_dw & 0xFF): # event type
+      case soc21.THREAD_TRACE_FINISH:
+        old_idx = self.gpu.regs.grbm_index
+        for se in range(self.gpu.regs.n_se):
+          self.gpu.regs.grbm_index = 0b011 << 29 | se << 16 # select se, broadcast sa and instance
+          self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << 12 # FINISH_PENDING==0 FINISH_DONE==1 BUSY==0
+          buf = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12 # per page addressing
+          fake_used = 0x1000 # fake one page long trace
+          self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = ((buf+fake_used)//32) & 0x1FFFFFFF
+        self.gpu.regs.grbm_index = old_idx
+      case _: pass # NOTE: for now most events aren't emulated
 
 class SDMAExecutor(AMDQueue):
   def __init__(self, gpu, base, size, rptr, wptr):
@@ -252,9 +282,25 @@ class SDMAExecutor(AMDQueue):
     ctypes.memmove(struct.dst_addr, struct.src_addr, count_cnt + 1)
     self.rptr[0] += ctypes.sizeof(struct)
 
+class AMDGPURegisters:
+  def __init__(self, n_se:int=6):
+    self.n_se = n_se
+    self.grbm_index = 0b111 << 0x1d # all broadcast. NOTE: only per-se register emulation is currently supported
+    self.regs: dict[tuple[int, int], int] = {}
+  def __getitem__(self, addr:int) -> int:
+    if addr == regGRBM_GFX_INDEX: return self.grbm_index
+    return self.regs[(addr, getbits(self.grbm_index, 16, 23))]
+  def __setitem__(self, addr:int, val:int):
+    if addr == regGRBM_GFX_INDEX: self.grbm_index = val
+    if getbits(self.grbm_index, 31, 31):
+      for se in range(self.n_se): self.regs[(addr, se)] = val
+    else:
+      self.regs[(addr, getbits(self.grbm_index, 16, 23))] = val
+
 class AMDGPU(VirtGPU):
   def __init__(self, gpuid):
     super().__init__(gpuid)
+    self.regs = AMDGPURegisters()
     self.mapped_ranges = set()
     self.queues = []
 

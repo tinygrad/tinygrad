@@ -490,8 +490,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
   def copy_to_device(self, device:str|tuple[str, ...]|UOp, arg=None):
     assert arg is None or isinstance(self.device, tuple)
-    # TODO: this contiguous should not be required!!!
-    inp = self if arg is None else UOp(Ops.MSELECT, self.dtype, src=(self.contiguous(),), arg=arg)
+    inp = self if arg is None else UOp(Ops.MSELECT, self.dtype, src=(self,), arg=arg)
     return UOp(Ops.COPY, self.dtype, (inp, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device))
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, self.dtype, (self,), arg)
   @property
@@ -502,6 +501,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp:
     if (self.op is Ops.VIEW and len(self.src) != 0) or self.op in GroupOp.Movement: return self.src[0].base
+    if self.op is Ops.MULTI: return self.src[0].base  # MULTI is really a VIEW
     return self
   def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
 
@@ -1004,8 +1004,10 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 @track_matches
 def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, input_map:dict[UOp, UOp]|None=None) -> dict[UOp, UOp]:
   rewrite_ctx = RewriteContext(pm, ctx)
-  new_map = {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in sink.toposort()}
-  all_metadata.update((v, tuple(dedup(all_metadata.get(v, ())+k.metadata))) for k,v in new_map.items() if k.metadata is not None)
+  new_map: dict[UOp, UOp] = {}
+  for k in sink.toposort():
+    new_map[k] = v = rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)
+    if k.metadata is not None: all_metadata[v] = tuple(dedup(all_metadata.get(v, ())))+k.metadata
   if input_map is not None:
     for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
   return new_map

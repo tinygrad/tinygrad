@@ -220,8 +220,8 @@ def diskcache_put(table:str, key:Union[dict, str, int], val:Any, prepickled=Fals
   cur.close()
   return val
 
-def diskcache(func):
-  def wrapper(*args, **kwargs) -> bytes:
+def diskcache(func:Callable[..., T]):
+  def wrapper(*args, **kwargs) -> T:
     table, key = f"cache_{func.__name__}", hashlib.sha256(pickle.dumps((args, kwargs))).hexdigest()
     if (ret:=diskcache_get(table, key)) is not None: return ret
     return diskcache_put(table, key, func(*args, **kwargs))

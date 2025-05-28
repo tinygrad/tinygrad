@@ -39,6 +39,8 @@ buffer_spec = PatternMatcher([
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),), name="buf_view"),
    lambda buf_view: isinstance(buf_view.arg, tuple) and len(buf_view.arg) == 2 and all(isinstance(arg, (int, UOp)) for arg in buf_view.arg)),
+  # allow VIEW here. TODO: what views specifically are allowed? does this mess with gradient?
+  (UPat(Ops.VIEW), lambda: True),
 ])
 
 def validate_kernel(k:UOp):
@@ -75,8 +77,9 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
 
   # Tensor const has a device and an unmasked ShapeTracker of stride 0
+  # NOTE: variables in shape can cause multiple views in this ShapeTracker and other issues, see TestSymbolicJit.test_ones_sum
   (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)),
-   lambda st: st.st.views[0].mask is None and len(st.st.views) == 1 and all(s == 0 for s in st.st.views[0].strides)),
+   lambda st: len(st.st.views) == 1 and all(v.mask is None for v in st.st.views)),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
@@ -84,7 +87,7 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
    lambda root,x: root.dtype == x.dtype),
 
   # COPY/ALLREDUCE/MULTI
-  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda copy,x: copy.dtype == x.dtype),
+  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), arg=None), lambda copy,x: copy.dtype == x.dtype),
   (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda red,x: red.dtype == x.dtype and isinstance(red.arg, Ops)),
   (UPat(Ops.MULTI, name="multi"), lambda multi: all(x.dtype == multi.dtype for x in multi.src) and isinstance(multi.arg, int)),
 ])
@@ -189,12 +192,6 @@ spec = PatternMatcher([
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
-])
-
-# *** schedule spec only allows buffers, assigns and kernels in the graph ***
-
-sched_spec = buffer_spec+assign_spec+PatternMatcher([
-  (UPat(GroupOp.All-{Ops.SINK}), lambda: False),
 ])
 
 # *** this is the UOp AST spec ***
