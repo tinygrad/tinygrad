@@ -1898,7 +1898,7 @@ class Tensor(MathTrait):
     """
     return self.std(axis, keepdim, correction), self.mean(axis, keepdim)
 
-  def keccak(self: Tensor, cfg: Union[str, Tuple[int, int]] = "sha3_256"):
+  def keccak(self, cfg:str|tuple[int, int] = "sha3_256"):
     """
     Calculates a Keccak hash over the last dimension. Uses "sha3_256" by default.
 
@@ -1934,17 +1934,17 @@ class Tensor(MathTrait):
 
     state = Tensor.zeros((data.shape[0], 25), **tkwargs)
     for k in range(int(data.shape[1])):
-      state = state.xor(data[:,k].reshape(-1, 25))
+      state = state.bitwise_xor(data[:,k].reshape(-1, 25))
       for i in range(24): # f1600
         # θ step
         p = state.reshape((-1, 5, 5)).transpose(2, 1)
         t1 = (p[:,:,0] ^ p[:,:,1] ^ p[:,:,2] ^ p[:,:,3] ^ p[:,:,4]).roll(-1, 1) # xor reduce
-        state = state ^ (t1.roll(2, 1).xor((t1 << 1) ^ (t1 >> 63)).unsqueeze(2).expand((-1, -1, 5)).transpose(2, 1).flatten(1))
+        state = state ^ (t1.roll(2, 1).bitwise_xor((t1 << 1) ^ (t1 >> 63)).unsqueeze(2).expand((-1, -1, 5)).transpose(2, 1).flatten(1))
         # ρ and π steps
         state = state[:,reorder_indexes]
-        state = state.mul(rot_offsets_vecs[0]).xor(state.div(rot_offsets_vecs[1], upcast=False)).reshape((-1, 5, 5))
+        state = (state * rot_offsets_vecs[0]).bitwise_xor(state // rot_offsets_vecs[1]).reshape((-1, 5, 5))
         # χ and ι step
-        state = state.xor(state.roll(shifts=-1, dims=2).xor(-1).bitwise_and(state.roll(shifts=-2, dims=2))).flatten(1) ^ round_const_masks[i]
+        state = state.bitwise_xor((state.roll(shifts=-1, dims=2) ^ -1) & state.roll(shifts=-2, dims=2)).flatten(1) ^ round_const_masks[i]
     return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], -1)
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
