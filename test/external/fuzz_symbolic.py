@@ -5,7 +5,6 @@ from tinygrad.uop.ops import UOp, graph_rewrite
 from tinygrad.uop.spec import z3_renderer
 from tinygrad.helpers import DEBUG, Context
 
-seed = 42
 seed = random.randint(0, 100)
 print(f"Seed: {seed}")
 random.seed(seed)
@@ -42,6 +41,7 @@ def random_bool_expr(depth=10, expr1=None):
 
 
 if __name__ == "__main__":
+  skipped = 0
   for i in range(10000):
     if i % 1000 == 0:
       print(f"Running test {i}")
@@ -61,6 +61,7 @@ if __name__ == "__main__":
     z3_expr, z3_simplified_expr = z3_sink.src[0].arg, z3_sink.src[1].arg
     check = solver.check(z3_simplified_expr != z3_expr)
     if check == z3.unknown and DEBUG>=1:
+      skipped += 1
       print("Skipped due to timeout or interrupt:\n" +
             f"v1=Variable(\"{u1.arg[0]}\", {u1.arg[1]}, {u1.arg[2]})\n" +
             f"v2=Variable(\"{u2.arg[0]}\", {u2.arg[1]}, {u2.arg[2]})\n" +
@@ -88,3 +89,4 @@ if __name__ == "__main__":
             "assert num==rn, f\"{num} != {rn}\"\n"
 
     if DEBUG >= 2: print(f"validated {expr.render()}")
+  print(f"Skipped {skipped} expressions due to timeout")
