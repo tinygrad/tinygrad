@@ -59,7 +59,7 @@ class GraphRenderer(Renderer):
 
     del original_uops, sink_toposort, realizer_dummy, u, r, ret_tensors, sink, remove_assign_map
     for si, ei in lower_schedule(memory_planner(schedule)):
-      assert isinstance(ei.prg, CompiledRunner), f"Unsupported data xfer between bufs:\n{ei.bufs}\n\nDid you realize all state Tensors before export?"
+      assert isinstance(ei.prg, CompiledRunner), f"Export only supported for CompiledRunner\nei.prg: {ei.prg}\n\nei.bufs: {ei.bufs}"
       for buf in ei.bufs: assert buf is not None and buf.device == device, "All compute and returned Tensor(s) must be on the same device"
       self.eis.append(ei)
       for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
