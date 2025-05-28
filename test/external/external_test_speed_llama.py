@@ -4,7 +4,7 @@ from examples.llama import Transformer, MODEL_PARAMS
 from tinygrad.tensor import Tensor
 from tinygrad import Device
 from tinygrad.nn.state import get_state_dict
-from tinygrad.device import Allocator
+from tinygrad.device import Allocator, Compiled
 from tinygrad.engine.realize import method_cache
 from tinygrad.helpers import Profiling
 
@@ -12,9 +12,9 @@ class FakeProgram:
   def __init__(self, name:str, prg:bytes): pass
   def __call__(self, *bufs, global_size, local_size, vals=(), wait=False): pass
 
-class FakeAllocator(Allocator):
+class FakeAllocator(Allocator[Compiled]):
   def _alloc(self, sz, options): return None
-  def copyin(self, dest, src:memoryview): pass
+  def _copyin(self, dest, src:memoryview): pass
 
 class TestLLaMASpeed(unittest.TestCase):
   def test_llama_compile(self):
@@ -22,7 +22,7 @@ class TestLLaMASpeed(unittest.TestCase):
     backup_allocator = Device[Device.DEFAULT].allocator
     backup_compiler = Device[Device.DEFAULT].compiler
     Device[Device.DEFAULT].runtime = FakeProgram
-    Device[Device.DEFAULT].allocator = FakeAllocator()
+    Device[Device.DEFAULT].allocator = FakeAllocator(Device.default)
 
     print("testing llama python run time")
     model = Transformer(**MODEL_PARAMS["1"]["7B"]["args"])

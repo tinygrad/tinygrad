@@ -3,7 +3,7 @@ import ctypes, functools, subprocess, io, atexit, collections, json
 from typing import Tuple, TypeVar, List, Dict, Any
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.helpers import DEBUG, init_c_var, from_mv, round_up, to_mv, init_c_struct_t, getenv, PROFILE
-from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator
+from tinygrad.device import Compiled, Compiler, CompileError, BufferSpec, LRUAllocator
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.support.hsa import check, scan_agents, find_memory_pool, AQLQueue
 from tinygrad.runtime.support.hip_comgr import compile_hip
@@ -102,7 +102,7 @@ class HSAAllocator(LRUAllocator):
     self.device = device
     super().__init__()
 
-  def _alloc(self, size:int, options:BufferOptions):
+  def _alloc(self, size:int, options:BufferSpec):
     if options.host:
       check(hsa.hsa_amd_memory_pool_allocate(HSADevice.cpu_mempool, size, 0, ctypes.byref(mem := ctypes.c_void_p())))
       check(hsa.hsa_amd_agents_allow_access(2, (hsa.hsa_agent_t*2)(HSADevice.cpu_agent, self.device.agent), None, mem))
@@ -112,14 +112,14 @@ class HSAAllocator(LRUAllocator):
     check(hsa.hsa_amd_agents_allow_access(len(HSADevice.agents[hsa.HSA_DEVICE_TYPE_GPU]), c_agents, None, buf))
     return buf.value
 
-  def _free(self, opaque:T, options:BufferOptions):
+  def _free(self, opaque:T, options:BufferSpec):
     HSADevice.synchronize_system()
     check(hsa.hsa_amd_memory_pool_free(opaque))
 
-  def copyin(self, dest:T, src: memoryview):
+  def _copyin(self, dest:T, src: memoryview):
     # Async copyin sync model uses barriers on the main hw queue, since barriers are guaranteed to execute in order with all other packets.
     self.device.hw_queue.submit_barrier([], sync_signal := self.device.alloc_signal(reusable=True))
-    mem = self._alloc(src.nbytes, BufferOptions(host=True))
+    mem = self._alloc(src.nbytes, BufferSpec(host=True))
     ctypes.memmove(mem, from_mv(src), src.nbytes)
     check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, mem, HSADevice.cpu_agent, src.nbytes, 1, ctypes.byref(sync_signal),
                                                   copy_signal := self.device.alloc_signal(reusable=True), hsa.HSA_AMD_SDMA_ENGINE_0, True))
@@ -131,7 +131,7 @@ class HSAAllocator(LRUAllocator):
     self.device.hw_queue.submit_barrier([], sync_signal := self.device.alloc_signal(reusable=True))
 
     if not hasattr(self, 'hb'):
-      self.hb = [self._alloc(CHUNK_SIZE, BufferOptions(host=True)) for _ in range(2)]
+      self.hb = [self._alloc(CHUNK_SIZE, BufferSpec(host=True)) for _ in range(2)]
       self.hb_signals = [self.device.alloc_signal(reusable=False) for _ in range(2)]
       self.hb_polarity = 0
       self.sdma = [hsa.HSA_AMD_SDMA_ENGINE_0, hsa.HSA_AMD_SDMA_ENGINE_1]
@@ -164,7 +164,7 @@ class HSAAllocator(LRUAllocator):
     if copies_called > 1: wait_signals.append(self.hb_signals[self.hb_polarity])
     self.device.hw_queue.submit_barrier(wait_signals)
 
-  def copyout(self, dest:memoryview, src:T):
+  def _copyout(self, dest:memoryview, src:T):
     HSADevice.synchronize_system()
     copy_signal = self.device.alloc_signal(reusable=True)
     c_agents = (hsa.hsa_agent_t*2)(self.device.agent, HSADevice.cpu_agent)
@@ -256,7 +256,7 @@ class HSADevice(Compiled):
 
   def _new_kernargs_region(self, sz:int):
     if hasattr(self, 'kernarg_start_addr'): self.delayed_free.append(self.kernarg_start_addr)
-    self.kernarg_start_addr: int = self.allocator._alloc(sz, BufferOptions())
+    self.kernarg_start_addr: int = self.allocator._alloc(sz, BufferSpec())
     self.kernarg_next_addr = self.kernarg_start_addr
     self.kernarg_pool_sz: int = sz
 

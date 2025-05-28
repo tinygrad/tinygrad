@@ -5,6 +5,7 @@
 ::: tinygrad.Tensor.ones
 ::: tinygrad.Tensor.full
 ::: tinygrad.Tensor.arange
+::: tinygrad.Tensor.linspace
 ::: tinygrad.Tensor.eye
 ::: tinygrad.Tensor.full_like
 ::: tinygrad.Tensor.zeros_like
@@ -19,7 +20,9 @@
 
 ::: tinygrad.Tensor.manual_seed
 ::: tinygrad.Tensor.rand
+::: tinygrad.Tensor.rand_like
 ::: tinygrad.Tensor.randn
+::: tinygrad.Tensor.randn_like
 ::: tinygrad.Tensor.randint
 ::: tinygrad.Tensor.normal
 ::: tinygrad.Tensor.uniform

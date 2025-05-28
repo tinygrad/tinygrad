@@ -107,7 +107,7 @@ class ResNet:
     is_feature_only = self.fc is None
     if is_feature_only: features = []
     out = self.bn1(self.conv1(x)).relu()
-    out = out.pad2d([1,1,1,1]).max_pool2d((3,3), 2)
+    out = out.pad([1,1,1,1]).max_pool2d((3,3), 2)
     out = out.sequential(self.layer1)
     if is_feature_only: features.append(out)
     out = out.sequential(self.layer2)
@@ -137,7 +137,13 @@ class ResNet:
 
     self.url = model_urls[(self.num, self.groups, self.base_width)]
     for k, dat in torch_load(fetch(self.url)).items():
-      obj: Tensor = get_child(self, k)
+      try:
+        obj: Tensor = get_child(self, k)
+      except AttributeError as e:
+        if 'fc.' in k and self.fc is None:
+          continue
+
+        raise e
 
       if 'fc.' in k and obj.shape != dat.shape:
         print("skipping fully connected layer")

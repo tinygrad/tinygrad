@@ -6,8 +6,6 @@
 from pathlib import Path
 from typing import List, Optional
 import argparse, json
-import numpy as np
-np.set_printoptions(linewidth=200)
 from tinygrad import Tensor, Device, GlobalCounters, nn
 from tinygrad.helpers import Context, Timing, Profiling, DEBUG, JIT, getenv, colored
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
@@ -15,6 +13,7 @@ from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from sentencepiece import SentencePieceProcessor
 import tiktoken, sys
 from tiktoken.load import load_tiktoken_bpe
+from extra.bench_log import BenchEvent, WallTimeEvent
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
 
@@ -208,40 +207,43 @@ class LLaMa:
 
     model = Transformer(**params["args"], linear=linear, max_context=MAX_CONTEXT, jit=bool(JIT))
 
-    if model_path.is_dir():
-      weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]], device[0] if isinstance(device, tuple) else device)
-    else:
-      weights = load(str(model_path))
-    if "model.embed_tokens.weight" in weights:
-      weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
+    with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
+      if model_path.is_dir():
+        weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]], device[0] if isinstance(device, tuple) else device)
+      else:
+        weights = load(str(model_path))
+      if "model.embed_tokens.weight" in weights:
+        weights = convert_from_huggingface(weights, params["args"]["n_layers"], params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
 
-    weights = fix_bf16(weights)
+      weights = fix_bf16(weights)
 
-    with Context(BEAM=0):
-      # quantize
-      if quantize is not None:
-        weights = linear.quantize(weights, device)
-        for _,v in weights.items(): v.realize()
+      # prevent tracking model weights
+      # this is a part of a larger problem with BUFFER UOps and gc in TRACK_MATCH_STATS=2
+      with Context(BEAM=0, TRACK_MATCH_STATS=0):
+        # quantize
+        if quantize is not None:
+          weights = linear.quantize(weights, device)
+          for _,v in weights.items(): v.realize()
 
-      # shard
-      if isinstance(device, tuple):
-        for k,v in nn.state.get_state_dict(model).items():
-          if 'scale' in k: v.shard_(device, axis=None)  # from quantized
-          elif '.attention.' in k:
-            if getenv("SHARD_KVCACHE") and ('.wq.' in k or '.wk.' in k or '.wv.' in k): v.shard_(device, axis=0)
-            else: v.shard_(device, axis=-1)
-          elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
-          elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
-          elif '.feed_forward.' in k: v.shard_(device, axis=-1)
-          elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
-          elif 'output.weight' in k: v.shard_(device, axis=-1)
-          #elif k.endswith('.weight'): v.shard_(device, axis=-1)
-          #elif 'norm.' in k: v.shard_(device, axis=-1)
-          else: v.shard_(device, axis=None)
-          #print(k, v.shape, v.lazydata.axis)
+        # shard
+        if isinstance(device, tuple):
+          for k,v in nn.state.get_state_dict(model).items():
+            if 'scale' in k: v.shard_(device, axis=None)  # from quantized
+            elif '.attention.' in k:
+              if getenv("SHARD_KVCACHE") and ('.wq.' in k or '.wk.' in k or '.wv.' in k): v.shard_(device, axis=0)
+              else: v.shard_(device, axis=-1)
+            elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
+            elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
+            elif '.feed_forward.' in k: v.shard_(device, axis=-1)
+            elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
+            elif 'output.weight' in k: v.shard_(device, axis=-1)
+            #elif k.endswith('.weight'): v.shard_(device, axis=-1)
+            #elif 'norm.' in k: v.shard_(device, axis=-1)
+            else: v.shard_(device, axis=None)
+            #print(k, v.shape, v.lazydata.axis)
 
-      # replace weights in model
-      load_state_dict(model, weights, strict=False, consume=True)
+        # replace weights in model
+        load_state_dict(model, weights, strict=False, consume=True)
 
     return LLaMa(model, tokenizer)
 
@@ -250,6 +252,8 @@ class LLaMa:
     self.tokenizer = tokenizer
 
   def greedy_until(self, prompt:str, until, max_length, temperature):
+    # only used in old eval script
+    import numpy as np
     toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)
     start_pos = 0
     for i in range(max_length):
@@ -475,11 +479,12 @@ After you are done speaking, output [EOS]. You are not Chad.
       next_tok = Tensor([toks[start_pos:]], device=device) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
       with Profiling(enabled=args.profile):
         with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
-          with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
-                      f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                      (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
-            tok_tensor = llama.model(next_tok, start_pos, args.temperature)
-          tok = tok_tensor.item()
+          with WallTimeEvent(BenchEvent.STEP):
+            with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                        f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                        (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
+              tok_tensor = llama.model(next_tok, start_pos, args.temperature)
+            tok = tok_tensor.item()
 
       # use the kv cache
       start_pos = len(toks)
@@ -498,14 +503,16 @@ After you are done speaking, output [EOS]. You are not Chad.
     if not chatbot: break
 
   # validate output!
-  if args.temperature == 0 and args.count == 10 and args.prompt == "Hello." and not args.quantize:
+  if args.temperature == 0 and args.count == 10 and args.prompt == "Hello.":
     text = llama.tokenizer.decode(toks)
-    key = (args.gen, args.size)
+    key = (args.gen, args.size, args.quantize)
     expected = {
-      ("1", "7B"): "Hello. I'm a 20 year old male",
-      ("2", "7B"): "Hello. I'm a 20 year old girl",
-      ("2", "70B"): "Hello. I am a 20 year old female.",
-      ("3", "8B"): "Hello. I am a 20 year old female. I",
+      ("1", "7B", None): "Hello. I'm a 20 year old male",
+      ("1", "7B", "int8"): "Hello. I'm a 20 year old male",
+      ("1", "7B", "nf4"): "Hello. I'm a 20 year old male",
+      ("2", "7B", None): "Hello. I'm a 20 year old girl",
+      ("2", "70B", None): "Hello. I am a 20 year old female.",
+      ("3", "8B", None): "Hello. I am a 20 year old female. I",
     }
     try:
       assert text == expected[key], f"invalid output: `{colored(text, 'red')}` != `{expected[key]}`"

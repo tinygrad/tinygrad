@@ -3,6 +3,7 @@ os.environ["NVIDIA_TF32_OVERRIDE"] = "0"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 import unittest
 import torch
 torch.set_num_threads(1)
@@ -38,6 +39,7 @@ def helper_test_speed(f1, *args):
 
     # operation cache defeats
     args = [(x+1).realize() if isinstance(x, Tensor) else (None if x is None else (x+1)) for x in args]
+    args = [(x-1).realize() if isinstance(x, Tensor) else (None if x is None else (x-1)) for x in args]
 
     # force syncing
     [x.numpy() if isinstance(x, Tensor) or str(torch_device) == "cpu" else x.cpu().numpy() for x in args if x is not None]
@@ -46,14 +48,16 @@ def helper_test_speed(f1, *args):
     cache_defeat += 1
 
     # manual pre sync
-    if isinstance(args[0], Tensor): Device[args[0].device].synchronize()
+    if isinstance(args[0], Tensor):
+      local_device = Device[args[0].device]
+      local_device.synchronize()
     else: sync()
 
     GlobalCounters.global_ops = 0
     GlobalCounters.global_mem = 0
     st = time.perf_counter()
     ret = f1(*args)
-    if isinstance(ret, Tensor): Device[ret.device].synchronize()
+    if isinstance(ret, Tensor): local_device.synchronize()
     else: sync()
     et = (time.perf_counter() - st) * 1000
     if i >= 1: ets.append(et)
@@ -91,8 +95,9 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
   desc = "faster" if et_torch > et_tinygrad else "slower"
   flops = save_ops*1e-6
   mem = save_mem*1e-6
-  print(("\r" if not CI else "")+f"{name:42s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")  # noqa: E501
-  np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-3, rtol=1e-3)
+  print(("\r" if not CI else "")+f"{name:42s} {et_torch:7.2f} ms ({flops/et_torch:9.2f} GFLOPS {mem/et_torch:7.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:9.2f} GFLOPS {mem/et_tinygrad:7.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")  # noqa: E501
+  atol, rtol = (1e-2, 1e-2) if torch_dt == torch.float16 else (1e-3, 1e-3)
+  np.testing.assert_allclose(val_tinygrad, val_torch, atol=atol, rtol=rtol)
 
 def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_x):
   torch.manual_seed(0)
@@ -135,7 +140,6 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a-b
     helper_test_generic_square('sub', 4096, f, f)
 
-  @unittest.skipIf(CI and Device.DEFAULT == "WEBGPU", "breaking on webgpu CI")
   def test_pow(self):
     def f(a, b): return a.pow(b)
     helper_test_generic_square('pow', 2048, f, f)
@@ -158,8 +162,8 @@ class TestSpeed(unittest.TestCase):
     helper_test_generic_square('cumsum_1', 256, f1, f1, onearg=True)
 
   def test_cat(self):
-    helper_test_generic_square('cat_0', 256, lambda x,y: torch.cat((x,y),dim=0), lambda x,y: x.cat(y,dim=0))
-    helper_test_generic_square('cat_1', 256, lambda x,y: torch.cat((x,y),dim=1), lambda x,y: x.cat(y,dim=1))
+    helper_test_generic_square('cat_0', 2048, lambda x,y: torch.cat((x,y),dim=0), lambda x,y: x.cat(y,dim=0))
+    helper_test_generic_square('cat_1', 2048, lambda x,y: torch.cat((x,y),dim=1), lambda x,y: x.cat(y,dim=1))
 
   def test_array_packing(self):
     N = 2048
@@ -189,6 +193,10 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a.exp()
     helper_test_generic_square('exp', 2048, f, f, onearg=True)
 
+  def test_sqrt(self):
+    def f(a, b): return a.sqrt()
+    helper_test_generic_square('sqrt', 2048, f, f, onearg=True)
+
   def test_relu(self):
     def f(a, b): return a.relu()
     helper_test_generic_square('relu', 4096, f, f, onearg=True)
@@ -201,8 +209,12 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return (a*b).sum()
     helper_test_generic_square('mul_sum', 4096, f, f)
 
-  def test_add(self):
-    for N in [1, 1024, 4096]:
+  def test_add_a(self):
+    def f(a, b): return a + b
+    helper_test_generic_square('add', 1, f, f)
+
+  def test_add_big(self):
+    for N in [1024, 4096]:
       def f(a, b): return a + b
       helper_test_generic_square('add', N, f, f)
 

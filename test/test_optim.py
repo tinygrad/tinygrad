@@ -4,7 +4,7 @@ import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW
 from tinygrad.helpers import CI
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 np.random.seed(1337)
 x_init = np.random.randn(1,4).astype(np.float32)
@@ -127,7 +127,7 @@ class TestOptim(unittest.TestCase):
     old_state = Tensor.training
     t.sum().backward()
     Tensor.training = False
-    self.assertRaises(AssertionError, optimizer.step)
+    self.assertRaises(RuntimeError, optimizer.step)
     Tensor.training = True
     optimizer.step()
     Tensor.training = old_state

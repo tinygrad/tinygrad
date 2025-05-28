@@ -20,8 +20,8 @@ na = np.zeros((N,N),dtype=np.float32)
 nb = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32) #.astype(np.int32).astype(np.float32)N
 nc = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32) #.astype(np.int32).astype(np.float32)
 
-metalalloc.copyin(b,nb.tobytes())
-metalalloc.copyin(c,nc.tobytes())
+metalalloc._copyin(b,nb.tobytes())
+metalalloc._copyin(c,nc.tobytes())
 
 FLOPS = N*N*N*2
 BW = N*N*3*4
@@ -96,7 +96,7 @@ def timeit(fxn):
   return time.perf_counter() - st
 tm = min([timeit(lambda: prog(a, b, c, global_size=[N//(8*4), N//(8*4*LID), 1], local_size=[32, LID, 1], wait=True)) for _ in range(20)])
 comp = nb@nc
-metalalloc.copyout(flat_mv(na.data), a)
+metalalloc._copyout(flat_mv(na.data), a)
 if N <= 32:
   print(na)
   print(comp)

@@ -361,21 +361,21 @@ class SineGen:
     self.dim = self.harmonic_num + 1
   def _f02uv(self, f0): return (f0 > self.voiced_threshold).float()  #generate uv signal
   def _f02sine(self, f0_values):
-    def padDiff(x : Tensor): return (x.pad2d((0,0,-1,1)) - x).pad2d((0,0,0,-1))
+    def padDiff(x : Tensor): return (x.pad((0,0,-1,1)) - x).pad((0,0,0,-1))
     def mod(x: Tensor, n: int) -> Tensor: return x - n * x.div(n).floor()  # this is what the % operator does in pytorch.
     rad_values = mod((f0_values / self.sampling_rate) , 1)  # convert to F0 in rad
     rand_ini = Tensor.rand(f0_values.shape[0], f0_values.shape[2], device=f0_values.device)  # initial phase noise
 
     #rand_ini[:, 0] = 0
-    m = Tensor.ones(f0_values.shape[0]).unsqueeze(1).pad2d((0,f0_values.shape[2]-1,0,0)).cast(dtypes.bool)
+    m = Tensor.ones(f0_values.shape[0]).unsqueeze(1).pad((0,f0_values.shape[2]-1,0,0)).cast(dtypes.bool)
     m = tilde(m)
     rand_ini = m.where(rand_ini, 0)
 
     #rad_values[:, 0, :] = rad_values[:, 0, :] + rand_ini
     tmp = rad_values[:, 0, :] + rand_ini
-    m = Tensor.ones(tmp.shape).pad2d((0,0,0,rad_values.shape[1]-1,0)).cast(dtypes.bool)
+    m = Tensor.ones(tmp.shape).pad((0,0,0,rad_values.shape[1]-1,0)).cast(dtypes.bool)
     m = tilde(m)
-    tmp = tmp.unsqueeze(1).pad2d((0,0,0,rad_values.shape[1]-1,0))
+    tmp = tmp.unsqueeze(1).pad((0,0,0,rad_values.shape[1]-1,0))
     rad_values = m.where(rad_values, tmp)
 
     tmp_over_one = mod(rad_values.cumsum(1), 1)
@@ -383,7 +383,7 @@ class SineGen:
     cumsum_shift = Tensor.zeros_like(rad_values)
 
     #cumsum_shift[:, 1:, :] = tmp_over_one_idx * -1.0
-    tmp_over_one_idx = (tmp_over_one_idx * -1.0).pad2d((0,0,1,0))
+    tmp_over_one_idx = (tmp_over_one_idx * -1.0).pad((0,0,1,0))
     cumsum_shift = tmp_over_one_idx
 
     sines = ((rad_values + cumsum_shift).cumsum(1) * 2 * np.pi).sin()
@@ -437,14 +437,14 @@ class Generator:
     x = self.conv_pre(x)
     if g is not None:  x = x + self.cond(g)
     for i in range(self.num_upsamples):
-      x, xs = self.ups[i](x.leakyrelu(LRELU_SLOPE)), None
+      x, xs = self.ups[i](x.leaky_relu(LRELU_SLOPE)), None
       x_source = self.noise_convs[i](har_source)
       x = x + x_source
       for j in range(self.num_kernels):
         if xs is None: xs = self.resblocks[i * self.num_kernels + j].forward(x)
         else: xs += self.resblocks[i * self.num_kernels + j].forward(x)
       x = xs / self.num_kernels
-    return self.conv_post(x.leakyrelu()).tanh()
+    return self.conv_post(x.leaky_relu()).tanh()
 
 # **** helpers ****
 
@@ -504,7 +504,7 @@ def load_checkpoint_enc(checkpoint_path, model: ContentVec, optimizer=None, skip
         obj, v = getattr(parent, "weight"), weight_norm(weight_v, weight_g, 0)
         weight_g, weight_v, parent, skip = None, None, None, False
       if not skip and obj.shape == v.shape:
-        if "feature_extractor" in key and (isinstance(parent, nn.GroupNorm) or isinstance(parent, nn.LayerNorm)):  # cast
+        if "feature_extractor" in key and (isinstance(parent, (nn.GroupNorm, nn.LayerNorm))):  # cast
           obj.assign(v.to(obj.device).float())
         else:
           obj.assign(v.to(obj.device))

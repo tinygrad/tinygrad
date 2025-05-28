@@ -1,5 +1,5 @@
 import unittest
-from tinygrad.device import CompileError, Device
+from tinygrad.device import CompileError, Device, Compiler
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
@@ -10,14 +10,12 @@ class TestMetal(unittest.TestCase):
       device.allocator.alloc(10000000000000000000)
 
   def test_compile_error(self):
-    device = MetalDevice("metal")
-    compiler = MetalCompiler(device)
+    compiler = MetalCompiler()
     with self.assertRaises(CompileError):
       compiler.compile("this is not valid metal")
 
   def test_compile_success(self):
-    device = MetalDevice("metal")
-    compiler = MetalCompiler(device)
+    compiler = MetalCompiler()
     ret = compiler.compile("""
 #include <metal_stdlib>
   using namespace metal;
@@ -41,7 +39,7 @@ class TestMetal(unittest.TestCase):
 
   def test_failed_newLibraryWithData(self):
     device = MetalDevice("metal")
-    compiler = MetalCompiler(device)
+    compiler = MetalCompiler()
     compiled = compiler.compile("""
 #include <metal_stdlib>
 kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]){
@@ -52,3 +50,26 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
       compiled = compiled[:40] # corrupt the compiled program
       MetalProgram(device, "r_5", compiled)
 
+  def test_program_w_empty_compiler(self):
+    device = MetalDevice("metal")
+    compiler = Compiler(device)
+    compiled = compiler.compile("""
+#include <metal_stdlib>
+kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]){
+  data0[0] = 0;
+}
+""")
+    MetalProgram(device, "r_5", compiled)
+
+  def test_bad_program_w_empty_compiler(self):
+    device = MetalDevice("metal")
+    compiler = Compiler(device)
+    # this does not raise
+    compiled = compiler.compile("""
+#include <metal_stdlib>
+kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]){
+  invalid codes;
+}
+""")
+    with self.assertRaises(RuntimeError):
+      MetalProgram(device, "r_5", compiled)

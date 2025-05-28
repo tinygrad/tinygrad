@@ -5,23 +5,25 @@ from tinygrad import Device
 
 class TestKernelCache(unittest.TestCase):
   def test_kernel_cache_in_action(self):
-    if Device.DEFAULT not in ["CLANG"]:
+    if Device.DEFAULT not in ["CPU"]:
       self.skipTest("No custom kernel cache is implemented")
 
-    a = Tensor.rand(4,4)
-    b = Tensor.rand(4,4)
-    x = a + b
+    unique_const = 0.6765677269
+    a = Tensor.rand(4,4).realize()
+    b = Tensor.rand(4,4).realize()
+    x = a + b + unique_const
     x.realize()
 
-    orig_compile_func = Device['CLANG'].compiler
-    Device['CLANG'].compiler = None # making it not callable
+    a1 = Tensor.rand(4,4).realize()
+    b1 = Tensor.rand(4,4).realize()
+    orig_compile_func = Device['CPU'].compiler
+    Device['CPU'].compiler = None # making it not callable
 
-    a1 = Tensor.rand(4,4)
-    b1 = Tensor.rand(4,4)
-    x1 = a1 + b1
-    x1.realize() # Same kernel should be from cache.
-
-    Device['CLANG'].compiler = orig_compile_func
+    try:
+      x1 = a1 + b1 + unique_const
+      x1.realize() # Same kernel should be from cache.
+    finally:
+      Device['CPU'].compiler = orig_compile_func
 
 if __name__ == "__main__":
   unittest.main()

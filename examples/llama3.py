@@ -1,12 +1,13 @@
 from pathlib import Path
 from typing import List
-import json, argparse, random, time
+import json, argparse, random, time, os
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
-from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
-from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
+from extra.models.llama import Transformer, convert_from_huggingface, convert_from_gguf, fix_bf16
+from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters, gguf_load
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
 from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm
+from extra.bench_log import BenchEvent, WallTimeEvent
 
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
@@ -47,7 +48,7 @@ def concat_weights(models, device=None):
     disk_tensors: List[Tensor] = [model[name] for model in models]
     if len(disk_tensors) == 1 or len(disk_tensors[0].shape) == 1:
       return disk_tensors[0].to(device=device)
-    axis = 1 if name.endswith(".attention.wo.weight") or name.endswith(".feed_forward.w2.weight") else 0
+    axis = 1 if name.endswith((".attention.wo.weight", ".feed_forward.w2.weight")) else 0
     lazy_tensors = [data.to(device=device) for data in disk_tensors]
     return lazy_tensors[0].cat(*lazy_tensors[1:], dim=axis)
   return {name: convert(name) for name in {name: None for model in models for name in model}}
@@ -57,6 +58,9 @@ def load(fn:str):
     with open(fn) as fp: weight_map = json.load(fp)['weight_map']
     parts = {n: load(str(Path(fn).parent / Path(n).name)) for n in set(weight_map.values())}
     return {k: parts[n][k] for k, n in weight_map.items()}
+  elif fn.endswith(".gguf"):
+    gguf_tensor = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}").to(Device.DEFAULT)
+    return gguf_load(gguf_tensor)[1]
   elif fn.endswith(".safetensors"):
     return safe_load(fn)
   else:
@@ -70,16 +74,17 @@ class Int8Linear:
     self.scale = Tensor.ones(out_features, dtype=dtypes.half)
 
   def __call__(self, x):
-    return x.dot(self.weight.cast(dtype=dtypes.half).T*self.scale)
+    return x.dot(self.weight.cast(self.scale.dtype).T*self.scale)
 
   @staticmethod
-  def quantize(tensors, device):
+  def quantize(tensors, device, scale_dtype=dtypes.float16, quantize_embeds=False):
     new_tensors = {}
     for name,v in tensors.items():
-      if "feed_forward" in name or "attention.w" in name:
+      if "feed_forward" in name or "attention.w" in name or (quantize_embeds and "tok_embeddings.weight" in name):
         assert "weight" in name, name
+        v = v.cast(scale_dtype)
         scale = v.abs().max(axis=1) / 127.0
-        int8_weight = (v.T/scale).T.cast(dtype=dtypes.int8)
+        int8_weight = (v.T/scale).T.round().cast(dtype=dtypes.int8) # without round(), cast truncates -34.9 to -34
         new_tensors[name] = int8_weight
         new_tensors[name.replace('weight', 'scale')] = scale
         if isinstance(device, tuple):
@@ -87,7 +92,19 @@ class Int8Linear:
           new_tensors[name.replace('weight', 'scale')].shard_(device, axis=None)
       else:
         new_tensors[name] = v
+    if quantize_embeds: new_tensors.update({"output.weight": new_tensors["tok_embeddings.weight"], "output.scale": new_tensors["tok_embeddings.scale"]})
     return new_tensors
+
+class Int8Embedding:
+  def __init__(self, vocab_size:int, embed_size:int):
+    self.vocab_sz, self.embed_sz = vocab_size, embed_size
+    self.weight, self.scale = Tensor.ones(vocab_size, embed_size, dtype=dtypes.int8), Tensor.ones(vocab_size, dtype=dtypes.half)
+
+  def __call__(self, idx:Tensor) -> Tensor:
+    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).unsqueeze(-1)
+    big_shp = idx.shape+(self.vocab_sz, self.embed_sz)
+    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), (self.weight.cast(self.scale.dtype).T*self.scale).T
+    return (arange == idx).mul(vals).sum(-2, dtype=vals.dtype)
 
 def NF4Linear(block_size):
   _CODE = [
@@ -105,12 +122,13 @@ def NF4Linear(block_size):
     def __call__(self, x: Tensor) -> Tensor:
       high_bits = self.weight
       low_bits = (self.weight * 2 ** 4).contiguous()
-      unpacked = Tensor.stack(high_bits, low_bits, dim=-1).div(2 ** 4, upcast=False)
+      unpacked = Tensor.stack(high_bits, low_bits, dim=-1).idiv(2 ** 4)
       unscaled = CODE[unpacked].to(x.device).reshape(-1, block_size) * self.scale
       return x.linear(unscaled.reshape(self.out_features, self.in_features).T)
 
     @staticmethod
-    def quantize(state_dict: dict[str, Tensor], device) -> dict[str, Tensor]:
+    def quantize(state_dict: dict[str, Tensor], device, scale_dtype=dtypes.float16, quantize_embeds=False) -> dict[str, Tensor]:
+      assert not quantize_embeds  # TODO: support this?
       new_state_dict = {}
       for k, v in state_dict.items():
         if "feed_forward" in k or "attention.w" in k:
@@ -118,7 +136,7 @@ def NF4Linear(block_size):
           scale = (grouped.abs().max(axis=1, keepdim=True))
           coded = ((grouped / scale).unsqueeze(-1) - CODE.to(v.device)).abs().argmin(axis=-1).cast(dtypes.uint8).flatten()
           new_state_dict[k] = coded[::2] * 2 ** 4 + coded[1::2]
-          new_state_dict[k.replace(".weight", ".scale")] = scale.cast(dtypes.float16)
+          new_state_dict[k.replace(".weight", ".scale")] = scale.cast(scale_dtype)
           if isinstance(device, tuple):
             new_state_dict[k].shard_(device, axis=-1)
             new_state_dict[k.replace('weight', 'scale')].shard_(device, axis=None)
@@ -128,6 +146,10 @@ def NF4Linear(block_size):
   return _NF4Linear
 
 MODEL_PARAMS = {
+  "1B": {
+    "args": {"dim": 2048, "n_heads": 32, "n_kv_heads": 8, "n_layers": 16, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 128256, "hidden_dim": 8192},
+    "files": 1
+  },
   "8B": {
     "args": {"dim": 4096, "n_heads": 32, "n_kv_heads": 8, "n_layers": 32, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 128256, "hidden_dim": 14336},
     "files": 1
@@ -137,44 +159,50 @@ MODEL_PARAMS = {
     "files": 8
   }
 }
-def build_transformer(model_path: Path, model_size="8B", quantize=None, device=None):
+def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dtype=dtypes.float16, device=None, max_context=8192, load_weights=True):
   # build model
-  if quantize == "int8": linear = Int8Linear
-  elif quantize == "nf4": linear = NF4Linear(64)
-  else: linear = nn.Linear
-  model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, max_context=8192, jit=True)
+  if quantize == "int8": linear, embedding, quantize_embeds = Int8Linear, Int8Embedding, True
+  elif quantize == "nf4": linear, embedding, quantize_embeds = NF4Linear(64), nn.Embedding, False
+  else: linear, embedding, quantize_embeds = nn.Linear, nn.Embedding, False
+  model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, embedding=embedding, max_context=max_context, jit=True)
+
+  if not load_weights: return model
 
   # load weights
-  if model_path.is_dir():
-    if (model_path / "model.safetensors.index.json").exists(): weights = load(str(model_path / "model.safetensors.index.json"))
-    elif (model_path / "model.safetensors").exists(): weights = load(str(model_path / "model.safetensors"))
-    else: weights = concat_weights([load(str(model_path / f"consolidated.{i:02d}.pth")) for i in range(MODEL_PARAMS[model_size]["files"])], device[0] if isinstance(device, tuple) else device)
-  else:
-    weights = load(str(model_path))
-  if "model.embed_tokens.weight" in weights:
-    weights = convert_from_huggingface(weights, model, MODEL_PARAMS[model_size]["args"]["n_heads"], MODEL_PARAMS[model_size]["args"]["n_kv_heads"])
-  weights = fix_bf16(weights)
+  with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
+    if model_path.is_dir():
+      if (model_path / "model.safetensors.index.json").exists(): weights = load(str(model_path / "model.safetensors.index.json"))
+      elif (model_path / "model.safetensors").exists(): weights = load(str(model_path / "model.safetensors"))
+      else: weights = concat_weights([load(str(model_path / f"consolidated.{i:02d}.pth")) for i in range(MODEL_PARAMS[model_size]["files"])], device[0] if isinstance(device, tuple) else device)
+    else:
+      weights = load(str(model_path))
+    if "model.embed_tokens.weight" in weights:
+      weights = convert_from_huggingface(weights, MODEL_PARAMS[model_size]["args"]["n_layers"], MODEL_PARAMS[model_size]["args"]["n_heads"], MODEL_PARAMS[model_size]["args"]["n_kv_heads"])
+    elif "token_embd.weight" in weights:
+      weights = convert_from_gguf(weights, MODEL_PARAMS[model_size]["args"]["n_layers"])
+    weights = fix_bf16(weights)
 
-  with Context(BEAM=0):
-    # quantize
-    if quantize is not None:
-      weights = linear.quantize(weights, device)
-      for _,v in weights.items(): v.realize()
+    with Context(BEAM=0):
+      # quantize
+      if quantize == "float16": weights = {k:v.cast(quantize).contiguous() for k,v in weights.items()}
+      elif quantize is not None:
+        weights = linear.quantize(weights, device, scale_dtype, quantize_embeds)
+        for _,v in weights.items(): v.realize()
 
-    # shard
-    if isinstance(device, tuple):
-      for k,v in nn.state.get_state_dict(model).items():
-        if 'scale' in k: v.shard_(device, axis=None)  # from quantized
-        elif '.attention.' in k: v.shard_(device, axis=-1)
-        elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
-        elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
-        elif '.feed_forward.' in k: v.shard_(device, axis=-1)
-        elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
-        elif 'output.weight' in k: v.shard_(device, axis=0)
-        else: v.shard_(device, axis=None)
+      # shard
+      if isinstance(device, tuple):
+        for k,v in nn.state.get_state_dict(model).items():
+          if 'scale' in k: v.shard_(device, axis=None)  # from quantized
+          elif '.attention.' in k: v.shard_(device, axis=-1)
+          elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
+          elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
+          elif '.feed_forward.' in k: v.shard_(device, axis=-1)
+          elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
+          elif 'output.weight' in k: v.shard_(device, axis=0)
+          else: v.shard_(device, axis=None)
 
-    # replace weights in model
-    load_state_dict(model, weights, strict=False, consume=True)
+      # replace weights in model
+      load_state_dict(model, weights, strict=False, consume=True)
   return model
 
 # default settings
@@ -208,11 +236,11 @@ if __name__ == "__main__":
   Tensor.no_grad = True
 
   parser = argparse.ArgumentParser()
-  parser.add_argument("--download_model", action="store_true", help="Download a 8B model")
+  parser.add_argument("--download_model", action="store_true", help="Download a model")
   parser.add_argument("--model", type=Path, help="Model path")
-  parser.add_argument("--size", choices=["8B", "70B"], default="8B", help="Model size")
+  parser.add_argument("--size", choices=["1B", "8B", "70B"], default="1B", help="Model size")
   parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
-  parser.add_argument("--quantize", choices=["int8", "nf4"], help="Quantization method")
+  parser.add_argument("--quantize", choices=["int8", "nf4", "float16"], help="Quantization method")
   parser.add_argument("--no_api", action="store_true", help="Disable the api and run a cli test interface")
   parser.add_argument("--host", type=str, default="0.0.0.0", help="Web server bind address")
   parser.add_argument("--port", type=int, default=7776, help="Web server port")
@@ -224,14 +252,24 @@ if __name__ == "__main__":
   parser.add_argument("--profile", action="store_true", help="Output profile data")
   args = parser.parse_args()
 
-  assert not (args.download_model and args.model), "either download or provide model"
-  if args.download_model:
-    fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-8b-sfr")
-    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00001-of-00004.safetensors", "model-00001-of-00004.safetensors", subdir="llama3-8b-sfr")
-    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00002-of-00004.safetensors", "model-00002-of-00004.safetensors", subdir="llama3-8b-sfr")
-    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00003-of-00004.safetensors", "model-00003-of-00004.safetensors", subdir="llama3-8b-sfr")
-    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00004-of-00004.safetensors", "model-00004-of-00004.safetensors", subdir="llama3-8b-sfr")
-    args.model = fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/raw/main/model.safetensors.index.json", "model.safetensors.index.json", subdir="llama3-8b-sfr")
+  # download_model is the default without a model passed in
+  if args.download_model or not args.model:
+    if args.size == "1B":
+      fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
+      args.model = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
+    elif args.size == "8B":
+      fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-8b-sfr")
+      fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00001-of-00004.safetensors", "model-00001-of-00004.safetensors", subdir="llama3-8b-sfr")
+      fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00002-of-00004.safetensors", "model-00002-of-00004.safetensors", subdir="llama3-8b-sfr")
+      fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00003-of-00004.safetensors", "model-00003-of-00004.safetensors", subdir="llama3-8b-sfr")
+      fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00004-of-00004.safetensors", "model-00004-of-00004.safetensors", subdir="llama3-8b-sfr")
+      args.model = fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/raw/main/model.safetensors.index.json", "model.safetensors.index.json", subdir="llama3-8b-sfr")
+    elif args.size == "70B":
+      subdir = "DeepSeek-R1-Distill-Llama-70B"
+      args.model = fetch("https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-70B/resolve/main/model.safetensors.index.json?download=true", "model.safetensors.index.json", subdir=subdir)
+      fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir=subdir)
+      for i in range(17):
+        fetch(f"https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-70B/resolve/main/model-{i+1:05d}-of-000017.safetensors?download=true", f"model-{i+1:05d}-of-000017.safetensors", subdir=subdir)
 
   assert args.model is not None, "please provide --model option"
 
@@ -268,8 +306,9 @@ if __name__ == "__main__":
       for key, value in cors_headers.items(): response.set_header(key, value)
 
     @app.route("/<filename>")
-    def server_static(filename):
-      return static_file(filename, root=(Path(__file__).parent / "tinychat").as_posix())
+    def server_static(filename): return static_file(filename, root=(Path(__file__).parent / "tinychat").as_posix())
+    @app.route("/assets/<filename:path>")
+    def server_assets(filename): return static_file(filename, root=(Path(__file__).parent / "tinychat" / "assets").as_posix())
     @app.route("/")
     def index():
       return static_file("index.html", root=(Path(__file__).parent / "tinychat").as_posix())
@@ -399,11 +438,12 @@ if __name__ == "__main__":
       st = GlobalCounters.time_sum_s
       with Profiling(enabled=args.profile):
         with Timing("total ", on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
-          with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
-                      f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                      (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None):
-            tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
-          tok = tok.item()
+          with WallTimeEvent(BenchEvent.STEP):
+            with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                        f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                        (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None):
+              tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
+            tok = tok.item()
       start_pos += 1
       last_tok = tok
       generated += tokenizer.decode([tok])

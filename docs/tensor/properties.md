@@ -25,10 +25,15 @@
 ::: tinygrad.Tensor.replace
 ::: tinygrad.Tensor.assign
 ::: tinygrad.Tensor.detach
+::: tinygrad.Tensor.clone
 ::: tinygrad.Tensor.to
 ::: tinygrad.Tensor.to_
 ::: tinygrad.Tensor.shard
 ::: tinygrad.Tensor.shard_
 ::: tinygrad.Tensor.contiguous
 ::: tinygrad.Tensor.contiguous_backward
+
+## Gradient
+
+::: tinygrad.Tensor.gradient
 ::: tinygrad.Tensor.backward
