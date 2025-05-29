@@ -1,5 +1,5 @@
 from tinygrad.device import Compiled, MallocAllocator
-from tinygrad.renderer.x86 import X86Renderer
+from tinygrad.renderer.asm import X86Renderer
 from tinygrad.runtime.ops_cpu import ClangJITCompiler, CPUProgram
 
 class X86Device(Compiled):

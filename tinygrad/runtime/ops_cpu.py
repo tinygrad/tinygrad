@@ -8,7 +8,7 @@ class ClangJITCompiler(Compiler):
   def __init__(self, cachekey="compile_clang_jit", lang_args:list[str]=['c', '-ffreestanding', '-fno-math-errno', '-fno-ident'],
                opt_args:list[str]=['-O2', '-march=native']):
     self.lang_args, self.opt_args = lang_args, opt_args
-    super().__init__(None)
+    super().__init__(cachekey)
 
   def compile(self, src:str) -> bytes:
     # -fno-math-errno is required for __builtin_sqrt to become an instruction instead of a function call
