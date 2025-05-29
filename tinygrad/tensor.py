@@ -110,8 +110,6 @@ def _flat_to_grouped(padding:Sequence[sint]) -> tuple[tuple[sint, sint], ...]: r
 
 ReductionStr = Literal["mean", "sum", "none"]
 
-no_realize_uops: set[UOp] = set() # with LIMIT_REALIZE, these UOps are not allowed in lazydata graphs of Tensors being realized
-
 class Tensor(MathTrait):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
