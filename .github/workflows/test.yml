@@ -381,8 +381,8 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: fuzzing-minimal
-        deps: testing_minimal
+        key: fuzzing-unit
+        deps: testing_unit
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test fast idiv
@@ -415,6 +415,8 @@ jobs:
         run: |
           PYTHONPATH="." GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py --durations=20
           PYTHONPATH="." GPU=1 IMAGE=2 python3 test/models/test_end2end.py TestEnd2End.test_linear_mnist
+      - name: Run fused optimizer tests
+        run: PYTHONPATH="." GPU=1 FUSE_OPTIM=1 python -m pytest -n=auto test/models/test_mnist.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
