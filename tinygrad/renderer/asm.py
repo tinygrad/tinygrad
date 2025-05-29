@@ -370,7 +370,7 @@ x86_rewrite = PatternMatcher([
   # float cmp requires nan check
   (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat(dtype=dtypes.floats), UPat()), name="x"), lambda ctx,x:
    f"{ctx.ops[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n"
-   f"{x86_cflag(x)} {ctx[x]}\nsetp {ctx[x][:-1]+"h"}\nor {ctx[x]}, {ctx[x][:-1]+"h"}"),
+   f"{x86_cflag(x)} {ctx[x]}\nsetp {ctx[x][:-1]+'h'}\nor {ctx[x]}, {ctx[x][:-1]+'h'}"),
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
    lambda ctx,x: f"{ctx.ops[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{x86_cflag(x)} {ctx[x]}"),
   (UPat((Ops.IDIV,), dtypes.sints, name="x"), lambda ctx,x:
