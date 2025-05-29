@@ -30,7 +30,7 @@ base_rewrite = PatternMatcher([
    f"{ctx.ops[x.dtype][x.op]} .L{ctx.uops.index(x)}"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f".L{ctx.uops.index(x.src[0])}:"),
 ])
-# TODO: rewrite gated index to cmove
+
 asm_matcher = PatternMatcher([
   # can't cast from float16 to ints/float64 directly and vice versa
   (UPat(Ops.CAST, (*dtypes.ints, dtypes.float64), (UPat(dtype=dtypes.float16),), name="c"), lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
@@ -41,6 +41,8 @@ asm_matcher = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=(dtypes.bool, dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16)),), name="c"),
     lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
   # some cast/bitcast are noops
+  #(UPat(Ops.CAST, dtypes.int64, src=(UPat.var("y"),), name="x"),
+  # lambda x,y: UOp(Ops.NOOP, x.dtype, x.src) if isinstance(y.dtype, PtrDType) else None),
   (UPat(Ops.CAST, dtypes.ints, src=(UPat.var("y", dtypes.ints + (dtypes.bool,)),), name="x"),
    lambda x,y: UOp(Ops.NOOP, x.dtype, x.src) if x.dtype.itemsize <= y.dtype.itemsize or y.dtype is dtypes.uint32 else None),
   (UPat(Ops.BITCAST, dtypes.ints, src=(UPat.var("y", dtypes.ints),), name="x"),
@@ -69,15 +71,17 @@ class AsmRenderer(Renderer):
   ops: dict[DType, dict[Ops, str]] = {}
   string_rewrite = base_rewrite
 
-  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|int|UOp: raise NotImplementedError("arch specific")
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|int: raise NotImplementedError("arch specific")
   def render_imm(self, imm:str): raise NotImplementedError("arch specific")
   def render_mem(self, sz:int, dt:DType): raise NotImplementedError("arch specific")
   def render_reg(self, reg:str, dt:DType): raise NotImplementedError("arch specific")
   def dt(self, d:DType) -> DType: return dtypes.uint64 if isinstance(d, PtrDType) else d
   def reg_class(self, x:UOp) -> list[str]: return self.regs[self.dt(x.dtype).scalar()]
   def __getitem__(self, x:UOp) -> str: # hacky helper
-    if x.op is Ops.CONST: return self.render_imm(to_hex(x.arg, x.dtype))
-    return self.render_mem(self.r[x], self.dt(x.dtype)) if isinstance(self.r[x], int) else self.render_reg(self.r[x], self.dt(x.dtype))
+    dt = x.dtype
+    x = x.src[0] if x.op in (Ops.ASSIGN, Ops.NOOP) else x
+    if x.op is Ops.CONST: return self.render_imm(to_hex(x.arg, dt))
+    return self.render_mem(self.r[x], self.dt(dt)) if isinstance(self.r[x], int) else self.render_reg(self.r[x], self.dt(dt))
   def _render(self, uops:list[UOp]):
     self.uops = uops
     regs = copy.deepcopy(self.regs)
@@ -91,8 +95,10 @@ class AsmRenderer(Renderer):
     stack_size: int = 16
     cur_uop: UOp = None
     inst_map: dict[UOp, list[str]] = {}
-    # interval in which a var is live meaning its value is needed, void dtypes don't hold values, consts aren't instructions
-    live_range = {var:i for i,u in enumerate(uops) for var in (v for v in (u,) + u.src if v.dtype != dtypes.void and v.op != Ops.CONST)}
+    # interval in which a var is live meaning its value is needed,
+    # void dtypes don't hold values, consts aren't instructions, noop and assign use location of src[0]
+    live_range = {(var.src[0] if var.op in (Ops.ASSIGN, Ops.NOOP) else var):i for i,u in enumerate(uops) \
+                  for var in (v for v in (u,) + u.src if v.dtype != dtypes.void and v.op != Ops.CONST)}
     next_range = None
     for u in reversed(uops):
       # a var defined before a range and used inside it is needed for the whole range
@@ -119,14 +125,14 @@ class AsmRenderer(Renderer):
       if (free:=next((r for r in reg_class(x) if r in cons), None)) is not None: return reg_class(x).pop(reg_class(x).index(free))
       # we choose the var whose next use is the latest, in case no next use we use the uop(endrange) that kills the var
       # this prioritizes vars defined outside loops
+      # TODO: account for noop and assign
       spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next((j for j,u in enumerate(uops[i:]) if k in u.src), live_range[k]-i))
       spill(spilled)
       # TODO: # if x is live need move instruction
       return live.pop(spilled)
 
-    def alloc(x:UOp, cons:list[str]|int|UOp):
-      if isinstance(cons, UOp): ret = loc[cons]
-      elif isinstance(cons, int): ret = cons
+    def alloc(x:UOp, cons:list[str]|int):
+      if isinstance(cons, int): ret = cons
       else: ret = _alloc(x, cons)
       if isinstance(ret, int): mem[x] = ret
       elif isinstance(ret, str): live[x] = ret
@@ -141,8 +147,7 @@ class AsmRenderer(Renderer):
         continue
       if u.op is Ops.CONST: continue
       # free dead registers
-      for v in [v for v in live if live_range[v] < i]:
-        if (freed:=live.pop(v)) not in live.values(): reg_class(v).insert(0, freed)
+      for v in [v for v in live if live_range[v] < i]: reg_class(v).insert(0, live.pop(v))
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         loc[u] = alloc(u, self.constraints(u))
         continue
@@ -151,12 +156,12 @@ class AsmRenderer(Renderer):
         for k,v in live_at_range.pop(u.src[0], {}).items():
           # if var was used before spill and not in original reg need to reload
           if k in mem and any(k in x.src for x in uops[uops.index(u.src[0]):spilled_at[k]]):
-            if k in live:
-              if live[k] == v: continue
-              if (freed:=live.pop(k)) not in live.values(): reg_class(k).insert(0, freed)
+            if k in live and live[k] == v: continue
+            if k in live: reg_class(k).insert(0, live.pop(k))
             loc[k] = alloc(k, [v])
-      # assign srcs
-      for s in (s for s in u.src if s in live_range):
+      # assign srcs, ignore assign and noop
+      srcs = tuple(s.src[0] if s.op in (Ops.ASSIGN, Ops.NOOP) else s for s in u.src)
+      for s in (s for s in srcs if s in live_range):
         cons = self.constraints(u, s)
         if s in loc and loc[s] not in cons: loc[s] = alloc(s, cons)
       # free srcs before assigning destination to coalesce
@@ -165,10 +170,9 @@ class AsmRenderer(Renderer):
           if u.op is Ops.WHERE and s is not u.src[1]: continue
           if u.op is Ops.MULACC and s is not u.src[0]: continue
           if u.op in GroupOp.Binary - {Ops.CMPLT, Ops.CMPNE} and u.dtype in dtypes.ints + (dtypes.bool,) and s is not u.src[0]: continue
-        if s in live and live_range[s] == i:
-          if (freed:=live.pop(s)) not in live.values(): reg_class(s).insert(0, freed)
+        if s in live and live_range[s] == i: reg_class(s).insert(0, live.pop(s))
       # assign destination
-      if u.dtype is not dtypes.void: loc[u] = alloc(u, self.constraints(u))
+      if u in live_range: loc[u] = alloc(u, self.constraints(u))
       # save live vars that haven't been spilled at loop entry
       if u.op is Ops.RANGE: live_at_range[u] = {k:v for k,v in live.items() if k not in mem}
       # render assembly
@@ -279,12 +283,11 @@ class Arm64Renderer(AsmRenderer):
   ops = arm64_ops
   regs = arm64_regs
 
-  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|int|UOp:
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|int:
     if s is not None: return self.reg_class(s)
     # TODO: think I need to track function arg index here cause of def var
     if u.op is Ops.DEFINE_GLOBAL and u.arg < 8: return [("x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7")[u.arg]]
     if u.op is Ops.DEFINE_GLOBAL and u.arg >= 8: return (u.arg-6)*8
-    if u.op in (Ops.ASSIGN, Ops.NOOP): return u.src[0]
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return f"#{imm}"
   def render_mem(self, sz:int) -> str: return f"[x29, #{sz}]"
@@ -303,8 +306,7 @@ x86_reg_map = {"rdi": {4: "edi", 2: "di", 1: "dil"}, "rsi": {4: "esi", 2: "si", 
 x86_mov_ops = {Ops.STORE: "mov", Ops.LOAD: "mov", Ops.ASSIGN: "mov"}
 x86_branch_ops = {Ops.ENDRANGE: "jl", Ops.IF: "je"}
 x86_unsigned_ops = {**x86_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "div", Ops.MOD: "div", Ops.CMPNE: "cmp",
-                    Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor", Ops.SHL: "shl", Ops.SHR: "shr",
-                    Ops.WHERE: "cmove"}
+                    Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor", Ops.SHL: "shl", Ops.SHR: "shr", Ops.WHERE: "cmove"}
 x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR: "sar"}
 # NOTE: these are just for reg/stack reg/reg movs, for float16 heap load/stores we use gen regs
 x86_float16_ops = {Ops.STORE: "movss", Ops.LOAD: "movss", Ops.ASSIGN: "movss"}
@@ -446,7 +448,7 @@ class X86Renderer(AsmRenderer):
   ops = x86_ops
   regs = x86_regs
 
-  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|int|UOp:
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|int:
     # constraints for srcs
     if u.op is Ops.IDIV and s is u.src[1]: return [r for r in self.reg_class(s) if r != "rdx"]
     if u.op is Ops.MOD and s is u.src[1]: return [r for r in self.reg_class(s) if r != "rax"]
@@ -460,7 +462,6 @@ class X86Renderer(AsmRenderer):
     if u.op is Ops.MOD: return ["rdx"]
     # float cmp requires nan check, to avoid reserving temp reg we constrain dest to regs that have a high 8 bit portion
     if u.op in (Ops.CMPLT, Ops.CMPNE) and u.src[0].dtype in dtypes.floats: return ["rax", "rbx", "rcx", "rdx"]
-    if u.op in (Ops.ASSIGN, Ops.NOOP): return u.src[0]
     return self.reg_class(u)
   def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
   def render_imm(self, imm:str) -> str: return imm
