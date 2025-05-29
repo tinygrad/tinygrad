@@ -43,7 +43,7 @@ class UnsyncedBatchNorm:
       batch_mean, batch_invstd, axis=(0, 2))
     return ret.reshape(x.shape).cast(x.dtype)
 
-  def calc_stats(self, x:Tensor):                                                          
+  def calc_stats(self, x:Tensor):
     if Tensor.training:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
