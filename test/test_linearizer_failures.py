@@ -1620,5 +1620,57 @@ class TestLinearizerFailures(unittest.TestCase):
     # NOTE: this is slow to run, just confirm it can generate the program without Exception
     Kernel(ast, opts=Device[Device.DEFAULT].renderer).apply_opts(opts).to_program()
 
+  def test_failure_61(self):
+    # WINO=1 JITBEAM=4 python3 examples/beautiful_cifar.py
+    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(1024), arg=0, src=()),
+        x2:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 1, 1), strides=(1, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(Ops.CAST, dtypes.half, arg=None, src=(
+          UOp(Ops.CAST, dtypes.float, arg=None, src=(
+            UOp(Ops.MUL, dtypes.half, arg=None, src=(
+              UOp(Ops.MUL, dtypes.half, arg=None, src=(
+                x7:=UOp(Ops.CONST, dtypes.half, arg=0.6931471805599453, src=(
+                  UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                UOp(Ops.CAST, dtypes.half, arg=None, src=(
+                  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (1,)), src=(
+                    UOp(Ops.CAST, dtypes.float, arg=None, src=(
+                      UOp(Ops.MUL, dtypes.half, arg=None, src=(
+                        UOp(Ops.CONST, dtypes.half, arg=-1.0, src=(
+                          x14:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 10, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                        UOp(Ops.ADD, dtypes.half, arg=None, src=(
+                          UOp(Ops.CONST, dtypes.half, arg=-0.010000000000000002, src=(
+                            x14,)),
+                          UOp(Ops.MUL, dtypes.half, arg=None, src=(
+                            UOp(Ops.CAST, dtypes.half, arg=None, src=(
+                              UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
+                                UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
+                                  UOp(Ops.LOAD, dtypes.int, arg=None, src=(
+                                    UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(1024), arg=1, src=()),
+                                    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 10, 1), strides=(1, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                                  UOp(Ops.ADD, dtypes.int, arg=None, src=(
+                                    UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(Ops.ADD, (2,), True), src=(
+                                      UOp(Ops.WHERE, dtypes.int, arg=None, src=(
+                                        UOp(Ops.VALID, dtypes.bool, arg=None, src=(
+                                          UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(11, 19), strides=(0, 0), offset=0, mask=((0, 11), (9, 19)), contiguous=False), View(shape=(1024, 10, 10), strides=(0, 1, 20), offset=0, mask=None, contiguous=False))), src=()),)),
+                                        UOp(Ops.CONST, dtypes.int, arg=1, src=(
+                                          x30:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 10, 10), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                                        UOp(Ops.CONST, dtypes.int, arg=0, src=(
+                                          x30,)),)),)),
+                                    UOp(Ops.CONST, dtypes.int, arg=-1, src=(
+                                      x14,)),)),)),
+                                UOp(Ops.CONST, dtypes.bool, arg=True, src=(
+                                  x14,)),)),)),
+                            UOp(Ops.CONST, dtypes.half, arg=-0.4, src=(
+                              x14,)),)),)),)),)),)),)),)),
+              UOp(Ops.RECIP, dtypes.half, arg=None, src=(
+                UOp(Ops.MUL, dtypes.half, arg=None, src=(
+                  UOp(Ops.LOAD, dtypes.half, arg=None, src=(
+                    UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(1024), arg=2, src=()),
+                    x2,)),
+                  x7,)),)),)),)),)),)),))
+    opts = [Opt(op=OptOps.LOCAL, axis=0, arg=32), Opt(op=OptOps.GROUP, axis=1, arg=0)]
+    helper_test_lin(Kernel(ast), opts, failed_platforms=["AMD", "METAL", "CUDA", "NV"])
+
 if __name__ == '__main__':
   unittest.main()
