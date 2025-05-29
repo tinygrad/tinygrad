@@ -52,8 +52,8 @@ class GraphRenderer(Renderer):
     for t, u in original_uops.items():
       if any(u.base in toposort for toposort in diff.values()):
         (dummy:=Tensor(1)).lazydata = u
-        if u not in self.inputs:
-          self.impl_ins[cast(Buffer, dummy.realize().lazydata.base.realized)] = name = f"buf_{next(ctr)}"
+        if (realized_u := dummy.realize().lazydata) not in self.inputs:
+          self.impl_ins[cast(Buffer, realized_u.base.realized)] = name = f"buf_{next(ctr)}"
           exported_data[dummy] = {"default_name": name}
           if t in name_lookup: exported_data[dummy]["tensor_name"] = name_lookup[t]
       del u # for memory planning
