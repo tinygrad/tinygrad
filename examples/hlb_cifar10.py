@@ -3,7 +3,7 @@
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
-import random, time
+import time
 import numpy as np
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
@@ -149,7 +149,6 @@ def train_cifar():
 
   def set_seed(seed):
     Tensor.manual_seed(seed)
-    random.seed(seed)
 
   # ========== Model ==========
   def whitening(X, kernel_size=hyp['net']['kernel_size']):
