@@ -180,7 +180,7 @@ class AsmRenderer(Renderer):
 
     for u in uops: kernel.extend(inst_map[u])
     return (name, kernel, stack_size)
-  
+
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int): raise NotImplementedError("arch specific")
   def render(self, uops:list[UOp]): return self.render_kernel(*self._render(uops))
 
