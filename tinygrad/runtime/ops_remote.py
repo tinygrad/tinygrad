@@ -118,7 +118,7 @@ class BatchRequest:
     self._q: list[RemoteRequest] = []
     self._h: dict[str, bytes] = {}
   def h(self, d:bytes|memoryview) -> str:
-    datahash = hashlib.sha256(d).hexdigest() # NOTE: this is very slow, should use blake3 on gpu instead
+    datahash = hashlib.shake_128(d, usedforsecurity=False).hexdigest(16) # NOTE: this is very slow, should use blake3 on gpu instead
     if datahash not in self._h:
       self._h[datahash] = bytes.fromhex(datahash)+struct.pack("<Q", len(d))+bytes(d)
     return datahash
@@ -129,9 +129,9 @@ class BatchRequest:
   def deserialize(self, dat:bytes) -> BatchRequest:
     ptr = 0
     while ptr < len(dat):
-      datahash, datalen = binascii.hexlify(dat[ptr:ptr+0x20]).decode(), struct.unpack("<Q", dat[ptr+0x20:ptr+0x28])[0]
-      self._h[datahash] = dat[ptr+0x28:ptr+0x28+datalen]
-      ptr += 0x28+datalen
+      datahash, datalen = binascii.hexlify(dat[ptr:ptr+0x10]).decode(), struct.unpack("<Q", dat[ptr+0x10:ptr+0x18])[0]
+      self._h[datahash] = dat[ptr+0x18:ptr+0x18+datalen]
+      ptr += 0x18+datalen
     self._q = safe_eval(ast.parse(self._h[datahash], mode="eval").body)
     return self
 
@@ -270,7 +270,7 @@ class RemoteProgram:
   def __init__(self, dev:RemoteDevice, name:str, lib:bytes):
     self.dev, self.name = dev, name
     self.datahash = self.dev.conn.req.h(lib)
-    self.dev.q(ProgramAlloc(self.name, self.datahash))
+    self.dev.q(ProgramAlloc(self.name, self.datahash, bool(getenv("LOCAL_COMPILE", 0))))
     super().__init__()
     weakref.finalize(self, self._fini, self.dev, self.name, self.datahash)
 
