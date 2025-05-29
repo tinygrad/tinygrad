@@ -1,5 +1,5 @@
 from typing import cast
-from tinygrad.ops import UOp, Ops, GroupOp, PatternMatcher, UPat
+from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat
 from tinygrad.renderer import Renderer
 from tinygrad import dtypes
 from tinygrad.dtype import DType, PtrDType
@@ -99,7 +99,7 @@ class AsmRenderer(Renderer):
       if u.op is Ops.RANGE: next_range = u
       if u in live_range and next_range is not None and live_range[u] > uops.index(next_range):
         live_range[u] = max(live_range[u], live_range[next_range])
-    
+
     def reg_class(x:UOp): return regs[self.dt(x.dtype).scalar()]
     def spill(x:UOp):
       nonlocal stack_size
@@ -279,17 +279,16 @@ class Arm64Renderer(AsmRenderer):
   ops = arm64_ops
   regs = arm64_regs
 
-  def constraints(self, u:UOp) -> dict[UOp, str|int|UOp|None]:
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|int|UOp:
+    if s is not None: return self.reg_class(s)
     # TODO: think I need to track function arg index here cause of def var
-    if u.op is Ops.DEFINE_GLOBAL and u.arg < 8: return {u: ("x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7")[u.arg]}
-    if u.op is Ops.DEFINE_GLOBAL and u.arg >= 8: return {u: (u.arg-6)*8}
-    if u.op is Ops.ASSIGN: return {u: u.src[0]}
-    if u.op is Ops.NOOP: return {u: u.src[0]}
-    return {}
+    if u.op is Ops.DEFINE_GLOBAL and u.arg < 8: return [("x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7")[u.arg]]
+    if u.op is Ops.DEFINE_GLOBAL and u.arg >= 8: return (u.arg-6)*8
+    if u.op in (Ops.ASSIGN, Ops.NOOP): return u.src[0]
+    return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return f"#{imm}"
   def render_mem(self, sz:int) -> str: return f"[x29, #{sz}]"
-  def render_reg(self, reg:str, dt:DType) -> str:
-    return reg if dt.itemsize == 8 or isinstance(dt, PtrDType) else arm64_reg_map[reg][dt.itemsize]
+  def render_reg(self, reg:str, dt:DType) -> str: return reg if dt.itemsize == 8 else arm64_reg_map[reg][dt.itemsize]
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", f"stp x29, x30, [sp, #{-stack_size}]!", "mov x29, sp"] + \
                       kernel + [f"ldp x29, x30, [sp], #{-stack_size}]", "ret", "\n"])
