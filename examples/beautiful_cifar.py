@@ -138,7 +138,6 @@ if __name__ == "__main__":
 
   eval_batchsize = 2500
   @TinyJit
-  @Tensor.test()
   def val_step() -> Tuple[Tensor, Tensor]:
     loss, acc = [], []
     for i in range(0, X_test.size(0), eval_batchsize):
