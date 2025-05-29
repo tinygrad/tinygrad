@@ -1,7 +1,7 @@
 from typing import Literal, Callable, cast
 import os, math, sys
 from collections import defaultdict, Counter
-from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
+from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
@@ -18,7 +18,7 @@ base_rewrite = PatternMatcher([
    lambda ctx,x: f"for ({ctx.render_dtype(x.dtype)} {ctx[x]} = 0; {ctx[x]} < {ctx[x.src[0]]}; {ctx[x]}++) {{"),
   (UPat(Ops.VECTORIZE, name="x"),
    lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_dtype(x.dtype))}" + \
-    (f"{{{','.join([ctx[y] for y in x.src])}}}" if ctx.device in {'CPU', 'DSP'} else f"({','.join([ctx[y] for y in x.src])})")),
+    f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x:
     f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_dtype(x.dtype)})" if x.dtype.count > 1 and not isinstance(x.dtype, PtrDType) else None),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, ctx[x.src[0]])})"),
@@ -53,8 +53,7 @@ base_rewrite = PatternMatcher([
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
     *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR} else ctx[v] for v in x.src]), x.dtype)),
   (UPat(Ops.GEP, name="x"), lambda ctx,x: ctx[x.src[0]] + \
-    (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if ctx.device in {"CUDA", "NV"} else 4) or ctx.device in {'CPU', 'DSP'} else \
-     f".{'xyzwabcd'[x.arg[0]]}")),
+    (f"[{x.arg[0]}]" if x.src[0].dtype.count > ctx.gep_arr_threshold else f".{'xyzwabcd'[x.arg[0]]}")),
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg.format(*[ctx[y] for y in x.src])),
 ])
@@ -87,6 +86,8 @@ class CStyleLanguage(Renderer):
   code_for_workitem: dict[Literal["g", "l", "i"], Callable] = {}
   extra_args: list[str] = []
   float4: str|None = None
+  float4_style: tuple[str, str] = ('(', ')')
+  gep_arr_threshold: int = 4
   type_map: dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
@@ -179,6 +180,8 @@ class CStyleLanguage(Renderer):
 class ClangRenderer(CStyleLanguage):
   device = "CPU"
   float4 = "(float4)"
+  float4_style = ('{', '}')
+  gep_arr_threshold = 0
   has_local = False
   global_max = None
   infinity = "__builtin_inff()"
@@ -284,7 +287,7 @@ class MetalRenderer(CStyleLanguage):
   # language options
   kernel_prefix = "kernel "
   buffer_prefix = "device "
-  smem_prefix = "threadgroup "
+  smem_prefix = "threadgroup __attribute__((aligned(16))) "
   arg_int_prefix = "constant int&"
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
@@ -343,10 +346,11 @@ class CUDARenderer(CStyleLanguage):
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
-  smem_prefix = "__shared__ "
+  smem_prefix = "__shared__ __align__(16) "
   smem_prefix_for_cast = False
   barrier = "__syncthreads();"
   float4 = "make_float4"
+  gep_arr_threshold = 8
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
   code_for_op = { **CStyleLanguage.code_for_op,
@@ -445,7 +449,7 @@ class AMDRenderer(CStyleLanguage):
     Ops.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
     Ops.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
     Ops.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})" }
-  smem_prefix = "__attribute__((shared))"
+  smem_prefix = "__attribute__((shared, aligned(16)))"
   smem_prefix_for_cast: bool = False
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'

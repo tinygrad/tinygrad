@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Optional, Any, Iterator, Generator
+from typing import Optional, Any, Generic, TypeVar, Iterator, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
                              cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE
@@ -37,7 +37,9 @@ class _Device:
       with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
-    if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
+    from_env = [d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1]
+    assert len(from_env) < 2, f"multiple devices set in env: {from_env}"
+    if len(from_env) == 1: return from_env[0]
     try:
       device = next(self.get_available_devices())
       os.environ[device] = "1"   # we set this in environment for spawned children
@@ -89,6 +91,16 @@ class BufferSpec:
   nolru: bool = False
   external_ptr: Optional[int] = None
 
+class MultiBuffer:
+  def __init__(self, device:tuple[str, ...], size:int, dtype:DType):
+    self.bufs = [Buffer(d, size, dtype) for d in device]
+    self.size, self.dtype = size, dtype
+  def ref(self, cnt):
+    for b in self.bufs: b.ref(cnt)
+    return self
+  def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
+  def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} size:{self.size} dtype:{self.dtype}>"
+
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,
                lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
@@ -119,6 +131,7 @@ class Buffer:
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
     assert not self.is_allocated(), "can't allocate already allocated buffer"
+    if DEBUG >= 7: print(f"buffer: allocate {self.nbytes} bytes on {self.device}")
     self.allocator:Allocator = Device[self.device].allocator
     if external_ptr is not None:
       self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferSpec(external_ptr=external_ptr)
@@ -133,6 +146,7 @@ class Buffer:
     return self
   def deallocate(self):
     assert self.is_allocated(), "buffer must be allocated to deallocate"
+    if DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
@@ -152,7 +166,7 @@ class Buffer:
   def __del__(self): (not self.is_allocated()) or self.deallocate()
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
-           (f" offset:{self.offset}" if hasattr(self, "base") else "") + (f" {self.options=}" if self.options is not None else "") + ">"
+           (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer') and (self.options is None or self.options.image is None):
@@ -184,8 +198,11 @@ class Buffer:
     if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
     return Buffer(self.device, size, dtype, base=self, offset=offset)
 
+DeviceType = TypeVar('DeviceType', bound='Compiled')
+
 # TODO: size, dest, src are the same type. can we enforce this?
-class Allocator:
+class Allocator(Generic[DeviceType]):
+  def __init__(self, dev:DeviceType): self.dev: DeviceType = dev
   # overridden in LRUAllocator
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
@@ -201,12 +218,14 @@ class Allocator:
   # def _offset(self, buf, size:int, offset:int):
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
 
-class LRUAllocator(Allocator):
+class LRUAllocator(Allocator, Generic[DeviceType]):
   """
   The LRU Allocator is responsible for caching buffers.
   It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
   """
-  def __init__(self): self.cache: dict[tuple[int, Optional[BufferSpec]], Any] = defaultdict(list)
+  def __init__(self, dev:DeviceType):
+    self.cache: dict[tuple[int, Optional[BufferSpec]], Any] = defaultdict(list)
+    super().__init__(dev)
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
@@ -221,7 +240,7 @@ class LRUAllocator(Allocator):
     if LRU and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
     else: super().free(opaque, size, options)
 
-class _MallocAllocator(LRUAllocator):
+class _MallocAllocator(LRUAllocator['Compiled']):
   def _alloc(self, size:int, options:BufferSpec):
     # must be aligned to 0x20 for 256-bit ymm registers
     # TODO: investigate if this is the cause of nondeterminism in speed
@@ -236,7 +255,7 @@ class _MallocAllocator(LRUAllocator):
   def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
   def _offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
 
-MallocAllocator = _MallocAllocator()
+MallocAllocator = _MallocAllocator(None) # type: ignore
 
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
@@ -363,7 +382,7 @@ if PROFILE:
     with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(Compiled.profile_events, f)
 
     if not getenv("SQTT", 0):
-      from tinygrad.ops import launch_viz
+      from tinygrad.uop.ops import launch_viz
       launch_viz("PROFILE", fn)
 
 if __name__ == "__main__":

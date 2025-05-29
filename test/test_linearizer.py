@@ -6,7 +6,7 @@ from dataclasses import replace
 from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
-from tinygrad.ops import UOp, Ops, GroupOp
+from tinygrad.uop.ops import UOp, Ops, GroupOp
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -1750,7 +1750,7 @@ class TestHandCodedOpts(unittest.TestCase):
     # float4/other hcopt shouldn't upcast last axis, since we already have 7 upcast, and the last axis is not very contiguous
     assert k.upcasted == 1 and k.full_shape[-1] == 7
 
-  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL can only run kernels with up to 32 buffers")
+  @unittest.skipIf(Device.DEFAULT in {"METAL", "WEBGPU"}, "METAL/WEBGPU split this kernel since it has 37 buffers")
   def test_masked_upcast_wino(self):
     monster = Tensor.stack(*[Tensor.stack(*[Tensor.empty(16) for _ in range(6)]) for _ in range(6)])
 

@@ -1,6 +1,6 @@
 import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
 from typing import Any, Union, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, CI
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, cpu_profile, ProfileDeviceEvent, ProfileRangeEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -76,7 +76,7 @@ class MetalDevice(Compiled):
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
     # This can be reproduced locally with any virtualization software (like utm) that can create macOS VMs with apple's own virtualization framework.
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
-                     functools.partial(MetalProgram, self), MetalGraph if not CI else None)
+                     functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(msg('name')(self.sysdevice)).lower() else None)
 
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
@@ -99,7 +99,7 @@ class MetalCompiler(Compiler):
   # This means that MTLCompiler's llvm will create it's own instances of global state because RTLD_LOCAL doesn't export symbols, but if RTLD_GLOBAL
   # library is loaded first then RTLD_LOCAL library will just use it's symbols. On linux there is RTLD_DEEPBIND to prevent that, but on macos there
   # doesn't seem to be anything we can do.
-  with contextlib.suppress(FileNotFoundError):
+  with contextlib.suppress(FileNotFoundError, ModuleNotFoundError):
     import tinygrad.runtime.autogen.llvm # noqa: F401
   support = ctypes.CDLL("/System/Library/PrivateFrameworks/MTLCompiler.framework/MTLCompiler")
   support.MTLCodeGenServiceCreate.restype = ctypes.c_void_p
@@ -189,10 +189,7 @@ class MetalProgram:
 class MetalBuffer:
   def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
 
-class MetalAllocator(LRUAllocator):
-  def __init__(self, dev:MetalDevice):
-    self.dev:MetalDevice = dev
-    super().__init__()
+class MetalAllocator(LRUAllocator[MetalDevice]):
   def _alloc(self, size:int, options) -> MetalBuffer:
     if options.external_ptr: return MetalBuffer(objc_id(options.external_ptr), size)
 

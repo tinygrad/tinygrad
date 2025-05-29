@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad import Variable
-from tinygrad.ops import UOp, Ops, graph_rewrite
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.codegen.devectorizer import sym
 from itertools import product
 
@@ -871,6 +871,47 @@ class TestRender(unittest.TestCase):
     idx, valid = st.to_indexed_uops()
     self.assertEqual(idx.render(), "((ridx0*3)+ridx1)")
     self.assertEqual(valid.render(), "(ridx0<2)")
+
+class TestVariableReshape(unittest.TestCase):
+  def test_reshape(self):
+    st = ShapeTracker.from_shape((3,))
+    st = st.reshape((Variable("i", 1, 10),))
+    assert len(st.views) == 1
+
+  def test_reshape_stride_0(self):
+    st = ShapeTracker.from_shape((3,), (0,))
+    st = st.reshape((Variable("i", 1, 10).bind(3),))
+    assert len(st.views) == 1, f"multiview {st}"
+
+  def test_reshape_bound(self):
+    st = ShapeTracker.from_shape((3,))
+    st = st.reshape((Variable("i", 1, 10).bind(3),))
+    assert len(st.views) == 1
+
+  def test_add(self):
+    st1 = ShapeTracker.from_shape((3,))
+    st2 = ShapeTracker.from_shape((Variable("i", 1, 10),))
+    st = st1+st2
+    assert len(st.views) == 1
+
+  def test_add_stride_0(self):
+    st1 = ShapeTracker.from_shape((3,), (0,))
+    st2 = ShapeTracker.from_shape((Variable("i", 1, 10).bind(3),), (0,))
+    st = st1+st2
+    assert len(st.views) == 1, f"multiview {st}"
+
+  def test_add_bound(self):
+    st1 = ShapeTracker.from_shape((3,))
+    st2 = ShapeTracker.from_shape((Variable("i", 1, 10).bind(3),))
+    st = st1+st2
+    assert len(st.views) == 1
+
+  def test_simplify(self):
+    st1 = ShapeTracker.from_shape((3,))
+    st2 = ShapeTracker.from_shape((Variable("i", 1, 10).bind(3),))
+    st = ShapeTracker((st1.views[0], st2.views[0]))
+    st = st.simplify()
+    assert len(st.views) == 1
 
 if __name__ == '__main__':
   unittest.main()

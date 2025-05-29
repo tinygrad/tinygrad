@@ -8,6 +8,8 @@ from tinygrad import dtypes
 from tinygrad.frontend.onnx import OnnxRunner
 import numpy as np
 from extra.onnx_helpers import validate
+from onnx.defs import ONNX_DOMAIN, AI_ONNX_PREVIEW_TRAINING_DOMAIN
+MICROSOFT_CONTRIB_OPS_DOMAIN = "com.microsoft"
 
 class TestOnnxOps(unittest.TestCase):
   DOMAIN = None
@@ -26,12 +28,19 @@ class TestOnnxOps(unittest.TestCase):
       validate(tmp.name, inps, rtol, atol)
 
 class TestMainOnnxOps(TestOnnxOps):
-  DOMAIN = ""
+  DOMAIN = ONNX_DOMAIN
   def test_reshape(self):
     inputs = {"in": np.arange(6, dtype=np.float32), "shape": np.array([2,3], dtype=np.int64)}
     attributes = {}
     outputs = ["out"]
     self.helper_test_single_op("Reshape", inputs, attributes, outputs)
+
+  def test_squeeze(self):
+    # axes is None
+    inputs = {"data": np.random.randn(1, 3, 1, 1).astype(np.float32)}
+    attributes = {}
+    outputs = ["squeezed"]
+    self.helper_test_single_op("Squeeze", inputs, attributes, outputs)
 
   def test_conv(self):
     # test VALID auto_pad
@@ -54,8 +63,8 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["y"]
     self.helper_test_single_op("Gather", inputs, attributes, outputs)
 
-  def test_maxunpool(self):
-    # test_maxunpool_export_with_output_shape_cpu
+  def test_maxunpool_export_with_output_shape(self):
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-91
     xT = np.array([[[[5, 6], [7, 8]]]], dtype=np.float32)
     xI = np.array([[[[5, 7], [13, 15]]]], dtype=np.int64)
     output_shape = np.array((1, 1, 5, 5), dtype=np.int64)
@@ -63,6 +72,13 @@ class TestMainOnnxOps(TestOnnxOps):
     attributes = {"kernel_shape": [2, 2], "strides": [2, 2]}
     outputs = ["y"]
     self.helper_test_single_op("MaxUnpool", inputs, attributes, outputs)
+
+  def test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True(self):
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-13
+    inputs = {"x": np.random.randn(1, 1, 32, 32, 32).astype(np.float32)}
+    attributes = {"kernel_shape": (5, 5, 5), "strides": (3, 3, 3), "dilations": (2, 2, 2), "count_include_pad": 1, "ceil_mode": True}
+    outputs = ["y"]
+    self.helper_test_single_op("AveragePool", inputs, attributes, outputs)
 
   def test_isinf(self):
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md#isinf
@@ -156,8 +172,89 @@ class TestMainOnnxOps(TestOnnxOps):
         outputs = ["Y"]
         self.helper_test_single_op("QLinearMatMul", inputs, attributes, outputs)
 
+  def _run_qlinearmatmul_test(self, quant_type, dtype, dims):
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-111
+    if dims == 2:
+      a = np.array([[208, 236, 0, 238], [3, 214, 255, 29]])
+      b = np.array([[152, 51, 244], [60, 26, 255], [0, 127, 246], [127, 254, 247]])
+    else:
+      a = np.array([[[208, 236, 0, 238], [3, 214, 255, 29]], [[208, 236, 0, 238], [3, 214, 255, 29]]])
+      b = np.array([[[152, 51, 244], [60, 26, 255], [0, 127, 246], [127, 254, 247]], [[152, 51, 244], [60, 26, 255], [0, 127, 246], [127, 254, 247]]])
+    a_zero_point = np.array([113])
+    b_zero_point = np.array([114])
+    y_zero_point = np.array([118])
+    if quant_type == np.int8:
+      a, b, a_zero_point, b_zero_point, y_zero_point = (x - 127 for x in (a, b, a_zero_point, b_zero_point, y_zero_point))
+    a, b, a_zero_point, b_zero_point, y_zero_point = (x.astype(quant_type) for x in (a, b, a_zero_point, b_zero_point, y_zero_point))
+    inputs = {
+      "a": a, "a_scale": np.array([0.0066], dtype=dtype), "a_zero_point": a_zero_point,
+      "b": b, "b_scale": np.array([0.00705], dtype=dtype), "b_zero_point": b_zero_point,
+      "y_scale": np.array([0.0107], dtype=dtype), "y_zero_point": y_zero_point
+    }
+    self.helper_test_single_op("QLinearMatMul", inputs, {}, ["y"],)
+  def test_qlinearmatmul_2D_int8_float16(self): self._run_qlinearmatmul_test(np.int8, np.float16, 2)
+  def test_qlinearmatmul_3D_int8_float16(self): self._run_qlinearmatmul_test(np.int8, np.float16, 3)
+  def test_qlinearmatmul_2D_int8_float32(self): self._run_qlinearmatmul_test(np.int8, np.float32, 2)
+  def test_qlinearmatmul_3D_int8_float32(self): self._run_qlinearmatmul_test(np.int8, np.float32, 3)
+
+class TestTrainingOnnxOps(TestOnnxOps):
+  # NOTE: ORT doesn't actually support training ops on cpu so we test using functions provided by onnx
+  DOMAIN = AI_ONNX_PREVIEW_TRAINING_DOMAIN
+  def _validate_training(self, op:str, onnx_fxn, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str]):
+    model = self.helper_build_model(op, inps, opts, outs)
+    if op == "Momentum": del opts['mode']
+    runner = OnnxRunner(model)
+    tiny_out = runner(inps)
+    onnx_out = onnx_fxn(**inps, **opts)
+    for (nm, t_out), o_out in  zip(tiny_out.items(), onnx_out):
+      np.testing.assert_allclose(t_out.numpy(), o_out, rtol=1e-3, atol=1e-6, err_msg=f"{nm} failed")
+
+  def test_adagrad_t_greater_than_zero(self):
+    from onnx.backend.test.case.node.adagrad import apply_adagrad
+    for t in [1, 3, 100]:
+      inputs = {
+        "r": np.array(0.01, dtype=np.float32),
+        "t": np.array(t, dtype=np.int32),
+        "x": np.random.randn(3, 3).astype(np.float32),
+        "g": np.random.randn(3, 3).astype(np.float32),
+        "h": np.random.randn(3, 3).astype(np.float32),
+      }
+      attributes = {"decay_factor": 0.1, "epsilon": 1e-6, "norm_coefficient": 0.01}
+      outputs = ["X_out", "H_out"]
+      self._validate_training("Adagrad", apply_adagrad, inputs, attributes, outputs)
+
+  def test_momentum_t_greater_than_zero(self):
+    from onnx.backend.test.case.node.momentum import apply_momentum, apply_nesterov
+    for onnx_fxn, mode in ((apply_momentum, "standard"), (apply_nesterov, "nesterov")):
+      for t in [1, 3, 100]:
+        inputs = {
+          "r": np.array(0.01, dtype=np.float32),
+          "t": np.array(t, dtype=np.int32),
+          "x": np.random.randn(3, 3).astype(np.float32),
+          "g": np.random.randn(3, 3).astype(np.float32),
+          "v": np.random.randn(3, 3).astype(np.float32),
+        }
+        attributes = {"alpha": 0.9, "beta": 0.1, "mode": mode, "norm_coefficient": 0.01}
+        outputs = ["X_out", "V_out"]
+        self._validate_training("Momentum", onnx_fxn, inputs, attributes, outputs)
+
+  def test_adam_t_greater_than_zero(self):
+    from onnx.backend.test.case.node.adam import apply_adam
+    for t in [1, 3, 100]:
+      inputs = {
+        "r": np.array(0.01, dtype=np.float32),
+        "t": np.array(t, dtype=np.int32),
+        "x": np.random.randn(3, 3).astype(np.float32),
+        "g": np.random.randn(3, 3).astype(np.float32),
+        "v": np.random.randn(3, 3).astype(np.float32),
+        "h": np.random.randn(3, 3).astype(np.float32),
+      }
+      attributes = { "alpha": 0.9, "beta": 0.999, "epsilon": 1e-8, "norm_coefficient": 0.01, "norm_coefficient_post": 0.02 }
+      outputs = ["X_new", "V_new", "H_new"]
+      self._validate_training("Adam", apply_adam, inputs, attributes, outputs)
+
 class TestContribOnnxOps(TestOnnxOps):
-  DOMAIN = "com.microsoft"
+  DOMAIN = MICROSOFT_CONTRIB_OPS_DOMAIN
   def test_attention(self):
     batch_size, seq_len, input_hidden_size = 2, 8, 256
     num_heads, head_size = 4, 64

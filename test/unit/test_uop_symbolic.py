@@ -1,12 +1,14 @@
 #!/usr/bin/env python
-import unittest, pickle
+import unittest, pickle, functools
+import z3
 
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen import full_rewrite
 from tinygrad.codegen.devectorizer import sym
-from tinygrad.ops import UOp, Ops, graph_rewrite, sym_infer
+from tinygrad.helpers import Context
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
-import functools
+from tinygrad.uop.spec import z3_renderer
 
 def render(self) -> tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
@@ -33,6 +35,10 @@ class TestSymbolic(unittest.TestCase):
     else: self.assertEqual(rendered, s)
     self.assertEqual(nmin, n)
     self.assertEqual(nmax, m)
+    solver = z3.Solver()
+    z3_sink = graph_rewrite(v.sink(v.simplify()), z3_renderer, ctx=(solver, {}))
+    expr, epxr_simplified = z3_sink.src[0].arg, z3_sink.src[1].arg
+    self.assertEqual(solver.check(expr != epxr_simplified), z3.unsat, "simplified expression not equal to original")
 
   def test_cmp_simple(self):
     self.helper_test_variable(Variable("a", 3, 8) < 4, 0, 1, "(a<4)")
@@ -84,9 +90,9 @@ class TestSymbolic(unittest.TestCase):
     assert idx1*4 is not idx1+4
     assert idx1*4 is not idx2*4
     assert idx1+idx2 is idx1+idx2
-    # assert idx1+idx2 is idx2+idx1
+    assert idx1+idx2 is not idx2+idx1
     assert idx1+idx2 is not idx2
-    # assert idx1*idx2 is idx2*idx1
+    assert idx1*idx2 is not idx2*idx1
 
   def test_factorize(self):
     a = Variable("a", 0, 8)
@@ -130,9 +136,9 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_1(self):
     self.helper_test_variable(Variable("a", 0, 8)*1, 0, 8, "a")
 
-  @unittest.expectedFailure
   def test_mul_neg_1(self):
-    self.helper_test_variable((Variable("a", 0, 2)*-1)//3, -1, 0, "((((a*-1)+3)//3)+-1)")
+    self.helper_test_variable((Variable("a", 0, 2)*-1)//3, 0, 0, "0")
+    self.helper_test_variable((Variable("a", 2, 7)*-1)//3, -2, 0, "((a//3)*-1)")
 
   def test_mul_2(self):
     self.helper_test_variable(Variable("a", 0, 8)*2, 0, 16, "(a*2)")
@@ -256,7 +262,7 @@ class TestSymbolic(unittest.TestCase):
     a = Variable("a", 0, 124)
     self.helper_test_variable((a//2+1)//2, 0, 31, "((a+2)//4)")
     self.helper_test_variable(((-a)//2-1)//2, -31, 0, "(((a+2)//4)*-1)")
-    # self.helper_test_variable(((-a)//2+10)//2, -26, 5, "(((a*-1)+20)//4)")
+    self.helper_test_variable(((-a)//2+10)//2, -26, 5, "((((a//2)*-1)+10)//2)")
 
   def test_div_const_div_wrong_sign(self):
     a = Variable("a", 0, 124)
@@ -276,12 +282,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6)%100, 0, 6, "a")
 
   def test_big_mod(self):
-    # NOTE: we no longer support negative variables
-    #self.helper_test_variable(Variable("a", -20, 20)%10, -9, 9, "(a%10)")
-    #self.helper_test_variable(Variable("a", -20, 0)%10, -9, 0, "(a%10)")
-    #self.helper_test_variable(Variable("a", -20, 1)%10, -9, 1, "(a%10)")
+    self.helper_test_variable(Variable("a", -20, 20)%10, -9, 9, "(a%10)")
+    self.helper_test_variable(Variable("a", -20, 0)%10, -9, 0, "(((a*-1)%10)*-1)")
+    self.helper_test_variable(Variable("a", -20, 1)%10, -9, 9, "(a%10)")  # TODO: tighter max
     self.helper_test_variable(Variable("a", 0, 20)%10, 0, 9, "(a%10)")
-    #self.helper_test_variable(Variable("a", -1, 20)%10, -1, 9, "(a%10)")
+    self.helper_test_variable(Variable("a", -1, 20)%10, -9, 9, "(a%10)")  # TODO: tighter min
 
   def test_ge_remove(self):
     self.helper_test_variable(Variable("a", 0, 6) >= 25, 0, 0, "False")
@@ -321,11 +326,21 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_num_hoisted_and_factors_cancel_out(self):
     self.helper_test_variable(usum([Variable("a", 0, 1) * -4 + 1, Variable("a", 0, 1) * 4]), 1, 1, "1")
 
+  @unittest.expectedFailure  # only correct for floordiv, not truncdiv
   def test_div_cancel(self):
     self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(b+-1)")
 
+  def test_div_cancel_correct(self):
+    with Context(CORRECT_DIVMOD_FOLDING=1):
+      self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(((a+(b*20))+-20)//20)")
+
+  @unittest.expectedFailure  # only correct for floordiv, not truncdiv
   def test_mod_cancel(self):
     self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, 0, 20, "(a*2)")
+
+  def test_mod_cancel_correct(self):
+    with Context(CORRECT_DIVMOD_FOLDING=1):
+      self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, -38, 38, "((((a+(b*20))+-20)%20)*2)")
 
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
@@ -347,20 +362,38 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_div_factor_mul(self):
     self.helper_test_variable((Variable("a", 0, 10)*8)//4, 0, 20, "(a*2)")
 
+  def test_mul_div_factor_mul_neg(self):
+    self.helper_test_variable((Variable("a", 0, 10)*-8+16)//4, -16, 4, "((a*-2)+4)")
+
   def test_mul_div_factor_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//8, 0, 5, "(a//2)")
+
+  def test_mul_div_factor_div_neg(self):
+    self.helper_test_variable((Variable("a", 0, 10)*-4+4)//8, -4, 0, "(((a*-1)+1)//2)")
+
+  def test_mod_gcd_factor_neg(self):
+    self.helper_test_variable((Variable("a", 0, 10)*-4+4)%8, -4, 4, "((((a*-1)+1)%2)*4)")
+
+  def test_mod_gcd_fold_neg(self):
+    self.helper_test_variable((Variable("a", 0, 10)*-8+20)%4, 0, 0, "0")
 
   def test_sum_div_partial_remove(self):
     self.helper_test_variable(usum([Variable("idx0", 0, 127)*4, Variable("idx2", 0, 3)])//4, 0, 127, "idx0")
 
-  @unittest.expectedFailure
+  def test_cdiv_const_evaluation(self):
+    self.helper_test_variable((Variable("a", 0, 2)-12)//8, -1, -1, "-1")
+    self.helper_test_variable((-Variable("a", 0, 2))//7, 0, 0, "0")
+
+  def test_cmod_const_evaluation(self):
+    self.helper_test_variable((Variable("a", 1, 1)*-3)%8, -3, -3, "-3")
+    self.helper_test_variable((-Variable("a", 10, 10))%7, -3, -3, "-3")
+
   def test_div_numerator_negative(self):
-    self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "((((idx*-10)+99)//11)+-9)")
+    self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -8, 0, "(((idx*10)//11)*-1)")
 
   def test_div_into_mod(self):
     self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
 
-  # TODO: simplify the expression
   def test_div_neg_cancel(self):
     self.helper_test_variable((-Variable("idx", 0, 100)+199)//-4 + 50, 1, 26, "((idx//4)+1)")
     self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "((idx+3)//4)")
@@ -427,7 +460,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(x//y, -2147483648, 2147483647, "(x//y)")
     self.helper_test_variable(x%y, -2147483648, 2147483647, "(x%y)")
 
-  # TODO: simplify the expression
   def test_div_neg_all_range(self):
     gidx = Variable("gidx", 0, 124)
     lidx = Variable("lidx", 0, 7)
@@ -436,7 +468,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((-gidx*8-lidx+1001)//-4 + 250, 0, 250, "((gidx*2)+((lidx+2)//4))")
     self.helper_test_variable((-gidx*8-lidx+1002)//-4 + 250, 0, 250, "((gidx*2)+((lidx+1)//4))")
 
-  # NOTE: tests are not correct in symbolic
   def test_div_neg_then_neg(self):
     # taken from arange opts
     lidx0 = Variable("lidx0", 0, 7)
@@ -510,6 +541,8 @@ class TestSymbolic(unittest.TestCase):
   def test_idiv_lt(self):
     idx = Variable("idx", 0, 24)
     self.helper_test_variable((idx//4<3), 0, 1, "(idx<12)")
+    self.helper_test_variable(((idx-20)//4<-3), 0, 1, "(idx<5)")
+    self.helper_test_variable(((idx-10)//4<0), 0, 1, "(idx<7)")
     self.helper_test_variable((idx//-4<-3), 0, 1, "(((idx//4)*-1)<-3)")
 
   def test_simplex_lt(self):
@@ -679,6 +712,12 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(a+b+c, var_vals) == 9
     assert sym_infer(a*b, var_vals) == 6
     assert sym_infer(a*b+c, var_vals) == 10
+  def test_sym_infer_cdiv_cmod(self):
+    a = Variable("a", -1000, 1)
+    b = Variable("b", -1000, 1)
+    var_vals = {a: 1, b: -1000}
+    assert sym_infer(a%b, var_vals) == 1
+    assert sym_infer(a//b, var_vals) == 0
 
 """
 @unittest.skip("not supported on uops yet")
@@ -817,6 +856,17 @@ class TestBounds(unittest.TestCase):
     assert (alu0+2559).vmin == 0 and (alu0+2559).vmax == 2559
     assert ((alu0+2559)//-4).vmin == -639 and ((alu0+2559)//-4).vmax == 0
     assert (((alu0+2559)//-4)*(-1)).vmin == 0 and (((alu0+2559)//-4)*(-1)).vmax == 639
+
+class TestFuzzFailure(unittest.TestCase):
+  def test_fuzz_failure1(self):
+    v1=Variable('v1', 0, 8)
+    v2=Variable('v2', 0, 2)
+    v3=Variable('v3', 0, 1)
+    expr = (((((((((((((((((((((((0//4)%2)//8)+-2)+-4)+-3)+v1)+-4)+v2)+-2)+v3)+v2)//3)%7)*1)//2)+v2)*-1)+2)+1)+0)+-3)+v3)
+    v1_val, v2_val, v3_val = v1.const_like(8), v2.const_like(0), v3.const_like(0)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    assert num==rn, f"{num} != {rn}"
 
 if __name__ == '__main__':
   unittest.main()
