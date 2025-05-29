@@ -1912,7 +1912,8 @@ class Tensor(MathTrait):
 
     tkwargs, targs = dict(device=self.device, dtype=dtypes.uint64, requires_grad=False), (self.device, dtypes.uint64, False) # make linters happy
     rot_offsets = [44, 43, 21, 14, 28, 20, 3, 45, 61, 1, 6, 25, 8, 18, 27, 36, 10, 15, 56, 62, 55, 39, 41, 2]
-    rot_offsets_vecs = Tensor([[0, 1]] + [[1 << v, 1 << (64 - v)] for v in rot_offsets ], *targs).transpose()
+    rot_offsets_v0, rot_offsets_v1 = Tensor([0] + [1 << v for v in rot_offsets], *targs), Tensor([1] + [1 << (64 - v) for v in rot_offsets], *targs)
+
     # calculated from π step
     reorder_indexes = Tensor([0,6,12,18,24,3,9,10,16,22,1,7,13,19,20,4,5,11,17,23,2,8,14,15,21], device=self.device, dtype=dtypes.int32)
     round_const_masks = Tensor([ 1, 0x8082, 0x800000000000808a, 0x8000000080008000, 0x808b, 0x80000001, 0x8000000080008081, 0x8000000000008009, 0x8a,
@@ -1943,7 +1944,7 @@ class Tensor(MathTrait):
         state = state ^ (t1.roll(2, 1).bitwise_xor((t1 << 1) ^ (t1 >> 63)).unsqueeze(2).expand((-1, -1, 5)).transpose(2, 1).flatten(1))
         # ρ and π steps
         state = state[:,reorder_indexes]
-        state = (state * rot_offsets_vecs[0]).bitwise_xor(state // rot_offsets_vecs[1]).reshape((-1, 5, 5))
+        state = (state * rot_offsets_v0).bitwise_or(state // rot_offsets_v1).reshape((-1, 5, 5))
         # χ and ι step
         state = state.bitwise_xor((state.roll(shifts=-1, dims=2) ^ -1) & state.roll(shifts=-2, dims=2)).flatten(1) ^ round_const_masks[i]
     return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], -1)
