@@ -222,7 +222,7 @@ def train_cifar():
     mix_portion = float(mask_size**2) / (H * W)
     Y_mixed = (1 - mix_portion) * Y + mix_portion * Y_shuffled
     return X_mixed, Y_mixed
-  
+
   # the operations that remain inside batch fetcher is the ones that involves random operations
   def fetch_batches(X_in:Tensor, Y_in:Tensor, BS:int, is_train:bool):
     step, epoch = 0, 0
@@ -238,14 +238,14 @@ def train_cifar():
         if getenv("CUTMIX", 1):
           if step >= hyp['net']['cutmix_steps']:
             X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
-        
+
         n_samples = X.shape[0]
         rand_indices = Tensor.randint(n_samples, low=0, high=n_samples)
         X_gather_indices = rand_indices.reshape(-1, 1, 1, 1).expand((n_samples, X.shape[1], X.shape[2], X.shape[3]))
         Y_gather_indices = rand_indices.reshape(-1, 1).expand((n_samples, Y.shape[1]))
         X = X.gather(0, X_gather_indices)
         Y = Y.gather(0, Y_gather_indices)
-      
+
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X.shape[0], BS):
