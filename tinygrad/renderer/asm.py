@@ -441,6 +441,7 @@ class X86Renderer(AsmRenderer):
   global_max = None
   extra_matcher = x86_matcher
   string_rewrite = x86_rewrite
+  # TODO: fix this
   code_for_op = {Ops.SQRT:None, Ops.AND:None, Ops.SHL:None, Ops.SHR:None}
   ops = x86_ops
   regs = x86_regs
@@ -464,8 +465,7 @@ class X86Renderer(AsmRenderer):
   def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
   def render_imm(self, imm:str) -> str: return imm
   def render_mem(self, sz:int, dt:DType) -> str: return f"{size_prefix[dt.itemsize]} [rbp {'+' if sz>0 else ''}{sz}]"
-  def render_reg(self, reg:str, dt:DType) -> str:
-    return reg if dt.itemsize == 8 or dtypes.is_float(dt) else x86_reg_map[reg][dt.itemsize]
+  def render_reg(self, reg:str, dt:DType) -> str: return reg if dt.itemsize == 8 or dtypes.is_float(dt) else x86_reg_map[reg][dt.itemsize]
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
-    return "\n".join([".text", f".global {name}", f"{name}:", "push rbp", "mov rbp, rsp", f"sub rsp, {stack_size}"] + 
+    return "\n".join([".text", f".global {name}", f"{name}:", "push rbp", "mov rbp, rsp", f"sub rsp, {stack_size}"] +
                      kernel + [f"add rsp, {stack_size}", "pop rbp", "ret", "\n"])
