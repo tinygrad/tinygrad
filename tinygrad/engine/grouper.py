@@ -4,37 +4,17 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewr
 from tinygrad.uop.ops import can_pad, sint, track_rewrites, _substitute
 from tinygrad.codegen.lowerer import get_contraction_with_reduce, get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put, flatten
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.multi import multi_pm, replace_allreduce
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
-from tinygrad.uop.spec import type_verify, sched_spec
+from tinygrad.uop.spec import type_verify, tensor_uop_spec
 
 # creation can recurse a lot
 import sys
 sys.setrecursionlimit(10000)
-
-# **** UOp merge views
-
-merge_views = PatternMatcher([
-  # merge adjacent views
-  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="v1"),), name="v2"), lambda v1,v2: v1.replace(arg=v1.arg+v2.arg)),
-  # merge view on load/store/valid
-  (UPat(Ops.VIEW, src=(UPat((Ops.LOAD, Ops.STORE, Ops.VALID), name="x"),), name="view"),
-   lambda x,view: x.replace(src=tuple((s.st+view.st).to_uop() if s.op is Ops.VIEW else s for s in x.src))),
-  # merge view on const if it's not masked
-  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="x").view(name="view"),
-   lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
-  # replace view with base if it's contiguous and the shapes match
-  (UPat(GroupOp.All-{Ops.DEVICE}, name="x").view(name="view"), lambda x,view: x if view.st.contiguous and x.shape == view.shape else None),
-  # replace masked view with zero if it can collapse
-  (UPat(Ops.VIEW, src=(UPat(),), name="view"),
-   lambda view: view.const_like(0) if (mask:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
-  # movement ops apply a new view on the base
-  (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
-])
 
 # **** schedule simplifier
 
@@ -71,6 +51,14 @@ def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
   if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
   return base.copy_to_device(copy.device).view(view.arg)
 
+def mselect_reorder_view(ms:UOp, view:UOp, base:UOp):
+  st = unwrap(view.st)
+  # replace dnum in ShapeTracker with literal const for this mselect
+  if (dnums:=[x for x in st.vars() if x.arg[0] == '_device_num']):
+    assert len(dnums) == 1, f"view must have exactly 0 or 1 dnum, got {dnums}"
+    st = st.substitute({dnums[0]:dnums[0].const_like(ms.arg)})
+  return base.mselect(ms.arg).view(st)
+
 ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT}
 
 sym = symbolic_simple+PatternMatcher([
@@ -79,9 +67,6 @@ sym = symbolic_simple+PatternMatcher([
     and not (root.base.op is Ops.CONST and root.base.arg == 0) else None),
   # DETACH and CONTIGUOUS_BACKWARD are NOOPs here
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
-  # MULTI in SINK just flattens srcs
-  (UPat(Ops.SINK, name="x"),
-   lambda x: UOp.sink(*new_src) if (new_src:=tuple(flatten([s.src if s.op is Ops.MULTI else [s] for s in x.src]))) != x.src else None),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
@@ -95,6 +80,8 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.COPY, name="c", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda c,x: x if c.device == x.device else None),
   # store a shrink before COPY, otherwise view after the COPY
   (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"), UPat(Ops.DEVICE)), name="copy"), copy_reorder_view),
+  # MSELECT must select a base, if there are views apply them after selecting the base
+  (UPat(Ops.MSELECT, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"),), name="ms"), mselect_reorder_view),
   # remove cast to image when it's already a contiguous image
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(Ops.CONTIGUOUS, name="base"),)),)),
    lambda cast,base,vm: base.view(vm.st) if isinstance(cast.dtype, ImageDType) and isinstance(base.dtype, ImageDType) else None),
@@ -251,7 +238,7 @@ def create_kernel(x:UOp, b:UOp|None=None):
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return buffer.assign(kernel).reshape(x.shape)
 
-DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.MSELECT}
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.MSELECT, Ops.MULTI}
 def append_to_kernel(x:UOp):
   new_srcs: list[UOp] = []
   metadata = x.arg.metadata
@@ -270,14 +257,28 @@ create_kernels = PatternMatcher([
   (UPat(Ops.GBARRIER, src=(UPat.var("x"),)), create_kernel),
   # walk back the local graph until we reach a realized source
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
-  # remove extra views and constants from SINK
-  (UPat(Ops.SINK, name="x"),
-   lambda x: x.replace(src=new_src) if (new_src:=tuple(dedup(s.base for s in x.src if s.base.op not in {Ops.CONST, Ops.BIND}))) != x.src else None),
   # push RESHAPE through MSELECT
   (UPat(Ops.MSELECT, src=(UPat(Ops.RESHAPE, name="r"),), name="ms"), lambda ms,r: r.src[0].mselect(ms.arg).reshape(r.arg)),
 ])
 
 # **** swizzler
+
+merge_views = PatternMatcher([
+  # merge adjacent views
+  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="v1"),), name="v2"), lambda v1,v2: v1.replace(arg=v1.arg+v2.arg)),
+  # replace MovementOps with VIEW
+  (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
+  # remove NOOP views
+  (UPat.var("x").view(name="view"), lambda x,view: x if x.st is not None and view.st.contiguous and view.shape == x.shape else None),
+  (UPat().view(name="view"),
+   lambda view: view.const_like(0) if (mask:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
+  # VIEW on BufferOps replaces the ShapeTracker
+  (UPat(Ops.VIEW, src=(UPat((Ops.LOAD, Ops.STORE, Ops.VALID), name="x"),), name="view"),
+   lambda x,view: x.replace(src=tuple(s.replace(arg=s.st+view.st) if s.op is Ops.VIEW else s for s in x.src))),
+  # only unmaksed VIEW on CONST replaces the ShapeTracker
+  (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),), name="view"),
+   lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
+])
 
 def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
   # contiguous, expand, and the same with ones removed
@@ -502,6 +503,29 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
 
 add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"),
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
+
+# TODO: get this from the device through GrouperOpts
+DEVICE_MAX_BUFS = {"METAL":32, "WEBGPU":8}
+
+def limit_bufs(root:UOp):
+  # check if backend has a buffer limit
+  device = root.device if isinstance(root.device, str) else root.device[0].split(":")[0]
+  if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return None
+  # count number of unique buffers flowing into this op
+  bufs: set[UOp] = set()
+  def gate_input(u:UOp):
+    if (is_buffer:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): bufs.add(u)
+    return not is_buffer
+  root.toposort(gate=gate_input)
+  # NOTE: this -1 is for the output buffer
+  if len(bufs)>=MAX_BUFS-1:
+    return root.replace(src=tuple(s if s.base in bufs else s.replace(tag=1).gbarrier() for s in root.src))
+
+split_kernels = PatternMatcher([
+  (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs),
+  (UPat((Ops.GBARRIER, Ops.CONTIGUOUS), src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
+])
+
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 @track_rewrites(name_fxn=get_name)
@@ -515,6 +539,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # insert gbarriers in places determined by the realize map
   realize_map = group_realizes(tensor_map[big_sink])
   tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], split_kernels, input_map=tensor_map, name="split_kernels")
   tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
 
   # TODO: move view_left/view_right here
@@ -545,22 +570,13 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
 
   # verify Kernels match the spec
-  type_verify(list(toposort:=sched_sink.toposort()), sched_spec)
+  if __debug__: type_verify(list(sched_sink.toposort()), tensor_uop_spec)
 
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0):
       import pickle
-      PROCESS_REPLAY_CAPTURE[id(big_sink)] = pickle.dumps((big_sink, ContextVar._cache, [u.arg.ast for u in toposort if u.op is Ops.KERNEL]))
+      kernel_asts = [u.arg.ast for u in sched_sink.toposort() if u.op is Ops.KERNEL]
+      PROCESS_REPLAY_CAPTURE[id(big_sink)] = pickle.dumps((big_sink, ContextVar._cache, kernel_asts))
 
-  # map tensors to buffer/assign/const
-  # TODO: this is not right, and causes TestDataset.test_dataset_is_realized to fail unless I unprincipledly add Ops.COPY, which breaks others
-  becomes_map: dict[UOp, UOp] = {}
-  for k,v in tensor_map.items():
-    if k is v: continue
-    op = v.base.op
-    if op in {Ops.BUFFER, Ops.ASSIGN}: becomes_map[k] = v
-    if op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
-    if op is Ops.MULTI and all(x.base in becomes_map for x in v.base.src): becomes_map[k] = v
-
-  return becomes_map
+  return tensor_map

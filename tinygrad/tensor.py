@@ -123,7 +123,6 @@ class Tensor(MathTrait):
   """
   __slots__ = "lazydata", "requires_grad", "grad"
   training: ClassVar[bool] = False
-  no_grad: ClassVar[bool] = False
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'np.ndarray'|pathlib.Path|None,  # type: ignore [name-defined] # noqa: F821
                device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None):
@@ -193,11 +192,6 @@ class Tensor(MathTrait):
     def __init__(self, mode:bool = True): self.mode = mode
     def __enter__(self): self.prev, Tensor.training = Tensor.training, self.mode
     def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
-
-  class test(ContextDecorator):
-    def __init__(self, mode:bool = True): self.mode = mode
-    def __enter__(self): self.prev, Tensor.no_grad = Tensor.no_grad, self.mode
-    def __exit__(self, exc_type, exc_value, traceback): Tensor.no_grad = self.prev
 
   def __repr__(self):
     ld = self.lazydata
@@ -908,7 +902,6 @@ class Tensor(MathTrait):
     assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
     if not (self.is_floating_point() and all(t.is_floating_point() for t in targets)): raise RuntimeError("only float Tensors have gradient")
     if gradient is None: gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
-    rets = []
     target_uops = [x.lazydata for x in targets]
     grads = compute_gradient(self.lazydata, gradient.lazydata, set(target_uops))
     ret = []
@@ -917,9 +910,8 @@ class Tensor(MathTrait):
         if materialize_grads: y = x.const_like(0)
         else: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}")
       ret.append(y)
-    rets.append(ret)
     # create returned Tensors
-    return [Tensor(u, device=t.device) for t,u in zip(targets, rets[0])]
+    return [Tensor(u, device=t.device) for t,u in zip(targets, ret)]
 
   def backward(self, gradient:Tensor|None=None) -> Tensor:
     """
@@ -933,7 +925,7 @@ class Tensor(MathTrait):
     """
     all_uops = self.lazydata.toposort()
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
-                                       t.lazydata in all_uops and t.requires_grad and not Tensor.no_grad]
+                                       t.lazydata in all_uops and t.requires_grad]
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient, materialize_grads=True)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
@@ -1394,6 +1386,30 @@ class Tensor(MathTrait):
     dim = self._resolve_dim(dim)
     return list(self.split(ceildiv(self.shape[dim], chunks) if self.shape[dim] else [0]*chunks, dim=dim))
 
+  def unfold(self, dim:int, size:sint, step:int) -> Tensor:
+    """
+    Unfolds the tensor along dimension `dim` into overlapping windows.
+
+    Each window has length `size` and begins every `step` elements of `self`.
+    Returns the input tensor with dimension `dim` replaced by dims `(n_windows, size)`
+    where `n_windows = (self.shape[dim] - size) // step + 1`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    unfolded = Tensor.arange(8).unfold(0,2,2)
+    print("\\n".join([repr(x.numpy()) for x in unfolded]))
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    unfolded = Tensor.arange(27).reshape(3,3,3).unfold(-1,2,3)
+    print("\\n".join([repr(x.numpy()) for x in unfolded]))
+    ```
+    """
+    if size < 0: raise RuntimeError(f'size must be >= 0 but got {size=}')
+    if step <= 0: raise RuntimeError(f'step must be > 0 but got {step=}')
+    if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
+    dim = self._resolve_dim(dim)
+    perm_to_last = tuple(i for i in range(self.ndim) if i != dim) + (dim,)
+    return self.permute(perm_to_last)._pool((size,), step).permute(argsort(perm_to_last) + (self.ndim,))
+
   def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
     """
     Generates coordinate matrices from coordinate vectors.
@@ -1591,6 +1607,23 @@ class Tensor(MathTrait):
     counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32)
     idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
     return x[idxs]
+
+  def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor:
+    """
+    Replace `self` with `value` wherever the elements of `mask` are True.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4, 5])
+    mask = Tensor([True, False, True, False, False])
+    print(t.masked_fill(mask, -12).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4, 5])
+    mask = Tensor([True, False, True, False, False])
+    value = Tensor([-1, -2, -3, -4, -5])
+    print(t.masked_fill(mask, value).numpy())
+    """
+    return mask.where(value, self)
 
   # ***** reduce ops *****
 
@@ -3662,8 +3695,6 @@ class Tensor(MathTrait):
     cond, x = self._broadcasted(x, match_dtype=False)
     cond, y = cond._broadcasted(y, match_dtype=False)
     return cond.cast(dtypes.bool)._apply_uop(UOp.where, *x._broadcasted(y))
-
-  def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor: return mask.where(value, self)
 
   def copysign(self, other) -> Tensor:
     """

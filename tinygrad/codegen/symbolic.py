@@ -263,9 +263,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # c0*x<c1 for negative int c0 and non-positive c1
   ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints))<UPat.cvar("c1", vec=False),
    lambda x,c0,c1: (-x)<(-(math.floor(-c1.arg/-c0.arg))) if c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
-  # x//c0<c1 for positive int c0
-  ((UPat.var("x", dtype=dtypes.ints)//UPat.cvar("c0", vec=False))<UPat.cvar("c1", vec=False),
-   lambda x,c0,c1: x<(c1.arg*c0.arg) if c0.arg > 0 else None),
+  # x//d<c
+  ((UPat.var("x", dtype=dtypes.ints)//UPat.cvar("d", vec=False))<UPat.cvar("c", vec=False),
+   lambda x,d,c: (x<(c.arg*d.arg) if c.arg > 0 else x<(c.arg*d.arg-(d.arg-1))) if d.arg > 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
   ((UPat.var("x") + UPat.cvar("c1")) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
@@ -282,7 +282,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** div **
   # div folding
   ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)
-      if x.vmin>=0 or x.vmax<=0 else None),  # (x//c+a)//d -> (x+a*c)//(c*d)
+    if (x.vmin>=0 and a.vmin>=0) or (x.vmax<=0 and a.vmax<=0) else None),  # (x//c+a)//d -> (x+a*c)//(c*d)
   (UPat.var("x", dtypes.sints) // UPat.var("y"), lambda x,y: div_and_mod_folding(x,y,Ops.IDIV)),
   (UPat.var("x") // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax <=0 else None),
   (UPat.var("x") // UPat.var("d"), lambda x,d: -((-x)//d) if x.vmax <=0 else None),

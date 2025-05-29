@@ -82,7 +82,6 @@ if __name__ == "__main__":
   args = parser.parse_args()
   Device.DEFAULT = "WEBGPU"
 
-  Tensor.no_grad = True
   model = StableDiffusion()
 
   # load in weights

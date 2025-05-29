@@ -378,7 +378,6 @@ if __name__ == "__main__":
   parser.add_argument('--noshow',   action='store_true', help="Don't show the image")
   args = parser.parse_args()
 
-  Tensor.no_grad = True
   if args.seed is not None:
     Tensor.manual_seed(args.seed)
 
