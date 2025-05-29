@@ -241,7 +241,7 @@ def train_cifar():
         
         n_samples = X.shape[0]
         rand_indices = Tensor.randint(n_samples, low=0, high=n_samples)
-        X_gather_indices = rand_indices.reshape(-1, 1,wwwww 1, 1).expand((n_samples, X.shape[1], X.shape[2], X.shape[3]))
+        X_gather_indices = rand_indices.reshape(-1, 1, 1, 1).expand((n_samples, X.shape[1], X.shape[2], X.shape[3]))
         Y_gather_indices = rand_indices.reshape(-1, 1).expand((n_samples, Y.shape[1]))
         X = X.gather(0, X_gather_indices)
         Y = Y.gather(0, Y_gather_indices)
