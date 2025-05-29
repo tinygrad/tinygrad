@@ -89,18 +89,13 @@ class SpeedyConvNet:
 if __name__ == "__main__":
   # *** dataset ***
   X_train, Y_train, X_test, Y_test = nn.datasets.cifar()
-  # TODO: without this line indexing doesn't fuse!
-  X_train, Y_train, X_test, Y_test = [x.contiguous() for x in [X_train, Y_train, X_test, Y_test]]
   cifar10_std, cifar10_mean = X_train.float().std_mean(axis=(0, 2, 3))
   def preprocess(X:Tensor) -> Tensor: return ((X - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)).cast(dtypes.default_float)
 
   # *** model ***
   model = SpeedyConvNet()
-  state_dict = nn.state.get_state_dict(model)
 
-  #for k,v in nn.state.torch_load("/tmp/cifar_net.pt").items(): print(k)
-
-  params_bias, params_non_bias = partition(state_dict.items(), lambda x: 'bias' in x[0])
+  params_bias, params_non_bias = partition(nn.state.get_state_dict(model).items(), lambda x: 'bias' in x[0])
   opt_bias     = nn.optim.SGD([x[1] for x in params_bias],     lr=0.01, momentum=.85, nesterov=True, weight_decay=hyp['opt']['bias_decay'])
   opt_non_bias = nn.optim.SGD([x[1] for x in params_non_bias], lr=0.01, momentum=.85, nesterov=True, weight_decay=hyp['opt']['non_bias_decay'])
   opt = nn.optim.OptimizerGroup(opt_bias, opt_non_bias)
