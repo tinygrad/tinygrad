@@ -1,12 +1,13 @@
 from tinygrad import Tensor, dtypes
-from icecream import install
-install()
 
-tensor_size, idx_size = 50257, 324
-mask = Tensor.ones(1, tensor_size, dtype=dtypes.bool).contiguous()
-idx1 = Tensor.zeros(idx_size, dtype=dtypes.int)
-idx2 = Tensor.randint(idx_size, low=0, high=tensor_size, dtype=dtypes.int)
-ic(mask, idx1, idx1.numpy(), idx2, idx2.numpy())
+mask_size, idx_size = 256, 256
+# mask = (Tensor.rand(1, mask_size) < 0.5).contiguous()
+# mask = (Tensor.arange(0, mask_size) < (mask_size / 2)).contiguous()
 
-out = mask[idx1, idx2]
-ic(out.numpy())
+mask = Tensor.arange(0, mask_size).contiguous()
+
+# idx1 = Tensor.zeros(idx_size, dtype=dtypes.int)
+idx = Tensor.arange(0, idx_size, dtype=dtypes.int)
+# mask[idx1, idx2] = False
+# mask[:, idx2] = 2
+mask[idx] = 0
