@@ -1,9 +1,10 @@
-import os, mmap, re, array, gzip, struct, ctypes
+import os, mmap, re, array, gzip, struct, ctypes, time
 from tinygrad.helpers import fetch, to_mv, round_up
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.autogen import libc
+from tinygrad.runtime.autogen import libc, pci
 from tinygrad.runtime.autogen.nv import nv
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
+from hexdump import hexdump
 
 pagemap = FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
 
@@ -39,6 +40,11 @@ bar_fds = {b: FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/resource{b}", os.O
 bar_info = FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/resource", os.O_RDONLY).read().splitlines()
 bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
+cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
+pci_cmd = int.from_bytes(cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
+cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=pci.PCI_COMMAND)
+# print('pci cfg', hex(pci_cmd))
+
 def _map_pci_range(bar, off=0, addr=0, size=None, fmt='B'):
   fd, sz = bar_fds[bar], size or (bar_info[bar][1] - bar_info[bar][0] + 1)
   libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
@@ -54,16 +60,13 @@ class NVDev():
     self.defs, self.scanned_files = {}, set()
 
     self.include("src/nvidia/arch/nvalloc/common/inc/fsp/fsp_nvdm_format.h")
+    self.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
+    self.include("src/common/inc/swref/published/hopper/gh100/dev_riscv_pri.h")
+    self.include("src/common/inc/swref/published/ampere/ga102/dev_riscv_pri.h")
+    self.include("src/common/inc/swref/published/hopper/gh100/dev_falcon_v4.h")
+
+    self.kfsp_send_msg(self.NVDM_TYPE_CAPS_QUERY, bytes([self.NVDM_TYPE_CLOCK_BOOST]))
     self.init_gsp()
-
-    # self.kfsp_send_msg(self.NVDM_TYPE_CAPS_QUERY, bytes([self.NVDM_TYPE_CLOCK_BOOST]))
-
-    # print([hex(x) for x in alloc_sysmem(0x0000000000031000, contigous=True)])  # Allocate 0x31000 bytes of contiguous system memory
-
-    # gb100+ are cot v2.
-    # cot = nv.NVDM_PAYLOAD_COT(version=2, size=ctypes.sizeof(nv.NVDM_PAYLOAD_COT), frtsSysmemOffset=0x0, frtsSysmemSize=0x0,
-    #                          frtsVidmemOffset=0x1c00000, frtsVidmemSize=0x100000, gspBootArgsSysmemOffset=0xfffff000)
-
 
   def wreg(self, addr, value): self.mmio[addr // 4] = value
   def rreg(self, addr): return self.mmio[addr // 4]
@@ -88,6 +91,24 @@ class NVDev():
 
     assert len(image) == 0x31000
     return image_sysmem[0], len(image), nv.RM_RISCV_UCODE_DESC.from_buffer_copy(desc)
+
+  def init_gsp_fmc_image(self):
+    text = self._download("src/nvidia/generated/g_bindata_kgspGetBinArchiveGspRmFmcGfwProdSigned_GB202.c")
+
+    def _find_section(name):
+      sl = text[text.find(name) + len(name) + 7:]
+      return bytes.fromhex(sl[:sl.find("};")].strip().replace("0x", "").replace(",", "").replace(" ", "").replace("\n", ""))
+
+    image = _find_section("kgspBinArchiveGspRmFmcGfwProdSigned_GB202_ucode_image_data")
+    ihash = _find_section("kgspBinArchiveGspRmFmcGfwProdSigned_GB202_ucode_hash_data")
+    sig = _find_section("kgspBinArchiveGspRmFmcGfwProdSigned_GB202_ucode_sig_data")
+    pkey = _find_section("kgspBinArchiveGspRmFmcGfwProdSigned_GB202_ucode_pkey_data") + b'\x00\x00\x00'
+
+    print('fmc len:', hex(len(image)),  image[:16])
+    image_va, image_sysmem = alloc_sysmem(len(image), contigous=True)
+    to_mv(image_va, len(image))[:] = image
+
+    return image_sysmem[0], len(image), memoryview(ihash).cast('I'), memoryview(sig).cast('I'), memoryview(pkey).cast('I')
 
   def init_gsp_image(self):
     fwpath = "/lib/firmware/nvidia/570.133.20/gsp_ga10x.bin"
@@ -129,6 +150,63 @@ class NVDev():
 
     return radix3_head, sign_sysmem, len(image)
 
+  def init_rm_args(self):
+    rm_args, rm_args_sysmem = self._alloc_boot_struct(nv.GSP_ARGUMENTS_CACHED)
+    
+    # queue messages init
+    queue_sizes = 0x40000 + 0x40000 # cmd + stat
+    pt_size = round_up((pt_entries:=(queue_sizes >> 12)) * 8, 0x1000)
+    shared_buf_size = pt_size + queue_sizes
+
+    shared_va, shared_sysmem = alloc_sysmem(shared_buf_size, contigous=False)
+    for i,sysmem in enumerate(shared_sysmem): to_mv(shared_va + i * 0x8, 0x8).cast('Q')[0] = sysmem
+
+    self.command_queue_va = shared_va + pt_size
+    self.status_queue_va = shared_va + pt_size + 0x40000
+
+    rm_args.messageQueueInitArguments.sharedMemPhysAddr = shared_sysmem[0]
+    rm_args.messageQueueInitArguments.pageTableEntryCount = pt_entries
+    rm_args.messageQueueInitArguments.cmdQueueOffset = pt_size
+    rm_args.messageQueueInitArguments.statQueueOffset = pt_size + 0x40000
+    rm_args.bDmemStack = True
+
+    rm_args.srInitArguments.bInPMTransition = False
+    rm_args.srInitArguments.oldLevel = 0
+    rm_args.srInitArguments.flags = 0
+
+    rm_args.gpuInstance = 0
+    return rm_args_sysmem
+
+  def init_libos_args(self):
+    logbuf_va, logbuf_sysmem = alloc_sysmem((2 << 20), contigous=True)
+    libos_init, libos_init_sysmem = alloc_sysmem(0x1000, contigous=True)
+
+    off_sz = 0
+    for i,(name, size) in enumerate([("INIT", 0x10000), ("INTR", 0x10000), ("RM", 0x10000), ("MNOC", 0x10000), ("KRNL", 0x10000)]):
+      to_mv(logbuf_va + off_sz + 8, 8).cast('Q')[0] = logbuf_sysmem[0] + off_sz # this is radix3 pt address, we can ignore it, it's contig now.
+
+      arg = nv.LibosMemoryRegionInitArgument.from_address(libos_init + i * ctypes.sizeof(nv.LibosMemoryRegionInitArgument))
+      arg.kind = nv.LIBOS_MEMORY_REGION_CONTIGUOUS
+      arg.loc = nv.LIBOS_MEMORY_REGION_LOC_SYSMEM
+      arg.size = size
+      arg.id8 = int.from_bytes(bytes("LOG" + name, 'utf-8'), 'big')
+      arg.pa = logbuf_sysmem[0] + off_sz
+
+      print(hex(arg.id8))
+
+      off_sz += size
+
+    # rm initargs
+    rm_args_sysmem = self.init_rm_args()
+    arg = nv.LibosMemoryRegionInitArgument.from_address(libos_init + 5 * ctypes.sizeof(nv.LibosMemoryRegionInitArgument))
+    arg.kind = nv.LIBOS_MEMORY_REGION_CONTIGUOUS
+    arg.loc = nv.LIBOS_MEMORY_REGION_LOC_SYSMEM
+    arg.size = 0x1000
+    arg.id8 = int.from_bytes(bytes("RMARGS", 'utf-8'), 'big')
+    arg.pa = rm_args_sysmem
+
+    return libos_init_sysmem[0]
+
   def init_gsp(self):
     bootload_ucode_sysmem, bootload_ucode_size, bootload_desc = self.init_boot_binary_image()
     radix3_sysmem, signature_sysmem, radix3_elf_size = self.init_gsp_image()
@@ -137,9 +215,8 @@ class NVDev():
 
     fmc_boot, fmc_boot_sysmem = self._alloc_boot_struct(nv.GSP_FMC_BOOT_PARAMS)
     wpr_meta, wpr_meta_sysmem = self._alloc_boot_struct(nv.GspFwWprMeta)
-    # libos_init, libos_init_sysmem = self._alloc_boot_struct(nv.GspFwLibosInit)
+    libos_init_sysmem = self.init_libos_args()
 
-    
     # wpr meta fillup
     wpr_meta.vgaWorkspaceSize = 128 * 1024
     wpr_meta.pmuReservedSize = 0x1820000
@@ -148,14 +225,16 @@ class NVDev():
 
     wpr_meta.sizeOfRadix3Elf = radix3_elf_size
     wpr_meta.sysmemAddrOfRadix3Elf = radix3_sysmem
+    print("radix3_sysmem:", hex(radix3_sysmem), "size:", radix3_elf_size)
 
     wpr_meta.bootloaderCodeOffset = bootload_desc.monitorCodeOffset
     wpr_meta.bootloaderDataOffset = bootload_desc.monitorDataOffset
     wpr_meta.bootloaderManifestOffset = bootload_desc.manifestOffset
-    print(hex(wpr_meta.bootloaderCodeOffset), hex(wpr_meta.bootloaderDataOffset), hex(wpr_meta.bootloaderManifestOffset))
+    print("bootloader:", hex(wpr_meta.bootloaderCodeOffset), hex(wpr_meta.bootloaderDataOffset), hex(wpr_meta.bootloaderManifestOffset))
 
-    wpr_meta.sysmemAddrOfSignature = sign_sysmem
+    wpr_meta.sysmemAddrOfSignature = signature_sysmem[0]
     wpr_meta.sizeOfSignature = 0x1000
+    print("wpr signatue:", hex(signature_sysmem[0]), "size:", 0x1000)
 
     wpr_meta.nonWprHeapSize = 0x220000
     wpr_meta.gspFwHeapSize = 0x8700000
@@ -169,23 +248,39 @@ class NVDev():
     fmc_boot.bootGspRmParams.target = nv.GSP_DMA_TARGET_COHERENT_SYSTEM
     fmc_boot.bootGspRmParams.bIsGspRmBoot = True
 
-    fmc_boot.gspRmParams.bootArgsOffset
+    fmc_boot.gspRmParams.bootArgsOffset = libos_init_sysmem
+    fmc_boot.gspRmParams.target = nv.GSP_DMA_TARGET_COHERENT_SYSTEM
+
+    fmc_image_sysmem, fmc_image_len, ihash, sig, pkey = self.init_gsp_fmc_image()
+    cot_payload = nv.NVDM_PAYLOAD_COT(version=0x2, size=0x35c, frtsVidmemOffset=0x1c00000, frtsVidmemSize=0x100000)
+    cot_payload.gspBootArgsSysmemOffset = fmc_boot_sysmem
+    cot_payload.gspFmcSysmemOffset = fmc_image_sysmem
+    for i,x in enumerate(ihash): cot_payload.hash384[i] = x
+    for i,x in enumerate(sig): cot_payload.signature[i] = x
+    for i,x in enumerate(pkey): cot_payload.publicKey[i] = x
+
+    print("COT")
+    # hexdump(bytes(cot_payload))
+
+    print(hex(self.rreg(self.NV_PFB_PRI_MMU_WPR2_ADDR_HI)))
+    print(hex(self.rreg(self.NV_FALCON2_GSP_BASE + self.NV_PRISCV_RISCV_CPUCTL)))
+
+    self.kfsp_send_msg(self.NVDM_TYPE_COT, bytes(cot_payload))
+
+    time.sleep(5) # need normal wait here
+
+    print(hex(self.rreg(self.NV_PFB_PRI_MMU_WPR2_ADDR_HI)))
+    # print(hex(self.rreg(self.NV_FALCON2_GSP_BASE + self.NV_PFALCON_FALCON_MAILBOX0)))
+    print(hex(self.rreg(self.NV_FALCON2_GSP_BASE + self.NV_PRISCV_RISCV_CPUCTL)))
+
+    hexdump(to_mv(self.status_queue_va, 0x100))
+    hexdump(to_mv(self.command_queue_va, 0x100))
 
 
-    cot_payload = nv.NVDM_PAYLOAD_COT()
-
-
-
-    
-    
+  def gsp_rpc_wait(self, op):
     pass
+
   
-  def kgspCalculateFbLayout(self):
-    pass
-  
-  def kfspSetupGspImages(self):
-    pass
-
   def _download(self, file) -> str:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/e8113f665d936d9f30a6d508f3bacd1e148539be/{file}"
     return fetch(url, subdir="defines").read_text()
@@ -213,7 +308,7 @@ class NVDev():
           self.__dict__[name] = eval(f"lambda {param}: {expr}")
         elif (m := CONST.match(raw)):
           name, value = m.groups()
-          assert self.__dict__.get(name) is None, f"Duplicate definition for {name} in {file}"
+          assert self.__dict__.get(name) in [None, int(value, 0)], f"Duplicate definition for {name} in {file}"
           self.__dict__[name] = int(value, 0)
 
   def build_num(self, name, _val=0, **kwargs):
