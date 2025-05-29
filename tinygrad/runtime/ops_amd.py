@@ -711,6 +711,10 @@ class PCIIface:
     self._setup_adev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2, fmt='Q'), self._map_pci_range(5, fmt='I'))
     self.doorbell_cpu_addr = dbell.addr
 
+    if first_dev:
+      res = FileIOInterface.anon_mmap(self.adev.mm.va_allocator.base, self.adev.mm.va_allocator.size, 0, mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS|MAP_NORESERVE, 0)
+      assert res != 0xffffffffffffffff
+
     pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
     self.cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=pci.PCI_COMMAND)
 
