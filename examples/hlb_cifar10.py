@@ -43,7 +43,7 @@ class UnsyncedBatchNorm:
       batch_mean, batch_invstd, axis=(0, 2))
     return ret.reshape(x.shape).cast(x.dtype)
 
-  def calc_stats(self, x:Tensor):
+  def calc_stats(self, x:Tensor):                                                          
     if Tensor.training:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
@@ -194,31 +194,35 @@ def train_cifar():
 
   # return a binary mask in the format of BS x C x H x W where H x W contains a random square mask
   def make_square_mask(shape, mask_size) -> Tensor:
-    BS, _, H, W = shape
+    BS, C, H, W = shape
     low_x = Tensor.randint(BS, low=0, high=W-mask_size).reshape(BS,1,1,1)
     low_y = Tensor.randint(BS, low=0, high=H-mask_size).reshape(BS,1,1,1)
     idx_x = Tensor.arange(W, dtype=dtypes.int32).reshape((1,1,1,W))
     idx_y = Tensor.arange(H, dtype=dtypes.int32).reshape((1,1,H,1))
-    return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
+    mask = (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
+    return mask.expand((BS, C, H, W))
 
   def random_crop(X:Tensor, crop_size=32):
-    mask = make_square_mask(X.shape, crop_size)
-    mask = mask.expand((-1,3,-1,-1))
-    X_cropped = Tensor(X.numpy()[mask.numpy()])
-    return X_cropped.reshape((-1, 3, crop_size, crop_size))
+    H, W = X.shape[2], X.shape[3]
+    start_h = Tensor.randint(1, low=0, high=H-crop_size+1).item()
+    start_w = Tensor.randint(1, low=0, high=W-crop_size+1).item()
+    return X[:, :, start_h:start_h+crop_size, start_w:start_w+crop_size]
 
-  def cutmix(X:Tensor, Y:Tensor, mask_size=3):
-    # fill the square with randomly selected images from the same batch
-    mask = make_square_mask(X.shape, mask_size)
-    order = list(range(0, X.shape[0]))
-    random.shuffle(order)
-    X_patch = Tensor(X.numpy()[order], device=X.device, dtype=X.dtype)
-    Y_patch = Tensor(Y.numpy()[order], device=Y.device, dtype=Y.dtype)
-    X_cutmix = mask.where(X_patch, X)
-    mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
-    Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
-    return X_cutmix, Y_cutmix
-
+  def cutmix(X: Tensor, Y: Tensor, mask_size=3):
+    BS, C, H, W = X.shape
+    start_h = Tensor.randint(1, low=0, high=H-mask_size+1).item()
+    start_w = Tensor.randint(1, low=0, high=W-mask_size+1).item()
+    perm_indices = Tensor.randperm(BS)
+    X_shuffled = X[perm_indices]
+    Y_shuffled = Y[perm_indices]
+    X_mixed = X.clone()
+    Y_mixed = Y.clone()
+    X_mixed[:, :, start_h:start_h+mask_size, start_w:start_w+mask_size] = \
+        X_shuffled[:, :, start_h:start_h+mask_size, start_w:start_w+mask_size]
+    mix_portion = float(mask_size**2) / (H * W)
+    Y_mixed = (1 - mix_portion) * Y + mix_portion * Y_shuffled
+    return X_mixed, Y_mixed
+  
   # the operations that remain inside batch fetcher is the ones that involves random operations
   def fetch_batches(X_in:Tensor, Y_in:Tensor, BS:int, is_train:bool):
     step, epoch = 0, 0
@@ -228,24 +232,27 @@ def train_cifar():
       if is_train:
         # TODO: these are not jitted
         if getenv("RANDOM_CROP", 1):
-          X = random_crop(X, crop_size=32)
+          X = random_crop(X)
         if getenv("RANDOM_FLIP", 1):
           X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
         if getenv("CUTMIX", 1):
           if step >= hyp['net']['cutmix_steps']:
             X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
-        order = list(range(0, X.shape[0]))
-        random.shuffle(order)
-        X, Y = X.numpy()[order], Y.numpy()[order]
-      else:
-        X, Y = X.numpy(), Y.numpy()
+        
+        n_samples = X.shape[0]
+        rand_indices = Tensor.randint(n_samples, low=0, high=n_samples)
+        X_gather_indices = rand_indices.reshape(-1, 1,wwwww 1, 1).expand((n_samples, X.shape[1], X.shape[2], X.shape[3]))
+        Y_gather_indices = rand_indices.reshape(-1, 1).expand((n_samples, Y.shape[1]))
+        X = X.gather(0, X_gather_indices)
+        Y = Y.gather(0, Y_gather_indices)
+      
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X.shape[0], BS):
         # pad the last batch  # TODO: not correct for test
         batch_end = min(i+BS, Y.shape[0])
-        x = Tensor(X[batch_end-BS:batch_end], device=X_in.device, dtype=X_in.dtype)
-        y = Tensor(Y[batch_end-BS:batch_end], device=Y_in.device, dtype=Y_in.dtype)
+        x = X[batch_end-BS:batch_end]
+        y = Y[batch_end-BS:batch_end]
         step += 1
         yield x, y
       epoch += 1
