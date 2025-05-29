@@ -7,9 +7,7 @@ from tinygrad import Tensor, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.helpers import partition, trange, getenv, Context
 from extra.lr_scheduler import OneCycleLR
 
-# override tinygrad defaults
 dtypes.default_float = dtypes.half
-Context(FUSE_ARANGE=1, FUSE_OPTIM=1).__enter__()
 
 # from https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 batchsize = getenv("BS", 1024)
@@ -69,7 +67,7 @@ class ConvGroup:
     cast(Tensor, self.norm2.weight).requires_grad = False
   def __call__(self, x:Tensor) -> Tensor:
     x =    self.norm1(self.conv1(x).max_pool2d().float()).cast(dtypes.default_float).quick_gelu()
-    return self.norm2(self.conv2(x).float()).cast(dtypes.default_float).quick_gelu() + x
+    return self.norm2(self.conv2(x).float()).cast(dtypes.default_float).quick_gelu()
 
 class SpeedyConvNet:
   def __init__(self):
@@ -80,9 +78,6 @@ class SpeedyConvNet:
     self.linear = nn.Linear(depths['block3'], depths['num_classes'], bias=False)
   def __call__(self, x:Tensor) -> Tensor:
     x = self.whiten(x).quick_gelu()
-    # ************* HACKS *************
-    x = x.pad((1,0,0,1)) # TODO: this pad should not be here! copied from hlb_cifar10 for speed
-    # ************* HACKS *************
     x = x.sequential([self.conv_group_1, self.conv_group_2, self.conv_group_3])
     return self.linear(x.max(axis=(2,3))) * hyp['opt']['scaling_factor']
 
@@ -92,7 +87,8 @@ if __name__ == "__main__":
   # TODO: without this line indexing doesn't fuse!
   X_train, Y_train, X_test, Y_test = [x.contiguous() for x in [X_train, Y_train, X_test, Y_test]]
   cifar10_std, cifar10_mean = X_train.float().std_mean(axis=(0, 2, 3))
-  def preprocess(X:Tensor) -> Tensor: return ((X - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)).cast(dtypes.default_float)
+  def preprocess(X:Tensor, Y:Tensor) -> Tuple[Tensor, Tensor]:
+    return ((X - cifar10_mean.view(1, -1, 1, 1)) / cifar10_std.view(1, -1, 1, 1)).cast(dtypes.default_float), Y.one_hot(depths['num_classes'])
 
   # *** model ***
   model = SpeedyConvNet()
@@ -115,15 +111,18 @@ if __name__ == "__main__":
   lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr'],     pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps)
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps)
 
-  def loss_fn(out:Tensor, Y:Tensor) -> Tensor:
-    ret = out.sparse_categorical_crossentropy(Y, reduction='none', label_smoothing=0.2)
-    return ret.mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
+  def loss_fn(out, Y):
+    return out.cross_entropy(Y, reduction='none', label_smoothing=0.2).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
   @TinyJit
   @Tensor.train()
   def train_step(idxs:Tensor) -> Tensor:
-    out = model(preprocess(X_train[idxs]))
-    loss = loss_fn(out, Y_train[idxs])
+    with Context(SPLIT_REDUCEOP=0, FUSE_ARANGE=1):
+      X = X_train[idxs]
+      Y = Y_train[idxs].realize(X)
+    X, Y = preprocess(X, Y)
+    out = model(X)
+    loss = loss_fn(out, Y)
     opt.zero_grad()
     loss.backward()
     opt.step()
@@ -135,12 +134,14 @@ if __name__ == "__main__":
   @TinyJit
   @Tensor.test()
   def val_step() -> Tuple[Tensor, Tensor]:
+    # TODO with Tensor.no_grad()
+    Tensor.no_grad = True
     loss, acc = [], []
     for i in range(0, X_test.size(0), eval_batchsize):
-      Y = Y_test[i:i+eval_batchsize]
-      out = model(preprocess(X_test[i:i+eval_batchsize]))
+      X, Y = preprocess(X_test[i:i+eval_batchsize], Y_test[i:i+eval_batchsize])
+      out = model(X)
       loss.append(loss_fn(out, Y))
-      acc.append((out.argmax(-1) == Y).sum() / eval_batchsize)
+      acc.append((out.argmax(-1).one_hot(depths['num_classes']) * Y).sum() / eval_batchsize)
     ret = Tensor.stack(*loss).mean() / (batchsize*loss_batchsize_scaler), Tensor.stack(*acc).mean()
     Tensor.no_grad = False
     return ret
