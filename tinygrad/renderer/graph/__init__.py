@@ -23,6 +23,7 @@ class GraphRenderer(Renderer):
     assert len(get_state_dict(args)) == len([x for x in args if isinstance(x, Tensor)]) and len(get_state_dict(kwargs)) == 0, \
       "All Tensor (and Variable) function arguments must be positional, whose order will match the order of the rendered function's arguments."
     self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
+    Tensor.randn(1).realize() # move random seeds and counter onto device so our jitted fxn doesn't do it
 
     # calculate the diff in global Tensor lazydata state caused by fxn
     original_uops: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in all_tensors if (tref:=t()) is not None}
@@ -30,7 +31,7 @@ class GraphRenderer(Renderer):
       ret_tensors: list[Tensor] = [*filter(lambda t:isinstance(t, Tensor), r if isinstance(r:=fxn(*args, **kwargs), (list, tuple)) else [r])]
     postcall_uops: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in all_tensors if (tref:=t()) is not None}
 
-    # diff contains new or mutated Tensors
+    # diff contains only new or mutated Tensors
     diff: dict[Tensor, dict] = dict()
     for t in postcall_uops:
       if t not in original_uops or original_uops[t].key != postcall_uops[t].key:
@@ -39,7 +40,7 @@ class GraphRenderer(Renderer):
 
     # realize up until start of our jitted function
     for u in original_uops.values():
-      if any(u in toposort for toposort in diff.values()):
+      if any(u.base in toposort for toposort in diff.values()):
         (realizer_dummy:=Tensor(1)).lazydata = u
         realizer_dummy.realize()
 
@@ -50,18 +51,17 @@ class GraphRenderer(Renderer):
     self.extra_copies: list[tuple[Buffer, Buffer]] = []
     for t in diff:
       if t in original_uops and (new_buf := t.lazydata.base.buf_uop.buffer) != (old_buf := original_uops[t].base.buf_uop.buffer):
-        self.extra_copies.append((old_buf, new_buf))
+        self.extra_copies.append((cast(Buffer, old_buf), cast(Buffer, new_buf)))
 
     # TODO: remove this assertion?
     assert (l:=len(ret_tensors)) and l == len(get_state_dict(r)), "One or more Tensors must be returned as a singleton or elements of a list/tuple."
     if not isinstance(device:=ret_tensors[0].device, str): raise RuntimeError(f"Multiple devices not supported: {device}")
-    rng_tensors = [Tensor._device_seeds[device].realize(), Tensor._device_rng_counters[device].realize()] if device in Tensor._device_seeds else []
+    rng_tensors = [Tensor._device_seeds[device], Tensor._device_rng_counters[device]]
 
     # linearize the kernel graph
     schedule, var_vals = create_schedule_with_vars(sink)
     assert set(var_vals.keys()) == set(u.unbind()[0] for u in self.inputs if u.op is Ops.BIND), "Variables must be positional arguments."
     remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.ASSIGN}
-    #self.outputs: list[UOp] = [remove_assign_map[uop.base] for uop in sink.src]
     self.outputs: list[UOp] = [remove_assign_map[t.lazydata.base] for t in ret_tensors]
 
     # render kernels, render buffer names
@@ -72,7 +72,9 @@ class GraphRenderer(Renderer):
     self.state_bufs: dict[Buffer, str] = dict()
     ctr = itertools.count()
 
-    del original_uops, postcall_uops, realizer_dummy, u, r, t, ret_tensors, sink, remove_assign_map
+    #if len(original_uops): del u
+    #del original_uops, postcall_uops, realizer_dummy, r, t, ret_tensors, sink, remove_assign_map
+    del postcall_uops, realizer_dummy, r, t, ret_tensors, sink, remove_assign_map
     for si, ei in lower_schedule(memory_planner(schedule)):
       assert isinstance(ei.prg, CompiledRunner), f"Export only supported for CompiledRunner\nei.prg: {ei.prg}\n\nei.bufs: {ei.bufs}"
       for buf in ei.bufs: assert buf is not None and buf.device == device, "All compute and returned Tensor(s) must be on the same device"
@@ -83,8 +85,12 @@ class GraphRenderer(Renderer):
           if i not in ei.prg.p.outs or i in ei.prg.p.ins or is_partial_write(si.ast, i): self.state_bufs[buf] = name
 
     self.state_dict = {k:v for k,v in tensor_names.items() if (b:=v.lazydata.base.realized) and b in self.state_bufs} if tensor_names else {}
-    if rng_tensors and all((b:=t.lazydata.base.realized) and b in self.state_bufs for t in rng_tensors):
-      self.state_dict.update({"random_seeds": rng_tensors[0], "random_counter": rng_tensors[1]})
+    for k,v in self.state_dict.items():
+      (dummy := Tensor(1)).lazydata = original_uops[v].base.buf_uop
+      self.state_dict[k] = dummy
+    if all(original_uops[t].base.buf_uop.buffer in self.state_bufs for t in rng_tensors):
+      (dummy := Tensor(1)).lazydata = original_uops[rng_tensors[1]].base.buf_uop
+      self.state_dict.update({"random_seeds": rng_tensors[0], "random_counter": dummy})
     for k,v in self.state_dict.items(): v.lazydata = v.lazydata.base # non-contiguous views cause data permutation in safe_save
     self.state_bufs.update({cast(Buffer, v.lazydata.base.realized):k for k,v in self.state_dict.items()})
 
