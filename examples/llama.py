@@ -3,6 +3,9 @@
 #import typeguard.importhook
 #typeguard.importhook.install_import_hook('tinygrad')
 
+import sys
+sys.path.append(".")
+
 from pathlib import Path
 from typing import List, Optional
 import argparse, json

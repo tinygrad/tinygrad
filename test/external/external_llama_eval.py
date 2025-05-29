@@ -1,8 +1,9 @@
 from lm_eval.api.model import LM
 from lm_eval.evaluator import simple_evaluate
 import torch, json, argparse
-
-from examples.llama import LLaMa
+import sys
+sys.path.append("examples")
+from llama import LLaMa
 from tinygrad.tensor import Tensor
 from tinygrad import Device
 
@@ -74,6 +75,7 @@ class LLaMaAdaptor(LM):
     return torch.Tensor(self.llama.model(Tensor(inps.numpy()), 0).numpy())
 
   def generate_until(self, requests: list[Instance]) -> list[str]:
+    # TODO: use params in requests
     continuations = []
     for request in requests:
       prompt, until = request[0], request[1]['until']
