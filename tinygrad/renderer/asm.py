@@ -26,8 +26,8 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.const_like(0)]}\n.LOOP_{x.arg}:"),
   (UPat(Ops.ENDRANGE, src=(UPat.var("rng")), name="x"), lambda ctx,x,rng: f"{ctx.ops[rng.dtype][Ops.ADD]} {ctx[rng]}, {ctx[rng.const_like(1)]}\n"
    f"{ctx.ops[rng.dtype][Ops.CMPLT]} {ctx[rng]}, {ctx[rng.src[0]]}\n{ctx.ops[x.dtype][x.op]} .LOOP_{rng.arg}"),
-  (UPat(Ops.IF, name="x"),
-   lambda ctx,x: f"{ctx.ops[x.src[0].dtype][Ops.CMPNE]} {ctx[x.src[0]]}, {ctx[x.src[0].const_like(1)]}\n{ctx.ops[x.dtype][x.op]} .L{ctx.uops.index(x)}"),
+  (UPat(Ops.IF, name="x"), lambda ctx,x: f"{ctx.ops[x.src[0].dtype][Ops.CMPNE]} {ctx[x.src[0]]}, {ctx[x.src[0].const_like(1)]}\n"
+   f"{ctx.ops[x.dtype][x.op]} .L{ctx.uops.index(x)}"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f".L{ctx.uops.index(x.src[0])}:"),
 ])
 # TODO: rewrite gated index to cmove
@@ -223,9 +223,9 @@ arm64_rewrite = PatternMatcher([
    lambda ctx,x: "\n".join(f"ins {ctx[x]}.{arm64_vec_suffix[s.dtype.itemsize]}[{i}], {ctx[s]}" for i,s in enumerate(x.src))),
   # casts
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints),), name="x"),
-   lambda ctx,x: f"uxt{arm64_cast_suffix.get(x.src[0].dtype.itemsize, "")} {ctx[x]}, {ctx[x.src[0]]}"),
+   lambda ctx,x: f"uxt{arm64_cast_suffix.get(x.src[0].dtype.itemsize, '')} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.sints),), name="x"),
-   lambda ctx,x: f"sxt{arm64_cast_suffix.get(x.src[0].dtype.itemsize, "")} {ctx[x]}, {ctx[x.src[0]]}"),
+   lambda ctx,x: f"sxt{arm64_cast_suffix.get(x.src[0].dtype.itemsize, '')} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.floats),), name="x"), lambda ctx,x: f"fcvt {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.sints),), name="x"), lambda ctx,x: f"scvtf {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uints),), name="x"), lambda ctx,x: f"ucvtf {ctx[x]}, {ctx[x.src[0]]}"),
@@ -260,9 +260,9 @@ arm64_matcher = asm_matcher + PatternMatcher([
   (UPat(GroupOp.ALU, dtype=(dtypes.uint8, dtypes.uint16), name="x"),
    lambda x: UOp(x.op, dtypes.uint32, tuple(s.cast(dtypes.uint32) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
-   lambda x: UOp(x.op, x.dtype, tuple(s.cast(dtypes.int32) for s in x.src)) if any(s.dtype in (dtypes.int8, dtypes.int16) for s in x.src) else None),
-  (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
-   lambda x: UOp(x.op, x.dtype, tuple(s.cast(dtypes.uint32) for s in x.src)) if any(s.dtype in (dtypes.uint8, dtypes.uint16) for s in x.src) else None),
+   lambda x: UOp(x.op, x.dtype, tuple(s.cast(dtypes.int) for s in x.src)) if any(s.dtype in (dtypes.int8, dtypes.int16) for s in x.src) else None),
+  (UPat((Ops.CMPLT, Ops.CMPNE), name="x"), lambda x: UOp(x.op, x.dtype, tuple(s.cast(dtypes.uint) for s in x.src)) \
+   if any(s.dtype in (dtypes.uint8, dtypes.uint16) for s in x.src) else None),
    # *** also in ptx ***
   # load/store use pointer arithmetic
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx: buf.cast(dtypes.int64) + idx.cast(dtypes.int64)*buf.dtype.itemsize),
@@ -339,7 +339,8 @@ def float_cast(x:DType, s:DType) -> str:
 
 x86_rewrite = PatternMatcher([
   # loads/stores/movs
-  (UPat(Ops.INDEX, src=(UPat(), UPat.cvar(name="c")), name="x"), lambda ctx,x,c: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx[c]}*{x.src[0].dtype.itemsize}]"),
+  (UPat(Ops.INDEX, src=(UPat(), UPat.cvar(name="c")), name="x"),
+   lambda ctx,x,c: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx[c]}*{x.src[0].dtype.itemsize}]"),
   (UPat(Ops.INDEX, name="x"), lambda ctx,x: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx.r[x.src[1]]}*{x.src[0].dtype.itemsize}]"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}\ntest {ctx[mask]}, 1\n"
@@ -367,17 +368,16 @@ x86_rewrite = PatternMatcher([
    lambda ctx,x: f"{ctx.two_address(x, x.src[0])}{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}"),
   # binary ops, instructions that allow 3 operands (avx) use the base rewrite
   # float cmp requires nan check
-  #(UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat(dtype=dtypes.floats), UPat()), name="x"),
-  # lambda ctx,x: f"{ctx.ops[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{x86_cflag(x)} {ctx[x]}\nsetp r15b\nxor {ctx[x]}, r15b"),
   (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat(dtype=dtypes.floats), UPat()), name="x"), lambda ctx,x:
    f"{ctx.ops[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n"
    f"{x86_cflag(x)} {ctx[x]}\nsetp {ctx[x][:-1]+"h"}\nor {ctx[x]}, {ctx[x][:-1]+"h"}"),
-  (UPat((Ops.CMPLT, Ops.CMPNE), name="x"), lambda ctx,x: f"{ctx.ops[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{x86_cflag(x)} {ctx[x]}"),
+  (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
+   lambda ctx,x: f"{ctx.ops[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{x86_cflag(x)} {ctx[x]}"),
   (UPat((Ops.IDIV,), dtypes.sints, name="x"), lambda ctx,x:
    f"{ctx.two_address(x, x.src[0])}push rdx\n{idiv_signex[x.dtype.itemsize]}\n{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rdx"),
   (UPat((Ops.IDIV,), dtypes.uints, name="x"), lambda ctx,x:
-   f"{ctx.two_address(x, x.src[0])}push rdx\nxor {'rdx, rdx' if x.dtype.itemsize > 1 else 'ah, ah'}\n{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rdx"),
-  #(UPat((Ops.IDIV, Ops.MOD), name="x"), lambda ctx,x: f"{ctx.two_address(x, x.src[0])}{ctx.idiv(x, x.src[1])}"),
+   f"{ctx.two_address(x, x.src[0])}push rdx\nxor {'rdx, rdx' if x.dtype.itemsize > 1 else 'ah, ah'}\n"
+   f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rdx"),
   (UPat(GroupOp.Binary, dtypes.ints + (dtypes.bool,), name="x"),
    lambda ctx,x: f"{ctx.two_address(x, x.src[0])}{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
 ]) + base_rewrite
