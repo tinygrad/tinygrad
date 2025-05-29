@@ -201,7 +201,6 @@ class GPT2:
 # **** main code ****
 
 if __name__ == "__main__":
-  Tensor.no_grad = True
   print(f"using {Device.DEFAULT} backend")
   default_prompt = "What is the answer to life, the universe, and everything?"
 
