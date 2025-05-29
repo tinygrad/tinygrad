@@ -36,14 +36,14 @@ def decode_bbox(offsets, anchors):
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 
 def decode_bbox2(offsets, anchors):
-  dx, dy, dw, dh = np.rollaxis(offsets, 1)
+  dx, dy, dw, dh = offsets[:, 0::4].squeeze(), offsets[:, 1::4].squeeze(), offsets[:, 2::4].squeeze(), offsets[:, 3::4].squeeze()
   widths, heights = anchors[:, 2] - anchors[:, 0], anchors[:, 3] - anchors[:, 1]
   cx, cy = anchors[:, 0] + 0.5 * widths, anchors[:, 1] + 0.5 * heights
   pred_cx, pred_cy = dx * widths + cx, dy * heights + cy
-  pred_w, pred_h = np.exp(dw) * widths, np.exp(dh) * heights
+  pred_w, pred_h = dw.exp() * widths, dh.exp() * heights
   pred_x1, pred_y1 = pred_cx - 0.5 * pred_w, pred_cy - 0.5 * pred_h
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
-  return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
+  return Tensor.stack(pred_x1, pred_y1, pred_x2, pred_y2, dim=1)
 
 class RetinaNet:
   def __init__(self, backbone:ResNet, num_classes:int=264, num_anchors:int=9, scales:list[int]|None=None, aspect_ratios:list[float]|None=None):
@@ -118,7 +118,8 @@ class RetinaNet:
         # bbox coords from offsets
         anchor_idxs = topk_idxs.div(self.num_classes, rounding_mode="floor")
         lbls_level = topk_idxs % self.num_classes
-        detections.append(anchor_idxs)
+        boxes_level = decode_bbox2(offsets_level[anchor_idxs], anchors_level[anchor_idxs])
+        detections.append(boxes_level)
 
     return detections
 
@@ -150,7 +151,8 @@ class RetinaNet:
         # bbox coords from offsets
         anchor_idxs = topk_idxs // self.num_classes
         labels_per_level = topk_idxs % self.num_classes
-    #     boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level[anchor_idxs])
+        boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level[anchor_idxs])
+        detections.append(boxes_per_level)
     #     # clip to image size
     #     clipped_x = boxes_per_level[:, 0::2].clip(0, w)
     #     clipped_y = boxes_per_level[:, 1::2].clip(0, h)

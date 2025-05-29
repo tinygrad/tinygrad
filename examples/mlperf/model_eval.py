@@ -122,7 +122,8 @@ def eval_retinanet():
     # print(f"{act[0]=}")
     # print(f"{exp=}")
     for a, e in zip(act[0], exp):
-      np.testing.assert_equal(a.numpy(), e)
+      np.testing.assert_allclose(a.numpy(), e, rtol=1e-02)
+      # np.testing.assert_allclose(a.numpy(), e)
     # exp_split_idx = mdl.postprocess_detections(proc[0].numpy(), orig_image_sizes=proc[2]), proc[1]
   #   coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
   #     for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
