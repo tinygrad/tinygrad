@@ -1,4 +1,3 @@
-import itertools
 from tinygrad import Device
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, colorize_float

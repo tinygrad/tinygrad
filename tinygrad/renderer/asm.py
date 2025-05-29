@@ -467,5 +467,5 @@ class X86Renderer(AsmRenderer):
   def render_reg(self, reg:str, dt:DType) -> str:
     return reg if dt.itemsize == 8 or dtypes.is_float(dt) else x86_reg_map[reg][dt.itemsize]
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
-    return "\n".join([".text", f".global {name}", f"{name}:", "push rbp", "mov rbp, rsp", f"sub rsp, {stack_size}"] + \
-                      kernel + [f"add rsp, {stack_size}", "pop rbp", "ret", "\n"])
+    return "\n".join([".text", f".global {name}", f"{name}:", "push rbp", "mov rbp, rsp", f"sub rsp, {stack_size}"] + 
+                     kernel + [f"add rsp, {stack_size}", "pop rbp", "ret", "\n"])
