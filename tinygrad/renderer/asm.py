@@ -3,7 +3,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat
 from tinygrad.renderer import Renderer
 from tinygrad import dtypes
 from tinygrad.dtype import DType, PtrDType
-import struct, copy
+import struct, copy, sys
 
 def to_hex(x, dt:DType) -> str:
   if dt is dtypes.float64: return hex(struct.unpack('<Q', struct.pack('<d', x))[0])
@@ -459,6 +459,9 @@ class X86Renderer(AsmRenderer):
     if s is not None: return self.reg_class(s)
     # constraints for destination
     # abi constraints, TODO: not quite right
+    if sys.platform == "win32":
+      if u.op is Ops.DEFINE_GLOBAL and u.arg < 4: return [("rcx", "rdx", "r8", "r9")[u.arg]]
+      if u.op is Ops.DEFINE_GLOBAL and u.arg >= 4: return (u.arg-4)*8+16
     if u.op is Ops.DEFINE_GLOBAL and u.arg < 6: return [("rdi", "rsi", "rdx", "rcx", "r8", "r9")[u.arg]]
     if u.op is Ops.DEFINE_GLOBAL and u.arg >= 6: return (u.arg-6)*8+16
     if u.op is Ops.IDIV: return ["rax"]
