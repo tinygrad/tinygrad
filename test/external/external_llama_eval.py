@@ -67,7 +67,7 @@ if __name__ == '__main__':
   adaptor = LLaMaAdaptor(model_size=args.size, quantize=args.quantize,
                          checkpoint_path=Path(args.model), is_chat_model=args.chat, max_length=args.ctx)
   results = simple_evaluate(model=adaptor, tasks=args.eval.split(","),
-                            num_fewshot=args.num_fewshot, limit=args.limit, apply_chat_template=args.chat)
+                            num_fewshot=args.num_fewshot, limit=args.limit)
 
   if args.output_path: Path(args.output_path).write_text(json.dumps(results, indent=2))
   for task_name, val in results["results"].items():
