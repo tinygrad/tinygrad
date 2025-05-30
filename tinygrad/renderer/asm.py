@@ -41,8 +41,8 @@ asm_matcher = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=(dtypes.bool, dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16)),), name="c"),
     lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
   # some cast/bitcast are noops
-  #(UPat(Ops.CAST, dtypes.int64, src=(UPat.var("y"),), name="x"),
-  # lambda x,y: UOp(Ops.NOOP, x.dtype, x.src) if isinstance(y.dtype, PtrDType) else None),
+  (UPat(Ops.CAST, dtypes.int64, src=(UPat.var("y"),), name="x"),
+   lambda x,y: UOp(Ops.NOOP, x.dtype, x.src) if isinstance(y.dtype, PtrDType) else None),
   (UPat(Ops.CAST, dtypes.ints, src=(UPat.var("y", dtypes.ints + (dtypes.bool,)),), name="x"),
    lambda x,y: UOp(Ops.NOOP, x.dtype, x.src) if x.dtype.itemsize <= y.dtype.itemsize or y.dtype is dtypes.uint32 else None),
   (UPat(Ops.BITCAST, dtypes.ints, src=(UPat.var("y", dtypes.ints),), name="x"),
