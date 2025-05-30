@@ -16,19 +16,6 @@ The current integration with `tinygrad` supports core model computations, data l
 2.  **Model Initialization:**
     With the current setup, enabling the `TINY_BACKEND` allows you to construct the `SpeedyConvNet` model without any code changes.
 
-    Since tinygrad does not natively support the `unfold` operation, we use `np.lib.stride_tricks.sliding_window_view` to efficiently obtain a view of local blocks (patches) from the input tensor. This approach is necessary because implementing unfold-like overlapping views in tinygrad is non-trivial and cannot be achieved with simple movement operations.
-
-    ```python
-    def get_patches(x, patch_shape=(3, 3), dtype=torch.float32):
-        # This uses the unfold operation (https://pytorch.org/docs/stable/generated/torch.nn.functional.unfold.html?highlight=unfold#torch.nn.functional.unfold)
-        # to extract a _view_ (i.e., there's no data copied here) of blocks in the input tensor. We have to do it twice -- once horizontally, once vertically. Then
-        # from that, we get our kernel_size*kernel_size patches to later calculate the statistics for the whitening tensor on :D
-        c, (h, w) = x.shape[1], patch_shape
-        # return x.unfold(2,h,1).unfold(3,w,1).transpose(1,3).reshape(-1,c,h,w).to(dtype) # TODO: Annotate?
-        patch = np.lib.stride_tricks.sliding_window_view(x.cpu().numpy(), window_shape=(h, w), axis=(2,3)).transpose((0, 3, 2, 1, 4, 5)).reshape((-1, c, h, w))
-        return torch.from_numpy(patch).to(x.device)
-    ```
-
     For eigenvalue decomposition, tinygrad doesn't yet implement `linalg.eigh`, so we had to use NumPy's implementation as a workaround:
 
     ```python
