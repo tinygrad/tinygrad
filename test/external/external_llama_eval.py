@@ -1,9 +1,10 @@
 from lm_eval.api.model import LM
+from lm_eval.api.instance import Instance
 from lm_eval.evaluator import simple_evaluate
 import torch, json, argparse
 import sys
 sys.path.append("examples")
-from llama import LLaMa
+from llama import LLaMa, MODEL_PARAMS
 from tinygrad.tensor import Tensor
 from tinygrad import Device
 
@@ -30,13 +31,13 @@ class LLaMaAdaptor(LM):
     self.temperature = temperature
     self._device = device
 
-    assert isinstance(model_gen, int)
+    assert isinstance(model_gen, str)
     assert isinstance(model_size, str)
     assert isinstance(batch_size, int)
     assert isinstance(checkpoint_path, str)
     assert isinstance(tokenizer_path, str)
 
-    self.llama = LLaMa.build(checkpoint_path, tokenizer_path, model_gen, model_size, quantize)
+    self.llama = LLaMa.build(checkpoint_path, tokenizer_path, model_gen, model_size, quantize, MODEL_PARAMS=MODEL_PARAMS)
 
   @classmethod
   def create_from_arg_string(cls, arg_string, additional_config=None):
@@ -94,7 +95,7 @@ if __name__ == '__main__':
 
   parser = argparse.ArgumentParser(description='Run LLaMA evals in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B] for Gen 2")
-  parser.add_argument('--gen', type=int, default="1", help="Generation of the model to use [1, 2]")
+  parser.add_argument('--gen', type=str, default="1", help="Generation of the model to use [1, 2]")
   parser.add_argument('--quantize', action='store_true', help="Quantize the weights to int8 in memory")
   parser.add_argument('--eval', type=str, default="arc_easy", help="Run in evaluation mode")
   parser.add_argument('--limit', type=int, default=None, help="Limit tests in eval")
