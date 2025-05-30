@@ -7,6 +7,7 @@ sys.path.append("examples")
 from llama import LLaMa, MODEL_PARAMS
 from tinygrad.tensor import Tensor
 from tinygrad import Device
+from pathlib import Path
 
 # https://github.com/EleutherAI/lm-evaluation-harness/blob/main/docs/model_guide.md
 class LLaMaAdaptor(LM):
@@ -30,13 +31,6 @@ class LLaMaAdaptor(LM):
     self.do_sample = do_sample
     self.temperature = temperature
     self._device = device
-
-    assert isinstance(model_gen, str)
-    assert isinstance(model_size, str)
-    assert isinstance(batch_size, int)
-    assert isinstance(checkpoint_path, str)
-    assert isinstance(tokenizer_path, str)
-
     self.llama = LLaMa.build(checkpoint_path, tokenizer_path, model_gen, model_size, quantize, MODEL_PARAMS=MODEL_PARAMS)
 
   @classmethod
@@ -99,8 +93,8 @@ if __name__ == '__main__':
   parser.add_argument('--quantize', action='store_true', help="Quantize the weights to int8 in memory")
   parser.add_argument('--eval', type=str, default="arc_easy", help="Run in evaluation mode")
   parser.add_argument('--limit', type=int, default=None, help="Limit tests in eval")
-  parser.add_argument('--weights', type=str, default="./weights/LLaMa/", help="Location of the weights")
-  parser.add_argument('--tokenizer', type=str, default="./weights/LLaMa/tokenizer.model", help="Location of the tokenizer")
+  parser.add_argument('--weights', type=Path, default="./weights/LLaMa/", help="Location of the weights")
+  parser.add_argument('--tokenizer', type=Path, default="./weights/LLaMa/tokenizer.model", help="Location of the tokenizer")
   args = parser.parse_args()
 
   # run eval and exit
