@@ -159,13 +159,16 @@ class AsmRenderer(Renderer):
             if k in live and live[k] == v: continue
             if k in live: reg_class(k).insert(0, live.pop(k))
             loc[k] = alloc(k, [v])
-      # assign srcs, ignore assign and noop
-      srcs = tuple(s.src[0] if s.op in (Ops.ASSIGN, Ops.NOOP) else s for s in u.src)
-      for s in (s for s in srcs if s in live_range):
+      # assign srcs, bypass assign and noop and ignore srcs without live ranges
+      srcs = tuple(s for s in (s.src[0] if s.op in (Ops.ASSIGN, Ops.NOOP) else s for s in u.src) if s in live_range)
+      for s in srcs:
         cons = self.constraints(u, s)
         if s in loc and loc[s] not in cons: loc[s] = alloc(s, cons)
-      # free srcs before assigning destination to coalesce
-      for s in u.src:
+      # free srcs before assigning destination to coalesce when valid
+      # TODO: need to ignore noop and assign here
+      for s in srcs:
+        if u.op is Ops.VECTORIZE: continue
+        if u.op is Ops.LOAD and len(u.src) == 3 and s is not u.src[1]: continue
         if isinstance(self, X86Renderer):
           if u.op is Ops.WHERE and s is not u.src[1]: continue
           if u.op is Ops.MULACC and s is not u.src[0]: continue
@@ -345,11 +348,11 @@ x86_rewrite = PatternMatcher([
    lambda ctx,x,c: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx[c]}*{x.src[0].dtype.itemsize}]"),
   (UPat(Ops.INDEX, name="x"), lambda ctx,x: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx.r[x.src[1]]}*{x.src[0].dtype.itemsize}]"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
-   f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}\ntest {ctx[mask]}, 1\n"
-   f"jz .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
+   f"{ctx.two_address(x, alt)}test {ctx[mask]}, 1\n"
+   f"je .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
   (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[idx]}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x:
-   f"{ctx.ops[x.src[1].dtype][x.op]} {size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ''} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
+   f"{ctx.ops[x.src[1].dtype][x.op]} {size_prefix[x.src[1].dtype.itemsize]} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
   # devectorize/vectorize
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"insertps {ctx[x]}, {ctx[x.src[0]]}, {gep_imm[x.arg[0]]}"),
   (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {vec_imm[i]}" for i,s in enumerate(x.src))),
