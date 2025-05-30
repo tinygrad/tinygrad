@@ -98,8 +98,7 @@ if __name__ == '__main__':
   args = parser.parse_args()
 
   # run eval and exit
-  adaptor = LLaMaAdaptor(model_gen=args.gen, model_size=args.size, quantize=args.quantize,
+  model = LLaMaAdaptor(model_gen=args.gen, model_size=args.size, quantize=args.quantize,
                          checkpoint_path=args.weights, tokenizer_path=args.tokenizer, device="cpu")
-  #results = evaluator.evaluate(adaptor, tasks.get_task_dict(args.eval.split(",")), False, 0, args.limit)
-  results = evaluator.simple_evaluate(model, tasks='gsm8k', device='cuda:0', batch_size=1, limit=2)
+  results = simple_evaluate(model, tasks='gsm8k', device='cuda:0', batch_size=1, limit=2)
   print(json.dumps(results, indent=2))
