@@ -378,8 +378,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def index(self, idx:UOp, valid:UOp|None=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
-    if self._device is None: return UOp.const(self.dtype, b)
-    return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
+    if self._device is not None or self.st is not None: return UOp.metaop(Ops.CONST, self.shape, self.dtype, self._device, b)
+    return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
@@ -411,12 +411,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
-  def valid(self, st:ShapeTracker):
-    assert self.op in {Ops.CONST, Ops.DEFINE_VAR} and any(v.mask is not None for v in st.views), f"attempting to create VALID with {self.op} {st}"
-    from tinygrad.shape.shapetracker import ShapeTracker
-    # NOTE: only VALID has a masked ShapeTracker, the CONST operands are unmasked
-    unmasked_st = ShapeTracker.from_shape(()).reshape((1,)*len(st.shape)).expand(st.shape).to_uop()
-    return UOp(Ops.VALID, dtypes.bool, (st.to_uop(),)).where(self.replace(src=(unmasked_st,)), UOp.const(self.dtype, 0).replace(src=(unmasked_st,)))
+  def valid(self): return UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
   def r(self, op:Ops, axis:tuple[int, ...]):
@@ -477,13 +472,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** from LazyBuffer ***
 
   @staticmethod
-  def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str|tuple[str, ...], arg=None) -> UOp:
+  def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str|tuple[str, ...]|None=None, arg=None) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
     # Tensor const is CONST(VIEW(DEVICE)) -> RESHAPE -> EXPAND
     if op is Ops.CONST:
       assert isinstance(arg, get_args(ConstType)), f"trying to create CONST with {arg=}"
-      return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),),
-                 ShapeTracker.from_shape(())),)).reshape((1,)*len(shape)).expand(shape)
+      return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, () if device is None else (UOp(Ops.DEVICE, arg=device),),
+                 ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape)),))
     # Tensor variable binding is BIND(VAR(VIEW(DEVICE)), CONST(VIEW(DEVICE)))
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
