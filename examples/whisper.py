@@ -231,6 +231,10 @@ def init_whisper(model_name="tiny.en", batch_size=1):
 
 def load_file_waveform(filename):
   waveform, _ = librosa.load(filename, sr=RATE)
+  if waveform.size < N_FFT:
+    pad_len = N_FFT - waveform.size
+    waveform = np.pad(waveform, (0, pad_len), mode='constant')
+
   return waveform
 
 def transcribe_file(model, enc, filename):
