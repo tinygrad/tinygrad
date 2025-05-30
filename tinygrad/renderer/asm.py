@@ -90,7 +90,7 @@ class AsmRenderer(Renderer):
     mem: dict[UOp, str] = {}
     live_at_range: dict[UOp, dict[UOp, str]] = {}
     spilled_at: dict[UOp, int] = {}
-    stack_size: int = 16
+    stack_size: int = 0
     cur_uop: UOp = None
     inst_map: dict[UOp, list[str]] = {}
     # interval in which a var is live meaning its value is needed,
@@ -108,8 +108,8 @@ class AsmRenderer(Renderer):
     def spill(x:UOp):
       nonlocal stack_size
       if x not in mem:
-        mem[x] = -stack_size
         stack_size += 16
+        mem[x] = -stack_size
         inst_map[x].append(f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self.render_mem(mem[x], self.dt(x.dtype))}, {self[x]}")
         spilled_at[x] = i
       loc[x] = mem[x]
@@ -299,7 +299,7 @@ class Arm64Renderer(AsmRenderer):
   def render_reg(self, reg:str, dt:DType) -> str: return reg if dt.itemsize == 8 else arm64_reg_map[reg][dt.itemsize]
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", f"stp x29, x30, [sp, #{-stack_size}]!", "mov x29, sp"] + \
-                      kernel + [f"ldp x29, x30, [sp, #{-stack_size}]!", "ret", "\n"])
+                      kernel + [f"ldp x29, x30, [sp], #{-stack_size}", "ret", "\n"])
 
 x86_gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx", "r10", "r11", "r12", "r13", "r14", "r15"]
 x86_float_regs = ["xmm" + str(i) for i in range(0,16)]
@@ -476,7 +476,7 @@ class X86Renderer(AsmRenderer):
     return self.reg_class(u)
   def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
   def render_imm(self, imm:str) -> str: return imm
-  def render_mem(self, sz:int, dt:DType) -> str: return f"{size_prefix[dt.itemsize]} [rbp {'+' if sz>0 else ''}{sz}]"
+  def render_mem(self, sz:int, dt:DType) -> str: return f"{size_prefix[dt.itemsize]} [rbp {'+' if sz>=0 else ''}{sz}]"
   def render_reg(self, reg:str, dt:DType) -> str: return reg if dt.itemsize == 8 or dtypes.is_float(dt) else x86_reg_map[reg][dt.itemsize]
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", "push rbp", "mov rbp, rsp", f"sub rsp, {stack_size}"] +
