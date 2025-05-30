@@ -58,30 +58,47 @@ class BitNetConfig:
 # ────────────────────────────────────────────────────────────
 
 def unpack_weights(packed: Tensor, target_dtype=dtypes.float32) -> Tensor:
-    """Unpack weights directly on GPU without CPU conversion"""
-    # Get the packed data as tinygrad tensor (stay on current device)
-    if packed.dtype != dtypes.uint8:
-        packed = packed.cast(dtypes.uint8)
+    """
+    Unpack 2-bit weights following HuggingFace's exact implementation.
     
-    # Unpack using tinygrad operations instead of numpy
-    # This avoids the CPU conversion that triggers compilation
-    flat = packed.flatten()
+    Args:
+        packed: Tensor with packed weights [out_features//4, in_features]
+        target_dtype: Target dtype for unpacked weights
+        
+    Returns:
+        Tensor with unpacked ternary weights {-1, 0, 1}
+    """
+    debug(f"unpack_weights: packed.shape={packed.shape}, target_dtype={target_dtype}")
     
-    # Extract 2-bit values directly in tinygrad
-    val0 = (flat & 0x03).cast(dtypes.int8) - 1  # bits 0-1
-    val1 = ((flat >> 2) & 0x03).cast(dtypes.int8) - 1  # bits 2-3  
-    val2 = ((flat >> 4) & 0x03).cast(dtypes.int8) - 1  # bits 4-5
-    val3 = ((flat >> 6) & 0x03).cast(dtypes.int8) - 1  # bits 6-7
+    # Convert to CPU for bit operations, then to numpy
+    packed_np = packed.detach().to("CPU").numpy().astype(np.uint8)
+    packed_shape = packed_np.shape
     
-    # Stack and reshape
-    unpacked = Tensor.stack([val0, val1, val2, val3], dim=1).flatten()
+    # Calculate unpacked shape
+    if len(packed_shape) == 1:
+        original_row_dim = packed_shape[0] * VALUES_PER_ITEM
+        unpacked_shape = (original_row_dim,)
+    else:
+        original_row_dim = packed_shape[0] * VALUES_PER_ITEM
+        unpacked_shape = (original_row_dim, *packed_shape[1:])
     
-    # Reshape to target shape
-    original_shape = list(packed.shape)
-    original_shape[0] *= 4  # Expand first dimension by 4
+    # Unpack using exact HF method
+    unpacked = np.zeros(unpacked_shape, dtype=np.uint8)
     
-    return unpacked.reshape(original_shape).cast(target_dtype)
-
+    for i in range(VALUES_PER_ITEM):
+        start = i * packed_shape[0]
+        end = start + packed_shape[0]
+        mask = 3 << (2 * i)  # 2-bit mask
+        unpacked[start:end] = (packed_np & mask) >> (2 * i)
+    
+    # Convert to ternary {-1, 0, 1}
+    result_np = unpacked.astype(np.float32) - 1.0
+    
+    # Ensure values are exactly {-1, 0, 1}
+    result_np = np.clip(result_np, -1.0, 1.0)
+    
+    debug(f"unpack_weights: result.shape={result_np.shape}")
+    return Tensor(result_np, dtype=target_dtype, device=packed.device, requires_grad=False)
 
 def pack_weights(quantized_weights: Tensor) -> Tensor:
     """
