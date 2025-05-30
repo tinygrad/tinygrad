@@ -31,8 +31,6 @@ class LLaMaAdaptor(LM):
     continuations = []
     for request in tqdm(requests):
       prompt, args = request.args
-      temperature = args.get("temperature", 0.0)
-      max_length = args.get("max_length", self.max_length)
       until = [self.tokenizer.encode(tok) for tok in args.get("until", [])]
       if self.is_chat_model:
         toks = [self.tokenizer.bos_id] + self.encode_message("system", "You are a helpful assistant") + \
@@ -40,8 +38,8 @@ class LLaMaAdaptor(LM):
       else:
         toks = [self.tokenizer.bos_id] + self.tokenizer.encode(prompt)
       start_pos = 0
-      for i in range(max_length):
-        next_tok = self.model(Tensor([toks[start_pos:]]), start_pos, temperature, top_p=0.0).item()
+      for i in range(args.get("max_length", self.max_length)):
+        next_tok = self.model(Tensor([toks[start_pos:]]), start_pos, args.get("temperature", 0.0)).item()
         if next_tok in self.tokenizer.stop_tokens or next_tok in until: break
         start_pos = len(toks)
         toks.append(next_tok)
@@ -62,6 +60,7 @@ if __name__ == '__main__':
   parser.add_argument('--limit', type=int, default=None, help="Limit tests in eval")
   parser.add_argument('--num_fewshot', type=int, default=None, help="Limit tries(starts with 0)")
   parser.add_argument('--model', type=str, default="./weights/LLaMa/", help="Location of the weights")
+  parser.add_argument('--output_path', type=str, default=None, help="Location of the log file")
   args = parser.parse_args()
 
   # run eval and exit
@@ -74,4 +73,7 @@ if __name__ == '__main__':
     task_manager=None,
     limit=args.limit
   )
-  print(json.dumps(results, indent=2))
+  if args.output_path: Path(args.output_path).write_text(json.dumps(results, indent=2))
+  for task_name, val in results["results"].items():
+    print(f"{task_name}:")
+    print("\n".join(f"\t{k:20} | {v}" for k, v in val.items() if k != "alias"))
