@@ -45,7 +45,7 @@ class LLaMaAdaptor(LM):
         toks.append(next_tok)
       continuations.append(self.tokenizer.decode(toks)[len(prompt):])
     return continuations
-  def loglikelihood(self, requests: list[Instance]) -> list[tuple[float, bool]]: raise NotImplementedError() # not needed for gsm8k
+  def loglikelihood(self, requests: list[Instance]) -> list[tuple[float, bool]]: raise NotImplementedError() # needs changes to extra/models/llama.py
   def loglikelihood_rolling(self, requests: list[Instance]) -> list[tuple[float, bool]]: raise NotImplementedError()
 
 if __name__ == '__main__':
@@ -58,7 +58,7 @@ if __name__ == '__main__':
   parser.add_argument('--quantize', type=str, default=None, help="Quantize the weights to int8 or int4 in memory")
   parser.add_argument('--eval', type=str, default="gsm8k_cot_llama", help="Run evaluation")
   parser.add_argument('--limit', type=int, default=None, help="Limit tests in eval")
-  parser.add_argument('--num_fewshot', type=int, default=None, help="Limit tries(starts with 0)")
+  parser.add_argument('--num_fewshot', type=int, default=None, help="Limit tries(starts at 0)")
   parser.add_argument('--model', type=str, default="./weights/LLaMa/", help="Location of the weights")
   parser.add_argument('--output_path', type=str, default=None, help="Location of the log file")
   args = parser.parse_args()
