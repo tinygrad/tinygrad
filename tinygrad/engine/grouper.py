@@ -370,7 +370,7 @@ add_buffer_ops = PatternMatcher([
   # passthrough ASSIGN
   (UPat(Ops.ASSIGN, name="x"), lambda x: x.src[1]),
   # VALID
-  (UPat(Ops.VIEW, src=(UPat.cvar(),), name="view"), lambda view: UOp.valid(view)),
+  (UPat(Ops.VIEW, src=(UPat.cvar(),), name="self"), UOp.valid),
 ])
 
 def check_load_st(glbl:UOp, view:UOp):
