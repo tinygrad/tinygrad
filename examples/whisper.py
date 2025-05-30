@@ -14,6 +14,8 @@ import numpy as np
 import librosa
 import tiktoken
 from tiktoken import Encoding
+import functools
+import os
 
 class CacheDict(collections.OrderedDict):
   """Dict with a limited length, ejecting LRUs as needed."""
@@ -175,6 +177,22 @@ HOP_LENGTH = 160
 N_MELS = 80
 FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
 
+@functools.lru_cache(maxsize=16)
+def get_mel_filters(n_mels: int=80, n_fft: int=400, sr: int=16000) -> np.ndarray:
+    """
+    Cache the mel filterbank matrix for projecting STFT into a Mel spectrogram.
+    This avoids recomputing it for every audio sample and speeds up processing.
+    """
+    cache_dir = os.path.dirname(os.path.abspath(__file__))
+    filters_path = os.path.join(cache_dir, f"mel_filters_{n_mels}_{n_fft}_{sr}.npz")
+    if os.path.exists(filters_path):
+        with np.load(filters_path, allow_pickle=False) as f:
+            return f['mel_filters']
+    else:
+        filters = librosa.filters.mel(sr=sr, n_fft=n_fft, n_mels=n_mels)
+        np.savez_compressed(filters_path, mel_filters=filters)
+        return filters
+
 def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
   """
   :param waveforms: A list of possibly variable length 16000Hz audio samples
@@ -202,7 +220,10 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
 
   stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
   magnitudes = np.absolute(stft[..., :-1]) ** 2
-  mel_spec = librosa.filters.mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
+  
+  # Use cached mel filters instead of computing them every time
+  mel_filters_matrix = get_mel_filters(N_MELS, N_FFT, RATE)
+  mel_spec = mel_filters_matrix @ magnitudes
 
   log_spec = np.log10(np.clip(mel_spec, 1e-10, None))
   log_spec = np.maximum(log_spec, log_spec.max((1,2), keepdims=True) - 8.0)
@@ -277,8 +298,8 @@ def load_file_waveform(filename):
   waveform, _ = librosa.load(filename, sr=RATE)
   return waveform
 
-def transcribe_file(model, enc: Encoding, filename, output_fh, beam=False):
-  return transcribe_waveform(model, enc, [load_file_waveform(filename)], output_fh, beam=beam)
+def transcribe_file(model, enc: Encoding, filename, output_fh, beam=False, no_speech_threshold=0.8):
+  return transcribe_waveform(model, enc, [load_file_waveform(filename)], output_fh, beam=beam, no_speech_threshold=no_speech_threshold)
 
 def compression_ratio(text) -> float:
   text_bytes = text.encode("utf-8")
@@ -481,7 +502,7 @@ def get_start_tokens(enc: Encoding, is_multilingual: bool=False):
   return start_tokens
 
 
-def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, output_fh, truncate=False, beam=False):
+def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, output_fh, truncate=False, beam=False, no_speech_threshold=0.8):
   log_spec = prep_audio(waveforms, model.batch_size, truncate)
   nsample = model.decoder.max_tokens_to_sample
   eot = enc._special_tokens["<|endoftext|>"]
@@ -526,15 +547,29 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
       print(f"Decoder output: {text=}")
       compression = compression_ratio(text)
       print(f"\033[33m{compression=}, {selected_avg_prob=}\033[0m")
+      
+      is_no_speech = selected_avg_prob < -1.0 or (compression < 1.1 and selected_avg_prob < -0.1 * no_speech_threshold)
       if compression >= 2.4:
-        print("Too repetivie, resample")
+        print("Too repetitive, resample")
         continue
-      if selected_avg_prob < -1.0:
-        print("Avg log prob too low, resample")
-        continue
+        
+      if is_no_speech:
+        print(f"No speech detected (avg_prob={selected_avg_prob}, threshold={-0.1 * no_speech_threshold}), skipping segment")
+        start_time += 30
+        ctx = np.array(start_tokens)
+        break
+        
       segments = list(segment_and_seek(tokens, enc, start_time))
+      valid_segments = [segment for segment in segments if segment.text.strip()]
+      
+      if not valid_segments:
+        print("No speech segments found, skipping to next segment")
+        start_time += 30
+        ctx = np.array(start_tokens)
+        break
+      
       context_for_next = []
-      for segment in segments:
+      for segment in valid_segments:
         text = f"{format_time(int(segment.start))} -> {format_time(int(segment.end))}: {segment.text}"
         print(f"\033[31m{text}\033[0m")
         output_fh.write(f"{text}\n")
@@ -544,14 +579,20 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
           "start": segment.start,
           "end": segment.end
         })
-      start_time = segment.end
+      
+      if valid_segments:start_time = valid_segments[-1].end
+      else: start_time += 30
       break
     else:
       context_for_next = np.array([])
       start_time += 30
       ctx = np.array(start_tokens)
       continue
-    ctx = np.array([enc._special_tokens['<|startofprev|>']]+context_for_next[-nsample+len(start_tokens):]+start_tokens)
+    
+    # Only set context for next iteration if we have valid segments
+    if context_for_next:
+      ctx = np.array([enc._special_tokens['<|startofprev|>']]+context_for_next[-nsample+len(start_tokens):]+start_tokens)
+    else:ctx = np.array(start_tokens)
   return transcribed
 
 CHUNK = 1600
@@ -573,12 +614,13 @@ if __name__ == "__main__":
   parser.add_argument("--model", type=str, default="tiny.en", help="name of model")
   parser.add_argument("--audio", type=str, required=True, help="path to an mp3 audio file")
   parser.add_argument("--beam", action=argparse.BooleanOptionalAction, default=True, help="Whether to use beam decoding")
+  parser.add_argument("--no_speech_threshold", type=float, default=0.6, help="Threshold for determining no speech")
   args = parser.parse_args()
   model, enc = init_whisper(args.model, batch_size=1)
 
   if len(sys.argv) > 1:
     with open("transcribed.txt", "w") as output_fh:
-      transcribed = transcribe_file(model, enc, args.audio, output_fh, args.beam)
+      transcribed = transcribe_file(model, enc, args.audio, output_fh, beam=args.beam, no_speech_threshold=args.no_speech_threshold)
       with open("transcribed.json", "w") as output_fh2:
         json.dump(transcribed, output_fh2, indent=2)
 
