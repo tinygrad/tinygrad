@@ -37,13 +37,14 @@ class LLaMaAdaptor(LM):
           self.encode_message("user", prompt) + self.encode_role("assistant")
       else:
         toks = [self.tokenizer.bos_id] + self.tokenizer.encode(prompt)
+      prompt_len = len(toks)
       start_pos = 0
       for i in range(args.get("max_length", self.max_length)):
         next_tok = self.model(Tensor([toks[start_pos:]]), start_pos, args.get("temperature", 0.0)).item()
         if next_tok in self.tokenizer.stop_tokens or next_tok in until: break
         start_pos = len(toks)
         toks.append(next_tok)
-      continuations.append(self.tokenizer.decode(toks)[len(prompt):])
+      continuations.append(self.tokenizer.decode(toks[prompt_len:]))
     return continuations
   def loglikelihood(self, requests: list[Instance]) -> list[tuple[float, bool]]: raise NotImplementedError() # needs changes to extra/models/llama.py
   def loglikelihood_rolling(self, requests: list[Instance]) -> list[tuple[float, bool]]: raise NotImplementedError()
