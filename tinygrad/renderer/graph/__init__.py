@@ -5,7 +5,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from tinygrad.uop.ops import UOp, Variable, Ops
 from tinygrad.renderer import Renderer
-from tinygrad.nn.state import get_state_dict
+from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.realize import lower_schedule, ExecItem, CompiledRunner
@@ -23,12 +23,11 @@ class GraphRenderer(Renderer):
     assert len(get_state_dict(args)) == len([x for x in args if isinstance(x, Tensor)]) and len(get_state_dict(kwargs)) == 0, \
       "All Tensor (and Variable) function arguments must be positional, whose order will match the order of the rendered function's arguments."
     self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
-    Tensor.rand(1).realize() # Don't include host-->GPU BufferCopy of random seeds in our captured graph
+    Tensor.rand(1).realize() # Don't capture host-->GPU BufferCopy of random seeds/counter
 
     # Detect Tensors that are new or mutated as a result of calling fxn
     original: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in all_tensors if (tref:=t()) is not None}
-    with Context(BAN_REALIZE=1):
-      ret_tensors: list[Tensor] = [*filter(lambda t:isinstance(t, Tensor), r if isinstance(r:=fxn(*args, **kwargs), (list, tuple)) else [r])]
+    with Context(BAN_REALIZE=1): ret_tensors = get_parameters(fxn(*args, **kwargs))
     postcall: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in all_tensors if (tref:=t()) is not None}
     affected: dict[Tensor, dict] = {t: t.lazydata.toposort() for t in postcall if t not in original or original[t].key != postcall[t].key}
     assert len(affected), "The exported function did not create or change any Tensors, no graph can be captured"
@@ -70,7 +69,7 @@ class GraphRenderer(Renderer):
     assert set(var_vals.keys()) == set(u.unbind()[0] for u in self.inputs if u.op is Ops.BIND), "Variables must be positional arguments."
 
     self.eis: list[ExecItem] = []
-    del original, postcall, r, t, ret_tensors, sink, remove_assign_map, affected
+    del original, postcall, ret_tensors, sink, remove_assign_map, affected, t
     for si, ei in lower_schedule(memory_planner(schedule)):
       assert isinstance(ei.prg, CompiledRunner), f"Export only supported for CompiledRunner\nei.prg: {ei.prg}\n\nei.bufs: {ei.bufs}"
       for buf in ei.bufs: assert buf is not None and buf.device == device, "All compute and returned Tensor(s) must be on the same device"
