@@ -18,7 +18,7 @@ print(f"[INIT] Using device: {Device.DEFAULT}")
 
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
-from extra.models.bitnet import BitNetConfig, BitNetForCausalLM, convert_from_huggingface, build_transformer, debug, sample
+from extra.models.bitnet import BitNetConfig, BitNetForCausalLM, build_transformer, debug, sample
 from extra.models.llama import fix_bf16
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters, gguf_load
 from tinygrad import Tensor, dtypes, nn, Context, GlobalCounters
@@ -90,18 +90,17 @@ ALPHA_F     = 0.0  # Frequency penalty (unchanged)
 ALPHA_P     = 0.0  # Presence penalty (unchanged)
 
 
-last_seen_toks = []
-def prefill(model, prompt_ids: List[int], past=None):
-  if not prompt_ids:
-    print("[PREFILL] Empty prompt_ids, returning past cache")
-    return past
-  print(f"[PREFILL] Processing {len(prompt_ids)} tokens: {prompt_ids}")
-  prompt_ids = Tensor([prompt_ids], device=Device.DEFAULT)
-  print(f"[PREFILL] Prompt tensor shape: {prompt_ids.shape}")
-  # model returns (logits, new_cache) when no sample_args are given
-  logits, past = model(prompt_ids, past)
-  print(f"[PREFILL] Completed with logits shape: {logits.shape if hasattr(logits, 'shape') else 'N/A'}, cache size: {len(past) if past is not None else 'None'}")
-  return past
+def prefill(model, prompt_ids, past_key_values=None):
+    """Prefill model with prompt tokens."""
+    if not prompt_ids:
+        return past_key_values
+    
+    debug(f"Prefill: processing {len(prompt_ids)} tokens")
+    prompt_tensor = Tensor([prompt_ids], device=model.device)
+    
+    _, past_key_values = model(prompt_tensor, past_key_values)
+    
+    return past_key_values
 
 
 if __name__ == "__main__":
