@@ -73,6 +73,7 @@ class AsmRenderer(Renderer):
   def render_imm(self, imm:str): raise NotImplementedError("arch specific")
   def render_mem(self, sz:int, dt:DType): raise NotImplementedError("arch specific")
   def render_reg(self, reg:str, dt:DType): raise NotImplementedError("arch specific")
+  def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
   def dt(self, d:DType) -> DType: return dtypes.uint64 if isinstance(d, PtrDType) else d
   def reg_class(self, x:UOp) -> list[str]: return self.regs[self.dt(x.dtype).scalar()]
   def __getitem__(self, x:UOp) -> str: # hacky helper
@@ -218,9 +219,9 @@ def arm64_cflag(x:UOp) -> str: return "ne" if x.op is Ops.CMPNE else "lo" if x.s
 arm64_rewrite = PatternMatcher([
   # loads/stores/movs
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
-   f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}\ntst {ctx[mask]}, #1\n"
+   f"{ctx.two_address(x, alt)}tst {ctx[mask]}, #1\n"
    f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
-  (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, ={ctx[idx]}"),
+  (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, ={ctx[idx][1:]}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {ctx[x.src[1]]}, [{ctx[x.src[0]]}]"),
   # devectorize/vectorize
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"fmov {ctx[x]}, {ctx[x.src[0]]}.{arm64_vec_suffix[x.src[0].dtype.itemsize]}[{x.arg[0]}]"),
@@ -254,7 +255,8 @@ def arm64_load_consts(x:UOp) -> UOp|None:
   for s in x.src:
     if s.op is Ops.CONST:
       # NOTE: apparently just loading the consts works cause the assembler generates the correct instructions
-      if dtypes.is_float(s.dtype): s = s.load(dtype=s.dtype)
+      if s.dtype is dtypes.float32: s = s.load(dtype=dtypes.int32).bitcast(dtypes.float32)
+      elif s.dtype is dtypes.float64: s = s.load(dtype=dtypes.int64).bitcast(dtypes.float64)
       elif abs(s.arg) > (2 ** 12) - 1: s = s.load(dtype=s.dtype)
     nsrc.append(s)
   return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
@@ -474,7 +476,6 @@ class X86Renderer(AsmRenderer):
     # float cmp requires nan check, to avoid reserving temp reg we constrain dest to regs that have a high 8 bit portion
     if u.op in (Ops.CMPLT, Ops.CMPNE) and u.src[0].dtype in dtypes.floats: return ["rax", "rbx", "rcx", "rdx"]
     return self.reg_class(u)
-  def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
   def render_imm(self, imm:str) -> str: return imm
   def render_mem(self, sz:int, dt:DType) -> str: return f"{size_prefix[dt.itemsize]} [rbp {'+' if sz>=0 else ''}{sz}]"
   def render_reg(self, reg:str, dt:DType) -> str: return reg if dt.itemsize == 8 or dtypes.is_float(dt) else x86_reg_map[reg][dt.itemsize]
