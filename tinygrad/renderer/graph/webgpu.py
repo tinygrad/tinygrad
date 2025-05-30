@@ -81,8 +81,9 @@ class WebGPUJSRenderer(GraphRenderer):
 
     # render setup of WebGPU buffers
     state_dict, empty_buf_allocs, state_buf_allocs = ["const stateDict = {};"], [], []
+    state_names = {cast(Buffer, t.lazydata.base.realized): name for name,t in self.state_dict.items()}
     for buf, name in self.bufs.items():
-      if buf in self.impl_ins: state_buf_allocs.append(f'const {name} = stateDict["{self.impl_ins[buf]}"] = {alloc(str(buf.nbytes), "state")};')
+      if buf in state_names: state_buf_allocs.append(f'const {name} = stateDict["{state_names[buf]}"] = {alloc(str(buf.nbytes), "state")};')
       else: empty_buf_allocs.append(f'const {name} = {alloc(str(buf.nbytes), "empty")};')
     sym_uniforms = [f'const {name} = {alloc("4", "uniform")};' for name in sym_bufs.values()]
     # representing Infinity with a runtime buffer is the most correct way known, see https://github.com/tinygrad/tinygrad/pull/10179

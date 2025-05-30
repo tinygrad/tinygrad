@@ -22,8 +22,7 @@ class TestExportWebGPU(unittest.TestCase):
       name_t_u_b += str(t) + "\n"
       name_t_u_b += str(t.lazydata) + "\n"
       name_t_u_b += str(t.lazydata.base.realized) + "\n\n"
-    assert len(state_dict) == 1, name_t_u_b
-    #self.assertEqual(len(state_dict), 1)
+    self.assertEqual(len(state_dict), 1, name_t_u_b)
     self.assertEqual(list(state_dict.values())[0].tolist(), [0])
     self.assertEqual(model.w.tolist(), [7])
 
