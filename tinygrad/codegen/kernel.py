@@ -454,7 +454,7 @@ class Kernel:
       if op.op in GroupOp.Buffer and op in self.bufs:
         st_uop = self.sts[self.bufs.index(op)].to_uop()
         # NOTE: if CONST got masked after applying opts, we create a new VALID
-        if op.op is Ops.CONST and any(v.mask is not None for v in unwrap(st_uop.st).views): return op.valid(unwrap(st_uop.st))
+        if op.op is Ops.CONST and any(v.mask is not None for v in unwrap(st_uop.st).views): return op.view(st_uop.arg).valid()
         # otherwise we just replace the VIEW source
         return ret.replace(src=(st_uop,)) if len(op.src) == 1 else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
       if op.op is Ops.SINK:

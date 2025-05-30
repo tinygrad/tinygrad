@@ -98,6 +98,17 @@ class TestSchedule(unittest.TestCase):
       run_schedule(check_schedule(xt, 2))
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
 
+  @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
+  def test_add_chain_buffers(self):
+    N = 31
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+      bufs = [Tensor(i).reshape((1,)).contiguous().realize() for i in range(N)]
+    for X in range(1,N):
+      root = bufs[0]
+      for i in range(1,N,X):
+        root = root + functools.reduce(lambda a,b:a+b, bufs[i:i+X])
+      self.assertEqual(root.item(), sum(range(N)))
+
   @unittest.expectedFailure # TODO: failing because of can_chase
   def test_indexing_scalars_multiple_dims(self):
     X = Tensor.randn(2, 3).realize()
@@ -1316,7 +1327,7 @@ class TestSchedule(unittest.TestCase):
     b = r.sum(0) * 4
     c = r.sum(1) * 2
     schedule = check_schedule([b, c], 3)
-    self.assertIs(schedule[0].ast.src[0].src[2].op, Ops.ADD)
+    self.assertIs(store_val(schedule[0]).op, Ops.ADD)
 
   def test_multireduce_simple_chase(self):
     Tensor.manual_seed(0)
@@ -1339,7 +1350,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * d
     schedule = check_schedule([d, e], 3)
-    self.assertIs(schedule[0].ast.src[0].src[2].op, Ops.ADD)
+    self.assertIs(store_val(schedule[0]).op, Ops.ADD)
 
   def test_multireduce_push_permute_chase(self):
     Tensor.manual_seed(0)
@@ -1349,7 +1360,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * (d + a).sum(2)
     schedule = check_schedule([d, e], 3) # make sure it doesn't fuse
-    self.assertIs(schedule[0].ast.src[0].src[2].op, Ops.ADD)
+    self.assertIs(store_val(schedule[0]).op, Ops.ADD)
     run_schedule(schedule)
     np.testing.assert_allclose(d.numpy(), (a.numpy().sum(2) + b.numpy()).T * 4, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(e.numpy(), (a.numpy().sum(2) + b.numpy()) * (d.numpy() + a.numpy()).sum(2), atol=1e-4, rtol=1e-4)
@@ -1361,7 +1372,7 @@ class TestSchedule(unittest.TestCase):
     r = a.sum(1) + c
     d = r[:4] * b
     schedule = check_schedule(d, 2)
-    self.assertIs(schedule[0].ast.src[0].src[2].op, Ops.ADD)
+    self.assertIs(store_val(schedule[0]).op, Ops.ADD)
 
   def test_multireduce_push_shrink_chase(self):
     Tensor.manual_seed(0)
@@ -1373,7 +1384,7 @@ class TestSchedule(unittest.TestCase):
     out = r[:4] * b + d.sum(1)[:4]
     # schedule = check_schedule(out, 2)
     schedule = check_schedule(out, 3)
-    self.assertIs(schedule[0].ast.src[0].src[2].op, Ops.ADD)
+    self.assertIs(store_val(schedule[0]).op, Ops.ADD)
     run_schedule(schedule)
     np.testing.assert_allclose(out.numpy(), (a.numpy().sum(1) + c.numpy())[:4] * b.numpy() + d.numpy().sum(1)[:4], atol=1e-4, rtol=1e-4)
 
@@ -1381,7 +1392,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(16, 16)
     b = (a.sum(0) + a.max(1)) + 2
     schedule = check_schedule(b, 2)
-    self.assertIs(schedule[0].ast.src[0].src[2].op, Ops.REDUCE_AXIS)
+    self.assertIs(store_val(schedule[0]).op, Ops.REDUCE_AXIS)
 
   def test_multireduce_midreduce_nochase(self):
     Tensor.manual_seed(0)
@@ -1389,7 +1400,7 @@ class TestSchedule(unittest.TestCase):
     b = (a.sum(0)+a.max(0) + a.max(1)+a.sum(1)) + 2
     # schedule = check_schedule(b, 2)
     schedule = check_schedule(b, 4)
-    self.assertIs(schedule[0].ast.src[0].src[2].op, Ops.REDUCE_AXIS)
+    self.assertIs(store_val(schedule[0]).op, Ops.REDUCE_AXIS)
     run_schedule(schedule)
     np.testing.assert_allclose(b.numpy(), a.numpy().sum(0)+a.numpy().max(0) + a.numpy().max(1)+a.numpy().sum(1)+2, atol=1e-4, rtol=1e-4)
 
@@ -1878,8 +1889,8 @@ class TestIndexing(unittest.TestCase):
     a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).contiguous().to("CPU")
     sched = self.check_schedule(a, 2) # NOTE: there is a contiguous between REDUCE_AXIS and COPY
     self.assertIs(sched[2].ast.op, Ops.COPY)
-    self.assertIs(sched[1].ast.src[0].src[2].op, Ops.LOAD)
-    self.assertIs(sched[0].ast.src[0].src[2].op, Ops.ADD)
+    self.assertIs(store_val(sched[1]).op, Ops.LOAD)
+    self.assertIs(store_val(sched[0]).op, Ops.ADD)
     np.testing.assert_equal(a.numpy(), [[[0, 0], [1, 1]], [[2, 2], [3, 3]]])
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
