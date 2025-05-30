@@ -548,50 +548,12 @@ class TestLinearizer(unittest.TestCase):
     expected = 1/np.exp2(x.numpy() - x.numpy().max(axis=-1, keepdims=True)).sum(axis=-1, keepdims=True).reshape(4,1,1)
     helper_linearizer_ast(sink, [x], wanna_output=[expected])
 
-  # *** buildup to fused indexing
-  @unittest.skipIf(CI, "very slow because of recomputing")
-  def test_arange_expanded(self):
-    # Tensor.arange(16384) expanded such that output shape is (4, 16384, 256, 1)
-    # basically it's pushing the expand through this reduce:
-    tiny = Tensor.arange(16384).reshape(16384, 1).expand(4, 16384, 256).reshape(4, 16384, 256, 1)
-    real_arange = np.broadcast_to(np.arange(16384).reshape(16384, 1), (4, 16384, 256)).reshape(4, 16384, 256, 1)
-    # NOTE: this is stupidly recomputing because it's not fused, but it proves a point.
-    arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), \
-        View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
-    arange_input_st = arange_input_st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
-    arange_axis = (3,)
-    arange = UOp(Ops.REDUCE_AXIS, dtypes.int, (ast_const(dtypes.int, 1, st=arange_input_st),), (Ops.ADD, arange_axis))
-    output_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
-    out = arange+ast_const(dtypes.int, -1, output_shape)
-    store = UOp(Ops.STORE, src=(UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0), ShapeTracker.from_shape(output_shape).to_uop(), out))
-    sink = UOp(Ops.SINK, src=(store,))
-    helper_linearizer_ast(sink, [], wanna_output=[real_arange])
-    with Context(DEBUG=0, NOOPT=0): np.testing.assert_equal(tiny.numpy(), real_arange)
-
   @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "very slow")
   def test_indexing_multireduce(self):
-    g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
-    g2 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=2)
-    arange_input_st = ShapeTracker(views=(View(shape=(16385, 32767), strides=(0, 0), offset=0, mask=((0, 16385), (16383, 32767)), contiguous=False), \
-        View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
-    # TODO: do this arange broadcast in the scheduler
-    arange_input_st = arange_input_st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
-    arange_axis = (3,)
-    arange = UOp(Ops.REDUCE_AXIS, dtypes.int, (ast_const(dtypes.int, 1, st=arange_input_st),), (Ops.ADD, arange_axis))
-    arange_out_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
-    arange = arange+ast_const(dtypes.int, -1, arange_out_shape)
-    # p2: the indexing
     dataset = Tensor.rand(16384, 256).realize()
-    data1 = (g1, ShapeTracker.from_shape(dataset.shape).reshape((1, 16384, 256, 1)).expand(arange_out_shape).to_uop())
     idxs = Tensor([0,3,5,6]).realize()
-    data2 = (g2, ShapeTracker.from_shape((4,)+(1,)*(len(arange_out_shape)-1)).expand(arange_out_shape).to_uop())
-    arange_eq = arange.alu(Ops.CMPNE, UOp(Ops.LOAD, dtypes.int, data2)).alu(Ops.CMPNE, ast_const(dtypes.bool, True, arange_out_shape))
-    reduce_input = UOp(Ops.LOAD, dataset.dtype, data1)*UOp(Ops.CAST, dataset.dtype.scalar(), src=(arange_eq,))
-    out_axis = (1,)
-    out = UOp(Ops.REDUCE_AXIS, reduce_input.dtype, (reduce_input,), (Ops.ADD, out_axis))
-    output_shape = tuple(1 if i in out_axis else s for i,s in enumerate(arange_out_shape))
-    store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape(output_shape).to_uop(), out))
-    sink = UOp(Ops.SINK, src=(store,))
+    with Context(FUSE_ARANGE=1):
+      sink = dataset[idxs].contiguous().kernelize().lazydata.base.src[1].arg.ast
     real_index = dataset.numpy()[idxs.numpy()].reshape(4, 1, 256, 1)
     helper_linearizer_ast(sink, [dataset, idxs], wanna_output=[real_index])
 
