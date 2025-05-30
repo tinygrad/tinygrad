@@ -27,7 +27,7 @@ class FileIOInterface:
     if hasattr(self, 'fd'): os.close(self.fd)
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset):
-    x = libc.mmap(start, sz, prot, flags, 66, offset)
+    x = libc.mmap(start, sz, prot, flags, self.fd, offset)
     if x == 0xffffffffffffffff: raise OSError(f"Failed to mmap {sz} bytes at {hex(start)}: {os.strerror(ctypes.get_errno())}")
     return x
   def read(self, size=None, binary=False, offset=None):
