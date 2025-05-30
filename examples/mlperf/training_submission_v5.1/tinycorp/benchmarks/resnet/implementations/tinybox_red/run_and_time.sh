@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e  # Exit on any error
+set -o pipefail  # Make pipeline fail if any command fails
 
 export PYTHONPATH="." AMD=1
 export MODEL="resnet"

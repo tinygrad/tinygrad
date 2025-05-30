@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e  # Exit on any error
+set -o pipefail  # Make pipeline fail if any command fails
 
 export PYTHONPATH="." NV=1
 export MODEL="retinanet"
