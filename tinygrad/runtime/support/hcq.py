@@ -26,7 +26,9 @@ class FileIOInterface:
   def __del__(self):
     if hasattr(self, 'fd'): os.close(self.fd)
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
-  def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, self.fd, offset)
+  def mmap(self, start, sz, prot, flags, offset):
+    if libc.mmap(start, sz, prot, flags, self.fd, offset) == 0xffffffffffffffff:
+      raise OSError(f"Failed to mmap {size} bytes at {hex(addr)}: {os.strerror(os.errno)}")
   def read(self, size=None, binary=False, offset=None):
     if offset is not None: self.seek(offset)
     with open(self.fd, "rb" if binary else "r", closefd=False) as file: return file.read(size)
@@ -36,7 +38,9 @@ class FileIOInterface:
   def listdir(self): return os.listdir(self.path)
   def seek(self, offset): os.lseek(self.fd, offset, os.SEEK_SET)
   @staticmethod
-  def anon_mmap(start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, -1, offset)
+  def anon_mmap(start, sz, prot, flags, offset):
+    if libc.mmap(start, sz, prot, flags, -1, offset) == 0xffffffffffffffff:
+      raise OSError(f"Failed to mmap {size} bytes at {hex(addr)}: {os.strerror(os.errno)}")
   @staticmethod
   def munmap(buf, sz): return libc.munmap(buf, sz)
   @staticmethod
