@@ -130,12 +130,12 @@ spec = PatternMatcher([
   (UPat(Ops.VALID, dtypes.bool, (UPat(Ops.VIEW),)), lambda: True),
   (UPat(Ops.CONST, name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
 
-  # early LOAD has a <buf, shapetracker, store?>
-  (UPat(Ops.LOAD, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(Ops.VIEW))), lambda: True),
-  (UPat(Ops.LOAD, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(Ops.VIEW), UPat(Ops.STORE))), lambda: True),
+  # early LOAD has a <bufview, store?>
+  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)),)),)), lambda: True),
+  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)),)), UPat(Ops.STORE))), lambda: True),
 
-  # early STORE has a <buf, shapetracker, val>
-  (UPat(Ops.STORE, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(Ops.VIEW), UPat())), lambda: True),
+  # early STORE has a <bufview, val>
+  (UPat(Ops.STORE, src=(UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)),)), UPat())), lambda: True),
 
   # **** new style load/store ****
 
@@ -204,6 +204,7 @@ ast_spec = PatternMatcher([
   # shapes must have either 1 or n in each dimension
   (UPat(Ops.SINK, src=UPat(Ops.STORE), name="sink"), verify_sink_dims),
   # VIEW can only exist in the edges
+  (UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL),))), lambda: True),
   (UPat(Ops.VIEW, name="view"), lambda view: len(view.src) == 0),
   # all parent UOps must have the same shape
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: all_same([x.shape for x in root.src if x.st is not None])),

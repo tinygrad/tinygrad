@@ -92,7 +92,7 @@ def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_
 def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
   bufsts: defaultdict[int, list[UOp]] = defaultdict(list)
   for x in lin.bufs:
-    if x.src[0].op is Ops.DEFINE_GLOBAL: bufsts[x.src[0].arg].append(x)
+    if x.src[0].base.op is Ops.DEFINE_GLOBAL: bufsts[x.src[0].base.arg].append(x)
   # TODO: Nones are staying in here if buffers are optimized out!
   # TODO: add a test for this
   rawbufs: list[Optional[Buffer]] = [None]*(max(bufsts)+1)

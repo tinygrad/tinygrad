@@ -1994,7 +1994,8 @@ class TestIndexing(unittest.TestCase):
 
 @track_rewrites(named=True)
 def swizzle_rewrite(u:UOp) -> UOp: return graph_rewrite(graph_rewrite(u, view_left), view_right)
-def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op is not Ops.BUFFER])
+def swizzle_cnt(u:UOp) -> int:
+  return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL}])
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
@@ -2096,7 +2097,7 @@ class TestSwizzle(unittest.TestCase):
     run_schedule(check_schedule(t, 3))
     np.testing.assert_equal(t.numpy(), [[0.5, 0.5], [0.5, 0.5], [0., 0.]])
 
-def store_val(si:ScheduleItem): return si.ast.src[0].src[2]
+def store_val(si:ScheduleItem): return si.ast.src[0].src[1]
 zero_pm = UPat(Ops.CONST, arg=0)
 class TestView(unittest.TestCase):
   def test_all_masked_out(self):
@@ -2252,7 +2253,7 @@ class TestConst(unittest.TestCase):
     a = Tensor.ones((4,)).pad((1, 1)).contiguous()
     sched = a.schedule()
     print(sched[0].ast)
-    const_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat.where(UPat(Ops.VALID), UPat.cvar("x"), UPat(Ops.CONST, arg=0))),))
+    const_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat.where(UPat(Ops.VALID), UPat.cvar("x"), UPat(Ops.CONST, arg=0))),))
     self.assertEqual(len(const_ast_pattern.match(sched[0].ast, {})), 1)
     run_schedule(sched)
     self.assertListEqual(a.tolist(), [0, 1, 1, 1, 1, 0])
@@ -2261,7 +2262,7 @@ class TestConst(unittest.TestCase):
     a = Tensor.ones((4,)).contiguous()
     sched = a.schedule()
     print(sched[0].ast)
-    const_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(Ops.CONST)),))
+    const_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(Ops.CONST)),))
     self.assertEqual(len(const_ast_pattern.match(sched[0].ast, {})), 1)
     run_schedule(sched)
     self.assertListEqual(a.tolist(), [1, 1, 1, 1])
