@@ -23,24 +23,19 @@ class GraphRenderer(Renderer):
     assert len(get_state_dict(args)) == len([x for x in args if isinstance(x, Tensor)]) and len(get_state_dict(kwargs)) == 0, \
       "All Tensor (and Variable) function arguments must be positional, whose order will match the order of the rendered function's arguments."
     self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
-    Tensor.rand(1).realize() # move random seeds and counter onto device so our exported fxn doesn't have to do it
+    Tensor.rand(1).realize() # Don't include host-->GPU BufferCopy of random seeds in our captured graph
 
-    # calculate the diff in global Tensor lazydata state caused by fxn
-    original_uops: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in all_tensors if (tref:=t()) is not None}
+    # Detect Tensors that are new or mutated as a result of calling fxn
+    original: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in all_tensors if (tref:=t()) is not None}
     with Context(BAN_REALIZE=1):
       ret_tensors: list[Tensor] = [*filter(lambda t:isinstance(t, Tensor), r if isinstance(r:=fxn(*args, **kwargs), (list, tuple)) else [r])]
-    postcall_uops: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in all_tensors if (tref:=t()) is not None}
-
-    # diff contains only new or mutated Tensors
-    diff: dict[Tensor, dict] = dict()
-    for t in postcall_uops:
-      if t not in original_uops or original_uops[t].key != postcall_uops[t].key:
-        diff[t] = t.lazydata.toposort()
-    assert len(diff), "The exported function did not create or change any Tensors, no graph can be captured"
-
-    device = ret_tensors[0].device if ret_tensors else list(diff)[0].device
+    postcall: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in all_tensors if (tref:=t()) is not None}
+    affected: dict[Tensor, dict] = {t: t.lazydata.toposort() for t in postcall if t not in original or original[t].key != postcall[t].key}
+    assert len(affected), "The exported function did not create or change any Tensors, no graph can be captured"
+    device = next(iter(affected)).device
     if not isinstance(device, str): raise RuntimeError(f"Multiple devices not supported: {device}")
 
+    # For each implicit input Tensor, execute the portion of its UOp graph that existed before calling fxn
     self.impl_ins: dict[Buffer, str] = dict()
     ctr = itertools.count()
     exported_data: dict[Tensor, dict] = {}
@@ -48,8 +43,8 @@ class GraphRenderer(Renderer):
     if tensor_names: all_names.update(tensor_names)
     name_lookup = {v:k for k,v in all_names.items()} if all_names else {}
     # realize implicit inputs to fxn
-    for t, u in original_uops.items():
-      if any(u.base in toposort for toposort in diff.values()):
+    for t, u in original.items():
+      if any(u.base in toposort for toposort in affected.values()):
         (dummy:=Tensor(1)).lazydata = u
         if (realized_u := dummy.realize().lazydata) not in self.inputs:
           self.impl_ins[cast(Buffer, realized_u.base.realized)] = name = f"buf_{next(ctr)}"
@@ -58,25 +53,24 @@ class GraphRenderer(Renderer):
       del u # for memory planning
 
     # TODO: does scheduling always respect chronological order of assigns, e.g. when a buffer is mutated in one branch and used in another?
-    sink = UOp.sink(*[t.lazydata.base for t in diff])
+    sink = UOp.sink(*[t.lazydata.base for t in affected])
     remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.ASSIGN}
     self.outputs: list[UOp] = [remove_assign_map[t.lazydata.base] for t in ret_tensors]
     self.bufs: dict[Buffer, str] = {cast(Buffer, u.base.buffer): f"input_{i}" for i, u in enumerate(self.inputs) if u.base.op is Ops.BUFFER}
     self.bufs.update({cast(Buffer, u.base.buffer): f"output_{i}" for i, u in enumerate(self.outputs)})
 
-    self.eis: list[ExecItem] = []
-
     # assigns on implicit input can cause the final buffer to be different than the original buffer, so we need to copy the data back
     self.extra_copies: list[tuple[Buffer, Buffer]] = []
-    for t in diff:
-      if t in original_uops and (new_buf := t.lazydata.base.buf_uop.buffer) != (old_buf := original_uops[t].base.buf_uop.buffer):
+    for t in affected:
+      if t in original and (new_buf := t.lazydata.base.buf_uop.buffer) != (old_buf := original[t].base.buf_uop.buffer):
         self.extra_copies.append((cast(Buffer, old_buf), cast(Buffer, new_buf)))
 
     # linearize the kernel graph
     schedule, var_vals = create_schedule_with_vars(sink)
     assert set(var_vals.keys()) == set(u.unbind()[0] for u in self.inputs if u.op is Ops.BIND), "Variables must be positional arguments."
 
-    del original_uops, postcall_uops, r, t, ret_tensors, sink, remove_assign_map, diff
+    self.eis: list[ExecItem] = []
+    del original, postcall, r, t, ret_tensors, sink, remove_assign_map, affected
     for si, ei in lower_schedule(memory_planner(schedule)):
       assert isinstance(ei.prg, CompiledRunner), f"Export only supported for CompiledRunner\nei.prg: {ei.prg}\n\nei.bufs: {ei.bufs}"
       for buf in ei.bufs: assert buf is not None and buf.device == device, "All compute and returned Tensor(s) must be on the same device"
