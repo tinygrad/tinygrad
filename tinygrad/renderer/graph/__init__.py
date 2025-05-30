@@ -23,7 +23,7 @@ class GraphRenderer(Renderer):
     assert len(get_state_dict(args)) == len([x for x in args if isinstance(x, Tensor)]) and len(get_state_dict(kwargs)) == 0, \
       "All Tensor (and Variable) function arguments must be positional, whose order will match the order of the rendered function's arguments."
     self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
-    Tensor.randn(1).realize() # move random seeds and counter onto device so our exported fxn doesn't have to do it
+    Tensor.rand(1).realize() # move random seeds and counter onto device so our exported fxn doesn't have to do it
 
     # calculate the diff in global Tensor lazydata state caused by fxn
     original_uops: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in all_tensors if (tref:=t()) is not None}
@@ -38,9 +38,8 @@ class GraphRenderer(Renderer):
         diff[t] = t.lazydata.toposort()
     assert len(diff), "The exported function did not create or change any Tensors, no graph can be captured"
 
-    # TODO: remove this assertion?
-    assert (l:=len(ret_tensors)) and l == len(get_state_dict(r)), "One or more Tensors must be returned as a singleton or elements of a list/tuple."
-    if not isinstance(device:=ret_tensors[0].device, str): raise RuntimeError(f"Multiple devices not supported: {device}")
+    device = ret_tensors[0].device if ret_tensors else list(diff)[0].device
+    if not isinstance(device, str): raise RuntimeError(f"Multiple devices not supported: {device}")
 
     self.impl_ins: dict[Buffer, str] = dict()
     ctr = itertools.count()
