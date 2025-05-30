@@ -46,7 +46,7 @@ class LLaMaAdaptor(LM):
         if next_tok in self.tokenizer.stop_tokens or next_tok in until: break
         start_pos = len(toks)
         toks.append(next_tok)
-      continuations.append(self.tokenizer.decode(toks)[:len(prompt)])
+      continuations.append(self.tokenizer.decode(toks)[len(prompt):])
     return continuations
   def loglikelihood(self, requests: list[Instance]) -> list[tuple[float, bool]]: raise NotImplementedError() # not needed for gsm8k
   def loglikelihood_rolling(self, requests: list[Instance]) -> list[tuple[float, bool]]: raise NotImplementedError()
