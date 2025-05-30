@@ -571,7 +571,6 @@ class KFDIface:
     if flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR:
       buf = addr = FileIOInterface.anon_mmap(0, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, 0)
     else: buf, addr = 0, FileIOInterface.anon_mmap(0, size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE, 0)
-    assert addr != 0xffffffffffffffff
 
     try: mem = kfd.AMDKFD_IOC_ALLOC_MEMORY_OF_GPU(self.kfd, va_addr=addr, size=size, base=addr, length=size, gpu_id=self.gpu_id,
                                                   flags=flags, mmap_offset=buf)
@@ -711,6 +710,9 @@ class PCIIface:
     self._setup_adev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2, fmt='Q'), self._map_pci_range(5, fmt='I'))
     self.doorbell_cpu_addr = dbell.addr
 
+    if first_dev:
+      FileIOInterface.anon_mmap((alloc:=self.adev.mm.va_allocator).base, alloc.size, 0, mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS|MAP_NORESERVE, 0)
+
     pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
     self.cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=pci.PCI_COMMAND)
 
@@ -729,20 +731,18 @@ class PCIIface:
   def _map_pci_range(self, bar, off=0, addr=0, size=None, fmt='B'):
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
-    assert loc != 0xffffffffffffffff, f"Failed to mmap {size} bytes at {hex(addr)}"
     return MMIOInterface(loc, sz, fmt=fmt)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     if host or (not getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1) and uncached and cpu_access): # host or gtt-like memory.
       vaddr = self.adev.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | MAP_FIXED, 0)
-      assert va != 0xffffffffffffffff, f"Failed to mmap {size} bytes at {hex(vaddr)}"
 
       # Read pagemap to get the physical address of each page. The pages are locked.
       self.pagemap.seek(va // mmap.PAGESIZE * 8)
       paddrs = [((x & ((1<<55) - 1)) * mmap.PAGESIZE, mmap.PAGESIZE) for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
       am_mapping = self.adev.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=cpu_access),
+      return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=True),
         view=MMIOInterface(am_mapping.va_addr, size, fmt='B'))
 
     am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
