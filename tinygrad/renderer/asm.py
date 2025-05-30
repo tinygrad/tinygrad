@@ -24,8 +24,6 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.SQRT, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
   # branches
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.const_like(0)]}\n.LOOP_{x.arg}:"),
-  (UPat(Ops.ENDRANGE, src=(UPat.var("rng")), name="x"), lambda ctx,x,rng: f"{ctx.ops[rng.dtype][Ops.ADD]} {ctx[rng]}, {ctx[rng.const_like(1)]}\n"
-   f"{ctx.ops[rng.dtype][Ops.CMPLT]} {ctx[rng]}, {ctx[rng.src[0]]}\n{ctx.ops[x.dtype][x.op]} .LOOP_{rng.arg}"),
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"{ctx.ops[x.src[0].dtype][Ops.CMPNE]} {ctx[x.src[0]]}, {ctx[x.src[0].const_like(1)]}\n"
    f"{ctx.ops[x.dtype][x.op]} .L{ctx.uops.index(x)}"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f".L{ctx.uops.index(x.src[0])}:"),
@@ -181,7 +179,7 @@ class AsmRenderer(Renderer):
       # render assembly
       if (l:=self.string_rewrite.rewrite(u, ctx=self)) is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
-      inst_map[u].append(cast(str, l))
+      if l: inst_map[u].append(cast(str, l))
       # making sure nothing got lost
       assert len(set(live.values()) | set(regs[dtypes.int]) | set(regs[dtypes.float])) == len(self.regs[dtypes.int] + self.regs[dtypes.float])
 
@@ -214,7 +212,7 @@ arm64_ops = {**{dtypes.void:arm64_branch_ops}, **{x:arm64_unsigned_ops for x in 
              **{x:arm64_16bit_signed_ops for x in (dtypes.int16,)}, **{x:arm64_8bit_unsigned_ops for x in (dtypes.uint8,)},
              **{x:arm64_8bit_signed_ops for x in (dtypes.int8,)}, **{x:arm64_float_ops for x in dtypes.floats}}
 arm64_vec_suffix = {1: "b", 2: "h", 4: "s", 8: "d"}
-arm64_cast_suffix = {1: "b", 2: "w"}
+arm64_cast_suffix = {1: "b", 2: "h", 4: "w"}
 def arm64_cflag(x:UOp) -> str: return "ne" if x.op is Ops.CMPNE else "lo" if x.src[0].dtype in dtypes.uints else "lt"
 
 arm64_rewrite = PatternMatcher([
@@ -244,6 +242,10 @@ arm64_rewrite = PatternMatcher([
   (UPat(Ops.MULACC, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, {ctx[x.src[0]]}"),
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
    lambda ctx,x: f"{ctx.ops[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\ncset {ctx[x]}, {arm64_cflag(x)}"),
+  # endrange #TODO: should be in base rewrite
+  (UPat(Ops.ENDRANGE, src=(UPat.var("rng")), name="x"),
+   lambda ctx,x,rng: f"{ctx.ops[rng.dtype][Ops.ADD]} {ctx[rng]}, {ctx[rng]}, {ctx[rng.const_like(1)]}\n"
+   f"{ctx.ops[rng.dtype][Ops.CMPLT]} {ctx[rng]}, {ctx[rng.src[0]]}\n{ctx.ops[x.dtype][x.op]} .LOOP_{rng.arg}"),
 ]) + base_rewrite
 
 def arm64_load_consts(x:UOp) -> UOp|None:
@@ -297,7 +299,7 @@ class Arm64Renderer(AsmRenderer):
   def render_reg(self, reg:str, dt:DType) -> str: return reg if dt.itemsize == 8 else arm64_reg_map[reg][dt.itemsize]
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", f"stp x29, x30, [sp, #{-stack_size}]!", "mov x29, sp"] + \
-                      kernel + [f"ldp x29, x30, [sp], #{-stack_size}]", "ret", "\n"])
+                      kernel + [f"ldp x29, x30, [sp, #{-stack_size}]!", "ret", "\n"])
 
 x86_gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx", "r10", "r11", "r12", "r13", "r14", "r15"]
 x86_float_regs = ["xmm" + str(i) for i in range(0,16)]
@@ -385,6 +387,9 @@ x86_rewrite = PatternMatcher([
    f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rdx"),
   (UPat(GroupOp.Binary, dtypes.ints + (dtypes.bool,), name="x"),
    lambda ctx,x: f"{ctx.two_address(x, x.src[0])}{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
+  # endrange
+  (UPat(Ops.ENDRANGE, src=(UPat.var("rng")), name="x"), lambda ctx,x,rng: f"{ctx.ops[rng.dtype][Ops.ADD]} {ctx[rng]}, {ctx[rng.const_like(1)]}\n"
+   f"{ctx.ops[rng.dtype][Ops.CMPLT]} {ctx[rng]}, {ctx[rng.src[0]]}\n{ctx.ops[x.dtype][x.op]} .LOOP_{rng.arg}"),
 ]) + base_rewrite
 
 def x86_load_consts(x:UOp) -> UOp|None:
