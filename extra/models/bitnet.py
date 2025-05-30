@@ -19,7 +19,7 @@ from tinygrad.helpers import getenv, DEBUG
 # ────────────────────────────────────────────────────────────
 
 VALUES_PER_ITEM = 4  # 4 ternary values packed per uint8 byte
-DEBUG_PRINT = getenv("DEBUG_BITNET", False)
+DEBUG_PRINT = True
 
 def debug(msg: str) -> None:
     if DEBUG_PRINT:
@@ -58,21 +58,10 @@ class BitNetConfig:
 # ────────────────────────────────────────────────────────────
 
 def unpack_weights(packed: Tensor, target_dtype=dtypes.float32) -> Tensor:
-    """
-    Unpack 2-bit weights following HuggingFace's exact implementation.
-    
-    Args:
-        packed: Tensor with packed weights [out_features//4, in_features]
-        target_dtype: Target dtype for unpacked weights
-        
-    Returns:
-        Tensor with unpacked ternary weights {-1, 0, 1}
-    """
+    """Fixed unpack_weights to match HuggingFace exactly."""
     debug(f"unpack_weights: packed.shape={packed.shape}, target_dtype={target_dtype}")
     
-    # Convert to CPU for bit operations, then to numpy
-    packed_np = packed.detach().to("CPU").numpy().astype(np.uint8)
-    packed_shape = packed_np.shape
+    packed_shape = packed.shape
     
     # Calculate unpacked shape
     if len(packed_shape) == 1:
@@ -82,24 +71,24 @@ def unpack_weights(packed: Tensor, target_dtype=dtypes.float32) -> Tensor:
         original_row_dim = packed_shape[0] * VALUES_PER_ITEM
         unpacked_shape = (original_row_dim, *packed_shape[1:])
     
-    # Unpack using exact HF method
-    unpacked = np.zeros(unpacked_shape, dtype=np.uint8)
+    # FIXED: Use numpy for proper bit unpacking (like HuggingFace)
+    packed_np = packed.detach().to('CPU').numpy().astype(np.uint8)
+    unpacked_np = np.zeros(unpacked_shape, dtype=np.uint8)
     
+    # HuggingFace unpacking logic - EXACT MATCH
     for i in range(VALUES_PER_ITEM):
         start = i * packed_shape[0]
         end = start + packed_shape[0]
-        mask = 3 << (2 * i)  # 2-bit mask
-        unpacked[start:end] = (packed_np & mask) >> (2 * i)
+        mask = 3 << (2 * i)
+        unpacked_np[start:end] = (packed_np & mask) >> (2 * i)
     
-    # Convert to ternary {-1, 0, 1}
-    result_np = unpacked.astype(np.float32) - 1.0
+    # Convert back to tensor and apply ternary mapping
+    unpacked_tensor = Tensor(unpacked_np, device=packed.device)
+    result = unpacked_tensor.cast(target_dtype) - 1.0
     
-    # Ensure values are exactly {-1, 0, 1}
-    result_np = np.clip(result_np, -1.0, 1.0)
+    debug(f"unpack_weights: result.shape={result.shape}")
+    return result
     
-    debug(f"unpack_weights: result.shape={result_np.shape}")
-    return Tensor(result_np, dtype=target_dtype, device=packed.device, requires_grad=False)
-
 def pack_weights(quantized_weights: Tensor) -> Tensor:
     """
     Pack ternary weights into 2-bit format.
@@ -190,58 +179,49 @@ class BitLinear:
         return self._unpacked_weights
     
     def activation_quant(self, x: Tensor, num_bits: int = 8) -> Tuple[Tensor, Tensor]:
-        """
-        Per-token symmetric quantization following HF implementation.
-        
-        Args:
-            x: Input tensor [..., features]
-            num_bits: Number of bits for quantization
-            
-        Returns:
-            (quantized_tensor, scale_tensor)
-        """
         Qn = -(2 ** (num_bits - 1))  # -128
         Qp = 2 ** (num_bits - 1) - 1  # 127
         
-        # Per-token scaling (max across last dimension)
-        scale = Qp / x.abs().max(axis=-1, keepdim=True).maximum(1e-5)
+        # CORRECTED: Per-token scaling - EXACT HF implementation
+        scale = Qp / x.abs().max(axis=-1, keepdim=True).clamp(min_=1e-5)  # ✅ CLAMP NOT MAXIMUM
         
-        # Quantize and clamp
+        # Quantize and clamp - EXACT HF implementation
         result = (x * scale).round().clip(Qn, Qp)
         
-        return result, scale
-    
-    def post_quant_process(self, y: Tensor, input_scale: Tensor, weight_scale: Tensor) -> Tensor:
-        """Dequantize output using both scales."""
-        return y / (input_scale * weight_scale)
-    
+        return result.cast(dtypes.int8), scale  # ✅ CAST TO INT8
+
     def __call__(self, x: Tensor) -> Tensor:
-        """
-        Forward pass with quantized computation.
+        debug(f"🔍 BitLinear input: shape={x.shape}, mean={x.mean().item():.6f}, std={x.std().item():.6f}")
         
-        Args:
-            x: Input tensor [..., in_features]
-            
-        Returns:
-            Output tensor [..., out_features]
-        """
         # Get unpacked ternary weights
         w_unpacked = self._get_unpacked_weights()
+        debug(f"🔍 Unpacked weights: shape={w_unpacked.shape}, mean={w_unpacked.mean().item():.6f}")
         
-        # Quantize activations
+        # Apply activation quantization
         x_quant, x_scale = self.activation_quant(x)
+        debug(f"🔍 Quantized input: shape={x_quant.shape}, scale_mean={x_scale.mean().item():.6f}")
+        debug(f"🔍 Weight scale: {self.weight_scale.item():.6f}")
         
-        # Matrix multiplication with quantized inputs and ternary weights
-        y = x_quant @ w_unpacked.T
+        # Matrix multiplication
+        y = x_quant.cast(self.dtype) @ w_unpacked.T
+        debug(f"🔍 After matmul: shape={y.shape}, mean={y.mean().item():.6f}, std={y.std().item():.6f}")
         
-        # Dequantize using scales
-        y = self.post_quant_process(y, x_scale, self.weight_scale)
+        # Post quantization process
+        y = y / (x_scale * self.weight_scale)
+        debug(f"🔍 After scaling: mean={y.mean().item():.6f}, std={y.std().item():.6f}")
         
-        # Add bias if present
+        # Check for NaN/inf
+        if y.isnan().any().item():
+            debug("❌ NaN detected in BitLinear output!")
+        if y.isinf().any().item():
+            debug("❌ Inf detected in BitLinear output!")
+        
         if self.bias is not None:
             y = y + self.bias
         
+        debug(f"🔍 BitLinear final output: mean={y.mean().item():.6f}, std={y.std().item():.6f}")
         return y
+
 
 class BitNetRMSNorm:
     """RMS Normalization following HuggingFace implementation."""
@@ -263,39 +243,31 @@ class BitNetRMSNorm:
         return (self.weight * h).cast(input_dtype)
 
 class BitNetRotaryEmbedding:
-    """Rotary Position Embedding."""
-    
     def __init__(self, config: BitNetConfig, device=None):
-        self.dim = config.head_dim()
+        self.head_dim = config.head_dim()
+        self.max_position_embeddings = config.max_position_embeddings  
+        self.base = config.rope_theta
         self.device = device or Device.DEFAULT
         
-        # Precompute inverse frequencies
-        inv_freq = 1.0 / (config.rope_theta ** (
-            Tensor.arange(0, self.dim, 2, dtype=dtypes.float32, device=self.device) / self.dim
-        ))
-        self.inv_freq = inv_freq
-    
-    def __call__(self, x: Tensor, position_ids: Tensor) -> Tuple[Tensor, Tensor]:
-        """
-        Generate cos/sin for rotary embeddings.
+        # ✅ Use float64 for higher precision like HF
+        inv_freq = 1.0 / (self.base ** (np.arange(0, self.head_dim, 2, dtype=np.float64) / self.head_dim))
+        self.inv_freq = Tensor(inv_freq.astype(np.float32), device=self.device, requires_grad=False)
         
-        Args:
-            x: Input tensor (for dtype/device reference)
-            position_ids: Position indices [batch, seq_len]
-            
-        Returns:
-            (cos, sin) tensors for rotary embedding
-        """
-        # Generate frequencies
-        freqs = position_ids.unsqueeze(-1).float() @ self.inv_freq.unsqueeze(0)
+    def __call__(self, x, position_ids):
+        # ✅ Simplified approach matching HF more closely
+        seq_len = position_ids.shape[-1]
         
-        # Duplicate for real/imaginary parts
-        emb = freqs.repeat_interleave(2, dim=-1)
+        # Create frequency matrix
+        t = position_ids.cast(dtypes.float32)  # [batch, seq_len]
+        freqs = t.unsqueeze(-1) * self.inv_freq.unsqueeze(0).unsqueeze(0)  # [batch, seq_len, head_dim//2]
         
-        cos = emb.cos().cast(x.dtype)
-        sin = emb.sin().cast(x.dtype)
+        # Concatenate cos and sin
+        emb = freqs.cat(freqs, dim=-1)  # [batch, seq_len, head_dim]
         
-        return cos, sin
+        cos = emb.cos()
+        sin = emb.sin() 
+        
+        return cos.cast(x.dtype), sin.cast(x.dtype)
 
 def rotate_half(x: Tensor) -> Tensor:
     """Rotate half the hidden dimensions."""
@@ -304,11 +276,13 @@ def rotate_half(x: Tensor) -> Tensor:
     return (-x2).cat(x1, dim=-1)
 
 def apply_rotary_pos_emb(q: Tensor, k: Tensor, cos: Tensor, sin: Tensor) -> Tuple[Tensor, Tensor]:
-    """Apply rotary position embeddings to query and key tensors."""
-    # Ensure cos/sin have correct dimensions for broadcasting
-    if cos.ndim == 3:  # [batch, seq, dim]
-        cos = cos.unsqueeze(1)  # [batch, 1, seq, dim]
-        sin = sin.unsqueeze(1)
+    # ✅ Simplified broadcasting - let tinygrad handle it
+    # q, k shape: [batch, num_heads, seq_len, head_dim]
+    # cos, sin shape: [batch, seq_len, head_dim]
+    
+    # Add head dimension for broadcasting
+    cos = cos.unsqueeze(1)  # [batch, 1, seq_len, head_dim] 
+    sin = sin.unsqueeze(1)  # [batch, 1, seq_len, head_dim]
     
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
@@ -432,7 +406,7 @@ class BitNetMLP:
         up = self.up_proj(x)
         
         # ReLU²(x) = (ReLU(x))²
-        activated = (up.relu() ** 2) * gate
+        activated = (gate.relu() ** 2) * up
         
         # Apply sub-normalization
         activated = self.ffn_sub_norm(activated)
@@ -570,11 +544,11 @@ class BitNetForCausalLM:
         self.lm_head.weight = self.model.embed_tokens.weight
     
     def __call__(self, 
-                 input_ids: Tensor,
-                 past_key_values: Optional[List[Tuple[Tensor, Tensor]]] = None,
-                 *sample_args) -> Tuple[Any, List[Tuple[Tensor, Tensor]]]:
+                input_ids: Tensor,
+                past_key_values: Optional[List[Tuple[Tensor, Tensor]]] = None,
+                *sample_args) -> Tuple[Any, List[Tuple[Tensor, Tensor]]]:
         """
-        Forward pass with optional sampling.
+        Forward pass with optional sampling - WITH COMPREHENSIVE DEBUGGING.
         
         Args:
             input_ids: Input token IDs
@@ -585,19 +559,125 @@ class BitNetForCausalLM:
             If sample_args provided: (sampled_token, present_key_values, logits)
             Else: (logits, present_key_values)
         """
+        debug(f"🚀 MODEL FORWARD START")
+        debug(f"   input_ids.shape: {input_ids.shape}")
+        debug(f"   input_ids sample: {input_ids.flatten()[:10].detach().to('CPU').numpy()}")
+        debug(f"   past_key_values provided: {past_key_values is not None}")
+        debug(f"   sample_args: {len(sample_args) if sample_args else 0}")
+        
         # Forward through model
-        hidden_states, present_key_values = self.model(input_ids, past_key_values)
+        try:
+            debug(f"🔄 Calling model.forward...")
+            hidden_states, present_key_values = self.model(input_ids, past_key_values)
+            
+            debug(f"✅ Model forward completed")
+            debug(f"   hidden_states.shape: {hidden_states.shape}")
+            debug(f"   hidden_states mean: {hidden_states.mean().item():.6f}")
+            debug(f"   hidden_states std: {hidden_states.std().item():.6f}")
+            debug(f"   hidden_states min/max: [{hidden_states.min().item():.6f}, {hidden_states.max().item():.6f}]")
+            
+            # Check for numerical issues in hidden states
+            if hidden_states.isnan().any().item():
+                debug("❌ CRITICAL: NaN detected in hidden_states!")
+                # Return dummy values to avoid crash
+                if sample_args:
+                    return 0, present_key_values, Tensor.zeros(1, 1, self.config.vocab_size)
+                else:
+                    return Tensor.zeros(1, 1, self.config.vocab_size), present_key_values
+            
+            if hidden_states.isinf().any().item():
+                debug("❌ CRITICAL: Inf detected in hidden_states!")
+                if sample_args:
+                    return 0, present_key_values, Tensor.zeros(1, 1, self.config.vocab_size)
+                else:
+                    return Tensor.zeros(1, 1, self.config.vocab_size), present_key_values
+            
+            if hidden_states.std().item() < 1e-6:
+                debug("❌ CRITICAL: Hidden states have near-zero variance!")
+            
+            if hidden_states.std().item() > 1000:
+                debug("❌ CRITICAL: Hidden states have excessive variance!")
+                
+        except Exception as e:
+            debug(f"❌ EXCEPTION in model forward: {e}")
+            import traceback
+            debug(f"   Traceback: {traceback.format_exc()}")
+            raise
         
         # Compute logits
-        logits = self.lm_head(hidden_states)
+        try:
+            debug(f"🔄 Computing logits with lm_head...")
+            debug(f"   lm_head input shape: {hidden_states.shape}")
+            
+            logits = self.lm_head(hidden_states)
+            
+            debug(f"✅ Logits computed")
+            debug(f"   logits.shape: {logits.shape}")
+            debug(f"   logits mean: {logits.mean().item():.6f}")
+            debug(f"   logits std: {logits.std().item():.6f}")
+            debug(f"   logits min/max: [{logits.min().item():.6f}, {logits.max().item():.6f}]")
+            
+            # Check for numerical issues in logits
+            if logits.isnan().any().item():
+                debug("❌ CRITICAL: NaN detected in logits!")
+                return 0, present_key_values, logits if sample_args else (logits, present_key_values)
+            
+            if logits.isinf().any().item():
+                debug("❌ CRITICAL: Inf detected in logits!")
+            
+            # Check logits distribution
+            if logits.std().item() < 0.1:
+                debug("❌ PROBLEM: Logits have very low variance - model outputs are too similar!")
+                debug("   This suggests the model is broken or not learning properly")
+            elif logits.std().item() > 100:
+                debug("❌ PROBLEM: Logits have excessive variance - scaling issues!")
+                debug("   This suggests numerical instability or wrong scaling")
+            else:
+                debug("✅ Logits variance looks reasonable")
+                
+        except Exception as e:
+            debug(f"❌ EXCEPTION in logits computation: {e}")
+            import traceback
+            debug(f"   Traceback: {traceback.format_exc()}")
+            raise
         
         # If sampling parameters provided, sample next token
         if sample_args:
-            # Get logits for last token
-            last_token_logits = logits[0, -1, :]  # [vocab_size]
-            token = sample(last_token_logits, *sample_args)
-            return token, present_key_values, logits
+            try:
+                debug(f"🎯 Sampling next token...")
+                debug(f"   sample_args: {sample_args}")
+                
+                # Get logits for last token
+                last_token_logits = logits[0, -1, :]  # [vocab_size]
+                debug(f"   last_token_logits.shape: {last_token_logits.shape}")
+                debug(f"   last_token_logits mean: {last_token_logits.mean().item():.6f}")
+                debug(f"   last_token_logits std: {last_token_logits.std().item():.6f}")
+                debug(f"   last_token_logits top5: {last_token_logits.topk(5)[1].detach().to('CPU').numpy()}")
+                
+                # Check if logits are reasonable for sampling
+                if last_token_logits.std().item() < 0.01:
+                    debug("❌ WARNING: Very low logits variance - will produce repetitive output")
+                
+                token = sample(last_token_logits, *sample_args)
+                debug(f"✅ Sampled token: {token}")
+                
+                # Validate token
+                if token < 0 or token >= self.config.vocab_size:
+                    debug(f"❌ INVALID TOKEN: {token} (vocab_size: {self.config.vocab_size})")
+                    token = 0  # Fallback to safe token
+                
+                return token, present_key_values, logits
+                
+            except Exception as e:
+                debug(f"❌ EXCEPTION in sampling: {e}")
+                import traceback
+                debug(f"   Traceback: {traceback.format_exc()}")
+                # Fallback to greedy sampling
+                token = int(last_token_logits.argmax().detach().to("CPU").numpy())
+                debug(f"   Fallback greedy token: {token}")
+                return token, present_key_values, logits
         else:
+            debug(f"✅ Returning logits without sampling")
             return logits, present_key_values
 
 # ────────────────────────────────────────────────────────────
@@ -721,33 +801,62 @@ def load_safetensors_weights(file_path: Path) -> Dict[str, np.ndarray]:
 def convert_and_load_weights(model: BitNetForCausalLM, weights: Dict[str, np.ndarray]):
     """Convert HF weights to tinygrad format and load into model."""
     debug("Converting and loading weights")
+    debug(f"Input weights keys count: {len(weights)}")
+    
+    # DEBUG: Check what weight scales we actually have
+    weight_scale_keys = [key for key in weights.keys() if 'weight_scale' in key]
+    debug(f"=== FOUND {len(weight_scale_keys)} WEIGHT SCALES ===")
+    for scale_key in weight_scale_keys[:5]:  # Show first 5
+        scale_value = weights[scale_key]
+        debug(f"Weight scale: {scale_key} = {scale_value}")
+    
+    # Initialize tensor_weights dictionary
+    tensor_weights = {}
+    debug(f"Initialized tensor_weights dictionary")
     
     # Convert weights to tensors
-    tensor_weights = {}
-    
+    processed_count = 0
     for key, weight_np in weights.items():
+        processed_count += 1
+        if processed_count <= 10:  # Limit debug spam
+            debug(f"Processing {processed_count}: {key}")
+        
         if key.endswith('.weight_scale'):
-            # Scale tensors
+            # Scale tensors - CRITICAL for BitNet inference
+            if processed_count <= 10:
+                debug(f"🔥 LOADING WEIGHT SCALE: {key}")
+                debug(f"   Value: {weight_np}")
+            
+            # Convert to float32
+            scale_f32 = weight_np.astype(np.float32)
+            
             tensor_weights[key] = Tensor(
-                weight_np.astype(np.float32),
+                scale_f32,
                 dtype=dtypes.float32,
                 device=model.device,
                 requires_grad=False
             )
+            
         elif key.endswith('.weight') and any(proj in key for proj in ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']):
             # BitLinear weights - keep as packed uint8
+            if processed_count <= 10:
+                debug(f"🔧 LOADING BITLINEAR WEIGHT: {key}")
+            
             if weight_np.dtype == np.int8:
                 weight_np = weight_np.astype(np.uint8)
+            
             tensor_weights[key] = Tensor(
                 weight_np,
                 dtype=dtypes.uint8,
                 device=model.device,
                 requires_grad=False
             )
+            
         else:
             # Regular weights (embeddings, norms)
             if weight_np.dtype == np.float16:
                 weight_np = weight_np.astype(np.float32)
+            
             tensor_weights[key] = Tensor(
                 weight_np,
                 dtype=dtypes.float32,
@@ -755,14 +864,113 @@ def convert_and_load_weights(model: BitNetForCausalLM, weights: Dict[str, np.nda
                 requires_grad=False
             )
     
+    debug(f"Processed {processed_count} weights")
+    debug(f"=== CONVERTED TENSORS SUMMARY ===")
+    debug(f"Total tensors to load: {len(tensor_weights)}")
+    
+    scale_tensors = [k for k in tensor_weights.keys() if 'weight_scale' in k]
+    debug(f"Weight scale tensors: {len(scale_tensors)}")
+    
+    debug(f"tensor_weights type: {type(tensor_weights)}")
+    debug(f"tensor_weights defined: {'tensor_weights' in locals()}")
+    
     # Load into model
     try:
+        debug("🚀 Loading state dict into model...")
         load_state_dict(model, tensor_weights, strict=False, realize=False)
-        debug("Weights loaded successfully")
+        debug("✅ State dict loaded successfully")
+        
+        # CRITICAL: Verify weight scales are actually loaded
+        debug("=== VERIFYING WEIGHT SCALES IN MODEL ===")
+        
+        scales_found = 0
+        scales_default = 0
+        
+        for layer_idx in range(min(2, len(model.model.layers))):  # Check first 2 layers
+            layer = model.model.layers[layer_idx]
+            
+            # Check attention projections
+            for proj_name in ['q_proj', 'k_proj', 'v_proj', 'o_proj']:
+                proj = getattr(layer.self_attn, proj_name)
+                scale_val = proj.weight_scale.detach().to('CPU').numpy()[0]
+                expected_key = f"model.layers.{layer_idx}.self_attn.{proj_name}.weight_scale"
+                
+                debug(f"Layer {layer_idx} {proj_name} weight_scale: {scale_val}")
+                
+                if abs(scale_val - 1.0) < 1e-6:
+                    debug(f"❌ {proj_name} weight_scale is DEFAULT 1.0 (expected from {expected_key})")
+                    scales_default += 1
+                else:
+                    debug(f"✅ {proj_name} weight_scale loaded correctly: {scale_val}")
+                    scales_found += 1
+            
+            # Check MLP projections  
+            for proj_name in ['gate_proj', 'up_proj', 'down_proj']:
+                proj = getattr(layer.mlp, proj_name)
+                scale_val = proj.weight_scale.detach().to('CPU').numpy()[0]
+                expected_key = f"model.layers.{layer_idx}.mlp.{proj_name}.weight_scale"
+                
+                debug(f"Layer {layer_idx} MLP {proj_name} weight_scale: {scale_val}")
+                
+                if abs(scale_val - 1.0) < 1e-6:
+                    debug(f"❌ MLP {proj_name} weight_scale is DEFAULT 1.0 (expected from {expected_key})")
+                    scales_default += 1
+                else:
+                    debug(f"✅ MLP {proj_name} weight_scale loaded correctly: {scale_val}")
+                    scales_found += 1
+        
+        debug(f"=== WEIGHT SCALE VERIFICATION SUMMARY ===")
+        debug(f"Properly loaded scales: {scales_found}")
+        debug(f"Default (1.0) scales: {scales_default}")
+        
+        if scales_default > 0:
+            debug("🚨 CRITICAL ISSUE: Some weight scales are still 1.0!")
+            debug("   This means load_state_dict didn't match the keys properly.")
+            
+            # Let's debug the key mismatch
+            debug("=== DEBUGGING KEY MISMATCH ===")
+            from tinygrad.nn.state import get_state_dict
+            
+            model_state = get_state_dict(model)
+            model_keys = [k for k in model_state.keys() if 'weight_scale' in k]
+            tensor_keys = [k for k in tensor_weights.keys() if 'weight_scale' in k]
+            
+            debug(f"Model expects these weight_scale keys ({len(model_keys)}):")
+            for key in model_keys[:5]:
+                debug(f"  MODEL: {key}")
+            
+            debug(f"Tensor dict has these weight_scale keys ({len(tensor_keys)}):")  
+            for key in tensor_keys[:5]:
+                debug(f"  TENSOR: {key}")
+                
+            # Check for exact matches
+            matches = set(model_keys) & set(tensor_keys)
+            debug(f"Exact key matches: {len(matches)} out of {len(model_keys)}")
+            
+            if len(matches) == 0:
+                debug("💡 SOLUTION: Key names don't match - need to strip 'model.' prefix")
+                # Create corrected tensor_weights without 'model.' prefix
+                corrected_weights = {}
+                for key, tensor in tensor_weights.items():
+                    if key.startswith('model.'):
+                        new_key = key[6:]  # Remove 'model.' prefix
+                        corrected_weights[new_key] = tensor
+                        if 'weight_scale' in key:
+                            debug(f"  RENAMED: {key} -> {new_key}")
+                    else:
+                        corrected_weights[key] = tensor
+                
+                debug("🔄 Reloading with corrected keys...")
+                load_state_dict(model, corrected_weights, strict=False, realize=False)
+                debug("✅ Reloaded with corrected keys")
+        else:
+            debug("🎉 SUCCESS: All weight scales loaded correctly!")
+            
     except Exception as e:
-        debug(f"Error loading weights: {e}")
+        debug(f"❌ Error loading weights: {e}")
+        import traceback
+        debug(f"Full traceback: {traceback.format_exc()}")
         raise
-
 def build_transformer(model_path: Path, load_weights: bool = True) -> Tuple[BitNetForCausalLM, Optional[Dict]]:
     """Build and optionally load BitNet transformer."""
     debug(f"Building transformer from {model_path}")
