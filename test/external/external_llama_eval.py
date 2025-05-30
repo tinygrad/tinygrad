@@ -5,9 +5,8 @@ from pathlib import Path
 import json, argparse
 
 from examples.llama3 import build_transformer, Tokenizer, MODEL_PARAMS
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, Device
 from tinygrad.helpers import tqdm
-from tinygrad import Device
 
 class LLaMaAdaptor(LM):
   def __init__(
