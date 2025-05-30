@@ -34,22 +34,19 @@ class GraphRenderer(Renderer):
     device = next(iter(affected)).device
     if not isinstance(device, str): raise RuntimeError(f"Multiple devices not supported: {device}")
 
-    # For each implicit input Tensor, execute the portion of its UOp graph that existed before calling fxn
+    # For each implicit input Tensor, realize the portion of its UOp graph that existed before calling fxn
     self.impl_ins: dict[Buffer, str] = dict()
     ctr = itertools.count()
     exported_data: dict[Tensor, dict] = {}
     all_names = {"random_seeds": ds[device], "random_counter": Tensor._device_rng_counters[device]} if device in (ds:=Tensor._device_seeds) else {}
     if tensor_names: all_names.update(tensor_names)
     name_lookup = {v:k for k,v in all_names.items()} if all_names else {}
-    # realize implicit inputs to fxn
     for t, u in original.items():
-      if any(u.base in toposort for toposort in affected.values()):
-        (dummy:=Tensor(1)).lazydata = u
-        if (realized_u := dummy.realize().lazydata) not in self.inputs:
-          self.impl_ins[cast(Buffer, realized_u.base.realized)] = name = f"buf_{next(ctr)}"
-          exported_data[dummy] = {"default_name": name}
-          if t in name_lookup: exported_data[dummy]["tensor_name"] = name_lookup[t]
-      del u # for memory planning
+      if u.base not in self.inputs and u.base.op in (Ops.BUFFER, Ops.ASSIGN) and any(u.base in toposort for toposort in affected.values()):
+        (precall_implicit_input:=Tensor(0)).lazydata = u.base
+        self.impl_ins[cast(Buffer, precall_implicit_input.realize().lazydata.base.realized)] = name = f"buf_{next(ctr)}"
+        exported_data[precall_implicit_input] = {"default_name": name}
+        if t in name_lookup: exported_data[precall_implicit_input]["tensor_name"] = name_lookup[t]
 
     # TODO: does scheduling always respect chronological order of assigns, e.g. when a buffer is mutated in one branch and used in another?
     sink = UOp.sink(*[t.lazydata.base for t in affected])
