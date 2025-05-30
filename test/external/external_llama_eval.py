@@ -31,7 +31,7 @@ class LLaMaAdaptor(LM):
     self.do_sample = do_sample
     self.temperature = temperature
     self._device = device
-    self.llama = LLaMa.build(checkpoint_path, tokenizer_path, model_gen, model_size, quantize, MODEL_PARAMS=MODEL_PARAMS)
+    self.llama = LLaMa.build(checkpoint_path, tokenizer_path, model_gen, model_size, MODEL_PARAMS=MODEL_PARAMS)
 
   @classmethod
   def create_from_arg_string(cls, arg_string, additional_config=None):
