@@ -387,8 +387,8 @@ fix_kernel_ops = PatternMatcher([
   # remove CONTIGUOUS/DEVICE from kernel AST
   (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
-  # no ImageDType after load
-  (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
+  # no ImageDType after index
+  (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL, Ops.VIEW}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
   (UPat(Ops.LOAD, src=(UPat.var("glbl").view(name="view"),)), check_load_st),
 ])
