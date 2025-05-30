@@ -270,7 +270,7 @@ merge_views = PatternMatcher([
   (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
   # remove NOOP views
   (UPat.var("x").view(name="view"), lambda x,view: x if x.st is not None and view.st.contiguous and view.shape == x.shape else None),
-  (UPat().view(name="view"),
+  (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}).view(name="view"),
    lambda view: view.const_like(0) if (mask:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
   # VIEW on BufferOps replaces the ShapeTracker
   (UPat(Ops.VIEW, src=(UPat((Ops.LOAD, Ops.STORE, Ops.VALID), name="x"),), name="view"),
