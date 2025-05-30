@@ -15,7 +15,7 @@ class LLaMaAdaptor(LM):
     checkpoint_path: Path,
     is_chat_model: bool,
     max_length: int,
-    quantize: bool,
+    quantize: Optional[str],
   ):
     super().__init__()
     self.max_length = max_length
