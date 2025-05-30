@@ -42,17 +42,9 @@ class TestTimeLinearizer(unittest.TestCase):
     assert all(isinstance(r, Buffer) for r in rawbufs)
     assert all(r.size > 0 for r in rawbufs)
 
+  # Ensure that the kernel count is not incremented by time_linearizer when clearing l2
   def test_kernel_count(self):
-    """
-    Ensure that the kernel count is not incremented by time_linearizer when clearing l2
-    """
-    # ast of Tensor.zeros(16).contiguous().realize()
-    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
-      UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(16), arg=0, src=()),
-        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(16,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=()),
-        UOp(Ops.CONST, dtypes.float, arg=0.0, src=(
-          UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(16,), strides=(0,), offset=0, mask=None, contiguous=False),)), src=()),)),)),)) # noqa: E501
+    ast = Tensor.zeros(16).contiguous().kernelize().lazydata.src[1].arg.ast
     lin = Kernel(ast)
     bufs = bufs_from_lin(lin)
 
