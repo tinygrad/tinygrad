@@ -22,7 +22,7 @@ class GraphRenderer(Renderer):
     precall: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in list(all_tensors) if (tref:=t()) is not None}
     with Context(BAN_REALIZE=1): ret_tensors = get_parameters(graph_constructor(*args, **kwargs))
     postcall: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in list(all_tensors) if (tref:=t()) is not None}
-    affected: dict[Tensor, dict] = {t: t.lazydata.toposort() for t in postcall if t not in precall or precall[t].key != postcall[t].key}
+    affected: dict[Tensor, dict[UOp, None]] = {t: t.lazydata.toposort() for t in postcall if t not in precall or precall[t].key != postcall[t].key}
     assert len(affected), "The exported function did not create or change any Tensors, no graph can be captured"
     device = next(iter(affected)).device
     if not isinstance(device, str): raise RuntimeError(f"Multiple devices not supported: {device}")
