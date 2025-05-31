@@ -1,7 +1,6 @@
 import unittest
 from tinygrad import Tensor, Device, TinyJit
 from tinygrad.nn.state import get_state_dict
-from tinygrad.tensor import all_tensors
 
 @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "only used for WebGPU export currently")
 class TestExportWebGPU(unittest.TestCase):
@@ -14,24 +13,10 @@ class TestExportWebGPU(unittest.TestCase):
       def mutate_implicit_input(self, x:Tensor):
         self.w = self.w + x
 
-    name_t_u_b = "\nStart:\n"
-    name_t_u_b += "\n".join(str(tref) for t in all_tensors if (tref:=t()) is not None)
-    name_t_u_b += "\nEnd Start\n\n"
-
     model = Model()
     _, state_dict = TinyJit(model.mutate_implicit_input).export_webgpu(Tensor([7]), tensor_names=get_state_dict(model))
 
-    # debugging test failure in CI that doesn't reproduce locally
-    for name, t in state_dict.items():
-      name_t_u_b += str(name) + "\n"
-      name_t_u_b += str(t) + "\n"
-      name_t_u_b += str(t.lazydata) + "\n"
-      name_t_u_b += str(t.lazydata.base.realized) + "\n\n"
-
-    name_t_u_b += "End:\n"
-    name_t_u_b += "\n".join(str(tref) for t in all_tensors if (tref:=t()) is not None)
-    name_t_u_b += "\nEnd End"
-    self.assertEqual(len(state_dict), 1, name_t_u_b)
+    self.assertEqual(len(state_dict), 1)
     self.assertEqual(list(state_dict.values())[0].tolist(), [0])
     self.assertEqual(model.w.tolist(), [7])
 
