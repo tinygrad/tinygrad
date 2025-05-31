@@ -109,7 +109,6 @@ if __name__=="__main__":
   tokenizer = Tokenizer(str(tokenizer_path))
 
   model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-f16.gguf", "Llama-3.2-1B-Instruct-f16.gguf", subdir="llama3-1b-instruct")
-  Tensor.no_grad = True
   max_context=1024
   tok = 128000
   TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
