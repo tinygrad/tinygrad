@@ -54,6 +54,14 @@ def _map_pci_range(bar, off=0, addr=0, size=None, fmt='B'):
 regs = _map_pci_range(0, fmt='I')
 fb = _map_pci_range(1)
 
+class NVRpcQueue():
+  def __init__(self, queue_va, rptr, wptr): self.queue_va, self.rptr, self.wptr = queue_va, rptr, wptr
+  def wait_for_read_size(self, size):
+    while True:
+      rptr, wptr = self.rptr[0], self.wptr[0]
+      if (wptr - rptr) >= size: return
+      time.sleep(0.001)  # Sleep for 1 ms to avoid busy waiting
+
 class NVDev():
   def __init__(self, devfmt, mmio, vram):
     self.devfmt, self.mmio, self.vram = devfmt, mmio, vram
@@ -64,6 +72,8 @@ class NVDev():
     self.include("src/common/inc/swref/published/hopper/gh100/dev_riscv_pri.h")
     self.include("src/common/inc/swref/published/ampere/ga102/dev_riscv_pri.h")
     self.include("src/common/inc/swref/published/hopper/gh100/dev_falcon_v4.h")
+    self.include("src/common/inc/swref/published/blackwell/gb202/dev_therm.h")
+    self.include("src/common/inc/swref/published/blackwell/gb202/dev_therm_addendum.h")
 
     self.kfsp_send_msg(self.NVDM_TYPE_CAPS_QUERY, bytes([self.NVDM_TYPE_CLOCK_BOOST]))
     self.init_gsp()
@@ -161,9 +171,6 @@ class NVDev():
     shared_va, shared_sysmem = alloc_sysmem(shared_buf_size, contigous=False)
     for i,sysmem in enumerate(shared_sysmem): to_mv(shared_va + i * 0x8, 0x8).cast('Q')[0] = sysmem
 
-    self.command_queue_va = shared_va + pt_size
-    self.status_queue_va = shared_va + pt_size + 0x40000
-
     rm_args.messageQueueInitArguments.sharedMemPhysAddr = shared_sysmem[0]
     rm_args.messageQueueInitArguments.pageTableEntryCount = pt_entries
     rm_args.messageQueueInitArguments.cmdQueueOffset = pt_size
@@ -175,11 +182,33 @@ class NVDev():
     rm_args.srInitArguments.flags = 0
 
     rm_args.gpuInstance = 0
+
+    self.command_queue_st_va = shared_va + pt_size
+    self.status_queue_st_va = shared_va + pt_size + 0x40000
+
+    self.command_queue_va = self.command_queue_st_va + 0x1000
+
+    self.command_queue_tx = nv.msgqTxHeader.from_address(self.command_queue_st_va)
+    self.command_queue_rx = nv.msgqRxHeader.from_address(self.command_queue_st_va + ctypes.sizeof(nv.msgqTxHeader))
+
+    self.command_queue_tx.version = 0
+    self.command_queue_tx.size = 0x40000
+    self.command_queue_tx.entryOff = 0x1000
+    self.command_queue_tx.msgSize = 0x1000
+    self.command_queue_tx.msgCount = (0x40000 - 0x1000) // 0x1000
+    self.command_queue_tx.writePtr = 0
+    self.command_queue_tx.flags = 1
+    self.command_queue_tx.rxHdrOff = ctypes.sizeof(nv.msgqTxHeader)
+
+    self.status_queue_tx = nv.msgqTxHeader.from_address(shared_va + pt_size + 0x40000)
+
     return rm_args_sysmem
 
   def init_libos_args(self):
     logbuf_va, logbuf_sysmem = alloc_sysmem((2 << 20), contigous=True)
     libos_init, libos_init_sysmem = alloc_sysmem(0x1000, contigous=True)
+
+    self.logs = {}
 
     off_sz = 0
     for i,(name, size) in enumerate([("INIT", 0x10000), ("INTR", 0x10000), ("RM", 0x10000), ("MNOC", 0x10000), ("KRNL", 0x10000)]):
@@ -191,6 +220,8 @@ class NVDev():
       arg.size = size
       arg.id8 = int.from_bytes(bytes("LOG" + name, 'utf-8'), 'big')
       arg.pa = logbuf_sysmem[0] + off_sz
+
+      self.logs[name] = to_mv(logbuf_va + off_sz, size)
 
       print(hex(arg.id8))
 
@@ -204,7 +235,6 @@ class NVDev():
     arg.size = 0x1000
     arg.id8 = int.from_bytes(bytes("RMARGS", 'utf-8'), 'big')
     arg.pa = rm_args_sysmem
-
     return libos_init_sysmem[0]
 
   def init_gsp(self):
@@ -265,22 +295,30 @@ class NVDev():
     print(hex(self.rreg(self.NV_PFB_PRI_MMU_WPR2_ADDR_HI)))
     print(hex(self.rreg(self.NV_FALCON2_GSP_BASE + self.NV_PRISCV_RISCV_CPUCTL)))
 
+    print(hex(self.rreg(self.NV_THERM_I2CS_SCRATCH)))
+    while self.rreg(self.NV_THERM_I2CS_SCRATCH) & 0xff != 0xff:
+      time.sleep(0.01)
+    print(hex(self.rreg(self.NV_THERM_I2CS_SCRATCH)))
+
     self.kfsp_send_msg(self.NVDM_TYPE_COT, bytes(cot_payload))
 
-    time.sleep(5) # need normal wait here
+    time.sleep(0.5)
+
+    self.status_queue_va = self.status_queue_st_va + self.status_queue_tx.entryOff
+    self.status_queue_rx = nv.msgqRxHeader.from_address(self.status_queue_st_va + self.status_queue_tx.rxHdrOff)
+    print(hex(self.status_queue_tx.entryOff), hex(self.status_queue_tx.rxHdrOff))
 
     print(hex(self.rreg(self.NV_PFB_PRI_MMU_WPR2_ADDR_HI)))
-    # print(hex(self.rreg(self.NV_FALCON2_GSP_BASE + self.NV_PFALCON_FALCON_MAILBOX0)))
+    print(hex(self.rreg(self.NV_FALCON2_GSP_BASE + self.NV_PFALCON_FALCON_MAILBOX0)))
     print(hex(self.rreg(self.NV_FALCON2_GSP_BASE + self.NV_PRISCV_RISCV_CPUCTL)))
-
+    print(self.status_queue_tx.writePtr, self.status_queue_tx.entryOff)
     hexdump(to_mv(self.status_queue_va, 0x100))
     hexdump(to_mv(self.command_queue_va, 0x100))
 
+    # for k,v in self.logs.items():
+    #   print(f"{k}:")
+    #   hexdump(v)
 
-  def gsp_rpc_wait(self, op):
-    pass
-
-  
   def _download(self, file) -> str:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/e8113f665d936d9f30a6d508f3bacd1e148539be/{file}"
     return fetch(url, subdir="defines").read_text()
