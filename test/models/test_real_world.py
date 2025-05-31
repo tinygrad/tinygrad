@@ -4,7 +4,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.jit import TinyJit
-from tinygrad import Tensor, Device, GlobalCounters, dtypes, Variable
+from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.helpers import CI, Context
 from extra.lr_scheduler import OneCycleLR
 from test.helpers import derandomize_model
@@ -94,7 +94,7 @@ class TestRealWorld(unittest.TestCase):
     @TinyJit
     def test(t, v):
       with Context(JIT=0): return model(t, v).realize()
-    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 137 if CI else 396, all_jitted=True)
+    helper_test("test_gpt2", lambda: (Tensor([[1,]]), 1), test, 0.23 if CI else 0.9, 137 if CI else 396, all_jitted=True)
 
   @unittest.skipIf(CI and Device.DEFAULT == "CPU", "slow")
   def test_train_mnist(self):
