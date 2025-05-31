@@ -92,8 +92,8 @@ jobs:
       run: |
         BENCHMARK_LOG=llama3_int8 python3.11 examples/llama3.py --size 8B --temperature 0 --benchmark --quantize int8 | tee llama3_int8.txt
         BENCHMARK_LOG=llama3_nf4 python3.11 examples/llama3.py --size 8B --temperature 0 --benchmark --quantize nf4 | tee llama3_nf4.txt
-    #- name: Run LLaMA 7B on 4 (virtual) GPUs
-    #  run: python3.11 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
+    - name: Run LLaMA 7B on 4 (virtual) GPUs
+      run: python3.11 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run GPT2
       run: |
         BENCHMARK_LOG=gpt2_nojit JIT=0 python3.11 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
