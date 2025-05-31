@@ -38,8 +38,8 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
 def replay_linearize(k:Kernel, _:Kernel, name_override=None, ast_transform=None) -> tuple[str, str, tuple[Any, ...]]:
-  k2 = Kernel(k.ast, opts=k.opts).apply_opts(k.applied_opts)
-  k2.to_program(name_override=to_function_name(k.name))
+  k2 = k.copy()
+  k2.linearize(name_override=to_function_name(k.name), ast_transform=ast_transform)
   def to_str(ret:Kernel): return ret.opts.render(ret.uops)
   return to_str(k2), to_str(k), (k.ast, k.opts, k.applied_opts)
 
@@ -73,7 +73,7 @@ def diff(offset:int) -> None:
         warnings.warn("PROCESS REPLAY DETECTED CHANGE", ProcessReplayWarning)
     except Exception as e:
       changed += 1
-      warnings.warn(f"FAILED TO CREATE DIFF {e}", ProcessReplayWarning)
+      warnings.warn(e, ProcessReplayWarning)
   conn.commit()
   cur.close()
 
@@ -104,7 +104,7 @@ if __name__ == "__main__":
 
   print(f"running process replay with {ASSERT_DIFF=}")
   try: _pmap()
-  except ProcessReplayWarning: exit(0)
+  except ProcessReplayWarning: exit(1)
   except Exception as e:
     if ASSERT_DIFF: raise e
     logging.error(f"diff err {e}")
