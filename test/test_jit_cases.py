@@ -19,8 +19,7 @@ from typing import cast
 # explicit inputs and outputs are realized on their way in and out of the JIT
 # there's a whole bunch of edge cases and weirdness here that needs to be tested and clarified.
 
-# NOTE: This is a very rough/unoptimized jit_v2 prototype, because GraphRenderer is currently designed for model export
-# The purpose is to show that the new graph capture method works for all the TestJitCases
+# This prototype jit is for testing whether GraphRenderer captures graphs correctly
 def jit_v2(fxn, *args, **kwargs):
   r = GraphRenderer(fxn, *args, **kwargs)
 
@@ -37,7 +36,7 @@ def jit_v2(fxn, *args, **kwargs):
         if buf == out.buffer:
           explicit_output_j_i[idx] = (j, i)
 
-  # NOTE: To make model export to other languages simple, Tensor and Variable args must be positional (not kwargs)
+  # NOTE: The graph captured by GraphRenderer only takes positional Tensor/Variable args (no kwargs)
   def captured_jit_v2(*args: Tensor|UOp):
     if args: Tensor.realize(*[arg for arg in args if isinstance(arg, Tensor)])
     var_vals = dict(v.unbind() for v in args if isinstance(v, UOp))
@@ -47,12 +46,21 @@ def jit_v2(fxn, *args, **kwargs):
       assert isinstance(b, Buffer)
       r.eis[j].bufs[i] = b
     for ei in r.eis: ei.run(var_vals)
-    # NOTE: for model export we don't need to return a Tensor, we do the below just for these tests
+    # NOTE: GraphRenderer captures only ret buffers, not Tensors, so we need to wrap the ret buffer in a Tensor to be consistent with TinyJit
     assert all(isinstance(b, Buffer) for ei in r.eis for b in ei.bufs)
+
+    # Implicit input buffers can change during execution, so we have to copy the data from the new buffer back to the original buffer
+    for dest, src in r.implicit_input_copies:
+      dest.copyin(src.as_buffer(allow_zero_copy=True))
+
     ret = [Tensor(bytes((b:=cast(Buffer, r.eis[j].bufs[i])).as_buffer()), b.device, b.dtype) for j,i in explicit_output_j_i.values()]
     return ret[0] if len(ret) == 1 else ret
 
   return captured_jit_v2
+
+def check_realize(t:Tensor, v2=False):
+  if not v2: return t.realize()
+  else: return t
 
 class TestJitCases(unittest.TestCase):
   def test_explicit(self, v2=False):
@@ -97,10 +105,7 @@ class TestJitCases(unittest.TestCase):
     def f(x:Tensor):
       # NOTE: this must be realized here
       # if we were explicitly tracking the implicit output Tensors, we might not need this realize
-      if not v2: out.assign(x*2).realize()
-
-      # realize within jitted function is banned in v2
-      else: out.assign(x*2)
+      check_realize(out.assign(x*2), v2)
     f = TinyJit(f) if not v2 else jit_v2(f, Tensor([0]))
 
     for i in range(5):
@@ -118,8 +123,7 @@ class TestJitCases(unittest.TestCase):
 
     # this function has an implicit input and an implicit output
     def f():
-      if not v2: out.assign(x*2).realize() # NOTE: this must be realized here
-      else: out.assign(x*2) # realize within jitted function is banned in v2
+      check_realize(out.assign(x*2), v2) # NOTE: this must be realized here
     f = TinyJit(f) if not v2 else jit_v2(f)
 
     for i in range(5):
@@ -129,6 +133,27 @@ class TestJitCases(unittest.TestCase):
 
   def test_implicit_io_v2(self):
     self.test_implicit_io(v2=True)
+
+  def test_implicit_input_is_implicit_output(self, v2=False):
+    w = Tensor([0])
+
+    def f(x:Tensor):
+      check_realize(w.assign(w + 1), v2)
+      x = check_realize(x + w, v2)
+      check_realize(w.assign(w + 1), v2)
+      return x
+
+    f = TinyJit(f) if not v2 else jit_v2(f, Tensor([123]))
+
+    for i in range(5):
+      out = f(Tensor([42]))
+      self.assertEqual(out.item(), 42 + 2*i + 1)
+      #print(w.item())
+      #self.assertEqual(w.item(), 2*(i + 1))
+    #if v2: assert False
+
+  def test_implicit_input_is_implicit_output_v2(self):
+    self.test_implicit_input_is_implicit_output(v2=True)
 
 if __name__ == '__main__':
   unittest.main()

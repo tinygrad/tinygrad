@@ -44,7 +44,7 @@ class GraphRenderer(Renderer):
     # Assigns on implicit input can cause the final buffer to be different than the original buffer, so we need to copy the data back
     self.implicit_input_copies: list[tuple[Buffer, Buffer]] = []
     for t in affected:
-      if t in precall and (new_buf := t.lazydata.base.buf_uop.buffer) != (old_buf := precall[t].base.buf_uop.buffer):
+      if t in precall and (new_buf := t.lazydata.base.buf_uop.buffer) != (old_buf := precall[t].base.buf_uop.buffer) and old_buf.is_allocated():
         self.implicit_input_copies.append((cast(Buffer, old_buf), cast(Buffer, new_buf)))
 
     # Linearize the kernel graph
