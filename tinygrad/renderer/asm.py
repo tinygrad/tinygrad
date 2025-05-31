@@ -223,9 +223,13 @@ arm64_rewrite = PatternMatcher([
    f"{ctx.two_address(x, alt)}tst {ctx[mask]}, #1\n"
    f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
   (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, ={ctx[idx][1:]}"),
+  (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"),
+   lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {{{ctx[x]}}}, [{ctx[idx]}]" if x.dtype.count > 1 else None),
+  (UPat(Ops.STORE, name="x"),
+   lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {{{ctx[x.src[1]]}}}, [{ctx[x.src[0]]}]" if x.src[1].dtype.count > 1 else None),
   (UPat(Ops.STORE, name="x"), lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {ctx[x.src[1]]}, [{ctx[x.src[0]]}]"),
   # devectorize/vectorize
-  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"fmov {ctx[x]}, {ctx[x.src[0]]}.{arm64_vec_suffix[x.src[0].dtype.itemsize]}[{x.arg[0]}]"),
+  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"fmov {ctx[x]}, {ctx.r[x.src[0]]}.{arm64_vec_suffix[x.src[0].dtype.scalar().itemsize]}[{x.arg[0]}]"),
   (UPat(Ops.VECTORIZE, name="x"),
    lambda ctx,x: "\n".join(f"ins {ctx[x]}.{arm64_vec_suffix[s.dtype.itemsize]}[{i}], {ctx[s]}" for i,s in enumerate(x.src))),
   # casts
@@ -300,7 +304,7 @@ class Arm64Renderer(AsmRenderer):
   def render_imm(self, imm:str) -> str: return f"#{imm}"
   def render_mem(self, sz:int) -> str: return f"[x29, #{sz}]"
   def render_reg(self, reg:str, dt:DType) -> str:
-    if dt.count > 1: return "{" + f"{reg}.{dt.count}{arm64_vec_suffix[dt.scalar().itemsize]}" + "}"
+    if dt.count > 1: return f"{reg}.{dt.count}{arm64_vec_suffix[dt.scalar().itemsize]}"
     if dt in dtypes.floats: return arm64_reg_map[reg][dt.itemsize]
     return reg if dt.itemsize == 8 else arm64_reg_map[reg][dt.itemsize]
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
