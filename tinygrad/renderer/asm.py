@@ -60,8 +60,6 @@ asm_matcher = PatternMatcher([
   (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
   # rewrite MAX to CMPLT + WHERE
   (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
-  # mulacc only available for floats, NOTE: arm64 supports int mullac but requires no imm operands
-  (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
 ])
 
 # reg alloc based on https://dash.harvard.edu/server/api/core/bitstreams/7312037d-c641-6bd4-e053-0100007fdf3b/content
@@ -271,6 +269,9 @@ def arm64_load_consts(x:UOp) -> UOp|None:
 # TODO: technically loading to w reg doesn't zero extend upper 32 bits so not a NOOP, use 64 regs when loading?
 arm64_matcher = asm_matcher + PatternMatcher([
   (UPat(GroupOp.All, name="x"), arm64_load_consts),
+  # some ops can't take imm in srcs
+  (UPat((Ops.IDIV, Ops.MUL, Ops.MULACC), name="x"),
+   lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   # TODO: uint16/int16 to float16 bitcast and vice versa is different from x86 need to use vector reg and just move
   # int8/int16 alus perform instruction in int32
   (UPat(GroupOp.ALU, dtype=(dtypes.int8, dtypes.int16), name="x"),
@@ -293,7 +294,7 @@ class Arm64Renderer(AsmRenderer):
   global_max = None
   extra_matcher = arm64_matcher
   string_rewrite = arm64_rewrite
-  code_for_op = {Ops.SQRT:None, Ops.AND:None, Ops.SHL:None, Ops.SHR:None}
+  code_for_op = {Ops.SQRT:None, Ops.AND:None, Ops.SHL:None, Ops.SHR:None, Ops.MULACC:None}
   ops = arm64_ops
   regs = arm64_regs
 
@@ -451,6 +452,8 @@ x86_matcher = asm_matcher + PatternMatcher([
     lambda x: UOp(Ops.MUL, dtype=dtypes.int16, src=(x.src[0].cast(dtypes.int16), x.src[1].cast(dtypes.int16))).cast(x.dtype)),
   (UPat(Ops.WHERE, dtype=(dtypes.bool, dtypes.uint8, dtypes.int8), name="x"),
     lambda x: UOp(Ops.WHERE, dtype=dtypes.int16, src=(x.src[0], x.src[1].cast(dtypes.int16), x.src[2].cast(dtypes.int16))).cast(x.dtype)),
+  # mulacc only available for floats
+  (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
 ])
 
 class X86Renderer(AsmRenderer):
