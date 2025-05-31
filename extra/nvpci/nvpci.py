@@ -40,6 +40,10 @@ bar_fds = {b: FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/resource{b}", os.O
 bar_info = FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/resource", os.O_RDONLY).read().splitlines()
 bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
+# for b in bar_info:
+#   print(f"BAR {b}: start={hex(bar_info[b][0])}, end={hex(bar_info[b][1])}, flags={hex(bar_info[b][2])}")
+# exit(0)
+
 cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
 pci_cmd = int.from_bytes(cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
 cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=pci.PCI_COMMAND)
@@ -187,6 +191,7 @@ class NVDev():
     self.status_queue_st_va = shared_va + pt_size + 0x40000
 
     self.command_queue_va = self.command_queue_st_va + 0x1000
+    self.command_queue_mv = to_mv(self.command_queue_va, 0x40000 - 0x1000)
 
     self.command_queue_tx = nv.msgqTxHeader.from_address(self.command_queue_st_va)
     self.command_queue_rx = nv.msgqRxHeader.from_address(self.command_queue_st_va + ctypes.sizeof(nv.msgqTxHeader))
@@ -236,6 +241,46 @@ class NVDev():
     arg.id8 = int.from_bytes(bytes("RMARGS", 'utf-8'), 'big')
     arg.pa = rm_args_sysmem
     return libos_init_sysmem[0]
+
+  def _checksum(self, data):
+    pad_len = (-len(data)) % 8
+    if pad_len: data += b'\x00' * pad_len
+    checksum = 0
+    for offset in range(0, len(data), 8):
+      (value,) = struct.unpack_from('<Q', data, offset)
+      checksum ^= value
+    return ((checksum >> 32) & 0xFFFFFFFF) ^ checksum & 0xFFFFFFFF
+  
+  def send_rpc(self, func, msg):
+    assert len(msg) < 0xf00
+
+    header = nv.rpc_message_header_v(signature=nv.NV_VGPU_MSG_SIGNATURE_VALID, rpc_result=nv.NV_VGPU_MSG_RESULT_RPC_PENDING,
+      rpc_result_private=nv.NV_VGPU_MSG_RESULT_RPC_PENDING, header_version=(3<<24), function=func,
+      length=len(msg))
+    
+    # simple put rpc
+    msg = bytes(header) + msg
+    phdr = nv.GSP_MSG_QUEUE_ELEMENT(checkSum=self._checksum(msg), elemCount=1)
+    msg = bytes(phdr) + msg
+
+    off = self.command_queue_tx.writePtr * 0x1000
+    self.command_queue_mv[off:off+len(msg)] = msg
+    self.command_queue_tx.writePtr += 1
+
+    # hexdump(msg)
+
+    self.wreg(0x110c00, 0x0) # ring
+
+  def rpc_set_system_data(self):
+    data = nv.GspSystemInfo(gpuPhysAddr=bar_info[0][0], gpuPhysFbAddr=bar_info[1][0], gpuPhysInstAddr=bar_info[3][0],
+      pciConfigMirrorBase=0x92000, pciConfigMirrorSize=0x1000, nvDomainBusDeviceFunc=0x100,
+      PCIDeviceID=0x2b8510de, PCISubDeviceID=0x1430196e, PCIRevisionID=0xa1, bFlrSupported=1, hostPageSize=0x1000,
+      pcieAtomicsOpMask=0x0, pcieAtomicsCplDeviceCapMask=0x3f, consoleMemSize=0x0, maxUserVa=0x7ffffffff000, bEnableDynamicGranularityPageArrays=0,
+      bGpuBehindBridge=0, bUpstreamL0sUnsupported=0, bUpstreamL1Unsupported=0, bUpstreamL1PorSupported=0, bUpstreamL1PorMobileOnly=0, 
+      upstreamAddressValid=1, hypervisorType=4, bIsPassthru=0)
+
+    dt = bytes(data) + b'\x00' * (960 - len(bytes(data))) # pad to 960 bytes
+    self.send_rpc(72, dt)
 
   def init_gsp(self):
     bootload_ucode_sysmem, bootload_ucode_size, bootload_desc = self.init_boot_binary_image()
@@ -300,6 +345,9 @@ class NVDev():
       time.sleep(0.01)
     print(hex(self.rreg(self.NV_THERM_I2CS_SCRATCH)))
 
+    self.rpc_set_system_data()
+    # exit(0)
+
     self.kfsp_send_msg(self.NVDM_TYPE_COT, bytes(cot_payload))
 
     time.sleep(0.5)
@@ -312,12 +360,15 @@ class NVDev():
     print(hex(self.rreg(self.NV_FALCON2_GSP_BASE + self.NV_PFALCON_FALCON_MAILBOX0)))
     print(hex(self.rreg(self.NV_FALCON2_GSP_BASE + self.NV_PRISCV_RISCV_CPUCTL)))
     print(self.status_queue_tx.writePtr, self.status_queue_tx.entryOff)
-    hexdump(to_mv(self.status_queue_va, 0x100))
-    hexdump(to_mv(self.command_queue_va, 0x100))
 
-    # for k,v in self.logs.items():
-    #   print(f"{k}:")
-    #   hexdump(v)
+    while True:
+      if self.status_queue_rx.readPtr != self.status_queue_tx.writePtr:
+        off = self.status_queue_rx.readPtr * 0x1000
+        # bts = self.status_queue_mv[off:off+0x1000]
+
+        x = nv.rpc_message_header_v.from_address(self.status_queue_va + off + 0x30)
+        print(f"RPC message: {x.function}, {x.length}, {x.signature}, {x.rpc_result}, {x.rpc_result_private}")
+        self.status_queue_rx.readPtr += 1
 
   def _download(self, file) -> str:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/e8113f665d936d9f30a6d508f3bacd1e148539be/{file}"
@@ -377,7 +428,7 @@ class NVDev():
     offs, blk = self.read_num("NV_PFSP_EMEMC", self.rreg(self.NV_PFSP_EMEMC(self.FSP_EMEM_CHANNEL_RM)), "OFFS", "BLK")
     # print(offs, blk)
 
-    self.wreg(self.NV_PFSP_QUEUE_TAIL(self.FSP_EMEM_CHANNEL_RM), len(buf) - 4) # TAIL points to the last DWORD written, so subtract 1
+    self.wreg(self.NV_PFSP_QUEUE_TAIL(self.FSP_EMEM_CHANNEL_RM), len(buf) - 8) # TAIL points to the last DWORD written, so subtract 1
     self.wreg(self.NV_PFSP_QUEUE_HEAD(self.FSP_EMEM_CHANNEL_RM), 0)
 
     while True:
