@@ -617,7 +617,7 @@ jobs:
       run: |
         # generate quantized weights
         ln -s /data/home/tiny/tinygrad/extra/datasets/imagenet extra/datasets/imagenet
-        ln -s /data/home/tiny/tinygrad/testsig-0x858d6c15.so .
+        ln -s /data/home/tiny/tinygrad/testsig-*.so .
         PYTHONPATH=. CC=clang-19 CPU=1 QUANT=1 CNT=0 python3 examples/test_onnx_imagenet.py https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx /tmp/model.quant.onnx
         # benchmark on DSP with NOOPT=1, the devectorizer has issues
         PYTHONPATH=. CC=clang-19 DSP=1 DONT_REALIZE_EXPAND=1 NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
