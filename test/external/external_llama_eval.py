@@ -1,102 +1,80 @@
-from lm_eval.base import BaseLM
-from lm_eval import evaluator, tasks
-import torch, json, argparse
+from lm_eval import simple_evaluate
+from lm_eval.api.instance import Instance
+from lm_eval.api.model import LM
+from pathlib import Path
+import json, argparse
 
-from examples.llama import LLaMa
-from tinygrad.tensor import Tensor
-from tinygrad import Device
+from examples.llama3 import build_transformer, Tokenizer, MODEL_PARAMS
+from tinygrad import Tensor, Device
+from tinygrad.helpers import tqdm
 
-class LLaMaAdaptor(BaseLM):
+class LLaMaAdaptor(LM):
   def __init__(
     self,
-    model_size="7B",
-    model_gen=1,
-    device="",
-    quantize=False,
-    batch_size=1,
-    max_batch_size=1,
-    do_sample=False,
-    temperature=1.0,
-    checkpoint_path="",
-    tokenizer_path="",
+    model_size: str,
+    checkpoint_path: Path,
+    is_chat_model: bool,
+    max_length: int,
+    quantize: str | None,
   ):
     super().__init__()
+    self.max_length = max_length
+    self.is_chat_model = is_chat_model
+    self.tokenizer = Tokenizer(str((checkpoint_path if checkpoint_path.is_dir() else checkpoint_path.parent) / "tokenizer.model"))
+    self.model = build_transformer(checkpoint_path, model_size, quantize)
 
-    if batch_size is None:
-      batch_size = 1
-    self.do_sample = do_sample
-    self.temperature = temperature
-    self._device = device
+  def _encode_role(self, role: str):
+    return [self.tokenizer.special_tokens["<|start_header_id|>"]] + self.tokenizer.encode(role) + \
+      [self.tokenizer.special_tokens["<|end_header_id|>"]] + self.tokenizer.encode("\n\n")
 
-    assert isinstance(model_gen, int)
-    assert isinstance(model_size, str)
-    assert isinstance(batch_size, int)
-    assert isinstance(checkpoint_path, str)
-    assert isinstance(tokenizer_path, str)
+  def _encode_message(self, role: str, content: str):
+    return self._encode_role(role) + self.tokenizer.encode(content.strip()) + [self.tokenizer.special_tokens["<|eot_id|>"]]
 
-    self.llama = LLaMa.build(checkpoint_path, tokenizer_path, model_gen, model_size, quantize)
-
-  @classmethod
-  def create_from_arg_string(cls, arg_string, additional_config=None):
-    kwargs = {el.split("=")[0]: el.split("=")[1] for el in arg_string.split(",")}
-    return cls(**kwargs, **additional_config)
-
-  @property
-  def eot_token_id(self):
-    # we use EOT because end of *text* is more accurate for what we're doing than end of *sentence*
-    return self.llama.tokenizer.eos_id()
-
-  @property
-  def max_length(self):
-    return 1024
-
-  @property
-  def max_gen_toks(self):
-    return 256
-
-  @property
-  def batch_size(self):
-    return 1
-
-  @property
-  def device(self):
-    return self._device
-
-  def tok_encode(self, string: str):
-    return [self.llama.tokenizer.bos_id()] + self.llama.tokenizer.encode(string)
-
-  def tok_decode(self, tokens):
-    return self.llama.tokenizer.decode(tokens)
-
-  def _model_call(self, inps):
-    return torch.Tensor(self.llama.model(Tensor(inps.numpy()), 0).numpy())
-
-  def greedy_until(self, requests):
+  def generate_until(self, requests: list[Instance]) -> list[str]:
     continuations = []
-    for request in requests:
-      prompt, until = request[0], request[1]['until']
-      output = self.llama.greedy_until(prompt, until, max_length=128, temperature=0.0)
-      continuations.append(output[len(prompt):])
+    for request in tqdm(requests):
+      prompt, args = request.args
+      until = [self.tokenizer.encode(tok) for tok in args.get("until", [])]
+      if self.is_chat_model:
+        toks = [self.tokenizer.bos_id] + self._encode_message("system", "You are a helpful assistant") + \
+          self._encode_message("user", prompt) + self._encode_role("assistant")
+      else:
+        toks = [self.tokenizer.bos_id] + self.tokenizer.encode(prompt)
+      prompt_len = len(toks)
+      start_pos = 0
+      for i in range(args.get("max_length", self.max_length)):
+        next_tok = self.model(Tensor([toks[start_pos:]]), start_pos, args.get("temperature", 0.0)).item()
+        if next_tok in self.tokenizer.stop_tokens or next_tok in until: break
+        start_pos = len(toks)
+        toks.append(next_tok)
+      continuations.append(self.tokenizer.decode(toks[prompt_len:]))
     return continuations
 
-  def _model_generate(self, context, max_length, eos_token_id):
-    raise NotImplementedError()
+  def loglikelihood(self, requests: list[Instance]) -> list[tuple[float, bool]]: raise NotImplementedError() # needs changes to extra/models/llama.py
+  def loglikelihood_rolling(self, requests: list[Instance]) -> list[tuple[float, bool]]: raise NotImplementedError()
 
 if __name__ == '__main__':
   print(f"using {Device.DEFAULT} backend")
 
   parser = argparse.ArgumentParser(description='Run LLaMA evals in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B] for Gen 2")
-  parser.add_argument('--gen', type=int, default="1", help="Generation of the model to use [1, 2]")
-  parser.add_argument('--quantize', action='store_true', help="Quantize the weights to int8 in memory")
-  parser.add_argument('--eval', type=str, default="arc_easy", help="Run in evaluation mode")
+  parser.add_argument('--size', type=str, default="8B", help=f"Size of model to use [{', '.join(list(MODEL_PARAMS.keys()))}]")
+  parser.add_argument('--chat', action='store_true', help="Use chat model")
+  parser.add_argument('--ctx', type=int, default=128000, help="Max context length")
+  parser.add_argument('--quantize', type=str, default=None, help="Quantize the weights to int8 or int4 in memory")
+  parser.add_argument('--eval', type=str, default="gsm8k_cot_llama", help="Run evaluation")
   parser.add_argument('--limit', type=int, default=None, help="Limit tests in eval")
-  parser.add_argument('--weights', type=str, default="./weights/LLaMa/", help="Location of the weights")
-  parser.add_argument('--tokenizer', type=str, default="./weights/LLaMa/tokenizer.model", help="Location of the tokenizer")
+  parser.add_argument('--num_fewshot', type=int, default=None, help="Number of examples to add to context")
+  parser.add_argument('--model', type=str, default="./weights/LLaMa/", help="Location of the weights")
+  parser.add_argument('--output_path', type=str, default=None, help="Location of the log file")
   args = parser.parse_args()
 
   # run eval and exit
-  adaptor = LLaMaAdaptor(model_gen=args.gen, model_size=args.size, quantize=args.quantize,
-                         checkpoint_path=args.weights, tokenizer_path=args.tokenizer, device="cpu")
-  results = evaluator.evaluate(adaptor, tasks.get_task_dict(args.eval.split(",")), False, 0, args.limit)
-  print(json.dumps(results, indent=2))
+  adaptor = LLaMaAdaptor(model_size=args.size, quantize=args.quantize,
+                         checkpoint_path=Path(args.model), is_chat_model=args.chat, max_length=args.ctx)
+  results = simple_evaluate(model=adaptor, tasks=args.eval.split(","),
+                            num_fewshot=args.num_fewshot, limit=args.limit)
+
+  if args.output_path: Path(args.output_path).write_text(json.dumps(results, indent=2))
+  for task_name, val in results["results"].items():
+    print(f"{task_name}:")
+    print("\n".join(f"\t{k:20} | {v}" for k, v in val.items() if k != "alias"))
