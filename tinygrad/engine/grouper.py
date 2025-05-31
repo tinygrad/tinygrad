@@ -1,7 +1,7 @@
-from collections import defaultdict, deque
 from dataclasses import dataclass
-from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
-from tinygrad.uop.ops import can_pad, sint, track_rewrites, _substitute
+from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, can_pad, sint
+from tinygrad.uop.ops import track_rewrites, _substitute
+from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.codegen.lowerer import get_contraction_with_reduce, get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
@@ -10,7 +10,6 @@ from tinygrad.dtype import ImageDType
 from tinygrad.engine.multi import multi_pm, replace_allreduce
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
-from tinygrad.uop.spec import type_verify, tensor_uop_spec
 
 # creation can recurse a lot
 import sys
@@ -142,7 +141,7 @@ do_realize = PatternMatcher([
   (UPat((Ops.COPY, Ops.MSELECT), src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), allow_any_len=True), realize),
 ])
 
-def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
+def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:dict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
                     reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]) -> None:
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
@@ -152,7 +151,7 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
     # max one reduceop per kernel
     if not st.contiguous or st.size != rsize or tr in reduce_for_op: group.setdefault(r)
     return group.setdefault(tr)
-  for tr_next in children[tr]:
+  for tr_next in children.get(tr, {}):
     # max one reduceop per kernel
     if tr_next.op is Ops.REDUCE_AXIS: return group.setdefault(r)
     # can only fuse contiguous
@@ -166,12 +165,12 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   if DONT_GROUP_REDUCES: return realizes
 
   # construct children graph (only for bases)
-  children: defaultdict[UOp, dict[UOp, None]] = defaultdict(dict)
+  children: dict[UOp, dict[UOp, None]] = {}
   assigns: dict[UOp, None] = {}
   for u in (toposort:=sink.toposort()):
     if u.op in {Ops.VIEW, Ops.SINK}: continue
     if u.op is Ops.ASSIGN: assigns[u.buf_uop] = None
-    for s in u.src: children[s.base][u] = None
+    for s in u.src: children.setdefault(s.base, {})[u] = None
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
@@ -191,7 +190,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
     if not forced_realize and len(group) > 1: forced_realize = True
     # can only fuse assign if no other assign_target is used in the kernel
     if not forced_realize and (assign_targets:={x.buf_uop for x in group if x.op is Ops.ASSIGN}):
-      parents = deque((r, *group))
+      parents = [r, *group]
       while parents and not forced_realize:
         p = parents.pop().base
         if p.op is Ops.BUFFER and p in assigns and p not in assign_targets: forced_realize, can_chase = True, False
@@ -202,8 +201,8 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
       if can_chase:
         # can chase this down to contiguous children
         st = unwrap(tr.st)
-        while len(children[tr]) == 1:
-          tr_next = next(iter(children[tr]))
+        while len(lst:=children.get(tr, {})) == 1:
+          tr_next = next(iter(lst))
           st_childs = dedup(unwrap(s.st) for s in tr_next.src if s.base is tr)
           if len(st_childs) > 1: break
           if st.size != st_childs[0].size: break
@@ -219,7 +218,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   # fuse double reduces with no other child
   for reduceop in double_reduces:
     top_reduce = reduceop.src[0].base
-    if len(children[top_reduce]) == 1: del realizes[top_reduce]
+    if len(children.get(top_reduce, {})) == 1: del realizes[top_reduce]
   return realizes
 
 # **** create kernels
