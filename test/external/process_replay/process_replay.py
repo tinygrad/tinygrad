@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools
-from typing import Callable
+from typing import Callable, Any
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm, to_function_name
 from tinygrad.engine.grouper import get_kernelize_map
 from tinygrad.codegen.kernel import Kernel
@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 MAX_LINES = 500
 def trunc_log(x):
   if len(lines:=repr(x).splitlines()) > MAX_LINES: lines = lines[:MAX_LINES]+[f"WARN: truncated string with {len(lines)} lines"]
-  logging.info("\n".join(lines))
+  logging.info(repr(x))
 
 # user config
 ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
@@ -31,19 +31,19 @@ class ProcessReplayWarning(Warning): pass
 
 # *** replay the function and convert return values to string
 
-def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str]:
+def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[Any, ...]]:
   UOp.unique_num = itertools.count(max([u.arg for u in big_sink.toposort() if u.op is Ops.UNIQUE], default=0)+1)
   new_sink = big_sink.substitute(get_kernelize_map(big_sink))
   def to_str(ret:UOp): return "\n".join([repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.KERNEL])
-  return to_str(new_sink), to_str(ret[big_sink])
+  return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
-def replay_linearize(ret:Kernel, s:Kernel, name_override=None, ast_transform=None) -> tuple[str, str]:
+def replay_linearize(ret:Kernel, s:Kernel, name_override=None, ast_transform=None) -> tuple[str, str, tuple[Any, ...]]:
   k = Kernel(s.ast, opts=s.opts).apply_opts(s.applied_opts)
   k.to_program(name_override=to_function_name(ret.name))
   def to_str(ret:Kernel): return ret.opts.render(ret.uops)
-  return to_str(k), to_str(ret)
+  return to_str(k), to_str(ret), (s.ast, s.opts, s.applied_opts)
 
-differs: dict[str, Callable[..., tuple[str, str]]] = {"get_kernelize_map":replay_kernelize, "linearize":replay_linearize}
+replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_kernelize_map":replay_kernelize, "linearize":replay_linearize}
 
 # *** run replayers on captured rows and print diffs
 
@@ -59,34 +59,20 @@ def diff(offset:int) -> None:
       warnings.warn(f"detected changes in over {MAX_DIFF_PCT}%. skipping further diff generation.", ProcessReplayWarning)
       early_stop.set()
       break
-    # try unpickle
-    try: name, args, kwargs, ctx_vals, loc, ret = pickle.loads(row[0])
-    except Exception as e:
-      changed += 1
-      warnings.warn(f"FAILED TO UNPICKLE OBJECTS {e}", ProcessReplayWarning)
-      continue
-    if (differ:=differs.get(name)) is None: continue
-    # try recreate
     try:
+      name, args, kwargs, ctx_vals, loc, ret = pickle.loads(row[0])
       ctx_vars = {k:v.value for k,v in ctx_vals.items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
-      with Context(**ctx_vars): good, compare = differ(ret, *args, **kwargs)
+      if (replayer:=replayers.get(name)) is None: continue
+      with Context(**ctx_vars): good, compare, metadata = replayer(ret, *args, **kwargs)
+      if good != compare:
+        for m in metadata: trunc_log(m)
+        for line in difflib.unified_diff(good.splitlines(), compare.splitlines()):
+          logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+        if ctx_vars: logging.info(ctx_vars)
+        warnings.warn("PROCESS REPLAY DETECTED CHANGE", ProcessReplayWarning)
     except Exception as e:
       changed += 1
-      if ctx_vars: logging.info(ctx_vars)
-      for x in args: trunc_log(x)
-      for k,v in kwargs.items(): trunc_log((k, v))
-      warnings.warn(f"FAILED TO RECREATE KERNEL {e}", ProcessReplayWarning)
-      continue
-    # diff kernels
-    try: assert good == compare
-    except AssertionError:
-      changed += 1
-      if ctx_vars: logging.info(ctx_vars)
-      for x in args: trunc_log(x)
-      for k,v in kwargs.items(): trunc_log((k, v))
-      changes = list(difflib.unified_diff(good.splitlines(), compare.splitlines()))
-      logging.info("\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in changes))
-      warnings.warn("PROCESS REPLAY DETECTED CHANGE", ProcessReplayWarning)
+      warnings.warn(f"FAILED TO CREATE DIFF {e}", ProcessReplayWarning)
   conn.commit()
   cur.close()
 
