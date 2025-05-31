@@ -22,19 +22,22 @@ class LLaMaAdaptor(LM):
     self.is_chat_model = is_chat_model
     self.tokenizer = Tokenizer(str((checkpoint_path if checkpoint_path.is_dir() else checkpoint_path.parent) / "tokenizer.model"))
     self.model = build_transformer(checkpoint_path, model_size, quantize)
-  def encode_role(self, role: str):
+
+  def _encode_role(self, role: str):
     return [self.tokenizer.special_tokens["<|start_header_id|>"]] + self.tokenizer.encode(role) + \
       [self.tokenizer.special_tokens["<|end_header_id|>"]] + self.tokenizer.encode("\n\n")
-  def encode_message(self, role: str, content: str):
-    return self.encode_role(role) + self.tokenizer.encode(content.strip()) + [self.tokenizer.special_tokens["<|eot_id|>"]]
+
+  def _encode_message(self, role: str, content: str):
+    return self._encode_role(role) + self.tokenizer.encode(content.strip()) + [self.tokenizer.special_tokens["<|eot_id|>"]]
+
   def generate_until(self, requests: list[Instance]) -> list[str]:
     continuations = []
     for request in tqdm(requests):
       prompt, args = request.args
       until = [self.tokenizer.encode(tok) for tok in args.get("until", [])]
       if self.is_chat_model:
-        toks = [self.tokenizer.bos_id] + self.encode_message("system", "You are a helpful assistant") + \
-          self.encode_message("user", prompt) + self.encode_role("assistant")
+        toks = [self.tokenizer.bos_id] + self._encode_message("system", "You are a helpful assistant") + \
+          self._encode_message("user", prompt) + self._encode_role("assistant")
       else:
         toks = [self.tokenizer.bos_id] + self.tokenizer.encode(prompt)
       prompt_len = len(toks)
@@ -46,6 +49,7 @@ class LLaMaAdaptor(LM):
         toks.append(next_tok)
       continuations.append(self.tokenizer.decode(toks[prompt_len:]))
     return continuations
+
   def loglikelihood(self, requests: list[Instance]) -> list[tuple[float, bool]]: raise NotImplementedError() # needs changes to extra/models/llama.py
   def loglikelihood_rolling(self, requests: list[Instance]) -> list[tuple[float, bool]]: raise NotImplementedError()
 
