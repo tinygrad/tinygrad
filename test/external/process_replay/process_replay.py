@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 MAX_LINES = 500
 def trunc_log(x):
   if len(lines:=repr(x).splitlines()) > MAX_LINES: lines = lines[:MAX_LINES]+[f"WARN: truncated string with {len(lines)} lines"]
-  logging.info(repr(x))
+  logging.info("\n".join(lines))
 
 # user config
 ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
