@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools
-from typing import Callable, cast
+from typing import Callable
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm, to_function_name
 from tinygrad.engine.grouper import get_kernelize_map
 from tinygrad.codegen.kernel import Kernel
@@ -29,25 +29,23 @@ SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE"
 if REF == "master": SKIP_PROCESS_REPLAY = True
 class ProcessReplayWarning(Warning): pass
 
-# *** recreators
+# *** replay the function and convert return values to string
 
-def recreate_sched(ret:dict[UOp, UOp], big_sink:UOp) -> bool:
+def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str]:
   UOp.unique_num = itertools.count(max([u.arg for u in big_sink.toposort() if u.op is Ops.UNIQUE], default=0)+1)
   new_sink = big_sink.substitute(get_kernelize_map(big_sink))
-  new_asts = "\n".join([repr(u.arg.ast) for u in new_sink.toposort() if u.op is Ops.KERNEL])
-  old_asts = "\n".join([repr(u.arg.ast) for u in ret[big_sink].toposort() if u.op is Ops.KERNEL])
-  return new_asts, old_asts
+  def to_str(ret:UOp): return "\n".join([repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.KERNEL])
+  return to_str(new_sink), to_str(ret[big_sink])
 
-def recreate_kernel(ret:Kernel, s:Kernel, name_override=None, ast_transform=None) -> bool:
+def replay_linearize(ret:Kernel, s:Kernel, name_override=None, ast_transform=None) -> tuple[str, str]:
   k = Kernel(s.ast, opts=s.opts).apply_opts(s.applied_opts)
-  # NOTE: replay with the captured renderer, not the one in master
-  new_src = k.opts.render(cast(list,k.to_program(to_function_name(ret.name)).uops))
-  old_src = ret.opts.render(ret.uops)
-  return new_src, old_src
+  k.to_program(name_override=to_function_name(ret.name))
+  def to_str(ret:Kernel): return ret.opts.render(ret.uops)
+  return to_str(k), to_str(ret)
 
-differs: dict[str, Callable[..., tuple[str, str]]] = {"get_kernelize_map":recreate_sched, "linearize":recreate_kernel}
+differs: dict[str, Callable[..., tuple[str, str]]] = {"get_kernelize_map":replay_kernelize, "linearize":replay_linearize}
 
-# *** replay all rows starting from the offset and print generated diff
+# *** Run replayers on captured rows starting from offset and print generated diff
 
 def diff(offset:int) -> None:
   if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
