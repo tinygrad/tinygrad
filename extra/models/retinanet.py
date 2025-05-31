@@ -36,7 +36,7 @@ def decode_bbox(offsets, anchors):
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 
 def decode_bbox2(offsets, anchors):
-  dx, dy, dw, dh = offsets[:, 0::4].squeeze(), offsets[:, 1::4].squeeze(), offsets[:, 2::4].squeeze(), offsets[:, 3::4].squeeze()
+  dx, dy, dw, dh = offsets.permute(1,0)
   widths, heights = anchors[:, 2] - anchors[:, 0], anchors[:, 3] - anchors[:, 1]
   cx, cy = anchors[:, 0] + 0.5 * widths, anchors[:, 1] + 0.5 * heights
   pred_cx, pred_cy = dx * widths + cx, dy * heights + cy
@@ -133,7 +133,6 @@ class RetinaNet:
       img_boxes = Tensor.cat(*img_boxes)
       img_scores = Tensor.cat(*img_scores)
       img_labels = Tensor.cat(*img_labels)
-      detections.append(img_labels)
 
     return detections
 
@@ -179,16 +178,15 @@ class RetinaNet:
       image_boxes = np.concatenate(image_boxes)
       image_scores = np.concatenate(image_scores)
       image_labels = np.concatenate(image_labels)
-      detections.append(image_labels)
 
-    #   # nms for each class
-    #   keep_mask = np.zeros_like(image_scores, dtype=bool)
-    #   for class_id in np.unique(image_labels):
-    #     curr_indices = np.where(image_labels == class_id)[0]
-    #     curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
-    #     keep_mask[curr_indices[curr_keep_indices]] = True
-    #   keep = np.where(keep_mask)[0]
-    #   keep = keep[image_scores[keep].argsort()[::-1]]
+      # nms for each class
+      # keep_mask = np.zeros_like(image_scores, dtype=bool)
+      # for class_id in np.unique(image_labels):
+      #   curr_indices = np.where(image_labels == class_id)[0]
+      #   curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
+      #   keep_mask[curr_indices[curr_keep_indices]] = True
+      # keep = np.where(keep_mask)[0]
+      # keep = keep[image_scores[keep].argsort()[::-1]]
 
     #   # resize bboxes back to original size
     #   image_boxes = image_boxes[keep]
