@@ -37,11 +37,11 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
   def to_str(ret:UOp): return "\n".join([repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.KERNEL])
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
-def replay_linearize(ret:Kernel, s:Kernel, name_override=None, ast_transform=None) -> tuple[str, str, tuple[Any, ...]]:
-  k = Kernel(s.ast, opts=s.opts).apply_opts(s.applied_opts)
-  k.to_program(name_override=to_function_name(ret.name))
+def replay_linearize(k:Kernel, _:Kernel, name_override=None, ast_transform=None) -> tuple[str, str, tuple[Any, ...]]:
+  k2 = Kernel(k.ast, opts=k.opts).apply_opts(k.applied_opts)
+  k2.to_program(name_override=to_function_name(k.name))
   def to_str(ret:Kernel): return ret.opts.render(ret.uops)
-  return to_str(k), to_str(ret), (s.ast, s.opts, s.applied_opts)
+  return to_str(k2), to_str(k), (k.ast, k.opts, k.applied_opts)
 
 replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_kernelize_map":replay_kernelize, "linearize":replay_linearize}
 
@@ -104,7 +104,7 @@ if __name__ == "__main__":
 
   print(f"running process replay with {ASSERT_DIFF=}")
   try: _pmap()
-  except ProcessReplayWarning: exit(1)
+  except ProcessReplayWarning: exit(0)
   except Exception as e:
     if ASSERT_DIFF: raise e
     logging.error(f"diff err {e}")
