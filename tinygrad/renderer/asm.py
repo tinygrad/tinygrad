@@ -60,6 +60,8 @@ asm_matcher = PatternMatcher([
   (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
   # rewrite MAX to CMPLT + WHERE
   (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
+  # mulacc only available for floats, NOTE: arm64 supports int mullac but requires no imm operands
+  (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
 ])
 
 # reg alloc based on https://dash.harvard.edu/server/api/core/bitstreams/7312037d-c641-6bd4-e053-0100007fdf3b/content
@@ -229,7 +231,7 @@ arm64_rewrite = PatternMatcher([
    lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {{{ctx[x.src[1]]}}}, [{ctx[x.src[0]]}]" if x.src[1].dtype.count > 1 else None),
   (UPat(Ops.STORE, name="x"), lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {ctx[x.src[1]]}, [{ctx[x.src[0]]}]"),
   # devectorize/vectorize
-  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"fmov {ctx[x]}, {ctx.r[x.src[0]]}.{arm64_vec_suffix[x.src[0].dtype.scalar().itemsize]}[{x.arg[0]}]"),
+  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx.r[x.src[0]]}.{arm64_vec_suffix[x.src[0].dtype.scalar().itemsize]}[{x.arg[0]}]"),
   (UPat(Ops.VECTORIZE, name="x"),
    lambda ctx,x: "\n".join(f"ins {ctx[x]}.{arm64_vec_suffix[s.dtype.itemsize]}[{i}], {ctx[s]}" for i,s in enumerate(x.src))),
   # casts
@@ -291,7 +293,7 @@ class Arm64Renderer(AsmRenderer):
   global_max = None
   extra_matcher = arm64_matcher
   string_rewrite = arm64_rewrite
-  code_for_op = {Ops.SQRT:None, Ops.AND:None, Ops.SHL:None, Ops.SHR:None, Ops.MULACC:None}
+  code_for_op = {Ops.SQRT:None, Ops.AND:None, Ops.SHL:None, Ops.SHR:None}
   ops = arm64_ops
   regs = arm64_regs
 
@@ -449,8 +451,6 @@ x86_matcher = asm_matcher + PatternMatcher([
     lambda x: UOp(Ops.MUL, dtype=dtypes.int16, src=(x.src[0].cast(dtypes.int16), x.src[1].cast(dtypes.int16))).cast(x.dtype)),
   (UPat(Ops.WHERE, dtype=(dtypes.bool, dtypes.uint8, dtypes.int8), name="x"),
     lambda x: UOp(Ops.WHERE, dtype=dtypes.int16, src=(x.src[0], x.src[1].cast(dtypes.int16), x.src[2].cast(dtypes.int16))).cast(x.dtype)),
-  # mulacc only available for floats
-  (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
 ])
 
 class X86Renderer(AsmRenderer):
