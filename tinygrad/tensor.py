@@ -1904,15 +1904,15 @@ class Tensor(MathTrait):
 
     # https://keccak.team/keccak_specs_summary.html
 
-    tkwargs, targs = dict(device=self.device, dtype=dtypes.uint64, requires_grad=False), (self.device, dtypes.uint64, False) # make linters happy
+    def ctensor(l: list[ConstType], dtype: DType = dtypes.uint64): return Tensor.stack(*(Tensor(v, dtype=dtype, device=self.device) for v in l))
     rot_offsets = [44, 43, 21, 14, 28, 20, 3, 45, 61, 1, 6, 25, 8, 18, 27, 36, 10, 15, 56, 62, 55, 39, 41, 2]
-    rot_offsets_v0, rot_offsets_v1 = Tensor([0] + [1 << v for v in rot_offsets], *targs), Tensor([1] + [1 << (64 - v) for v in rot_offsets], *targs)
+    rot_offsets_v0, rot_offsets_v1 =  ctensor([0] + [1 << v for v in rot_offsets]), ctensor([1] + [1 << (64 - v) for v in rot_offsets])
 
     # calculated from π step
-    reorder_indexes = Tensor([0,6,12,18,24,3,9,10,16,22,1,7,13,19,20,4,5,11,17,23,2,8,14,15,21], device=self.device, dtype=dtypes.int32)
-    round_const_masks = Tensor([ 1, 0x8082, 0x800000000000808a, 0x8000000080008000, 0x808b, 0x80000001, 0x8000000080008081, 0x8000000000008009, 0x8a,
+    reorder_indexes = ctensor([0,6,12,18,24,3,9,10,16,22,1,7,13,19,20,4,5,11,17,23,2,8,14,15,21], dtype=dtypes.int32)
+    round_const_masks = ctensor([ 1, 0x8082, 0x800000000000808a, 0x8000000080008000, 0x808b, 0x80000001, 0x8000000080008081, 0x8000000000008009, 0x8a,
     0x88, 0x80008009, 0x8000000a, 0x8000808b, 0x800000000000008b, 0x8000000000008089, 0x8000000000008003, 0x8000000000008002, 0x8000000000000080,
-    0x800a, 0x800000008000000a, 0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008 ], *targs).unsqueeze(1).pad((None, (0, 24)))
+    0x800a, 0x800000008000000a, 0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008 ]).unsqueeze(1).pad((None, (0, 24)))
 
     rate, dsbyte = { "sha3_224": (144, 6), "sha3_256": (136, 6), "sha3_384": (104, 6), "sha3_512": (72, 6),
       "shake_128": (168, 31) }[cfg] if isinstance(cfg, str) else cfg
@@ -1928,7 +1928,7 @@ class Tensor(MathTrait):
 
     data = (data ^ pad_mask).reshape(data.shape[0], -1, 200).bitcast(dtypes.uint64)
 
-    state = Tensor.zeros((data.shape[0], 25), **tkwargs)
+    state = Tensor.zeros((data.shape[0], 25), device=self.device, dtype=dtypes.uint64)
     for k in range(int(data.shape[1])):
       state = state.bitwise_xor(data[:,k].reshape(-1, 25))
       for i in range(24): # f1600
