@@ -189,8 +189,6 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(X_train.numpy()[samples.numpy()], x)
     np.testing.assert_allclose(Y_train.numpy()[samples.numpy()], y)
 
-  # TODO: fix these on WEBGPU, it looks like it has to do with packed stuff
-  @unittest.skipIf(getenv("WEBGPU"), "broken on webgpu for some reason")
   def test_index_mnist_opt(self): self.test_index_mnist(0)
   def test_index_mnist_split(self): self.test_index_mnist(1, split_reduceop=1)
   def test_index_mnist_opt_split(self): self.test_index_mnist(0, split_reduceop=1)
