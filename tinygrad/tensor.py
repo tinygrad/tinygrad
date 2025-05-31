@@ -1914,8 +1914,7 @@ class Tensor(MathTrait):
     0x88, 0x80008009, 0x8000000a, 0x8000808b, 0x800000000000008b, 0x8000000000008089, 0x8000000000008003, 0x8000000000008002, 0x8000000000000080,
     0x800a, 0x800000008000000a, 0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008 ]).unsqueeze(1).pad((None, (0, 24)))
 
-    rate, dsbyte = { "sha3_224": (144, 6), "sha3_256": (136, 6), "sha3_384": (104, 6), "sha3_512": (72, 6),
-      "shake_128": (168, 31) }[cfg] if isinstance(cfg, str) else cfg
+    rate, dsbyte = { "sha3_224": (144, 6), "sha3_256": (136, 6), "shake_128": (168, 31) }[cfg] if isinstance(cfg, str) else cfg
     data, data_pad = self.bitcast(dtypes.uint8).reshape(prod(self.shape[:-1]), -1), rate - (self.shape[-1] * self.dtype.itemsize % rate)
     # pad batches then pad blocks
     data = data.pad((None, (0, data_pad))).reshape(data.shape[0], -1, rate).pad((None, None, (0, 200 - rate))).flatten(1)

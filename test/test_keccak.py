@@ -16,8 +16,6 @@ class TestKeccak(unittest.TestCase):
 
   def test_sha3_224(self): self._test_preset("sha3_224", [143, 144])
   def test_sha3_256(self): self._test_preset("sha3_256", [135, 136])
-  def test_sha3_384(self): self._test_preset("sha3_384", [103, 104])
-  def test_sha3_512(self): self._test_preset("sha3_512", [71, 72])
   def test_shake_128(self): self._test_preset("shake_128", [167, 168], lambda d: hashlib.shake_128(d).digest(16))
 
   def _test_preset(self, name: str, special_sizes: list[int], hasher: Callable[[bytes], bytes] | None = None):
