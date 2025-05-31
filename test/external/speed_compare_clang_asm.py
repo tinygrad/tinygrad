@@ -5,19 +5,21 @@ from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.engine.search import bufs_from_lin
 from tinygrad.runtime.ops_cpu import ClangJITCompiler
 from tinygrad.runtime.ops_x86 import X86Renderer
+from tinygrad.runtime.ops_arm64 import Arm64Renderer
 from tinygrad.codegen.heuristic import hand_coded_optimizations
+import platform
 
 if __name__ == "__main__":
   ast_strs = load_worlds(filter_reduce=False, filter_novariable=True)
-  # no bfloat16 for ptx at the moment
+  # TODO: include float16
   ast_strs = [x for x in ast_strs if "dtypes.bfloat16" not in x and "dtypes.half" not in x]
   dev = Device["CPU"]
-  x86 = X86Renderer()
+  asm = X86Renderer() if platform.machine() in ("x86_64", "amd64") else Arm64Renderer()
 
   single = getenv("NUM", -1)
   if single != -1: ast_strs = ast_strs[single:single+1]
 
-  average_tm_clang, average_tm_x86 = 0, 0
+  average_tm_clang, average_tm_asm = 0, 0
   for num,ast in enumerate(ast_strs):
     # clang compile
     dev.compiler = ClangJITCompiler(opt_args=['-O1', '-march=native'])
@@ -28,10 +30,10 @@ if __name__ == "__main__":
     bufs = bufs_from_lin(lin)
 
     # x86 compile
-    dev.compiler = ClangJITCompiler(lang_args=['assembler', '-masm=intel'])
-    lin = ast_str_to_lin(ast, opts=x86)
+    dev.compiler = ClangJITCompiler(lang_args=['assembler'] + (['-masm=intel']) if isinstance(asm, X86Renderer) else [])
+    lin = ast_str_to_lin(ast, opts=asm)
     lin.apply_opts(hand_coded_optimizations(lin))
-    x86_prg = CompiledRunner(lin.to_program())
+    asm_prg = CompiledRunner(lin.to_program())
 
     # warmup
     try:
@@ -42,16 +44,16 @@ if __name__ == "__main__":
     if runtime > 1:
       print("kernel timeout")
       continue
-    x86_prg(bufs, {}, wait=True)
+    asm_prg(bufs, {}, wait=True)
 
-    tm_clang, tm_x86 = [], []
+    tm_clang, tm_asm = [], []
     for i in range(5):
       tm_clang.append(clang_prg(bufs, {}, wait=True))
-      tm_x86.append(x86_prg(bufs, {}, wait=True))
+      tm_asm.append(asm_prg(bufs, {}, wait=True))
     average_tm_clang += min(tm_clang)
-    average_tm_x86 += min(tm_x86)
-    ratio = min(tm_x86)/min(tm_clang)
-    print(f"{average_tm_x86/average_tm_clang:5.2f}x -- {num:4d} {colorize_float(ratio)}  {min(tm_x86)*1e6:7.2f} us", lin.name)
+    average_tm_asm += min(tm_asm)
+    ratio = min(tm_asm)/min(tm_clang)
+    print(f"{average_tm_asm/average_tm_clang:5.2f}x -- {num:4d} {colorize_float(ratio)}  {min(tm_asm)*1e6:7.2f} us", lin.name)
     #if ratio > 1.5:
     #  def fix(x): return x.replace('\t', ' ').strip()
     #  ll1, ll2 = clang_prg.lib.decode().split('\n'), x86_prg.lib.decode().split('\n')
