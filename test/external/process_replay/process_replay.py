@@ -66,6 +66,7 @@ def diff(offset:int) -> None:
       with Context(**ctx_vars): good, compare, metadata = replayer(ret, *args, **kwargs)
       if good != compare:
         for m in metadata: trunc_log(m)
+        logging.info(loc)
         for line in difflib.unified_diff(good.splitlines(), compare.splitlines()):
           logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
         if ctx_vars: logging.info(ctx_vars)
