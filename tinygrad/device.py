@@ -146,10 +146,13 @@ class Buffer:
     return self
   def deallocate(self):
     assert self.is_allocated(), "buffer must be allocated to deallocate"
-    if DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
+    if DEBUG is not None:
+      if DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None and (self.options is None or self.options.external_ptr is None):
-      if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
-      self.allocator.free(self._buf, self.nbytes, self.options)
+      if GlobalCounters is not None:
+        if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
+      if hasattr(self, 'allocator') and self.allocator is not None and hasattr(self.allocator, 'free'):
+        self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
     del self._buf
   def __reduce__(self):
@@ -163,7 +166,14 @@ class Buffer:
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
-  def __del__(self): (not self.is_allocated()) or self.deallocate()
+  def __del__(self):
+    try:
+      if hasattr(self, '_buf') and self.is_allocated():
+        self.deallocate()
+    except (AttributeError, TypeError, ValueError):
+      # Ignore cleanup errors during shutdown
+      pass
+
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
