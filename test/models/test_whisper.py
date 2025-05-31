@@ -4,6 +4,7 @@ from examples.whisper import init_whisper, load_file_waveform, transcribe_file, 
 from tinygrad.helpers import CI, fetch, Context
 from tinygrad import Device, dtypes
 from tinygrad.device import is_dtype_supported
+import numpy as np, soundfile as sf, tempfile, os
 
 # Audio generated with the command on MacOS:
 # say "Could you please let me out of the box?" --file-format=WAVE  --data-format=LEUI8@16000 -o test
@@ -76,6 +77,21 @@ class TestWhisper(unittest.TestCase):
     self.assertEqual(2, len(trancriptions))
     self.assertEqual(TRANSCRIPTION_3, trancriptions[0])
     self.assertEqual(TRANSCRIPTION_1, trancriptions[1])
+  
+  def test_transcribe_file_tiny_wav(self):
+    sr = 16000   # matches RATE in whisper.py
+    tiny_data = np.zeros(100, dtype=np.float32)
+    tmp_f = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    sf.write(tmp_f.name, tiny_data, sr)
+    tmp_f.close()
+
+    try:
+      result = transcribe_file(self.model, self.enc, tmp_f.name)
+    except Exception as e:
+      self.fail(f"transcribe_file crashed on tiny WAV: {e}")
+
+    self.assertIsInstance(result, str)
+    os.unlink(tmp_f.name)
 
 if __name__ == '__main__':
   unittest.main()
