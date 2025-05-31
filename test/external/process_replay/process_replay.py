@@ -45,7 +45,7 @@ def replay_linearize(ret:Kernel, s:Kernel, name_override=None, ast_transform=Non
 
 differs: dict[str, Callable[..., tuple[str, str]]] = {"get_kernelize_map":replay_kernelize, "linearize":replay_linearize}
 
-# *** Run replayers on captured rows starting from offset and print generated diff
+# *** run replayers on captured rows and print diffs
 
 def diff(offset:int) -> None:
   if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
@@ -59,7 +59,7 @@ def diff(offset:int) -> None:
       warnings.warn(f"detected changes in over {MAX_DIFF_PCT}%. skipping further diff generation.", ProcessReplayWarning)
       early_stop.set()
       break
-    # try unpickle and unpack
+    # try unpickle
     try: name, args, kwargs, ctx_vals, loc, ret = pickle.loads(row[0])
     except Exception as e:
       changed += 1
