@@ -80,7 +80,7 @@ class TestBrowserModels(unittest.IsolatedAsyncioTestCase):
       await page.wait_for_selector("textarea#input-form:enabled", timeout=10_000)
       last = await page.inner_text(".message-role-assistant:last-child")
       # NOTE: relies on random seeds staying constant; TODO: set random seeds manually
-      self.assertEqual(last.strip(), "What's up?")
+      self.assertEqual(last.strip(), "how's it going?")
 
 if __name__ == "__main__":
   unittest.main()

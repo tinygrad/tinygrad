@@ -150,10 +150,13 @@ if __name__=="__main__":
   #model.forward(Tensor([[tok]]), Variable("start_pos", 0, model.max_context - 1).bind(0), 0.0, 0, 0.0, 0.0, 0.0).realize()
   #r = export_webgpu(model.forward, [Tensor([[123]]), Variable("start_pos", 0, model.max_context - 1).bind(1), 0.95, 0, 0.0, 0.0, 0.0])
   #metadata = prepare_browser_chunks(model) # export weights to disk
+  tensor_names = get_state_dict(model)
+  Tensor.rand(1, device="WEBGPU").realize()
+  tensor_names.update({"random_seeds": Tensor._device_seeds["WEBGPU"], "random_counter": Tensor._device_rng_counters["WEBGPU"]})
 
   with Context(BEAM=3):
     prg, state = TinyJit(model.forward).export_webgpu(
-      Tensor([[123]]), Variable("start_pos", 0, model.max_context - 1).bind(0), 0.95, 0, 0.0, 0.0, 0.0, tensor_names=get_state_dict(model)
+      Tensor([[123]]), Variable("start_pos", 0, model.max_context - 1).bind(0), 0.95, 0, 0.0, 0.0, 0.0, tensor_names=tensor_names
     )
     #prg, input_sizes, output_sizes, state = export_model(model, "webgpu", *model_input(), model_name=model_name, stream_weights=True)
     # ensure consistency with exported weights
