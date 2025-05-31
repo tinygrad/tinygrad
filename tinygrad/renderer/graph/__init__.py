@@ -28,30 +28,30 @@ class GraphRenderer(Renderer):
     if not isinstance(device, str): raise RuntimeError(f"Multiple devices not supported: {device}")
 
     # Realize implicit inputs as they were before calling graph_constructor
+    # Capture implicit inputs in self.state_dict
     ctr = itertools.count()
     self.state_dict: dict[str, Tensor] = {}
     tensor_name_lookup = {t: name for name, t in tensor_names.items()} if tensor_names else {}
     self.bufs: dict[Buffer, str] = {cast(Buffer, u.base.buffer): f"input_{i}" for i, u in enumerate(self.inputs) if u.base.op is Ops.BUFFER}
+    self.outputs: list[UOp] = [t.lazydata.base.buf_uop for t in ret_tensors]
+    self.bufs.update({cast(Buffer, u.base.buffer): f"output_{i}" for i, u in enumerate(self.outputs)})
     for t, u in original.items():
       if u.base not in self.inputs and u.base.op in (Ops.BUFFER, Ops.ASSIGN) and any(u.base in toposort for toposort in affected.values()):
         (precall_implicit_input:=Tensor(0)).lazydata = u.base
         if (b:=cast(Buffer, precall_implicit_input.realize().lazydata.base.realized)) not in self.bufs: self.bufs[b] = name = f"buf_{next(ctr)}"
         self.state_dict[tensor_name_lookup.get(t, name)] = precall_implicit_input
+    for v in self.state_dict.values(): v.lazydata = v.lazydata.base # non-contiguous views cause data permutation in safe_save
 
-    sink = UOp.sink(*[t.lazydata.base for t in affected])
-    self.outputs: list[UOp] = [t.lazydata.base.buf_uop for t in ret_tensors]
-    self.bufs.update({cast(Buffer, u.base.buffer): f"output_{i}" for i, u in enumerate(self.outputs)})
-
-    # assigns on implicit input can cause the final buffer to be different than the original buffer, so we need to copy the data back
+    # Assigns on implicit input can cause the final buffer to be different than the original buffer, so we need to copy the data back
     self.extra_copies: list[tuple[Buffer, Buffer]] = []
     for t in affected:
       if t in original and (new_buf := t.lazydata.base.buf_uop.buffer) != (old_buf := original[t].base.buf_uop.buffer):
         self.extra_copies.append((cast(Buffer, old_buf), cast(Buffer, new_buf)))
 
-    # linearize the kernel graph
+    # Linearize the kernel graph
+    sink = UOp.sink(*[t.lazydata.base for t in affected])
     schedule, var_vals = create_schedule_with_vars(sink)
     assert set(var_vals.keys()) == set(u.unbind()[0] for u in self.inputs if u.op is Ops.BIND), "Variables must be positional arguments"
-
     self.eis: list[ExecItem] = []
     del original, postcall, ret_tensors, sink, affected, t
     for _, ei in lower_schedule(memory_planner(schedule)):
@@ -59,9 +59,5 @@ class GraphRenderer(Renderer):
       for buf in ei.bufs: assert buf is not None and buf.device == device, "All compute must be on the same device"
       self.eis.append(ei)
       self.bufs.update({b: f"buf_{next(ctr)}" for b in cast(list[Buffer], ei.bufs) if b not in self.bufs})
-
-    for v in self.state_dict.values(): v.lazydata = v.lazydata.base # non-contiguous views cause data permutation in safe_save
-    if device in (s:=Tensor._device_seeds) and s[device] in self.state_dict:
-      self.state_dict.update({"random_seeds":s[device], "random_counter":Tensor._device_rng_counters[device]})
 
   def render_graph(self) -> str: raise NotImplementedError("Implement a language-specific GraphRenderer")
