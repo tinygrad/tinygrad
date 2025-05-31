@@ -179,19 +179,19 @@ FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
 
 @functools.lru_cache(maxsize=16)
 def get_mel_filters(n_mels: int=80, n_fft: int=400, sr: int=16000) -> np.ndarray:
-    """
-    Cache the mel filterbank matrix for projecting STFT into a Mel spectrogram.
-    This avoids recomputing it for every audio sample and speeds up processing.
-    """
-    cache_dir = os.path.dirname(os.path.abspath(__file__))
-    filters_path = os.path.join(cache_dir, f"mel_filters_{n_mels}_{n_fft}_{sr}.npz")
-    if os.path.exists(filters_path):
-        with np.load(filters_path, allow_pickle=False) as f:
-            return f['mel_filters']
-    else:
-        filters = librosa.filters.mel(sr=sr, n_fft=n_fft, n_mels=n_mels)
-        np.savez_compressed(filters_path, mel_filters=filters)
-        return filters
+  """
+  Cache the mel filterbank matrix for projecting STFT into a Mel spectrogram.
+  This avoids recomputing it for every audio sample and speeds up processing.
+  """
+  cache_dir = os.path.dirname(os.path.abspath(__file__))
+  filters_path = os.path.join(cache_dir, f"mel_filters_{n_mels}_{n_fft}_{sr}.npz")
+  if os.path.exists(filters_path):
+    with np.load(filters_path, allow_pickle=False) as f:
+      return f['mel_filters']
+  else:
+    filters = librosa.filters.mel(sr=sr, n_fft=n_fft, n_mels=n_mels)
+    np.savez_compressed(filters_path, mel_filters=filters)
+    return filters
 
 def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
   """
@@ -298,7 +298,7 @@ def load_file_waveform(filename):
   waveform, _ = librosa.load(filename, sr=RATE)
   return waveform
 
-def transcribe_file(model, enc: Encoding, filename, output_fh, beam=False, no_speech_threshold=0.8):
+def transcribe_file(model, enc: Encoding, filename, output_fh=None, beam=False, no_speech_threshold=0.8):
   return transcribe_waveform(model, enc, [load_file_waveform(filename)], output_fh, beam=beam, no_speech_threshold=no_speech_threshold)
 
 def compression_ratio(text) -> float:
@@ -502,7 +502,7 @@ def get_start_tokens(enc: Encoding, is_multilingual: bool=False):
   return start_tokens
 
 
-def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, output_fh, truncate=False, beam=False, no_speech_threshold=0.8):
+def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, output_fh=None, truncate=False, beam=False, no_speech_threshold=0.8):
   log_spec = prep_audio(waveforms, model.batch_size, truncate)
   nsample = model.decoder.max_tokens_to_sample
   eot = enc._special_tokens["<|endoftext|>"]
@@ -513,10 +513,14 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
   start_time = 0
   total_time = log_spec.shape[-1] // FRAMES_PER_SEGMENT * 30
   print(f"{total_time=}")
-  i = 0
   transcribed = {
     "segments": [],
   }
+  
+  transcriptions = []
+  if len(waveforms) > 1:
+    transcriptions = [""] * len(waveforms)
+  
   while start_time < total_time:
     curr_frame = int(start_time) * 100
     end_frame = curr_frame + FRAMES_PER_SEGMENT
@@ -572,13 +576,25 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
       for segment in valid_segments:
         text = f"{format_time(int(segment.start))} -> {format_time(int(segment.end))}: {segment.text}"
         print(f"\033[31m{text}\033[0m")
-        output_fh.write(f"{text}\n")
+        if output_fh:
+          output_fh.write(f"{text}\n")
         context_for_next.extend(segment.tokens)
         transcribed["segments"].append({
           "text": segment.text,
           "start": segment.start,
           "end": segment.end
         })
+        
+        if len(waveforms) > 1:
+          batch_idx = 0  
+          if log_spec.shape[0] > 1:
+            batch_idx = min(batch_idx, len(transcriptions) - 1)
+          if len(transcriptions) > batch_idx:
+            transcriptions[batch_idx] += segment.text + " "
+        else:
+          if not transcriptions:
+            transcriptions.append("")
+          transcriptions[0] += segment.text + " "
       
       if valid_segments:start_time = valid_segments[-1].end
       else: start_time += 30
@@ -593,6 +609,11 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
     if context_for_next:
       ctx = np.array([enc._special_tokens['<|startofprev|>']]+context_for_next[-nsample+len(start_tokens):]+start_tokens)
     else:ctx = np.array(start_tokens)
+  
+  if len(waveforms) > 1:
+    return [t.strip() for t in transcriptions]
+  elif transcriptions:
+    return transcriptions[0].strip()
   return transcribed
 
 CHUNK = 1600
@@ -614,7 +635,7 @@ if __name__ == "__main__":
   parser.add_argument("--model", type=str, default="tiny.en", help="name of model")
   parser.add_argument("--audio", type=str, required=True, help="path to an mp3 audio file")
   parser.add_argument("--beam", action=argparse.BooleanOptionalAction, default=True, help="Whether to use beam decoding")
-  parser.add_argument("--no_speech_threshold", type=float, default=0.6, help="Threshold for determining no speech")
+  parser.add_argument("--no_speech_threshold", type=float, default=0.8, help="Threshold for determining no speech")
   args = parser.parse_args()
   model, enc = init_whisper(args.model, batch_size=1)
 
