@@ -23,6 +23,8 @@ def alloc(size:str, usage:str) -> str: return f"device.createBuffer({{size: {siz
 
 def copyin(dest:str, src:str) -> str: return f"device.queue.writeBuffer({dest}, 0, {src});"
 
+def copy(dest:str, src:str) -> str: return f"commandEncoder.copyBufferToBuffer({src}, 0, {dest}, 0, {src}.size);"
+
 pipes = """let pipelines = await Promise.all(kernelSequence.map((name, i) => device.createComputePipelineAsync({layout: device.createPipelineLayout(
   { bindGroupLayouts: [layouts[i]]}), compute: {module: device.createShaderModule({code: kernels[name]}), entryPoint: "main" }\n})));
 pipelines = pipelines.map((pipeline, i) => { return {[kernelSequence[i]] : pipeline} });""".split("\n")
@@ -70,7 +72,7 @@ class WebGPUJSRenderer(GraphRenderer):
     command_encoder = ["const commandEncoder = device.createCommandEncoder();"]
     for i, uop in enumerate(self.outputs):
       copyout_bufs.append(f'const gpuReadBuffer{i} = {alloc(str((buf:=cast(Buffer, uop.base.buffer)).nbytes), "map_read")};')
-      output_copies.append(f"commandEncoder.copyBufferToBuffer({(out_buf:=self.bufs[buf])}, 0, gpuReadBuffer{i}, 0, {out_buf}.size);")
+      output_copies.append(copy(f"gpuReadBuffer{i}", self.bufs[buf]))
       array_type = f"{'Uint' if (dt:=uop.dtype) in dtypes.uints else 'Int' if dt in (dtypes.sints+(dtypes.bool,)) else 'Float'}{8*dt.itemsize}Array"
       ret_bufs.append(f"const resultBuffer{i} = new {array_type}(gpuReadBuffer{i}.size / {dt.itemsize});")
       copyouts += [f"await gpuReadBuffer{i}.mapAsync(GPUMapMode.READ);",
@@ -81,7 +83,7 @@ class WebGPUJSRenderer(GraphRenderer):
 
     # render setup of WebGPU buffers
     state_dict, empty_buf_allocs, state_buf_allocs = ["const stateDict = {};"], [], []
-    state_names = {cast(Buffer, t.lazydata.base.realized): name for name,t in self.state_dict.items()}
+    state_names = {cast(Buffer, t.lazydata.base.realized): name for name, t in self.state_dict.items()}
     for buf, name in self.bufs.items():
       if buf in state_names: state_buf_allocs.append(f'const {name} = stateDict["{state_names[buf]}"] = {alloc(str(buf.nbytes), "state")};')
       else: empty_buf_allocs.append(f'const {name} = {alloc(str(buf.nbytes), "empty")};')
@@ -105,8 +107,8 @@ class WebGPUJSRenderer(GraphRenderer):
       global_size = ', '.join(idx.simplify().render() if isinstance(idx, Variable) else str(idx) for idx in p.global_size)
       # deliberately display p.function_name in every addComputePass for easier debugging/understanding
       compute_passes.append(f'addComputePass(commandEncoder, {i}, "{p.function_name}", [{buf_names}], [{global_size}]);')
-    for dest, src in self.extra_copies:
-      compute_passes.append(f"commandEncoder.copyBufferToBuffer({self.bufs[src]}, 0, {self.bufs[dest]}, 0, {self.bufs[dest]}.size);")
+
+    for dest, src in self.implicit_input_copies: compute_passes.append(copy(self.bufs[dest], self.bufs[src]))
 
     kernel_sequence = [f'const kernelSequence = [{", ".join(kernel_sequence)}];']
     layouts = [f'const layouts = [{", ".join(layouts)}];']

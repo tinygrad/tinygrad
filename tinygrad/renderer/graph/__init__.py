@@ -15,27 +15,27 @@ class GraphRenderer(Renderer):
   def __init__(self, graph_constructor:Callable, *args, tensor_names:dict[str, Tensor]|None=None, **kwargs):
     assert len(get_state_dict(args)) == len([x for x in args if isinstance(x, Tensor)]) and len(get_state_dict(kwargs)) == 0, \
       "All Tensor (and Variable) function arguments must be positional, whose order will match the order of the rendered function's arguments"
-    self.inputs: list[UOp] = [(x.realize().lazydata if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
+    self.inputs: list[UOp] = [(x.realize().lazydata.base if isinstance(x, Tensor) else x) for x in args if isinstance(x, (Tensor, Variable))]
     Tensor.rand(1).realize() # Don't capture PYTHON-->device BufferCopy of random seeds/counter
 
     # Detect Tensors that are new or mutated as a result of calling graph_constructor
-    original: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in all_tensors if (tref:=t()) is not None}
+    precall: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in list(all_tensors) if (tref:=t()) is not None}
     with Context(BAN_REALIZE=1): ret_tensors = get_parameters(graph_constructor(*args, **kwargs))
-    postcall: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in all_tensors if (tref:=t()) is not None}
-    affected: dict[Tensor, dict] = {t: t.lazydata.toposort() for t in postcall if t not in original or original[t].key != postcall[t].key}
+    postcall: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in list(all_tensors) if (tref:=t()) is not None}
+    affected: dict[Tensor, dict] = {t: t.lazydata.toposort() for t in postcall if t not in precall or precall[t].key != postcall[t].key}
     assert len(affected), "The exported function did not create or change any Tensors, no graph can be captured"
     device = next(iter(affected)).device
     if not isinstance(device, str): raise RuntimeError(f"Multiple devices not supported: {device}")
+    self.bufs: dict[Buffer, str] = {cast(Buffer, u.base.buffer): f"input_{i}" for i, u in enumerate(self.inputs) if u.base.op is Ops.BUFFER}
+    self.outputs: list[UOp] = [t.lazydata.base.buf_uop for t in ret_tensors]
+    self.bufs.update({cast(Buffer, u.base.buffer): f"output_{i}" for i, u in enumerate(self.outputs)})
 
     # Realize implicit inputs as they were before calling graph_constructor
     # Capture implicit inputs in self.state_dict
     ctr = itertools.count()
     self.state_dict: dict[str, Tensor] = {}
     tensor_name_lookup = {t: name for name, t in tensor_names.items()} if tensor_names else {}
-    self.bufs: dict[Buffer, str] = {cast(Buffer, u.base.buffer): f"input_{i}" for i, u in enumerate(self.inputs) if u.base.op is Ops.BUFFER}
-    self.outputs: list[UOp] = [t.lazydata.base.buf_uop for t in ret_tensors]
-    self.bufs.update({cast(Buffer, u.base.buffer): f"output_{i}" for i, u in enumerate(self.outputs)})
-    for t, u in original.items():
+    for t, u in precall.items():
       if u.base not in self.inputs and u.base.op in (Ops.BUFFER, Ops.ASSIGN) and any(u.base in toposort for toposort in affected.values()):
         (precall_implicit_input:=Tensor(0)).lazydata = u.base
         if (b:=cast(Buffer, precall_implicit_input.realize().lazydata.base.realized)) not in self.bufs: self.bufs[b] = name = f"buf_{next(ctr)}"
@@ -43,17 +43,17 @@ class GraphRenderer(Renderer):
     for v in self.state_dict.values(): v.lazydata = v.lazydata.base # non-contiguous views cause data permutation in safe_save
 
     # Assigns on implicit input can cause the final buffer to be different than the original buffer, so we need to copy the data back
-    self.extra_copies: list[tuple[Buffer, Buffer]] = []
+    self.implicit_input_copies: list[tuple[Buffer, Buffer]] = []
     for t in affected:
-      if t in original and (new_buf := t.lazydata.base.buf_uop.buffer) != (old_buf := original[t].base.buf_uop.buffer):
-        self.extra_copies.append((cast(Buffer, old_buf), cast(Buffer, new_buf)))
+      if t in precall and (new_buf := t.lazydata.base.buf_uop.buffer) != (old_buf := precall[t].base.buf_uop.buffer):
+        self.implicit_input_copies.append((cast(Buffer, old_buf), cast(Buffer, new_buf)))
 
     # Linearize the kernel graph
     sink = UOp.sink(*[t.lazydata.base for t in affected])
     schedule, var_vals = create_schedule_with_vars(sink)
     assert set(var_vals.keys()) == set(u.unbind()[0] for u in self.inputs if u.op is Ops.BIND), "Variables must be positional arguments"
     self.eis: list[ExecItem] = []
-    del original, postcall, ret_tensors, sink, affected, t
+    del precall, postcall, ret_tensors, affected, sink, t
     for _, ei in lower_schedule(memory_planner(schedule)):
       assert isinstance(ei.prg, CompiledRunner), f"Export only supported for CompiledRunner\nei.prg: {ei.prg}\n\nei.bufs: {ei.bufs}"
       for buf in ei.bufs: assert buf is not None and buf.device == device, "All compute must be on the same device"
