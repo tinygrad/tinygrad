@@ -40,7 +40,6 @@ class GraphRenderer(Renderer):
         (precall_implicit_input:=Tensor(0)).lazydata = u.base
         if (b:=cast(Buffer, precall_implicit_input.realize().lazydata.base.realized)) not in self.bufs: self.bufs[b] = name = f"buf_{next(ctr)}"
         self.state_dict[tensor_name_lookup.get(t, name)] = precall_implicit_input
-    for v in self.state_dict.values(): v.lazydata = v.lazydata.base # non-contiguous views cause data permutation in safe_save
 
     # Assigns on implicit input can cause the final buffer to be different than the original buffer, so we need to copy the data back
     self.implicit_input_copies: list[tuple[Buffer, Buffer]] = []
