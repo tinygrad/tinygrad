@@ -300,7 +300,7 @@ class Arm64Renderer(AsmRenderer):
   def render_imm(self, imm:str) -> str: return f"#{imm}"
   def render_mem(self, sz:int) -> str: return f"[x29, #{sz}]"
   def render_reg(self, reg:str, dt:DType) -> str:
-    if dt.count > 1: return "{" + f"{reg}.{dt.count}{arm64_vec_suffix[dt.itemsize]}" + "}"
+    if dt.count > 1: return "{" + f"{reg}.{dt.count}{arm64_vec_suffix[dt.scalar().itemsize]}" + "}"
     if dt in dtypes.floats: return arm64_reg_map[reg][dt.itemsize]
     return reg if dt.itemsize == 8 else arm64_reg_map[reg][dt.itemsize]
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
