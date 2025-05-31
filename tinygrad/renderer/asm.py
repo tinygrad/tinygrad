@@ -73,6 +73,8 @@ class AsmRenderer(Renderer):
   def render_imm(self, imm:str): raise NotImplementedError("arch specific")
   def render_mem(self, sz:int, dt:DType): raise NotImplementedError("arch specific")
   def render_reg(self, reg:str, dt:DType): raise NotImplementedError("arch specific")
+  def render_spill(self, x:UOp, sz:int): raise NotImplementedError("arch specific")
+  def render_fill(self, x:UOp, reg:str) -> str: return f"{self.ops[self.dt(x.dtype)][Ops.LOAD]} {self.render_reg(reg, self.dt(x.dtype))}, {self[x]}"
   def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
   def dt(self, d:DType) -> DType: return dtypes.uint64 if isinstance(d, PtrDType) else d
   def reg_class(self, x:UOp) -> list[str]: return self.regs[self.dt(x.dtype).scalar()]
@@ -106,19 +108,6 @@ class AsmRenderer(Renderer):
         live_range[u] = max(live_range[u], live_range[next_range])
 
     def reg_class(x:UOp): return regs[self.dt(x.dtype).scalar()]
-    def spill(x:UOp):
-      nonlocal stack_size
-      if x not in mem:
-        stack_size += 16
-        mem[x] = -stack_size
-        inst_map[x].append(f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self.render_mem(mem[x], self.dt(x.dtype))}, {self[x]}")
-        spilled_at[x] = i
-      loc[x] = mem[x]
-
-    def fill(x:UOp, reg:str):
-      assert isinstance(reg, str)
-      inst_map[cur_uop].append(f"{self.ops[self.dt(x.dtype)][Ops.LOAD]} {self.render_reg(reg, self.dt(x.dtype))}, {self[x]}")
-
     def _alloc(x:UOp, cons:list[str]):
       # assign free register, otherwise spill one
       if (free:=next((r for r in reg_class(x) if r in cons), None)) is not None: return reg_class(x).pop(reg_class(x).index(free))
@@ -126,7 +115,13 @@ class AsmRenderer(Renderer):
       # this prioritizes vars defined outside loops
       # TODO: account for noop and assign
       spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next((j for j,u in enumerate(uops[i:]) if k in u.src), live_range[k]-i))
-      spill(spilled)
+      if spilled not in mem:
+        nonlocal stack_size
+        stack_size += 16
+        mem[spilled] = -stack_size
+        inst_map[spilled].append(self.render_spill(spilled, mem[spilled]))
+        spilled_at[spilled] = i
+      loc[spilled] = mem[spilled]
       # TODO: # if x is live need move instruction
       return live.pop(spilled)
 
@@ -135,7 +130,7 @@ class AsmRenderer(Renderer):
       else: ret = _alloc(x, cons)
       if isinstance(ret, int): mem[x] = ret
       elif isinstance(ret, str): live[x] = ret
-      if x in loc: fill(x, ret)
+      if x in loc: inst_map[cur_uop].append(self.render_fill(x, ret))
       return ret
 
     name = "test"
@@ -305,11 +300,12 @@ class Arm64Renderer(AsmRenderer):
     if u.op is Ops.DEFINE_GLOBAL and u.arg >= 8: return (u.arg-6)*8
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return f"#{imm}"
-  def render_mem(self, sz:int) -> str: return f"[x29, #{sz}]"
+  def render_mem(self, sz:int, dt:DType) -> str: return f"[x29, #{sz}]"
   def render_reg(self, reg:str, dt:DType) -> str:
     if dt.count > 1: return f"{reg}.{dt.count}{arm64_vec_suffix[dt.scalar().itemsize]}"
     if dt in dtypes.floats: return arm64_reg_map[reg][dt.itemsize]
     return reg if dt.itemsize == 8 else arm64_reg_map[reg][max(dt.itemsize, dtypes.int32.itemsize)]
+  def render_spill(self, x:UOp, sz:int) -> str: return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self[x]}, {self.render_mem(sz, self.dt(x.dtype))}"
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", f"stp x29, x30, [sp, #{-stack_size}]!", "mov x29, sp"] + \
                       kernel + [f"ldp x29, x30, [sp], #{-stack_size}", "ret", "\n"])
@@ -490,6 +486,7 @@ class X86Renderer(AsmRenderer):
   def render_imm(self, imm:str) -> str: return imm
   def render_mem(self, sz:int, dt:DType) -> str: return f"{size_prefix[dt.itemsize]} [rbp {'+' if sz>=0 else ''}{sz}]"
   def render_reg(self, reg:str, dt:DType) -> str: return reg if dt.itemsize == 8 or dtypes.is_float(dt) else x86_reg_map[reg][dt.itemsize]
+  def render_spill(self, x:UOp, sz:int) -> str: return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self.render_mem(sz, self.dt(x.dtype))}, {self[x]}"
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", "push rbp", "mov rbp, rsp", f"sub rsp, {stack_size}"] +
                      kernel + [f"add rsp, {stack_size}", "pop rbp", "ret", "\n"])
