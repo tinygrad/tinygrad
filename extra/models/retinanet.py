@@ -97,6 +97,7 @@ class RetinaNet:
 
     detections = []
     for i, pred_img in enumerate(predictions):
+      height, width = input_size if image_sizes is None else image_sizes[i]
       pred_img = pred_img.split(num_anchors_per_level)
       offsets_img, scores_img = [br[:, :4] for br in pred_img], [cl[:, 4:] for cl in pred_img]
       img_boxes, img_scores, img_labels = [], [], []
@@ -117,9 +118,22 @@ class RetinaNet:
 
         # bbox coords from offsets
         anchor_idxs = topk_idxs.div(self.num_classes, rounding_mode="floor")
-        lbls_level = topk_idxs % self.num_classes
+        labels_level = topk_idxs % self.num_classes
         boxes_level = decode_bbox2(offsets_level[anchor_idxs], anchors_level[anchor_idxs])
-        detections.append(boxes_level)
+
+        # clip to image size
+        clipped_x = boxes_level[:, 0::2].clamp(0, width)
+        clipped_y = boxes_level[:, 1::2].clamp(0, height)
+        boxes_level = Tensor.stack(clipped_x, clipped_y, dim=2).reshape(-1, 4)
+
+        img_boxes.append(boxes_level)
+        img_scores.append(scores_level)
+        img_labels.append(labels_level)
+
+      img_boxes = Tensor.cat(*img_boxes)
+      img_scores = Tensor.cat(*img_scores)
+      img_labels = Tensor.cat(*img_labels)
+      detections.append(img_labels)
 
     return detections
 
@@ -152,19 +166,20 @@ class RetinaNet:
         anchor_idxs = topk_idxs // self.num_classes
         labels_per_level = topk_idxs % self.num_classes
         boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level[anchor_idxs])
-        detections.append(boxes_per_level)
-    #     # clip to image size
-    #     clipped_x = boxes_per_level[:, 0::2].clip(0, w)
-    #     clipped_y = boxes_per_level[:, 1::2].clip(0, h)
-    #     boxes_per_level = np.stack([clipped_x, clipped_y], axis=2).reshape(-1, 4)
 
-    #     image_boxes.append(boxes_per_level)
-    #     image_scores.append(scores_per_level)
-    #     image_labels.append(labels_per_level)
+        # clip to image size
+        clipped_x = boxes_per_level[:, 0::2].clip(0, w)
+        clipped_y = boxes_per_level[:, 1::2].clip(0, h)
+        boxes_per_level = np.stack([clipped_x, clipped_y], axis=2).reshape(-1, 4)
 
-    #   image_boxes = np.concatenate(image_boxes)
-    #   image_scores = np.concatenate(image_scores)
-    #   image_labels = np.concatenate(image_labels)
+        image_boxes.append(boxes_per_level)
+        image_scores.append(scores_per_level)
+        image_labels.append(labels_per_level)
+
+      image_boxes = np.concatenate(image_boxes)
+      image_scores = np.concatenate(image_scores)
+      image_labels = np.concatenate(image_labels)
+      detections.append(image_labels)
 
     #   # nms for each class
     #   keep_mask = np.zeros_like(image_scores, dtype=bool)
