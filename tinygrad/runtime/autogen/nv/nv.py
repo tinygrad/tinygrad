@@ -117,6 +117,33 @@ class Union(ctypes.Union, AsDictMixin):
 
 
 
+c_int128 = ctypes.c_ubyte*16
+c_uint128 = c_int128
+void = None
+if ctypes.sizeof(ctypes.c_longdouble) == 16:
+    c_long_double_t = ctypes.c_longdouble
+else:
+    c_long_double_t = ctypes.c_ubyte*16
+
+def string_cast(char_pointer, encoding='utf-8', errors='strict'):
+    value = ctypes.cast(char_pointer, ctypes.c_char_p).value
+    if value is not None and encoding is not None:
+        value = value.decode(encoding, errors=errors)
+    return value
+
+
+def char_pointer_cast(string, encoding='utf-8'):
+    if encoding is not None:
+        try:
+            string = string.encode(encoding)
+        except AttributeError:
+            # In Python3, bytes has no encode attribute
+            pass
+    string = ctypes.c_char_p(string)
+    return ctypes.cast(string, ctypes.POINTER(ctypes.c_char))
+
+
+
 
 
 KERN_FSP_COT_PAYLOAD_H = True # macro
@@ -508,6 +535,70 @@ struct_c__SA_RM_RISCV_UCODE_DESC._fields_ = [
 ]
 
 RM_RISCV_UCODE_DESC = struct_c__SA_RM_RISCV_UCODE_DESC
+MSGQ_PRIV_H = True # macro
+MSGQ_VERSION = 0 # macro
+class struct_c__SA_msgqTxHeader(Structure):
+    pass
+
+struct_c__SA_msgqTxHeader._pack_ = 1 # source:False
+struct_c__SA_msgqTxHeader._fields_ = [
+    ('version', ctypes.c_uint32),
+    ('size', ctypes.c_uint32),
+    ('msgSize', ctypes.c_uint32),
+    ('msgCount', ctypes.c_uint32),
+    ('writePtr', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('rxHdrOff', ctypes.c_uint32),
+    ('entryOff', ctypes.c_uint32),
+]
+
+msgqTxHeader = struct_c__SA_msgqTxHeader
+class struct_c__SA_msgqRxHeader(Structure):
+    pass
+
+struct_c__SA_msgqRxHeader._pack_ = 1 # source:False
+struct_c__SA_msgqRxHeader._fields_ = [
+    ('readPtr', ctypes.c_uint32),
+]
+
+msgqRxHeader = struct_c__SA_msgqRxHeader
+class struct_c__SA_msgqMetadata(Structure):
+    pass
+
+struct_c__SA_msgqMetadata._pack_ = 1 # source:False
+struct_c__SA_msgqMetadata._fields_ = [
+    ('pOurTxHdr', ctypes.POINTER(struct_c__SA_msgqTxHeader)),
+    ('pTheirTxHdr', ctypes.POINTER(struct_c__SA_msgqTxHeader)),
+    ('pOurRxHdr', ctypes.POINTER(struct_c__SA_msgqRxHeader)),
+    ('pTheirRxHdr', ctypes.POINTER(struct_c__SA_msgqRxHeader)),
+    ('pOurEntries', ctypes.POINTER(ctypes.c_ubyte)),
+    ('pTheirEntries', ctypes.POINTER(ctypes.c_ubyte)),
+    ('pReadIncoming', ctypes.POINTER(ctypes.c_uint32)),
+    ('pWriteIncoming', ctypes.POINTER(ctypes.c_uint32)),
+    ('pReadOutgoing', ctypes.POINTER(ctypes.c_uint32)),
+    ('pWriteOutgoing', ctypes.POINTER(ctypes.c_uint32)),
+    ('tx', msgqTxHeader),
+    ('txReadPtr', ctypes.c_uint32),
+    ('txFree', ctypes.c_uint32),
+    ('txLinked', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('rx', msgqTxHeader),
+    ('rxReadPtr', ctypes.c_uint32),
+    ('rxAvail', ctypes.c_uint32),
+    ('rxLinked', ctypes.c_ubyte),
+    ('rxSwapped', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte * 2),
+    ('fcnNotify', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_int32, ctypes.POINTER(None))),
+    ('fcnNotifyArg', ctypes.POINTER(None)),
+    ('fcnBackendRw', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(None), ctypes.POINTER(None), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(None))),
+    ('fcnBackendRwArg', ctypes.POINTER(None)),
+    ('fcnInvalidate', ctypes.CFUNCTYPE(None, ctypes.POINTER(None), ctypes.c_uint32)),
+    ('fcnFlush', ctypes.CFUNCTYPE(None, ctypes.POINTER(None), ctypes.c_uint32)),
+    ('fcnZero', ctypes.CFUNCTYPE(None, ctypes.POINTER(None), ctypes.c_uint32)),
+    ('fcnBarrier', ctypes.CFUNCTYPE(None)),
+]
+
+msgqMetadata = struct_c__SA_msgqMetadata
 __all__ = \
     ['GSPIFPUB_H', 'GSP_ACR_BOOT_GSP_RM_PARAMS',
     'GSP_ARGUMENTS_CACHED', 'GSP_DMA_TARGET',
@@ -533,12 +624,14 @@ __all__ = \
     'LibosMemoryRegionInitArgument', 'LibosMemoryRegionKind',
     'LibosMemoryRegionKind__enumvalues', 'LibosMemoryRegionLoc',
     'LibosMemoryRegionLoc__enumvalues', 'MCTP_HEADER',
-    'MESSAGE_QUEUE_INIT_ARGUMENTS', 'NVDM_PAYLOAD_COT',
-    'RM_RISCV_UCODE_DESC', 'RM_RISCV_UCODE_H', 'c__EA_GSP_DMA_TARGET',
-    'c__EA_LibosMemoryRegionKind', 'c__EA_LibosMemoryRegionLoc',
-    'struct_GSP_ACR_BOOT_GSP_RM_PARAMS', 'struct_GSP_FMC_BOOT_PARAMS',
-    'struct_GSP_FMC_INIT_PARAMS', 'struct_GSP_RM_PARAMS',
-    'struct_GSP_SPDM_PARAMS', 'struct_c__SA_GSP_ARGUMENTS_CACHED',
+    'MESSAGE_QUEUE_INIT_ARGUMENTS', 'MSGQ_PRIV_H', 'MSGQ_VERSION',
+    'NVDM_PAYLOAD_COT', 'RM_RISCV_UCODE_DESC', 'RM_RISCV_UCODE_H',
+    'c__EA_GSP_DMA_TARGET', 'c__EA_LibosMemoryRegionKind',
+    'c__EA_LibosMemoryRegionLoc', 'msgqMetadata', 'msgqRxHeader',
+    'msgqTxHeader', 'struct_GSP_ACR_BOOT_GSP_RM_PARAMS',
+    'struct_GSP_FMC_BOOT_PARAMS', 'struct_GSP_FMC_INIT_PARAMS',
+    'struct_GSP_RM_PARAMS', 'struct_GSP_SPDM_PARAMS',
+    'struct_c__SA_GSP_ARGUMENTS_CACHED',
     'struct_c__SA_GSP_ARGUMENTS_CACHED_profilerArgs',
     'struct_c__SA_GSP_SR_INIT_ARGUMENTS',
     'struct_c__SA_GspFwHeapFreeList',
@@ -550,5 +643,6 @@ __all__ = \
     'struct_c__SA_MCTP_HEADER',
     'struct_c__SA_MESSAGE_QUEUE_INIT_ARGUMENTS',
     'struct_c__SA_NVDM_PAYLOAD_COT',
-    'struct_c__SA_RM_RISCV_UCODE_DESC', 'union_c__SA_GspFwWprMeta_0',
-    'union_c__SA_GspFwWprMeta_1']
+    'struct_c__SA_RM_RISCV_UCODE_DESC', 'struct_c__SA_msgqMetadata',
+    'struct_c__SA_msgqRxHeader', 'struct_c__SA_msgqTxHeader',
+    'union_c__SA_GspFwWprMeta_0', 'union_c__SA_GspFwWprMeta_1']
