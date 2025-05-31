@@ -208,10 +208,11 @@ arm64_8bit_unsigned_ops = {**arm64_unsigned_ops, Ops.STORE: "strb", Ops.LOAD: "l
 arm64_8bit_signed_ops = {**arm64_signed_ops, Ops.STORE: "strb", Ops.LOAD: "ldrb"}
 arm64_float_ops = {Ops.ADD: "fadd", Ops.SUB: "fsub", Ops.MUL: "fmul", Ops.FDIV: "fdiv", Ops.CMPLT: "fcmp", Ops.CMPNE: "fcmp",
                   Ops.SQRT: "fsqrt", Ops.MULACC: "fmadd", Ops.WHERE: "fcsel", Ops.STORE: "str", Ops.LOAD: "ldr", Ops.ASSIGN: "fmov"}
-arm64_ops = {**{dtypes.void:arm64_branch_ops}, **{x:arm64_unsigned_ops for x in (dtypes.bool,)+dtypes.uints},
-             **{x:arm64_signed_ops for x in dtypes.sints}, **{x:arm64_16bit_unsigned_ops for x in (dtypes.uint16,)},
-             **{x:arm64_16bit_signed_ops for x in (dtypes.int16,)}, **{x:arm64_8bit_unsigned_ops for x in (dtypes.uint8,)},
-             **{x:arm64_8bit_signed_ops for x in (dtypes.int8,)}, **{x:arm64_float_ops for x in dtypes.floats}}
+arm64_vec_ops = {Ops.STORE: "ld1", Ops.LOAD: "ld1"}
+arm64_ops = {**{x:arm64_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:arm64_signed_ops for x in dtypes.sints},
+             **{x:arm64_float_ops for x in dtypes.floats}, dtypes.uint16:arm64_16bit_unsigned_ops, dtypes.int16:arm64_16bit_signed_ops,
+             dtypes.uint8:arm64_8bit_unsigned_ops, dtypes.int8:arm64_8bit_signed_ops, dtypes.float32.vec(2):arm64_vec_ops,
+             dtypes.float32.vec(4):arm64_vec_ops, dtypes.float64.vec(2):arm64_vec_ops, dtypes.void:arm64_branch_ops}
 arm64_vec_suffix = {1: "b", 2: "h", 4: "s", 8: "d"}
 arm64_cast_suffix = {1: "b", 2: "h", 4: "w"}
 def arm64_cflag(x:UOp) -> str: return "ne" if x.op is Ops.CMPNE else "lo" if x.src[0].dtype in dtypes.uints else "lt"
@@ -298,7 +299,10 @@ class Arm64Renderer(AsmRenderer):
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return f"#{imm}"
   def render_mem(self, sz:int) -> str: return f"[x29, #{sz}]"
-  def render_reg(self, reg:str, dt:DType) -> str: return reg if dt.itemsize == 8 else arm64_reg_map[reg][dt.itemsize]
+  def render_reg(self, reg:str, dt:DType) -> str:
+    if dt.count > 1: return "{" + f"{reg}.{dt.count}{arm64_vec_suffix[dt.itemsize]}" + "}"
+    if dt in dtypes.floats: return arm64_reg_map[reg][dt.itemsize]
+    return reg if dt.itemsize == 8 else arm64_reg_map[reg][dt.itemsize]
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", f"stp x29, x30, [sp, #{-stack_size}]!", "mov x29, sp"] + \
                       kernel + [f"ldp x29, x30, [sp], #{-stack_size}", "ret", "\n"])
@@ -326,11 +330,11 @@ x86_vec4_float32_ops = {**{k:v[:-2]+"ps" for k,v in x86_float32_ops.items()}, **
 # TODO: this requires ymm registers, must be 32 byte aligned
 x86_vec2_float64_ops = x86_vec4_float64_ops = {**{k:v[:-1]+"d" for k,v in x86_vec4_float32_ops.items()}}
 x86_vec8_float32_ops = x86_vec4_float32_ops
-x86_ops = {**{dtypes.void:x86_branch_ops}, **{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86_signed_ops for x in dtypes.sints},
+x86_ops = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86_signed_ops for x in dtypes.sints},
           dtypes.float32:x86_float32_ops, dtypes.float64:x86_float64_ops, dtypes.float16:x86_float16_ops,
           dtypes.float32.vec(2):x86_vec2_float32_ops, dtypes.float32.vec(4):x86_vec4_float32_ops,
           dtypes.float64.vec(2):x86_vec2_float64_ops, dtypes.float64.vec(4):x86_vec4_float64_ops,
-          dtypes.float32.vec(8):x86_vec8_float32_ops}
+          dtypes.float32.vec(8):x86_vec8_float32_ops, dtypes.void:x86_branch_ops}
 
 gep_imm = {0: "0x00", 1: "0x40", 2: "0x80", 3: "0xC0"}
 vec_imm = {0: "0x00", 1: "0x10", 2: "0x20", 3: "0x30"}
