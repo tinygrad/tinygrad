@@ -1,6 +1,7 @@
 import unittest
-from tinygrad import Tensor, TinyJit, Variable, dtypes
+from tinygrad import Tensor, TinyJit, Variable, dtypes, Device
 from tinygrad.helpers import Context
+from tinygrad.device import CompileError
 import numpy as np
 
 class TestSetitem(unittest.TestCase):
@@ -157,6 +158,20 @@ class TestSetitem(unittest.TestCase):
     t = Tensor([[3.0], [2.0], [1.0]]).contiguous()
     t[:-1] = t[1:]
     self.assertEqual(t.tolist(), [[2.0], [1.0], [1.0]])
+
+  @unittest.skipUnless(Device.DEFAULT in {"METAL"}, "METAL device required to run")
+  def test_setitem_big(self):
+    tensor_size, val = 256, 4
+    # success for index tensors with <= 255 elements
+    t = Tensor.arange(0, tensor_size).contiguous()
+    idx_small = Tensor.arange(0, 255, dtype=dtypes.int)
+    t[idx_small] = val
+
+    # failure for index tensors with > 255 elements
+    t = Tensor.arange(0, tensor_size).contiguous()
+    idx_big = Tensor.arange(0, 256, dtype=dtypes.int)
+    with self.assertRaises(CompileError):
+      t[idx_big] = val
 
 class TestWithGrad(unittest.TestCase):
   def test_no_requires_grad_works(self):
