@@ -245,7 +245,7 @@ arm64_rewrite = PatternMatcher([
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"{ctx.ops[dtypes.float32][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}"),
    # ternary ops
   (UPat(Ops.WHERE, name="x"), lambda ctx,x: f"tst {ctx[x.src[0]]}, #1\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, ne"),
-  (UPat(Ops.MULACC, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.MULACC, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}"),
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
    lambda ctx,x: f"{ctx.ops[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\ncset {ctx[x]}, {arm64_cflag(x)}"),
   # endrange #TODO: should be in base rewrite
@@ -309,7 +309,7 @@ class Arm64Renderer(AsmRenderer):
   def render_reg(self, reg:str, dt:DType) -> str:
     if dt.count > 1: return f"{reg}.{dt.count}{arm64_vec_suffix[dt.scalar().itemsize]}"
     if dt in dtypes.floats: return arm64_reg_map[reg][dt.itemsize]
-    return reg if dt.itemsize == 8 else arm64_reg_map[reg][dt.itemsize]
+    return reg if dt.itemsize == 8 else arm64_reg_map[reg][max(dt.itemsize, dtypes.int32.itemsize)]
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", f"stp x29, x30, [sp, #{-stack_size}]!", "mov x29, sp"] + \
                       kernel + [f"ldp x29, x30, [sp], #{-stack_size}", "ret", "\n"])
