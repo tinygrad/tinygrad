@@ -74,7 +74,9 @@ class AsmRenderer(Renderer):
   def render_mem(self, sz:int, dt:DType): raise NotImplementedError("arch specific")
   def render_reg(self, reg:str, dt:DType): raise NotImplementedError("arch specific")
   def render_spill(self, x:UOp, sz:int): raise NotImplementedError("arch specific")
-  def render_fill(self, x:UOp, reg:str) -> str: return f"{self.ops[self.dt(x.dtype)][Ops.LOAD]} {self.render_reg(reg, self.dt(x.dtype))}, {self[x]}"
+  def render_fill(self, x:UOp, reg:str) -> str:
+    op = Ops.LOAD if isinstance(self.r[x], int) else Ops.ASSIGN
+    return f"{self.ops[self.dt(x.dtype)][op]} {self.render_reg(reg, self.dt(x.dtype))}, {self[x]}"
   def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
   def dt(self, d:DType) -> DType: return dtypes.uint64 if isinstance(d, PtrDType) else d
   def reg_class(self, x:UOp) -> list[str]: return self.regs[self.dt(x.dtype).scalar()]
@@ -104,7 +106,7 @@ class AsmRenderer(Renderer):
     for u in reversed(uops):
       # a var defined before a range and used inside it is needed for the whole range
       if u.op is Ops.RANGE: next_range = u
-      if u in live_range and next_range is not None and live_range[u] > uops.index(next_range):
+      if u in live_range and next_range is not None and live_range[u] >= uops.index(next_range):
         live_range[u] = max(live_range[u], live_range[next_range])
 
     def reg_class(x:UOp): return regs[self.dt(x.dtype).scalar()]
