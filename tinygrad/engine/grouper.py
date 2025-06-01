@@ -337,7 +337,7 @@ def elementwise_view_right(root:UOp):
   assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
   # place view after applying the elementwise op
   new_st = ShapeTracker.from_shape(swizzles[0].base.shape)
-  new_src = [x.base if x.base.shape == new_st.shape else else apply_swizzle(x.view(new_st)) for x in root.src]
+  new_src = [x.base if x.base.shape == new_st.shape else apply_swizzle(x.view(new_st)) for x in root.src]
   # reshape to match downstream shapes
   return root.replace(src=tuple(new_src)).reshape(root.shape)
 
