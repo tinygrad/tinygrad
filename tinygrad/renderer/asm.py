@@ -191,7 +191,7 @@ class AsmRenderer(Renderer):
 arm64_gen_regs = ['x' + str(i) for i in range(31) if i != 29 and not (i == 18 and sys.platform in ("darwin", "win32"))]
 arm64_float_regs = ['v' + str(i) for i in range(32)]
 arm64_regs = {**{x:arm64_gen_regs for x in (dtypes.bool,)+dtypes.ints}, **{x:arm64_float_regs for x in dtypes.floats}}
-arm64_reg_map = {**{f"x{i}": {4: f"w{i}"} for i in range(31)}, **{f"v{i}": {8: f"d{i}", 4: f"s{i}", 2: f"h{i}"} for i in range(32)}}
+arm64_reg_map = {**{f"x{i}": {4: f"w{i}"} for i in range(31)}, **{f"v{i}": {16: f"q{i}", 8: f"d{i}", 4: f"s{i}", 2: f"h{i}"} for i in range(32)}}
 
 arm64_mov_ops = {Ops.STORE: "str", Ops.LOAD: "ldr", Ops.ASSIGN: "mov"}
 arm64_branch_ops = {Ops.ENDRANGE: "b.lt", Ops.IF: "b.eq"}
@@ -205,7 +205,7 @@ arm64_8bit_unsigned_ops = {**arm64_unsigned_ops, Ops.STORE: "strb", Ops.LOAD: "l
 arm64_8bit_signed_ops = {**arm64_signed_ops, Ops.STORE: "strb", Ops.LOAD: "ldrb"}
 arm64_float_ops = {Ops.ADD: "fadd", Ops.SUB: "fsub", Ops.MUL: "fmul", Ops.FDIV: "fdiv", Ops.CMPLT: "fcmp", Ops.CMPNE: "fcmp",
                   Ops.SQRT: "fsqrt", Ops.MULACC: "fmadd", Ops.WHERE: "fcsel", Ops.STORE: "str", Ops.LOAD: "ldr", Ops.ASSIGN: "fmov"}
-arm64_vec_ops = {Ops.STORE: "ld1", Ops.LOAD: "ld1", Ops.ASSIGN: "mov"}
+arm64_vec_ops = arm64_mov_ops
 arm64_ops = {**{x:arm64_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:arm64_signed_ops for x in dtypes.sints},
              **{x:arm64_float_ops for x in dtypes.floats}, dtypes.uint16:arm64_16bit_unsigned_ops, dtypes.int16:arm64_16bit_signed_ops,
              dtypes.uint8:arm64_8bit_unsigned_ops, dtypes.int8:arm64_8bit_signed_ops, dtypes.float32.vec(2):arm64_vec_ops,
@@ -216,18 +216,10 @@ def arm64_cflag(x:UOp) -> str: return "ne" if x.op is Ops.CMPNE else "lo" if x.s
 
 arm64_rewrite = PatternMatcher([
   # loads/stores/movs
-  # TODO: better way to render vector load/store
-  (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
-   f"{ctx.two_address(x, alt)}tst {ctx[mask]}, #1\n"
-   f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {{{ctx[x]}}}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:" if x.dtype.count > 1 else None),
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"{ctx.two_address(x, alt)}tst {ctx[mask]}, #1\n"
    f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
   (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, ={ctx[idx][1:]}"),
-  (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"),
-   lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {{{ctx[x]}}}, [{ctx[idx]}]" if x.dtype.count > 1 else None),
-  (UPat(Ops.STORE, name="x"),
-   lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {{{ctx[x.src[1]]}}}, [{ctx[x.src[0]]}]" if x.src[1].dtype.count > 1 else None),
   (UPat(Ops.STORE, name="x"), lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {ctx[x.src[1]]}, [{ctx[x.src[0]]}]"),
   # devectorize/vectorize
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx.r[x.src[0]]}.{arm64_vec_suffix[x.dtype.itemsize]}[{x.arg[0]}]"),
@@ -310,15 +302,9 @@ class Arm64Renderer(AsmRenderer):
   def render_imm(self, imm:str) -> str: return f"#{imm}"
   def render_mem(self, sz:int, dt:DType) -> str: return f"[x29, #{abs(sz)}]"
   def render_reg(self, reg:str, dt:DType) -> str:
-    if dt.count > 1: return f"{reg}.{dt.count}{arm64_vec_suffix[dt.scalar().itemsize]}"
     if dt in dtypes.floats: return arm64_reg_map[reg][dt.itemsize]
     return reg if dt.itemsize == 8 else arm64_reg_map[reg][max(dt.itemsize, dtypes.int32.itemsize)]
   def render_spill(self, x:UOp, sz:int) -> str: return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self[x]}, {self.render_mem(sz, self.dt(x.dtype))}"
-  def render_fill(self, x:UOp, reg:str) -> str:
-    op = Ops.LOAD if isinstance(self.r[x], int) else Ops.ASSIGN
-    loc = self.render_reg(reg, self.dt(x.dtype))
-    loc = "{"+loc+"}" if x.dtype.count > 1 and op is Ops.LOAD else loc
-    return f"{self.ops[self.dt(x.dtype)][op]} {loc}, {self[x]}"
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", f"sub sp, sp, #{stack_size}", "stp x29, x30, [sp]", "mov x29, sp"] + \
                       kernel + ["ldp x29, x30, [sp]", f"add sp, sp, #{stack_size}", "ret", "\n"])
