@@ -79,24 +79,6 @@ def diff(offset:int) -> None:
   conn.commit()
   cur.close()
 
-# *** generic runner for executing fxn across all rows of a table in parallel
-
-def _pmap(maxtasksperchild:int=16) -> None:
-  conn = db_connection()
-  cur = conn.cursor()
-  try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
-  except sqlite3.OperationalError:
-    warnings.warn(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?", ProcessReplayWarning)
-    return None
-  conn.commit()
-  cur.close()
-  with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), maxtasksperchild=maxtasksperchild) as pool:
-    inputs = list(range(0, row_count, PAGE_SIZE))
-    list(tqdm(pool.imap_unordered(diff, inputs), total=len(inputs)))
-    pool.close()
-    pool.join()
-    pool.terminate()
-
 # *** main loop
 
 if __name__ == "__main__":
@@ -104,8 +86,20 @@ if __name__ == "__main__":
     logging.info("skipping process replay.")
     exit(0)
 
-  print(f"running process replay with {ASSERT_DIFF=}")
-  try: _pmap()
-  except Exception as e:
-    if ASSERT_DIFF: raise e
-    logging.error(f"diff err {e}")
+  conn = db_connection()
+  cur = conn.cursor()
+  try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
+  except sqlite3.OperationalError:
+    warnings.warn(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?", ProcessReplayWarning)
+    exit(int(ASSERT_DIFF))
+  finally:
+    conn.commit()
+    cur.close()
+
+  logging.info(f"running process replay with {ASSERT_DIFF=}")
+  with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count()) as pool:
+    inputs = list(range(0, row_count, PAGE_SIZE))
+    list(tqdm(pool.imap_unordered(diff, inputs), total=len(inputs)))
+    pool.close()
+    pool.join()
+    pool.terminate()
