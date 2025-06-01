@@ -10,6 +10,8 @@ from tinygrad.helpers import Context
 from typing import Callable, cast
 import itertools
 
+def substitute_view(view:UOp, u:UOp) -> UOp: return u if view.base is view else view.replace(src=(u,))
+
 # Common logic regardless of render target (e.g. JavaScript, C)
 class GraphRenderer(Renderer):
   def __init__(self, graph_constructor:Callable, *args, tensor_names:dict[str, Tensor]|None=None, **kwargs):
@@ -22,7 +24,7 @@ class GraphRenderer(Renderer):
     precall: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in list(all_tensors) if (tref:=t()) is not None}
     with Context(BAN_REALIZE=1): ret_tensors = get_parameters(graph_constructor(*args, **kwargs))
     postcall: dict[Tensor, UOp] = {tref: tref.kernelize().lazydata for t in list(all_tensors) if (tref:=t()) is not None}
-    affected: dict[Tensor, dict[UOp, None]] = {t: t.lazydata.toposort() for t in postcall if t not in precall or precall[t].key != postcall[t].key}
+    affected: dict[Tensor, dict[UOp, None]] = {t: t.lazydata.toposort() for t in postcall if t not in precall or precall[t] is not postcall[t]}
     assert len(affected), "The exported function did not create or change any Tensors, no graph can be captured"
     device = next(iter(affected)).device
     if not isinstance(device, str): raise RuntimeError(f"Multiple devices not supported: {device}")
@@ -47,11 +49,11 @@ class GraphRenderer(Renderer):
     # Holding the end buffer's UOp prevents the memory planner from reassigning the end buffer's Buffer, so the copy will stay correct
     self.implicit_input_copies: list[tuple[UOp, UOp]] = []
     for t in set(affected).intersection(set(precall)):
-      if (end := t.lazydata.base.buf_uop).key != (start := precall[t].base.buf_uop).key and start in t.lazydata.toposort():
+      if (end := t.lazydata.base.buf_uop) is not (start := precall[t].base.buf_uop) and start in t.lazydata.toposort():
         self.implicit_input_copies.append((start, end))
         # Ensure implicit i/o Tensors point at the correct data, but don't leave unrealized compute in them
-        t.lazydata = start
-      else: t.lazydata = end
+        t.lazydata = substitute_view(precall[t], start)
+      else: t.lazydata = substitute_view(t.lazydata, end)
 
     # Linearize the kernel graph
     schedule, var_vals = create_schedule_with_vars(sink)
