@@ -187,8 +187,8 @@ class AsmRenderer(Renderer):
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int): raise NotImplementedError("arch specific")
   def render(self, uops:list[UOp]): return self.render_kernel(*self._render(uops))
 
-# x29,x31 reserved for stack access / x30 for return address
-arm64_gen_regs = ['x' + str(i) for i in (range(29)) if i != 18]
+# x18 clobbered on macos/windows, x29 holds sp for debugging
+arm64_gen_regs = ['x' + str(i) for i in (range(31)) if i not in (18, 29)]
 arm64_float_regs = ['v' + str(i) for i in (range(32))]
 arm64_regs = {**{x:arm64_gen_regs for x in (dtypes.bool,)+dtypes.ints}, **{x:arm64_float_regs for x in dtypes.floats}}
 arm64_reg_map = {**{f"x{i}": {4: f"w{i}"} for i in range(31)}, **{f"v{i}": {8: f"d{i}", 4: f"s{i}", 2: f"h{i}"} for i in range(32)}}
@@ -303,7 +303,7 @@ class Arm64Renderer(AsmRenderer):
     if u.op is Ops.DEFINE_GLOBAL and u.arg >= 8: return (u.arg-6)*8
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return f"#{imm}"
-  def render_mem(self, sz:int, dt:DType) -> str: return f"[x29, #{sz}]"
+  def render_mem(self, sz:int, dt:DType) -> str: return f"[x29, #{abs(sz)}]"
   def render_reg(self, reg:str, dt:DType) -> str:
     if dt.count > 1: return f"{reg}.{dt.count}{arm64_vec_suffix[dt.scalar().itemsize]}"
     if dt in dtypes.floats: return arm64_reg_map[reg][dt.itemsize]
@@ -311,7 +311,7 @@ class Arm64Renderer(AsmRenderer):
   def render_spill(self, x:UOp, sz:int) -> str: return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self[x]}, {self.render_mem(sz, self.dt(x.dtype))}"
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", f"stp x29, x30, [sp, #{-stack_size}]!", "mov x29, sp"] + \
-                      kernel + [f"ldp x29, x30, [sp], #{-stack_size}", "ret", "\n"])
+                      kernel + [f"ldp x29, x30, [sp], #{stack_size}", "ret", "\n"])
 
 x86_gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx", "r10", "r11", "r12", "r13", "r14", "r15"]
 x86_float_regs = ["xmm" + str(i) for i in range(0,16)]
