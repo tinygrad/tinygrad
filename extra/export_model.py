@@ -111,7 +111,133 @@ const {model_name}_name_to_id = Object.fromEntries(weightNames.map((name, index)
 def dtype_to_js_type(dtype: DType) -> str:
   return f"{'Uint' if dtype in dtypes.uints else 'Int' if (dtype in dtypes.sints or dtype == dtypes.bool) else 'Float'}{8*dtype.itemsize}Array"
 
-def export_model(model, target:str, *inputs, model_name: Optional[str] = "model", tensor_names=None):
+def export_model_webgpu(functions, statements, bufs, weight_names, input_names, output_names, model_name, symbolic_vars={}, stream_weights=False) -> Tuple[str,int,int]:
+  kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
+  kernel_names = ', '.join([name for (name, _, _, _) in statements])
+  input_names += list(symbolic_vars.values())
+  input_buffer_types = [dtype_to_js_type(bufs[inp_name][1]) for inp_name in input_names]
+  output_buffer_types = [dtype_to_js_type(bufs[out_name][1]) for out_name in output_names]
+
+  buf_type = lambda x: "uniform" if x in set(symbolic_vars.values()) else "storage"
+  create_bind_group_layouts = ",".join([
+    "device.createBindGroupLayout({{entries: [{{binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {{ type: 'uniform' }}}}, {}]}})".format(
+        ",".join([f"{{binding: {argIdx+1}, visibility: GPUShaderStage.COMPUTE, buffer: {{ type: '{buf_type(argName)}' }} }}" for argIdx, argName in enumerate(args)])
+    )
+    for _, (_, args, _, _) in enumerate(statements)
+  ])
+  layouts = f"const layouts=[{create_bind_group_layouts}]"
+  kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, pipelines[{i}], layouts[{i}], infinityBuf, [{', '.join(args)}], [{', '.join(str(x) for x in global_size)}]);" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
+
+  buf_type = lambda x: "createUniformBuf" if x in set(uop.arg[0] for uop in symbolic_vars) else "createEmptyBuf"
+  map_to_external_weight = lambda _key: f"state_dict['{weight_names[_key]}']" if stream_weights else f"getTensorBuffer(safetensor, metadata['{weight_names[_key]}'])"
+  _bufs =  '\n    '.join([f"const {name} = " + (f"{buf_type(_key)}(device, {size});" if _key not in weight_names else f"createWeightBuf(device, {size}, {map_to_external_weight(_key)})") + ";"  for name,(size,dtype,_key) in bufs.items()])
+  gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:{input_name}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,input_name in enumerate(input_names)])
+  input_writers = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n        new {input_buffer_types[i]}(gpuWriteBuffer{i}.getMappedRange()).set(" + f'_{inp_name});' + f"\n        gpuWriteBuffer{i}.unmap();\n        commandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, {inp_name}, 0, gpuWriteBuffer{i}.size);"  for i,inp_name in enumerate(input_names)])
+  gpu_read_bufs = '\n    '.join([f"const gpuReadBuffer{i} = device.createBuffer({{size:{output_name}.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }});" for i,output_name in enumerate(output_names)])
+  outbuf_copies = '\n        '.join([f"commandEncoder.copyBufferToBuffer({output_name}, 0, gpuReadBuffer{i}, 0, output{i}.size);" for i,output_name in enumerate(output_names)])
+  output_readers = '\n        '.join([f"await gpuReadBuffer{i}.mapAsync(GPUMapMode.READ);\n        const resultBuffer{i} = new {output_buffer_types[i]}(gpuReadBuffer{i}.size/{bufs[output_names[i]][1].itemsize});\n        resultBuffer{i}.set(new {output_buffer_types[i]}(gpuReadBuffer{i}.getMappedRange()));\n        gpuReadBuffer{i}.unmap();" for i in range(len(output_names))])
+  output_return = '[{}]'.format(",".join([f'resultBuffer{i}' for i in range(len(output_names))]))
+  getTensorMetadata = f"""\nconst getTensorMetadata = (safetensorBuffer) => {{
+    const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
+    const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
+    return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
+}};\n""" if not stream_weights else ""
+  return f"""
+const {model_name} = (() => {{
+const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {{
+  return safetensorBuffer.subarray(...tensorMetadata.data_offsets);
+}};
+{getTensorMetadata}
+const createEmptyBuf = (device, size) => {{
+    return device.createBuffer({{size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }});
+}};
+
+const createUniformBuf = (device, size) => {{
+  return device.createBuffer({{size, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST}})
+}}
+
+const createInfinityUniformBuf = (device) => {{
+  const size = 4;
+  const buf = device.createBuffer({{
+    mappedAtCreation: true,
+    size,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+  }});
+  new Float32Array(buf.getMappedRange())[0] = Infinity;
+  buf.unmap();
+  return buf;
+}};
+
+const createWeightBuf = (device, size, data) => {{
+  const buf = device.createBuffer({{ size, usage: GPUBufferUsage.STORAGE{" | GPUBufferUsage.COPY_DST" if stream_weights else ", mappedAtCreation: true"} }});
+  {"data.bytes = buf;" if stream_weights else "new Uint8Array(buf.getMappedRange()).set(data); buf.unmap();"}
+  return buf;
+}};
+
+const addComputePass = (device, commandEncoder, pipeline, layout, infinityUniformBuf, bufs, workgroup) => {{
+  const bindGroup = device.createBindGroup({{
+    layout: layout,
+    entries: [
+      {{ binding: 0, resource: {{ buffer: infinityUniformBuf }} }},
+      ...bufs.map((buffer, index) => ({{ binding: index + 1, resource: {{ buffer }} }}))
+    ]
+  }});
+
+  const passEncoder = commandEncoder.beginComputePass();
+  passEncoder.setPipeline(pipeline);
+  passEncoder.setBindGroup(0, bindGroup);
+  passEncoder.dispatchWorkgroups(...workgroup);
+  passEncoder.end();
+}};
+
+{kernel_code}
+
+const setupNet = async (device, {"state_dict" if stream_weights else "safetensor"}) => {{
+    {"const metadata = getTensorMetadata(safetensor);" if not stream_weights else ""}
+    const infinityBuf = createInfinityUniformBuf(device);
+
+    {layouts}
+
+    {_bufs}
+
+    {gpu_write_bufs}
+
+    {gpu_read_bufs}
+
+    const kernels = [{kernel_names}];
+    const pipelines = await Promise.all(kernels.map(async (name, i) => {{
+      return await device.createComputePipelineAsync({{
+          layout: device.createPipelineLayout({{
+              bindGroupLayouts: [layouts[i]],
+          }}),
+          compute: {{
+              module: device.createShaderModule({{
+                  code: name,
+              }}),
+              entryPoint: "main",
+          }},
+      }});
+  }}))
+
+    return async ({",".join([f"_{input_name}" for input_name in input_names])}) => {{
+        const commandEncoder = device.createCommandEncoder();
+        {input_writers}
+        {kernel_calls}
+        {outbuf_copies}
+        const gpuCommands = commandEncoder.finish();
+        device.queue.submit([gpuCommands]);
+
+        {output_readers}
+        return {output_return};
+    }}
+}}
+const load = async (device, weight_path) => {{ return await fetch(weight_path).then(x => x.arrayBuffer()).then(x => setupNet(device, new Uint8Array(x))); }}
+return {{ load, setupNet }};
+}})();
+export default {model_name};
+"""
+
+def export_model(model, target:str, *inputs, model_name: Optional[str] = "model", stream_weights=False):
   assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, f"only {', '.join(EXPORT_SUPPORTED_DEVICE)} are supported"
   with Context(JIT=2): run,special_names = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
@@ -142,7 +268,7 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
   elif target == "wasm":
     return export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names, weight_names, model_name, symbolic_vars, wasm=True)
   elif target == "webgpu":
-    prg, _ = TinyJit(getattr(model, "forward", model)).export_webgpu(*inputs, tensor_names=tensor_names)
+    prg = export_model_webgpu(functions, statements, bufs, weight_names, input_names, output_names, model_name, symbolic_vars, stream_weights)
   else:
     prg = json.dumps({
       "backend": Device.DEFAULT,

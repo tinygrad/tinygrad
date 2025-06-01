@@ -47,7 +47,7 @@ class TextModelExport(unittest.TestCase):
       assert outputs[i].dtype.name == exported_output["dtype"], f"Model and exported output dtype don't match: mdl={outputs[i].dtype.name}, prg={exported_output['dtype']}"  # noqa: E501
 
 @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Testing WebGPU specific model export behavior")
-class TestModelExportWebGPU(unittest.TestCase):
+class TextModelExportWebGPU(unittest.TestCase):
   def test_exported_input_output_dtypes(self):
     class MyModel:
       def forward(self, *inputs): return tuple([(inp+2).cast(inp.dtype) for inp in inputs])
@@ -60,10 +60,10 @@ class TestModelExportWebGPU(unittest.TestCase):
       dt = inputs[i].dtype
       expected_arr_prefix = f"{expected_buffer_type}{dt.itemsize*8}"
       # test input buffers
-      self.assertIn(f"if (bufArg_{i}.byteLength !== input_{i}.size)", prg)
+      self.assertIn(f"new {expected_arr_prefix}Array(gpuWriteBuffer{i}.getMappedRange()).set(_input{i});", prg)
       # test output buffers
-      self.assertIn(f"const resultBuffer{i} = new {expected_arr_prefix}Array(gpuReadBuffer{i}.size / {dt.itemsize});", prg)
-      self.assertIn(f"resultBuffer{i}.set(new resultBuffer{i}.constructor(gpuReadBuffer{i}.getMappedRange()));", prg)
+      self.assertIn(f"const resultBuffer{i} = new {expected_arr_prefix}Array(gpuReadBuffer{i}.size/{dt.itemsize});", prg)
+      self.assertIn(f"resultBuffer{i}.set(new {expected_arr_prefix}Array(gpuReadBuffer{i}.getMappedRange()));", prg)
 
 if __name__ == '__main__':
   unittest.main()

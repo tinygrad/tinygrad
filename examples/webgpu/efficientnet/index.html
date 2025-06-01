@@ -42,6 +42,15 @@ canvas {  display: none; }
 		throw new Error(err);
 	}
 
+	const getDevice = async () => {
+		if (!navigator.gpu) error("WebGPU not supported.");
+		const adapter = await navigator.gpu.requestAdapter();
+		return await adapter.requestDevice({
+			requiredFeatures: ["shader-f16"],
+			powerPreference: "high-performance"
+		});
+	};
+
 	const timer = async (func, label = "") => {
 		document.getElementById('time').innerHTML = "";
 		const start = performance.now();
@@ -88,10 +97,9 @@ canvas {  display: none; }
 		try {
 			resultText.innerHTML = "loading..."
 			labels = await getLabels();
-			const createGraph = (await import("../../net.js")).default;
-			const model = await createGraph();
-			await timer(() => model.load('../../net.js.safetensors'), "(compilation)");
-			net = model.run;
+			const device = await getDevice();
+			const model = (await import("../../net.js")).default;
+			net = await timer(() => model.load(device, '../../net.safetensors'), "(compilation)");
 			resultText.innerHTML = "ready"
 		} catch (e) {
 			error(e)

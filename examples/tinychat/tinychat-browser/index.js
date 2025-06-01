@@ -234,7 +234,7 @@ function sendMessageToWorker(worker, message) {
   });
 }
 
-async function load_state_dict (data, progress) {
+async function load_state_dict (data, device, progress) {
   let state_dict = data.metadata.state_dict;
   let completed = 0;
 
@@ -282,15 +282,9 @@ async function load_state_dict (data, progress) {
 
   // instantiates empty weight buffers on WebGPU, attaches buffers to state_dict
   let model;
-  let device;
   if (window.BACKEND === "WebGPU") {
     //model = await transformer().setup(device, state_dict, progress);
-    //[model, device] = await transformer.setupNet(state_dict);
-    model = await transformer();
-    for (const [k, v] of Object.entries(model.stateDict)) {
-      state_dict[k].bytes = v;
-    }
-    device = model.device;
+    model = await transformer.setupNet(device, state_dict);
     progress(0.15 * progress.total);
 
   }
@@ -390,12 +384,6 @@ async function load_state_dict (data, progress) {
       await loadFileToStateDict(file);
     }
   }
-  
-  if (queryParams.has("VALIDATE")) {
-    // make output deterministic
-    device.queue.writeBuffer(state_dict["random_seeds"].bytes, 0, new Uint32Array([0,0]));
-    device.queue.writeBuffer(state_dict["random_counter"].bytes, 0, new Uint32Array([0]));
-  }
 
   return model;
 };
@@ -415,11 +403,11 @@ document.addEventListener("alpine:init", () => {
     progress: null,
 
     async init() {
-      //var device = null;
+      var device = null;
       var webgpuErrorMessage = null;
       if (window.BACKEND === "WebGPU") {
         try {
-          const device = await getDevice.call(this);
+          device = await getDevice.call(this);
           console.log("WebGPU device initialized");
         } catch (error) {
           window.BACKEND = "WASM";
@@ -514,10 +502,10 @@ document.addEventListener("alpine:init", () => {
         const loadModelMessage = (webgpuErrorMessage) ? webgpuErrorMessage : `Loading ${window.BACKEND} model:`
         this.progress(0, loadModelMessage);
         await kernelsReady;
-        const model = await load_state_dict(data, this.progress);
+        const model = await load_state_dict(data, device, this.progress);
 
         if (window.BACKEND === "WebGPU") {
-          this.nets = {"transformer": model.run};
+          this.nets = {"transformer": model};
         }
         else if (window.BACKEND === "WASM") {
           const msg = await sendMessageToWorker(model, {header: "load_state_dict", data: "done"});
@@ -700,8 +688,7 @@ document.addEventListener("alpine:init", () => {
       this.progress(0, this.loadingMessage);
       for (const tok of unprocessedPrefillToks) {
         if (this.cancelGeneration) {this.loadingMessage=""; return;}
-        //if (window.BACKEND === "WebGPU") {await this.nets["transformer"](new Int32Array([tok]), new Int32Array([startPos]));}
-        if (window.BACKEND === "WebGPU") {await this.nets["transformer"](new Int32Array([tok]), startPos);}
+        if (window.BACKEND === "WebGPU") {await this.nets["transformer"](new Int32Array([tok]), new Int32Array([startPos]));}
         else {await this.nets["transformer"](tok, startPos);}
         this.lastSeenToks.push(tok)
         startPos += 1;
@@ -711,8 +698,7 @@ document.addEventListener("alpine:init", () => {
 
       let lastTok = tokens[tokens.length - 1];
       while (true) {
-        //if (window.BACKEND === "WebGPU") {var tok = await this.nets["transformer"](new Int32Array([lastTok]), new Int32Array([startPos])); tok = tok[0][0];}
-        if (window.BACKEND === "WebGPU") {var tok = await this.nets["transformer"](new Int32Array([lastTok]), startPos); tok = tok[0][0];}
+        if (window.BACKEND === "WebGPU") {var tok = await this.nets["transformer"](new Int32Array([lastTok]), new Int32Array([startPos])); tok = tok[0][0];}
         else {var tok = await this.nets["transformer"](lastTok, startPos);}
         this.lastSeenToks.push(lastTok); // lets us skip prefilling with these tokens at the next prompt in this chain
         startPos += 1;

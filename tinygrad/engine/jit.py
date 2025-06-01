@@ -247,12 +247,6 @@ class TinyJit(Generic[ReturnType]):
     self.cnt = 0
     self.captured = None
 
-  def export_webgpu(self, *args, tensor_names:dict[str, Tensor]|None=None, **kwargs) -> tuple[str, dict[str, Tensor]]:
-    assert self.fxn is not None
-    from tinygrad.renderer.graph.webgpu import WebGPUJSRenderer
-    renderer = WebGPUJSRenderer(self.fxn, *args, tensor_names=tensor_names, **kwargs)
-    return renderer.render_graph(), renderer.state_dict
-
   def __reduce__(self):
     assert self.captured is not None, "can't pickle an uncaptured JIT"
     return self.__class__, (None, self.captured)
