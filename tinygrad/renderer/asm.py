@@ -116,8 +116,9 @@ class AsmRenderer(Renderer):
       if (free:=next((r for r in reg_class(x) if r in cons), None)) is not None: return reg_class(x).pop(reg_class(x).index(free))
       # we choose the var whose next use is the latest, in case no next use we use the uop(endrange) that kills the var
       # this prioritizes vars defined outside loops
-      # TODO: account for noop and assign
-      spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next((j for j,u in enumerate(uops[i:]) if k in u.src), live_range[k]-i))
+      #spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next((j for j,u in enumerate(uops[i:]) if k in u.src), live_range[k]-i))
+      spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next((j for j,u in enumerate(uops[i:]) if k in \
+                tuple(s.src[0] if s.op in (Ops.ASSIGN, Ops.NOOP) else s for s in u.src)), live_range[k]-i))
       if spilled not in mem:
         nonlocal stack_size
         stack_size += 16
