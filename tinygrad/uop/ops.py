@@ -5,7 +5,7 @@ from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten
-from tinygrad.helpers import PICKLE_BUFFERS, dedup, cdiv, cmod
+from tinygrad.helpers import PICKLE_BUFFERS, dedup, cdiv, cmod, diskcache_put
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
@@ -498,7 +498,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if (self.op is Ops.VIEW and len(self.src) != 0) or self.op in GroupOp.Movement: return self.src[0].base
     if self.op is Ops.MULTI: return self.src[0].base  # MULTI is really a VIEW
     return self
-  def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
+  def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self,), new_st)
 
   def _mop(self, op:Ops, arg):
     ret = UOp(op, self.dtype, (self,), arg)
@@ -892,6 +892,14 @@ class TrackedGraphRewrite:
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, int] = {}
+
+if getenv("CAPTURE_PROCESS_REPLAY"):
+  replay_capture: dict[str, bytes] = {}
+  import atexit
+  @atexit.register
+  def save_to_diskcache():
+    for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
+
 def track_rewrites(named=False, name_fxn:Callable|None=None):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
@@ -901,6 +909,15 @@ def track_rewrites(named=False, name_fxn:Callable|None=None):
         tracked_ctxs.append([])
       ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and name_fxn is not None: tracked_keys[-1] = f"{name_fxn(ret)} n{_name_cnt[func.__name__]}"
+      if getenv("CAPTURE_PROCESS_REPLAY"):
+        # find the unittest frame we're capturing in
+        frm = sys._getframe(1)
+        while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
+        loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
+        # capture global context vars and all the args passed in
+        with Context(PICKLE_BUFFERS=0):
+          inputs = (func.__name__, args, kwargs, ContextVar._cache)
+          replay_capture[hashlib.sha256(pickle.dumps(inputs)).hexdigest()] = pickle.dumps(inputs+(loc, ret))
       return ret
     return __wrapper
   return _decorator
