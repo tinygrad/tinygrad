@@ -96,7 +96,7 @@ if __name__ == "__main__":
     conn.commit()
     cur.close()
 
-  print(f"running process replay with {ASSERT_DIFF=}")
+  logging.info(f"running process replay with {ASSERT_DIFF=}")
   with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count()) as pool:
     inputs = list(range(0, row_count, PAGE_SIZE))
     list(tqdm(pool.imap_unordered(diff, inputs), total=len(inputs)))
