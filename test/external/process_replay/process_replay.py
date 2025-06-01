@@ -2,7 +2,7 @@
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools
 from typing import Callable, Any
-from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
+from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm, to_function_name
 from tinygrad.engine.grouper import get_kernelize_map
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.uop.ops import UOp, Ops
@@ -41,7 +41,7 @@ def replay_linearize(k:Kernel, _:Kernel, name_override=None, ast_transform=None)
   # create a copy because the Kernel class contains optimization parameters (other than applied_opts) in its state
   # this should be made fully functional. It's fine for process replay since copy returns a fresh instance
   k2 = k.copy()
-  k2.linearize(name_override=name_override, ast_transform=ast_transform)
+  k2.linearize(name_override=name_override or to_function_name(k.name), ast_transform=ast_transform)
   def to_str(ret:Kernel): return ret.opts.render(ret.uops)
   return to_str(k2), to_str(k), (k.ast, k.opts, k.applied_opts)
 
