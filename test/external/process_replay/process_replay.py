@@ -106,7 +106,6 @@ if __name__ == "__main__":
 
   print(f"running process replay with {ASSERT_DIFF=}")
   try: _pmap()
-  except ProcessReplayWarning: exit(1)
   except Exception as e:
     if ASSERT_DIFF: raise e
     logging.error(f"diff err {e}")
