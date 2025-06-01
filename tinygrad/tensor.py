@@ -4142,7 +4142,7 @@ class Tensor(SimpleMathTrait):
     # groups*cout x cin x H, W
     cw = w.transpose(w.ndim-1, w.ndim-2).reshape((groups*cout, cin, 1, 1))
     if dtype is None and IMAGE >= 2 and getenv("FLOAT16", 0) and self.dtype == dtypes.float16 and w.dtype == dtypes.float16:
-        dtype = dtypes.float16
+      dtype = dtypes.float16
     return cx.image_conv2d(cw, groups=groups, dtype=dtype).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
 
   def image_conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, dtype=None) -> Tensor:
