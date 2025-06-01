@@ -39,7 +39,7 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
 
 def replay_linearize(k:Kernel, _:Kernel, name_override=None, ast_transform=None) -> tuple[str, str, tuple[Any, ...]]:
   k2 = k.copy()
-  k2.linearize(name_override=to_function_name(k.name), ast_transform=ast_transform)
+  k2.linearize(name_override=name_override, ast_transform=ast_transform)
   def to_str(ret:Kernel): return ret.opts.render(ret.uops)
   return to_str(k2), to_str(k), (k.ast, k.opts, k.applied_opts)
 
