@@ -38,6 +38,8 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
 def replay_linearize(k:Kernel, _:Kernel, name_override=None, ast_transform=None) -> tuple[str, str, tuple[Any, ...]]:
+  # create a copy because the Kernel class contains optimization parameters (other than applied_opts) in its state
+  # this should be made fully functional. It's fine for process replay since copy returns a fresh instance
   k2 = k.copy()
   k2.linearize(name_override=name_override, ast_transform=ast_transform)
   def to_str(ret:Kernel): return ret.opts.render(ret.uops)
