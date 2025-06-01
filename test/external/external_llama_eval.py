@@ -61,7 +61,7 @@ if __name__ == '__main__':
   parser.add_argument('--chat', action='store_true', help="Use chat model")
   parser.add_argument('--ctx', type=int, default=128000, help="Max context length")
   parser.add_argument('--quantize', type=str, default=None, help="Quantize the weights to int8 or int4 in memory")
-  parser.add_argument('--eval', type=str, default="gsm8k_cot_llama", help="Run evaluation")
+  parser.add_argument('--eval', type=str, default="arc_easy", help="Run in evaluation mode")
   parser.add_argument('--limit', type=int, default=None, help="Limit tests in eval")
   parser.add_argument('--num_fewshot', type=int, default=None, help="Number of examples to add to context")
   parser.add_argument('--model', type=str, default="./weights/LLaMa/", help="Location of the weights")
