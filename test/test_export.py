@@ -11,15 +11,15 @@ class TestGraphRenderer(unittest.TestCase):
         self.w = Tensor([42])
 
       def mutate_implicit_input(self, x:Tensor):
-        self.w = self.w + x
+        self.w.assign(self.w + x)
 
     model = Model()
     r = GraphRenderer(model.mutate_implicit_input, Tensor([7]), tensor_names=get_state_dict(model))
 
     self.assertIn("w", r.state_dict)
+    self.assertEqual(r.state_dict["w"].lazydata.base.is_realized, True)
+    self.assertEqual(r.state_dict["w"].lazydata.base.realized, model.w.lazydata.base.realized)
     self.assertEqual(r.state_dict["w"].tolist(), [42])
-    self.assertEqual(model.w.lazydata.base.is_realized, False)
-    self.assertEqual(model.w.tolist(), [49])
 
 if __name__ == "__main__":
   unittest.main()
