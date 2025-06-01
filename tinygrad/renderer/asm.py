@@ -205,7 +205,7 @@ arm64_8bit_unsigned_ops = {**arm64_unsigned_ops, Ops.STORE: "strb", Ops.LOAD: "l
 arm64_8bit_signed_ops = {**arm64_signed_ops, Ops.STORE: "strb", Ops.LOAD: "ldrb"}
 arm64_float_ops = {Ops.ADD: "fadd", Ops.SUB: "fsub", Ops.MUL: "fmul", Ops.FDIV: "fdiv", Ops.CMPLT: "fcmp", Ops.CMPNE: "fcmp",
                   Ops.SQRT: "fsqrt", Ops.MULACC: "fmadd", Ops.WHERE: "fcsel", Ops.STORE: "str", Ops.LOAD: "ldr", Ops.ASSIGN: "fmov"}
-arm64_vec_ops = {Ops.STORE: "ld1", Ops.LOAD: "ld1"}
+arm64_vec_ops = {Ops.STORE: "ld1", Ops.LOAD: "ld1", Ops.ASSIGN: "mov"}
 arm64_ops = {**{x:arm64_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:arm64_signed_ops for x in dtypes.sints},
              **{x:arm64_float_ops for x in dtypes.floats}, dtypes.uint16:arm64_16bit_unsigned_ops, dtypes.int16:arm64_16bit_signed_ops,
              dtypes.uint8:arm64_8bit_unsigned_ops, dtypes.int8:arm64_8bit_signed_ops, dtypes.float32.vec(2):arm64_vec_ops,
@@ -226,9 +226,10 @@ arm64_rewrite = PatternMatcher([
    lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {{{ctx[x.src[1]]}}}, [{ctx[x.src[0]]}]" if x.src[1].dtype.count > 1 else None),
   (UPat(Ops.STORE, name="x"), lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {ctx[x.src[1]]}, [{ctx[x.src[0]]}]"),
   # devectorize/vectorize
-  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx.r[x.src[0]]}.{arm64_vec_suffix[x.src[0].dtype.scalar().itemsize]}[{x.arg[0]}]"),
+  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx.r[x.src[0]]}.{arm64_vec_suffix[x.dtype.itemsize]}[{x.arg[0]}]"),
   (UPat(Ops.VECTORIZE, name="x"),
-   lambda ctx,x: "\n".join(f"ins {ctx[x]}.{arm64_vec_suffix[s.dtype.itemsize]}[{i}], {ctx[s]}" for i,s in enumerate(x.src))),
+   lambda ctx,x: "\n".join(f"mov {ctx.r[x]}.{arm64_vec_suffix[s.dtype.itemsize]}[{i}], {ctx.r[s]}.{arm64_vec_suffix[s.dtype.itemsize]}[{0}]"
+     for i,s in enumerate(x.src))),
   # casts
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints),), name="x"),
    lambda ctx,x: f"uxt{arm64_cast_suffix.get(x.src[0].dtype.itemsize, '')} {ctx[x]}, {ctx[x.src[0]]}"),
