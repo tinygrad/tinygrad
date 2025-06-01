@@ -77,6 +77,7 @@ class AsmRenderer(Renderer):
   def render_fill(self, x:UOp, reg:str) -> str:
     op = Ops.LOAD if isinstance(self.r[x], int) else Ops.ASSIGN
     return f"{self.ops[self.dt(x.dtype)][op]} {self.render_reg(reg, self.dt(x.dtype))}, {self[x]}"
+  #def two_address(self, x:UOp, y:UOp) -> str: return cast(str, l)+"\n" if (l:=self.string_rewrite.rewrite(x.assign(y), self)) is not None else ""
   def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
   def dt(self, d:DType) -> DType: return dtypes.uint64 if isinstance(d, PtrDType) else d
   def reg_class(self, x:UOp) -> list[str]: return self.regs[self.dt(x.dtype).scalar()]
@@ -124,7 +125,6 @@ class AsmRenderer(Renderer):
         inst_map[spilled].append(self.render_spill(spilled, mem[spilled]))
         spilled_at[spilled] = i
       loc[spilled] = mem[spilled]
-      # TODO: # if x is live need move instruction
       return live.pop(spilled)
 
     def alloc(x:UOp, cons:list[str]|int):
@@ -188,8 +188,8 @@ class AsmRenderer(Renderer):
   def render(self, uops:list[UOp]): return self.render_kernel(*self._render(uops))
 
 # x18 clobbered on macos/windows, x29 holds sp for debugging
-arm64_gen_regs = ['x' + str(i) for i in (range(31)) if i not in (18, 29)]
-arm64_float_regs = ['v' + str(i) for i in (range(32))]
+arm64_gen_regs = ['x' + str(i) for i in range(31) if i != 29 and not (i == 18 and sys.platform in ("darwin", "win32"))]
+arm64_float_regs = ['v' + str(i) for i in range(32)]
 arm64_regs = {**{x:arm64_gen_regs for x in (dtypes.bool,)+dtypes.ints}, **{x:arm64_float_regs for x in dtypes.floats}}
 arm64_reg_map = {**{f"x{i}": {4: f"w{i}"} for i in range(31)}, **{f"v{i}": {8: f"d{i}", 4: f"s{i}", 2: f"h{i}"} for i in range(32)}}
 
@@ -216,6 +216,10 @@ def arm64_cflag(x:UOp) -> str: return "ne" if x.op is Ops.CMPNE else "lo" if x.s
 
 arm64_rewrite = PatternMatcher([
   # loads/stores/movs
+  # TODO: better way to render vector load/store
+  (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
+   f"{ctx.two_address(x, alt)}tst {ctx[mask]}, #1\n"
+   f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {{{ctx[x]}}}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:" if x.dtype.count > 1 else None),
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"{ctx.two_address(x, alt)}tst {ctx[mask]}, #1\n"
    f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
@@ -300,6 +304,7 @@ class Arm64Renderer(AsmRenderer):
     if s is not None: return self.reg_class(s)
     # TODO: think I need to track function arg index here cause of def var
     if u.op is Ops.DEFINE_GLOBAL and u.arg < 8: return [("x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7")[u.arg]]
+    # TODO: this offset is wrong needs to include stack size
     if u.op is Ops.DEFINE_GLOBAL and u.arg >= 8: return (u.arg-6)*8
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return f"#{imm}"
@@ -309,9 +314,14 @@ class Arm64Renderer(AsmRenderer):
     if dt in dtypes.floats: return arm64_reg_map[reg][dt.itemsize]
     return reg if dt.itemsize == 8 else arm64_reg_map[reg][max(dt.itemsize, dtypes.int32.itemsize)]
   def render_spill(self, x:UOp, sz:int) -> str: return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self[x]}, {self.render_mem(sz, self.dt(x.dtype))}"
+  def render_fill(self, x:UOp, reg:str) -> str:
+    op = Ops.LOAD if isinstance(self.r[x], int) else Ops.ASSIGN
+    loc = self.render_reg(reg, self.dt(x.dtype))
+    loc = "{"+loc+"}" if x.dtype.count > 1 and op is Ops.LOAD else loc
+    return f"{self.ops[self.dt(x.dtype)][op]} {loc}, {self[x]}"
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
-    return "\n".join([".text", f".global {name}", f"{name}:", f"stp x29, x30, [sp, #{-stack_size}]!", "mov x29, sp"] + \
-                      kernel + [f"ldp x29, x30, [sp], #{stack_size}", "ret", "\n"])
+    return "\n".join([".text", f".global {name}", f"{name}:", f"sub sp, sp, #{stack_size}", "stp x29, x30, [sp]", "mov x29, sp"] + \
+                      kernel + ["ldp x29, x30, [sp]", f"add sp, sp, #{stack_size}", "ret", "\n"])
 
 x86_gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx", "r10", "r11", "r12", "r13", "r14", "r15"]
 x86_float_regs = ["xmm" + str(i) for i in range(0,16)]
