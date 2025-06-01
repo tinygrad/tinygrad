@@ -4,8 +4,8 @@ from tinygrad.uop.ops import track_rewrites, _substitute
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.codegen.lowerer import get_contraction_with_reduce, get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.multi import multi_pm, replace_allreduce
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -486,13 +486,6 @@ do_fuse = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
 ])
 
-PROCESS_REPLAY_CAPTURE:dict[int,bytes] = {}
-if CAPTURE_PROCESS_REPLAY:
-  import atexit
-  @atexit.register
-  def save_process_replay():
-    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
-
 def get_name(becomes_map:dict[UOp, UOp]) -> str:
   assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
   return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
@@ -567,12 +560,5 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # verify Kernels match the spec
   if __debug__: type_verify(list(sched_sink.toposort()), tensor_uop_spec)
-
-  # capture process replay
-  if CAPTURE_PROCESS_REPLAY:
-    with Context(PICKLE_BUFFERS=0):
-      import pickle
-      kernel_asts = [u.arg.ast for u in sched_sink.toposort() if u.op is Ops.KERNEL]
-      PROCESS_REPLAY_CAPTURE[id(big_sink)] = pickle.dumps((big_sink, ContextVar._cache, kernel_asts))
 
   return tensor_map

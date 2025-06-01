@@ -10,8 +10,8 @@ from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap, ContextVar
-from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, AMX, CAPTURE_PROCESS_REPLAY
+from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, unwrap
+from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.lowerer import get_contraction
@@ -566,15 +566,6 @@ class Kernel:
     self.linearize(name_override, ast_transform)
     assert self.uops[-1].op is Ops.SINK, "last uop must be sink"
     src = self.opts.render(self.uops)
-
-    if CAPTURE_PROCESS_REPLAY:
-      import sys
-      frm = sys._getframe(1)
-      while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
-      loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[-1].arg.name, loc, ContextVar._cache,
-                                                             src))
-
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
     mem_bytes = sum(max(x.src[0].dtype.nbytes() for x in group)
