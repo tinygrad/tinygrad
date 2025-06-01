@@ -51,7 +51,7 @@ def jit_v2(fxn, *args, **kwargs):
 
     # Implicit input buffers can change during execution, so we have to copy the data from the new buffer back to the original buffer
     for dest, src in r.implicit_input_copies:
-      dest.copyin(src.as_buffer(allow_zero_copy=True))
+      dest.buffer.copyin(src.buffer.as_buffer())
 
     ret = [Tensor(bytes((b:=cast(Buffer, r.eis[j].bufs[i])).as_buffer()), b.device, b.dtype) for j,i in explicit_output_j_i.values()]
     return ret[0] if len(ret) == 1 else ret
@@ -134,7 +134,7 @@ class TestJitCases(unittest.TestCase):
   def test_implicit_io_v2(self):
     self.test_implicit_io(v2=True)
 
-  def test_implicit_input_is_implicit_output(self, v2=False):
+  def test_mutate_implicit_input(self, v2=False):
     w = Tensor([0])
 
     def f(x:Tensor):
@@ -148,12 +148,10 @@ class TestJitCases(unittest.TestCase):
     for i in range(5):
       out = f(Tensor([42]))
       self.assertEqual(out.item(), 42 + 2*i + 1)
-      #print(w.item())
-      #self.assertEqual(w.item(), 2*(i + 1))
-    #if v2: assert False
+      self.assertEqual(w.item(), 2*(i + 1))
 
-  def test_implicit_input_is_implicit_output_v2(self):
-    self.test_implicit_input_is_implicit_output(v2=True)
+  def test_mutate_implicit_input_v2(self):
+    self.test_mutate_implicit_input(v2=True)
 
 if __name__ == '__main__':
   unittest.main()

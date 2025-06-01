@@ -40,15 +40,22 @@ class GraphRenderer(Renderer):
         (precall_implicit_input:=Tensor(0)).lazydata = u.base
         if (b:=cast(Buffer, precall_implicit_input.realize().lazydata.base.realized)) not in self.bufs: self.bufs[b] = name = f"buf_{next(ctr)}"
         self.state_dict[tensor_name_lookup.get(t, name)] = precall_implicit_input
+        #t.lazydata = precall_implicit_input.lazydata
+        #precall_implicit_input.lazydata = precall_implicit_input.lazydata.base
 
+    sink = UOp.sink(*[t.lazydata.base for t in affected])
     # Assigns on implicit input can cause the final buffer to be different than the original buffer, so we need to copy the data back
-    self.implicit_input_copies: list[tuple[Buffer, Buffer]] = []
+    # hold UOps so that the new buf doesn't get memory planned
+    self.implicit_input_copies: list[tuple[UOp, UOp]] = []
     for t in affected:
-      if t in precall and (new_buf := t.lazydata.base.buf_uop.buffer) != (old_buf := precall[t].base.buf_uop.buffer) and old_buf.is_allocated():
-        self.implicit_input_copies.append((cast(Buffer, old_buf), cast(Buffer, new_buf)))
+      if t in precall and (new := t.lazydata.base.buf_uop).key != (old := precall[t].base.buf_uop).key and old.buffer.is_allocated():
+        self.implicit_input_copies.append((old, new))
+        # rewind
+        t.lazydata = precall[t]
+        t.realize()
 
     # Linearize the kernel graph
-    sink = UOp.sink(*[t.lazydata.base for t in affected])
+    #sink = UOp.sink(*[t.lazydata.base for t in affected])
     schedule, var_vals = create_schedule_with_vars(sink)
     assert set(var_vals.keys()) == set(u.unbind()[0] for u in self.inputs if u.op is Ops.BIND), "Variables must be positional arguments"
     self.eis: list[ExecItem] = []

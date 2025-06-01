@@ -108,7 +108,8 @@ class WebGPUJSRenderer(GraphRenderer):
       # deliberately display p.function_name in every addComputePass for easier debugging/understanding
       compute_passes.append(f'addComputePass(commandEncoder, {i}, "{p.function_name}", [{buf_names}], [{global_size}]);')
 
-    for dest, src in self.implicit_input_copies: compute_passes.append(copy(self.bufs[dest], self.bufs[src]))
+    for dest, src in self.implicit_input_copies:
+      compute_passes.append(copy(self.bufs[cast(Buffer, dest.buffer)], self.bufs[cast(Buffer, src.buffer)]))
 
     kernel_sequence = [f'const kernelSequence = [{", ".join(kernel_sequence)}];']
     layouts = [f'const layouts = [{", ".join(layouts)}];']
