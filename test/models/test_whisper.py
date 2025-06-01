@@ -1,6 +1,6 @@
 import unittest
 import pathlib
-from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
+from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform, RATE
 from tinygrad.helpers import CI, fetch, Context
 from tinygrad import Device, dtypes
 from tinygrad.device import is_dtype_supported
@@ -79,7 +79,7 @@ class TestWhisper(unittest.TestCase):
     self.assertEqual(TRANSCRIPTION_1, trancriptions[1])
   
   def test_transcribe_file_tiny_wav(self):
-    sr = 16000   # matches RATE in whisper.py
+    sr = RATE
     tiny_data = np.zeros(100, dtype=np.float32)
     tmp_f = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     sf.write(tmp_f.name, tiny_data, sr)

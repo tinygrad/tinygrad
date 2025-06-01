@@ -231,7 +231,6 @@ def init_whisper(model_name="tiny.en", batch_size=1):
 
 def load_file_waveform(filename):
   waveform, _ = librosa.load(filename, sr=RATE)
-# Padding added in transcribe_file
   return waveform
 
 def transcribe_file(model, enc, filename):
