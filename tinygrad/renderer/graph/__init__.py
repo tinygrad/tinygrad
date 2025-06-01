@@ -40,22 +40,20 @@ class GraphRenderer(Renderer):
         (precall_implicit_input:=Tensor(0)).lazydata = u.base
         if (b:=cast(Buffer, precall_implicit_input.realize().lazydata.base.realized)) not in self.bufs: self.bufs[b] = name = f"buf_{next(ctr)}"
         self.state_dict[tensor_name_lookup.get(t, name)] = precall_implicit_input
-        #t.lazydata = precall_implicit_input.lazydata
-        #precall_implicit_input.lazydata = precall_implicit_input.lazydata.base
 
     sink = UOp.sink(*[t.lazydata.base for t in affected])
-    # Assigns on implicit input can cause the final buffer to be different than the original buffer, so we need to copy the data back
-    # hold UOps so that the new buf doesn't get memory planned
+
+    # Assigns on implicit input can cause the final buffer to be different from the original buffer, so we need to copy the data back
+    # Holding the end buffer's UOp prevents the memory planner from reassigning the end buffer's Buffer, so the copy will stay correct
     self.implicit_input_copies: list[tuple[UOp, UOp]] = []
-    for t in affected:
-      if t in precall and (new := t.lazydata.base.buf_uop).key != (old := precall[t].base.buf_uop).key and old.buffer.is_allocated():
-        self.implicit_input_copies.append((old, new))
-        # rewind
-        t.lazydata = precall[t]
-        t.realize()
+    for t in set(affected).intersection(set(precall)):
+      if (end := t.lazydata.base.buf_uop).key != (start := precall[t].base.buf_uop).key and start in t.lazydata.toposort():
+        self.implicit_input_copies.append((start, end))
+        # Ensure implicit i/o Tensors point at the correct data, but don't leave unrealized compute in them
+        t.lazydata = start
+      else: t.lazydata = end
 
     # Linearize the kernel graph
-    #sink = UOp.sink(*[t.lazydata.base for t in affected])
     schedule, var_vals = create_schedule_with_vars(sink)
     assert set(var_vals.keys()) == set(u.unbind()[0] for u in self.inputs if u.op is Ops.BIND), "Variables must be positional arguments"
     self.eis: list[ExecItem] = []
