@@ -9,10 +9,11 @@ from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, python_alu
 from tinygrad.renderer import ProgramSpec
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.codegen import full_rewrite
+from tinygrad.engine.realize import lower_schedule_item
 
 def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
   for x in inputs: x.realize()
@@ -68,6 +69,23 @@ class TestCStyleFailures(unittest.TestCase):
     # CPU doesn't use the max function
     ret = _setup_and_test_alu(Ops.MAX, 1, UOp.const(dtypes.int, dtypes.min(dtypes.int)+1))
     self.assertEqual(ret[0], 1)
+
+  def _test_src_strip_paren(self, op: Ops, should_strip_paren:bool=True):
+    dtype = "bool" if op in (Ops.OR, Ops.XOR, Ops.AND) else None
+    ret = Tensor.empty(1, dtype=dtype)
+    for _ in range(5): ret = python_alu[op](ret, Tensor.empty(1, dtype=dtype))
+    schedule = ret.schedule()
+    assert len(schedule) == 1
+    ei = lower_schedule_item(schedule[0])
+    src = ei.prg.p.src
+    self.assertEqual("("*5 not in src, should_strip_paren)
+
+  def test_repeat_add(self): self._test_src_strip_paren(Ops.ADD)
+  def test_repeat_mul(self): self._test_src_strip_paren(Ops.MUL)
+  def test_repeat_xor(self): self._test_src_strip_paren(Ops.XOR)
+  def test_repeat_or(self): self._test_src_strip_paren(Ops.OR)
+  def test_repeat_and(self): self._test_src_strip_paren(Ops.AND)
+  def test_repeat_sub(self): self._test_src_strip_paren(Ops.SUB, should_strip_paren=False)
 
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "tests for wgsl renderer")
 class TestWGSLFailures(unittest.TestCase):

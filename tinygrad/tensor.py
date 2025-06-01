@@ -49,8 +49,6 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
 # this tracks the tensor.py METADATA
 _METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
 
-def _metaop(op, shape:tuple[sint,...], dtype:DType, device:str|tuple[str, ...], arg=None) -> UOp: return UOp.metaop(op, shape, dtype, device, arg)
-
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
   # fake realize
@@ -123,7 +121,6 @@ class Tensor(MathTrait):
   """
   __slots__ = "lazydata", "requires_grad", "grad"
   training: ClassVar[bool] = False
-  no_grad: ClassVar[bool] = False
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'np.ndarray'|pathlib.Path|None,  # type: ignore [name-defined] # noqa: F821
                device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None):
@@ -141,9 +138,9 @@ class Tensor(MathTrait):
     # create a UOp from the different types of inputs
     if isinstance(data, UOp):
       assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
-      if data.op is Ops.BIND: data = _metaop(Ops.BIND, tuple(), dtype or data.dtype, device, data)
-    elif data is None: data = _metaop(Ops.CONST, (0,), dtype or dtypes.default_float, device, arg=0)
-    elif isinstance(data, get_args(ConstType)): data = _metaop(Ops.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
+      if data.op is Ops.BIND: data = UOp.metaop(Ops.BIND, tuple(), dtype or data.dtype, device, data)
+    elif data is None: data = UOp.metaop(Ops.CONST, (0,), dtype or dtypes.default_float, device, arg=0)
+    elif isinstance(data, get_args(ConstType)): data = UOp.metaop(Ops.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
     elif isinstance(data, (list, tuple)):
       if dtype is None:
@@ -154,7 +151,7 @@ class Tensor(MathTrait):
     elif str(type(data)) == "<class 'numpy.ndarray'>":
       import numpy as np
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
-      if data.shape == (): data = _metaop(Ops.CONST, tuple(), dtype or _from_np_dtype(data.dtype), device, data.item())
+      if data.shape == (): data = UOp.metaop(Ops.CONST, tuple(), dtype or _from_np_dtype(data.dtype), device, data.item())
       else: data = _fromnp(data.astype(npdtype) if dtype is not None and (npdtype:=_to_np_dtype(dtype)) is not None else data)  # type: ignore [name-defined]
     elif isinstance(data, pathlib.Path):
       dtype = dtype or dtypes.uint8
@@ -193,11 +190,6 @@ class Tensor(MathTrait):
     def __init__(self, mode:bool = True): self.mode = mode
     def __enter__(self): self.prev, Tensor.training = Tensor.training, self.mode
     def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
-
-  class test(ContextDecorator):
-    def __init__(self, mode:bool = True): self.mode = mode
-    def __enter__(self): self.prev, Tensor.no_grad = Tensor.no_grad, self.mode
-    def __exit__(self, exc_type, exc_value, traceback): Tensor.no_grad = self.prev
 
   def __repr__(self):
     ld = self.lazydata
@@ -931,7 +923,7 @@ class Tensor(MathTrait):
     """
     all_uops = self.lazydata.toposort()
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
-                                       t.lazydata in all_uops and t.requires_grad and not Tensor.no_grad]
+                                       t.lazydata in all_uops and t.requires_grad]
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient, materialize_grads=True)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
@@ -1613,6 +1605,23 @@ class Tensor(MathTrait):
     counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32)
     idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
     return x[idxs]
+
+  def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor:
+    """
+    Replace `self` with `value` wherever the elements of `mask` are True.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4, 5])
+    mask = Tensor([True, False, True, False, False])
+    print(t.masked_fill(mask, -12).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4, 5])
+    mask = Tensor([True, False, True, False, False])
+    value = Tensor([-1, -2, -3, -4, -5])
+    print(t.masked_fill(mask, value).numpy())
+    """
+    return mask.where(value, self)
 
   # ***** reduce ops *****
 
@@ -3684,8 +3693,6 @@ class Tensor(MathTrait):
     cond, x = self._broadcasted(x, match_dtype=False)
     cond, y = cond._broadcasted(y, match_dtype=False)
     return cond.cast(dtypes.bool)._apply_uop(UOp.where, *x._broadcasted(y))
-
-  def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor: return mask.where(value, self)
 
   def copysign(self, other) -> Tensor:
     """
