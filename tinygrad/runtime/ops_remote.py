@@ -15,7 +15,7 @@ from tinygrad.uop.ops import UOp, Ops, Variable, sint
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferXfer
-from tinygrad.device import Compiled, Buffer, Allocator, Compiler, Device, BufferSpec
+from tinygrad.device import Compiled, Buffer, Allocator, Device, BufferSpec
 from tinygrad.runtime.graph.cpu import CPUGraph
 
 # ***** API *****
