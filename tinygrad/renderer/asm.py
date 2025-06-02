@@ -304,9 +304,9 @@ class Arm64Renderer(AsmRenderer):
   def render_mem(self, sz:int, dt:DType) -> str: return f"[x29, #{abs(sz)}]"
   # arm64 vec load/store use q/d instead of v.suffix
   def render_reg(self, reg:str, dt:DType, alias:bool=False) -> str:
-    dt = self.dt(dt).scalar()
-    if dt.count > 1 and not alias: return f"{reg}.{dt.count}{arm64_vec[dt.itemsize]}"
-    if dt in dtypes.floats: return arm64_reg_map[reg][dt.itemsize]
+    dt = self.dt(dt)
+    if dt.count > 1 and not alias: return f"{reg}.{dt.count}{arm64_vec[dt.scalar().itemsize]}"
+    if dtypes.is_float(dt): return arm64_reg_map[reg][dt.itemsize]
     return reg if dt.itemsize == 8 else arm64_reg_map[reg][max(dt.itemsize, dtypes.int32.itemsize)]
   def render_spill(self, x:UOp, sz:int) -> str:
     return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self.render_reg(self.r[x], x.dtype, True)}, {self.render_mem(sz, self.dt(x.dtype))}"
