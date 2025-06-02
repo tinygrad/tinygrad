@@ -1272,14 +1272,18 @@ class Tensor(MathTrait):
     return (x * index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim])).sum(-1, dtype=self.dtype)
 
   def as_strided(self, size, stride, storage_offset=0) -> Tensor:
-    """
-    Returns a tensor with the specified shape, strides, and offset.
-    """
+    """Returns a tensor with the specified shape, strides, and offset."""
     if any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
-    idx = [storage_offset + sum(i * s for i, s in zip(c, stride)) for c in itertools.product(*(range(s) for s in size))]
-    if any(i < 0 or i >= self.numel() for i in idx): raise IndexError("as_strided generated out-of-bounds index")
+    if prod(size) == 1: return self.flatten()[storage_offset].reshape(size)
 
-    return self.reshape(-1).gather(0, Tensor(idx, device=self.device)).reshape(size)
+    from tinygrad.shape.shapetracker import ShapeTracker, View
+    from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
+
+    st = ShapeTracker(self.lazydata.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
+    mops, ret = to_movement_ops(st), self
+    if mops and mops[0] == (MovementOps.RESHAPE, self.shape): mops = mops[1:]
+    for mo in mops: ret = apply_mop(ret, mo)
+    return ret
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
