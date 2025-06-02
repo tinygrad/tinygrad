@@ -42,15 +42,15 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   ret.append(RewriteStep(pm_store_ignore, name="store_ignore"))
   ret.append(RewriteStep(pm_move_ignore, name="move_ignore"))
 
-  # loop splitting
-  ret.append(RewriteStep(pm_split_loop+sym, name="split_loop"))
-
   # expand + remove surviving ignores
   ret.append(RewriteStep(pm_delete_ignore+sym+expander, name="expander"))
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
   ret.append(RewriteStep(pm_reduce+gep_pushing, lambda _: ReduceContext(), name="remove_reduce"))
+
+  # loop splitting
+  ret.append(RewriteStep(sym+pm_split_loop, name="split_loop"))
 
   # devectorize (TODO: does this need opts?)
   if _DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing

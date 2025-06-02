@@ -1,6 +1,6 @@
 # this converts a lowerer program into a vectorized program
 
-import functools, itertools, operator
+import functools, itertools, operator, typing
 from tinygrad.helpers import AMX, dedup, flatten, all_same, prod
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp
 
@@ -115,16 +115,54 @@ migrate_indexing = PatternMatcher([
   (UPat(Ops.STORE, name="root"), create_gate),
 ])
 
-def split_loop(store: UOp, pivot: UOp, prange: UOp):
-  pivot_point = prange.src[0].minimum(pivot)
-  nrange_lower = UOp.range(prange.dtype, pivot_point, prange.arg + 0x8000)
-  # no reliable split (avoid inf. recursion)
-  if (nrange_lower < pivot_point).simplify().op == Ops.CMPLT: return None
-  nrange_upper = UOp.range(prange.dtype, prange.src[0] - pivot_point, prange.arg + 0x4000) + pivot_point
-  return UOp.sink(store.substitute({ prange: nrange_lower }), store.substitute({ prange: nrange_upper }))
+def split_loop(sink: UOp):
+  if any(p.op is Ops.SPLIT for p in sink.parents): raise RuntimeError("Only one split at a time!")
 
-pm_split_loop = PatternMatcher([ (UPat(Ops.STORE, src=(UPat(), UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(Ops.CMPLT,
-  src=(UPat(Ops.RANGE, name="prange"), UPat.var("pivot"))))).load() + UPat()), name="store"), split_loop) ])
+  try: res: tuple[UOp, UOp] = next(m for n in sink.parents if (m:=find_split_loop_candidate.rewrite(n)) is not None and m[0].tag != "no_split")
+  except StopIteration: return
+
+  rng, rpivot = res[0], res[0].src[0].minimum(res[1])
+  nrng_l, nrng_h = UOp.range(rng.dtype, rpivot, rng.arg + 0x8000), UOp.range(rng.dtype, rng.src[0] - rpivot, rng.arg + 0x4000) + rpivot
+
+  # ensure reliable split simplification (avoid inf. recursion) and make sure we are not splitting a reduce
+  # TODO: test for reduce split!
+  # TODO: what happens if our condition does not fold?
+  do_split = not any(check_split_loop_forbidden.rewrite(op, rng) for op in sink.parents)
+
+  # TODO test all conditions here!
+  return sink.substitute({ rng: UOp(Ops.SPLIT, dtype=rng.dtype, src=(nrng_l, nrng_h)) if do_split else rng.replace(tag="no_split") })
+
+def split_through(uop: UOp):
+  nchildren: list[tuple[UOp, UOp]] = []
+  for s in uop.src:
+    if s.op is Ops.SPLIT: nchildren.append(typing.cast(tuple[UOp, UOp], s.src))
+    elif not any(p.op is Ops.SPLIT for p in s.parents): nchildren.append((s, s))
+    else: return None
+  nchildren_l, nchildren_h = zip(*nchildren)
+  return UOp(Ops.SINK if uop.op is Ops.STORE else Ops.SPLIT, uop.dtype, src=(uop.replace(src=nchildren_l), uop.replace(src=nchildren_h)))
+
+def split_assign(orig_acc: UOp, val: UOp, split_rng: UOp, iv: UOp):
+  sel_val_l, sel_val_h =  (UOp(Ops.SPLITSELECT, dtype=val.dtype, src=(val,), arg=i) for i in range(2))
+  # TODO: what if the range is already a const (transformed by sym)??
+  rng_l, rng_h = (next(p for p in rng.toposort() if p.op is Ops.RANGE) for rng in split_rng.src)
+  # TODO: test no dependence on define_acc (yes and no dep)
+  acc_l = orig_acc.replace(src=(iv, rng_l))
+  assign_l = acc_l.assign(sel_val_l.substitute({ orig_acc: acc_l }))
+  acc_h = orig_acc.replace(src=(assign_l, rng_h))
+  return acc_h.assign(sel_val_h.substitute({ orig_acc: acc_h }))
+
+# ctx is the RANGE split candidate
+check_split_loop_forbidden = PatternMatcher([ (UPat(Ops.DEFINE_ACC, name="acc").assign(UPat.var("x")),
+  lambda ctx, acc, x: ctx not in acc.src and ctx in x.toposort(gate=lambda op: op.op is not Ops.ASSIGN)) ])
+find_split_loop_candidate = PatternMatcher([ (UPat(Ops.RANGE, name="rng") < UPat.var("pivot"), lambda rng, pivot: (rng, pivot)) ])
+
+pm_split_loop = PatternMatcher([
+  (UPat(GroupOp.All - {Ops.ASSIGN, Ops.DEFINE_ACC, Ops.SPLITSELECT}, custom_early_reject={Ops.SPLIT}, name="uop"), split_through),
+  (UPat(Ops.SPLITSELECT, src=(UPat(Ops.SPLIT, name="x"),), name="sel"), lambda x, sel: x.src[sel.arg]),
+  (UPat(Ops.DEFINE_ACC, src=(UPat.var("iv"), UPat(Ops.SPLIT, name="split_rng")), name="orig_acc").assign(UPat.var("val")), split_assign),
+  (UPat(Ops.SINK, name="sink"), split_loop),
+  (UPat(Ops.SPLITSELECT, src=(UPat.var("x"))), lambda x: x if not any(uop.op is Ops.SPLIT for uop in x.parents) else None) # TODO: testing
+])
 
 # **** IGNORE support ****
 
