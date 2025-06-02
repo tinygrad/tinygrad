@@ -221,7 +221,7 @@ def train_cifar():
     mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
     return X_cutmix, Y_cutmix
-  
+
   def data_augmentation(X, Y, step, crop_size=32, mask_size=hyp['net']['cutmix_size']):
     if getenv("RANDOM_CROP", 1):
       X = random_crop(X, crop_size=32)
@@ -233,7 +233,7 @@ def train_cifar():
     order = Tensor.randperm(X.shape[0], device=X.device)
     X, Y = X[order], Y[order]
     return X, Y
-    
+
   data_augmentation_jitted = TinyJit(data_augmentation)
 
   # the operations that remain inside batch fetcher is the ones that involves random operations
@@ -330,7 +330,7 @@ def train_cifar():
     out = model(X)
     loss_batchsize_scaler = 512/BS
     loss = cross_entropy(out, Y, reduction='none', label_smoothing=hyp['opt']['label_smoothing']).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
-    
+
     if not getenv("DISABLE_BACKWARD"):
       # index 0 for bias and 1 for non-bias
       optimizer.zero_grad()
