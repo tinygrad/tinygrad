@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, cast, ClassVar
-import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select, weakref
+import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select, weakref, traceback
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
@@ -15,7 +15,7 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
-from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module, setup_pci_bars
+from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, setup_pci_bars
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -128,7 +128,7 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_TG_CHUNK_SIZE, 1)
     for xcc_id in range(self.dev.xccs):
       with self.pred_exec(xcc_mask=1 << xcc_id):
-        self.wreg(self.gc.regCOMPUTE_CURRENT_LOGIC_XCC_ID, xcc_id)
+        self.wreg(self.dev.regCOMPUTE_CURRENT_LOGIC_XCC_ID, xcc_id)
     return self
 
   def spi_config(self, tracing:bool):
@@ -190,15 +190,15 @@ class AMDComputeQueue(HWQueue):
       self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, instance_broadcast_writes=1)
       # Wait for FINISH_PENDING==0
       self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
-                self.gc.regSQ_THREAD_TRACE_STATUS.addr, 0, 0, self.gc.SQ_THREAD_TRACE_STATUS__FINISH_PENDING_MASK, 4)
+                self.gc.regSQ_THREAD_TRACE_STATUS.addr, 0, 0, self.gc.regSQ_THREAD_TRACE_STATUS.field_mask('finish_pending'), 4)
       # Wait for FINISH_DONE!=0
       self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_NEQ),
-                self.gc.regSQ_THREAD_TRACE_STATUS.addr, 0, 0, self.gc.SQ_THREAD_TRACE_STATUS__FINISH_DONE_MASK, 4)
+                self.gc.regSQ_THREAD_TRACE_STATUS.addr, 0, 0, self.gc.regSQ_THREAD_TRACE_STATUS.field_mask('finish_done'), 4)
       # Disable SQTT
       self.sqtt_config(tracing=False)
       # Wait for BUSY==0
       self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
-                self.gc.regSQ_THREAD_TRACE_STATUS.addr, 0, 0, self.gc.SQ_THREAD_TRACE_STATUS__BUSY_MASK, 4)
+                self.gc.regSQ_THREAD_TRACE_STATUS.addr, 0, 0, self.gc.regSQ_THREAD_TRACE_STATUS.field_mask('busy'), 4)
       # Copy WPTR to memory (src_sel = perf, dst_sel = tc_l2, wr_confirm = True)
       self.pkt3(self.pm4.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, self.gc.regSQ_THREAD_TRACE_WPTR.addr, 0, *data64_le(wptrs.va_addr+(se*4)))
     # Restore global broadcasting
@@ -508,27 +508,6 @@ class AMDQueueDesc:
     if dev.is_am() and not dev.is_usb() and getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1): dev.dev_iface.adev.gmc.flush_hdp()
     for doorbell in self.doorbells: doorbell[0] = self.put_value
 
-@dataclass(frozen=True)
-class AMDReg(AMDRegBase):
-  ip: AMDIP
-  @property
-  def addr(self): return self.ip.bases[self.segment] + self.offset
-
-@dataclass(frozen=True)
-class AMDIP:
-  name: str
-  version: tuple[int, ...]
-  bases: tuple[int, ...]
-  @functools.cached_property
-  def module(self): return import_module(self.name, self.version)
-  @functools.cached_property
-  def regs(self): return collect_registers(self.module, cls=functools.partial(AMDReg, ip=self))
-  def __getattr__(self, name:str):
-    if name in self.regs: return self.regs[name]
-    # NOTE: gfx10 gc registers always start with mm, no reg prefix
-    if (mmname:=name.replace('reg', 'mm')) in self.regs: return self.regs[mmname]
-    return getattr(self.module, name)
-
 class KFDIface:
   kfd:FileIOInterface|None = None
   event_page:HCQBuffer|None = None
@@ -592,7 +571,6 @@ class KFDIface:
     if flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR:
       buf = addr = FileIOInterface.anon_mmap(0, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, 0)
     else: buf, addr = 0, FileIOInterface.anon_mmap(0, size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE, 0)
-    assert addr != 0xffffffffffffffff
 
     try: mem = kfd.AMDKFD_IOC_ALLOC_MEMORY_OF_GPU(self.kfd, va_addr=addr, size=size, base=addr, length=size, gpu_id=self.gpu_id,
                                                   flags=flags, mmap_offset=buf)
@@ -660,8 +638,7 @@ class AMAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:AM
 
 class PCIIface:
   supported_devs:list[int] = [0x744c, 0x7480, 0x7550]
-  vfio:bool = getenv("VFIO", 1) and FileIOInterface.exists("/dev/vfio/vfio")
-  vfio_fd:FileIOInterface
+  vfio_fd:FileIOInterface|None = None
   gpus:list[Any] = []
 
   def __init__(self, dev, dev_id):
@@ -689,23 +666,25 @@ class PCIIface:
     except OSError as e: raise RuntimeError(f"Cannot resize BAR: {e}. Ensure the resizable BAR option is enabled on your system.") from e
 
     # Try to init vfio. Use it if success.
-    if PCIIface.vfio:
+    if getenv("VFIO", 0):
       try:
         if first_dev:
+          if not FileIOInterface.exists("/sys/module/vfio"): os.system("sudo modprobe vfio-pci disable_idle_d3=1")
+
           FileIOInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
           PCIIface.vfio_fd = FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
-        vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
+          vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
 
         FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
         FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
 
         iommu_group = FileIOInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
-      except OSError:
-        if DEBUG >= 1: print(f"am {self.pcibus}: failed to init vfio-pci module (run `sudo modprobe vfio-pci`).")
-        PCIIface.vfio = False
+      except OSError as e:
+        if DEBUG >= 1: print(f"am {self.pcibus}: failed to init vfio-pci module (run `sudo modprobe vfio-pci`): {e}.")
+        PCIIface.vfio_fd = None
 
     # Init vfio for the device
-    if PCIIface.vfio:
+    if PCIIface.vfio_fd is not None:
       self.vfio_group = FileIOInterface(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
       vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(PCIIface.vfio_fd.fd))
 
@@ -731,6 +710,9 @@ class PCIIface:
     self._setup_adev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2, fmt='Q'), self._map_pci_range(5, fmt='I'))
     self.doorbell_cpu_addr = dbell.addr
 
+    if first_dev:
+      FileIOInterface.anon_mmap((alloc:=self.adev.mm.va_allocator).base, alloc.size, 0, mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS|MAP_NORESERVE, 0)
+
     pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
     self.cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=pci.PCI_COMMAND)
 
@@ -749,20 +731,18 @@ class PCIIface:
   def _map_pci_range(self, bar, off=0, addr=0, size=None, fmt='B'):
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
-    assert loc != 0xffffffffffffffff, f"Failed to mmap {size} bytes at {hex(addr)}"
     return MMIOInterface(loc, sz, fmt=fmt)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     if host or (not getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1) and uncached and cpu_access): # host or gtt-like memory.
       vaddr = self.adev.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | MAP_FIXED, 0)
-      assert va != 0xffffffffffffffff, f"Failed to mmap {size} bytes at {hex(vaddr)}"
 
       # Read pagemap to get the physical address of each page. The pages are locked.
       self.pagemap.seek(va // mmap.PAGESIZE * 8)
       paddrs = [((x & ((1<<55) - 1)) * mmap.PAGESIZE, mmap.PAGESIZE) for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
       am_mapping = self.adev.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=cpu_access),
+      return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=True),
         view=MMIOInterface(am_mapping.va_addr, size, fmt='B'))
 
     am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
@@ -797,7 +777,7 @@ class PCIIface:
       write_ptrs=[MMIOInterface(gart.va_addr+0x10, 8, fmt='Q')], doorbells=[MMIOInterface(self.doorbell_cpu_addr + doorbell_index * 8, 8, fmt='Q')])
 
   def sleep(self, timeout):
-    if PCIIface.vfio and (events_cnt:=len(self.irq_poller.poll(timeout))):
+    if PCIIface.vfio_fd is not None and (events_cnt:=len(self.irq_poller.poll(timeout))):
       self.irq_fd.read(8 * events_cnt)
       self.adev.ih.interrupt_handler()
 
@@ -861,8 +841,8 @@ class AMDDevice(HCQCompiled):
     errs:str = ""
     for iface_t in (KFDIface, PCIIface, USBIface):
       try: return iface_t(self, self.device_id)
-      except Exception as e: errs += f"\n{iface_t.__name__}: {type(e).__name__}: {e}"
-    raise RuntimeError(f"Cannot find a usable interface for AMD:{self.device_id}:{errs}")
+      except Exception: errs += f"\n{iface_t.__name__}: {traceback.format_exc()}"
+    raise RuntimeError(f"Cannot find a usable interface for AMD:{self.device_id}:\n{errs}")
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
@@ -892,11 +872,13 @@ class AMDDevice(HCQCompiled):
     self.pm4 = importlib.import_module(f"tinygrad.runtime.autogen.am.pm4_{'nv' if self.target[0] >= 10 else 'soc15'}")
     self.sdma = import_module('sdma', min(self.dev_iface.ip_versions[am.SDMA0_HWIP], (6, 0, 0)))
     self.gc = AMDIP('gc', self.dev_iface.ip_versions[am.GC_HWIP], self.dev_iface.ip_offsets[am.GC_HWIP])
-    nbio_ver = self.dev_iface.ip_versions[am.NBIF_HWIP]
-    if nbio_ver[:2] == (3, 3):
-      nbio_ver = (2, 3, 0)
+
+    # Define the regCOMPUTE_CURRENT_LOGIC_XCC_ID register, which is missing from the asic_regs files.
+    if self.target[:2] == (9,4): self.regCOMPUTE_CURRENT_LOGIC_XCC_ID = AMDReg("regCOMPUTE_CURRENT_LOGIC_XCC_ID", 0xe25, 0, {}, self.gc.bases)
+
+    nbio_name = 'nbio' if self.target[0] < 12 else 'nbif'
     nbio_pad = (0,) if self.target[0] == 9 else ()
-    self.nbio = AMDIP('nbio' if self.target[0]<12 else 'nbif', nbio_ver, nbio_pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
+    self.nbio = AMDIP(nbio_name, self.dev_iface.ip_versions[am.NBIF_HWIP], nbio_pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
 
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x2000 if self.is_usb() else 0x800000, eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)

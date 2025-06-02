@@ -50,8 +50,9 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var('bidx'),), allow_any_len=True), lambda ctx,bidx: f"*{ctx[bidx]}"),
   (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var")), allow_any_len=True), lambda ctx,bidx,var: f"*{ctx[bidx]} = {ctx[var]};"),
   # alu/gep
+  # TODO: look for left-associative
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
-    *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR} else ctx[v] for v in x.src]), x.dtype)),
+    *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[v] for v in x.src]), x.dtype)),
   (UPat(Ops.GEP, name="x"), lambda ctx,x: ctx[x.src[0]] + \
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > ctx.gep_arr_threshold else f".{'xyzwabcd'[x.arg[0]]}")),
   # custom passes through with format
@@ -287,7 +288,7 @@ class MetalRenderer(CStyleLanguage):
   # language options
   kernel_prefix = "kernel "
   buffer_prefix = "device "
-  smem_prefix = "threadgroup "
+  smem_prefix = "threadgroup __attribute__((aligned(16))) "
   arg_int_prefix = "constant int&"
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
@@ -346,7 +347,7 @@ class CUDARenderer(CStyleLanguage):
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
-  smem_prefix = "__shared__ "
+  smem_prefix = "__shared__ __align__(16) "
   smem_prefix_for_cast = False
   barrier = "__syncthreads();"
   float4 = "make_float4"
@@ -449,7 +450,7 @@ class AMDRenderer(CStyleLanguage):
     Ops.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
     Ops.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
     Ops.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})" }
-  smem_prefix = "__attribute__((shared))"
+  smem_prefix = "__attribute__((shared, aligned(16)))"
   smem_prefix_for_cast: bool = False
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
