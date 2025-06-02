@@ -501,16 +501,17 @@ def limit_bufs(root:UOp):
   # count number of unique buffers flowing into this op
   bufs: set[UOp] = set()
   def gate_input(u:UOp):
-    if (is_buffer:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): bufs.add(u)
-    return not is_buffer
+    if (is_load:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): bufs.add(u)
+    return not is_load
   root.toposort(gate=gate_input)
   # NOTE: this -1 is for the output buffer
   if len(bufs)>=MAX_BUFS-1:
     return root.replace(src=tuple(s if s.base in bufs else s.replace(tag=1).gbarrier() for s in root.src))
 
 finalize_gbarrier = PatternMatcher([
-  # if an ALU has more than one input, check the combined buffers don't exceed kernel input limit
+  # if an op takes more than one input, check combined LOADs don't exceed device limits
   (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs),
+  # merge gbarrier
   (UPat((Ops.GBARRIER, Ops.CONTIGUOUS), src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
   # put UnaryOps before EXPANDs
   (UPat(GroupOp.Unary, src=(UPat(GroupOp.All-{Ops.COPY}, name="x").gbarrier().view(name="v"),), name="alu"),
@@ -532,7 +533,6 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
   # optionally reorder gbarriers or insert more (top down)
   tensor_map = graph_rewrite_map(tensor_map[big_sink], finalize_gbarrier, input_map=tensor_map, name="finalize_gbarrier")
-  # finally, remove tags from UOps
   tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
 
   # TODO: move view_left/view_right here
