@@ -11,27 +11,14 @@ os.environ['CLANG_FLAGS'] = '-O2 -fPIC -ffreestanding -fno-math-errno -nostdlib 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import tinygrad; tinygrad.DEBUG = 2
 from tinygrad import Device
-
-print(f"[INIT] Using device: {Device.DEFAULT}")
 
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
-from extra.models.bitnet import BitNetConfig, BitNetForCausalLM, build_transformer, debug, sample
-from extra.models.llama import fix_bf16
-from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters, gguf_load
-from tinygrad import Tensor, dtypes, nn, Context, GlobalCounters
-from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm, getenv, CI, JIT
-
-from tokenizers import Tokenizer as HFTokenizer
-
-# Debug prints for device information
-print("[DEBUG-DEVICE] Device.DEFAULT:", Device.DEFAULT)
-print("[DEBUG-DEVICE] Available devices:", [str(d) for d in Device._devices])
-if Device.DEFAULT in Device._devices:
-    print("[DEBUG-DEVICE] Default device renderer:", Device[Device.DEFAULT].renderer)
-    print("[DEBUG-DEVICE] Default device renderer type:", type(Device[Device.DEFAULT].renderer))
+from extra.models.bitnet import BitNetConfig, BitNetForCausalLM, build_transformer, sample
+from tinygrad.nn.state import get_parameters
+from tinygrad import Tensor, dtypes, GlobalCounters
+from tinygrad.helpers import fetch
 
 
 class Tokenizer:
@@ -68,26 +55,13 @@ class Tokenizer:
   def encode(self, text, allow_special=False):
     return self.model.encode(text, allowed_special="all" if allow_special else set(), disallowed_special=set())
 
-def load(fn:str):
-  if fn.endswith('.index.json'):
-    with open(fn) as fp: weight_map = json.load(fp)['weight_map']
-    parts = {n: load(str(Path(fn).parent / Path(n).name)) for n in set(weight_map.values())}
-    return {k: parts[n][k] for k, n in weight_map.items()}
-  elif fn.endswith(".gguf"):
-    gguf_tensor = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}").to(Device.DEFAULT)
-    return gguf_load(gguf_tensor)[1]
-  elif fn.endswith(".safetensors"):
-    return safe_load(fn)
-  else:
-    return torch_load(fn)
 
-
-# default settings - using greedy sampling to debug
-TEMPERATURE = 0.0  # Greedy sampling to see if model can generate anything coherent
-TOP_K       = 0    # Disable top-k for greedy sampling
-TOP_P       = 0.0  # Disable nucleus sampling
-ALPHA_F     = 0.0  # Frequency penalty (unchanged)
-ALPHA_P     = 0.0  # Presence penalty (unchanged)
+# Default settings
+TEMPERATURE = 0.85
+TOP_K       = 0
+TOP_P       = 0.0
+ALPHA_F     = 0.0
+ALPHA_P     = 0.0
 
 
 def prefill(model, prompt_ids, past_key_values=None):
@@ -95,9 +69,7 @@ def prefill(model, prompt_ids, past_key_values=None):
     if not prompt_ids:
         return past_key_values
     
-    debug(f"Prefill: processing {len(prompt_ids)} tokens")
     prompt_tensor = Tensor([prompt_ids], device=model.device)
-    
     _, past_key_values = model(prompt_tensor, past_key_values)
     
     return past_key_values
@@ -125,8 +97,6 @@ if __name__ == "__main__":
   parser.add_argument("--device", type=str, default=Device.DEFAULT, help="Device to use (e.g., METAL, CUDA, CPU)")
   args = parser.parse_args()
 
-  print(f"[DEBUG] Using device: {args.device}")
-
   # download_model is the default without a model passed in
   if args.download_model or not args.model:
     # bitnet uses the same tokenizer as llama3
@@ -143,8 +113,6 @@ if __name__ == "__main__":
   # Use absolute path for tokenizer model
   model_dir = args.model if args.model.is_dir() else args.model.parent
   tokenizer_path = (model_dir / "tokenizer.model").resolve()
-  print(f"Tokenizer model path: {tokenizer_path}")
-  print(f"Model path: {model_dir}")
   if not tokenizer_path.is_file():
     raise FileNotFoundError(f"Tokenizer model not found at expected path: {tokenizer_path}")
   
@@ -163,7 +131,6 @@ if __name__ == "__main__":
 
   param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(model))
   print(f"ram used: {param_bytes/1e9:.2f} GB")
-
 
   if not args.no_api and not args.benchmark:
     from bottle import Bottle, request, response, HTTPResponse, abort, static_file
@@ -198,6 +165,7 @@ if __name__ == "__main__":
     def token_count():
       rjson = json.loads(request.body.read())
       return json.dumps(len(tokenizer.encode(rjson.get("text", ""))))
+
     @app.post("/v1/token/encode")
     def token_encode():
       rjson = json.loads(request.body.read())
@@ -207,7 +175,6 @@ if __name__ == "__main__":
     def completions():
       try:
         rjson = json.loads(request.body.read())
-        print(f"[DEBUG] Request JSON: {rjson}")
         
         prompt = rjson.get("prompt", "")
         max_tokens = rjson.get("max_tokens", 100)
@@ -216,9 +183,7 @@ if __name__ == "__main__":
         top_p = rjson.get("top_p", TOP_P)
         stream = rjson.get("stream", False)
         
-        print(f"[DEBUG] Encoding prompt: '{prompt}'")
         prompt_ids = tokenizer.encode(prompt)
-        print(f"[DEBUG] Encoded to {len(prompt_ids)} tokens")
         
         # Check if we are streaming
         if stream:
@@ -271,9 +236,7 @@ if __name__ == "__main__":
     def chat_completions():
       try:
         rjson = json.loads(request.body.read())
-        print(f"[DEBUG] Request JSON: {rjson}")
         
-        print(f"[DEBUG] Creating token sequence")
         messages = rjson.get("messages", [])
         max_tokens = rjson.get("max_tokens", 100)
         temperature = rjson.get("temperature", TEMPERATURE)
@@ -290,22 +253,15 @@ if __name__ == "__main__":
         
         # Build token sequence
         token_sequence = [tokenizer.bos_id]
-        print(f"[DEBUG] Starting with BOS token: {tokenizer.bos_id}")
         
         for message in messages:
           role = message.get("role", "user")
           content = message.get("content", "")
-          print(f"[DEBUG] Processing message: {role}")
           message_tokens = encode_message(role, content)
           token_sequence.extend(message_tokens)
         
         # Add assistant role start
-        print(f"[DEBUG] Encoded to {len(token_sequence)} tokens")
-        print(f"[DEBUG] Adding assistant role")
         token_sequence.extend(encode_role("assistant"))
-        
-        print(f"[DEBUG] Token sequence length: {len(token_sequence)}")
-        print(f"[DEBUG] Starting prefill with token sequence")
         
         # Prefill with the entire conversation
         past = prefill(model, token_sequence)
@@ -314,8 +270,6 @@ if __name__ == "__main__":
         random_id = random.randbytes(16).hex()
         last_tok = token_sequence[-1]
         
-        print(f"[DEBUG] Starting generation...")
-        
         for i in range(max_tokens):
           GlobalCounters.reset()
           token, past, logits = model(Tensor([[last_tok]], device=Device.DEFAULT), past, temperature, top_k, top_p, ALPHA_F, ALPHA_P)
@@ -323,7 +277,6 @@ if __name__ == "__main__":
           
           # Check for stop tokens
           if token in tokenizer.stop_tokens:
-            print(f"[DEBUG] Hit stop token: {token}")
             break
           
           # Stream the token
@@ -358,12 +311,12 @@ if __name__ == "__main__":
         yield f"data: {json.dumps(res)}\n\n"
           
       except Exception as e:
-        print(f"[DEBUG] CRITICAL ERROR in chat_completions: {type(e).__name__}: {e}")
+        print(f"[ERROR] Error in chat_completions: {e}")
         import traceback
         traceback.print_exc()
         abort(500, f"Internal server error: {e}")
 
-    print(f"[DEBUG] Starting server on {args.host}:{args.port}")
+    print(f"Starting server on {args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=args.debug)
 
   else:

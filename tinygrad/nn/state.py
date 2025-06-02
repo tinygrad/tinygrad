@@ -349,19 +349,6 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
     shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
     return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
-  if ggml_type == 36:  # GGML_TYPE_I2_S
-    # Calculate the number of bytes needed for the weights (2 bits per value)
-    weight_bytes = (n + 3) // 4  # Each byte holds 4 weights
-      
-    # Extract the scale factor (stored as float32 at the end)
-    scale_bytes = t[weight_bytes:weight_bytes+4]
-    scale = scale_bytes.bitcast(dtypes.float32)
-      
-    # Use the raw bytes for BitLinear.unpack_i2_weights
-    raw_bytes = t[:weight_bytes+4].data()
-      
-    # Return both the raw bytes and shape for later processing
-    return (raw_bytes, (n,))
   # map to (number of elements, number of bytes)
   if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 14: (256, 210), 8: (32, 34) }.get(ggml_type)) is not None:
     blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1]))
@@ -413,9 +400,6 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
 
   for name, dims, typ, off in t_infos:
     tensor_data = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ)
-    if isinstance(tensor_data, tuple):
-      state_dict[name] = tensor_data  # Store the tuple directly for BitNet processing
-    else:
-      state_dict[name] = tensor_data.reshape(*reversed(dims))
+    state_dict[name] = tensor_data.reshape(*reversed(dims))
 
   return kv_data, state_dict
