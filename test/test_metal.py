@@ -5,7 +5,7 @@ from unittest.mock import patch
 from tinygrad.device import CompileError, Device, Compiler
 from tinygrad.helpers import getenv
 if Device.DEFAULT=="METAL":
-  from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram, MetalBuffer, msg, libobjc
+  from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram, MetalBuffer
 
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
@@ -336,4 +336,4 @@ kernel void sync_test(device int* data, uint3 gid [[threadgroup_position_in_grid
       device.allocator.free(test_buf, None)
 
 if __name__ == '__main__':
-    unittest.main()
+  unittest.main()
