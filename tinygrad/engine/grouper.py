@@ -513,8 +513,8 @@ finalize_gbarrier = PatternMatcher([
   (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs),
   (UPat((Ops.GBARRIER, Ops.CONTIGUOUS), src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
   # put UnaryOps before EXPANDs
-  (UPat(GroupOp.Unary, src=(UPat.var("inp").gbarrier().view(name="v"),), name="alu"),
-   lambda inp,v,alu: inp.alu(alu.op).replace(tag=1).gbarrier().view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
+  (UPat(GroupOp.Unary, src=(UPat(GroupOp.All-{Ops.COPY}, name="x").gbarrier().view(name="v"),), name="alu"),
+   lambda x,v,alu: x.alu(alu.op).replace(tag=1).gbarrier().view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
 ])
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
