@@ -42,7 +42,7 @@ class AM_GMC(AM_IP):
     self.dummy_page_paddr = self.adev.mm.palloc(0x1000, zero=False, boot=True)
     self.hub_initted = {"MM": False, "GC": False}
 
-    self.pf_status_reg = f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS{'_LO32' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else ''}"
+    self.pf_status_reg = lambda ip: f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS{'_LO32' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else ''}"
 
   def init_hw(self): self.init_hub("MM")
 
@@ -130,8 +130,8 @@ class AM_GMC(AM_IP):
   def on_interrupt(self):
     for ip in ["MM", "GC"]:
       va = (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_HI32').read()<<32) | self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_LO32').read()
-      if self.adev.reg(self.pf_status_reg).read():
-        raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {self.adev.reg(self.pf_status_reg).read_bitfields()} {va<<12:#x}")
+      if self.adev.reg(self.pf_status_reg(ip)).read():
+        raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {self.adev.reg(self.pf_status_reg(ip)).read_bitfields()} {va<<12:#x}")
 
 class AM_SMU(AM_IP):
   def init_sw(self):
