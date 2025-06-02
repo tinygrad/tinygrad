@@ -594,7 +594,7 @@ class Tensor(MathTrait):
     return Tensor.full(argfix(*shape), 1.0, **kwargs)
 
   @staticmethod
-  def fromfunction(function: Callable[..., UOp], shape, **kwargs) -> Tensor:
+  def fromfunction(function: Callable[..., UOp], shape: tuple[sint,...], **kwargs) -> Tensor:
     """
     Create a tensor from a symbolic function over each index coordinate.
     """
