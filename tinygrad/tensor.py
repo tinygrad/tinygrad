@@ -1271,6 +1271,16 @@ class Tensor(MathTrait):
     x = self.shrink(tuple((0, i) if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (x * index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim])).sum(-1, dtype=self.dtype)
 
+  def as_strided(self, size, stride, storage_offset=0) -> Tensor:
+    """
+    Returns a tensor with the specified shape, strides, and offset.
+    """
+    if any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
+    idx = [storage_offset + sum(i * s for i, s in zip(c, stride)) for c in itertools.product(*(range(s) for s in size))]
+    if any(i < 0 or i >= self.numel() for i in idx): raise IndexError("as_strided generated out-of-bounds index")
+
+    return self.reshape(-1).gather(0, Tensor(idx, device=self.device)).reshape(size)
+
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
     Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
