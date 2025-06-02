@@ -4,6 +4,7 @@ from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.autogen import libc, pci
 from tinygrad.runtime.autogen.nv import nv
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
+from tinygrad.device import CPUProgram
 from hexdump import hexdump
 
 pagemap = FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
@@ -33,6 +34,8 @@ pcibus = dev
 
 if FileIOInterface.exists(f"/sys/bus/pci/devices/{pcibus}/driver"):
   FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/driver/unbind", os.O_WRONLY).write(pcibus)
+
+FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/enable", os.O_RDWR).write("1")
 
 cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
 bar_fds = {b: FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/resource{b}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC) for b in [0, 1, 3]}
@@ -168,17 +171,21 @@ class NVDev():
     rm_args, rm_args_sysmem = self._alloc_boot_struct(nv.GSP_ARGUMENTS_CACHED)
     
     # queue messages init
-    queue_sizes = 0x40000 + 0x40000 # cmd + stat
-    pt_size = round_up((pt_entries:=(queue_sizes >> 12)) * 8, 0x1000)
+    self.queue_size = 0x40000
+
+    queue_sizes = self.queue_size + self.queue_size # cmd + stat
+    num_ptes = queue_sizes >> 12
+    num_ptes += round_up(num_ptes * 8, 0x1000) // 0x1000
+    pt_size = round_up(num_ptes * 8, 0x1000)
     shared_buf_size = pt_size + queue_sizes
 
     shared_va, shared_sysmem = alloc_sysmem(shared_buf_size, contigous=False)
     for i,sysmem in enumerate(shared_sysmem): to_mv(shared_va + i * 0x8, 0x8).cast('Q')[0] = sysmem
 
     rm_args.messageQueueInitArguments.sharedMemPhysAddr = shared_sysmem[0]
-    rm_args.messageQueueInitArguments.pageTableEntryCount = pt_entries
+    rm_args.messageQueueInitArguments.pageTableEntryCount = num_ptes
     rm_args.messageQueueInitArguments.cmdQueueOffset = pt_size
-    rm_args.messageQueueInitArguments.statQueueOffset = pt_size + 0x40000
+    rm_args.messageQueueInitArguments.statQueueOffset = pt_size + self.queue_size
     rm_args.bDmemStack = True
 
     rm_args.srInitArguments.bInPMTransition = False
@@ -188,24 +195,24 @@ class NVDev():
     rm_args.gpuInstance = 0
 
     self.command_queue_st_va = shared_va + pt_size
-    self.status_queue_st_va = shared_va + pt_size + 0x40000
+    self.status_queue_st_va = shared_va + pt_size + self.queue_size
 
     self.command_queue_va = self.command_queue_st_va + 0x1000
-    self.command_queue_mv = to_mv(self.command_queue_va, 0x40000 - 0x1000)
+    self.command_queue_mv = to_mv(self.command_queue_va, self.queue_size - 0x1000)
 
     self.command_queue_tx = nv.msgqTxHeader.from_address(self.command_queue_st_va)
     self.command_queue_rx = nv.msgqRxHeader.from_address(self.command_queue_st_va + ctypes.sizeof(nv.msgqTxHeader))
 
     self.command_queue_tx.version = 0
-    self.command_queue_tx.size = 0x40000
+    self.command_queue_tx.size = self.queue_size
     self.command_queue_tx.entryOff = 0x1000
     self.command_queue_tx.msgSize = 0x1000
-    self.command_queue_tx.msgCount = (0x40000 - 0x1000) // 0x1000
+    self.command_queue_tx.msgCount = (self.queue_size - 0x1000) // 0x1000
     self.command_queue_tx.writePtr = 0
     self.command_queue_tx.flags = 1
     self.command_queue_tx.rxHdrOff = ctypes.sizeof(nv.msgqTxHeader)
 
-    self.status_queue_tx = nv.msgqTxHeader.from_address(shared_va + pt_size + 0x40000)
+    self.status_queue_tx = nv.msgqTxHeader.from_address(shared_va + pt_size + self.queue_size)
 
     return rm_args_sysmem
 
@@ -217,7 +224,9 @@ class NVDev():
 
     off_sz = 0
     for i,(name, size) in enumerate([("INIT", 0x10000), ("INTR", 0x10000), ("RM", 0x10000), ("MNOC", 0x10000), ("KRNL", 0x10000)]):
-      to_mv(logbuf_va + off_sz + 8, 8).cast('Q')[0] = logbuf_sysmem[0] + off_sz # this is radix3 pt address, we can ignore it, it's contig now.
+      # this is radix3 pt address, we can ignore it, it's contig now.
+      for poff in range(0, size, 0x1000):
+        to_mv(logbuf_va + off_sz + 8 + (poff // 0x1000) * 8, 8).cast('Q')[0] = logbuf_sysmem[0] + off_sz + poff
 
       arg = nv.LibosMemoryRegionInitArgument.from_address(libos_init + i * ctypes.sizeof(nv.LibosMemoryRegionInitArgument))
       arg.kind = nv.LIBOS_MEMORY_REGION_CONTIGUOUS
@@ -247,20 +256,21 @@ class NVDev():
     if pad_len: data += b'\x00' * pad_len
     checksum = 0
     for offset in range(0, len(data), 8):
-      (value,) = struct.unpack_from('<Q', data, offset)
+      (value,) = struct.unpack_from('Q', data, offset)
       checksum ^= value
-    return ((checksum >> 32) & 0xFFFFFFFF) ^ checksum & 0xFFFFFFFF
+    return ((checksum >> 32) & 0xFFFFFFFF) ^ (checksum & 0xFFFFFFFF)
   
-  def send_rpc(self, func, msg):
+  def send_rpc(self, func, msg, seqNum=0):
     assert len(msg) < 0xf00
 
     header = nv.rpc_message_header_v(signature=nv.NV_VGPU_MSG_SIGNATURE_VALID, rpc_result=nv.NV_VGPU_MSG_RESULT_RPC_PENDING,
       rpc_result_private=nv.NV_VGPU_MSG_RESULT_RPC_PENDING, header_version=(3<<24), function=func,
-      length=len(msg))
+      length=len(msg) + 0x20)
     
-    # simple put rpc
+    # simple put rpcPARISBETTERTHANBARCA
     msg = bytes(header) + msg
-    phdr = nv.GSP_MSG_QUEUE_ELEMENT(checkSum=self._checksum(msg), elemCount=1)
+    phdr = nv.GSP_MSG_QUEUE_ELEMENT(elemCount=1, seqNum=seqNum)
+    phdr.checkSum = self._checksum(bytes(phdr) + msg)
     msg = bytes(phdr) + msg
 
     off = self.command_queue_tx.writePtr * 0x1000
@@ -274,13 +284,25 @@ class NVDev():
   def rpc_set_system_data(self):
     data = nv.GspSystemInfo(gpuPhysAddr=bar_info[0][0], gpuPhysFbAddr=bar_info[1][0], gpuPhysInstAddr=bar_info[3][0],
       pciConfigMirrorBase=0x92000, pciConfigMirrorSize=0x1000, nvDomainBusDeviceFunc=0x100,
-      PCIDeviceID=0x2b8510de, PCISubDeviceID=0x1430196e, PCIRevisionID=0xa1, bFlrSupported=1, hostPageSize=0x1000,
-      pcieAtomicsOpMask=0x0, pcieAtomicsCplDeviceCapMask=0x3f, consoleMemSize=0x0, maxUserVa=0x7ffffffff000, bEnableDynamicGranularityPageArrays=0,
-      bGpuBehindBridge=0, bUpstreamL0sUnsupported=0, bUpstreamL1Unsupported=0, bUpstreamL1PorSupported=0, bUpstreamL1PorMobileOnly=0, 
-      upstreamAddressValid=1, hypervisorType=4, bIsPassthru=0)
+      PCIDeviceID=0x2b8510de, PCISubDeviceID=0x1430196e, PCIRevisionID=0xa1)
 
-    dt = bytes(data) + b'\x00' * (960 - len(bytes(data))) # pad to 960 bytes
-    self.send_rpc(72, dt)
+    data.Chipset = 0x1061
+    data.FHBBusInfo.deviceID = 0xa700
+    data.FHBBusInfo.vendorID = 0x8086
+    data.FHBBusInfo.subdeviceID = 0x8882
+    data.FHBBusInfo.subvendorID = 0x1043
+    data.FHBBusInfo.revisionID = 0x1
+    data.chipsetIDInfo.deviceID = 0x7a04
+    data.chipsetIDInfo.vendorID = 0x8086
+    data.chipsetIDInfo.subdeviceID = 0x8882
+    data.chipsetIDInfo.subvendorID = 0x1043
+    data.chipsetIDInfo.revisionID = 0x0
+
+    self.send_rpc(72, bytes(data))
+
+  def rpc_get_static_info(self):
+    data = nv.GspStaticConfigInfo()
+    self.send_rpc(65, bytes(data), seqNum=1)
 
   def init_gsp(self):
     bootload_ucode_sysmem, bootload_ucode_size, bootload_desc = self.init_boot_binary_image()
@@ -350,25 +372,65 @@ class NVDev():
 
     self.kfsp_send_msg(self.NVDM_TYPE_COT, bytes(cot_payload))
 
-    time.sleep(0.5)
+    # time.sleep(5)
+
+    while True:
+      hwcfg2 = self.rreg(0x110000 + self.NV_PFALCON_FALCON_HWCFG2)
+      mailbox0 = self.rreg(0x110000 + self.NV_PFALCON_FALCON_MAILBOX0)
+
+      if hwcfg2 == 0x818787f7: break
+      # print("polling for GSP to be ready...", hex(hwcfg2), hex(mailbox0))
+
+    # time.sleep(0.01)
+    # CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
+
+    while self.status_queue_tx.entryOff != 0x1000:
+      CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
 
     self.status_queue_va = self.status_queue_st_va + self.status_queue_tx.entryOff
+    self.status_queue_mv = to_mv(self.status_queue_va, self.queue_size - self.status_queue_tx.entryOff)
     self.status_queue_rx = nv.msgqRxHeader.from_address(self.status_queue_st_va + self.status_queue_tx.rxHdrOff)
     print(hex(self.status_queue_tx.entryOff), hex(self.status_queue_tx.rxHdrOff))
 
     print(hex(self.rreg(self.NV_PFB_PRI_MMU_WPR2_ADDR_HI)))
     print(hex(self.rreg(self.NV_FALCON2_GSP_BASE + self.NV_PFALCON_FALCON_MAILBOX0)))
     print(hex(self.rreg(self.NV_FALCON2_GSP_BASE + self.NV_PRISCV_RISCV_CPUCTL)))
-    print(self.status_queue_tx.writePtr, self.status_queue_tx.entryOff)
+
+    print(self.status_queue_tx.writePtr, hex(self.status_queue_tx.entryOff), hex(self.status_queue_tx.size), hex(self.status_queue_tx.msgSize), self.status_queue_tx.msgCount)
 
     while True:
-      if self.status_queue_rx.readPtr != self.status_queue_tx.writePtr:
-        off = self.status_queue_rx.readPtr * 0x1000
+      CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
+
+      if self.command_queue_rx.readPtr != self.status_queue_tx.writePtr:
+        off = self.command_queue_rx.readPtr * 0x1000
         # bts = self.status_queue_mv[off:off+0x1000]
 
         x = nv.rpc_message_header_v.from_address(self.status_queue_va + off + 0x30)
+        rptr = (self.command_queue_rx.readPtr + round_up(x.length, 0x1000) // 0x1000) % self.status_queue_tx.msgCount
+        self.command_queue_rx.readPtr = rptr
+        CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
+
+        print(f"RPC message: {x.function:x}, {x.length}, {x.signature}, {x.rpc_result}, {x.rpc_result_private} {self.status_queue_tx.writePtr} {self.command_queue_rx.readPtr}")
+        hexdump(self.status_queue_mv[off:off+0x100])
+
+        # assert x.rpc_result == 0
+        if x.function == 4097: break
+
+    exit(0)
+
+    self.rpc_get_static_info()
+    time.sleep(0.5)
+
+    print(self.command_queue_tx.writePtr, self.status_queue_rx.readPtr)
+    hexdump(self.status_queue_mv[0x0:0x80])
+
+    while True:
+      if self.command_queue_rx.readPtr != self.status_queue_tx.writePtr:
+        off = self.status_queue_rx.readPtr * 0x1000
+
+        x = nv.rpc_message_header_v.from_address(self.status_queue_va + off + 0x30)
         print(f"RPC message: {x.function}, {x.length}, {x.signature}, {x.rpc_result}, {x.rpc_result_private}")
-        self.status_queue_rx.readPtr += 1
+        self.command_queue_rx.readPtr += 1
 
   def _download(self, file) -> str:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/e8113f665d936d9f30a6d508f3bacd1e148539be/{file}"
@@ -428,7 +490,8 @@ class NVDev():
     offs, blk = self.read_num("NV_PFSP_EMEMC", self.rreg(self.NV_PFSP_EMEMC(self.FSP_EMEM_CHANNEL_RM)), "OFFS", "BLK")
     # print(offs, blk)
 
-    self.wreg(self.NV_PFSP_QUEUE_TAIL(self.FSP_EMEM_CHANNEL_RM), len(buf) - 8) # TAIL points to the last DWORD written, so subtract 1
+    print("tail", hex(len(buf) - 4))
+    self.wreg(self.NV_PFSP_QUEUE_TAIL(self.FSP_EMEM_CHANNEL_RM), len(buf) - 4) # TAIL points to the last DWORD written, so subtract 1
     self.wreg(self.NV_PFSP_QUEUE_HEAD(self.FSP_EMEM_CHANNEL_RM), 0)
 
     while True:
