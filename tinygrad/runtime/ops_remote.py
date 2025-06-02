@@ -56,7 +56,7 @@ class CopyIn(RemoteRequest): buffer_num: int; datahash: str # noqa: E702
 class CopyOut(RemoteRequest): buffer_num: int
 
 @dataclass(frozen=True)
-class Transfer(RemoteRequest): buffer_num: int; ssession: SessionKey; sbuffer_num: int # noqa: E702
+class Transfer(RemoteRequest): buffer_num: int; dsession: SessionKey; dbuffer_num: int # noqa: E702
 
 @dataclass(frozen=True)
 class ProgramAlloc(RemoteRequest): name: str; datahash: str # noqa: E702
@@ -190,11 +190,11 @@ class RemoteHandler:
           case CopyIn(): session.buffers[c.buffer_num].copyin(memoryview(bytearray(req._h[c.datahash])))
           case CopyOut(): session.buffers[c.buffer_num].copyout(memoryview(ret:=bytearray(session.buffers[c.buffer_num].nbytes)))
           case Transfer():
-            ssession, sdev = self.sessions[c.ssession], Device[f"{self.base_device}:{unwrap(c.ssession).idx}"]
-            dbuf, sbuf = session.buffers[c.buffer_num], ssession.buffers[c.sbuffer_num]
+            dsession, ddev = self.sessions[c.dsession], Device[f"{self.base_device}:{unwrap(c.dsession).idx}"]
+            dbuf, sbuf = dsession.buffers[c.dbuffer_num], session.buffers[c.buffer_num]
             assert dbuf.nbytes == sbuf.nbytes, f"{dbuf.nbytes} != {sbuf.nbytes}"
-            assert hasattr(dev.allocator, '_transfer'), f"Device {dev.device} doesn't support transfers"
-            dev.allocator._transfer(dbuf._buf, sbuf._buf, dbuf.nbytes, dest_dev=dev, src_dev=sdev)
+            assert hasattr(ddev.allocator, '_transfer'), f"Device {ddev.device} doesn't support transfers"
+            ddev.allocator._transfer(dbuf._buf, sbuf._buf, dbuf.nbytes, dest_dev=ddev, src_dev=dev)
           case ProgramAlloc():
             lib = dev.compiler.compile_cached(req._h[c.datahash].decode())
             session.programs[(c.name, c.datahash)] = dev.runtime(c.name, lib)
@@ -217,7 +217,7 @@ class RemoteHandler:
                   return ExecItem(CompiledRunner(ps, precompiled=b'', prg=prg), [self.sessions[gi.session].buffers[buf] for buf in gi.bufs],
                                   fixedvars=gi.fixedvars)
                 case Transfer():
-                  dbuf, sbuf = self.sessions[unwrap(gi.session)].buffers[gi.buffer_num], self.sessions[gi.ssession].buffers[gi.sbuffer_num]
+                  dbuf, sbuf = self.sessions[gi.dsession].buffers[gi.dbuffer_num], self.sessions[unwrap(gi.session)].buffers[gi.buffer_num]
                   assert dbuf.nbytes == sbuf.nbytes, f"{dbuf.nbytes} != {sbuf.nbytes}"
                   return ExecItem(BufferXfer(dbuf.nbytes, dbuf.device, sbuf.device), [dbuf, sbuf])
             assert c.graph_num not in session.graphs, f"graph {c.graph_num} already allocated"
@@ -257,7 +257,7 @@ class RemoteAllocator(Allocator['RemoteDevice']):
     dest[:] = resp
   def _transfer(self, dest, src, sz, src_dev, dest_dev):
     if dest_dev.properties.transfer_supported and src_dev.conn == dest_dev.conn:
-      dest_dev.q(Transfer(dest, src_dev.session, src))
+      src_dev.q(Transfer(src, dest_dev.session, dest))
     else:
       src_dev.allocator._copyout(tmp:=memoryview(bytearray(sz)), src)
       dest_dev.allocator._copyin(dest, tmp)
