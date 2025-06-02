@@ -28,7 +28,8 @@ class RemoteGraph(GraphRunner):
     self.devices[0].q(GraphAlloc(self.graph_num, tuple(_process_ji(ji) for ji in jit_cache), self.map_rawbufs(rawbufs), var_vals))
 
   def __del__(self):
-    self.devices[0].q(GraphFree(self.graph_num))
+    # This can happen if `GraphException` is thrown at the very start
+    if hasattr(self, "graph_num"): self.devices[0].q(GraphFree(self.graph_num))
 
   def map_rawbufs(self, rawbufs:list[Buffer]):
     return tuple((cast(RemoteDevice, Device[rawbufs[i].device]).session, rawbufs[i]._buf) for i in self.iids)
