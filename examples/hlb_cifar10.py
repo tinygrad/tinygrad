@@ -8,7 +8,7 @@ import numpy as np
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
 from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
-from tinygrad.nn.state import get_state_dict
+from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
 from extra.bench_log import BenchEvent, WallTimeEvent
@@ -192,31 +192,25 @@ def train_cifar():
     X = X[...,1:size+1,:].flip(-2).cat(X, X[...,-(size+1):-1,:].flip(-2), dim=-2)
     return X
 
-  def random_mask_start_and_idx(batch_size:int, dim_size:int, high:int):
-    low = Tensor.randint(batch_size, low=0, high=high).reshape(batch_size,1)
-    idx = Tensor.arange(dim_size, dtype=dtypes.int32).reshape(1,dim_size)
-    return low, idx
-
   # return a binary mask in the format of BS x C x H x W where H x W contains a random square mask
   def make_square_mask(shape, mask_size) -> Tensor:
     BS, _, H, W = shape
-    low_x, idx_x = random_mask_start_and_idx(BS, W, W-mask_size)
-    low_y, idx_y = random_mask_start_and_idx(BS, H, H-mask_size)
-    low_x, idx_x = low_x.reshape(BS,1,1,1), idx_x.reshape(1,1,1,W)
-    low_y, idx_y = low_y.reshape(BS,1,1,1), idx_y.reshape(1,1,H,1)
+    low_x = Tensor.randint(BS, low=0, high=W-mask_size).reshape(BS,1,1,1)
+    low_y = Tensor.randint(BS, low=0, high=H-mask_size).reshape(BS,1,1,1)
+    idx_x = Tensor.arange(W, dtype=dtypes.int32).reshape((1,1,1,W))
+    idx_y = Tensor.arange(H, dtype=dtypes.int32).reshape((1,1,H,1))
     return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
 
-  # NOTE: uses indexing instead of masked_select for speed (masked_select is very slow)
   def random_crop(X:Tensor, pad_size:int):
     BS, C, H_padded, W_padded = X.shape
     H, W = H_padded - 2*pad_size, W_padded - 2*pad_size
-    low_x, idx_x = random_mask_start_and_idx(BS, W, 2*pad_size)
-    low_y, idx_y = random_mask_start_and_idx(BS, H, 2*pad_size)
-    idx_x = (idx_x+low_x).reshape(BS,1,W)
-    idx_y = (idx_y+low_y).reshape(BS,H,1)
-    idx_flat = (idx_y * W_padded + idx_x).reshape(BS, 1, H*W).expand(BS, C, H*W)
-    X_flat = X.reshape(BS, C, H_padded*W_padded)
-    return X_flat.gather(2, idx_flat).reshape(BS, C, H, W)
+    low_x = Tensor.randint(BS, low=0, high=2*pad_size).reshape(BS,1,1,1)
+    low_y = Tensor.randint(BS, low=0, high=2*pad_size).reshape(BS,1,1,1)
+    idx_x = Tensor.arange(W, dtype=dtypes.int32).reshape(1,1,1,W)
+    idx_y = Tensor.arange(H, dtype=dtypes.int32).reshape(1,1,H,1)
+    mask_idx_x = (idx_x + low_x).expand(BS, C, H_padded, W)
+    mask_idx_y = (idx_y + low_y).expand(BS, C, H, W)
+    return X.gather(3, mask_idx_x).gather(2, mask_idx_y)
 
   def cutmix(X:Tensor, Y:Tensor, mask_size=3):
     # fill the square with randomly selected images from the same batch
