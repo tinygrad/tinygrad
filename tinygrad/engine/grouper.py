@@ -514,7 +514,7 @@ finalize_gbarrier = PatternMatcher([
   # merge gbarrier
   (UPat((Ops.GBARRIER, Ops.CONTIGUOUS), src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
   # put UnaryOps before EXPANDs
-  (UPat(GroupOp.Unary, src=(UPat(GroupOp.All-{Ops.COPY}, name="x").gbarrier().view(name="v"),), name="alu"),
+  (UPat(GroupOp.Unary, src=(UPat(GroupOp.All-{Ops.COPY, Ops.CONTIGUOUS}, name="x").gbarrier().view(name="v"),), name="alu"),
    lambda x,v,alu: x.alu(alu.op).replace(tag=1).gbarrier().view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
 ])
 
