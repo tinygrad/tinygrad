@@ -58,6 +58,9 @@ def mselect_reorder_view(ms:UOp, view:UOp, base:UOp):
     st = st.substitute({dnums[0]:dnums[0].const_like(ms.arg)})
   return base.mselect(ms.arg).view(st)
 
+# TODO: this should be replaced everywhere with GBARRIER/ASSIGN/BUFFER group
+ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT}
+
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
@@ -113,9 +116,6 @@ replace_contiguous = PatternMatcher([
 ])
 
 # **** Grouper decides which of the UOps realize
-
-# TODO: remove this!
-ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT}
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
