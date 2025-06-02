@@ -69,11 +69,11 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight: list[Any] = []
     self.timeline_signal = msg("newSharedEvent", objc_instance)(self.sysdevice)
     self.timeline_value = 0
-    
+
     # Check if this is a virtual device
     device_name = from_ns_str(msg('name')(self.sysdevice)).lower()
     self.is_virtual = 'virtual' in device_name or 'paravirtualized' in device_name
-    
+
     # Enhanced synchronization for virtual devices
     if self.is_virtual:
       # Create additional synchronization primitives for virtual devices
@@ -94,7 +94,7 @@ class MetalDevice(Compiled):
     # Enable MetalGraph for virtual devices with enhanced synchronization
     # instead of completely disabling it
     graph_class = MetalGraph if not self.is_virtual or getenv("METAL_ENABLE_VIRTUAL_GRAPH", 0) else None
-    
+
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
                      functools.partial(MetalProgram, self), graph_class)
 
@@ -103,7 +103,7 @@ class MetalDevice(Compiled):
     if self.is_virtual and len(self.mtl_buffers_in_flight) > self.max_buffers_in_flight // 2:
       # More aggressive synchronization for virtual devices
       self._sync_oldest_buffers(len(self.mtl_buffers_in_flight) // 2)
-    
+
     for cbuf in self.mtl_buffers_in_flight:
       wait_check(cbuf)
       st, en = decimal.Decimal(cmdbuf_st_time(cbuf)) * 1000000, decimal.Decimal(cmdbuf_en_time(cbuf)) * 1000000
@@ -115,14 +115,14 @@ class MetalDevice(Compiled):
     """Synchronize the oldest command buffers to prevent memory pressure in virtual devices"""
     if count <= 0 or count >= len(self.mtl_buffers_in_flight):
       return
-    
+
     buffers_to_sync = self.mtl_buffers_in_flight[:count]
     for cbuf in buffers_to_sync:
       wait_check(cbuf)
       st, en = decimal.Decimal(cmdbuf_st_time(cbuf)) * 1000000, decimal.Decimal(cmdbuf_en_time(cbuf)) * 1000000
       if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None:
         Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
-    
+
     # Remove synced buffers from the list
     self.mtl_buffers_in_flight = self.mtl_buffers_in_flight[count:]
 
@@ -218,10 +218,10 @@ class MetalProgram:
       exec_width = msg("threadExecutionWidth", ctypes.c_ulong)(self.pipeline_state)
       memory_length = msg("staticThreadgroupMemoryLength", ctypes.c_ulong)(self.pipeline_state)
       raise RuntimeError(f"local size {local_size} bigger than {self.max_total_threads} with exec width {exec_width} memory length {memory_length}")
-    
+
     # Ensure we don't exceed buffer capacity before creating new command buffer
     self.dev.ensure_sync_capacity()
-    
+
     command_buffer = msg("commandBuffer", objc_instance)(self.dev.mtl_queue)
     encoder = msg("computeCommandEncoder", objc_instance)(command_buffer)
     msg("setComputePipelineState:")(encoder, self.pipeline_state)
@@ -229,16 +229,16 @@ class MetalProgram:
     for i,a in enumerate(vals, start=len(bufs)): msg("setBytes:length:atIndex:")(encoder, bytes(ctypes.c_int(a)), 4, i)
     msg("dispatchThreadgroups:threadsPerThreadgroup:")(encoder, to_struct(*global_size), to_struct(*local_size))
     msg("endEncoding")(encoder)
-    
+
     # Enhanced synchronization for virtual devices
     if self.dev.is_virtual and self.dev.virtual_sync_event:
       msg("encodeSignalEvent:value:")(command_buffer, self.dev.virtual_sync_event, self.dev.virtual_sync_value)
       self.dev.virtual_sync_value += 1
-    
+
     msg("setLabel:")(command_buffer, to_ns_str(self.name)) # TODO: is this always needed?
     msg("commit")(command_buffer)
     self.dev.mtl_buffers_in_flight.append(command_buffer)
-    
+
     if wait:
       wait_check(command_buffer)
       return cmdbuf_en_time(command_buffer) - cmdbuf_st_time(command_buffer)
@@ -264,12 +264,12 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
         src_dev.synchronize()
     else:
       dest_dev.synchronize()
-    
+
     # Ensure capacity before creating command buffers
     src_dev.ensure_sync_capacity()
     if src_dev != dest_dev:
       dest_dev.ensure_sync_capacity()
-    
+
     src_command_buffer = msg("commandBuffer", objc_instance)(src_dev.mtl_queue)
     encoder = msg("blitCommandEncoder", objc_instance)(src_command_buffer)
     msg("copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:")(encoder, src.buf, ctypes.c_ulong(src.offset),
@@ -279,20 +279,20 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
       msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
       dest_command_buffer = msg("commandBuffer", objc_instance)(dest_dev.mtl_queue)
       msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
-      
+
       # Additional virtual device synchronization
       if dest_dev.is_virtual and dest_dev.virtual_sync_event:
         msg("encodeSignalEvent:value:")(dest_command_buffer, dest_dev.virtual_sync_event, dest_dev.virtual_sync_value)
         dest_dev.virtual_sync_value += 1
-      
+
       msg("commit")(dest_command_buffer)
       dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
       src_dev.timeline_value += 1
-    
+
     msg("setLabel:")(src_command_buffer, to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
     msg("commit")(src_command_buffer)
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
-    
+
   def _cp_mv(self, dst, src, prof_desc):
     with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
