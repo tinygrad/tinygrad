@@ -243,7 +243,7 @@ def train_cifar():
       st = time.monotonic()
       X, Y = X_in, Y_in
       if is_train:
-        X, Y = data_augmentation(X, Y, step, crop_size=32, mask_size=hyp['net']['cutmix_size'])
+        X, Y = data_augmentation_jitted(X, Y, step, crop_size=32, mask_size=hyp['net']['cutmix_size'])
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X.shape[0], BS):
