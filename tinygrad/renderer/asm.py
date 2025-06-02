@@ -86,7 +86,7 @@ class AsmRenderer(Renderer):
   def reg_class(self, x:UOp) -> list[str]: return self.regs[self.dt(x.dtype).scalar()]
   def bypass(self, x:UOp) -> UOp: return x.src[0] if x.op in (Ops.ASSIGN, Ops.NOOP) else x
   def __getitem__(self, x:UOp) -> str: # hacky helper
-    if x.op is Ops.CONST: return self.render_imm(to_hex(x.arg, dt))
+    if x.op is Ops.CONST: return self.render_imm(to_hex(x.arg, x.dtype))
     r, dt = self.r[self.bypass(x)], self.dt(x.dtype)
     return self.render_mem(r, dt) if isinstance(r, int) else self.render_reg(r, dt)
   def _render(self, uops:list[UOp]):
