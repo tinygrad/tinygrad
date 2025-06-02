@@ -52,8 +52,6 @@ def load_model(model_path:Path, model_params:Dict[str, Union[int, float]]) -> Tr
 
 
 if __name__ == "__main__":
-  Tensor.no_grad = True
-
   parser = argparse.ArgumentParser(description="Run QwQ in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument("--size", choices=["32B"], default="32B", help="Model size")
   parser.add_argument("--count", type=int, default=30, help="Max number of tokens to generate")
