@@ -368,7 +368,7 @@ add_buffer_ops = PatternMatcher([
   (UPat(Ops.FCONST, name="x").view(name="view"),
    lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
   # VALID
-  (UPat(Ops.VIEW, src=(UPat.cvar(),), name="self"), UOp.valid),
+  (UPat(Ops.VIEW, src=(UPat((Ops.FCONST, Ops.CONST)),), name="self"), UOp.valid),
 ])
 
 def check_load_st(glbl:UOp, view:UOp):

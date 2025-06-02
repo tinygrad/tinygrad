@@ -596,7 +596,7 @@ class Tensor(MathTrait):
     device = kwargs.pop("device", None)
     device = tuple(Device.canonicalize(x) for x in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
     assert kwargs.pop("dtype", sym_fn_op.dtype)==sym_fn_op.dtype, "dtype doesn't match, and casting isn't supported"
-    op = _metaop(Ops.FCONST, shape, sym_fn_op.dtype, device, (sym_fn_op, shape))
+    op = UOp.metaop(Ops.FCONST, shape, sym_fn_op.dtype, device, (sym_fn_op, shape))
     return Tensor(op, device, **kwargs)
 
   @staticmethod
