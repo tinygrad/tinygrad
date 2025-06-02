@@ -58,8 +58,6 @@ def mselect_reorder_view(ms:UOp, view:UOp, base:UOp):
     st = st.substitute({dnums[0]:dnums[0].const_like(ms.arg)})
   return base.mselect(ms.arg).view(st)
 
-ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT}
-
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
@@ -102,9 +100,6 @@ sym = symbolic_simple+PatternMatcher([
   # put CAST to smaller dtype before EXPAND
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm"),)), lambda cast,vm: vm.base.cast(cast.dtype).view(vm.st)
     if cast.dtype.itemsize <= vm.dtype.itemsize and resolve(prod(vm.shape) > vm.st.real_size()) else None),
-  # put UnaryOps before EXPANDs, if it can fuse with the input
-  (UPat(GroupOp.Unary, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="inp"),), name="v"),), name="alu"),
-   lambda inp,v,alu: inp.alu(alu.op).view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
 ])
 
 # support for using a contiguous permuted view instead of the parent view if one exists
@@ -118,6 +113,9 @@ replace_contiguous = PatternMatcher([
 ])
 
 # **** Grouper decides which of the UOps realize
+
+# TODO: remove this!
+ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT}
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
@@ -510,9 +508,13 @@ def limit_bufs(root:UOp):
   if len(bufs)>=MAX_BUFS-1:
     return root.replace(src=tuple(s if s.base in bufs else s.replace(tag=1).gbarrier() for s in root.src))
 
-split_kernels = PatternMatcher([
+finalize_gbarrier = PatternMatcher([
+  # if an ALU has more than one input, check the combined buffers don't exceed kernel input limit
   (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs),
   (UPat((Ops.GBARRIER, Ops.CONTIGUOUS), src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
+  # put UnaryOps before EXPANDs
+  (UPat(GroupOp.Unary, src=(UPat.var("inp").gbarrier().view(name="v"),), name="alu"),
+   lambda inp,v,alu: inp.alu(alu.op).replace(tag=1).gbarrier().view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
 ])
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
@@ -528,7 +530,9 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # insert gbarriers in places determined by the realize map
   realize_map = group_realizes(tensor_map[big_sink])
   tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], split_kernels, input_map=tensor_map, name="split_kernels")
+  # optionally reorder gbarriers or insert more (top down)
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], finalize_gbarrier, input_map=tensor_map, name="finalize_gbarrier")
+  # finally, remove tags from UOps
   tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
 
   # TODO: move view_left/view_right here
