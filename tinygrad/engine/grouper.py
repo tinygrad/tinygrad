@@ -25,7 +25,7 @@ merge_views = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat((Ops.LOAD, Ops.STORE, Ops.VALID), name="x"),), name="view"),
    lambda x,view: x.replace(src=tuple((s.st+view.st).to_uop() if s.op is Ops.VIEW else s for s in x.src))),
   # merge view on const if it's not masked
-  (UPat((Ops.CONST, Ops.FCONST, Ops.DEFINE_VAR), name="x").view(name="view"),
+  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="x").view(name="view"),
    lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
   # replace view with base if it's contiguous and the shapes match
   (UPat(GroupOp.All-{Ops.DEVICE}, name="x").view(name="view"), lambda x,view: x if view.st.contiguous and x.shape == view.shape else None),
@@ -368,6 +368,8 @@ add_buffer_ops = PatternMatcher([
    UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i), s.st.to_uop(), s) for i,x in enumerate(sink.src)])),
   # passthrough ASSIGN
   (UPat(Ops.ASSIGN, name="x"), lambda x: x.src[1]),
+  (UPat(Ops.FCONST, name="x").view(name="view"),
+   lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
   # VALID
   (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.FCONST, Ops.DEFINE_VAR), name="x"),), name="view"), lambda x,view: x.valid(view.arg)),
 ])
