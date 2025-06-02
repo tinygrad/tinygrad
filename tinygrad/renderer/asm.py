@@ -9,7 +9,7 @@ def to_hex(x, dt:DType) -> str:
   if dt is dtypes.float64: return hex(struct.unpack('<Q', struct.pack('<d', x))[0])
   if dt is dtypes.float32: return hex(struct.unpack('<I', struct.pack('<f', x))[0])
   if dt is dtypes.float16: return hex(struct.unpack('<H', struct.pack('<e', x))[0])
-  return int(truncate[dt](x))
+  return cast(str, truncate[dt](x))
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.NOOP, name="x"), lambda ctx,x: ""),
@@ -74,18 +74,21 @@ class AsmRenderer(Renderer):
   def render_mem(self, sz:int, dt:DType): raise NotImplementedError("arch specific")
   def render_reg(self, reg:str, dt:DType): raise NotImplementedError("arch specific")
   def render_spill(self, x:UOp, sz:int): raise NotImplementedError("arch specific")
+  # TODO: clean this up
   def render_fill(self, x:UOp, reg:str) -> str:
     op = Ops.LOAD if isinstance(self.r[x], int) else Ops.ASSIGN
+    if isinstance(self, Arm64Renderer) and op is Ops.ASSIGN and x.dtype.count > 1:
+      return f"{self.ops[self.dt(x.dtype)][op]} {self.render_vec(reg, self.dt(x.dtype))}, {self.render_vec(self.r[x], self.dt(x.dtype))}"
     return f"{self.ops[self.dt(x.dtype)][op]} {self.render_reg(reg, self.dt(x.dtype))}, {self[x]}"
   #def two_address(self, x:UOp, y:UOp) -> str: return cast(str, l)+"\n" if (l:=self.string_rewrite.rewrite(x.assign(y), self)) is not None else ""
   def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
   def dt(self, d:DType) -> DType: return dtypes.uint64 if isinstance(d, PtrDType) else d
   def reg_class(self, x:UOp) -> list[str]: return self.regs[self.dt(x.dtype).scalar()]
+  def bypass(self, x:UOp) -> UOp: return x.src[0] if x.op in (Ops.ASSIGN, Ops.NOOP) else x
   def __getitem__(self, x:UOp) -> str: # hacky helper
-    dt = x.dtype
-    x = x.src[0] if x.op in (Ops.ASSIGN, Ops.NOOP) else x
     if x.op is Ops.CONST: return self.render_imm(to_hex(x.arg, dt))
-    return self.render_mem(self.r[x], self.dt(dt)) if isinstance(self.r[x], int) else self.render_reg(self.r[x], self.dt(dt))
+    r, dt = self.r[self.bypass(x)], self.dt(x.dtype)
+    return self.render_mem(r, dt) if isinstance(r, int) else self.render_reg(r, dt)
   def _render(self, uops:list[UOp]):
     self.uops = uops
     regs = copy.deepcopy(self.regs)
@@ -101,7 +104,7 @@ class AsmRenderer(Renderer):
     inst_map: dict[UOp, list[str]] = {}
     # interval in which a var is live meaning its value is needed,
     # void dtypes don't hold values, consts aren't instructions, noop and assign use location of src[0]
-    live_range = {(var.src[0] if var.op in (Ops.ASSIGN, Ops.NOOP) else var):i for i,u in enumerate(uops) \
+    live_range = {self.bypass(var):i for i,u in enumerate(uops) \
                   for var in (v for v in (u,) + u.src if v.dtype != dtypes.void and v.op != Ops.CONST)}
     next_range = None
     for u in reversed(uops):
@@ -110,7 +113,7 @@ class AsmRenderer(Renderer):
       if u in live_range and next_range is not None and live_range[u] >= uops.index(next_range):
         live_range[u] = max(live_range[u], live_range[next_range])
 
-    def srcs(x:UOp) -> tuple[UOp]: return tuple(s.src[0] if s.op in (Ops.ASSIGN, Ops.NOOP) else s for s in x.src)
+    def srcs(x:UOp) -> tuple[UOp]: return tuple(self.bypass(s) for s in x.src)
     def reg_class(x:UOp): return regs[self.dt(x.dtype).scalar()]
     def _alloc(x:UOp, cons:list[str]):
       # assign free register, otherwise spill one
@@ -210,7 +213,7 @@ arm64_ops = {**{x:arm64_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x
              **{x:arm64_float_ops for x in dtypes.floats}, dtypes.uint16:arm64_16bit_unsigned_ops, dtypes.int16:arm64_16bit_signed_ops,
              dtypes.uint8:arm64_8bit_unsigned_ops, dtypes.int8:arm64_8bit_signed_ops, dtypes.float32.vec(2):arm64_vec_ops,
              dtypes.float32.vec(4):arm64_vec_ops, dtypes.float64.vec(2):arm64_vec_ops, dtypes.void:arm64_branch_ops}
-arm64_vec_suffix = {1: "b", 2: "h", 4: "s", 8: "d"}
+arm64_vec = {1: "b", 2: "h", 4: "s", 8: "d"}
 arm64_cast_suffix = {1: "b", 2: "h", 4: "w"}
 def arm64_cflag(x:UOp) -> str: return "ne" if x.op is Ops.CMPNE else "lo" if x.src[0].dtype in dtypes.uints else "lt"
 
@@ -222,9 +225,9 @@ arm64_rewrite = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, ={ctx[idx][1:]}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {ctx[x.src[1]]}, [{ctx[x.src[0]]}]"),
   # devectorize/vectorize
-  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx.r[x.src[0]]}.{arm64_vec_suffix[x.dtype.itemsize]}[{x.arg[0]}]"),
+  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx.render_vec(ctx.r[x.src[0]], x.src[0].dtype, x.arg[0])}"),
   (UPat(Ops.VECTORIZE, name="x"),
-   lambda ctx,x: "\n".join(f"mov {ctx.r[x]}.{arm64_vec_suffix[s.dtype.itemsize]}[{i}], {ctx.r[s]}.{arm64_vec_suffix[s.dtype.itemsize]}[{0}]"
+   lambda ctx,x: "\n".join(f"mov {ctx.render_vec(ctx.r[x], s.dtype, i)}, {ctx.render_vec(ctx.r[ctx.bypass(s)], s.dtype, 0)}"
      for i,s in enumerate(x.src))),
   # casts
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints),), name="x"),
@@ -305,6 +308,8 @@ class Arm64Renderer(AsmRenderer):
     if dtypes.is_float(dt): return arm64_reg_map[reg][dt.itemsize]
     return reg if dt.itemsize == 8 else arm64_reg_map[reg][max(dt.itemsize, dtypes.int32.itemsize)]
   def render_spill(self, x:UOp, sz:int) -> str: return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self[x]}, {self.render_mem(sz, self.dt(x.dtype))}"
+  def render_vec(self, reg:str, dt:DType, i:int|None=None) -> str:
+    return f"{reg}.{dt.count}{arm64_vec[dt.scalar().itemsize]}" if i is None else f"{reg}.{arm64_vec[dt.scalar().itemsize]}[{i}]"
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", f"sub sp, sp, #{stack_size}", "stp x29, x30, [sp]", "mov x29, sp"] + \
                       kernel + ["ldp x29, x30, [sp]", f"add sp, sp, #{stack_size}", "ret", "\n"])
