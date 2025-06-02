@@ -58,7 +58,7 @@ def mselect_reorder_view(ms:UOp, view:UOp, base:UOp):
     st = st.substitute({dnums[0]:dnums[0].const_like(ms.arg)})
   return base.mselect(ms.arg).view(st)
 
-ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT}
+ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.GBARRIER}
 
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
@@ -398,8 +398,6 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
   # replace global memory ops with the BUFFER they write to
   ast = graph_rewrite(k.arg.ast, replace_globals, bottom_up=True, name="replace globals")
-  # push views to edges
-  ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
   bufs = tuple(s.buf_uop if s.op is not Ops.MSELECT else s.src[0].buf_uop for s in k.src)
   ast = graph_rewrite(ast, view_left+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
@@ -531,7 +529,9 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[big_sink], split_kernels, input_map=tensor_map, name="split_kernels")
   tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
 
-  # TODO: move view_left/view_right here
+  # push views to memory barriers
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], view_left, input_map=tensor_map, name="Main View Left")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], view_right, input_map=tensor_map, name="Main View Right")
 
   # group into kernels (this is context-free)
   tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, input_map=tensor_map, name="create_kernels")
