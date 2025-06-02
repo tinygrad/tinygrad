@@ -1280,7 +1280,8 @@ class Tensor(MathTrait):
     from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 
     st = ShapeTracker(self.lazydata.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
-    mops, ret = to_movement_ops(st), self
+    mops = to_movement_ops(st)
+    ret = self
     if mops and mops[0] == (MovementOps.RESHAPE, self.shape): mops = mops[1:]
     for mo in mops: ret = apply_mop(ret, mo)
     return ret
