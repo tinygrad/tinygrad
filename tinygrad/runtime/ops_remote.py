@@ -20,7 +20,10 @@ from tinygrad.device import Compiled, Buffer, Allocator, Compiler, Device, Buffe
 # ***** API *****
 
 @dataclass(frozen=True)
-class RemoteRequest: session: tuple[str, int]|None = field(default=None, kw_only=True)
+class SessionKey: idx: int; nonce: str # noqa: E702
+
+@dataclass(frozen=True)
+class RemoteRequest: session: SessionKey|None = field(default=None, kw_only=True)
 
 @dataclass(frozen=True)
 class SessionFree(RemoteRequest): pass
@@ -53,7 +56,7 @@ class CopyIn(RemoteRequest): buffer_num: int; datahash: str # noqa: E702
 class CopyOut(RemoteRequest): buffer_num: int
 
 @dataclass(frozen=True)
-class Transfer(RemoteRequest): buffer_num: int; ssession: tuple[str, int]; sbuffer_num: int # noqa: E702
+class Transfer(RemoteRequest): buffer_num: int; ssession: SessionKey; sbuffer_num: int # noqa: E702
 
 @dataclass(frozen=True)
 class ProgramAlloc(RemoteRequest): name: str; datahash: str # noqa: E702
@@ -68,7 +71,7 @@ class ProgramExec(RemoteRequest):
 
 @dataclass(frozen=True)
 class GraphComputeItem:
-  session: tuple[str, int]
+  session: SessionKey
   name: str
   datahash: str
   bufs: tuple[int, ...]
@@ -83,7 +86,7 @@ class GraphComputeItem:
 class GraphAlloc(RemoteRequest):
   graph_num: int
   jit_cache: tuple[GraphComputeItem|Transfer, ...]
-  bufs: tuple[tuple[tuple[str, int], int], ...]
+  bufs: tuple[tuple[SessionKey, int], ...]
   var_vals: dict[Variable, int]
 
 @dataclass(frozen=True)
@@ -93,14 +96,14 @@ class GraphFree(RemoteRequest):
 @dataclass(frozen=True)
 class GraphExec(RemoteRequest):
   graph_num: int
-  bufs: tuple[tuple[tuple[str, int], int], ...]
+  bufs: tuple[tuple[SessionKey, int], ...]
   var_vals: dict[Variable, int]
   wait: bool
 
 # for safe deserialization
-eval_globals = {x.__name__:x for x in [SessionFree, RemoteProperties, GetProperties, BufferAlloc, BufferOffset, BufferFree, CopyIn, CopyOut, Transfer,
-                                       ProgramAlloc, ProgramFree, ProgramExec, GraphComputeItem, GraphAlloc, GraphFree, GraphExec, BufferSpec, UOp,
-                                       Ops, dtypes]}
+eval_globals = {x.__name__:x for x in [SessionKey, SessionFree, RemoteProperties, GetProperties, BufferAlloc, BufferOffset, BufferFree, CopyIn,
+                                       CopyOut, Transfer, ProgramAlloc, ProgramFree, ProgramExec, GraphComputeItem, GraphAlloc, GraphFree, GraphExec,
+                                       BufferSpec, UOp, Ops, dtypes]}
 attribute_whitelist: dict[Any, set[str]] = {dtypes: {*DTYPES_DICT.keys(), 'imagef', 'imageh'}, Ops: {x.name for x in Ops}}
 eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
   ast.Dict: lambda x: {safe_eval(k):safe_eval(v) for k,v in zip(x.keys, x.values)},
@@ -144,7 +147,7 @@ class RemoteSession:
 class RemoteHandler:
   def __init__(self, base_device: str):
     self.base_device = base_device
-    self.sessions: defaultdict[tuple[str, int], RemoteSession] = defaultdict(RemoteSession)
+    self.sessions: defaultdict[SessionKey, RemoteSession] = defaultdict(RemoteSession)
 
   async def __call__(self, reader:asyncio.StreamReader, writer:asyncio.StreamWriter):
     while (req_hdr:=(await reader.readline()).decode().strip()):
@@ -165,7 +168,7 @@ class RemoteHandler:
       # the cmds are always last (currently in datahash)
       for c in req._q:
         if DEBUG >= 1: print(c)
-        session, dev = self.sessions[unwrap(c.session)], Device[f"{self.base_device}:{unwrap(c.session)[1]}"]
+        session, dev = self.sessions[unwrap(c.session)], Device[f"{self.base_device}:{unwrap(c.session).idx}"]
         match c:
           case SessionFree(): del self.sessions[unwrap(c.session)]
           case GetProperties():
@@ -187,7 +190,7 @@ class RemoteHandler:
           case CopyIn(): session.buffers[c.buffer_num].copyin(memoryview(bytearray(req._h[c.datahash])))
           case CopyOut(): session.buffers[c.buffer_num].copyout(memoryview(ret:=bytearray(session.buffers[c.buffer_num].nbytes)))
           case Transfer():
-            ssession, sdev = self.sessions[c.ssession], Device[f"{self.base_device}:{unwrap(c.ssession)[1]}"]
+            ssession, sdev = self.sessions[c.ssession], Device[f"{self.base_device}:{unwrap(c.ssession).idx}"]
             dbuf, sbuf = session.buffers[c.buffer_num], ssession.buffers[c.sbuffer_num]
             assert dbuf.nbytes == sbuf.nbytes, f"{dbuf.nbytes} != {sbuf.nbytes}"
             assert hasattr(dev.allocator, '_transfer'), f"Device {dev.device} doesn't support transfers"
@@ -207,7 +210,7 @@ class RemoteHandler:
               match gi:
                 case GraphComputeItem():
                   prg = self.sessions[gi.session].programs[(gi.name, gi.datahash)]
-                  ps = ProgramSpec(gi.name, '', f"{self.base_device}:{gi.session[1]}", UOp(Ops.NOOP),
+                  ps = ProgramSpec(gi.name, '', f"{self.base_device}:{gi.session.idx}", UOp(Ops.NOOP),
                                    vars=list(gi.vars), ins=list(gi.ins), outs=list(gi.outs),
                                    global_size=list(cast(tuple[int], gi.global_size)) if gi.global_size is not None else None,
                                    local_size=list(cast(tuple[int], gi.local_size)) if gi.local_size is not None else None)
@@ -316,7 +319,7 @@ class RemoteDevice(Compiled):
     self.conn: RemoteConnection = RemoteConnection(host or RemoteDevice.local_server())
 
     # state for the session
-    self.session = (binascii.hexlify(os.urandom(0x10)).decode(), idx)
+    self.session = SessionKey(idx, binascii.hexlify(os.urandom(0x10)).decode())
     self.buffer_num: Iterator[int] = itertools.count(0)
     self.graph_num: Iterator[int] = itertools.count(0)
 
