@@ -2,14 +2,14 @@ from typing import cast
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat
 from tinygrad.renderer import Renderer
 from tinygrad import dtypes
-from tinygrad.dtype import DType, PtrDType
+from tinygrad.dtype import DType, PtrDType, truncate
 import struct, copy, sys
 
 def to_hex(x, dt:DType) -> str:
   if dt is dtypes.float64: return hex(struct.unpack('<Q', struct.pack('<d', x))[0])
   if dt is dtypes.float32: return hex(struct.unpack('<I', struct.pack('<f', x))[0])
   if dt is dtypes.float16: return hex(struct.unpack('<H', struct.pack('<e', x))[0])
-  return hex(x)
+  return int(truncate[dt](x))
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.NOOP, name="x"), lambda ctx,x: ""),
@@ -110,15 +110,14 @@ class AsmRenderer(Renderer):
       if u in live_range and next_range is not None and live_range[u] >= uops.index(next_range):
         live_range[u] = max(live_range[u], live_range[next_range])
 
+    def srcs(x:UOp) -> tuple[UOp]: return tuple(s.src[0] if s.op in (Ops.ASSIGN, Ops.NOOP) else s for s in x.src)
     def reg_class(x:UOp): return regs[self.dt(x.dtype).scalar()]
     def _alloc(x:UOp, cons:list[str]):
       # assign free register, otherwise spill one
       if (free:=next((r for r in reg_class(x) if r in cons), None)) is not None: return reg_class(x).pop(reg_class(x).index(free))
       # we choose the var whose next use is the latest, in case no next use we use the uop(endrange) that kills the var
       # this prioritizes vars defined outside loops
-      #spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next((j for j,u in enumerate(uops[i:]) if k in u.src), live_range[k]-i))
-      spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next((j for j,u in enumerate(uops[i:]) if k in \
-                tuple(s.src[0] if s.op in (Ops.ASSIGN, Ops.NOOP) else s for s in u.src)), live_range[k]-i))
+      spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next((j for j,u in enumerate(uops[i:]) if k in srcs(u)), live_range[k]-i))
       if spilled not in mem:
         nonlocal stack_size
         stack_size += 16
@@ -152,18 +151,18 @@ class AsmRenderer(Renderer):
       if u.op is Ops.ENDRANGE:
         for k,v in live_at_range.pop(u.src[0], {}).items():
           # if var was used before spill and not in original reg need to reload
-          if k in mem and any(k in x.src for x in uops[uops.index(u.src[0]):spilled_at[k]]):
+          if k in mem and any(k in srcs(x) for x in uops[uops.index(u.src[0]):spilled_at[k]]):
             if k in live and live[k] == v: continue
             if k in live: reg_class(k).insert(0, live.pop(k))
             loc[k] = alloc(k, [v])
-      # assign srcs, bypass assign and noop and ignore srcs without live ranges
-      srcs = tuple(s for s in (s.src[0] if s.op in (Ops.ASSIGN, Ops.NOOP) else s for s in u.src) if s in live_range)
-      for s in srcs:
+      # assign srcs, ignore srcs without live ranges
+      src = tuple(s for s in srcs(u) if s in live_range)
+      for s in src:
         cons = self.constraints(u, s)
         if s in loc and loc[s] not in cons: loc[s] = alloc(s, cons)
       # free srcs before assigning destination to coalesce when valid
       # TODO: need to ignore noop and assign here
-      for s in srcs:
+      for s in src:
         if u.op is Ops.VECTORIZE: continue
         if u.op is Ops.LOAD and len(u.src) == 3 and s is not u.src[1]: continue
         if isinstance(self, X86Renderer):
@@ -265,7 +264,7 @@ def arm64_load_consts(x:UOp) -> UOp|None:
 arm64_matcher = asm_matcher + PatternMatcher([
   (UPat(GroupOp.All, name="x"), arm64_load_consts),
   # some ops can't take imm in srcs
-  (UPat((Ops.IDIV, Ops.MUL, Ops.MULACC), name="x"),
+  (UPat((Ops.IDIV, Ops.MUL, Ops.MULACC, Ops.WHERE), name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   # TODO: uint16/int16 to float16 bitcast and vice versa is different from x86 need to use vector reg and just move
   # int8/int16 alus perform instruction in int32
@@ -303,7 +302,7 @@ class Arm64Renderer(AsmRenderer):
   def render_imm(self, imm:str) -> str: return f"#{imm}"
   def render_mem(self, sz:int, dt:DType) -> str: return f"[x29, #{abs(sz)}]"
   def render_reg(self, reg:str, dt:DType) -> str:
-    if dt in dtypes.floats: return arm64_reg_map[reg][dt.itemsize]
+    if dtypes.is_float(dt): return arm64_reg_map[reg][dt.itemsize]
     return reg if dt.itemsize == 8 else arm64_reg_map[reg][max(dt.itemsize, dtypes.int32.itemsize)]
   def render_spill(self, x:UOp, sz:int) -> str: return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self[x]}, {self.render_mem(sz, self.dt(x.dtype))}"
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
