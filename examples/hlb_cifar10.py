@@ -202,22 +202,39 @@ def train_cifar():
     return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
 
   def random_crop(X:Tensor, crop_size=32):
-    mask = make_square_mask(X.shape, crop_size)
-    mask = mask.expand((-1,3,-1,-1))
-    X_cropped = Tensor(X.numpy()[mask.numpy()])
-    return X_cropped.reshape((-1, 3, crop_size, crop_size))
+    BS, C, H, W = X.shape
+    a = Tensor.arange(crop_size).expand(BS, crop_size)
+    rand_x = Tensor.randint(BS, low=0, high=W-crop_size).reshape(BS, 1)
+    rand_y = Tensor.randint(BS, low=0, high=H-crop_size).reshape(BS, 1)
+    indices_y = (a + rand_y).reshape(BS, 1, crop_size, 1).expand(BS, C, crop_size, W)
+    indices_x = (a + rand_x).reshape(BS, 1, 1, crop_size).expand(BS, C, crop_size, crop_size)
+    X_cropped = X.gather(2, indices_y).gather(3, indices_x)
+    return X_cropped
 
   def cutmix(X:Tensor, Y:Tensor, mask_size=3):
     # fill the square with randomly selected images from the same batch
     mask = make_square_mask(X.shape, mask_size)
-    order = list(range(0, X.shape[0]))
-    random.shuffle(order)
-    X_patch = Tensor(X.numpy()[order], device=X.device, dtype=X.dtype)
-    Y_patch = Tensor(Y.numpy()[order], device=Y.device, dtype=Y.dtype)
+    order = Tensor.randperm(X.shape[0], device=X.device)
+    X_patch = X[order]
+    Y_patch = Y[order]
     X_cutmix = mask.where(X_patch, X)
     mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
     return X_cutmix, Y_cutmix
+  
+  def data_augmentation(X, Y, step, crop_size=32, mask_size=hyp['net']['cutmix_size']):
+    if getenv("RANDOM_CROP", 1):
+      X = random_crop(X, crop_size=32)
+    if getenv("RANDOM_FLIP", 1):
+      X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
+    if getenv("CUTMIX", 1):
+      if step >= hyp['net']['cutmix_steps']:
+        X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
+    order = Tensor.randperm(X.shape[0], device=X.device)
+    X, Y = X[order], Y[order]
+    return X, Y
+    
+  data_augmentation_jitted = TinyJit(data_augmentation)
 
   # the operations that remain inside batch fetcher is the ones that involves random operations
   def fetch_batches(X_in:Tensor, Y_in:Tensor, BS:int, is_train:bool):
@@ -226,26 +243,14 @@ def train_cifar():
       st = time.monotonic()
       X, Y = X_in, Y_in
       if is_train:
-        # TODO: these are not jitted
-        if getenv("RANDOM_CROP", 1):
-          X = random_crop(X, crop_size=32)
-        if getenv("RANDOM_FLIP", 1):
-          X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
-        if getenv("CUTMIX", 1):
-          if step >= hyp['net']['cutmix_steps']:
-            X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
-        order = list(range(0, X.shape[0]))
-        random.shuffle(order)
-        X, Y = X.numpy()[order], Y.numpy()[order]
-      else:
-        X, Y = X.numpy(), Y.numpy()
+        X, Y = data_augmentation(X, Y, step, crop_size=32, mask_size=hyp['net']['cutmix_size'])
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X.shape[0], BS):
         # pad the last batch  # TODO: not correct for test
         batch_end = min(i+BS, Y.shape[0])
-        x = Tensor(X[batch_end-BS:batch_end], device=X_in.device, dtype=X_in.dtype)
-        y = Tensor(Y[batch_end-BS:batch_end], device=Y_in.device, dtype=Y_in.dtype)
+        x = X[batch_end-BS:batch_end].contiguous()
+        y = Y[batch_end-BS:batch_end].contiguous()
         step += 1
         yield x, y
       epoch += 1
@@ -325,7 +330,7 @@ def train_cifar():
     out = model(X)
     loss_batchsize_scaler = 512/BS
     loss = cross_entropy(out, Y, reduction='none', label_smoothing=hyp['opt']['label_smoothing']).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
-
+    
     if not getenv("DISABLE_BACKWARD"):
       # index 0 for bias and 1 for non-bias
       optimizer.zero_grad()
