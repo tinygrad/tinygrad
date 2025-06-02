@@ -9,7 +9,7 @@ def to_hex(x, dt:DType) -> str:
   if dt is dtypes.float64: return hex(struct.unpack('<Q', struct.pack('<d', x))[0])
   if dt is dtypes.float32: return hex(struct.unpack('<I', struct.pack('<f', x))[0])
   if dt is dtypes.float16: return hex(struct.unpack('<H', struct.pack('<e', x))[0])
-  return cast(str, truncate[dt](x))
+  return cast(str, int(truncate[dt](x)))
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.NOOP, name="x"), lambda ctx,x: ""),
@@ -72,14 +72,11 @@ class AsmRenderer(Renderer):
   def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|int: raise NotImplementedError("arch specific")
   def render_imm(self, imm:str): raise NotImplementedError("arch specific")
   def render_mem(self, sz:int, dt:DType): raise NotImplementedError("arch specific")
-  def render_reg(self, reg:str, dt:DType): raise NotImplementedError("arch specific")
+  def render_reg(self, reg:str, dt:DType, alias:bool=False): raise NotImplementedError("arch specific")
   def render_spill(self, x:UOp, sz:int): raise NotImplementedError("arch specific")
-  # TODO: clean this up
   def render_fill(self, x:UOp, reg:str) -> str:
     op = Ops.LOAD if isinstance(self.r[x], int) else Ops.ASSIGN
-    if isinstance(self, Arm64Renderer) and op is Ops.ASSIGN and x.dtype.count > 1:
-      return f"{self.ops[self.dt(x.dtype)][op]} {self.render_vec(reg, self.dt(x.dtype))}, {self.render_vec(self.r[x], self.dt(x.dtype))}"
-    return f"{self.ops[self.dt(x.dtype)][op]} {self.render_reg(reg, self.dt(x.dtype))}, {self[x]}"
+    return f"{self.ops[self.dt(x.dtype)][op]} {self.render_reg(reg, self.dt(x.dtype), op is Ops.LOAD)}, {self[x]}"
   #def two_address(self, x:UOp, y:UOp) -> str: return cast(str, l)+"\n" if (l:=self.string_rewrite.rewrite(x.assign(y), self)) is not None else ""
   def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
   def dt(self, d:DType) -> DType: return dtypes.uint64 if isinstance(d, PtrDType) else d
@@ -88,7 +85,7 @@ class AsmRenderer(Renderer):
   def __getitem__(self, x:UOp) -> str: # hacky helper
     if x.op is Ops.CONST: return self.render_imm(to_hex(x.arg, x.dtype))
     r, dt = self.r[self.bypass(x)], self.dt(x.dtype)
-    return self.render_mem(r, dt) if isinstance(r, int) else self.render_reg(r, dt)
+    return self.render_mem(r, dt) if isinstance(r, int) else self.render_reg(r, dt, x.op is Ops.LOAD)
   def _render(self, uops:list[UOp]):
     self.uops = uops
     regs = copy.deepcopy(self.regs)
@@ -223,11 +220,12 @@ arm64_rewrite = PatternMatcher([
    f"{ctx.two_address(x, alt)}tst {ctx[mask]}, #1\n"
    f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
   (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, ={ctx[idx][1:]}"),
-  (UPat(Ops.STORE, name="x"), lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {ctx[x.src[1]]}, [{ctx[x.src[0]]}]"),
+  (UPat(Ops.STORE, name="x"),
+   lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {ctx.render_reg(ctx.r[x.src[1]], x.src[1].dtype, True)}, [{ctx[x.src[0]]}]"),
   # devectorize/vectorize
-  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx.render_vec(ctx.r[x.src[0]], x.src[0].dtype, x.arg[0])}"),
+  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx.r[x.src[0]]}.{arm64_vec[x.dtype.itemsize]}[{x.arg[0]}]"),
   (UPat(Ops.VECTORIZE, name="x"),
-   lambda ctx,x: "\n".join(f"mov {ctx.render_vec(ctx.r[x], s.dtype, i)}, {ctx.render_vec(ctx.r[ctx.bypass(s)], s.dtype, 0)}"
+   lambda ctx,x: "\n".join(f"mov {ctx.r[x]}.{arm64_vec[s.dtype.itemsize]}[{i}], {ctx.r[ctx.bypass(s)]}.{arm64_vec[s.dtype.itemsize]}[{0}]"
      for i,s in enumerate(x.src))),
   # casts
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints),), name="x"),
@@ -304,12 +302,14 @@ class Arm64Renderer(AsmRenderer):
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return f"#{imm}"
   def render_mem(self, sz:int, dt:DType) -> str: return f"[x29, #{abs(sz)}]"
-  def render_reg(self, reg:str, dt:DType) -> str:
-    if dtypes.is_float(dt): return arm64_reg_map[reg][dt.itemsize]
+  # arm64 vec load/store use q/d instead of v.suffix
+  def render_reg(self, reg:str, dt:DType, alias:bool=False) -> str:
+    dt = self.dt(dt).scalar()
+    if dt.count > 1 and not alias: return f"{reg}.{dt.count}{arm64_vec[dt.itemsize]}"
+    if dt in dtypes.floats: return arm64_reg_map[reg][dt.itemsize]
     return reg if dt.itemsize == 8 else arm64_reg_map[reg][max(dt.itemsize, dtypes.int32.itemsize)]
-  def render_spill(self, x:UOp, sz:int) -> str: return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self[x]}, {self.render_mem(sz, self.dt(x.dtype))}"
-  def render_vec(self, reg:str, dt:DType, i:int|None=None) -> str:
-    return f"{reg}.{dt.count}{arm64_vec[dt.scalar().itemsize]}" if i is None else f"{reg}.{arm64_vec[dt.scalar().itemsize]}[{i}]"
+  def render_spill(self, x:UOp, sz:int) -> str:
+    return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self.render_reg(self.r[x], x.dtype, True)}, {self.render_mem(sz, self.dt(x.dtype))}"
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", f"sub sp, sp, #{stack_size}", "stp x29, x30, [sp]", "mov x29, sp"] + \
                       kernel + ["ldp x29, x30, [sp]", f"add sp, sp, #{stack_size}", "ret", "\n"])
@@ -489,7 +489,8 @@ class X86Renderer(AsmRenderer):
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return imm
   def render_mem(self, sz:int, dt:DType) -> str: return f"{size_prefix[dt.itemsize]} [rbp {'+' if sz>=0 else ''}{sz}]"
-  def render_reg(self, reg:str, dt:DType) -> str: return reg if dt.itemsize == 8 or dtypes.is_float(dt) else x86_reg_map[reg][dt.itemsize]
+  def render_reg(self, reg:str, dt:DType, alias:bool=False) -> str:
+    return reg if dt.itemsize == 8 or dtypes.is_float(dt) else x86_reg_map[reg][dt.itemsize]
   def render_spill(self, x:UOp, sz:int) -> str: return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self.render_mem(sz, self.dt(x.dtype))}, {self[x]}"
   def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", "push rbp", "mov rbp, rsp", f"sub rsp, {stack_size}"] +
