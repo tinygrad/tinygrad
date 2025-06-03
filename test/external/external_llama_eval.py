@@ -21,12 +21,13 @@ class LLaMaAdaptor(LM):
     self.tokenizer = Tokenizer(str((checkpoint_path if checkpoint_path.is_dir() else checkpoint_path.parent) / "tokenizer.model"))
     self.model = build_transformer(checkpoint_path, model_size=model_size, quantize=quantize, max_context=self.max_length)
   @property
-  def tokenizer_name(self) -> str: return ""
-  def chat_template(self, chat_template: bool | str = False) -> str: return ""
-  def apply_chat_template(self, chat_history: list[dict[str, str]]) -> str:
+  def tokenizer_name(self) -> str: pass
+  def chat_template(self, chat_template: bool | str = False) -> str: pass
+  def apply_chat_template(self, chat_history: list[dict[str, str]], add_generation_prompt: bool = True) -> str:
     ret = ""
     for message in chat_history:
       ret += f"<|start_header_id|>{message["role"]}<|end_header_id|>\n\n{message["content"].strip()}<|eot_id|>"
+    if add_generation_prompt: ret += f"<|start_header_id|>assistant<|end_header_id|>"
     return ret
   def generate_until(self, requests: list[Instance]) -> list[str]:
     continuations = []
