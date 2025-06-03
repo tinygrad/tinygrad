@@ -13,23 +13,7 @@ The current integration with `tinygrad` supports core model computations, data l
         hyp["misc"]["device"] = "tiny" # Device set for tinygrad
     ```
 
-2.  **Model Initialization:**
-    With the current setup, enabling the `TINY_BACKEND` allows you to construct the `SpeedyConvNet` model without any code changes.
-
-    For eigenvalue decomposition, tinygrad doesn't yet implement `linalg.eigh`, so we had to use NumPy's implementation as a workaround:
-
-    ```python
-    def get_whitening_parameters(patches):
-        ...
-        est_covariance = torch.cov(patches.view(n, c*h*w).t())
-        # eigenvalues, eigenvectors = torch.linalg.eigh(est_covariance, UPLO='U') # this is the same as saying we want our eigenvectors, with the specification that the matrix be an upper triangular matrix (instead of a lower-triangular matrix)
-        eigenvalues,eigenvectors = np.linalg.eigh(est_covariance.cpu().numpy(), UPLO="U")
-        eigenvalues = torch.from_numpy(eigenvalues).to(patches.device)
-        eigenvectors = torch.from_numpy(eigenvectors).to(patches.device)
-        return eigenvalues.flip(0).view(-1, 1, 1, 1), eigenvectors.t().reshape(c*h*w,c,h,w).flip(0)
-    ```
-
-3.  **Data Handling:**
+2.  **Data Handling:**
     Dataset loading and preprocessing steps such as normalization and padding are fully compatible with the tinygrad backend without requiring any code modifications. However, minor adjustments are necessary in the original hlb-cifar10 repository due to hardcoded device specifications in the `batch_cutmix` and `get_batches` functions, which default to "cuda". We have updated these functions to dynamically select the device based on the `TINY_BACKEND` environment variable as shown below:
 
     ```python
