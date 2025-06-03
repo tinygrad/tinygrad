@@ -1,6 +1,6 @@
 import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
 from typing import Any, Union, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile
+from tinygrad.helpers import to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -166,14 +166,8 @@ class MetalProgram:
     self.pipeline_state = msg("newComputePipelineStateWithDescriptor:options:reflection:error:", objc_instance)(self.dev.sysdevice,
       descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()))
     error_check(error_pipeline_creation)
-    # cache these msg calls
-    self.max_total_threads: int = cast(int, msg("maxTotalThreadsPerThreadgroup", ctypes.c_ulong)(self.pipeline_state))
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
-    if prod(local_size) > self.max_total_threads:
-      exec_width = msg("threadExecutionWidth", ctypes.c_ulong)(self.pipeline_state)
-      memory_length = msg("staticThreadgroupMemoryLength", ctypes.c_ulong)(self.pipeline_state)
-      raise RuntimeError(f"local size {local_size} bigger than {self.max_total_threads} with exec width {exec_width} memory length {memory_length}")
     command_buffer = msg("commandBuffer", objc_instance)(self.dev.mtl_queue)
     encoder = msg("computeCommandEncoder", objc_instance)(command_buffer)
     msg("setComputePipelineState:")(encoder, self.pipeline_state)
