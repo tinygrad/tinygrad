@@ -112,9 +112,8 @@ class OnnxRunner:
   def __init__(self, model: ModelProto):
     # parse model protobuf
     self.is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model.graph.node)
-    self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
+    self.old_training = Tensor.training
     Tensor.training = True if self.is_training else False
-    Tensor.no_grad = False if self.is_training else True
     self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
     self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
     self.graph_outputs = tuple(x.name for x in model.graph.output)
@@ -176,9 +175,9 @@ class OnnxRunner:
       self.graph_values.update(dict(zip(node.outputs, ret[:len(node.outputs)], strict=True)))
 
       if node.num == limit:
-        Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
+        Tensor.training = self.old_training
         return {name:self.graph_values[name] for name in node.outputs}
-    Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
+    Tensor.training = self.old_training
     return {name:self.graph_values[name] for name in self.graph_outputs}
 
 ####################

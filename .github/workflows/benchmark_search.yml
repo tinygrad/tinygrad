@@ -1,0 +1,24 @@
+name: Benchmark with kernel search
+
+on:
+  push:
+    branches:
+      - update_benchmark_search
+  workflow_dispatch:
+
+jobs:
+  run_script_job:
+    runs-on: [self-hosted, Linux, tinybox]
+    if: github.repository_owner == 'tinygrad'
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Remove amdgpu
+      run: sudo rmmod amdgpu || true
+    - name: Run SDXL with new search
+      run: |
+        BENCHMARK_LOG=search_sdxl PYTHONPATH=. AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python examples/sdxl.py --noshow --timing --seed 0
+    - name: Run SDXL with cached search
+      run: |
+        BENCHMARK_LOG=search_sdxl_cached PYTHONPATH=. AMD=1 JITBEAM=2 python examples/sdxl.py --noshow --timing --seed 0
