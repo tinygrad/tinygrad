@@ -27,7 +27,7 @@ class LLaMaAdaptor(LM):
     ret = ""
     for message in chat_history:
       ret += f"<|start_header_id|>{message["role"]}<|end_header_id|>\n\n{message["content"].strip()}<|eot_id|>"
-    if add_generation_prompt: ret += f"<|start_header_id|>assistant<|end_header_id|>\n\n"
+    if add_generation_prompt: ret += "<|start_header_id|>assistant<|end_header_id|>\n\n"
     return ret
   def generate_until(self, requests: list[Instance]) -> list[str]:
     continuations = []
