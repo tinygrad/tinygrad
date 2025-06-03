@@ -21,7 +21,7 @@ class LLaMaAdaptor(LM):
     self.max_length = max_length
     self.is_chat_model = is_chat_model
     self.tokenizer = Tokenizer(str((checkpoint_path if checkpoint_path.is_dir() else checkpoint_path.parent) / "tokenizer.model"))
-    self.model = build_transformer(checkpoint_path, model_size, quantize)
+    self.model = build_transformer(checkpoint_path, model_size=model_size, quantize=quantize, max_context=self.max_length)
 
   def _encode_role(self, role: str):
     return [self.tokenizer.special_tokens["<|start_header_id|>"]] + self.tokenizer.encode(role) + \
