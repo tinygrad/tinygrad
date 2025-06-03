@@ -229,7 +229,7 @@ class RemoteHandler:
         except Exception as e:
           if isinstance(c, (ProgramExec, GraphExec)) and c.wait:
             ret = 'inf'.encode()
-          elif not isinstance(c, (ProgramAlloc, GraphAlloc)): raise(e)
+          elif not isinstance(c, (ProgramAlloc, GraphAlloc)): raise e
     else: status, ret = http.HTTPStatus.NOT_FOUND, b"Not Found"
     return status, ret
 
