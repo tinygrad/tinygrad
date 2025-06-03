@@ -666,7 +666,9 @@ class PCIIface:
     except OSError as e: raise RuntimeError(f"Cannot resize BAR: {e}. Ensure the resizable BAR option is enabled on your system.") from e
 
     # Disable migartion of locked pages.
-    if first_dev: FileIOInterface("/proc/sys/vm/compact_unevictable_allowed", os.O_RDWR).write("0")
+    if first_dev and FileIOInterface("/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read() != "0":
+      os.system("sudo sh -c 'echo 1 > /proc/sys/vm/compact_unevictable_allowed'")
+      assert FileIOInterface("/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read() == "0", f"Failed to disable migration of locked pages."
 
     # Try to init vfio. Use it if success.
     if getenv("VFIO", 0):
