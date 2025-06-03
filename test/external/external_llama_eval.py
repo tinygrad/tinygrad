@@ -61,17 +61,17 @@ if __name__ == '__main__':
   parser.add_argument('--eval', type=str, default="gsm8k", help="Run in evaluation mode")
   parser.add_argument('--limit', type=int, default=None, help="Limit tests in eval")
   parser.add_argument('--num_fewshot', type=int, default=None, help="Number of examples to add to context")
-  parser.add_argument('--model', type=str, default="./weights/LLaMa/", help="Location of the weights")
-  parser.add_argument('--output_path', type=str, default=None, help="Location of the log file")
+  parser.add_argument('--model', type=Path, default="./weights/LLaMa/", help="Location of the weights")
+  parser.add_argument('--output_path', type=Path, default=None, help="Location of the log file")
   args = parser.parse_args()
 
   # run eval and exit
   adaptor = LLaMaAdaptor(model_size=args.size, quantize=args.quantize,
-                         checkpoint_path=Path(args.model), max_length=args.ctx)
+                         checkpoint_path=args.model, max_length=args.ctx)
   results = simple_evaluate(model=adaptor, tasks=args.eval.split(","), apply_chat_template=args.chat,
                             num_fewshot=args.num_fewshot, limit=args.limit, system_instruction="You are a helpful assistant.")
 
-  if args.output_path: Path(args.output_path).write_text(json.dumps(results, indent=2))
+  if args.output_path: args.output_path.write_text(json.dumps(results, indent=2))
   for task_name, val in results["results"].items():
     print(f"{task_name}:")
     print("\n".join(f"\t{k:20} | {v}" for k, v in val.items() if k != "alias"))
