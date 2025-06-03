@@ -74,4 +74,4 @@ if __name__ == '__main__':
   if args.output_path: args.output_path.write_text(json.dumps(results, indent=2))
   for task_name, val in results["results"].items():
     print(f"{task_name}:")
-    print("\n".join(f"\t{k:20} | {v}" for k, v in val.items() if k != "alias"))
+    print("\n".join(f"\t{k}: {v}" for k, v in val.items() if k != "alias"))
