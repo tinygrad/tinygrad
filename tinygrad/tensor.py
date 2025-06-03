@@ -452,7 +452,7 @@ class Tensor(MathTrait):
     It currently returns a DISK Tensor, but in the future it may return an HTTP Tensor.
     This also will soon become lazy (when possible) and not print progress without DEBUG.
 
-    THe `gunzip` flag will gzip extract the resource and return an extracted Tensor.
+    The `gunzip` flag will gzip extract the resource and return an extracted Tensor.
     """
     return Tensor(fetch(url, gunzip=gunzip), **kwargs)
 
@@ -2597,7 +2597,7 @@ class Tensor(MathTrait):
 
   def _pre_scatter(self, dim:int, index:Tensor, src:Tensor) -> tuple[Tensor, Tensor]:
     index, dim = index.to(self.device), self._resolve_dim(dim)
-    assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
+    assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.ndim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
     assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
       f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
     if self.dtype != src.dtype: raise RuntimeError(f"expect {self.dtype=} to be equal to {src.dtype=}")
@@ -2878,7 +2878,7 @@ class Tensor(MathTrait):
   def hardsigmoid(self, alpha:float=1/6, beta:float=0.5) -> Tensor:
     """
     Applies the Hardsigmoid function element-wise.
-    NOTE: default `alpha` and `beta` values is taken from torch
+    NOTE: default `alpha` and `beta` values are taken from torch
 
     - Described: https://paperswithcode.com/method/hard-sigmoid
     - See: https://pytorch.org/docs/stable/generated/torch.nn.functional.hardsigmoid.html
