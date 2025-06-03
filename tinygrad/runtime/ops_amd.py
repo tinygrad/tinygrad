@@ -667,7 +667,7 @@ class PCIIface:
 
     # Disable migartion of locked pages.
     if first_dev and FileIOInterface(reloc_sysfs:="/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read() != "0":
-      os.system(cmd:=f"sudo sh -c 'echo 1 > {reloc_sysfs}'")
+      os.system(cmd:=f"sudo sh -c 'echo 0 > {reloc_sysfs}'")
       assert FileIOInterface(reloc_sysfs, os.O_RDONLY).read() == "0", f"Failed to disable migration of locked pages. Please run {cmd} manually."
 
     # Try to init vfio. Use it if success.
