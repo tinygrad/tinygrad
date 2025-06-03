@@ -167,64 +167,69 @@ class RemoteHandler:
       for c in req._q:
         if DEBUG >= 1: print(c)
         session, dev = self.sessions[unwrap(c.session)], Device[f"{self.base_device}:{unwrap(c.session)[1]}"]
-        match c:
-          case SessionFree(): del self.sessions[unwrap(c.session)]
-          case GetProperties():
-            cls, args = dev.renderer.__reduce__()
-            # CPUGraph re-renders kernel from uops specified in CompiledRunner, this is not supported
-            graph_cls = gt if (gt:=graph_class(Device[self.base_device])) is not CPUGraph else None
-            rp = RemoteProperties(
-              real_device=dev.device, renderer=(cls.__module__, cls.__name__, args),
-              graph_supported=graph_cls is not None, graph_supports_multi=graph_cls is not None and issubclass(graph_cls, MultiGraphRunner),
-              transfer_supported=hasattr(dev.allocator, '_transfer'), offset_supported=hasattr(dev.allocator, '_offset'),
-            )
-            ret = repr(rp).encode()
-          case BufferAlloc():
-            assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already allocated"
-            session.buffers[c.buffer_num] = Buffer(dev.device, c.size, dtypes.uint8, options=c.options, preallocate=True)
-          case BufferOffset():
-            assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already exists"
-            session.buffers[c.buffer_num] = session.buffers[c.sbuffer_num].view(c.size, dtypes.uint8, c.offset).allocate()
-          case BufferFree(): del session.buffers[c.buffer_num]
-          case CopyIn(): session.buffers[c.buffer_num].copyin(memoryview(bytearray(req._h[c.datahash])))
-          case CopyOut(): session.buffers[c.buffer_num].copyout(memoryview(ret:=bytearray(session.buffers[c.buffer_num].nbytes)))
-          case Transfer():
-            ssession, sdev = self.sessions[c.ssession], Device[f"{self.base_device}:{unwrap(c.ssession)[1]}"]
-            dbuf, sbuf = session.buffers[c.buffer_num], ssession.buffers[c.sbuffer_num]
-            assert dbuf.nbytes == sbuf.nbytes, f"{dbuf.nbytes} != {sbuf.nbytes}"
-            assert hasattr(dev.allocator, '_transfer'), f"Device {dev.device} doesn't support transfers"
-            dev.allocator._transfer(dbuf._buf, sbuf._buf, dbuf.nbytes, dest_dev=dev, src_dev=sdev)
-          case ProgramAlloc():
-            lib = dev.compiler.compile_cached(req._h[c.datahash].decode())
-            session.programs[(c.name, c.datahash)] = dev.runtime(c.name, lib)
-          case ProgramFree(): del session.programs[(c.name, c.datahash)]
-          case ProgramExec():
-            bufs = [session.buffers[x]._buf for x in c.bufs]
-            extra_args = {k:v for k,v in [("global_size", c.global_size), ("local_size", c.local_size)] if v is not None}
-            r = session.programs[(c.name, c.datahash)](*bufs, vals=c.vals, wait=c.wait, **extra_args)
-            if r is not None: ret = str(r).encode()
-          case GraphAlloc():
-            graph_fn: Callable = unwrap(dev.graph)
-            def _parse_ji(gi: GraphComputeItem|Transfer):
-              match gi:
-                case GraphComputeItem():
-                  prg = self.sessions[gi.session].programs[(gi.name, gi.datahash)]
-                  ps = ProgramSpec(gi.name, '', f"{self.base_device}:{gi.session[1]}", UOp(Ops.NOOP),
-                                   vars=list(gi.vars), ins=list(gi.ins), outs=list(gi.outs),
-                                   global_size=list(cast(tuple[int], gi.global_size)) if gi.global_size is not None else None,
-                                   local_size=list(cast(tuple[int], gi.local_size)) if gi.local_size is not None else None)
-                  return ExecItem(CompiledRunner(ps, precompiled=b'', prg=prg), [self.sessions[gi.session].buffers[buf] for buf in gi.bufs],
-                                  fixedvars=gi.fixedvars)
-                case Transfer():
-                  dbuf, sbuf = self.sessions[unwrap(gi.session)].buffers[gi.buffer_num], self.sessions[gi.ssession].buffers[gi.sbuffer_num]
-                  assert dbuf.nbytes == sbuf.nbytes, f"{dbuf.nbytes} != {sbuf.nbytes}"
-                  return ExecItem(BufferXfer(dbuf.nbytes, dbuf.device, sbuf.device), [dbuf, sbuf])
-            assert c.graph_num not in session.graphs, f"graph {c.graph_num} already allocated"
-            session.graphs[c.graph_num] = graph_fn(list(map(_parse_ji, c.jit_cache)), [self.sessions[s].buffers[i] for s,i in c.bufs], c.var_vals)
-          case GraphFree(): del session.graphs[c.graph_num]
-          case GraphExec():
-            r = session.graphs[c.graph_num]([self.sessions[s].buffers[i] for s,i in c.bufs], c.var_vals, wait=c.wait)
-            if r is not None: ret = str(r).encode()
+        try:
+          match c:
+            case SessionFree(): del self.sessions[unwrap(c.session)]
+            case GetProperties():
+              cls, args = dev.renderer.__reduce__()
+              # CPUGraph re-renders kernel from uops specified in CompiledRunner, this is not supported
+              graph_cls = gt if (gt:=graph_class(Device[self.base_device])) is not CPUGraph else None
+              rp = RemoteProperties(
+                real_device=dev.device, renderer=(cls.__module__, cls.__name__, args),
+                graph_supported=graph_cls is not None, graph_supports_multi=graph_cls is not None and issubclass(graph_cls, MultiGraphRunner),
+                transfer_supported=hasattr(dev.allocator, '_transfer'), offset_supported=hasattr(dev.allocator, '_offset'),
+              )
+              ret = repr(rp).encode()
+            case BufferAlloc():
+              assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already allocated"
+              session.buffers[c.buffer_num] = Buffer(dev.device, c.size, dtypes.uint8, options=c.options, preallocate=True)
+            case BufferOffset():
+              assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already exists"
+              session.buffers[c.buffer_num] = session.buffers[c.sbuffer_num].view(c.size, dtypes.uint8, c.offset).allocate()
+            case BufferFree(): del session.buffers[c.buffer_num]
+            case CopyIn(): session.buffers[c.buffer_num].copyin(memoryview(bytearray(req._h[c.datahash])))
+            case CopyOut(): session.buffers[c.buffer_num].copyout(memoryview(ret:=bytearray(session.buffers[c.buffer_num].nbytes)))
+            case Transfer():
+              ssession, sdev = self.sessions[c.ssession], Device[f"{self.base_device}:{unwrap(c.ssession)[1]}"]
+              dbuf, sbuf = session.buffers[c.buffer_num], ssession.buffers[c.sbuffer_num]
+              assert dbuf.nbytes == sbuf.nbytes, f"{dbuf.nbytes} != {sbuf.nbytes}"
+              assert hasattr(dev.allocator, '_transfer'), f"Device {dev.device} doesn't support transfers"
+              dev.allocator._transfer(dbuf._buf, sbuf._buf, dbuf.nbytes, dest_dev=dev, src_dev=sdev)
+            case ProgramAlloc():
+              lib = dev.compiler.compile_cached(req._h[c.datahash].decode())
+              session.programs[(c.name, c.datahash)] = dev.runtime(c.name, lib)
+            case ProgramFree(): session.programs.pop((c.name, c.datahash),None)
+            case ProgramExec():
+              bufs = [session.buffers[x]._buf for x in c.bufs]
+              extra_args = {k:v for k,v in [("global_size", c.global_size), ("local_size", c.local_size)] if v is not None}
+              r = session.programs[(c.name, c.datahash)](*bufs, vals=c.vals, wait=c.wait, **extra_args)
+              if r is not None: ret = str(r).encode()
+            case GraphAlloc():
+              graph_fn: Callable = unwrap(dev.graph)
+              def _parse_ji(gi: GraphComputeItem|Transfer):
+                match gi:
+                  case GraphComputeItem():
+                    prg = self.sessions[gi.session].programs[(gi.name, gi.datahash)]
+                    ps = ProgramSpec(gi.name, '', f"{self.base_device}:{gi.session[1]}", UOp(Ops.NOOP),
+                                    vars=list(gi.vars), ins=list(gi.ins), outs=list(gi.outs),
+                                    global_size=list(cast(tuple[int], gi.global_size)) if gi.global_size is not None else None,
+                                    local_size=list(cast(tuple[int], gi.local_size)) if gi.local_size is not None else None)
+                    return ExecItem(CompiledRunner(ps, precompiled=b'', prg=prg), [self.sessions[gi.session].buffers[buf] for buf in gi.bufs],
+                                    fixedvars=gi.fixedvars)
+                  case Transfer():
+                    dbuf, sbuf = self.sessions[unwrap(gi.session)].buffers[gi.buffer_num], self.sessions[gi.ssession].buffers[gi.sbuffer_num]
+                    assert dbuf.nbytes == sbuf.nbytes, f"{dbuf.nbytes} != {sbuf.nbytes}"
+                    return ExecItem(BufferXfer(dbuf.nbytes, dbuf.device, sbuf.device), [dbuf, sbuf])
+              assert c.graph_num not in session.graphs, f"graph {c.graph_num} already allocated"
+              session.graphs[c.graph_num] = graph_fn(list(map(_parse_ji, c.jit_cache)), [self.sessions[s].buffers[i] for s,i in c.bufs], c.var_vals)
+            case GraphFree(): session.graphs.pop(c.graph_num, None)
+            case GraphExec():
+              r = session.graphs[c.graph_num]([self.sessions[s].buffers[i] for s,i in c.bufs], c.var_vals, wait=c.wait)
+              if r is not None: ret = str(r).encode()
+        except Exception as e:
+          if isinstance(c, (ProgramExec, GraphExec)) and c.wait:
+            ret = 'inf'.encode()
+          elif not isinstance(c, (ProgramAlloc, GraphAlloc)): raise(e)
     else: status, ret = http.HTTPStatus.NOT_FOUND, b"Not Found"
     return status, ret
 
