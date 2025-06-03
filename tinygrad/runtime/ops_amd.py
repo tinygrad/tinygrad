@@ -739,10 +739,10 @@ class PCIIface:
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     if host or (not getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1) and uncached and cpu_access): # host or gtt-like memory.
       vaddr = self.adev.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
-      va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED, 0)
+      FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|MAP_FIXED, 0)
 
       # Read pagemap to get the physical address of each page. The pages are locked.
-      self.pagemap.seek(va // mmap.PAGESIZE * 8)
+      self.pagemap.seek(vaddr // mmap.PAGESIZE * 8)
       paddrs = [((x & ((1<<55) - 1)) * mmap.PAGESIZE, mmap.PAGESIZE) for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
       am_mapping = self.adev.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
       return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=True),
