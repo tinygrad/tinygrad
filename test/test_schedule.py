@@ -1711,11 +1711,10 @@ class TestSchedule(unittest.TestCase):
     assume(is_dtype_supported(dt1) and is_dtype_supported(dt2))
     a = Tensor(1, dtype=dt1).reshape(1, 1).pad(((1, 1), None))
     casted_view = a.cast(dt2)
-    if casted_view.dtype == dtypes.bfloat16: casted_view = casted_view.cast(dtypes.half)
     run_schedule(check_schedule(casted_view, 0))
     realized_const_view = casted_view.contiguous()
     run_schedule(check_schedule(realized_const_view, 1))
-    self.assertListEqual(realized_const_view.tolist(), [[0], [1], [0]])
+    np.testing.assert_equal(realized_const_view.numpy(), [[0], [1], [0]])
 
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
