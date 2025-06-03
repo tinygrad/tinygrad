@@ -42,7 +42,7 @@ class LLaMaAdaptor(LM):
         toks = [self.tokenizer.bos_id] + self.tokenizer.encode(prompt)
       prompt_len = len(toks)
       start_pos = 0
-      for i in range(args.get("max_length", self.max_length)-prompt_len):
+      for i in range(args.get("max_length", self.max_length-prompt_len)):
         assert self.max_length >= args.get("max_length", self.max_length), "This eval needs a longer context length"
         next_tok = self.model(Tensor([toks[start_pos:]]), start_pos, args.get("temperature", 0.0)).item()
         if next_tok in self.tokenizer.stop_tokens or next_tok in until: break
