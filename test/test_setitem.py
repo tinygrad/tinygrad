@@ -159,19 +159,11 @@ class TestSetitem(unittest.TestCase):
     t[:-1] = t[1:]
     self.assertEqual(t.tolist(), [[2.0], [1.0], [1.0]])
 
-  @unittest.skipUnless(Device.DEFAULT in {"METAL"}, "METAL device required to run")
   def test_setitem_big(self):
-    tensor_size, val = 256, 4
-    # success for index tensors with <= 255 elements
-    t = Tensor.arange(0, tensor_size).contiguous()
-    idx_small = Tensor.arange(0, 255, dtype=dtypes.int)
-    t[idx_small] = val
-
-    # failure for index tensors with > 255 elements
-    t = Tensor.arange(0, tensor_size).contiguous()
-    idx_big = Tensor.arange(0, 256, dtype=dtypes.int)
-    with self.assertRaises(CompileError):
-      t[idx_big] = val
+    idx_size, val = 256, 4
+    t = Tensor.arange(0, idx_size+1).contiguous()
+    idx_big = Tensor.arange(0, idx_size, dtype=dtypes.int)
+    t[idx_big] = val
 
 class TestWithGrad(unittest.TestCase):
   def test_no_requires_grad_works(self):
