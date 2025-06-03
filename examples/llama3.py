@@ -35,7 +35,6 @@ class Tokenizer:
 
   @property
   def bos_id(self): return self.special_tokens["<|begin_of_text|>"]
-  
   @property
   def stop_tokens(self): return {self.special_tokens["<|end_of_text|>"], self.special_tokens["<|eot_id|>"]}
 
