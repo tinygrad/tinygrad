@@ -11,9 +11,7 @@ class ClangJITCompiler(Compiler):
     # -fno-math-errno is required for __builtin_sqrt to become an instruction instead of a function call
     # x18 is a reserved platform register. It is clobbered on context switch in macos and is used to store TEB pointer in windows on arm, don't use it
     target = 'x86_64' if sys.platform == 'win32' else platform.machine()
-    # Use compatible march flag for ARM64 instead of march=native which is not supported
-    march_flag = '-march=armv8-a' if target == 'aarch64' else '-march=native'
-    args = [march_flag, f'--target={target}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib', '-fno-ident']
+    args = ['-march=native', f'--target={target}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib', '-fno-ident']
     arch_args = ['-ffixed-x18'] if target == 'arm64' else []
     obj = subprocess.check_output([getenv("CC", 'clang'), '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
     return jit_loader(obj)

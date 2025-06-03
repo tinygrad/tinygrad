@@ -1,8 +1,0 @@
-tiktoken
-numpy
-tokenizers
-blobfile
-bottle
-numpy
-torch
-git+https://github.com/huggingface/transformers.git@096f25ae1f501a084d8ff2dcaf25fbc2bd60eba4

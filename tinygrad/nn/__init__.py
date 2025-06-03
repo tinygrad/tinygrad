@@ -3,7 +3,7 @@ import math
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import make_tuple, flatten
+from tinygrad.helpers import prod, make_tuple, flatten
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm:
@@ -104,7 +104,7 @@ class Conv2d:
       pad = [(d*(k-1)//2, d*(k-1) - d*(k-1)//2) for d,k in zip(make_tuple(dilation, len(self.kernel_size)), self.kernel_size[::-1])]
       padding = tuple(flatten(pad))
     self.stride, self.dilation, self.groups, self.padding = stride, dilation, groups, padding
-    scale = 1 / math.sqrt(in_channels * self.kernel_size[0] * self.kernel_size[1])
+    scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
     self.weight = Tensor.uniform(out_channels, in_channels//groups, *self.kernel_size, low=-scale, high=scale)
     self.bias: Tensor|None = Tensor.uniform(out_channels, low=-scale, high=scale) if bias else None
 
@@ -148,7 +148,7 @@ class ConvTranspose2d(Conv2d):
   def __init__(self, in_channels:int, out_channels:int, kernel_size:int|tuple[int, ...], stride=1, padding=0, output_padding=0,
                 dilation=1, groups=1, bias=True):
     super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
-    scale = 1 / math.sqrt(in_channels * self.kernel_size[0] * self.kernel_size[1])
+    scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
     self.weight = Tensor.uniform(in_channels, out_channels//groups, *self.kernel_size, low=-scale, high=scale)
     self.output_padding = output_padding
 
@@ -174,7 +174,7 @@ class Linear:
   def __init__(self, in_features:int, out_features:int, bias=True):
     bound = 1 / math.sqrt(in_features)
     self.weight = Tensor.uniform(out_features, in_features, low=-bound, high=bound)
-    self.bias: Tensor|None = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
+    self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
 
   def __call__(self, x:Tensor) -> Tensor: return x.linear(self.weight.transpose(), self.bias)
 
@@ -353,14 +353,3 @@ class LSTMCell:
     new_c = f * hc[1] + i * g
     new_h = o * new_c.tanh()
     return (new_h.contiguous(), new_c.contiguous())
-
-def kaiming_uniform(tensor:Tensor, a:float = 0.0, mode:str = 'fan_in', nonlinearity:str = 'leaky_relu') -> Tensor:
-  bound = math.sqrt(6.0 / ((1.0 + a**2) * getattr(tensor, mode+'_size'))) / tensor.max().item()
-  return tensor.uniform(-bound, bound)
-
-def get_parameter(name:str, tensor:Tensor) -> Tensor:
-  # TODO: this requires a clear on init
-  tensor.requires_grad = True
-  setattr(tensor, 'name', name)
-  return tensor
-
