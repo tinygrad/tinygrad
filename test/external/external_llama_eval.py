@@ -64,10 +64,10 @@ if __name__ == '__main__':
   args = parser.parse_args()
 
   # run eval and exit
-  adaptor = LLaMaAdaptor(model_size=args.size, quantize=args.quantize, apply_chat_template=args.chat,
-                         checkpoint_path=Path(args.model), max_length=args.ctx, system_instruction="You are a helpful assistant.")
-  results = simple_evaluate(model=adaptor, tasks=args.eval.split(","),
-                            num_fewshot=args.num_fewshot, limit=args.limit)
+  adaptor = LLaMaAdaptor(model_size=args.size, quantize=args.quantize,
+                         checkpoint_path=Path(args.model), max_length=args.ctx)
+  results = simple_evaluate(model=adaptor, tasks=args.eval.split(","), apply_chat_template=args.chat,
+                            num_fewshot=args.num_fewshot, limit=args.limit, system_instruction="You are a helpful assistant.")
 
   if args.output_path: Path(args.output_path).write_text(json.dumps(results, indent=2))
   for task_name, val in results["results"].items():
