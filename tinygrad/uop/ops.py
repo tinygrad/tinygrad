@@ -411,8 +411,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
-  def valid(self): return UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.base
-    if self.op is Ops.FCONST else self.const_like(self.base.arg), 0)
+  def valid(self):
+    ff = self.const_like(0)
+    if self.base.op is Ops.FCONST:
+      assert self.base.src[0].arg.contiguous
+      new_view = UOp(Ops.VIEW, arg=self.st.remove_mask())
+      tt = self.base.replace(src=(new_view,))
+      ff = ff.replace(src=(new_view,))
+    else:
+      tt = self.const_like(self.base.arg)
+    return UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), tt, ff)
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
   def r(self, op:Ops, axis:tuple[int, ...]):
