@@ -205,10 +205,7 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
     curr_len = len(arr)
     if curr_len == target_len:
       return arr
-    elif curr_len < target_len:
-      return np.pad(arr, (0, target_len - curr_len), 'constant')
-    else:
-      return arr[:target_len]
+    return np.pad(arr[:target_len], (0, max(0, target_len - curr_len)), 'constant')
 
   max_len = SAMPLES_PER_SEGMENT if truncate else max(len(wav) for wav in waveforms)
   if (r := max_len % SAMPLES_PER_SEGMENT) > 0: max_len += SAMPLES_PER_SEGMENT - r
@@ -306,17 +303,18 @@ def compression_ratio(text) -> float:
   return len(text_bytes) / len(zlib.compress(text_bytes))
 
 def argmax_sampling(logits: np.ndarray):
-  softmax: np.ndarray = log_softmax(logits, axis=-1)
+  logits = Tensor(logits)
+  softmax = logits.log_softmax(axis=-1)
   idx = softmax.argmax(axis=-1)
   prob = softmax.max(axis=-1)
-  return idx, prob
+  return idx.numpy(), prob.numpy()
 
-  # return logits.log_softmax(axis=-1).argmax(axis=-1), logits.log_softmax(axis=-1).max(axis=-1)
 def multinomial_sampling(logits: Tensor, temperature: int):
-  scaled = (logits / (temperature if temperature != 0 else 1)).softmax(axis=-1)
-  next_tokens = scaled.multinomial(1)
-  probs = scaled[Tensor.arange(logits.shape[0]), next_tokens.flatten()]
-  return next_tokens.numpy().astype(np.int64), probs.numpy().astype(np.int64)
+  scaled = logits / temperature if temperature != 0 else logits
+  probs = scaled.softmax(axis=-1)
+  next_tokens = probs.multinomial(1)
+  selected_probs = probs[Tensor.arange(logits.shape[0]), next_tokens.flatten()]
+  return next_tokens.numpy().astype(np.int64), selected_probs.numpy().astype(np.int64)
 
 def timestamp_filter(logits: np.ndarray, enc: Encoding):
   logits[:, np.array([enc._special_tokens["<|notimestamps|>"]])] = -math.inf
@@ -331,21 +329,16 @@ def timestamp_filter2(logits: np.ndarray, enc: Encoding, ctx: np.ndarray, sample
   timestamp_begin = enc._special_tokens["<|0.00|>"]
   for k in range(ctx.shape[0]):
     sampled_tokens = ctx[k, sample_begin:]
-    seq = [t for t in sampled_tokens.tolist()]
-    last_was_timestamp = (
-        len(seq) >= 1 and seq[-1] >= enc._special_tokens["<|0.00|>"]
-    )
-    penultimate_was_timestamp = (
-        len(seq) < 2 or seq[-2] >= enc._special_tokens["<|0.00|>"]
-    )
+    seq = sampled_tokens.tolist()
+    timestamp_token = enc._special_tokens["<|0.00|>"]
+    last_was_timestamp = bool(seq and seq[-1] >= timestamp_token)
+    penultimate_was_timestamp = len(seq) < 2 or seq[-2] >= timestamp_token
     if last_was_timestamp:
       if penultimate_was_timestamp:  # has to be non-timestamp
         logits[k, timestamp_begin :] = -np.inf
       else:  # cannot be normal text tokens
         logits[k, : enc._special_tokens["<|endoftext|>"]] = -np.inf
-    timestamps = sampled_tokens[
-        sampled_tokens >= timestamp_begin
-    ]
+    timestamps = sampled_tokens[sampled_tokens >= timestamp_begin]
     if timestamps.size > 0:
         # timestamps shouldn't decrease; forbid timestamp tokens smaller than the last
         # also force each segment to have a nonzero length, to prevent infinite looping
@@ -361,9 +354,7 @@ def timestamp_filter2(logits: np.ndarray, enc: Encoding, ctx: np.ndarray, sample
 
     # apply the `max_initial_timestamp` option
     max_initial_timestamp_index = 50
-    last_allowed = (
-        timestamp_begin + max_initial_timestamp_index
-    )
+    last_allowed = timestamp_begin + max_initial_timestamp_index
     logits[:, last_allowed + 1 :] = -np.inf
 
 def non_speech_filter(logits: np.ndarray):
@@ -392,8 +383,11 @@ def beamsearch_sampling(logits: np.ndarray, model: Whisper, sum_probs: np.ndarra
   log_probs: np.ndarray = log_softmax(logits, axis=-1)
   top_k_idx = np.argpartition(log_probs, -beam_size)[:, -beam_size:]
   top_k_probs = np.take_along_axis(log_probs, top_k_idx, axis=-1)
-  _tokens = [[enc.decode([top_k_idx[i][j]]) for j in range(top_k_idx.shape[1])] for i in range(5)]
-  candidates = {(sum_probs[i] + top_k_probs[i][j]).tolist(): (i, j, top_k_probs[i][j]) for i in range(beam_size) for j in range(topk)}
+  _tokens = [enc.decode([idx]) for idx in top_k_idx.reshape(-1)]
+  candidates = {
+      (sum_probs[i] + top_k_probs[i][j]).tolist(): (i, j, top_k_probs[i][j])
+      for i, j in itertools.product(range(beam_size), range(topk))
+  }
   next_tokens, probs, indices, finished, finished_prob, selected_sequence = [], [], [], [], [], []
   saved = 0
   
@@ -517,9 +511,7 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
     "segments": [],
   }
   
-  transcriptions = []
-  if len(waveforms) > 1:
-    transcriptions = [""] * len(waveforms)
+  transcriptions = ["" for _ in range(len(waveforms))] if len(waveforms) > 1 else []
   
   while start_time < total_time:
     curr_frame = int(start_time) * 100
@@ -531,10 +523,10 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
     print(f"\033[32mcontext to decoder: {enc.decode(ctx)=}\033[0m")
     to_decode = np.tile(ctx, (5, 1))
 
-    for t in [0, 0.2, 0.4, 0.6, 0.8, 1.0]:
-      print("temperature", t)
-      infer_result = inferloop(model, to_decode, encoded_audio, t, (nsample-len(start_tokens))*2, enc, beam)
-      if infer_result is None:
+    temperatures = np.linspace(0, 1.0, 6)
+    for t in temperatures:
+      print(f"temperature {t:.1f}")
+      if (infer_result := inferloop(model, to_decode, encoded_audio, t, (nsample-len(start_tokens))*2, enc, beam)) is None:
         print("infer result is None, resampling")
         continue
       inferred, sum_probs = infer_result
