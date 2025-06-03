@@ -562,4 +562,6 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # verify Kernels match the spec
   if __debug__: type_verify(list(sched_sink.toposort()), tensor_uop_spec)
 
+  # remove any leftover gbarriers
+  tensor_map = {k:v for k,v in tensor_map.items() if v.op is not Ops.GBARRIER}
   return tensor_map

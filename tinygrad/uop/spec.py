@@ -80,8 +80,7 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
-  # NOTE: gbarriers that got reordered can still exist in the overworld, they won't impact future kernels
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE, Ops.GBARRIER), name="root", src=(UPat.var("x"),), arg=None),
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="root", src=(UPat.var("x"),), arg=None),
    lambda root,x: root.dtype == x.dtype),
 
   # COPY/ALLREDUCE/MULTI
