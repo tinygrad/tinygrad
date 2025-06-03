@@ -1,7 +1,6 @@
 import unittest
-from tinygrad import Tensor, TinyJit, Variable, dtypes, Device
+from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.helpers import Context
-from tinygrad.device import CompileError
 import numpy as np
 
 class TestSetitem(unittest.TestCase):
