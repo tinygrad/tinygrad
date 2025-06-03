@@ -47,7 +47,6 @@ class MultiHeadAttention:
     self.key = nn.Linear(n_state, n_state, bias=False)
     self.value = nn.Linear(n_state, n_state)
     self.out = nn.Linear(n_state, n_state)
-
     self.kv_caching = kv_caching
     self.max_self_attn_cache_len = max_self_attn_cache_len
 
@@ -98,10 +97,8 @@ class ResidualAttentionBlock:
   def __init__(self, n_state, n_head, is_decoder_block=False, max_self_attn_cache_len=None):
     self.attn = MultiHeadAttention(n_state, n_head, kv_caching='self' if is_decoder_block else None, max_self_attn_cache_len=max_self_attn_cache_len)
     self.attn_ln = nn.LayerNorm(n_state)
-
     self.cross_attn = MultiHeadAttention(n_state, n_head, kv_caching='cross') if is_decoder_block else None
     self.cross_attn_ln = nn.LayerNorm(n_state) if is_decoder_block else None
-
     self.mlp = [nn.Linear(n_state, n_state*4), Tensor.gelu, nn.Linear(n_state*4, n_state)]
     self.mlp_ln = nn.LayerNorm(n_state)
 
@@ -502,17 +499,12 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
   eot = enc._special_tokens["<|endoftext|>"]
   start_tokens = get_start_tokens(enc, model.is_multilingual)
   ctx = np.array(start_tokens)
-
   curr_frame = 0
   start_time = 0
   total_time = log_spec.shape[-1] // FRAMES_PER_SEGMENT * 30
   print(f"{total_time=}")
-  transcribed = {
-    "segments": [],
-  }
-  
+  transcribed = {"segments": []}
   transcriptions = ["" for _ in range(len(waveforms))] if len(waveforms) > 1 else []
-  
   while start_time < total_time:
     curr_frame = int(start_time) * 100
     end_frame = curr_frame + FRAMES_PER_SEGMENT
@@ -522,7 +514,6 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
     encoded_audio = model.encoder.encode(Tensor(log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT]))
     print(f"\033[32mcontext to decoder: {enc.decode(ctx)=}\033[0m")
     to_decode = np.tile(ctx, (5, 1))
-
     temperatures = np.linspace(0, 1.0, 6)
     for t in temperatures:
       print(f"temperature {t:.1f}")
@@ -543,27 +534,22 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
       print(f"Decoder output: {text=}")
       compression = compression_ratio(text)
       print(f"\033[33m{compression=}, {selected_avg_prob=}\033[0m")
-      
       is_no_speech = selected_avg_prob < -1.0 or (compression < 1.1 and selected_avg_prob < -0.1 * no_speech_threshold)
       if compression >= 2.4:
         print("Too repetitive, resample")
         continue
-        
       if is_no_speech:
         print(f"No speech detected (avg_prob={selected_avg_prob}, threshold={-0.1 * no_speech_threshold}), skipping segment")
         start_time += 30
         ctx = np.array(start_tokens)
         break
-        
       segments = list(segment_and_seek(tokens, enc, start_time))
       valid_segments = [segment for segment in segments if segment.text.strip()]
-      
       if not valid_segments:
         print("No speech segments found, skipping to next segment")
         start_time += 30
         ctx = np.array(start_tokens)
         break
-      
       context_for_next = []
       for segment in valid_segments:
         text = f"{format_time(int(segment.start))} -> {format_time(int(segment.end))}: {segment.text}"
@@ -576,9 +562,8 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
           "start": segment.start,
           "end": segment.end
         })
-        
         if len(waveforms) > 1:
-          batch_idx = 0  
+          batch_idx = 0
           if log_spec.shape[0] > 1:
             batch_idx = min(batch_idx, len(transcriptions) - 1)
           if len(transcriptions) > batch_idx:
@@ -587,7 +572,6 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
           if not transcriptions:
             transcriptions.append("")
           transcriptions[0] += segment.text + " "
-      
       if valid_segments:start_time = valid_segments[-1].end
       else: start_time += 30
       break
@@ -596,7 +580,6 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
       start_time += 30
       ctx = np.array(start_tokens)
       continue
-    
     # Only set context for next iteration if we have valid segments
     if context_for_next:
       ctx = np.array([enc._special_tokens['<|startofprev|>']]+context_for_next[-nsample+len(start_tokens):]+start_tokens)
