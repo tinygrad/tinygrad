@@ -12,6 +12,10 @@ class BitLinear:
 
     def __init__(self, in_features: int, out_features: int, bias: bool = False):
 
+        self.in_features = in_features
+        self.out_features = out_features
+        self.bias = bias
+
         # Packed weight tensor: (out_features//4, in_features)
         self.weight = Tensor.zeros(
             (out_features // self.VALUES_PER_ITEM, in_features),
@@ -82,20 +86,24 @@ class BitLinear:
         """
         packed_shape = packed.shape
 
-        if len(packed_shape) == 1:
-            original_row_dim = packed_shape[0] * BitLinear.VALUES_PER_ITEM
-            unpacked_shape = (original_row_dim,)
-        else:
-            original_row_dim = packed_shape[0] * BitLinear.VALUES_PER_ITEM
-            unpacked_shape = (original_row_dim, *packed_shape[1:])
-
-        unpacked = Tensor.zeros(unpacked_shape, device=packed.device, dtype=dtypes.uint8)
-
+        # Extract each 2-bit component by creating separate tensors for each bit position
+        unpacked_parts = []
         for i in range(BitLinear.VALUES_PER_ITEM):
-            start = i * packed_shape[0]
-            end = start + packed_shape[0]
-            mask = 3 << (2 * i)
-            unpacked[start:end] = (packed & mask) >> (2 * i)
+            mask = 3 << (2 * i)  # 3 = 0b11, shifted to the right position
+            extracted = (packed & mask) >> (2 * i)
+            unpacked_parts.append(extracted)
+
+        # Stack the parts along a new dimension and then reshape
+        if len(packed_shape) == 1:
+            # For 1D input, stack along dimension 0
+            stacked = Tensor.stack(*unpacked_parts, dim=0)
+            # Reshape to flatten: (4, N) -> (4*N,)
+            unpacked = stacked.reshape(-1)
+        else:
+            # For 2D input, stack along dimension 0  
+            stacked = Tensor.stack(*unpacked_parts, dim=0)
+            # Reshape to interleave: (4, H, W) -> (4*H, W)
+            unpacked = stacked.reshape(BitLinear.VALUES_PER_ITEM * packed_shape[0], *packed_shape[1:])
 
         return unpacked.cast(dtype) - 1
 
