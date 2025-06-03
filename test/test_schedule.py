@@ -83,6 +83,11 @@ class TestSchedule(unittest.TestCase):
     c = a+b
     with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
 
+  def test_reoreder_unaryop(self):
+    x = Tensor.empty(4,1)*Tensor.empty(4,1)
+    w = x.expand(4,4).cast(dtypes.int)
+    run_schedule(check_schedule(w, 1))
+
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and getenv("CAST_AFTER_EXPAND"), "need half and CAST_AFTER_EXPAND=1")
   @unittest.skip("CAST_AFTER_EXPAND is not supported")
   def test_expand_buffer_before_cast(self):

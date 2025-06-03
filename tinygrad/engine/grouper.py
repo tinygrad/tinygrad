@@ -100,9 +100,6 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat.var("x"))))), lambda x,t: t.assign(x.contiguous())),
   # ASSIGN to unrealized replaces the UOp
   (UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat.var("x"))), lambda x,t: x.contiguous() if t.base.op not in {Ops.BUFFER, Ops.BUFFER_VIEW} else None),
-  # put CAST to smaller dtype before EXPAND
-  (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm"),)), lambda cast,vm: vm.base.cast(cast.dtype).view(vm.st)
-    if cast.dtype.itemsize <= vm.dtype.itemsize and resolve(prod(vm.shape) > vm.st.real_size()) else None),
 ])
 
 # support for using a contiguous permuted view instead of the parent view if one exists
@@ -512,10 +509,10 @@ finalize_gbarrier = PatternMatcher([
   # if an op takes more than one input, check combined LOADs don't exceed device limits
   (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs),
   # merge gbarrier
-  (UPat((Ops.GBARRIER, Ops.CONTIGUOUS), src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
+  (UPat((Ops.GBARRIER, Ops.CONTIGUOUS), src=(UPat.any(UPat(Ops.GBARRIER), UPat(Ops.GBARRIER).view()),), name="x"), lambda x: x.src[0]),
   # put UnaryOps before EXPANDs
-  (UPat(GroupOp.Unary, src=(UPat(GroupOp.All-{Ops.COPY, Ops.CONTIGUOUS}, name="x").gbarrier().view(name="v"),), name="alu"),
-   lambda x,v,alu: x.alu(alu.op).replace(tag=1).gbarrier().view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
+  (UPat({*GroupOp.Unary, Ops.CAST, Ops.BITCAST}, src=(UPat(GroupOp.All-{Ops.COPY, Ops.CONTIGUOUS}, name="x").gbarrier().view(name="v"),), name="a"),
+   lambda x,v,a: x.alu(a.op).replace(tag=1).gbarrier().view(v.st) if resolve(prod(a.shape) > v.st.real_size()) else None),
 ])
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
