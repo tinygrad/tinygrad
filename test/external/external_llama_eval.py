@@ -23,11 +23,11 @@ class LLaMaAdaptor(LM):
     self.tokenizer = Tokenizer(str((checkpoint_path if checkpoint_path.is_dir() else checkpoint_path.parent) / "tokenizer.model"))
     self.model = build_transformer(checkpoint_path, model_size=model_size, quantize=quantize, max_context=self.max_length)
 
-  def _encode_role(self, role: str):
+  def _encode_role(self, role: str) -> list[int]:
     return [self.tokenizer.special_tokens["<|start_header_id|>"]] + self.tokenizer.encode(role) + \
       [self.tokenizer.special_tokens["<|end_header_id|>"]] + self.tokenizer.encode("\n\n")
 
-  def _encode_message(self, role: str, content: str):
+  def _encode_message(self, role: str, content: str) -> list[int]:
     return self._encode_role(role) + self.tokenizer.encode(content.strip()) + [self.tokenizer.special_tokens["<|eot_id|>"]]
 
   def generate_until(self, requests: list[Instance]) -> list[str]:
@@ -42,7 +42,7 @@ class LLaMaAdaptor(LM):
         toks = [self.tokenizer.bos_id] + self.tokenizer.encode(prompt)
       prompt_len = len(toks)
       start_pos = 0
-      for i in range(args.get("max_length", self.max_length)):
+      for i in range(args.get("max_length", self.max_length)-prompt_len):
         assert self.max_length >= args.get("max_length", self.max_length), "This eval needs a longer context length."
         next_tok = self.model(Tensor([toks[start_pos:]]), start_pos, args.get("temperature", 0.0)).item()
         if next_tok in self.tokenizer.stop_tokens or next_tok in until: break
