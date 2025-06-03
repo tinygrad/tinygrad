@@ -489,7 +489,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, () if device is None else (UOp(Ops.DEVICE, arg=device),),
                  ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape)),))
     if op is Ops.FCONST:
-       return UOp(op, dtype, (UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),), arg)
+      return UOp(op, dtype, (UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),), arg)
     # Tensor variable binding is BIND(VAR(VIEW(DEVICE)), CONST(VIEW(DEVICE)))
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
