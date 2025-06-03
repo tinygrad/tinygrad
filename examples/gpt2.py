@@ -20,10 +20,7 @@ class Attention:
     self.dim = dim
     self.head_dim = dim // n_heads
 
-  def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]) -> Tensor:
-    if mask is not None or start_pos.val == 0:
-      # no symbolic shape qkv when consuming prompts
-      start_pos = start_pos.val
+  def __call__(self, x:Tensor, start_pos:Union[Variable,int], mask:Optional[Tensor]) -> Tensor:
 
     if HALF: x = x.half()
     xqkv = self.c_attn(x)
@@ -76,21 +73,18 @@ class Transformer:
     self.lm_head = Linear(dim, vocab_size, bias=False)
     self.forward_jit = TinyJit(self.forward)
 
-  def forward(self, tokens:Union[Tensor,UOp], start_pos:Variable, temperature:float=0.0):
+  def forward(self, tokens:Union[Tensor,UOp], start_pos:Union[Variable,int], temperature:float=0.0):
     if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
-    if isinstance(tokens, UOp):
-      seqlen = 1
-      tok_emb = self.wte.weight.shrink(((tokens, tokens+1), None))
-    else:
-      seqlen = tokens.shape[1]
-      tok_emb = self.wte(tokens)
+
+    seqlen = tokens.shape[1]
+    tok_emb = self.wte(tokens)
 
     pos_emb = self.wpe(self.allpos.shrink((None, (start_pos, start_pos+seqlen))))
     h = tok_emb + pos_emb
 
     if HALF: h = h.half()
 
-    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos.val+1) if seqlen > 1 else None
+    mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos+1) if seqlen > 1 else None
 
     for hi in self.h: h = hi(h, start_pos, mask)
 
@@ -108,9 +102,11 @@ class Transformer:
       ret = (logits / temperature).softmax().multinomial()
     return ret.flatten().realize()
 
-  def __call__(self, tokens:Union[Tensor,UOp], start_pos:Variable, temperature:float=0.0) -> Tensor:
-    forward = (self.forward_jit if JIT and (isinstance(tokens, UOp) or tokens.shape[1] == 1) else self.forward)
-    return forward(tokens, start_pos, temperature)
+  def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0):
+    # TODO: better way to handle the first call v.s. the rest?
+    if tokens.shape[0:2] == (1,1) and JIT and start_pos != 0:
+      return self.forward_jit(tokens, Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos), temperature)
+    return self.forward(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
@@ -189,13 +185,9 @@ class GPT2:
                   f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                   (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
         with WallTimeEvent(BenchEvent.STEP):
-          if batch_size == 1 and len(toks[0][start_pos:]) == 1:
-            tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
-          else:
-            tokens = Tensor([x[start_pos:] for x in toks])
-          tok = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT-1).bind(start_pos), temperature).tolist()
-      start_pos = len(toks[0])
-      for i,t in enumerate(tok): toks[i].append(t)
+          new_toks = self.model(Tensor([x[start_pos:] for x in toks]), start_pos, temperature).tolist()
+      for i,x in enumerate(new_toks): toks[i].append(x)
+      start_pos = len(toks[0]) - 1
     return [self.tokenizer.decode(x) for x in toks]
 
 # **** main code ****
@@ -223,7 +215,7 @@ if __name__ == "__main__":
   gpt2 = GPT2.build_gguf(args.model_size) if args.model_size.startswith("gpt2_gguf_") else GPT2.build(args.model_size)
 
   if args.benchmark != -1:
-    gpt2.model(Tensor.rand(args.batch_size, args.benchmark), Variable("a", 0, MAX_CONTEXT).bind(0)).realize()
+    gpt2.model(Tensor.rand(args.batch_size, args.benchmark), 0).realize()
   else:
     texts = gpt2.generate(args.prompt, args.count, args.temperature, timing=args.timing, batch_size=args.batch_size)
     if not args.noshow:
