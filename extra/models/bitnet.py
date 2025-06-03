@@ -83,15 +83,15 @@ class BitLinear:
         packed_shape = packed.shape
 
         if len(packed_shape) == 1:
-            original_row_dim = packed_shape[0] * LinearBitNet.VALUES_PER_ITEM
+            original_row_dim = packed_shape[0] * BitLinear.VALUES_PER_ITEM
             unpacked_shape = (original_row_dim,)
         else:
-            original_row_dim = packed_shape[0] * LinearBitNet.VALUES_PER_ITEM
+            original_row_dim = packed_shape[0] * BitLinear.VALUES_PER_ITEM
             unpacked_shape = (original_row_dim, *packed_shape[1:])
 
         unpacked = Tensor.zeros(unpacked_shape, device=packed.device, dtype=dtypes.uint8)
 
-        for i in range(LinearBitNet.VALUES_PER_ITEM):
+        for i in range(BitLinear.VALUES_PER_ITEM):
             start = i * packed_shape[0]
             end = start + packed_shape[0]
             mask = 3 << (2 * i)
@@ -110,12 +110,12 @@ class BitLinear:
 
         return self._unpacked_weights
 
-    def activation_quant(self, input: Tensor, num_bits: int = 8) -> Tuple[Tensor, Tensor]:
+    def activation_quant(self, x: Tensor, num_bits: int = 8) -> Tuple[Tensor, Tensor]:
         """
         Activation function : Performs symmetric, per-token quantization on the input activations.
         Parameters:
         -----------
-        input : Tensor
+        x : Tensor
             Input activations to be quantized.
         num_bits : int, optional (default=8)
             Number of bits to use for quantization, determining the quantization range.
@@ -130,24 +130,24 @@ class BitLinear:
         Qp = 2 ** (num_bits - 1) - 1  # 127
 
         # Per-token scaling
-        scale = Qp / input.abs().max(axis=-1, keepdim=True).clamp(min_=1e-5)
+        scale = Qp / x.abs().max(axis=-1, keepdim=True).clamp(min_=1e-5)
 
         # Quantize and clamp
-        result = (input * scale).round().clip(Qn, Qp)
+        result = (x * scale).round().clip(Qn, Qp)
 
         return result.cast(dtypes.int8), scale
 
-    def post_quant_process(self, input: Tensor, input_scale: Tensor, weight_scale: Tensor) -> Tensor:
+    def post_quant_process(self, x: Tensor, input_scale: Tensor, weight_scale: Tensor) -> Tensor:
         """Apply post-quantization scaling."""
-        out = input / (input_scale * weight_scale)
+        out = x / (input_scale * weight_scale)
         return out
 
-    def __call__(self, input: Tensor) -> Tensor:
+    def __call__(self, x: Tensor) -> Tensor:
         # Get unpacked ternary weights
         w_quant = self._get_unpacked_weights()
 
         # Apply activation quantization
-        input_quant, input_scale = self.activation_quant(input)
+        input_quant, input_scale = self.activation_quant(x)
 
         # Cast to computation dtype for matrix multiplication
         input_float = input_quant.cast(dtypes.float32)
