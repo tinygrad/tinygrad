@@ -13,33 +13,27 @@ class LLaMaAdaptor(LM):
     self,
     model_size: str,
     checkpoint_path: Path,
-    is_chat_model: bool,
     max_length: int,
     quantize: str | None,
   ):
     super().__init__()
     self.max_length = max_length
-    self.is_chat_model = is_chat_model
     self.tokenizer = Tokenizer(str((checkpoint_path if checkpoint_path.is_dir() else checkpoint_path.parent) / "tokenizer.model"))
     self.model = build_transformer(checkpoint_path, model_size=model_size, quantize=quantize, max_context=self.max_length)
-
-  def _encode_role(self, role: str) -> list[int]:
-    return [self.tokenizer.special_tokens["<|start_header_id|>"]] + self.tokenizer.encode(role) + \
-      [self.tokenizer.special_tokens["<|end_header_id|>"]] + self.tokenizer.encode("\n\n")
-
-  def _encode_message(self, role: str, content: str) -> list[int]:
-    return self._encode_role(role) + self.tokenizer.encode(content.strip()) + [self.tokenizer.special_tokens["<|eot_id|>"]]
-
+  @property
+  def tokenizer_name(self) -> str: return ""
+  def chat_template(self, chat_template: bool | str = False) -> str: return ""
+  def apply_chat_template(self, chat_history: list[dict[str, str]]) -> str:
+    ret = ""
+    for message in chat_history:
+      ret += f"<|start_header_id|>{message["role"]}<|end_header_id|>\n\n{message["content"].strip()}<|eot_id|>"
+    return ret
   def generate_until(self, requests: list[Instance]) -> list[str]:
     continuations = []
     for request in tqdm(requests):
       prompt, args = request.args
       until = [self.tokenizer.encode(tok) for tok in args.get("until", [])]
-      if self.is_chat_model:
-        toks = [self.tokenizer.bos_id] + self._encode_message("system", "You are a helpful assistant") + \
-          self._encode_message("user", prompt) + self._encode_role("assistant")
-      else:
-        toks = [self.tokenizer.bos_id] + self.tokenizer.encode(prompt)
+      toks = [self.tokenizer.bos_id] + self.tokenizer.encode(prompt,allow_special=True)
       prompt_len = len(toks)
       start_pos = 0
       for i in range(args.get("max_length", self.max_length-prompt_len)):
@@ -70,8 +64,8 @@ if __name__ == '__main__':
   args = parser.parse_args()
 
   # run eval and exit
-  adaptor = LLaMaAdaptor(model_size=args.size, quantize=args.quantize,
-                         checkpoint_path=Path(args.model), is_chat_model=args.chat, max_length=args.ctx)
+  adaptor = LLaMaAdaptor(model_size=args.size, quantize=args.quantize, apply_chat_template=args.chat,
+                         checkpoint_path=Path(args.model), max_length=args.ctx, system_instruction="You are a helpful assistant.")
   results = simple_evaluate(model=adaptor, tasks=args.eval.split(","),
                             num_fewshot=args.num_fewshot, limit=args.limit)
 
