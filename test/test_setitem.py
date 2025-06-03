@@ -161,8 +161,8 @@ class TestSetitem(unittest.TestCase):
   def test_setitem_big(self):
     idx_size, val = 256, 4
     t = Tensor.arange(0, idx_size+1).contiguous()
-    idx_big = Tensor.arange(0, idx_size, dtype=dtypes.int)
-    t[idx_big] = val
+    idx = Tensor.arange(0, idx_size, dtype=dtypes.int)
+    t[idx] = val
 
 class TestWithGrad(unittest.TestCase):
   def test_no_requires_grad_works(self):
