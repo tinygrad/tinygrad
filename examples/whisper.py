@@ -191,39 +191,20 @@ def get_mel_filters(n_mels: int=80, n_fft: int=400, sr: int=16000) -> np.ndarray
     return filters
 
 def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
-  """
-  :param waveforms: A list of possibly variable length 16000Hz audio samples
-  :param batch_size: The batch_size associated with the Whisper model being used to transcribe the audio.
-                     Used to prevent JIT mismatch errors since the encoder does not accept symbolic shapes
-  :param truncate: If true, truncates (or pads) audio to exactly 30s for a single encoder pass
-  :return: mel spectrogram of the given waveforms
-  """
-  def pad_or_trim(arr, target_len):
-    curr_len = len(arr)
-    if curr_len == target_len:
-      return arr
-    return np.pad(arr[:target_len], (0, max(0, target_len - curr_len)), 'constant')
-
   max_len = SAMPLES_PER_SEGMENT if truncate else max(len(wav) for wav in waveforms)
   if (r := max_len % SAMPLES_PER_SEGMENT) > 0: max_len += SAMPLES_PER_SEGMENT - r
-  waveforms = np.array(list(map(lambda w: pad_or_trim(w, max_len), waveforms)))
-  assert waveforms.shape[0] <= batch_size
+  
+  waveforms = np.stack([np.pad(wav[:max_len], (0, max(0, max_len - len(wav))), 'constant') for wav in waveforms])
   if waveforms.shape[0] < batch_size:
-    # we could have a symbolic batch_size dim instead of manually padding here if conv/layernorm supported symbolic shapes
-    waveforms = np.pad(waveforms, pad_width=((0, batch_size - waveforms.shape[0]), (0, 0)))
+    waveforms = np.pad(waveforms, ((0, batch_size - waveforms.shape[0]), (0, 0)))
 
   stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
-  magnitudes = np.absolute(stft[..., :-1]) ** 2
+  magnitudes = np.abs(stft[..., :-1]) ** 2
   
-  # Use cached mel filters instead of computing them every time
   mel_filters_matrix = get_mel_filters(N_MELS, N_FFT, RATE)
-  mel_spec = mel_filters_matrix @ magnitudes
-
-  log_spec = np.log10(np.clip(mel_spec, 1e-10, None))
+  log_spec = np.log10(np.clip(mel_filters_matrix @ magnitudes, 1e-10, None))
   log_spec = np.maximum(log_spec, log_spec.max((1,2), keepdims=True) - 8.0)
-  log_spec = (log_spec + 4.0) / 4.0
-
-  return log_spec
+  return (log_spec + 4.0) / 4.0
 
 LANGUAGES = {
   "en": "english", "zh": "chinese", "de": "german", "es": "spanish", "ru": "russian", "ko": "korean", "fr": "french", "ja": "japanese", "pt": "portuguese", "tr": "turkish",
@@ -418,14 +399,15 @@ def inferloop(model: Whisper, ctx: np.ndarray, encoded_audio: Tensor, temperatur
   sum_probs = np.zeros(ctx.shape[0])
   beam_sequence = []
   beam_sequence_probs = []
+  
   for i in trange(num_sample):
-    to_decode = Tensor(next_tokens)
-    logits = model.decoder(to_decode, pos, encoded_audio)
-    logits = logits[:, -1].contiguous().numpy()
+    logits = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1].contiguous().numpy()
+    
     if i == 0: suppress_blank(logits, enc)
     non_speech_filter(logits)
     timestamp_filter2(logits, enc, ctx, sample_begin)
     timestamp_filter(logits, enc)
+    
     if beam and temperature == 0:
       sampled = beamsearch_sampling(logits, model, sum_probs, ctx)
       ctx = sampled.ctx
@@ -435,9 +417,7 @@ def inferloop(model: Whisper, ctx: np.ndarray, encoded_audio: Tensor, temperatur
         beam_sequence.extend(sampled.finished)
         beam_sequence_probs.extend(sampled.finished_prob)
         if len(beam_sequence) >= 5:
-          ctx = beam_sequence
-          sum_probs = np.array(beam_sequence_probs)
-          break
+          return beam_sequence, np.array(beam_sequence_probs)
     else:
       if temperature == 0:
         next_tokens, probs = argmax_sampling(logits)
@@ -445,12 +425,11 @@ def inferloop(model: Whisper, ctx: np.ndarray, encoded_audio: Tensor, temperatur
         next_tokens, probs = multinomial_sampling(Tensor(logits), temperature)
       sum_probs += probs
       next_tokens = replace_eot(next_tokens.flatten(), ctx, eot)
-      done = (next_tokens == eot).all()
-      next_tokens.shape[-1]
-      if done: break
+      if (next_tokens == eot).all(): break
       next_tokens = next_tokens.reshape((-1, 1))
       ctx = np.concat((ctx, next_tokens), axis=1)
     pos = ctx.shape[-1] - 1
+    
   return ctx, sum_probs
 
 @dataclass
