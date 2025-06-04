@@ -6,8 +6,8 @@ Minimal ONNX support optimized for code size and essential functionality.
 """
 
 import struct
-from typing import Any, Dict, List, Tuple, Union
-from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple, Union, Optional
+from dataclasses import dataclass, field
 
 # Minimal ONNX type definitions
 @dataclass
@@ -15,14 +15,9 @@ class TensorProto:
   dims: Tuple[int, ...] = ()
   data_type: int = 0
   raw_data: bytes = b''
-  float_data: List[float] = None
-  int32_data: List[int] = None
-  int64_data: List[int] = None
-
-  def __post_init__(self):
-    if self.float_data is None: self.float_data = []
-    if self.int32_data is None: self.int32_data = []
-    if self.int64_data is None: self.int64_data = []
+  float_data: List[float] = field(default_factory=list)
+  int32_data: List[int] = field(default_factory=list)
+  int64_data: List[int] = field(default_factory=list)
 
 @dataclass
 class Attribute:
@@ -31,12 +26,8 @@ class Attribute:
   f: float = 0.0
   i: int = 0
   s: bytes = b''
-  floats: List[float] = None
-  ints: List[int] = None
-
-  def __post_init__(self):
-    if self.floats is None: self.floats = []
-    if self.ints is None: self.ints = []
+  floats: List[float] = field(default_factory=list)
+  ints: List[int] = field(default_factory=list)
 
 @dataclass
 class NodeProto:
@@ -61,7 +52,7 @@ class GraphProto:
 
 @dataclass
 class ModelProto:
-  graph: GraphProto = None
+  graph: Optional[GraphProto] = None
   opset_import: Tuple[Tuple[str, int], ...] = ()
 
   def __post_init__(self):
@@ -196,7 +187,12 @@ class OnnxRunner:
   def __init__(self, model: ModelProto):
     self.model = model
 
+  def __call__(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """Make OnnxRunner callable for compatibility."""
+    return self.run(inputs)
+
   def run(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """Run inference with the ONNX model."""
     # Placeholder for actual inference - would need full implementation
     return {}
 
