@@ -311,7 +311,7 @@ view_left = merge_views+PatternMatcher([
 def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub View Left")
 
 def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
-  if (st:=unwrap(view.st)).contiguous and st.size == r.size: return None
+  if (st:=unwrap(view.st)).contiguous and tuple(x for x in r.shape if resolve(x != 1)) == tuple(x for x in view.shape if resolve(x != 1)): return None
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
   prshape = prod(rshape:=tmp.shape[-len(r.axis_arg):])
@@ -345,7 +345,7 @@ def elementwise_view_right(root:UOp):
 
 # push VIEW to children
 view_right = merge_views+PatternMatcher([
-  # push a non contiguous ShapeTracker through reduceop
+  # push view through reduceops
   (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), swizzle_reduceop),
   # apply view after reduceops
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="src"),), name="v"),), name="r"), reduceop_view_right),
