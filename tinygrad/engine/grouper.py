@@ -186,6 +186,10 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
     recursive_group(r, unwrap(r.st), r, children, realizes, reduce_for_op, group, cache={})
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
+    for u in r.toposort(gate=lambda u: u not in realizes):
+      if u.op is Ops.REDUCE_AXIS and u.src[0].base.op is Ops.CONST:
+        can_chase = False
+        break
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = r in group
     # can only have one output
