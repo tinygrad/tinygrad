@@ -601,6 +601,19 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 0, 3)
     self.helper_test_variable(-a<-b, False, True, "(b<a)")
 
+  def test_eq_to_self(self):
+    a = Variable("a", 0, 3)
+    self.helper_test_variable(a.ne(a), False, False, "False")
+
+  def test_eq_to_self_plus_const(self):
+    a = Variable("a", 0, 3)
+    self.helper_test_variable(a.ne(a+1), True, True, "True")
+
+  def test_eq_to_self_plus_var(self):
+    a = Variable("a", 0, 3)
+    b = Variable("b", 1, 3)
+    self.helper_test_variable(a.ne(a+b), True, True, "True")
+
   def test_where_cast(self):
     s = Variable("s", 0, 3)
     cond = s < 2
