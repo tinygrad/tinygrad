@@ -882,7 +882,7 @@ class Tensor(MathTrait):
 
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
     """
-    Sample indices from a multinomial distribution based on the weights of this tensor.
+    Sample from a multinomial distribution weighted by `self`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
