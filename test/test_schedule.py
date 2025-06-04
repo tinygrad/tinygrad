@@ -6,6 +6,7 @@ import unittest
 import numpy as np
 import functools
 from typing import List, Optional, Union, cast
+from hypothesis import assume, given, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
@@ -69,6 +70,33 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
 def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, merge_views+sym, {})
 
 class TestSchedule(unittest.TestCase):
+  def test_arange_avgpool2d(self, kcount=2):
+    x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
+    t = x.avg_pool2d(padding=1)
+    sched = t.schedule()
+    self.assertEqual(len(sched), kcount)
+    run_schedule(sched)
+    import torch
+    torch_out = torch.nn.functional.avg_pool2d(torch.arange(25).reshape(1,1,5,5).float(), kernel_size=(2,2), padding=1).numpy()
+    np.testing.assert_allclose(t.numpy(), torch_out)
+
+  def test_arange_avgpool2d_fused_noopt(self):
+    with Context(FUSE_ARANGE=1, NOOPT=1): self.test_arange_avgpool2d(kcount=1)
+
+  # linearizer error
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "needs supports_float4 to fail")
+  def test_arange_avgpool2d_fused(self):
+    with self.assertRaises(RecursionError):
+      with Context(FUSE_ARANGE=1, NOOPT=0): self.test_arange_avgpool2d(kcount=1)
+
+  # grouper error
+  @unittest.expectedFailure
+  def test_arange_sum(self):
+    a = Tensor.arange(6).reshape(3, 2).sum(axis=1)
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(a, 1))
+    self.assertListEqual(a.tolist(), [1, 5, 9])
+
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
   def test_error_on_device_mismatch(self):
     a = Tensor.empty(10)
@@ -1705,13 +1733,15 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(realized_const_view, 1))
     self.assertListEqual(realized_const_view.tolist(), [[1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]])
 
-  def test_cast_padded_const(self):
-    a = Tensor(1, dtype=dtypes.int32).reshape(1, 1).pad(((1, 1), None))
-    casted_view = a.cast(dtypes.float32)
+  @given(strat.sampled_from(dtypes.all), strat.sampled_from(dtypes.all))
+  def test_cast_padded_const(self, dt1, dt2):
+    assume(is_dtype_supported(dt1) and is_dtype_supported(dt2))
+    a = Tensor(1, dtype=dt1).reshape(1, 1).pad(((1, 1), None))
+    casted_view = a.cast(dt2)
     run_schedule(check_schedule(casted_view, 0))
     realized_const_view = casted_view.contiguous()
     run_schedule(check_schedule(realized_const_view, 1))
-    self.assertListEqual(realized_const_view.tolist(), [[0], [1], [0]])
+    np.testing.assert_equal(realized_const_view.numpy(), [[0], [1], [0]])
 
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
