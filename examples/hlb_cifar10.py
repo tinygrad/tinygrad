@@ -4,7 +4,7 @@
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
 import random, time
-import numpy as np
+import numpy as np  # only for eigenvalue decomposition in whitening - TODO: replace with pure tinygrad
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
 from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
@@ -18,7 +18,7 @@ cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
 
 BS, STEPS = getenv("BS", 512), getenv("STEPS", 1000)
 EVAL_BS = getenv("EVAL_BS", BS)
-GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
+GPUS = tuple(f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1)))
 assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 assert EVAL_BS % len(GPUS) == 0, f"{EVAL_BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 
@@ -159,20 +159,30 @@ def train_cifar():
     def _patches(data, patch_size=(kernel_size,kernel_size)):
       h, w = patch_size
       c = data.shape[1]
-      axis = (2, 3)
-      return np.lib.stride_tricks.sliding_window_view(data, window_shape=(h,w), axis=axis).transpose((0,3,2,1,4,5)).reshape((-1,c,h,w))
+      # Convert to tinygrad and use unfold to create sliding windows
+      # unfold(dim, size, step) creates sliding windows
+      # We need to unfold both height and width dimensions
+      x = data.unfold(-2, h, 1).unfold(-2, w, 1)  # unfold height, then width
+      # Reshape to match the expected output format: (n_patches, c, h, w)
+      x = x.permute(0, 2, 3, 1, 4, 5).reshape(-1, c, h, w)
+      return x
 
     def _eigens(patches):
       n,c,h,w = patches.shape
       Σ = _cov(patches.reshape(n, c*h*w))
-      Λ, V = np.linalg.eigh(Σ, UPLO='U')
-      return np.flip(Λ, 0), np.flip(V.T.reshape(c*h*w, c, h, w), 0)
+      # Keep eigenvalue decomposition as numpy for now since it's complex
+      Σ_np = Σ.numpy()
+      Λ_np, V_np = np.linalg.eigh(Σ_np, UPLO='U')
+      # Convert back to tinygrad tensors and use tinygrad flip
+      Λ = Tensor(Λ_np, device=patches.device).flip(0)
+      V = Tensor(V_np, device=patches.device).T.reshape(c*h*w, c, h, w).flip(0)
+      return Λ, V
 
-    # NOTE: np.linalg.eigh only supports float32 so the whitening layer weights need to be converted to float16 manually
-    Λ, V = _eigens(_patches(X.float().numpy()))
-    W = V/np.sqrt(Λ+1e-2)[:,None,None,None]
+    # NOTE: eigenvalue decomposition still uses numpy internally but data flows through tinygrad
+    Λ, V = _eigens(_patches(X))
+    W = V / (Λ + 1e-2).sqrt().reshape(-1, 1, 1, 1)
 
-    return Tensor(W.astype(np.float32), requires_grad=False).cast(dtypes.default_float)
+    return W.cast(dtypes.default_float)
 
   # ========== Loss ==========
   def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
@@ -192,32 +202,42 @@ def train_cifar():
     X = X[...,1:size+1,:].flip(-2).cat(X, X[...,-(size+1):-1,:].flip(-2), dim=-2)
     return X
 
-  # return a binary mask in the format of BS x C x H x W where H x W contains a random square mask
-  def make_square_mask(shape, mask_size) -> Tensor:
-    BS, _, H, W = shape
-    low_x = Tensor.randint(BS, low=0, high=W-mask_size).reshape(BS,1,1,1)
-    low_y = Tensor.randint(BS, low=0, high=H-mask_size).reshape(BS,1,1,1)
-    idx_x = Tensor.arange(W, dtype=dtypes.int32).reshape((1,1,1,W))
-    idx_y = Tensor.arange(H, dtype=dtypes.int32).reshape((1,1,H,1))
-    return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
-
+  @TinyJit
   def random_crop(X:Tensor, crop_size=32):
-    mask = make_square_mask(X.shape, crop_size)
-    mask = mask.expand((-1,3,-1,-1))
-    X_cropped = Tensor(X.numpy()[mask.numpy()])
-    return X_cropped.reshape((-1, 3, crop_size, crop_size))
+    BS, C, H, W = map(int, X.shape)
+    assert H >= crop_size and W >= crop_size
+    
+    low_y = Tensor.randint(BS, low=0, high=H-crop_size, dtype=dtypes.int32, device=X.device)
+    low_x = Tensor.randint(BS, low=0, high=W-crop_size, dtype=dtypes.int32, device=X.device)
+    
+    rel_y = Tensor.arange(crop_size, dtype=dtypes.int32, device=X.device).reshape(1, crop_size, 1)
+    rel_x = Tensor.arange(crop_size, dtype=dtypes.int32, device=X.device).reshape(1, 1, crop_size)
+    
+    lin = ((rel_y + low_y[:, None, None]) * W + (rel_x + low_x[:, None, None])).reshape(BS, -1)
+    
+    out = X.reshape(BS, C, H*W).gather(2, lin[:, None, :].expand(BS, C, -1)).reshape(BS, C, crop_size, crop_size)
+    return out
 
+  @TinyJit
   def cutmix(X:Tensor, Y:Tensor, mask_size=3):
-    # fill the square with randomly selected images from the same batch
-    mask = make_square_mask(X.shape, mask_size)
-    order = list(range(0, X.shape[0]))
-    random.shuffle(order)
-    X_patch = Tensor(X.numpy()[order], device=X.device, dtype=X.dtype)
-    Y_patch = Tensor(Y.numpy()[order], device=Y.device, dtype=Y.dtype)
-    X_cutmix = mask.where(X_patch, X)
-    mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
-    Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
-    return X_cutmix, Y_cutmix
+    BS, _, H, W = map(int, X.shape)
+    order = Tensor.randperm(int(BS), dtype=dtypes.int32, device=X.device)
+    
+    Xp = X.gather(0, order.reshape(int(BS), 1, 1, 1).expand(X.shape))
+    Yp = Y.gather(0, order.reshape(int(BS), 1).expand(Y.shape))
+    
+    lam = (mask_size**2) / (H * W)
+    
+    alpha = Tensor.full((BS, 1, 1, 1), lam, dtype=X.dtype, device=X.device)
+    
+    X_out = alpha * Xp + (1.0 - alpha) * X
+    Y_out = lam * Yp + (1.0 - lam) * Y
+    return X_out, Y_out
+
+  @TinyJit
+  def random_flip(X:Tensor):
+    mask = Tensor.rand(X.shape[0], 1, 1, 1, device=X.device) < 0.5
+    return mask.where(X.flip(-1), X)
 
   # the operations that remain inside batch fetcher is the ones that involves random operations
   def fetch_batches(X_in:Tensor, Y_in:Tensor, BS:int, is_train:bool):
@@ -226,26 +246,22 @@ def train_cifar():
       st = time.monotonic()
       X, Y = X_in, Y_in
       if is_train:
-        # TODO: these are not jitted
         if getenv("RANDOM_CROP", 1):
           X = random_crop(X, crop_size=32)
         if getenv("RANDOM_FLIP", 1):
-          X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
+          X = random_flip(X)
         if getenv("CUTMIX", 1):
           if step >= hyp['net']['cutmix_steps']:
             X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
-        order = list(range(0, X.shape[0]))
-        random.shuffle(order)
-        X, Y = X.numpy()[order], Y.numpy()[order]
-      else:
-        X, Y = X.numpy(), Y.numpy()
+        order = Tensor.randperm(int(X.shape[0]), device=X.device, dtype=dtypes.int32)
+        X = X.gather(0, order.reshape(-1, 1, 1, 1).expand(X.shape))
+        Y = Y.gather(0, order.reshape(-1, 1).expand(Y.shape))
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
-      for i in range(0, X.shape[0], BS):
-        # pad the last batch  # TODO: not correct for test
-        batch_end = min(i+BS, Y.shape[0])
-        x = Tensor(X[batch_end-BS:batch_end], device=X_in.device, dtype=X_in.dtype)
-        y = Tensor(Y[batch_end-BS:batch_end], device=Y_in.device, dtype=Y_in.dtype)
+      for i in range(0, int(X.shape[0]), BS):
+        batch_end = min(i+BS, int(Y.shape[0]))
+        x = X[batch_end-BS:batch_end].contiguous()
+        y = Y[batch_end-BS:batch_end].contiguous()
         step += 1
         yield x, y
       epoch += 1
@@ -273,6 +289,10 @@ def train_cifar():
           net_ema_param.assign(net_ema_param.detach()*decay + net_param.detach()*(1.-decay)).realize()
 
   set_seed(getenv('SEED', hyp['seed']))
+
+  rank = int(Device.DEFAULT.split(":")[1]) if ":" in Device.DEFAULT else 0
+  Tensor.manual_seed(hyp['seed'] + rank)
+  random.seed(hyp['seed'] + rank)
 
   X_train, Y_train, X_test, Y_test = nn.datasets.cifar()
   # one-hot encode labels
