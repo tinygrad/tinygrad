@@ -70,6 +70,13 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
 def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, merge_views+sym, {})
 
 class TestSchedule(unittest.TestCase):
+  @unittest.expectedFailure
+  def test_arange_sum(self):
+    a = Tensor.arange(6).reshape(3, 2).sum(axis=1)
+    with Context(FUSE_ARANGE=1):
+      a.realize()
+    self.assertEqual(a.numpy(), np.arange(6).reshape(3,2).sum(axis=1))
+
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
   def test_error_on_device_mismatch(self):
     a = Tensor.empty(10)
