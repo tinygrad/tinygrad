@@ -45,7 +45,7 @@ symbolic_simple = PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints) != UPat.var("x", dtype=dtypes.ints),
    lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x != x -> False (only ints)
   (UPat.var("x", dtype=dtypes.ints) != UPat.var("x", dtype=dtypes.ints)+UPat.var("y"),
-   lambda x,y: UOp.const(dtypes.bool, True) if y.vmax<0 or y.vmin>0 else None), # x != x+y -> True  (if y can't be 0)
+   lambda x,y: x.const_like(True).cast(dtypes.bool.vec(x.dtype.count)) if y.vmax<0 or y.vmin>0 else None), # x != x+y -> True  (if y can't be 0)
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
