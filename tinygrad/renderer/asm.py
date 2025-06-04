@@ -3,6 +3,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat
 from tinygrad.renderer import Renderer
 from tinygrad import dtypes
 from tinygrad.dtype import DType, PtrDType, truncate
+from tinygrad.helpers import flatten
 import struct, copy, sys
 
 def to_hex(x, dt:DType) -> str:
@@ -69,7 +70,7 @@ class AsmRenderer(Renderer):
   ops: dict[DType, dict[Ops, str]] = {}
   string_rewrite = base_rewrite
 
-  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|int: raise NotImplementedError("arch specific")
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str|int]: raise NotImplementedError("arch specific")
   def render_imm(self, imm:str): raise NotImplementedError("arch specific")
   def render_mem(self, sz:int, dt:DType): raise NotImplementedError("arch specific")
   def render_reg(self, reg:str, dt:DType, alias:bool=False): raise NotImplementedError("arch specific")
@@ -94,6 +95,7 @@ class AsmRenderer(Renderer):
     loc: dict[UOp, str] = {}
     self.r = loc
     mem: dict[UOp, str] = {}
+    self.mem = mem
     live_at_range: dict[UOp, dict[UOp, str]] = {}
     spilled_at: dict[UOp, int] = {}
     stack_size: int = 0
@@ -103,12 +105,11 @@ class AsmRenderer(Renderer):
     # void dtypes don't hold values, consts aren't instructions, noop and assign use location of src[0]
     live_range = {self.bypass(var):i for i,u in enumerate(uops) \
                   for var in (v for v in (u,) + u.src if v.dtype != dtypes.void and v.op != Ops.CONST)}
-    next_range = None
-    for u in reversed(uops):
-      # a var defined before a range and used inside it is needed for the whole range
-      if u.op is Ops.RANGE: next_range = u
-      if u in live_range and next_range is not None and live_range[u] >= uops.index(next_range):
-        live_range[u] = max(live_range[u], live_range[next_range])
+    # a var defined before a range and used inside it is needed for the whole range
+    for i,u in enumerate(uops):
+      if u.op is Ops.RANGE:
+        for x in flatten([x.src for x in uops[i:live_range[u]]]):
+          if x in live_range and uops.index(x) < i: live_range[x] = max(live_range[x], live_range[u])
 
     def srcs(x:UOp) -> tuple[UOp]: return tuple(self.bypass(s) for s in x.src)
     def reg_class(x:UOp): return regs[self.dt(x.dtype).scalar()]
@@ -127,12 +128,15 @@ class AsmRenderer(Renderer):
       loc[spilled] = mem[spilled]
       return live.pop(spilled)
 
-    def alloc(x:UOp, cons:list[str]|int):
-      if isinstance(cons, int): ret = cons
+    def alloc(x:UOp, cons:list[str|int]):
+      # if x already had a reg we free it
+      if x in live: reg_class(x).insert(0, live.pop(x))
+      if isinstance(cons[0], int): ret = cons[0]
       else: ret = _alloc(x, cons)
       if isinstance(ret, int): mem[x] = ret
-      elif isinstance(ret, str): live[x] = ret
-      if x in loc: inst_map[cur_uop].append(self.render_fill(x, ret))
+      elif isinstance(ret, str):
+        live[x] = ret
+        if x in loc: inst_map[cur_uop].append(self.render_fill(x, ret))
       return ret
 
     name = "test"
@@ -147,14 +151,10 @@ class AsmRenderer(Renderer):
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         loc[u] = alloc(u, self.constraints(u))
         continue
-      # reload necessary vars
+      # reload vars in different location at end of range that weren't loaded on first use
       if u.op is Ops.ENDRANGE:
         for k,v in live_at_range.pop(u.src[0], {}).items():
-          # if var was used before spill and not in original reg need to reload
-          if k in mem and any(k in srcs(x) for x in uops[uops.index(u.src[0]):spilled_at[k]]):
-            if k in live and live[k] == v: continue
-            if k in live: reg_class(k).insert(0, live.pop(k))
-            loc[k] = alloc(k, [v])
+          if loc[k] != v and (k not in mem or any(k in srcs(x) for x in uops[uops.index(u.src[0]):spilled_at[k]])): loc[k] = alloc(k, [v])
       # assign srcs, ignore srcs without live ranges
       src = tuple(s for s in srcs(u) if s in live_range)
       for s in src:
@@ -293,12 +293,12 @@ class Arm64Renderer(AsmRenderer):
   ops = arm64_ops
   regs = arm64_regs
 
-  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|int:
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str|int]:
     if s is not None: return self.reg_class(s)
     # TODO: think I need to track function arg index here cause of def var
     if u.op is Ops.DEFINE_GLOBAL and u.arg < 8: return [("x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7")[u.arg]]
     # TODO: this offset is wrong needs to include stack size
-    if u.op is Ops.DEFINE_GLOBAL and u.arg >= 8: return (u.arg-6)*8
+    if u.op is Ops.DEFINE_GLOBAL and u.arg >= 8: return [(u.arg-6)*8]
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return f"#{imm}"
   def render_mem(self, sz:int, dt:DType) -> str: return f"[x29, #{abs(sz)}]"
@@ -393,11 +393,17 @@ x86_rewrite = PatternMatcher([
    f"{x86_cflag(x)} {ctx[x]}\nsetp {ctx[x][:-1]+'h'}\nor {ctx[x]}, {ctx[x][:-1]+'h'}"),
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
    lambda ctx,x: f"{ctx.ops[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{x86_cflag(x)} {ctx[x]}"),
+   # TODO: get rid of push/pop somehow, some new constraint maybe
   (UPat((Ops.IDIV,), dtypes.sints, name="x"), lambda ctx,x:
    f"{ctx.two_address(x, x.src[0])}push rdx\n{idiv_signex[x.dtype.itemsize]}\n{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rdx"),
+  (UPat((Ops.MOD,), dtypes.sints, name="x"), lambda ctx,x:
+   f"push rax\n{ctx.ops[x.dtype][Ops.ASSIGN]} rax, {ctx.r[x.src[0]]}\n{idiv_signex[x.dtype.itemsize]}\n{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rax"),
   (UPat((Ops.IDIV,), dtypes.uints, name="x"), lambda ctx,x:
    f"{ctx.two_address(x, x.src[0])}push rdx\nxor {'rdx, rdx' if x.dtype.itemsize > 1 else 'ah, ah'}\n"
    f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rdx"),
+  (UPat((Ops.MOD,), dtypes.uints, name="x"), lambda ctx,x:
+   f"push rax\n{ctx.ops[x.dtype][Ops.ASSIGN]} rax, {ctx.r[x.src[0]]}\nxor {'rdx, rdx' if x.dtype.itemsize > 1 else 'ah, ah'}\n"
+   f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rax"),
   (UPat(GroupOp.Binary, dtypes.ints + (dtypes.bool,), name="x"),
    lambda ctx,x: f"{ctx.two_address(x, x.src[0])}{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
   # endrange
@@ -469,19 +475,20 @@ class X86Renderer(AsmRenderer):
   ops = x86_ops
   regs = x86_regs
 
-  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|int:
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str|int]:
     # constraints for srcs
-    if u.op is Ops.IDIV and s is u.src[1]: return [r for r in self.reg_class(s) if r != "rdx"]
-    if u.op is Ops.MOD and s is u.src[1]: return [r for r in self.reg_class(s) if r != "rax"]
+    if u.op in (Ops.IDIV, Ops.MOD) and s is u.src[1]: return [r for r in self.reg_class(s) if r not in ("rdx", "rax")]
     if u.op in (Ops.SHL, Ops.SHR) and s is u.src[1] and s.op != Ops.CONST: return ["rcx"]
+    # because of spill hoisting need to ensure acc is in memory before assign if it was spilled
+    if u.op is Ops.ASSIGN and s is u.src[0] and s in self.mem: return [self.mem[s]]
     if s is not None: return self.reg_class(s)
     # constraints for destination
     # abi constraints, TODO: not quite right
     if sys.platform == "win32":
       if u.op is Ops.DEFINE_GLOBAL and u.arg < 4: return [("rcx", "rdx", "r8", "r9")[u.arg]]
-      if u.op is Ops.DEFINE_GLOBAL and u.arg >= 4: return (u.arg-4)*8+16
+      if u.op is Ops.DEFINE_GLOBAL and u.arg >= 4: return [(u.arg-4)*8+16]
     if u.op is Ops.DEFINE_GLOBAL and u.arg < 6: return [("rdi", "rsi", "rdx", "rcx", "r8", "r9")[u.arg]]
-    if u.op is Ops.DEFINE_GLOBAL and u.arg >= 6: return (u.arg-6)*8+16
+    if u.op is Ops.DEFINE_GLOBAL and u.arg >= 6: return [(u.arg-6)*8+16]
     if u.op is Ops.IDIV: return ["rax"]
     if u.op is Ops.MOD: return ["rdx"]
     # float cmp requires nan check, to avoid reserving temp reg we constrain dest to regs that have a high 8 bit portion
