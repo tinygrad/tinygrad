@@ -18,13 +18,13 @@ class TensorProto:
   float_data: List[float] = None
   int32_data: List[int] = None
   int64_data: List[int] = None
-  
+
   def __post_init__(self):
     if self.float_data is None: self.float_data = []
     if self.int32_data is None: self.int32_data = []
     if self.int64_data is None: self.int64_data = []
 
-@dataclass  
+@dataclass
 class Attribute:
   name: str = ''
   type: int = 0
@@ -33,7 +33,7 @@ class Attribute:
   s: bytes = b''
   floats: List[float] = None
   ints: List[int] = None
-  
+
   def __post_init__(self):
     if self.floats is None: self.floats = []
     if self.ints is None: self.ints = []
@@ -63,7 +63,7 @@ class GraphProto:
 class ModelProto:
   graph: GraphProto = None
   opset_import: Tuple[Tuple[str, int], ...] = ()
-  
+
   def __post_init__(self):
     if self.graph is None: self.graph = GraphProto()
 
@@ -159,20 +159,20 @@ class OnnxRunner:
   """Minimal ONNX runner for basic inference."""
   def __init__(self, model: ModelProto):
     self.model = model
-  
+
   def run(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
     # Placeholder for actual inference - would need full implementation
     return {}
 
 # Export for backward compatibility
-def get_onnx_ops(): 
+def get_onnx_ops():
   """Return available ONNX operators."""
   return ['Add', 'Conv', 'Relu', 'MatMul', 'Reshape', 'Concat', 'Transpose']
 
 # Legacy compatibility
 onnx_ops = get_onnx_ops()
 dtype_parse = lambda x: x
-attribute_parse = lambda x: x  
+attribute_parse = lambda x: x
 buffer_parse = lambda x: x
 type_parse = lambda x: x
 OnnxValue = dict
@@ -182,4 +182,4 @@ __all__ = [
   'load', 'OnnxRunner', 'ModelProto', 'GraphProto', 'NodeProto', 'TensorProto',
   'get_onnx_ops', 'onnx_ops', 'dtype_parse', 'attribute_parse', 'buffer_parse',
   'type_parse', 'OnnxValue', 'OnnxNode'
-] 
+]
