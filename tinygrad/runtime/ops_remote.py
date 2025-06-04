@@ -204,7 +204,7 @@ class RemoteHandler:
             try:
               r = session.programs[(c.name, c.datahash)](*bufs, vals=c.vals, wait=c.wait, **extra_args)
               if r is not None: ret = str(r).encode()
-            except Exception as e:
+            except RuntimeError as e:
               if c.wait: ret = 'inf'.encode()
               else: raise e
           case GraphAlloc():
