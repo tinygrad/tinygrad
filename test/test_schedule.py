@@ -70,6 +70,25 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
 def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, merge_views+sym, {})
 
 class TestSchedule(unittest.TestCase):
+  def test_arange_avgpool2d(self, kcount=2):
+    x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
+    t = x.avg_pool2d(padding=1)
+    sched = t.schedule()
+    self.assertEqual(len(sched), kcount)
+    run_schedule(sched)
+    import torch
+    torch_out = torch.nn.functional.avg_pool2d(torch.arange(25).reshape(1,1,5,5).float(), kernel_size=(2,2), padding=1).numpy()
+    np.testing.assert_allclose(t.numpy(), torch_out)
+
+  def test_arange_avgpool2d_fused_noopt(self):
+    with Context(FUSE_ARANGE=1, NOOPT=1): self.test_arange_avgpool2d(kcount=1)
+
+  # linearizer error
+  def test_arange_avgpool2d_fused(self):
+    with self.assertRaises(RecursionError):
+      with Context(FUSE_ARANGE=1, NOOPT=0): self.test_arange_avgpool2d(kcount=1)
+
+  # grouper error
   @unittest.expectedFailure
   def test_arange_sum(self):
     a = Tensor.arange(6).reshape(3, 2).sum(axis=1)
