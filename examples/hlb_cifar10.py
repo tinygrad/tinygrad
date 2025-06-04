@@ -206,15 +206,15 @@ def train_cifar():
   def random_crop(X:Tensor, crop_size=32):
     BS, C, H, W = map(int, X.shape)
     assert H >= crop_size and W >= crop_size
-    
+
     low_y = Tensor.randint(BS, low=0, high=H-crop_size, dtype=dtypes.int32, device=X.device)
     low_x = Tensor.randint(BS, low=0, high=W-crop_size, dtype=dtypes.int32, device=X.device)
-    
+
     rel_y = Tensor.arange(crop_size, dtype=dtypes.int32, device=X.device).reshape(1, crop_size, 1)
     rel_x = Tensor.arange(crop_size, dtype=dtypes.int32, device=X.device).reshape(1, 1, crop_size)
-    
+
     lin = ((rel_y + low_y[:, None, None]) * W + (rel_x + low_x[:, None, None])).reshape(BS, -1)
-    
+
     out = X.reshape(BS, C, H*W).gather(2, lin[:, None, :].expand(BS, C, -1)).reshape(BS, C, crop_size, crop_size)
     return out
 
@@ -222,14 +222,14 @@ def train_cifar():
   def cutmix(X:Tensor, Y:Tensor, mask_size=3):
     BS, _, H, W = map(int, X.shape)
     order = Tensor.randperm(int(BS), dtype=dtypes.int32, device=X.device)
-    
+
     Xp = X.gather(0, order.reshape(int(BS), 1, 1, 1).expand(X.shape))
     Yp = Y.gather(0, order.reshape(int(BS), 1).expand(Y.shape))
-    
+
     lam = (mask_size**2) / (H * W)
-    
+
     alpha = Tensor.full((BS, 1, 1, 1), lam, dtype=X.dtype, device=X.device)
-    
+
     X_out = alpha * Xp + (1.0 - alpha) * X
     Y_out = lam * Yp + (1.0 - lam) * Y
     return X_out, Y_out
