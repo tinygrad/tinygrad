@@ -1,16 +1,15 @@
-from collections import defaultdict, deque
 from dataclasses import dataclass
-from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
-from tinygrad.uop.ops import can_pad, sint, track_rewrites, _substitute
+from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, can_pad, sint
+from tinygrad.uop.ops import track_rewrites, _substitute
+from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.codegen.lowerer import get_contraction_with_reduce, get_contraction
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, ContextVar, Context, diskcache_put
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP, CAPTURE_PROCESS_REPLAY
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.multi import multi_pm, replace_allreduce
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
-from tinygrad.uop.spec import type_verify, tensor_uop_spec
 
 # creation can recurse a lot
 import sys
@@ -85,6 +84,8 @@ sym = symbolic_simple+PatternMatcher([
   # remove cast to image when it's already a contiguous image
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(Ops.CONTIGUOUS, name="base"),)),)),
    lambda cast,base,vm: base.view(vm.st) if isinstance(cast.dtype, ImageDType) and isinstance(base.dtype, ImageDType) else None),
+  # CAST before masking constants
+  (UPat.cvar("x").view().cast(name="c"), lambda x,c: x.cast(c.dtype).view(c.src[0].arg)),
   # make things that can't be images not images
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.VIEW, Ops.CONST, Ops.DEVICE}, name="u"), lambda u: u.replace(dtype=dt.base) if isinstance(dt:=u.dtype,ImageDType)
    and (prod(u.shape) != prod(dt.shape) or not any(u.shape[x]%4 == 0 for x in u.st.unit_stride_axes())) else None),
@@ -142,7 +143,7 @@ do_realize = PatternMatcher([
   (UPat((Ops.COPY, Ops.MSELECT), src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), allow_any_len=True), realize),
 ])
 
-def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
+def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:dict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
                     reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]) -> None:
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
@@ -152,7 +153,7 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
     # max one reduceop per kernel
     if not st.contiguous or st.size != rsize or tr in reduce_for_op: group.setdefault(r)
     return group.setdefault(tr)
-  for tr_next in children[tr]:
+  for tr_next in children.get(tr, {}):
     # max one reduceop per kernel
     if tr_next.op is Ops.REDUCE_AXIS: return group.setdefault(r)
     # can only fuse contiguous
@@ -166,12 +167,12 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   if DONT_GROUP_REDUCES: return realizes
 
   # construct children graph (only for bases)
-  children: defaultdict[UOp, dict[UOp, None]] = defaultdict(dict)
+  children: dict[UOp, dict[UOp, None]] = {}
   assigns: dict[UOp, None] = {}
   for u in (toposort:=sink.toposort()):
     if u.op in {Ops.VIEW, Ops.SINK}: continue
     if u.op is Ops.ASSIGN: assigns[u.buf_uop] = None
-    for s in u.src: children[s.base][u] = None
+    for s in u.src: children.setdefault(s.base, {})[u] = None
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
@@ -191,7 +192,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
     if not forced_realize and len(group) > 1: forced_realize = True
     # can only fuse assign if no other assign_target is used in the kernel
     if not forced_realize and (assign_targets:={x.buf_uop for x in group if x.op is Ops.ASSIGN}):
-      parents = deque((r, *group))
+      parents = [r, *group]
       while parents and not forced_realize:
         p = parents.pop().base
         if p.op is Ops.BUFFER and p in assigns and p not in assign_targets: forced_realize, can_chase = True, False
@@ -202,8 +203,8 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
       if can_chase:
         # can chase this down to contiguous children
         st = unwrap(tr.st)
-        while len(children[tr]) == 1:
-          tr_next = next(iter(children[tr]))
+        while len(lst:=children.get(tr, {})) == 1:
+          tr_next = next(iter(lst))
           st_childs = dedup(unwrap(s.st) for s in tr_next.src if s.base is tr)
           if len(st_childs) > 1: break
           if st.size != st_childs[0].size: break
@@ -219,7 +220,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   # fuse double reduces with no other child
   for reduceop in double_reduces:
     top_reduce = reduceop.src[0].base
-    if len(children[top_reduce]) == 1: del realizes[top_reduce]
+    if len(children.get(top_reduce, {})) == 1: del realizes[top_reduce]
   return realizes
 
 # **** create kernels
@@ -267,7 +268,7 @@ merge_views = PatternMatcher([
   # merge adjacent views
   (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="v1"),), name="v2"), lambda v1,v2: v1.replace(arg=v1.arg+v2.arg)),
   # replace MovementOps with VIEW
-  (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
+  (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.base.view(mop.st)),
   # remove NOOP views
   (UPat.var("x").view(name="view"), lambda x,view: x if x.st is not None and view.st.contiguous and view.shape == x.shape else None),
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}).view(name="view"),
@@ -302,7 +303,7 @@ def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
 view_left = merge_views+PatternMatcher([
   # view before elementwise and buffer ops
   (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.BIND, Ops.LOAD, Ops.STORE, Ops.VALID}, name="e"),), name="view"),
-   lambda e,view: e.replace(src=tuple(s.view(s.st+view.st) if s.op is Ops.VIEW else s.view(view.st) for s in e.src))),
+   lambda e,view: e.replace(src=tuple(s.view(view.st) for s in e.src))),
   # if there's ones added after reduce, put this before the reduce
   (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
 ])
@@ -320,7 +321,7 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   # create a new reduceop for the swizzled input
   new_input_st = tmp + ShapeTracker(tuple(nv))
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
-  swizzled_src = apply_swizzle(src.view(src.arg+new_input_st if src.op is Ops.VIEW else new_input_st))
+  swizzled_src = apply_swizzle(src.view(new_input_st))
   if fuse: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src.fuse(),), (r.arg[0], new_axis, True))
   else: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src,), (r.arg[0], new_axis))
   return red.view(ShapeTracker.from_shape(st.shape))
@@ -338,7 +339,7 @@ def elementwise_view_right(root:UOp):
   assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
   # place view after applying the elementwise op
   new_st = ShapeTracker.from_shape(swizzles[0].base.shape)
-  new_src = [x.base if x.base.shape==new_st.shape else apply_swizzle(x.view(x.arg+new_st) if x.op is Ops.VIEW else x.view(new_st)) for x in root.src]
+  new_src = [x.base if x.base.shape==new_st.shape else apply_swizzle(x.view(new_st)) for x in root.src]
   # reshape to match downstream shapes
   return root.replace(src=tuple(new_src)).reshape(root.shape)
 
@@ -436,7 +437,7 @@ pm_fuse = PatternMatcher([
 
   # FUSE elementwise.
   (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST}, name="alu"),), name="view").fuse(),
-   lambda alu, view: alu.replace(src=tuple(x.view(x.arg+view.arg if x.op is Ops.VIEW else view.arg).fuse() for x in alu.src))),
+   lambda alu, view: alu.replace(src=tuple(apply_swizzle(x.view(view.arg)).fuse() for x in alu.src))),
 
   # push FUSE through to srcs
   (UPat(Ops.FUSE, name="x"), lambda x: x.src[0].replace(src=tuple(y.fuse() for y in x.src[0].src))),
@@ -487,13 +488,6 @@ do_fuse = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
 ])
 
-PROCESS_REPLAY_CAPTURE:dict[int,bytes] = {}
-if CAPTURE_PROCESS_REPLAY:
-  import atexit
-  @atexit.register
-  def save_process_replay():
-    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
-
 def get_name(becomes_map:dict[UOp, UOp]) -> str:
   assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
   return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
@@ -511,15 +505,17 @@ def limit_bufs(root:UOp):
   # count number of unique buffers flowing into this op
   bufs: set[UOp] = set()
   def gate_input(u:UOp):
-    if (is_buffer:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): bufs.add(u)
-    return not is_buffer
+    if (is_load:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): bufs.add(u)
+    return not is_load
   root.toposort(gate=gate_input)
   # NOTE: this -1 is for the output buffer
   if len(bufs)>=MAX_BUFS-1:
     return root.replace(src=tuple(s if s.base in bufs else s.replace(tag=1).gbarrier() for s in root.src))
 
-split_kernels = PatternMatcher([
+finalize_gbarrier = PatternMatcher([
+  # if an op takes more than one input, check combined LOADs don't exceed device limits
   (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs),
+  # merge gbarrier
   (UPat((Ops.GBARRIER, Ops.CONTIGUOUS), src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
 ])
 
@@ -536,7 +532,8 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # insert gbarriers in places determined by the realize map
   realize_map = group_realizes(tensor_map[big_sink])
   tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], split_kernels, input_map=tensor_map, name="split_kernels")
+  # optionally reorder gbarriers or insert more (top down)
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], finalize_gbarrier, input_map=tensor_map, name="finalize_gbarrier")
   tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
 
   # TODO: move view_left/view_right here
@@ -568,12 +565,5 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # verify Kernels match the spec
   if __debug__: type_verify(list(sched_sink.toposort()), tensor_uop_spec)
-
-  # capture process replay
-  if CAPTURE_PROCESS_REPLAY:
-    with Context(PICKLE_BUFFERS=0):
-      import pickle
-      kernel_asts = [u.arg.ast for u in sched_sink.toposort() if u.op is Ops.KERNEL]
-      PROCESS_REPLAY_CAPTURE[id(big_sink)] = pickle.dumps((big_sink, ContextVar._cache, kernel_asts))
 
   return tensor_map

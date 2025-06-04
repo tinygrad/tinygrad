@@ -6,6 +6,7 @@ import unittest
 import numpy as np
 import functools
 from typing import List, Optional, Union, cast
+from hypothesis import assume, given, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
@@ -1705,13 +1706,15 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(realized_const_view, 1))
     self.assertListEqual(realized_const_view.tolist(), [[1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]])
 
-  def test_cast_padded_const(self):
-    a = Tensor(1, dtype=dtypes.int32).reshape(1, 1).pad(((1, 1), None))
-    casted_view = a.cast(dtypes.float32)
+  @given(strat.sampled_from(dtypes.all), strat.sampled_from(dtypes.all))
+  def test_cast_padded_const(self, dt1, dt2):
+    assume(is_dtype_supported(dt1) and is_dtype_supported(dt2))
+    a = Tensor(1, dtype=dt1).reshape(1, 1).pad(((1, 1), None))
+    casted_view = a.cast(dt2)
     run_schedule(check_schedule(casted_view, 0))
     realized_const_view = casted_view.contiguous()
     run_schedule(check_schedule(realized_const_view, 1))
-    self.assertListEqual(realized_const_view.tolist(), [[0], [1], [0]])
+    np.testing.assert_equal(realized_const_view.numpy(), [[0], [1], [0]])
 
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
