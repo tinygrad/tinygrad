@@ -81,7 +81,9 @@ def _read_varint(buf: bytes, pos: int) -> Tuple[int, int]:
 def _skip_field(wire_type: int, buf: bytes, pos: int) -> int:
   if wire_type == 0: _, pos = _read_varint(buf, pos)
   elif wire_type == 1: pos += 8
-  elif wire_type == 2: size, pos = _read_varint(buf, pos); pos += size
+  elif wire_type == 2:
+    size, pos = _read_varint(buf, pos)
+    pos += size
   elif wire_type == 5: pos += 4
   return pos
 
@@ -91,9 +93,14 @@ def _parse_tensor(buf: bytes) -> TensorProto:
   while pos < len(buf):
     tag, pos = _read_varint(buf, pos)
     field, wtype = tag >> 3, tag & 0x07
-    if field == 1 and wtype == 0: val, pos = _read_varint(buf, pos); t.dims += (val,)
+    if field == 1 and wtype == 0:
+      val, pos = _read_varint(buf, pos)
+      t.dims += (val,)
     elif field == 2 and wtype == 0: t.data_type, pos = _read_varint(buf, pos)
-    elif field == 9 and wtype == 2: size, pos = _read_varint(buf, pos); t.raw_data = buf[pos:pos+size]; pos += size
+    elif field == 9 and wtype == 2:
+      size, pos = _read_varint(buf, pos)
+      t.raw_data = buf[pos:pos+size]
+      pos += size
     else: pos = _skip_field(wtype, buf, pos)
   return t
 
@@ -103,11 +110,19 @@ def _parse_attr(buf: bytes) -> Attribute:
   while pos < len(buf):
     tag, pos = _read_varint(buf, pos)
     field, wtype = tag >> 3, tag & 0x07
-    if field == 1 and wtype == 2: size, pos = _read_varint(buf, pos); a.name = buf[pos:pos+size].decode(); pos += size
+    if field == 1 and wtype == 2:
+      size, pos = _read_varint(buf, pos)
+      a.name = buf[pos:pos+size].decode()
+      pos += size
     elif field == 3 and wtype == 0: a.type, pos = _read_varint(buf, pos)
-    elif field == 4 and wtype == 5: a.f = struct.unpack("<f", buf[pos:pos+4])[0]; pos += 4
+    elif field == 4 and wtype == 5:
+      a.f = struct.unpack("<f", buf[pos:pos+4])[0]
+      pos += 4
     elif field == 5 and wtype == 0: a.i, pos = _read_varint(buf, pos)
-    elif field == 6 and wtype == 2: size, pos = _read_varint(buf, pos); a.s = buf[pos:pos+size]; pos += size
+    elif field == 6 and wtype == 2:
+      size, pos = _read_varint(buf, pos)
+      a.s = buf[pos:pos+size]
+      pos += size
     else: pos = _skip_field(wtype, buf, pos)
   return a
 
@@ -118,10 +133,22 @@ def _parse_node(buf: bytes) -> NodeProto:
   while pos < len(buf):
     tag, pos = _read_varint(buf, pos)
     field, wtype = tag >> 3, tag & 0x07
-    if field == 1 and wtype == 2: size, pos = _read_varint(buf, pos); inps.append(buf[pos:pos+size].decode()); pos += size
-    elif field == 2 and wtype == 2: size, pos = _read_varint(buf, pos); outs.append(buf[pos:pos+size].decode()); pos += size
-    elif field == 4 and wtype == 2: size, pos = _read_varint(buf, pos); n.op_type = buf[pos:pos+size].decode(); pos += size
-    elif field == 5 and wtype == 2: size, pos = _read_varint(buf, pos); attrs.append(_parse_attr(buf[pos:pos+size])); pos += size
+    if field == 1 and wtype == 2:
+      size, pos = _read_varint(buf, pos)
+      inps.append(buf[pos:pos+size].decode())
+      pos += size
+    elif field == 2 and wtype == 2:
+      size, pos = _read_varint(buf, pos)
+      outs.append(buf[pos:pos+size].decode())
+      pos += size
+    elif field == 4 and wtype == 2:
+      size, pos = _read_varint(buf, pos)
+      n.op_type = buf[pos:pos+size].decode()
+      pos += size
+    elif field == 5 and wtype == 2:
+      size, pos = _read_varint(buf, pos)
+      attrs.append(_parse_attr(buf[pos:pos+size]))
+      pos += size
     else: pos = _skip_field(wtype, buf, pos)
   n.input, n.output, n.attribute = tuple(inps), tuple(outs), tuple(attrs)
   return n
@@ -133,8 +160,14 @@ def _parse_graph(buf: bytes) -> GraphProto:
   while pos < len(buf):
     tag, pos = _read_varint(buf, pos)
     field, wtype = tag >> 3, tag & 0x07
-    if field == 1 and wtype == 2: size, pos = _read_varint(buf, pos); nodes.append(_parse_node(buf[pos:pos+size])); pos += size
-    elif field == 5 and wtype == 2: size, pos = _read_varint(buf, pos); init.append(_parse_tensor(buf[pos:pos+size])); pos += size
+    if field == 1 and wtype == 2:
+      size, pos = _read_varint(buf, pos)
+      nodes.append(_parse_node(buf[pos:pos+size]))
+      pos += size
+    elif field == 5 and wtype == 2:
+      size, pos = _read_varint(buf, pos)
+      init.append(_parse_tensor(buf[pos:pos+size]))
+      pos += size
     else: pos = _skip_field(wtype, buf, pos)
   g.node, g.initializer = tuple(nodes), tuple(init)
   return g
@@ -145,7 +178,10 @@ def parse_model(buf: bytes) -> ModelProto:
   while pos < len(buf):
     tag, pos = _read_varint(buf, pos)
     field, wtype = tag >> 3, tag & 0x07
-    if field == 4 and wtype == 2: size, pos = _read_varint(buf, pos); m.graph = _parse_graph(buf[pos:pos+size]); pos += size
+    if field == 4 and wtype == 2:
+      size, pos = _read_varint(buf, pos)
+      m.graph = _parse_graph(buf[pos:pos+size])
+      pos += size
     else: pos = _skip_field(wtype, buf, pos)
   return m
 
@@ -169,12 +205,13 @@ def get_onnx_ops():
   """Return available ONNX operators."""
   return ['Add', 'Conv', 'Relu', 'MatMul', 'Reshape', 'Concat', 'Transpose']
 
-# Legacy compatibility
+# Legacy compatibility functions
+def dtype_parse(x): return x
+def attribute_parse(x): return x
+def buffer_parse(x): return x
+def type_parse(x): return x
+
 onnx_ops = get_onnx_ops()
-dtype_parse = lambda x: x
-attribute_parse = lambda x: x
-buffer_parse = lambda x: x
-type_parse = lambda x: x
 OnnxValue = dict
 OnnxNode = NodeProto
 
