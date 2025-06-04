@@ -24,7 +24,7 @@ _impl: _ModuleType | None = None
 def _load_impl() -> _ModuleType:
   global _impl  # noqa: PLW0603
   if _impl is None:
-      _impl = _imp("extra.onnx")
+    _impl = _imp("extra.onnx")
   return _impl
 
 
@@ -36,9 +36,9 @@ def _load_impl() -> _ModuleType:
 def __getattr__(name: str) -> _Any:  # noqa: D401,E501  (simple getter)
   mod = _load_impl()
   try:
-      return getattr(mod, name)
+    return getattr(mod, name)
   except AttributeError as err:
-      raise AttributeError(f"module 'tinygrad.frontend.onnx' has no attribute {name!r}") from err
+    raise AttributeError(f"module 'tinygrad.frontend.onnx' has no attribute {name!r}") from err
 
 
 def __dir__() -> list[str]:
