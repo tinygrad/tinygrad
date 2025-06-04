@@ -121,6 +121,12 @@ def cummax(self, dim):
 # TODO: move to tinygrad
 def nonzero(self): return aten.nonzero(self.cpu()).tiny()
 
+@torch.library.impl("aten::_linalg_eigh", "privateuseone")
+# TODO: move to tinygrad
+def _linalg_eigh(self, UPLO: str = 'U'):
+  w, v = torch.linalg.eigh(self.cpu(), UPLO=UPLO)
+  return w.tiny(), v.tiny()
+
 def upsample_backward(grad_out, output_size, input_size, *args, f=None): return f(grad_out.cpu(), output_size, input_size, *args).tiny()
 
 for i in [
