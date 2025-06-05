@@ -17,6 +17,7 @@ from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_c
 from tinygrad.engine.realize import CompiledRunner, BufferXfer
 from tinygrad.device import Compiled, Buffer, Allocator, Compiler, Device, BufferSpec
 from tinygrad.runtime.graph.cpu import CPUGraph
+from tinygrad.runtime.support.ib import DEFAULT_PORT, DEFAULT_GID, IBCtx, IBConn
 
 # ***** API *****
 
@@ -36,6 +37,7 @@ class RemoteProperties:
   offset_supported: bool
   graph_supported: bool
   graph_supports_multi: bool
+  ib_gid: bytes|None
 
 @dataclass(frozen=True)
 class GetProperties(RemoteRequest): pass
@@ -45,6 +47,9 @@ class Event(RemoteRequest): event_session: SessionKey; event: int # noqa: E702
 
 @dataclass(frozen=True)
 class Wait(RemoteRequest): event: int
+
+@dataclass(frozen=True)
+class IBXChg(RemoteRequest): host: str; gid: bytes; qp_num: int # noqa: E702
 
 @dataclass(frozen=True)
 class BufferAlloc(RemoteRequest): buffer_num: int; size: int; options: BufferSpec # noqa: E702
@@ -108,8 +113,8 @@ class GraphExec(RemoteRequest):
 
 # for safe deserialization
 eval_globals = {x.__name__:x for x in [SessionKey, SessionFree, RemoteProperties, GetProperties, Event, Wait, BufferAlloc, BufferOffset, BufferFree,
-                                       CopyIn, CopyOut, Transfer, ProgramAlloc, ProgramFree, ProgramExec, GraphComputeItem, GraphAlloc, GraphFree,
-                                       GraphExec, BufferSpec, UOp, Ops, dtypes]}
+                                       CopyIn, CopyOut, Transfer, IBXChg, ProgramAlloc, ProgramFree, ProgramExec, GraphComputeItem, GraphAlloc,
+                                       GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes]}
 attribute_whitelist: dict[Any, set[str]] = {dtypes: {*DTYPES_DICT.keys(), 'imagef', 'imageh'}, Ops: {x.name for x in Ops}}
 eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
   ast.Dict: lambda x: {safe_eval(k):safe_eval(v) for k,v in zip(x.keys, x.values)},
@@ -153,8 +158,14 @@ class RemoteSession:
 
 class RemoteHandler:
   def __init__(self, base_device: str):
-    self.base_device = base_device
+    self.base_device: str = base_device
     self.sessions: defaultdict[SessionKey, RemoteSession] = defaultdict(RemoteSession)
+
+    self.ib_ctx: IBCtx|None = IBCtx(0) if getenv("IB", 1) else None
+    if self.ib_ctx is not None:
+      self.ib_gid: bytes = self.ib_ctx.get_gid(DEFAULT_PORT, DEFAULT_GID)
+
+    self.ib_conns: dict[str, IBConn|None] = {}
 
   async def __call__(self, reader:asyncio.StreamReader, writer:asyncio.StreamWriter):
     while (req_hdr:=(await reader.readline()).decode().strip()):
@@ -185,6 +196,7 @@ class RemoteHandler:
             rp = RemoteProperties(
               real_device=dev.device, renderer=(cls.__module__, cls.__name__, args), offset_supported=hasattr(dev.allocator, '_offset'),
               graph_supported=graph_cls is not None, graph_supports_multi=graph_cls is not None and issubclass(graph_cls, MultiGraphRunner),
+              ib_gid=self.ib_gid if self.ib_ctx is not None else None,
             )
             ret = repr(rp).encode()
           case Event():
@@ -196,6 +208,10 @@ class RemoteHandler:
           case Wait():
             assert await session.events[c.event].wait()
             del session.events[c.event] # do not leak memory
+          case IBXChg():
+            self.ib_conns[c.host] = ib_conn = IBConn(self.ib_ctx, DEFAULT_PORT, DEFAULT_GID)
+            ib_conn.connect(c.gid, c.qp_num)
+            ret = struct.pack('<16sQ', ib_conn.gid, ib_conn.qp_num)
           case BufferAlloc():
             assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already allocated"
             session.buffers[c.buffer_num] = Buffer(dev.device, c.size, dtypes.uint8, options=c.options, preallocate=True)
@@ -218,8 +234,22 @@ class RemoteHandler:
             else:
               conn = RemoteConnection(c.dsession.host)
               sbuf = session.buffers[c.buffer_num]
-              sbuf.copyout(data:=memoryview(bytearray(sbuf.nbytes)))
-              conn.q(CopyIn(c.dbuffer_num, conn.req.h(data), session=c.dsession), wait=True)
+
+              # this will hang if both are trying to trasnfer to each other at the same time
+              if c.dsession.host not in self.ib_conns:
+                props = safe_eval(ast.parse(conn.q(GetProperties(session=c.dsession), wait=True), mode="eval").body)
+
+                if props.ib_gid is not None:
+                  self.ib_conns[c.dsession.host] = ib_conn = IBConn(self.ib_ctx, DEFAULT_PORT, DEFAULT_GID)
+                  ib_conn.connect(*struct.unpack('<16sQ', conn.q(IBXChg(c.session.host, ib_conn.gid, ib_conn.qp_num, session=c.dsession), wait=True)))
+                else:
+                  self.ib_conns[c.dsession.host] = None
+
+              if self.ib_conns[c.dsession.host] is not None:
+                print(f"IB TRANSFER ({c.dsession.host}), {self.ib_conns[c.dsession.host]}")
+              else:
+                sbuf.copyout(data:=memoryview(bytearray(sbuf.nbytes)))
+                conn.q(CopyIn(c.dbuffer_num, conn.req.h(data), session=c.dsession), wait=True)
           case ProgramAlloc():
             lib = dev.compiler.compile_cached(req._h[c.datahash].decode())
             session.programs[(c.name, c.datahash)] = dev.runtime(c.name, lib)
