@@ -310,21 +310,24 @@ view_left = merge_views+PatternMatcher([
 
 def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub View Left")
 
+# change reduceop axes and input ShapeTrackers, view gets replaced with a reshape.
 def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
-  if (st:=unwrap(view.st)).contiguous and st.size == r.size: return None
+  # don't swizzle if we can push the view to children
+  if unwrap(view.st).contiguous and view.size == r.size: return None
+  # swizzle the input
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
   prshape = prod(rshape:=tmp.shape[-len(r.axis_arg):])
   strides = strides_for_shape(rshape)
   nv = [View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
-                    v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None) for v in st.views]
-  # create a new reduceop for the swizzled input
-  new_input_st = tmp + ShapeTracker(tuple(nv))
-  new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
-  swizzled_src = apply_swizzle(src.view(new_input_st))
-  if fuse: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src.fuse(),), (r.arg[0], new_axis, True))
-  else: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_src,), (r.arg[0], new_axis))
-  return red.view(ShapeTracker.from_shape(st.shape))
+                    v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None) for v in unwrap(view.st).views]
+  new_view = tmp + ShapeTracker(tuple(nv))
+  swizzled_input = apply_swizzle(src.view(new_view))
+  # create a new reduceop
+  new_axis = tuple(range(len(view.shape), len(view.shape) + len(r.axis_arg)))
+  if fuse: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_input.fuse(),), (r.arg[0], new_axis, True))
+  else: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_input,), (r.arg[0], new_axis))
+  return red.reshape(view.shape)
 
 def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   assert unwrap(v.st).contiguous and v.size == src.size, f"can't compute new axis for {src.shape} -> {r.shape}"
