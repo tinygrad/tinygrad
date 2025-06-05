@@ -449,6 +449,82 @@ def get_start_tokens(enc: Encoding, is_multilingual: bool=False):
     start_tokens.append(enc._special_tokens["<|transcribe|>"])
   return start_tokens
 
+def pad_log_spec_if_needed(log_spec, end_frame):
+  return np.pad(log_spec, ((0, 0), (0, 0), (0, end_frame - log_spec.shape[2]))) if end_frame > log_spec.shape[2] else log_spec
+
+def get_segment_tokens(selected, start_tokens, eot, enc):
+  eoti = index[0] if (index := (np.where(selected == eot)[0])).size > 0 else None
+  soti = np.where(selected == start_tokens[-1])[0][0] + 1
+  tokens = selected[soti:eoti]
+  text = enc.decode(tokens)
+  return tokens, text
+
+def should_skip_segment(selected_avg_prob, compression, no_speech_threshold):
+  is_no_speech = selected_avg_prob < -1.0 or (compression < 1.1 and selected_avg_prob < -0.1 * no_speech_threshold)
+  too_repetitive = compression >= 2.4
+  return is_no_speech, too_repetitive
+
+def get_valid_segments(tokens, enc, start_time):
+  segments = list(segment_and_seek(tokens, enc, start_time))
+  return [segment for segment in segments if segment.text.strip()]
+
+def update_transcriptions(transcriptions, segment, batch_idx, waveforms, log_spec):
+  if len(waveforms) > 1:
+    if log_spec.shape[0] > 1:
+      batch_idx = min(batch_idx, len(transcriptions) - 1)
+    if len(transcriptions) > batch_idx:
+      transcriptions[batch_idx] += segment.text + " "
+  else:
+    if not transcriptions:
+      transcriptions.append("")
+    transcriptions[0] += segment.text + " "
+
+def print_and_write_segment(segment, output_fh):
+  text = f"{format_time(int(segment.start))} -> {format_time(int(segment.end))}: {segment.text}"
+  print(f"\033[31m{text}\033[0m")
+  if output_fh:
+    output_fh.write(f"{text}\n")
+
+def get_next_context(context_for_next, nsample, start_tokens, enc):
+  return np.array([enc._special_tokens['<|startofprev|>']]+context_for_next[-nsample+len(start_tokens):]+start_tokens) if context_for_next else np.array(start_tokens)
+
+def process_temperature_loop(model, to_decode, encoded_audio, nsample, start_tokens, eot, enc, beam, no_speech_threshold, start_time, output_fh, transcribed, transcriptions, waveforms, log_spec):
+  for t in np.linspace(0, 1.0, 6):
+    print(f"temperature {t:.1f}")
+    infer_result = inferloop(model, to_decode, encoded_audio, t, (nsample-len(start_tokens))*2, enc, beam)
+    if infer_result is None:
+      print("infer result is None, resampling")
+      continue
+    inferred, sum_probs = infer_result
+    sum_probs = sum_probs.tolist()
+    avg_probs = [sum_probs[i] / len(sequence) for i, sequence in enumerate(inferred)]
+    candidate_idx = avg_probs.index(max(avg_probs))
+    print(f"\033[34m{avg_probs=} {candidate_idx=}\033[0m")
+    selected: np.ndarray = inferred[candidate_idx]
+    selected_avg_prob = avg_probs[candidate_idx]
+    tokens, text = get_segment_tokens(selected, start_tokens, eot, enc)
+    print(f"Decoder output: {text=}")
+    compression = compression_ratio(text)
+    print(f"\033[33m{compression=}, {selected_avg_prob=}\033[0m")
+    is_no_speech, too_repetitive = should_skip_segment(selected_avg_prob, compression, no_speech_threshold)
+    if too_repetitive:
+      print("Too repetitive, resample")
+      continue
+    if is_no_speech:
+      print(f"No speech detected (avg_prob={selected_avg_prob}, threshold={-0.1 * no_speech_threshold}), skipping segment")
+      return True, start_time + 30, np.array(start_tokens)
+    valid_segments = get_valid_segments(tokens, enc, start_time)
+    if not valid_segments:
+      print("No speech segments found, skipping to next segment")
+      return True, start_time + 30, np.array(start_tokens)
+    context_for_next = []
+    for segment in valid_segments:
+      print_and_write_segment(segment, output_fh)
+      context_for_next.extend(segment.tokens)
+      transcribed["segments"].append({"text": segment.text, "start": segment.start, "end": segment.end})
+      update_transcriptions(transcriptions, segment, 0, waveforms, log_spec)
+    return True, valid_segments[-1].end if valid_segments else start_time + 30, get_next_context(context_for_next, nsample, start_tokens, enc)
+  return False, start_time + 30, np.array(start_tokens)
 
 def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, output_fh=None, truncate=False, beam=False, no_speech_threshold=0.8):
   log_spec = prep_audio(waveforms, model.batch_size, truncate)
@@ -456,96 +532,25 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
   eot = enc._special_tokens["<|endoftext|>"]
   start_tokens = get_start_tokens(enc, model.is_multilingual)
   ctx = np.array(start_tokens)
-  curr_frame = 0
-  start_time = 0
+  curr_frame, start_time = 0, 0
   total_time = log_spec.shape[-1] // FRAMES_PER_SEGMENT * 30
   print(f"{total_time=}")
   transcribed = {"segments": []}
   transcriptions = ["" for _ in range(len(waveforms))] if len(waveforms) > 1 else []
   while start_time < total_time:
-    curr_frame = int(start_time) * 100
-    end_frame = curr_frame + FRAMES_PER_SEGMENT
+    curr_frame, end_frame = int(start_time) * 100, int(start_time) * 100 + FRAMES_PER_SEGMENT
     print(f"\n{curr_frame=} {end_frame=} {start_time=}")
-    if end_frame > log_spec.shape[2]:
-      log_spec = np.pad(log_spec, ((0, 0), (0, 0), (0, end_frame - log_spec.shape[2])))
+    log_spec = pad_log_spec_if_needed(log_spec, end_frame)
     encoded_audio = model.encoder.encode(Tensor(log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT]))
     print(f"\033[32mcontext to decoder: {enc.decode(ctx)=}\033[0m")
     to_decode = np.tile(ctx, (5, 1))
-    temperatures = np.linspace(0, 1.0, 6)
-    for t in temperatures:
-      print(f"temperature {t:.1f}")
-      if (infer_result := inferloop(model, to_decode, encoded_audio, t, (nsample-len(start_tokens))*2, enc, beam)) is None:
-        print("infer result is None, resampling")
-        continue
-      inferred, sum_probs = infer_result
-      sum_probs = sum_probs.tolist()
-      avg_probs = [sum_probs[i] / len(sequence) for i, sequence in enumerate(inferred)]
-      candidate_idx = avg_probs.index(max(avg_probs))
-      print(f"\033[34m{avg_probs=} {candidate_idx=}\033[0m")
-      selected: np.ndarray = inferred[candidate_idx]
-      selected_avg_prob = avg_probs[candidate_idx]
-      eoti = index[0] if (index:=(np.where(selected == eot)[0])).size > 0 else None
-      soti = np.where(selected == start_tokens[-1])[0][0] + 1
-      tokens = selected[soti:eoti]
-      text = enc.decode(tokens)
-      print(f"Decoder output: {text=}")
-      compression = compression_ratio(text)
-      print(f"\033[33m{compression=}, {selected_avg_prob=}\033[0m")
-      is_no_speech = selected_avg_prob < -1.0 or (compression < 1.1 and selected_avg_prob < -0.1 * no_speech_threshold)
-      if compression >= 2.4:
-        print("Too repetitive, resample")
-        continue
-      if is_no_speech:
-        print(f"No speech detected (avg_prob={selected_avg_prob}, threshold={-0.1 * no_speech_threshold}), skipping segment")
-        start_time += 30
-        ctx = np.array(start_tokens)
-        break
-      segments = list(segment_and_seek(tokens, enc, start_time))
-      valid_segments = [segment for segment in segments if segment.text.strip()]
-      if not valid_segments:
-        print("No speech segments found, skipping to next segment")
-        start_time += 30
-        ctx = np.array(start_tokens)
-        break
-      context_for_next = []
-      for segment in valid_segments:
-        text = f"{format_time(int(segment.start))} -> {format_time(int(segment.end))}: {segment.text}"
-        print(f"\033[31m{text}\033[0m")
-        if output_fh:
-          output_fh.write(f"{text}\n")
-        context_for_next.extend(segment.tokens)
-        transcribed["segments"].append({
-          "text": segment.text,
-          "start": segment.start,
-          "end": segment.end
-        })
-        if len(waveforms) > 1:
-          batch_idx = 0
-          if log_spec.shape[0] > 1:
-            batch_idx = min(batch_idx, len(transcriptions) - 1)
-          if len(transcriptions) > batch_idx:
-            transcriptions[batch_idx] += segment.text + " "
-        else:
-          if not transcriptions:
-            transcriptions.append("")
-          transcriptions[0] += segment.text + " "
-      if valid_segments:start_time = valid_segments[-1].end
-      else: start_time += 30
-      break
-    else:
-      context_for_next = np.array([])
-      start_time += 30
-      ctx = np.array(start_tokens)
+    processed, start_time, ctx = process_temperature_loop(model, to_decode, encoded_audio, nsample, start_tokens, eot, enc, beam, no_speech_threshold, start_time, output_fh, transcribed, transcriptions, waveforms, log_spec)
+    if processed:
       continue
-    # Only set context for next iteration if we have valid segments
-    if context_for_next:
-      ctx = np.array([enc._special_tokens['<|startofprev|>']]+context_for_next[-nsample+len(start_tokens):]+start_tokens)
-    else:ctx = np.array(start_tokens)
-  
-  if len(waveforms) > 1:
-    return [t.strip() for t in transcriptions]
-  elif transcriptions:
-    return transcriptions[0].strip()
+    else:
+      start_time, ctx = start_time + 30, np.array(start_tokens)
+  if len(waveforms) > 1: return [t.strip() for t in transcriptions]
+  elif transcriptions: return transcriptions[0].strip()
   return transcribed
 
 def listener(q):
