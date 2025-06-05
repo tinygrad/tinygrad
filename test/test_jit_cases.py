@@ -87,7 +87,7 @@ class DocumentJitRealizeCases(unittest.TestCase):
     """
     If we want to export this function, and we want `w` to be [-2.0] when exported, we'll have to add copyin steps after JIT capture.
     If JIT capture didn't depend on realize, then you could export the graph with `w` having a value of [-2.0].
-    You can't just JIT this function from "two steps back", starting with `w` = Tensor([-2.0 ** 1/4]), because complex numbers aren't supported.
+    You can't get `w` = [-2.0] by jitting the function starting with `w` = Tensor([(-2.0) ** (1/4)]), because complex numbers aren't supported.
     """
     w = Tensor([-2.0])
 
