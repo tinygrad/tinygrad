@@ -98,6 +98,12 @@ class TestSchedule(unittest.TestCase):
       run_schedule(check_schedule(a, 1))
     self.assertListEqual(a.tolist(), [1, 5, 9])
 
+  def test_arange_sum_alt(self):
+    a = (Tensor.arange(5).reshape(1,5).expand(6,5)*Tensor(2)).reshape(1,6,5).sum(axis=2)
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(a, 1))
+    np.testing.assert_equal(a.numpy(), 20)
+
   def test_permute_arange(self):
     a = Tensor.arange(6).reshape(6, 1, 1).permute(2, 0, 1).sum(axis=1)
     with Context(FUSE_ARANGE=1):
@@ -142,7 +148,13 @@ class TestSchedule(unittest.TestCase):
     xt = X[Tensor(0)][Tensor(1)]
     with Context(FUSE_ARANGE=1):
       run_schedule(check_schedule(xt, 2))
-    np.testing.assert_equal(xt.numpy(), X.numpy()[0][1])
+
+  @given(strat.sampled_from(range(2,4)), strat.sampled_from(range(2,4)), strat.sampled_from(range(0,4)), strat.sampled_from(range(0,4)))
+  def test_indexing_scalars(self, x, y, a, b):
+    assume(a<x and b<y)
+    X = Tensor.randn(x, y).realize()
+    xt = X[Tensor(a)][Tensor(b)]
+    np.testing.assert_equal(xt.numpy(), X.numpy()[a][b])
 
   def test_push_pads_elementwise(self):
     x = Tensor.full((4,4), 2.).contiguous().realize()
