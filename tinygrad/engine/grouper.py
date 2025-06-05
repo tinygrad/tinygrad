@@ -67,13 +67,13 @@ ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFE
 
 multi_sym = PatternMatcher([
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
+  # TODO: why is this CONTIGUOUS needed?
   (UPat(Ops.COPY, name="c", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda c,x:
-    UOp(Ops.MSTACK, c.dtype, tuple(x.copy_to_device(d) for d in c.device)) \
+    UOp(Ops.MSTACK, c.dtype, tuple(x.copy_to_device(d) for d in c.device)).contiguous() \
       if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
   # COPY_TO_ONE: if copying from multidevice to one, MSELECT the first (TODO: a little from each?)
   (UPat(Ops.COPY, name="c", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda c,x:
-    UOp(Ops.MSELECT, x.dtype, (x,), arg=0).copy_to_device(c.device) \
-      if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
+    x.mselect(0).copy_to_device(c.device) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
   # MSELECT must select a base, if there are views apply them after selecting the base
   (UPat(Ops.MSELECT, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"),), name="ms"), mselect_reorder_view),
   # move view through MSTACK
