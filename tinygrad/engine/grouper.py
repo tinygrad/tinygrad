@@ -135,6 +135,10 @@ replace_contiguous = PatternMatcher([
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
+def realize_parents(ctx:dict[UOp, None], rb:UOp) -> None:
+  for s in rb.src:
+    if s.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
+
 def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
   st = unwrap(view.st)
   # always realize unsafe pad ops before masked view
@@ -151,8 +155,8 @@ do_realize = PatternMatcher([
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}, name="tr"), realize),
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), name="view"), realize_before_view),
-  # realize before COPY, MSELECT, MSTACK
-  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), allow_any_len=True), realize),
+  # realize parents of COPY, MSELECT, MSTACK
+  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
 ])
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:dict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
