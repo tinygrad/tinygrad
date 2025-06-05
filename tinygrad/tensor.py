@@ -3638,9 +3638,9 @@ class Tensor(MathTrait):
     # TODO: int pow
     if not base.is_floating_point(): raise RuntimeError("base needs to be float")
 
-    # NOTE: pow(int, float) -> int
     ret = base._apply_uop(UOp.pow, exponent)
-    return ret.round().cast(self.dtype) if not dtypes.is_float(self.dtype) else ret
+    # NOTE: pow(int, float) -> int
+    return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) else ret
 
   def maximum(self, x:Tensor|ConstType) -> Tensor:
     """
