@@ -58,7 +58,7 @@ def mselect_reorder_view(ms:UOp, view:UOp, base:UOp):
     st = st.substitute({dnums[0]:dnums[0].const_like(ms.arg)})
   return base.mselect(ms.arg).view(st)
 
-ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT}
+ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK}
 
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
@@ -123,6 +123,10 @@ replace_contiguous = PatternMatcher([
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
+def realize_parents(ctx:dict[UOp, None], rb:UOp) -> None:
+  for s in rb.src:
+    if s.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
+
 def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
   st = unwrap(view.st)
   # always realize unsafe pad ops before masked view
@@ -139,8 +143,8 @@ do_realize = PatternMatcher([
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}, name="tr"), realize),
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), name="view"), realize_before_view),
-  # realize before COPY and MSELECT
-  (UPat((Ops.COPY, Ops.MSELECT), src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), allow_any_len=True), realize),
+  # realize parents of COPY, MSELECT, MSTACK
+  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
 ])
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:dict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
@@ -243,7 +247,7 @@ def create_kernel(x:UOp, b:UOp|None=None):
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return buffer.assign(kernel).reshape(x.shape)
 
-DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.MSELECT, Ops.MULTI}
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.MULTI}
 def append_to_kernel(x:UOp):
   new_srcs: list[UOp] = []
   metadata = x.arg.metadata
@@ -402,6 +406,8 @@ fix_kernel_ops = PatternMatcher([
 replace_globals = PatternMatcher([
   # replace ASSIGN with the target BUFFER
   (UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat(Ops.KERNEL)), name="assign", allow_any_len=True), lambda assign: assign.src[0]),
+  # HACK: select the 0 branch of MSTACK (the device is wrong after this, is that okay?)
+  (UPat(Ops.MSTACK, name="x"), lambda x: x.src[0]),
 ])
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
@@ -411,7 +417,11 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
-  bufs = tuple(s.buf_uop if s.op is not Ops.MSELECT else s.src[0].buf_uop for s in k.src)
+  bufs = []
+  for s in k.src:
+    # traverse back through MSELECT and MSTACK. HACK: 0 branch of MSTACK only
+    while s.op in {Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
+    bufs.append(s.buf_uop)
   ast = graph_rewrite(ast, view_left+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
   if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
@@ -513,7 +523,7 @@ def limit_bufs(root:UOp):
   # count number of unique buffers flowing into this op
   bufs: set[UOp] = set()
   def gate_input(u:UOp):
-    if (is_load:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): bufs.add(u)
+    if (is_load:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN, Ops.MSTACK})): bufs.add(u)
     return not is_load
   root.toposort(gate=gate_input)
   # NOTE: this -1 is for the output buffer

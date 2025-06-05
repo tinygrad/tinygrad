@@ -1,5 +1,5 @@
-import csv, pathlib, time, numpy as np
-from os import getenv
+import csv, pathlib, time
+import numpy as np
 import torch
 torch.set_num_threads(1)
 import onnx
@@ -7,7 +7,7 @@ from onnx.helper import tensor_dtype_to_np_dtype
 import onnxruntime as ort
 from onnx2torch import convert
 from tinygrad.frontend.onnx import OnnxRunner
-from tinygrad.helpers import OSX, DEBUG, fetch
+from tinygrad.helpers import OSX, DEBUG, fetch, getenv
 from tinygrad import Tensor, Device
 
 MODELS = {
@@ -123,15 +123,14 @@ def benchmark_model(m, devices, validate_outs=False):
     open_csv.writeheader()
   open_csv.writerow(CSV)
 
-def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
-  assert len(tiny_out) == len(onnx_out) and tiny_out.keys() == onnx_out.keys()
+def assert_allclose(tiny_out:dict, onnx_out:dict, rtol, atol):
+  assert tiny_out.keys() == onnx_out.keys()
   for k in tiny_out.keys():
     tiny_v, onnx_v = tiny_out[k], onnx_out[k]
-    if tiny_v is None: assert tiny_v == onnx_v
-    else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
+    np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
 
 if __name__ == "__main__":
   devices = [Device.DEFAULT] if getenv("NOCLANG") else [Device.DEFAULT, "CPU"]
-  if getenv("MODEL", "") != "": benchmark_model(getenv("MODEL", ""), devices, True)
+  if (model:=getenv("MODEL", "")) != "": benchmark_model(model, devices, validate_outs=True)
   else:
-    for m in MODELS: benchmark_model(m, devices, True)
+    for m in MODELS: benchmark_model(m, devices, validate_outs=True)
