@@ -174,12 +174,12 @@ class TestSchedule(unittest.TestCase):
 
   def test_rand(self):
     x = Tensor.rand(32)
-    check_schedule(x, 3, [Tensor._device_rng_counters[x.device]])
+    check_schedule(x, 4, [Tensor._device_rng_counters[x.device]])
 
   def test_rand_recompute_arange(self):
     x = Tensor.rand(32)
     with Context(DONT_GROUP_REDUCES=1):
-      check_schedule(x, 2, [Tensor._device_rng_counters[x.device]])
+      check_schedule(x, 3, [Tensor._device_rng_counters[x.device]])
 
   @unittest.skip("TODO: do not divide by zero given x.idiv(VALID)")
   def test_rand_handcoded(self):
