@@ -1645,21 +1645,6 @@ class TestSchedule(unittest.TestCase):
   @unittest.expectedFailure
   def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
 
-  @unittest.skip("splitting kernels exceeding device buffer count is not yet supported")
-  def _test_buf_cnt(self, cnt:int, allowed:int):
-    alu = functools.reduce(lambda x,y: x+y, [Tensor.ones((1, 1)).contiguous().realize() for _ in range(cnt-1)])
-    s = alu.schedule()
-    assert len(s) == allowed
-    run_schedule(s)
-    expected = functools.reduce(lambda x,y: x+y, [np.ones((1, 1)) for _ in range(cnt-1)])
-    np.testing.assert_equal(alu.numpy(), expected)
-
-  def test_buf_cnt_at_limit(self): self._test_buf_cnt(31, allowed=1)
-  @unittest.expectedFailure
-  def test_buf_cnt_over_limit(self): self._test_buf_cnt(32, allowed=2)
-  @unittest.expectedFailure
-  def test_buf_cnt_over_limit_alt(self): self._test_buf_cnt(63, allowed=3)
-
   @unittest.skipIf(getenv("VIZ"), "TODO: VIZ blocks gc")
   def test_schedule_mem_used(self):
     base = GlobalCounters.mem_used
