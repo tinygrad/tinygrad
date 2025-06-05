@@ -4,7 +4,7 @@ from tinygrad import TinyJit, Tensor, Device, dtypes
 def f16_is_unsupported():
   assert (Tensor([1], dtype=dtypes.float32) + 1).tolist() == [2], "float32 kernel failed, there is an unexpected problem"
   try: (Tensor([1], dtype=dtypes.float16) + 1).realize()
-  except: return True
+  except RuntimeError: return True
   return False
 
 class TestJitFailures(unittest.TestCase):
@@ -30,7 +30,7 @@ class TestJitFailures(unittest.TestCase):
     @TinyJit
     def f():
       return (Tensor([1], dtype=dtypes.float16) + 1)
-    
+
     with self.assertRaisesRegex(RuntimeError, "f16"):
       for _ in range(2): f()
 
