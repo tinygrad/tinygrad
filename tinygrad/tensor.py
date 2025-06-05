@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref, contextvars
 from contextlib import ContextDecorator
-from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Optional
+from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Optional
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -1261,6 +1261,18 @@ class Tensor(MathTrait):
     index = index.to(self.device)
     x = self.shrink(tuple((0, i) if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (x * index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim])).sum(-1, dtype=self.dtype)
+
+  def as_strided(self, size, stride, storage_offset=0) -> Tensor:
+    """Returns a tensor with the specified shape, strides, and offset."""
+    if any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
+    if prod(size) == 1: return self.flatten()[storage_offset].reshape(size)
+    from tinygrad.shape.shapetracker import ShapeTracker, View, apply_mop
+    st = ShapeTracker(getattr(self.lazydata.st, 'views', ()) + (View.create(size, stride, storage_offset),))
+    mops = st.to_movement_ops()
+    if mops and mops[0] == (Ops.RESHAPE, self.shape): mops.pop(0)
+    ret: Any = self
+    for mop in mops: ret = apply_mop(ret, mop)
+    return ret
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """

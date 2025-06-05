@@ -215,15 +215,15 @@ def max_unpool2d(self:torch.Tensor, indices:torch.Tensor, output_size):
   return wrap(unwrap(self).max_unpool2d(unwrap(indices), output_size=output_size))
 
 @torch.library.impl("aten::arange", "privateuseone")
-def arange(end, dtype=None, device=None, pin_memory=None):
+def arange(end, dtype=None, device=None, pin_memory=None, layout=None):
   return wrap(Tensor.arange(0, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
 
 @torch.library.impl("aten::arange.start", "privateuseone")
-def arange_start(start, end, dtype=None, device=None, pin_memory=None):
+def arange_start(start, end, dtype=None, device=None, pin_memory=None, layout=None):
   return wrap(Tensor.arange(start, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
 
 @torch.library.impl("aten::arange.start_step", "privateuseone")
-def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None):
+def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None, layout=None):
   return wrap(Tensor.arange(start, end, step, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
 
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
@@ -306,6 +306,18 @@ def scatter_add(self, dim, index, src, out):
   self, index, src, out = unwrap(self), unwrap(index), unwrap(src), unwrap(out)
   if self.shape == (): return wrap(out.assign(src))
   return wrap(out.assign(Tensor.scatter_reduce(self, dim, index, src, reduce='sum')))
+
+@torch.library.impl("aten::index_add.out", "privateuseone")
+@inplace_fn("out")
+def index_add(self, dim, index, src, out, alpha=1):
+  self, index, src, out = unwrap(self), unwrap(index), unwrap(src), unwrap(out)
+  if alpha != 1: src = src * alpha
+  if self.shape == (): return wrap(out.assign(src))
+  # reshape and expand 1D index to full src shape
+  prefix = (1,)*dim
+  suffix = (1,)*(src.ndim - dim - 1)
+  idx = index.reshape(*prefix, -1, *suffix).expand(src.shape)
+  return wrap(out.assign(Tensor.scatter_reduce(self, dim, idx, src, reduce='sum')))
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
