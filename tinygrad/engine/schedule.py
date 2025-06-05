@@ -50,8 +50,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
         in_degree[k] += 1
       elif s.op in {Ops.MSELECT, Ops.MSTACK}:
         for ss in s.src:
-          # TODO: this is somewhat replicated from grouper
-          while ss.op in {Ops.MSELECT, Ops.MSTACK}: ss = ss.src[0]
+          if ss.op is Ops.MSELECT: ss = ss.src[0]
           if ss.op is not Ops.BUFFER:
             assert ss.op is Ops.ASSIGN
             children[ss.src[1]].append(k)
