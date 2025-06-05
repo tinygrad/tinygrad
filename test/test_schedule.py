@@ -70,7 +70,7 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
 def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, merge_views+sym, {})
 
 class TestSchedule(unittest.TestCase):
-  @unittest.skip("linearizer failure")
+  @unittest.skip("linearizer err")
   def test_arange_avgpool2d(self, kcount=1):
     x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
     t = x.avg_pool2d(padding=1)
@@ -111,6 +111,13 @@ class TestSchedule(unittest.TestCase):
     self.assertListEqual(a.tolist(), [[15]])
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
+  def test_error_on_device_mismatch(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10, device="CPU")
+    c = a+b
+    with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
+
+  @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
   def test_error_on_device_mismatch_alt(self):
     a = Tensor.empty(10)
     b = Tensor.empty((1,), device="CPU").expand(10).contiguous()
@@ -143,17 +150,13 @@ class TestSchedule(unittest.TestCase):
         root = root + functools.reduce(lambda a,b:a+b, bufs[i:i+X])
       self.assertEqual(root.item(), sum(range(N)))
 
-  def test_indexing_scalars_multiple_dims(self):
-    X = Tensor.randn(2, 3).realize()
-    xt = X[Tensor(0)][Tensor(1)]
-    with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(xt, 2))
-
   @given(strat.sampled_from(range(2,4)), strat.sampled_from(range(2,4)), strat.sampled_from(range(0,4)), strat.sampled_from(range(0,4)))
   def test_indexing_scalars(self, x, y, a, b):
     assume(a<x and b<y)
     X = Tensor.randn(x, y).realize()
     xt = X[Tensor(a)][Tensor(b)]
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(xt, 2))
     np.testing.assert_equal(xt.numpy(), X.numpy()[a][b])
 
   def test_push_pads_elementwise(self):
