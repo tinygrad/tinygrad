@@ -9,6 +9,9 @@ from hexdump import hexdump
 
 pagemap = FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
 
+os.system(cmd:=f"sudo sh -c 'echo 0 > /proc/sys/vm/compact_unevictable_allowed'")
+os.system(cmd:=f"sudo sh -c 'echo 8 > /proc/sys/vm/nr_hugepages'")
+
 MAP_LOCKED = 0x2000
 def alloc_sysmem(size, contigous=False):
   size = round_up(size, mmap.PAGESIZE)
@@ -141,7 +144,7 @@ class NVDev():
     offsets = [0] * 4
     npages[3] = (len(image) + nv.LIBOS_MEMORY_REGION_RADIX_PAGE_SIZE - 1) >> nv.LIBOS_MEMORY_REGION_RADIX_PAGE_LOG2
     for i in range(3, 0, -1): npages[i-1] = ((npages[i] - 1) >> (nv.LIBOS_MEMORY_REGION_RADIX_PAGE_LOG2 - 3)) + 1
-    
+
     total_pages = 0
     for i in range(1, 4):
       total_pages += npages[i-1]
@@ -237,8 +240,6 @@ class NVDev():
 
       self.logs[name] = to_mv(logbuf_va + off_sz, size)
 
-      print(hex(arg.id8))
-
       off_sz += size
 
     # rm initargs
@@ -267,7 +268,7 @@ class NVDev():
       rpc_result_private=nv.NV_VGPU_MSG_RESULT_RPC_PENDING, header_version=(3<<24), function=func,
       length=len(msg) + 0x20)
     
-    # simple put rpcPARISBETTERTHANBARCA
+    # simple put rpc
     msg = bytes(header) + msg
     phdr = nv.GSP_MSG_QUEUE_ELEMENT(elemCount=1, seqNum=seqNum)
     phdr.checkSum = self._checksum(bytes(phdr) + msg)
@@ -300,9 +301,64 @@ class NVDev():
 
     self.send_rpc(72, bytes(data))
 
+  def rpc_set_registry_table(self):
+    dt = {'GrdmaPciTopoCheckOverride': 0x0,
+          'CreateImexChannel0': 0x0,
+          'ImexChannelCount': 0x800,
+          'DmaRemapPeerMmio': 0x1,
+          'OpenRmEnableUnsupportedGpus': 0x1,
+          'EnableDbgBreakpoint': 0x0,
+          'RmNvlinkBandwidthLinkCount': 0x0,
+          'EnableGpuFirmwareLogs': 0x2,
+          'EnableGpuFirmware': 0x12,
+          'EnableResizableBar': 0x0,
+          'EnablePCIERelaxedOrderingMode': 0x0,
+          'RegisterPCIDriver': 0x1,
+          'DynamicPowerManagementVideoMemoryThreshold': 0xc8,
+          'DynamicPowerManagement': 0x3,
+          'S0ixPowerManagementVideoMemoryThreshold': 0x100,
+          'EnableS0ixPowerManagement': 0x0,
+          'PreserveVideoMemoryAllocations': 0x0,
+          'RmProfilingAdminOnly': 0x1,
+          'NvLinkDisable': 0x0,
+          'EnableUserNUMAManagement': 0x1,
+          'EnableStreamMemOPs': 0x0,
+          'IgnoreMMIOCheck': 0x0,
+          'VMallocHeapMaxSize': 0x0,
+          'KMallocHeapMaxSize': 0x0,
+          'MemoryPoolSize': 0x0,
+          'EnablePCIeGen3': 0x0,
+          'EnableMSI': 0x0,
+          'UsePageAttributeTable': 0xffffffff,
+          'InitializeSystemMemoryAllocations': 0x1,
+          'DeviceFileMode': 0x1b6,
+          'DeviceFileGID': 0x0,
+          'DeviceFileUID': 0x0,
+          'ModifyDeviceFiles': 0x1,
+          'RmLogonRC': 0x1,
+          'ResmanDebugLevel': 0xffffffff,
+          'RMForcePcieConfigSave': 0x1,
+          'RMSecBusResetEnable': 0x1}
+
+    hdr_size = ctypes.sizeof(nv.PACKED_REGISTRY_TABLE)
+    entries_size = ctypes.sizeof(nv.PACKED_REGISTRY_ENTRY) * len(dt)
+    next_strs_offset = hdr_size + entries_size
+
+    entries_bytes = b''
+    data_bytes = b''
+
+    for k,v in dt.items():
+      entry = nv.PACKED_REGISTRY_ENTRY(nameOffset=hdr_size + entries_size + len(data_bytes),
+        type=nv.REGISTRY_TABLE_ENTRY_TYPE_DWORD, data=v, length=4)
+      entries_bytes += bytes(entry)
+      data_bytes += k.encode('utf-8') + b'\x00'
+
+    header = nv.PACKED_REGISTRY_TABLE(size=hdr_size + len(entries_bytes) + len(data_bytes), numEntries=len(dt))
+    self.send_rpc(73, bytes(header) + entries_bytes + data_bytes, seqNum=1)
+
   def rpc_get_static_info(self):
     data = nv.GspStaticConfigInfo()
-    self.send_rpc(65, bytes(data), seqNum=1)
+    self.send_rpc(65, bytes(data), seqNum=2)
 
   def init_gsp(self):
     bootload_ucode_sysmem, bootload_ucode_size, bootload_desc = self.init_boot_binary_image()
@@ -340,6 +396,11 @@ class NVDev():
     wpr_meta.revision = nv.GSP_FW_WPR_META_REVISION
     wpr_meta.magic = nv.GSP_FW_WPR_META_MAGIC
 
+    # wpr_meta.nonWprHeapOffset = 0x7e7c00000
+    # wpr_meta.frtsOffset = 0x7f4200000
+
+    assert ctypes.sizeof(nv.GspFwWprMeta) == 0x100
+
     fmc_boot.bootGspRmParams.gspRmDescOffset = wpr_meta_sysmem
     fmc_boot.bootGspRmParams.gspRmDescSize = ctypes.sizeof(nv.GspFwWprMeta)
     fmc_boot.bootGspRmParams.target = nv.GSP_DMA_TARGET_COHERENT_SYSTEM
@@ -367,9 +428,10 @@ class NVDev():
       time.sleep(0.01)
     print(hex(self.rreg(self.NV_THERM_I2CS_SCRATCH)))
 
-    self.rpc_set_system_data()
-    # exit(0)
+    for i in range(6): CPUProgram.atomic_lib.atomic_thread_fence(i)
 
+    self.rpc_set_system_data()
+    self.rpc_set_registry_table()
     self.kfsp_send_msg(self.NVDM_TYPE_COT, bytes(cot_payload))
 
     # time.sleep(5)
@@ -379,10 +441,6 @@ class NVDev():
       mailbox0 = self.rreg(0x110000 + self.NV_PFALCON_FALCON_MAILBOX0)
 
       if hwcfg2 == 0x818787f7: break
-      # print("polling for GSP to be ready...", hex(hwcfg2), hex(mailbox0))
-
-    # time.sleep(0.01)
-    # CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
 
     while self.status_queue_tx.entryOff != 0x1000:
       CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
@@ -399,7 +457,7 @@ class NVDev():
     print(self.status_queue_tx.writePtr, hex(self.status_queue_tx.entryOff), hex(self.status_queue_tx.size), hex(self.status_queue_tx.msgSize), self.status_queue_tx.msgCount)
 
     while True:
-      CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
+      for i in range(6): CPUProgram.atomic_lib.atomic_thread_fence(i)
 
       if self.command_queue_rx.readPtr != self.status_queue_tx.writePtr:
         off = self.command_queue_rx.readPtr * 0x1000
@@ -408,7 +466,7 @@ class NVDev():
         x = nv.rpc_message_header_v.from_address(self.status_queue_va + off + 0x30)
         rptr = (self.command_queue_rx.readPtr + round_up(x.length, 0x1000) // 0x1000) % self.status_queue_tx.msgCount
         self.command_queue_rx.readPtr = rptr
-        CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
+        for i in range(6): CPUProgram.atomic_lib.atomic_thread_fence(i)
 
         print(f"RPC message: {x.function:x}, {x.length}, {x.signature}, {x.rpc_result}, {x.rpc_result_private} {self.status_queue_tx.writePtr} {self.command_queue_rx.readPtr}")
         hexdump(self.status_queue_mv[off:off+0x100])

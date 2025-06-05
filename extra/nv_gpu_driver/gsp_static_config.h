@@ -42,6 +42,24 @@
 #define MAX_DSM_SUPPORTED_FUNCS_RTN_LEN 8 // # bytes to store supported functions
 #define NV_ACPI_GENERIC_FUNC_COUNT                  8
 
+#define REGISTRY_TABLE_ENTRY_TYPE_UNKNOWN  0
+#define REGISTRY_TABLE_ENTRY_TYPE_DWORD    1
+#define REGISTRY_TABLE_ENTRY_TYPE_BINARY   2
+#define REGISTRY_TABLE_ENTRY_TYPE_STRING   3
+typedef struct PACKED_REGISTRY_ENTRY
+{
+    NvU32                   nameOffset;
+    NvU8                    type;
+    NvU32                   data;
+    NvU32                   length;
+} PACKED_REGISTRY_ENTRY;
+
+typedef struct PACKED_REGISTRY_TABLE
+{
+    NvU32                   size;
+    NvU32                   numEntries;
+} PACKED_REGISTRY_TABLE;
+
 /* Indicates the current state of mux */
 typedef enum
 {
