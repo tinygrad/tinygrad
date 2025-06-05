@@ -9,7 +9,6 @@ from onnx2torch import convert
 from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.helpers import OSX, DEBUG, fetch
 from tinygrad import Tensor, Device
-from tinygrad.device import CompileError
 
 MODELS = {
   "resnet50": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
@@ -63,23 +62,16 @@ def benchmark_model(m, devices, validate_outs=False):
   # print input names
   if DEBUG >= 2: print([inp.name for inp in onnx_model.graph.input if inp.name not in excluded])
   for device in devices:
-    try:
-      Device.DEFAULT = device
-      inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-      tinygrad_model = OnnxRunner(onnx_model)
-      benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
+    Device.DEFAULT = device
+    inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
+    tinygrad_model = OnnxRunner(onnx_model)
+    benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
 
-      from tinygrad.engine.jit import TinyJit
-      tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model(kwargs).items()})
-      for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
-      benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}) # noqa: F821
-      del inputs, tinygrad_model, tinygrad_jitted_model
-    except CompileError as e:
-      # TODO: we don't run the dm model on METAL for now
-      if Device.DEFAULT == "METAL":
-        assert "no 'buffer' resource location available" in str(e)
-        return
-      else: raise e
+    from tinygrad.engine.jit import TinyJit
+    tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model(kwargs).items()})
+    for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
+    benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}) # noqa: F821
+    del inputs, tinygrad_model, tinygrad_jitted_model
 
   # convert model to torch
   try:
