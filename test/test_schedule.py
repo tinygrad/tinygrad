@@ -97,6 +97,12 @@ class TestSchedule(unittest.TestCase):
       run_schedule(check_schedule(a, 1))
     self.assertListEqual(a.tolist(), [1, 5, 9])
 
+  def test_arange_sum_alt(self):
+    a = (Tensor.arange(5).reshape(1,5).expand(6,5)*Tensor(2)).reshape(1,6,5).sum(axis=2)
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(a, 1))
+    np.testing.assert_equal(a.numpy(), 20)
+
   def test_permute_arange(self):
     a = Tensor.arange(6).reshape(6, 1, 1).permute(2, 0, 1).sum(axis=1)
     with Context(FUSE_ARANGE=1):
