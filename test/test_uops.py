@@ -310,7 +310,7 @@ class TestLocalAccess(unittest.TestCase):
     sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
 
-  # NOTE: webgpu specific, since only webgpu performs bitpacking for uchar
+  # NOTE: webgpu specific, since only webgpu performs bitpacking
   @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Test local access with packed data type")
   def test_local_packed(self):
     uops = []
@@ -319,6 +319,19 @@ class TestLocalAccess(unittest.TestCase):
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
     sres = uop(uops, Ops.LOAD, dtypes.uint8, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
     self.assertEqual(_test_uops_result(dtypes.uint8, uops, sres), 42)
+
+  # NOTE: webgpu specific, since only webgpu performs bitpacking
+  @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Test local memory size for packed data types")
+  def test_packed_smem_size(self):
+    _dtypes = [dtypes.char, dtypes.uchar, dtypes.short, dtypes.ushort, dtypes.half]
+    size = 16
+    for dtype in _dtypes:
+      temp = UOp(Ops.DEFINE_LOCAL, dtype.ptr(size=size, local=True), (), 'smem')
+      uops = to_uops_list([temp], opts=Device[Device.DEFAULT].renderer)
+      out = Device[Device.DEFAULT].renderer.render(uops)
+      # half is supported in wgsl, so it doesn't have to be packed
+      corrected_size = size//(4//dtype.itemsize) if dtype != dtypes.half else size
+      self.assertIn(f"temp0: array<{Device[Device.DEFAULT].renderer.buf_map(dtype)},{corrected_size}>;", out)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   @unittest.skip("tinygrad doesn't support this behavior")

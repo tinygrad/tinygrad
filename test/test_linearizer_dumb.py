@@ -137,38 +137,6 @@ class TestLinearizerDumb(unittest.TestCase):
     prg = k.to_program()
     print(prg.src)
 
-  # from process replay https://github.com/tinygrad/tinygrad/actions/runs/10389229290/job/28766762085#step:18:6490
-  @unittest.expectedFailure
-  def test_unaligns_idxs(self):
-    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
-      UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.VIEW, dtypes.float.ptr(3), arg=ShapeTracker(views=(View(shape=(3, 1, 1), strides=(1, 0, 0), offset=0, mask=None, contiguous=True),)), src=(
-          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(3), arg=0, src=()),)),
-        UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (2,)), src=(
-          UOp(Ops.MUL, dtypes.float, arg=None, src=(
-            UOp(Ops.CAST, dtypes.float, arg=None, src=(
-              UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
-                UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
-                  UOp(Ops.LOAD, dtypes.long, arg=None, src=(
-                    UOp(Ops.VIEW, dtypes.long.ptr(3), arg=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(1, 0, 0), offset=0, mask=None, contiguous=False),)), src=(
-                      UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(3), arg=1, src=()),)),)),
-                  UOp(Ops.CAST, dtypes.long, arg=None, src=(
-                    UOp(Ops.LOAD, dtypes.int, arg=None, src=(
-                      UOp(Ops.VIEW, dtypes.int.ptr(5), arg=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),)), src=(
-                        UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(5), arg=2, src=()),)),)),)),)),
-                UOp(Ops.CONST, dtypes.bool, arg=True, src=(
-                  UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
-            UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-              UOp(Ops.VIEW, dtypes.float.ptr(5), arg=ShapeTracker(views=(View(shape=(3, 1, 5), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),)), src=(
-                UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(5), arg=3, src=()),)),)),)),)),)),))
-    opts = [Opt(op=OptOps.UNROLL, axis=0, arg=0), Opt(op=OptOps.LOCAL, axis=0, arg=3)]
-    k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-    k.apply_opts(opts)
-    prg = k.to_program()
-    print(prg.src)
-    load_idxs = [x.src[1] for x in k.uops if x.op is Ops.LOAD and x.src[0].arg == 3]
-    assert load_idxs[0] < load_idxs[1], f"first loaded idx {load_idxs[0].arg} then {load_idxs[1].arg}!"
-
   @unittest.expectedFailure
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need float4")
   def test_unrolled_float4_align(self):
