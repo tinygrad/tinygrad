@@ -203,6 +203,10 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
     recursive_group(r, unwrap(r.st), r, children, realizes, reduce_for_op, group, cache={})
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
+    for u in r.toposort(gate=lambda u: u not in realizes):
+      if u.op is Ops.REDUCE_AXIS and u.src[0].base.op is Ops.CONST:
+        can_chase = False
+        break
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = r in group
     # can only have one output
@@ -332,9 +336,11 @@ def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub Vi
 
 # change reduceop axes and input ShapeTrackers, view gets replaced with a reshape.
 def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
-  # don't swizzle if we can push the view to children
+  # contiguous and same size can push to children
+  # if there's a reduce child, shapes match with ones removed
   if unwrap(view.st).contiguous and view.size == r.size and \
-      (not (len(r.arg) == 3 and r.arg[2]) or tuple(x for x in r.shape if resolve(x != 1)) == tuple(x for x in view.shape if resolve(x != 1))):
+      (not (len(r.arg) == 3 and r.arg[2]) or # arg[2] = True is fuse marker
+       tuple((i,x) for i,x in enumerate(r.shape) if resolve(x != 1)) == tuple((i,x) for i,x in enumerate(view.shape) if resolve(x != 1))):
     return None
   # swizzle the input
   input_st = ShapeTracker.from_shape(src.shape)
