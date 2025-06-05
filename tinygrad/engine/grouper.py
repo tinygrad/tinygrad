@@ -402,6 +402,8 @@ fix_kernel_ops = PatternMatcher([
 replace_globals = PatternMatcher([
   # replace ASSIGN with the target BUFFER
   (UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat(Ops.KERNEL)), name="assign", allow_any_len=True), lambda assign: assign.src[0]),
+  # HACK: select the 0 branch of MSTACK (the device is wrong after this, is that okay?)
+  (UPat(Ops.MSTACK, name="x"), lambda x: x.src[0]),
 ])
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
@@ -413,8 +415,8 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # replace buffer with define_global + add load/store last
   bufs = []
   for s in k.src:
-    if s.op is Ops.MSELECT: bufs.append(s.src[0].buf_uop)
-    elif s.op is Ops.MSTACK: bufs.extend([x.buf_uop for x in s.src])
+    # HACK: 0 branch of MSTACK only
+    if s.op in {Ops.MSELECT, Ops.MSTACK}: bufs.append(s.src[0].buf_uop)
     else: bufs.append(s.buf_uop)
   ast = graph_rewrite(ast, view_left+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
   if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
