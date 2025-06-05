@@ -1,6 +1,6 @@
 from typing import cast
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv
+from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, unwrap
 from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp
 
 # *** allreduce implementation ***
@@ -53,7 +53,37 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   pads = [((s,numel-e),) for s,e in chunks]
   return functools.reduce(operator.add, [c.pad(pad) for pad,c in zip(pads, copied_chunks)]).reshape(shape)
 
-replace_allreduce = PatternMatcher([(UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),])
+# ***** multi rewrite MSELECT/MSTACK *****
+
+def mselect_reorder_view(ms:UOp, view:UOp, base:UOp):
+  st = unwrap(view.st)
+  # replace dnum in ShapeTracker with literal const for this mselect
+  if (dnums:=[x for x in st.vars() if x.arg[0] == '_device_num']):
+    assert len(dnums) == 1, f"view must have exactly 0 or 1 dnum, got {dnums}"
+    st = st.substitute({dnums[0]:dnums[0].const_like(ms.arg)})
+  return base.mselect(ms.arg).view(st)
+
+def mstack_reorder_view(ms:UOp):
+  args = [x.arg for x in ms.src]
+  assert all_same(args)
+  return UOp(Ops.MSTACK, ms.dtype, tuple(x.src[0] for x in ms.src)).view(args[0])
+
+replace_allreduce = PatternMatcher([
+  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
+  # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
+  (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"), UPat(Ops.DEVICE))), lambda c,x:
+    UOp(Ops.MSTACK, c.dtype, tuple(x.copy_to_device(d) for d in c.device)) \
+      if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
+  # COPY_TO_ONE: if copying from multidevice to one, MSELECT the first (TODO: a little from each?)
+  (UPat(Ops.COPY, name="c", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda c,x:
+    x.mselect(0).copy_to_device(c.device) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
+  # MSELECT on MSTACK is replaced with nothing
+  (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
+  # MSELECT must select a base, if there are views apply them after selecting the base
+  (UPat(Ops.MSELECT, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"),), name="ms"), mselect_reorder_view),
+  # move view through MSTACK
+  (UPat(Ops.MSTACK, src=UPat(Ops.VIEW), name="ms"), mstack_reorder_view),
+])
 
 # ***** multi functions *****
 
