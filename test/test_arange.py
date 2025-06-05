@@ -11,7 +11,7 @@ from tinygrad.uop.ops import Ops
 class TestArange(unittest.TestCase):
   def _get_flops(self, N, opts=None):
     GlobalCounters.reset()
-    tt = Tensor.arange(N)
+    tt = Tensor.arange(N).contiguous()
     sched = tt.schedule()
     self.assertEqual(len(sched), 1)
     k = Kernel(sched[-1].ast)
@@ -52,11 +52,11 @@ class TestArange(unittest.TestCase):
     def test_complexity_w_local_and_padto(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.PADTO, axis=1, arg=32)])
 
   def test_all_opts(self, opts=None, exclude=None):
-    k = Kernel(Tensor.arange(256).schedule()[-1].ast)
+    k = Kernel(Tensor.arange(256).contiguous().schedule()[-1].ast)
     if opts is not None:
       for o in opts: k.apply_opt(o)
     all_opts_256 = [kk.applied_opts for kk in get_kernel_actions(k, include_0=False).values()]
-    k = Kernel(Tensor.arange(2560).schedule()[-1].ast)
+    k = Kernel(Tensor.arange(2560).contiguous().schedule()[-1].ast)
     if opts is not None:
       for o in opts: k.apply_opt(o)
     all_opts_2560 = [kk.applied_opts for kk in get_kernel_actions(k, include_0=False).values()]

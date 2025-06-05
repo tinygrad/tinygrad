@@ -15,7 +15,7 @@ class TestLinearizerRewrite(unittest.TestCase):
       print(prg.src)
 
   def test_arange(self):
-    out = Tensor.arange(32, device="NULL")
+    out = Tensor.arange(32, device="NULL").contiguous()
     with Context(SPLIT_REDUCEOP=0, DEVECTORIZE=0):
       si = out.schedule()[-1]
       k = Kernel(si.ast, Device["CPU"].renderer)

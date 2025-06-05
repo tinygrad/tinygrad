@@ -586,6 +586,20 @@ class Tensor(MathTrait):
     return Tensor.full(argfix(*shape), 1.0, **kwargs)
 
   @staticmethod
+  def fromfunction(function: Callable[..., UOp], shape: tuple[sint,...], **kwargs) -> Tensor:
+    """
+    Create a tensor from a symbolic function over each index coordinate.
+    """
+    # we can't pickle a function so we need to evaluate it with dumy arguments and turn it into a uop, we also need to get the dtype
+    args = [UOp.variable(f"arg{i}", 0, d-1) for i,d in enumerate(shape)]
+    sym_fn_op = function(*args)
+    device = kwargs.pop("device", None)
+    device = tuple(Device.canonicalize(x) for x in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
+    assert kwargs.pop("dtype", sym_fn_op.dtype)==sym_fn_op.dtype, "dtype doesn't match, and casting isn't supported"
+    op = UOp.metaop(Ops.FCONST, shape, sym_fn_op.dtype, device, (sym_fn_op, shape))
+    return Tensor(op, device, **kwargs)
+
+  @staticmethod
   def arange(start, stop=None, step=1, **kwargs) -> Tensor:
     """
     Returns a 1-D tensor of size `ceil((stop - start) / step)` with values from `[start, stop)`, with spacing between values given by `step`.
@@ -614,7 +628,7 @@ class Tensor(MathTrait):
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
-    return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
+    return Tensor.fromfunction(lambda idx: idx.cast(dtype)*step+start, (output_len,))
 
   @staticmethod
   def linspace(start:int|float, stop:int|float, steps:int, **kwargs) -> Tensor:

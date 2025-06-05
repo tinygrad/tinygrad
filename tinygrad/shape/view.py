@@ -151,6 +151,8 @@ class View:
     new_mask = tuple((_substitute(x[0]), _substitute(x[1])) for x in self.mask) if self.mask is not None else None
     return View.create(new_shape, new_strides, new_offset, new_mask)
 
+  def remove_mask(self) -> View: return View.create(self.shape, self.strides, self.offset, None)
+
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, vm1:View) -> Optional[View]:
     vm2 = self

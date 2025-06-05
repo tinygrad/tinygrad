@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
+  def __reduce_ex__(self, proto): return getattr, (self.__class__, self._name_)  # pickle by name instead of value, to be removed before merge
   def __str__(self): return Enum.__str__(self)
   @staticmethod
   def _generate_next_value_(_, __, ___, last_values): return 1 + max([0, *last_values, *[max(c) for c in FastEnum.__subclasses__()]])
@@ -144,7 +145,7 @@ class Ops(FastEnum):
   BARRIER = auto(); RANGE = auto(); IF = auto(); ENDRANGE = auto(); ENDIF = auto(); GBARRIER = auto() # noqa: E702
 
   # consts last!
-  VCONST = auto(); CONST = auto() # noqa: E702
+  VCONST = auto(); FCONST = auto(); CONST = auto() # noqa: E702
 
   # device
   DEVICE = auto()
@@ -164,7 +165,7 @@ class GroupOp:
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
-  Buffer = {Ops.LOAD, Ops.STORE, Ops.VALID, Ops.CONST, Ops.DEFINE_VAR}
+  Buffer = {Ops.LOAD, Ops.STORE, Ops.VALID, Ops.CONST, Ops.FCONST, Ops.DEFINE_VAR}
   Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKSTART}
 
   # BinaryOps that can be flipped
@@ -411,7 +412,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
-  def valid(self): return UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)
+  def valid(self):
+    ff = self.const_like(0)
+    if self.base.op is Ops.FCONST:
+      assert self.base.src[0].arg.contiguous
+      new_view = UOp(Ops.VIEW, arg=self.st.remove_mask())
+      tt = self.base.replace(src=(new_view,))
+      ff = ff.replace(src=(new_view,))
+    else:
+      tt = self.const_like(self.base.arg)
+    return UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), tt, ff)
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
   def r(self, op:Ops, axis:tuple[int, ...]):
@@ -479,6 +489,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       assert isinstance(arg, get_args(ConstType)), f"trying to create CONST with {arg=}"
       return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, () if device is None else (UOp(Ops.DEVICE, arg=device),),
                  ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape)),))
+    if op is Ops.FCONST:
+      return UOp(op, dtype, (UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),), arg)
     # Tensor variable binding is BIND(VAR(VIEW(DEVICE)), CONST(VIEW(DEVICE)))
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()

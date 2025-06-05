@@ -88,6 +88,7 @@ class ShapeTracker:
   def to_uop(self) -> UOp: return UOp(Ops.VIEW, dtypes.void, (), self)
   def to_indexed_uops(self, _idxs:Optional[list[UOp]|tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
     return views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
+  def remove_mask(self) -> ShapeTracker: return ShapeTracker(tuple(v.remove_mask() for v in self.views))
 
   # upper bound on buffer size required to fit this shapetracker
   def real_size(self) -> int:
