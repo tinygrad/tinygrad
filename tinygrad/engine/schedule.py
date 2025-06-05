@@ -21,7 +21,8 @@ def unbind_view(ctx:list[dict[Variable, int]], x:UOp):
   if any(x.op is Ops.BIND for x in st.vars()):
     st, var_vals = st.unbind()
     ctx.append(var_vals)
-  return x.replace(arg=st) if st != x.st else None
+    return x.replace(arg=st)
+  return None
 
 def unbind_bind(ctx:list[dict[Variable, int]], x:UOp):
   var, val = x.unbind()
