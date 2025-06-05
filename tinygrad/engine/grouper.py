@@ -332,7 +332,7 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   return red.reshape(view.shape)
 
 def reduceop_view_right(src:UOp, v:UOp, r:UOp):
-  assert unwrap(v.st).contiguous and set(v.shape) == set(r.shape), f"can't compute new axis for {src.shape} -> {r.shape}"
+  assert unwrap(v.st).contiguous and v.size == src.size, f"can't compute new axis for {src.shape} -> {r.shape}"
   new_axis = [i for i,(s,u) in enumerate(zip(src.shape, r.shape)) if s != u]
   return src.r(r.arg[0], tuple(new_axis)).reshape(r.shape)
 
