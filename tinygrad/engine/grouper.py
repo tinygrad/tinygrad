@@ -66,7 +66,7 @@ def mstack_reorder_view(ms:UOp):
 ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK}
 
 multi_sym = PatternMatcher([
-  # BROADCAST: explicitly expand broadcast copies
+  # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
   (UPat(Ops.COPY, name="c", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda c,x:
     UOp(Ops.MSTACK, c.dtype, tuple(x.copy_to_device(d) for d in c.device)) \
       if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
@@ -74,13 +74,11 @@ multi_sym = PatternMatcher([
   (UPat(Ops.COPY, name="c", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda c,x:
     UOp(Ops.MSELECT, x.dtype, (x,), arg=0).copy_to_device(c.device) \
       if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
-  # store a shrink before COPY, otherwise view after the COPY
-  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"), UPat(Ops.DEVICE)), name="copy"), copy_reorder_view),
   # MSELECT must select a base, if there are views apply them after selecting the base
   (UPat(Ops.MSELECT, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"),), name="ms"), mselect_reorder_view),
   # move view through MSTACK
   (UPat(Ops.MSTACK, src=UPat(Ops.VIEW), name="ms"), mstack_reorder_view),
-  # MSELECT on MSTACK is replaced
+  # MSELECT on MSTACK is replaced with nothing
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
 ])
 
@@ -101,6 +99,8 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.COPY, name="root", src=(UPat.cvar("x"), UPat(Ops.DEVICE))), lambda root,x: root.const_like(x.arg)),
   # non device changing COPY is a NOOP
   (UPat(Ops.COPY, name="c", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda c,x: x if c.device == x.device else None),
+  # store a shrink before COPY, otherwise view after the COPY
+  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"), UPat(Ops.DEVICE)), name="copy"), copy_reorder_view),
   # remove cast to image when it's already a contiguous image
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(Ops.CONTIGUOUS, name="base"),)),)),
    lambda cast,base,vm: base.view(vm.st) if isinstance(cast.dtype, ImageDType) and isinstance(base.dtype, ImageDType) else None),
