@@ -2,8 +2,8 @@ from typing import cast
 from dataclasses import dataclass, field
 from collections import deque, defaultdict
 from tinygrad.uop.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
-from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import Metadata, unwrap, merge_dicts
+from tinygrad.device import Device, Buffer, MultiBuffer
+from tinygrad.helpers import Metadata, unwrap, all_same, merge_dicts
 
 # **** ScheduleItem return type
 
@@ -61,11 +61,22 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
         raise RuntimeError(f"input to kernel must be ASSIGN or BUFFER, not {s.op}")
 
   # linearize KERNEL UOps into ScheduleItems in BFS order
-  queue = deque(k for k,v in in_degree.items() if v == 0)
+
+  def _heuristic(k: UOp):
+    if k.arg.ast.op is Ops.COPY and not all_same([Device[cast(Buffer, s.buf_uop.buffer).device].group_id for s in k.src]): return 1000
+    return 0
+
+  last_heuristic: int = 0
+  queues: defaultdict[int, deque[UOp]] = defaultdict(deque)
+  last_queue: deque[UOp] = deque()
+  for k,v in in_degree.items():
+    if v == 0: queues[_heuristic(k)].append(k)
+
   schedule: list[ScheduleItem] = []
   var_vals: dict[Variable, int] = {}
-  while queue:
-    k = queue.popleft()
+  while last_queue or any(queues.values()):
+    if not last_queue: last_heuristic, last_queue = min((it for it in queues.items() if it[1]), key=lambda x: abs(x[0]-last_heuristic))
+    k = last_queue.popleft()
     # unbind var_vals from the kernel
     local_var_vals: list[dict[Variable, int]] = []
     ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=local_var_vals, name="unbind vars")
@@ -86,6 +97,6 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       schedule.append(ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata))
     for x in children[k]:
       in_degree[x] -= 1
-      if in_degree[x] == 0: queue.append(x)
+      if in_degree[x] == 0: queues[_heuristic(x)].append(x)
 
   return schedule, var_vals

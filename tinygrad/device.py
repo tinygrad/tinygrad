@@ -346,9 +346,9 @@ class Compiler:
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
+  def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None, group_id=None):
     self.device, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
-    self.renderer = renderer or Renderer()
+    self.renderer, self.group_id = renderer or Renderer(), group_id
   def synchronize(self):
     """
     Synchronize all pending operations on the device.
