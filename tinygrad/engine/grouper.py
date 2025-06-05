@@ -504,7 +504,7 @@ add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, nam
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
 
 # TODO: get this from the device through GrouperOpts
-DEVICE_MAX_BUFS = {"METAL":32, "WEBGPU":8, "CPU":4}
+DEVICE_MAX_BUFS = {"METAL":32, "WEBGPU":8, "CPU":5}
 
 def limit_bufs(root:UOp):
   # check if backend has a buffer limit
