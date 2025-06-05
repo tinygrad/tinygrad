@@ -1,21 +1,69 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
 import sys, base64, multiprocessing, itertools, collections, zlib, datetime, math, argparse, json
-from scipy.special import log_softmax, logsumexp, softmax
+from scipy.special import log_softmax, logsumexp
 from dataclasses import dataclass
 from typing import Optional, Union, Literal, List
-
-from tinygrad import Tensor, TinyJit, nn, dtypes
+from tinygrad import Tensor, TinyJit, nn
 from tinygrad.nn.state import torch_load, load_state_dict
-from tinygrad.helpers import getenv, DEBUG, fetch, trange
+from tinygrad.helpers import DEBUG, fetch, trange
 from tinygrad.uop.ops import UOp
-
 import numpy as np
 import librosa
 import tiktoken
 from tiktoken import Encoding
 import functools
 import os
+
+RATE = 16000
+SEGMENT_SECONDS = 30
+SAMPLES_PER_SEGMENT = RATE * SEGMENT_SECONDS  # 480000
+N_FFT = 400
+HOP_LENGTH = 160
+N_MELS = 80
+FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH  # 3000
+CHUNK = 1600
+RECORD_SECONDS = 10
+
+@functools.lru_cache(maxsize=16)
+def get_mel_filters(n_mels=80, n_fft=400, sr=16000):
+    filters_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"mel_filters_{n_mels}_{n_fft}_{sr}.npz")
+    if os.path.exists(filters_path):
+        return np.load(filters_path, allow_pickle=False)['mel_filters']
+    filters = librosa.filters.mel(sr=sr, n_fft=n_fft, n_mels=n_mels)
+    np.savez_compressed(filters_path, mel_filters=filters)
+    return filters
+
+def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
+  max_len = SAMPLES_PER_SEGMENT if truncate else max(len(wav) for wav in waveforms)
+  if (r := max_len % SAMPLES_PER_SEGMENT) > 0: max_len += SAMPLES_PER_SEGMENT - r
+  waveforms = np.stack([np.pad(wav[:max_len], (0, max(0, max_len - len(wav))), 'constant') for wav in waveforms])
+  if waveforms.shape[0] < batch_size:
+    waveforms = np.pad(waveforms, ((0, batch_size - waveforms.shape[0]), (0, 0)))
+  stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
+  magnitudes = np.abs(stft[..., :-1]) ** 2
+  mel_filters_matrix = get_mel_filters(N_MELS, N_FFT, RATE)
+  log_spec = np.log10(np.clip(mel_filters_matrix @ magnitudes, 1e-10, None))
+  log_spec = np.maximum(log_spec, log_spec.max((1,2), keepdims=True) - 8.0)
+  return (log_spec + 4.0) / 4.0
+
+def compression_ratio(text) -> float:
+  text_bytes = text.encode("utf-8")
+  return len(text_bytes) / len(zlib.compress(text_bytes))
+
+def argmax_sampling(logits: np.ndarray):
+  logits = Tensor(logits)
+  softmax = logits.log_softmax(axis=-1)
+  idx = softmax.argmax(axis=-1)
+  prob = softmax.max(axis=-1)
+  return idx.numpy(), prob.numpy()
+
+def multinomial_sampling(logits: Tensor, temperature: int):
+  scaled = logits / temperature if temperature != 0 else logits
+  probs = scaled.softmax(axis=-1)
+  next_tokens = probs.multinomial(1)
+  selected_probs = probs[Tensor.arange(logits.shape[0]), next_tokens.flatten()]
+  return next_tokens.numpy().astype(np.int64), selected_probs.numpy().astype(np.int64)
 
 class CacheDict(collections.OrderedDict):
   """Dict with a limited length, ejecting LRUs as needed."""
@@ -138,11 +186,7 @@ class TextDecoder:
     self.mask = Tensor.full((n_text_ctx, n_text_ctx), -np.inf).triu(1).realize()
     self.jit = CacheDict(cache_len=2)
 
-  def get_jitted(self, shape):
-    if shape in self.jit:
-      return self.jit[shape]
-    self.jit[shape] = TinyJit(self.forward)
-    return self.jit[shape]
+  def get_jitted(self, shape): return self.jit[shape] if shape in self.jit else self.jit.setdefault(shape, TinyJit(self.forward))
 
   def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor):
     pos = UOp.variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos) if pos else 0
@@ -165,46 +209,6 @@ class Whisper:
     self.is_multilingual = dims["n_vocab"] == 51865
     self.batch_size = batch_size
 
-
-RATE = 16000
-SEGMENT_SECONDS=30
-SAMPLES_PER_SEGMENT = RATE * SEGMENT_SECONDS # 480000
-N_FFT = 400
-HOP_LENGTH = 160
-N_MELS = 80
-FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
-
-@functools.lru_cache(maxsize=16)
-def get_mel_filters(n_mels: int=80, n_fft: int=400, sr: int=16000) -> np.ndarray:
-  """
-  Cache the mel filterbank matrix for projecting STFT into a Mel spectrogram.
-  This avoids recomputing it for every audio sample and speeds up processing.
-  """
-  cache_dir = os.path.dirname(os.path.abspath(__file__))
-  filters_path = os.path.join(cache_dir, f"mel_filters_{n_mels}_{n_fft}_{sr}.npz")
-  if os.path.exists(filters_path):
-    with np.load(filters_path, allow_pickle=False) as f:
-      return f['mel_filters']
-  else:
-    filters = librosa.filters.mel(sr=sr, n_fft=n_fft, n_mels=n_mels)
-    np.savez_compressed(filters_path, mel_filters=filters)
-    return filters
-
-def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
-  max_len = SAMPLES_PER_SEGMENT if truncate else max(len(wav) for wav in waveforms)
-  if (r := max_len % SAMPLES_PER_SEGMENT) > 0: max_len += SAMPLES_PER_SEGMENT - r
-  
-  waveforms = np.stack([np.pad(wav[:max_len], (0, max(0, max_len - len(wav))), 'constant') for wav in waveforms])
-  if waveforms.shape[0] < batch_size:
-    waveforms = np.pad(waveforms, ((0, batch_size - waveforms.shape[0]), (0, 0)))
-
-  stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
-  magnitudes = np.abs(stft[..., :-1]) ** 2
-  
-  mel_filters_matrix = get_mel_filters(N_MELS, N_FFT, RATE)
-  log_spec = np.log10(np.clip(mel_filters_matrix @ magnitudes, 1e-10, None))
-  log_spec = np.maximum(log_spec, log_spec.max((1,2), keepdims=True) - 8.0)
-  return (log_spec + 4.0) / 4.0
 
 LANGUAGES = {
   "en": "english", "zh": "chinese", "de": "german", "es": "spanish", "ru": "russian", "ko": "korean", "fr": "french", "ja": "japanese", "pt": "portuguese", "tr": "turkish",
@@ -269,30 +273,10 @@ def init_whisper(model_name="tiny.en", batch_size=1):
   enc = get_encoding("multilingual" if model.is_multilingual else "gpt2")
   return model, enc
 
-def load_file_waveform(filename):
-  waveform, _ = librosa.load(filename, sr=RATE)
-  return waveform
+def load_file_waveform(filename): return librosa.load(filename, sr=RATE)[0]
 
 def transcribe_file(model, enc: Encoding, filename, output_fh=None, beam=False, no_speech_threshold=0.8):
   return transcribe_waveform(model, enc, [load_file_waveform(filename)], output_fh, beam=beam, no_speech_threshold=no_speech_threshold)
-
-def compression_ratio(text) -> float:
-  text_bytes = text.encode("utf-8")
-  return len(text_bytes) / len(zlib.compress(text_bytes))
-
-def argmax_sampling(logits: np.ndarray):
-  logits = Tensor(logits)
-  softmax = logits.log_softmax(axis=-1)
-  idx = softmax.argmax(axis=-1)
-  prob = softmax.max(axis=-1)
-  return idx.numpy(), prob.numpy()
-
-def multinomial_sampling(logits: Tensor, temperature: int):
-  scaled = logits / temperature if temperature != 0 else logits
-  probs = scaled.softmax(axis=-1)
-  next_tokens = probs.multinomial(1)
-  selected_probs = probs[Tensor.arange(logits.shape[0]), next_tokens.flatten()]
-  return next_tokens.numpy().astype(np.int64), selected_probs.numpy().astype(np.int64)
 
 def timestamp_filter(logits: np.ndarray, enc: Encoding):
   logits[:, np.array([enc._special_tokens["<|notimestamps|>"]])] = -math.inf
@@ -343,10 +327,7 @@ def suppress_blank(logits: np.ndarray, enc: Encoding):
   tokens = np.array([enc.encode(" ")[0], enc._special_tokens["<|endoftext|>"]])
   logits[:, tokens] = -math.inf
 
-def replace_eot(tokens: np.ndarray, ctx: np.ndarray, eot: int):
-  last = ctx[:, -1]
-  tokens[last == eot] = eot
-  return tokens
+def replace_eot(tokens: np.ndarray, ctx: np.ndarray, eot: int): return np.where(ctx[:, -1] == eot, eot, tokens)
 
 @dataclass
 class BeamSampled:
@@ -439,12 +420,9 @@ class Segment:
   text: str
   tokens: list[int]
   
-def parse(timetoken: str):
-  return float(timetoken[2:-2])
+def parse(timetoken: str): return float(timetoken[2:-2])
 
-def format_time(seconds: int):
-  timestamp = str(datetime.timedelta(seconds=seconds))
-  return timestamp
+def format_time(seconds: int): return str(datetime.timedelta(seconds=seconds))
 
 def segment_and_seek(tokens: list[int], enc: Encoding, timeoffset: int):
   timestamp_pos = [i for i, tok in enumerate(tokens) if tok > enc._special_tokens["<|notimestamps|>"]]
@@ -569,9 +547,6 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
   elif transcriptions:
     return transcriptions[0].strip()
   return transcribed
-
-CHUNK = 1600
-RECORD_SECONDS = 10
 
 def listener(q):
   import pyaudio
