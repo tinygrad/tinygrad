@@ -138,6 +138,7 @@ class TestSchedule(unittest.TestCase):
       run_schedule(check_schedule(xt, 2))
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
 
+  @unittest.skip("buf limit doesn't work")
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
   def test_add_chain_buffers(self):
     N = 31

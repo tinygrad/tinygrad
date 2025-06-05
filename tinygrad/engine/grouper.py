@@ -502,27 +502,7 @@ def get_name(becomes_map:dict[UOp, UOp]) -> str:
 
 add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"),
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
-
-# TODO: get this from the device through GrouperOpts
-DEVICE_MAX_BUFS = {"METAL":32, "WEBGPU":8}
-
-def limit_bufs(root:UOp):
-  # check if backend has a buffer limit
-  device = root.device if isinstance(root.device, str) else root.device[0].split(":")[0]
-  if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return None
-  # count number of unique buffers flowing into this op
-  bufs: set[UOp] = set()
-  def gate_input(u:UOp):
-    if (is_load:=(u.op in {Ops.BUFFER, Ops.GBARRIER, Ops.ASSIGN})): bufs.add(u)
-    return not is_load
-  root.toposort(gate=gate_input)
-  # NOTE: this -1 is for the output buffer
-  if len(bufs)>=MAX_BUFS-1:
-    return root.replace(src=tuple(s if s.base in bufs else s.replace(tag=1).gbarrier() for s in root.src))
-
 finalize_gbarrier = PatternMatcher([
-  # if an op takes more than one input, check combined LOADs don't exceed device limits
-  (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs),
   # merge gbarrier
   (UPat((Ops.GBARRIER, Ops.CONTIGUOUS), src=(UPat(Ops.GBARRIER),), name="x"), lambda x: x.src[0]),
 ])
