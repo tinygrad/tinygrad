@@ -16,6 +16,7 @@ from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, LazySeq, Timing
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferXfer
 from tinygrad.device import Compiled, Buffer, Allocator, Compiler, Device, BufferSpec
+from tinygrad.runtime.support.ib import IBCtx, IBConn
 
 # ***** API *****
 
@@ -35,6 +36,7 @@ class RemoteProperties:
   offset_supported: bool
   graph_supported: bool
   graph_supports_multi: bool
+  ib_gid: bytes|None
 
 @dataclass(frozen=True)
 class GetProperties(RemoteRequest): pass
@@ -46,7 +48,13 @@ class Event(RemoteRequest): event_session: SessionKey; event: int # noqa: E702
 class Wait(RemoteRequest): event: int
 
 @dataclass(frozen=True)
+class IBConnect(RemoteRequest): host: str; gid: bytes; qp_num: int # noqa: E702
+
+@dataclass(frozen=True)
 class BufferAlloc(RemoteRequest): buffer_num: int; size: int; options: BufferSpec # noqa: E702
+
+@dataclass(frozen=True)
+class BufferIOVA(RemoteRequest): buffer_num: int
 
 @dataclass(frozen=True)
 class BufferOffset(RemoteRequest): buffer_num: int; size: int; offset: int; sbuffer_num: int # noqa: E702
@@ -106,9 +114,9 @@ class GraphExec(RemoteRequest):
   wait: bool
 
 # for safe deserialization
-eval_globals = {x.__name__:x for x in [SessionKey, SessionFree, RemoteProperties, GetProperties, Event, Wait, BufferAlloc, BufferOffset, BufferFree,
-                                       CopyIn, CopyOut, Transfer, ProgramAlloc, ProgramFree, ProgramExec, GraphComputeItem, GraphAlloc, GraphFree,
-                                       GraphExec, BufferSpec, UOp, Ops, dtypes]}
+eval_globals = {x.__name__:x for x in [SessionKey, SessionFree, RemoteProperties, GetProperties, Event, Wait, BufferAlloc, BufferIOVA, BufferOffset,
+                                       BufferFree, CopyIn, CopyOut, Transfer, IBConnect, ProgramAlloc, ProgramFree, ProgramExec, GraphComputeItem,
+                                       GraphAlloc, GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes]}
 attribute_whitelist: dict[Any, set[str]] = {dtypes: {*DTYPES_DICT.keys(), 'imagef', 'imageh'}, Ops: {x.name for x in Ops}}
 eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
   ast.Dict: lambda x: {safe_eval(k):safe_eval(v) for k,v in zip(x.keys, x.values)},
@@ -155,6 +163,14 @@ class RemoteHandler:
     self.base_device = base_device
     self.sessions: defaultdict[SessionKey, RemoteSession] = defaultdict(RemoteSession)
 
+    try:
+      self.ib_ctx: IBCtx|None = IBCtx(getenv("IB_DEV", 0))
+      self.ib_conns: dict[str, IBConn|None] = {}
+      self.remote_iova_cache: dict[tuple[SessionKey, int], tuple[int, int, int]] = {}
+    except Exception as e:
+      self.ib_ctx = None
+      if getenv("FORCE_IB", 0): raise e
+
   async def __call__(self, reader:asyncio.StreamReader, writer:asyncio.StreamWriter):
     while (req_hdr:=(await reader.readline()).decode().strip()):
       req_method, req_path, _ = req_hdr.split(' ')
@@ -183,6 +199,7 @@ class RemoteHandler:
             rp = RemoteProperties(
               real_device=dev.device, renderer=(cls.__module__, cls.__name__, args), offset_supported=hasattr(dev.allocator, '_offset'),
               graph_supported=graph_cls is not None, graph_supports_multi=graph_cls is not None and issubclass(graph_cls, MultiGraphRunner),
+              ib_gid=bytes(self.ib_ctx.gid_attr.raw) if self.ib_ctx is not None else None,
             )
             ret = repr(rp).encode()
           case Event():
@@ -195,9 +212,17 @@ class RemoteHandler:
           case Wait():
             assert await session.events[c.event].wait()
             del session.events[c.event] # do not leak memory
+          case IBConnect():
+            self.ib_conns[c.host] = ib_conn = IBConn(unwrap(self.ib_ctx))
+            ib_conn.connect(c.gid, c.qp_num)
+            ret = struct.pack('<16sQ', ib_conn.gid, ib_conn.qp_num)
           case BufferAlloc():
             assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already allocated"
             session.buffers[c.buffer_num] = Buffer(dev.device, c.size, dtypes.uint8, options=c.options, preallocate=True)
+          case BufferIOVA():
+            # Buffer would be unregistred when it's GCd. Don't call .deallocate() manually, it will break things
+            iova, mr = unwrap(self.ib_ctx).reg(buf:=session.buffers[c.buffer_num])
+            ret =  struct.pack("<QQQ", iova, mr.contents.rkey, buf.nbytes)
           case BufferOffset():
             assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already exists"
             session.buffers[c.buffer_num] = session.buffers[c.sbuffer_num].view(c.size, dtypes.uint8, c.offset).allocate()
@@ -217,8 +242,31 @@ class RemoteHandler:
             else:
               conn = RemoteConnection(c.dsession.host)
               sbuf = session.buffers[c.buffer_num]
-              sbuf.copyout(data:=memoryview(bytearray(sbuf.nbytes)))
-              conn.q(CopyIn(c.dbuffer_num, conn.req.h(data), session=c.dsession), wait=True)
+
+              # this will hang if both are trying to trasnfer to each other at the same time
+              if self.ib_ctx is not None and c.dsession.host not in self.ib_conns:
+                props = safe_eval(ast.parse(conn.q(GetProperties(session=c.dsession), wait=True), mode="eval").body)
+
+                if props.ib_gid is not None:
+                  self.ib_conns[c.dsession.host] = ib_conn = IBConn(self.ib_ctx)
+                  ibxc_ret = conn.q(IBConnect(unwrap(c.session).host, ib_conn.gid, ib_conn.qp_num, session=c.dsession), wait=True)
+                  ib_conn.connect(*struct.unpack('<16sQ', ibxc_ret))
+                else:
+                  self.ib_conns[c.dsession.host] = None
+
+              if self.ib_ctx is not None and self.ib_conns[c.dsession.host] is not None:
+                dev.synchronize() # wait for device to finish executing previous stuff
+                remote_iova_key = (c.dsession, c.dbuffer_num)
+                if remote_iova_key not in self.remote_iova_cache:
+                  self.remote_iova_cache[remote_iova_key] = struct.unpack('<QQQ', conn.q(BufferIOVA(c.dbuffer_num, session=c.dsession), wait=True))
+                src_iova, src_mr = self.ib_ctx.reg(sbuf)
+                dst_iova, dst_key, dst_size = self.remote_iova_cache[remote_iova_key]
+                assert sbuf.nbytes == dst_size, f"{sbuf.nbytes} != {dst_size}"
+                unwrap(self.ib_conns[c.dsession.host]).rdma_write(dst_iova, src_iova, dst_size, dst_key, src_mr.contents.lkey)
+              else:
+                if getenv("FORCE_IB", 0): raise RuntimeError("tried non-ib cross-host transfer")
+                sbuf.copyout(data:=memoryview(bytearray(sbuf.nbytes)))
+                conn.q(CopyIn(c.dbuffer_num, conn.req.h(data), session=c.dsession), wait=True)
           case ProgramAlloc():
             lib = dev.compiler.compile_cached(req._h[c.datahash].decode())
             session.programs[(c.name, c.datahash)] = dev.runtime(c.name, lib)
