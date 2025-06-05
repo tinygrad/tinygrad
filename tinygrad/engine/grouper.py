@@ -82,9 +82,10 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.COPY, name="root", src=(UPat.cvar("x"), UPat(Ops.DEVICE))), lambda root,x: root.const_like(x.arg)),
   # non device changing COPY is a NOOP
   (UPat(Ops.COPY, name="c", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda c,x: x if c.device == x.device else None),
-  # explicitly expand broadcast copies
+  # explicitly expand broadcast copies. force non copies to be contiguous
   (UPat(Ops.COPY, name="c", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda c,x:
-    UOp(Ops.MSTACK, c.dtype, tuple(x.copy_to_device(d) for d in c.device)) if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
+    UOp(Ops.MSTACK, c.dtype, tuple(x.copy_to_device(d) if d != x.device else x.contiguous() for d in c.device)) \
+      if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
   # store a shrink before COPY, otherwise view after the COPY
   (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"), UPat(Ops.DEVICE)), name="copy"), copy_reorder_view),
   # MSELECT must select a base, if there are views apply them after selecting the base
