@@ -1134,12 +1134,17 @@ class TestMultiRamUsage(unittest.TestCase):
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiTransformer(unittest.TestCase):
-  def _get_sharded_transformers(self, device):
+  def _get_sharded_transformers(self, device, all_ones=False):
     from extra.models.llama import Transformer
     args = {"dim": 64, "n_heads": 1, "n_kv_heads": 1, "n_layers": 1, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 1024, "hidden_dim": 64}
     real_model = Transformer(**args, jit=False)
     shard_model = Transformer(**args, jit=False)
-    nn.state.load_state_dict(shard_model, nn.state.get_state_dict(real_model))
+    if all_ones:
+      for s in nn.state.get_parameters(real_model): s.replace(Tensor.ones_like(s))
+      for s in nn.state.get_parameters(shard_model): s.replace(Tensor.ones_like(s))
+    else:
+      # copy state
+      nn.state.load_state_dict(shard_model, nn.state.get_state_dict(real_model))
 
     for k,v in nn.state.get_state_dict(shard_model).items():
       if 'scale' in k: v.shard_(device, axis=None)  # from quantized
@@ -1150,19 +1155,29 @@ class TestMultiTransformer(unittest.TestCase):
       elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
       elif 'output.weight' in k: v.shard_(device, axis=0)
       else: v.shard_(device, axis=None)
+
+    # do this here also
+    if all_ones:
+      for s in nn.state.get_parameters(shard_model): s.replace(Tensor.ones_like(s))
+
     return real_model, shard_model
 
-  def test_transformer_pieces(self):
+  def test_transformer_attention(self):
     device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-    rmodel, smodel = self._get_sharded_transformers(device)
+    rmodel, smodel = self._get_sharded_transformers(device, all_ones=True)
 
     last_tok = 0
-    rh = rmodel.tok_embeddings(Tensor([[last_tok]], device=Device.DEFAULT))
-    sh = smodel.tok_embeddings(Tensor([[last_tok]], device=device))
+    rh = rmodel.tok_embeddings(Tensor([[last_tok]], device=Device.DEFAULT)).realize()
+    sh = smodel.tok_embeddings(Tensor([[last_tok]], device=device)).realize()
+    #print(sh.device, sh.lazydata.axis)
     np.testing.assert_allclose(rh.numpy(), sh.numpy(), atol=1e-6)
+    print("**** real ****")
     GlobalCounters.reset()
-    for layer in rmodel.layers: rh = layer.attention(rh, 0, rmodel.freqs_cis[:, :1, :, :, :], None)
-    for layer in smodel.layers: sh = layer.attention(sh, 0, smodel.freqs_cis[:, :1, :, :, :], None)
+    for layer in rmodel.layers: rh = layer.attention(rh, 0, rmodel.freqs_cis[:, :1, :, :, :], None).realize()
+    print("**** shard ****")
+    GlobalCounters.reset()
+    for layer in smodel.layers: sh = layer.attention(sh, 0, smodel.freqs_cis[:, :1, :, :, :], None).realize()
+    print("copyout")
     np.testing.assert_allclose(rh.numpy(), sh.numpy(), atol=1e-6)
 
   def test_transformer(self):
