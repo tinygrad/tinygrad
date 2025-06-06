@@ -70,7 +70,7 @@ class AsmRenderer(Renderer):
   ops: dict[DType, dict[Ops, str]] = {}
   string_rewrite = base_rewrite
 
-  def constraints(self, u:UOp, s:UOp|None=None) -> list[str|int]: raise NotImplementedError("arch specific")
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|list[int]: raise NotImplementedError("arch specific")
   def render_imm(self, imm:str): raise NotImplementedError("arch specific")
   def render_mem(self, sz:int, dt:DType): raise NotImplementedError("arch specific")
   def render_reg(self, reg:str, dt:DType, alias:bool=False): raise NotImplementedError("arch specific")
@@ -94,7 +94,7 @@ class AsmRenderer(Renderer):
     live: dict[UOp, str] = {}
     loc: dict[UOp, str] = {}
     self.r = loc
-    mem: dict[UOp, str] = {}
+    mem: dict[UOp, int] = {}
     self.mem = mem
     live_at_range: dict[UOp, dict[UOp, str]] = {}
     spill_place: dict[UOp, UOp] = {}
@@ -128,7 +128,7 @@ class AsmRenderer(Renderer):
       loc[spilled] = mem[spilled]
       return live.pop(spilled)
 
-    def alloc(x:UOp, cons:list[str|int]):
+    def alloc(x:UOp, cons:list[str]|list[int]):
       # if x already had a reg we free it
       if x in live: reg_class(x).insert(0, live.pop(x))
       if isinstance(cons[0], int): ret = cons[0]
@@ -297,11 +297,11 @@ class Arm64Renderer(AsmRenderer):
   global_max = None
   extra_matcher = arm64_matcher
   string_rewrite = arm64_rewrite
-  code_for_op = {Ops.SQRT:None, Ops.AND:None, Ops.SHL:None, Ops.SHR:None, Ops.MULACC:None}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.SHL, Ops.SHR, Ops.MULACC)}
   ops = arm64_ops
   regs = arm64_regs
 
-  def constraints(self, u:UOp, s:UOp|None=None) -> list[str|int]:
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|list[int]:
     if s is not None: return self.reg_class(s)
     # TODO: think I need to track function arg index here cause of def var
     if u.op is Ops.DEFINE_GLOBAL and u.arg < 8: return [("x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7")[u.arg]]
@@ -480,11 +480,11 @@ class X86Renderer(AsmRenderer):
   extra_matcher = x86_matcher
   string_rewrite = x86_rewrite
   # TODO: fix this
-  code_for_op = {Ops.SQRT:None, Ops.AND:None, Ops.SHL:None, Ops.SHR:None}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.SHL, Ops.SHR)}
   ops = x86_ops
   regs = x86_regs
 
-  def constraints(self, u:UOp, s:UOp|None=None) -> list[str|int]:
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]|list[int]:
     # constraints for srcs
     if u.op in (Ops.IDIV, Ops.MOD) and s in u.src: return [r for r in self.reg_class(s) if r not in ("rdx", "rax")]
     if u.op in (Ops.SHL, Ops.SHR) and s is u.src[1] and s.op != Ops.CONST: return ["rcx"]
