@@ -1,4 +1,4 @@
-import unittest, functools, random
+import unittest, functools, random, os
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
@@ -1123,12 +1123,13 @@ class TestMultiRamUsage(unittest.TestCase):
     # NOTE: the first one on the DEFAULT device should be freed
     self.assertUsed(self.N*self.N*4*2)
 
-  @unittest.skip("TODO: this is broken")
   def test_zeros_shard(self):
+    assert int(os.getenv("VIZ", "0")) == 0
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).realize()
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
 
   def test_zeros_contiguous_shard(self):
+    assert int(os.getenv("VIZ", "0")) == 0
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).contiguous().realize()
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
 

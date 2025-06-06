@@ -68,6 +68,18 @@ def mstack_reorder_view(ms:UOp):
   assert all_same(args) and len([x for x in args[0].vars() if x.arg[0] == '_device_num']) == 0
   return UOp(Ops.MSTACK, ms.dtype, tuple(x.src[0] for x in ms.src)).view(args[0])
 
+def mstack_slice_copy(view:UOp, ms:UOp, base:UOp):
+  ret = []
+  st = unwrap(view.st)
+  for i,copy in enumerate(ms.src):
+    st_local = st
+    # replace dnum in ShapeTracker with literal const for this mselect
+    if (dnums:=[x for x in st.vars() if x.arg[0] == '_device_num']):
+      assert len(dnums) == 1, f"view must have exactly 0 or 1 dnum, got {dnums}"
+      st_local = st_local.substitute({dnums[0]:dnums[0].const_like(i)})
+    ret.append(base.view(st_local).copy_to_device(copy.device))
+  return UOp(Ops.MSTACK, ms.dtype, src=tuple(ret))
+
 replace_allreduce = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
@@ -82,6 +94,8 @@ replace_allreduce = PatternMatcher([
   (UPat(Ops.MSELECT, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"),), name="ms"), mselect_reorder_view),
   # move view through MSTACK
   (UPat(Ops.MSTACK, src=UPat(Ops.VIEW), name="ms"), mstack_reorder_view),
+  # view, mstack, copy
+  (UPat(Ops.VIEW, src=(UPat(Ops.MSTACK, src=UPat(Ops.COPY, src=(UPat.var("base"), UPat())), name="ms"),), name="view"), mstack_slice_copy),
 ])
 
 # ***** multi functions *****
