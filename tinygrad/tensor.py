@@ -446,7 +446,7 @@ class Tensor(MathTrait):
   @staticmethod
   def from_url(url:str, gunzip:bool=False, **kwargs) -> Tensor:
     """
-    Create a Tensor from a URL.
+    Creates a Tensor from a URL.
 
     This is the preferred way to access Internet resources.
     It currently returns a DISK Tensor, but in the future it may return an HTTP Tensor.
@@ -512,12 +512,13 @@ class Tensor(MathTrait):
       Tensor._device_seeds[device] = Tensor(
         [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed],
         device=device, dtype=dtypes.uint32, requires_grad=False)
-      Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint32, requires_grad=False)
+      Tensor._device_rng_counters[device] = Tensor([num], device=device, dtype=dtypes.uint32, requires_grad=False)
     # increment rng counter for devices
     else: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num).contiguous()
 
     # threefry random bits
-    counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
+    bits_count = Tensor._device_rng_counters[device] - num
+    counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+bits_count)
     counts1 = counts0 + ceildiv(num, 2)
     bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts0, counts1)[:num]
 
@@ -867,12 +868,30 @@ class Tensor(MathTrait):
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
   @staticmethod
-  def randperm(n: int, *, device=None, dtype=dtypes.int32, **kwargs) -> Tensor:
+  def randperm(n:int, device=None, dtype=dtypes.int32, **kwargs) -> Tensor:
+    """
+    Returns a tensor with a random permutation of integers from `0` to `n-1`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    print(Tensor.randperm(6).numpy())
+    ```
+    """
     r = Tensor.rand(n, device=device, **kwargs)
     _, indices = r.sort()
     return indices.cast(dtype)
 
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
+    """
+    Returns a tensor with `num_samples` indices sampled from a multinomial distribution weighted by `self`.
+
+    NOTE: `replacement=False` for `num_samples > 1` is not supported yet.
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor([1, 2, 3, 4])
+    print(t.multinomial(20, replacement=True).numpy())
+    ```
+    """
     assert 1 <= self.ndim <= 2 and num_samples > 0, f"{self.ndim=} must be 1 or 2 dim, {num_samples=} must be positive"
     assert replacement or num_samples == 1, "no replacement only supports num_samples = 1"
     weight = self.unsqueeze(0) if self.ndim == 1 else self
@@ -885,7 +904,7 @@ class Tensor(MathTrait):
 
   def gradient(self, *targets:Tensor, gradient:Tensor|None=None, materialize_grads=False) -> list[Tensor]:
     """
-    Compute the gradient of the targets with respect to self.
+    Computes the gradient of the targets with respect to self.
 
     ```python exec="true" source="above" session="tensor" result="python"
     x = Tensor.eye(3)
@@ -1187,7 +1206,7 @@ class Tensor(MathTrait):
 
   def __getitem__(self, indices) -> Tensor:
     """
-    Retrieve a sub-tensor using indexing.
+    Retrieves a sub-tensor using indexing.
 
     Supported Index Types: `int | slice | Tensor | None | list | tuple | Ellipsis`
 
@@ -1311,7 +1330,7 @@ class Tensor(MathTrait):
 
   def repeat_interleave(self, repeats:int, dim:int|None=None) -> Tensor:
     """
-    Repeat elements of a tensor.
+    Repeats elements of a tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3])
@@ -1620,7 +1639,7 @@ class Tensor(MathTrait):
 
   def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor:
     """
-    Replace `self` with `value` wherever the elements of `mask` are True.
+    Replaces `self` with `value` wherever the elements of `mask` are True.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3, 4, 5])
@@ -1632,6 +1651,7 @@ class Tensor(MathTrait):
     mask = Tensor([True, False, True, False, False])
     value = Tensor([-1, -2, -3, -4, -5])
     print(t.masked_fill(mask, value).numpy())
+    ```
     """
     return mask.where(value, self)
 
@@ -2801,7 +2821,7 @@ class Tensor(MathTrait):
 
   def fuse(self) -> Tensor:
     """
-    Make this a single kernel back to Ops.CONTIGUOUS on the inputs.
+    Makes this a single kernel back to Ops.CONTIGUOUS on the inputs.
 
     Useful for single kernel softmax and flash attention.
     Careful, this can break codegen or make kernels really slow.
@@ -3121,7 +3141,7 @@ class Tensor(MathTrait):
 
   def reciprocal(self) -> Tensor:
     """
-    Compute `1/x` element-wise.
+    Computes `1/x` element-wise.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
@@ -3565,7 +3585,7 @@ class Tensor(MathTrait):
 
   def bitwise_and(self, x:Tensor|ConstType, reverse=False) -> Tensor:
     """
-    Compute the bitwise AND of `self` and `x`.
+    Computes the bitwise AND of `self` and `x`.
     Equivalent to `self & x`.
     Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3580,7 +3600,7 @@ class Tensor(MathTrait):
 
   def bitwise_or(self, x:Tensor|ConstType, reverse=False) -> Tensor:
     """
-    Compute the bitwise OR of `self` and `x`.
+    Computes the bitwise OR of `self` and `x`.
     Equivalent to `self | x`.
     Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3595,7 +3615,7 @@ class Tensor(MathTrait):
 
   def bitwise_not(self) -> Tensor:
     """
-    Compute the bitwise NOT of `self`.
+    Computes the bitwise NOT of `self`.
     Equivalent to `~self`.
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([0, 2, 5, 255], dtype="int8").bitwise_not().numpy())
@@ -3650,9 +3670,9 @@ class Tensor(MathTrait):
     # TODO: int pow
     if not base.is_floating_point(): raise RuntimeError("base needs to be float")
 
-    # NOTE: pow(int, float) -> int
     ret = base._apply_uop(UOp.pow, exponent)
-    return ret.round().cast(self.dtype) if not dtypes.is_float(self.dtype) else ret
+    # NOTE: pow(int, float) -> int
+    return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) else ret
 
   def maximum(self, x:Tensor|ConstType) -> Tensor:
     """
@@ -3683,7 +3703,7 @@ class Tensor(MathTrait):
 
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
     """
-    Return a tensor of elements selected from either `x` or `y`, depending on `self`.
+    Returns a tensor of elements selected from either `x` or `y`, depending on `self`.
     `output_i = x_i if self_i else y_i`.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3707,7 +3727,7 @@ class Tensor(MathTrait):
 
   def copysign(self, other) -> Tensor:
     """
-    Return a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
+    Returns a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
     """
     # NOTE: torch always return in float, we return based on the broadcasting rule.
     other = self._broadcasted(other)[1]
@@ -3946,7 +3966,7 @@ class Tensor(MathTrait):
 
   def cross_entropy(self, Y:Tensor, reduction:ReductionStr="mean", label_smoothing:float=0.0) -> Tensor:
     """
-    Compute the cross entropy loss between input logits and target.
+    Computes the cross entropy loss between input logits and target.
 
     NOTE: `self` are logits and `Y` are the target labels or class probabilities.
 
@@ -3971,7 +3991,7 @@ class Tensor(MathTrait):
 
   def nll_loss(self, Y:Tensor, weight:Tensor|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean") -> Tensor:
     """
-    Compute the negative log likelihood loss between log-probabilities and target labels.
+    Computes the negative log likelihood loss between log-probabilities and target labels.
 
     NOTE: `self` is log-probabilities and `Y` is the Y labels or class probabilities.
 
@@ -4054,7 +4074,7 @@ class Tensor(MathTrait):
 
   def size(self, dim:int|None=None) -> sint|tuple[sint, ...]:
     """
-    Return the size of the tensor. If `dim` is specified, return the length along dimension `dim`. Otherwise return the shape of the tensor.
+    Returns the size of the tensor. If `dim` is specified, return the length along dimension `dim`. Otherwise return the shape of the tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[4, 5, 6], [7, 8, 9]])

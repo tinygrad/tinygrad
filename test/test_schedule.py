@@ -89,13 +89,25 @@ class TestSchedule(unittest.TestCase):
     with self.assertRaises(RecursionError):
       with Context(FUSE_ARANGE=1, NOOPT=0): self.test_arange_avgpool2d(kcount=1)
 
-  # grouper error
-  @unittest.expectedFailure
+  # when we're fusing a reduce, all ReduceOps must have the same N in the dimensions
+  # all permutes, reshapes, expands and shrinks push through the reduce
   def test_arange_sum(self):
     a = Tensor.arange(6).reshape(3, 2).sum(axis=1)
     with Context(FUSE_ARANGE=1):
       run_schedule(check_schedule(a, 1))
     self.assertListEqual(a.tolist(), [1, 5, 9])
+
+  def test_arange_sum_alt(self):
+    a = (Tensor.arange(5).reshape(1,5).expand(6,5)*Tensor(2)).reshape(1,6,5).sum(axis=2)
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(a, 1))
+    np.testing.assert_equal(a.numpy(), 20)
+
+  def test_permute_arange(self):
+    a = Tensor.arange(6).reshape(6, 1, 1).permute(2, 0, 1).sum(axis=1)
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(a, 1))
+    self.assertListEqual(a.tolist(), [[15]])
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
   def test_error_on_device_mismatch(self):
@@ -137,13 +149,14 @@ class TestSchedule(unittest.TestCase):
         root = root + functools.reduce(lambda a,b:a+b, bufs[i:i+X])
       self.assertEqual(root.item(), sum(range(N)))
 
-  @unittest.expectedFailure # TODO: failing because of can_chase
-  def test_indexing_scalars_multiple_dims(self):
-    X = Tensor.randn(2, 3).realize()
-    xt = X[Tensor(0)][Tensor(1)]
+  @given(strat.sampled_from(range(2,4)), strat.sampled_from(range(2,4)), strat.sampled_from(range(0,4)), strat.sampled_from(range(0,4)))
+  def test_indexing_scalars(self, x, y, a, b):
+    assume(a<x and b<y)
+    X = Tensor.randn(x, y).realize()
+    xt = X[Tensor(a)][Tensor(b)]
     with Context(FUSE_ARANGE=1):
       run_schedule(check_schedule(xt, 2))
-    np.testing.assert_equal(xt.numpy(), X.numpy()[0][1])
+    np.testing.assert_equal(xt.numpy(), X.numpy()[a][b])
 
   def test_push_pads_elementwise(self):
     x = Tensor.full((4,4), 2.).contiguous().realize()
@@ -161,12 +174,12 @@ class TestSchedule(unittest.TestCase):
 
   def test_rand(self):
     x = Tensor.rand(32)
-    check_schedule(x, 3, [Tensor._device_rng_counters[x.device]])
+    check_schedule(x, 4, [Tensor._device_rng_counters[x.device]])
 
   def test_rand_recompute_arange(self):
     x = Tensor.rand(32)
     with Context(DONT_GROUP_REDUCES=1):
-      check_schedule(x, 2, [Tensor._device_rng_counters[x.device]])
+      check_schedule(x, 3, [Tensor._device_rng_counters[x.device]])
 
   @unittest.skip("TODO: do not divide by zero given x.idiv(VALID)")
   def test_rand_handcoded(self):
@@ -1631,21 +1644,6 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")
   @unittest.expectedFailure
   def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
-
-  @unittest.skip("splitting kernels exceeding device buffer count is not yet supported")
-  def _test_buf_cnt(self, cnt:int, allowed:int):
-    alu = functools.reduce(lambda x,y: x+y, [Tensor.ones((1, 1)).contiguous().realize() for _ in range(cnt-1)])
-    s = alu.schedule()
-    assert len(s) == allowed
-    run_schedule(s)
-    expected = functools.reduce(lambda x,y: x+y, [np.ones((1, 1)) for _ in range(cnt-1)])
-    np.testing.assert_equal(alu.numpy(), expected)
-
-  def test_buf_cnt_at_limit(self): self._test_buf_cnt(31, allowed=1)
-  @unittest.expectedFailure
-  def test_buf_cnt_over_limit(self): self._test_buf_cnt(32, allowed=2)
-  @unittest.expectedFailure
-  def test_buf_cnt_over_limit_alt(self): self._test_buf_cnt(63, allowed=3)
 
   @unittest.skipIf(getenv("VIZ"), "TODO: VIZ blocks gc")
   def test_schedule_mem_used(self):
