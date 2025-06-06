@@ -15,7 +15,7 @@ from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.lowerer import get_contraction
-from tinygrad.engine.grouper import view_left, pm_dedup_const
+from tinygrad.engine.grouper import view_left
 from tinygrad.codegen import full_rewrite
 
 class KernelOptError(Exception): pass
@@ -527,7 +527,7 @@ class Kernel:
       return ret
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
-    return graph_rewrite(fixed_ast, view_left+pm_dedup_const, name="fixup optimized AST")
+    return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
 
   # **** this is the lowerer ****
 
