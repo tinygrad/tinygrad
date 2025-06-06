@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import functools
 from typing import Optional, Callable
-from tinygrad.helpers import merge_dicts, getenv, prod
+from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape, unravel
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, PatternMatcher, UPat, GroupOp
@@ -73,10 +73,6 @@ class ShapeTracker:
 
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
-
-  def as_buffer_view(self) -> tuple[sint, sint]|None:
-    if len(self.views) > 1 or self.views[0].strides != strides_for_shape(self.shape): return None
-    return (prod(self.views[0].shape), self.views[0].offset)
 
   @property
   def consecutive(self) -> bool: return len(self.views) == 1 and (v:=self.views[0]).mask is None and v.strides == strides_for_shape(v.shape)
