@@ -413,9 +413,10 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # replace buffer with define_global + add load/store last
   bufs = []
   for s in k.src:
+    s = s.buf_uop
     # traverse back through MSELECT and MSTACK. HACK: 0 branch of MSTACK only
     while s.op in {Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
-    bufs.append(s.buf_uop)
+    bufs.append(s)
   ast = graph_rewrite(ast, view_left+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
   if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
