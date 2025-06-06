@@ -436,9 +436,9 @@ class NVDevice(HCQCompiled[NVSignal]):
     if self.device_id >= len(NVDevice.gpus_info) or not NVDevice.gpus_info[self.device_id].valid:
       raise RuntimeError(f"No device found for {device}. Requesting more devices than the system has?")
 
+    self.fd_dev = self._new_gpu_fd()
     self.gpu_info = rmctrl.gpu_get_id_info_v2(self.fd_ctl, self.root, self.root, gpuId=NVDevice.gpus_info[self.device_id].gpu_id)
     self.gpu_minor = NVDevice.gpus_info[self.device_id].minor_number
-    self.fd_dev = self._new_gpu_fd()
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.gpu_info.deviceInstance, hClientShare=self.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
