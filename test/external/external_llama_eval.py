@@ -23,20 +23,20 @@ class LLaMaAdaptor(LM):
     self.last_seen_toks = []
   def _prefill(self, toks, temperature, start_pos=0):
 
-  # we can skip part of the prompt if it is the same as last and start_pos=0
-  if start_pos == 0:
-    for i, (a, b) in enumerate(zip(toks, self.last_seen_toks)):
-      if a != b: break
-    else: i = min(len(toks), len(self.last_seen_toks))
-    start_pos += i
-    self.last_seen_toks = toks
-    toks = toks[i:]
+    # we can skip part of the prompt if it is the same as last and start_pos=0
+    if start_pos == 0:
+      for i, (a, b) in enumerate(zip(toks, self.last_seen_toks)):
+        if a != b: break
+      else: i = min(len(toks), len(self.last_seen_toks))
+      start_pos += i
+      self.last_seen_toks = toks
+      toks = toks[i:]
 
-  # prefill the model
-  for tok in tqdm(toks):
-    model(Tensor([[tok]]), start_pos, temperature).realize()
-    start_pos += 1
-  return start_pos
+    # prefill the model
+    for tok in tqdm(toks):
+      model(Tensor([[tok]]), start_pos, temperature).realize()
+      start_pos += 1
+    return start_pos
 
   @property
   def tokenizer_name(self) -> str: pass
