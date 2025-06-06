@@ -300,7 +300,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, use_beam=False, truncate
   def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
     pos, next_tokens, sum_logprobs = 0, ctx, [0]*ctx.shape[0]
     for i in range((nsample-len(start_tokens))*2):
-      next_logits = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1]
+      next_logits = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1].numpy()
       next_tokens, ctx, pos, sum_logprobs = sample(ctx, next_logits, sum_logprobs)
       if (next_tokens == eot).all(): break
     if use_beam:
