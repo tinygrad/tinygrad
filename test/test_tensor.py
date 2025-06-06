@@ -151,7 +151,7 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5, rtol=1e-6)
 
-  @unittest.expectedFailure
+  #@unittest.expectedFailure
   def test_const_backward_pass(self):
     init = 3.5
 
