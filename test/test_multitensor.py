@@ -1123,14 +1123,15 @@ class TestMultiRamUsage(unittest.TestCase):
     # NOTE: the first one on the DEFAULT device should be freed
     self.assertUsed(self.N*self.N*4*2)
 
-  def test_zeros_shard(self):
+  def test_zeros_shard(self, devices=(d1, d2)):
+    _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices, axis=0).realize()
     assert int(os.getenv("VIZ", "0")) == 0
-    _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).realize()
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
+  def test_zeros_shard_self(self): self.test_zeros_shard((d0, d1))
 
   def test_zeros_contiguous_shard(self):
-    assert int(os.getenv("VIZ", "0")) == 0
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).contiguous().realize()
+    assert int(os.getenv("VIZ", "0")) == 0
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
