@@ -1,10 +1,10 @@
 # https://github.com/onnx/onnx/blob/main/onnx/onnx.proto3
 
-import os, struct
+import os, pathlib, struct
 from io import BufferedReader
-from typing import Tuple
+from typing import Tuple, Union
 from types import SimpleNamespace
-from tinygrad.nn.state import TensorIO, accept_filename
+from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, dtypes
 
 # Protobuf Wire Types
@@ -26,6 +26,7 @@ PB_INFOS = {
   "OperatorSetIdProto": {1: ("domain", PBType.STRING), 2: ("version", PBType.INT)},
   "StringStringEntryProto": {1: ("key", PBType.STRING), 2: ("value", PBType.STRING)},
   "TensorProto": {1: ("dims", PBType.INT, True), 2: ("data_type", PBType.INT), 4: ("float_data", PBType.FLOATS),
+    13: ("external_data", PBType.SUB, True, "StringStringEntryProto"), 14: ("data_location", PBType.INT),
     5: ("int32_data", PBType.INTS), 7: ("int64_data", PBType.INTS), 8: ("name", PBType.STRING), 9: ("raw_data", PBType.BYTES)},
   "TensorShapeProtoDimension": {1: ("dim_value", PBType.INT), 2: ("dim_param", PBType.STRING)},
   "TensorShapeProto": {1: ("dim", PBType.SUB, True, "TensorShapeProtoDimension")},
@@ -53,11 +54,9 @@ PB_INFOS = {
   "TypeProtoTensor": {1: ("elem_type", PBType.INT), 2: ("shape", PBType.SUB, False, ("TensorShapeProto", lambda: {"dim": []}))},
 }
 
-@accept_filename
-def onnx_load(tensor: Tensor):
-  reader = BufferedReader(TensorIO(tensor))
-  parser = OnnxParser()
-  onnx_model = parser.parse(reader)
+def onnx_load(fn: Union[Tensor, str, pathlib.Path], load_external_data: bool=True):
+  parser = OnnxParser(fn, load_external_data)
+  onnx_model = parser.parse()
   model = dict_to_namespace(onnx_model)
   return model
 
@@ -71,7 +70,13 @@ def dict_to_namespace(d):
   return d
 
 class OnnxParser:
-  def __init__(self):
+  def __init__(self, inp: Union[Tensor, str, pathlib.Path], load_external_data: bool=True):
+    self.file_path: Union[pathlib.Path, None] = None
+    self.load_external_data = load_external_data
+    if not isinstance(inp, Tensor):
+      self.file_path = pathlib.Path(inp)
+      self.tensor = Tensor(self.file_path)
+    else: self.tensor = inp
     self.attr_func_dict = { PBType.BYTES: self._handle_bytes, PBType.SUB: self._handle_sub_message, PBType.FLOATS: self._handle_packed_floats,
       PBType.INT: self._handle_int64, PBType.INTS: self._handle_packed_int64s, PBType.STRING: self._handle_string, PBType.FLOAT: self._handle_float}
     self.registered_handles = {}
@@ -88,7 +93,9 @@ class OnnxParser:
         res[fid] = _wrapper_handler
       self.registered_handles[pb_name] = res
 
-  def parse(self, reader): return self._parse_message(reader, "ModelProto", lambda: {"opset_import": [], "domain": None, "graph": None})
+  def parse(self):
+    reader = BufferedReader(TensorIO(self.tensor))
+    return self._parse_message(reader, "ModelProto", lambda: {"opset_import": [], "domain": None, "graph": None})
 
   def decode_varint(self, reader: BufferedReader) -> int:
     result = 0
@@ -120,6 +127,7 @@ class OnnxParser:
           handler(obj, reader, wire_type)
         else: self.skip_field_value(reader, wire_type)
       except EOFError: break
+    if message_field_handlers_name == "TensorProto" and self.load_external_data and obj.get("data_location", 0) == 1: self._parse_external_data(obj)
     return obj
 
   def _handle_delimited(self, reader:BufferedReader, use_tensor=False) -> Tuple[bytes, Tensor]:
@@ -171,3 +179,26 @@ class OnnxParser:
     elif isinstance(parser_func, tuple): sub_obj = self._parse_message(BufferedReader(TensorIO(value)), parser_func[0], parser_func[1])
     else: sub_obj = parser_func(BufferedReader(TensorIO(value)))
     gen_result(obj, key_name, sub_obj, repeated)
+
+  def _parse_external_data(self, obj):
+    if "external_data" not in obj: raise ValueError("no external_data")
+    location = None
+    length = None
+    offset = 0
+    for kv in obj["external_data"]:
+      if kv["key"] == "location": location = kv["value"]
+      if kv["key"] == "offset": offset = int(kv["value"])
+      if kv["key"] == "length": length = int(kv["value"])
+    if location is None: raise ValueError("no location in external_data")
+    if self.file_path is None:
+      # get onnx file path from Tensor
+      if isinstance(self.tensor.device, str) and self.tensor.device.startswith("DISK:"):
+        self.file_path = self.tensor.device[5:]
+        if not (ext_path := self.file_path.parent.joinpath(location)).exists():
+          raise Exception(f"external location not exists: {ext_path}, may caused by symbolic link, try passing onnx file path to onnx_load")
+      else: raise Exception("onnx external_data need the origin file path, try passing onnx file path to onnx_load")
+    ext_path = self.file_path.parent.joinpath(location)
+    if not ext_path.exists(): raise Exception(f"external location not exists: {ext_path}")
+    ext_tensor = Tensor(ext_path)
+    obj["raw_data"] = ext_tensor[offset:offset+length] if length is not None else ext_tensor[offset:]
+    obj["data_location"] = 0
