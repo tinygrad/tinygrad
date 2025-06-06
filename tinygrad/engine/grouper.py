@@ -393,11 +393,13 @@ def check_load_st(glbl:UOp, view:UOp):
   raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                      +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
 
-fix_kernel_ops = PatternMatcher([
+
+pm_dedup_const = PatternMatcher([(UPat(Ops.CONST, src=(UPat(), UPat(Ops.UNIQUE)), name="x"), lambda x: x.replace(src=(x.src[0],))),])
+
+fix_kernel_ops = pm_dedup_const+PatternMatcher([
   # remove CONTIGUOUS/DEVICE/UNIQUE on const from kernel AST
   (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
-  (UPat(Ops.CONST, src=(UPat(), UPat(Ops.UNIQUE)), name="x"), lambda x: x.replace(src=(x.src[0],))),
   # no ImageDType after index
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL, Ops.VIEW}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
