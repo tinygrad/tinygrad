@@ -67,6 +67,26 @@ def mstack_reorder_view(ms:UOp):
   if not all_same(args) or len([x for x in args[0].vars() if x.arg[0] == '_device_num']) != 0: return None
   return UOp(Ops.MSTACK, ms.dtype, tuple(x.src[0] for x in ms.src)).view(args[0])
 
+def mstack_early_shrink(view:UOp, ms:UOp):
+  if resolve(prod(view.shape) >= prod(ms.shape)) or _replace_dnum(view.st, 0) == view.st: return None
+  ret = []
+  for i, x in enumerate(ms.src):
+    new_view = _replace_dnum(view.st, i)
+    if x.op is Ops.COPY:
+      # TODO: should this logic be here?
+      if False and (bv:=new_view.as_buffer_view()) is not None:
+        ret.append(UOp(Ops.BUFFER_VIEW, x.dtype, x.src, bv).copy_to_device(x.device).reshape(new_view.shape))
+      else:
+        # if src device doesn't have a renderer, we have to view after the copy
+        # TODO: a way to understand this
+        if x.src[0].device in {"DISK", "NPY"}:
+          ret.append(x.view(new_view))
+        else:
+          ret.append(x.src[0].view(new_view).copy_to_device(x.device))
+    else:
+      ret.append(x.view(new_view).contiguous())
+  return ms.replace(src=tuple(ret))
+
 replace_allreduce = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
@@ -83,10 +103,7 @@ replace_allreduce = PatternMatcher([
   # move view through MSTACK
   (UPat(Ops.MSTACK, src=UPat(Ops.VIEW), name="ms"), mstack_reorder_view),
   # move shrink before MSTACK
-  (UPat(Ops.VIEW, src=(UPat(Ops.MSTACK, name="ms"),), name="view"), lambda view, ms:
-    ms.replace(src=tuple(x.src[0].view(_replace_dnum(view.st, i)).copy_to_device(x.device) if x.op is Ops.COPY else \
-                         x.view(_replace_dnum(view.st, i)).contiguous() for i,x in enumerate(ms.src))) \
-      if resolve(prod(view.shape) < prod(ms.shape), False) and _replace_dnum(view.st, 0) != view.st else None),
+  (UPat(Ops.VIEW, src=(UPat(Ops.MSTACK, name="ms"),), name="view"), mstack_early_shrink),
 ])
 
 # ***** multi functions *****

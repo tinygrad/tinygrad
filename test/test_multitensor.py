@@ -1136,6 +1136,12 @@ class TestMultiRamUsage(unittest.TestCase):
     assert int(os.getenv("VIZ", "0")) == 0
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
 
+class TestMultiFromUnrenderable(unittest.TestCase):
+  def test_from_npy(self):
+    t = Tensor(np.arange(100))
+    ll = t.shard((d0, d1), axis=0) + 1
+    np.testing.assert_equal(ll.numpy(), np.arange(100)+1)
+
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiAssign(unittest.TestCase):
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
