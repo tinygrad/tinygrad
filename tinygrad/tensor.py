@@ -138,6 +138,10 @@ class Tensor(MathTrait):
     # create a UOp from the different types of inputs
     if isinstance(data, UOp):
       assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
+      if data.op is Ops.BIND:
+        var, val = data.unbind()
+        # give the bound constant a device
+        data = var.bind(UOp.const(var.dtype, val, device, ()))
     elif data is None: data = UOp.const(dtype or dtypes.default_float, 0, device, ())
     elif isinstance(data, get_args(ConstType)): data = UOp.const(dtype or dtypes.from_py(data), data, device, ())
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)

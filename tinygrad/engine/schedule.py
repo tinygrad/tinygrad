@@ -26,8 +26,8 @@ def unbind_view(ctx:list[dict[Variable, int]], x:UOp):
 
 def unbind_bind(ctx:list[dict[Variable, int]], x:UOp):
   var, val = x.unbind()
-  ctx.append({var.replace(src=()):val})
-  return var
+  ctx.append({var:val})
+  return var.replace(src=x.src[1].src)
 
 pm_unbind = PatternMatcher([
   (UPat(Ops.VIEW, name="x"), unbind_view),
