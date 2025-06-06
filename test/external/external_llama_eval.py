@@ -32,7 +32,7 @@ class LLaMaAdaptor(LM):
     toks = toks[i:]
 
     # prefill the model
-    for tok in tqdm(toks):
+    for tok in toks:
       self.model(Tensor([[tok]]), start_pos, temperature).realize()
       start_pos += 1
     return start_pos
