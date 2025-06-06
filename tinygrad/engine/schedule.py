@@ -77,28 +77,23 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       buffers[k.src[0]] = base.view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
     ubufs = tuple(s.buf_uop.buffer for s in k.src)
     if any(isinstance(x, MultiBuffer) for x in ubufs):
-      if ast.op is Ops.COPY:
-        assert ast.arg is None, "copy arg is no longer supported"
-        if isinstance(ubufs[1], MultiBuffer):  # src is multiple buffers, none selected
-          if isinstance(ubufs[0], MultiBuffer):
-            # COPY ALL -> ALL
-            assert len(ubufs[0].bufs) == len(ubufs[1].bufs), "all to all copy must have matching buffer length"
-            for b1,b2 in zip(ubufs[0].bufs, ubufs[1].bufs): schedule.append(ScheduleItem(ast, (b1, b2), k.arg.metadata))
-          else:
-            # COPY ANY -> ONE. Currently we just select the first
-            schedule.append(ScheduleItem(ast, (ubufs[0], ubufs[1].bufs[0]), k.arg.metadata))
+      if ast.op is Ops.COPY and (isinstance(ubufs[0], Buffer) or isinstance(ubufs[1], Buffer)):
+        if isinstance(ubufs[1], MultiBuffer) and isinstance(ubufs[0], Buffer):  # src is multiple buffers, none selected
+          # COPY ANY -> ONE. Currently we just select the first
+          schedule.append(ScheduleItem(ast, (ubufs[0], ubufs[1].bufs[0]), k.arg.metadata))
+        elif isinstance(ubufs[0], MultiBuffer) and isinstance(ubufs[1], Buffer):
+          # COPY ONE -> ALL (BROADCAST)
+          for b in ubufs[0].bufs: schedule.append(ScheduleItem(ast, (b, ubufs[1]), k.arg.metadata))
         else:
-          assert isinstance(ubufs[1], Buffer), "src can't be MultiBuffer"
-          if isinstance(ubufs[0], MultiBuffer):
-            # COPY ONE -> ALL (BROADCAST)
-            for b in ubufs[0].bufs: schedule.append(ScheduleItem(ast, (b, ubufs[1]), k.arg.metadata))
-          else: schedule.append(ScheduleItem(ast, (ubufs[0], ubufs[1]), k.arg.metadata)) # COPY ONE -> ONE
+          raise RuntimeError("unsupported copy type")
       else:
         assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
+        # ALL -> ALL
         dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
         for i,bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
           schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0]:i} if len(dnums) else {}))
     else:
+      # ONE -> ONE
       schedule.append(ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata))
     for x in children[k]:
       in_degree[x] -= 1
