@@ -53,11 +53,6 @@ jobs:
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-        # Test using VIZ=1 after package installation
-        VIZ=1 python -c "from tinygrad.tensor import Tensor; Tensor([1,2,3,4,5]).realize()" & VIZ_PID=$!
-        echo "started VIZ server at: $(ps -p "$VIZ_PID" -o pid=)"
-        i=0; while ((i++ < 10)); do curl -sSf localhost:8000 > /dev/null && break || { echo "VIZ verification attempt $i/10"; sleep 1; }; done; ((i > 10)) && echo "Could not verify VIZ server" && exit 1
-        kill $VIZ_PID
         pip install mypy
         mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
     - name: Run beautiful_mnist with tinygrad only
@@ -784,6 +779,15 @@ jobs:
       run: npm install puppeteer
     - name: Run WEBGPU Efficientnet
       run: node test/web/test_webgpu.js
+    - name: Run VIZ tests as external package
+      run: |
+        mkdir $GITHUB_WORKSPACE/test_dir
+        cd $GITHUB_WORKSPACE/test_dir
+        python -m venv venv
+        source venv/bin/activate
+        pip install $GITHUB_WORKSPACE
+        cp $GITHUB_WORKSPACE/test/web/test_viz.js .
+        node test_viz.js
 
   osxremote:
     name: MacOS (remote metal)
