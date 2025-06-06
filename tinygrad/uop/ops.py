@@ -378,7 +378,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def index(self, idx:UOp, valid:UOp|None=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
-    if self._device is not None or self.st is not None: return UOp.metaop(Ops.CONST, self.shape, self.dtype, self._device, b)
+    if self._device is not None or self.st is not None: return UOp.metaop(Ops.CONST, self.shape, self.dtype, self._device, b, unique=len(self.src) == 2)
     return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
@@ -472,13 +472,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** from LazyBuffer ***
 
   @staticmethod
-  def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str|tuple[str, ...]|None=None, arg=None) -> UOp:
+  def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str|tuple[str, ...]|None=None, arg=None, unique=True) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
     # Tensor const is CONST(VIEW(DEVICE)) -> RESHAPE -> EXPAND
     if op is Ops.CONST:
       assert isinstance(arg, get_args(ConstType)), f"trying to create CONST with {arg=}"
       return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, () if device is None else (UOp(Ops.DEVICE, arg=device),),
-                 ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape)), UOp.unique()))
+                 ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape)),)+((UOp.unique(),) if unique else ()))
     # Tensor variable binding is BIND(VAR(VIEW(DEVICE)), CONST(VIEW(DEVICE)))
     assert op is Ops.BIND, f"unknown op {op}"
     var, val = arg.unbind()
