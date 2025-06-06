@@ -6,6 +6,7 @@ import unittest
 import numpy as np
 import functools
 from typing import List, Optional, Union, cast
+from hypothesis import assume, given, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
@@ -69,6 +70,45 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
 def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, merge_views+sym, {})
 
 class TestSchedule(unittest.TestCase):
+  def test_arange_avgpool2d(self, kcount=2):
+    x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
+    t = x.avg_pool2d(padding=1)
+    sched = t.schedule()
+    self.assertEqual(len(sched), kcount)
+    run_schedule(sched)
+    import torch
+    torch_out = torch.nn.functional.avg_pool2d(torch.arange(25).reshape(1,1,5,5).float(), kernel_size=(2,2), padding=1).numpy()
+    np.testing.assert_allclose(t.numpy(), torch_out)
+
+  def test_arange_avgpool2d_fused_noopt(self):
+    with Context(FUSE_ARANGE=1, NOOPT=1): self.test_arange_avgpool2d(kcount=1)
+
+  # linearizer error
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "needs supports_float4 to fail")
+  def test_arange_avgpool2d_fused(self):
+    with self.assertRaises(RecursionError):
+      with Context(FUSE_ARANGE=1, NOOPT=0): self.test_arange_avgpool2d(kcount=1)
+
+  # when we're fusing a reduce, all ReduceOps must have the same N in the dimensions
+  # all permutes, reshapes, expands and shrinks push through the reduce
+  def test_arange_sum(self):
+    a = Tensor.arange(6).reshape(3, 2).sum(axis=1)
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(a, 1))
+    self.assertListEqual(a.tolist(), [1, 5, 9])
+
+  def test_arange_sum_alt(self):
+    a = (Tensor.arange(5).reshape(1,5).expand(6,5)*Tensor(2)).reshape(1,6,5).sum(axis=2)
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(a, 1))
+    np.testing.assert_equal(a.numpy(), 20)
+
+  def test_permute_arange(self):
+    a = Tensor.arange(6).reshape(6, 1, 1).permute(2, 0, 1).sum(axis=1)
+    with Context(FUSE_ARANGE=1):
+      run_schedule(check_schedule(a, 1))
+    self.assertListEqual(a.tolist(), [[15]])
+
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
   def test_error_on_device_mismatch(self):
     a = Tensor.empty(10)
@@ -109,13 +149,14 @@ class TestSchedule(unittest.TestCase):
         root = root + functools.reduce(lambda a,b:a+b, bufs[i:i+X])
       self.assertEqual(root.item(), sum(range(N)))
 
-  @unittest.expectedFailure # TODO: failing because of can_chase
-  def test_indexing_scalars_multiple_dims(self):
-    X = Tensor.randn(2, 3).realize()
-    xt = X[Tensor(0)][Tensor(1)]
+  @given(strat.sampled_from(range(2,4)), strat.sampled_from(range(2,4)), strat.sampled_from(range(0,4)), strat.sampled_from(range(0,4)))
+  def test_indexing_scalars(self, x, y, a, b):
+    assume(a<x and b<y)
+    X = Tensor.randn(x, y).realize()
+    xt = X[Tensor(a)][Tensor(b)]
     with Context(FUSE_ARANGE=1):
       run_schedule(check_schedule(xt, 2))
-    np.testing.assert_equal(xt.numpy(), X.numpy()[0][1])
+    np.testing.assert_equal(xt.numpy(), X.numpy()[a][b])
 
   def test_push_pads_elementwise(self):
     x = Tensor.full((4,4), 2.).contiguous().realize()
@@ -1604,21 +1645,6 @@ class TestSchedule(unittest.TestCase):
   @unittest.expectedFailure
   def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
 
-  @unittest.skip("splitting kernels exceeding device buffer count is not yet supported")
-  def _test_buf_cnt(self, cnt:int, allowed:int):
-    alu = functools.reduce(lambda x,y: x+y, [Tensor.ones((1, 1)).contiguous().realize() for _ in range(cnt-1)])
-    s = alu.schedule()
-    assert len(s) == allowed
-    run_schedule(s)
-    expected = functools.reduce(lambda x,y: x+y, [np.ones((1, 1)) for _ in range(cnt-1)])
-    np.testing.assert_equal(alu.numpy(), expected)
-
-  def test_buf_cnt_at_limit(self): self._test_buf_cnt(31, allowed=1)
-  @unittest.expectedFailure
-  def test_buf_cnt_over_limit(self): self._test_buf_cnt(32, allowed=2)
-  @unittest.expectedFailure
-  def test_buf_cnt_over_limit_alt(self): self._test_buf_cnt(63, allowed=3)
-
   @unittest.skipIf(getenv("VIZ"), "TODO: VIZ blocks gc")
   def test_schedule_mem_used(self):
     base = GlobalCounters.mem_used
@@ -1705,13 +1731,15 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(realized_const_view, 1))
     self.assertListEqual(realized_const_view.tolist(), [[1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]])
 
-  def test_cast_padded_const(self):
-    a = Tensor(1, dtype=dtypes.int32).reshape(1, 1).pad(((1, 1), None))
-    casted_view = a.cast(dtypes.float32)
+  @given(strat.sampled_from(dtypes.all), strat.sampled_from(dtypes.all))
+  def test_cast_padded_const(self, dt1, dt2):
+    assume(is_dtype_supported(dt1) and is_dtype_supported(dt2))
+    a = Tensor(1, dtype=dt1).reshape(1, 1).pad(((1, 1), None))
+    casted_view = a.cast(dt2)
     run_schedule(check_schedule(casted_view, 0))
     realized_const_view = casted_view.contiguous()
     run_schedule(check_schedule(realized_const_view, 1))
-    self.assertListEqual(realized_const_view.tolist(), [[0], [1], [0]])
+    np.testing.assert_equal(realized_const_view.numpy(), [[0], [1], [0]])
 
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):

@@ -518,6 +518,10 @@ class TestTinygrad(unittest.TestCase):
     except ValueError:
       Tensor.zeros(2, 2).realize()
 
+  def test_shrink(self):
+    t = Tensor.arange(32).contiguous().realize()
+    self.assertListEqual(t[16:20].tolist(), [16,17,18,19])
+
 @unittest.skip("this test is just flaky, sync issue")
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
