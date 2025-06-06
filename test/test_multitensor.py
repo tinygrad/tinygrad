@@ -1134,14 +1134,13 @@ class TestMultiRamUsage(unittest.TestCase):
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiTransformer(unittest.TestCase):
-  def test_transformer(self):
+  def _get_sharded_transformers(self, device):
     from extra.models.llama import Transformer
     args = {"dim": 64, "n_heads": 1, "n_kv_heads": 1, "n_layers": 1, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 1024, "hidden_dim": 64}
     real_model = Transformer(**args, jit=False)
     shard_model = Transformer(**args, jit=False)
     nn.state.load_state_dict(shard_model, nn.state.get_state_dict(real_model))
 
-    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
     for k,v in nn.state.get_state_dict(shard_model).items():
       if 'scale' in k: v.shard_(device, axis=None)  # from quantized
       elif '.attention.' in k: v.shard_(device, axis=-1)
@@ -1151,6 +1150,24 @@ class TestMultiTransformer(unittest.TestCase):
       elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
       elif 'output.weight' in k: v.shard_(device, axis=0)
       else: v.shard_(device, axis=None)
+    return real_model, shard_model
+
+  def test_transformer_pieces(self):
+    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    rmodel, smodel = self._get_sharded_transformers(device)
+
+    last_tok = 0
+    rh = rmodel.tok_embeddings(Tensor([[last_tok]], device=Device.DEFAULT))
+    sh = smodel.tok_embeddings(Tensor([[last_tok]], device=device))
+    np.testing.assert_allclose(rh.numpy(), sh.numpy(), atol=1e-6)
+    GlobalCounters.reset()
+    for layer in rmodel.layers: rh = layer.attention(rh, 0, rmodel.freqs_cis[:, :1, :, :, :], None)
+    for layer in smodel.layers: sh = layer.attention(sh, 0, smodel.freqs_cis[:, :1, :, :, :], None)
+    np.testing.assert_allclose(rh.numpy(), sh.numpy(), atol=1e-6)
+
+  def test_transformer(self):
+    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    real_model, shard_model = self._get_sharded_transformers(device)
 
     last_tok = 0
     real_tok = real_model(Tensor([[last_tok]], device=Device.DEFAULT), 0)
