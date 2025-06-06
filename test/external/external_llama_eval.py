@@ -20,6 +20,24 @@ class LLaMaAdaptor(LM):
     self.max_length = max_length
     self.tokenizer = Tokenizer(str((checkpoint_path if checkpoint_path.is_dir() else checkpoint_path.parent) / "tokenizer.model"))
     self.model = build_transformer(checkpoint_path, model_size=model_size, quantize=quantize, max_context=self.max_length)
+    self.last_seen_toks = []
+  def _prefill(self, toks, temperature, start_pos=0):
+
+  # we can skip part of the prompt if it is the same as last and start_pos=0
+  if start_pos == 0:
+    for i, (a, b) in enumerate(zip(toks, self.last_seen_toks)):
+      if a != b: break
+    else: i = min(len(toks), len(self.last_seen_toks))
+    start_pos += i
+    self.last_seen_toks = toks
+    toks = toks[i:]
+
+  # prefill the model
+  for tok in tqdm(toks):
+    model(Tensor([[tok]]), start_pos, temperature).realize()
+    start_pos += 1
+  return start_pos
+
   @property
   def tokenizer_name(self) -> str: pass
   def chat_template(self, chat_template: bool | str = False) -> str: pass
@@ -39,10 +57,10 @@ class LLaMaAdaptor(LM):
       prompt_len = len(toks)
       max_gen_toks = args.get("max_gen_toks") or args.get("max_length") or self.max_length-prompt_len
       assert self.max_length >= max_gen_toks, "This eval needs a longer context length"
-      device = Device.DEFAULT
-      start_pos = prefill(self.model, toks[:-1], args.get("temperature", 0.0))
+      temperature = args.get("temperature", 0.0)
+      start_pos = self._prefill(toks[:-1], temperature)
       for _ in range(max_gen_toks):
-        next_tok = self.model(Tensor([toks[start_pos:]]), start_pos, args.get("temperature", 0.0)).item()
+        next_tok = self.model(Tensor([toks[start_pos:]]), start_pos, temperature).item()
         if next_tok in self.tokenizer.stop_tokens or next_tok in until: break
         toks.append(next_tok)
         start_pos += 1
