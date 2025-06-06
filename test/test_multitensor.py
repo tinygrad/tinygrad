@@ -1132,5 +1132,46 @@ class TestMultiRamUsage(unittest.TestCase):
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).contiguous().realize()
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
 
+@unittest.skipIf(not_support_multi_device(), "need multi")
+class TestMultiAssign(unittest.TestCase):
+  device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+
+  def test_multi_assign_realized(self):
+    out = Tensor.zeros(4).shard(self.device, 0).contiguous().realize()
+    ones = Tensor.ones(4).shard(self.device, 0).contiguous().realize()
+    out.assign(ones).realize()
+    self.assertListEqual(out.tolist(), [1,1,1,1])
+
+  def test_multi_assign_unrealized(self):
+    out = Tensor.zeros(4).contiguous().realize().shard(self.device, 0)
+    ones = Tensor.ones(4).shard(self.device, 0).contiguous().realize()
+    out.assign(ones).realize()
+    self.assertListEqual(out.tolist(), [1,1,1,1])
+
+  def test_multi_assign_both_unrealized(self):
+    out = Tensor.zeros(4).contiguous().realize().shard(self.device, 0)
+    ones = Tensor.ones(4).contiguous().realize().shard(self.device, 0)
+    out.assign(ones).realize()
+    self.assertListEqual(out.tolist(), [1,1,1,1])
+
+  def test_multi_assign_piece(self):
+    out = Tensor.zeros(4,4).shard(self.device, 0).contiguous().realize()
+    ones = Tensor.ones(4,1).shard(self.device, 0).contiguous().realize()
+    out[:, 2:3].assign(ones).realize()
+    self.assertListEqual(out.tolist(), [[0,0,1,0], [0,0,1,0], [0,0,1,0], [0,0,1,0]])
+
+  def test_multi_assign_piece_noncontig(self):
+    out = Tensor.zeros(4,4).contiguous().realize().shard(self.device, 0).realize()
+    ones = Tensor.ones(4,1).shard(self.device, 0).contiguous().realize()
+    out[:, 2:3].assign(ones).realize()
+    self.assertListEqual(out.tolist(), [[0,0,1,0], [0,0,1,0], [0,0,1,0], [0,0,1,0]])
+
+  @unittest.expectedFailure
+  def test_multi_assign_piece_unrealized(self):
+    out = Tensor.zeros(4,4).contiguous().realize().shard(self.device, 0)
+    ones = Tensor.ones(4,1).shard(self.device, 0).contiguous().realize()
+    out[:, 2:3].assign(ones).realize()
+    self.assertListEqual(out.tolist(), [[0,0,1,0], [0,0,1,0], [0,0,1,0], [0,0,1,0]])
+
 if __name__ == '__main__':
   unittest.main()
