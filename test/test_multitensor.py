@@ -1173,6 +1173,25 @@ class TestMultiAssign(unittest.TestCase):
     out[:, 2:3].assign(ones).realize()
     self.assertListEqual(out.tolist(), [[0,0,1,0], [0,0,1,0], [0,0,1,0], [0,0,1,0]])
 
+  def test_multi_assign_var_offset(self):
+    out = Tensor.zeros(4,4).contiguous().realize().shard(self.device, 0).realize()
+    ones = Tensor.ones(4,1).shard(self.device, 0).contiguous().realize()
+    vi = Variable("i", 0, 3).bind(2)
+    out[:, vi:vi+1].assign(ones).realize()
+    self.assertListEqual(out.tolist(), [[0,0,1,0], [0,0,1,0], [0,0,1,0], [0,0,1,0]])
+
+  def test_multi_assign_var_offset_jit(self):
+    out = Tensor.zeros(4,6).contiguous().realize().shard(self.device, 0).realize()
+    ones = Tensor.ones(4,1).shard(self.device, 0).contiguous().realize()
+
+    @TinyJit
+    def f(out, vi):
+      out[:, vi:vi+1].assign(ones).realize()
+
+    vi = Variable("i", 0, 3)
+    for i in range(4): f(out, vi.bind(i))
+    self.assertListEqual(out.tolist(), [[1,1,1,1,0,0], [1,1,1,1,0,0], [1,1,1,1,0,0], [1,1,1,1,0,0]])
+
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiTransformer(unittest.TestCase):
   def test_transformer(self):
