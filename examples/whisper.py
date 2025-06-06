@@ -9,6 +9,7 @@ from tinygrad.helpers import getenv, DEBUG, fetch
 
 import numpy as np
 import librosa
+from scipy.special import log_softmax
 
 class MultiHeadAttention:
   def __init__(self, n_state, n_head, kv_caching: Literal['cross', 'self']=None, max_self_attn_cache_len=None):
@@ -245,13 +246,32 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
   log_spec = prep_audio(waveforms, model.batch_size, truncate)
   nsample = model.decoder.max_tokens_to_sample
 
+  def apply_logit_rules(ctx, logits):
+    supr = [enc._special_tokens[c] for c in ["<|startoftranscript|>", "<|translate|>", "<|transcribe|>","<|startoflm|>","<|startofprev|>","<|nospeech|>","<|notimestamps|>",]]
+    logits[:, supr] = -np.inf
+    for i, row in enumerate(ctx):
+      last = row[-1]
+      if last == start_tokens[-1]: logits[:, enc.encode(' ') + [eot]] = -np.inf
+    return logits
+
+  def sample(ctx, next_logits, sum_logprobs):
+    next_logits = apply_logit_rules(ctx, next_logits)
+    logprobs = log_softmax(next_logits, axis=-1)
+    last_eot = (ctx[:, -1] == eot)
+
+    tokens = np.argmax(next_logits, axis=-1).astype(np.int32).reshape(-1, 1)
+    sum_logprobs += logprobs[np.arange(logprobs.shape[0]), tokens[:, 0]].reshape(-1) * ~last_eot
+
+    tokens[last_eot] = eot
+    ctx = np.concatenate((ctx, tokens), axis=1)
+    pos = ctx.shape[-1] - 1
+    return tokens, ctx, pos, sum_logprobs
+
   def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
-    pos, next_tokens = 0, ctx
+    pos, next_tokens, sum_logprobs = 0, ctx, [0]*ctx.shape[0]
     for i in range((nsample-len(start_tokens))*2):
-      next_tokens = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32).reshape(-1, 1)
-      next_tokens[ctx[:, -1] == eot] = eot
-      ctx = np.concatenate((ctx, next_tokens), axis=1)
-      pos = ctx.shape[-1] - 1
+      next_logits = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1]
+      next_tokens, ctx, pos, sum_logprobs = sample(ctx, next_logits, sum_logprobs)
       if (next_tokens == eot).all(): break
     return ctx
 
