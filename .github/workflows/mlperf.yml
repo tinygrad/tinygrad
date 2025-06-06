@@ -16,6 +16,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: Cleanup running AM processes
+      run: python extra/amdpci/am_smi.py --pids --kill
     - name: Symlink datasets
       run: |
         mkdir -p extra/datasets
