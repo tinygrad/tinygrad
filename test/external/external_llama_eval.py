@@ -20,6 +20,11 @@ class LLaMaAdaptor(LM):
     self.max_length = max_length
     self.tokenizer = Tokenizer(str((checkpoint_path if checkpoint_path.is_dir() else checkpoint_path.parent) / "tokenizer.model"))
     self.model = build_transformer(checkpoint_path, model_size=model_size, quantize=quantize, max_context=self.max_length)
+  def _prefill(self, toks, temperature, start_pos=0):
+    for tok in tqdm(toks):
+      model(Tensor([[tok]]), start_pos, temperature).realize()
+      start_pos += 1
+    return start_pos
   @property
   def tokenizer_name(self) -> str: pass
   def chat_template(self, chat_template: bool | str = False) -> str: pass
@@ -38,11 +43,12 @@ class LLaMaAdaptor(LM):
       prompt_len = len(toks)
       max_gen_toks = args.get("max_gen_toks") or args.get("max_length") or self.max_length-prompt_len
       assert self.max_length >= max_gen_toks, "This eval needs a longer context length"
-      for i in range(0,max_gen_toks+prompt_len):
+      start_pos = self._prefill(toks, args.get("temperature", 0.0))
+      for _ in range(max_gen_toks):
         next_tok = self.model(Tensor([[toks[i]]]), i, args.get("temperature", 0.0)).item()
-        if i > prompt_len-1:
-          if next_tok in self.tokenizer.stop_tokens or next_tok in until: break
-          toks.append(next_tok)
+        if next_tok in self.tokenizer.stop_tokens or next_tok in until: break
+        toks.append(next_tok)
+        start_pos += 1
       continuations.append(self.tokenizer.decode(toks[prompt_len:]))
     return continuations
 
