@@ -557,7 +557,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     buffers[self] = ret
     return ret
   @property
-  def realized(self) -> Optional[Buffer|MultiBuffer]: return self.buffer if self.op is Ops.BUFFER and self.buffer.is_allocated() else None
+  def realized(self) -> Optional[Buffer|MultiBuffer]:
+    # NOTE: this is used by the JIT to determine which inputs we capture
+    return self.buffer if self.op in {Ops.BUFFER, Ops.MSTACK} and self.buffer.is_allocated() else None
   @property
   def is_realized(self) -> bool:
     return all(x.base.realized is not None for x in self.base.src) if self.base.op is Ops.MULTI else self.base.realized is not None
