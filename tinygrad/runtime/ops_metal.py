@@ -199,22 +199,33 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): msg("release")(opaque.buf)
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
-    dest_dev.synchronize()
-    src_command_buffer = msg("commandBuffer", objc_instance)(src_dev.mtl_queue)
-    encoder = msg("blitCommandEncoder", objc_instance)(src_command_buffer)
-    msg("copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:")(encoder, src.buf, ctypes.c_ulong(src.offset),
-        dest.buf, ctypes.c_ulong(dest.offset), ctypes.c_ulong(sz))
-    msg("endEncoding")(encoder)
+    dest_dev.synchronize()                     # flush previous work
+
+    # --- NEW: choose a value strictly greater than current ---
     if src_dev != dest_dev:
-      msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
-      dest_command_buffer = msg("commandBuffer", objc_instance)(dest_dev.mtl_queue)
-      msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
-      msg("commit")(dest_command_buffer)
-      dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
-      src_dev.timeline_value += 1
-    msg("setLabel:")(src_command_buffer, to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
-    msg("commit")(src_command_buffer)
-    src_dev.mtl_buffers_in_flight.append(src_command_buffer)
+        src_dev.timeline_value += 1
+    wait_value = src_dev.timeline_value
+    # ---------------------------------------------------------
+
+    src_cb  = msg("commandBuffer", objc_instance)(src_dev.mtl_queue)
+    blit    = msg("blitCommandEncoder", objc_instance)(src_cb)
+    msg("copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:")(
+           blit, src.buf, ctypes.c_ulong(src.offset),
+           dest.buf, ctypes.c_ulong(dest.offset), ctypes.c_ulong(sz))
+    msg("endEncoding")(blit)
+
+    if src_dev != dest_dev:
+        # Signal in A, wait in B
+        msg("encodeSignalEvent:value:")(src_cb,  src_dev.timeline_signal, wait_value)
+
+        dst_cb = msg("commandBuffer", objc_instance)(dest_dev.mtl_queue)
+        msg("encodeWaitForEvent:value:")(dst_cb, src_dev.timeline_signal, wait_value)
+        msg("commit")(dst_cb)
+        dest_dev.mtl_buffers_in_flight.append(dst_cb)
+
+    msg("setLabel:")(src_cb, to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
+    msg("commit")(src_cb)
+    src_dev.mtl_buffers_in_flight.append(src_cb)
   def _cp_mv(self, dst, src, prof_desc):
     with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
