@@ -108,7 +108,7 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(GroupOp.Unary, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="inp"),), name="v"),), name="alu"),
    lambda inp,v,alu: inp.alu(alu.op).view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
   # scheduler dedups constants
-  (UPat(Ops.CONST, src=(UPat(), UPat(Ops.UNIQUE)), name="x"), lambda x: x.replace(src=x.src[:1])),
+  (UPat((Ops.CONST, Ops.DEFINE_VAR), src=(UPat(), UPat(Ops.UNIQUE)), name="x"), lambda x: x.replace(src=x.src[:1])),
 ])
 
 # support for using a contiguous permuted view instead of the parent view if one exists
@@ -396,8 +396,10 @@ def check_load_st(glbl:UOp, view:UOp):
                      +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
 
 fix_kernel_ops = PatternMatcher([
-  # remove CONTIGUOUS from kernel AST
+  # remove CONTIGUOUS/DEVICE from kernel AST
   (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
+  (UPat((Ops.CONST, Ops.DEFINE_VAR), src=(UPat(), UPat(Ops.UNIQUE)), name="x"), lambda x: x.replace(src=x.src[:1])),
   # no ImageDType after index
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL, Ops.VIEW}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
@@ -410,7 +412,6 @@ replace_globals = PatternMatcher([
   # HACK: select the 0 branch of MSTACK (the device is wrong after this, is that okay?)
   (UPat(Ops.MSTACK, name="x"), lambda x: x.src[0]),
   # no device ops in kernel ast
-  # keeping device around prevents gc of buffers on that device, while asts continue to live inside the JIT/method_cache
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
 ])
 

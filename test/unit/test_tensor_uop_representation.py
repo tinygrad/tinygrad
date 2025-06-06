@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UPat, Ops, UOp
 realized_pattern = UPat(Ops.BUFFER)
 # after realization, base tensor uops become RESHAPE(BUFFER)
 buffer_view_pattern = UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),))
-const_pattern = UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),),)))
+const_pattern = UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),),),), allow_any_len=True)
 def is_pattern_uop(u:UOp, pat:UPat): assert pat.match(u, {}), f"{u}\nis not\n{pat}"
 def is_pattern(ten:Tensor, pat:UPat): is_pattern_uop(ten.lazydata, pat)
 
@@ -67,9 +67,8 @@ class TestTensorUopRepresentation(unittest.TestCase):
   def test_consts_do_not_realize(self):
     a = Tensor(1)
     print(a.lazydata)
-    pre_realize = a.lazydata
     a.realize()
-    assert a.lazydata is pre_realize
+    assert not a.lazydata.is_realized
 
   def test_viewed_consts_do_not_realize(self):
     a = Tensor.ones(10, 10)
