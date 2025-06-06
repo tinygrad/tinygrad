@@ -349,7 +349,7 @@ def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   return src.r(r.arg[0], tuple(new_axis)).reshape(r.shape)
 
 def elementwise_view_right(root:UOp):
-  if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW and x.base.op not in ALWAYS_CONTIGUOUS]): return None
+  if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW and x.src and x.base.op not in ALWAYS_CONTIGUOUS]): return None
   assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
   # place view after applying the elementwise op
   new_st = ShapeTracker.from_shape(swizzles[0].base.shape)
@@ -396,9 +396,8 @@ def check_load_st(glbl:UOp, view:UOp):
                      +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
 
 fix_kernel_ops = PatternMatcher([
-  # remove CONTIGUOUS/DEVICE from kernel AST
+  # remove CONTIGUOUS from kernel AST
   (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
-  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
   # no ImageDType after index
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL, Ops.VIEW}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
@@ -410,6 +409,9 @@ replace_globals = PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat(Ops.KERNEL)), name="assign", allow_any_len=True), lambda assign: assign.src[0]),
   # HACK: select the 0 branch of MSTACK (the device is wrong after this, is that okay?)
   (UPat(Ops.MSTACK, name="x"), lambda x: x.src[0]),
+  # no device ops in kernel ast
+  # keeping device around prevents gc of buffers on that device, while asts continue to live inside the JIT/method_cache
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
 ])
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
