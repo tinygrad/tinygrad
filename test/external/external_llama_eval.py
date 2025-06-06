@@ -22,7 +22,7 @@ class LLaMaAdaptor(LM):
     self.model = build_transformer(checkpoint_path, model_size=model_size, quantize=quantize, max_context=self.max_length)
   def _prefill(self, toks, temperature, start_pos=0):
     for tok in tqdm(toks):
-      model(Tensor([[tok]]), start_pos, temperature).realize()
+      self.model(Tensor([[tok]]), start_pos, temperature).realize()
       start_pos += 1
     return start_pos
   @property
