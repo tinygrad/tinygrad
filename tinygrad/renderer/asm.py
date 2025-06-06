@@ -92,7 +92,7 @@ class AsmRenderer(Renderer):
     regs = copy.deepcopy(self.regs)
     kernel: list[str] = []
     live: dict[UOp, str] = {}
-    loc: dict[UOp, str] = {}
+    loc: dict[UOp, str|int] = {}
     self.r = loc
     mem: dict[UOp, int] = {}
     self.mem = mem
@@ -111,7 +111,7 @@ class AsmRenderer(Renderer):
         for x in flatten([x.src for x in uops[i:live_range[u]]]):
           if x in live_range and uops.index(x) < i: live_range[x] = max(live_range[x], live_range[u])
 
-    def srcs(x:UOp) -> tuple[UOp]: return tuple(self.bypass(s) for s in x.src)
+    def srcs(x:UOp) -> tuple[UOp, ...]: return tuple(self.bypass(s) for s in x.src)
     def reg_class(x:UOp): return regs[self.dt(x.dtype).scalar()]
     def _alloc(x:UOp, cons:list[str]):
       # assign free register, otherwise spill one
@@ -192,7 +192,7 @@ class AsmRenderer(Renderer):
     for u in uops: kernel.extend(inst_map[u])
     return (name, kernel, stack_size)
 
-  def render_kernel(self, name:str, kernel:list[UOp], stack_size:int): raise NotImplementedError("arch specific")
+  def render_kernel(self, name:str, kernel:list[str], stack_size:int): raise NotImplementedError("arch specific")
   def render(self, uops:list[UOp]): return self.render_kernel(*self._render(uops))
 
 # x18 clobbered on macos/windows, x29 holds sp for debugging
@@ -318,7 +318,7 @@ class Arm64Renderer(AsmRenderer):
     return reg if dt.itemsize == 8 else arm64_reg_map[reg][max(dt.itemsize, dtypes.int32.itemsize)]
   def render_spill(self, x:UOp, sz:int) -> str:
     return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self.render_reg(self.r[x], x.dtype, True)}, {self.render_mem(sz, self.dt(x.dtype))}"
-  def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
+  def render_kernel(self, name:str, kernel:list[str], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", f"sub sp, sp, #{stack_size}", "stp x29, x30, [sp]", "mov x29, sp"] + \
                       kernel + ["ldp x29, x30, [sp]", f"add sp, sp, #{stack_size}", "ret", "\n"])
 
@@ -508,6 +508,6 @@ class X86Renderer(AsmRenderer):
   def render_reg(self, reg:str, dt:DType, alias:bool=False) -> str:
     return reg if dt.itemsize == 8 or dtypes.is_float(dt) else x86_reg_map[reg][dt.itemsize]
   def render_spill(self, x:UOp, sz:int) -> str: return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self.render_mem(sz, self.dt(x.dtype))}, {self[x]}"
-  def render_kernel(self, name:str, kernel:list[UOp], stack_size:int) -> str:
+  def render_kernel(self, name:str, kernel:list[str], stack_size:int) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", "push rbp", "mov rbp, rsp", f"sub rsp, {stack_size}"] +
                      kernel + [f"add rsp, {stack_size}", "pop rbp", "ret", "\n"])
