@@ -50,14 +50,6 @@ def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
   if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
   return base.copy_to_device(copy.device).view(view.arg)
 
-def mselect_reorder_view(ms:UOp, view:UOp, base:UOp):
-  st = unwrap(view.st)
-  # replace dnum in ShapeTracker with literal const for this mselect
-  if (dnums:=[x for x in st.vars() if x.arg[0] == '_device_num']):
-    assert len(dnums) == 1, f"view must have exactly 0 or 1 dnum, got {dnums}"
-    st = st.substitute({dnums[0]:dnums[0].const_like(ms.arg)})
-  return base.mselect(ms.arg).view(st)
-
 ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK}
 
 sym = symbolic_simple+PatternMatcher([
@@ -79,8 +71,6 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.COPY, name="c", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda c,x: x if c.device == x.device else None),
   # store a shrink before COPY, otherwise view after the COPY
   (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"), UPat(Ops.DEVICE)), name="copy"), copy_reorder_view),
-  # MSELECT must select a base, if there are views apply them after selecting the base
-  (UPat(Ops.MSELECT, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"),), name="ms"), mselect_reorder_view),
   # remove cast to image when it's already a contiguous image
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(Ops.CONTIGUOUS, name="base"),)),)),
    lambda cast,base,vm: base.view(vm.st) if isinstance(cast.dtype, ImageDType) and isinstance(base.dtype, ImageDType) else None),
@@ -570,6 +560,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
     if u.op is not Ops.ASSIGN: continue
     kernel_assign[u.buf_uop] = u
     for s in u.src[1].src:
+      # TODO: this is probably broken for MSELECT/MSTACK
       if s.op is not Ops.BUFFER or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
       if any(x.op is Ops.ASSIGN and x.buf_uop is s for x in u.toposort()):
         raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on ASSIGN or BUFFER")
