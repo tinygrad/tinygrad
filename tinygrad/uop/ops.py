@@ -377,8 +377,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
   def index(self, idx:UOp, valid:UOp|None=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
   def const_like(self, b:ConstLike):
-    # constants can optionally have a DEVICE source
-    if self._device is not None or self.st is not None: return UOp.metaop(Ops.CONST, self.shape, self.dtype, self._device, b)
+    # constants can optionally have shape/device
+    if self.st is not None: return UOp.metaop(Ops.CONST, self.shape, self.dtype, self._device, b)
     return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
