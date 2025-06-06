@@ -564,6 +564,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
     if u.op is not Ops.ASSIGN: continue
     kernel_assign[u.buf_uop] = u
     for s in u.src[1].src:
+      # TODO: this is probably broken for MSELECT/MSTACK
       if s.op is not Ops.BUFFER or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
       if any(x.op is Ops.ASSIGN and x.buf_uop is s for x in u.toposort()):
         raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on ASSIGN or BUFFER")
