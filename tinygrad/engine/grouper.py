@@ -107,8 +107,8 @@ sym = symbolic_simple+PatternMatcher([
   # put UnaryOps before EXPANDs, if it can fuse with the input
   (UPat(GroupOp.Unary, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="inp"),), name="v"),), name="alu"),
    lambda inp,v,alu: inp.alu(alu.op).view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
-  # constants are unique in the tensor graph, they get deduped in the scheduler
-  (UPat(Ops.CONST, src=(UPat(), UPat(Ops.UNIQUE)), name="x"), lambda x: x.replace(src=(x.src[0],))),
+  # scheduler dedups constants
+  (UPat(Ops.CONST, src=(UPat(), UPat(Ops.UNIQUE)), name="x"), lambda x: x.replace(src=x.src[:1])),
 ])
 
 # support for using a contiguous permuted view instead of the parent view if one exists
@@ -285,7 +285,7 @@ merge_views = PatternMatcher([
    lambda view: view.const_like(0) if (mask:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
   # only unmaksed VIEW on CONST replaces the ShapeTracker
   (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),), name="view"),
-   lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)+x.src[1:]) if all(v.mask is None for v in (x.st+view.st).views) else None),
+   lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
 ])
 
 def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
@@ -396,7 +396,7 @@ def check_load_st(glbl:UOp, view:UOp):
                      +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
 
 fix_kernel_ops = PatternMatcher([
-  # remove CONTIGUOUS/DEVICE/UNIQUE on const from kernel AST
+  # remove CONTIGUOUS/DEVICE from kernel AST
   (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
   # no ImageDType after index

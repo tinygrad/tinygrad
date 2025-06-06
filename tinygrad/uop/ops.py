@@ -414,7 +414,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       from tinygrad.shape.shapetracker import ShapeTracker
       ret = ret.replace(src=(ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),))
     if device is not None:
-      ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)),))
+      ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)), UOp.unique()))
     return ret
   def valid(self): return UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)
   @staticmethod
