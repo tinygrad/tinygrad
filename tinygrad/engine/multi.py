@@ -1,3 +1,4 @@
+from typing import cast
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv
 from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp
@@ -38,9 +39,19 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
         .alu(red.arg, chunk.copy_to_device(buf.device[dest], dest))
     reduced_chunks.append(reduced_chunk)
 
-  # allgather + reassemble
+  # allgather
+  copied_chunks = []
+  for i,c in enumerate(reduced_chunks):
+    this_chunk = [None] * len(buf.device)
+    this_chunk[(i+len(buf.device)-1)%n_lbs] = c
+    for step in range(n_lbs-1):
+      dest = (i+step)%n_lbs
+      this_chunk[dest] = c = c.copy_to_device(buf.device[dest])
+    copied_chunks.append(UOp(Ops.MSTACK, buf.dtype, tuple(cast(list[UOp], this_chunk))))
+
+  # reassemble
   pads = [((s,numel-e),) for s,e in chunks]
-  return functools.reduce(operator.add, [c.copy_to_device(buf.device).pad(pad) for pad,c in zip(pads, reduced_chunks)]).reshape(shape)
+  return functools.reduce(operator.add, [c.pad(pad) for pad,c in zip(pads, copied_chunks)]).reshape(shape)
 
 replace_allreduce = PatternMatcher([(UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),])
 
