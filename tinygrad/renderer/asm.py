@@ -405,7 +405,8 @@ x86_rewrite = PatternMatcher([
   (UPat((Ops.IDIV,), dtypes.sints, name="x"), lambda ctx,x:
    f"{ctx.two_address(x, x.src[0])}push rdx\n{idiv_signex[x.dtype.itemsize]}\n{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rdx"),
   (UPat((Ops.MOD,), dtypes.sints, name="x"), lambda ctx,x:
-   f"push rax\n{ctx.ops[x.dtype][Ops.ASSIGN]} rax, {ctx.r[x.src[0]]}\n{idiv_signex[x.dtype.itemsize]}\n{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rax"),
+   f"push rax\n{ctx.ops[x.dtype][Ops.ASSIGN]} rax, {ctx.r[x.src[0]]}\n"
+   f"{idiv_signex[x.dtype.itemsize]}\n{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rax"),
   (UPat((Ops.IDIV,), dtypes.uints, name="x"), lambda ctx,x:
    f"{ctx.two_address(x, x.src[0])}push rdx\nxor {'rdx, rdx' if x.dtype.itemsize > 1 else 'ah, ah'}\n"
    f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rdx"),
