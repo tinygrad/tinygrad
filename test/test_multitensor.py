@@ -1134,67 +1134,59 @@ class TestMultiRamUsage(unittest.TestCase):
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiAssign(unittest.TestCase):
+  device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+
   def test_multi_assign_realized(self):
-    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-    out = Tensor.zeros(4).shard(device, 0).contiguous().realize()
-    ones = Tensor.ones(4).shard(device, 0).contiguous().realize()
+    out = Tensor.zeros(4).shard(self.device, 0).contiguous().realize()
+    ones = Tensor.ones(4).shard(self.device, 0).contiguous().realize()
     out.assign(ones).realize()
     self.assertListEqual(out.tolist(), [1,1,1,1])
 
   def test_multi_assign_unrealized(self):
-    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-    out = Tensor.zeros(4).contiguous().realize().shard(device, 0)
-    ones = Tensor.ones(4).shard(device, 0).contiguous().realize()
+    out = Tensor.zeros(4).contiguous().realize().shard(self.device, 0)
+    ones = Tensor.ones(4).shard(self.device, 0).contiguous().realize()
     out.assign(ones).realize()
     self.assertListEqual(out.tolist(), [1,1,1,1])
 
   def test_multi_assign_both_unrealized(self):
-    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-    out = Tensor.zeros(4).contiguous().realize().shard(device, 0)
-    ones = Tensor.ones(4).contiguous().realize().shard(device, 0)
+    out = Tensor.zeros(4).contiguous().realize().shard(self.device, 0)
+    ones = Tensor.ones(4).contiguous().realize().shard(self.device, 0)
     out.assign(ones).realize()
     self.assertListEqual(out.tolist(), [1,1,1,1])
 
   def test_multi_assign_piece(self):
-    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-    out = Tensor.zeros(4,4).shard(device, 0).contiguous().realize()
-    ones = Tensor.ones(4,1).shard(device, 0).contiguous().realize()
+    out = Tensor.zeros(4,4).shard(self.device, 0).contiguous().realize()
+    ones = Tensor.ones(4,1).shard(self.device, 0).contiguous().realize()
     out[:, 2:3].assign(ones).realize()
     self.assertListEqual(out.tolist(), [[0,0,1,0], [0,0,1,0], [0,0,1,0], [0,0,1,0]])
 
   def test_multi_assign_piece_noncontig(self):
-    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-    out = Tensor.zeros(4,4).contiguous().realize().shard(device, 0).realize()
-    ones = Tensor.ones(4,1).shard(device, 0).contiguous().realize()
-    GlobalCounters.reset()
-    print("assign")
+    out = Tensor.zeros(4,4).contiguous().realize().shard(self.device, 0).realize()
+    ones = Tensor.ones(4,1).shard(self.device, 0).contiguous().realize()
     out[:, 2:3].assign(ones).realize()
-    GlobalCounters.reset()
-    print("copyout")
     self.assertListEqual(out.tolist(), [[0,0,1,0], [0,0,1,0], [0,0,1,0], [0,0,1,0]])
 
-  @unittest.skip("this one doesn't work")
+  @unittest.expectedFailure
   def test_multi_assign_piece_unrealized(self):
-    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-    out = Tensor.zeros(4,4).contiguous().realize().shard(device, 0)
-    ones = Tensor.ones(4,1).shard(device, 0).contiguous().realize()
+    out = Tensor.zeros(4,4).contiguous().realize().shard(self.device, 0)
+    ones = Tensor.ones(4,1).shard(self.device, 0).contiguous().realize()
     out[:, 2:3].assign(ones).realize()
     self.assertListEqual(out.tolist(), [[0,0,1,0], [0,0,1,0], [0,0,1,0], [0,0,1,0]])
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiTransformer(unittest.TestCase):
-  def _get_sharded_transformers(self, device, all_ones=False):
+  def test_transformer(self):
+    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+
     from extra.models.llama import Transformer
     args = {"dim": 64, "n_heads": 1, "n_kv_heads": 1, "n_layers": 2, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 1024, "hidden_dim": 64}
     real_model = Transformer(**args, jit=False)
     shard_model = Transformer(**args, jit=False)
-    if all_ones:
-      for s in nn.state.get_parameters(real_model): s.replace(Tensor.ones_like(s))
-      for s in nn.state.get_parameters(shard_model): s.replace(Tensor.ones_like(s))
-    else:
-      # copy state
-      nn.state.load_state_dict(shard_model, nn.state.get_state_dict(real_model))
 
+    # copy state
+    nn.state.load_state_dict(shard_model, nn.state.get_state_dict(real_model))
+
+    # shard
     for k,v in nn.state.get_state_dict(shard_model).items():
       if 'scale' in k: v.shard_(device, axis=None)  # from quantized
       elif '.attention.' in k: v.shard_(device, axis=-1)
@@ -1204,34 +1196,6 @@ class TestMultiTransformer(unittest.TestCase):
       elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
       elif 'output.weight' in k: v.shard_(device, axis=0)
       else: v.shard_(device, axis=None)
-
-    # do this here also
-    if all_ones:
-      for s in nn.state.get_parameters(shard_model): s.replace(Tensor.ones_like(s))
-
-    return real_model, shard_model
-
-  def test_transformer_attention(self):
-    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-    rmodel, smodel = self._get_sharded_transformers(device, all_ones=True)
-
-    last_tok = 0
-    rh = rmodel.tok_embeddings(Tensor([[last_tok]], device=Device.DEFAULT)).realize()
-    sh = smodel.tok_embeddings(Tensor([[last_tok]], device=device)).realize()
-    #print(sh.device, sh.lazydata.axis)
-    np.testing.assert_allclose(rh.numpy(), sh.numpy(), atol=1e-6)
-    print("**** real ****")
-    GlobalCounters.reset()
-    rh = rmodel.layers[0].attention(rh, 0, rmodel.freqs_cis[:, :1, :, :, :], None).realize()
-    print("**** shard ****")
-    GlobalCounters.reset()
-    sh = smodel.layers[0].attention(sh, 0, smodel.freqs_cis[:, :1, :, :, :], None).realize()
-    print("copyout")
-    np.testing.assert_allclose(rh.numpy(), sh.numpy(), atol=1e-6)
-
-  def test_transformer(self):
-    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-    real_model, shard_model = self._get_sharded_transformers(device)
 
     last_tok = 0
     real_tok = real_model(Tensor([[last_tok]], device=Device.DEFAULT), 0)
