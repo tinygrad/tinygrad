@@ -4,7 +4,7 @@ from lm_eval.api.model import LM
 from pathlib import Path
 import json, argparse
 
-from examples.llama3 import build_transformer, Tokenizer, MODEL_PARAMS, prefill
+from examples.llama3 import build_transformer, Tokenizer, MODEL_PARAMS
 from tinygrad import Tensor, Device
 from tinygrad.helpers import tqdm
 
