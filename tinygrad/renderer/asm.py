@@ -97,7 +97,7 @@ class AsmRenderer(Renderer):
     mem: dict[UOp, str] = {}
     self.mem = mem
     live_at_range: dict[UOp, dict[UOp, str]] = {}
-    spilled_at: dict[UOp, int] = {}
+    spill_place: dict[UOp, UOp] = {}
     stack_size: int = 0
     cur_uop: UOp = None
     inst_map: dict[UOp, list[str]] = {}
@@ -123,8 +123,8 @@ class AsmRenderer(Renderer):
         nonlocal stack_size
         stack_size += 16
         mem[spilled] = -stack_size
-        inst_map[spilled].append(self.render_spill(spilled, mem[spilled]))
-        spilled_at[spilled] = i
+        inst = spill_place.get(spilled, spilled)
+        inst_map[inst].append(self.render_spill(spilled, mem[spilled]))
       loc[spilled] = mem[spilled]
       return live.pop(spilled)
 
@@ -136,7 +136,10 @@ class AsmRenderer(Renderer):
       if isinstance(ret, int): mem[x] = ret
       elif isinstance(ret, str):
         live[x] = ret
-        if x in loc: inst_map[cur_uop].append(self.render_fill(x, ret))
+        if x in loc:
+          # if x already in reg and we move to another reg the spill place changes
+          if isinstance(loc[x], str): spill_place[x] = cur_uop
+          inst_map[cur_uop].append(self.render_fill(x, ret))
       return ret
 
     name = "test"
@@ -146,20 +149,25 @@ class AsmRenderer(Renderer):
         if u.arg is not None: name = u.arg.name
         continue
       if u.op is Ops.CONST: continue
-      # free dead registers
-      for v in [v for v in live if live_range[v] < i]: reg_class(v).insert(0, live.pop(v))
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         loc[u] = alloc(u, self.constraints(u))
         continue
-      # reload vars in different location at end of range that weren't loaded on first use
+      # free dead registers
+      for v in [v for v in live if live_range[v] < i]: reg_class(v).insert(0, live.pop(v))
+      # reload necessary vars
       if u.op is Ops.ENDRANGE:
         for k,v in live_at_range.pop(u.src[0], {}).items():
-          if loc[k] != v and (k not in mem or any(k in srcs(x) for x in uops[uops.index(u.src[0]):spilled_at[k]])): loc[k] = alloc(k, [v])
+          if loc[k] != v: loc[k] = alloc(k, [v])
       # assign srcs, ignore srcs without live ranges
       src = tuple(s for s in srcs(u) if s in live_range)
       for s in src:
         cons = self.constraints(u, s)
-        if s in loc and loc[s] not in cons: loc[s] = alloc(s, cons)
+        if s in loc and loc[s] not in cons:
+          # if var first use in range is a load we don't need to reload
+          cr = list(live_at_range)[-1] if live_at_range else None
+          if cr is not None and s in live_at_range[cr] and isinstance(loc[s], int) and not any(s in srcs(x) for x in uops[uops.index(cr):i-1]):
+            live_at_range[cr].pop(s)
+          loc[s] = alloc(s, cons)
       # free srcs before assigning destination to coalesce when valid
       # TODO: need to ignore noop and assign here
       for s in src:
@@ -172,8 +180,8 @@ class AsmRenderer(Renderer):
         if s in live and live_range[s] == i: reg_class(s).insert(0, live.pop(s))
       # assign destination
       if u in live_range: loc[u] = alloc(u, self.constraints(u))
-      # save live vars that haven't been spilled at loop entry
-      if u.op is Ops.RANGE: live_at_range[u] = {k:v for k,v in live.items() if k not in mem}
+      # save live vars at loop entry
+      if u.op is Ops.RANGE: live_at_range[u] = live.copy()
       # render assembly
       if (l:=self.string_rewrite.rewrite(u, ctx=self)) is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
@@ -477,7 +485,7 @@ class X86Renderer(AsmRenderer):
 
   def constraints(self, u:UOp, s:UOp|None=None) -> list[str|int]:
     # constraints for srcs
-    if u.op in (Ops.IDIV, Ops.MOD) and s is u.src[1]: return [r for r in self.reg_class(s) if r not in ("rdx", "rax")]
+    if u.op in (Ops.IDIV, Ops.MOD) and s in u.src: return [r for r in self.reg_class(s) if r not in ("rdx", "rax")]
     if u.op in (Ops.SHL, Ops.SHR) and s is u.src[1] and s.op != Ops.CONST: return ["rcx"]
     # because of spill hoisting need to ensure acc is in memory before assign if it was spilled
     if u.op is Ops.ASSIGN and s is u.src[0] and s in self.mem: return [self.mem[s]]
