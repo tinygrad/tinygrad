@@ -56,7 +56,7 @@ if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='Run LLaMA evals in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--size', type=str, default="8B", help=f"Size of model to use [{', '.join(list(MODEL_PARAMS.keys()))}]")
   parser.add_argument('--chat', action='store_true', help="Use chat model")
-  parser.add_argument('--ctx', type=int, default=128000, help="Max context length")
+  parser.add_argument('--ctx', type=int, default=8192, help="Max context length")
   parser.add_argument('--quantize', type=str, default=None, help="Quantize the weights to int8 or int4 in memory")
   parser.add_argument('--eval', type=str, default="gsm8k", help="Run in evaluation mode")
   parser.add_argument('--limit', type=int, default=None, help="Limit tests in eval")
@@ -69,7 +69,7 @@ if __name__ == '__main__':
   adaptor = LLaMaAdaptor(model_size=args.size, quantize=args.quantize,
                          checkpoint_path=args.model, max_length=args.ctx)
   results = simple_evaluate(model=adaptor, tasks=args.eval.split(","), apply_chat_template=args.chat,
-                            num_fewshot=args.num_fewshot, limit=args.limit, system_instruction="You are a helpful assistant.")
+                            num_fewshot=args.num_fewshot, limit=args.limit, system_instruction="You are a helpful assistant")
 
   if args.output_path: args.output_path.write_text(json.dumps(results, indent=2))
   for task_name, val in results["results"].items():
