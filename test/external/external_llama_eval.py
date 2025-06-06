@@ -21,20 +21,19 @@ class LLaMaAdaptor(LM):
     self.tokenizer = Tokenizer(str((checkpoint_path if checkpoint_path.is_dir() else checkpoint_path.parent) / "tokenizer.model"))
     self.model = build_transformer(checkpoint_path, model_size=model_size, quantize=quantize, max_context=self.max_length)
     self.last_seen_toks = []
-  def _prefill(self, toks, temperature, start_pos=0):
-
-    # we can skip part of the prompt if it is the same as last and start_pos=0
-    if start_pos == 0:
-      for i, (a, b) in enumerate(zip(toks, self.last_seen_toks)):
-        if a != b: break
-      else: i = min(len(toks), len(self.last_seen_toks))
-      start_pos += i
-      self.last_seen_toks = toks
-      toks = toks[i:]
+  def _prefill(self, toks, temperature):
+    start_pos = 0
+    # we can skip part of the prompt if it is the same as last
+    for i, (a, b) in enumerate(zip(toks, self.last_seen_toks)):
+      if a != b: break
+    else: i = min(len(toks), len(self.last_seen_toks))
+    start_pos += i
+    self.last_seen_toks = toks
+    toks = toks[i:]
 
     # prefill the model
     for tok in tqdm(toks):
-      model(Tensor([[tok]]), start_pos, temperature).realize()
+      self.model(Tensor([[tok]]), start_pos, temperature).realize()
       start_pos += 1
     return start_pos
 
