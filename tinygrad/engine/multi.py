@@ -1,7 +1,7 @@
 from typing import cast
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, unwrap
-from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp
+from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, resolve
 
 # *** allreduce implementation ***
 
@@ -86,7 +86,7 @@ replace_allreduce = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat(Ops.MSTACK, name="ms"),), name="view"), lambda view, ms:
     ms.replace(src=tuple(x.src[0].view(_replace_dnum(view.st, i)).copy_to_device(x.device) if x.op is Ops.COPY else \
                          x.view(_replace_dnum(view.st, i)).contiguous() for i,x in enumerate(ms.src))) \
-      if prod(view.shape) < prod(ms.shape) and _replace_dnum(view.st, 0) != view.st else None),
+      if resolve(prod(view.shape) < prod(ms.shape), False) and _replace_dnum(view.st, 0) != view.st else None),
 ])
 
 # ***** multi functions *****
