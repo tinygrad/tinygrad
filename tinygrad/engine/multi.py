@@ -57,7 +57,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
 def _replace_dnum(st, val):
   # replace dnum in ShapeTracker with literal const for this mselect
-  if (dnums:=[x for x in st.vars() if x.arg[0] == '_device_num']):
+  if (dnums:=[x for x in st.vars() if x.op is Ops.DEFINE_VAR and x.arg[0] == '_device_num']):
     assert len(dnums) == 1, f"view must have exactly 0 or 1 dnum, got {dnums}"
     st = st.substitute({dnums[0]:dnums[0].const_like(val)})
   return st
