@@ -138,9 +138,13 @@ class Tensor(MathTrait):
     # create a UOp from the different types of inputs
     if isinstance(data, UOp):
       assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
-      if data.op is Ops.BIND: data = UOp.metaop(Ops.BIND, tuple(), dtype or data.dtype, device, data)
-    elif data is None: data = UOp.metaop(Ops.CONST, (0,), dtype or dtypes.default_float, device, arg=0)
-    elif isinstance(data, get_args(ConstType)): data = UOp.metaop(Ops.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
+      if data.op is Ops.BIND:
+        var, val = data.unbind()
+        # give the bound constant a device
+        const = UOp.const(var.dtype, val, device, ())
+        data = data.replace(src=(var.replace(src=const.src), const))
+    elif data is None: data = UOp.const(dtype or dtypes.default_float, 0, device, ())
+    elif isinstance(data, get_args(ConstType)): data = UOp.const(dtype or dtypes.from_py(data), data, device, ())
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
     elif isinstance(data, (list, tuple)):
       if dtype is None:
@@ -151,7 +155,7 @@ class Tensor(MathTrait):
     elif str(type(data)) == "<class 'numpy.ndarray'>":
       import numpy as np
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
-      if data.shape == (): data = UOp.metaop(Ops.CONST, tuple(), dtype or _from_np_dtype(data.dtype), device, data.item())
+      if data.shape == (): data = UOp.const(dtype or _from_np_dtype(data.dtype), data.item(), device, ())
       else: data = _fromnp(data.astype(npdtype) if dtype is not None and (npdtype:=_to_np_dtype(dtype)) is not None else data)  # type: ignore [name-defined]
     elif isinstance(data, pathlib.Path):
       dtype = dtype or dtypes.uint8
