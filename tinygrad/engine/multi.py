@@ -73,16 +73,12 @@ def mstack_early_shrink(view:UOp, ms:UOp):
   for i, x in enumerate(ms.src):
     new_view = _replace_dnum(view.st, i)
     if x.op is Ops.COPY:
-      # TODO: should this logic be here?
-      if False and (bv:=new_view.as_buffer_view()) is not None:
-        ret.append(UOp(Ops.BUFFER_VIEW, x.dtype, x.src, bv).copy_to_device(x.device).reshape(new_view.shape))
+      # if src device doesn't have a renderer, we have to view after the copy
+      # TODO: a way to understand this
+      if x.src[0].device in {"DISK", "NPY"}:
+        ret.append(x.view(new_view))
       else:
-        # if src device doesn't have a renderer, we have to view after the copy
-        # TODO: a way to understand this
-        if x.src[0].device in {"DISK", "NPY"}:
-          ret.append(x.view(new_view))
-        else:
-          ret.append(x.src[0].view(new_view).copy_to_device(x.device))
+        ret.append(x.src[0].view(new_view).copy_to_device(x.device))
     else:
       ret.append(x.view(new_view).contiguous())
   return ms.replace(src=tuple(ret))
