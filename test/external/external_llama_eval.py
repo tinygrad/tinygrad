@@ -4,7 +4,7 @@ from lm_eval.api.model import LM
 from pathlib import Path
 import json, argparse
 
-from examples.llama3 import build_transformer, Tokenizer, MODEL_PARAMS
+from examples.llama3 import build_transformer, Tokenizer, MODEL_PARAMS, prefill
 from tinygrad import Tensor, Device
 from tinygrad.helpers import tqdm
 
@@ -20,11 +20,6 @@ class LLaMaAdaptor(LM):
     self.max_length = max_length
     self.tokenizer = Tokenizer(str((checkpoint_path if checkpoint_path.is_dir() else checkpoint_path.parent) / "tokenizer.model"))
     self.model = build_transformer(checkpoint_path, model_size=model_size, quantize=quantize, max_context=self.max_length)
-  def _prefill(self, toks, temperature, start_pos=0):
-    for tok in tqdm(toks):
-      self.model(Tensor([[tok]]), start_pos, temperature).realize()
-      start_pos += 1
-    return start_pos
   @property
   def tokenizer_name(self) -> str: pass
   def chat_template(self, chat_template: bool | str = False) -> str: pass
@@ -36,6 +31,8 @@ class LLaMaAdaptor(LM):
     return ret
   def generate_until(self, requests: list[Instance]) -> list[str]:
     continuations = []
+    last_seen_toks = []
+    device = Device.DEFAULT
     for request in tqdm(requests):
       prompt, args = request.args
       until = [self.tokenizer.encode(tok) for tok in args.get("until", [])]
@@ -43,7 +40,7 @@ class LLaMaAdaptor(LM):
       prompt_len = len(toks)
       max_gen_toks = args.get("max_gen_toks") or args.get("max_length") or self.max_length-prompt_len
       assert self.max_length >= max_gen_toks, "This eval needs a longer context length"
-      start_pos = self._prefill(toks[:-1], args.get("temperature", 0.0))
+      start_pos = prefill(self.model, toks[:-1], args.get("temperature", 0.0))
       for _ in range(max_gen_toks):
         next_tok = self.model(Tensor([toks[start_pos:]]), start_pos, args.get("temperature", 0.0)).item()
         if next_tok in self.tokenizer.stop_tokens or next_tok in until: break
