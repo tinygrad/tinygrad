@@ -82,12 +82,13 @@ class AsmRenderer(Renderer):
   def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
   def dt(self, d:DType) -> DType: return dtypes.uint64 if isinstance(d, PtrDType) else d
   def reg_class(self, x:UOp) -> list[str]: return self.regs[self.dt(x.dtype).scalar()]
-  def bypass(self, x:UOp) -> UOp: return x.src[0] if x.op in (Ops.ASSIGN, Ops.NOOP) else x
+  def bypass(self, x:UOp) -> UOp: return self.bypass(x.src[0]) if x.op in (Ops.ASSIGN, Ops.NOOP) else x
   def __getitem__(self, x:UOp) -> str: # hacky helper
     if x.op is Ops.CONST: return self.render_imm(to_hex(x.arg, x.dtype))
     r, dt = self.r[self.bypass(x)], self.dt(x.dtype)
     return self.render_mem(r, dt) if isinstance(r, int) else self.render_reg(r, dt, x.op is Ops.LOAD)
   def _render(self, uops:list[UOp]):
+    def srcs(x:UOp) -> tuple[UOp, ...]: return tuple(self.bypass(s) for s in x.src)
     self.uops = uops
     regs = copy.deepcopy(self.regs)
     kernel: list[str] = []
@@ -108,10 +109,9 @@ class AsmRenderer(Renderer):
     # a var defined before a range and used inside it is needed for the whole range
     for i,u in enumerate(uops):
       if u.op is Ops.RANGE:
-        for x in flatten([x.src for x in uops[i:live_range[u]]]):
+        for x in flatten([srcs(x) for x in uops[i:live_range[u]]]):
           if x in live_range and uops.index(x) < i: live_range[x] = max(live_range[x], live_range[u])
 
-    def srcs(x:UOp) -> tuple[UOp, ...]: return tuple(self.bypass(s) for s in x.src)
     def reg_class(x:UOp): return regs[self.dt(x.dtype).scalar()]
     def _alloc(x:UOp, cons:list[str]):
       # assign free register, otherwise spill one
@@ -334,8 +334,13 @@ x86_branch_ops = {Ops.ENDRANGE: "jl", Ops.IF: "je"}
 x86_unsigned_ops = {**x86_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "div", Ops.MOD: "div", Ops.CMPNE: "cmp",
                     Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor", Ops.SHL: "shl", Ops.SHR: "shr", Ops.WHERE: "cmove"}
 x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR: "sar"}
-# NOTE: these are just for reg/stack reg/reg movs, for float16 heap load/stores we use gen regs
-x86_float16_ops = {Ops.STORE: "movss", Ops.LOAD: "movss", Ops.ASSIGN: "movss"}
+# NOTE: float16 alus are done in float32, load/store are done with general regs unless vectorized
+# TODO: switch all float load/store to movd/q instead of moss/sd
+# TODO: add full float16/64 vec support, mainly need to change vectorize/gep
+x86_float16_ops = {Ops.ASSIGN: "movss"}
+x86_vec2_float16_ops = {Ops.STORE: "vmovd", Ops.LOAD: "vmovd", Ops.ASSIGN: "movss"}
+x86_vec4_float16_ops = {Ops.STORE: "vmovq", Ops.LOAD: "vmovq", Ops.ASSIGN: "movsd"}
+x86_vec8_float16_ops = {Ops.STORE: "vmovdqa", Ops.LOAD: "vmovdqa", Ops.ASSIGN: "movaps"}
 # NOTE: we use avx instructions for float ops
 x86_float32_ops = {Ops.ADD: "vaddss", Ops.SUB: "vsubss", Ops.MUL: "vmulss", Ops.FDIV: "vdivss", Ops.CMPLT: "vucomiss", Ops.CMPNE: "vucomiss",
                  Ops.SQRT: "sqrtss", Ops.MULACC: "vfmadd213ss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
@@ -347,6 +352,7 @@ x86_vec2_float64_ops = x86_vec4_float64_ops = {**{k:v[:-1]+"d" for k,v in x86_ve
 x86_vec8_float32_ops = x86_vec4_float32_ops
 x86_ops = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86_signed_ops for x in dtypes.sints},
           dtypes.float32:x86_float32_ops, dtypes.float64:x86_float64_ops, dtypes.float16:x86_float16_ops,
+          dtypes.float16.vec(2):x86_vec2_float16_ops, dtypes.float16.vec(4):x86_vec4_float16_ops, dtypes.float16.vec(8):x86_vec8_float16_ops,
           dtypes.float32.vec(2):x86_vec2_float32_ops, dtypes.float32.vec(4):x86_vec4_float32_ops,
           dtypes.float64.vec(2):x86_vec2_float64_ops, dtypes.float64.vec(4):x86_vec4_float64_ops,
           dtypes.float32.vec(8):x86_vec8_float32_ops, dtypes.void:x86_branch_ops}
@@ -426,6 +432,7 @@ def x86_load_consts(x:UOp) -> UOp|None:
   for s in x.src:
     if s.op is Ops.CONST and (dtypes.is_float(s.dtype) or abs(s.arg) > dtypes.max(dtypes.int32)):
       if s.dtype in (dtypes.int64, dtypes.uint64): s = s.load(dtype=s.dtype)
+      elif s.dtype is dtypes.float16: s = s.load(dtype=dtypes.int16).bitcast(dtypes.float16)
       elif s.dtype is dtypes.float32: s = s.load(dtype=dtypes.int32).bitcast(dtypes.float32)
       elif s.dtype is dtypes.float64: s = s.load(dtype=dtypes.int64).bitcast(dtypes.float64)
     nsrc.append(s)
