@@ -21,7 +21,7 @@ class LLaMaAdaptor(LM):
     self.tokenizer = Tokenizer(str((checkpoint_path if checkpoint_path.is_dir() else checkpoint_path.parent) / "tokenizer.model"))
     self.model = build_transformer(checkpoint_path, model_size=model_size, quantize=quantize, max_context=self.max_length)
     self.last_seen_toks = []
-  def _prefill(self, toks, temperature):
+  def _prefill(self, toks, temperature) -> int:
     start_pos = 0
     # we can skip part of the prompt if it is the same as last
     for i, (a, b) in enumerate(zip(toks, self.last_seen_toks)):
@@ -46,9 +46,9 @@ class LLaMaAdaptor(LM):
       ret += f"<|start_header_id|>{message['role']}<|end_header_id|>\n\n{message['content'].strip()}<|eot_id|>"
     if add_generation_prompt: ret += "<|start_header_id|>assistant<|end_header_id|>\n\n"
     return ret
+
   def generate_until(self, requests: list[Instance]) -> list[str]:
     continuations = []
-    last_seen_toks = []
     for request in tqdm(requests):
       prompt, args = request.args
       until = [self.tokenizer.encode(tok) for tok in args.get("until", [])]
@@ -58,11 +58,13 @@ class LLaMaAdaptor(LM):
       assert self.max_length >= max_gen_toks, "This eval needs a longer context length"
       temperature = args.get("temperature", 0.0)
       start_pos = self._prefill(toks[:-1], temperature)
+
       for _ in range(max_gen_toks):
         next_tok = self.model(Tensor([toks[start_pos:]]), start_pos, temperature).item()
         if next_tok in self.tokenizer.stop_tokens or next_tok in until: break
         toks.append(next_tok)
         start_pos += 1
+
       continuations.append(self.tokenizer.decode(toks[prompt_len:]))
     return continuations
 
