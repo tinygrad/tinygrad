@@ -16,6 +16,8 @@ jobs:
       uses: actions/checkout@v4
     - name: Remove amdgpu
       run: sudo rmmod amdgpu || true
+    - name: Cleanup running AM processes
+      run: python extra/amdpci/am_smi.py --pids --kill
     - name: Run SDXL with new search
       run: |
         BENCHMARK_LOG=search_sdxl PYTHONPATH=. AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 DISABLE_COMPILER_CACHE=1 python examples/sdxl.py --noshow --timing --seed 0
