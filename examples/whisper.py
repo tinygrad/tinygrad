@@ -116,6 +116,17 @@ class TextDecoder:
 
   def output_tok(self, x):
     return (self.ln(x) @ self.token_embedding.weight.T).realize()
+  
+  def rearrange_kv_cache(self, beam_indices: List[int], length=None):
+    for block in self.blocks:
+      if block.attn.kv_caching != 'self': continue
+      for cache_attr in ['cache_k', 'cache_v']:
+        cache = getattr(block.attn, cache_attr, None)
+        if cache is None: continue
+        selected = [cache[i] for i in beam_indices]
+        if isinstance(length, int): selected = [s[:, :length] for s in selected]
+        selected_tensor = selected[0].stack(*selected[1:], dim=0)
+        getattr(block.attn, cache_attr).assign(selected_tensor.contiguous()).realize()
 
 class Whisper:
   def __init__(self, dims, batch_size=1):
@@ -234,16 +245,16 @@ def load_file_waveform(filename):
   waveform, _ = librosa.load(filename, sr=RATE)
   return waveform
 
-def transcribe_file(model, enc, filename):
-  return transcribe_waveform(model, enc, [load_file_waveform(filename)])
+def transcribe_file(model, enc, filename, **kwargs):
+  return transcribe_waveform(model, enc, [load_file_waveform(filename)], **kwargs)
 
-def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
+def transcribe_waveform(model: Whisper, enc, waveforms, use_beam=False, truncate=False):
   """
   Expects an array of shape (N,S) where N is the number waveforms to transcribe in parallel and S is number of 16000Hz samples
   Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
   """
 
-  log_spec = prep_audio(waveforms, model.batch_size, truncate)
+  log_spec = prep_audio(waveforms, 1 if use_beam else model.batch_size, truncate)
   nsample = model.decoder.max_tokens_to_sample
 
   def apply_logit_rules(ctx, logits):
@@ -258,14 +269,33 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
     next_logits = apply_logit_rules(ctx, next_logits)
     logprobs = log_softmax(next_logits, axis=-1)
     last_eot = (ctx[:, -1] == eot)
-
-    tokens = np.argmax(next_logits, axis=-1).astype(np.int32).reshape(-1, 1)
-    sum_logprobs += logprobs[np.arange(logprobs.shape[0]), tokens[:, 0]].reshape(-1) * ~last_eot
+    if use_beam:
+      bs, vs = model.batch_size, next_logits.shape[-1]
+      if ctx[0, -1] == start_tokens[-1]: logprobs = logprobs[0, :].flatten()
+      else:
+        mask = np.full_like(logprobs, -np.inf)
+        mask[:, eot] = 0
+        logprobs = (np.where((ctx[:, -1] == eot)[:, None], mask, logprobs) + sum_logprobs.reshape(-1, 1)).flatten()
+      top_idxs = np.argpartition(logprobs, -bs)[-bs:]
+      top_idxs = top_idxs[np.argsort(-logprobs[top_idxs])]
+      beam_idxs = top_idxs // vs
+      tokens = (top_idxs % vs).reshape(-1, 1)
+      sum_logprobs, ctx = logprobs[top_idxs], ctx[beam_idxs]
+      model.decoder.rearrange_kv_cache(beam_idxs.tolist())
+    else:
+      tokens = np.argmax(next_logits, axis=-1).astype(np.int32).reshape(-1, 1)
+      sum_logprobs += logprobs[np.arange(logprobs.shape[0]), tokens[:, 0]].reshape(-1) * ~last_eot
 
     tokens[last_eot] = eot
     ctx = np.concatenate((ctx, tokens), axis=1)
     pos = ctx.shape[-1] - 1
     return tokens, ctx, pos, sum_logprobs
+  
+  def get_ctx_lens(ctx): return [len(seq) - np.argmax(seq[::-1] != eot) for seq in ctx]
+
+  def rank(ctx_lens, logprobs, length_penalty=None):
+    best_idx = int(np.argmax([logprob / (length if length_penalty is None else ((5+length)/6)**length_penalty) for logprob, length in zip(logprobs, ctx_lens)]))
+    return best_idx
 
   def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
     pos, next_tokens, sum_logprobs = 0, ctx, [0]*ctx.shape[0]
@@ -273,6 +303,11 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
       next_logits = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1]
       next_tokens, ctx, pos, sum_logprobs = sample(ctx, next_logits, sum_logprobs)
       if (next_tokens == eot).all(): break
+    if use_beam:
+      ctx_lens = get_ctx_lens(ctx, i)
+      idx = rank(ctx_lens, sum_logprobs)
+      model.decoder.rearrange_kv_cache([idx]*model.batch_size, ctx_lens[idx])
+      ctx = np.tile(ctx[idx], (model.batch_size, 1))
     return ctx
 
   def gettexttoks(line): return [tok for tok in line if tok < eot or tok > enc._special_tokens["<|notimestamps|>"]][-nsample+len(start_tokens):]
@@ -317,10 +352,11 @@ def listener(q):
   print("done listening")
 
 if __name__ == "__main__":
-  model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=1)
+  beam_size = getenv("BEAMSIZE", 1)
+  model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=beam_size)
 
   if len(sys.argv) > 1:
-    print(transcribe_file(model, enc, sys.argv[1]))
+    print(transcribe_file(model, enc, sys.argv[1], use_beam=beam_size>1))
   else:
     # online
     q = multiprocessing.Queue()
