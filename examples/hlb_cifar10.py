@@ -17,6 +17,8 @@ cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
 
 BS, STEPS = getenv("BS", 512), getenv("STEPS", 1000)
+STEPSN = getenv("STEPSN", 8)
+
 EVAL_BS = getenv("EVAL_BS", BS)
 GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
 assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
@@ -207,6 +209,7 @@ def train_cifar():
     X_cropped = Tensor(X.numpy()[mask.numpy()])
     return X_cropped.reshape((-1, 3, crop_size, crop_size))
 
+  # @TinyJit
   def cutmix(X:Tensor, Y:Tensor, mask_size=3):
     # fill the square with randomly selected images from the same batch
     mask = make_square_mask(X.shape, mask_size)
@@ -241,12 +244,12 @@ def train_cifar():
         X, Y = X.numpy(), Y.numpy()
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
-      for i in range(0, X.shape[0], BS):
+      for i in range(0, X.shape[0], BS*STEPSN):
         # pad the last batch  # TODO: not correct for test
         batch_end = min(i+BS, Y.shape[0])
         x = Tensor(X[batch_end-BS:batch_end], device=X_in.device, dtype=X_in.dtype)
         y = Tensor(Y[batch_end-BS:batch_end], device=Y_in.device, dtype=Y_in.dtype)
-        step += 1
+        step += STEPSN
         yield x, y
       epoch += 1
       if not is_train: break
@@ -415,7 +418,7 @@ def train_cifar():
       #  53  221.74 ms run,    2.22 ms python,  219.52 ms CL,  803.39 loss, 0.000807 LR, 4.66 GB used,   3042.49 GFLOPS,    674.65 GOPS
       print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
       st = cl
-      i += 1
+      i += STEPSN
 
   # verify eval acc
   if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):
