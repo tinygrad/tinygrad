@@ -1133,6 +1133,43 @@ class TestMultiRamUsage(unittest.TestCase):
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
+class TestMultiAssign(unittest.TestCase):
+  def test_multi_assign_realized(self):
+    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    out = Tensor.zeros(4).shard(device, 0).contiguous().realize()
+    ones = Tensor.ones(4).shard(device, 0).contiguous().realize()
+    out.assign(ones).realize()
+    self.assertListEqual(out.tolist(), [1,1,1,1])
+
+  def test_multi_assign_unrealized(self):
+    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    out = Tensor.zeros(4).contiguous().realize().shard(device, 0)
+    ones = Tensor.ones(4).shard(device, 0).contiguous().realize()
+    out.assign(ones).realize()
+    self.assertListEqual(out.tolist(), [1,1,1,1])
+
+  def test_multi_assign_both_unrealized(self):
+    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    out = Tensor.zeros(4).contiguous().realize().shard(device, 0)
+    ones = Tensor.ones(4).contiguous().realize().shard(device, 0)
+    out.assign(ones).realize()
+    self.assertListEqual(out.tolist(), [1,1,1,1])
+
+  def test_multi_assign_piece(self):
+    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    out = Tensor.zeros(4,4).shard(device, 0).contiguous().realize()
+    ones = Tensor.ones(4,1).shard(device, 0).contiguous().realize()
+    out[:, 2:3].assign(ones).realize()
+    self.assertListEqual(out.tolist(), [[0,0,1,0], [0,0,1,0], [0,0,1,0], [0,0,1,0]])
+
+  def test_multi_assign_piece_unrealized(self):
+    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    out = Tensor.zeros(4,4).contiguous().realize().shard(device, 0)
+    ones = Tensor.ones(4,1).shard(device, 0).contiguous().realize()
+    out[:, 2:3].assign(ones).realize()
+    self.assertListEqual(out.tolist(), [[0,0,1,0], [0,0,1,0], [0,0,1,0], [0,0,1,0]])
+
+@unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiTransformer(unittest.TestCase):
   def _get_sharded_transformers(self, device, all_ones=False):
     from extra.models.llama import Transformer
