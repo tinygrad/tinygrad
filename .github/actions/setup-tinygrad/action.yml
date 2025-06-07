@@ -47,28 +47,20 @@ runs:
     - name: Upgrade pip
       shell: bash
       run: python -m pip install --upgrade pip
+    - name: Create and populate local venv
+      run: |
+        python -m venv .venv
+        . .venv/bin/activate
 
     # **** Caching packages ****
     # TODO: key should include input.deps, but it can't since it can't contain commas
 
-    - name: Cache Python packages (Linux)
+    - name: Cache Python packages
       if: inputs.key != '' && runner.os == 'Linux'
       uses: actions/cache@v4
       with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python${{ inputs.python-version }}/site-packages
-        key: python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
-    - name: Cache Python packages (macOS)
-      if: inputs.key != '' && runner.os == 'macOS'
-      uses: actions/cache@v4
-      with:
-        path: /Users/runner/Library/Python/${{ inputs.python-version }}/lib/python/site-packages
-        key: osx-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
-    - name: Cache Python packages (Windows)
-      if: inputs.key != '' && runner.os == 'Windows'
-      uses: actions/cache@v4
-      with:
-        path: ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
-        key: windows-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
+        path: .venv
+        key: venv-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
 
     # **** Caching downloads ****
 
