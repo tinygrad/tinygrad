@@ -45,6 +45,12 @@ def decode_bbox2(offsets, anchors):
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return Tensor.stack(pred_x1, pred_y1, pred_x2, pred_y2, dim=1)
 
+def _unique(x:Tensor) -> Tensor:
+  assert len(x.shape) == 1, "does not work on multi-dimensional Tensors"
+  x = x.sort()
+  unique_mask = Tensor.cat(Tensor([True]), x[1:] != x[:-1])
+  return x.masked_select(unique_mask)
+
 class RetinaNet:
   def __init__(self, backbone:ResNet, num_classes:int=264, num_anchors:int=9, scales:list[int]|None=None, aspect_ratios:list[float]|None=None):
     assert isinstance(backbone, ResNet)
@@ -134,6 +140,10 @@ class RetinaNet:
       img_scores = Tensor.cat(*img_scores)
       img_labels = Tensor.cat(*img_labels)
 
+      # nms for each class
+      unique_img_labels = _unique(img_labels)
+      detections.append(unique_img_labels)
+
     return detections
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
@@ -180,7 +190,10 @@ class RetinaNet:
       image_labels = np.concatenate(image_labels)
 
       # nms for each class
+      unique_image_labels = np.unique(image_labels)
+      detections.append(unique_image_labels)
       # keep_mask = np.zeros_like(image_scores, dtype=bool)
+      # print(f"---unique: {image_labels.shape=} {np.unique(image_labels).shape=}")
       # for class_id in np.unique(image_labels):
       #   curr_indices = np.where(image_labels == class_id)[0]
       #   curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
