@@ -70,7 +70,6 @@ class MetalDevice(Compiled):
     self.timeline_signal = msg("newSharedEvent", objc_instance)(self.sysdevice)
     self.timeline_value = 0
     self.timeline_lock = threading.Lock()
-    self.is_virtual = 'virtual' in from_ns_str(msg('name')(self.sysdevice)).lower()
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
 
@@ -79,7 +78,7 @@ class MetalDevice(Compiled):
     # This can be reproduced locally with any virtualization software (like utm) that can create macOS VMs with apple's own virtualization framework.
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
                      functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(msg('name')
-                     (self.sysdevice)).lower() else None)
+(self.sysdevice)).lower() else None)
 
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
