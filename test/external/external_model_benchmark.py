@@ -2,11 +2,10 @@ import csv, pathlib, time
 import numpy as np
 import torch
 torch.set_num_threads(1)
-import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
 import onnxruntime as ort
 from onnx2torch import convert
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 from tinygrad.helpers import OSX, DEBUG, fetch, getenv
 from tinygrad import Tensor, Device
 
@@ -50,10 +49,10 @@ def benchmark_model(m, devices, validate_outs=False):
   CSV = {"model": m}
 
   fn = fetch(MODELS[m])
-  onnx_model = onnx.load(fn)
+  onnx_model = onnx_load(fn)
   output_names = [out.name for out in onnx_model.graph.output]
   excluded = {inp.name for inp in onnx_model.graph.initializer}
-  input_shapes = {inp.name:tuple(x.dim_value if x.dim_value != 0 else 1 for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input if inp.name not in excluded}  # noqa: E501
+  input_shapes = {inp.name:tuple(x.dim_value if hasattr(x, "dim_value") and x.dim_value != 0 else 1 for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input if inp.name not in excluded}  # noqa: E501
   input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input if inp.name not in excluded}
   #input_types = {k:v if v!=np.float16 else np.float32 for k,v in input_types.items()}  # cast
   np_inputs = {k:torch.randn(shp).numpy().astype(input_types[k]) for k,shp in input_shapes.items()}
@@ -75,7 +74,7 @@ def benchmark_model(m, devices, validate_outs=False):
 
   # convert model to torch
   try:
-    torch_model = convert(onnx_model)
+    torch_model = convert(fn)
   except Exception as e:
     # model conversion failed
     print(f"{m:16s}onnx2torch {type(e).__name__:>25}")
