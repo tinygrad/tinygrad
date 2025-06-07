@@ -1,7 +1,7 @@
 import unittest
 import pathlib
 from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
-from tinygrad.helpers import CI, fetch, Context
+from tinygrad.helpers import CI, fetch
 from tinygrad import Device, dtypes
 from tinygrad.device import is_dtype_supported
 
