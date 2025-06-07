@@ -14,7 +14,7 @@ async function main() {
   try {
     browser = await puppeteer.launch({ headless: true });
     const page = await browser.newPage();
-    const res = await page.goto("http://localhost:8000");
+    const res = await page.goto("http://localhost:8000", { waitUntil:"domcontentloaded" });
     if (res.status() !== 200) throw new Error("Failed to load page");
     const scheduleSelector = await page.waitForSelector("ul");
     scheduleSelector.click();
