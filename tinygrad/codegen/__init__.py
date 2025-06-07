@@ -8,7 +8,7 @@ from tinygrad.renderer import Renderer
 # import all pattern matchers here
 from tinygrad.codegen.lowerer import pm_quant, pm_lowerer, get_index
 from tinygrad.codegen.symbolic import sym, symbolic_simple, gep_pushing
-from tinygrad.codegen.expander import migrate_indexing, pm_store_ignore, pm_move_ignore, pm_delete_ignore, expander
+from tinygrad.codegen.expander import migrate_indexing, pm_store_ignore, pm_move_ignore, pm_delete_ignore, expander, pm_split_loop
 from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexing, devectorize, \
   pm_reduce, ReduceContext, correct_load_store, pm_render, get_late_rewrite_patterns
 from tinygrad.codegen.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
@@ -48,6 +48,9 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
   ret.append(RewriteStep(pm_reduce+gep_pushing, lambda _: ReduceContext(), name="remove_reduce"))
+
+  # loop splitting
+  ret.append(RewriteStep(sym+pm_split_loop, name="split_loop"))
 
   # devectorize (TODO: does this need opts?)
   if _DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
