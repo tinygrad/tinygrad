@@ -1,4 +1,4 @@
-import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
+import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, threading
 from typing import Any, Union, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, cpu_profile, ProfileDeviceEvent, ProfileRangeEvent
@@ -69,6 +69,8 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight: list[Any] = []
     self.timeline_signal = msg("newSharedEvent", objc_instance)(self.sysdevice)
     self.timeline_value = 0
+    self.timeline_lock = threading.Lock()
+    self.is_virtual = 'virtual' in from_ns_str(msg('name')(self.sysdevice)).lower()
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
 
@@ -76,7 +78,8 @@ class MetalDevice(Compiled):
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
     # This can be reproduced locally with any virtualization software (like utm) that can create macOS VMs with apple's own virtualization framework.
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
-                     functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(msg('name')(self.sysdevice)).lower() else None)
+                     functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(msg('name')
+                     (self.sysdevice)).lower() else None)
 
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
@@ -85,6 +88,12 @@ class MetalDevice(Compiled):
       if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None:
         Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
     self.mtl_buffers_in_flight.clear()
+
+  def get_next_timeline_values(self) -> tuple[int, int]:
+    with self.timeline_lock:
+      current_value = self.timeline_value
+      self.timeline_value += 2
+      return current_value, current_value+1
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))
@@ -162,7 +171,7 @@ class MetalProgram:
     msg("setComputeFunction:")(descriptor, self.fxn)
     msg("setSupportIndirectCommandBuffers:")(descriptor, True)
     self.pipeline_state = msg("newComputePipelineStateWithDescriptor:options:reflection:error:", objc_instance)(self.dev.sysdevice,
-      descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()))
+                          descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()))
     error_check(error_pipeline_creation)
     # cache these msg calls
     self.max_total_threads: int = cast(int, msg("maxTotalThreadsPerThreadgroup", ctypes.c_ulong)(self.pipeline_state))
@@ -182,7 +191,7 @@ class MetalProgram:
     msg("setLabel:")(command_buffer, to_ns_str(self.name)) # TODO: is this always needed?
     msg("commit")(command_buffer)
     self.dev.mtl_buffers_in_flight.append(command_buffer)
-    if wait:
+    if wait or self.dev.is_virtual:
       wait_check(command_buffer)
       return cmdbuf_en_time(command_buffer) - cmdbuf_st_time(command_buffer)
 
@@ -203,15 +212,20 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     src_command_buffer = msg("commandBuffer", objc_instance)(src_dev.mtl_queue)
     encoder = msg("blitCommandEncoder", objc_instance)(src_command_buffer)
     msg("copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:")(encoder, src.buf, ctypes.c_ulong(src.offset),
-        dest.buf, ctypes.c_ulong(dest.offset), ctypes.c_ulong(sz))
+                                                                        dest.buf, ctypes.c_ulong(dest.offset), ctypes.c_ulong(sz))
     msg("endEncoding")(encoder)
+
     if src_dev != dest_dev:
-      msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
+      # Get unique timeline values in thread-safe manner
+      timeline_value, next_timeline_value = src_dev.get_next_timeline_values()
+      # Signal event on source with unique timeline value
+      msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, timeline_value)
+      msg("encodeWaitForEvent:value:")(src_command_buffer, src_dev.timeline_signal, next_timeline_value)
       dest_command_buffer = msg("commandBuffer", objc_instance)(dest_dev.mtl_queue)
-      msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
+      msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, timeline_value)
+      msg("encodeSignalEvent:value:")(dest_command_buffer, src_dev.timeline_signal, next_timeline_value)
       msg("commit")(dest_command_buffer)
       dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
-      src_dev.timeline_value += 1
     msg("setLabel:")(src_command_buffer, to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
     msg("commit")(src_command_buffer)
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)

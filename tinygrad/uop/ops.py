@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, get_args, Sequence
+from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -378,8 +378,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def index(self, idx:UOp, valid:UOp|None=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
-    if self._device is not None or self.st is not None: return UOp.metaop(Ops.CONST, self.shape, self.dtype, self._device, b)
-    return UOp.const(self.dtype, b)
+    return UOp.const(self.dtype, b, device=self._device, shape=self.shape if self.st is not None else None)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
@@ -407,10 +406,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if arg in {Ops.CMPLT, Ops.CMPNE}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(arg, out_dtype, (self,)+src)
   @staticmethod
-  def const(dtype:DType, b:ConstLike):
+  def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
-    return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
+    ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
+    if shape is not None:
+      from tinygrad.shape.shapetracker import ShapeTracker
+      ret = ret.replace(src=(ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),))
+    if device is not None:
+      ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)),))
+    return ret
   def valid(self): return UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
@@ -471,18 +476,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** from LazyBuffer ***
 
-  @staticmethod
-  def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str|tuple[str, ...]|None=None, arg=None) -> UOp:
-    from tinygrad.shape.shapetracker import ShapeTracker
-    # Tensor const is CONST(VIEW(DEVICE)) -> RESHAPE -> EXPAND
-    if op is Ops.CONST:
-      assert isinstance(arg, get_args(ConstType)), f"trying to create CONST with {arg=}"
-      return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, () if device is None else (UOp(Ops.DEVICE, arg=device),),
-                 ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape)),))
-    # Tensor variable binding is BIND(VAR(VIEW(DEVICE)), CONST(VIEW(DEVICE)))
-    assert op is Ops.BIND, f"unknown op {op}"
-    var, val = arg.unbind()
-    return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
   def copy_to_device(self, device:str|tuple[str, ...]|UOp, arg=None):
     assert arg is None or isinstance(self.device, tuple)
     inp = self if arg is None else UOp(Ops.MSELECT, self.dtype, src=(self,), arg=arg)
@@ -564,7 +557,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     buffers[self] = ret
     return ret
   @property
-  def realized(self) -> Optional[Buffer|MultiBuffer]: return self.buffer if self.op is Ops.BUFFER and self.buffer.is_allocated() else None
+  def realized(self) -> Optional[Buffer|MultiBuffer]:
+    # NOTE: this is used by the JIT to determine which inputs we capture
+    return self.buffer if self.op in {Ops.BUFFER, Ops.MSTACK} and self.buffer.is_allocated() else None
   @property
   def is_realized(self) -> bool:
     return all(x.base.realized is not None for x in self.base.src) if self.base.op is Ops.MULTI else self.base.realized is not None
@@ -915,7 +910,7 @@ def track_rewrites(named=False, name_fxn:Callable|None=None):
         tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if count_names else args[0])
         tracked_ctxs.append([])
       ret = func(*args, **kwargs)
-      if TRACK_MATCH_STATS >= 2 and name_fxn is not None: tracked_keys[-1] = f"{name_fxn(ret)} n{_name_cnt[func.__name__]}"
+      if TRACK_MATCH_STATS >= 2 and name_fxn is not None: tracked_keys[-1] = f"{name_fxn(*args, **kwargs, ret=ret)} n{_name_cnt[func.__name__]}"
       if getenv("CAPTURE_PROCESS_REPLAY"):
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
