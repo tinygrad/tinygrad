@@ -116,7 +116,7 @@ if __name__ == "__main__":
       # repo id
       # validates all onnx models inside repo
       repo_id = "/".join(path)
-      root_path = Path(snapshot_download(repo_id=repo_id, allow_patterns=["*.onnx", ".onnx_data"], cache_dir=download_dir))
+      root_path = Path(snapshot_download(repo_id=repo_id, allow_patterns=["*.onnx", "*.onnx_data"], cache_dir=download_dir))
       snapshot_download(repo_id=repo_id, allow_patterns=["*config.json"], cache_dir=download_dir)
       config = get_config(root_path)
       for onnx_model in root_path.rglob("*.onnx"):
