@@ -5,18 +5,20 @@ const ctx = canvas.getContext("2d");
 ctx.font = `${LINE_HEIGHT}px sans-serif`;
 
 onmessage = (e) => {
-  const { graph, additions } = e.data;
+  const { graph, additions, kernels } = e.data;
   const g = new dagre.graphlib.Graph({ compound: true });
   g.setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
   if (additions.length !== 0) g.setNode("addition", {label:"", style:"fill: rgba(26, 27, 38, 0.5);", padding:0});
-  for (const [k, {label, src, ...rest }] of Object.entries(graph)) {
+  for (let [k, {label, src, ref, ...rest }] of Object.entries(graph)) {
+    const refIdx = ref ? kernels.findIndex((k) => k.ref == ref) : -1;
+    if (refIdx != -1) label += `\nView codegen rewrite ${kernels[refIdx].name}`;
     // adjust node dims by label size + add padding
     let [width, height] = [0, 0];
     for (line of label.split("\n")) {
       width = Math.max(width, ctx.measureText(line).width);
       height += LINE_HEIGHT;
     }
-    g.setNode(k, {width:width+NODE_PADDING*2, height:height+NODE_PADDING*2, padding:NODE_PADDING, label, ...rest});
+    g.setNode(k, {width:width+NODE_PADDING*2, height:height+NODE_PADDING*2, padding:NODE_PADDING, label, refIdx, ...rest});
     // add edges
     const edgeCounts = {}
     for (const s of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
