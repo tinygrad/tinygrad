@@ -1140,7 +1140,9 @@ class Tensor(MathTrait):
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
         case slice():
           if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
-          if all(isinstance(s, int) or s is None for s in (index.start,index.stop,index.step)):
+          if all(s is None for s in (index.start,index.stop,index.step)):
+            boundary, stride = [0, size], 1
+          elif all(isinstance(s, int) or s is None for s in (index.start,index.stop,index.step)):
             # handle int slicing
             *boundary, stride = index.indices(cast(SupportsIndex, size))
             if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
@@ -1931,7 +1933,7 @@ class Tensor(MathTrait):
     """
     return self.std(axis, keepdim, correction), self.mean(axis, keepdim)
 
-  def keccak(self, cfg:str|tuple[int, int] = "sha3_256"):
+  def keccak(self, cfg:str|tuple[int, int]="sha3_256"):
     """
     Calculates a Keccak hash over the last dimension. Uses "sha3_256" by default.
 
@@ -1954,7 +1956,7 @@ class Tensor(MathTrait):
     0x8000000000008002, 0x8000000000000080, 0x800a, 0x800000008000000a, 0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008)]
 
     rate, dsbyte = { "sha3_224": (144, 6), "sha3_256": (136, 6), "shake_128": (168, 31) }[cfg] if isinstance(cfg, str) else cfg
-    data, data_pad = self.bitcast(dtypes.uint8).reshape(prod(self.shape[:-1]), -1), rate - (self.shape[-1] * self.dtype.itemsize % rate)
+    data, data_pad = self.bitcast(dtypes.uint8).reshape(prod(self.shape[:-1]), self.shape[-1]), rate - (self.shape[-1] * self.dtype.itemsize % rate)
     # pad batches then pad blocks
     data = data.pad((None, (0, data_pad))).reshape(data.shape[0], -1, rate).pad((None, None, (0, 200 - rate))).flatten(1)
 
@@ -1968,7 +1970,7 @@ class Tensor(MathTrait):
 
     state = Tensor.zeros((data.shape[0], 25), device=self.device, dtype=dtypes.uint64)
     for k in range(int(data.shape[1])):
-      state = state.bitwise_xor(data[:,k].reshape(-1, 25))
+      state = state.bitwise_xor(data.shrink((None, (k, k+1), None)).reshape(-1, 25))
       for i in range(24): # f1600
         # θ step
         p = state.reshape((-1, 5, 5)).transpose(2, 1)
@@ -1979,7 +1981,7 @@ class Tensor(MathTrait):
         state = (state * rot_offsets_v0).bitwise_or(state // rot_offsets_v1).reshape((-1, 5, 5))
         # χ and ι step
         state = state.bitwise_xor((state.roll(shifts=-1, dims=2) ^ -1) & state.roll(shifts=-2, dims=2)).flatten(1) ^ rnd_const_masks[i]
-    return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], -1)
+    return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], self.shape[-1])
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
     m = self - self.max(axis=axis, keepdim=True).detach()
