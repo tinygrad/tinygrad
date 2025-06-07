@@ -132,7 +132,8 @@ class ShapeTracker:
 
   def reshape(self, new_shape: tuple[sint, ...]) -> ShapeTracker:
     if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
-    return ShapeTracker(self.views + (View.create(new_shape), ))
+    # NOTE: in order to allow invert_view to work, we create the view with the current shape as contiguous then reshape it
+    return ShapeTracker(self.views + (View.create(self.shape).reshape(new_shape), ))
 
   def mop(self, op, arg): return mops[op](self, arg)
 

@@ -494,7 +494,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self,), new_st)
 
   def _mop(self, op:Ops, arg):
-    ret = UOp(op, self.dtype, (self,), arg)
+    #ret = UOp(op, self.dtype, (self,), arg)
+    ret = self.src[0].view(self.arg.mop(op, arg)) if self.op is Ops.VIEW else self.view(self.st.mop(op, arg))
     if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
