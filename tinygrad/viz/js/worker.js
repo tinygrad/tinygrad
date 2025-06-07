@@ -5,6 +5,7 @@ const ctx = canvas.getContext("2d");
 ctx.font = `${LINE_HEIGHT}px sans-serif`;
 
 const escapeXML = (st) => st.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const ansiStrip = (st, tag) => st.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => st);
 
 onmessage = (e) => {
   const { graph, additions, kernels } = e.data;
@@ -13,7 +14,7 @@ onmessage = (e) => {
   if (additions.length !== 0) g.setNode("addition", {label:"", style:"fill: rgba(26, 27, 38, 0.5);", padding:0});
   for (let [k, {label, src, ref, ...rest }] of Object.entries(graph)) {
     const refIdx = ref ? kernels.findIndex((k) => k.ref == ref) : -1;
-    if (refIdx != -1) label += `\nView codegen rewrite ${kernels[refIdx].name}`;
+    if (refIdx != -1) label += `\nView codegen rewrite ${ansiStrip(kernels[refIdx].name)}`;
     // adjust node dims by label size + add padding
     let [width, height] = [0, 0];
     for (line of label.split("\n")) {
