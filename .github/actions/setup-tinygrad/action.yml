@@ -50,17 +50,15 @@ runs:
         python -m pip install --upgrade pip
         python -m venv .venv
     - name: Enter venv
-      if: runner.os != 'Windows'
       shell: bash
       run: |
-        . .venv/bin/activate
-        echo PATH=$PATH >> $GITHUB_ENV
-    - name: Enter venv (Windows)
-      if: runner.os == 'Windows'
-      shell: bash
-      run: |
-        source .venv/Scripts/activate
-        echo PATH=$PATH >> $GITHUB_ENV
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          source .venv/Scripts/activate
+        else
+          . .venv/bin/activate
+        fi
+        echo "VIRTUAL_ENV=$VIRTUAL_ENV" >> "$GITHUB_ENV"
+        echo "PATH=$PATH"               >> "$GITHUB_ENV"
 
     # **** Caching packages ****
     # TODO: key should include input.deps, but it can't since it can't contain commas
@@ -69,7 +67,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: .venv
-        key: ven-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
+        key: ve-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
 
     # **** Caching downloads ****
 
