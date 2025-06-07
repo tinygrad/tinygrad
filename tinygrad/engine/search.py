@@ -38,6 +38,7 @@ def get_test_global_size(global_size, max_global_size, var_vals):
 def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbufs:list[Buffer], early_stop:Optional[float]=None,
                   allow_test_size:int=True, max_global_size:Optional[int]=65536, clear_l2=False, cnt=3, name="test") -> list[float]:
   factor = 1
+  old_p = p
   if allow_test_size and p.global_size is not None and max_global_size is not None:
     global_size, factor = get_test_global_size(p.global_size, max_global_size, var_vals)
     p = replace(p, global_size=global_size)
@@ -52,6 +53,16 @@ def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbuf
         with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
     tms.append(cast(float, car(input_bufs, var_vals, wait=True))*factor)
     if early_stop is not None and early_stop < min(tms): break
+  if factor != 1:
+    if int(factor) != factor:
+      print(f"{old_p.global_size=} -> {p.global_size=}")
+      print(f"{min(tms)=}, {colored(f'{factor=}', 'green')}")
+    else: print(f"{min(tms)=}, {factor=}")
+    if factor <= 512:
+      rtms = _time_program(old_p, lib, var_vals, rawbufs, early_stop, False, max_global_size, clear_l2, cnt, name)
+      print(f"{min(rtms)=}, ratio={min(rtms)/min(tms)}")
+    else:
+      print(colored(f"{factor=}", "red"))
   return tms
 
 class TimeoutException(Exception): pass
