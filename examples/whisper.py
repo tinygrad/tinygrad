@@ -264,26 +264,26 @@ def transcribe_waveform(model: Whisper, enc, waveforms, use_beam=False, use_time
     logits[:, special_ids] = -np.inf
 
     for i, row in enumerate(ctx):
-        last_tok = row[-1]
-        penult_tok = row[-2] if len(row) > 1 else None
+      last_tok = row[-1]
+      penult_tok = row[-2] if len(row) > 1 else None
 
-        if last_tok == start_tokens[-1]: logits[i, enc.encode(' ') + [eot]] = -np.inf
-        if not use_timestamps: continue
+      if last_tok == start_tokens[-1]: logits[i, enc.encode(' ') + [eot]] = -np.inf
+      if not use_timestamps: continue
 
-        ts_indices = np.where(row > notimestamp)[0]
-        last_time_tok = row[ts_indices[-1]] if len(ts_indices) > 0 else notimestamp
-        if last_tok == start_tokens[-1]:
-            logits[i, :notimestamp] = -np.inf
-            logits[i, enc._special_tokens['<|1.00|>'] + 1:] = -np.inf
-        elif penult_tok == start_tokens[-1]: logits[i, notimestamp:] = -np.inf
-        elif last_tok > notimestamp:
-            if penult_tok is not None and penult_tok > notimestamp: logits[i, notimestamp:] = -np.inf
-            else: logits[i, np.r_[:eot, notimestamp:last_time_tok]] = -np.inf
-        else:
-            logprobs = log_softmax(logits[i])
-            ts_prob = logsumexp(logprobs[last_time_tok:])
-            text_prob = np.max(logprobs[:eot])
-            if ts_prob > text_prob: logits[i, np.r_[:eot, notimestamp:last_time_tok + 1]] = -np.inf
+      ts_indices = np.where(row > notimestamp)[0]
+      last_time_tok = row[ts_indices[-1]] if len(ts_indices) > 0 else notimestamp
+      if last_tok == start_tokens[-1]:
+        logits[i, :notimestamp] = -np.inf
+        logits[i, enc._special_tokens['<|1.00|>'] + 1:] = -np.inf
+      elif penult_tok == start_tokens[-1]: logits[i, notimestamp:] = -np.inf
+      elif last_tok > notimestamp:
+        if penult_tok is not None and penult_tok > notimestamp: logits[i, notimestamp:] = -np.inf
+        else: logits[i, np.r_[:eot, notimestamp:last_time_tok]] = -np.inf
+      else:
+        logprobs = log_softmax(logits[i])
+        ts_prob = logsumexp(logprobs[last_time_tok:])
+        text_prob = np.max(logprobs[:eot])
+        if ts_prob > text_prob: logits[i, np.r_[:eot, notimestamp:last_time_tok + 1]] = -np.inf
 
     return logits
 
@@ -338,16 +338,12 @@ def transcribe_waveform(model: Whisper, enc, waveforms, use_beam=False, use_time
   def group_sequence(data: np.ndarray):
     data = np.insert(data, 0, 0)
     result, i, n = [], 0, len(data)
-    
-    if n >= 3:
-        result.append([data[0], data[1], data[2]])
-        current_first, i = data[0], 3
-    
+    if n >= 3: _, current_first, i = result.append([data[0], data[1], data[2]]), data[0], 3
     while i < n:
         if i + 1 < n and i>1 and data[i+1] == data[i] + 1 and data[i-1] == data[i] - 1: _, current_first, i = result.append([data[i], data[i+1], data[i+2]]), data[i], i+3 
         else:
             if i + 1 < n: _, i = result.append([current_first, data[i], data[i+1]]), i+2
-            else: break  # Incomplete pair (shouldn't happen if input is correct)
+            else: break
     return result
 
   def ctx2segs(line):
@@ -391,8 +387,8 @@ def transcribe_waveform(model: Whisper, enc, waveforms, use_beam=False, use_time
   
   transcriptions = list(map(lambda tokens: enc.decode(tokens).strip() if not use_timestamps else ctx2segs(np.asarray(tokens)), transcriptions))
   if use_timestamps:
-      with open('transcription.json', 'w') as f: json.dump(transcriptions[0], f)
-      transcriptions = [t['text'] for t in transcriptions]
+    with open('transcription.json', 'w') as f: json.dump(transcriptions[0], f)
+    transcriptions = [t['text'] for t in transcriptions]
   return transcriptions if len(transcriptions) > 1 else transcriptions[0]
 
 CHUNK = 1600
