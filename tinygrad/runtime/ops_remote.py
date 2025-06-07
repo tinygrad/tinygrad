@@ -201,8 +201,12 @@ class RemoteHandler:
           case ProgramExec():
             bufs = [session.buffers[x]._buf for x in c.bufs]
             extra_args = {k:v for k,v in [("global_size", c.global_size), ("local_size", c.local_size)] if v is not None}
-            r = session.programs[(c.name, c.datahash)](*bufs, vals=c.vals, wait=c.wait, **extra_args)
-            if r is not None: ret = str(r).encode()
+            try:
+              r = session.programs[(c.name, c.datahash)](*bufs, vals=c.vals, wait=c.wait, **extra_args)
+              if r is not None: ret = str(r).encode()
+            except RuntimeError as e:
+              if c.wait: ret = 'inf'.encode()
+              else: raise e
           case GraphAlloc():
             graph_fn: Callable = unwrap(dev.graph)
             def _parse_ji(gi: GraphComputeItem|Transfer):
