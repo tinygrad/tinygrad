@@ -38,7 +38,7 @@ async function renderDag(graph, additions, recenter=false) {
     const STROKE_WIDTH = 1.4;
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").on("click", (e,d) => {
       if (d.ref != null) {
-        const found = kernels.findIndex(([_, steps]) => steps[0].ref == d.ref);
+        const found = kernels.findIndex(({ ref }) => ref == d.ref);
         if (found !== -1) setState({ expandKernel: true, currentKernel: found, currentUOp: 0, currentRewrite: 0 });
       }
     }).attr("transform", d => `translate(${d.x},${d.y})`);
