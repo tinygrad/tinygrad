@@ -171,7 +171,7 @@ class MetalProgram:
     msg("setComputeFunction:")(descriptor, self.fxn)
     msg("setSupportIndirectCommandBuffers:")(descriptor, True)
     self.pipeline_state = msg("newComputePipelineStateWithDescriptor:options:reflection:error:", objc_instance)(self.dev.sysdevice,
-                          descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()))
+      descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()))
     error_check(error_pipeline_creation)
     # cache these msg calls
     self.max_total_threads: int = cast(int, msg("maxTotalThreadsPerThreadgroup", ctypes.c_ulong)(self.pipeline_state))
@@ -191,7 +191,7 @@ class MetalProgram:
     msg("setLabel:")(command_buffer, to_ns_str(self.name)) # TODO: is this always needed?
     msg("commit")(command_buffer)
     self.dev.mtl_buffers_in_flight.append(command_buffer)
-    if wait or self.dev.is_virtual:
+    if wait:
       wait_check(command_buffer)
       return cmdbuf_en_time(command_buffer) - cmdbuf_st_time(command_buffer)
 
@@ -212,7 +212,7 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     src_command_buffer = msg("commandBuffer", objc_instance)(src_dev.mtl_queue)
     encoder = msg("blitCommandEncoder", objc_instance)(src_command_buffer)
     msg("copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:")(encoder, src.buf, ctypes.c_ulong(src.offset),
-                                                                        dest.buf, ctypes.c_ulong(dest.offset), ctypes.c_ulong(sz))
+        dest.buf, ctypes.c_ulong(dest.offset), ctypes.c_ulong(sz))
     msg("endEncoding")(encoder)
 
     if src_dev != dest_dev:

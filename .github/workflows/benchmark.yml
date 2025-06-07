@@ -32,6 +32,7 @@ jobs:
     defaults:
       run:
         shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
