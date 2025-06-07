@@ -49,13 +49,12 @@ runs:
       run: |
         python -m pip install --upgrade pip
         python -m venv .venv
-        . .venv/bin/activate
+        source .venv/bin/activate
 
     # **** Caching packages ****
     # TODO: key should include input.deps, but it can't since it can't contain commas
 
     - name: Cache Python packages
-      if: inputs.key != '' && runner.os == 'Linux'
       uses: actions/cache@v4
       with:
         path: .venv
@@ -81,11 +80,11 @@ runs:
     - name: Install dependencies (with extra)
       if: inputs.deps != ''
       shell: bash
-      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+      run: pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies (without extra)
       if: inputs.deps == ''
       shell: bash
-      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e . ${{ inputs.pydeps }}
+      run: pip install -e . ${{ inputs.pydeps }}
 
     # **** OpenCL ****
 
