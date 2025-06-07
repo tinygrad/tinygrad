@@ -149,6 +149,7 @@ class AsmRenderer(Renderer):
         continue
       if u.op is Ops.CONST: continue
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
+        assert not (u.op is Ops.DEFINE_VAR and dtypes.is_float(u.dtype))
         loc[u] = alloc(u, self.constraints(u))
         continue
       # free dead registers
