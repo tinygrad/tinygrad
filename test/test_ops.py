@@ -1860,6 +1860,18 @@ class TestOps(unittest.TestCase):
   def test_view(self):
     helper_test_op([(4,3,6,6)], lambda x: x.view((12,6,6)))
     helper_test_op([(4,3,6,6)], lambda x: x.view((-1,3,6,6)))
+    helper_test_op([(4,3,6,6)], lambda x: x.view((-1,1,6,6)))
+    helper_test_op([(4,3,6,6)], lambda x: x.view((4,3,6,6)), lambda x: x.view((None,None,6,6)))
+    helper_test_op([()], lambda x: x.view(()))
+    helper_test_op([(1,)], lambda x: x.view(()))
+    helper_test_op([()], lambda x: x.view((1,)))
+    helper_test_op([()], lambda x: x.view((1,1,1)))
+    self.helper_test_exception([(3,4)], lambda x: x.view((-1,-1,2)), lambda x: x.view((-1,-1,2)), expected=RuntimeError)
+    self.helper_test_exception([(3,4)], lambda x: x.view((-1,-1,-1,2)), lambda x: x.view((-1,-1,-1,2)), expected=RuntimeError)
+
+    with self.assertRaises(ValueError):
+      x = Tensor.ones((4,3,6,6))
+      x.view([])
 
   def test_flip(self):
     helper_test_op([(4,3,6,6)], lambda x: x.flip((0,)))
