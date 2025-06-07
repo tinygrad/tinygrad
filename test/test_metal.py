@@ -1,5 +1,7 @@
 import unittest
-from tinygrad.device import CompileError, Device, Compiler
+import numpy as np
+from tinygrad.device import Device, Buffer, CompileError, Compiler
+from tinygrad.dtype import dtypes
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
@@ -73,3 +75,37 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
 """)
     with self.assertRaises(RuntimeError):
       MetalProgram(device, "r_5", compiled)
+
+  def test_cross_device_transfer_synchronization(self):
+    metal_device_names = [d for d in Device.devices if d.startswith("METAL")]
+    if len(metal_device_names) < 2:
+      self.skipTest("At least two Metal devices are required for the cross-device transfer test.")
+
+    dev1 = Device[metal_device_names[0]]
+    dev2 = Device[metal_device_names[1]]
+
+    dev1.timeline_value = 0
+    dev2.timeline_value = 0
+
+
+    test_data = np.arange(1024, dtype=np.float32)
+    src_buf = Buffer(device=dev1.id, size=1024, dtype=dtypes.float32).copyin(memoryview(test_data))
+
+    # 2. Create an empty destination buffer on dev2.
+    dest_buf = Buffer(device=dev2.id, size=1024, dtype=dtypes.float32)
+
+    # 3. Perform the cross-device transfer. This will invoke the allocator's `_transfer`
+    #    method, which should contain the signal/wait synchronization logic.
+    dest_buf.copy(src_buf)
+
+    # 4. Synchronize the destination device to ensure the transfer operation is complete.
+    dev2.synchronize()
+
+    # 5. Verify that the data in the destination buffer matches the source data.
+    result_data = dest_buf.to('CPU').cast('f').numpy()
+    np.testing.assert_allclose(result_data, test_data, atol=1e-5, rtol=1e-5, err_msg="Data mismatch after cross-device transfer")
+
+    # 6. Verify that the timeline value was incremented correctly on the source device.
+    #    The _transfer method should call get_next_timeline_value() twice.
+    self.assertEqual(dev1.timeline_value, 2, f"Timeline value on source device ({dev1.dname}) was not incremented correctly.")
+    self.assertEqual(dev2.timeline_value, 0, f"Timeline value on destination device ({dev2.dname}) should not be incremented.")
