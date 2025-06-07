@@ -280,7 +280,7 @@ async function main() {
   }
   const kernelList = document.querySelector(".kernel-list");
   kernelList.innerHTML = "";
-  for (const [i,[name, steps]] of kernels.entries()) {
+  for (const [i,{name, steps}] of kernels.entries()) {
     const ul = kernelList.appendChild(document.createElement("ul"));
     if (i === currentKernel) {
       ul.className = "active";
@@ -311,7 +311,7 @@ async function main() {
   }
   // ** center graph
   if (currentKernel == -1) return;
-  const kernel = kernels[currentKernel][1][currentUOp];
+  const kernel = kernels[currentKernel].steps[currentUOp];
   const cacheKey = `kernel=${currentKernel}&idx=${currentUOp}`;
   // close any pending event sources
   let activeSrc = null;
@@ -425,7 +425,7 @@ document.addEventListener("keydown", async function(event) {
   if (event.key == "ArrowDown") {
     event.preventDefault();
     if (expandKernel) {
-      const totalUOps = kernels[currentKernel][1].length-1;
+      const totalUOps = kernels[currentKernel].steps.length-1;
       return setState({ currentRewrite:0, currentUOp:Math.min(totalUOps, currentUOp+1) });
     }
     return setState({ currentUOp:0, currentRewrite:0, currentKernel:Math.min(kernels.length-1, currentKernel+1) });
