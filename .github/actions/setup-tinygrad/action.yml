@@ -56,19 +56,19 @@ runs:
       uses: actions/cache@v4
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python${{ inputs.python-version }}/site-packages
-        key: python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
+        key: python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}-${{ env.PYTHON_CACHE_VERSION }}
     - name: Cache Python packages (macOS)
       if: inputs.key != '' && runner.os == 'macOS'
       uses: actions/cache@v4
       with:
         path: /Users/runner/Library/Python/${{ inputs.python-version }}/lib/python/site-packages
-        key: osx-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
+        key: osx-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}-${{ env.PYTHON_CACHE_VERSION }}
     - name: Cache Python packages (Windows)
       if: inputs.key != '' && runner.os == 'Windows'
       uses: actions/cache@v4
       with:
         path: ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
-        key: windows-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
+        key: windows-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}-${{ env.PYTHON_CACHE_VERSION }}
 
     # **** Caching downloads ****
 
@@ -90,11 +90,11 @@ runs:
     - name: Install dependencies (with extra)
       if: inputs.deps != ''
       shell: bash
-      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+      run: python -m pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies (without extra)
       if: inputs.deps == ''
       shell: bash
-      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e . ${{ inputs.pydeps }}
+      run: python -m pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e . ${{ inputs.pydeps }}
 
     # **** OpenCL ****
 
