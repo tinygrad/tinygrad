@@ -98,6 +98,8 @@ sym = symbolic_simple+PatternMatcher([
   # put UnaryOps before EXPANDs, if it can fuse with the input
   (UPat(GroupOp.Unary, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="inp"),), name="v"),), name="alu"),
    lambda inp,v,alu: inp.alu(alu.op).view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
+  # scheduler dedups constants
+  (UPat((Ops.CONST, Ops.DEFINE_VAR), src=(UPat(), UPat(Ops.UNIQUE)), name="x"), lambda x: x.replace(src=x.src[:1])),
 ])
 
 # support for using a contiguous permuted view instead of the parent view if one exists
@@ -341,7 +343,7 @@ def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   return src.r(r.arg[0], tuple(new_axis)).reshape(r.shape)
 
 def elementwise_view_right(root:UOp):
-  if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW and x.base.op not in ALWAYS_CONTIGUOUS]): return None
+  if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW and x.src and x.base.op not in ALWAYS_CONTIGUOUS]): return None
   assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
   # place view after applying the elementwise op
   new_st = ShapeTracker.from_shape(swizzles[0].base.shape)
@@ -391,6 +393,7 @@ fix_kernel_ops = PatternMatcher([
   # remove CONTIGUOUS/DEVICE from kernel AST
   (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
+  (UPat((Ops.CONST, Ops.DEFINE_VAR), src=(UPat(), UPat(Ops.UNIQUE)), name="x"), lambda x: x.replace(src=x.src[:1])),
   # no ImageDType after index
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL, Ops.VIEW}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
@@ -402,6 +405,8 @@ replace_globals = PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat(Ops.KERNEL)), name="assign", allow_any_len=True), lambda assign: assign.src[0]),
   # HACK: select the 0 branch of MSTACK (the device is wrong after this, is that okay?)
   (UPat(Ops.MSTACK, name="x"), lambda x: x.src[0]),
+  # no device ops in kernel ast
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
 ])
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
