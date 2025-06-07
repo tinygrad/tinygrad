@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
 from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, print_uops
-from tinygrad.uop.ops import PatternMatcher, smax
+from tinygrad.uop.ops import PatternMatcher, smax, UPat
 from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
@@ -76,6 +76,8 @@ class Kernel:
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     self.use_tensor_cores: int = 0
     self.dont_use_locals: bool = False
+    self.lds: list[bool] = [False] * len(self.bufs)
+    self.smem_usage: int = 0
 
     # group simplifies
     self.simplify_ones()
@@ -95,6 +97,7 @@ class Kernel:
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
     ret.tensor_core, ret.tensor_core_opts, ret.use_tensor_cores = self.tensor_core, self.tensor_core_opts, self.use_tensor_cores
+    ret.lds, ret.smem_usage = self.lds[:], self.smem_usage
 
     return ret
 
@@ -352,7 +355,9 @@ class Kernel:
       return
 
     axis = self.real_axis(opt)
-    check(axis < len(self.full_shape), "invalid axis")
+    if opt.op is not OptOps.LDS:
+      if opt.op != OptOps.SWAP: check(not any(self.lds), f"can't reshape after LDS {self.applied_opts=} {opt=}")
+      check(axis < len(self.full_shape), "invalid axis")
 
     if opt.op is OptOps.SWAP: amt = cast(int, opt.arg)  # arg is an axis in the SWAPs
     elif opt.arg is not None:
@@ -423,6 +428,15 @@ class Kernel:
           self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
           padded = True
       check(padded, "nothing was padded")
+    elif opt.op is OptOps.LDS:
+      check(0 <= axis < len(self.bufs) and not self.lds[axis], f"invalid lds {axis=}")
+      check(self.group_for_reduces == 0, "can't apply lds with group/grouptop")
+      buf_st = next(st for st, buf in zip(self.sts, self.bufs) if buf.src[0].base.arg == axis)
+      check(all(not buf_st.axis_is_masked(i) for i in range(len(buf_st.shape))), "can't apply lds with masked axis")
+      self.smem_usage += prod(sz for i,(sz,st) in enumerate(zip(buf_st.shape, buf_st.real_strides()))
+                              if st != 0 and ((self.global_dims <= i < self.first_reduce) or self.first_upcast <= i))
+      check(self.smem_usage <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {self.smem_usage}, max {self.opts.shared_max}")
+      self.lds[axis] = True
 
     if append_opt: self.applied_opts.append(opt)
     if self.simplify_ones() and self.tensor_core_opts:
@@ -529,6 +543,29 @@ class Kernel:
     del fixup_ast
     return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
 
+  def apply_lds(self, ast) -> UOp:
+    def transform(ctx:Kernel, global_access:UOp):
+      buf, kernel = global_access.src[0].base, ctx
+      if buf.op is not Ops.DEFINE_GLOBAL or not kernel.lds[buf.arg] or buf.tag == "applied_lds": return None
+
+      global_st: ShapeTracker = global_access.st_arg
+      shape: list[sint] = []
+      for i, st in enumerate(global_st.real_strides()):
+        shape.append(global_st.shape[i] if i >=  kernel.global_dims and st != 0 and (i < kernel.first_reduce or i >= kernel.first_upcast) else 1)
+      store_st = load_st = ShapeTracker.from_shape(tuple(shape))
+
+      local_buffer = UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(size=store_st.real_size(), local=True), (), f"lds{buf.arg}")
+      if global_access.op == Ops.LOAD:
+        global_access = global_access.replace(src=(buf.replace(tag="applied_lds").view(global_st),))
+        local_store = UOp.store(local_buffer.view(store_st), global_access)
+        return UOp(Ops.LOAD, global_access.dtype, (local_buffer.view(load_st), local_store))
+      if global_access.op == Ops.STORE:
+        local_store = UOp.store(local_buffer.view(store_st), global_access.src[1])
+        local_load = UOp(Ops.LOAD, local_buffer.dtype.base, (local_buffer.view(load_st), local_store))
+        return global_access.replace(src=(buf.replace(tag="applied_lds").view(global_st), local_load))
+
+    return graph_rewrite(ast, PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), name="global_access"), transform)]), ctx=self)
+
   # **** this is the lowerer ****
 
   @track_rewrites()
@@ -537,6 +574,7 @@ class Kernel:
     if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
 
     modified_ast = self.get_optimized_ast(name_override)
+    if any(self.lds): modified_ast = self.apply_lds(modified_ast)
     if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
 
     if DEBUG >= 3:
