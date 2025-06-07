@@ -333,10 +333,10 @@ x86_branch_ops = {Ops.ENDRANGE: "jl", Ops.IF: "je"}
 x86_unsigned_ops = {**x86_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "div", Ops.MOD: "div", Ops.CMPNE: "cmp",
                     Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor", Ops.SHL: "shl", Ops.SHR: "shr", Ops.WHERE: "cmove"}
 x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR: "sar"}
-# NOTE: float16 alus are done in float32, load/store are done with general regs unless vectorized
+# NOTE: float16 alus are done in float32, load/store are done with general regs unless vectorized these are just for spill/fill
+x86_float16_ops = {Ops.STORE:"movss", Ops.LOAD:"movss", Ops.ASSIGN: "movss"}
 # TODO: switch all float load/store to movd/q instead of moss/sd
 # TODO: add full float16/64 vec support, mainly need to change vectorize/gep
-x86_float16_ops = {Ops.ASSIGN: "movss"}
 x86_vec2_float16_ops = {Ops.STORE: "vmovd", Ops.LOAD: "vmovd", Ops.ASSIGN: "movss"}
 x86_vec4_float16_ops = {Ops.STORE: "vmovq", Ops.LOAD: "vmovq", Ops.ASSIGN: "movsd"}
 x86_vec8_float16_ops = {Ops.STORE: "vmovdqa", Ops.LOAD: "vmovdqa", Ops.ASSIGN: "movaps"}
@@ -500,17 +500,18 @@ class X86Renderer(AsmRenderer):
     # constraints for destination
     # abi constraints, TODO: not quite right
     if sys.platform == "win32":
-      if u.op is Ops.DEFINE_GLOBAL and u.arg < 4: return [("rcx", "rdx", "r8", "r9")[u.arg]]
-      if u.op is Ops.DEFINE_GLOBAL and u.arg >= 4: return [(u.arg-4)*8+16]
-    if u.op is Ops.DEFINE_GLOBAL and u.arg < 6: return [("rdi", "rsi", "rdx", "rcx", "r8", "r9")[u.arg]]
-    if u.op is Ops.DEFINE_GLOBAL and u.arg >= 6: return [(u.arg-6)*8+16]
+      if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR) and (i:=self.uops.index(u)) < 4: return [("rcx", "rdx", "r8", "r9")[i]]
+      if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR) and (i:=self.uops.index(u)) >= 4: return [(i-4)*8+16]
+    if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR) and (i:=self.uops.index(u)) < 6: return [("rdi", "rsi", "rdx", "rcx", "r8", "r9")[i]]
+    if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR) and (i:=self.uops.index(u)) >= 6: return [(i-6)*8+16]
     if u.op is Ops.IDIV: return ["rax"]
     if u.op is Ops.MOD: return ["rdx"]
     # float cmp requires nan check, to avoid reserving temp reg we constrain dest to regs that have a high 8 bit portion
     if u.op in (Ops.CMPLT, Ops.CMPNE) and u.src[0].dtype in dtypes.floats: return ["rax", "rbx", "rcx", "rdx"]
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return imm
-  def render_mem(self, sz:int, dt:DType) -> str: return f"{size_prefix[dt.itemsize]} [rbp {'+' if sz>=0 else ''}{sz}]"
+  #def render_mem(self, sz:int, dt:DType) -> str: return f"{size_prefix[dt.itemsize]} [rbp {'+' if sz>=0 else ''}{sz}]"
+  def render_mem(self, sz:int, dt:DType) -> str: return f"[rbp {'+' if sz>=0 else ''}{sz}]"
   def render_reg(self, reg:str, dt:DType, alias:bool=False) -> str:
     return reg if dt.itemsize == 8 or dtypes.is_float(dt) else x86_reg_map[reg][dt.itemsize]
   def render_spill(self, x:UOp, sz:int) -> str: return f"{self.ops[self.dt(x.dtype)][Ops.STORE]} {self.render_mem(sz, self.dt(x.dtype))}, {self[x]}"
