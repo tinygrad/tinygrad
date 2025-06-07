@@ -231,7 +231,7 @@ class TestSymbolicOps(unittest.TestCase):
       symbolic = a.reshape(vi, 3).bitcast(dtypes.uint8).reshape(expected.shape).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=0)
 
-  @skipIf(Device.DEFAULT == "WEBGPU", "no uint64")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "no uint64")
   def test_bitcast_up(self):
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
