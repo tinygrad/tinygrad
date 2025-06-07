@@ -202,20 +202,43 @@ def train_cifar():
     return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
 
   def random_crop(X:Tensor, crop_size=32):
-    mask = make_square_mask(X.shape, crop_size)
-    mask = mask.expand((-1,3,-1,-1))
-    X_cropped = Tensor(X.numpy()[mask.numpy()])
-    return X_cropped.reshape((-1, 3, crop_size, crop_size))
+    BS, C, H, W = X.shape
+    assert C == 3, "random_crop currently assumes 3 channels"
+
+    low_x = Tensor.randint(BS, low=0, high=W-crop_size, dtype=dtypes.int32).reshape(BS, 1, 1, 1)
+    low_y = Tensor.randint(BS, low=0, high=H-crop_size, dtype=dtypes.int32).reshape(BS, 1, 1, 1)
+
+    rng = Tensor.arange(crop_size, dtype=dtypes.int32)
+
+    idx_w = (low_x + rng.reshape(1, crop_size)).reshape(BS, 1, 1, crop_size)
+    idx_w = idx_w.expand((BS, 1, H, crop_size))
+
+    X_gather_w = X.gather(-1, idx_w.expand((BS, C, H, crop_size)))
+
+    idx_h = (low_y + rng.reshape(1, crop_size)).reshape(BS, 1, crop_size, 1)
+    idx_h = idx_h.expand((BS, 1, crop_size, crop_size))
+
+    X_crop = X_gather_w.gather(-2, idx_h.expand((BS, C, crop_size, crop_size)))
+
+    return X_crop
 
   def cutmix(X:Tensor, Y:Tensor, mask_size=3):
-    # fill the square with randomly selected images from the same batch
-    mask = make_square_mask(X.shape, mask_size)
-    order = list(range(0, X.shape[0]))
+    BS, C, H, W = X.shape
+
+    order = list(range(BS))
     random.shuffle(order)
-    X_patch = Tensor(X.numpy()[order], device=X.device, dtype=X.dtype)
-    Y_patch = Tensor(Y.numpy()[order], device=Y.device, dtype=Y.dtype)
+    order_t = Tensor(order, dtype=dtypes.int32)
+
+    idx_full_X = order_t.reshape(BS, 1, 1, 1).expand((BS, C, H, W))
+    idx_full_Y = order_t.reshape(BS, 1).expand((BS, Y.shape[1]))
+
+    X_patch = X.gather(0, idx_full_X)
+    Y_patch = Y.gather(0, idx_full_Y)
+
+    mask = make_square_mask(X.shape, mask_size).expand((-1, C, -1, -1))
+
     X_cutmix = mask.where(X_patch, X)
-    mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
+    mix_portion = float(mask_size**2)/(H*W)
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
     return X_cutmix, Y_cutmix
 
