@@ -331,7 +331,6 @@ int main()
 \end{code}
 """
 if __name__ == "__main__":
-  Tensor.no_grad = True
   print(f"using {Device.DEFAULT} backend")
 
   parser = argparse.ArgumentParser(description="Run LLaMA in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
