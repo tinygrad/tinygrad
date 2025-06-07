@@ -116,7 +116,7 @@ class TextDecoder:
 
   def output_tok(self, x):
     return (self.ln(x) @ self.token_embedding.weight.T).realize()
-  
+
   def rearrange_kv_cache(self, beam_indices: List[int], length=None):
     for block in self.blocks:
       if block.attn.kv_caching != 'self': continue
@@ -307,7 +307,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, use_beam=False, use_time
     tokens[last_eot] = eot
     ctx = np.concatenate((ctx, tokens), axis=1)
     return tokens, ctx, ctx.shape[-1] - 1, sum_logprobs
-  
+
   def get_ctx_lens(ctx): return [len(seq) - (r := np.argmax(seq[::-1] != eot)) - ((i := len(seq) - r) >= 2 and seq[i-2] > eot and seq[i-1] > eot) for seq in ctx]
 
   def rank(ctx_lens, logprobs, length_penalty=None):
@@ -328,10 +328,10 @@ def transcribe_waveform(model: Whisper, enc, waveforms, use_beam=False, use_time
     return ctx
 
   notimestamp = enc._special_tokens["<|notimestamps|>"]
-  def gettexttoks(line): 
-      toks = [tok for tok in line if tok < eot or tok > notimestamp]
-      if len(toks)>1 and toks[-1]>notimestamp and toks[-2]>notimestamp: toks = toks[:-1]
-      return toks[-nsample+len(start_tokens):]
+  def gettexttoks(line):
+    toks = [tok for tok in line if tok < eot or tok > notimestamp]
+    if len(toks)>1 and toks[-1]>notimestamp and toks[-2]>notimestamp: toks = toks[:-1]
+    return toks[-nsample+len(start_tokens):]
 
   def ts2frame(token): return FRAMES_PER_SEGMENT if token<notimestamp else int(float(enc.decode([token])[2:-2])*RATE//HOP_LENGTH)
 
@@ -340,10 +340,10 @@ def transcribe_waveform(model: Whisper, enc, waveforms, use_beam=False, use_time
     result, i, n = [], 0, len(data)
     if n >= 3: _, current_first, i = result.append([data[0], data[1], data[2]]), data[0], 3
     while i < n:
-        if i + 1 < n and i>1 and data[i+1] == data[i] + 1 and data[i-1] == data[i] - 1: _, current_first, i = result.append([data[i], data[i+1], data[i+2]]), data[i], i+3 
-        else:
-            if i + 1 < n: _, i = result.append([current_first, data[i], data[i+1]]), i+2
-            else: break
+      if i + 1 < n and i>1 and data[i+1] == data[i] + 1 and data[i-1] == data[i] - 1: _, current_first, i = result.append([data[i], data[i+1], data[i+2]]), data[i], i+3
+      else:
+        if i + 1 < n: _, i = result.append([current_first, data[i], data[i+1]]), i+2
+        else: break
     return result
 
   def ctx2segs(line):
@@ -351,13 +351,12 @@ def transcribe_waveform(model: Whisper, enc, waveforms, use_beam=False, use_time
     outline = group_sequence(np.where(line > notimestamp)[0])
     segments, curr_seek, seek_sum = [], 0, 0
     for key_idxs in outline:
-        time_tokens, text_tokens = line[key_idxs], line[key_idxs[1]+1:key_idxs[2]]
-        seek_frame, start_frame, end_frame = tuple(map(ts2frame, time_tokens))
-        if seek_frame!=curr_seek: 
-            seek_sum += seek_frame
-            curr_seek = seek_frame
-        segments.append({'start': round((seek_sum+start_frame)/100/0.2)*0.2, 'end': round((seek_sum+end_frame)/100/0.2)*0.2, 'text': enc.decode(text_tokens)})
-
+      time_tokens, text_tokens = line[key_idxs], line[key_idxs[1]+1:key_idxs[2]]
+      seek_frame, start_frame, end_frame = tuple(map(ts2frame, time_tokens))
+      if seek_frame!=curr_seek:
+        seek_sum += seek_frame
+        curr_seek = seek_frame
+      segments.append({'start': round((seek_sum+start_frame)/100/0.2)*0.2, 'end': round((seek_sum+end_frame)/100/0.2)*0.2, 'text': enc.decode(text_tokens)})
     return {'text': enc.decode(text), 'segments': segments}
 
   start_tokens = [enc._special_tokens["<|startoftranscript|>"]]
@@ -384,7 +383,6 @@ def transcribe_waveform(model: Whisper, enc, waveforms, use_beam=False, use_time
     curr_frame += FRAMES_PER_SEGMENT if not use_timestamps else ts2frame(ctx[0, -2])
     ctx = [[enc._special_tokens['<|startofprev|>']]+gettexttoks(cs)+start_tokens for cs in ctx]
 
-  
   transcriptions = list(map(lambda tokens: enc.decode(tokens).strip() if not use_timestamps else ctx2segs(np.asarray(tokens)), transcriptions))
   if use_timestamps:
     with open('transcription.json', 'w') as f: json.dump(transcriptions[0], f)
