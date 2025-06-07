@@ -93,7 +93,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(ret), 1)
 
   def test_track_rewrites_name_fxn(self):
-    @track_rewrites(name_fxn=lambda r: f"output_{r}")
+    @track_rewrites(name_fxn=lambda _,ret: f"output_{ret}")
     def do_rewrite(x:UOp):
       x = graph_rewrite(x, symbolic)
       return x.render()
