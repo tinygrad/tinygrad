@@ -1492,6 +1492,122 @@ struct_GspSystemInfo._fields_ = [
 ]
 
 GspSystemInfo = struct_GspSystemInfo
+VBIOS_H = True # macro
+FALCON_APPLICATION_INTERFACE_ENTRY_ID_DMEMMAPPER = (0x4) # macro
+FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3_CMD_FRTS = (0x15) # macro
+FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3_CMD_SB = (0x19) # macro
+# NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_VERSION = 0 : 0 # macro
+NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_VERSION_UNAVAILABLE = 0x00 # macro
+NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_VERSION_AVAILABLE = 0x01 # macro
+# NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_RESERVED = 1 : 1 # macro
+# NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_ENCRYPTED = 2 : 2 # macro
+# NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_RESERVED = 7 : 3 # macro
+# NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION = 15 : 8 # macro
+NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V1 = 0x01 # macro
+NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V2 = 0x02 # macro
+NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V3 = 0x03 # macro
+NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V4 = 0x04 # macro
+# NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_SIZE = 31 : 16 # macro
+FALCON_UCODE_DESC_HEADER_FORMAT = "1d" # macro
+FALCON_UCODE_DESC_V3_SIZE_44 = 44 # macro
+FALCON_UCODE_DESC_V3_44_FMT = "9d1w2b2w" # macro
+BCRT30_RSA3K_SIG_SIZE = 384 # macro
+FWSECLIC_READ_VBIOS_STRUCT_FLAGS = (2) # macro
+FWSECLIC_FRTS_REGION_MEDIA_FB = (2) # macro
+FWSECLIC_FRTS_REGION_SIZE_1MB_IN_4K = (0x100) # macro
+class struct_c__SA_FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3(Structure):
+    pass
+
+struct_c__SA_FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3._pack_ = 1 # source:False
+struct_c__SA_FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3._fields_ = [
+    ('signature', ctypes.c_uint32),
+    ('version', ctypes.c_uint16),
+    ('size', ctypes.c_uint16),
+    ('cmd_in_buffer_offset', ctypes.c_uint32),
+    ('cmd_in_buffer_size', ctypes.c_uint32),
+    ('cmd_out_buffer_offset', ctypes.c_uint32),
+    ('cmd_out_buffer_size', ctypes.c_uint32),
+    ('nvf_img_data_buffer_offset', ctypes.c_uint32),
+    ('nvf_img_data_buffer_size', ctypes.c_uint32),
+    ('printfBufferHdr', ctypes.c_uint32),
+    ('ucode_build_time_stamp', ctypes.c_uint32),
+    ('ucode_signature', ctypes.c_uint32),
+    ('init_cmd', ctypes.c_uint32),
+    ('ucode_feature', ctypes.c_uint32),
+    ('ucode_cmd_mask0', ctypes.c_uint32),
+    ('ucode_cmd_mask1', ctypes.c_uint32),
+    ('multiTgtTbl', ctypes.c_uint32),
+]
+
+FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3 = struct_c__SA_FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3
+class struct_c__SA_FALCON_UCODE_DESC_HEADER(Structure):
+    pass
+
+struct_c__SA_FALCON_UCODE_DESC_HEADER._pack_ = 1 # source:False
+struct_c__SA_FALCON_UCODE_DESC_HEADER._fields_ = [
+    ('vDesc', ctypes.c_uint32),
+]
+
+FALCON_UCODE_DESC_HEADER = struct_c__SA_FALCON_UCODE_DESC_HEADER
+class struct_c__SA_FALCON_UCODE_DESC_V3(Structure):
+    pass
+
+struct_c__SA_FALCON_UCODE_DESC_V3._pack_ = 1 # source:False
+struct_c__SA_FALCON_UCODE_DESC_V3._fields_ = [
+    ('Hdr', FALCON_UCODE_DESC_HEADER),
+    ('StoredSize', ctypes.c_uint32),
+    ('PKCDataOffset', ctypes.c_uint32),
+    ('InterfaceOffset', ctypes.c_uint32),
+    ('IMEMPhysBase', ctypes.c_uint32),
+    ('IMEMLoadSize', ctypes.c_uint32),
+    ('IMEMVirtBase', ctypes.c_uint32),
+    ('DMEMPhysBase', ctypes.c_uint32),
+    ('DMEMLoadSize', ctypes.c_uint32),
+    ('EngineIdMask', ctypes.c_uint16),
+    ('UcodeId', ctypes.c_ubyte),
+    ('SignatureCount', ctypes.c_ubyte),
+    ('SignatureVersions', ctypes.c_uint16),
+    ('Reserved', ctypes.c_uint16),
+]
+
+FALCON_UCODE_DESC_V3 = struct_c__SA_FALCON_UCODE_DESC_V3
+class struct_c__SA_FWSECLIC_READ_VBIOS_DESC(Structure):
+    pass
+
+struct_c__SA_FWSECLIC_READ_VBIOS_DESC._pack_ = 1 # source:False
+struct_c__SA_FWSECLIC_READ_VBIOS_DESC._fields_ = [
+    ('version', ctypes.c_uint32),
+    ('size', ctypes.c_uint32),
+    ('gfwImageOffset', ctypes.c_uint64),
+    ('gfwImageSize', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+]
+
+FWSECLIC_READ_VBIOS_DESC = struct_c__SA_FWSECLIC_READ_VBIOS_DESC
+class struct_c__SA_FWSECLIC_FRTS_REGION_DESC(Structure):
+    pass
+
+struct_c__SA_FWSECLIC_FRTS_REGION_DESC._pack_ = 1 # source:False
+struct_c__SA_FWSECLIC_FRTS_REGION_DESC._fields_ = [
+    ('version', ctypes.c_uint32),
+    ('size', ctypes.c_uint32),
+    ('frtsRegionOffset4K', ctypes.c_uint32),
+    ('frtsRegionSize', ctypes.c_uint32),
+    ('frtsRegionMediaType', ctypes.c_uint32),
+]
+
+FWSECLIC_FRTS_REGION_DESC = struct_c__SA_FWSECLIC_FRTS_REGION_DESC
+class struct_c__SA_FWSECLIC_FRTS_CMD(Structure):
+    pass
+
+struct_c__SA_FWSECLIC_FRTS_CMD._pack_ = 1 # source:False
+struct_c__SA_FWSECLIC_FRTS_CMD._fields_ = [
+    ('readVbiosDesc', FWSECLIC_READ_VBIOS_DESC),
+    ('frtsRegionDesc', FWSECLIC_FRTS_REGION_DESC),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+FWSECLIC_FRTS_CMD = struct_c__SA_FWSECLIC_FRTS_CMD
 __all__ = \
     ['ACPI_DATA', 'ACPI_DSM_CACHE', 'ACPI_DSM_FUNCTION_COUNT',
     'ACPI_DSM_FUNCTION_CURRENT', 'ACPI_DSM_FUNCTION_GPS',
@@ -1501,13 +1617,23 @@ __all__ = \
     'ACPI_DSM_FUNCTION_NVHG', 'ACPI_DSM_FUNCTION_NVOP',
     'ACPI_DSM_FUNCTION_NVPCF', 'ACPI_DSM_FUNCTION_NVPCF_2X',
     'ACPI_DSM_FUNCTION_PCFG', 'ACPI_DSM_FUNCTION_PEX',
-    'ACPI_METHOD_DATA', 'BUSINFO', 'CAPS_METHOD_DATA', 'DISPMUXSTATE',
-    'DISPMUXSTATE__enumvalues', 'DOD_METHOD_DATA',
-    'EcidManufacturingInfo', 'FECS_ERROR_EVENT_TYPE',
+    'ACPI_METHOD_DATA', 'BCRT30_RSA3K_SIG_SIZE', 'BUSINFO',
+    'CAPS_METHOD_DATA', 'DISPMUXSTATE', 'DISPMUXSTATE__enumvalues',
+    'DOD_METHOD_DATA', 'EcidManufacturingInfo',
+    'FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3',
+    'FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3_CMD_FRTS',
+    'FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3_CMD_SB',
+    'FALCON_APPLICATION_INTERFACE_ENTRY_ID_DMEMMAPPER',
+    'FALCON_UCODE_DESC_HEADER', 'FALCON_UCODE_DESC_HEADER_FORMAT',
+    'FALCON_UCODE_DESC_V3', 'FALCON_UCODE_DESC_V3_44_FMT',
+    'FALCON_UCODE_DESC_V3_SIZE_44', 'FECS_ERROR_EVENT_TYPE',
     'FECS_ERROR_EVENT_TYPE_BUFFER_FULL',
     'FECS_ERROR_EVENT_TYPE_BUFFER_RESET_REQUIRED',
     'FECS_ERROR_EVENT_TYPE_MAX', 'FECS_ERROR_EVENT_TYPE_NONE',
-    'FECS_ERROR_EVENT_TYPE__enumvalues', 'FW_WPR_LAYOUT_OFFSET',
+    'FECS_ERROR_EVENT_TYPE__enumvalues', 'FWSECLIC_FRTS_CMD',
+    'FWSECLIC_FRTS_REGION_DESC', 'FWSECLIC_FRTS_REGION_MEDIA_FB',
+    'FWSECLIC_FRTS_REGION_SIZE_1MB_IN_4K', 'FWSECLIC_READ_VBIOS_DESC',
+    'FWSECLIC_READ_VBIOS_STRUCT_FLAGS', 'FW_WPR_LAYOUT_OFFSET',
     'GPU_RECOVERY_EVENT_TYPE',
     'GPU_RECOVERY_EVENT_TYPE_GPU_DRAIN_P2P',
     'GPU_RECOVERY_EVENT_TYPE_REFRESH',
@@ -1545,9 +1671,15 @@ __all__ = \
     'MSGQ_PRIV_H', 'MSGQ_VERSION', 'MUX_METHOD_DATA',
     'MUX_METHOD_DATA_ELEMENT', 'NVDM_PAYLOAD_COT',
     'NVGPU_ENGINE_CAPS_MASK_ARRAY_MAX', 'NVGPU_ENGINE_CAPS_MASK_BITS',
-    'NV_ACPI_GENERIC_FUNC_COUNT', 'NV_RPC_UPDATE_PDE_BAR_1',
-    'NV_RPC_UPDATE_PDE_BAR_2', 'NV_RPC_UPDATE_PDE_BAR_INVALID',
-    'NV_RPC_UPDATE_PDE_BAR_TYPE',
+    'NV_ACPI_GENERIC_FUNC_COUNT',
+    'NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_VERSION_AVAILABLE',
+    'NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_VERSION_UNAVAILABLE',
+    'NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V1',
+    'NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V2',
+    'NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V3',
+    'NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V4',
+    'NV_RPC_UPDATE_PDE_BAR_1', 'NV_RPC_UPDATE_PDE_BAR_2',
+    'NV_RPC_UPDATE_PDE_BAR_INVALID', 'NV_RPC_UPDATE_PDE_BAR_TYPE',
     'NV_RPC_UPDATE_PDE_BAR_TYPE__enumvalues',
     'NV_VGPU_LOG_LEVEL_DEBUG', 'NV_VGPU_LOG_LEVEL_ERROR',
     'NV_VGPU_LOG_LEVEL_FATAL', 'NV_VGPU_LOG_LEVEL_NOTICE',
@@ -1648,8 +1780,9 @@ __all__ = \
     'RPC_GR_BUFFER_TYPE_GRAPHICS_PRIV_ACCESS_MAP',
     'RPC_GR_BUFFER_TYPE_GRAPHICS_RTV_CB_GLOBAL',
     'RPC_GR_BUFFER_TYPE_GRAPHICS_ZCULL',
-    'RPC_GR_BUFFER_TYPE__enumvalues', 'VGPU_MAX_REGOPS_PER_RPC',
-    'VGPU_RESERVED_HANDLE_BASE', 'VGPU_RESERVED_HANDLE_RANGE',
+    'RPC_GR_BUFFER_TYPE__enumvalues', 'VBIOS_H',
+    'VGPU_MAX_REGOPS_PER_RPC', 'VGPU_RESERVED_HANDLE_BASE',
+    'VGPU_RESERVED_HANDLE_RANGE',
     'VGPU_RPC_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PER_RPC_v21_06',
     'VGPU_RPC_GET_P2P_CAPS_V2_MAX_GPUS_SQUARED_PER_RPC',
     'VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS',
@@ -1681,6 +1814,12 @@ __all__ = \
     'struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS',
     'struct_c__SA_ACPI_DATA', 'struct_c__SA_ACPI_DSM_CACHE',
     'struct_c__SA_BUSINFO', 'struct_c__SA_EcidManufacturingInfo',
+    'struct_c__SA_FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3',
+    'struct_c__SA_FALCON_UCODE_DESC_HEADER',
+    'struct_c__SA_FALCON_UCODE_DESC_V3',
+    'struct_c__SA_FWSECLIC_FRTS_CMD',
+    'struct_c__SA_FWSECLIC_FRTS_REGION_DESC',
+    'struct_c__SA_FWSECLIC_READ_VBIOS_DESC',
     'struct_c__SA_FW_WPR_LAYOUT_OFFSET',
     'struct_c__SA_GSP_ARGUMENTS_CACHED',
     'struct_c__SA_GSP_ARGUMENTS_CACHED_profilerArgs',
