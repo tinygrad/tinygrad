@@ -47,7 +47,12 @@ def split_reduceop(reduce:UOp, x:UOp):
   return splitted.r(*reduce.arg).r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
 def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
-  if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
+  if prod(view.shape) < prod(base.shape):
+    if (bv:=view.arg.as_buffer_view()) is not None:
+      # this can be expressed as a buffer view
+      return UOp(Ops.BUFFER_VIEW, view.dtype, (base,), bv).copy_to_device(copy.device).reshape(view.shape)
+    else:
+      return view.contiguous().copy_to_device(copy.device)
   return base.copy_to_device(copy.device).view(view.arg)
 
 ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK}
@@ -116,7 +121,7 @@ def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
 def realize_parents(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
-    if s.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
+    if s.op not in ALWAYS_CONTIGUOUS and not s.st.contiguous: ctx[s] = None
 
 def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
   st = unwrap(view.st)
