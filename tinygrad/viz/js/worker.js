@@ -4,6 +4,8 @@ const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext("2d");
 ctx.font = `${LINE_HEIGHT}px sans-serif`;
 
+const escapeXML = (st) => st.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 onmessage = (e) => {
   const { graph, additions, kernels } = e.data;
   const g = new dagre.graphlib.Graph({ compound: true });
@@ -18,7 +20,7 @@ onmessage = (e) => {
       width = Math.max(width, ctx.measureText(line).width);
       height += LINE_HEIGHT;
     }
-    g.setNode(k, {width:width+NODE_PADDING*2, height:height+NODE_PADDING*2, padding:NODE_PADDING, label, refIdx, ...rest});
+    g.setNode(k, {width:width+NODE_PADDING*2, height:height+NODE_PADDING*2, padding:NODE_PADDING, label:escapeXML(label), refIdx, ...rest});
     // add edges
     const edgeCounts = {}
     for (const s of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
