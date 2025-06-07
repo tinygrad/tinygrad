@@ -36,8 +36,12 @@ async function renderDag(graph, additions, recenter=false) {
     const g = dagre.graphlib.json.read(e.data);
     // draw nodes
     const STROKE_WIDTH = 1.4;
-    const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
-      .attr("transform", d => `translate(${d.x},${d.y})`);
+    const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").on("click", (e,d) => {
+      if (d.ref != null) {
+        const found = kernels.findIndex(([_, steps]) => steps[0].ref == d.ref);
+        if (found !== -1) setState({ expandKernel: true, currentKernel: found, currentUOp: 0, currentRewrite: 0 });
+      }
+    }).attr("transform", d => `translate(${d.x},${d.y})`);
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style ?? `stroke:#4a4b57; stroke-width:${STROKE_WIDTH}px;`);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {

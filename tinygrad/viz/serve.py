@@ -27,6 +27,7 @@ class GraphRewriteMetadata(TypedDict):
   code_line: str                         # source code calling graph_rewrite
   kernel_code: str|None                  # optionally render the final kernel code
   name: str|None                         # optional name of the rewrite
+  ref: str|None                          # optional reference key of this rewrite
   depth: int                             # depth if it's a subrewrite
 
 @functools.cache
@@ -36,7 +37,7 @@ def render_program(k:Kernel):
 
 def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
   return {"loc":v.loc, "match_count":len(v.matches), "name":v.name, "depth":v.depth, "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
-          "kernel_code":render_program(k) if isinstance(k, Kernel) else None}
+          "kernel_code":render_program(k) if isinstance(k, Kernel) else None, "ref":str(k.ast) if isinstance(k, Kernel) else None}
 
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
   return [(k.name if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]
@@ -82,7 +83,8 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       label += "\n<ISSUE GETTING SHAPE>"
     # NOTE: kernel already has metadata in arg
     if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+repr(u.metadata)
-    graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff")}
+    graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff"),
+                    "ref":str(u.arg.ast) if u.op is Ops.KERNEL else None}
   return graph
 
 def get_details(k:Any, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
