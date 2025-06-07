@@ -3,6 +3,8 @@ from tinygrad import Tensor, Variable
 from tinygrad.shape.shapetracker import View
 from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.uop.ops import sym_infer
+from tinygrad.dtype import dtypes
+from tinygrad.device import Device
 from examples.gpt2 import Attention
 import numpy as np
 
@@ -220,6 +222,23 @@ class TestSymbolicOps(unittest.TestCase):
           expected = a.var(axis).numpy()
           symbolic = a.reshape(vi, vj).var(axis).reshape(expected.shape).numpy()
           np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+  def test_bitcast_down(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      a = Tensor.rand(i, 3)
+      expected = a.bitcast(dtypes.uint8).numpy()
+      symbolic = a.reshape(vi, 3).bitcast(dtypes.uint8).reshape(expected.shape).numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=0)
+
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "no uint64")
+  def test_bitcast_up(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      a = Tensor.rand(i, 4)
+      expected = a.bitcast(dtypes.uint64).numpy()
+      symbolic = a.reshape(vi, 4).bitcast(dtypes.uint64).reshape(expected.shape).numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=0)
 
   @unittest.expectedFailure
   def test_conv2d_ceildiv_edge_case(self):
