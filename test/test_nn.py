@@ -530,7 +530,8 @@ class TestNN(unittest.TestCase):
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
-  def test_embedding_one_kernel(self, ops=41410, kcount=3):
+  # TODO: it's more ops with the arange fused
+  def test_embedding_one_kernel(self, ops=612_000, kcount=2):
     GlobalCounters.reset()
     layer = Embedding(20, 30)
     layer.weight = Tensor.zeros_like(layer.weight).contiguous()
