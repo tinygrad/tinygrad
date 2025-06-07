@@ -74,7 +74,8 @@ setup(name='tinygrad',
             "pycocotools",
             "boto3",
             "pandas",
-            "influxdb3-python"
+            "influxdb3-python",
+            "lm_eval"
         ],
         'docs': [
             "mkdocs",
