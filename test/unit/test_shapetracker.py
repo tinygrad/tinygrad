@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 import unittest
-import numpy as np
+import numpy as np, random
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod
-from tinygrad.shape.shapetracker import ShapeTracker, View
+from tinygrad.shape.shapetracker import ShapeTracker, View, apply_mop
 from tinygrad import Variable
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.codegen.devectorizer import sym
@@ -912,6 +912,138 @@ class TestVariableReshape(unittest.TestCase):
     st = ShapeTracker((st1.views[0], st2.views[0]))
     st = st.simplify()
     assert len(st.views) == 1
+
+class TestMovementOps(unittest.TestCase):
+  def roundtrip(self, st):
+    mops = st.to_movement_ops()
+    buffer_size = st.real_size()
+
+    # for zero-size shapes, start with the original shape since no movement ops will be applied
+    curr = ShapeTracker.from_shape(st.shape if buffer_size == 0 else (buffer_size,))
+    for mop in mops: curr = apply_mop(curr, mop)
+
+    # reconstructed ShapeTracker should have equivalent semantic behavior
+    self.assertEqual(st.shape, curr.shape)
+    self.assertEqual(st.real_strides(), curr.real_strides())
+    self.assertEqual(st.size, curr.size)
+    self.assertEqual(st.contiguous, curr.contiguous)
+
+    # check indexing equivalence
+    orig_idx, orig_valid = st.to_indexed_uops()
+    final_idx, final_valid = curr.to_indexed_uops()
+    self.assertEqual(orig_idx.render(), final_idx.render())
+    self.assertEqual(orig_valid.render(), final_valid.render())
+
+  def test_simple(self):
+    st = ShapeTracker.from_shape((2,3,4))
+    self.roundtrip(st)
+
+  def test_pad_shrink(self):
+    st = ShapeTracker.from_shape((5,5)).pad(((1,2),(0,0))).shrink(((2,4),(1,3)))
+    self.roundtrip(st)
+
+  def test_negative_stride(self):
+    st = ShapeTracker.from_shape((3,4)).permute((1,0)).flip((-1,1))
+    self.roundtrip(st)
+
+  def test_simple_reshape(self):
+    st = ShapeTracker.from_shape((2,3,4)).reshape((6,4))
+    self.roundtrip(st)
+
+  def test_flatten_unflatten(self):
+    st = ShapeTracker.from_shape((2,3,4)).reshape((24,)).reshape((2,3,4))
+    self.roundtrip(st)
+
+  def test_expand(self):
+    st = ShapeTracker.from_shape((1,3,1)).expand((2,3,4))
+    self.roundtrip(st)
+
+  def test_complex_chain(self):
+    base = ShapeTracker.from_shape((2,2,3))
+    st = (base.reshape((4,3))
+              .pad(((0,0),(0,3)))
+              .permute((1,0))
+              .flip((-1,1))
+              .pad(((0,1),(2,0)))
+              .shrink(((1,3),(0,5))) )
+    self.roundtrip(st)
+
+  def test_zero_dim(self):
+    st = ShapeTracker.from_shape((0,3,1))
+    self.roundtrip(st)
+
+  def test_single_dim(self):
+    st = ShapeTracker.from_shape((5,)).reshape((1,5)).expand((5,5)).permute((1,0))
+    self.roundtrip(st)
+
+  def test_scalar(self):
+    st = ShapeTracker.from_shape(tuple())
+    self.roundtrip(st)
+
+  def test_random_sequences(self):
+    random.seed(0)
+    for i in range(100):
+      # choose random initial shape (1 to 4 dims, each 1 to 4)
+      ndims = random.randint(1, 4)
+      base_shape = tuple(random.randint(1, 4) for _ in range(ndims))
+      st = ShapeTracker.from_shape(base_shape)
+      ops_seq = []
+      # apply a random sequence of view ops
+      for _ in range(random.randint(1, 5)):
+        op = random.choice(['pad', 'shrink', 'permute', 'flip', 'expand', 'reshape'])
+        try:
+          if op == 'pad':
+            arg = tuple((random.randint(0, 2), random.randint(0, 2)) for _ in st.shape)
+            st = st.pad(arg)
+            ops_seq.append(('pad', arg))
+          elif op == 'shrink':
+            arg = []
+            for s in st.shape:
+              if s == 0:
+                arg.append((0, 0))
+              else:
+                b = random.randint(0, s-1)
+                e = random.randint(b+1, s)
+                arg.append((b, e))
+            st = st.shrink(tuple(arg))
+            ops_seq.append(('shrink', tuple(arg)))
+          elif op == 'permute':
+            axes = list(range(len(st.shape)))
+            random.shuffle(axes)
+            st = st.permute(tuple(axes))
+            ops_seq.append(('permute', tuple(axes)))
+          elif op == 'flip':
+            arg = tuple(random.choice([-1, 1]) for _ in st.shape)
+            st = st.flip(arg)
+            ops_seq.append(('flip', arg))
+          elif op == 'expand':
+            ns = []
+            for s in st.shape:
+              if s == 1:
+                ns.append(random.randint(1, 4))
+              else:
+                ns.append(s)
+            st = st.expand(tuple(ns))
+            ops_seq.append(('expand', tuple(ns)))
+          elif op == 'reshape':
+            size = st.size
+            # only reshape when contiguous to avoid fallback merging
+            if size == 0 or not st.views[-1].contiguous:
+              continue
+            # choose a random 2D reshape
+            divs = [d for d in range(1, size+1) if size % d == 0]
+            d = random.choice(divs)
+            new_shape = (d, size // d)
+            st = st.reshape(new_shape)
+            ops_seq.append(('reshape', new_shape))
+        except Exception: continue
+      try:
+        self.roundtrip(st)
+      except AssertionError:
+        print(f"Failed random sequence #{i}")
+        print(f"base_shape={base_shape}")
+        print(f"ops_seq={ops_seq}")
+        raise
 
 if __name__ == '__main__':
   unittest.main()

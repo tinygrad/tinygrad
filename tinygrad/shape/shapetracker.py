@@ -2,8 +2,8 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import functools
-from typing import Optional, Callable
-from tinygrad.helpers import merge_dicts, getenv
+from typing import Optional, Callable, Any
+from tinygrad.helpers import merge_dicts, getenv, prod
 from tinygrad.shape.view import View, strides_for_shape, unravel
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, PatternMatcher, UPat, GroupOp
@@ -21,6 +21,65 @@ def handle_upcast(u: UOp) -> UOp|None:
     return u.replace(dtype=dtype, src=tuple([x.cast(dtype) for x in u.src])).cast(u.dtype)
   return None
 pm_upcast = PatternMatcher([(UPat(GroupOp.ALU, dtype=dtypes.int, name="u"), handle_upcast),])
+
+def apply_mop(st: Any|ShapeTracker, mop_arg: tuple[Ops, tuple]) -> ShapeTracker:
+  mop, arg = mop_arg
+  if mop == Ops.RESHAPE:
+    # shapetracker doesn't allow flattening with -1 but required for Ops.RESHAPE
+    if arg == (-1,): return st.reshape((prod(st.shape),))
+    return st.reshape(arg)
+  if mop == Ops.PERMUTE: return st.permute(arg)
+  if mop == Ops.EXPAND:
+    if len(arg) != len(st.shape): st = st.reshape((1,*st.shape))
+    return st.expand(arg)
+  if mop == Ops.PAD: return st.pad(arg)
+  if mop == Ops.SHRINK: return st.shrink(arg)
+  if mop == Ops.FLIP: return st.flip(arg)
+  raise ValueError("invalid mop")
+
+@functools.cache
+def st_to_movement_ops(st) -> list[tuple[Ops, Any]]:
+  if 0 in st.shape: return []
+  ops:list[tuple[Ops, tuple]] = []
+  for i, v in enumerate(st.views):
+    shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
+    offset = v.offset + sum(st*(s-1) for s,st in zip(shape, v.strides) if st<0)
+    pos = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
+    dims = [s for s,st in zip(shape, v.strides) if st]
+    strides: list[int] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
+    buffer = sum((s-1)*st for s,st in zip(dims,strides)) + 1
+    if i: buffer = prod(st.views[i-1].shape) - pos if dims else 1
+    order, pairs = map(list, zip(*sorted(enumerate(zip(dims, strides)), key=lambda p: (p[1][1], -p[1][0]), reverse=True))) if dims else ([], [])
+    ops.extend([(Ops.RESHAPE, (-1,)), (Ops.SHRINK, ((pos, pos+buffer),))])
+    if strides:
+      if (pairs[0][0]*pairs[0][1]) - buffer > 0:
+        ops.append((Ops.PAD, ((0, (pairs[0][0] * pairs[0][1]) - buffer),)))
+      for j, shape_stride in enumerate(pairs):
+        if j<len(pairs)-1 and shape_stride[1] < pairs[j+1][0]*pairs[j+1][1]:
+          remaining_buffer = pairs[j-1][1] if j>0 else buffer
+          ops.append((Ops.EXPAND, (shape_stride[0], *(s[0] for s in pairs[:j]), remaining_buffer)))
+          ops.append((Ops.PERMUTE, (*range(1,j+1), 0, j+1)))
+          ops.append((Ops.RESHAPE, (*(s[0] for s in pairs[:j]), shape_stride[0]*remaining_buffer)))
+          ops.append((Ops.PAD, (*((0,0) for _ in range(j)), (0, shape_stride[0]*shape_stride[1]))))
+          ops.append((Ops.RESHAPE, (*(s[0] for s in pairs[:j+1]), remaining_buffer+shape_stride[1])))
+          pairs[j] = (pairs[j][0], remaining_buffer+shape_stride[1])
+        else:
+          ops.append((Ops.SHRINK, (*((0, s[0]) for s in pairs[:j]), (0, shape_stride[0]*shape_stride[1]))))
+          ops.append((Ops.RESHAPE, (*[s[0] for s in pairs[:j+1]], shape_stride[1])))
+      ops.extend([(Ops.SHRINK, (*[(0, s[0]) for s in pairs], (0,1))), (Ops.RESHAPE, tuple(s[0] for s in pairs))])
+      if order != list(range(len(order))): ops.append((Ops.PERMUTE, tuple(order.index(i) for i in range(len(strides)))))
+    ops.append((Ops.RESHAPE, tuple(s if st else 1 for s,st in zip(shape, v.strides))))
+    if any(i<0 for i in v.strides): ops.append((Ops.FLIP, tuple(-1 if st<0 else 1 for st in v.strides)))
+    # then, we apply pre expand pads
+    if v.mask is not None:
+      pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
+      post_expand_pads = tuple((x,s-y) if st == 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
+      if any(x != (0,0) for x in pre_expand_pads):
+        ops.append((Ops.PAD, pre_expand_pads))
+        shape = tuple(x+s[0]+s[1] for x,s in zip(shape, pre_expand_pads))
+    if any(s != 1 and st == 0 for s,st in zip(shape, v.strides)): ops.append((Ops.EXPAND, shape))
+    if v.mask is not None and any(x != (0,0) for x in post_expand_pads): ops.append((Ops.PAD, post_expand_pads))
+  return ops
 
 @functools.cache
 def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
@@ -89,6 +148,7 @@ class ShapeTracker:
   def to_indexed_uops(self, _idxs:Optional[list[UOp]|tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
     return views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
 
+  def to_movement_ops(self) -> list[tuple[Ops, Any]]: return st_to_movement_ops(self)
   # upper bound on buffer size required to fit this shapetracker
   def real_size(self) -> int:
     if 0 in self.shape: return 0
