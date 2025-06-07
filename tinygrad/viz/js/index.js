@@ -46,9 +46,7 @@ async function renderDag(graph, additions, recenter=false) {
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
       return `translate(-${x}, -${y})`;
     }).selectAll("text").data(d => [d.label.split("\n")]).join("text").selectAll("tspan").data(d => d).join("tspan").text(d => d).attr("x", "0")
-      .attr("dy", 14).attr("xml:space", "preserve").html(d => {
-        return `<tspan>${coloredHTML(d, "tspan")}<tspan>`;
-      });
+      .attr("dy", 14).attr("xml:space", "preserve");
     // draw edges
     const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis);
     d3.select("#edges").selectAll("path.edgePath").data(g.edges()).join("path").attr("class", "edgePath").attr("d", (e) => {
@@ -233,12 +231,6 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
 
 // **** main VIZ interfacae
 
-const ANSI_COLORS = ['gray','red','green','yellow','blue','magenta','cyan','white'];
-const coloredHTML = (st, tag) => st.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
-  const baseColor = ANSI_COLORS[(parseInt(code)-30+60)%60];
-  return `<${tag} ${tag === "tspan" ? `fill="${baseColor}"` : `style="color: color-mix(in srgb, ${baseColor} 60%, white)"`}>${st}</${tag}>`;
-});
-
 function codeBlock(st, language, { loc, wrap }) {
   const code = document.createElement("code");
   code.innerHTML = hljs.highlight(st, { language }).value;
@@ -296,7 +288,10 @@ async function main() {
       requestAnimationFrame(() => ul.scrollIntoView({ behavior: "auto", block: "nearest" }));
     }
     const p = ul.appendChild(document.createElement("p"));
-    p.innerHTML = coloredHTML(name, "span");
+    p.innerHTML = name.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
+      const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
+      return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
+    });
     p.onclick = () => {
       setState(i === currentKernel ? { expandKernel:!expandKernel } : { expandKernel:true, currentKernel:i, currentUOp:0, currentRewrite:0 });
     }
