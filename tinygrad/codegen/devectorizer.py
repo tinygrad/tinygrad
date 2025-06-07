@@ -202,7 +202,9 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   if ctx is not None and ctx.device == "DSP":
     lengths = [128,64,32,16,8,4]
     must_divide = False
-  elif buf.dtype.base != dtypes.float and (buf.dtype.base != dtypes.half or ctx.device == "X86") and not isinstance(buf.dtype, ImageDType):
+  if ctx is not None and ctx.device == "X86" and buf.dtype.base == dtypes.half:
+    pass
+  elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
     pass
   elif isinstance(buf.dtype, ImageDType):
     lengths = [4]

@@ -100,7 +100,6 @@ class AsmRenderer(Renderer):
     live_at_range: dict[UOp, dict[UOp, str]] = {}
     spill_place: dict[UOp, UOp] = {}
     stack_size: int = 0
-    cur_uop: UOp = None
     inst_map: dict[UOp, list[str]] = {}
     # interval in which a var is live meaning its value is needed,
     # void dtypes don't hold values, consts aren't instructions, noop and assign use location of src[0]
@@ -138,13 +137,13 @@ class AsmRenderer(Renderer):
         live[x] = ret
         if x in loc:
           # if x already in reg and we move to another reg the spill place changes
-          if isinstance(loc[x], str): spill_place[x] = cur_uop
-          inst_map[cur_uop].append(self.render_fill(x, ret))
+          if isinstance(loc[x], str): spill_place[x] = u
+          inst_map[u].append(self.render_fill(x, ret))
       return ret
 
     name = "test"
     for i,u in enumerate(uops):
-      cur_uop, inst_map[u] = u, []
+      inst_map[u] = []
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.name
         continue
