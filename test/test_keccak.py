@@ -2,6 +2,7 @@ from typing_extensions import Callable
 import hashlib, random, unittest
 from tinygrad import Tensor, Device, getenv, dtypes
 from tinygrad.device import is_dtype_supported
+from tinygrad.uop.ops import UOp
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uint8) and is_dtype_supported(dtypes.uint64), "Device must support uint8 and uint64")
 @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashes in NV CI")
@@ -37,6 +38,16 @@ class TestKeccak(unittest.TestCase):
     # https://www.di-mgt.com.au/sha_testvectors.html
     out = Tensor(b"abc").keccak()
     self.assertEqual(bytes(out.tolist()), bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
+
+  def test_variable_bs(self):
+    bs = UOp.variable("bs", 1, 4096).bind(1)
+    data = Tensor([b"abc"], dtype=dtypes.uint8)
+    out = data.reshape(bs, data.shape[-1]).keccak()
+    print(out)
+
+    bs = UOp.variable("bs", 1, 4096).bind(2)
+    out2 = Tensor([b"abc", b"def"], dtype=dtypes.uint8).reshape(bs, -1).keccak()
+    print(out2)
 
 if __name__ == "__main__":
   unittest.main()
