@@ -74,7 +74,7 @@ runs:
       if: inputs.deps != ''
       shell: bash
       run: |
-        if [[ ! -f .venv/bin/activate ]]; then
+        if [[ ! -d .venv ]]; then
           python -m venv .venv
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             source .venv/Scripts/activate
