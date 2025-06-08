@@ -163,7 +163,7 @@ runs:
 
         # ******** do install ********
         if [[ -n "$pkgs" ]]; then
-          sudo apt-get -y --no-install-recommends install $pkgs
+          sudo apt-get -y --allow-unauthenticated --no-install-recommends install $pkgs
         fi
 
     # **** AMD ****
@@ -227,7 +227,9 @@ runs:
     - name: Install WebGPU dawn (Linux)
       if: inputs.webgpu == 'true' && runner.os == 'Linux'
       shell: bash
-      run: sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
+      run: |
+        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
+        sudo ldconfig
     - name: Install WebGPU dawn (macOS)
       if: inputs.webgpu == 'true' && runner.os == 'macOS'
       shell: bash
