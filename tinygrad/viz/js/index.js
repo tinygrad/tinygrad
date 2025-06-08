@@ -169,6 +169,9 @@ function renderMemoryGraph(graph) {
     b.y.push(b.y.at(-1));
   }
   // ** render traces
+  // clear existing groups
+  document.querySelector(".progress-message").style.display = "none";
+  for (c of document.getElementById("render").children) c.innerHTML = "";
   const render = d3.select("#bars");
   const yscale = d3.scaleLinear().domain([0, peak]).range([576, 0]);
   const xscale = d3.scaleLinear().domain([0, timestep]).range([0, 1024]);
@@ -203,9 +206,6 @@ function renderMemoryGraph(graph) {
     document.getElementById("current-buf")?.remove()
   });
   // TODO: add the kernel line here
-  document.querySelector(".progress-message").style.display = "none";
-  d3.select("#nodes").html("");
-  d3.select("#edges").html("");
   document.getElementById("zoom-to-fit-btn").click();
 }
 
