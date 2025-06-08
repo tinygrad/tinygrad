@@ -25,7 +25,7 @@ class TestRewriteTrackedChildren(unittest.TestCase):
     a = Tensor(2)
     b = Tensor(3)
     c = a + b
-    sink = c.lazydata.sink()
+    sink = c.uop.sink()
     sink = graph_rewrite(sink, rewrite, track_children=True)
 
   def test_simple_child(self):
@@ -35,8 +35,8 @@ class TestRewriteTrackedChildren(unittest.TestCase):
     a = Tensor(2)
     b = Tensor(3)
     c = a + b
-    sink = c.lazydata
-    view_w_child = a.lazydata.src[0]
+    sink = c.uop
+    view_w_child = a.uop.src[0]
     print([x().arg for x in view_w_child.children])
     print([x.arg for x in sink.get_children_map()[view_w_child]])
     self.assertSetEqual(set([x.arg for x in sink.get_children_map()[view_w_child]]), set((2,3)))
@@ -57,7 +57,7 @@ class TestRewriteTrackedChildren(unittest.TestCase):
     extra = PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="r"), print_children)])
     a = Tensor.empty(3, 3)
     r = (a+0).sum()
-    graph_rewrite(r.lazydata, merge_views+sym+extra, track_children=True)
+    graph_rewrite(r.uop, merge_views+sym+extra, track_children=True)
 
 if __name__ == '__main__':
   unittest.main()

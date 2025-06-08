@@ -19,8 +19,8 @@ if __name__ == "__main__":
 
   inputs = run_onnx.get_empty_input_data("npy")
   out: Tensor = next(iter(run_onnx({k:v.to(None) for k,v in inputs.items()}).values())).to('cpu')
-  root = out.lazydata
-  targets = [x.lazydata for x in inputs.values()]
+  root = out.uop
+  targets = [x.uop for x in inputs.values()]
   print(targets)
 
   # TODO: abstract this from gradient?
@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
   print("**** real ****")
   GlobalCounters.reset()
-  out.lazydata = root.substitute(kernelized).substitute(becomes_map)
+  out.uop = root.substitute(kernelized).substitute(becomes_map)
   out.kernelize()
 
   # realize
