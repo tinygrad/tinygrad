@@ -836,29 +836,29 @@ class TestConsecutive(unittest.TestCase):
     self.ones = Tensor.ones(2, 4)
 
   def test_unmodified(self):
-    assert self.t.lazydata.st.consecutive
-    assert self.t.reshape(4, 2).lazydata.st.consecutive
-    assert self.t.reshape(1, 8).lazydata.st.consecutive
+    assert self.t.uop.st.consecutive
+    assert self.t.reshape(4, 2).uop.st.consecutive
+    assert self.t.reshape(1, 8).uop.st.consecutive
 
   def test_sliced(self):
-    assert self.t[0].lazydata.st.consecutive
-    assert self.t[0, 1:2].lazydata.st.consecutive
-    assert self.t[1].lazydata.st.consecutive
-    assert not self.t[:, 0].lazydata.st.consecutive
-    assert not self.t[:, 1].lazydata.st.consecutive
+    assert self.t[0].uop.st.consecutive
+    assert self.t[0, 1:2].uop.st.consecutive
+    assert self.t[1].uop.st.consecutive
+    assert not self.t[:, 0].uop.st.consecutive
+    assert not self.t[:, 1].uop.st.consecutive
 
   def test_padded(self):
-    assert not self.t.pad(((1, 1), None)).lazydata.st.consecutive
-    assert not self.t.pad((None, (1, 1))).lazydata.st.consecutive
+    assert not self.t.pad(((1, 1), None)).uop.st.consecutive
+    assert not self.t.pad((None, (1, 1))).uop.st.consecutive
 
   def test_const(self):
-    assert self.const.lazydata.st.consecutive
+    assert self.const.uop.st.consecutive
 
   def test_ones(self):
-    assert not self.ones.lazydata.st.consecutive
-    assert not self.ones[0, :].lazydata.st.consecutive
+    assert not self.ones.uop.st.consecutive
+    assert not self.ones[0, :].uop.st.consecutive
     # consecutive if sliced into size 1
-    assert self.ones[0, 0].lazydata.st.consecutive
+    assert self.ones[0, 0].uop.st.consecutive
 
 class TestRender(unittest.TestCase):
   def test_render(self):
