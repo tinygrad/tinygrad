@@ -438,7 +438,7 @@ document.addEventListener("keydown", async function(event) {
   // enter toggles focus on a single rewrite stage
   if (event.key == "Enter") {
     event.preventDefault()
-    if (state.currentCtx === -1) {
+    if (currentCtx === -1) {
       return setState({ currentCtx:0, expandSteps:true });
     }
     return setState({ currentStep:0, currentRewrite:0, expandSteps:!expandSteps });
