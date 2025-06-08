@@ -501,10 +501,6 @@ do_fuse = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
 ])
 
-def get_name(becomes_map:dict[UOp, UOp]) -> str:
-  assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
-  return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
-
 add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"),
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
 
@@ -538,7 +534,7 @@ finalize_gbarrier = PatternMatcher([
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
-@track_rewrites(name_fxn=get_name)
+@track_rewrites(name_fxn=lambda big_sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[big_sink].toposort() if u.op is Ops.KERNEL]))}")
 def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # multi + merge_views + simplify
   tensor_map = graph_rewrite_map(big_sink, multi_pm+replace_allreduce+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")

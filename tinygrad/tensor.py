@@ -957,7 +957,7 @@ class Tensor(MathTrait):
 
   def view(self, shape:tuple[sint, ...], *args) -> Tensor:
     """`.view` is an alias for `.reshape`."""
-    return self.reshape(argfix(shape, *args))
+    return self.reshape(shape, *args)
 
   def reshape(self, shape, *args) -> Tensor:
     """

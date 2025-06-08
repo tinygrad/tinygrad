@@ -81,8 +81,10 @@ def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tup
     if hasattr(signal, "alarm"): signal.alarm(0)
   return x[0], ret
 
-# workers should ignore ctrl c
-def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
+# workers should not open devices and should ignore ctrl c
+def _init_worker():
+  Context(ALLOW_DEVICE_USAGE=0).__enter__()
+  signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_allocated() if buf is not None else buf for buf in bufs]
 

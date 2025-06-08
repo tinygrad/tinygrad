@@ -1093,8 +1093,8 @@ class TestOps(unittest.TestCase):
   def test_sort(self):
     for dim in [-1, 0, 1]:
       for descending in [True, False]:
-        helper_test_op([(8,45,65)], lambda x: x.sort(dim, descending).values, lambda x: x.sort(dim, descending)[0], forward_only=True)
-        helper_test_op([(8,45,65)], lambda x: x.sort(dim, descending).indices.type(torch.int32), lambda x: x.sort(dim, descending)[1],
+        helper_test_op([(8,45,6)], lambda x: x.sort(dim, descending).values, lambda x: x.sort(dim, descending)[0], forward_only=True)
+        helper_test_op([(8,45,6)], lambda x: x.sort(dim, descending).indices.type(torch.int32), lambda x: x.sort(dim, descending)[1],
                        forward_only=True)
     # repeated values
     helper_test_op(None, lambda x: x.sort(stable=True).values, lambda x: x.sort()[0], forward_only=True, vals=[[0, 1] * 9])
@@ -1110,10 +1110,10 @@ class TestOps(unittest.TestCase):
     for dim in [0, 1, -1]:
       for largest in [True, False]:
         for sorted_ in [True]: # TODO support False
-          helper_test_op([(10,20,30)],
+          helper_test_op([(10,12,6)],
                           lambda x: x.topk(5, dim, largest, sorted_).values,
                           lambda x: x.topk(5, dim, largest, sorted_)[0], forward_only=True)
-          helper_test_op([(10,20,30)],
+          helper_test_op([(10,12,6)],
                           lambda x: x.topk(5, dim, largest, sorted_).indices.type(torch.int32),
                           lambda x: x.topk(5, dim, largest, sorted_)[1], forward_only=True)
     # repeated values
@@ -1860,6 +1860,11 @@ class TestOps(unittest.TestCase):
   def test_view(self):
     helper_test_op([(4,3,6,6)], lambda x: x.view((12,6,6)))
     helper_test_op([(4,3,6,6)], lambda x: x.view((-1,3,6,6)))
+    helper_test_op([(6,)], lambda x: x.view(2, 3))
+    helper_test_op([(6,1)], lambda x: x.view([2, 3]))
+    helper_test_op([(1,6)], lambda x: x.view((3, 2)))
+    helper_test_op([(3,2)], lambda x: x.view((2, 3)))
+    helper_test_op([(3,2)], lambda x: x.view(6))
 
   def test_flip(self):
     helper_test_op([(4,3,6,6)], lambda x: x.flip((0,)))
