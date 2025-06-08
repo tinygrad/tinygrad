@@ -48,6 +48,7 @@ runs:
     # **** Caching packages ****
 
     - name: Cache Python packages
+      id: restore-venv
       uses: actions/cache@v4
       with:
         path: .venv
@@ -71,31 +72,27 @@ runs:
     # **** Python deps ****
 
     - name: Install dependencies in venv (with extra)
-      if: inputs.deps != ''
+      if: inputs.deps != '' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        if [[ ! -d .venv ]]; then
-          python -m venv .venv
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            source .venv/Scripts/activate
-          else
-            . .venv/bin/activate
-          fi
-          python -m pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        python -m venv .venv
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          source .venv/Scripts/activate
+        else
+          . .venv/bin/activate
         fi
+        python -m pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies in venv (without extra)
-      if: inputs.deps == ''
+      if: inputs.deps == '' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        if [[ ! -d .venv ]]; then
-          python -m venv .venv
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            source .venv/Scripts/activate
-          else
-            . .venv/bin/activate
-          fi
-          python -m pip install -e . ${{ inputs.pydeps }}
+        python -m venv .venv
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          source .venv/Scripts/activate
+        else
+          . .venv/bin/activate
         fi
+        python -m pip install -e . ${{ inputs.pydeps }}
     - name: Export venv
       shell: bash
       run: |
@@ -130,31 +127,51 @@ runs:
         wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
         echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-19 main" | sudo tee /etc/apt/sources.list.d/llvm.list
 
-    - name: apt-get update
+    - name: apt-get update + install
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
       shell: bash
       run: |
+        echo 'Acquire::GzipIndexes "true";' | sudo tee /etc/apt/apt.conf.d/gzip
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-        sudo apt update || true
+        sudo apt -qq update || true
 
-    # **** OpenCL ****
+        pkgs=""
+        # **** OpenCL ****
+        if [[ "${{ inputs.opencl }}" == "true" ]]; then
+          pkgs+=" opencl-headers \
+            intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
+            intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
+            intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16"
+        fi
+        # **** AMD ****
+        if [[ "${{ inputs.amd }}" == "true" ]]; then
+          pkgs+=" hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev"
+        fi
+        # **** CUDA ****
+        if [[ "${{ inputs.cuda }}" == "true" ]]; then
+          pkgs+=" git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
+            flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev"
+        fi
+        # **** WebGPU (dependencies for software-based vulkan) ****
+        if [[ "${{ inputs.webgpu }}" == "true" ]]; then
+          pkgs+=" libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers"
+        fi
+        # **** LLVM ****
+        if [[ "${{ inputs.llvm }}" == "true" ]]; then
+          pkgs+=" libllvm19 clang-19 lld-19"
+        fi
 
-    - name: Install OpenCL
-      if: inputs.opencl == 'true' && runner.os == 'Linux'
-      shell: bash
-      run: |
-        sudo apt install --allow-unauthenticated -y --no-install-recommends opencl-headers \
-          intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
-          intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
-          intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
+        # ******** do install ********
+        if [[ -n "$pkgs" ]]; then
+          sudo apt-get -y --allow-unauthenticated --no-install-recommends install $pkgs
+        fi
 
     # **** AMD ****
 
-    - name: Install AMD (Linux)
+    - name: Setup AMD (Linux)
       if: inputs.amd == 'true' && runner.os == 'Linux'
       shell: bash
       run: |
-        sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev
         cargo build --release --manifest-path ./extra/remu/Cargo.toml
         sudo ln -sf ${{ github.workspace }}/extra/remu/target/release/libremu.so /usr/local/lib/libremu.so
         sudo tee --append /etc/ld.so.conf.d/rocm.conf <<'EOF'
@@ -162,7 +179,7 @@ runs:
           /opt/rocm/lib64
         EOF
         sudo ldconfig
-    - name: Install AMD comgr+remu (macOS)
+    - name: Setup AMD comgr+remu (macOS)
       if: inputs.amd == 'true' && runner.os == 'macOS'
       shell: bash
       run: |
@@ -174,12 +191,6 @@ runs:
 
     # **** CUDA ****
 
-    - name: Install cuda packages (Linux)
-      if: inputs.cuda == 'true' && runner.os == 'Linux'
-      shell: bash
-      run: |
-        sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
-          flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev
     - name: Install gpuocelot dependencies (MacOS)
       if: inputs.cuda == 'true' && runner.os == 'macOS'
       shell: bash
@@ -216,12 +227,9 @@ runs:
     - name: Install WebGPU dawn (Linux)
       if: inputs.webgpu == 'true' && runner.os == 'Linux'
       shell: bash
-      run: sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
-    - name: Install dependencies for software-based vulkan
-      if: inputs.webgpu == 'true' && runner.os == 'Linux'
-      shell: bash
-      run: sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
-
+      run: |
+        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
+        sudo ldconfig
     - name: Install WebGPU dawn (macOS)
       if: inputs.webgpu == 'true' && runner.os == 'macOS'
       shell: bash
@@ -230,11 +238,6 @@ runs:
         brew install dawn
 
     # **** LLVM ****
-
-    - name: Install LLVM (Linux)
-      if: inputs.llvm == 'true' && runner.os == 'Linux'
-      shell: bash
-      run: sudo apt install -y --no-install-recommends libllvm19 clang-19 lld-19
 
     - name: Install LLVM (macOS)
       if: inputs.llvm == 'true' && runner.os == 'macOS'
