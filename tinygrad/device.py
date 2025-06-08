@@ -205,12 +205,15 @@ DeviceType = TypeVar('DeviceType', bound='Compiled')
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator(Generic[DeviceType]):
-  def __init__(self, dev:DeviceType): self.dev: DeviceType = dev
+  def __init__(self, dev:DeviceType):
+    self.dev: DeviceType = dev
+    self.default_buffer_spec: BufferSpec = BufferSpec()
   # overridden in LRUAllocator
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
-    return self._alloc(size, options if options is not None else BufferSpec())
-  def free(self, opaque, size:int, options:Optional[BufferSpec]=None): self._free(opaque, options if options is not None else BufferSpec())
+    return self._alloc(size, options if options is not None else self.default_buffer_spec)
+  def free(self, opaque, size:int, options:Optional[BufferSpec]=None):
+    self._free(opaque, options if options is not None else self.default_buffer_spec)
 
   # implemented by the runtime
   def _alloc(self, size:int, options:BufferSpec): raise NotImplementedError("need alloc")
