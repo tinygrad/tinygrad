@@ -225,7 +225,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const r = rect("#render");
   if (r.width === 0) return;
   const scale = Math.min(R.width/r.width, R.height/r.height);
-  const [tx, ty] = [R.x+(R.width-(r.width+r.left)*scale)/2, R.y+(R.height-r.height*scale)/2];
+  const [tx, ty] = [R.x+(R.width-r.width*scale)/2-r.left*scale, R.y+(R.height-r.height*scale)/2];
   svg.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
 });
 
