@@ -4,6 +4,7 @@ from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, round_up, mv_addr
 from tinygrad.runtime.support.hcq import FileIOInterface
 from tinygrad.runtime.support.nvd import alloc_sysmem
 from tinygrad.runtime.support.elf import elf_loader
+from tinygrad.runtime.autogen import nv_gpu
 from tinygrad.device import CPUProgram
 from hexdump import hexdump
 
@@ -21,7 +22,7 @@ class NVRpcQueue:
       checksum ^= value
     return ((checksum >> 32) & 0xFFFFFFFF) ^ (checksum & 0xFFFFFFFF)
 
-  def send_rpc(self, func, msg):
+  def send_rpc(self, func, msg, wait=False):
     assert len(msg) < 0xf00
 
     header = nv.rpc_message_header_v(signature=nv.NV_VGPU_MSG_SIGNATURE_VALID, rpc_result=nv.NV_VGPU_MSG_RESULT_RPC_PENDING,
@@ -39,6 +40,10 @@ class NVRpcQueue:
 
     self.seq += 1
     self.gsp.nvdev.wreg(0x110c00, 0x0) # TODO
+
+    if wait:
+      while self.tx.writePtr != self.rx.readPtr: CPUProgram.atomic_lib.atomic_thread_fence(5)
+      return to_mv(self.content_va + off + 0x50, header.length)
   
   def wait_resp(self, cmd):
     while True:
@@ -49,16 +54,15 @@ class NVRpcQueue:
       off = self.rx.readPtr * 0x1000
       x = nv.rpc_message_header_v.from_address(self.content_va + off + 0x30)
 
-      print(f"RPC message: {x.function:x}, {x.length}, {x.signature}, {x.rpc_result}, {x.rpc_result_private} {self.tx.writePtr} {self.rx.readPtr}")
-      # msg = self.queue_mv[off+0x50:off+0x50 + x.length] # TODO: wrap around
-
       # Special functions
       if x.function == 0x1002: self.gsp.run_cpu_seq(to_mv(self.content_va+off+0x50, x.length))
 
       self.rx.readPtr = (self.rx.readPtr + round_up(x.length, 0x1000) // 0x1000) % self.tx.msgCount
       CPUProgram.atomic_lib.atomic_thread_fence(5)
 
-      if x.function == cmd and x.rpc_result == 0: return x
+      print(f"RPC message: {x.function:x}, {x.length}, {x.rpc_result}, {x.rpc_result_private} {self.tx.writePtr} {self.rx.readPtr}")
+
+      if x.function == cmd and x.rpc_result == 0: return to_mv(self.content_va+off+0x50, x.length)
 
 class NV_FLCN:
   def __init__(self, nvdev): self.nvdev = nvdev
@@ -378,43 +382,7 @@ class NV_GSP:
     return libos_init_sysmem[0]
 
   def rpc_set_registry_table(self):
-    dt = {'GrdmaPciTopoCheckOverride': 0x0,
-          'CreateImexChannel0': 0x0,
-          'ImexChannelCount': 0x800,
-          'DmaRemapPeerMmio': 0x1,
-          'OpenRmEnableUnsupportedGpus': 0x1,
-          'EnableDbgBreakpoint': 0x0,
-          'RmNvlinkBandwidthLinkCount': 0x0,
-          'EnableGpuFirmwareLogs': 0x2,
-          'EnableGpuFirmware': 0x12,
-          'EnableResizableBar': 0x0,
-          'EnablePCIERelaxedOrderingMode': 0x0,
-          'RegisterPCIDriver': 0x1,
-          'DynamicPowerManagementVideoMemoryThreshold': 0xc8,
-          'DynamicPowerManagement': 0x3,
-          'S0ixPowerManagementVideoMemoryThreshold': 0x100,
-          'EnableS0ixPowerManagement': 0x0,
-          'PreserveVideoMemoryAllocations': 0x0,
-          'RmProfilingAdminOnly': 0x1,
-          'NvLinkDisable': 0x0,
-          'EnableUserNUMAManagement': 0x1,
-          'EnableStreamMemOPs': 0x0,
-          'IgnoreMMIOCheck': 0x0,
-          'VMallocHeapMaxSize': 0x0,
-          'KMallocHeapMaxSize': 0x0,
-          'MemoryPoolSize': 0x0,
-          'EnablePCIeGen3': 0x0,
-          'EnableMSI': 0x1,
-          'UsePageAttributeTable': 0xffffffff,
-          'InitializeSystemMemoryAllocations': 0x1,
-          'DeviceFileMode': 0x1b6,
-          'DeviceFileGID': 0x0,
-          'DeviceFileUID': 0x0,
-          'ModifyDeviceFiles': 0x1,
-          'RmLogonRC': 0x1,
-          'ResmanDebugLevel': 0xffffffff,
-          'RMForcePcieConfigSave': 0x1,
-          'RMSecBusResetEnable': 0x1}
+    dt = {'RMForcePcieConfigSave': 0x1, 'RMSecBusResetEnable': 0x1}
 
     hdr_size = ctypes.sizeof(nv.PACKED_REGISTRY_TABLE)
     entries_size = ctypes.sizeof(nv.PACKED_REGISTRY_ENTRY) * len(dt)
@@ -542,11 +510,23 @@ class NV_GSP:
     self.status_queue_va = self.status_queue_st_va + self.status_queue_tx.entryOff
     self.status_queue_rx = nv.msgqRxHeader.from_address(self.status_queue_st_va + self.status_queue_tx.rxHdrOff)
 
+    self.command_q.rx = self.status_queue_rx
     self.status_q = NVRpcQueue(self, self.status_queue_va, self.status_queue_tx, self.command_queue_rx)
     self.status_q.wait_resp(0x1001)
     print("GSP init done")
 
-    
+    self.rpc_get_gsp_static_info()
+    self.rpc_rm_alloc(hParent=0x0, hObject=0x0, hClass=0x0, params=nv_gpu.NV0000_ALLOC_PARAMETERS())
+    self.rpc_rm_alloc(hParent=0xc1e00004, hObject=0xcf000000, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=0x0, hClientShare=0xc1e00004,
+      vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES))
+    self.rpc_rm_alloc(hParent=0xcf000000, hObject=0xcf000001, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS(subDeviceId=0x0)) 
+
+    vaspace_params = nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS(vaBase=0x1000, vaSize=0x1fffffb000000,
+      flags=nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_ENABLE_PAGE_FAULTING | nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_IS_EXTERNALLY_OWNED)
+    self.rpc_rm_alloc(hParent=0xcf000000, hObject=0xcf000002, hClass=nv_gpu.FERMI_VASPACE_A, params=vaspace_params)
+
+    self.rpc_set_page_directory(device=0xcf000000, hVASpace=0xcf000002, pdir_paddr=0x600000)
+    exit(0)
 
     # self.status_queue = RPCQueue(self, self.status_queue_va, self.status_queue_tx, self.status_queue_rx,
     #   self.status_queue_st_va + ctypes.sizeof(nv.msgqTxHeader), self.status_queue_st_va + 0x40000)
@@ -613,3 +593,34 @@ class NV_GSP:
 
       else: raise ValueError(f"Unknown op code {op_code} at index {cmd_idx}")
 
+  ### RPCs
+
+  def rpc_get_gsp_static_info(self):
+    # TODO: nv.GspStaticConfigInfo is parsed wrong, size does not match C impl.
+    self.command_q.send_rpc(65, bytes(0x8b0))
+    resp = self.status_q.wait_resp(65)
+    self.client = 0xc1e00004 # int.from_bytes(resp[0x888:0x888+4], 'little')
+    # print(hex(self.client))
+
+  def rpc_rm_alloc(self, hParent, hObject, hClass, params):
+    alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=0xc1e00004, hParent=hParent, hObject=hObject, hClass=hClass, flags=0x0,
+      paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
+    self.command_q.send_rpc(103, bytes(alloc_args) + bytes(params) if params is not None else b'')
+    resp = self.status_q.wait_resp(103)
+    hexdump(resp[:0x80])
+
+  def rpc_set_page_directory(self, device, hVASpace, pdir_paddr):
+    # UVM depth   HW level                            VA bits
+    # 0           PDE3                                48:47
+    # 1           PDE2                                46:38
+    # 2           PDE1 (or 512M PTE)                  37:29
+    # 3           PDE0 (dual 64k/4k PDE, or 2M PTE)   28:21
+    # 4           PTE_64K / PTE_4K                    20:16 / 20:12
+    # So, top level is 4 entries (?). Flags is all channels, vid mem.
+    # subDeviceId = ID+1, 0 for BC
+    params = nv.struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(physAddress=pdir_paddr,
+      numEntries=4, flags=0x8, hVASpace=hVASpace, pasid=0xffffffff, subDeviceId=0+1)
+    alloc_args = nv.rpc_set_page_directory_v(hClient=0xc1e00004, hDevice=device, pasid=0xffffffff, params=params)
+    self.command_q.send_rpc(54, bytes(alloc_args))
+    resp = self.status_q.wait_resp(54)
+    hexdump(resp[:0x80])
