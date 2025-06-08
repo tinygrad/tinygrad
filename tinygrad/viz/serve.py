@@ -133,9 +133,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".js"): content_type = "application/javascript"
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
-    elif url.path == "/kernels":
-      if "kernel" in (query:=parse_qs(url.query)):
-        kidx, ridx = int(query["kernel"][0]), int(query["idx"][0])
+    elif url.path == "/ctxs":
+      if "ctx" in (query:=parse_qs(url.query)):
+        kidx, ridx = int(query["ctx"][0]), int(query["idx"][0])
         try:
           # stream details
           self.send_response(200)
@@ -149,7 +149,7 @@ class Handler(BaseHTTPRequestHandler):
           return self.wfile.flush()
         # pass if client closed connection
         except (BrokenPipeError, ConnectionResetError): return
-      ret, content_type = json.dumps(kernels).encode(), "application/json"
+      ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and perfetto_profile is not None: ret, content_type = perfetto_profile, "application/json"
     else: status_code = 404
 
@@ -194,7 +194,7 @@ if __name__ == "__main__":
   contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
 
   # NOTE: this context is a tuple of list[keys] and list[values]
-  kernels = get_metadata(*contexts) if contexts is not None else []
+  ctxs = get_metadata(*contexts) if contexts is not None else []
 
   perfetto_profile = to_perfetto(profile) if profile is not None else None
 
