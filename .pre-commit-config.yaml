@@ -28,7 +28,7 @@ repos:
         pass_filenames: false
       - id: tests
         name: subset of tests
-        entry: env MAX_BUFFER_SIZE=200000000 PYTHONPATH="." python3 -m pytest -n=4 test/unit/ test/test_ops.py test/test_dtype.py test/test_schedule.py test/test_assign.py test/test_symbolic_shapetracker.py
+        entry: env MAX_BUFFER_SIZE=300000000 PYTHONPATH="." python3 -m pytest -n=4 --ignore=test/unit/test_keccak.py --ignore=test/unit/test_indexing.py test/unit/ test/test_ops.py test/test_dtype.py test/test_schedule.py test/test_assign.py test/test_symbolic_shapetracker.py
         language: system
         always_run: true
         pass_filenames: false

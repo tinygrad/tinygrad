@@ -34,7 +34,7 @@ class ProcessReplayWarning(Warning): pass
 def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[Any, ...]]:
   UOp.unique_num = itertools.count(max([u.arg for u in big_sink.toposort() if u.op is Ops.UNIQUE], default=0)+1)
   new_sink = big_sink.substitute(get_kernelize_map(big_sink))
-  def to_str(ret:UOp):
+  def to_str(ret:UOp) -> str:
     asts = [repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.KERNEL]
     return "\n".join([f"{len(asts)} kernels", *asts])
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
@@ -44,7 +44,9 @@ def replay_linearize(k:Kernel, _:Kernel, name_override=None, ast_transform=None)
   # this should be made fully functional. It's fine for process replay since copy returns a fresh instance
   k2 = k.copy()
   k2.linearize(name_override=name_override or to_function_name(k.name), ast_transform=ast_transform)
-  def to_str(ret:Kernel): return ret.opts.render(ret.uops)
+  def to_str(ret:Kernel) -> str:
+    try: return ret.opts.render(ret.uops)
+    except NotImplementedError: return "" # NULL backend doesn't have a renderer, this is okay
   return to_str(k2), to_str(k), (k.ast, k.opts, k.applied_opts)
 
 replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_kernelize_map":replay_kernelize, "linearize":replay_linearize}
