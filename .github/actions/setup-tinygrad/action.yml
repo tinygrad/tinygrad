@@ -55,7 +55,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: .venv
-        key: venv-$RUNNER_OS-python-${{ inputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ hashFiles('**/setup.py') }}-${{ env.PYTHON_CACHE_VERSION }}
+        key: venv-${{ runner.os }}-python-${{ inputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ hashFiles('**/setup.py') }}-${{ env.PYTHON_CACHE_VERSION }}
 
     # **** Caching downloads ****
 
@@ -91,7 +91,7 @@ runs:
       if: inputs.deps == ''
       shell: bash
       run: |
-        if [[ ! -f .venv/bin/activate ]]; then
+        if [[ ! -d .venv ]]; then
           python -m venv .venv
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             source .venv/Scripts/activate
@@ -104,7 +104,11 @@ runs:
       shell: bash
       run: |
         echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> "$GITHUB_ENV"
-        echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          echo "${{ github.workspace }}/.venv/Scripts" >> "$GITHUB_PATH"
+        else
+          echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
+        fi
 
     # **** OpenCL ****
 
