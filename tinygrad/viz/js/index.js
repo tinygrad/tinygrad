@@ -38,7 +38,7 @@ async function renderDag(graph, additions, recenter=false) {
     const STROKE_WIDTH = 1.4;
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null)
-      .on("click", (_,d) => d.ref != null && setState({ expandKernel: true, currentCtx:d.ref, currentUOp:0, currentRewrite:0 }));
+      .on("click", (_,d) => d.ref != null && setState({ expandSteps: true, currentCtx:d.ref, currentStep:0, currentRewrite:0 }));
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style ?? `stroke:#4a4b57; stroke-width:${STROKE_WIDTH}px;`);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
@@ -271,13 +271,13 @@ const evtSources = [];
 // rewrite: a single UOp transformation
 // step: collection of rewrites
 // context: collection of steps
-const state = {currentCtx:-1, currentUOp:0, currentRewrite:0, expandKernel:false};
+const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
 function setState(ns) {
   Object.assign(state, ns);
   main();
 }
 async function main() {
-  const { currentCtx, currentUOp, currentRewrite, expandKernel } = state;
+  const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // ** left sidebar ctx list
   if (ctxs == null) {
     ctxs = await (await fetch("/ctxs")).json();
@@ -297,27 +297,27 @@ async function main() {
       return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
     });
     p.onclick = () => {
-      setState(i === currentCtx ? { expandKernel:!expandKernel } : { expandKernel:true, currentCtx:i, currentUOp:0, currentRewrite:0 });
+      setState(i === currentCtx ? { expandSteps:!expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
     }
     for (const [j,u] of steps.entries()) {
       const inner = ul.appendChild(document.createElement("ul"));
-      if (i === currentCtx && j === currentUOp) {
+      if (i === currentCtx && j === currentStep) {
         inner.className = "active";
         requestAnimationFrame(() => inner.scrollIntoView({ behavior: "auto", block: "nearest" }));
       }
       inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]} - ${u.match_count}`;
       inner.style.marginLeft = `${8*u.depth}px`;
-      inner.style.display = i === currentCtx && expandKernel ? "block" : "none";
+      inner.style.display = i === currentCtx && expandSteps ? "block" : "none";
       inner.onclick = (e) => {
         e.stopPropagation();
-        setState({ currentUOp:j, currentCtx:i, currentRewrite:0 });
+        setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
       }
     }
   }
   // ** center graph
   if (currentCtx == -1) return;
-  const ctx = ctxs[currentCtx].steps[currentUOp];
-  const cacheKey = `ctx=${currentCtx}&idx=${currentUOp}`;
+  const ctx = ctxs[currentCtx].steps[currentStep];
+  const cacheKey = `ctx=${currentCtx}&idx=${currentStep}`;
   // close any pending event sources
   let activeSrc = null;
   for (const e of evtSources) {
@@ -331,7 +331,7 @@ async function main() {
   if (!(cacheKey in cache) || (cache[cacheKey].length !== ctx.match_count+1 && activeSrc == null)) {
     ret = [];
     cache[cacheKey] = ret;
-    const eventSource = new EventSource(`/ctxs?ctx=${currentCtx}&idx=${currentUOp}`);
+    const eventSource = new EventSource(`/ctxs?ctx=${currentCtx}&idx=${currentStep}`);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
       if (e.data === "END") return eventSource.close();
@@ -418,30 +418,30 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 // **** keyboard shortcuts
 
 document.addEventListener("keydown", async function(event) {
-  const { currentCtx, currentUOp, currentRewrite, expandKernel } = state;
+  const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // up and down change the UOp or ctx from the list
   if (event.key == "ArrowUp") {
     event.preventDefault();
-    if (expandKernel) {
-      return setState({ currentRewrite:0, currentUOp:Math.max(0, currentUOp-1) });
+    if (expandSteps) {
+      return setState({ currentRewrite:0, currentStep:Math.max(0, currentStep-1) });
     }
-    return setState({ currentUOp:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1) });
+    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1) });
   }
   if (event.key == "ArrowDown") {
     event.preventDefault();
-    if (expandKernel) {
+    if (expandSteps) {
       const totalUOps = ctxs[currentCtx].steps.length-1;
-      return setState({ currentRewrite:0, currentUOp:Math.min(totalUOps, currentUOp+1) });
+      return setState({ currentRewrite:0, currentStep:Math.min(totalUOps, currentStep+1) });
     }
-    return setState({ currentUOp:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1) });
+    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1) });
   }
   // enter toggles focus on a single rewrite stage
   if (event.key == "Enter") {
     event.preventDefault()
     if (state.currentCtx === -1) {
-      return setState({ currentCtx:0, expandKernel:true });
+      return setState({ currentCtx:0, expandSteps:true });
     }
-    return setState({ currentUOp:0, currentRewrite:0, expandKernel:!expandKernel });
+    return setState({ currentStep:0, currentRewrite:0, expandSteps:!expandSteps });
   }
   // left and right go through rewrites in a single UOp
   if (event.key == "ArrowLeft") {
