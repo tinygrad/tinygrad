@@ -28,7 +28,7 @@ async function renderDag(graph, additions, recenter=false) {
   if (timeout != null) clearTimeout(timeout);
   const progressMessage = document.querySelector(".progress-message");
   timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
-  worker.postMessage({graph, additions});
+  worker.postMessage({graph, additions, kernels});
   worker.onmessage = (e) => {
     progressMessage.style.display = "none";
     clearTimeout(timeout);
@@ -37,7 +37,8 @@ async function renderDag(graph, additions, recenter=false) {
     // draw nodes
     const STROKE_WIDTH = 1.4;
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
-      .attr("transform", d => `translate(${d.x},${d.y})`);
+      .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null)
+      .on("click", (_,d) => d.ref != null && setState({ expandKernel: true, currentKernel:d.ref, currentUOp:0, currentRewrite:0 }));
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style ?? `stroke:#4a4b57; stroke-width:${STROKE_WIDTH}px;`);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
@@ -347,7 +348,7 @@ async function main() {
   }
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
-  const [code, lang] = kernel.kernel_code != null ? [kernel.kernel_code, "cpp"] : [ret[currentRewrite].uop, "python"];
+  const [code, lang] = kernels[currentKernel].kernel_code != null ? [kernels[currentKernel].kernel_code, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(kernel.code_line, "python", { loc:kernel.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
   // ** rewrite steps
   if (kernel.match_count >= 1) {

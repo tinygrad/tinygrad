@@ -30,7 +30,7 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
   ret = []
   for k,v in zip(keys, contexts):
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":lines(s.loc[0])[s.loc[1]-1].strip()} for s in v]
-    if isinstance(k, Kernel): ret.append({"name":k.name, "kernel_code":render_program(k), "steps":steps})
+    if isinstance(k, Kernel): ret.append({"name":k.name, "kernel_code":render_program(k), "ref":id(k.ast), "steps":steps})
     else: ret.append({"name":str(k), "steps":steps})
   return ret
 
@@ -75,7 +75,8 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       label += "\n<ISSUE GETTING SHAPE>"
     # NOTE: kernel already has metadata in arg
     if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+repr(u.metadata)
-    graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff")}
+    graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff"),
+                    "ref":id(u.arg.ast) if u.op is Ops.KERNEL else None}
   return graph
 
 def get_details(k:Any, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
