@@ -278,7 +278,7 @@ function setState(ns) {
 }
 async function main() {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
-  // ** left sidebar ctx list
+  // ** left sidebar context list
   if (ctxs == null) {
     ctxs = await (await fetch("/ctxs")).json();
     setState({ currentCtx:-1 });
@@ -316,7 +316,8 @@ async function main() {
   }
   // ** center graph
   if (currentCtx == -1) return;
-  const ctx = ctxs[currentCtx].steps[currentStep];
+  const ctx = ctxs[currentCtx];
+  const step = ctx.steps[currentStep];
   const cacheKey = `ctx=${currentCtx}&idx=${currentStep}`;
   // close any pending event sources
   let activeSrc = null;
@@ -327,8 +328,8 @@ async function main() {
   if (cacheKey in cache) {
     ret = cache[cacheKey];
   }
-  // if we don't have a complete cache yet we start streaming this ctx
-  if (!(cacheKey in cache) || (cache[cacheKey].length !== ctx.match_count+1 && activeSrc == null)) {
+  // if we don't have a complete cache yet we start streaming rewrites in this step
+  if (!(cacheKey in cache) || (cache[cacheKey].length !== step.match_count+1 && activeSrc == null)) {
     ret = [];
     cache[cacheKey] = ret;
     const eventSource = new EventSource(`/ctxs?ctx=${currentCtx}&idx=${currentStep}`);
@@ -352,13 +353,13 @@ async function main() {
   }
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
-  const [code, lang] = ctxs[currentCtx].ctx_code != null ? [ctxs[currentCtx].ctx_code, "cpp"] : [ret[currentRewrite].uop, "python"];
-  metadata.replaceChildren(codeBlock(ctx.code_line, "python", { loc:ctx.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
+  const [code, lang] = ctx.kernel_code != null ? [ctx.kernel_code, "cpp"] : [ret[currentRewrite].uop, "python"];
+  metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
   // ** rewrite steps
-  if (ctx.match_count >= 1) {
+  if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
     rewriteList.className = "rewrite-list";
-    for (let s=0; s<=ctx.match_count; s++) {
+    for (let s=0; s<=step.match_count; s++) {
       const ul = rewriteList.appendChild(document.createElement("ul"));
       ul.innerText = s;
       ul.id = `rewrite-${s}`;
@@ -419,7 +420,7 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 
 document.addEventListener("keydown", async function(event) {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
-  // up and down change the UOp or ctx from the list
+  // up and down change the step or context from the list
   if (event.key == "ArrowUp") {
     event.preventDefault();
     if (expandSteps) {
