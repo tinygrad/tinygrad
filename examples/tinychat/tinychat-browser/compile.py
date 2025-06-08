@@ -13,8 +13,8 @@ def prepare_browser_chunks(model):
   chunk_size = 16 * 1024 * 1024 # small chunks based on iphone browser constraints
   metadata = {}
   # We won't export cache_kv bytes (because we start inference on client at start_pos=0), but we will tell the client how big cache_kv needs to be
-  t_infos = [(v.lazydata.base.realized.nbytes, k, v.dtype) for k,v in state_dict.items() if "cache_kv" not in k]
-  empty_t_infos = [(v.lazydata.base.realized.nbytes, k, v.dtype) for k,v in state_dict.items() if "cache_kv" in k]
+  t_infos = [(v.uop.base.realized.nbytes, k, v.dtype) for k,v in state_dict.items() if "cache_kv" not in k]
+  empty_t_infos = [(v.uop.base.realized.nbytes, k, v.dtype) for k,v in state_dict.items() if "cache_kv" in k]
 
   split_t_infos = []
   for size, name, dtype in t_infos:
@@ -48,7 +48,7 @@ def prepare_browser_chunks(model):
         weight_metadata = metadata.get(name, default)
         weight_metadata["parts"][part_num] = {"file": i, "file_start_pos": cursor, "size": size}
         metadata[name] = weight_metadata
-        data = bytes(state_dict[name].lazydata.base.realized.as_buffer())
+        data = bytes(state_dict[name].uop.base.realized.as_buffer())
         data = data if not offsets else data[offsets[0]:offsets[1]]
         writer.write(data)
         cursor += size

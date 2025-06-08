@@ -221,7 +221,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     # contiguous folded const can still schedule
     a = Tensor.empty(1, 0).sum().contiguous()
     _check_ast_count(2, a+2)
-    self.assertIs(a.lazydata.base.op, Ops.BUFFER)
+    self.assertIs(a.uop.base.op, Ops.BUFFER)
     np.testing.assert_equal((Tensor.empty(1, 0).sum().contiguous()+2).numpy(), 2)
     # otherwise we just fuse it
     _check_ast_count(1, (Tensor.empty(1, 0).sum()+2).contiguous())
