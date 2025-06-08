@@ -356,7 +356,7 @@ jobs:
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
-      run: PYTHONPATH="." python -m pytest -n=auto test/unit/
+      run: PYTHONPATH="." python -m pytest -n=auto test/unit/ --durations=20
     - name: Run targetted tests on NULL backend
       run: PYTHONPATH="." NULL=1 python3 test/test_multitensor.py TestMultiTensor.test_data_parallel_resnet_train_step
     # TODO: support fake weights
