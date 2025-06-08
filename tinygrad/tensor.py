@@ -1638,7 +1638,6 @@ class Tensor(MathTrait):
     total_size = mask.numel()
     num_chunks = ceildiv(total_size, chunk_size)
     results = []
-
     for i in range(num_chunks):
       start_idx = i * chunk_size
       end_idx = min((i + 1) * chunk_size, total_size)
@@ -1656,7 +1655,7 @@ class Tensor(MathTrait):
 
     if len(results) == 0: return Tensor.zeros(0, device=self.device, dtype=self.dtype)
     elif len(results) == 1: return results[0]
-    else: return results[0].cat(*results[1:])
+    else: return Tensor.cat(*results)
 
   def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor:
     """
