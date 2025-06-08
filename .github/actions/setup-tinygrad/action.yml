@@ -98,6 +98,8 @@ runs:
       run: |
         echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> "$GITHUB_ENV"
         echo "OMP_NUM_THREADS=1" >> "$GITHUB_ENV"
+        # no buffers should be over 200MB in CI
+        echo "MAX_BUFFER_SIZE=200000000" >> "$GITHUB_ENV"
         if [[ "$RUNNER_OS" == "Windows" ]]; then
           echo "${{ github.workspace }}/.venv/Scripts" >> "$GITHUB_PATH"
         else
