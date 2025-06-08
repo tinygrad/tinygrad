@@ -41,9 +41,9 @@ class CLProgram:
     self.kernel = checked(cl.clCreateKernel(self.program, name.encode(), status := ctypes.c_int32()), status)
 
   def __del__(self):
-    try:
-      check(cl.clReleaseKernel(self.kernel))
-      check(cl.clReleaseProgram(self.program))
+    try: check(cl.clReleaseKernel(self.kernel))
+    except (TypeError, AttributeError): pass
+    try: check(cl.clReleaseProgram(self.program))
     except (TypeError, AttributeError): pass
 
   def __call__(self, *bufs:tuple[ctypes._CData, BufferSpec], global_size:tuple[int,int,int]=(1,1,1), local_size:Optional[tuple[int,int,int]]=None, vals:tuple[int, ...]=(), wait=False) -> Optional[float]:  # noqa: E501
