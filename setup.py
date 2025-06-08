@@ -85,9 +85,5 @@ setup(name='tinygrad',
             "black",
             "numpy",
         ],
-        'testing_tf': [
-            "tensorflow==2.15.1",
-            "tensorflow_addons",
-        ],
       },
       include_package_data=True)

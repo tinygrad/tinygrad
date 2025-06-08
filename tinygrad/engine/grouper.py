@@ -90,7 +90,8 @@ sym = symbolic_simple+PatternMatcher([
   # double ASSIGN to same target is one ASSIGN
   (UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat.var("x"))))), lambda x,t: t.assign(x.contiguous())),
   # ASSIGN to unrealized replaces the UOp
-  (UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat.var("x"))), lambda x,t: x.contiguous() if t.base.op not in {Ops.BUFFER, Ops.BUFFER_VIEW} else None),
+  (UPat(Ops.ASSIGN, src=(UPat.var("t"), UPat.var("x"))), lambda x,t: x.contiguous() if t.base.op not in {Ops.BUFFER, Ops.BUFFER_VIEW} and
+   not (t.base.op is Ops.MSTACK and all(x.op is Ops.BUFFER for x in t.base.src)) else None),
   # put CAST to smaller dtype before EXPAND
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm"),)), lambda cast,vm: vm.base.cast(cast.dtype).view(vm.st)
     if cast.dtype.itemsize <= vm.dtype.itemsize and resolve(prod(vm.shape) > vm.st.real_size()) else None),
@@ -258,6 +259,9 @@ create_kernels = PatternMatcher([
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # push RESHAPE through MSELECT
   (UPat(Ops.MSELECT, src=(UPat(Ops.RESHAPE, name="r"),), name="ms"), lambda ms,r: r.src[0].mselect(ms.arg).reshape(r.arg)),
+  # push RESHAPE through MSTACK
+  (UPat(Ops.MSTACK, src=UPat(Ops.RESHAPE), name="ms"),
+   lambda ms: UOp(Ops.MSTACK, ms.dtype, tuple(x.src[0] for x in ms.src)).reshape(ms.src[0].arg)),
 ])
 
 # **** swizzler
@@ -409,9 +413,10 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # replace buffer with define_global + add load/store last
   bufs = []
   for s in k.src:
+    s = s.buf_uop
     # traverse back through MSELECT and MSTACK. HACK: 0 branch of MSTACK only
     while s.op in {Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
-    bufs.append(s.buf_uop)
+    bufs.append(s)
   ast = graph_rewrite(ast, view_left+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
   if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
@@ -496,10 +501,6 @@ do_fuse = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
 ])
 
-def get_name(becomes_map:dict[UOp, UOp]) -> str:
-  assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
-  return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
-
 add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"),
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
 
@@ -533,7 +534,7 @@ finalize_gbarrier = PatternMatcher([
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
-@track_rewrites(name_fxn=get_name)
+@track_rewrites(name_fxn=lambda big_sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[big_sink].toposort() if u.op is Ops.KERNEL]))}")
 def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # multi + merge_views + simplify
   tensor_map = graph_rewrite_map(big_sink, multi_pm+replace_allreduce+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
