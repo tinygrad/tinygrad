@@ -267,6 +267,10 @@ var ret = [];
 var cache = {};
 var kernels = null;
 const evtSources = [];
+// VIZ displays graph rewrites in 3 levels, from bottom-up:
+// rewrite: a single UOp transformation
+// step: collection of rewrites
+// context: collection of steps
 const state = {currentKernel:-1, currentUOp:0, currentRewrite:0, expandKernel:false};
 function setState(ns) {
   Object.assign(state, ns);
