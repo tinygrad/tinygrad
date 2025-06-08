@@ -46,7 +46,7 @@ class CUDAProgram:
     if self.smem > 0: check(cuda.cuFuncSetAttribute(self.prg, cuda.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, self.smem))
 
   def __del__(self):
-    if hasattr(self, 'module'): check(cuda.cuModuleUnload(self.module))
+    if hasattr(self, 'module') and hasattr(cuda, 'cuModuleUnload'): check(cuda.cuModuleUnload(self.module))
 
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     check(cuda.cuCtxSetCurrent(self.dev.context))
