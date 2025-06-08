@@ -1624,10 +1624,16 @@ class Tensor(MathTrait):
     """
     if not dtypes.is_bool(mask.dtype): raise RuntimeError(f"masked_select expects bool mask tensor, got {mask.dtype}")
     x, mask = self.flatten(), mask._broadcast_to(self.shape).flatten()
-    mask_cumsum = mask.cumsum()
-    counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32)
-    idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
-    return x[idxs]
+    chunk_size = 1024 * 1024
+    if mask.numel() <= chunk_size:
+      mask_cumsum = mask.cumsum()
+      counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32)
+      idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
+      return x[idxs]
+
+    # numpy implementation for large tensors
+    selected = x.numpy()[mask.numpy()]
+    return Tensor(selected, device=self.device, dtype=self.dtype)
 
   def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor:
     """
