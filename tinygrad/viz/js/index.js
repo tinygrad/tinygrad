@@ -95,7 +95,7 @@ function pluralize(num, name, alt=null) {
 
 function renderMemoryGraph(graph) {
   // ** construct alloc/free traces
-  // we can map reads/writes from the ctx graph
+  // we can map reads/writes from the kernel graph
   const actions = [];
   const children = new Map(); // {buffer: [...assign]}
   for (const [k,v] of Object.entries(graph)) {
