@@ -149,7 +149,7 @@ class Buffer:
     return self
   def deallocate(self):
     assert self.is_allocated(), "buffer must be allocated to deallocate"
-    if DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
+    if DEBUG is not None and DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
