@@ -333,7 +333,9 @@ def transcribe_waveform(model: Whisper, enc, waveforms, use_beam=False, use_time
     if len(toks)>1 and toks[-1]>notimestamp and toks[-2]>notimestamp: toks = toks[:-1]
     return toks[-nsample+len(start_tokens):]
 
-  def ts2frame(token): return FRAMES_PER_SEGMENT if token<notimestamp else int(float(enc.decode([token])[2:-2])*RATE//HOP_LENGTH)
+  def ts2frame(tokens):
+    token = tokens[tokens > notimestamp][-1] if np.any(tokens > notimestamp) else None
+    return FRAMES_PER_SEGMENT if token is None or token<notimestamp else int(float(enc.decode([token])[2:-2])*RATE//HOP_LENGTH)
 
   def group_sequence(data: np.ndarray):
     data = np.insert(data, 0, 0)
@@ -380,7 +382,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, use_beam=False, use_time
     else: ctx = [inferloop((np.array([c]*model.batch_size)), encoded_audio)[i] for i,c in enumerate(ctx)]
     for i, (res, arr) in enumerate(zip(transcriptions, ctx)):
       if curr_frame*HOP_LENGTH <= len(waveforms[i]): res.extend(arr[np.where(arr == start_tokens[-1])[0][0]+1:eoti[0] if len (eoti:=np.where(arr == eot)[0]) else None])
-    curr_frame += FRAMES_PER_SEGMENT if not use_timestamps else ts2frame(ctx[0, -2])
+    curr_frame += FRAMES_PER_SEGMENT if not use_timestamps else ts2frame(ctx[0, :])
     ctx = [[enc._special_tokens['<|startofprev|>']]+gettexttoks(cs)+start_tokens for cs in ctx]
 
   transcriptions = list(map(lambda tokens: enc.decode(tokens).strip() if not use_timestamps else ctx2segs(np.asarray(tokens)), transcriptions))
