@@ -1233,8 +1233,8 @@ class TestSchedule(unittest.TestCase):
 
   def test_adam_step_fusion(self):
     with Tensor.train():
-      x = Tensor.empty(4, 64, 768)
-      layer = nn.Linear(768, 768*4)
+      x = Tensor.empty(4, 64, 32)
+      layer = nn.Linear(32, 32*4)
       _realize_weights(layer)
       opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
       layer(x).relu().sum().backward()

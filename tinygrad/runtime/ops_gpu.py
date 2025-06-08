@@ -67,7 +67,9 @@ class CLAllocator(LRUAllocator['CLDevice']):
                                         cl.cl_image_format(cl.CL_RGBA, {2: cl.CL_HALF_FLOAT, 4: cl.CL_FLOAT}[options.image.itemsize]),
                                         options.image.shape[1], options.image.shape[0], 0, None, status := ctypes.c_int32()), status), options)
     return (checked(cl.clCreateBuffer(self.dev.context, cl.CL_MEM_READ_WRITE, size, None, status := ctypes.c_int32()), status), options)
-  def _free(self, opaque:tuple[ctypes._CData, BufferSpec], options:BufferSpec): check(cl.clReleaseMemObject(opaque[0]))
+  def _free(self, opaque:tuple[ctypes._CData, BufferSpec], options:BufferSpec):
+    try: check(cl.clReleaseMemObject(opaque[0]))
+    except AttributeError: pass
   def _copyin(self, dest:tuple[ctypes._CData, BufferSpec], src:memoryview):
     if dest[1].image is not None:
       check(cl.clEnqueueWriteImage(self.dev.queue, dest[0], False, (ctypes.c_size_t * 3)(0,0,0),

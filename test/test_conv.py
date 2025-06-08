@@ -5,7 +5,7 @@ from tinygrad.helpers import Context
 
 class TestConv(unittest.TestCase):
   def test_simple(self):
-    x = Tensor.ones(1,12,128,256).contiguous().realize()
+    x = Tensor.ones(1,12,16,32).contiguous().realize()
     w = Tensor.ones(32,12,3,3).contiguous().realize()
     ret = x.conv2d(w, stride=(2,2), padding=(1,1)).numpy()
     # it's not 108 around the padding
@@ -14,7 +14,7 @@ class TestConv(unittest.TestCase):
     assert ret[0,0,0,1] == 72
 
   def test_simple_rand(self):
-    x = Tensor.rand(1,12,128,256)
+    x = Tensor.rand(1,12,16,32)
     w = Tensor.rand(32,12,3,3)
     x.conv2d(w, stride=(2,2), padding=(1,1)).numpy()
 
