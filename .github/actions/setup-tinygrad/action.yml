@@ -55,7 +55,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: .venv
-        key: venv-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}-${{ env.PYTHON_CACHE_VERSION }}
+        key: venv-python-package-${{ inputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ hashFiles('**/setup.py') }}-${{ env.PYTHON_CACHE_VERSION }}
 
     # **** Caching downloads ****
 
@@ -102,7 +102,9 @@ runs:
         fi
     - name: Export venv
       shell: bash
-      run: echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
+      run: |
+        echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> "$GITHUB_ENV"
+        echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
 
     # **** OpenCL ****
 
