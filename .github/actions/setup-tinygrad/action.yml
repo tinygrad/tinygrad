@@ -74,7 +74,7 @@ runs:
 
     # **** Python deps ****
 
-    - name: Install dependencies (with extra)
+    - name: Install dependencies in venv (with extra)
       if: inputs.deps != ''
       shell: bash
       run: |
@@ -87,7 +87,7 @@ runs:
           fi
           python -m pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
         fi
-    - name: Install dependencies (without extra)
+    - name: Install dependencies in venv (without extra)
       if: inputs.deps == ''
       shell: bash
       run: |
@@ -100,6 +100,9 @@ runs:
           fi
           python -m pip install -e . ${{ inputs.pydeps }}
         fi
+    - name: Export venv
+      shell: bash
+      run: echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
 
     # **** OpenCL ****
 
