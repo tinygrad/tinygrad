@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 # -*- coding: utf-8 -*-
 #
-# TARGET arch is: ['-DRPC_MESSAGE_STRUCTURES', '-include', '/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/common/sdk/nvidia/inc/nvtypes.h', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/generated', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/common/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/interface/', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/inc/kernel', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/inc/libraries', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/arch/nvalloc/common/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/kernel-open/nvidia-uvm', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/kernel-open/common/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/common/sdk/nvidia/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/arch/nvalloc/unix/include', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/common/sdk/nvidia/inc/ctrl']
+# TARGET arch is: ['-DRPC_MESSAGE_STRUCTURES', '-DRPC_STRUCTURES', '-include', '/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/common/sdk/nvidia/inc/nvtypes.h', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/generated', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/common/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/interface/', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/inc/kernel', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/inc/libraries', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/arch/nvalloc/common/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/kernel-open/nvidia-uvm', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/kernel-open/common/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/common/sdk/nvidia/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/arch/nvalloc/unix/include', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/common/sdk/nvidia/inc/ctrl']
 # WORD_SIZE is: 8
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
@@ -802,6 +802,5086 @@ GPU_RECOVERY_EVENT_TYPE_SYS_REBOOT = 2
 c__EA_GPU_RECOVERY_EVENT_TYPE = ctypes.c_uint32 # enum
 GPU_RECOVERY_EVENT_TYPE = c__EA_GPU_RECOVERY_EVENT_TYPE
 GPU_RECOVERY_EVENT_TYPE__enumvalues = c__EA_GPU_RECOVERY_EVENT_TYPE__enumvalues
+SDK_STRUCTURES = True # macro
+class struct_rpc_set_guest_system_info_v03_00(Structure):
+    pass
+
+struct_rpc_set_guest_system_info_v03_00._pack_ = 1 # source:False
+struct_rpc_set_guest_system_info_v03_00._fields_ = [
+    ('vgxVersionMajorNum', ctypes.c_uint32),
+    ('vgxVersionMinorNum', ctypes.c_uint32),
+    ('guestDriverVersionBufferLength', ctypes.c_uint32),
+    ('guestVersionBufferLength', ctypes.c_uint32),
+    ('guestTitleBufferLength', ctypes.c_uint32),
+    ('guestClNum', ctypes.c_uint32),
+    ('guestDriverVersion', ctypes.c_char * 256),
+    ('guestVersion', ctypes.c_char * 256),
+    ('guestTitle', ctypes.c_char * 256),
+]
+
+rpc_set_guest_system_info_v03_00 = struct_rpc_set_guest_system_info_v03_00
+rpc_set_guest_system_info_v = struct_rpc_set_guest_system_info_v03_00
+class struct_rpc_set_guest_system_info_ext_v15_02(Structure):
+    pass
+
+struct_rpc_set_guest_system_info_ext_v15_02._pack_ = 1 # source:False
+struct_rpc_set_guest_system_info_ext_v15_02._fields_ = [
+    ('guestDriverBranch', ctypes.c_char * 256),
+    ('domain', ctypes.c_uint32),
+    ('bus', ctypes.c_uint16),
+    ('device', ctypes.c_uint16),
+]
+
+rpc_set_guest_system_info_ext_v15_02 = struct_rpc_set_guest_system_info_ext_v15_02
+class struct_rpc_set_guest_system_info_ext_v25_1B(Structure):
+    pass
+
+struct_rpc_set_guest_system_info_ext_v25_1B._pack_ = 1 # source:False
+struct_rpc_set_guest_system_info_ext_v25_1B._fields_ = [
+    ('guestDriverBranch', ctypes.c_char * 256),
+    ('domain', ctypes.c_uint32),
+    ('bus', ctypes.c_uint16),
+    ('device', ctypes.c_uint16),
+    ('gridBuildCsp', ctypes.c_uint32),
+]
+
+rpc_set_guest_system_info_ext_v25_1B = struct_rpc_set_guest_system_info_ext_v25_1B
+rpc_set_guest_system_info_ext_v = struct_rpc_set_guest_system_info_ext_v25_1B
+class struct_rpc_alloc_root_v07_00(Structure):
+    pass
+
+struct_rpc_alloc_root_v07_00._pack_ = 1 # source:False
+struct_rpc_alloc_root_v07_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('processID', ctypes.c_uint32),
+    ('processName', ctypes.c_char * 100),
+]
+
+rpc_alloc_root_v07_00 = struct_rpc_alloc_root_v07_00
+rpc_alloc_root_v = struct_rpc_alloc_root_v07_00
+class struct_rpc_alloc_memory_v13_01(Structure):
+    pass
+
+class struct_pte_desc(Structure):
+    pass
+
+class union_pte_desc_0(Union):
+    pass
+
+union_pte_desc_0._pack_ = 1 # source:False
+union_pte_desc_0._fields_ = [
+    ('pte', ctypes.c_uint64),
+    ('pde', ctypes.c_uint64),
+]
+
+struct_pte_desc._pack_ = 1 # source:False
+struct_pte_desc._fields_ = [
+    ('idr', ctypes.c_uint32, 2),
+    ('reserved1', ctypes.c_uint32, 14),
+    ('length', ctypes.c_uint32, 16),
+    ('PADDING_0', ctypes.c_uint32, 32),
+    ('pte_pde', union_pte_desc_0 * 0),
+]
+
+struct_rpc_alloc_memory_v13_01._pack_ = 1 # source:False
+struct_rpc_alloc_memory_v13_01._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hDevice', ctypes.c_uint32),
+    ('hMemory', ctypes.c_uint32),
+    ('hClass', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('pteAdjust', ctypes.c_uint32),
+    ('format', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('length', ctypes.c_uint64),
+    ('pageCount', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('pteDesc', struct_pte_desc),
+]
+
+rpc_alloc_memory_v13_01 = struct_rpc_alloc_memory_v13_01
+rpc_alloc_memory_v = struct_rpc_alloc_memory_v13_01
+class struct_rpc_alloc_channel_dma_v1F_04(Structure):
+    pass
+
+class struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04(Structure):
+    pass
+
+class struct_NV_MEMORY_DESC_PARAMS_v18_01(Structure):
+    pass
+
+struct_NV_MEMORY_DESC_PARAMS_v18_01._pack_ = 1 # source:False
+struct_NV_MEMORY_DESC_PARAMS_v18_01._fields_ = [
+    ('base', ctypes.c_uint64),
+    ('size', ctypes.c_uint64),
+    ('addressSpace', ctypes.c_uint32),
+    ('cacheAttrib', ctypes.c_uint32),
+]
+
+struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04._pack_ = 1 # source:False
+struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04._fields_ = [
+    ('hObjectError', ctypes.c_uint32),
+    ('hObjectBuffer', ctypes.c_uint32),
+    ('gpFifoOffset', ctypes.c_uint64),
+    ('gpFifoEntries', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('hContextShare', ctypes.c_uint32),
+    ('hVASpace', ctypes.c_uint32),
+    ('hUserdMemory', ctypes.c_uint32 * 1),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('userdOffset', ctypes.c_uint64 * 1),
+    ('engineType', ctypes.c_uint32),
+    ('hObjectEccError', ctypes.c_uint32),
+    ('instanceMem', struct_NV_MEMORY_DESC_PARAMS_v18_01),
+    ('ramfcMem', struct_NV_MEMORY_DESC_PARAMS_v18_01),
+    ('userdMem', struct_NV_MEMORY_DESC_PARAMS_v18_01),
+    ('mthdbufMem', struct_NV_MEMORY_DESC_PARAMS_v18_01),
+    ('hPhysChannelGroup', ctypes.c_uint32),
+    ('subDeviceId', ctypes.c_uint32),
+    ('internalFlags', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('errorNotifierMem', struct_NV_MEMORY_DESC_PARAMS_v18_01),
+    ('eccErrorNotifierMem', struct_NV_MEMORY_DESC_PARAMS_v18_01),
+]
+
+struct_rpc_alloc_channel_dma_v1F_04._pack_ = 1 # source:False
+struct_rpc_alloc_channel_dma_v1F_04._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hDevice', ctypes.c_uint32),
+    ('hChannel', ctypes.c_uint32),
+    ('hClass', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('params', struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04),
+    ('chid', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+]
+
+rpc_alloc_channel_dma_v1F_04 = struct_rpc_alloc_channel_dma_v1F_04
+rpc_alloc_channel_dma_v = struct_rpc_alloc_channel_dma_v1F_04
+class struct_rpc_alloc_object_v25_08(Structure):
+    pass
+
+class union_alloc_object_params_v25_08(Union):
+    pass
+
+class struct_alloc_object_NV50_TESLA_v03_00(Structure):
+    pass
+
+struct_alloc_object_NV50_TESLA_v03_00._pack_ = 1 # source:False
+struct_alloc_object_NV50_TESLA_v03_00._fields_ = [
+    ('version', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('size', ctypes.c_uint32),
+    ('caps', ctypes.c_uint32),
+]
+
+class struct_alloc_object_GT212_DMA_COPY_v03_00(Structure):
+    pass
+
+struct_alloc_object_GT212_DMA_COPY_v03_00._pack_ = 1 # source:False
+struct_alloc_object_GT212_DMA_COPY_v03_00._fields_ = [
+    ('version', ctypes.c_uint32),
+    ('engineInstance', ctypes.c_uint32),
+]
+
+class struct_alloc_object_GF100_DISP_SW_v03_00(Structure):
+    pass
+
+struct_alloc_object_GF100_DISP_SW_v03_00._pack_ = 1 # source:False
+struct_alloc_object_GF100_DISP_SW_v03_00._fields_ = [
+    ('_reserved1', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('_reserved2', ctypes.c_uint64),
+    ('logicalHeadId', ctypes.c_uint32),
+    ('displayMask', ctypes.c_uint32),
+    ('caps', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+]
+
+class struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08(Structure):
+    pass
+
+struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08._pack_ = 1 # source:False
+struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08._fields_ = [
+    ('hObjectError', ctypes.c_uint32),
+    ('hVASpace', ctypes.c_uint32),
+    ('engineType', ctypes.c_uint32),
+]
+
+class struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00(Structure):
+    pass
+
+struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00._pack_ = 1 # source:False
+struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00._fields_ = [
+    ('hVASpace', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('subctxId', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00(Structure):
+    pass
+
+struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00._pack_ = 1 # source:False
+struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00._fields_ = [
+    ('size', ctypes.c_uint32),
+    ('prohibitMultipleInstances', ctypes.c_uint32),
+    ('engineInstance', ctypes.c_uint32),
+]
+
+class struct_alloc_object_FERMI_VASPACE_A_v03_00(Structure):
+    pass
+
+struct_alloc_object_FERMI_VASPACE_A_v03_00._pack_ = 1 # source:False
+struct_alloc_object_FERMI_VASPACE_A_v03_00._fields_ = [
+    ('index', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('vaSize', ctypes.c_uint64),
+    ('bigPageSize', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('vaBase', ctypes.c_uint64),
+]
+
+class struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00(Structure):
+    pass
+
+struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00._pack_ = 1 # source:False
+struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00._fields_ = [
+    ('size', ctypes.c_uint32),
+    ('prohibitMultipleInstances', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00(Structure):
+    pass
+
+struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00._pack_ = 1 # source:False
+struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00._fields_ = [
+    ('hDebuggerClient', ctypes.c_uint32),
+    ('hAppClient', ctypes.c_uint32),
+    ('hClass3dObject', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NVENC_SW_SESSION_v06_01(Structure):
+    pass
+
+struct_alloc_object_NVENC_SW_SESSION_v06_01._pack_ = 1 # source:False
+struct_alloc_object_NVENC_SW_SESSION_v06_01._fields_ = [
+    ('codecType', ctypes.c_uint32),
+    ('hResolution', ctypes.c_uint32),
+    ('vResolution', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02(Structure):
+    pass
+
+struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02._pack_ = 1 # source:False
+struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02._fields_ = [
+    ('size', ctypes.c_uint32),
+    ('prohibitMultipleInstances', ctypes.c_uint32),
+    ('engineInstance', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NVFBC_SW_SESSION_v12_04(Structure):
+    pass
+
+struct_alloc_object_NVFBC_SW_SESSION_v12_04._pack_ = 1 # source:False
+struct_alloc_object_NVFBC_SW_SESSION_v12_04._fields_ = [
+    ('displayOrdinal', ctypes.c_uint32),
+    ('sessionType', ctypes.c_uint32),
+    ('sessionFlags', ctypes.c_uint32),
+    ('hMaxResolution', ctypes.c_uint32),
+    ('vMaxResolution', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02(Structure):
+    pass
+
+struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02._pack_ = 1 # source:False
+struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02._fields_ = [
+    ('size', ctypes.c_uint32),
+    ('prohibitMultipleInstances', ctypes.c_uint32),
+    ('engineInstance', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02(Structure):
+    pass
+
+struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02._pack_ = 1 # source:False
+struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02._fields_ = [
+    ('hSubDevice', ctypes.c_uint32),
+    ('hPeerSubDevice', ctypes.c_uint32),
+    ('subDevicePeerIdMask', ctypes.c_uint32),
+    ('peerSubDevicePeerIdMask', ctypes.c_uint32),
+    ('mailboxBar1Addr', ctypes.c_uint64),
+    ('mailboxTotalSize', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00(Structure):
+    pass
+
+struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00._pack_ = 1 # source:False
+struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00._fields_ = [
+    ('swizzId', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03(Structure):
+    pass
+
+struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03._pack_ = 1 # source:False
+struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03._fields_ = [
+    ('offset', ctypes.c_uint64),
+    ('limit', ctypes.c_uint64),
+    ('hVASpace', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+class struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06(Structure):
+    pass
+
+struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06._pack_ = 1 # source:False
+struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06._fields_ = [
+    ('execPartitionId', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15(Structure):
+    pass
+
+struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15._pack_ = 1 # source:False
+struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15._fields_ = [
+    ('flags', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('p2pToken', ctypes.c_uint64),
+]
+
+class struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01(Structure):
+    pass
+
+struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01._pack_ = 1 # source:False
+struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01._fields_ = [
+    ('numHeads', ctypes.c_uint32),
+    ('numSors', ctypes.c_uint32),
+    ('numDsis', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03(Structure):
+    pass
+
+struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03._pack_ = 1 # source:False
+struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03._fields_ = [
+    ('hSubDevice', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03(Structure):
+    pass
+
+struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03._pack_ = 1 # source:False
+struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03._fields_ = [
+    ('hClientTarget', ctypes.c_uint32),
+    ('hContextTarget', ctypes.c_uint32),
+]
+
+class struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17(Structure):
+    pass
+
+struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17._pack_ = 1 # source:False
+struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17._fields_ = [
+    ('version', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('size', ctypes.c_uint32),
+    ('caps', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B(Structure):
+    pass
+
+struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B._pack_ = 1 # source:False
+struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hChannel', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C(Structure):
+    pass
+
+class struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C(Structure):
+    pass
+
+struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C._pack_ = 1 # source:False
+struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C._fields_ = [
+    ('offset', ctypes.c_uint64),
+    ('hVidMem', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+]
+
+struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C._pack_ = 1 # source:False
+struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C._fields_ = [
+    ('alignment', ctypes.c_uint64),
+    ('allocSize', ctypes.c_uint64),
+    ('pageSize', ctypes.c_uint32),
+    ('allocFlags', ctypes.c_uint32),
+    ('map', struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C),
+]
+
+class struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00(Structure):
+    pass
+
+struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00._pack_ = 1 # source:False
+struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00._fields_ = [
+    ('size', ctypes.c_uint32),
+    ('prohibitMultipleInstances', ctypes.c_uint32),
+]
+
+class struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08(Structure):
+    pass
+
+struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08._pack_ = 1 # source:False
+struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08._fields_ = [
+    ('reserved', ctypes.c_uint32),
+]
+
+union_alloc_object_params_v25_08._pack_ = 1 # source:False
+union_alloc_object_params_v25_08._fields_ = [
+    ('param_NV50_TESLA', struct_alloc_object_NV50_TESLA_v03_00),
+    ('param_GT212_DMA_COPY', struct_alloc_object_GT212_DMA_COPY_v03_00),
+    ('param_GF100_DISP_SW', struct_alloc_object_GF100_DISP_SW_v03_00),
+    ('param_KEPLER_CHANNEL_GROUP_A', struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08),
+    ('param_FERMI_CONTEXT_SHARE_A', struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00),
+    ('param_NVD0B7_VIDEO_ENCODER', struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00),
+    ('param_FERMI_VASPACE_A', struct_alloc_object_FERMI_VASPACE_A_v03_00),
+    ('param_NVB0B0_VIDEO_DECODER', struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00),
+    ('param_NV83DE_ALLOC_PARAMETERS', struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00),
+    ('param_NVENC_SW_SESSION', struct_alloc_object_NVENC_SW_SESSION_v06_01),
+    ('param_NVC4B0_VIDEO_DECODER', struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02),
+    ('param_NVFBC_SW_SESSION', struct_alloc_object_NVFBC_SW_SESSION_v12_04),
+    ('param_NV_NVJPG_ALLOCATION_PARAMETERS', struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02),
+    ('param_NV503B_ALLOC_PARAMETERS', struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02),
+    ('param_NVC637_ALLOCATION_PARAMETERS', struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00),
+    ('param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03),
+    ('param_NVC638_ALLOCATION_PARAMETERS', struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06),
+    ('param_NV503C_ALLOC_PARAMETERS', struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15),
+    ('param_NVC670_ALLOCATION_PARAMETERS', struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01),
+    ('param_NVB1CC_ALLOC_PARAMETERS', struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03),
+    ('param_NVB2CC_ALLOC_PARAMETERS', struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03),
+    ('param_NV_GR_ALLOCATION_PARAMETERS', struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17),
+    ('param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B),
+    ('param_NV00F8_ALLOCATION_PARAMETERS', struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C),
+    ('param_NVC9FA_VIDEO_OFA', struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00),
+    ('param_NV2081_ALLOC_PARAMETERS', struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08),
+    ('PADDING_0', ctypes.c_ubyte * 36),
+]
+
+struct_rpc_alloc_object_v25_08._pack_ = 1 # source:False
+struct_rpc_alloc_object_v25_08._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hParent', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('hClass', ctypes.c_uint32),
+    ('param_len', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('params', union_alloc_object_params_v25_08),
+]
+
+rpc_alloc_object_v25_08 = struct_rpc_alloc_object_v25_08
+class struct_rpc_alloc_object_v26_00(Structure):
+    pass
+
+class union_alloc_object_params_v26_00(Union):
+    pass
+
+union_alloc_object_params_v26_00._pack_ = 1 # source:False
+union_alloc_object_params_v26_00._fields_ = [
+    ('param_NV50_TESLA', struct_alloc_object_NV50_TESLA_v03_00),
+    ('param_GT212_DMA_COPY', struct_alloc_object_GT212_DMA_COPY_v03_00),
+    ('param_GF100_DISP_SW', struct_alloc_object_GF100_DISP_SW_v03_00),
+    ('param_KEPLER_CHANNEL_GROUP_A', struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08),
+    ('param_FERMI_CONTEXT_SHARE_A', struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00),
+    ('param_NVD0B7_VIDEO_ENCODER', struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00),
+    ('param_FERMI_VASPACE_A', struct_alloc_object_FERMI_VASPACE_A_v03_00),
+    ('param_NVB0B0_VIDEO_DECODER', struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00),
+    ('param_NV83DE_ALLOC_PARAMETERS', struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00),
+    ('param_NVENC_SW_SESSION', struct_alloc_object_NVENC_SW_SESSION_v06_01),
+    ('param_NVC4B0_VIDEO_DECODER', struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02),
+    ('param_NVFBC_SW_SESSION', struct_alloc_object_NVFBC_SW_SESSION_v12_04),
+    ('param_NV_NVJPG_ALLOCATION_PARAMETERS', struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02),
+    ('param_NV503B_ALLOC_PARAMETERS', struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02),
+    ('param_NVC637_ALLOCATION_PARAMETERS', struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00),
+    ('param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03),
+    ('param_NVC638_ALLOCATION_PARAMETERS', struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06),
+    ('param_NV503C_ALLOC_PARAMETERS', struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15),
+    ('param_NVC670_ALLOCATION_PARAMETERS', struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01),
+    ('param_NVB1CC_ALLOC_PARAMETERS', struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03),
+    ('param_NVB2CC_ALLOC_PARAMETERS', struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03),
+    ('param_NV_GR_ALLOCATION_PARAMETERS', struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17),
+    ('param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B),
+    ('param_NV00F8_ALLOCATION_PARAMETERS', struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C),
+    ('param_NVC9FA_VIDEO_OFA', struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00),
+    ('param_NV2081_ALLOC_PARAMETERS', struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08),
+    ('param_padding', ctypes.c_ubyte * 56),
+]
+
+struct_rpc_alloc_object_v26_00._pack_ = 1 # source:False
+struct_rpc_alloc_object_v26_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hParent', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('hClass', ctypes.c_uint32),
+    ('param_len', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('params', union_alloc_object_params_v26_00),
+]
+
+rpc_alloc_object_v26_00 = struct_rpc_alloc_object_v26_00
+class struct_rpc_alloc_object_v27_00(Structure):
+    pass
+
+class union_alloc_object_params_v27_00(Union):
+    pass
+
+union_alloc_object_params_v27_00._pack_ = 1 # source:False
+union_alloc_object_params_v27_00._fields_ = [
+    ('param_NV50_TESLA', struct_alloc_object_NV50_TESLA_v03_00),
+    ('param_GT212_DMA_COPY', struct_alloc_object_GT212_DMA_COPY_v03_00),
+    ('param_GF100_DISP_SW', struct_alloc_object_GF100_DISP_SW_v03_00),
+    ('param_KEPLER_CHANNEL_GROUP_A', struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08),
+    ('param_FERMI_CONTEXT_SHARE_A', struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00),
+    ('param_NVD0B7_VIDEO_ENCODER', struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00),
+    ('param_FERMI_VASPACE_A', struct_alloc_object_FERMI_VASPACE_A_v03_00),
+    ('param_NVB0B0_VIDEO_DECODER', struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00),
+    ('param_NV83DE_ALLOC_PARAMETERS', struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00),
+    ('param_NVENC_SW_SESSION', struct_alloc_object_NVENC_SW_SESSION_v06_01),
+    ('param_NVC4B0_VIDEO_DECODER', struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02),
+    ('param_NVFBC_SW_SESSION', struct_alloc_object_NVFBC_SW_SESSION_v12_04),
+    ('param_NV_NVJPG_ALLOCATION_PARAMETERS', struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02),
+    ('param_NV503B_ALLOC_PARAMETERS', struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02),
+    ('param_NVC637_ALLOCATION_PARAMETERS', struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00),
+    ('param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03),
+    ('param_NVC638_ALLOCATION_PARAMETERS', struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06),
+    ('param_NV503C_ALLOC_PARAMETERS', struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15),
+    ('param_NVC670_ALLOCATION_PARAMETERS', struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01),
+    ('param_NVB1CC_ALLOC_PARAMETERS', struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03),
+    ('param_NVB2CC_ALLOC_PARAMETERS', struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03),
+    ('param_NV_GR_ALLOCATION_PARAMETERS', struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17),
+    ('param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B),
+    ('param_NV00F8_ALLOCATION_PARAMETERS', struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C),
+    ('param_NVC9FA_VIDEO_OFA', struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00),
+    ('param_NV2081_ALLOC_PARAMETERS', struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08),
+    ('param_padding', ctypes.c_ubyte * 56),
+]
+
+struct_rpc_alloc_object_v27_00._pack_ = 1 # source:False
+struct_rpc_alloc_object_v27_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hParent', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('hClass', ctypes.c_uint32),
+    ('param_len', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('params', union_alloc_object_params_v27_00),
+]
+
+rpc_alloc_object_v27_00 = struct_rpc_alloc_object_v27_00
+class struct_rpc_alloc_object_v29_06(Structure):
+    pass
+
+class union_alloc_object_params_v29_06(Union):
+    pass
+
+class struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06(Structure):
+    pass
+
+struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06._pack_ = 1 # source:False
+struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06._fields_ = [
+    ('size', ctypes.c_uint32),
+    ('prohibitMultipleInstances', ctypes.c_uint32),
+    ('engineInstance', ctypes.c_uint32),
+]
+
+union_alloc_object_params_v29_06._pack_ = 1 # source:False
+union_alloc_object_params_v29_06._fields_ = [
+    ('param_NV50_TESLA', struct_alloc_object_NV50_TESLA_v03_00),
+    ('param_GT212_DMA_COPY', struct_alloc_object_GT212_DMA_COPY_v03_00),
+    ('param_GF100_DISP_SW', struct_alloc_object_GF100_DISP_SW_v03_00),
+    ('param_KEPLER_CHANNEL_GROUP_A', struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08),
+    ('param_FERMI_CONTEXT_SHARE_A', struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00),
+    ('param_NVD0B7_VIDEO_ENCODER', struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00),
+    ('param_FERMI_VASPACE_A', struct_alloc_object_FERMI_VASPACE_A_v03_00),
+    ('param_NVB0B0_VIDEO_DECODER', struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00),
+    ('param_NV83DE_ALLOC_PARAMETERS', struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00),
+    ('param_NVENC_SW_SESSION', struct_alloc_object_NVENC_SW_SESSION_v06_01),
+    ('param_NVC4B0_VIDEO_DECODER', struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02),
+    ('param_NVFBC_SW_SESSION', struct_alloc_object_NVFBC_SW_SESSION_v12_04),
+    ('param_NV_NVJPG_ALLOCATION_PARAMETERS', struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02),
+    ('param_NV503B_ALLOC_PARAMETERS', struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02),
+    ('param_NVC637_ALLOCATION_PARAMETERS', struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00),
+    ('param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03),
+    ('param_NVC638_ALLOCATION_PARAMETERS', struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06),
+    ('param_NV503C_ALLOC_PARAMETERS', struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15),
+    ('param_NVC670_ALLOCATION_PARAMETERS', struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01),
+    ('param_NVB1CC_ALLOC_PARAMETERS', struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03),
+    ('param_NVB2CC_ALLOC_PARAMETERS', struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03),
+    ('param_NV_GR_ALLOCATION_PARAMETERS', struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17),
+    ('param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B),
+    ('param_NV00F8_ALLOCATION_PARAMETERS', struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C),
+    ('param_NVC9FA_VIDEO_OFA', struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06),
+    ('param_NV2081_ALLOC_PARAMETERS', struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08),
+    ('param_padding', ctypes.c_ubyte * 56),
+]
+
+struct_rpc_alloc_object_v29_06._pack_ = 1 # source:False
+struct_rpc_alloc_object_v29_06._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hParent', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('hClass', ctypes.c_uint32),
+    ('param_len', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('params', union_alloc_object_params_v29_06),
+]
+
+rpc_alloc_object_v29_06 = struct_rpc_alloc_object_v29_06
+rpc_alloc_object_v = struct_rpc_alloc_object_v29_06
+class struct_rpc_free_v03_00(Structure):
+    pass
+
+class struct_NVOS00_PARAMETERS_v03_00(Structure):
+    pass
+
+struct_NVOS00_PARAMETERS_v03_00._pack_ = 1 # source:False
+struct_NVOS00_PARAMETERS_v03_00._fields_ = [
+    ('hRoot', ctypes.c_uint32),
+    ('hObjectParent', ctypes.c_uint32),
+    ('hObjectOld', ctypes.c_uint32),
+    ('status', ctypes.c_uint32),
+]
+
+struct_rpc_free_v03_00._pack_ = 1 # source:False
+struct_rpc_free_v03_00._fields_ = [
+    ('params', struct_NVOS00_PARAMETERS_v03_00),
+]
+
+rpc_free_v03_00 = struct_rpc_free_v03_00
+rpc_free_v = struct_rpc_free_v03_00
+class struct_rpc_log_v03_00(Structure):
+    pass
+
+struct_rpc_log_v03_00._pack_ = 1 # source:False
+struct_rpc_log_v03_00._fields_ = [
+    ('level', ctypes.c_uint32),
+    ('log_len', ctypes.c_uint32),
+    ('log_msg', ctypes.c_char * 0),
+]
+
+rpc_log_v03_00 = struct_rpc_log_v03_00
+rpc_log_v = struct_rpc_log_v03_00
+class struct_rpc_map_memory_dma_v03_00(Structure):
+    pass
+
+class struct_NVOS46_PARAMETERS_v03_00(Structure):
+    pass
+
+struct_NVOS46_PARAMETERS_v03_00._pack_ = 1 # source:False
+struct_NVOS46_PARAMETERS_v03_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hDevice', ctypes.c_uint32),
+    ('hDma', ctypes.c_uint32),
+    ('hMemory', ctypes.c_uint32),
+    ('offset', ctypes.c_uint64),
+    ('length', ctypes.c_uint64),
+    ('flags', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('dmaOffset', ctypes.c_uint64),
+    ('status', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+]
+
+struct_rpc_map_memory_dma_v03_00._pack_ = 1 # source:False
+struct_rpc_map_memory_dma_v03_00._fields_ = [
+    ('params', struct_NVOS46_PARAMETERS_v03_00),
+]
+
+rpc_map_memory_dma_v03_00 = struct_rpc_map_memory_dma_v03_00
+rpc_map_memory_dma_v = struct_rpc_map_memory_dma_v03_00
+class struct_rpc_unmap_memory_dma_v03_00(Structure):
+    pass
+
+class struct_NVOS47_PARAMETERS_v03_00(Structure):
+    pass
+
+struct_NVOS47_PARAMETERS_v03_00._pack_ = 1 # source:False
+struct_NVOS47_PARAMETERS_v03_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hDevice', ctypes.c_uint32),
+    ('hDma', ctypes.c_uint32),
+    ('hMemory', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('dmaOffset', ctypes.c_uint64),
+    ('status', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+]
+
+struct_rpc_unmap_memory_dma_v03_00._pack_ = 1 # source:False
+struct_rpc_unmap_memory_dma_v03_00._fields_ = [
+    ('params', struct_NVOS47_PARAMETERS_v03_00),
+]
+
+rpc_unmap_memory_dma_v03_00 = struct_rpc_unmap_memory_dma_v03_00
+rpc_unmap_memory_dma_v = struct_rpc_unmap_memory_dma_v03_00
+class struct_rpc_alloc_subdevice_v08_01(Structure):
+    pass
+
+class struct_NVOS21_PARAMETERS_v03_00(Structure):
+    pass
+
+struct_NVOS21_PARAMETERS_v03_00._pack_ = 1 # source:False
+struct_NVOS21_PARAMETERS_v03_00._fields_ = [
+    ('hRoot', ctypes.c_uint32),
+    ('hObjectParent', ctypes.c_uint32),
+    ('hObjectNew', ctypes.c_uint32),
+    ('hClass', ctypes.c_uint32),
+    ('pAllocParms', ctypes.POINTER(None)),
+    ('status', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+struct_rpc_alloc_subdevice_v08_01._pack_ = 1 # source:False
+struct_rpc_alloc_subdevice_v08_01._fields_ = [
+    ('subDeviceInst', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('params', struct_NVOS21_PARAMETERS_v03_00),
+]
+
+rpc_alloc_subdevice_v08_01 = struct_rpc_alloc_subdevice_v08_01
+rpc_alloc_subdevice_v = struct_rpc_alloc_subdevice_v08_01
+class struct_rpc_dup_object_v03_00(Structure):
+    pass
+
+class struct_NVOS55_PARAMETERS_v03_00(Structure):
+    pass
+
+struct_NVOS55_PARAMETERS_v03_00._pack_ = 1 # source:False
+struct_NVOS55_PARAMETERS_v03_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hParent', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('hClientSrc', ctypes.c_uint32),
+    ('hObjectSrc', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('status', ctypes.c_uint32),
+]
+
+struct_rpc_dup_object_v03_00._pack_ = 1 # source:False
+struct_rpc_dup_object_v03_00._fields_ = [
+    ('params', struct_NVOS55_PARAMETERS_v03_00),
+]
+
+rpc_dup_object_v03_00 = struct_rpc_dup_object_v03_00
+rpc_dup_object_v = struct_rpc_dup_object_v03_00
+class struct_rpc_idle_channels_v03_00(Structure):
+    pass
+
+class struct_idle_channel_list_v03_00(Structure):
+    pass
+
+struct_idle_channel_list_v03_00._pack_ = 1 # source:False
+struct_idle_channel_list_v03_00._fields_ = [
+    ('phClient', ctypes.c_uint32),
+    ('phDevice', ctypes.c_uint32),
+    ('phChannel', ctypes.c_uint32),
+]
+
+struct_rpc_idle_channels_v03_00._pack_ = 1 # source:False
+struct_rpc_idle_channels_v03_00._fields_ = [
+    ('flags', ctypes.c_uint32),
+    ('timeout', ctypes.c_uint32),
+    ('nchannels', ctypes.c_uint32),
+    ('channel_list', struct_idle_channel_list_v03_00 * 0),
+]
+
+rpc_idle_channels_v03_00 = struct_rpc_idle_channels_v03_00
+rpc_idle_channels_v = struct_rpc_idle_channels_v03_00
+class struct_rpc_alloc_event_v03_00(Structure):
+    pass
+
+struct_rpc_alloc_event_v03_00._pack_ = 1 # source:False
+struct_rpc_alloc_event_v03_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hParentClient', ctypes.c_uint32),
+    ('hChannel', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('hEvent', ctypes.c_uint32),
+    ('hClass', ctypes.c_uint32),
+    ('notifyIndex', ctypes.c_uint32),
+]
+
+rpc_alloc_event_v03_00 = struct_rpc_alloc_event_v03_00
+rpc_alloc_event_v = struct_rpc_alloc_event_v03_00
+class struct_rpc_rm_api_control_v25_0D(Structure):
+    pass
+
+class struct_NVOS54_PARAMETERS_v03_00(Structure):
+    pass
+
+struct_NVOS54_PARAMETERS_v03_00._pack_ = 1 # source:False
+struct_NVOS54_PARAMETERS_v03_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('cmd', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('params', ctypes.POINTER(None)),
+    ('paramsSize', ctypes.c_uint32),
+    ('status', ctypes.c_uint32),
+]
+
+struct_rpc_rm_api_control_v25_0D._pack_ = 1 # source:False
+struct_rpc_rm_api_control_v25_0D._fields_ = [
+    ('params', struct_NVOS54_PARAMETERS_v03_00),
+    ('rm_api_params', ctypes.POINTER(None)),
+]
+
+rpc_rm_api_control_v25_0D = struct_rpc_rm_api_control_v25_0D
+class struct_rpc_rm_api_control_v25_0F(Structure):
+    pass
+
+struct_rpc_rm_api_control_v25_0F._pack_ = 1 # source:False
+struct_rpc_rm_api_control_v25_0F._fields_ = [
+    ('params', struct_NVOS54_PARAMETERS_v03_00),
+    ('rm_api_params', ctypes.POINTER(None)),
+]
+
+rpc_rm_api_control_v25_0F = struct_rpc_rm_api_control_v25_0F
+class struct_rpc_rm_api_control_v25_10(Structure):
+    pass
+
+struct_rpc_rm_api_control_v25_10._pack_ = 1 # source:False
+struct_rpc_rm_api_control_v25_10._fields_ = [
+    ('params', struct_NVOS54_PARAMETERS_v03_00),
+    ('rm_api_params', ctypes.POINTER(None)),
+]
+
+rpc_rm_api_control_v25_10 = struct_rpc_rm_api_control_v25_10
+class struct_rpc_rm_api_control_v25_14(Structure):
+    pass
+
+struct_rpc_rm_api_control_v25_14._pack_ = 1 # source:False
+struct_rpc_rm_api_control_v25_14._fields_ = [
+    ('params', struct_NVOS54_PARAMETERS_v03_00),
+    ('rm_api_params', ctypes.POINTER(None)),
+]
+
+rpc_rm_api_control_v25_14 = struct_rpc_rm_api_control_v25_14
+class struct_rpc_rm_api_control_v25_15(Structure):
+    pass
+
+struct_rpc_rm_api_control_v25_15._pack_ = 1 # source:False
+struct_rpc_rm_api_control_v25_15._fields_ = [
+    ('params', struct_NVOS54_PARAMETERS_v03_00),
+    ('rm_api_params', ctypes.POINTER(None)),
+]
+
+rpc_rm_api_control_v25_15 = struct_rpc_rm_api_control_v25_15
+class struct_rpc_rm_api_control_v25_16(Structure):
+    pass
+
+struct_rpc_rm_api_control_v25_16._pack_ = 1 # source:False
+struct_rpc_rm_api_control_v25_16._fields_ = [
+    ('params', struct_NVOS54_PARAMETERS_v03_00),
+    ('rm_api_params', ctypes.POINTER(None)),
+]
+
+rpc_rm_api_control_v25_16 = struct_rpc_rm_api_control_v25_16
+class struct_rpc_rm_api_control_v25_17(Structure):
+    pass
+
+struct_rpc_rm_api_control_v25_17._pack_ = 1 # source:False
+struct_rpc_rm_api_control_v25_17._fields_ = [
+    ('params', struct_NVOS54_PARAMETERS_v03_00),
+    ('rm_api_params', ctypes.POINTER(None)),
+]
+
+rpc_rm_api_control_v25_17 = struct_rpc_rm_api_control_v25_17
+class struct_rpc_rm_api_control_v25_18(Structure):
+    pass
+
+struct_rpc_rm_api_control_v25_18._pack_ = 1 # source:False
+struct_rpc_rm_api_control_v25_18._fields_ = [
+    ('params', struct_NVOS54_PARAMETERS_v03_00),
+    ('rm_api_params', ctypes.POINTER(None)),
+]
+
+rpc_rm_api_control_v25_18 = struct_rpc_rm_api_control_v25_18
+class struct_rpc_rm_api_control_v25_19(Structure):
+    pass
+
+struct_rpc_rm_api_control_v25_19._pack_ = 1 # source:False
+struct_rpc_rm_api_control_v25_19._fields_ = [
+    ('params', struct_NVOS54_PARAMETERS_v03_00),
+    ('rm_api_params', ctypes.POINTER(None)),
+]
+
+rpc_rm_api_control_v25_19 = struct_rpc_rm_api_control_v25_19
+class struct_rpc_rm_api_control_v25_1A(Structure):
+    pass
+
+struct_rpc_rm_api_control_v25_1A._pack_ = 1 # source:False
+struct_rpc_rm_api_control_v25_1A._fields_ = [
+    ('params', struct_NVOS54_PARAMETERS_v03_00),
+    ('rm_api_params', ctypes.POINTER(None)),
+]
+
+rpc_rm_api_control_v25_1A = struct_rpc_rm_api_control_v25_1A
+class struct_rpc_rm_api_control_v27_03(Structure):
+    pass
+
+struct_rpc_rm_api_control_v27_03._pack_ = 1 # source:False
+struct_rpc_rm_api_control_v27_03._fields_ = [
+    ('params', struct_NVOS54_PARAMETERS_v03_00),
+    ('rm_api_params', ctypes.POINTER(None)),
+]
+
+rpc_rm_api_control_v27_03 = struct_rpc_rm_api_control_v27_03
+class struct_rpc_rm_api_control_v29_04(Structure):
+    pass
+
+struct_rpc_rm_api_control_v29_04._pack_ = 1 # source:False
+struct_rpc_rm_api_control_v29_04._fields_ = [
+    ('params', struct_NVOS54_PARAMETERS_v03_00),
+    ('rm_api_params', ctypes.POINTER(None)),
+]
+
+rpc_rm_api_control_v29_04 = struct_rpc_rm_api_control_v29_04
+class struct_rpc_rm_api_control_v29_09(Structure):
+    pass
+
+struct_rpc_rm_api_control_v29_09._pack_ = 1 # source:False
+struct_rpc_rm_api_control_v29_09._fields_ = [
+    ('params', struct_NVOS54_PARAMETERS_v03_00),
+    ('rm_api_params', ctypes.POINTER(None)),
+]
+
+rpc_rm_api_control_v29_09 = struct_rpc_rm_api_control_v29_09
+rpc_rm_api_control_v = struct_rpc_rm_api_control_v29_09
+class struct_rpc_alloc_share_device_v03_00(Structure):
+    pass
+
+class struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00(Structure):
+    pass
+
+struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00._pack_ = 1 # source:False
+struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00._fields_ = [
+    ('szName', ctypes.POINTER(None)),
+    ('hClientShare', ctypes.c_uint32),
+    ('hTargetClient', ctypes.c_uint32),
+    ('hTargetDevice', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('vaSpaceSize', ctypes.c_uint64),
+    ('vaMode', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('vaBase', ctypes.c_uint64),
+]
+
+struct_rpc_alloc_share_device_v03_00._pack_ = 1 # source:False
+struct_rpc_alloc_share_device_v03_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hDevice', ctypes.c_uint32),
+    ('hClass', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('params', struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00),
+]
+
+rpc_alloc_share_device_v03_00 = struct_rpc_alloc_share_device_v03_00
+rpc_alloc_share_device_v = struct_rpc_alloc_share_device_v03_00
+class struct_rpc_get_engine_utilization_v1F_0E(Structure):
+    pass
+
+class union_vgpuGetEngineUtilization_data_v1F_0E(Union):
+    pass
+
+class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00(Structure):
+    pass
+
+
+# values for enumeration 'NV2080_CTRL_CMD_PERF_VID_ENG'
+NV2080_CTRL_CMD_PERF_VID_ENG__enumvalues = {
+    1: 'NV2080_CTRL_CMD_PERF_VID_ENG_NVENC',
+    2: 'NV2080_CTRL_CMD_PERF_VID_ENG_NVDEC',
+    3: 'NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG',
+    4: 'NV2080_CTRL_CMD_PERF_VID_ENG_NVOFA',
+}
+NV2080_CTRL_CMD_PERF_VID_ENG_NVENC = 1
+NV2080_CTRL_CMD_PERF_VID_ENG_NVDEC = 2
+NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG = 3
+NV2080_CTRL_CMD_PERF_VID_ENG_NVOFA = 4
+NV2080_CTRL_CMD_PERF_VID_ENG = ctypes.c_uint32 # enum
+struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00._fields_ = [
+    ('engineType', NV2080_CTRL_CMD_PERF_VID_ENG),
+    ('clkPercentBusy', ctypes.c_uint32),
+    ('samplingPeriodUs', ctypes.c_uint32),
+]
+
+class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C(Structure):
+    pass
+
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C._pack_ = 1 # source:False
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C._fields_ = [
+    ('gpuId', ctypes.c_uint32),
+    ('vmPid', ctypes.c_uint32),
+    ('state', ctypes.c_uint32),
+]
+
+class struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C(Structure):
+    pass
+
+struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C._pack_ = 1 # source:False
+struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C._fields_ = [
+    ('gpuId', ctypes.c_uint32),
+    ('vmPid', ctypes.c_uint32),
+    ('newState', ctypes.c_uint32),
+]
+
+class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C(Structure):
+    pass
+
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C._pack_ = 1 # source:False
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C._fields_ = [
+    ('gpuId', ctypes.c_uint32),
+    ('vmPid', ctypes.c_uint32),
+    ('passIndex', ctypes.c_uint32),
+    ('pidCount', ctypes.c_uint32),
+    ('pidTable', ctypes.c_uint32 * 1000),
+]
+
+class struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C(Structure):
+    pass
+
+struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C._pack_ = 1 # source:False
+struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C._fields_ = [
+    ('gpuId', ctypes.c_uint32),
+    ('pid', ctypes.c_uint32),
+    ('subPid', ctypes.c_uint32),
+    ('gpuUtil', ctypes.c_uint32),
+    ('fbUtil', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('maxFbUsage', ctypes.c_uint64),
+    ('startTime', ctypes.c_uint64),
+    ('endTime', ctypes.c_uint64),
+]
+
+class struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C(Structure):
+    pass
+
+struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C._pack_ = 1 # source:False
+struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C._fields_ = [
+    ('gpuId', ctypes.c_uint32),
+    ('vmPid', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E(Structure):
+    pass
+
+class struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00(Structure):
+    pass
+
+struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00._fields_ = [
+    ('util', ctypes.c_uint32),
+    ('procId', ctypes.c_uint32),
+    ('subProcessID', ctypes.c_uint32),
+]
+
+struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E._pack_ = 1 # source:False
+struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E._fields_ = [
+    ('timeStamp', ctypes.c_uint64),
+    ('fb', struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00),
+    ('gr', struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00),
+    ('nvenc', struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00),
+    ('nvdec', struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00),
+]
+
+union_vgpuGetEngineUtilization_data_v1F_0E._pack_ = 1 # source:False
+union_vgpuGetEngineUtilization_data_v1F_0E._fields_ = [
+    ('vidPerfmonSample', struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00),
+    ('getAccountingState', struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C),
+    ('setAccountingState', struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C),
+    ('getAccountingPidList', struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C),
+    ('procAccountingInfo', struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C),
+    ('clearAccountingInfo', struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C),
+    ('gpumonPerfmonsampleV2', struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E * 72),
+]
+
+struct_rpc_get_engine_utilization_v1F_0E._pack_ = 1 # source:False
+struct_rpc_get_engine_utilization_v1F_0E._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('cmd', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('params', union_vgpuGetEngineUtilization_data_v1F_0E),
+]
+
+rpc_get_engine_utilization_v1F_0E = struct_rpc_get_engine_utilization_v1F_0E
+rpc_get_engine_utilization_v = struct_rpc_get_engine_utilization_v1F_0E
+class struct_rpc_perf_get_level_info_v03_00(Structure):
+    pass
+
+struct_rpc_perf_get_level_info_v03_00._pack_ = 1 # source:False
+struct_rpc_perf_get_level_info_v03_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('level', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('perfGetClkInfoListSize', ctypes.c_uint32),
+    ('param_size', ctypes.c_uint32),
+    ('params', ctypes.c_uint32 * 0),
+]
+
+rpc_perf_get_level_info_v03_00 = struct_rpc_perf_get_level_info_v03_00
+rpc_perf_get_level_info_v = struct_rpc_perf_get_level_info_v03_00
+class struct_rpc_set_surface_properties_v07_07(Structure):
+    pass
+
+class struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07(Structure):
+    pass
+
+struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07._pack_ = 1 # source:False
+struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07._fields_ = [
+    ('headIndex', ctypes.c_uint32),
+    ('isPrimary', ctypes.c_uint32),
+    ('offset', ctypes.c_uint32),
+    ('surfaceType', ctypes.c_uint32),
+    ('surfaceBlockHeight', ctypes.c_uint32),
+    ('surfacePitch', ctypes.c_uint32),
+    ('surfaceFormat', ctypes.c_uint32),
+    ('surfaceWidth', ctypes.c_uint32),
+    ('surfaceHeight', ctypes.c_uint32),
+    ('rectX', ctypes.c_uint32),
+    ('rectY', ctypes.c_uint32),
+    ('rectWidth', ctypes.c_uint32),
+    ('rectHeight', ctypes.c_uint32),
+    ('surfaceSize', ctypes.c_uint32),
+    ('surfaceKind', ctypes.c_uint32),
+    ('hHwResDevice', ctypes.c_uint32),
+    ('hHwResHandle', ctypes.c_uint32),
+    ('effectiveFbPageSize', ctypes.c_uint32),
+]
+
+struct_rpc_set_surface_properties_v07_07._pack_ = 1 # source:False
+struct_rpc_set_surface_properties_v07_07._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('params', struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07),
+]
+
+rpc_set_surface_properties_v07_07 = struct_rpc_set_surface_properties_v07_07
+rpc_set_surface_properties_v = struct_rpc_set_surface_properties_v07_07
+class struct_rpc_cleanup_surface_v03_00(Structure):
+    pass
+
+class struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00(Structure):
+    pass
+
+struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00._pack_ = 1 # source:False
+struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00._fields_ = [
+    ('headIndex', ctypes.c_uint32),
+    ('blankingEnabled', ctypes.c_uint32),
+]
+
+struct_rpc_cleanup_surface_v03_00._pack_ = 1 # source:False
+struct_rpc_cleanup_surface_v03_00._fields_ = [
+    ('params', struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00),
+]
+
+rpc_cleanup_surface_v03_00 = struct_rpc_cleanup_surface_v03_00
+rpc_cleanup_surface_v = struct_rpc_cleanup_surface_v03_00
+class struct_rpc_unloading_guest_driver_v1F_07(Structure):
+    pass
+
+struct_rpc_unloading_guest_driver_v1F_07._pack_ = 1 # source:False
+struct_rpc_unloading_guest_driver_v1F_07._fields_ = [
+    ('bInPMTransition', ctypes.c_ubyte),
+    ('bGc6Entering', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('newLevel', ctypes.c_uint32),
+]
+
+rpc_unloading_guest_driver_v1F_07 = struct_rpc_unloading_guest_driver_v1F_07
+rpc_unloading_guest_driver_v = struct_rpc_unloading_guest_driver_v1F_07
+class struct_rpc_gpu_exec_reg_ops_v12_01(Structure):
+    pass
+
+class struct_gpu_exec_reg_ops_v12_01(Structure):
+    pass
+
+class struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01(Structure):
+    pass
+
+class struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01(Structure):
+    pass
+
+struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01._pack_ = 1 # source:False
+struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01._fields_ = [
+    ('flags', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('route', ctypes.c_uint64),
+]
+
+struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01._fields_ = [
+    ('hClientTarget', ctypes.c_uint32),
+    ('hChannelTarget', ctypes.c_uint32),
+    ('reserved00', ctypes.c_uint32 * 3),
+    ('regOpCount', ctypes.c_uint32),
+    ('grRouteInfo', struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01),
+    ('regOps', ctypes.POINTER(None)),
+]
+
+class struct_NV2080_CTRL_GPU_REG_OP_v03_00(Structure):
+    pass
+
+struct_NV2080_CTRL_GPU_REG_OP_v03_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_REG_OP_v03_00._fields_ = [
+    ('regOp', ctypes.c_ubyte),
+    ('regType', ctypes.c_ubyte),
+    ('regStatus', ctypes.c_ubyte),
+    ('regQuad', ctypes.c_ubyte),
+    ('regGroupMask', ctypes.c_uint32),
+    ('regSubGroupMask', ctypes.c_uint32),
+    ('regOffset', ctypes.c_uint32),
+    ('regValueHi', ctypes.c_uint32),
+    ('regValueLo', ctypes.c_uint32),
+    ('regAndNMaskHi', ctypes.c_uint32),
+    ('regAndNMaskLo', ctypes.c_uint32),
+]
+
+struct_gpu_exec_reg_ops_v12_01._pack_ = 1 # source:False
+struct_gpu_exec_reg_ops_v12_01._fields_ = [
+    ('reg_op_params', struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01),
+    ('operations', struct_NV2080_CTRL_GPU_REG_OP_v03_00 * 0),
+]
+
+struct_rpc_gpu_exec_reg_ops_v12_01._pack_ = 1 # source:False
+struct_rpc_gpu_exec_reg_ops_v12_01._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_gpu_exec_reg_ops_v12_01),
+]
+
+rpc_gpu_exec_reg_ops_v12_01 = struct_rpc_gpu_exec_reg_ops_v12_01
+rpc_gpu_exec_reg_ops_v = struct_rpc_gpu_exec_reg_ops_v12_01
+class struct_rpc_get_static_data_v25_0E(Structure):
+    pass
+
+struct_rpc_get_static_data_v25_0E._pack_ = 1 # source:False
+struct_rpc_get_static_data_v25_0E._fields_ = [
+    ('offset', ctypes.c_uint32),
+    ('size', ctypes.c_uint32),
+    ('payload', ctypes.c_ubyte * 0),
+]
+
+rpc_get_static_data_v25_0E = struct_rpc_get_static_data_v25_0E
+class struct_rpc_get_static_data_v27_01(Structure):
+    pass
+
+struct_rpc_get_static_data_v27_01._pack_ = 1 # source:False
+struct_rpc_get_static_data_v27_01._fields_ = [
+    ('offset', ctypes.c_uint32),
+    ('size', ctypes.c_uint32),
+    ('payload', ctypes.c_ubyte * 0),
+]
+
+rpc_get_static_data_v27_01 = struct_rpc_get_static_data_v27_01
+rpc_get_static_data_v = struct_rpc_get_static_data_v27_01
+class struct_rpc_get_consolidated_gr_static_info_v1B_04(Structure):
+    pass
+
+struct_rpc_get_consolidated_gr_static_info_v1B_04._pack_ = 1 # source:False
+struct_rpc_get_consolidated_gr_static_info_v1B_04._fields_ = [
+    ('offset', ctypes.c_uint32),
+    ('size', ctypes.c_uint32),
+    ('payload', ctypes.c_ubyte * 0),
+]
+
+rpc_get_consolidated_gr_static_info_v1B_04 = struct_rpc_get_consolidated_gr_static_info_v1B_04
+rpc_get_consolidated_gr_static_info_v = struct_rpc_get_consolidated_gr_static_info_v1B_04
+class struct_rpc_set_page_directory_v1E_05(Structure):
+    pass
+
+class struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(Structure):
+    pass
+
+struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05._pack_ = 1 # source:False
+struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05._fields_ = [
+    ('physAddress', ctypes.c_uint64),
+    ('numEntries', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('hVASpace', ctypes.c_uint32),
+    ('chId', ctypes.c_uint32),
+    ('subDeviceId', ctypes.c_uint32),
+    ('pasid', ctypes.c_uint32),
+]
+
+struct_rpc_set_page_directory_v1E_05._pack_ = 1 # source:False
+struct_rpc_set_page_directory_v1E_05._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hDevice', ctypes.c_uint32),
+    ('pasid', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('params', struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05),
+]
+
+rpc_set_page_directory_v1E_05 = struct_rpc_set_page_directory_v1E_05
+rpc_set_page_directory_v = struct_rpc_set_page_directory_v1E_05
+class struct_rpc_unset_page_directory_v1E_05(Structure):
+    pass
+
+class struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05(Structure):
+    pass
+
+struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05._pack_ = 1 # source:False
+struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05._fields_ = [
+    ('hVASpace', ctypes.c_uint32),
+    ('subDeviceId', ctypes.c_uint32),
+]
+
+struct_rpc_unset_page_directory_v1E_05._pack_ = 1 # source:False
+struct_rpc_unset_page_directory_v1E_05._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hDevice', ctypes.c_uint32),
+    ('params', struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05),
+]
+
+rpc_unset_page_directory_v1E_05 = struct_rpc_unset_page_directory_v1E_05
+rpc_unset_page_directory_v = struct_rpc_unset_page_directory_v1E_05
+class struct_rpc_get_gsp_static_info_v14_00(Structure):
+    pass
+
+struct_rpc_get_gsp_static_info_v14_00._pack_ = 1 # source:False
+struct_rpc_get_gsp_static_info_v14_00._fields_ = [
+    ('data', ctypes.c_uint32),
+]
+
+rpc_get_gsp_static_info_v14_00 = struct_rpc_get_gsp_static_info_v14_00
+rpc_get_gsp_static_info_v = struct_rpc_get_gsp_static_info_v14_00
+class struct_rpc_update_bar_pde_v15_00(Structure):
+    pass
+
+class struct_UpdateBarPde_v15_00(Structure):
+    pass
+
+struct_UpdateBarPde_v15_00._pack_ = 1 # source:False
+struct_UpdateBarPde_v15_00._fields_ = [
+    ('barType', NV_RPC_UPDATE_PDE_BAR_TYPE),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('entryValue', ctypes.c_uint64),
+    ('entryLevelShift', ctypes.c_uint64),
+]
+
+struct_rpc_update_bar_pde_v15_00._pack_ = 1 # source:False
+struct_rpc_update_bar_pde_v15_00._fields_ = [
+    ('info', struct_UpdateBarPde_v15_00),
+]
+
+rpc_update_bar_pde_v15_00 = struct_rpc_update_bar_pde_v15_00
+rpc_update_bar_pde_v = struct_rpc_update_bar_pde_v15_00
+class struct_rpc_get_encoder_capacity_v07_00(Structure):
+    pass
+
+struct_rpc_get_encoder_capacity_v07_00._pack_ = 1 # source:False
+struct_rpc_get_encoder_capacity_v07_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('encoderCapacity', ctypes.c_uint32),
+]
+
+rpc_get_encoder_capacity_v07_00 = struct_rpc_get_encoder_capacity_v07_00
+rpc_get_encoder_capacity_v = struct_rpc_get_encoder_capacity_v07_00
+class struct_rpc_vgpu_pf_reg_read32_v15_00(Structure):
+    pass
+
+struct_rpc_vgpu_pf_reg_read32_v15_00._pack_ = 1 # source:False
+struct_rpc_vgpu_pf_reg_read32_v15_00._fields_ = [
+    ('address', ctypes.c_uint64),
+    ('value', ctypes.c_uint32),
+    ('grEngId', ctypes.c_uint32),
+]
+
+rpc_vgpu_pf_reg_read32_v15_00 = struct_rpc_vgpu_pf_reg_read32_v15_00
+rpc_vgpu_pf_reg_read32_v = struct_rpc_vgpu_pf_reg_read32_v15_00
+class struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08(Structure):
+    pass
+
+class struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02(Structure):
+    pass
+
+struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02._pack_ = 1 # source:False
+struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02._fields_ = [
+    ('fbUsed', ctypes.c_uint64),
+]
+
+struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08._pack_ = 1 # source:False
+struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08._fields_ = [
+    ('setFbUsage', struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02),
+]
+
+rpc_ctrl_set_vgpu_fb_usage_v1A_08 = struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08
+rpc_ctrl_set_vgpu_fb_usage_v = struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08
+class struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09(Structure):
+    pass
+
+class struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01(Structure):
+    pass
+
+struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01._pack_ = 1 # source:False
+struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01._fields_ = [
+    ('hResolution', ctypes.c_uint32),
+    ('vResolution', ctypes.c_uint32),
+    ('averageEncodeLatency', ctypes.c_uint32),
+    ('averageEncodeFps', ctypes.c_uint32),
+    ('timestampBufferSize', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('timestampBuffer', ctypes.POINTER(None)),
+]
+
+struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09._pack_ = 1 # source:False
+struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('nvencSessionUpdate', struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01),
+]
+
+rpc_ctrl_nvenc_sw_session_update_info_v1A_09 = struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09
+rpc_ctrl_nvenc_sw_session_update_info_v = struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09
+class struct_rpc_ctrl_reset_channel_v1A_09(Structure):
+    pass
+
+class struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01(Structure):
+    pass
+
+struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01._pack_ = 1 # source:False
+struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01._fields_ = [
+    ('engineID', ctypes.c_uint32),
+    ('subdeviceInstance', ctypes.c_uint32),
+    ('resetReason', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_reset_channel_v1A_09._pack_ = 1 # source:False
+struct_rpc_ctrl_reset_channel_v1A_09._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('resetChannel', struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01),
+]
+
+rpc_ctrl_reset_channel_v1A_09 = struct_rpc_ctrl_reset_channel_v1A_09
+rpc_ctrl_reset_channel_v = struct_rpc_ctrl_reset_channel_v1A_09
+class struct_rpc_ctrl_reset_isolated_channel_v1A_09(Structure):
+    pass
+
+class struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00(Structure):
+    pass
+
+struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00._pack_ = 1 # source:False
+struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00._fields_ = [
+    ('exceptType', ctypes.c_uint32),
+    ('engineID', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_reset_isolated_channel_v1A_09._pack_ = 1 # source:False
+struct_rpc_ctrl_reset_isolated_channel_v1A_09._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('resetIsolatedChannel', struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00),
+]
+
+rpc_ctrl_reset_isolated_channel_v1A_09 = struct_rpc_ctrl_reset_isolated_channel_v1A_09
+rpc_ctrl_reset_isolated_channel_v = struct_rpc_ctrl_reset_isolated_channel_v1A_09
+class struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09(Structure):
+    pass
+
+class struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09(Structure):
+    pass
+
+struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09._pack_ = 1 # source:False
+struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09._fields_ = [
+    ('faultType', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09._pack_ = 1 # source:False
+struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('handleVfPriFault', struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09),
+]
+
+rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09 = struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09
+rpc_ctrl_gpu_handle_vf_pri_fault_v = struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09
+class struct_rpc_ctrl_perf_boost_v1A_09(Structure):
+    pass
+
+class struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00(Structure):
+    pass
+
+struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00._fields_ = [
+    ('flags', ctypes.c_uint32),
+    ('duration', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_perf_boost_v1A_09._pack_ = 1 # source:False
+struct_rpc_ctrl_perf_boost_v1A_09._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('perfBoost', struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00),
+]
+
+rpc_ctrl_perf_boost_v1A_09 = struct_rpc_ctrl_perf_boost_v1A_09
+rpc_ctrl_perf_boost_v = struct_rpc_ctrl_perf_boost_v1A_09
+class struct_rpc_ctrl_get_zbc_clear_table_v1A_09(Structure):
+    pass
+
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00(Structure):
+    pass
+
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00(Structure):
+    pass
+
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00._pack_ = 1 # source:False
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00._fields_ = [
+    ('colorFB', ctypes.c_uint32 * 4),
+    ('colorDS', ctypes.c_uint32 * 4),
+    ('depth', ctypes.c_uint32),
+    ('stencil', ctypes.c_uint32),
+]
+
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00._pack_ = 1 # source:False
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00._fields_ = [
+    ('value', struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00),
+    ('indexSize', ctypes.c_uint32),
+    ('indexUsed', ctypes.c_uint32),
+    ('format', ctypes.c_uint32),
+    ('valType', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_get_zbc_clear_table_v1A_09._pack_ = 1 # source:False
+struct_rpc_ctrl_get_zbc_clear_table_v1A_09._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('getZbcClearTable', struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00),
+]
+
+rpc_ctrl_get_zbc_clear_table_v1A_09 = struct_rpc_ctrl_get_zbc_clear_table_v1A_09
+rpc_ctrl_get_zbc_clear_table_v = struct_rpc_ctrl_get_zbc_clear_table_v1A_09
+class struct_rpc_ctrl_set_zbc_color_clear_v1A_09(Structure):
+    pass
+
+class struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00(Structure):
+    pass
+
+struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00._pack_ = 1 # source:False
+struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00._fields_ = [
+    ('colorFB', ctypes.c_uint32 * 4),
+    ('colorDS', ctypes.c_uint32 * 4),
+    ('format', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_set_zbc_color_clear_v1A_09._pack_ = 1 # source:False
+struct_rpc_ctrl_set_zbc_color_clear_v1A_09._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('setZbcColorClr', struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00),
+]
+
+rpc_ctrl_set_zbc_color_clear_v1A_09 = struct_rpc_ctrl_set_zbc_color_clear_v1A_09
+rpc_ctrl_set_zbc_color_clear_v = struct_rpc_ctrl_set_zbc_color_clear_v1A_09
+class struct_rpc_ctrl_set_zbc_depth_clear_v1A_09(Structure):
+    pass
+
+class struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00(Structure):
+    pass
+
+struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00._pack_ = 1 # source:False
+struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00._fields_ = [
+    ('depth', ctypes.c_uint32),
+    ('format', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_set_zbc_depth_clear_v1A_09._pack_ = 1 # source:False
+struct_rpc_ctrl_set_zbc_depth_clear_v1A_09._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('setZbcDepthClr', struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00),
+]
+
+rpc_ctrl_set_zbc_depth_clear_v1A_09 = struct_rpc_ctrl_set_zbc_depth_clear_v1A_09
+rpc_ctrl_set_zbc_depth_clear_v = struct_rpc_ctrl_set_zbc_depth_clear_v1A_09
+class struct_rpc_ctrl_set_zbc_stencil_clear_v27_06(Structure):
+    pass
+
+class struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06(Structure):
+    pass
+
+struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06._pack_ = 1 # source:False
+struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06._fields_ = [
+    ('stencil', ctypes.c_uint32),
+    ('format', ctypes.c_uint32),
+    ('bSkipL2Table', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+struct_rpc_ctrl_set_zbc_stencil_clear_v27_06._pack_ = 1 # source:False
+struct_rpc_ctrl_set_zbc_stencil_clear_v27_06._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('setZbcStencilClr', struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06),
+]
+
+rpc_ctrl_set_zbc_stencil_clear_v27_06 = struct_rpc_ctrl_set_zbc_stencil_clear_v27_06
+rpc_ctrl_set_zbc_stencil_clear_v = struct_rpc_ctrl_set_zbc_stencil_clear_v27_06
+class struct_rpc_ctrl_gpfifo_schedule_v1A_0A(Structure):
+    pass
+
+class struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00(Structure):
+    pass
+
+struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00._pack_ = 1 # source:False
+struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00._fields_ = [
+    ('bEnable', ctypes.c_ubyte),
+]
+
+struct_rpc_ctrl_gpfifo_schedule_v1A_0A._pack_ = 1 # source:False
+struct_rpc_ctrl_gpfifo_schedule_v1A_0A._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('cmd', ctypes.c_uint32),
+    ('gpfifoSchedule', struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+rpc_ctrl_gpfifo_schedule_v1A_0A = struct_rpc_ctrl_gpfifo_schedule_v1A_0A
+rpc_ctrl_gpfifo_schedule_v = struct_rpc_ctrl_gpfifo_schedule_v1A_0A
+class struct_rpc_ctrl_set_timeslice_v1A_0A(Structure):
+    pass
+
+class struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00(Structure):
+    pass
+
+struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00._pack_ = 1 # source:False
+struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00._fields_ = [
+    ('timesliceUs', ctypes.c_uint64),
+]
+
+struct_rpc_ctrl_set_timeslice_v1A_0A._pack_ = 1 # source:False
+struct_rpc_ctrl_set_timeslice_v1A_0A._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('setTimeSlice', struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00),
+]
+
+rpc_ctrl_set_timeslice_v1A_0A = struct_rpc_ctrl_set_timeslice_v1A_0A
+rpc_ctrl_set_timeslice_v = struct_rpc_ctrl_set_timeslice_v1A_0A
+class struct_rpc_ctrl_fifo_disable_channels_v1A_0A(Structure):
+    pass
+
+class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00(Structure):
+    pass
+
+struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00._fields_ = [
+    ('bDisable', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('numChannels', ctypes.c_uint32),
+    ('bOnlyDisableScheduling', ctypes.c_ubyte),
+    ('bRewindGpPut', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte * 6),
+    ('pRunlistPreemptEvent', ctypes.POINTER(None)),
+    ('hClientList', ctypes.c_uint32 * 64),
+    ('hChannelList', ctypes.c_uint32 * 64),
+]
+
+struct_rpc_ctrl_fifo_disable_channels_v1A_0A._pack_ = 1 # source:False
+struct_rpc_ctrl_fifo_disable_channels_v1A_0A._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('fifoDisableChannels', struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00),
+]
+
+rpc_ctrl_fifo_disable_channels_v1A_0A = struct_rpc_ctrl_fifo_disable_channels_v1A_0A
+rpc_ctrl_fifo_disable_channels_v = struct_rpc_ctrl_fifo_disable_channels_v1A_0A
+class struct_rpc_ctrl_preempt_v1A_0A(Structure):
+    pass
+
+class struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A(Structure):
+    pass
+
+struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A._pack_ = 1 # source:False
+struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A._fields_ = [
+    ('bWait', ctypes.c_ubyte),
+    ('bManualTimeout', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('timeoutUs', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_preempt_v1A_0A._pack_ = 1 # source:False
+struct_rpc_ctrl_preempt_v1A_0A._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('cmdPreempt', struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A),
+]
+
+rpc_ctrl_preempt_v1A_0A = struct_rpc_ctrl_preempt_v1A_0A
+rpc_ctrl_preempt_v = struct_rpc_ctrl_preempt_v1A_0A
+class struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A(Structure):
+    pass
+
+class struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02(Structure):
+    pass
+
+struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02._pack_ = 1 # source:False
+struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02._fields_ = [
+    ('tsgInterleaveLevel', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A._pack_ = 1 # source:False
+struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('interleaveLevelTSG', struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02),
+]
+
+rpc_ctrl_set_tsg_interleave_level_v1A_0A = struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A
+rpc_ctrl_set_tsg_interleave_level_v = struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A
+class struct_rpc_ctrl_set_channel_interleave_level_v1A_0A(Structure):
+    pass
+
+class struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02(Structure):
+    pass
+
+struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02._pack_ = 1 # source:False
+struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02._fields_ = [
+    ('channelInterleaveLevel', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_set_channel_interleave_level_v1A_0A._pack_ = 1 # source:False
+struct_rpc_ctrl_set_channel_interleave_level_v1A_0A._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('interleaveLevelChannel', struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02),
+]
+
+rpc_ctrl_set_channel_interleave_level_v1A_0A = struct_rpc_ctrl_set_channel_interleave_level_v1A_0A
+rpc_ctrl_set_channel_interleave_level_v = struct_rpc_ctrl_set_channel_interleave_level_v1A_0A
+class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E(Structure):
+    pass
+
+class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01(Structure):
+    pass
+
+struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01._pack_ = 1 # source:False
+struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01._fields_ = [
+    ('flags', ctypes.c_uint32),
+    ('hClient', ctypes.c_uint32),
+    ('hChannel', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('vMemPtrs', ctypes.c_uint64 * 8),
+    ('gfxpPreemptMode', ctypes.c_uint32),
+    ('cilpPreemptMode', ctypes.c_uint32),
+    ('grRouteInfo', struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01),
+]
+
+struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E._pack_ = 1 # source:False
+struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01),
+]
+
+rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E
+class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07(Structure):
+    pass
+
+class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07(Structure):
+    pass
+
+struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07._pack_ = 1 # source:False
+struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07._fields_ = [
+    ('flags', ctypes.c_uint32),
+    ('hClient', ctypes.c_uint32),
+    ('hChannel', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('vMemPtrs', ctypes.c_uint64 * 9),
+    ('gfxpPreemptMode', ctypes.c_uint32),
+    ('cilpPreemptMode', ctypes.c_uint32),
+    ('grRouteInfo', struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01),
+]
+
+struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07._pack_ = 1 # source:False
+struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07),
+]
+
+rpc_ctrl_gr_ctxsw_preemption_bind_v28_07 = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07
+rpc_ctrl_gr_ctxsw_preemption_bind_v = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07
+class struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E(Structure):
+    pass
+
+class struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01(Structure):
+    pass
+
+struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01._pack_ = 1 # source:False
+struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01._fields_ = [
+    ('flags', ctypes.c_uint32),
+    ('hChannel', ctypes.c_uint32),
+    ('gfxpPreemptMode', ctypes.c_uint32),
+    ('cilpPreemptMode', ctypes.c_uint32),
+    ('grRouteInfo', struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01),
+]
+
+struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E._pack_ = 1 # source:False
+struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01),
+]
+
+rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E = struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E
+rpc_ctrl_gr_set_ctxsw_preemption_mode_v = struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E
+class struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E(Structure):
+    pass
+
+class struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00(Structure):
+    pass
+
+struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hChannel', ctypes.c_uint32),
+    ('vMemPtr', ctypes.c_uint64),
+    ('zcullMode', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E._pack_ = 1 # source:False
+struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00),
+]
+
+rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E = struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E
+rpc_ctrl_gr_ctxsw_zcull_bind_v = struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E
+class struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E(Structure):
+    pass
+
+class struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00(Structure):
+    pass
+
+struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00._fields_ = [
+    ('engineType', ctypes.c_uint32),
+    ('hClient', ctypes.c_uint32),
+    ('ChID', ctypes.c_uint32),
+    ('hChanClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('hVirtMemory', ctypes.c_uint32),
+    ('physAddress', ctypes.c_uint64),
+    ('physAttr', ctypes.c_uint32),
+    ('hDmaHandle', ctypes.c_uint32),
+    ('index', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('size', ctypes.c_uint64),
+]
+
+struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E._pack_ = 1 # source:False
+struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00),
+]
+
+rpc_ctrl_gpu_initialize_ctx_v1A_0E = struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E
+rpc_ctrl_gpu_initialize_ctx_v = struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E
+class struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04(Structure):
+    pass
+
+class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04(Structure):
+    pass
+
+class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04(Structure):
+    pass
+
+struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04._pack_ = 1 # source:False
+struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04._fields_ = [
+    ('physAddress', ctypes.c_uint64),
+    ('size', ctypes.c_uint64),
+    ('aperture', ctypes.c_uint32),
+    ('pageShift', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04._pack_ = 1 # source:False
+struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04._fields_ = [
+    ('hSubDevice', ctypes.c_uint32),
+    ('subDeviceId', ctypes.c_uint32),
+    ('pageSize', ctypes.c_uint64),
+    ('virtAddrLo', ctypes.c_uint64),
+    ('virtAddrHi', ctypes.c_uint64),
+    ('numLevelsToCopy', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('levels', struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04 * 6),
+]
+
+struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04._pack_ = 1 # source:False
+struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04),
+]
+
+rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04 = struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04
+rpc_ctrl_vaspace_copy_server_reserved_pdes_v = struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04
+class struct_rpc_ctrl_mc_service_interrupts_v1A_0E(Structure):
+    pass
+
+class struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01(Structure):
+    pass
+
+struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01._pack_ = 1 # source:False
+struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01._fields_ = [
+    ('engines', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_mc_service_interrupts_v1A_0E._pack_ = 1 # source:False
+struct_rpc_ctrl_mc_service_interrupts_v1A_0E._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01),
+]
+
+rpc_ctrl_mc_service_interrupts_v1A_0E = struct_rpc_ctrl_mc_service_interrupts_v1A_0E
+rpc_ctrl_mc_service_interrupts_v = struct_rpc_ctrl_mc_service_interrupts_v1A_0E
+class struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D(Structure):
+    pass
+
+struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D._pack_ = 1 # source:False
+struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D._fields_ = [
+    ('iter', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('gpuIds', ctypes.c_uint32 * 32),
+    ('gpuCount', ctypes.c_uint32),
+    ('p2pCaps', ctypes.c_uint32),
+    ('p2pOptimalReadCEs', ctypes.c_uint32),
+    ('p2pOptimalWriteCEs', ctypes.c_uint32),
+    ('p2pCapsStatus', ctypes.c_ubyte * 9),
+    ('PADDING_1', ctypes.c_ubyte * 3),
+    ('busPeerIds', ctypes.c_uint32 * 512),
+]
+
+rpc_ctrl_get_p2p_caps_v2_v1F_0D = struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D
+rpc_ctrl_get_p2p_caps_v2_v = struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D
+class struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02(Structure):
+    pass
+
+class struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02(Structure):
+    pass
+
+class struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02(Structure):
+    pass
+
+struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02._fields_ = [
+    ('gpuId', ctypes.c_uint32),
+    ('gpuUuid', ctypes.c_ubyte * 16),
+    ('p2pCaps', ctypes.c_uint32),
+    ('p2pOptimalReadCEs', ctypes.c_uint32),
+    ('p2pOptimalWriteCEs', ctypes.c_uint32),
+    ('p2pCapsStatus', ctypes.c_ubyte * 9),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('busPeerId', ctypes.c_uint32),
+]
+
+struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02._pack_ = 1 # source:False
+struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02._fields_ = [
+    ('bAllCaps', ctypes.c_ubyte),
+    ('bUseUuid', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('peerGpuCount', ctypes.c_uint32),
+    ('peerGpuCaps', struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02 * 32),
+]
+
+struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02._pack_ = 1 # source:False
+struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02._fields_ = [
+    ('ctrlParams', struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02),
+]
+
+rpc_ctrl_subdevice_get_p2p_caps_v21_02 = struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02
+rpc_ctrl_subdevice_get_p2p_caps_v = struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02
+class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03(Structure):
+    pass
+
+class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03(Structure):
+    pass
+
+struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03._pack_ = 1 # source:False
+struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03._fields_ = [
+    ('allocatedSize', ctypes.c_uint64),
+    ('peakAllocatedSize', ctypes.c_uint64),
+    ('managedSize', ctypes.c_uint64),
+    ('allocationCount', ctypes.c_uint32),
+    ('peakAllocationCount', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03._pack_ = 1 # source:False
+struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03),
+]
+
+rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03 = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03
+class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06(Structure):
+    pass
+
+class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06(Structure):
+    pass
+
+struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06._pack_ = 1 # source:False
+struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06._fields_ = [
+    ('allocatedSize', ctypes.c_uint64),
+    ('peakAllocatedSize', ctypes.c_uint64),
+    ('managedSize', ctypes.c_uint64),
+    ('allocationCount', ctypes.c_uint32),
+    ('peakAllocationCount', ctypes.c_uint32),
+    ('largestFreeChunkSize', ctypes.c_uint64),
+]
+
+struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06._pack_ = 1 # source:False
+struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06),
+]
+
+rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06 = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06
+rpc_ctrl_subdevice_get_vgpu_heap_stats_v = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06
+class struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C(Structure):
+    pass
+
+class struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00(Structure):
+    pass
+
+struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00._fields_ = [
+    ('hTargetChannel', ctypes.c_uint32),
+    ('numSMsToClear', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00),
+]
+
+rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C = struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C
+rpc_ctrl_dbg_clear_all_sm_error_states_v = struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C
+class struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06(Structure):
+    pass
+
+class struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06(Structure):
+    pass
+
+class struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06(Structure):
+    pass
+
+struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06._pack_ = 1 # source:False
+struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06._fields_ = [
+    ('hwwGlobalEsr', ctypes.c_uint32),
+    ('hwwWarpEsr', ctypes.c_uint32),
+    ('hwwWarpEsrPc', ctypes.c_uint32),
+    ('hwwGlobalEsrReportMask', ctypes.c_uint32),
+    ('hwwWarpEsrReportMask', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('hwwEsrAddr', ctypes.c_uint64),
+    ('hwwWarpEsrPc64', ctypes.c_uint64),
+    ('hwwCgaEsr', ctypes.c_uint32),
+    ('hwwCgaEsrReportMask', ctypes.c_uint32),
+]
+
+class struct_NV83DE_MMU_FAULT_INFO_v16_03(Structure):
+    pass
+
+struct_NV83DE_MMU_FAULT_INFO_v16_03._pack_ = 1 # source:False
+struct_NV83DE_MMU_FAULT_INFO_v16_03._fields_ = [
+    ('valid', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('faultInfo', ctypes.c_uint32),
+]
+
+struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06._fields_ = [
+    ('hTargetChannel', ctypes.c_uint32),
+    ('numSMsToRead', ctypes.c_uint32),
+    ('smErrorStateArray', struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06 * 80),
+    ('mmuFaultInfo', ctypes.c_uint32),
+    ('mmuFault', struct_NV83DE_MMU_FAULT_INFO_v16_03),
+    ('startingSM', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06),
+]
+
+rpc_ctrl_dbg_read_all_sm_error_states_v21_06 = struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06
+rpc_ctrl_dbg_read_all_sm_error_states_v = struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06
+class struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C(Structure):
+    pass
+
+class struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00(Structure):
+    pass
+
+struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00._fields_ = [
+    ('exceptionMask', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00),
+]
+
+rpc_ctrl_dbg_set_exception_mask_v1A_0C = struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C
+rpc_ctrl_dbg_set_exception_mask_v = struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C
+class struct_rpc_ctrl_gpu_promote_ctx_v1A_20(Structure):
+    pass
+
+class struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20(Structure):
+    pass
+
+class struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20(Structure):
+    pass
+
+struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20._fields_ = [
+    ('gpuPhysAddr', ctypes.c_uint64),
+    ('gpuVirtAddr', ctypes.c_uint64),
+    ('size', ctypes.c_uint64),
+    ('physAttr', ctypes.c_uint32),
+    ('bufferId', ctypes.c_uint16),
+    ('bInitialize', ctypes.c_ubyte),
+    ('bNonmapped', ctypes.c_ubyte),
+]
+
+struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20._fields_ = [
+    ('engineType', ctypes.c_uint32),
+    ('hClient', ctypes.c_uint32),
+    ('ChID', ctypes.c_uint32),
+    ('hChanClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('hVirtMemory', ctypes.c_uint32),
+    ('virtAddress', ctypes.c_uint64),
+    ('size', ctypes.c_uint64),
+    ('entryCount', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('promoteEntry', struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20 * 16),
+]
+
+struct_rpc_ctrl_gpu_promote_ctx_v1A_20._pack_ = 1 # source:False
+struct_rpc_ctrl_gpu_promote_ctx_v1A_20._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('promoteCtx', struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20),
+]
+
+rpc_ctrl_gpu_promote_ctx_v1A_20 = struct_rpc_ctrl_gpu_promote_ctx_v1A_20
+rpc_ctrl_gpu_promote_ctx_v = struct_rpc_ctrl_gpu_promote_ctx_v1A_20
+class struct_rpc_ctrl_dbg_suspend_context_v1A_10(Structure):
+    pass
+
+class struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06(Structure):
+    pass
+
+struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06._pack_ = 1 # source:False
+struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06._fields_ = [
+    ('waitForEvent', ctypes.c_uint32),
+    ('hResidentChannel', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_dbg_suspend_context_v1A_10._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_suspend_context_v1A_10._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06),
+]
+
+rpc_ctrl_dbg_suspend_context_v1A_10 = struct_rpc_ctrl_dbg_suspend_context_v1A_10
+rpc_ctrl_dbg_suspend_context_v = struct_rpc_ctrl_dbg_suspend_context_v1A_10
+class struct_rpc_ctrl_dbg_resume_context_v1A_10(Structure):
+    pass
+
+struct_rpc_ctrl_dbg_resume_context_v1A_10._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_resume_context_v1A_10._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+]
+
+rpc_ctrl_dbg_resume_context_v1A_10 = struct_rpc_ctrl_dbg_resume_context_v1A_10
+rpc_ctrl_dbg_resume_context_v = struct_rpc_ctrl_dbg_resume_context_v1A_10
+class struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10(Structure):
+    pass
+
+class struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06(Structure):
+    pass
+
+struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06._fields_ = [
+    ('bNonTransactional', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('regOpCount', ctypes.c_uint32),
+    ('regOps', struct_NV2080_CTRL_GPU_REG_OP_v03_00 * 100),
+]
+
+struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06),
+]
+
+rpc_ctrl_dbg_exec_reg_ops_v1A_10 = struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10
+rpc_ctrl_dbg_exec_reg_ops_v = struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10
+class struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10(Structure):
+    pass
+
+class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06(Structure):
+    pass
+
+struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06._fields_ = [
+    ('action', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06),
+]
+
+rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10 = struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10
+rpc_ctrl_dbg_set_mode_mmu_debug_v = struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10
+class struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07(Structure):
+    pass
+
+class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07(Structure):
+    pass
+
+struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07._fields_ = [
+    ('action', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07),
+]
+
+rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07 = struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07
+rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v = struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07
+class struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06(Structure):
+    pass
+
+class struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06(Structure):
+    pass
+
+struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06._fields_ = [
+    ('hTargetChannel', ctypes.c_uint32),
+    ('smID', ctypes.c_uint32),
+    ('smErrorState', struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06),
+]
+
+struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06),
+]
+
+rpc_ctrl_dbg_read_single_sm_error_state_v21_06 = struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06
+rpc_ctrl_dbg_read_single_sm_error_state_v = struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06
+class struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10(Structure):
+    pass
+
+class struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06(Structure):
+    pass
+
+struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06._fields_ = [
+    ('hTargetChannel', ctypes.c_uint32),
+    ('smID', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06),
+]
+
+rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10 = struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10
+rpc_ctrl_dbg_clear_single_sm_error_state_v = struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10
+class struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10(Structure):
+    pass
+
+class struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06(Structure):
+    pass
+
+struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06._fields_ = [
+    ('action', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06),
+]
+
+rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10 = struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10
+rpc_ctrl_dbg_set_mode_errbar_debug_v = struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10
+class struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10(Structure):
+    pass
+
+class struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06(Structure):
+    pass
+
+struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06._fields_ = [
+    ('stopTriggerType', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06),
+]
+
+rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10 = struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10
+rpc_ctrl_dbg_set_next_stop_trigger_type_v = struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10
+class struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E(Structure):
+    pass
+
+class struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00(Structure):
+    pass
+
+struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00._pack_ = 1 # source:False
+struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00._fields_ = [
+    ('hVASpace', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E._pack_ = 1 # source:False
+struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00),
+]
+
+rpc_ctrl_dma_set_default_vaspace_v1A_0E = struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E
+rpc_ctrl_dma_set_default_vaspace_v = struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E
+class struct_rpc_ctrl_get_ce_pce_mask_v1A_0E(Structure):
+    pass
+
+class struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07(Structure):
+    pass
+
+struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07._pack_ = 1 # source:False
+struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07._fields_ = [
+    ('ceEngineType', ctypes.c_uint32),
+    ('pceMask', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_get_ce_pce_mask_v1A_0E._pack_ = 1 # source:False
+struct_rpc_ctrl_get_ce_pce_mask_v1A_0E._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07),
+]
+
+rpc_ctrl_get_ce_pce_mask_v1A_0E = struct_rpc_ctrl_get_ce_pce_mask_v1A_0E
+rpc_ctrl_get_ce_pce_mask_v = struct_rpc_ctrl_get_ce_pce_mask_v1A_0E
+class struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E(Structure):
+    pass
+
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07(Structure):
+    pass
+
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07(Structure):
+    pass
+
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07._pack_ = 1 # source:False
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07._fields_ = [
+    ('colorFB', ctypes.c_uint32 * 4),
+    ('colorDS', ctypes.c_uint32 * 4),
+    ('depth', ctypes.c_uint32),
+    ('stencil', ctypes.c_uint32),
+]
+
+
+# values for enumeration 'NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE'
+NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE__enumvalues = {
+    0: 'NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_INVALID',
+    1: 'NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COLOR',
+    2: 'NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_DEPTH',
+    3: 'NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_STENCIL',
+    4: 'NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COUNT',
+}
+NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_INVALID = 0
+NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COLOR = 1
+NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_DEPTH = 2
+NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_STENCIL = 3
+NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COUNT = 4
+NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE = ctypes.c_uint32 # enum
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07._pack_ = 1 # source:False
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07._fields_ = [
+    ('value', struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07),
+    ('format', ctypes.c_uint32),
+    ('index', ctypes.c_uint32),
+    ('bIndexValid', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('tableType', NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE),
+]
+
+struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E._pack_ = 1 # source:False
+struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07),
+]
+
+rpc_ctrl_get_zbc_clear_table_entry_v1A_0E = struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E
+rpc_ctrl_get_zbc_clear_table_entry_v = struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E
+class struct_rpc_ctrl_get_nvlink_status_v23_04(Structure):
+    pass
+
+class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04(Structure):
+    pass
+
+class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D(Structure):
+    pass
+
+class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02._fields_ = [
+    ('deviceIdFlags', ctypes.c_uint32),
+    ('domain', ctypes.c_uint32),
+    ('bus', ctypes.c_uint16),
+    ('device', ctypes.c_uint16),
+    ('function', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('pciDeviceId', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('deviceType', ctypes.c_uint64),
+    ('deviceUUID', ctypes.c_ubyte * 16),
+]
+
+struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D._fields_ = [
+    ('capsTbl', ctypes.c_uint32),
+    ('phyType', ctypes.c_ubyte),
+    ('subLinkWidth', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('linkState', ctypes.c_uint32),
+    ('rxSublinkStatus', ctypes.c_ubyte),
+    ('txSublinkStatus', ctypes.c_ubyte),
+    ('nvlinkVersion', ctypes.c_ubyte),
+    ('nciVersion', ctypes.c_ubyte),
+    ('phyVersion', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte * 3),
+    ('nvlinkLinkClockKHz', ctypes.c_uint32),
+    ('nvlinkLineRateMbps', ctypes.c_uint32),
+    ('connected', ctypes.c_ubyte),
+    ('remoteDeviceLinkNumber', ctypes.c_ubyte),
+    ('localDeviceLinkNumber', ctypes.c_ubyte),
+    ('PADDING_2', ctypes.c_ubyte),
+    ('remoteDeviceInfo', struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02),
+    ('localDeviceInfo', struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02),
+]
+
+struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04._pack_ = 1 # source:False
+struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04._fields_ = [
+    ('enabledLinkMask', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('linkInfo', struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D * 24),
+]
+
+struct_rpc_ctrl_get_nvlink_status_v23_04._pack_ = 1 # source:False
+struct_rpc_ctrl_get_nvlink_status_v23_04._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04),
+]
+
+rpc_ctrl_get_nvlink_status_v23_04 = struct_rpc_ctrl_get_nvlink_status_v23_04
+class struct_rpc_ctrl_get_nvlink_status_v28_09(Structure):
+    pass
+
+class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09(Structure):
+    pass
+
+class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09(Structure):
+    pass
+
+class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09._fields_ = [
+    ('deviceIdFlags', ctypes.c_uint32),
+    ('domain', ctypes.c_uint32),
+    ('bus', ctypes.c_uint16),
+    ('device', ctypes.c_uint16),
+    ('function', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('pciDeviceId', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('deviceType', ctypes.c_uint64),
+    ('deviceUUID', ctypes.c_ubyte * 16),
+    ('fabricRecoveryStatusMask', ctypes.c_uint32),
+    ('PADDING_2', ctypes.c_ubyte * 4),
+]
+
+struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09._fields_ = [
+    ('capsTbl', ctypes.c_uint32),
+    ('phyType', ctypes.c_ubyte),
+    ('subLinkWidth', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('linkState', ctypes.c_uint32),
+    ('rxSublinkStatus', ctypes.c_ubyte),
+    ('txSublinkStatus', ctypes.c_ubyte),
+    ('nvlinkVersion', ctypes.c_ubyte),
+    ('nciVersion', ctypes.c_ubyte),
+    ('phyVersion', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte * 3),
+    ('nvlinkLinkClockKHz', ctypes.c_uint32),
+    ('nvlinkLineRateMbps', ctypes.c_uint32),
+    ('connected', ctypes.c_ubyte),
+    ('remoteDeviceLinkNumber', ctypes.c_ubyte),
+    ('localDeviceLinkNumber', ctypes.c_ubyte),
+    ('PADDING_2', ctypes.c_ubyte),
+    ('remoteDeviceInfo', struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09),
+    ('localDeviceInfo', struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09),
+]
+
+struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09._pack_ = 1 # source:False
+struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09._fields_ = [
+    ('enabledLinkMask', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('linkInfo', struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09 * 24),
+]
+
+struct_rpc_ctrl_get_nvlink_status_v28_09._pack_ = 1 # source:False
+struct_rpc_ctrl_get_nvlink_status_v28_09._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09),
+]
+
+rpc_ctrl_get_nvlink_status_v28_09 = struct_rpc_ctrl_get_nvlink_status_v28_09
+rpc_ctrl_get_nvlink_status_v = struct_rpc_ctrl_get_nvlink_status_v28_09
+class struct_rpc_ctrl_get_p2p_caps_v1F_0D(Structure):
+    pass
+
+class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D(Structure):
+    pass
+
+struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D._pack_ = 1 # source:False
+struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D._fields_ = [
+    ('gpuIds', ctypes.c_uint32 * 32),
+    ('gpuCount', ctypes.c_uint32),
+    ('p2pCaps', ctypes.c_uint32),
+    ('p2pOptimalReadCEs', ctypes.c_uint32),
+    ('p2pOptimalWriteCEs', ctypes.c_uint32),
+    ('p2pCapsStatus', ctypes.c_ubyte * 9),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+struct_rpc_ctrl_get_p2p_caps_v1F_0D._pack_ = 1 # source:False
+struct_rpc_ctrl_get_p2p_caps_v1F_0D._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D),
+]
+
+rpc_ctrl_get_p2p_caps_v1F_0D = struct_rpc_ctrl_get_p2p_caps_v1F_0D
+rpc_ctrl_get_p2p_caps_v = struct_rpc_ctrl_get_p2p_caps_v1F_0D
+class struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E(Structure):
+    pass
+
+class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A(Structure):
+    pass
+
+class struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A(Structure):
+    pass
+
+struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A._pack_ = 1 # source:False
+struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A._fields_ = [
+    ('array', ctypes.c_uint32 * 8),
+]
+
+struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A._pack_ = 1 # source:False
+struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A._fields_ = [
+    ('grpACount', ctypes.c_uint32),
+    ('grpBCount', ctypes.c_uint32),
+    ('gpuIdGrpA', ctypes.c_uint32 * 8),
+    ('gpuIdGrpB', ctypes.c_uint32 * 8),
+    ('p2pCaps', struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A * 8),
+    ('a2bOptimalReadCes', struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A * 8),
+    ('a2bOptimalWriteCes', struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A * 8),
+    ('b2aOptimalReadCes', struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A * 8),
+    ('b2aOptimalWriteCes', struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A * 8),
+]
+
+struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E._pack_ = 1 # source:False
+struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A),
+]
+
+rpc_ctrl_get_p2p_caps_matrix_v1A_0E = struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E
+rpc_ctrl_get_p2p_caps_matrix_v = struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E
+class struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F(Structure):
+    pass
+
+struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F._fields_ = [
+    ('ctxsw', ctypes.c_ubyte),
+]
+
+struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F._pack_ = 1 # source:False
+struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+rpc_ctrl_reserve_pm_area_smpc_v1A_0F = struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F
+rpc_ctrl_reserve_pm_area_smpc_v = struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F
+class struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F(Structure):
+    pass
+
+struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F._fields_ = [
+    ('ctxsw', ctypes.c_ubyte),
+]
+
+struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F._pack_ = 1 # source:False
+struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+rpc_ctrl_reserve_hwpm_legacy_v1A_0F = struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F
+rpc_ctrl_reserve_hwpm_legacy_v = struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F
+class struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F(Structure):
+    pass
+
+
+# values for enumeration 'NVB0CC_REGOPS_MODE'
+NVB0CC_REGOPS_MODE__enumvalues = {
+    0: 'NVB0CC_REGOPS_MODE_ALL_OR_NONE',
+    1: 'NVB0CC_REGOPS_MODE_CONTINUE_ON_ERROR',
+}
+NVB0CC_REGOPS_MODE_ALL_OR_NONE = 0
+NVB0CC_REGOPS_MODE_CONTINUE_ON_ERROR = 1
+NVB0CC_REGOPS_MODE = ctypes.c_uint32 # enum
+struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F._fields_ = [
+    ('regOpCount', ctypes.c_uint32),
+    ('mode', NVB0CC_REGOPS_MODE),
+    ('bPassed', ctypes.c_ubyte),
+    ('bDirect', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('regOps', struct_NV2080_CTRL_GPU_REG_OP_v03_00 * 124),
+]
+
+struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F._pack_ = 1 # source:False
+struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F),
+]
+
+rpc_ctrl_b0cc_exec_reg_ops_v1A_0F = struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F
+rpc_ctrl_b0cc_exec_reg_ops_v = struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F
+class struct_rpc_ctrl_bind_pm_resources_v1A_0F(Structure):
+    pass
+
+struct_rpc_ctrl_bind_pm_resources_v1A_0F._pack_ = 1 # source:False
+struct_rpc_ctrl_bind_pm_resources_v1A_0F._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+]
+
+rpc_ctrl_bind_pm_resources_v1A_0F = struct_rpc_ctrl_bind_pm_resources_v1A_0F
+rpc_ctrl_bind_pm_resources_v = struct_rpc_ctrl_bind_pm_resources_v1A_0F
+class struct_rpc_ctrl_alloc_pma_stream_v1A_14(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14(Structure):
+    pass
+
+struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14._fields_ = [
+    ('hMemPmaBuffer', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('pmaBufferOffset', ctypes.c_uint64),
+    ('pmaBufferSize', ctypes.c_uint64),
+    ('hMemPmaBytesAvailable', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('pmaBytesAvailableOffset', ctypes.c_uint64),
+    ('ctxsw', ctypes.c_ubyte),
+    ('PADDING_2', ctypes.c_ubyte * 3),
+    ('pmaChannelIdx', ctypes.c_uint32),
+    ('pmaBufferVA', ctypes.c_uint64),
+]
+
+struct_rpc_ctrl_alloc_pma_stream_v1A_14._pack_ = 1 # source:False
+struct_rpc_ctrl_alloc_pma_stream_v1A_14._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14),
+]
+
+rpc_ctrl_alloc_pma_stream_v1A_14 = struct_rpc_ctrl_alloc_pma_stream_v1A_14
+rpc_ctrl_alloc_pma_stream_v = struct_rpc_ctrl_alloc_pma_stream_v1A_14
+class struct_rpc_ctrl_pma_stream_update_get_put_v1A_14(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14(Structure):
+    pass
+
+struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14._fields_ = [
+    ('bytesConsumed', ctypes.c_uint64),
+    ('bUpdateAvailableBytes', ctypes.c_ubyte),
+    ('bWait', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 6),
+    ('bytesAvailable', ctypes.c_uint64),
+    ('bReturnPut', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte * 7),
+    ('putPtr', ctypes.c_uint64),
+    ('pmaChannelIdx', ctypes.c_uint32),
+    ('PADDING_2', ctypes.c_ubyte * 4),
+]
+
+struct_rpc_ctrl_pma_stream_update_get_put_v1A_14._pack_ = 1 # source:False
+struct_rpc_ctrl_pma_stream_update_get_put_v1A_14._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14),
+]
+
+rpc_ctrl_pma_stream_update_get_put_v1A_14 = struct_rpc_ctrl_pma_stream_update_get_put_v1A_14
+rpc_ctrl_pma_stream_update_get_put_v = struct_rpc_ctrl_pma_stream_update_get_put_v1A_14
+class struct_rpc_ctrl_fb_get_info_v2_v25_0A(Structure):
+    pass
+
+class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A(Structure):
+    pass
+
+class struct_NV2080_CTRL_FB_INFO_v1A_15(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_INFO_v1A_15._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_INFO_v1A_15._fields_ = [
+    ('index', ctypes.c_uint32),
+    ('data', ctypes.c_uint32),
+]
+
+struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A._fields_ = [
+    ('fbInfoListSize', ctypes.c_uint32),
+    ('fbInfoList', struct_NV2080_CTRL_FB_INFO_v1A_15 * 55),
+]
+
+struct_rpc_ctrl_fb_get_info_v2_v25_0A._pack_ = 1 # source:False
+struct_rpc_ctrl_fb_get_info_v2_v25_0A._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A),
+]
+
+rpc_ctrl_fb_get_info_v2_v25_0A = struct_rpc_ctrl_fb_get_info_v2_v25_0A
+class struct_rpc_ctrl_fb_get_info_v2_v27_00(Structure):
+    pass
+
+class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00._fields_ = [
+    ('fbInfoListSize', ctypes.c_uint32),
+    ('fbInfoList', struct_NV2080_CTRL_FB_INFO_v1A_15 * 57),
+]
+
+struct_rpc_ctrl_fb_get_info_v2_v27_00._pack_ = 1 # source:False
+struct_rpc_ctrl_fb_get_info_v2_v27_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00),
+]
+
+rpc_ctrl_fb_get_info_v2_v27_00 = struct_rpc_ctrl_fb_get_info_v2_v27_00
+rpc_ctrl_fb_get_info_v2_v = struct_rpc_ctrl_fb_get_info_v2_v27_00
+class struct_rpc_ctrl_fifo_set_channel_properties_v1A_16(Structure):
+    pass
+
+class struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00(Structure):
+    pass
+
+struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00._pack_ = 1 # source:False
+struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00._fields_ = [
+    ('hChannel', ctypes.c_uint32),
+    ('property', ctypes.c_uint32),
+    ('value', ctypes.c_uint64),
+]
+
+struct_rpc_ctrl_fifo_set_channel_properties_v1A_16._pack_ = 1 # source:False
+struct_rpc_ctrl_fifo_set_channel_properties_v1A_16._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00),
+]
+
+rpc_ctrl_fifo_set_channel_properties_v1A_16 = struct_rpc_ctrl_fifo_set_channel_properties_v1A_16
+rpc_ctrl_fifo_set_channel_properties_v = struct_rpc_ctrl_fifo_set_channel_properties_v1A_16
+class struct_rpc_ctrl_gpu_evict_ctx_v1A_1C(Structure):
+    pass
+
+class struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00(Structure):
+    pass
+
+struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00._fields_ = [
+    ('engineType', ctypes.c_uint32),
+    ('hClient', ctypes.c_uint32),
+    ('ChID', ctypes.c_uint32),
+    ('hChanClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_gpu_evict_ctx_v1A_1C._pack_ = 1 # source:False
+struct_rpc_ctrl_gpu_evict_ctx_v1A_1C._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00),
+]
+
+rpc_ctrl_gpu_evict_ctx_v1A_1C = struct_rpc_ctrl_gpu_evict_ctx_v1A_1C
+rpc_ctrl_gpu_evict_ctx_v = struct_rpc_ctrl_gpu_evict_ctx_v1A_1C
+class struct_rpc_ctrl_fb_get_fs_info_v24_00(Structure):
+    pass
+
+class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00(Structure):
+    pass
+
+class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D(Structure):
+    pass
+
+class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D(Union):
+    pass
+
+class struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D._fields_ = [
+    ('data', ctypes.c_ubyte * 24),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D._fields_ = [
+    ('swizzId', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('fbpEnMask', ctypes.c_uint64),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('ltcEnMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('ltsEnMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('fbpaEnMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('ropEnMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('swizzId', ctypes.c_uint32),
+    ('ltcEnMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('swizzId', ctypes.c_uint32),
+    ('ltsEnMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('swizzId', ctypes.c_uint32),
+    ('fbpaEnMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('swizzId', ctypes.c_uint32),
+    ('ropEnMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('swizzId', ctypes.c_uint32),
+    ('fbpaSubpEnMask', ctypes.c_uint64),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('fbpaSubpEnMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('fbpLogicalIndex', ctypes.c_uint32),
+]
+
+union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D._pack_ = 1 # source:False
+union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D._fields_ = [
+    ('inv', struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D),
+    ('fbp', struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D),
+    ('ltc', struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D),
+    ('lts', struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D),
+    ('fbpa', struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D),
+    ('rop', struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D),
+    ('dmLtc', struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D),
+    ('dmLts', struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D),
+    ('dmFbpa', struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D),
+    ('dmRop', struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D),
+    ('dmFbpaSubp', struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D),
+    ('fbpaSubp', struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D),
+    ('fbpLogicalMap', struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D),
+    ('PADDING_0', ctypes.c_ubyte * 16),
+]
+
+struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D._fields_ = [
+    ('queryType', ctypes.c_uint16),
+    ('reserved', ctypes.c_ubyte * 2),
+    ('status', ctypes.c_uint32),
+    ('queryParams', union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D),
+]
+
+struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00._fields_ = [
+    ('numQueries', ctypes.c_uint16),
+    ('reserved', ctypes.c_ubyte * 6),
+    ('queries', struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D * 120),
+]
+
+struct_rpc_ctrl_fb_get_fs_info_v24_00._pack_ = 1 # source:False
+struct_rpc_ctrl_fb_get_fs_info_v24_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00),
+]
+
+rpc_ctrl_fb_get_fs_info_v24_00 = struct_rpc_ctrl_fb_get_fs_info_v24_00
+class struct_rpc_ctrl_fb_get_fs_info_v26_04(Structure):
+    pass
+
+class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04(Structure):
+    pass
+
+class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04(Structure):
+    pass
+
+class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04(Union):
+    pass
+
+class struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04(Structure):
+    pass
+
+struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04._pack_ = 1 # source:False
+struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04._fields_ = [
+    ('sysIdx', ctypes.c_uint32),
+    ('sysl2LtcEnMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('pacEnMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('logicalLtcEnMask', ctypes.c_uint64),
+]
+
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04(Structure):
+    pass
+
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04._fields_ = [
+    ('fbpIndex', ctypes.c_uint32),
+    ('swizzId', ctypes.c_uint32),
+    ('logicalLtcEnMask', ctypes.c_uint64),
+]
+
+union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04._pack_ = 1 # source:False
+union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04._fields_ = [
+    ('inv', struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D),
+    ('fbp', struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D),
+    ('ltc', struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D),
+    ('lts', struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D),
+    ('fbpa', struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D),
+    ('rop', struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D),
+    ('dmLtc', struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D),
+    ('dmLts', struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D),
+    ('dmFbpa', struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D),
+    ('dmRop', struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D),
+    ('dmFbpaSubp', struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D),
+    ('fbpaSubp', struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D),
+    ('fbpLogicalMap', struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D),
+    ('sysl2Ltc', struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04),
+    ('pac', struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04),
+    ('logicalLtc', struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04),
+    ('dmLogicalLtc', struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04),
+    ('PADDING_0', ctypes.c_ubyte * 8),
+]
+
+struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04._fields_ = [
+    ('queryType', ctypes.c_uint16),
+    ('reserved', ctypes.c_ubyte * 2),
+    ('status', ctypes.c_uint32),
+    ('queryParams', union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04),
+]
+
+struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04._pack_ = 1 # source:False
+struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04._fields_ = [
+    ('numQueries', ctypes.c_uint16),
+    ('reserved', ctypes.c_ubyte * 6),
+    ('queries', struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04 * 120),
+]
+
+struct_rpc_ctrl_fb_get_fs_info_v26_04._pack_ = 1 # source:False
+struct_rpc_ctrl_fb_get_fs_info_v26_04._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04),
+]
+
+rpc_ctrl_fb_get_fs_info_v26_04 = struct_rpc_ctrl_fb_get_fs_info_v26_04
+rpc_ctrl_fb_get_fs_info_v = struct_rpc_ctrl_fb_get_fs_info_v26_04
+class struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D(Structure):
+    pass
+
+class struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D(Structure):
+    pass
+
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D(Structure):
+    pass
+
+class union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D(Union):
+    pass
+
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D._fields_ = [
+    ('gpcCount', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D._fields_ = [
+    ('gpcId', ctypes.c_uint32),
+    ('chipletGpcMap', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D._fields_ = [
+    ('gpcId', ctypes.c_uint32),
+    ('tpcMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D._fields_ = [
+    ('gpcId', ctypes.c_uint32),
+    ('ppcMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D._fields_ = [
+    ('swizzId', ctypes.c_uint32),
+    ('gpcId', ctypes.c_uint32),
+    ('chipletGpcMap', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D._fields_ = [
+    ('chipletSyspipeMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D._fields_ = [
+    ('swizzId', ctypes.c_uint16),
+    ('physSyspipeIdCount', ctypes.c_uint16),
+    ('physSyspipeId', ctypes.c_ubyte * 8),
+]
+
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D._fields_ = [
+    ('swizzId', ctypes.c_uint32),
+    ('grIdx', ctypes.c_uint32),
+    ('gpcEnMask', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D._fields_ = [
+    ('syspipeId', ctypes.c_uint32),
+]
+
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D(Structure):
+    pass
+
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D._fields_ = [
+    ('gpcId', ctypes.c_uint32),
+    ('ropMask', ctypes.c_uint32),
+]
+
+union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D._pack_ = 1 # source:False
+union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D._fields_ = [
+    ('gpcCountData', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D),
+    ('chipletGpcMapData', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D),
+    ('tpcMaskData', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D),
+    ('ppcMaskData', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D),
+    ('partitionGpcMapData', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D),
+    ('syspipeMaskData', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D),
+    ('partitionChipletSyspipeData', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D),
+    ('dmGpcMaskData', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D),
+    ('partitionSyspipeIdData', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D),
+    ('ropMaskData', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D._fields_ = [
+    ('queryType', ctypes.c_uint16),
+    ('reserved', ctypes.c_ubyte * 2),
+    ('status', ctypes.c_uint32),
+    ('queryData', union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D),
+]
+
+struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D._pack_ = 1 # source:False
+struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D._fields_ = [
+    ('numQueries', ctypes.c_uint16),
+    ('reserved', ctypes.c_ubyte * 6),
+    ('queries', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D * 96),
+]
+
+struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D._pack_ = 1 # source:False
+struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D),
+]
+
+rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D = struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D
+rpc_ctrl_grmgr_get_gr_fs_info_v = struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D
+class struct_rpc_ctrl_stop_channel_v1A_1E(Structure):
+    pass
+
+class struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E(Structure):
+    pass
+
+struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E._pack_ = 1 # source:False
+struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E._fields_ = [
+    ('bImmediate', ctypes.c_ubyte),
+]
+
+struct_rpc_ctrl_stop_channel_v1A_1E._pack_ = 1 # source:False
+struct_rpc_ctrl_stop_channel_v1A_1E._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+rpc_ctrl_stop_channel_v1A_1E = struct_rpc_ctrl_stop_channel_v1A_1E
+rpc_ctrl_stop_channel_v = struct_rpc_ctrl_stop_channel_v1A_1E
+class struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F(Structure):
+    pass
+
+class struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F(Structure):
+    pass
+
+struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F._pack_ = 1 # source:False
+struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F._fields_ = [
+    ('hChannel', ctypes.c_uint32),
+    ('samplingMode', ctypes.c_uint32),
+    ('grRouteInfo', struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01),
+]
+
+struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F._pack_ = 1 # source:False
+struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F),
+]
+
+rpc_ctrl_gr_pc_sampling_mode_v1A_1F = struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F
+rpc_ctrl_gr_pc_sampling_mode_v = struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F
+class struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F(Structure):
+    pass
+
+class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F(Structure):
+    pass
+
+class struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F(Structure):
+    pass
+
+struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F._pack_ = 1 # source:False
+struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F._fields_ = [
+    ('clientActiveMask', ctypes.c_uint32),
+    ('bRegkeyLimitRatedTdp', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+
+# values for enumeration 'NV2080_CTRL_PERF_RATED_TDP_ACTION'
+NV2080_CTRL_PERF_RATED_TDP_ACTION__enumvalues = {
+    0: 'NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT',
+    1: 'NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED',
+    2: 'NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT',
+    3: 'NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LOCK',
+    4: 'NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR',
+}
+NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT = 0
+NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED = 1
+NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT = 2
+NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LOCK = 3
+NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR = 4
+NV2080_CTRL_PERF_RATED_TDP_ACTION = ctypes.c_uint32 # enum
+struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F._pack_ = 1 # source:False
+struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F._fields_ = [
+    ('rm', struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F),
+    ('output', NV2080_CTRL_PERF_RATED_TDP_ACTION),
+    ('inputs', NV2080_CTRL_PERF_RATED_TDP_ACTION * 5),
+]
+
+struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F._pack_ = 1 # source:False
+struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F),
+]
+
+rpc_ctrl_perf_rated_tdp_get_status_v1A_1F = struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F
+rpc_ctrl_perf_rated_tdp_get_status_v = struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F
+class struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F(Structure):
+    pass
+
+class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F(Structure):
+    pass
+
+
+# values for enumeration 'NV2080_CTRL_PERF_RATED_TDP_CLIENT'
+NV2080_CTRL_PERF_RATED_TDP_CLIENT__enumvalues = {
+    0: 'NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM',
+    1: 'NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342',
+    2: 'NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL',
+    3: 'NV2080_CTRL_PERF_RATED_TDP_CLIENT_OS',
+    4: 'NV2080_CTRL_PERF_RATED_TDP_CLIENT_PROFILE',
+    5: 'NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS',
+}
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM = 0
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342 = 1
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL = 2
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_OS = 3
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_PROFILE = 4
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS = 5
+NV2080_CTRL_PERF_RATED_TDP_CLIENT = ctypes.c_uint32 # enum
+struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F._pack_ = 1 # source:False
+struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F._fields_ = [
+    ('client', NV2080_CTRL_PERF_RATED_TDP_CLIENT),
+    ('input', NV2080_CTRL_PERF_RATED_TDP_ACTION),
+]
+
+struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F._pack_ = 1 # source:False
+struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F),
+]
+
+rpc_ctrl_perf_rated_tdp_set_control_v1A_1F = struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F
+rpc_ctrl_perf_rated_tdp_set_control_v = struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F
+class struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F(Structure):
+    pass
+
+class struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F(Structure):
+    pass
+
+struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F._pack_ = 1 # source:False
+struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F._fields_ = [
+    ('bSetMaxFreq', ctypes.c_ubyte),
+]
+
+struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F._pack_ = 1 # source:False
+struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+rpc_ctrl_timer_set_gr_tick_freq_v1A_1F = struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F
+rpc_ctrl_timer_set_gr_tick_freq_v = struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F
+class struct_rpc_ctrl_free_pma_stream_v1A_1F(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F(Structure):
+    pass
+
+struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F._fields_ = [
+    ('pmaChannelIdx', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_free_pma_stream_v1A_1F._pack_ = 1 # source:False
+struct_rpc_ctrl_free_pma_stream_v1A_1F._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F),
+]
+
+rpc_ctrl_free_pma_stream_v1A_1F = struct_rpc_ctrl_free_pma_stream_v1A_1F
+rpc_ctrl_free_pma_stream_v = struct_rpc_ctrl_free_pma_stream_v1A_1F
+class struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23(Structure):
+    pass
+
+class struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23(Structure):
+    pass
+
+struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23._pack_ = 1 # source:False
+struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23._fields_ = [
+    ('base', ctypes.c_uint64),
+    ('size', ctypes.c_uint64),
+    ('addressSpace', ctypes.c_uint32),
+    ('cacheAttrib', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23._pack_ = 1 # source:False
+struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23),
+]
+
+rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23 = struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23
+rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v = struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23
+class struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02(Structure):
+    pass
+
+class struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02(Structure):
+    pass
+
+struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02._fields_ = [
+    ('smID', ctypes.c_uint32),
+    ('bSingleStep', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02),
+]
+
+rpc_ctrl_dbg_set_single_sm_single_step_v1C_02 = struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02
+rpc_ctrl_dbg_set_single_sm_single_step_v = struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02
+class struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04(Structure):
+    pass
+
+class struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04(Structure):
+    pass
+
+
+# values for enumeration 'NV0080_CTRL_GR_TPC_PARTITION_MODE'
+NV0080_CTRL_GR_TPC_PARTITION_MODE__enumvalues = {
+    0: 'NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE',
+    1: 'NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC',
+    2: 'NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC',
+}
+NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE = 0
+NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC = 1
+NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC = 2
+NV0080_CTRL_GR_TPC_PARTITION_MODE = ctypes.c_uint32 # enum
+struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04._pack_ = 1 # source:False
+struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04._fields_ = [
+    ('hChannelGroup', ctypes.c_uint32),
+    ('mode', NV0080_CTRL_GR_TPC_PARTITION_MODE),
+    ('bEnableAllTpcs', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 7),
+    ('grRouteInfo', struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01),
+]
+
+struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04._pack_ = 1 # source:False
+struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04),
+]
+
+rpc_ctrl_gr_get_tpc_partition_mode_v1C_04 = struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04
+rpc_ctrl_gr_get_tpc_partition_mode_v = struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04
+class struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04(Structure):
+    pass
+
+struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04._pack_ = 1 # source:False
+struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04),
+]
+
+rpc_ctrl_gr_set_tpc_partition_mode_v1C_04 = struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04
+rpc_ctrl_gr_set_tpc_partition_mode_v = struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04
+class struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07(Structure):
+    pass
+
+class struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07(Structure):
+    pass
+
+class struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07._fields_ = [
+    ('base', ctypes.c_uint64),
+    ('size', ctypes.c_uint64),
+    ('alignment', ctypes.c_uint64),
+    ('addressSpace', ctypes.c_uint32),
+    ('cpuCacheAttrib', ctypes.c_uint32),
+]
+
+struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07._pack_ = 1 # source:False
+struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07._fields_ = [
+    ('methodBufferMemdesc', struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07 * 2),
+    ('bar2Addr', ctypes.c_uint64 * 2),
+    ('numValidEntries', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07._pack_ = 1 # source:False
+struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07),
+]
+
+rpc_ctrl_internal_promote_fault_method_buffers_v1E_07 = struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07
+rpc_ctrl_internal_promote_fault_method_buffers_v = struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07
+class struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05(Structure):
+    pass
+
+class struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05(Structure):
+    pass
+
+struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05._pack_ = 1 # source:False
+struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05._fields_ = [
+    ('bZbcSurfacesExist', ctypes.c_ubyte),
+]
+
+struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05._pack_ = 1 # source:False
+struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05 = struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05
+rpc_ctrl_internal_memsys_set_zbc_referenced_v = struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05
+class struct_rpc_ctrl_fabric_memory_describe_v1E_0C(Structure):
+    pass
+
+class struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C(Structure):
+    pass
+
+struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C._pack_ = 1 # source:False
+struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C._fields_ = [
+    ('offset', ctypes.c_uint64),
+    ('totalPfns', ctypes.c_uint64),
+    ('pfnArray', ctypes.c_uint32 * 512),
+    ('numPfns', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+struct_rpc_ctrl_fabric_memory_describe_v1E_0C._pack_ = 1 # source:False
+struct_rpc_ctrl_fabric_memory_describe_v1E_0C._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C),
+]
+
+rpc_ctrl_fabric_memory_describe_v1E_0C = struct_rpc_ctrl_fabric_memory_describe_v1E_0C
+rpc_ctrl_fabric_memory_describe_v = struct_rpc_ctrl_fabric_memory_describe_v1E_0C
+class struct_rpc_ctrl_fabric_mem_stats_v1E_0C(Structure):
+    pass
+
+class struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C(Structure):
+    pass
+
+struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C._pack_ = 1 # source:False
+struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C._fields_ = [
+    ('totalSize', ctypes.c_uint64),
+    ('freeSize', ctypes.c_uint64),
+]
+
+struct_rpc_ctrl_fabric_mem_stats_v1E_0C._pack_ = 1 # source:False
+struct_rpc_ctrl_fabric_mem_stats_v1E_0C._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C),
+]
+
+rpc_ctrl_fabric_mem_stats_v1E_0C = struct_rpc_ctrl_fabric_mem_stats_v1E_0C
+rpc_ctrl_fabric_mem_stats_v = struct_rpc_ctrl_fabric_mem_stats_v1E_0C
+class struct_rpc_ctrl_bus_set_p2p_mapping_v21_03(Structure):
+    pass
+
+class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03(Structure):
+    pass
+
+struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03._pack_ = 1 # source:False
+struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03._fields_ = [
+    ('connectionType', ctypes.c_uint32),
+    ('peerId', ctypes.c_uint32),
+    ('bSpaAccessOnly', ctypes.c_uint32),
+    ('bUseUuid', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('remoteGpuId', ctypes.c_uint32),
+    ('remoteGpuUuid', ctypes.c_ubyte * 16),
+]
+
+struct_rpc_ctrl_bus_set_p2p_mapping_v21_03._pack_ = 1 # source:False
+struct_rpc_ctrl_bus_set_p2p_mapping_v21_03._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03),
+]
+
+rpc_ctrl_bus_set_p2p_mapping_v21_03 = struct_rpc_ctrl_bus_set_p2p_mapping_v21_03
+class struct_rpc_ctrl_bus_set_p2p_mapping_v29_08(Structure):
+    pass
+
+class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08(Structure):
+    pass
+
+struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08._pack_ = 1 # source:False
+struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08._fields_ = [
+    ('connectionType', ctypes.c_uint32),
+    ('peerId', ctypes.c_uint32),
+    ('bEgmPeer', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('bSpaAccessOnly', ctypes.c_uint32),
+    ('bUseUuid', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte * 3),
+    ('remoteGpuId', ctypes.c_uint32),
+    ('remoteGpuUuid', ctypes.c_ubyte * 16),
+]
+
+struct_rpc_ctrl_bus_set_p2p_mapping_v29_08._pack_ = 1 # source:False
+struct_rpc_ctrl_bus_set_p2p_mapping_v29_08._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08),
+]
+
+rpc_ctrl_bus_set_p2p_mapping_v29_08 = struct_rpc_ctrl_bus_set_p2p_mapping_v29_08
+rpc_ctrl_bus_set_p2p_mapping_v = struct_rpc_ctrl_bus_set_p2p_mapping_v29_08
+class struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03(Structure):
+    pass
+
+class struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03(Structure):
+    pass
+
+struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03._pack_ = 1 # source:False
+struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03._fields_ = [
+    ('connectionType', ctypes.c_uint32),
+    ('peerId', ctypes.c_uint32),
+    ('bUseUuid', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('remoteGpuId', ctypes.c_uint32),
+    ('remoteGpuUuid', ctypes.c_ubyte * 16),
+]
+
+struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03._pack_ = 1 # source:False
+struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03),
+]
+
+rpc_ctrl_bus_unset_p2p_mapping_v21_03 = struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03
+rpc_ctrl_bus_unset_p2p_mapping_v = struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03
+class struct_rpc_ctrl_gpu_get_info_v2_v25_11(Structure):
+    pass
+
+class struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11(Structure):
+    pass
+
+class struct_NV2080_CTRL_GPU_INFO_v25_11(Structure):
+    pass
+
+struct_NV2080_CTRL_GPU_INFO_v25_11._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_INFO_v25_11._fields_ = [
+    ('index', ctypes.c_uint32),
+    ('data', ctypes.c_uint32),
+]
+
+struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11._fields_ = [
+    ('gpuInfoListSize', ctypes.c_uint32),
+    ('gpuInfoList', struct_NV2080_CTRL_GPU_INFO_v25_11 * 65),
+]
+
+struct_rpc_ctrl_gpu_get_info_v2_v25_11._pack_ = 1 # source:False
+struct_rpc_ctrl_gpu_get_info_v2_v25_11._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11),
+]
+
+rpc_ctrl_gpu_get_info_v2_v25_11 = struct_rpc_ctrl_gpu_get_info_v2_v25_11
+rpc_ctrl_gpu_get_info_v2_v = struct_rpc_ctrl_gpu_get_info_v2_v25_11
+class struct_rpc_update_gpm_guest_buffer_info_v27_01(Structure):
+    pass
+
+struct_rpc_update_gpm_guest_buffer_info_v27_01._pack_ = 1 # source:False
+struct_rpc_update_gpm_guest_buffer_info_v27_01._fields_ = [
+    ('gpfn', ctypes.c_uint64),
+    ('swizzId', ctypes.c_uint32),
+    ('computeId', ctypes.c_uint32),
+    ('bufSize', ctypes.c_uint32),
+    ('bMap', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+rpc_update_gpm_guest_buffer_info_v27_01 = struct_rpc_update_gpm_guest_buffer_info_v27_01
+rpc_update_gpm_guest_buffer_info_v = struct_rpc_update_gpm_guest_buffer_info_v27_01
+class struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08(Structure):
+    pass
+
+struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08._fields_ = [
+    ('pmaChannelIdx', ctypes.c_uint32),
+    ('bMembytesPollingRequired', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08._pack_ = 1 # source:False
+struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08),
+]
+
+rpc_ctrl_internal_quiesce_pma_channel_v1C_08 = struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08
+rpc_ctrl_internal_quiesce_pma_channel_v = struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08
+class struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C(Structure):
+    pass
+
+struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C._fields_ = [
+    ('pmaChannelIdx', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('pmaBufferVA', ctypes.c_uint64),
+    ('pmaBufferSize', ctypes.c_uint64),
+    ('membytesVA', ctypes.c_uint64),
+    ('hwpmIBPA', ctypes.c_uint64),
+    ('hwpmIBAperture', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte * 7),
+]
+
+struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C._pack_ = 1 # source:False
+struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C),
+]
+
+rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C = struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C
+rpc_ctrl_internal_sriov_promote_pma_stream_v = struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C
+class struct_rpc_ctrl_exec_partitions_create_v24_05(Structure):
+    pass
+
+class struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05(Structure):
+    pass
+
+class struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05(Structure):
+    pass
+
+struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05._pack_ = 1 # source:False
+struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05._fields_ = [
+    ('gpcCount', ctypes.c_uint32),
+    ('gfxGpcCount', ctypes.c_uint32),
+    ('veidCount', ctypes.c_uint32),
+    ('ceCount', ctypes.c_uint32),
+    ('nvEncCount', ctypes.c_uint32),
+    ('nvDecCount', ctypes.c_uint32),
+    ('nvJpgCount', ctypes.c_uint32),
+    ('ofaCount', ctypes.c_uint32),
+    ('sharedEngFlag', ctypes.c_uint32),
+    ('smCount', ctypes.c_uint32),
+    ('spanStart', ctypes.c_uint32),
+    ('computeSize', ctypes.c_uint32),
+]
+
+struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05._pack_ = 1 # source:False
+struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05._fields_ = [
+    ('bQuery', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('execPartCount', ctypes.c_uint32),
+    ('execPartInfo', struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05 * 8),
+    ('execPartId', ctypes.c_uint32 * 8),
+]
+
+struct_rpc_ctrl_exec_partitions_create_v24_05._pack_ = 1 # source:False
+struct_rpc_ctrl_exec_partitions_create_v24_05._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('status', ctypes.c_uint32),
+    ('execPartitionsCreate', struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05),
+]
+
+rpc_ctrl_exec_partitions_create_v24_05 = struct_rpc_ctrl_exec_partitions_create_v24_05
+rpc_ctrl_exec_partitions_create_v = struct_rpc_ctrl_exec_partitions_create_v24_05
+class struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05(Structure):
+    pass
+
+class struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04(Structure):
+    pass
+
+struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04._pack_ = 1 # source:False
+struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04._fields_ = [
+    ('imbPhysAddr', ctypes.c_uint64),
+    ('addrSpace', ctypes.c_uint32),
+    ('flaAction', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05._pack_ = 1 # source:False
+struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04),
+]
+
+rpc_ctrl_fla_setup_instance_mem_block_v21_05 = struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05
+rpc_ctrl_fla_setup_instance_mem_block_v = struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05
+class struct_rpc_ctrl_get_total_hs_credits_v21_08(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08(Structure):
+    pass
+
+struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08._fields_ = [
+    ('numCredits', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_get_total_hs_credits_v21_08._pack_ = 1 # source:False
+struct_rpc_ctrl_get_total_hs_credits_v21_08._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08),
+]
+
+rpc_ctrl_get_total_hs_credits_v21_08 = struct_rpc_ctrl_get_total_hs_credits_v21_08
+rpc_ctrl_get_total_hs_credits_v = struct_rpc_ctrl_get_total_hs_credits_v21_08
+class struct_rpc_ctrl_get_hs_credits_v21_08(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08(Structure):
+    pass
+
+struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08._fields_ = [
+    ('status', ctypes.c_ubyte),
+    ('entryIndex', ctypes.c_ubyte),
+]
+
+class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08(Structure):
+    pass
+
+struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08._fields_ = [
+    ('chipletType', ctypes.c_ubyte),
+    ('chipletIndex', ctypes.c_ubyte),
+    ('numCredits', ctypes.c_uint16),
+]
+
+struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08._fields_ = [
+    ('pmaChannelIdx', ctypes.c_ubyte),
+    ('numEntries', ctypes.c_ubyte),
+    ('statusInfo', struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08),
+    ('creditInfo', struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08 * 63),
+]
+
+struct_rpc_ctrl_get_hs_credits_v21_08._pack_ = 1 # source:False
+struct_rpc_ctrl_get_hs_credits_v21_08._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08),
+]
+
+rpc_ctrl_get_hs_credits_v21_08 = struct_rpc_ctrl_get_hs_credits_v21_08
+rpc_ctrl_get_hs_credits_v = struct_rpc_ctrl_get_hs_credits_v21_08
+class struct_rpc_ctrl_reserve_hes_v29_07(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07(Structure):
+    pass
+
+struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07._fields_ = [
+    ('ctxsw', ctypes.c_ubyte),
+]
+
+struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07._fields_ = [
+    ('cwd', struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07),
+]
+
+struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07._fields_ = [
+    ('type', ctypes.c_uint32),
+    ('reserveParams', struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+struct_rpc_ctrl_reserve_hes_v29_07._pack_ = 1 # source:False
+struct_rpc_ctrl_reserve_hes_v29_07._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07),
+]
+
+rpc_ctrl_reserve_hes_v29_07 = struct_rpc_ctrl_reserve_hes_v29_07
+rpc_ctrl_reserve_hes_v = struct_rpc_ctrl_reserve_hes_v29_07
+class struct_rpc_ctrl_release_hes_v29_07(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07(Structure):
+    pass
+
+struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07._fields_ = [
+    ('type', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_release_hes_v29_07._pack_ = 1 # source:False
+struct_rpc_ctrl_release_hes_v29_07._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07),
+]
+
+rpc_ctrl_release_hes_v29_07 = struct_rpc_ctrl_release_hes_v29_07
+rpc_ctrl_release_hes_v = struct_rpc_ctrl_release_hes_v29_07
+class struct_rpc_ctrl_reserve_ccu_prof_v29_07(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07(Structure):
+    pass
+
+struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07._fields_ = [
+    ('ctxsw', ctypes.c_ubyte),
+]
+
+struct_rpc_ctrl_reserve_ccu_prof_v29_07._pack_ = 1 # source:False
+struct_rpc_ctrl_reserve_ccu_prof_v29_07._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+rpc_ctrl_reserve_ccu_prof_v29_07 = struct_rpc_ctrl_reserve_ccu_prof_v29_07
+rpc_ctrl_reserve_ccu_prof_v = struct_rpc_ctrl_reserve_ccu_prof_v29_07
+class struct_rpc_ctrl_release_ccu_prof_v29_07(Structure):
+    pass
+
+struct_rpc_ctrl_release_ccu_prof_v29_07._pack_ = 1 # source:False
+struct_rpc_ctrl_release_ccu_prof_v29_07._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+]
+
+rpc_ctrl_release_ccu_prof_v29_07 = struct_rpc_ctrl_release_ccu_prof_v29_07
+rpc_ctrl_release_ccu_prof_v = struct_rpc_ctrl_release_ccu_prof_v29_07
+class struct_rpc_ctrl_set_hs_credits_v21_08(Structure):
+    pass
+
+class struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08(Structure):
+    pass
+
+struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08._pack_ = 1 # source:False
+struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08._fields_ = [
+    ('pmaChannelIdx', ctypes.c_ubyte),
+    ('numEntries', ctypes.c_ubyte),
+    ('statusInfo', struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08),
+    ('creditInfo', struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08 * 63),
+]
+
+struct_rpc_ctrl_set_hs_credits_v21_08._pack_ = 1 # source:False
+struct_rpc_ctrl_set_hs_credits_v21_08._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08),
+]
+
+rpc_ctrl_set_hs_credits_v21_08 = struct_rpc_ctrl_set_hs_credits_v21_08
+rpc_ctrl_set_hs_credits_v = struct_rpc_ctrl_set_hs_credits_v21_08
+class struct_rpc_ctrl_pm_area_pc_sampler_v21_0B(Structure):
+    pass
+
+struct_rpc_ctrl_pm_area_pc_sampler_v21_0B._pack_ = 1 # source:False
+struct_rpc_ctrl_pm_area_pc_sampler_v21_0B._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('cmd', ctypes.c_uint32),
+]
+
+rpc_ctrl_pm_area_pc_sampler_v21_0B = struct_rpc_ctrl_pm_area_pc_sampler_v21_0B
+rpc_ctrl_pm_area_pc_sampler_v = struct_rpc_ctrl_pm_area_pc_sampler_v21_0B
+class struct_rpc_ctrl_exec_partitions_delete_v1F_0A(Structure):
+    pass
+
+class struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05(Structure):
+    pass
+
+struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05._pack_ = 1 # source:False
+struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05._fields_ = [
+    ('execPartCount', ctypes.c_uint32),
+    ('execPartId', ctypes.c_uint32 * 8),
+]
+
+struct_rpc_ctrl_exec_partitions_delete_v1F_0A._pack_ = 1 # source:False
+struct_rpc_ctrl_exec_partitions_delete_v1F_0A._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('execPartitionsDelete', struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05),
+]
+
+rpc_ctrl_exec_partitions_delete_v1F_0A = struct_rpc_ctrl_exec_partitions_delete_v1F_0A
+rpc_ctrl_exec_partitions_delete_v = struct_rpc_ctrl_exec_partitions_delete_v1F_0A
+class struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A(Structure):
+    pass
+
+class struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00(Structure):
+    pass
+
+struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00._pack_ = 1 # source:False
+struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00._fields_ = [
+    ('workSubmitToken', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A._pack_ = 1 # source:False
+struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('workSubmitToken', struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00),
+]
+
+rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A = struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A
+rpc_ctrl_gpfifo_get_work_submit_token_v = struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A
+class struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A(Structure):
+    pass
+
+class struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04(Structure):
+    pass
+
+struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04._pack_ = 1 # source:False
+struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04._fields_ = [
+    ('index', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A._pack_ = 1 # source:False
+struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('setWorkSubmitTokenIndex', struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04),
+]
+
+rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A = struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A
+rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v = struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A
+class struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D(Structure):
+    pass
+
+class struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B(Structure):
+    pass
+
+struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B._pack_ = 1 # source:False
+struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B._fields_ = [
+    ('eccMask', ctypes.c_uint32),
+    ('nvlinkMask', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D._pack_ = 1 # source:False
+struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('vfErrContIntrMask', struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B),
+]
+
+rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D = struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D
+rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v = struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D
+class struct_rpc_save_hibernation_data_v1E_0E(Structure):
+    pass
+
+struct_rpc_save_hibernation_data_v1E_0E._pack_ = 1 # source:False
+struct_rpc_save_hibernation_data_v1E_0E._fields_ = [
+    ('remainedBytes', ctypes.c_uint32),
+    ('payload', ctypes.c_ubyte * 0),
+]
+
+rpc_save_hibernation_data_v1E_0E = struct_rpc_save_hibernation_data_v1E_0E
+rpc_save_hibernation_data_v = struct_rpc_save_hibernation_data_v1E_0E
+class struct_rpc_restore_hibernation_data_v1E_0E(Structure):
+    pass
+
+struct_rpc_restore_hibernation_data_v1E_0E._pack_ = 1 # source:False
+struct_rpc_restore_hibernation_data_v1E_0E._fields_ = [
+    ('remainedBytes', ctypes.c_uint32),
+    ('payload', ctypes.c_ubyte * 0),
+]
+
+rpc_restore_hibernation_data_v1E_0E = struct_rpc_restore_hibernation_data_v1E_0E
+rpc_restore_hibernation_data_v = struct_rpc_restore_hibernation_data_v1E_0E
+class struct_rpc_ctrl_get_mmu_debug_mode_v1E_06(Structure):
+    pass
+
+class struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06(Structure):
+    pass
+
+struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06._pack_ = 1 # source:False
+struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06._fields_ = [
+    ('bMode', ctypes.c_ubyte),
+]
+
+struct_rpc_ctrl_get_mmu_debug_mode_v1E_06._pack_ = 1 # source:False
+struct_rpc_ctrl_get_mmu_debug_mode_v1E_06._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+rpc_ctrl_get_mmu_debug_mode_v1E_06 = struct_rpc_ctrl_get_mmu_debug_mode_v1E_06
+rpc_ctrl_get_mmu_debug_mode_v = struct_rpc_ctrl_get_mmu_debug_mode_v1E_06
+class struct_rpc_disable_channels_v1E_0B(Structure):
+    pass
+
+struct_rpc_disable_channels_v1E_0B._pack_ = 1 # source:False
+struct_rpc_disable_channels_v1E_0B._fields_ = [
+    ('bDisable', ctypes.c_uint32),
+]
+
+rpc_disable_channels_v1E_0B = struct_rpc_disable_channels_v1E_0B
+rpc_disable_channels_v = struct_rpc_disable_channels_v1E_0B
+class struct_rpc_ctrl_gpu_migratable_ops_v21_07(Structure):
+    pass
+
+class struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07(Structure):
+    pass
+
+struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07._fields_ = [
+    ('hClientTarget', ctypes.c_uint32),
+    ('hChannelTarget', ctypes.c_uint32),
+    ('bNonTransactional', ctypes.c_uint32),
+    ('regOpCount', ctypes.c_uint32),
+    ('smIds', ctypes.c_uint32 * 50),
+    ('regOps', struct_NV2080_CTRL_GPU_REG_OP_v03_00 * 50),
+    ('grRouteInfo', struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01),
+]
+
+struct_rpc_ctrl_gpu_migratable_ops_v21_07._pack_ = 1 # source:False
+struct_rpc_ctrl_gpu_migratable_ops_v21_07._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07),
+]
+
+rpc_ctrl_gpu_migratable_ops_v21_07 = struct_rpc_ctrl_gpu_migratable_ops_v21_07
+rpc_ctrl_gpu_migratable_ops_v = struct_rpc_ctrl_gpu_migratable_ops_v21_07
+class struct_rpc_invalidate_tlb_v23_03(Structure):
+    pass
+
+struct_rpc_invalidate_tlb_v23_03._pack_ = 1 # source:False
+struct_rpc_invalidate_tlb_v23_03._fields_ = [
+    ('pdbAddress', ctypes.c_uint64),
+    ('regVal', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+rpc_invalidate_tlb_v23_03 = struct_rpc_invalidate_tlb_v23_03
+rpc_invalidate_tlb_v = struct_rpc_invalidate_tlb_v23_03
+class struct_rpc_get_brand_caps_v25_12(Structure):
+    pass
+
+struct_rpc_get_brand_caps_v25_12._pack_ = 1 # source:False
+struct_rpc_get_brand_caps_v25_12._fields_ = [
+    ('brands', ctypes.c_uint32),
+]
+
+rpc_get_brand_caps_v25_12 = struct_rpc_get_brand_caps_v25_12
+rpc_get_brand_caps_v = struct_rpc_get_brand_caps_v25_12
+class struct_rpc_gsp_set_system_info_v17_00(Structure):
+    pass
+
+struct_rpc_gsp_set_system_info_v17_00._pack_ = 1 # source:False
+struct_rpc_gsp_set_system_info_v17_00._fields_ = [
+    ('data', ctypes.c_uint32),
+]
+
+rpc_gsp_set_system_info_v17_00 = struct_rpc_gsp_set_system_info_v17_00
+rpc_gsp_set_system_info_v = struct_rpc_gsp_set_system_info_v17_00
+class struct_rpc_gsp_rm_alloc_v03_00(Structure):
+    pass
+
+struct_rpc_gsp_rm_alloc_v03_00._pack_ = 1 # source:False
+struct_rpc_gsp_rm_alloc_v03_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hParent', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('hClass', ctypes.c_uint32),
+    ('status', ctypes.c_uint32),
+    ('paramsSize', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('reserved', ctypes.c_ubyte * 4),
+    ('params', ctypes.c_ubyte * 0),
+]
+
+rpc_gsp_rm_alloc_v03_00 = struct_rpc_gsp_rm_alloc_v03_00
+rpc_gsp_rm_alloc_v = struct_rpc_gsp_rm_alloc_v03_00
+class struct_rpc_gsp_rm_control_v03_00(Structure):
+    pass
+
+struct_rpc_gsp_rm_control_v03_00._pack_ = 1 # source:False
+struct_rpc_gsp_rm_control_v03_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('cmd', ctypes.c_uint32),
+    ('status', ctypes.c_uint32),
+    ('paramsSize', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('params', ctypes.c_ubyte * 0),
+]
+
+rpc_gsp_rm_control_v03_00 = struct_rpc_gsp_rm_control_v03_00
+rpc_gsp_rm_control_v = struct_rpc_gsp_rm_control_v03_00
+class struct_rpc_dump_protobuf_component_v18_12(Structure):
+    pass
+
+struct_rpc_dump_protobuf_component_v18_12._pack_ = 1 # source:False
+struct_rpc_dump_protobuf_component_v18_12._fields_ = [
+    ('component', ctypes.c_uint16),
+    ('nvDumpType', ctypes.c_ubyte),
+    ('countOnly', ctypes.c_ubyte),
+    ('bugCheckCode', ctypes.c_uint32),
+    ('internalCode', ctypes.c_uint32),
+    ('bufferSize', ctypes.c_uint32),
+    ('blob', ctypes.c_ubyte * 0),
+]
+
+rpc_dump_protobuf_component_v18_12 = struct_rpc_dump_protobuf_component_v18_12
+rpc_dump_protobuf_component_v = struct_rpc_dump_protobuf_component_v18_12
+class struct_rpc_run_cpu_sequencer_v17_00(Structure):
+    pass
+
+struct_rpc_run_cpu_sequencer_v17_00._pack_ = 1 # source:False
+struct_rpc_run_cpu_sequencer_v17_00._fields_ = [
+    ('bufferSizeDWord', ctypes.c_uint32),
+    ('cmdIndex', ctypes.c_uint32),
+    ('regSaveArea', ctypes.c_uint32 * 8),
+    ('commandBuffer', ctypes.c_uint32 * 0),
+]
+
+rpc_run_cpu_sequencer_v17_00 = struct_rpc_run_cpu_sequencer_v17_00
+rpc_run_cpu_sequencer_v = struct_rpc_run_cpu_sequencer_v17_00
+class struct_rpc_post_event_v17_00(Structure):
+    pass
+
+struct_rpc_post_event_v17_00._pack_ = 1 # source:False
+struct_rpc_post_event_v17_00._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hEvent', ctypes.c_uint32),
+    ('notifyIndex', ctypes.c_uint32),
+    ('data', ctypes.c_uint32),
+    ('info16', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('status', ctypes.c_uint32),
+    ('eventDataSize', ctypes.c_uint32),
+    ('bNotifyList', ctypes.c_ubyte),
+    ('eventData', ctypes.c_ubyte * 0),
+    ('PADDING_1', ctypes.c_ubyte * 3),
+]
+
+rpc_post_event_v17_00 = struct_rpc_post_event_v17_00
+rpc_post_event_v = struct_rpc_post_event_v17_00
+class struct_rpc_rc_triggered_v17_02(Structure):
+    pass
+
+struct_rpc_rc_triggered_v17_02._pack_ = 1 # source:False
+struct_rpc_rc_triggered_v17_02._fields_ = [
+    ('nv2080EngineType', ctypes.c_uint32),
+    ('chid', ctypes.c_uint32),
+    ('gfid', ctypes.c_uint32),
+    ('exceptLevel', ctypes.c_uint32),
+    ('exceptType', ctypes.c_uint32),
+    ('scope', ctypes.c_uint32),
+    ('partitionAttributionId', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('mmuFaultAddrLo', ctypes.c_uint32),
+    ('mmuFaultAddrHi', ctypes.c_uint32),
+    ('mmuFaultType', ctypes.c_uint32),
+    ('bCallbackNeeded', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte * 3),
+    ('rcJournalBufferSize', ctypes.c_uint32),
+    ('rcJournalBuffer', ctypes.c_ubyte * 0),
+]
+
+rpc_rc_triggered_v17_02 = struct_rpc_rc_triggered_v17_02
+rpc_rc_triggered_v = struct_rpc_rc_triggered_v17_02
+class struct_rpc_os_error_log_v17_00(Structure):
+    pass
+
+struct_rpc_os_error_log_v17_00._pack_ = 1 # source:False
+struct_rpc_os_error_log_v17_00._fields_ = [
+    ('exceptType', ctypes.c_uint32),
+    ('runlistId', ctypes.c_uint32),
+    ('chid', ctypes.c_uint32),
+    ('errString', ctypes.c_char * 256),
+]
+
+rpc_os_error_log_v17_00 = struct_rpc_os_error_log_v17_00
+rpc_os_error_log_v = struct_rpc_os_error_log_v17_00
+class struct_rpc_rg_line_intr_v17_00(Structure):
+    pass
+
+struct_rpc_rg_line_intr_v17_00._pack_ = 1 # source:False
+struct_rpc_rg_line_intr_v17_00._fields_ = [
+    ('head', ctypes.c_uint32),
+    ('rgIntr', ctypes.c_uint32),
+]
+
+rpc_rg_line_intr_v17_00 = struct_rpc_rg_line_intr_v17_00
+rpc_rg_line_intr_v = struct_rpc_rg_line_intr_v17_00
+class struct_rpc_display_modeset_v01_00(Structure):
+    pass
+
+struct_rpc_display_modeset_v01_00._pack_ = 1 # source:False
+struct_rpc_display_modeset_v01_00._fields_ = [
+    ('bModesetStart', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('minRequiredIsoBandwidthKBPS', ctypes.c_uint32),
+    ('minRequiredFloorBandwidthKBPS', ctypes.c_uint32),
+]
+
+rpc_display_modeset_v01_00 = struct_rpc_display_modeset_v01_00
+rpc_display_modeset_v = struct_rpc_display_modeset_v01_00
+class struct_rpc_gpuacct_perfmon_util_samples_v1F_0E(Structure):
+    pass
+
+class struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E(Structure):
+    pass
+
+struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E._pack_ = 1 # source:False
+struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E._fields_ = [
+    ('type', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('bufSize', ctypes.c_uint32),
+    ('count', ctypes.c_uint32),
+    ('tracker', ctypes.c_uint32),
+    ('samples', struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E * 72),
+]
+
+struct_rpc_gpuacct_perfmon_util_samples_v1F_0E._pack_ = 1 # source:False
+struct_rpc_gpuacct_perfmon_util_samples_v1F_0E._fields_ = [
+    ('params', struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E),
+]
+
+rpc_gpuacct_perfmon_util_samples_v1F_0E = struct_rpc_gpuacct_perfmon_util_samples_v1F_0E
+rpc_gpuacct_perfmon_util_samples_v = struct_rpc_gpuacct_perfmon_util_samples_v1F_0E
+class struct_rpc_vgpu_gsp_plugin_triggered_v17_00(Structure):
+    pass
+
+struct_rpc_vgpu_gsp_plugin_triggered_v17_00._pack_ = 1 # source:False
+struct_rpc_vgpu_gsp_plugin_triggered_v17_00._fields_ = [
+    ('gfid', ctypes.c_uint32),
+    ('notifyIndex', ctypes.c_uint32),
+]
+
+rpc_vgpu_gsp_plugin_triggered_v17_00 = struct_rpc_vgpu_gsp_plugin_triggered_v17_00
+rpc_vgpu_gsp_plugin_triggered_v = struct_rpc_vgpu_gsp_plugin_triggered_v17_00
+class struct_rpc_vgpu_config_event_v17_00(Structure):
+    pass
+
+struct_rpc_vgpu_config_event_v17_00._pack_ = 1 # source:False
+struct_rpc_vgpu_config_event_v17_00._fields_ = [
+    ('notifyIndex', ctypes.c_uint32),
+]
+
+rpc_vgpu_config_event_v17_00 = struct_rpc_vgpu_config_event_v17_00
+rpc_vgpu_config_event_v = struct_rpc_vgpu_config_event_v17_00
+class struct_rpc_dce_rm_init_v01_00(Structure):
+    pass
+
+struct_rpc_dce_rm_init_v01_00._pack_ = 1 # source:False
+struct_rpc_dce_rm_init_v01_00._fields_ = [
+    ('bInit', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('hInternalClient', ctypes.c_uint32),
+]
+
+rpc_dce_rm_init_v01_00 = struct_rpc_dce_rm_init_v01_00
+rpc_dce_rm_init_v = struct_rpc_dce_rm_init_v01_00
+class struct_rpc_sim_read_v1E_01(Structure):
+    pass
+
+struct_rpc_sim_read_v1E_01._pack_ = 1 # source:False
+struct_rpc_sim_read_v1E_01._fields_ = [
+    ('path', ctypes.c_char * 256),
+    ('index', ctypes.c_uint32),
+    ('count', ctypes.c_uint32),
+]
+
+rpc_sim_read_v1E_01 = struct_rpc_sim_read_v1E_01
+rpc_sim_read_v = struct_rpc_sim_read_v1E_01
+class struct_rpc_sim_write_v1E_01(Structure):
+    pass
+
+struct_rpc_sim_write_v1E_01._pack_ = 1 # source:False
+struct_rpc_sim_write_v1E_01._fields_ = [
+    ('path', ctypes.c_char * 256),
+    ('index', ctypes.c_uint32),
+    ('count', ctypes.c_uint32),
+    ('data', ctypes.c_uint32),
+]
+
+rpc_sim_write_v1E_01 = struct_rpc_sim_write_v1E_01
+rpc_sim_write_v = struct_rpc_sim_write_v1E_01
+class struct_rpc_ucode_libos_print_v1E_08(Structure):
+    pass
+
+struct_rpc_ucode_libos_print_v1E_08._pack_ = 1 # source:False
+struct_rpc_ucode_libos_print_v1E_08._fields_ = [
+    ('ucodeEngDesc', ctypes.c_uint32),
+    ('libosPrintBufSize', ctypes.c_uint32),
+    ('libosPrintBuf', ctypes.c_ubyte * 0),
+]
+
+rpc_ucode_libos_print_v1E_08 = struct_rpc_ucode_libos_print_v1E_08
+rpc_ucode_libos_print_v = struct_rpc_ucode_libos_print_v1E_08
+class struct_rpc_init_done_v17_00(Structure):
+    pass
+
+struct_rpc_init_done_v17_00._pack_ = 1 # source:False
+struct_rpc_init_done_v17_00._fields_ = [
+    ('not_used', ctypes.c_uint32),
+]
+
+rpc_init_done_v17_00 = struct_rpc_init_done_v17_00
+rpc_init_done_v = struct_rpc_init_done_v17_00
+class struct_rpc_semaphore_schedule_callback_v17_00(Structure):
+    pass
+
+struct_rpc_semaphore_schedule_callback_v17_00._pack_ = 1 # source:False
+struct_rpc_semaphore_schedule_callback_v17_00._fields_ = [
+    ('GPUVA', ctypes.c_uint64),
+    ('hVASpace', ctypes.c_uint32),
+    ('ReleaseValue', ctypes.c_uint32),
+    ('Flags', ctypes.c_uint32),
+    ('completionStatus', ctypes.c_uint32),
+    ('hClient', ctypes.c_uint32),
+    ('hEvent', ctypes.c_uint32),
+]
+
+rpc_semaphore_schedule_callback_v17_00 = struct_rpc_semaphore_schedule_callback_v17_00
+rpc_semaphore_schedule_callback_v = struct_rpc_semaphore_schedule_callback_v17_00
+class struct_rpc_timed_semaphore_release_v01_00(Structure):
+    pass
+
+struct_rpc_timed_semaphore_release_v01_00._pack_ = 1 # source:False
+struct_rpc_timed_semaphore_release_v01_00._fields_ = [
+    ('semaphoreVA', ctypes.c_uint64),
+    ('notifierVA', ctypes.c_uint64),
+    ('hVASpace', ctypes.c_uint32),
+    ('releaseValue', ctypes.c_uint32),
+    ('completionStatus', ctypes.c_uint32),
+    ('hClient', ctypes.c_uint32),
+    ('hDevice', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+rpc_timed_semaphore_release_v01_00 = struct_rpc_timed_semaphore_release_v01_00
+rpc_timed_semaphore_release_v = struct_rpc_timed_semaphore_release_v01_00
+class struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00(Structure):
+    pass
+
+class struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00._fields_ = [
+    ('flags', ctypes.c_uint32),
+    ('bBridgeless', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('currLimits', ctypes.c_uint32 * 2),
+]
+
+struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00._pack_ = 1 # source:False
+struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00._fields_ = [
+    ('params', struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00),
+]
+
+rpc_perf_gpu_boost_sync_limits_callback_v17_00 = struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00
+rpc_perf_gpu_boost_sync_limits_callback_v = struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00
+class struct_rpc_perf_bridgeless_info_update_v17_00(Structure):
+    pass
+
+struct_rpc_perf_bridgeless_info_update_v17_00._pack_ = 1 # source:False
+struct_rpc_perf_bridgeless_info_update_v17_00._fields_ = [
+    ('bBridgeless', ctypes.c_uint64),
+]
+
+rpc_perf_bridgeless_info_update_v17_00 = struct_rpc_perf_bridgeless_info_update_v17_00
+rpc_perf_bridgeless_info_update_v = struct_rpc_perf_bridgeless_info_update_v17_00
+class struct_rpc_nvlink_fault_up_v17_00(Structure):
+    pass
+
+struct_rpc_nvlink_fault_up_v17_00._pack_ = 1 # source:False
+struct_rpc_nvlink_fault_up_v17_00._fields_ = [
+    ('linkId', ctypes.c_uint32),
+]
+
+rpc_nvlink_fault_up_v17_00 = struct_rpc_nvlink_fault_up_v17_00
+rpc_nvlink_fault_up_v = struct_rpc_nvlink_fault_up_v17_00
+class struct_rpc_nvlink_inband_received_data_256_v17_00(Structure):
+    pass
+
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00._fields_ = [
+    ('dataSize', ctypes.c_uint32),
+    ('data', ctypes.c_ubyte * 256),
+]
+
+struct_rpc_nvlink_inband_received_data_256_v17_00._pack_ = 1 # source:False
+struct_rpc_nvlink_inband_received_data_256_v17_00._fields_ = [
+    ('params', struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00),
+]
+
+rpc_nvlink_inband_received_data_256_v17_00 = struct_rpc_nvlink_inband_received_data_256_v17_00
+rpc_nvlink_inband_received_data_256_v = struct_rpc_nvlink_inband_received_data_256_v17_00
+class struct_rpc_nvlink_inband_received_data_512_v17_00(Structure):
+    pass
+
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00._fields_ = [
+    ('dataSize', ctypes.c_uint32),
+    ('data', ctypes.c_ubyte * 512),
+]
+
+struct_rpc_nvlink_inband_received_data_512_v17_00._pack_ = 1 # source:False
+struct_rpc_nvlink_inband_received_data_512_v17_00._fields_ = [
+    ('params', struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00),
+]
+
+rpc_nvlink_inband_received_data_512_v17_00 = struct_rpc_nvlink_inband_received_data_512_v17_00
+rpc_nvlink_inband_received_data_512_v = struct_rpc_nvlink_inband_received_data_512_v17_00
+class struct_rpc_nvlink_inband_received_data_1024_v17_00(Structure):
+    pass
+
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00._fields_ = [
+    ('dataSize', ctypes.c_uint32),
+    ('data', ctypes.c_ubyte * 1024),
+]
+
+struct_rpc_nvlink_inband_received_data_1024_v17_00._pack_ = 1 # source:False
+struct_rpc_nvlink_inband_received_data_1024_v17_00._fields_ = [
+    ('params', struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00),
+]
+
+rpc_nvlink_inband_received_data_1024_v17_00 = struct_rpc_nvlink_inband_received_data_1024_v17_00
+rpc_nvlink_inband_received_data_1024_v = struct_rpc_nvlink_inband_received_data_1024_v17_00
+class struct_rpc_nvlink_inband_received_data_2048_v17_00(Structure):
+    pass
+
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00._fields_ = [
+    ('dataSize', ctypes.c_uint32),
+    ('data', ctypes.c_ubyte * 2048),
+]
+
+struct_rpc_nvlink_inband_received_data_2048_v17_00._pack_ = 1 # source:False
+struct_rpc_nvlink_inband_received_data_2048_v17_00._fields_ = [
+    ('params', struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00),
+]
+
+rpc_nvlink_inband_received_data_2048_v17_00 = struct_rpc_nvlink_inband_received_data_2048_v17_00
+rpc_nvlink_inband_received_data_2048_v = struct_rpc_nvlink_inband_received_data_2048_v17_00
+class struct_rpc_nvlink_inband_received_data_4096_v17_00(Structure):
+    pass
+
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00._fields_ = [
+    ('dataSize', ctypes.c_uint32),
+    ('data', ctypes.c_ubyte * 4096),
+]
+
+struct_rpc_nvlink_inband_received_data_4096_v17_00._pack_ = 1 # source:False
+struct_rpc_nvlink_inband_received_data_4096_v17_00._fields_ = [
+    ('params', struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00),
+]
+
+rpc_nvlink_inband_received_data_4096_v17_00 = struct_rpc_nvlink_inband_received_data_4096_v17_00
+rpc_nvlink_inband_received_data_4096_v = struct_rpc_nvlink_inband_received_data_4096_v17_00
+class struct_rpc_nvlink_is_gpu_degraded_v17_00(Structure):
+    pass
+
+class struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00._fields_ = [
+    ('linkId', ctypes.c_uint32),
+    ('bIsGpuDegraded', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+struct_rpc_nvlink_is_gpu_degraded_v17_00._pack_ = 1 # source:False
+struct_rpc_nvlink_is_gpu_degraded_v17_00._fields_ = [
+    ('params', struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00),
+]
+
+rpc_nvlink_is_gpu_degraded_v17_00 = struct_rpc_nvlink_is_gpu_degraded_v17_00
+rpc_nvlink_is_gpu_degraded_v = struct_rpc_nvlink_is_gpu_degraded_v17_00
+class struct_rpc_nvlink_fatal_error_recovery_v17_00(Structure):
+    pass
+
+class struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00._fields_ = [
+    ('bRecoverable', ctypes.c_ubyte),
+    ('bLazy', ctypes.c_ubyte),
+]
+
+struct_rpc_nvlink_fatal_error_recovery_v17_00._pack_ = 1 # source:False
+struct_rpc_nvlink_fatal_error_recovery_v17_00._fields_ = [
+    ('params', struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00),
+]
+
+rpc_nvlink_fatal_error_recovery_v17_00 = struct_rpc_nvlink_fatal_error_recovery_v17_00
+rpc_nvlink_fatal_error_recovery_v = struct_rpc_nvlink_fatal_error_recovery_v17_00
+class struct_rpc_update_gsp_trace_v01_00(Structure):
+    pass
+
+struct_rpc_update_gsp_trace_v01_00._pack_ = 1 # source:False
+struct_rpc_update_gsp_trace_v01_00._fields_ = [
+    ('records', ctypes.c_uint32),
+    ('data', ctypes.c_uint32),
+]
+
+rpc_update_gsp_trace_v01_00 = struct_rpc_update_gsp_trace_v01_00
+rpc_update_gsp_trace_v = struct_rpc_update_gsp_trace_v01_00
+class struct_rpc_gsp_post_nocat_record_v01_00(Structure):
+    pass
+
+struct_rpc_gsp_post_nocat_record_v01_00._pack_ = 1 # source:False
+struct_rpc_gsp_post_nocat_record_v01_00._fields_ = [
+    ('data', ctypes.c_uint32),
+]
+
+rpc_gsp_post_nocat_record_v01_00 = struct_rpc_gsp_post_nocat_record_v01_00
+rpc_gsp_post_nocat_record_v = struct_rpc_gsp_post_nocat_record_v01_00
+class struct_rpc_extdev_intr_service_v17_00(Structure):
+    pass
+
+struct_rpc_extdev_intr_service_v17_00._pack_ = 1 # source:False
+struct_rpc_extdev_intr_service_v17_00._fields_ = [
+    ('lossRegStatus', ctypes.c_ubyte),
+    ('gainRegStatus', ctypes.c_ubyte),
+    ('miscRegStatus', ctypes.c_ubyte),
+    ('rmStatus', ctypes.c_ubyte),
+]
+
+rpc_extdev_intr_service_v17_00 = struct_rpc_extdev_intr_service_v17_00
+rpc_extdev_intr_service_v = struct_rpc_extdev_intr_service_v17_00
+class struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04(Structure):
+    pass
+
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04(Structure):
+    pass
+
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04(Structure):
+    pass
+
+class union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04(Union):
+    pass
+
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04(Structure):
+    pass
+
+struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04._fields_ = [
+    ('sensorId', ctypes.c_uint32),
+    ('limit', ctypes.c_uint32),
+]
+
+union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04._pack_ = 1 # source:False
+union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04._fields_ = [
+    ('smbpbi', struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04),
+]
+
+struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04._fields_ = [
+    ('type', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('data', union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04),
+]
+
+struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04._pack_ = 1 # source:False
+struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04._fields_ = [
+    ('flags', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('syncData', struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04),
+]
+
+struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04._pack_ = 1 # source:False
+struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04._fields_ = [
+    ('params', struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04),
+]
+
+rpc_pfm_req_hndlr_state_sync_callback_v21_04 = struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04
+rpc_pfm_req_hndlr_state_sync_callback_v = struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04
+class struct_rpc_vgpu_gsp_mig_ci_config_v21_03(Structure):
+    pass
+
+struct_rpc_vgpu_gsp_mig_ci_config_v21_03._pack_ = 1 # source:False
+struct_rpc_vgpu_gsp_mig_ci_config_v21_03._fields_ = [
+    ('execPartCount', ctypes.c_uint32),
+    ('execPartId', ctypes.c_uint32 * 8),
+    ('gfid', ctypes.c_uint32),
+    ('bDelete', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+rpc_vgpu_gsp_mig_ci_config_v21_03 = struct_rpc_vgpu_gsp_mig_ci_config_v21_03
+rpc_vgpu_gsp_mig_ci_config_v = struct_rpc_vgpu_gsp_mig_ci_config_v21_03
+class struct_rpc_gsp_lockdown_notice_v17_00(Structure):
+    pass
+
+struct_rpc_gsp_lockdown_notice_v17_00._pack_ = 1 # source:False
+struct_rpc_gsp_lockdown_notice_v17_00._fields_ = [
+    ('bLockdownEngaging', ctypes.c_ubyte),
+]
+
+rpc_gsp_lockdown_notice_v17_00 = struct_rpc_gsp_lockdown_notice_v17_00
+rpc_gsp_lockdown_notice_v = struct_rpc_gsp_lockdown_notice_v17_00
+class struct_rpc_ctrl_gpu_query_ecc_status_v24_06(Structure):
+    pass
+
+class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06(Structure):
+    pass
+
+class struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01(Structure):
+    pass
+
+class struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01(Structure):
+    pass
+
+struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01._fields_ = [
+    ('count', ctypes.c_uint64),
+]
+
+struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01._fields_ = [
+    ('enabled', ctypes.c_ubyte),
+    ('scrubComplete', ctypes.c_ubyte),
+    ('supported', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 5),
+    ('dbe', struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01),
+    ('dbeNonResettable', struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01),
+    ('sbe', struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01),
+    ('sbeNonResettable', struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01),
+]
+
+struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06._fields_ = [
+    ('units', struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01 * 25),
+    ('bFatalPoisonError', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('flags', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_gpu_query_ecc_status_v24_06._pack_ = 1 # source:False
+struct_rpc_ctrl_gpu_query_ecc_status_v24_06._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06),
+]
+
+rpc_ctrl_gpu_query_ecc_status_v24_06 = struct_rpc_ctrl_gpu_query_ecc_status_v24_06
+class struct_rpc_ctrl_gpu_query_ecc_status_v26_02(Structure):
+    pass
+
+class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02(Structure):
+    pass
+
+struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02._pack_ = 1 # source:False
+struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02._fields_ = [
+    ('units', struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01 * 30),
+    ('bFatalPoisonError', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('flags', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_gpu_query_ecc_status_v26_02._pack_ = 1 # source:False
+struct_rpc_ctrl_gpu_query_ecc_status_v26_02._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('params', struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02),
+]
+
+rpc_ctrl_gpu_query_ecc_status_v26_02 = struct_rpc_ctrl_gpu_query_ecc_status_v26_02
+rpc_ctrl_gpu_query_ecc_status_v = struct_rpc_ctrl_gpu_query_ecc_status_v26_02
+class struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04(Structure):
+    pass
+
+class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04(Structure):
+    pass
+
+struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04._fields_ = [
+    ('value', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04),
+]
+
+rpc_ctrl_dbg_get_mode_mmu_debug_v25_04 = struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04
+rpc_ctrl_dbg_get_mode_mmu_debug_v = struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04
+class struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07(Structure):
+    pass
+
+class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07(Structure):
+    pass
+
+struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07._pack_ = 1 # source:False
+struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07._fields_ = [
+    ('value', ctypes.c_uint32),
+]
+
+struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07._pack_ = 1 # source:False
+struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07),
+]
+
+rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07 = struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07
+rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v = struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07
+class struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09(Structure):
+    pass
+
+struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09._pack_ = 1 # source:False
+struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09._fields_ = [
+    ('bwMode', ctypes.c_ubyte),
+]
+
+rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09 = struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09
+rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v = struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09
+class struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C(Structure):
+    pass
+
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C(Structure):
+    pass
+
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C._pack_ = 1 # source:False
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C._fields_ = [
+    ('dataSize', ctypes.c_uint32),
+    ('data', ctypes.c_ubyte * 512),
+]
+
+struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C._pack_ = 1 # source:False
+struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C._fields_ = [
+    ('message_type', ctypes.c_uint16),
+    ('more', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('payload', struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C),
+]
+
+rpc_ctrl_nvlink_get_inband_received_data_v25_0C = struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C
+rpc_ctrl_nvlink_get_inband_received_data_v = struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C
+class struct_rpc_fecs_error_v26_02(Structure):
+    pass
+
+struct_rpc_fecs_error_v26_02._pack_ = 1 # source:False
+struct_rpc_fecs_error_v26_02._fields_ = [
+    ('grIdx', ctypes.c_uint32),
+    ('error_type', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+rpc_fecs_error_v26_02 = struct_rpc_fecs_error_v26_02
+rpc_fecs_error_v = struct_rpc_fecs_error_v26_02
+class struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05(Structure):
+    pass
+
+struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05._pack_ = 1 # source:False
+struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05._fields_ = [
+    ('buffer', ctypes.c_ubyte * 1024),
+    ('dataSize', ctypes.c_uint32),
+]
+
+rpc_ctrl_cmd_nvlink_inband_send_data_v26_05 = struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05
+rpc_ctrl_cmd_nvlink_inband_send_data_v = struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05
+class struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00(Structure):
+    pass
+
+struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00._pack_ = 1 # source:False
+struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00._fields_ = [
+    ('bufferSize', ctypes.c_uint32),
+    ('tracepointMask', ctypes.c_uint32),
+    ('bufferWatermark', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('bufferAddr', ctypes.c_uint64),
+    ('flag', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte * 7),
+]
+
+rpc_ctrl_cmd_internal_control_gsp_trace_v28_00 = struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00
+rpc_ctrl_cmd_internal_control_gsp_trace_v = struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00
+class struct_rpc_recovery_action_v28_01(Structure):
+    pass
+
+struct_rpc_recovery_action_v28_01._pack_ = 1 # source:False
+struct_rpc_recovery_action_v28_01._fields_ = [
+    ('type', ctypes.c_uint32),
+    ('value', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+rpc_recovery_action_v28_01 = struct_rpc_recovery_action_v28_01
+rpc_recovery_action_v = struct_rpc_recovery_action_v28_01
+class struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02(Structure):
+    pass
+
+class struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02(Structure):
+    pass
+
+class struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02(Structure):
+    pass
+
+struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02._pack_ = 1 # source:False
+struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02._fields_ = [
+    ('allocations', ctypes.c_uint32),
+    ('peakAllocations', ctypes.c_uint32),
+    ('objectSize', ctypes.c_uint64),
+]
+
+struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02._pack_ = 1 # source:False
+struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02._fields_ = [
+    ('poolStats', struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02 * 64),
+    ('totalHeapSize', ctypes.c_uint64),
+    ('poolCount', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 7),
+]
+
+struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02._pack_ = 1 # source:False
+struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hObject', ctypes.c_uint32),
+    ('ctrlParams', struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02),
+]
+
+rpc_ctrl_subdevice_get_libos_heap_stats_v29_02 = struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02
+rpc_ctrl_subdevice_get_libos_heap_stats_v = struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02
 class struct_GSP_MSG_QUEUE_ELEMENT(Structure):
     pass
 
@@ -1669,7 +6749,36 @@ __all__ = \
     'MAX_DSM_SUPPORTED_FUNCS_RTN_LEN', 'MAX_GPC_COUNT',
     'MAX_GROUP_COUNT', 'MCTP_HEADER', 'MESSAGE_QUEUE_INIT_ARGUMENTS',
     'MSGQ_PRIV_H', 'MSGQ_VERSION', 'MUX_METHOD_DATA',
-    'MUX_METHOD_DATA_ELEMENT', 'NVDM_PAYLOAD_COT',
+    'MUX_METHOD_DATA_ELEMENT', 'NV0080_CTRL_GR_TPC_PARTITION_MODE',
+    'NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC',
+    'NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE',
+    'NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC',
+    'NV2080_CTRL_CMD_PERF_VID_ENG',
+    'NV2080_CTRL_CMD_PERF_VID_ENG_NVDEC',
+    'NV2080_CTRL_CMD_PERF_VID_ENG_NVENC',
+    'NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG',
+    'NV2080_CTRL_CMD_PERF_VID_ENG_NVOFA',
+    'NV2080_CTRL_PERF_RATED_TDP_ACTION',
+    'NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT',
+    'NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED',
+    'NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR',
+    'NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT',
+    'NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LOCK',
+    'NV2080_CTRL_PERF_RATED_TDP_CLIENT',
+    'NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL',
+    'NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS',
+    'NV2080_CTRL_PERF_RATED_TDP_CLIENT_OS',
+    'NV2080_CTRL_PERF_RATED_TDP_CLIENT_PROFILE',
+    'NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM',
+    'NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342',
+    'NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE',
+    'NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COLOR',
+    'NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COUNT',
+    'NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_DEPTH',
+    'NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_INVALID',
+    'NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_STENCIL', 'NVB0CC_REGOPS_MODE',
+    'NVB0CC_REGOPS_MODE_ALL_OR_NONE',
+    'NVB0CC_REGOPS_MODE_CONTINUE_ON_ERROR', 'NVDM_PAYLOAD_COT',
     'NVGPU_ENGINE_CAPS_MASK_ARRAY_MAX', 'NVGPU_ENGINE_CAPS_MASK_BITS',
     'NV_ACPI_GENERIC_FUNC_COUNT',
     'NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_VERSION_AVAILABLE',
@@ -1780,7 +6889,7 @@ __all__ = \
     'RPC_GR_BUFFER_TYPE_GRAPHICS_PRIV_ACCESS_MAP',
     'RPC_GR_BUFFER_TYPE_GRAPHICS_RTV_CB_GLOBAL',
     'RPC_GR_BUFFER_TYPE_GRAPHICS_ZCULL',
-    'RPC_GR_BUFFER_TYPE__enumvalues', 'VBIOS_H',
+    'RPC_GR_BUFFER_TYPE__enumvalues', 'SDK_STRUCTURES', 'VBIOS_H',
     'VGPU_MAX_REGOPS_PER_RPC', 'VGPU_RESERVED_HANDLE_BASE',
     'VGPU_RESERVED_HANDLE_RANGE',
     'VGPU_RPC_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PER_RPC_v21_06',
@@ -1794,24 +6903,517 @@ __all__ = \
     'c__EA_RM_ENGINE_TYPE', 'c__EA_RPC_GR_BUFFER_TYPE',
     'dispMuxState_DiscreteGPU', 'dispMuxState_IntegratedGPU',
     'dispMuxState_None', 'msgqMetadata', 'msgqRxHeader',
-    'msgqTxHeader', 'rpc_message_header_v',
-    'rpc_message_header_v03_00', 'rpc_message_rpc_union_field_v',
-    'rpc_message_rpc_union_field_v03_00', 'struct_ACPI_METHOD_DATA',
-    'struct_CAPS_METHOD_DATA', 'struct_DOD_METHOD_DATA',
-    'struct_GSP_ACR_BOOT_GSP_RM_PARAMS', 'struct_GSP_FMC_BOOT_PARAMS',
-    'struct_GSP_FMC_INIT_PARAMS', 'struct_GSP_MSG_QUEUE_ELEMENT',
-    'struct_GSP_RM_PARAMS', 'struct_GSP_SPDM_PARAMS',
-    'struct_GSP_VF_INFO', 'struct_GspStaticConfigInfo_t',
-    'struct_GspSystemInfo', 'struct_JT_METHOD_DATA',
-    'struct_MUX_METHOD_DATA', 'struct_MUX_METHOD_DATA_ELEMENT',
+    'msgqTxHeader', 'rpc_alloc_channel_dma_v',
+    'rpc_alloc_channel_dma_v1F_04', 'rpc_alloc_event_v',
+    'rpc_alloc_event_v03_00', 'rpc_alloc_memory_v',
+    'rpc_alloc_memory_v13_01', 'rpc_alloc_object_v',
+    'rpc_alloc_object_v25_08', 'rpc_alloc_object_v26_00',
+    'rpc_alloc_object_v27_00', 'rpc_alloc_object_v29_06',
+    'rpc_alloc_root_v', 'rpc_alloc_root_v07_00',
+    'rpc_alloc_share_device_v', 'rpc_alloc_share_device_v03_00',
+    'rpc_alloc_subdevice_v', 'rpc_alloc_subdevice_v08_01',
+    'rpc_cleanup_surface_v', 'rpc_cleanup_surface_v03_00',
+    'rpc_ctrl_alloc_pma_stream_v', 'rpc_ctrl_alloc_pma_stream_v1A_14',
+    'rpc_ctrl_b0cc_exec_reg_ops_v',
+    'rpc_ctrl_b0cc_exec_reg_ops_v1A_0F',
+    'rpc_ctrl_bind_pm_resources_v',
+    'rpc_ctrl_bind_pm_resources_v1A_0F',
+    'rpc_ctrl_bus_set_p2p_mapping_v',
+    'rpc_ctrl_bus_set_p2p_mapping_v21_03',
+    'rpc_ctrl_bus_set_p2p_mapping_v29_08',
+    'rpc_ctrl_bus_unset_p2p_mapping_v',
+    'rpc_ctrl_bus_unset_p2p_mapping_v21_03',
+    'rpc_ctrl_cmd_internal_control_gsp_trace_v',
+    'rpc_ctrl_cmd_internal_control_gsp_trace_v28_00',
+    'rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v',
+    'rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09',
+    'rpc_ctrl_cmd_nvlink_inband_send_data_v',
+    'rpc_ctrl_cmd_nvlink_inband_send_data_v26_05',
+    'rpc_ctrl_dbg_clear_all_sm_error_states_v',
+    'rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C',
+    'rpc_ctrl_dbg_clear_single_sm_error_state_v',
+    'rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10',
+    'rpc_ctrl_dbg_exec_reg_ops_v', 'rpc_ctrl_dbg_exec_reg_ops_v1A_10',
+    'rpc_ctrl_dbg_get_mode_mmu_debug_v',
+    'rpc_ctrl_dbg_get_mode_mmu_debug_v25_04',
+    'rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v',
+    'rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07',
+    'rpc_ctrl_dbg_read_all_sm_error_states_v',
+    'rpc_ctrl_dbg_read_all_sm_error_states_v21_06',
+    'rpc_ctrl_dbg_read_single_sm_error_state_v',
+    'rpc_ctrl_dbg_read_single_sm_error_state_v21_06',
+    'rpc_ctrl_dbg_resume_context_v',
+    'rpc_ctrl_dbg_resume_context_v1A_10',
+    'rpc_ctrl_dbg_set_exception_mask_v',
+    'rpc_ctrl_dbg_set_exception_mask_v1A_0C',
+    'rpc_ctrl_dbg_set_mode_errbar_debug_v',
+    'rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10',
+    'rpc_ctrl_dbg_set_mode_mmu_debug_v',
+    'rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10',
+    'rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v',
+    'rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07',
+    'rpc_ctrl_dbg_set_next_stop_trigger_type_v',
+    'rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10',
+    'rpc_ctrl_dbg_set_single_sm_single_step_v',
+    'rpc_ctrl_dbg_set_single_sm_single_step_v1C_02',
+    'rpc_ctrl_dbg_suspend_context_v',
+    'rpc_ctrl_dbg_suspend_context_v1A_10',
+    'rpc_ctrl_dma_set_default_vaspace_v',
+    'rpc_ctrl_dma_set_default_vaspace_v1A_0E',
+    'rpc_ctrl_exec_partitions_create_v',
+    'rpc_ctrl_exec_partitions_create_v24_05',
+    'rpc_ctrl_exec_partitions_delete_v',
+    'rpc_ctrl_exec_partitions_delete_v1F_0A',
+    'rpc_ctrl_fabric_mem_stats_v', 'rpc_ctrl_fabric_mem_stats_v1E_0C',
+    'rpc_ctrl_fabric_memory_describe_v',
+    'rpc_ctrl_fabric_memory_describe_v1E_0C',
+    'rpc_ctrl_fb_get_fs_info_v', 'rpc_ctrl_fb_get_fs_info_v24_00',
+    'rpc_ctrl_fb_get_fs_info_v26_04', 'rpc_ctrl_fb_get_info_v2_v',
+    'rpc_ctrl_fb_get_info_v2_v25_0A',
+    'rpc_ctrl_fb_get_info_v2_v27_00',
+    'rpc_ctrl_fifo_disable_channels_v',
+    'rpc_ctrl_fifo_disable_channels_v1A_0A',
+    'rpc_ctrl_fifo_set_channel_properties_v',
+    'rpc_ctrl_fifo_set_channel_properties_v1A_16',
+    'rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v',
+    'rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23',
+    'rpc_ctrl_fla_setup_instance_mem_block_v',
+    'rpc_ctrl_fla_setup_instance_mem_block_v21_05',
+    'rpc_ctrl_free_pma_stream_v', 'rpc_ctrl_free_pma_stream_v1A_1F',
+    'rpc_ctrl_get_ce_pce_mask_v', 'rpc_ctrl_get_ce_pce_mask_v1A_0E',
+    'rpc_ctrl_get_hs_credits_v', 'rpc_ctrl_get_hs_credits_v21_08',
+    'rpc_ctrl_get_mmu_debug_mode_v',
+    'rpc_ctrl_get_mmu_debug_mode_v1E_06',
+    'rpc_ctrl_get_nvlink_status_v',
+    'rpc_ctrl_get_nvlink_status_v23_04',
+    'rpc_ctrl_get_nvlink_status_v28_09',
+    'rpc_ctrl_get_p2p_caps_matrix_v',
+    'rpc_ctrl_get_p2p_caps_matrix_v1A_0E', 'rpc_ctrl_get_p2p_caps_v',
+    'rpc_ctrl_get_p2p_caps_v1F_0D', 'rpc_ctrl_get_p2p_caps_v2_v',
+    'rpc_ctrl_get_p2p_caps_v2_v1F_0D',
+    'rpc_ctrl_get_total_hs_credits_v',
+    'rpc_ctrl_get_total_hs_credits_v21_08',
+    'rpc_ctrl_get_zbc_clear_table_entry_v',
+    'rpc_ctrl_get_zbc_clear_table_entry_v1A_0E',
+    'rpc_ctrl_get_zbc_clear_table_v',
+    'rpc_ctrl_get_zbc_clear_table_v1A_09',
+    'rpc_ctrl_gpfifo_get_work_submit_token_v',
+    'rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A',
+    'rpc_ctrl_gpfifo_schedule_v', 'rpc_ctrl_gpfifo_schedule_v1A_0A',
+    'rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v',
+    'rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A',
+    'rpc_ctrl_gpu_evict_ctx_v', 'rpc_ctrl_gpu_evict_ctx_v1A_1C',
+    'rpc_ctrl_gpu_get_info_v2_v', 'rpc_ctrl_gpu_get_info_v2_v25_11',
+    'rpc_ctrl_gpu_handle_vf_pri_fault_v',
+    'rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09',
+    'rpc_ctrl_gpu_initialize_ctx_v',
+    'rpc_ctrl_gpu_initialize_ctx_v1A_0E',
+    'rpc_ctrl_gpu_migratable_ops_v',
+    'rpc_ctrl_gpu_migratable_ops_v21_07',
+    'rpc_ctrl_gpu_promote_ctx_v', 'rpc_ctrl_gpu_promote_ctx_v1A_20',
+    'rpc_ctrl_gpu_query_ecc_status_v',
+    'rpc_ctrl_gpu_query_ecc_status_v24_06',
+    'rpc_ctrl_gpu_query_ecc_status_v26_02',
+    'rpc_ctrl_gr_ctxsw_preemption_bind_v',
+    'rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E',
+    'rpc_ctrl_gr_ctxsw_preemption_bind_v28_07',
+    'rpc_ctrl_gr_ctxsw_zcull_bind_v',
+    'rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E',
+    'rpc_ctrl_gr_get_tpc_partition_mode_v',
+    'rpc_ctrl_gr_get_tpc_partition_mode_v1C_04',
+    'rpc_ctrl_gr_pc_sampling_mode_v',
+    'rpc_ctrl_gr_pc_sampling_mode_v1A_1F',
+    'rpc_ctrl_gr_set_ctxsw_preemption_mode_v',
+    'rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E',
+    'rpc_ctrl_gr_set_tpc_partition_mode_v',
+    'rpc_ctrl_gr_set_tpc_partition_mode_v1C_04',
+    'rpc_ctrl_grmgr_get_gr_fs_info_v',
+    'rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D',
+    'rpc_ctrl_internal_memsys_set_zbc_referenced_v',
+    'rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05',
+    'rpc_ctrl_internal_promote_fault_method_buffers_v',
+    'rpc_ctrl_internal_promote_fault_method_buffers_v1E_07',
+    'rpc_ctrl_internal_quiesce_pma_channel_v',
+    'rpc_ctrl_internal_quiesce_pma_channel_v1C_08',
+    'rpc_ctrl_internal_sriov_promote_pma_stream_v',
+    'rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C',
+    'rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v',
+    'rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D',
+    'rpc_ctrl_mc_service_interrupts_v',
+    'rpc_ctrl_mc_service_interrupts_v1A_0E',
+    'rpc_ctrl_nvenc_sw_session_update_info_v',
+    'rpc_ctrl_nvenc_sw_session_update_info_v1A_09',
+    'rpc_ctrl_nvlink_get_inband_received_data_v',
+    'rpc_ctrl_nvlink_get_inband_received_data_v25_0C',
+    'rpc_ctrl_perf_boost_v', 'rpc_ctrl_perf_boost_v1A_09',
+    'rpc_ctrl_perf_rated_tdp_get_status_v',
+    'rpc_ctrl_perf_rated_tdp_get_status_v1A_1F',
+    'rpc_ctrl_perf_rated_tdp_set_control_v',
+    'rpc_ctrl_perf_rated_tdp_set_control_v1A_1F',
+    'rpc_ctrl_pm_area_pc_sampler_v',
+    'rpc_ctrl_pm_area_pc_sampler_v21_0B',
+    'rpc_ctrl_pma_stream_update_get_put_v',
+    'rpc_ctrl_pma_stream_update_get_put_v1A_14', 'rpc_ctrl_preempt_v',
+    'rpc_ctrl_preempt_v1A_0A', 'rpc_ctrl_release_ccu_prof_v',
+    'rpc_ctrl_release_ccu_prof_v29_07', 'rpc_ctrl_release_hes_v',
+    'rpc_ctrl_release_hes_v29_07', 'rpc_ctrl_reserve_ccu_prof_v',
+    'rpc_ctrl_reserve_ccu_prof_v29_07', 'rpc_ctrl_reserve_hes_v',
+    'rpc_ctrl_reserve_hes_v29_07', 'rpc_ctrl_reserve_hwpm_legacy_v',
+    'rpc_ctrl_reserve_hwpm_legacy_v1A_0F',
+    'rpc_ctrl_reserve_pm_area_smpc_v',
+    'rpc_ctrl_reserve_pm_area_smpc_v1A_0F',
+    'rpc_ctrl_reset_channel_v', 'rpc_ctrl_reset_channel_v1A_09',
+    'rpc_ctrl_reset_isolated_channel_v',
+    'rpc_ctrl_reset_isolated_channel_v1A_09',
+    'rpc_ctrl_set_channel_interleave_level_v',
+    'rpc_ctrl_set_channel_interleave_level_v1A_0A',
+    'rpc_ctrl_set_hs_credits_v', 'rpc_ctrl_set_hs_credits_v21_08',
+    'rpc_ctrl_set_timeslice_v', 'rpc_ctrl_set_timeslice_v1A_0A',
+    'rpc_ctrl_set_tsg_interleave_level_v',
+    'rpc_ctrl_set_tsg_interleave_level_v1A_0A',
+    'rpc_ctrl_set_vgpu_fb_usage_v',
+    'rpc_ctrl_set_vgpu_fb_usage_v1A_08',
+    'rpc_ctrl_set_zbc_color_clear_v',
+    'rpc_ctrl_set_zbc_color_clear_v1A_09',
+    'rpc_ctrl_set_zbc_depth_clear_v',
+    'rpc_ctrl_set_zbc_depth_clear_v1A_09',
+    'rpc_ctrl_set_zbc_stencil_clear_v',
+    'rpc_ctrl_set_zbc_stencil_clear_v27_06',
+    'rpc_ctrl_stop_channel_v', 'rpc_ctrl_stop_channel_v1A_1E',
+    'rpc_ctrl_subdevice_get_libos_heap_stats_v',
+    'rpc_ctrl_subdevice_get_libos_heap_stats_v29_02',
+    'rpc_ctrl_subdevice_get_p2p_caps_v',
+    'rpc_ctrl_subdevice_get_p2p_caps_v21_02',
+    'rpc_ctrl_subdevice_get_vgpu_heap_stats_v',
+    'rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03',
+    'rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06',
+    'rpc_ctrl_timer_set_gr_tick_freq_v',
+    'rpc_ctrl_timer_set_gr_tick_freq_v1A_1F',
+    'rpc_ctrl_vaspace_copy_server_reserved_pdes_v',
+    'rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04',
+    'rpc_dce_rm_init_v', 'rpc_dce_rm_init_v01_00',
+    'rpc_disable_channels_v', 'rpc_disable_channels_v1E_0B',
+    'rpc_display_modeset_v', 'rpc_display_modeset_v01_00',
+    'rpc_dump_protobuf_component_v',
+    'rpc_dump_protobuf_component_v18_12', 'rpc_dup_object_v',
+    'rpc_dup_object_v03_00', 'rpc_extdev_intr_service_v',
+    'rpc_extdev_intr_service_v17_00', 'rpc_fecs_error_v',
+    'rpc_fecs_error_v26_02', 'rpc_free_v', 'rpc_free_v03_00',
+    'rpc_get_brand_caps_v', 'rpc_get_brand_caps_v25_12',
+    'rpc_get_consolidated_gr_static_info_v',
+    'rpc_get_consolidated_gr_static_info_v1B_04',
+    'rpc_get_encoder_capacity_v', 'rpc_get_encoder_capacity_v07_00',
+    'rpc_get_engine_utilization_v',
+    'rpc_get_engine_utilization_v1F_0E', 'rpc_get_gsp_static_info_v',
+    'rpc_get_gsp_static_info_v14_00', 'rpc_get_static_data_v',
+    'rpc_get_static_data_v25_0E', 'rpc_get_static_data_v27_01',
+    'rpc_gpu_exec_reg_ops_v', 'rpc_gpu_exec_reg_ops_v12_01',
+    'rpc_gpuacct_perfmon_util_samples_v',
+    'rpc_gpuacct_perfmon_util_samples_v1F_0E',
+    'rpc_gsp_lockdown_notice_v', 'rpc_gsp_lockdown_notice_v17_00',
+    'rpc_gsp_post_nocat_record_v', 'rpc_gsp_post_nocat_record_v01_00',
+    'rpc_gsp_rm_alloc_v', 'rpc_gsp_rm_alloc_v03_00',
+    'rpc_gsp_rm_control_v', 'rpc_gsp_rm_control_v03_00',
+    'rpc_gsp_set_system_info_v', 'rpc_gsp_set_system_info_v17_00',
+    'rpc_idle_channels_v', 'rpc_idle_channels_v03_00',
+    'rpc_init_done_v', 'rpc_init_done_v17_00', 'rpc_invalidate_tlb_v',
+    'rpc_invalidate_tlb_v23_03', 'rpc_log_v', 'rpc_log_v03_00',
+    'rpc_map_memory_dma_v', 'rpc_map_memory_dma_v03_00',
+    'rpc_message_header_v', 'rpc_message_header_v03_00',
+    'rpc_message_rpc_union_field_v',
+    'rpc_message_rpc_union_field_v03_00',
+    'rpc_nvlink_fatal_error_recovery_v',
+    'rpc_nvlink_fatal_error_recovery_v17_00', 'rpc_nvlink_fault_up_v',
+    'rpc_nvlink_fault_up_v17_00',
+    'rpc_nvlink_inband_received_data_1024_v',
+    'rpc_nvlink_inband_received_data_1024_v17_00',
+    'rpc_nvlink_inband_received_data_2048_v',
+    'rpc_nvlink_inband_received_data_2048_v17_00',
+    'rpc_nvlink_inband_received_data_256_v',
+    'rpc_nvlink_inband_received_data_256_v17_00',
+    'rpc_nvlink_inband_received_data_4096_v',
+    'rpc_nvlink_inband_received_data_4096_v17_00',
+    'rpc_nvlink_inband_received_data_512_v',
+    'rpc_nvlink_inband_received_data_512_v17_00',
+    'rpc_nvlink_is_gpu_degraded_v',
+    'rpc_nvlink_is_gpu_degraded_v17_00', 'rpc_os_error_log_v',
+    'rpc_os_error_log_v17_00', 'rpc_perf_bridgeless_info_update_v',
+    'rpc_perf_bridgeless_info_update_v17_00',
+    'rpc_perf_get_level_info_v', 'rpc_perf_get_level_info_v03_00',
+    'rpc_perf_gpu_boost_sync_limits_callback_v',
+    'rpc_perf_gpu_boost_sync_limits_callback_v17_00',
+    'rpc_pfm_req_hndlr_state_sync_callback_v',
+    'rpc_pfm_req_hndlr_state_sync_callback_v21_04',
+    'rpc_post_event_v', 'rpc_post_event_v17_00', 'rpc_rc_triggered_v',
+    'rpc_rc_triggered_v17_02', 'rpc_recovery_action_v',
+    'rpc_recovery_action_v28_01', 'rpc_restore_hibernation_data_v',
+    'rpc_restore_hibernation_data_v1E_0E', 'rpc_rg_line_intr_v',
+    'rpc_rg_line_intr_v17_00', 'rpc_rm_api_control_v',
+    'rpc_rm_api_control_v25_0D', 'rpc_rm_api_control_v25_0F',
+    'rpc_rm_api_control_v25_10', 'rpc_rm_api_control_v25_14',
+    'rpc_rm_api_control_v25_15', 'rpc_rm_api_control_v25_16',
+    'rpc_rm_api_control_v25_17', 'rpc_rm_api_control_v25_18',
+    'rpc_rm_api_control_v25_19', 'rpc_rm_api_control_v25_1A',
+    'rpc_rm_api_control_v27_03', 'rpc_rm_api_control_v29_04',
+    'rpc_rm_api_control_v29_09', 'rpc_run_cpu_sequencer_v',
+    'rpc_run_cpu_sequencer_v17_00', 'rpc_save_hibernation_data_v',
+    'rpc_save_hibernation_data_v1E_0E',
+    'rpc_semaphore_schedule_callback_v',
+    'rpc_semaphore_schedule_callback_v17_00',
+    'rpc_set_guest_system_info_ext_v',
+    'rpc_set_guest_system_info_ext_v15_02',
+    'rpc_set_guest_system_info_ext_v25_1B',
+    'rpc_set_guest_system_info_v', 'rpc_set_guest_system_info_v03_00',
+    'rpc_set_page_directory_v', 'rpc_set_page_directory_v1E_05',
+    'rpc_set_surface_properties_v',
+    'rpc_set_surface_properties_v07_07', 'rpc_sim_read_v',
+    'rpc_sim_read_v1E_01', 'rpc_sim_write_v', 'rpc_sim_write_v1E_01',
+    'rpc_timed_semaphore_release_v',
+    'rpc_timed_semaphore_release_v01_00', 'rpc_ucode_libos_print_v',
+    'rpc_ucode_libos_print_v1E_08', 'rpc_unloading_guest_driver_v',
+    'rpc_unloading_guest_driver_v1F_07', 'rpc_unmap_memory_dma_v',
+    'rpc_unmap_memory_dma_v03_00', 'rpc_unset_page_directory_v',
+    'rpc_unset_page_directory_v1E_05', 'rpc_update_bar_pde_v',
+    'rpc_update_bar_pde_v15_00', 'rpc_update_gpm_guest_buffer_info_v',
+    'rpc_update_gpm_guest_buffer_info_v27_01',
+    'rpc_update_gsp_trace_v', 'rpc_update_gsp_trace_v01_00',
+    'rpc_vgpu_config_event_v', 'rpc_vgpu_config_event_v17_00',
+    'rpc_vgpu_gsp_mig_ci_config_v',
+    'rpc_vgpu_gsp_mig_ci_config_v21_03',
+    'rpc_vgpu_gsp_plugin_triggered_v',
+    'rpc_vgpu_gsp_plugin_triggered_v17_00',
+    'rpc_vgpu_pf_reg_read32_v', 'rpc_vgpu_pf_reg_read32_v15_00',
+    'struct_ACPI_METHOD_DATA', 'struct_CAPS_METHOD_DATA',
+    'struct_DOD_METHOD_DATA', 'struct_GSP_ACR_BOOT_GSP_RM_PARAMS',
+    'struct_GSP_FMC_BOOT_PARAMS', 'struct_GSP_FMC_INIT_PARAMS',
+    'struct_GSP_MSG_QUEUE_ELEMENT', 'struct_GSP_RM_PARAMS',
+    'struct_GSP_SPDM_PARAMS', 'struct_GSP_VF_INFO',
+    'struct_GspStaticConfigInfo_t', 'struct_GspSystemInfo',
+    'struct_JT_METHOD_DATA', 'struct_MUX_METHOD_DATA',
+    'struct_MUX_METHOD_DATA_ELEMENT',
+    'struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C',
+    'struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C',
+    'struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C',
+    'struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C',
+    'struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C',
+    'struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A',
+    'struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A',
+    'struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D',
+    'struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00',
+    'struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05',
+    'struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05',
+    'struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00',
     'struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS',
+    'struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04',
+    'struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06',
+    'struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C',
+    'struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C',
     'struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS',
+    'struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03',
+    'struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08',
+    'struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03',
+    'struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07',
     'struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO',
     'struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS',
+    'struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09',
+    'struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02',
+    'struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03',
+    'struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06',
+    'struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05',
+    'struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04',
+    'struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09',
+    'struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F',
+    'struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04',
+    'struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04',
+    'struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04',
+    'struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D',
+    'struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04',
+    'struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00',
+    'struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04',
+    'struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A',
+    'struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00',
+    'struct_NV2080_CTRL_FB_INFO_v1A_15',
+    'struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00',
+    'struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23',
+    'struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C',
+    'struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04',
+    'struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02',
+    'struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00',
+    'struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01',
     'struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS',
+    'struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11',
+    'struct_NV2080_CTRL_GPU_INFO_v25_11',
+    'struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00',
+    'struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07',
+    'struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02',
+    'struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20',
+    'struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20',
+    'struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01',
+    'struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06',
+    'struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02',
+    'struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01',
+    'struct_NV2080_CTRL_GPU_REG_OP_v03_00',
+    'struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D',
+    'struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01',
+    'struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07',
+    'struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00',
+    'struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F',
+    'struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01',
+    'struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01',
+    'struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02',
+    'struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07',
+    'struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00',
+    'struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04',
+    'struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04',
+    'struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04',
+    'struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01',
+    'struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02',
+    'struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09',
+    'struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00',
+    'struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00',
+    'struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00',
+    'struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00',
+    'struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00',
+    'struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00',
+    'struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C',
+    'struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00',
+    'struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D',
+    'struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09',
+    'struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00',
+    'struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E',
+    'struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00',
+    'struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00',
+    'struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E',
+    'struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F',
+    'struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F',
+    'struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04',
+    'struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00',
+    'struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06',
+    'struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00',
+    'struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06',
+    'struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06',
+    'struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04',
+    'struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07',
+    'struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06',
+    'struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06',
+    'struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00',
+    'struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06',
+    'struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06',
+    'struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07',
+    'struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06',
+    'struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02',
+    'struct_NV83DE_MMU_FAULT_INFO_v16_03',
+    'struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06',
+    'struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01',
+    'struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07',
+    'struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07',
+    'struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00',
+    'struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00',
+    'struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00',
+    'struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00',
+    'struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06',
+    'struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B',
+    'struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04',
+    'struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04',
+    'struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02',
+    'struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07',
+    'struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A',
+    'struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00',
+    'struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00',
+    'struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02',
+    'struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E',
+    'struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02',
+    'struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00',
+    'struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07',
+    'struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01',
+    'struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14',
+    'struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F',
+    'struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F',
+    'struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08',
+    'struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08',
+    'struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07',
+    'struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08',
+    'struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C',
+    'struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08',
+    'struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08',
+    'struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14',
+    'struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07',
+    'struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07',
+    'struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07',
+    'struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07',
+    'struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F',
+    'struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F',
+    'struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08',
+    'struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00',
+    'struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04',
+    'struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05',
+    'struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05',
+    'struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05',
+    'struct_NVOS00_PARAMETERS_v03_00',
+    'struct_NVOS21_PARAMETERS_v03_00',
+    'struct_NVOS46_PARAMETERS_v03_00',
+    'struct_NVOS47_PARAMETERS_v03_00',
+    'struct_NVOS54_PARAMETERS_v03_00',
+    'struct_NVOS55_PARAMETERS_v03_00',
+    'struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04',
+    'struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00',
+    'struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17',
+    'struct_NV_MEMORY_DESC_PARAMS_v18_01',
     'struct_PACKED_REGISTRY_ENTRY', 'struct_PACKED_REGISTRY_TABLE',
+    'struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F',
+    'struct_UpdateBarPde_v15_00',
     'struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS',
     'struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS',
+    'struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00',
+    'struct_alloc_object_FERMI_VASPACE_A_v03_00',
+    'struct_alloc_object_GF100_DISP_SW_v03_00',
+    'struct_alloc_object_GT212_DMA_COPY_v03_00',
+    'struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08',
+    'struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C',
+    'struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08',
+    'struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02',
+    'struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15',
+    'struct_alloc_object_NV50_TESLA_v03_00',
+    'struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00',
+    'struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00',
+    'struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03',
+    'struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03',
+    'struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02',
+    'struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00',
+    'struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06',
+    'struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01',
+    'struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00',
+    'struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06',
+    'struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00',
+    'struct_alloc_object_NVENC_SW_SESSION_v06_01',
+    'struct_alloc_object_NVFBC_SW_SESSION_v12_04',
+    'struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03',
+    'struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02',
+    'struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B',
     'struct_c__SA_ACPI_DATA', 'struct_c__SA_ACPI_DSM_CACHE',
     'struct_c__SA_BUSINFO', 'struct_c__SA_EcidManufacturingInfo',
     'struct_c__SA_FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3',
@@ -1836,6 +7438,206 @@ __all__ = \
     'struct_c__SA_NVDM_PAYLOAD_COT',
     'struct_c__SA_RM_RISCV_UCODE_DESC', 'struct_c__SA_msgqMetadata',
     'struct_c__SA_msgqRxHeader', 'struct_c__SA_msgqTxHeader',
-    'struct_rpc_message_header_v03_00', 'union_c__SA_GspFwWprMeta_0',
-    'union_c__SA_GspFwWprMeta_1',
-    'union_rpc_message_rpc_union_field_v03_00']
+    'struct_gpu_exec_reg_ops_v12_01',
+    'struct_idle_channel_list_v03_00', 'struct_pte_desc',
+    'struct_rpc_alloc_channel_dma_v1F_04',
+    'struct_rpc_alloc_event_v03_00', 'struct_rpc_alloc_memory_v13_01',
+    'struct_rpc_alloc_object_v25_08',
+    'struct_rpc_alloc_object_v26_00',
+    'struct_rpc_alloc_object_v27_00',
+    'struct_rpc_alloc_object_v29_06', 'struct_rpc_alloc_root_v07_00',
+    'struct_rpc_alloc_share_device_v03_00',
+    'struct_rpc_alloc_subdevice_v08_01',
+    'struct_rpc_cleanup_surface_v03_00',
+    'struct_rpc_ctrl_alloc_pma_stream_v1A_14',
+    'struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F',
+    'struct_rpc_ctrl_bind_pm_resources_v1A_0F',
+    'struct_rpc_ctrl_bus_set_p2p_mapping_v21_03',
+    'struct_rpc_ctrl_bus_set_p2p_mapping_v29_08',
+    'struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03',
+    'struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00',
+    'struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09',
+    'struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05',
+    'struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C',
+    'struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10',
+    'struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10',
+    'struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04',
+    'struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07',
+    'struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06',
+    'struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06',
+    'struct_rpc_ctrl_dbg_resume_context_v1A_10',
+    'struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C',
+    'struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10',
+    'struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10',
+    'struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07',
+    'struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10',
+    'struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02',
+    'struct_rpc_ctrl_dbg_suspend_context_v1A_10',
+    'struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E',
+    'struct_rpc_ctrl_exec_partitions_create_v24_05',
+    'struct_rpc_ctrl_exec_partitions_delete_v1F_0A',
+    'struct_rpc_ctrl_fabric_mem_stats_v1E_0C',
+    'struct_rpc_ctrl_fabric_memory_describe_v1E_0C',
+    'struct_rpc_ctrl_fb_get_fs_info_v24_00',
+    'struct_rpc_ctrl_fb_get_fs_info_v26_04',
+    'struct_rpc_ctrl_fb_get_info_v2_v25_0A',
+    'struct_rpc_ctrl_fb_get_info_v2_v27_00',
+    'struct_rpc_ctrl_fifo_disable_channels_v1A_0A',
+    'struct_rpc_ctrl_fifo_set_channel_properties_v1A_16',
+    'struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23',
+    'struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05',
+    'struct_rpc_ctrl_free_pma_stream_v1A_1F',
+    'struct_rpc_ctrl_get_ce_pce_mask_v1A_0E',
+    'struct_rpc_ctrl_get_hs_credits_v21_08',
+    'struct_rpc_ctrl_get_mmu_debug_mode_v1E_06',
+    'struct_rpc_ctrl_get_nvlink_status_v23_04',
+    'struct_rpc_ctrl_get_nvlink_status_v28_09',
+    'struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E',
+    'struct_rpc_ctrl_get_p2p_caps_v1F_0D',
+    'struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D',
+    'struct_rpc_ctrl_get_total_hs_credits_v21_08',
+    'struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E',
+    'struct_rpc_ctrl_get_zbc_clear_table_v1A_09',
+    'struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A',
+    'struct_rpc_ctrl_gpfifo_schedule_v1A_0A',
+    'struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A',
+    'struct_rpc_ctrl_gpu_evict_ctx_v1A_1C',
+    'struct_rpc_ctrl_gpu_get_info_v2_v25_11',
+    'struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09',
+    'struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E',
+    'struct_rpc_ctrl_gpu_migratable_ops_v21_07',
+    'struct_rpc_ctrl_gpu_promote_ctx_v1A_20',
+    'struct_rpc_ctrl_gpu_query_ecc_status_v24_06',
+    'struct_rpc_ctrl_gpu_query_ecc_status_v26_02',
+    'struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E',
+    'struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07',
+    'struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E',
+    'struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04',
+    'struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F',
+    'struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E',
+    'struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04',
+    'struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D',
+    'struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05',
+    'struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07',
+    'struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08',
+    'struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C',
+    'struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D',
+    'struct_rpc_ctrl_mc_service_interrupts_v1A_0E',
+    'struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09',
+    'struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C',
+    'struct_rpc_ctrl_perf_boost_v1A_09',
+    'struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F',
+    'struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F',
+    'struct_rpc_ctrl_pm_area_pc_sampler_v21_0B',
+    'struct_rpc_ctrl_pma_stream_update_get_put_v1A_14',
+    'struct_rpc_ctrl_preempt_v1A_0A',
+    'struct_rpc_ctrl_release_ccu_prof_v29_07',
+    'struct_rpc_ctrl_release_hes_v29_07',
+    'struct_rpc_ctrl_reserve_ccu_prof_v29_07',
+    'struct_rpc_ctrl_reserve_hes_v29_07',
+    'struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F',
+    'struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F',
+    'struct_rpc_ctrl_reset_channel_v1A_09',
+    'struct_rpc_ctrl_reset_isolated_channel_v1A_09',
+    'struct_rpc_ctrl_set_channel_interleave_level_v1A_0A',
+    'struct_rpc_ctrl_set_hs_credits_v21_08',
+    'struct_rpc_ctrl_set_timeslice_v1A_0A',
+    'struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A',
+    'struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08',
+    'struct_rpc_ctrl_set_zbc_color_clear_v1A_09',
+    'struct_rpc_ctrl_set_zbc_depth_clear_v1A_09',
+    'struct_rpc_ctrl_set_zbc_stencil_clear_v27_06',
+    'struct_rpc_ctrl_stop_channel_v1A_1E',
+    'struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02',
+    'struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02',
+    'struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03',
+    'struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06',
+    'struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F',
+    'struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04',
+    'struct_rpc_dce_rm_init_v01_00',
+    'struct_rpc_disable_channels_v1E_0B',
+    'struct_rpc_display_modeset_v01_00',
+    'struct_rpc_dump_protobuf_component_v18_12',
+    'struct_rpc_dup_object_v03_00',
+    'struct_rpc_extdev_intr_service_v17_00',
+    'struct_rpc_fecs_error_v26_02', 'struct_rpc_free_v03_00',
+    'struct_rpc_get_brand_caps_v25_12',
+    'struct_rpc_get_consolidated_gr_static_info_v1B_04',
+    'struct_rpc_get_encoder_capacity_v07_00',
+    'struct_rpc_get_engine_utilization_v1F_0E',
+    'struct_rpc_get_gsp_static_info_v14_00',
+    'struct_rpc_get_static_data_v25_0E',
+    'struct_rpc_get_static_data_v27_01',
+    'struct_rpc_gpu_exec_reg_ops_v12_01',
+    'struct_rpc_gpuacct_perfmon_util_samples_v1F_0E',
+    'struct_rpc_gsp_lockdown_notice_v17_00',
+    'struct_rpc_gsp_post_nocat_record_v01_00',
+    'struct_rpc_gsp_rm_alloc_v03_00',
+    'struct_rpc_gsp_rm_control_v03_00',
+    'struct_rpc_gsp_set_system_info_v17_00',
+    'struct_rpc_idle_channels_v03_00', 'struct_rpc_init_done_v17_00',
+    'struct_rpc_invalidate_tlb_v23_03', 'struct_rpc_log_v03_00',
+    'struct_rpc_map_memory_dma_v03_00',
+    'struct_rpc_message_header_v03_00',
+    'struct_rpc_nvlink_fatal_error_recovery_v17_00',
+    'struct_rpc_nvlink_fault_up_v17_00',
+    'struct_rpc_nvlink_inband_received_data_1024_v17_00',
+    'struct_rpc_nvlink_inband_received_data_2048_v17_00',
+    'struct_rpc_nvlink_inband_received_data_256_v17_00',
+    'struct_rpc_nvlink_inband_received_data_4096_v17_00',
+    'struct_rpc_nvlink_inband_received_data_512_v17_00',
+    'struct_rpc_nvlink_is_gpu_degraded_v17_00',
+    'struct_rpc_os_error_log_v17_00',
+    'struct_rpc_perf_bridgeless_info_update_v17_00',
+    'struct_rpc_perf_get_level_info_v03_00',
+    'struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00',
+    'struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04',
+    'struct_rpc_post_event_v17_00', 'struct_rpc_rc_triggered_v17_02',
+    'struct_rpc_recovery_action_v28_01',
+    'struct_rpc_restore_hibernation_data_v1E_0E',
+    'struct_rpc_rg_line_intr_v17_00',
+    'struct_rpc_rm_api_control_v25_0D',
+    'struct_rpc_rm_api_control_v25_0F',
+    'struct_rpc_rm_api_control_v25_10',
+    'struct_rpc_rm_api_control_v25_14',
+    'struct_rpc_rm_api_control_v25_15',
+    'struct_rpc_rm_api_control_v25_16',
+    'struct_rpc_rm_api_control_v25_17',
+    'struct_rpc_rm_api_control_v25_18',
+    'struct_rpc_rm_api_control_v25_19',
+    'struct_rpc_rm_api_control_v25_1A',
+    'struct_rpc_rm_api_control_v27_03',
+    'struct_rpc_rm_api_control_v29_04',
+    'struct_rpc_rm_api_control_v29_09',
+    'struct_rpc_run_cpu_sequencer_v17_00',
+    'struct_rpc_save_hibernation_data_v1E_0E',
+    'struct_rpc_semaphore_schedule_callback_v17_00',
+    'struct_rpc_set_guest_system_info_ext_v15_02',
+    'struct_rpc_set_guest_system_info_ext_v25_1B',
+    'struct_rpc_set_guest_system_info_v03_00',
+    'struct_rpc_set_page_directory_v1E_05',
+    'struct_rpc_set_surface_properties_v07_07',
+    'struct_rpc_sim_read_v1E_01', 'struct_rpc_sim_write_v1E_01',
+    'struct_rpc_timed_semaphore_release_v01_00',
+    'struct_rpc_ucode_libos_print_v1E_08',
+    'struct_rpc_unloading_guest_driver_v1F_07',
+    'struct_rpc_unmap_memory_dma_v03_00',
+    'struct_rpc_unset_page_directory_v1E_05',
+    'struct_rpc_update_bar_pde_v15_00',
+    'struct_rpc_update_gpm_guest_buffer_info_v27_01',
+    'struct_rpc_update_gsp_trace_v01_00',
+    'struct_rpc_vgpu_config_event_v17_00',
+    'struct_rpc_vgpu_gsp_mig_ci_config_v21_03',
+    'struct_rpc_vgpu_gsp_plugin_triggered_v17_00',
+    'struct_rpc_vgpu_pf_reg_read32_v15_00',
+    'union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D',
+    'union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04',
+    'union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D',
+    'union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04',
+    'union_alloc_object_params_v25_08',
+    'union_alloc_object_params_v26_00',
+    'union_alloc_object_params_v27_00',
+    'union_alloc_object_params_v29_06', 'union_c__SA_GspFwWprMeta_0',
+    'union_c__SA_GspFwWprMeta_1', 'union_pte_desc_0',
+    'union_rpc_message_rpc_union_field_v03_00',
+    'union_vgpuGetEngineUtilization_data_v1F_0E']

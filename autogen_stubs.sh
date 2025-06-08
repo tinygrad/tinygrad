@@ -174,10 +174,11 @@ generate_nv() {
     $NVKERN_SRC/src/nvidia/arch/nvalloc/common/inc/rmRiscvUcode.h \
     $NVKERN_SRC/src/common/shared/msgq/inc/msgq/msgq_priv.h \
     $NVKERN_SRC/src/nvidia/inc/kernel/vgpu/rpc_headers.h \
+    $NVKERN_SRC/src/nvidia/generated/g_rpc-structures.h \
     extra/nv_gpu_driver/g_rpc-message-header.h \
     extra/nv_gpu_driver/gsp_static_config.h \
     extra/nv_gpu_driver/vbios.h \
-    --clang-args="-DRPC_MESSAGE_STRUCTURES -include $NVKERN_SRC/src/common/sdk/nvidia/inc/nvtypes.h -I$NVKERN_SRC/src/nvidia/generated -I$NVKERN_SRC/src/common/inc -I$NVKERN_SRC/src/nvidia/inc -I$NVKERN_SRC/src/nvidia/interface/ -I$NVKERN_SRC/src/nvidia/inc/kernel -I$NVKERN_SRC/src/nvidia/inc/libraries -I$NVKERN_SRC/src/nvidia/arch/nvalloc/common/inc -I$NVKERN_SRC/kernel-open/nvidia-uvm -I$NVKERN_SRC/kernel-open/common/inc -I$NVKERN_SRC/src/common/sdk/nvidia/inc -I$NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include -I$NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl" \
+    --clang-args="-DRPC_MESSAGE_STRUCTURES -DRPC_STRUCTURES -include $NVKERN_SRC/src/common/sdk/nvidia/inc/nvtypes.h -I$NVKERN_SRC/src/nvidia/generated -I$NVKERN_SRC/src/common/inc -I$NVKERN_SRC/src/nvidia/inc -I$NVKERN_SRC/src/nvidia/interface/ -I$NVKERN_SRC/src/nvidia/inc/kernel -I$NVKERN_SRC/src/nvidia/inc/libraries -I$NVKERN_SRC/src/nvidia/arch/nvalloc/common/inc -I$NVKERN_SRC/kernel-open/nvidia-uvm -I$NVKERN_SRC/kernel-open/common/inc -I$NVKERN_SRC/src/common/sdk/nvidia/inc -I$NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include -I$NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl" \
     -o $BASE/nv/nv.py
 
   fixup $BASE/nv/nv.py

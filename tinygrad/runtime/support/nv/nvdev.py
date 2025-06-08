@@ -69,7 +69,7 @@ class NVDev:
     return typ.from_address(va), paddrs[0]
 
   def _download(self, file) -> str:
-    url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/e8113f665d936d9f30a6d508f3bacd1e148539be/{file}"
+    url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/ed4be649623435ebb04f5e93f859bf46d977daa4/{file}"
     return fetch(url, subdir="defines").read_text()
 
   def include(self, file) -> str:
@@ -83,7 +83,7 @@ class NVDev:
     BITFLD = re.compile(r'#define\s+(\w+)\s+(\d+):(\d+)')
 
     regs_off = {'NV_PFALCON_FALCON': (None, 0x0), 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': (None, 0x1000), 'NV_PGC6_AON': 0x0,
-      'NV_PFALCON_FBIF': (None, 0x600), 'NV_PFALCON2_FALCON': (None, 0x1000), 'NV_PBUS': 0x0, 'NV_PFB': 0x0}
+      'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': (None, 0x600), 'NV_PFALCON2_FALCON': (None, 0x1000), 'NV_PBUS': 0x0, 'NV_PFB': 0x0}
 
     for raw in txt.splitlines():
       if raw.startswith("#define "):
