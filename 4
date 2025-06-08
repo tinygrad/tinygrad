@@ -1,0 +1,1780 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuites time="37.7726948261261">
+  <testsuite name="test.unit.test_allreduce.TestRingAllReduce" tests="4" failures="0" errors="0" skipped="0" time="0.5475199222564697">
+    <testcase name="test_correct_ring" classname="TestRingAllReduce" time="0.3497960567474365"/>
+    <testcase name="test_schedule_ring" classname="TestRingAllReduce" time="0.013157844543457031"/>
+    <testcase name="test_correct_ring" classname="TestRingAllReduce" time="0.17382597923278809"/>
+    <testcase name="test_schedule_ring" classname="TestRingAllReduce" time="0.010740041732788086"/>
+  </testsuite>
+  <testsuite name="test.unit.test_attention.TestAttention" tests="2" failures="0" errors="0" skipped="0" time="0.5403048992156982">
+    <testcase name="test_half_qkv_buffers" classname="TestAttention" time="0.533228874206543"/>
+    <testcase name="test_half_qkv_buffers" classname="TestAttention" time="0.0070760250091552734"/>
+  </testsuite>
+  <testsuite name="test.unit.test_block_reorder.TestBlockReorder" tests="2" failures="0" errors="0" skipped="0" time="0.056661128997802734">
+    <testcase name="test_loads" classname="TestBlockReorder" time="0.029118061065673828"/>
+    <testcase name="test_loads" classname="TestBlockReorder" time="0.027543067932128906"/>
+  </testsuite>
+  <testsuite name="test.unit.test_conv.TestConv" tests="30" failures="0" errors="0" skipped="0" time="4.587579727172852">
+    <testcase name="test_bias" classname="TestConv" time="0.7013680934906006"/>
+    <testcase name="test_elu" classname="TestConv" time="0.08914780616760254"/>
+    <testcase name="test_first_three" classname="TestConv" time="0.17243003845214844"/>
+    <testcase name="test_lazycache" classname="TestConv" time="0.043058156967163086"/>
+    <testcase name="test_many_simple" classname="TestConv" time="0.013228178024291992"/>
+    <testcase name="test_multiadd" classname="TestConv" time="0.013375043869018555"/>
+    <testcase name="test_reduce_relu" classname="TestConv" time="0.014536380767822266"/>
+    <testcase name="test_reorder" classname="TestConv" time="0.17193293571472168"/>
+    <testcase name="test_simple" classname="TestConv" time="0.03870797157287598"/>
+    <testcase name="test_simple_biased" classname="TestConv" time="0.0767660140991211"/>
+    <testcase name="test_simple_rand" classname="TestConv" time="0.012459039688110352"/>
+    <testcase name="test_two_binops_no_rerun" classname="TestConv" time="0.31951189041137695"/>
+    <testcase name="test_two_binops_no_rerun_small" classname="TestConv" time="0.1893939971923828"/>
+    <testcase name="test_two_overlapping_binops_no_rerun" classname="TestConv" time="0.024452924728393555"/>
+    <testcase name="test_two_overlapping_binops_no_rerun_wino" classname="TestConv" time="0.5482709407806396"/>
+    <testcase name="test_bias" classname="TestConv" time="0.43254709243774414"/>
+    <testcase name="test_elu" classname="TestConv" time="0.08624577522277832"/>
+    <testcase name="test_first_three" classname="TestConv" time="0.1871931552886963"/>
+    <testcase name="test_lazycache" classname="TestConv" time="0.04081892967224121"/>
+    <testcase name="test_many_simple" classname="TestConv" time="0.009865999221801758"/>
+    <testcase name="test_multiadd" classname="TestConv" time="0.013344049453735352"/>
+    <testcase name="test_reduce_relu" classname="TestConv" time="0.014361858367919922"/>
+    <testcase name="test_reorder" classname="TestConv" time="0.1523759365081787"/>
+    <testcase name="test_simple" classname="TestConv" time="0.03856921195983887"/>
+    <testcase name="test_simple_biased" classname="TestConv" time="0.10764813423156738"/>
+    <testcase name="test_simple_rand" classname="TestConv" time="0.01179814338684082"/>
+    <testcase name="test_two_binops_no_rerun" classname="TestConv" time="0.2976100444793701"/>
+    <testcase name="test_two_binops_no_rerun_small" classname="TestConv" time="0.23003697395324707"/>
+    <testcase name="test_two_overlapping_binops_no_rerun" classname="TestConv" time="0.023919105529785156"/>
+    <testcase name="test_two_overlapping_binops_no_rerun_wino" classname="TestConv" time="0.5126059055328369"/>
+  </testsuite>
+  <testsuite name="test.unit.test_device.TestCompiler" tests="6" failures="0" errors="0" skipped="0" time="0.3122897148132324">
+    <testcase name="test_compile_cached" classname="TestCompiler" time="0.025024890899658203"/>
+    <testcase name="test_compile_cached_disabled" classname="TestCompiler" time="0.0008242130279541016"/>
+    <testcase name="test_device_compile" classname="TestCompiler" time="0.2819020748138428"/>
+    <testcase name="test_compile_cached" classname="TestCompiler" time="0.00039076805114746094"/>
+    <testcase name="test_compile_cached_disabled" classname="TestCompiler" time="0.0001399517059326172"/>
+    <testcase name="test_device_compile" classname="TestCompiler" time="0.004007816314697266"/>
+  </testsuite>
+  <testsuite name="test.unit.test_device.TestDevice" tests="6" failures="0" errors="0" skipped="0" time="0.0015270709991455078">
+    <testcase name="test_canonicalize" classname="TestDevice" time="0.0004000663757324219"/>
+    <testcase name="test_getitem_not_exist" classname="TestDevice" time="0.0005781650543212891"/>
+    <testcase name="test_lowercase_canonicalizes" classname="TestDevice" time="0.00032210350036621094"/>
+    <testcase name="test_canonicalize" classname="TestDevice" time="8.392333984375e-05"/>
+    <testcase name="test_getitem_not_exist" classname="TestDevice" time="0.00011181831359863281"/>
+    <testcase name="test_lowercase_canonicalizes" classname="TestDevice" time="3.0994415283203125e-05"/>
+  </testsuite>
+  <testsuite name="test.unit.test_disk_cache.DiskCache" tests="22" failures="0" errors="0" skipped="2" time="0.9564166069030762">
+    <testcase name="test_decorator" classname="DiskCache" time="0.001138925552368164"/>
+    <testcase name="test_dict_key" classname="DiskCache" time="0.0007848739624023438"/>
+    <testcase name="test_getotherprocess" classname="DiskCache" time="0.2672841548919678"/>
+    <testcase name="test_no_table" classname="DiskCache" time="0.0010492801666259766"/>
+    <testcase name="test_non_str_key" classname="DiskCache" time="0.0005331039428710938"/>
+    <testcase name="test_putcomplex" classname="DiskCache" time="0.000431060791015625"/>
+    <testcase name="test_putget" classname="DiskCache" time="0.00036215782165527344"/>
+    <testcase name="test_putotherprocess" classname="DiskCache" time="0.25200986862182617"/>
+    <testcase name="test_ret" classname="DiskCache" time="0.00022912025451660156"/>
+    <testcase name="test_table_name" classname="DiskCache" time="0.0002551078796386719"/>
+    <testcase name="test_decorator" classname="DiskCache" time="9.489059448242188e-05"/>
+    <testcase name="test_dict_key" classname="DiskCache" time="0.0001888275146484375"/>
+    <testcase name="test_getotherprocess" classname="DiskCache" time="0.21084880828857422"/>
+    <testcase name="test_no_table" classname="DiskCache" time="0.0001552104949951172"/>
+    <testcase name="test_non_str_key" classname="DiskCache" time="0.000263214111328125"/>
+    <testcase name="test_putcomplex" classname="DiskCache" time="0.0001900196075439453"/>
+    <testcase name="test_putget" classname="DiskCache" time="0.0003440380096435547"/>
+    <testcase name="test_putotherprocess" classname="DiskCache" time="0.21728801727294922"/>
+    <testcase name="test_ret" classname="DiskCache" time="0.0003490447998046875"/>
+    <testcase name="test_table_name" classname="DiskCache" time="0.0002589225769042969"/>
+    <testcase name="test_clear_cache" classname="DiskCache" time="0.002321958541870117">
+      <skipped>disabled by default because this drops cache table</skipped>
+    </testcase>
+    <testcase name="test_clear_cache" classname="DiskCache" time="3.600120544433594e-05">
+      <skipped>disabled by default because this drops cache table</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_disk_tensor.TestDiskTensor" tests="32" failures="0" errors="0" skipped="4" time="1.761183500289917">
+    <testcase name="test_assign_slice" classname="TestDiskTensor" time="0.08296585083007812"/>
+    <testcase name="test_assign_to_different_dtype" classname="TestDiskTensor" time="0.009794950485229492"/>
+    <testcase name="test_bitcast" classname="TestDiskTensor" time="0.008030891418457031"/>
+    <testcase name="test_bitcast_view" classname="TestDiskTensor" time="0.03939676284790039"/>
+    <testcase name="test_copy_from_disk" classname="TestDiskTensor" time="0.14681601524353027"/>
+    <testcase name="test_copy_from_disk_huge" classname="TestDiskTensor" time="0.6594738960266113"/>
+    <testcase name="test_copy_from_disk_offset" classname="TestDiskTensor" time="0.0324711799621582"/>
+    <testcase name="test_empty" classname="TestDiskTensor" time="0.00014209747314453125"/>
+    <testcase name="test_reshape" classname="TestDiskTensor" time="0.010580301284790039"/>
+    <testcase name="test_simple_read" classname="TestDiskTensor" time="0.005957126617431641"/>
+    <testcase name="test_simple_read_bitcast" classname="TestDiskTensor" time="0.005773067474365234"/>
+    <testcase name="test_simple_read_bitcast_alt" classname="TestDiskTensor" time="0.004952192306518555"/>
+    <testcase name="test_simple_setitem" classname="TestDiskTensor" time="0.005961894989013672"/>
+    <testcase name="test_write_ones" classname="TestDiskTensor" time="0.011901140213012695"/>
+    <testcase name="test_assign_slice" classname="TestDiskTensor" time="0.01767277717590332"/>
+    <testcase name="test_assign_to_different_dtype" classname="TestDiskTensor" time="0.008296966552734375"/>
+    <testcase name="test_bitcast" classname="TestDiskTensor" time="0.006534099578857422"/>
+    <testcase name="test_bitcast_view" classname="TestDiskTensor" time="0.0073261260986328125"/>
+    <testcase name="test_copy_from_disk" classname="TestDiskTensor" time="0.006908893585205078"/>
+    <testcase name="test_copy_from_disk_huge" classname="TestDiskTensor" time="0.6249110698699951"/>
+    <testcase name="test_copy_from_disk_offset" classname="TestDiskTensor" time="0.019424915313720703"/>
+    <testcase name="test_empty" classname="TestDiskTensor" time="0.00018310546875"/>
+    <testcase name="test_reshape" classname="TestDiskTensor" time="0.01108407974243164"/>
+    <testcase name="test_simple_read" classname="TestDiskTensor" time="0.005024909973144531"/>
+    <testcase name="test_simple_read_bitcast" classname="TestDiskTensor" time="0.005710124969482422"/>
+    <testcase name="test_simple_read_bitcast_alt" classname="TestDiskTensor" time="0.0058591365814208984"/>
+    <testcase name="test_simple_setitem" classname="TestDiskTensor" time="0.005919933319091797"/>
+    <testcase name="test_write_ones" classname="TestDiskTensor" time="0.011028051376342773"/>
+    <testcase name="test_bf16_disk_write_read" classname="TestDiskTensor" time="0.0009391307830810547">
+      <skipped>new LLVM has an issue on OSX</skipped>
+    </testcase>
+    <testcase name="test_copy_to_cpu_not_truncated" classname="TestDiskTensor" time="6.103515625e-05">
+      <skipped>this allocates a lot of RAM</skipped>
+    </testcase>
+    <testcase name="test_bf16_disk_write_read" classname="TestDiskTensor" time="3.4809112548828125e-05">
+      <skipped>new LLVM has an issue on OSX</skipped>
+    </testcase>
+    <testcase name="test_copy_to_cpu_not_truncated" classname="TestDiskTensor" time="4.696846008300781e-05">
+      <skipped>this allocates a lot of RAM</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_disk_tensor.TestPathTensor" tests="12" failures="0" errors="0" skipped="0" time="0.042642831802368164">
+    <testcase name="test_path_tensor_copy_to_device" classname="TestPathTensor" time="0.004920005798339844"/>
+    <testcase name="test_path_tensor_empty_file" classname="TestPathTensor" time="0.0006148815155029297"/>
+    <testcase name="test_path_tensor_no_device" classname="TestPathTensor" time="0.005220174789428711"/>
+    <testcase name="test_path_tensor_non_existent_file" classname="TestPathTensor" time="0.0005249977111816406"/>
+    <testcase name="test_path_tensor_with_device" classname="TestPathTensor" time="0.005277156829833984"/>
+    <testcase name="test_path_tensor_with_dtype" classname="TestPathTensor" time="0.004762887954711914"/>
+    <testcase name="test_path_tensor_copy_to_device" classname="TestPathTensor" time="0.004914045333862305"/>
+    <testcase name="test_path_tensor_empty_file" classname="TestPathTensor" time="0.0005078315734863281"/>
+    <testcase name="test_path_tensor_no_device" classname="TestPathTensor" time="0.005213022232055664"/>
+    <testcase name="test_path_tensor_non_existent_file" classname="TestPathTensor" time="0.00045299530029296875"/>
+    <testcase name="test_path_tensor_with_device" classname="TestPathTensor" time="0.005282878875732422"/>
+    <testcase name="test_path_tensor_with_dtype" classname="TestPathTensor" time="0.004951953887939453"/>
+  </testsuite>
+  <testsuite name="test.unit.test_disk_tensor.TestRawDiskBuffer" tests="4" failures="0" errors="0" skipped="2" time="0.0746011734008789">
+    <testcase name="test_bitcasts_on_disk" classname="TestRawDiskBuffer" time="0.04558396339416504"/>
+    <testcase name="test_bitcasts_on_disk" classname="TestRawDiskBuffer" time="0.028937101364135742"/>
+    <testcase name="test_readinto_read_speed" classname="TestRawDiskBuffer" time="3.719329833984375e-05">
+      <skipped>download LLaMA weights for read in speed tests</skipped>
+    </testcase>
+    <testcase name="test_readinto_read_speed" classname="TestRawDiskBuffer" time="4.291534423828125e-05">
+      <skipped>download LLaMA weights for read in speed tests</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_disk_tensor.TestSafetensors" tests="16" failures="0" errors="0" skipped="2" time="1.5250144004821777">
+    <testcase name="test_huggingface_enet_safetensors" classname="TestSafetensors" time="0.0167391300201416"/>
+    <testcase name="test_huggingface_enet_safetensors_fromurl" classname="TestSafetensors" time="0.014147043228149414"/>
+    <testcase name="test_load_supported_types" classname="TestSafetensors" time="0.5369341373443604"/>
+    <testcase name="test_metadata" classname="TestSafetensors" time="0.006837129592895508"/>
+    <testcase name="test_real_safetensors" classname="TestSafetensors" time="0.02636098861694336"/>
+    <testcase name="test_real_safetensors_open" classname="TestSafetensors" time="0.06630563735961914"/>
+    <testcase name="test_save_all_dtypes" classname="TestSafetensors" time="0.36801934242248535"/>
+    <testcase name="test_huggingface_enet_safetensors" classname="TestSafetensors" time="0.017620086669921875"/>
+    <testcase name="test_huggingface_enet_safetensors_fromurl" classname="TestSafetensors" time="0.01428985595703125"/>
+    <testcase name="test_load_supported_types" classname="TestSafetensors" time="0.02234506607055664"/>
+    <testcase name="test_metadata" classname="TestSafetensors" time="0.006681919097900391"/>
+    <testcase name="test_real_safetensors" classname="TestSafetensors" time="0.02674722671508789"/>
+    <testcase name="test_real_safetensors_open" classname="TestSafetensors" time="0.040756940841674805"/>
+    <testcase name="test_save_all_dtypes" classname="TestSafetensors" time="0.36118316650390625"/>
+    <testcase name="test_efficientnet_safetensors" classname="TestSafetensors" time="2.193450927734375e-05">
+      <skipped>this test takes 7 seconds. TODO: make disk assign lazy</skipped>
+    </testcase>
+    <testcase name="test_efficientnet_safetensors" classname="TestSafetensors" time="2.47955322265625e-05">
+      <skipped>this test takes 7 seconds. TODO: make disk assign lazy</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_disk_tensor.TestTorchLoad" tests="10" failures="0" errors="0" skipped="0" time="4.6063783168792725">
+    <testcase name="test_load_convnext" classname="TestTorchLoad" time="0.3829610347747803"/>
+    <testcase name="test_load_enet" classname="TestTorchLoad" time="0.7610361576080322"/>
+    <testcase name="test_load_enet_alt" classname="TestTorchLoad" time="0.5736968517303467"/>
+    <testcase name="test_load_llama2bfloat" classname="TestTorchLoad" time="0.0058841705322265625"/>
+    <testcase name="test_load_resnet" classname="TestTorchLoad" time="0.5643250942230225"/>
+    <testcase name="test_load_convnext" classname="TestTorchLoad" time="0.32979512214660645"/>
+    <testcase name="test_load_enet" classname="TestTorchLoad" time="0.902735710144043"/>
+    <testcase name="test_load_enet_alt" classname="TestTorchLoad" time="0.5602560043334961"/>
+    <testcase name="test_load_llama2bfloat" classname="TestTorchLoad" time="0.009623050689697266"/>
+    <testcase name="test_load_resnet" classname="TestTorchLoad" time="0.5160651206970215"/>
+  </testsuite>
+  <testsuite name="test.unit.test_elf.TestElfLoader" tests="4" failures="0" errors="0" skipped="0" time="0.1392679214477539">
+    <testcase name="test_clang_jit_compiler_external_raise" classname="TestElfLoader" time="0.03829383850097656"/>
+    <testcase name="test_load_clang_jit_strtab" classname="TestElfLoader" time="0.03204607963562012"/>
+    <testcase name="test_clang_jit_compiler_external_raise" classname="TestElfLoader" time="0.036792755126953125"/>
+    <testcase name="test_load_clang_jit_strtab" classname="TestElfLoader" time="0.0321352481842041"/>
+  </testsuite>
+  <testsuite name="test.unit.test_gradient.TestGradient" tests="24" failures="0" errors="0" skipped="0" time="0.045151710510253906">
+    <testcase name="test_add" classname="TestGradient" time="0.0017120838165283203"/>
+    <testcase name="test_big_add_sin" classname="TestGradient" time="0.003186941146850586"/>
+    <testcase name="test_big_chain" classname="TestGradient" time="0.0034608840942382812"/>
+    <testcase name="test_chain" classname="TestGradient" time="0.0006380081176757812"/>
+    <testcase name="test_chain_binop" classname="TestGradient" time="0.0019049644470214844"/>
+    <testcase name="test_exp2" classname="TestGradient" time="0.00045990943908691406"/>
+    <testcase name="test_log2" classname="TestGradient" time="0.0003819465637207031"/>
+    <testcase name="test_mul" classname="TestGradient" time="0.0013020038604736328"/>
+    <testcase name="test_recip" classname="TestGradient" time="0.0004680156707763672"/>
+    <testcase name="test_sin" classname="TestGradient" time="0.0003609657287597656"/>
+    <testcase name="test_sqrt" classname="TestGradient" time="0.00039386749267578125"/>
+    <testcase name="test_where" classname="TestGradient" time="0.001993894577026367"/>
+    <testcase name="test_add" classname="TestGradient" time="0.014024972915649414"/>
+    <testcase name="test_big_add_sin" classname="TestGradient" time="0.0034198760986328125"/>
+    <testcase name="test_big_chain" classname="TestGradient" time="0.0032079219818115234"/>
+    <testcase name="test_chain" classname="TestGradient" time="0.0008490085601806641"/>
+    <testcase name="test_chain_binop" classname="TestGradient" time="0.0018591880798339844"/>
+    <testcase name="test_exp2" classname="TestGradient" time="0.000537872314453125"/>
+    <testcase name="test_log2" classname="TestGradient" time="0.0004417896270751953"/>
+    <testcase name="test_mul" classname="TestGradient" time="0.0011327266693115234"/>
+    <testcase name="test_recip" classname="TestGradient" time="0.0005118846893310547"/>
+    <testcase name="test_sin" classname="TestGradient" time="0.0004220008850097656"/>
+    <testcase name="test_sqrt" classname="TestGradient" time="0.00044083595275878906"/>
+    <testcase name="test_where" classname="TestGradient" time="0.0020401477813720703"/>
+  </testsuite>
+  <testsuite name="test.unit.test_gradient.TestRealizeMeansRealize" tests="6" failures="0" errors="0" skipped="0" time="0.41306376457214355">
+    <testcase name="test_randn_realizes" classname="TestRealizeMeansRealize" time="0.07779908180236816"/>
+    <testcase name="test_uniform_gradient" classname="TestRealizeMeansRealize" time="0.01994490623474121"/>
+    <testcase name="test_uniform_realizes" classname="TestRealizeMeansRealize" time="0.005536079406738281"/>
+    <testcase name="test_randn_realizes" classname="TestRealizeMeansRealize" time="0.25030994415283203"/>
+    <testcase name="test_uniform_gradient" classname="TestRealizeMeansRealize" time="0.053563833236694336"/>
+    <testcase name="test_uniform_realizes" classname="TestRealizeMeansRealize" time="0.005909919738769531"/>
+  </testsuite>
+  <testsuite name="test.unit.test_gradient.TestTensorGradient" tests="14" failures="0" errors="0" skipped="0" time="0.07424020767211914">
+    <testcase name="test_broadcast_gradient" classname="TestTensorGradient" time="0.00976109504699707"/>
+    <testcase name="test_cast_before_view" classname="TestTensorGradient" time="0.0004150867462158203"/>
+    <testcase name="test_example" classname="TestTensorGradient" time="0.012551069259643555"/>
+    <testcase name="test_non_float_tensor_raise" classname="TestTensorGradient" time="0.00019788742065429688"/>
+    <testcase name="test_non_scalar_output" classname="TestTensorGradient" time="0.004415988922119141"/>
+    <testcase name="test_raises" classname="TestTensorGradient" time="0.002190828323364258"/>
+    <testcase name="test_with_custom_gradient" classname="TestTensorGradient" time="0.0050449371337890625"/>
+    <testcase name="test_broadcast_gradient" classname="TestTensorGradient" time="0.014468193054199219"/>
+    <testcase name="test_cast_before_view" classname="TestTensorGradient" time="0.000354766845703125"/>
+    <testcase name="test_example" classname="TestTensorGradient" time="0.011649131774902344"/>
+    <testcase name="test_non_float_tensor_raise" classname="TestTensorGradient" time="0.00019884109497070312"/>
+    <testcase name="test_non_scalar_output" classname="TestTensorGradient" time="0.004532337188720703"/>
+    <testcase name="test_raises" classname="TestTensorGradient" time="0.002407073974609375"/>
+    <testcase name="test_with_custom_gradient" classname="TestTensorGradient" time="0.006052970886230469"/>
+  </testsuite>
+  <testsuite name="test.unit.test_gradient.TestViewGradient" tests="2" failures="0" errors="0" skipped="0" time="0.20638442039489746">
+    <testcase name="test_expand" classname="TestViewGradient" time="0.09748578071594238"/>
+    <testcase name="test_expand" classname="TestViewGradient" time="0.10889863967895508"/>
+  </testsuite>
+  <testsuite name="test.unit.test_graph_rewrite.TestArithmeticSimplifications" tests="10" failures="0" errors="0" skipped="0" time="0.026139020919799805">
+    <testcase name="test_full_graph_rewrite_division_by_one" classname="TestArithmeticSimplifications" time="0.00021409988403320312"/>
+    <testcase name="test_full_graph_rewrite_division_by_zero" classname="TestArithmeticSimplifications" time="0.00012183189392089844"/>
+    <testcase name="test_full_graph_rewrite_large_graph" classname="TestArithmeticSimplifications" time="0.0014941692352294922"/>
+    <testcase name="test_full_graph_rewrite_modulo_by_one" classname="TestArithmeticSimplifications" time="0.0001251697540283203"/>
+    <testcase name="test_full_graph_rewrite_redundant_operations" classname="TestArithmeticSimplifications" time="0.00011301040649414062"/>
+    <testcase name="test_full_graph_rewrite_division_by_one" classname="TestArithmeticSimplifications" time="0.011015892028808594"/>
+    <testcase name="test_full_graph_rewrite_division_by_zero" classname="TestArithmeticSimplifications" time="0.0005209445953369141"/>
+    <testcase name="test_full_graph_rewrite_large_graph" classname="TestArithmeticSimplifications" time="0.01170206069946289"/>
+    <testcase name="test_full_graph_rewrite_modulo_by_one" classname="TestArithmeticSimplifications" time="0.0005009174346923828"/>
+    <testcase name="test_full_graph_rewrite_redundant_operations" classname="TestArithmeticSimplifications" time="0.00033092498779296875"/>
+  </testsuite>
+  <testsuite name="test.unit.test_graph_rewrite.TestBottomUpRewrite" tests="2" failures="0" errors="0" skipped="0" time="0.0003452301025390625">
+    <testcase name="test_const_folding" classname="TestBottomUpRewrite" time="8.296966552734375e-05"/>
+    <testcase name="test_const_folding" classname="TestBottomUpRewrite" time="0.00026226043701171875"/>
+  </testsuite>
+  <testsuite name="test.unit.test_graph_rewrite.TestEdgeCasesAndSpecialOperations" tests="6" failures="0" errors="0" skipped="4" time="0.0007340908050537109">
+    <testcase name="test_full_graph_rewrite_transcendental_edge_cases" classname="TestEdgeCasesAndSpecialOperations" time="0.0001461505889892578"/>
+    <testcase name="test_full_graph_rewrite_transcendental_edge_cases" classname="TestEdgeCasesAndSpecialOperations" time="0.00032591819763183594"/>
+    <testcase name="test_full_graph_rewrite_division_negative_divisor" classname="TestEdgeCasesAndSpecialOperations" time="3.600120544433594e-05">
+      <skipped>broken</skipped>
+    </testcase>
+    <testcase name="test_full_graph_rewrite_modulo_negative_dividend" classname="TestEdgeCasesAndSpecialOperations" time="4.696846008300781e-05">
+      <skipped>broken</skipped>
+    </testcase>
+    <testcase name="test_full_graph_rewrite_division_negative_divisor" classname="TestEdgeCasesAndSpecialOperations" time="8.392333984375e-05">
+      <skipped>broken</skipped>
+    </testcase>
+    <testcase name="test_full_graph_rewrite_modulo_negative_dividend" classname="TestEdgeCasesAndSpecialOperations" time="9.512901306152344e-05">
+      <skipped>broken</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_graph_rewrite.TestGEPAndVectorizeRewrite" tests="12" failures="0" errors="0" skipped="0" time="0.0033485889434814453">
+    <testcase name="test_gep_gep_simplification" classname="TestGEPAndVectorizeRewrite" time="9.989738464355469e-05"/>
+    <testcase name="test_gep_on_vconst" classname="TestGEPAndVectorizeRewrite" time="9.202957153320312e-05"/>
+    <testcase name="test_gep_single_element_extraction" classname="TestGEPAndVectorizeRewrite" time="7.677078247070312e-05"/>
+    <testcase name="test_gep_tuple_extraction" classname="TestGEPAndVectorizeRewrite" time="0.00015783309936523438"/>
+    <testcase name="test_gep_tuple_on_vconst" classname="TestGEPAndVectorizeRewrite" time="0.00011229515075683594"/>
+    <testcase name="test_vectorize_multiple_elements" classname="TestGEPAndVectorizeRewrite" time="0.00012087821960449219"/>
+    <testcase name="test_gep_gep_simplification" classname="TestGEPAndVectorizeRewrite" time="0.0003800392150878906"/>
+    <testcase name="test_gep_on_vconst" classname="TestGEPAndVectorizeRewrite" time="0.0004439353942871094"/>
+    <testcase name="test_gep_single_element_extraction" classname="TestGEPAndVectorizeRewrite" time="0.00024890899658203125"/>
+    <testcase name="test_gep_tuple_extraction" classname="TestGEPAndVectorizeRewrite" time="0.000598907470703125"/>
+    <testcase name="test_gep_tuple_on_vconst" classname="TestGEPAndVectorizeRewrite" time="0.0003771781921386719"/>
+    <testcase name="test_vectorize_multiple_elements" classname="TestGEPAndVectorizeRewrite" time="0.0006399154663085938"/>
+  </testsuite>
+  <testsuite name="test.unit.test_graph_rewrite.TestModuloAndDivisionFolding" tests="14" failures="0" errors="0" skipped="0" time="0.004908084869384766">
+    <testcase name="test_full_graph_rewrite_complex_mod_div_expression" classname="TestModuloAndDivisionFolding" time="0.0003790855407714844"/>
+    <testcase name="test_full_graph_rewrite_complex_mod_div_folding" classname="TestModuloAndDivisionFolding" time="0.00020194053649902344"/>
+    <testcase name="test_full_graph_rewrite_division_folding_with_define_var" classname="TestModuloAndDivisionFolding" time="0.000186920166015625"/>
+    <testcase name="test_full_graph_rewrite_division_with_remainder" classname="TestModuloAndDivisionFolding" time="0.00020623207092285156"/>
+    <testcase name="test_full_graph_rewrite_modulo_folding_with_define_var" classname="TestModuloAndDivisionFolding" time="0.00015997886657714844"/>
+    <testcase name="test_full_graph_rewrite_modulo_large_divisor" classname="TestModuloAndDivisionFolding" time="0.00012302398681640625"/>
+    <testcase name="test_graph_rewrite_div_folding_bug" classname="TestModuloAndDivisionFolding" time="0.0002989768981933594"/>
+    <testcase name="test_full_graph_rewrite_complex_mod_div_expression" classname="TestModuloAndDivisionFolding" time="0.0009548664093017578"/>
+    <testcase name="test_full_graph_rewrite_complex_mod_div_folding" classname="TestModuloAndDivisionFolding" time="0.0002799034118652344"/>
+    <testcase name="test_full_graph_rewrite_division_folding_with_define_var" classname="TestModuloAndDivisionFolding" time="0.0005319118499755859"/>
+    <testcase name="test_full_graph_rewrite_division_with_remainder" classname="TestModuloAndDivisionFolding" time="0.0003170967102050781"/>
+    <testcase name="test_full_graph_rewrite_modulo_folding_with_define_var" classname="TestModuloAndDivisionFolding" time="0.00034308433532714844"/>
+    <testcase name="test_full_graph_rewrite_modulo_large_divisor" classname="TestModuloAndDivisionFolding" time="0.0005230903625488281"/>
+    <testcase name="test_graph_rewrite_div_folding_bug" classname="TestModuloAndDivisionFolding" time="0.0004019737243652344"/>
+  </testsuite>
+  <testsuite name="test.unit.test_graph_rewrite.TestSubstitute" tests="14" failures="0" errors="0" skipped="0" time="0.057676076889038086">
+    <testcase name="test_assert_inf_recurse" classname="TestSubstitute" time="0.016309022903442383"/>
+    <testcase name="test_diamond" classname="TestSubstitute" time="0.0014810562133789062"/>
+    <testcase name="test_double" classname="TestSubstitute" time="0.0009801387786865234"/>
+    <testcase name="test_double_sin_to_sqrt" classname="TestSubstitute" time="0.0010259151458740234"/>
+    <testcase name="test_simple" classname="TestSubstitute" time="0.0009400844573974609"/>
+    <testcase name="test_sin" classname="TestSubstitute" time="0.0010259151458740234"/>
+    <testcase name="test_sin_to_sqrt" classname="TestSubstitute" time="0.0009348392486572266"/>
+    <testcase name="test_assert_inf_recurse" classname="TestSubstitute" time="0.026180028915405273"/>
+    <testcase name="test_diamond" classname="TestSubstitute" time="0.0032987594604492188"/>
+    <testcase name="test_double" classname="TestSubstitute" time="0.0008029937744140625"/>
+    <testcase name="test_double_sin_to_sqrt" classname="TestSubstitute" time="0.0014829635620117188"/>
+    <testcase name="test_simple" classname="TestSubstitute" time="0.0009179115295410156"/>
+    <testcase name="test_sin" classname="TestSubstitute" time="0.0008392333984375"/>
+    <testcase name="test_sin_to_sqrt" classname="TestSubstitute" time="0.00145721435546875"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestArgFix" tests="8" failures="0" errors="0" skipped="0" time="0.002269268035888672">
+    <testcase name="test_list" classname="TestArgFix" time="5.507469177246094e-05"/>
+    <testcase name="test_none" classname="TestArgFix" time="6.198883056640625e-05"/>
+    <testcase name="test_positional_arguments" classname="TestArgFix" time="5.1975250244140625e-05"/>
+    <testcase name="test_tuple" classname="TestArgFix" time="4.410743713378906e-05"/>
+    <testcase name="test_list" classname="TestArgFix" time="0.0016021728515625"/>
+    <testcase name="test_none" classname="TestArgFix" time="0.00014901161193847656"/>
+    <testcase name="test_positional_arguments" classname="TestArgFix" time="0.00013589859008789062"/>
+    <testcase name="test_tuple" classname="TestArgFix" time="0.0001690387725830078"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestCStyleDivMod" tests="8" failures="0" errors="0" skipped="0" time="0.0011854171752929688">
+    <testcase name="test_div_neg" classname="TestCStyleDivMod" time="4.8160552978515625e-05"/>
+    <testcase name="test_div_pos" classname="TestCStyleDivMod" time="5.793571472167969e-05"/>
+    <testcase name="test_mod_neg" classname="TestCStyleDivMod" time="4.291534423828125e-05"/>
+    <testcase name="test_mod_pos" classname="TestCStyleDivMod" time="5.0067901611328125e-05"/>
+    <testcase name="test_div_neg" classname="TestCStyleDivMod" time="0.00033402442932128906"/>
+    <testcase name="test_div_pos" classname="TestCStyleDivMod" time="7.104873657226562e-05"/>
+    <testcase name="test_mod_neg" classname="TestCStyleDivMod" time="0.0003790855407714844"/>
+    <testcase name="test_mod_pos" classname="TestCStyleDivMod" time="0.000202178955078125"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestContextVars" tests="20" failures="0" errors="0" skipped="0" time="0.004472017288208008">
+    <testcase name="test_assignment_across_modules" classname="TestContextVars" time="0.00012302398681640625"/>
+    <testcase name="test_cannot_recreate" classname="TestContextVars" time="4.9114227294921875e-05"/>
+    <testcase name="test_context_assignment" classname="TestContextVars" time="4.8160552978515625e-05"/>
+    <testcase name="test_context_exit_reverts_updated_values" classname="TestContextVars" time="5.0067901611328125e-05"/>
+    <testcase name="test_decorator" classname="TestContextVars" time="6.818771362304688e-05"/>
+    <testcase name="test_initial_value_is_set" classname="TestContextVars" time="5.0067901611328125e-05"/>
+    <testcase name="test_nested_context" classname="TestContextVars" time="6.604194641113281e-05"/>
+    <testcase name="test_new_var_inside_context" classname="TestContextVars" time="5.1975250244140625e-05"/>
+    <testcase name="test_unknown_param_to_context" classname="TestContextVars" time="6.175041198730469e-05"/>
+    <testcase name="test_value_across_modules" classname="TestContextVars" time="9.989738464355469e-05"/>
+    <testcase name="test_assignment_across_modules" classname="TestContextVars" time="0.00020599365234375"/>
+    <testcase name="test_cannot_recreate" classname="TestContextVars" time="0.0005269050598144531"/>
+    <testcase name="test_context_assignment" classname="TestContextVars" time="0.0003859996795654297"/>
+    <testcase name="test_context_exit_reverts_updated_values" classname="TestContextVars" time="0.0003719329833984375"/>
+    <testcase name="test_decorator" classname="TestContextVars" time="0.0004668235778808594"/>
+    <testcase name="test_initial_value_is_set" classname="TestContextVars" time="0.0001270771026611328"/>
+    <testcase name="test_nested_context" classname="TestContextVars" time="0.00026607513427734375"/>
+    <testcase name="test_new_var_inside_context" classname="TestContextVars" time="0.0007998943328857422"/>
+    <testcase name="test_unknown_param_to_context" classname="TestContextVars" time="0.0003039836883544922"/>
+    <testcase name="test_value_across_modules" classname="TestContextVars" time="0.0003490447998046875"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestFullyFlatten" tests="4" failures="0" errors="0" skipped="0" time="0.0006780624389648438">
+    <testcase name="test_fully_flatten" classname="TestFullyFlatten" time="6.389617919921875e-05"/>
+    <testcase name="test_fully_flatten_numpy" classname="TestFullyFlatten" time="9.512901306152344e-05"/>
+    <testcase name="test_fully_flatten" classname="TestFullyFlatten" time="0.00021600723266601562"/>
+    <testcase name="test_fully_flatten_numpy" classname="TestFullyFlatten" time="0.00030303001403808594"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestGetBits" tests="10" failures="0" errors="0" skipped="0" time="0.0006170272827148438">
+    <testcase name="test_full_range" classname="TestGetBits" time="4.100799560546875e-05"/>
+    <testcase name="test_high_bits" classname="TestGetBits" time="4.982948303222656e-05"/>
+    <testcase name="test_low_bits" classname="TestGetBits" time="4.410743713378906e-05"/>
+    <testcase name="test_middle_bits" classname="TestGetBits" time="4.291534423828125e-05"/>
+    <testcase name="test_single_bit" classname="TestGetBits" time="4.291534423828125e-05"/>
+    <testcase name="test_full_range" classname="TestGetBits" time="0.00010323524475097656"/>
+    <testcase name="test_high_bits" classname="TestGetBits" time="0.00011014938354492188"/>
+    <testcase name="test_low_bits" classname="TestGetBits" time="6.699562072753906e-05"/>
+    <testcase name="test_middle_bits" classname="TestGetBits" time="5.984306335449219e-05"/>
+    <testcase name="test_single_bit" classname="TestGetBits" time="5.602836608886719e-05"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestGetContraction" tests="6" failures="0" errors="0" skipped="0" time="0.0010197162628173828">
+    <testcase name="test_contraction" classname="TestGetContraction" time="8.20159912109375e-05"/>
+    <testcase name="test_contraction_ones" classname="TestGetContraction" time="4.982948303222656e-05"/>
+    <testcase name="test_contraction_with_reduce" classname="TestGetContraction" time="6.008148193359375e-05"/>
+    <testcase name="test_contraction" classname="TestGetContraction" time="0.0001919269561767578"/>
+    <testcase name="test_contraction_ones" classname="TestGetContraction" time="0.0004019737243652344"/>
+    <testcase name="test_contraction_with_reduce" classname="TestGetContraction" time="0.0002338886260986328"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestGetShape" tests="4" failures="0" errors="0" skipped="0" time="0.0006260871887207031">
+    <testcase name="test_get_shape" classname="TestGetShape" time="4.887580871582031e-05"/>
+    <testcase name="test_inhomogeneous_shape" classname="TestGetShape" time="6.29425048828125e-05"/>
+    <testcase name="test_get_shape" classname="TestGetShape" time="0.00014328956604003906"/>
+    <testcase name="test_inhomogeneous_shape" classname="TestGetShape" time="0.00037097930908203125"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestMemoryview" tests="2" failures="0" errors="0" skipped="0" time="0.0003979206085205078">
+    <testcase name="test_from_mv_to_mv" classname="TestMemoryview" time="0.00012087821960449219"/>
+    <testcase name="test_from_mv_to_mv" classname="TestMemoryview" time="0.0002770423889160156"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestMergeDicts" tests="2" failures="0" errors="0" skipped="0" time="0.0001857280731201172">
+    <testcase name="test_merge_dicts" classname="TestMergeDicts" time="7.867813110351562e-05"/>
+    <testcase name="test_merge_dicts" classname="TestMergeDicts" time="0.00010704994201660156"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestPolyN" tests="6" failures="0" errors="0" skipped="0" time="0.3160872459411621">
+    <testcase name="test_float" classname="TestPolyN" time="0.00023317337036132812"/>
+    <testcase name="test_tensor" classname="TestPolyN" time="0.009382009506225586"/>
+    <testcase name="test_uop" classname="TestPolyN" time="0.0011858940124511719"/>
+    <testcase name="test_float" classname="TestPolyN" time="0.010061025619506836"/>
+    <testcase name="test_tensor" classname="TestPolyN" time="0.2911040782928467"/>
+    <testcase name="test_uop" classname="TestPolyN" time="0.004121065139770508"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestProd" tests="8" failures="0" errors="0" skipped="0" time="0.004227399826049805">
+    <testcase name="test_empty" classname="TestProd" time="4.696846008300781e-05"/>
+    <testcase name="test_ints" classname="TestProd" time="4.9114227294921875e-05"/>
+    <testcase name="test_variable" classname="TestProd" time="0.00012493133544921875"/>
+    <testcase name="test_variable_order" classname="TestProd" time="8.96453857421875e-05"/>
+    <testcase name="test_empty" classname="TestProd" time="0.00021696090698242188"/>
+    <testcase name="test_ints" classname="TestProd" time="0.001138925552368164"/>
+    <testcase name="test_variable" classname="TestProd" time="0.001664876937866211"/>
+    <testcase name="test_variable_order" classname="TestProd" time="0.0008959770202636719"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestRoundUp" tests="2" failures="0" errors="0" skipped="0" time="0.0001583099365234375">
+    <testcase name="test_round_up" classname="TestRoundUp" time="5.030632019042969e-05"/>
+    <testcase name="test_round_up" classname="TestRoundUp" time="0.00010800361633300781"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestStripParens" tests="6" failures="0" errors="0" skipped="0" time="0.001051187515258789">
+    <testcase name="test_casted_no_strip" classname="TestStripParens" time="4.029273986816406e-05"/>
+    <testcase name="test_nested" classname="TestStripParens" time="4.506111145019531e-05"/>
+    <testcase name="test_simple" classname="TestStripParens" time="4.220008850097656e-05"/>
+    <testcase name="test_casted_no_strip" classname="TestStripParens" time="0.00020885467529296875"/>
+    <testcase name="test_nested" classname="TestStripParens" time="0.0004699230194091797"/>
+    <testcase name="test_simple" classname="TestStripParens" time="0.0002448558807373047"/>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestTimeToStr" tests="14" failures="0" errors="0" skipped="0" time="0.0025391578674316406">
+    <testcase name="test_boundary_ms_us" classname="TestTimeToStr" time="6.29425048828125e-05"/>
+    <testcase name="test_boundary_sec_ms" classname="TestTimeToStr" time="3.600120544433594e-05"/>
+    <testcase name="test_microseconds" classname="TestTimeToStr" time="3.600120544433594e-05"/>
+    <testcase name="test_milliseconds" classname="TestTimeToStr" time="4.887580871582031e-05"/>
+    <testcase name="test_seconds" classname="TestTimeToStr" time="5.4836273193359375e-05"/>
+    <testcase name="test_width_formatting" classname="TestTimeToStr" time="4.792213439941406e-05"/>
+    <testcase name="test_zero" classname="TestTimeToStr" time="3.62396240234375e-05"/>
+    <testcase name="test_boundary_ms_us" classname="TestTimeToStr" time="0.00038886070251464844"/>
+    <testcase name="test_boundary_sec_ms" classname="TestTimeToStr" time="0.0003159046173095703"/>
+    <testcase name="test_microseconds" classname="TestTimeToStr" time="0.0004811286926269531"/>
+    <testcase name="test_milliseconds" classname="TestTimeToStr" time="0.00026917457580566406"/>
+    <testcase name="test_seconds" classname="TestTimeToStr" time="0.00031113624572753906"/>
+    <testcase name="test_width_formatting" classname="TestTimeToStr" time="9.894371032714844e-05"/>
+    <testcase name="test_zero" classname="TestTimeToStr" time="0.00035119056701660156"/>
+  </testsuite>
+  <testsuite name="test.unit.test_keccak.TestKeccak" tests="10" failures="0" errors="0" skipped="0" time="45.13322472572327">
+    <testcase name="test_abc" classname="TestKeccak" time="1.7962021827697754"/>
+    <testcase name="test_sha3_224" classname="TestKeccak" time="8.410968780517578"/>
+    <testcase name="test_sha3_256" classname="TestKeccak" time="6.367232799530029"/>
+    <testcase name="test_shake_128" classname="TestKeccak" time="6.5156409740448"/>
+    <testcase name="test_shape_keeping" classname="TestKeccak" time="0.16210007667541504"/>
+    <testcase name="test_abc" classname="TestKeccak" time="1.837878942489624"/>
+    <testcase name="test_sha3_224" classname="TestKeccak" time="7.568026781082153"/>
+    <testcase name="test_sha3_256" classname="TestKeccak" time="5.8879899978637695"/>
+    <testcase name="test_shake_128" classname="TestKeccak" time="6.307139158248901"/>
+    <testcase name="test_shape_keeping" classname="TestKeccak" time="0.2800450325012207"/>
+  </testsuite>
+  <testsuite name="test.unit.test_linearizer_rewrite.TestLinearizerRewrite" tests="4" failures="0" errors="0" skipped="0" time="0.0630035400390625">
+    <testcase name="test_arange" classname="TestLinearizerRewrite" time="0.007386207580566406"/>
+    <testcase name="test_reduction" classname="TestLinearizerRewrite" time="0.005956888198852539"/>
+    <testcase name="test_arange" classname="TestLinearizerRewrite" time="0.041761159896850586"/>
+    <testcase name="test_reduction" classname="TestLinearizerRewrite" time="0.007899284362792969"/>
+  </testsuite>
+  <testsuite name="test.unit.test_microbenchmarks.TestMicrobenchmarks" tests="12" failures="0" errors="0" skipped="0" time="0.5255653858184814">
+    <testcase name="test_uop_add_2n" classname="TestMicrobenchmarks" time="0.01489877700805664"/>
+    <testcase name="test_uop_instant_creation" classname="TestMicrobenchmarks" time="0.009428262710571289"/>
+    <testcase name="test_uop_list_creation" classname="TestMicrobenchmarks" time="0.012532949447631836"/>
+    <testcase name="test_uop_simplify" classname="TestMicrobenchmarks" time="0.06731224060058594"/>
+    <testcase name="test_uop_toposort" classname="TestMicrobenchmarks" time="0.19814515113830566"/>
+    <testcase name="test_uop_toposort_2n" classname="TestMicrobenchmarks" time="0.01826000213623047"/>
+    <testcase name="test_uop_add_2n" classname="TestMicrobenchmarks" time="0.03655385971069336"/>
+    <testcase name="test_uop_instant_creation" classname="TestMicrobenchmarks" time="0.009444952011108398"/>
+    <testcase name="test_uop_list_creation" classname="TestMicrobenchmarks" time="0.012639045715332031"/>
+    <testcase name="test_uop_simplify" classname="TestMicrobenchmarks" time="0.07768487930297852"/>
+    <testcase name="test_uop_toposort" classname="TestMicrobenchmarks" time="0.05181431770324707"/>
+    <testcase name="test_uop_toposort_2n" classname="TestMicrobenchmarks" time="0.016850948333740234"/>
+  </testsuite>
+  <testsuite name="test.unit.test_pattern_matcher.TestPatternMatcher" tests="34" failures="0" errors="0" skipped="2" time="0.02302265167236328">
+    <testcase name="test_allow_len" classname="TestPatternMatcher" time="0.00035500526428222656"/>
+    <testcase name="test_arg" classname="TestPatternMatcher" time="0.0003600120544433594"/>
+    <testcase name="test_deep_src_permutations" classname="TestPatternMatcher" time="0.0006330013275146484"/>
+    <testcase name="test_dtype" classname="TestPatternMatcher" time="0.0001800060272216797"/>
+    <testcase name="test_dtype_set" classname="TestPatternMatcher" time="0.0001838207244873047"/>
+    <testcase name="test_dup_name" classname="TestPatternMatcher" time="0.00025391578674316406"/>
+    <testcase name="test_filter_arg" classname="TestPatternMatcher" time="0.00030803680419921875"/>
+    <testcase name="test_match_sz_0_ctx" classname="TestPatternMatcher" time="0.00018715858459472656"/>
+    <testcase name="test_minimum_len" classname="TestPatternMatcher" time="0.00027489662170410156"/>
+    <testcase name="test_simple_match" classname="TestPatternMatcher" time="0.00017309188842773438"/>
+    <testcase name="test_src_one" classname="TestPatternMatcher" time="0.0001971721649169922"/>
+    <testcase name="test_src_permutations" classname="TestPatternMatcher" time="0.00028395652770996094"/>
+    <testcase name="test_src_repeat" classname="TestPatternMatcher" time="0.00021982192993164062"/>
+    <testcase name="test_uop" classname="TestPatternMatcher" time="0.00014209747314453125"/>
+    <testcase name="test_uop_set" classname="TestPatternMatcher" time="0.00016069412231445312"/>
+    <testcase name="test_upat_any" classname="TestPatternMatcher" time="0.0003898143768310547"/>
+    <testcase name="test_allow_len" classname="TestPatternMatcher" time="0.006373882293701172"/>
+    <testcase name="test_arg" classname="TestPatternMatcher" time="0.0008938312530517578"/>
+    <testcase name="test_deep_src_permutations" classname="TestPatternMatcher" time="0.0007779598236083984"/>
+    <testcase name="test_dtype" classname="TestPatternMatcher" time="0.00032329559326171875"/>
+    <testcase name="test_dtype_set" classname="TestPatternMatcher" time="0.00017499923706054688"/>
+    <testcase name="test_dup_name" classname="TestPatternMatcher" time="0.0007719993591308594"/>
+    <testcase name="test_filter_arg" classname="TestPatternMatcher" time="0.0008261203765869141"/>
+    <testcase name="test_match_sz_0_ctx" classname="TestPatternMatcher" time="0.00046706199645996094"/>
+    <testcase name="test_minimum_len" classname="TestPatternMatcher" time="0.0005328655242919922"/>
+    <testcase name="test_simple_match" classname="TestPatternMatcher" time="0.00025916099548339844"/>
+    <testcase name="test_src_one" classname="TestPatternMatcher" time="0.0005478858947753906"/>
+    <testcase name="test_src_permutations" classname="TestPatternMatcher" time="0.0008611679077148438"/>
+    <testcase name="test_src_repeat" classname="TestPatternMatcher" time="0.0008368492126464844"/>
+    <testcase name="test_uop" classname="TestPatternMatcher" time="0.0014841556549072266"/>
+    <testcase name="test_uop_set" classname="TestPatternMatcher" time="0.0007328987121582031"/>
+    <testcase name="test_upat_any" classname="TestPatternMatcher" time="0.0026471614837646484"/>
+    <testcase name="test_match_sz_0" classname="TestPatternMatcher" time="4.696846008300781e-05">
+      <skipped>closures aren't supported on pattern matchers</skipped>
+    </testcase>
+    <testcase name="test_match_sz_0" classname="TestPatternMatcher" time="0.00016188621520996094">
+      <skipped>closures aren't supported on pattern matchers</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_rewrite_map.TestRewriteMap" tests="16" failures="0" errors="0" skipped="0" time="0.0026650428771972656">
+    <testcase name="test_add_zero" classname="TestRewriteMap" time="9.393692016601562e-05"/>
+    <testcase name="test_add_zero_and_double_neg" classname="TestRewriteMap" time="9.894371032714844e-05"/>
+    <testcase name="test_complex_multi_var_edges" classname="TestRewriteMap" time="0.0001690387725830078"/>
+    <testcase name="test_double_neg" classname="TestRewriteMap" time="6.794929504394531e-05"/>
+    <testcase name="test_multi_var_rewrites" classname="TestRewriteMap" time="0.000125885009765625"/>
+    <testcase name="test_multistage_substitute" classname="TestRewriteMap" time="9.608268737792969e-05"/>
+    <testcase name="test_substitute" classname="TestRewriteMap" time="7.796287536621094e-05"/>
+    <testcase name="test_substitute_depth_2" classname="TestRewriteMap" time="9.512901306152344e-05"/>
+    <testcase name="test_add_zero" classname="TestRewriteMap" time="0.00026226043701171875"/>
+    <testcase name="test_add_zero_and_double_neg" classname="TestRewriteMap" time="0.0002391338348388672"/>
+    <testcase name="test_complex_multi_var_edges" classname="TestRewriteMap" time="0.00030994415283203125"/>
+    <testcase name="test_double_neg" classname="TestRewriteMap" time="0.00029087066650390625"/>
+    <testcase name="test_multi_var_rewrites" classname="TestRewriteMap" time="0.0002090930938720703"/>
+    <testcase name="test_multistage_substitute" classname="TestRewriteMap" time="0.000186920166015625"/>
+    <testcase name="test_substitute" classname="TestRewriteMap" time="0.00022602081298828125"/>
+    <testcase name="test_substitute_depth_2" classname="TestRewriteMap" time="0.00011587142944335938"/>
+  </testsuite>
+  <testsuite name="test.unit.test_search.TestSearchUtil" tests="2" failures="0" errors="0" skipped="0" time="0.0003757476806640625">
+    <testcase name="test_get_test_global_size" classname="TestSearchUtil" time="6.389617919921875e-05"/>
+    <testcase name="test_get_test_global_size" classname="TestSearchUtil" time="0.00031185150146484375"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestComplexShapeTracker" tests="24" failures="0" errors="0" skipped="0" time="0.017737150192260742">
+    <testcase name="test_add_1s" classname="TestComplexShapeTracker" time="0.00011706352233886719"/>
+    <testcase name="test_factorize_combine" classname="TestComplexShapeTracker" time="0.00010514259338378906"/>
+    <testcase name="test_factorize_combine_add_ones" classname="TestComplexShapeTracker" time="9.608268737792969e-05"/>
+    <testcase name="test_factorize_split" classname="TestComplexShapeTracker" time="7.390975952148438e-05"/>
+    <testcase name="test_fancy_factorize" classname="TestComplexShapeTracker" time="7.772445678710938e-05"/>
+    <testcase name="test_permute_1s_simple" classname="TestComplexShapeTracker" time="9.703636169433594e-05"/>
+    <testcase name="test_permute_reshape" classname="TestComplexShapeTracker" time="4.792213439941406e-05"/>
+    <testcase name="test_remove_1s" classname="TestComplexShapeTracker" time="7.200241088867188e-05"/>
+    <testcase name="test_remove_1s_simple" classname="TestComplexShapeTracker" time="6.580352783203125e-05"/>
+    <testcase name="test_super_complex_2_fail" classname="TestComplexShapeTracker" time="7.176399230957031e-05"/>
+    <testcase name="test_work" classname="TestComplexShapeTracker" time="0.00019097328186035156"/>
+    <testcase name="test_work2" classname="TestComplexShapeTracker" time="0.00012874603271484375"/>
+    <testcase name="test_add_1s" classname="TestComplexShapeTracker" time="0.000370025634765625"/>
+    <testcase name="test_factorize_combine" classname="TestComplexShapeTracker" time="0.00020813941955566406"/>
+    <testcase name="test_factorize_combine_add_ones" classname="TestComplexShapeTracker" time="0.0005159378051757812"/>
+    <testcase name="test_factorize_split" classname="TestComplexShapeTracker" time="0.0001537799835205078"/>
+    <testcase name="test_fancy_factorize" classname="TestComplexShapeTracker" time="0.00015091896057128906"/>
+    <testcase name="test_permute_1s_simple" classname="TestComplexShapeTracker" time="0.00013208389282226562"/>
+    <testcase name="test_permute_reshape" classname="TestComplexShapeTracker" time="7.82012939453125e-05"/>
+    <testcase name="test_remove_1s" classname="TestComplexShapeTracker" time="0.0002582073211669922"/>
+    <testcase name="test_remove_1s_simple" classname="TestComplexShapeTracker" time="0.00023889541625976562"/>
+    <testcase name="test_super_complex_2_fail" classname="TestComplexShapeTracker" time="0.0021071434020996094"/>
+    <testcase name="test_work" classname="TestComplexShapeTracker" time="0.010762929916381836"/>
+    <testcase name="test_work2" classname="TestComplexShapeTracker" time="0.0016167163848876953"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestConsecutive" tests="10" failures="0" errors="0" skipped="0" time="0.004073381423950195">
+    <testcase name="test_const" classname="TestConsecutive" time="4.887580871582031e-05"/>
+    <testcase name="test_ones" classname="TestConsecutive" time="0.0001518726348876953"/>
+    <testcase name="test_padded" classname="TestConsecutive" time="0.00013303756713867188"/>
+    <testcase name="test_sliced" classname="TestConsecutive" time="0.000240325927734375"/>
+    <testcase name="test_unmodified" classname="TestConsecutive" time="9.012222290039062e-05"/>
+    <testcase name="test_const" classname="TestConsecutive" time="0.00014209747314453125"/>
+    <testcase name="test_ones" classname="TestConsecutive" time="0.0007700920104980469"/>
+    <testcase name="test_padded" classname="TestConsecutive" time="0.0001430511474609375"/>
+    <testcase name="test_sliced" classname="TestConsecutive" time="0.002003908157348633"/>
+    <testcase name="test_unmodified" classname="TestConsecutive" time="0.00034999847412109375"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestIndexExpressions2d" tests="40" failures="0" errors="0" skipped="0" time="4.583373069763184">
+    <testcase name="test_combining_big" classname="TestIndexExpressions2d" time="0.0062029361724853516"/>
+    <testcase name="test_expanded_reshaped" classname="TestIndexExpressions2d" time="0.012150049209594727"/>
+    <testcase name="test_noop" classname="TestIndexExpressions2d" time="0.02721405029296875"/>
+    <testcase name="test_pad_reshape" classname="TestIndexExpressions2d" time="0.0006399154663085938"/>
+    <testcase name="test_permute" classname="TestIndexExpressions2d" time="0.027630090713500977"/>
+    <testcase name="test_permute_reshape_1" classname="TestIndexExpressions2d" time="0.07245111465454102"/>
+    <testcase name="test_permute_reshape_2" classname="TestIndexExpressions2d" time="0.0730428695678711"/>
+    <testcase name="test_reshape" classname="TestIndexExpressions2d" time="0.03150177001953125"/>
+    <testcase name="test_reshape_combining_1" classname="TestIndexExpressions2d" time="0.004817962646484375"/>
+    <testcase name="test_reshape_combining_2" classname="TestIndexExpressions2d" time="0.004755973815917969"/>
+    <testcase name="test_reshape_combining_3" classname="TestIndexExpressions2d" time="0.004662036895751953"/>
+    <testcase name="test_reshape_combining_4" classname="TestIndexExpressions2d" time="0.46639180183410645"/>
+    <testcase name="test_reshape_expand" classname="TestIndexExpressions2d" time="0.030784130096435547"/>
+    <testcase name="test_reshape_only_1s" classname="TestIndexExpressions2d" time="0.02325725555419922"/>
+    <testcase name="test_reshape_splitting_1" classname="TestIndexExpressions2d" time="0.008703947067260742"/>
+    <testcase name="test_reshape_splitting_combining" classname="TestIndexExpressions2d" time="0.0076961517333984375"/>
+    <testcase name="test_reshaping_splitting" classname="TestIndexExpressions2d" time="1.5514709949493408"/>
+    <testcase name="test_splitting_big" classname="TestIndexExpressions2d" time="0.02617812156677246"/>
+    <testcase name="test_zero_mask_1" classname="TestIndexExpressions2d" time="0.001232147216796875"/>
+    <testcase name="test_zero_mask_2" classname="TestIndexExpressions2d" time="0.000263214111328125"/>
+    <testcase name="test_combining_big" classname="TestIndexExpressions2d" time="0.007899761199951172"/>
+    <testcase name="test_expanded_reshaped" classname="TestIndexExpressions2d" time="0.012102127075195312"/>
+    <testcase name="test_noop" classname="TestIndexExpressions2d" time="0.02727508544921875"/>
+    <testcase name="test_pad_reshape" classname="TestIndexExpressions2d" time="0.0006279945373535156"/>
+    <testcase name="test_permute" classname="TestIndexExpressions2d" time="0.027432918548583984"/>
+    <testcase name="test_permute_reshape_1" classname="TestIndexExpressions2d" time="0.07866597175598145"/>
+    <testcase name="test_permute_reshape_2" classname="TestIndexExpressions2d" time="0.08150863647460938"/>
+    <testcase name="test_reshape" classname="TestIndexExpressions2d" time="0.034893035888671875"/>
+    <testcase name="test_reshape_combining_1" classname="TestIndexExpressions2d" time="0.005412101745605469"/>
+    <testcase name="test_reshape_combining_2" classname="TestIndexExpressions2d" time="0.012856006622314453"/>
+    <testcase name="test_reshape_combining_3" classname="TestIndexExpressions2d" time="0.0075228214263916016"/>
+    <testcase name="test_reshape_combining_4" classname="TestIndexExpressions2d" time="0.4650857448577881"/>
+    <testcase name="test_reshape_expand" classname="TestIndexExpressions2d" time="0.0302121639251709"/>
+    <testcase name="test_reshape_only_1s" classname="TestIndexExpressions2d" time="0.03452610969543457"/>
+    <testcase name="test_reshape_splitting_1" classname="TestIndexExpressions2d" time="0.00822591781616211"/>
+    <testcase name="test_reshape_splitting_combining" classname="TestIndexExpressions2d" time="0.007266044616699219"/>
+    <testcase name="test_reshaping_splitting" classname="TestIndexExpressions2d" time="1.3337059020996094"/>
+    <testcase name="test_splitting_big" classname="TestIndexExpressions2d" time="0.025707006454467773"/>
+    <testcase name="test_zero_mask_1" classname="TestIndexExpressions2d" time="0.001154184341430664"/>
+    <testcase name="test_zero_mask_2" classname="TestIndexExpressions2d" time="0.00024700164794921875"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestMaskedShapeTracker" tests="10" failures="0" errors="0" skipped="0" time="0.06140542030334473">
+    <testcase name="test_axis_is_masked" classname="TestMaskedShapeTracker" time="0.0006427764892578125"/>
+    <testcase name="test_axis_is_masked_rw1" classname="TestMaskedShapeTracker" time="0.0013349056243896484"/>
+    <testcase name="test_pad_1x1" classname="TestMaskedShapeTracker" time="0.0005629062652587891"/>
+    <testcase name="test_pad_2x2" classname="TestMaskedShapeTracker" time="0.0020017623901367188"/>
+    <testcase name="test_pad_reshape" classname="TestMaskedShapeTracker" time="0.02682805061340332"/>
+    <testcase name="test_axis_is_masked" classname="TestMaskedShapeTracker" time="0.0006420612335205078"/>
+    <testcase name="test_axis_is_masked_rw1" classname="TestMaskedShapeTracker" time="0.0013079643249511719"/>
+    <testcase name="test_pad_1x1" classname="TestMaskedShapeTracker" time="0.0005269050598144531"/>
+    <testcase name="test_pad_2x2" classname="TestMaskedShapeTracker" time="0.0018830299377441406"/>
+    <testcase name="test_pad_reshape" classname="TestMaskedShapeTracker" time="0.025675058364868164"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestRealDoesntSimplify" tests="4" failures="0" errors="0" skipped="0" time="0.004454851150512695">
+    <testcase name="test_1" classname="TestRealDoesntSimplify" time="0.0008578300476074219"/>
+    <testcase name="test_2" classname="TestRealDoesntSimplify" time="0.0013248920440673828"/>
+    <testcase name="test_1" classname="TestRealDoesntSimplify" time="0.0009229183197021484"/>
+    <testcase name="test_2" classname="TestRealDoesntSimplify" time="0.0013492107391357422"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestRealSimplifies" tests="4" failures="0" errors="0" skipped="0" time="0.004126310348510742">
+    <testcase name="test_1" classname="TestRealSimplifies" time="0.000990152359008789"/>
+    <testcase name="test_2" classname="TestRealSimplifies" time="0.0011219978332519531"/>
+    <testcase name="test_1" classname="TestRealSimplifies" time="0.0008790493011474609"/>
+    <testcase name="test_2" classname="TestRealSimplifies" time="0.001135110855102539"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestRealStrides" tests="10" failures="0" errors="0" skipped="0" time="0.016168832778930664">
+    <testcase name="test_1" classname="TestRealStrides" time="0.0003612041473388672"/>
+    <testcase name="test_2" classname="TestRealStrides" time="0.001728057861328125"/>
+    <testcase name="test_3" classname="TestRealStrides" time="0.0010709762573242188"/>
+    <testcase name="test_4" classname="TestRealStrides" time="0.0015149116516113281"/>
+    <testcase name="test_5" classname="TestRealStrides" time="0.003452777862548828"/>
+    <testcase name="test_1" classname="TestRealStrides" time="0.0003399848937988281"/>
+    <testcase name="test_2" classname="TestRealStrides" time="0.001786947250366211"/>
+    <testcase name="test_3" classname="TestRealStrides" time="0.0011110305786132812"/>
+    <testcase name="test_4" classname="TestRealStrides" time="0.0016760826110839844"/>
+    <testcase name="test_5" classname="TestRealStrides" time="0.003126859664916992"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestRender" tests="2" failures="0" errors="0" skipped="0" time="0.0006310939788818359">
+    <testcase name="test_render" classname="TestRender" time="0.0003399848937988281"/>
+    <testcase name="test_render" classname="TestRender" time="0.0002911090850830078"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestShapeTracker" tests="70" failures="0" errors="0" skipped="0" time="0.2269594669342041">
+    <testcase name="test_combo" classname="TestShapeTracker" time="0.005217790603637695"/>
+    <testcase name="test_double_flip" classname="TestShapeTracker" time="0.0006949901580810547"/>
+    <testcase name="test_double_permute" classname="TestShapeTracker" time="0.00017404556274414062"/>
+    <testcase name="test_expand" classname="TestShapeTracker" time="0.003984212875366211"/>
+    <testcase name="test_expand_then_reshape" classname="TestShapeTracker" time="0.0002613067626953125"/>
+    <testcase name="test_flip" classname="TestShapeTracker" time="0.0020318031311035156"/>
+    <testcase name="test_flip2" classname="TestShapeTracker" time="0.0020017623901367188"/>
+    <testcase name="test_flip3" classname="TestShapeTracker" time="0.0008730888366699219"/>
+    <testcase name="test_flip_0" classname="TestShapeTracker" time="0.0001480579376220703"/>
+    <testcase name="test_flip_01" classname="TestShapeTracker" time="0.00016999244689941406"/>
+    <testcase name="test_flip_1" classname="TestShapeTracker" time="0.0001609325408935547"/>
+    <testcase name="test_noop" classname="TestShapeTracker" time="0.0001609325408935547"/>
+    <testcase name="test_pad_expand" classname="TestShapeTracker" time="0.02690887451171875"/>
+    <testcase name="test_pad_expand_alt" classname="TestShapeTracker" time="0.0009472370147705078"/>
+    <testcase name="test_pad_flip" classname="TestShapeTracker" time="0.011528968811035156"/>
+    <testcase name="test_pad_flip_int" classname="TestShapeTracker" time="0.01166677474975586"/>
+    <testcase name="test_pad_one_sided" classname="TestShapeTracker" time="0.0011699199676513672"/>
+    <testcase name="test_pad_pad" classname="TestShapeTracker" time="0.010274887084960938"/>
+    <testcase name="test_pad_permute" classname="TestShapeTracker" time="0.008561849594116211"/>
+    <testcase name="test_pad_reshape" classname="TestShapeTracker" time="0.0002040863037109375"/>
+    <testcase name="test_pad_shrink" classname="TestShapeTracker" time="0.001714944839477539"/>
+    <testcase name="test_permute" classname="TestShapeTracker" time="0.0019290447235107422"/>
+    <testcase name="test_permute_then_reshape" classname="TestShapeTracker" time="0.00017499923706054688"/>
+    <testcase name="test_reshape" classname="TestShapeTracker" time="0.0001590251922607422"/>
+    <testcase name="test_reshape_then_expand" classname="TestShapeTracker" time="0.003968954086303711"/>
+    <testcase name="test_reshape_then_permute" classname="TestShapeTracker" time="0.0019488334655761719"/>
+    <testcase name="test_reshape_with_1" classname="TestShapeTracker" time="0.0001590251922607422"/>
+    <testcase name="test_simple_pad" classname="TestShapeTracker" time="0.006224870681762695"/>
+    <testcase name="test_simple_split" classname="TestShapeTracker" time="0.00016617774963378906"/>
+    <testcase name="test_slice_0" classname="TestShapeTracker" time="0.0006849765777587891"/>
+    <testcase name="test_slice_1" classname="TestShapeTracker" time="0.0015790462493896484"/>
+    <testcase name="test_slice_1c1" classname="TestShapeTracker" time="9.417533874511719e-05"/>
+    <testcase name="test_slice_1c2" classname="TestShapeTracker" time="0.000102996826171875"/>
+    <testcase name="test_slice_expand" classname="TestShapeTracker" time="0.0011739730834960938"/>
+    <testcase name="test_slice_permute" classname="TestShapeTracker" time="0.00039124488830566406"/>
+    <testcase name="test_combo" classname="TestShapeTracker" time="0.004720926284790039"/>
+    <testcase name="test_double_flip" classname="TestShapeTracker" time="0.0006580352783203125"/>
+    <testcase name="test_double_permute" classname="TestShapeTracker" time="0.0003070831298828125"/>
+    <testcase name="test_expand" classname="TestShapeTracker" time="0.004354000091552734"/>
+    <testcase name="test_expand_then_reshape" classname="TestShapeTracker" time="0.0002617835998535156"/>
+    <testcase name="test_flip" classname="TestShapeTracker" time="0.0020401477813720703"/>
+    <testcase name="test_flip2" classname="TestShapeTracker" time="0.0020279884338378906"/>
+    <testcase name="test_flip3" classname="TestShapeTracker" time="0.000865936279296875"/>
+    <testcase name="test_flip_0" classname="TestShapeTracker" time="0.0001437664031982422"/>
+    <testcase name="test_flip_01" classname="TestShapeTracker" time="0.00012302398681640625"/>
+    <testcase name="test_flip_1" classname="TestShapeTracker" time="0.0001270771026611328"/>
+    <testcase name="test_noop" classname="TestShapeTracker" time="0.0001270771026611328"/>
+    <testcase name="test_pad_expand" classname="TestShapeTracker" time="0.025885820388793945"/>
+    <testcase name="test_pad_expand_alt" classname="TestShapeTracker" time="0.0008792877197265625"/>
+    <testcase name="test_pad_flip" classname="TestShapeTracker" time="0.011088848114013672"/>
+    <testcase name="test_pad_flip_int" classname="TestShapeTracker" time="0.011610031127929688"/>
+    <testcase name="test_pad_one_sided" classname="TestShapeTracker" time="0.014982938766479492"/>
+    <testcase name="test_pad_pad" classname="TestShapeTracker" time="0.01013493537902832"/>
+    <testcase name="test_pad_permute" classname="TestShapeTracker" time="0.008806228637695312"/>
+    <testcase name="test_pad_reshape" classname="TestShapeTracker" time="0.00021409988403320312"/>
+    <testcase name="test_pad_shrink" classname="TestShapeTracker" time="0.0016601085662841797"/>
+    <testcase name="test_permute" classname="TestShapeTracker" time="0.0019659996032714844"/>
+    <testcase name="test_permute_then_reshape" classname="TestShapeTracker" time="0.0001480579376220703"/>
+    <testcase name="test_reshape" classname="TestShapeTracker" time="0.0001461505889892578"/>
+    <testcase name="test_reshape_then_expand" classname="TestShapeTracker" time="0.003970146179199219"/>
+    <testcase name="test_reshape_then_permute" classname="TestShapeTracker" time="0.0018508434295654297"/>
+    <testcase name="test_reshape_with_1" classname="TestShapeTracker" time="0.00013589859008789062"/>
+    <testcase name="test_simple_pad" classname="TestShapeTracker" time="0.006117820739746094"/>
+    <testcase name="test_simple_split" classname="TestShapeTracker" time="0.0001308917999267578"/>
+    <testcase name="test_slice_0" classname="TestShapeTracker" time="0.0006241798400878906"/>
+    <testcase name="test_slice_1" classname="TestShapeTracker" time="0.00150299072265625"/>
+    <testcase name="test_slice_1c1" classname="TestShapeTracker" time="0.00013065338134765625"/>
+    <testcase name="test_slice_1c2" classname="TestShapeTracker" time="8.702278137207031e-05"/>
+    <testcase name="test_slice_expand" classname="TestShapeTracker" time="0.0011758804321289062"/>
+    <testcase name="test_slice_permute" classname="TestShapeTracker" time="0.0003399848937988281"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestShapeTrackerEquality" tests="4" failures="0" errors="0" skipped="0" time="0.00025725364685058594">
+    <testcase name="test_other_equals" classname="TestShapeTrackerEquality" time="8.511543273925781e-05"/>
+    <testcase name="test_simple_equals" classname="TestShapeTrackerEquality" time="5.221366882324219e-05"/>
+    <testcase name="test_other_equals" classname="TestShapeTrackerEquality" time="5.078315734863281e-05"/>
+    <testcase name="test_simple_equals" classname="TestShapeTrackerEquality" time="6.914138793945312e-05"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestShapeTrackerFuzzFailures" tests="8" failures="0" errors="0" skipped="0" time="0.0053272247314453125">
+    <testcase name="test_case_1" classname="TestShapeTrackerFuzzFailures" time="0.0004010200500488281"/>
+    <testcase name="test_case_2" classname="TestShapeTrackerFuzzFailures" time="0.0005221366882324219"/>
+    <testcase name="test_case_3" classname="TestShapeTrackerFuzzFailures" time="0.00032210350036621094"/>
+    <testcase name="test_case_4" classname="TestShapeTrackerFuzzFailures" time="0.001416921615600586"/>
+    <testcase name="test_case_1" classname="TestShapeTrackerFuzzFailures" time="0.0004439353942871094"/>
+    <testcase name="test_case_2" classname="TestShapeTrackerFuzzFailures" time="0.0005469322204589844"/>
+    <testcase name="test_case_3" classname="TestShapeTrackerFuzzFailures" time="0.0003101825714111328"/>
+    <testcase name="test_case_4" classname="TestShapeTrackerFuzzFailures" time="0.001363992691040039"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestShapeTrackerSize" tests="22" failures="0" errors="0" skipped="0" time="0.002808809280395508">
+    <testcase name="test_0_in_shape_size" classname="TestShapeTrackerSize" time="6.103515625e-05"/>
+    <testcase name="test_expand_size" classname="TestShapeTrackerSize" time="0.00017499923706054688"/>
+    <testcase name="test_expand_size_flatten" classname="TestShapeTrackerSize" time="7.43865966796875e-05"/>
+    <testcase name="test_flip_size" classname="TestShapeTrackerSize" time="0.0001919269561767578"/>
+    <testcase name="test_pad_size_multiview" classname="TestShapeTrackerSize" time="0.00014328956604003906"/>
+    <testcase name="test_pad_size_simple" classname="TestShapeTrackerSize" time="0.00011801719665527344"/>
+    <testcase name="test_shrink_size_axis_0" classname="TestShapeTrackerSize" time="0.0001270771026611328"/>
+    <testcase name="test_shrink_size_axis_0_variable" classname="TestShapeTrackerSize" time="0.00019621849060058594"/>
+    <testcase name="test_shrink_size_axis_1" classname="TestShapeTrackerSize" time="0.00013899803161621094"/>
+    <testcase name="test_simple_size" classname="TestShapeTrackerSize" time="0.00011396408081054688"/>
+    <testcase name="test_size_variable" classname="TestShapeTrackerSize" time="0.00025177001953125"/>
+    <testcase name="test_0_in_shape_size" classname="TestShapeTrackerSize" time="5.1975250244140625e-05"/>
+    <testcase name="test_expand_size" classname="TestShapeTrackerSize" time="0.00013017654418945312"/>
+    <testcase name="test_expand_size_flatten" classname="TestShapeTrackerSize" time="5.3882598876953125e-05"/>
+    <testcase name="test_flip_size" classname="TestShapeTrackerSize" time="0.00016999244689941406"/>
+    <testcase name="test_pad_size_multiview" classname="TestShapeTrackerSize" time="0.00011396408081054688"/>
+    <testcase name="test_pad_size_simple" classname="TestShapeTrackerSize" time="9.298324584960938e-05"/>
+    <testcase name="test_shrink_size_axis_0" classname="TestShapeTrackerSize" time="0.0001010894775390625"/>
+    <testcase name="test_shrink_size_axis_0_variable" classname="TestShapeTrackerSize" time="0.00016117095947265625"/>
+    <testcase name="test_shrink_size_axis_1" classname="TestShapeTrackerSize" time="9.799003601074219e-05"/>
+    <testcase name="test_simple_size" classname="TestShapeTrackerSize" time="7.987022399902344e-05"/>
+    <testcase name="test_size_variable" classname="TestShapeTrackerSize" time="0.000164031982421875"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestSimplifyingShapeTracker" tests="6" failures="0" errors="0" skipped="0" time="0.020562410354614258">
+    <testcase name="test_expand_contract_different_shape" classname="TestSimplifyingShapeTracker" time="0.00504612922668457"/>
+    <testcase name="test_expand_contract_simple" classname="TestSimplifyingShapeTracker" time="0.00475001335144043"/>
+    <testcase name="test_expand_contract_still_complex" classname="TestSimplifyingShapeTracker" time="0.0005717277526855469"/>
+    <testcase name="test_expand_contract_different_shape" classname="TestSimplifyingShapeTracker" time="0.004811763763427734"/>
+    <testcase name="test_expand_contract_simple" classname="TestSimplifyingShapeTracker" time="0.004829883575439453"/>
+    <testcase name="test_expand_contract_still_complex" classname="TestSimplifyingShapeTracker" time="0.0005528926849365234"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestSingleShapeTracker" tests="14" failures="0" errors="0" skipped="0" time="0.002033233642578125">
+    <testcase name="test_double_permute" classname="TestSingleShapeTracker" time="0.00015425682067871094"/>
+    <testcase name="test_permute" classname="TestSingleShapeTracker" time="0.00015211105346679688"/>
+    <testcase name="test_reshape" classname="TestSingleShapeTracker" time="0.00016570091247558594"/>
+    <testcase name="test_reshape_permute" classname="TestSingleShapeTracker" time="0.00015687942504882812"/>
+    <testcase name="test_reshape_permute_no" classname="TestSingleShapeTracker" time="0.00015497207641601562"/>
+    <testcase name="test_reshape_permute_yes" classname="TestSingleShapeTracker" time="0.0001552104949951172"/>
+    <testcase name="test_shrink" classname="TestSingleShapeTracker" time="0.000186920166015625"/>
+    <testcase name="test_double_permute" classname="TestSingleShapeTracker" time="0.00013899803161621094"/>
+    <testcase name="test_permute" classname="TestSingleShapeTracker" time="0.0001220703125"/>
+    <testcase name="test_reshape" classname="TestSingleShapeTracker" time="0.00011491775512695312"/>
+    <testcase name="test_reshape_permute" classname="TestSingleShapeTracker" time="0.0001342296600341797"/>
+    <testcase name="test_reshape_permute_no" classname="TestSingleShapeTracker" time="0.00012421607971191406"/>
+    <testcase name="test_reshape_permute_yes" classname="TestSingleShapeTracker" time="0.00012183189392089844"/>
+    <testcase name="test_shrink" classname="TestSingleShapeTracker" time="0.00015091896057128906"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestVariableReshape" tests="14" failures="0" errors="0" skipped="0" time="0.0014524459838867188">
+    <testcase name="test_add" classname="TestVariableReshape" time="0.000102996826171875"/>
+    <testcase name="test_add_bound" classname="TestVariableReshape" time="0.00010704994201660156"/>
+    <testcase name="test_add_stride_0" classname="TestVariableReshape" time="9.608268737792969e-05"/>
+    <testcase name="test_reshape" classname="TestVariableReshape" time="0.00013685226440429688"/>
+    <testcase name="test_reshape_bound" classname="TestVariableReshape" time="0.00014972686767578125"/>
+    <testcase name="test_reshape_stride_0" classname="TestVariableReshape" time="0.00018477439880371094"/>
+    <testcase name="test_simplify" classname="TestVariableReshape" time="5.602836608886719e-05"/>
+    <testcase name="test_add" classname="TestVariableReshape" time="7.891654968261719e-05"/>
+    <testcase name="test_add_bound" classname="TestVariableReshape" time="7.295608520507812e-05"/>
+    <testcase name="test_add_stride_0" classname="TestVariableReshape" time="7.081031799316406e-05"/>
+    <testcase name="test_reshape" classname="TestVariableReshape" time="0.00010013580322265625"/>
+    <testcase name="test_reshape_bound" classname="TestVariableReshape" time="9.989738464355469e-05"/>
+    <testcase name="test_reshape_stride_0" classname="TestVariableReshape" time="0.00015425682067871094"/>
+    <testcase name="test_simplify" classname="TestVariableReshape" time="4.1961669921875e-05"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestViewMinify" tests="2" failures="0" errors="0" skipped="0" time="0.0001461505889892578">
+    <testcase name="test_minifies" classname="TestViewMinify" time="7.915496826171875e-05"/>
+    <testcase name="test_minifies" classname="TestViewMinify" time="6.699562072753906e-05"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker_math.TestShapeTrackerAdd" tests="8" failures="0" errors="0" skipped="0" time="0.01860189437866211">
+    <testcase name="test_off_by_one" classname="TestShapeTrackerAdd" time="0.0005447864532470703"/>
+    <testcase name="test_plus_real1" classname="TestShapeTrackerAdd" time="0.007016897201538086"/>
+    <testcase name="test_simple_add_permute" classname="TestShapeTrackerAdd" time="0.00023126602172851562"/>
+    <testcase name="test_simple_add_reshape" classname="TestShapeTrackerAdd" time="6.604194641113281e-05"/>
+    <testcase name="test_off_by_one" classname="TestShapeTrackerAdd" time="0.0012559890747070312"/>
+    <testcase name="test_plus_real1" classname="TestShapeTrackerAdd" time="0.008650064468383789"/>
+    <testcase name="test_simple_add_permute" classname="TestShapeTrackerAdd" time="0.0006718635559082031"/>
+    <testcase name="test_simple_add_reshape" classname="TestShapeTrackerAdd" time="0.00016498565673828125"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker_math.TestShapeTrackerAddVariable" tests="8" failures="0" errors="0" skipped="0" time="0.0031585693359375">
+    <testcase name="test_merge_symbolic_views" classname="TestShapeTrackerAddVariable" time="6.103515625e-05"/>
+    <testcase name="test_merge_symbolic_views_2" classname="TestShapeTrackerAddVariable" time="0.0005011558532714844"/>
+    <testcase name="test_self_add" classname="TestShapeTrackerAddVariable" time="0.00016498565673828125"/>
+    <testcase name="test_self_add_reshape" classname="TestShapeTrackerAddVariable" time="0.00013518333435058594"/>
+    <testcase name="test_merge_symbolic_views" classname="TestShapeTrackerAddVariable" time="0.00018596649169921875"/>
+    <testcase name="test_merge_symbolic_views_2" classname="TestShapeTrackerAddVariable" time="0.0014081001281738281"/>
+    <testcase name="test_self_add" classname="TestShapeTrackerAddVariable" time="0.0004191398620605469"/>
+    <testcase name="test_self_add_reshape" classname="TestShapeTrackerAddVariable" time="0.0002830028533935547"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker_math.TestShapeTrackerBasics" tests="8" failures="0" errors="0" skipped="0" time="0.005331993103027344">
+    <testcase name="test_pad_shrink_leaves_mask" classname="TestShapeTrackerBasics" time="7.081031799316406e-05"/>
+    <testcase name="test_pad_shrink_removes_mask" classname="TestShapeTrackerBasics" time="6.508827209472656e-05"/>
+    <testcase name="test_reshape_makes_same" classname="TestShapeTrackerBasics" time="9.393692016601562e-05"/>
+    <testcase name="test_simplify_is_correct" classname="TestShapeTrackerBasics" time="0.001972198486328125"/>
+    <testcase name="test_pad_shrink_leaves_mask" classname="TestShapeTrackerBasics" time="0.0002460479736328125"/>
+    <testcase name="test_pad_shrink_removes_mask" classname="TestShapeTrackerBasics" time="0.0001838207244873047"/>
+    <testcase name="test_reshape_makes_same" classname="TestShapeTrackerBasics" time="0.0003390312194824219"/>
+    <testcase name="test_simplify_is_correct" classname="TestShapeTrackerBasics" time="0.0023610591888427734"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker_math.TestShapeTrackerInvert" tests="18" failures="0" errors="0" skipped="0" time="0.006723880767822266">
+    <testcase name="test_can_invert_flip" classname="TestShapeTrackerInvert" time="0.00026488304138183594"/>
+    <testcase name="test_can_invert_flip_permute" classname="TestShapeTrackerInvert" time="0.00034689903259277344"/>
+    <testcase name="test_cant_invert_expand" classname="TestShapeTrackerInvert" time="7.510185241699219e-05"/>
+    <testcase name="test_cant_invert_shrink" classname="TestShapeTrackerInvert" time="8.296966552734375e-05"/>
+    <testcase name="test_invert_failure" classname="TestShapeTrackerInvert" time="0.0002830028533935547"/>
+    <testcase name="test_invert_permute" classname="TestShapeTrackerInvert" time="0.0002429485321044922"/>
+    <testcase name="test_invert_permute_3" classname="TestShapeTrackerInvert" time="0.0003120899200439453"/>
+    <testcase name="test_invert_real1" classname="TestShapeTrackerInvert" time="0.0003757476806640625"/>
+    <testcase name="test_invert_reshape" classname="TestShapeTrackerInvert" time="8.130073547363281e-05"/>
+    <testcase name="test_can_invert_flip" classname="TestShapeTrackerInvert" time="0.0004143714904785156"/>
+    <testcase name="test_can_invert_flip_permute" classname="TestShapeTrackerInvert" time="0.0007350444793701172"/>
+    <testcase name="test_cant_invert_expand" classname="TestShapeTrackerInvert" time="0.00016689300537109375"/>
+    <testcase name="test_cant_invert_shrink" classname="TestShapeTrackerInvert" time="0.0001590251922607422"/>
+    <testcase name="test_invert_failure" classname="TestShapeTrackerInvert" time="0.0006277561187744141"/>
+    <testcase name="test_invert_permute" classname="TestShapeTrackerInvert" time="0.0003600120544433594"/>
+    <testcase name="test_invert_permute_3" classname="TestShapeTrackerInvert" time="0.0009410381317138672"/>
+    <testcase name="test_invert_real1" classname="TestShapeTrackerInvert" time="0.0011069774627685547"/>
+    <testcase name="test_invert_reshape" classname="TestShapeTrackerInvert" time="0.00014781951904296875"/>
+  </testsuite>
+  <testsuite name="test.unit.test_shm_tensor.TestRawShmBuffer" tests="4" failures="0" errors="0" skipped="0" time="1.0070598125457764">
+    <testcase name="test_e2e" classname="TestRawShmBuffer" time="0.08924078941345215"/>
+    <testcase name="test_e2e_big" classname="TestRawShmBuffer" time="0.32268333435058594"/>
+    <testcase name="test_e2e" classname="TestRawShmBuffer" time="0.26714086532592773"/>
+    <testcase name="test_e2e_big" classname="TestRawShmBuffer" time="0.32799482345581055"/>
+  </testsuite>
+  <testsuite name="test.unit.test_simplify_valid_idx.TestHelpers" tests="2" failures="0" errors="0" skipped="0" time="0.0006506443023681641">
+    <testcase name="test_is_increasing" classname="TestHelpers" time="0.00020575523376464844"/>
+    <testcase name="test_is_increasing" classname="TestHelpers" time="0.0004448890686035156"/>
+  </testsuite>
+  <testsuite name="test.unit.test_simplify_valid_idx.TestImageSimplification" tests="26" failures="0" errors="0" skipped="0" time="0.05619382858276367">
+    <testcase name="test_generic_idx_lt_bound" classname="TestImageSimplification" time="0.0007100105285644531"/>
+    <testcase name="test_idx_gt_c" classname="TestImageSimplification" time="0.0014760494232177734"/>
+    <testcase name="test_idx_lt_bound" classname="TestImageSimplification" time="0.0008440017700195312"/>
+    <testcase name="test_openpilot_conv1" classname="TestImageSimplification" time="0.0023801326751708984"/>
+    <testcase name="test_openpilot_conv2" classname="TestImageSimplification" time="0.0023670196533203125"/>
+    <testcase name="test_openpilot_conv3" classname="TestImageSimplification" time="0.0015828609466552734"/>
+    <testcase name="test_simplify1" classname="TestImageSimplification" time="0.0007958412170410156"/>
+    <testcase name="test_simplify2" classname="TestImageSimplification" time="0.0006661415100097656"/>
+    <testcase name="test_simplify3" classname="TestImageSimplification" time="0.0005838871002197266"/>
+    <testcase name="test_simplify4" classname="TestImageSimplification" time="0.005701780319213867"/>
+    <testcase name="test_simplify5" classname="TestImageSimplification" time="0.0015747547149658203"/>
+    <testcase name="test_simplify6" classname="TestImageSimplification" time="0.003608226776123047"/>
+    <testcase name="test_valid_empty_set" classname="TestImageSimplification" time="0.0006897449493408203"/>
+    <testcase name="test_generic_idx_lt_bound" classname="TestImageSimplification" time="0.0013210773468017578"/>
+    <testcase name="test_idx_gt_c" classname="TestImageSimplification" time="0.0017478466033935547"/>
+    <testcase name="test_idx_lt_bound" classname="TestImageSimplification" time="0.00119781494140625"/>
+    <testcase name="test_openpilot_conv1" classname="TestImageSimplification" time="0.0029501914978027344"/>
+    <testcase name="test_openpilot_conv2" classname="TestImageSimplification" time="0.0036211013793945312"/>
+    <testcase name="test_openpilot_conv3" classname="TestImageSimplification" time="0.0020821094512939453"/>
+    <testcase name="test_simplify1" classname="TestImageSimplification" time="0.0011191368103027344"/>
+    <testcase name="test_simplify2" classname="TestImageSimplification" time="0.0007379055023193359"/>
+    <testcase name="test_simplify3" classname="TestImageSimplification" time="0.0011870861053466797"/>
+    <testcase name="test_simplify4" classname="TestImageSimplification" time="0.008589029312133789"/>
+    <testcase name="test_simplify5" classname="TestImageSimplification" time="0.003538846969604492"/>
+    <testcase name="test_simplify6" classname="TestImageSimplification" time="0.004117012023925781"/>
+    <testcase name="test_valid_empty_set" classname="TestImageSimplification" time="0.0010042190551757812"/>
+  </testsuite>
+  <testsuite name="test.unit.test_simplify_valid_idx.TestValidIdxSimplification" tests="18" failures="0" errors="0" skipped="0" time="0.036303043365478516">
+    <testcase name="test_cumsum" classname="TestValidIdxSimplification" time="0.00034880638122558594"/>
+    <testcase name="test_load_in_valid" classname="TestValidIdxSimplification" time="0.0002448558807373047"/>
+    <testcase name="test_simplify_valid_from_div" classname="TestValidIdxSimplification" time="0.00010609626770019531"/>
+    <testcase name="test_simplify_within_valid1" classname="TestValidIdxSimplification" time="0.0009672641754150391"/>
+    <testcase name="test_simplify_within_valid2" classname="TestValidIdxSimplification" time="0.0001742839813232422"/>
+    <testcase name="test_valid_becomes_const1" classname="TestValidIdxSimplification" time="0.0009670257568359375"/>
+    <testcase name="test_valid_becomes_const1_z3" classname="TestValidIdxSimplification" time="0.006479740142822266"/>
+    <testcase name="test_valid_order_matters1" classname="TestValidIdxSimplification" time="0.0002601146697998047"/>
+    <testcase name="test_valid_order_matters2" classname="TestValidIdxSimplification" time="0.007146358489990234"/>
+    <testcase name="test_cumsum" classname="TestValidIdxSimplification" time="0.0011577606201171875"/>
+    <testcase name="test_load_in_valid" classname="TestValidIdxSimplification" time="0.0004229545593261719"/>
+    <testcase name="test_simplify_valid_from_div" classname="TestValidIdxSimplification" time="0.00020599365234375"/>
+    <testcase name="test_simplify_within_valid1" classname="TestValidIdxSimplification" time="0.001032114028930664"/>
+    <testcase name="test_simplify_within_valid2" classname="TestValidIdxSimplification" time="0.00021982192993164062"/>
+    <testcase name="test_valid_becomes_const1" classname="TestValidIdxSimplification" time="0.0010528564453125"/>
+    <testcase name="test_valid_becomes_const1_z3" classname="TestValidIdxSimplification" time="0.005349159240722656"/>
+    <testcase name="test_valid_order_matters1" classname="TestValidIdxSimplification" time="0.0003979206085205078"/>
+    <testcase name="test_valid_order_matters2" classname="TestValidIdxSimplification" time="0.009769916534423828"/>
+  </testsuite>
+  <testsuite name="test.unit.test_symbolic_failures.TestFuzzFailure" tests="20" failures="0" errors="0" skipped="0" time="0.020383119583129883">
+    <testcase name="test_fuzz_failure1" classname="TestFuzzFailure" time="0.0010612010955810547"/>
+    <testcase name="test_fuzz_failure10" classname="TestFuzzFailure" time="0.0006730556488037109"/>
+    <testcase name="test_fuzz_failure2" classname="TestFuzzFailure" time="0.0003509521484375"/>
+    <testcase name="test_fuzz_failure3" classname="TestFuzzFailure" time="0.0006930828094482422"/>
+    <testcase name="test_fuzz_failure4" classname="TestFuzzFailure" time="0.0011348724365234375"/>
+    <testcase name="test_fuzz_failure5" classname="TestFuzzFailure" time="0.0004298686981201172"/>
+    <testcase name="test_fuzz_failure6" classname="TestFuzzFailure" time="0.0008859634399414062"/>
+    <testcase name="test_fuzz_failure7" classname="TestFuzzFailure" time="0.001283884048461914"/>
+    <testcase name="test_fuzz_failure8" classname="TestFuzzFailure" time="0.00026988983154296875"/>
+    <testcase name="test_fuzz_failure9" classname="TestFuzzFailure" time="0.0009081363677978516"/>
+    <testcase name="test_fuzz_failure1" classname="TestFuzzFailure" time="0.0018718242645263672"/>
+    <testcase name="test_fuzz_failure10" classname="TestFuzzFailure" time="0.0008637905120849609"/>
+    <testcase name="test_fuzz_failure2" classname="TestFuzzFailure" time="0.00042700767517089844"/>
+    <testcase name="test_fuzz_failure3" classname="TestFuzzFailure" time="0.0009281635284423828"/>
+    <testcase name="test_fuzz_failure4" classname="TestFuzzFailure" time="0.0016031265258789062"/>
+    <testcase name="test_fuzz_failure5" classname="TestFuzzFailure" time="0.0009121894836425781"/>
+    <testcase name="test_fuzz_failure6" classname="TestFuzzFailure" time="0.00119781494140625"/>
+    <testcase name="test_fuzz_failure7" classname="TestFuzzFailure" time="0.0033631324768066406"/>
+    <testcase name="test_fuzz_failure8" classname="TestFuzzFailure" time="0.0005121231079101562"/>
+    <testcase name="test_fuzz_failure9" classname="TestFuzzFailure" time="0.001013040542602539"/>
+  </testsuite>
+  <testsuite name="test.unit.test_tar.TestTarExtractFile" tests="14" failures="0" errors="0" skipped="0" time="0.21730780601501465">
+    <testcase name="test_tar_extract_content_size" classname="TestTarExtractFile" time="0.017796993255615234"/>
+    <testcase name="test_tar_extract_content_values" classname="TestTarExtractFile" time="0.014890193939208984"/>
+    <testcase name="test_tar_extract_correct_keys" classname="TestTarExtractFile" time="0.014680147171020508"/>
+    <testcase name="test_tar_extract_empty_file" classname="TestTarExtractFile" time="0.01316213607788086"/>
+    <testcase name="test_tar_extract_invalid_file" classname="TestTarExtractFile" time="0.00706028938293457"/>
+    <testcase name="test_tar_extract_non_existent_file" classname="TestTarExtractFile" time="0.0009288787841796875"/>
+    <testcase name="test_tar_extract_returns_dict" classname="TestTarExtractFile" time="0.01217198371887207"/>
+    <testcase name="test_tar_extract_content_size" classname="TestTarExtractFile" time="0.030254125595092773"/>
+    <testcase name="test_tar_extract_content_values" classname="TestTarExtractFile" time="0.02303290367126465"/>
+    <testcase name="test_tar_extract_correct_keys" classname="TestTarExtractFile" time="0.013980865478515625"/>
+    <testcase name="test_tar_extract_empty_file" classname="TestTarExtractFile" time="0.017175674438476562"/>
+    <testcase name="test_tar_extract_invalid_file" classname="TestTarExtractFile" time="0.01838088035583496"/>
+    <testcase name="test_tar_extract_non_existent_file" classname="TestTarExtractFile" time="0.003119945526123047"/>
+    <testcase name="test_tar_extract_returns_dict" classname="TestTarExtractFile" time="0.030672788619995117"/>
+  </testsuite>
+  <testsuite name="test.unit.test_tar.TestTarExtractGNU" tests="16" failures="0" errors="0" skipped="0" time="0.8654420375823975">
+    <testcase name="test_tar_extract_content_size" classname="TestTarExtractGNU" time="0.13277387619018555"/>
+    <testcase name="test_tar_extract_content_values" classname="TestTarExtractGNU" time="0.05750393867492676"/>
+    <testcase name="test_tar_extract_correct_keys" classname="TestTarExtractGNU" time="0.030837059020996094"/>
+    <testcase name="test_tar_extract_empty_file" classname="TestTarExtractGNU" time="0.029101848602294922"/>
+    <testcase name="test_tar_extract_invalid_file" classname="TestTarExtractGNU" time="0.0033850669860839844"/>
+    <testcase name="test_tar_extract_invalid_file_long" classname="TestTarExtractGNU" time="0.008851051330566406"/>
+    <testcase name="test_tar_extract_non_existent_file" classname="TestTarExtractGNU" time="0.00021004676818847656"/>
+    <testcase name="test_tar_extract_returns_dict" classname="TestTarExtractGNU" time="0.02851581573486328"/>
+    <testcase name="test_tar_extract_content_size" classname="TestTarExtractGNU" time="0.41252803802490234"/>
+    <testcase name="test_tar_extract_content_values" classname="TestTarExtractGNU" time="0.061638832092285156"/>
+    <testcase name="test_tar_extract_correct_keys" classname="TestTarExtractGNU" time="0.029236793518066406"/>
+    <testcase name="test_tar_extract_empty_file" classname="TestTarExtractGNU" time="0.030032873153686523"/>
+    <testcase name="test_tar_extract_invalid_file" classname="TestTarExtractGNU" time="0.0043849945068359375"/>
+    <testcase name="test_tar_extract_invalid_file_long" classname="TestTarExtractGNU" time="0.00649714469909668"/>
+    <testcase name="test_tar_extract_non_existent_file" classname="TestTarExtractGNU" time="0.00018978118896484375"/>
+    <testcase name="test_tar_extract_returns_dict" classname="TestTarExtractGNU" time="0.0297548770904541"/>
+  </testsuite>
+  <testsuite name="test.unit.test_tar.TestTarExtractPAX" tests="16" failures="0" errors="0" skipped="0" time="0.714261531829834">
+    <testcase name="test_tar_extract_content_size" classname="TestTarExtractPAX" time="0.22068500518798828"/>
+    <testcase name="test_tar_extract_content_values" classname="TestTarExtractPAX" time="0.058283090591430664"/>
+    <testcase name="test_tar_extract_correct_keys" classname="TestTarExtractPAX" time="0.027013063430786133"/>
+    <testcase name="test_tar_extract_empty_file" classname="TestTarExtractPAX" time="0.025311946868896484"/>
+    <testcase name="test_tar_extract_invalid_file" classname="TestTarExtractPAX" time="0.002051830291748047"/>
+    <testcase name="test_tar_extract_invalid_file_long" classname="TestTarExtractPAX" time="0.002985239028930664"/>
+    <testcase name="test_tar_extract_non_existent_file" classname="TestTarExtractPAX" time="0.0002002716064453125"/>
+    <testcase name="test_tar_extract_returns_dict" classname="TestTarExtractPAX" time="0.02595686912536621"/>
+    <testcase name="test_tar_extract_content_size" classname="TestTarExtractPAX" time="0.22379684448242188"/>
+    <testcase name="test_tar_extract_content_values" classname="TestTarExtractPAX" time="0.04729199409484863"/>
+    <testcase name="test_tar_extract_correct_keys" classname="TestTarExtractPAX" time="0.026571035385131836"/>
+    <testcase name="test_tar_extract_empty_file" classname="TestTarExtractPAX" time="0.02450084686279297"/>
+    <testcase name="test_tar_extract_invalid_file" classname="TestTarExtractPAX" time="0.0021889209747314453"/>
+    <testcase name="test_tar_extract_invalid_file_long" classname="TestTarExtractPAX" time="0.003003835678100586"/>
+    <testcase name="test_tar_extract_non_existent_file" classname="TestTarExtractPAX" time="0.00014591217041015625"/>
+    <testcase name="test_tar_extract_returns_dict" classname="TestTarExtractPAX" time="0.024274826049804688"/>
+  </testsuite>
+  <testsuite name="test.unit.test_tar.TestTarExtractUSTAR" tests="16" failures="0" errors="0" skipped="0" time="0.21764636039733887">
+    <testcase name="test_tar_extract_content_size" classname="TestTarExtractUSTAR" time="0.023874998092651367"/>
+    <testcase name="test_tar_extract_content_values" classname="TestTarExtractUSTAR" time="0.02850198745727539"/>
+    <testcase name="test_tar_extract_correct_keys" classname="TestTarExtractUSTAR" time="0.02084803581237793"/>
+    <testcase name="test_tar_extract_empty_file" classname="TestTarExtractUSTAR" time="0.018587827682495117"/>
+    <testcase name="test_tar_extract_invalid_file" classname="TestTarExtractUSTAR" time="0.00215911865234375"/>
+    <testcase name="test_tar_extract_invalid_file_long" classname="TestTarExtractUSTAR" time="0.0030059814453125"/>
+    <testcase name="test_tar_extract_non_existent_file" classname="TestTarExtractUSTAR" time="0.0002040863037109375"/>
+    <testcase name="test_tar_extract_returns_dict" classname="TestTarExtractUSTAR" time="0.018842220306396484"/>
+    <testcase name="test_tar_extract_content_size" classname="TestTarExtractUSTAR" time="0.020007848739624023"/>
+    <testcase name="test_tar_extract_content_values" classname="TestTarExtractUSTAR" time="0.025698184967041016"/>
+    <testcase name="test_tar_extract_correct_keys" classname="TestTarExtractUSTAR" time="0.017186880111694336"/>
+    <testcase name="test_tar_extract_empty_file" classname="TestTarExtractUSTAR" time="0.017416954040527344"/>
+    <testcase name="test_tar_extract_invalid_file" classname="TestTarExtractUSTAR" time="0.002107858657836914"/>
+    <testcase name="test_tar_extract_invalid_file_long" classname="TestTarExtractUSTAR" time="0.0026772022247314453"/>
+    <testcase name="test_tar_extract_non_existent_file" classname="TestTarExtractUSTAR" time="0.00014519691467285156"/>
+    <testcase name="test_tar_extract_returns_dict" classname="TestTarExtractUSTAR" time="0.01638197898864746"/>
+  </testsuite>
+  <testsuite name="test.unit.test_tensor_io.TestTensorIO" tests="8" failures="0" errors="0" skipped="0" time="0.2456073760986328">
+    <testcase name="test_create" classname="TestTensorIO" time="0.00019788742065429688"/>
+    <testcase name="test_read" classname="TestTensorIO" time="0.018674850463867188"/>
+    <testcase name="test_read_nolen" classname="TestTensorIO" time="0.008385658264160156"/>
+    <testcase name="test_seek" classname="TestTensorIO" time="0.0001289844512939453"/>
+    <testcase name="test_create" classname="TestTensorIO" time="0.0009601116180419922"/>
+    <testcase name="test_read" classname="TestTensorIO" time="0.20548009872436523"/>
+    <testcase name="test_read_nolen" classname="TestTensorIO" time="0.011409997940063477"/>
+    <testcase name="test_seek" classname="TestTensorIO" time="0.00036978721618652344"/>
+  </testsuite>
+  <testsuite name="test.unit.test_tensor_uop_representation.TestTensorMutates" tests="6" failures="0" errors="0" skipped="0" time="0.22597503662109375">
+    <testcase name="test_mutate_add" classname="TestTensorMutates" time="0.0008821487426757812"/>
+    <testcase name="test_reshape_is_same_child" classname="TestTensorMutates" time="0.0037147998809814453"/>
+    <testcase name="test_reshape_is_same_parent" classname="TestTensorMutates" time="0.000978231430053711"/>
+    <testcase name="test_mutate_add" classname="TestTensorMutates" time="0.009858131408691406"/>
+    <testcase name="test_reshape_is_same_child" classname="TestTensorMutates" time="0.2041468620300293"/>
+    <testcase name="test_reshape_is_same_parent" classname="TestTensorMutates" time="0.006394863128662109"/>
+  </testsuite>
+  <testsuite name="test.unit.test_tensor_uop_representation.TestTensorUopRepresentation" tests="16" failures="0" errors="0" skipped="0" time="0.010339736938476562">
+    <testcase name="test_add_realized" classname="TestTensorUopRepresentation" time="0.0008330345153808594"/>
+    <testcase name="test_const_pattern" classname="TestTensorUopRepresentation" time="0.00011014938354492188"/>
+    <testcase name="test_consts_do_not_realize" classname="TestTensorUopRepresentation" time="0.00019669532775878906"/>
+    <testcase name="test_consts_dont_have_buffers" classname="TestTensorUopRepresentation" time="0.00013899803161621094"/>
+    <testcase name="test_copyin" classname="TestTensorUopRepresentation" time="0.0004730224609375"/>
+    <testcase name="test_empty_buf" classname="TestTensorUopRepresentation" time="0.00028324127197265625"/>
+    <testcase name="test_realized" classname="TestTensorUopRepresentation" time="0.00043487548828125"/>
+    <testcase name="test_viewed_consts_do_not_realize" classname="TestTensorUopRepresentation" time="0.0003399848937988281"/>
+    <testcase name="test_add_realized" classname="TestTensorUopRepresentation" time="0.0013020038604736328"/>
+    <testcase name="test_const_pattern" classname="TestTensorUopRepresentation" time="0.0005209445953369141"/>
+    <testcase name="test_consts_do_not_realize" classname="TestTensorUopRepresentation" time="0.0006220340728759766"/>
+    <testcase name="test_consts_dont_have_buffers" classname="TestTensorUopRepresentation" time="0.0007827281951904297"/>
+    <testcase name="test_copyin" classname="TestTensorUopRepresentation" time="0.0013761520385742188"/>
+    <testcase name="test_empty_buf" classname="TestTensorUopRepresentation" time="0.0009129047393798828"/>
+    <testcase name="test_realized" classname="TestTensorUopRepresentation" time="0.0009210109710693359"/>
+    <testcase name="test_viewed_consts_do_not_realize" classname="TestTensorUopRepresentation" time="0.0010919570922851562"/>
+  </testsuite>
+  <testsuite name="test.unit.test_tqdm.TestProgressBar" tests="24" failures="0" errors="0" skipped="0" time="1.401780128479004">
+    <testcase name="test_set_description" classname="TestProgressBar" time="0.0028159618377685547"/>
+    <testcase name="test_tqdm_context_manager" classname="TestProgressBar" time="0.001622915267944336"/>
+    <testcase name="test_tqdm_output_custom" classname="TestProgressBar" time="0.0012919902801513672"/>
+    <testcase name="test_tqdm_output_custom_0_total" classname="TestProgressBar" time="0.0006821155548095703"/>
+    <testcase name="test_tqdm_output_custom_nolen_total" classname="TestProgressBar" time="0.0012619495391845703"/>
+    <testcase name="test_tqdm_output_iter" classname="TestProgressBar" time="0.0016629695892333984"/>
+    <testcase name="test_tqdm_perf" classname="TestProgressBar" time="0.00040411949157714844"/>
+    <testcase name="test_tqdm_perf_high_iter" classname="TestProgressBar" time="0.00022411346435546875"/>
+    <testcase name="test_tqdm_write" classname="TestProgressBar" time="0.6173639297485352"/>
+    <testcase name="test_trange_output_iter" classname="TestProgressBar" time="0.006386756896972656"/>
+    <testcase name="test_unit_scale" classname="TestProgressBar" time="0.05705118179321289"/>
+    <testcase name="test_unit_scale_exact" classname="TestProgressBar" time="0.0018260478973388672"/>
+    <testcase name="test_set_description" classname="TestProgressBar" time="0.023576974868774414"/>
+    <testcase name="test_tqdm_context_manager" classname="TestProgressBar" time="0.004954099655151367"/>
+    <testcase name="test_tqdm_output_custom" classname="TestProgressBar" time="0.0022220611572265625"/>
+    <testcase name="test_tqdm_output_custom_0_total" classname="TestProgressBar" time="0.0015048980712890625"/>
+    <testcase name="test_tqdm_output_custom_nolen_total" classname="TestProgressBar" time="0.0027887821197509766"/>
+    <testcase name="test_tqdm_output_iter" classname="TestProgressBar" time="0.004418849945068359"/>
+    <testcase name="test_tqdm_perf" classname="TestProgressBar" time="0.002869844436645508"/>
+    <testcase name="test_tqdm_perf_high_iter" classname="TestProgressBar" time="0.0004470348358154297"/>
+    <testcase name="test_tqdm_write" classname="TestProgressBar" time="0.6297297477722168"/>
+    <testcase name="test_trange_output_iter" classname="TestProgressBar" time="0.0012898445129394531"/>
+    <testcase name="test_unit_scale" classname="TestProgressBar" time="0.03362894058227539"/>
+    <testcase name="test_unit_scale_exact" classname="TestProgressBar" time="0.0017549991607666016"/>
+  </testsuite>
+  <testsuite name="test.unit.test_transcendental_helpers.TestTranscendentalFunctions" tests="10" failures="0" errors="0" skipped="0" time="0.07222771644592285">
+    <testcase name="test_cody_waite_reduction" classname="TestTranscendentalFunctions" time="0.0008981227874755859"/>
+    <testcase name="test_frexp" classname="TestTranscendentalFunctions" time="0.0025870800018310547"/>
+    <testcase name="test_payne_hanek_reduction" classname="TestTranscendentalFunctions" time="0.019188880920410156"/>
+    <testcase name="test_pow2if" classname="TestTranscendentalFunctions" time="0.0019409656524658203"/>
+    <testcase name="test_rintk" classname="TestTranscendentalFunctions" time="0.0017037391662597656"/>
+    <testcase name="test_cody_waite_reduction" classname="TestTranscendentalFunctions" time="0.015886783599853516"/>
+    <testcase name="test_frexp" classname="TestTranscendentalFunctions" time="0.005054950714111328"/>
+    <testcase name="test_payne_hanek_reduction" classname="TestTranscendentalFunctions" time="0.020762205123901367"/>
+    <testcase name="test_pow2if" classname="TestTranscendentalFunctions" time="0.0022530555725097656"/>
+    <testcase name="test_rintk" classname="TestTranscendentalFunctions" time="0.0019519329071044922"/>
+  </testsuite>
+  <testsuite name="test.unit.test_transcendental_helpers.TestTranscendentalVectorizedFunctions" tests="12" failures="0" errors="0" skipped="0" time="0.17931652069091797">
+    <testcase name="test_cody_waite_reduction" classname="TestTranscendentalVectorizedFunctions" time="0.003439188003540039"/>
+    <testcase name="test_payne_hanek_reduction" classname="TestTranscendentalVectorizedFunctions" time="0.03829002380371094"/>
+    <testcase name="test_trig_poly" classname="TestTranscendentalVectorizedFunctions" time="0.0006661415100097656"/>
+    <testcase name="test_xexp2" classname="TestTranscendentalVectorizedFunctions" time="0.012430191040039062"/>
+    <testcase name="test_xlog2" classname="TestTranscendentalVectorizedFunctions" time="0.02867889404296875"/>
+    <testcase name="test_xpow" classname="TestTranscendentalVectorizedFunctions" time="0.002567768096923828"/>
+    <testcase name="test_cody_waite_reduction" classname="TestTranscendentalVectorizedFunctions" time="0.004955768585205078"/>
+    <testcase name="test_payne_hanek_reduction" classname="TestTranscendentalVectorizedFunctions" time="0.04107308387756348"/>
+    <testcase name="test_trig_poly" classname="TestTranscendentalVectorizedFunctions" time="0.0009691715240478516"/>
+    <testcase name="test_xexp2" classname="TestTranscendentalVectorizedFunctions" time="0.013025045394897461"/>
+    <testcase name="test_xlog2" classname="TestTranscendentalVectorizedFunctions" time="0.030166149139404297"/>
+    <testcase name="test_xpow" classname="TestTranscendentalVectorizedFunctions" time="0.003055095672607422"/>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_resolve.TestUOpResolve" tests="48" failures="0" errors="0" skipped="0" time="0.015372037887573242">
+    <testcase name="test_ambiguous_less_than" classname="TestUOpResolve" time="0.0001678466796875"/>
+    <testcase name="test_and_false" classname="TestUOpResolve" time="9.012222290039062e-05"/>
+    <testcase name="test_and_true" classname="TestUOpResolve" time="0.0001220703125"/>
+    <testcase name="test_float_direct" classname="TestUOpResolve" time="0.00011801719665527344"/>
+    <testcase name="test_int_add" classname="TestUOpResolve" time="8.726119995117188e-05"/>
+    <testcase name="test_leq" classname="TestUOpResolve" time="0.0001201629638671875"/>
+    <testcase name="test_lt" classname="TestUOpResolve" time="9.894371032714844e-05"/>
+    <testcase name="test_max" classname="TestUOpResolve" time="0.00011992454528808594"/>
+    <testcase name="test_ne" classname="TestUOpResolve" time="8.702278137207031e-05"/>
+    <testcase name="test_ne_f" classname="TestUOpResolve" time="7.605552673339844e-05"/>
+    <testcase name="test_ngt" classname="TestUOpResolve" time="7.82012939453125e-05"/>
+    <testcase name="test_or_false" classname="TestUOpResolve" time="8.0108642578125e-05"/>
+    <testcase name="test_or_true" classname="TestUOpResolve" time="7.390975952148438e-05"/>
+    <testcase name="test_plus_ordering_lt" classname="TestUOpResolve" time="9.322166442871094e-05"/>
+    <testcase name="test_rfloordiv" classname="TestUOpResolve" time="8.797645568847656e-05"/>
+    <testcase name="test_rtruediv" classname="TestUOpResolve" time="0.00012373924255371094"/>
+    <testcase name="test_simple_int" classname="TestUOpResolve" time="7.700920104980469e-05"/>
+    <testcase name="test_ssimplify" classname="TestUOpResolve" time="9.393692016601562e-05"/>
+    <testcase name="test_var_cmp_assert" classname="TestUOpResolve" time="0.00011181831359863281"/>
+    <testcase name="test_var_cmp_f" classname="TestUOpResolve" time="8.106231689453125e-05"/>
+    <testcase name="test_var_cmp_f2" classname="TestUOpResolve" time="9.107589721679688e-05"/>
+    <testcase name="test_var_cmp_t" classname="TestUOpResolve" time="9.417533874511719e-05"/>
+    <testcase name="test_var_cmp_t2" classname="TestUOpResolve" time="0.0001239776611328125"/>
+    <testcase name="test_x_lt_x" classname="TestUOpResolve" time="9.417533874511719e-05"/>
+    <testcase name="test_ambiguous_less_than" classname="TestUOpResolve" time="0.0022449493408203125"/>
+    <testcase name="test_and_false" classname="TestUOpResolve" time="0.00027680397033691406"/>
+    <testcase name="test_and_true" classname="TestUOpResolve" time="0.0006940364837646484"/>
+    <testcase name="test_float_direct" classname="TestUOpResolve" time="0.0006940364837646484"/>
+    <testcase name="test_int_add" classname="TestUOpResolve" time="0.0004448890686035156"/>
+    <testcase name="test_leq" classname="TestUOpResolve" time="0.00024008750915527344"/>
+    <testcase name="test_lt" classname="TestUOpResolve" time="0.001348733901977539"/>
+    <testcase name="test_max" classname="TestUOpResolve" time="0.0008189678192138672"/>
+    <testcase name="test_ne" classname="TestUOpResolve" time="0.0002560615539550781"/>
+    <testcase name="test_ne_f" classname="TestUOpResolve" time="0.00014090538024902344"/>
+    <testcase name="test_ngt" classname="TestUOpResolve" time="0.0003540515899658203"/>
+    <testcase name="test_or_false" classname="TestUOpResolve" time="0.0006911754608154297"/>
+    <testcase name="test_or_true" classname="TestUOpResolve" time="0.0006101131439208984"/>
+    <testcase name="test_plus_ordering_lt" classname="TestUOpResolve" time="0.0003139972686767578"/>
+    <testcase name="test_rfloordiv" classname="TestUOpResolve" time="0.00040221214294433594"/>
+    <testcase name="test_rtruediv" classname="TestUOpResolve" time="0.0011088848114013672"/>
+    <testcase name="test_simple_int" classname="TestUOpResolve" time="0.00025916099548339844"/>
+    <testcase name="test_ssimplify" classname="TestUOpResolve" time="0.0001430511474609375"/>
+    <testcase name="test_var_cmp_assert" classname="TestUOpResolve" time="0.00017690658569335938"/>
+    <testcase name="test_var_cmp_f" classname="TestUOpResolve" time="0.0003662109375"/>
+    <testcase name="test_var_cmp_f2" classname="TestUOpResolve" time="0.0002701282501220703"/>
+    <testcase name="test_var_cmp_t" classname="TestUOpResolve" time="0.0004069805145263672"/>
+    <testcase name="test_var_cmp_t2" classname="TestUOpResolve" time="0.0004718303680419922"/>
+    <testcase name="test_x_lt_x" classname="TestUOpResolve" time="0.0002460479736328125"/>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_symbolic.TestBounds" tests="2" failures="0" errors="0" skipped="0" time="0.0008919239044189453">
+    <testcase name="test_unrolled_arange" classname="TestBounds" time="0.00011587142944335938"/>
+    <testcase name="test_unrolled_arange" classname="TestBounds" time="0.0007760524749755859"/>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_symbolic.TestFuzzFailure" tests="2" failures="0" errors="0" skipped="0" time="0.002469301223754883">
+    <testcase name="test_fuzz_failure1" classname="TestFuzzFailure" time="0.001032114028930664"/>
+    <testcase name="test_fuzz_failure1" classname="TestFuzzFailure" time="0.0014371871948242188"/>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_symbolic.TestSymInfer" tests="4" failures="0" errors="0" skipped="0" time="0.0014331340789794922">
+    <testcase name="test_sym_infer" classname="TestSymInfer" time="0.0004487037658691406"/>
+    <testcase name="test_sym_infer_cdiv_cmod" classname="TestSymInfer" time="0.0002009868621826172"/>
+    <testcase name="test_sym_infer" classname="TestSymInfer" time="0.00048828125"/>
+    <testcase name="test_sym_infer_cdiv_cmod" classname="TestSymInfer" time="0.0002951622009277344"/>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_symbolic.TestSymbolic" tests="226" failures="0" errors="0" skipped="0" time="0.5325484275817871">
+    <testcase name="test_add_1" classname="TestSymbolic" time="0.0009279251098632812"/>
+    <testcase name="test_add_div" classname="TestSymbolic" time="0.007096052169799805"/>
+    <testcase name="test_add_min_max" classname="TestSymbolic" time="0.0008399486541748047"/>
+    <testcase name="test_add_self" classname="TestSymbolic" time="0.001432180404663086"/>
+    <testcase name="test_and_fold" classname="TestSymbolic" time="0.0006110668182373047"/>
+    <testcase name="test_and_remove" classname="TestSymbolic" time="0.0005269050598144531"/>
+    <testcase name="test_arange_unrolled2" classname="TestSymbolic" time="0.0015721321105957031"/>
+    <testcase name="test_arange_unrolled2_neg" classname="TestSymbolic" time="0.0021152496337890625"/>
+    <testcase name="test_arange_unrolled4" classname="TestSymbolic" time="0.005433797836303711"/>
+    <testcase name="test_arange_unrolled4_mul" classname="TestSymbolic" time="0.0034859180450439453"/>
+    <testcase name="test_arange_unrolled4_small" classname="TestSymbolic" time="0.007443904876708984"/>
+    <testcase name="test_big_mod" classname="TestSymbolic" time="0.004630088806152344"/>
+    <testcase name="test_cdiv_const_evaluation" classname="TestSymbolic" time="0.00203704833984375"/>
+    <testcase name="test_cmod_const_evaluation" classname="TestSymbolic" time="0.0017919540405273438"/>
+    <testcase name="test_cmp_simple" classname="TestSymbolic" time="0.0012736320495605469"/>
+    <testcase name="test_const_var" classname="TestSymbolic" time="0.0007040500640869141"/>
+    <testcase name="test_distribute_mul" classname="TestSymbolic" time="0.001567840576171875"/>
+    <testcase name="test_div_1" classname="TestSymbolic" time="0.0006883144378662109"/>
+    <testcase name="test_div_cancel_correct" classname="TestSymbolic" time="0.002073049545288086"/>
+    <testcase name="test_div_congruence" classname="TestSymbolic" time="0.002049684524536133"/>
+    <testcase name="test_div_congruence_multiple_vars" classname="TestSymbolic" time="0.0020089149475097656"/>
+    <testcase name="test_div_const_div" classname="TestSymbolic" time="0.006147146224975586"/>
+    <testcase name="test_div_const_div_wrong_sign" classname="TestSymbolic" time="0.0019571781158447266"/>
+    <testcase name="test_div_div" classname="TestSymbolic" time="0.0014929771423339844"/>
+    <testcase name="test_div_into_mod" classname="TestSymbolic" time="0.0018072128295898438"/>
+    <testcase name="test_div_min_max" classname="TestSymbolic" time="0.0020689964294433594"/>
+    <testcase name="test_div_mod_recombine" classname="TestSymbolic" time="0.001878976821899414"/>
+    <testcase name="test_div_mod_recombine_folded_mod" classname="TestSymbolic" time="0.0020132064819335938"/>
+    <testcase name="test_div_mod_recombine_with_gcd" classname="TestSymbolic" time="0.0022580623626708984"/>
+    <testcase name="test_div_neg_all_range" classname="TestSymbolic" time="0.009454011917114258"/>
+    <testcase name="test_div_neg_cancel" classname="TestSymbolic" time="0.00477290153503418"/>
+    <testcase name="test_div_neg_min_max" classname="TestSymbolic" time="0.0025429725646972656"/>
+    <testcase name="test_div_neg_rem" classname="TestSymbolic" time="0.0017750263214111328"/>
+    <testcase name="test_div_neg_then_neg" classname="TestSymbolic" time="0.006768941879272461"/>
+    <testcase name="test_div_numerator_negative" classname="TestSymbolic" time="0.001711130142211914"/>
+    <testcase name="test_div_reduction" classname="TestSymbolic" time="0.0007660388946533203"/>
+    <testcase name="test_div_remove" classname="TestSymbolic" time="0.0010118484497070312"/>
+    <testcase name="test_divmod_variable_denom_fold_to_const" classname="TestSymbolic" time="0.003900289535522461"/>
+    <testcase name="test_equality" classname="TestSymbolic" time="0.00013899803161621094"/>
+    <testcase name="test_factorize" classname="TestSymbolic" time="0.0016787052154541016"/>
+    <testcase name="test_factorize_no_mul" classname="TestSymbolic" time="0.0025322437286376953"/>
+    <testcase name="test_gated_load" classname="TestSymbolic" time="0.0018641948699951172"/>
+    <testcase name="test_ge" classname="TestSymbolic" time="0.003592967987060547"/>
+    <testcase name="test_ge_remove" classname="TestSymbolic" time="0.0006620883941650391"/>
+    <testcase name="test_idiv_lt" classname="TestSymbolic" time="0.004042863845825195"/>
+    <testcase name="test_lt" classname="TestSymbolic" time="0.0058879852294921875"/>
+    <testcase name="test_lt_divides" classname="TestSymbolic" time="0.0008928775787353516"/>
+    <testcase name="test_lt_divides_and" classname="TestSymbolic" time="0.0014832019805908203"/>
+    <testcase name="test_lt_factors" classname="TestSymbolic" time="0.001055002212524414"/>
+    <testcase name="test_lt_remove" classname="TestSymbolic" time="0.0015900135040283203"/>
+    <testcase name="test_lt_simple_factor" classname="TestSymbolic" time="0.00113677978515625"/>
+    <testcase name="test_lt_sum_factor_rhs_all" classname="TestSymbolic" time="0.0013570785522460938"/>
+    <testcase name="test_lt_sum_factor_rhs_partial" classname="TestSymbolic" time="0.0013298988342285156"/>
+    <testcase name="test_lt_sum_remove" classname="TestSymbolic" time="0.0007281303405761719"/>
+    <testcase name="test_max_folds" classname="TestSymbolic" time="0.0008881092071533203"/>
+    <testcase name="test_mod_1" classname="TestSymbolic" time="0.0008318424224853516"/>
+    <testcase name="test_mod_binary_expression" classname="TestSymbolic" time="0.0025060176849365234"/>
+    <testcase name="test_mod_cancel_correct" classname="TestSymbolic" time="0.0021953582763671875"/>
+    <testcase name="test_mod_congruence" classname="TestSymbolic" time="0.0036559104919433594"/>
+    <testcase name="test_mod_congruence_mul_add" classname="TestSymbolic" time="0.0011038780212402344"/>
+    <testcase name="test_mod_congruence_multiple_vars" classname="TestSymbolic" time="0.004631757736206055"/>
+    <testcase name="test_mod_factor" classname="TestSymbolic" time="0.0015721321105957031"/>
+    <testcase name="test_mod_factor_negative" classname="TestSymbolic" time="0.002953052520751953"/>
+    <testcase name="test_mod_gcd_factor_neg" classname="TestSymbolic" time="0.0018286705017089844"/>
+    <testcase name="test_mod_gcd_fold_neg" classname="TestSymbolic" time="0.0010912418365478516"/>
+    <testcase name="test_mod_mod" classname="TestSymbolic" time="0.004860877990722656"/>
+    <testcase name="test_mod_mul_sum" classname="TestSymbolic" time="0.0011110305786132812"/>
+    <testcase name="test_mod_remove" classname="TestSymbolic" time="0.0008928775787353516"/>
+    <testcase name="test_mod_to_sub" classname="TestSymbolic" time="0.0010192394256591797"/>
+    <testcase name="test_mul_0" classname="TestSymbolic" time="0.0005588531494140625"/>
+    <testcase name="test_mul_1" classname="TestSymbolic" time="0.0006110668182373047"/>
+    <testcase name="test_mul_2" classname="TestSymbolic" time="0.0006871223449707031"/>
+    <testcase name="test_mul_div" classname="TestSymbolic" time="0.0009300708770751953"/>
+    <testcase name="test_mul_div_factor_div" classname="TestSymbolic" time="0.000972747802734375"/>
+    <testcase name="test_mul_div_factor_div_neg" classname="TestSymbolic" time="0.0016918182373046875"/>
+    <testcase name="test_mul_div_factor_mul" classname="TestSymbolic" time="0.0009739398956298828"/>
+    <testcase name="test_mul_div_factor_mul_neg" classname="TestSymbolic" time="0.0011670589447021484"/>
+    <testcase name="test_mul_lt" classname="TestSymbolic" time="0.003476858139038086"/>
+    <testcase name="test_mul_mod_large" classname="TestSymbolic" time="0.001188039779663086"/>
+    <testcase name="test_mul_mod_small" classname="TestSymbolic" time="0.0009660720825195312"/>
+    <testcase name="test_mul_mul" classname="TestSymbolic" time="0.000762939453125"/>
+    <testcase name="test_mul_neg_1" classname="TestSymbolic" time="0.0018661022186279297"/>
+    <testcase name="test_neg" classname="TestSymbolic" time="0.0006451606750488281"/>
+    <testcase name="test_neg_in_comp" classname="TestSymbolic" time="0.0008671283721923828"/>
+    <testcase name="test_negation_in_where" classname="TestSymbolic" time="0.0011582374572753906"/>
+    <testcase name="test_simplex_lt" classname="TestSymbolic" time="0.006495237350463867"/>
+    <testcase name="test_sub_1" classname="TestSymbolic" time="0.0006639957427978516"/>
+    <testcase name="test_sub_self" classname="TestSymbolic" time="0.0012500286102294922"/>
+    <testcase name="test_sum_0" classname="TestSymbolic" time="0.0005309581756591797"/>
+    <testcase name="test_sum_combine_num" classname="TestSymbolic" time="0.0007729530334472656"/>
+    <testcase name="test_sum_div_big_const" classname="TestSymbolic" time="0.003100872039794922"/>
+    <testcase name="test_sum_div_complex1" classname="TestSymbolic" time="0.00410008430480957"/>
+    <testcase name="test_sum_div_complex2" classname="TestSymbolic" time="0.004364728927612305"/>
+    <testcase name="test_sum_div_complex3" classname="TestSymbolic" time="0.004340171813964844"/>
+    <testcase name="test_sum_div_const" classname="TestSymbolic" time="0.0008680820465087891"/>
+    <testcase name="test_sum_div_const_big" classname="TestSymbolic" time="0.0011150836944580078"/>
+    <testcase name="test_sum_div_min_max" classname="TestSymbolic" time="0.0009222030639648438"/>
+    <testcase name="test_sum_div_mod_factor" classname="TestSymbolic" time="0.002457857131958008"/>
+    <testcase name="test_sum_div_no_factor" classname="TestSymbolic" time="0.0011436939239501953"/>
+    <testcase name="test_sum_div_partial_remove" classname="TestSymbolic" time="0.0010790824890136719"/>
+    <testcase name="test_sum_div_remove" classname="TestSymbolic" time="0.0008640289306640625"/>
+    <testcase name="test_sum_div_some_factor" classname="TestSymbolic" time="0.0015270709991455078"/>
+    <testcase name="test_sum_div_some_partial_factor" classname="TestSymbolic" time="0.004637956619262695"/>
+    <testcase name="test_sum_div_trim_const" classname="TestSymbolic" time="0.0015549659729003906"/>
+    <testcase name="test_sum_lt_fold" classname="TestSymbolic" time="0.0024149417877197266"/>
+    <testcase name="test_sum_mul_distribute" classname="TestSymbolic" time="0.0010561943054199219"/>
+    <testcase name="test_sum_num_hoisted_and_factors_cancel_out" classname="TestSymbolic" time="0.0010437965393066406"/>
+    <testcase name="test_symbolic_div" classname="TestSymbolic" time="0.0034818649291992188"/>
+    <testcase name="test_where_cast" classname="TestSymbolic" time="0.0003581047058105469"/>
+    <testcase name="test_where_combine" classname="TestSymbolic" time="0.006184816360473633"/>
+    <testcase name="test_where_merge_branches" classname="TestSymbolic" time="0.0010533332824707031"/>
+    <testcase name="test_where_merge_branches2" classname="TestSymbolic" time="0.001046895980834961"/>
+    <testcase name="test_where_removal" classname="TestSymbolic" time="0.0018239021301269531"/>
+    <testcase name="test_add_1" classname="TestSymbolic" time="0.0038330554962158203"/>
+    <testcase name="test_add_div" classname="TestSymbolic" time="0.009469032287597656"/>
+    <testcase name="test_add_min_max" classname="TestSymbolic" time="0.001497030258178711"/>
+    <testcase name="test_add_self" classname="TestSymbolic" time="0.003111124038696289"/>
+    <testcase name="test_and_fold" classname="TestSymbolic" time="0.0025169849395751953"/>
+    <testcase name="test_and_remove" classname="TestSymbolic" time="0.0026760101318359375"/>
+    <testcase name="test_arange_unrolled2" classname="TestSymbolic" time="0.004128217697143555"/>
+    <testcase name="test_arange_unrolled2_neg" classname="TestSymbolic" time="0.0026400089263916016"/>
+    <testcase name="test_arange_unrolled4" classname="TestSymbolic" time="0.005317211151123047"/>
+    <testcase name="test_arange_unrolled4_mul" classname="TestSymbolic" time="0.005872011184692383"/>
+    <testcase name="test_arange_unrolled4_small" classname="TestSymbolic" time="0.008635759353637695"/>
+    <testcase name="test_big_mod" classname="TestSymbolic" time="0.010811090469360352"/>
+    <testcase name="test_cdiv_const_evaluation" classname="TestSymbolic" time="0.0020842552185058594"/>
+    <testcase name="test_cmod_const_evaluation" classname="TestSymbolic" time="0.004506111145019531"/>
+    <testcase name="test_cmp_simple" classname="TestSymbolic" time="0.002010822296142578"/>
+    <testcase name="test_const_var" classname="TestSymbolic" time="0.0006570816040039062"/>
+    <testcase name="test_distribute_mul" classname="TestSymbolic" time="0.0016069412231445312"/>
+    <testcase name="test_div_1" classname="TestSymbolic" time="0.0006399154663085938"/>
+    <testcase name="test_div_cancel_correct" classname="TestSymbolic" time="0.002074718475341797"/>
+    <testcase name="test_div_congruence" classname="TestSymbolic" time="0.001875162124633789"/>
+    <testcase name="test_div_congruence_multiple_vars" classname="TestSymbolic" time="0.0032129287719726562"/>
+    <testcase name="test_div_const_div" classname="TestSymbolic" time="0.005978107452392578"/>
+    <testcase name="test_div_const_div_wrong_sign" classname="TestSymbolic" time="0.002207040786743164"/>
+    <testcase name="test_div_div" classname="TestSymbolic" time="0.0018661022186279297"/>
+    <testcase name="test_div_into_mod" classname="TestSymbolic" time="0.0017809867858886719"/>
+    <testcase name="test_div_min_max" classname="TestSymbolic" time="0.0018391609191894531"/>
+    <testcase name="test_div_mod_recombine" classname="TestSymbolic" time="0.002254009246826172"/>
+    <testcase name="test_div_mod_recombine_folded_mod" classname="TestSymbolic" time="0.0022068023681640625"/>
+    <testcase name="test_div_mod_recombine_with_gcd" classname="TestSymbolic" time="0.0024089813232421875"/>
+    <testcase name="test_div_neg_all_range" classname="TestSymbolic" time="0.010612010955810547"/>
+    <testcase name="test_div_neg_cancel" classname="TestSymbolic" time="0.004956245422363281"/>
+    <testcase name="test_div_neg_min_max" classname="TestSymbolic" time="0.0031168460845947266"/>
+    <testcase name="test_div_neg_rem" classname="TestSymbolic" time="0.0019791126251220703"/>
+    <testcase name="test_div_neg_then_neg" classname="TestSymbolic" time="0.007861852645874023"/>
+    <testcase name="test_div_numerator_negative" classname="TestSymbolic" time="0.002034902572631836"/>
+    <testcase name="test_div_reduction" classname="TestSymbolic" time="0.000904083251953125"/>
+    <testcase name="test_div_remove" classname="TestSymbolic" time="0.0007557868957519531"/>
+    <testcase name="test_divmod_variable_denom_fold_to_const" classname="TestSymbolic" time="0.0041348934173583984"/>
+    <testcase name="test_equality" classname="TestSymbolic" time="0.00010395050048828125"/>
+    <testcase name="test_factorize" classname="TestSymbolic" time="0.0018258094787597656"/>
+    <testcase name="test_factorize_no_mul" classname="TestSymbolic" time="0.002422809600830078"/>
+    <testcase name="test_gated_load" classname="TestSymbolic" time="0.0016438961029052734"/>
+    <testcase name="test_ge" classname="TestSymbolic" time="0.0035789012908935547"/>
+    <testcase name="test_ge_remove" classname="TestSymbolic" time="0.0005929470062255859"/>
+    <testcase name="test_idiv_lt" classname="TestSymbolic" time="0.005073070526123047"/>
+    <testcase name="test_lt" classname="TestSymbolic" time="0.0052759647369384766"/>
+    <testcase name="test_lt_divides" classname="TestSymbolic" time="0.0013360977172851562"/>
+    <testcase name="test_lt_divides_and" classname="TestSymbolic" time="0.0014798641204833984"/>
+    <testcase name="test_lt_factors" classname="TestSymbolic" time="0.0008819103240966797"/>
+    <testcase name="test_lt_remove" classname="TestSymbolic" time="0.0018570423126220703"/>
+    <testcase name="test_lt_simple_factor" classname="TestSymbolic" time="0.001135110855102539"/>
+    <testcase name="test_lt_sum_factor_rhs_all" classname="TestSymbolic" time="0.0013897418975830078"/>
+    <testcase name="test_lt_sum_factor_rhs_partial" classname="TestSymbolic" time="0.0012807846069335938"/>
+    <testcase name="test_lt_sum_remove" classname="TestSymbolic" time="0.0009870529174804688"/>
+    <testcase name="test_max_folds" classname="TestSymbolic" time="0.0008556842803955078"/>
+    <testcase name="test_mod_1" classname="TestSymbolic" time="0.0008349418640136719"/>
+    <testcase name="test_mod_binary_expression" classname="TestSymbolic" time="0.0026099681854248047"/>
+    <testcase name="test_mod_cancel_correct" classname="TestSymbolic" time="0.002382993698120117"/>
+    <testcase name="test_mod_congruence" classname="TestSymbolic" time="0.0034089088439941406"/>
+    <testcase name="test_mod_congruence_mul_add" classname="TestSymbolic" time="0.00152587890625"/>
+    <testcase name="test_mod_congruence_multiple_vars" classname="TestSymbolic" time="0.005017995834350586"/>
+    <testcase name="test_mod_factor" classname="TestSymbolic" time="0.001809835433959961"/>
+    <testcase name="test_mod_factor_negative" classname="TestSymbolic" time="0.002835988998413086"/>
+    <testcase name="test_mod_gcd_factor_neg" classname="TestSymbolic" time="0.002167224884033203"/>
+    <testcase name="test_mod_gcd_fold_neg" classname="TestSymbolic" time="0.0011920928955078125"/>
+    <testcase name="test_mod_mod" classname="TestSymbolic" time="0.0056781768798828125"/>
+    <testcase name="test_mod_mul_sum" classname="TestSymbolic" time="0.0014939308166503906"/>
+    <testcase name="test_mod_remove" classname="TestSymbolic" time="0.0013020038604736328"/>
+    <testcase name="test_mod_to_sub" classname="TestSymbolic" time="0.0016667842864990234"/>
+    <testcase name="test_mul_0" classname="TestSymbolic" time="0.000701904296875"/>
+    <testcase name="test_mul_1" classname="TestSymbolic" time="0.0009109973907470703"/>
+    <testcase name="test_mul_2" classname="TestSymbolic" time="0.0008089542388916016"/>
+    <testcase name="test_mul_div" classname="TestSymbolic" time="0.0011022090911865234"/>
+    <testcase name="test_mul_div_factor_div" classname="TestSymbolic" time="0.001316070556640625"/>
+    <testcase name="test_mul_div_factor_div_neg" classname="TestSymbolic" time="0.0020380020141601562"/>
+    <testcase name="test_mul_div_factor_mul" classname="TestSymbolic" time="0.0010569095611572266"/>
+    <testcase name="test_mul_div_factor_mul_neg" classname="TestSymbolic" time="0.001529693603515625"/>
+    <testcase name="test_mul_lt" classname="TestSymbolic" time="0.0035309791564941406"/>
+    <testcase name="test_mul_mod_large" classname="TestSymbolic" time="0.0011839866638183594"/>
+    <testcase name="test_mul_mod_small" classname="TestSymbolic" time="0.0011620521545410156"/>
+    <testcase name="test_mul_mul" classname="TestSymbolic" time="0.0008590221405029297"/>
+    <testcase name="test_mul_neg_1" classname="TestSymbolic" time="0.0020339488983154297"/>
+    <testcase name="test_neg" classname="TestSymbolic" time="0.0006170272827148438"/>
+    <testcase name="test_neg_in_comp" classname="TestSymbolic" time="0.000988006591796875"/>
+    <testcase name="test_negation_in_where" classname="TestSymbolic" time="0.0010619163513183594"/>
+    <testcase name="test_simplex_lt" classname="TestSymbolic" time="0.007169961929321289"/>
+    <testcase name="test_sub_1" classname="TestSymbolic" time="0.0008039474487304688"/>
+    <testcase name="test_sub_self" classname="TestSymbolic" time="0.0013611316680908203"/>
+    <testcase name="test_sum_0" classname="TestSymbolic" time="0.0004611015319824219"/>
+    <testcase name="test_sum_combine_num" classname="TestSymbolic" time="0.0008943080902099609"/>
+    <testcase name="test_sum_div_big_const" classname="TestSymbolic" time="0.0032722949981689453"/>
+    <testcase name="test_sum_div_complex1" classname="TestSymbolic" time="0.004266977310180664"/>
+    <testcase name="test_sum_div_complex2" classname="TestSymbolic" time="0.004968881607055664"/>
+    <testcase name="test_sum_div_complex3" classname="TestSymbolic" time="0.004390239715576172"/>
+    <testcase name="test_sum_div_const" classname="TestSymbolic" time="0.0009419918060302734"/>
+    <testcase name="test_sum_div_const_big" classname="TestSymbolic" time="0.0014908313751220703"/>
+    <testcase name="test_sum_div_min_max" classname="TestSymbolic" time="0.0011227130889892578"/>
+    <testcase name="test_sum_div_mod_factor" classname="TestSymbolic" time="0.002859830856323242"/>
+    <testcase name="test_sum_div_no_factor" classname="TestSymbolic" time="0.001402139663696289"/>
+    <testcase name="test_sum_div_partial_remove" classname="TestSymbolic" time="0.0012290477752685547"/>
+    <testcase name="test_sum_div_remove" classname="TestSymbolic" time="0.0008592605590820312"/>
+    <testcase name="test_sum_div_some_factor" classname="TestSymbolic" time="0.0014810562133789062"/>
+    <testcase name="test_sum_div_some_partial_factor" classname="TestSymbolic" time="0.005543231964111328"/>
+    <testcase name="test_sum_div_trim_const" classname="TestSymbolic" time="0.0021181106567382812"/>
+    <testcase name="test_sum_lt_fold" classname="TestSymbolic" time="0.003057241439819336"/>
+    <testcase name="test_sum_mul_distribute" classname="TestSymbolic" time="0.0012390613555908203"/>
+    <testcase name="test_sum_num_hoisted_and_factors_cancel_out" classname="TestSymbolic" time="0.0013740062713623047"/>
+    <testcase name="test_symbolic_div" classname="TestSymbolic" time="0.0042879581451416016"/>
+    <testcase name="test_where_cast" classname="TestSymbolic" time="0.00037598609924316406"/>
+    <testcase name="test_where_combine" classname="TestSymbolic" time="0.006253957748413086"/>
+    <testcase name="test_where_merge_branches" classname="TestSymbolic" time="0.000982046127319336"/>
+    <testcase name="test_where_merge_branches2" classname="TestSymbolic" time="0.0011839866638183594"/>
+    <testcase name="test_where_removal" classname="TestSymbolic" time="0.0020079612731933594"/>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_symbolic.TestSymbolicNumeric" tests="18" failures="0" errors="0" skipped="0" time="0.011827707290649414">
+    <testcase name="test_div_4" classname="TestSymbolicNumeric" time="0.0004177093505859375"/>
+    <testcase name="test_mod_4" classname="TestSymbolicNumeric" time="0.00038123130798339844"/>
+    <testcase name="test_plus_1_div_2" classname="TestSymbolicNumeric" time="0.0006461143493652344"/>
+    <testcase name="test_plus_1_mod_2" classname="TestSymbolicNumeric" time="0.0005781650543212891"/>
+    <testcase name="test_times_2" classname="TestSymbolicNumeric" time="0.0003859996795654297"/>
+    <testcase name="test_times_2_plus_3" classname="TestSymbolicNumeric" time="0.0006320476531982422"/>
+    <testcase name="test_times_2_plus_3_div_4" classname="TestSymbolicNumeric" time="0.0009207725524902344"/>
+    <testcase name="test_times_2_plus_3_div_4_mod_4" classname="TestSymbolicNumeric" time="0.0011126995086669922"/>
+    <testcase name="test_times_2_plus_3_mod_4" classname="TestSymbolicNumeric" time="0.0008521080017089844"/>
+    <testcase name="test_div_4" classname="TestSymbolicNumeric" time="0.0004038810729980469"/>
+    <testcase name="test_mod_4" classname="TestSymbolicNumeric" time="0.00034308433532714844"/>
+    <testcase name="test_plus_1_div_2" classname="TestSymbolicNumeric" time="0.0005948543548583984"/>
+    <testcase name="test_plus_1_mod_2" classname="TestSymbolicNumeric" time="0.0006349086761474609"/>
+    <testcase name="test_times_2" classname="TestSymbolicNumeric" time="0.00041294097900390625"/>
+    <testcase name="test_times_2_plus_3" classname="TestSymbolicNumeric" time="0.0006279945373535156"/>
+    <testcase name="test_times_2_plus_3_div_4" classname="TestSymbolicNumeric" time="0.0008471012115478516"/>
+    <testcase name="test_times_2_plus_3_div_4_mod_4" classname="TestSymbolicNumeric" time="0.0011141300201416016"/>
+    <testcase name="test_times_2_plus_3_mod_4" classname="TestSymbolicNumeric" time="0.0009219646453857422"/>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_symbolic.TestSymbolicPickle" tests="4" failures="0" errors="0" skipped="0" time="0.00038814544677734375">
+    <testcase name="test_pickle_variable" classname="TestSymbolicPickle" time="0.00010800361633300781"/>
+    <testcase name="test_pickle_variable_times_2" classname="TestSymbolicPickle" time="9.822845458984375e-05"/>
+    <testcase name="test_pickle_variable" classname="TestSymbolicPickle" time="0.00010800361633300781"/>
+    <testcase name="test_pickle_variable_times_2" classname="TestSymbolicPickle" time="7.390975952148438e-05"/>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_symbolic.TestSymbolicRealWorld" tests="2" failures="0" errors="0" skipped="0" time="0.0012099742889404297">
+    <testcase name="test_resnet_half" classname="TestSymbolicRealWorld" time="0.0006098747253417969"/>
+    <testcase name="test_resnet_half" classname="TestSymbolicRealWorld" time="0.0006000995635986328"/>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_symbolic.TestSymbolicVars" tests="6" failures="0" errors="0" skipped="0" time="0.0005574226379394531">
+    <testcase name="test_compound" classname="TestSymbolicVars" time="0.00012183189392089844"/>
+    <testcase name="test_dedup" classname="TestSymbolicVars" time="8.320808410644531e-05"/>
+    <testcase name="test_simple" classname="TestSymbolicVars" time="0.00012230873107910156"/>
+    <testcase name="test_compound" classname="TestSymbolicVars" time="8.7738037109375e-05"/>
+    <testcase name="test_dedup" classname="TestSymbolicVars" time="7.200241088867188e-05"/>
+    <testcase name="test_simple" classname="TestSymbolicVars" time="7.033348083496094e-05"/>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_vmin_vmax.TestConstFactor" tests="14" failures="0" errors="0" skipped="2" time="0.002439737319946289">
+    <testcase name="test_const_factor_addition" classname="TestConstFactor" time="6.318092346191406e-05"/>
+    <testcase name="test_const_factor_constant" classname="TestConstFactor" time="6.008148193359375e-05"/>
+    <testcase name="test_const_factor_division" classname="TestConstFactor" time="6.198883056640625e-05"/>
+    <testcase name="test_const_factor_multiplication" classname="TestConstFactor" time="6.699562072753906e-05"/>
+    <testcase name="test_const_factor_multiplication_of_var_and_const" classname="TestConstFactor" time="5.602836608886719e-05"/>
+    <testcase name="test_const_factor_with_variable" classname="TestConstFactor" time="5.602836608886719e-05"/>
+    <testcase name="test_const_factor_addition" classname="TestConstFactor" time="0.0003819465637207031"/>
+    <testcase name="test_const_factor_constant" classname="TestConstFactor" time="0.0003910064697265625"/>
+    <testcase name="test_const_factor_division" classname="TestConstFactor" time="0.00014281272888183594"/>
+    <testcase name="test_const_factor_multiplication" classname="TestConstFactor" time="0.0003483295440673828"/>
+    <testcase name="test_const_factor_multiplication_of_var_and_const" classname="TestConstFactor" time="0.000225067138671875"/>
+    <testcase name="test_const_factor_with_variable" classname="TestConstFactor" time="0.0003581047058105469"/>
+    <testcase name="test_const_factor_multiplication_of_consts_and_vars" classname="TestConstFactor" time="4.601478576660156e-05">
+      <skipped>broken</skipped>
+    </testcase>
+    <testcase name="test_const_factor_multiplication_of_consts_and_vars" classname="TestConstFactor" time="0.00018215179443359375">
+      <skipped>broken</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_vmin_vmax.TestDivides" tests="10" failures="0" errors="0" skipped="2" time="0.0021893978118896484">
+    <testcase name="test_divides_complex_expression" classname="TestDivides" time="7.295608520507812e-05"/>
+    <testcase name="test_divides_constant_exact" classname="TestDivides" time="5.507469177246094e-05"/>
+    <testcase name="test_divides_constant_inexact" classname="TestDivides" time="5.0067901611328125e-05"/>
+    <testcase name="test_divides_with_inexact_factors" classname="TestDivides" time="6.818771362304688e-05"/>
+    <testcase name="test_divides_complex_expression" classname="TestDivides" time="0.0004742145538330078"/>
+    <testcase name="test_divides_constant_exact" classname="TestDivides" time="0.00032901763916015625"/>
+    <testcase name="test_divides_constant_inexact" classname="TestDivides" time="0.0002770423889160156"/>
+    <testcase name="test_divides_with_inexact_factors" classname="TestDivides" time="0.0002968311309814453"/>
+    <testcase name="test_divides_variable_and_constant" classname="TestDivides" time="3.600120544433594e-05">
+      <skipped>broken</skipped>
+    </testcase>
+    <testcase name="test_divides_variable_and_constant" classname="TestDivides" time="0.0005300045013427734">
+      <skipped>broken</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_vmin_vmax.TestVminVmaxDivMod" tests="10" failures="0" errors="0" skipped="0" time="0.002012014389038086">
+    <testcase name="test_vmin_vmax_div_symbolic" classname="TestVminVmaxDivMod" time="0.00016736984252929688"/>
+    <testcase name="test_vmin_vmax_division_negative" classname="TestVminVmaxDivMod" time="0.00011897087097167969"/>
+    <testcase name="test_vmin_vmax_division_positive" classname="TestVminVmaxDivMod" time="7.081031799316406e-05"/>
+    <testcase name="test_vmin_vmax_mod_negative" classname="TestVminVmaxDivMod" time="9.679794311523438e-05"/>
+    <testcase name="test_vmin_vmax_mod_positive" classname="TestVminVmaxDivMod" time="8.511543273925781e-05"/>
+    <testcase name="test_vmin_vmax_div_symbolic" classname="TestVminVmaxDivMod" time="0.00038886070251464844"/>
+    <testcase name="test_vmin_vmax_division_negative" classname="TestVminVmaxDivMod" time="0.0003650188446044922"/>
+    <testcase name="test_vmin_vmax_division_positive" classname="TestVminVmaxDivMod" time="0.00017714500427246094"/>
+    <testcase name="test_vmin_vmax_mod_negative" classname="TestVminVmaxDivMod" time="0.0003120899200439453"/>
+    <testcase name="test_vmin_vmax_mod_positive" classname="TestVminVmaxDivMod" time="0.00022983551025390625"/>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_vmin_vmax.TestVminVmaxProperties" tests="28" failures="0" errors="0" skipped="0" time="0.006144523620605469">
+    <testcase name="test_vmin_vmax_addition_with_variable" classname="TestVminVmaxProperties" time="6.508827209472656e-05"/>
+    <testcase name="test_vmin_vmax_and_with_variable" classname="TestVminVmaxProperties" time="8.0108642578125e-05"/>
+    <testcase name="test_vmin_vmax_cmpne" classname="TestVminVmaxProperties" time="9.679794311523438e-05"/>
+    <testcase name="test_vmin_vmax_constant" classname="TestVminVmaxProperties" time="6.103515625e-05"/>
+    <testcase name="test_vmin_vmax_multiplication_0_inf" classname="TestVminVmaxProperties" time="8.106231689453125e-05"/>
+    <testcase name="test_vmin_vmax_multiplication_with_variable" classname="TestVminVmaxProperties" time="8.988380432128906e-05"/>
+    <testcase name="test_vmin_vmax_nested_min_max" classname="TestVminVmaxProperties" time="8.893013000488281e-05"/>
+    <testcase name="test_vmin_vmax_shl" classname="TestVminVmaxProperties" time="7.82012939453125e-05"/>
+    <testcase name="test_vmin_vmax_shr" classname="TestVminVmaxProperties" time="8.0108642578125e-05"/>
+    <testcase name="test_vmin_vmax_subtraction_with_variable" classname="TestVminVmaxProperties" time="7.987022399902344e-05"/>
+    <testcase name="test_vmin_vmax_variable_inside_special" classname="TestVminVmaxProperties" time="6.794929504394531e-05"/>
+    <testcase name="test_vmin_vmax_where" classname="TestVminVmaxProperties" time="6.580352783203125e-05"/>
+    <testcase name="test_vmin_vmax_with_negative_multiplication" classname="TestVminVmaxProperties" time="5.602836608886719e-05"/>
+    <testcase name="test_vmin_vmax_with_negative_multiplication2" classname="TestVminVmaxProperties" time="9.894371032714844e-05"/>
+    <testcase name="test_vmin_vmax_addition_with_variable" classname="TestVminVmaxProperties" time="0.00010967254638671875"/>
+    <testcase name="test_vmin_vmax_and_with_variable" classname="TestVminVmaxProperties" time="0.00032401084899902344"/>
+    <testcase name="test_vmin_vmax_cmpne" classname="TestVminVmaxProperties" time="0.00026798248291015625"/>
+    <testcase name="test_vmin_vmax_constant" classname="TestVminVmaxProperties" time="0.0002701282501220703"/>
+    <testcase name="test_vmin_vmax_multiplication_0_inf" classname="TestVminVmaxProperties" time="0.0005319118499755859"/>
+    <testcase name="test_vmin_vmax_multiplication_with_variable" classname="TestVminVmaxProperties" time="0.0002880096435546875"/>
+    <testcase name="test_vmin_vmax_nested_min_max" classname="TestVminVmaxProperties" time="0.0004100799560546875"/>
+    <testcase name="test_vmin_vmax_shl" classname="TestVminVmaxProperties" time="0.00013208389282226562"/>
+    <testcase name="test_vmin_vmax_shr" classname="TestVminVmaxProperties" time="0.0001380443572998047"/>
+    <testcase name="test_vmin_vmax_subtraction_with_variable" classname="TestVminVmaxProperties" time="0.00028586387634277344"/>
+    <testcase name="test_vmin_vmax_variable_inside_special" classname="TestVminVmaxProperties" time="0.0004210472106933594"/>
+    <testcase name="test_vmin_vmax_where" classname="TestVminVmaxProperties" time="0.0002758502960205078"/>
+    <testcase name="test_vmin_vmax_with_negative_multiplication" classname="TestVminVmaxProperties" time="0.0011310577392578125"/>
+    <testcase name="test_vmin_vmax_with_negative_multiplication2" classname="TestVminVmaxProperties" time="0.00046896934509277344"/>
+  </testsuite>
+  <testsuite name="test.unit.test_uop_vmin_vmax.TestVminVmaxVConst" tests="12" failures="0" errors="0" skipped="0" time="0.0034198760986328125">
+    <testcase name="test_vmin_vmax_vconst_all_equal" classname="TestVminVmaxVConst" time="5.888938903808594e-05"/>
+    <testcase name="test_vmin_vmax_vconst_multiple_elements" classname="TestVminVmaxVConst" time="7.104873657226562e-05"/>
+    <testcase name="test_vmin_vmax_vconst_single_element" classname="TestVminVmaxVConst" time="6.29425048828125e-05"/>
+    <testcase name="test_vmin_vmax_vconst_with_bools" classname="TestVminVmaxVConst" time="9.608268737792969e-05"/>
+    <testcase name="test_vmin_vmax_vconst_with_floats" classname="TestVminVmaxVConst" time="9.894371032714844e-05"/>
+    <testcase name="test_vmin_vmax_vconst_with_negative_values" classname="TestVminVmaxVConst" time="9.679794311523438e-05"/>
+    <testcase name="test_vmin_vmax_vconst_all_equal" classname="TestVminVmaxVConst" time="0.0014851093292236328"/>
+    <testcase name="test_vmin_vmax_vconst_multiple_elements" classname="TestVminVmaxVConst" time="0.0002448558807373047"/>
+    <testcase name="test_vmin_vmax_vconst_single_element" classname="TestVminVmaxVConst" time="0.0002110004425048828"/>
+    <testcase name="test_vmin_vmax_vconst_with_bools" classname="TestVminVmaxVConst" time="0.0001621246337890625"/>
+    <testcase name="test_vmin_vmax_vconst_with_floats" classname="TestVminVmaxVConst" time="0.00017905235290527344"/>
+    <testcase name="test_vmin_vmax_vconst_with_negative_values" classname="TestVminVmaxVConst" time="0.0006530284881591797"/>
+  </testsuite>
+  <testsuite name="test.unit.test_upat_compile.TestUPatCompile" tests="16" failures="0" errors="0" skipped="2" time="0.014964103698730469">
+    <testcase name="test_bool" classname="TestUPatCompile" time="0.0006327629089355469"/>
+    <testcase name="test_const_folding" classname="TestUPatCompile" time="0.00037598609924316406"/>
+    <testcase name="test_double" classname="TestUPatCompile" time="0.0015459060668945312"/>
+    <testcase name="test_single" classname="TestUPatCompile" time="0.0004100799560546875"/>
+    <testcase name="test_single_c" classname="TestUPatCompile" time="0.0007369518280029297"/>
+    <testcase name="test_xp0" classname="TestUPatCompile" time="0.000415802001953125"/>
+    <testcase name="test_xpx" classname="TestUPatCompile" time="0.0002949237823486328"/>
+    <testcase name="test_bool" classname="TestUPatCompile" time="0.0014979839324951172"/>
+    <testcase name="test_const_folding" classname="TestUPatCompile" time="0.0008471012115478516"/>
+    <testcase name="test_double" classname="TestUPatCompile" time="0.0034639835357666016"/>
+    <testcase name="test_single" classname="TestUPatCompile" time="0.0010159015655517578"/>
+    <testcase name="test_single_c" classname="TestUPatCompile" time="0.0010287761688232422"/>
+    <testcase name="test_xp0" classname="TestUPatCompile" time="0.0012187957763671875"/>
+    <testcase name="test_xpx" classname="TestUPatCompile" time="0.0010750293731689453"/>
+    <testcase name="test_range_named" classname="TestUPatCompile" time="7.104873657226562e-05">
+      <skipped>fix this</skipped>
+    </testcase>
+    <testcase name="test_range_named" classname="TestUPatCompile" time="0.0003330707550048828">
+      <skipped>fix this</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_verify_ast.TestVerifyAST" tests="18" failures="0" errors="0" skipped="0" time="0.03172731399536133">
+    <testcase name="test_assert_swizzle" classname="TestVerifyAST" time="0.00022602081298828125"/>
+    <testcase name="test_buffer_uops_st" classname="TestVerifyAST" time="0.008382797241210938"/>
+    <testcase name="test_const_view_always_valid" classname="TestVerifyAST" time="0.0004298686981201172"/>
+    <testcase name="test_exactly_one_full_shape" classname="TestVerifyAST" time="0.00021505355834960938"/>
+    <testcase name="test_no_implicit_broadcasting" classname="TestVerifyAST" time="0.00015616416931152344"/>
+    <testcase name="test_reduce_add_store" classname="TestVerifyAST" time="0.00020813941955566406"/>
+    <testcase name="test_reduce_store" classname="TestVerifyAST" time="0.00011515617370605469"/>
+    <testcase name="test_shrink_ok" classname="TestVerifyAST" time="0.0007259845733642578"/>
+    <testcase name="test_tiny_add" classname="TestVerifyAST" time="0.0010530948638916016"/>
+    <testcase name="test_assert_swizzle" classname="TestVerifyAST" time="0.0005571842193603516"/>
+    <testcase name="test_buffer_uops_st" classname="TestVerifyAST" time="0.013503074645996094"/>
+    <testcase name="test_const_view_always_valid" classname="TestVerifyAST" time="0.0007879734039306641"/>
+    <testcase name="test_exactly_one_full_shape" classname="TestVerifyAST" time="0.0007679462432861328"/>
+    <testcase name="test_no_implicit_broadcasting" classname="TestVerifyAST" time="0.00027298927307128906"/>
+    <testcase name="test_reduce_add_store" classname="TestVerifyAST" time="0.00032806396484375"/>
+    <testcase name="test_reduce_store" classname="TestVerifyAST" time="0.0002849102020263672"/>
+    <testcase name="test_shrink_ok" classname="TestVerifyAST" time="0.002354145050048828"/>
+    <testcase name="test_tiny_add" classname="TestVerifyAST" time="0.0013587474822998047"/>
+  </testsuite>
+  <testsuite name="test.unit.test_view.TestMergeDims" tests="8" failures="0" errors="0" skipped="0" time="0.001459360122680664">
+    <testcase name="test_0_in_strides" classname="TestMergeDims" time="6.818771362304688e-05"/>
+    <testcase name="test_contiguous" classname="TestMergeDims" time="5.1975250244140625e-05"/>
+    <testcase name="test_different_1_pad" classname="TestMergeDims" time="7.82012939453125e-05"/>
+    <testcase name="test_pad" classname="TestMergeDims" time="6.008148193359375e-05"/>
+    <testcase name="test_0_in_strides" classname="TestMergeDims" time="0.00037980079650878906"/>
+    <testcase name="test_contiguous" classname="TestMergeDims" time="0.00017499923706054688"/>
+    <testcase name="test_different_1_pad" classname="TestMergeDims" time="0.0003528594970703125"/>
+    <testcase name="test_pad" classname="TestMergeDims" time="0.0002932548522949219"/>
+  </testsuite>
+  <testsuite name="test.unit.test_view.TestMergeViews" tests="24" failures="0" errors="0" skipped="0" time="0.0162355899810791">
+    <testcase name="test_empty_shape_view1" classname="TestMergeViews" time="0.0002071857452392578"/>
+    <testcase name="test_empty_shape_view2" classname="TestMergeViews" time="0.0001780986785888672"/>
+    <testcase name="test_view_padded_area1" classname="TestMergeViews" time="0.00025200843811035156"/>
+    <testcase name="test_view_padded_area2" classname="TestMergeViews" time="0.00028204917907714844"/>
+    <testcase name="test_view_padded_area3" classname="TestMergeViews" time="0.0003440380096435547"/>
+    <testcase name="test_view_padded_area4" classname="TestMergeViews" time="0.00026607513427734375"/>
+    <testcase name="test_with_mask_0" classname="TestMergeViews" time="0.00032806396484375"/>
+    <testcase name="test_with_mask_1" classname="TestMergeViews" time="0.0004317760467529297"/>
+    <testcase name="test_with_mask_2" classname="TestMergeViews" time="0.0003840923309326172"/>
+    <testcase name="test_with_mask_3" classname="TestMergeViews" time="0.0006721019744873047"/>
+    <testcase name="test_with_mask_4" classname="TestMergeViews" time="0.0006091594696044922"/>
+    <testcase name="test_with_mask_5" classname="TestMergeViews" time="0.0005679130554199219"/>
+    <testcase name="test_empty_shape_view1" classname="TestMergeViews" time="0.0005807876586914062"/>
+    <testcase name="test_empty_shape_view2" classname="TestMergeViews" time="0.00024008750915527344"/>
+    <testcase name="test_view_padded_area1" classname="TestMergeViews" time="0.0008809566497802734"/>
+    <testcase name="test_view_padded_area2" classname="TestMergeViews" time="0.0006010532379150391"/>
+    <testcase name="test_view_padded_area3" classname="TestMergeViews" time="0.0007548332214355469"/>
+    <testcase name="test_view_padded_area4" classname="TestMergeViews" time="0.0005831718444824219"/>
+    <testcase name="test_with_mask_0" classname="TestMergeViews" time="0.0005886554718017578"/>
+    <testcase name="test_with_mask_1" classname="TestMergeViews" time="0.0014982223510742188"/>
+    <testcase name="test_with_mask_2" classname="TestMergeViews" time="0.0006041526794433594"/>
+    <testcase name="test_with_mask_3" classname="TestMergeViews" time="0.0023679733276367188"/>
+    <testcase name="test_with_mask_4" classname="TestMergeViews" time="0.0011379718780517578"/>
+    <testcase name="test_with_mask_5" classname="TestMergeViews" time="0.001875162124633789"/>
+  </testsuite>
+  <testsuite name="test.unit.test_view.TestView" tests="8" failures="0" errors="0" skipped="0" time="0.0017237663269042969">
+    <testcase name="test_canonicalize_empty_mask" classname="TestView" time="9.393692016601562e-05"/>
+    <testcase name="test_empty_mask_contiguous" classname="TestView" time="9.703636169433594e-05"/>
+    <testcase name="test_minify_zero_strided_dims" classname="TestView" time="0.00014901161193847656"/>
+    <testcase name="test_reshape_all_invalid" classname="TestView" time="9.703636169433594e-05"/>
+    <testcase name="test_canonicalize_empty_mask" classname="TestView" time="0.0005309581756591797"/>
+    <testcase name="test_empty_mask_contiguous" classname="TestView" time="0.00013208389282226562"/>
+    <testcase name="test_minify_zero_strided_dims" classname="TestView" time="0.0003657341003417969"/>
+    <testcase name="test_reshape_all_invalid" classname="TestView" time="0.0002579689025878906"/>
+  </testsuite>
+  <testsuite name="test.unit.test_viz.TestViz" tests="30" failures="0" errors="0" skipped="2" time="0.009205341339111328">
+    <testcase name="test_bottom_up_rewrite" classname="TestViz" time="0.00020813941955566406"/>
+    <testcase name="test_default_named" classname="TestViz" time="7.915496826171875e-05"/>
+    <testcase name="test_depth_level" classname="TestViz" time="0.00010704994201660156"/>
+    <testcase name="test_dont_create_const_nodes" classname="TestViz" time="0.00013875961303710938"/>
+    <testcase name="test_inner_rewrite_location" classname="TestViz" time="9.322166442871094e-05"/>
+    <testcase name="test_nested_rewrite" classname="TestViz" time="0.0004649162292480469"/>
+    <testcase name="test_rewrite_without_context" classname="TestViz" time="9.608268737792969e-05"/>
+    <testcase name="test_shape_label" classname="TestViz" time="0.00019025802612304688"/>
+    <testcase name="test_track_multiple_calls_one_ctx" classname="TestViz" time="0.00013494491577148438"/>
+    <testcase name="test_track_rewrites" classname="TestViz" time="0.00011014938354492188"/>
+    <testcase name="test_track_rewrites_name_fxn" classname="TestViz" time="0.0003428459167480469"/>
+    <testcase name="test_track_rewrites_with_exception" classname="TestViz" time="0.00012993812561035156"/>
+    <testcase name="test_track_two_rewrites" classname="TestViz" time="0.00011706352233886719"/>
+    <testcase name="test_viz_simple" classname="TestViz" time="0.00010013580322265625"/>
+    <testcase name="test_bottom_up_rewrite" classname="TestViz" time="0.0005822181701660156"/>
+    <testcase name="test_default_named" classname="TestViz" time="0.000244140625"/>
+    <testcase name="test_depth_level" classname="TestViz" time="0.0006070137023925781"/>
+    <testcase name="test_dont_create_const_nodes" classname="TestViz" time="0.00021696090698242188"/>
+    <testcase name="test_inner_rewrite_location" classname="TestViz" time="0.00047516822814941406"/>
+    <testcase name="test_nested_rewrite" classname="TestViz" time="0.0009968280792236328"/>
+    <testcase name="test_rewrite_without_context" classname="TestViz" time="0.00018167495727539062"/>
+    <testcase name="test_shape_label" classname="TestViz" time="0.00041985511779785156"/>
+    <testcase name="test_track_multiple_calls_one_ctx" classname="TestViz" time="0.0002639293670654297"/>
+    <testcase name="test_track_rewrites" classname="TestViz" time="0.0003838539123535156"/>
+    <testcase name="test_track_rewrites_name_fxn" classname="TestViz" time="0.0007870197296142578"/>
+    <testcase name="test_track_rewrites_with_exception" classname="TestViz" time="0.0003819465637207031"/>
+    <testcase name="test_track_two_rewrites" classname="TestViz" time="0.0006279945373535156"/>
+    <testcase name="test_viz_simple" classname="TestViz" time="0.0003209114074707031"/>
+    <testcase name="test_recursion_err" classname="TestViz" time="6.127357482910156e-05">
+      <skipped>TODO: doesn't work</skipped>
+    </testcase>
+    <testcase name="test_recursion_err" classname="TestViz" time="0.0003418922424316406">
+      <skipped>TODO: doesn't work</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_viz.TextVizProfiler" tests="6" failures="0" errors="0" skipped="0" time="0.002170562744140625">
+    <testcase name="test_perfetto_copy_node" classname="TextVizProfiler" time="0.0001850128173828125"/>
+    <testcase name="test_perfetto_graph" classname="TextVizProfiler" time="0.0001881122589111328"/>
+    <testcase name="test_perfetto_node" classname="TextVizProfiler" time="0.00016307830810546875"/>
+    <testcase name="test_perfetto_copy_node" classname="TextVizProfiler" time="0.0006132125854492188"/>
+    <testcase name="test_perfetto_graph" classname="TextVizProfiler" time="0.0005741119384765625"/>
+    <testcase name="test_perfetto_node" classname="TextVizProfiler" time="0.0004470348358154297"/>
+  </testsuite>
+  <testsuite name="green.loader.ModuleSkipped" tests="1" failures="0" errors="0" skipped="1" time="6.985664367675781e-05">
+    <testcase name="/Users/light/tinygrad/test/unit/test_gguf.py" classname="ModuleSkipped" time="6.985664367675781e-05">
+      <skipped>ggml not installed, skipping gguf test</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_graph_rewrite.TestFoldingAndReduction" tests="10" failures="0" errors="0" skipped="10" time="0.001470804214477539">
+    <testcase name="test_full_graph_rewrite_constant_reduction_folding" classname="TestFoldingAndReduction" time="2.5987625122070312e-05">
+      <skipped>reduce is removed now</skipped>
+    </testcase>
+    <testcase name="test_full_graph_rewrite_nested_loop_collapse" classname="TestFoldingAndReduction" time="4.601478576660156e-05">
+      <skipped>currently failing</skipped>
+    </testcase>
+    <testcase name="test_full_graph_rewrite_range_reduction" classname="TestFoldingAndReduction" time="4.887580871582031e-05">
+      <skipped>currently failing</skipped>
+    </testcase>
+    <testcase name="test_full_graph_rewrite_reduction_with_unused_range" classname="TestFoldingAndReduction" time="3.0279159545898438e-05">
+      <skipped>reduce is removed now</skipped>
+    </testcase>
+    <testcase name="test_full_graph_rewrite_simple_reduction_folding" classname="TestFoldingAndReduction" time="3.600120544433594e-05">
+      <skipped>currently failing</skipped>
+    </testcase>
+    <testcase name="test_full_graph_rewrite_constant_reduction_folding" classname="TestFoldingAndReduction" time="0.0007772445678710938">
+      <skipped>reduce is removed now</skipped>
+    </testcase>
+    <testcase name="test_full_graph_rewrite_nested_loop_collapse" classname="TestFoldingAndReduction" time="0.00020003318786621094">
+      <skipped>currently failing</skipped>
+    </testcase>
+    <testcase name="test_full_graph_rewrite_range_reduction" classname="TestFoldingAndReduction" time="0.00010204315185546875">
+      <skipped>currently failing</skipped>
+    </testcase>
+    <testcase name="test_full_graph_rewrite_reduction_with_unused_range" classname="TestFoldingAndReduction" time="9.322166442871094e-05">
+      <skipped>reduce is removed now</skipped>
+    </testcase>
+    <testcase name="test_full_graph_rewrite_simple_reduction_folding" classname="TestFoldingAndReduction" time="0.00011110305786132812">
+      <skipped>currently failing</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_helpers.TestFetch" tests="14" failures="0" errors="0" skipped="14" time="0.0012001991271972656">
+    <testcase name="test_fetch_bad_http" classname="TestFetch" time="3.695487976074219e-05">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+    <testcase name="test_fetch_gunzip_invalid" classname="TestFetch" time="3.910064697265625e-05">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+    <testcase name="test_fetch_gunzip_valid" classname="TestFetch" time="3.814697265625e-05">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+    <testcase name="test_fetch_img" classname="TestFetch" time="3.910064697265625e-05">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+    <testcase name="test_fetch_small" classname="TestFetch" time="5.1975250244140625e-05">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+    <testcase name="test_fetch_subdir" classname="TestFetch" time="5.2928924560546875e-05">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+    <testcase name="test_fetch_user_agent" classname="TestFetch" time="4.291534423828125e-05">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+    <testcase name="test_fetch_bad_http" classname="TestFetch" time="0.00028395652770996094">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+    <testcase name="test_fetch_gunzip_invalid" classname="TestFetch" time="6.604194641113281e-05">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+    <testcase name="test_fetch_gunzip_valid" classname="TestFetch" time="5.1975250244140625e-05">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+    <testcase name="test_fetch_img" classname="TestFetch" time="4.410743713378906e-05">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+    <testcase name="test_fetch_small" classname="TestFetch" time="0.00011801719665527344">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+    <testcase name="test_fetch_subdir" classname="TestFetch" time="0.0001671314239501953">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+    <testcase name="test_fetch_user_agent" classname="TestFetch" time="0.0001678466796875">
+      <skipped>no fetch tests because they need internet</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_qcom.TestQcom" tests="2" failures="0" errors="0" skipped="2" time="0.00022411346435546875">
+    <testcase name="test_image_pitch" classname="TestQcom" time="4.410743713378906e-05">
+      <skipped>QCOM device required to run</skipped>
+    </testcase>
+    <testcase name="test_image_pitch" classname="TestQcom" time="0.0001800060272216797">
+      <skipped>QCOM device required to run</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="test.unit.test_shapetracker.TestRealIssues" tests="6" failures="0" errors="0" skipped="6" time="0.00022220611572265625">
+    <testcase name="test_reshape_doesnt_multiview" classname="TestRealIssues" time="5.1021575927734375e-05">
+      <skipped>don't create shapetrackers with views</skipped>
+    </testcase>
+    <testcase name="test_reshape_stable_diffusion" classname="TestRealIssues" time="3.910064697265625e-05">
+      <skipped>don't create shapetrackers with views</skipped>
+    </testcase>
+    <testcase name="test_reshape_trailing_invalid_ones" classname="TestRealIssues" time="6.198883056640625e-05">
+      <skipped>don't create shapetrackers with views</skipped>
+    </testcase>
+    <testcase name="test_reshape_doesnt_multiview" classname="TestRealIssues" time="3.1948089599609375e-05">
+      <skipped>don't create shapetrackers with views</skipped>
+    </testcase>
+    <testcase name="test_reshape_stable_diffusion" classname="TestRealIssues" time="2.002716064453125e-05">
+      <skipped>don't create shapetrackers with views</skipped>
+    </testcase>
+    <testcase name="test_reshape_trailing_invalid_ones" classname="TestRealIssues" time="1.811981201171875e-05">
+      <skipped>don't create shapetrackers with views</skipped>
+    </testcase>
+  </testsuite>
+</testsuites>
