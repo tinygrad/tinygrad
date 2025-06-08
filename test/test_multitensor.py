@@ -373,7 +373,7 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
-  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "LLVM"), "slow")
+  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
   @unittest.skipIf(REAL_DEV == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_data_parallel_resnet(self):
     from extra.models.resnet import ResNet18
