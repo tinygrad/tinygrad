@@ -97,9 +97,7 @@ class TestOnnxModel(unittest.TestCase):
       et = time.monotonic()
       print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
-    Tensor.no_grad = True
     torch_out = run_onnx_torch(onnx_model, inputs).numpy()
-    Tensor.no_grad = False
     print(tinygrad_out, torch_out)
     # TODO: why is this higher
     np.testing.assert_allclose(tinygrad_out, torch_out, atol=4e-2, rtol=3e-2)

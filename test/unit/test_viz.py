@@ -35,7 +35,7 @@ class TestViz(unittest.TestCase):
     test(a*1)
     ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 1)
-    key, val = ret[0]
+    key, val = ret[0]["name"], ret[0]["steps"]
     self.assertEqual(key, "test_1")
     self.assertEqual(val[0]["match_count"], 1)
 
@@ -45,7 +45,7 @@ class TestViz(unittest.TestCase):
     def test(sink): return graph_rewrite(sink, symbolic)
     test((a+a)*1)
     ret = get_metadata(keys, contexts)
-    key, val = ret[0]
+    key, val = ret[0]["name"], ret[0]["steps"]
     self.assertEqual(len(ret), 1)              # one context
     self.assertEqual(len(val), 1)              # one graph_rewrite call in context
     self.assertEqual(key, "test_1")
@@ -59,7 +59,7 @@ class TestViz(unittest.TestCase):
       b = graph_rewrite(b, symbolic)
     test(a*1, a*5)
     ret = get_metadata(keys, contexts)
-    key, val = ret[0]
+    key, val = ret[0]["name"], ret[0]["steps"]
     self.assertEqual(len(ret), 1)              # one context
     self.assertEqual(len(val), 2)              # two graph_rewrite calls in context
     self.assertEqual(key, "test_1")
@@ -75,10 +75,10 @@ class TestViz(unittest.TestCase):
     do_rewrite(a*b)
     ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 2)
-    key, m = ret[0]
+    key, m = ret[0]["name"], ret[0]["steps"]
     self.assertEqual(key, "do_rewrite_1")
     self.assertEqual(m[0]["match_count"], 1)
-    key, m = ret[1]
+    key, m = ret[1]["name"], ret[1]["steps"]
     self.assertEqual(key, "do_rewrite_2")
     self.assertEqual(m[0]["match_count"], 0)
 
@@ -93,18 +93,18 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(ret), 1)
 
   def test_track_rewrites_name_fxn(self):
-    @track_rewrites(name_fxn=lambda r: f"output_{r}")
+    @track_rewrites(name_fxn=lambda _,ret: f"output_{ret}")
     def do_rewrite(x:UOp):
       x = graph_rewrite(x, symbolic)
       return x.render()
     expr = UOp.variable("a",0,10)*UOp.variable("b",0,10)
     do_rewrite(expr)
-    key = get_metadata(keys, contexts)[0][0]
+    key = get_metadata(keys, contexts)[0]["name"]
     self.assertEqual(key, "output_(a*b) n1")
 
     expr2 = UOp.variable("a",0,10)+UOp.variable("b",0,10)
     do_rewrite(expr2)
-    key = get_metadata(keys, contexts)[1][0]
+    key = get_metadata(keys, contexts)[1]["name"]
     self.assertEqual(key, "output_(a+b) n2")
 
   @unittest.expectedFailure
@@ -131,7 +131,7 @@ class TestViz(unittest.TestCase):
     #UOp.substitute(a+b, {a+b:c})
     ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 1)
-    _, m = ret[0]
+    m = ret[0]["steps"]
     self.assertEqual(m[0]["match_count"], 1)
 
   # NOTE: calling graph_rewrite when the function isn't decorated with track_rewrites should not VIZ

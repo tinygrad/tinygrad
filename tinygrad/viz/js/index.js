@@ -39,7 +39,7 @@ async function renderDag(graph, additions, recenter=false) {
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`);
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => `stroke:#4a4b57; stroke-width:${STROKE_WIDTH}px; ${d.style}`);
+      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style ?? `stroke:#4a4b57; stroke-width:${STROKE_WIDTH}px;`);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
@@ -280,21 +280,21 @@ async function main() {
   }
   const kernelList = document.querySelector(".kernel-list");
   kernelList.innerHTML = "";
-  for (const [i,k] of kernels.entries()) {
+  for (const [i,{name, steps}] of kernels.entries()) {
     const ul = kernelList.appendChild(document.createElement("ul"));
     if (i === currentKernel) {
       ul.className = "active";
       requestAnimationFrame(() => ul.scrollIntoView({ behavior: "auto", block: "nearest" }));
     }
     const p = ul.appendChild(document.createElement("p"));
-    p.innerHTML = k[0].replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
+    p.innerHTML = name.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
       const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
       return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
     });
     p.onclick = () => {
       setState(i === currentKernel ? { expandKernel:!expandKernel } : { expandKernel:true, currentKernel:i, currentUOp:0, currentRewrite:0 });
     }
-    for (const [j,u] of k[1].entries()) {
+    for (const [j,u] of steps.entries()) {
       const inner = ul.appendChild(document.createElement("ul"));
       if (i === currentKernel && j === currentUOp) {
         inner.className = "active";
@@ -311,7 +311,7 @@ async function main() {
   }
   // ** center graph
   if (currentKernel == -1) return;
-  const kernel = kernels[currentKernel][1][currentUOp];
+  const kernel = kernels[currentKernel].steps[currentUOp];
   const cacheKey = `kernel=${currentKernel}&idx=${currentUOp}`;
   // close any pending event sources
   let activeSrc = null;
@@ -425,7 +425,7 @@ document.addEventListener("keydown", async function(event) {
   if (event.key == "ArrowDown") {
     event.preventDefault();
     if (expandKernel) {
-      const totalUOps = kernels[currentKernel][1].length-1;
+      const totalUOps = kernels[currentKernel].steps.length-1;
       return setState({ currentRewrite:0, currentUOp:Math.min(totalUOps, currentUOp+1) });
     }
     return setState({ currentUOp:0, currentRewrite:0, currentKernel:Math.min(kernels.length-1, currentKernel+1) });

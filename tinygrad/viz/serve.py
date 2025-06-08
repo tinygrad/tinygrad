@@ -15,31 +15,24 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55", Ops.IGNORE: "#00C000",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80", Ops.BUFFER_VIEW: "#E5EAFF",
                Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.FUSE: "#FFa500",
-               Ops.ALLREDUCE: "#ff40a0", Ops.GBARRIER: "#FFC14D", Ops.MSELECT: "#d040a0"}
+               Ops.ALLREDUCE: "#ff40a0", Ops.GBARRIER: "#FFC14D", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0"}
 
 # VIZ API
 
 # ** Metadata for a track_rewrites scope
-
-class GraphRewriteMetadata(TypedDict):
-  loc: tuple[str, int]                   # [path, lineno] calling graph_rewrite
-  match_count: int                       # total match count in this context
-  code_line: str                         # source code calling graph_rewrite
-  kernel_code: str|None                  # optionally render the final kernel code
-  name: str|None                         # optional name of the rewrite
-  depth: int                             # depth if it's a subrewrite
 
 @functools.cache
 def render_program(k:Kernel):
   try: return k.opts.render(k.uops)
   except Exception as e: return f"ISSUE RENDERING KERNEL: {e}\nast = {k.ast}\nopts = {k.applied_opts}"
 
-def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
-  return {"loc":v.loc, "match_count":len(v.matches), "name":v.name, "depth":v.depth, "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
-          "kernel_code":render_program(k) if isinstance(k, Kernel) else None}
-
-def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
-  return [(k.name if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]
+def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
+  ret = []
+  for k,v in zip(keys, contexts):
+    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":lines(s.loc[0])[s.loc[1]-1].strip()} for s in v]
+    if isinstance(k, Kernel): ret.append({"name":k.name, "kernel_code":render_program(k), "steps":steps})
+    else: ret.append({"name":str(k), "steps":steps})
+  return ret
 
 # ** Complete rewrite details for a graph_rewrite call
 
@@ -208,7 +201,7 @@ if __name__ == "__main__":
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
   print(f"*** started viz on {HOST}:{PORT}")
-  print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"))
+  print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"), flush=True)
   if len(getenv("BROWSER", "")) > 0: webbrowser.open(f"{HOST}:{PORT}{'/profiler' if contexts is None else ''}")
   try: server.serve_forever()
   except KeyboardInterrupt:

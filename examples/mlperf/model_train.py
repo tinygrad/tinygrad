@@ -791,7 +791,6 @@ def train_unet3d():
     return loss.realize()
 
   @Tensor.train(mode=False)
-  @Tensor.test()
   def eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
     y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)

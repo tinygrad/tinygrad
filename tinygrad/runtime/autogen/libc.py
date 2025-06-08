@@ -27,7 +27,7 @@ class FunctionFactoryStub:
 # You can either re-run clan2py with -l /path/to/library.so
 # Or manually fix this by comment the ctypes.CDLL loading
 _libraries = {}
-_libraries['libc'] = None if (libc_path := ctypes.util.find_library('c')) is None else ctypes.CDLL(libc_path) #  ctypes.CDLL('libc')
+_libraries['libc'] = None if (libc_path := ctypes.util.find_library('c')) is None else ctypes.CDLL(libc_path, use_errno=True) #  ctypes.CDLL('libc')
 def string_cast(char_pointer, encoding='utf-8', errors='strict'):
     value = ctypes.cast(char_pointer, ctypes.c_char_p).value
     if value is not None and encoding is not None:
