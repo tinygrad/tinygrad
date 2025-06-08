@@ -65,12 +65,12 @@ for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "p
 
 # in place operations with views
 def realize_with_views(self: Tensor, views: Tensor):
-  if not self.lazydata.st.contiguous: self.replace(self.contiguous())
+  if not self.uop.st.contiguous: self.replace(self.contiguous())
   self.replace(self.clone().realize())
   for v in views:
-    if v.lazydata.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
+    if v.uop.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
     ret = self
-    st = ShapeTracker(self.lazydata.st.views + v.lazydata.st.views) # TODO: is this right?
+    st = ShapeTracker(self.uop.st.views + v.uop.st.views) # TODO: is this right?
     for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
     v.replace(ret)
 def maybe_realize_storage(self: Tensor) -> bool:
@@ -178,7 +178,7 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
     # multiple as_strided do not compound
     base = canonical_base(tensor)
     # TODO: this is heavyweight
-    st = ShapeTracker(base.lazydata.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
+    st = ShapeTracker(base.uop.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
     ret = base
     if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
     if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
@@ -315,7 +315,7 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
     to_device = _from_torch_device(dest.device)
     src,dest = unwrap(src),unwrap(dest)
     # TODO we need to properly match dest shape and strides, not blindly assign
-    if dest.lazydata.st.contiguous or dest.lazydata.is_realized: src = src.contiguous() # this only solves some cases
+    if dest.uop.st.contiguous or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
     dest.assign(src.cast(cast_dtype).to(to_device))
     if realize: Tensor.realize(dest)
   elif src.is_tiny and dest.is_cpu:
@@ -493,7 +493,7 @@ def wrap_out(f):
     assert out.shape == assigned.shape, f"shape mismatch: {assigned.shape} -> {out.shape}"
     assert out.device == assigned.device, f"device mismatch: {assigned.device} -> {out.device}"
     assert out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
-    if out.lazydata.is_realized: assigned = assigned.contiguous() # TODO: how does this map to torch's semantics
+    if out.uop.is_realized: assigned = assigned.contiguous() # TODO: how does this map to torch's semantics
     return out.assign(assigned)
   return _wrap_out
 

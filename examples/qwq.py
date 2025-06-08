@@ -66,7 +66,7 @@ if __name__ == "__main__":
   model_path = Path(args.weights) if args.weights else download_weights(model_info["total_num_weights"])
   transformer = load_model(model_path, model_info["model_params"])
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"])
-  param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(transformer))
+  param_bytes = sum(x.uop.size * x.dtype.itemsize for x in get_parameters(transformer))
 
   outputted = args.prompt
   start_pos, toks = 0, tokenizer(outputted)["input_ids"]

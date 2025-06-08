@@ -21,18 +21,18 @@ def consec(shape, start=1):
 
 # creates strided tensor with base set to reference tensor's base, equivalent to torch.set_()
 def set_(reference: Tensor, shape, strides, offset):
-  raise NotImplementedError("need to implement without calling lazydata.view")
-  if reference.lazydata.base.realized is None: reference.realize()
-  assert reference.lazydata.base.realized, "base has to be realized before setting it to strided's base"
-  strided = Tensor(reference.lazydata.view(ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),))))
-  assert strided.lazydata.st.real_strides() == strides, "real_strides should equal strides for strided"
+  raise NotImplementedError("need to implement without calling uop.view")
+  if reference.uop.base.realized is None: reference.realize()
+  assert reference.uop.base.realized, "base has to be realized before setting it to strided's base"
+  strided = Tensor(reference.uop.view(ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),))))
+  assert strided.uop.st.real_strides() == strides, "real_strides should equal strides for strided"
   return strided
 
 def clone(original:Tensor): return original.clone()
 def copy_(src:Tensor, other:Tensor) -> Tensor: return src.clone()
 # this is fine for tested usecases since as geohotstan understands,
 # data_ptr is used to compare if operations needed between tensors is the same
-def data_ptr(tensor:Tensor): return tensor.lazydata
+def data_ptr(tensor:Tensor): return tensor.uop
 
 # https://pytorch.org/docs/stable/generated/torch.Tensor.index_put_.html
 def index_put_(tensor:Tensor, indices, values, accumulate) -> Tensor:
@@ -971,9 +971,9 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper((2, 0, 4), z.shape)
     # this isn't technically necessary, but matches NumPy stride calculations.
     # NOTE: this is empty and shouldn't have strides
-    #numpy_testing_assert_equal_helper((60, 20, 5), z.lazydata.st.real_strides())
+    #numpy_testing_assert_equal_helper((60, 20, 5), z.uop.st.real_strides())
     # NOTE tinygrad's int slicing implementation makes this not contiguous
-    # self.assertTrue(z.lazydata.st.contiguous)
+    # self.assertTrue(z.uop.st.contiguous)
 
   @unittest.skip("bool indexing not supported")
   def test_index_getitem_copy_bools_slices(self):
