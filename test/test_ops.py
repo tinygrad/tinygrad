@@ -1860,6 +1860,11 @@ class TestOps(unittest.TestCase):
   def test_view(self):
     helper_test_op([(4,3,6,6)], lambda x: x.view((12,6,6)))
     helper_test_op([(4,3,6,6)], lambda x: x.view((-1,3,6,6)))
+    helper_test_op([(6,)], lambda x: x.view(2, 3))
+    helper_test_op([(6,1)], lambda x: x.view([2, 3]))
+    helper_test_op([(1,6)], lambda x: x.view((3, 2)))
+    helper_test_op([(3,2)], lambda x: x.view((2, 3)))
+    helper_test_op([(3,2)], lambda x: x.view(6))
 
   def test_flip(self):
     helper_test_op([(4,3,6,6)], lambda x: x.flip((0,)))
