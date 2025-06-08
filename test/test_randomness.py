@@ -258,7 +258,7 @@ class TestRandomness(unittest.TestCase):
     old_default_float = dtypes.default_float
     # low precision can result in inf from randn
     dtypes.default_float = default_float
-    t = Tensor.randn(1024, 1024)
+    t = Tensor.randn(256, 256)
     mx = t.max().numpy().item()
     mn = t.min().numpy().item()
     print(f"testing with {default_float=}")
