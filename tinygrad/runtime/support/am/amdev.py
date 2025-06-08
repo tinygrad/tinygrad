@@ -18,7 +18,7 @@ class AMRegister(AMDReg):
 
   def write(self, _am_val:int=0, **kwargs): self.adev.wreg(self.addr, _am_val | self.encode(**kwargs))
 
-  def update(self, **kwargs): self.write(self.encode(**{**self.read_bitfields(), **kwargs}))
+  def update(self, **kwargs): self.write(self.read() & ~self.fields_mask(*kwargs.keys()), **kwargs)
 
 class AMFirmware:
   def __init__(self, adev):
