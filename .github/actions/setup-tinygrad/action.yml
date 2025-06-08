@@ -48,6 +48,7 @@ runs:
     # **** Caching packages ****
 
     - name: Cache Python packages
+      id: restore-venv
       uses: actions/cache@v4
       with:
         path: .venv
@@ -71,31 +72,27 @@ runs:
     # **** Python deps ****
 
     - name: Install dependencies in venv (with extra)
-      if: inputs.deps != ''
+      if: inputs.deps != '' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        if [[ ! -d .venv ]]; then
-          python -m venv .venv
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            source .venv/Scripts/activate
-          else
-            . .venv/bin/activate
-          fi
-          python -m pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        python -m venv .venv
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          source .venv/Scripts/activate
+        else
+          . .venv/bin/activate
         fi
+        python -m pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies in venv (without extra)
-      if: inputs.deps == ''
+      if: inputs.deps == '' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        if [[ ! -d .venv ]]; then
-          python -m venv .venv
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            source .venv/Scripts/activate
-          else
-            . .venv/bin/activate
-          fi
-          python -m pip install -e . ${{ inputs.pydeps }}
+        python -m venv .venv
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          source .venv/Scripts/activate
+        else
+          . .venv/bin/activate
         fi
+        python -m pip install -e . ${{ inputs.pydeps }}
     - name: Export venv
       shell: bash
       run: |
@@ -134,6 +131,7 @@ runs:
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
       shell: bash
       run: |
+        echo 'Acquire::GzipIndexes "true";' | sudo tee /etc/apt/apt.conf.d/gzip
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
         sudo apt update || true
 
