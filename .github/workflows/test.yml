@@ -458,7 +458,8 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: onnxoptl
-          deps: testing,testing_tf
+          deps: testing
+          pydeps: "tensorflow==2.15.1 tensorflow_addons"
           python-version: '3.11'
           opencl: 'true'
           llvm: 'true'
@@ -493,7 +494,7 @@ jobs:
   testmodels:
     name: Models (llvm+cpu+gpu)
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       IGNORE_OOB: 0
     steps:
