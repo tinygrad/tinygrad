@@ -202,7 +202,7 @@ function renderMemoryGraph(graph) {
     d3.select(e.currentTarget).attr("stroke", null).attr("stroke-width", null);
     document.getElementById("current-buf")?.remove()
   });
-  // TODO: add the toposort graph here
+  // TODO: add the kernel line here
   document.querySelector(".progress-message").style.display = "none";
   d3.select("#nodes").html("");
   d3.select("#edges").html("");
@@ -346,7 +346,7 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
-  if (ctx.name == "View Memory Graph") {
+  if (step.name == "View Memory Graph") {
     renderMemoryGraph(ret[currentRewrite].graph);
   } else {
     renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
