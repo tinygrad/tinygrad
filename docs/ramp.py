@@ -39,8 +39,8 @@ assert t.shape == (4,)
 print(t)
 # <Tensor <UOp METAL (4,) int (<Ops.COPY: 7>, None)> on METAL with grad None>
 
-# the ".lazydata" property on Tensor contains the specification of how to compute it
-print(t.lazydata)
+# the ".uop" property on Tensor contains the specification of how to compute it
+print(t.uop)
 """
 UOp(Ops.COPY, dtypes.int, arg=None, src=(
   UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
@@ -57,21 +57,21 @@ UOp(Ops.COPY, dtypes.int, arg=None, src=(
 
 t.realize()
 # if we want to "realize" a tensor, we can with the "realize" method
-# now when we look at the lazydata, it's changed
-print(t.lazydata)
+# now when we look at the uop, it's changed
+print(t.uop)
 """
 UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
   UOp(Ops.UNIQUE, dtypes.void, arg=1, src=()),
   UOp(Ops.DEVICE, dtypes.void, arg='METAL', src=()),))
 """
-# the copy was actually run, and now the "lazydata" of the Tensor is just a BUFFER
+# the copy was actually run, and now the "uop" of the Tensor is just a BUFFER
 # if you run this script with DEBUG=2 in the environment, you can see the copy happen
 # *** METAL      1 copy       16,   METAL <- PYTHON ...
 
 # now let's do some compute
-# we look at the lazydata to see the specification of the compute
+# we look at the uop to see the specification of the compute
 t_times_2 = t * 2
-print(t_times_2.lazydata)
+print(t_times_2.uop)
 """
 UOp(Ops.MUL, dtypes.int, arg=None, src=(
   UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
@@ -90,24 +90,24 @@ UOp(Ops.MUL, dtypes.int, arg=None, src=(
 assert t_times_2.tolist() == [2, 4, 6, 8]
 
 # UOps are both immutable and globally unique
-# if i multiply the Tensor by 4 twice, these result Tensors will have the same lazydata specification
+# if i multiply the Tensor by 4 twice, these result Tensors will have the same uop specification
 t_times_4_try_1 = t * 4
 t_times_4_try_2 = t * 4
-assert t_times_4_try_1.lazydata is t_times_4_try_2.lazydata
+assert t_times_4_try_1.uop is t_times_4_try_2.uop
 # the specification isn't just the same, it's the exact same Python object
 assert t_times_4_try_1 is not t_times_4_try_2
 # the Tensor is a different Python object
 
 # if we realize `t_times_4_try_1` ...
 t_times_4_try_1.realize()
-print(t_times_4_try_2.lazydata)
+print(t_times_4_try_2.uop)
 """
 UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
   UOp(Ops.UNIQUE, dtypes.void, arg=4, src=()),
   UOp(Ops.DEVICE, dtypes.void, arg='METAL', src=()),))
 """
 # ... `t_times_4_try_2` also becomes the same BUFFER
-assert t_times_4_try_1.lazydata is t_times_4_try_2.lazydata
+assert t_times_4_try_1.uop is t_times_4_try_2.uop
 # so this print doesn't require any computation, just a copy back to the CPU so we can print it
 print("** only the copy start")
 print(t_times_4_try_2.tolist())  # [4, 8, 12, 16]
@@ -120,7 +120,7 @@ t_float = Tensor([3.0])
 t_log = t_float.log()
 t_log_grad, = t_log.sum().gradient(t_float)
 # due to how log is implemented, this gradient contains a lot of UOps
-print(t_log_grad.lazydata)
+print(t_log_grad.uop)
 # ...not shown here...
 # but if you run with DEBUG=4 (CPU=1 used here for simpler code), you can see the generated code
 """
@@ -144,7 +144,7 @@ t = Tensor([1,2,3,4])
 # NOTE: the APIs here are subject to change
 
 t_plus_3_plus_4 = t + 3 + 4
-print(t_plus_3_plus_4.lazydata)
+print(t_plus_3_plus_4.uop)
 """
 UOp(Ops.ADD, dtypes.int, arg=None, src=(
   UOp(Ops.ADD, dtypes.int, arg=None, src=(
@@ -166,7 +166,7 @@ UOp(Ops.ADD, dtypes.int, arg=None, src=(
 # but by the time we are actually running the code, it's adding 7
 # `kernelize` will simplify and group the operations in the graph into kernels
 t_plus_3_plus_4.kernelize()
-print(t_plus_3_plus_4.lazydata)
+print(t_plus_3_plus_4.uop)
 """
 UOp(Ops.ASSIGN, dtypes.int, arg=None, src=(
   x0:=UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
@@ -181,7 +181,7 @@ UOp(Ops.ASSIGN, dtypes.int, arg=None, src=(
 # ASSIGN has two srcs, src[0] is the BUFFER that's assigned to, and src[1] is the thing to assign
 # src[1] is the GPU Kernel that's going to be run
 # we can get the ast of the Kernel as follows
-kernel_ast = t_plus_3_plus_4.lazydata.src[1].arg.ast
+kernel_ast = t_plus_3_plus_4.uop.src[1].arg.ast
 
 # almost everything in tinygrad functions as a rewrite of the UOps
 # the codegen rewrites the ast to a simplified form ready for "rendering"
