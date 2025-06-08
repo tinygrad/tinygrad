@@ -268,7 +268,12 @@ def train_cifar():
     while True:
       st = time.monotonic()
       X, Y = X_in, Y_in
-      order = Tensor.randperm(X.shape[0], device=X.device).reshape(-1, BS)
+      def pad_ceil(product, denom):
+        pad_i = product - (product // denom * denom)
+        return (denom - pad_i) * bool(pad_i)
+      pad = pad_ceil(X.shape[0], BS)
+      order = Tensor.randperm(X.shape[0], device=X.device)
+      order = Tensor.cat(order, Tensor.randint(pad, high=X.shape[0], device=X.device)).reshape(-1, BS).contiguous()
       if is_train:
         X_shuffled, Y_shuffled = X[order], Y[order]
       else:
