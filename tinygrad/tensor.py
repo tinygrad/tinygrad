@@ -1654,8 +1654,8 @@ class Tensor(MathTrait):
         results.append(x_chunk[idxs])
 
     if len(results) == 0: return Tensor.zeros(0, device=self.device, dtype=self.dtype)
-    elif len(results) == 1: return results[0]
-    else: return Tensor.cat(*results)
+    if len(results) == 1: return results[0]
+    return Tensor.cat(results[0], *results[1:])
 
   def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor:
     """
