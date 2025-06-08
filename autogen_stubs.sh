@@ -9,7 +9,7 @@ if [[ ! $(clang2py -V) ]]; then
   pip install clang==14.0.6
   git clone https://github.com/nimlgen/ctypeslib.git
   cd ctypeslib
-  pip install --user .
+  pip install .
   clang2py -V
   popd
 fi
