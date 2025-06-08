@@ -7,11 +7,14 @@ import random, time
 import numpy as np
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
-from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
+from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit, Variable
 from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
-from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
+from tinygrad.helpers import Context, Profiling, BEAM, WINO, getenv, colored, prod
 from extra.bench_log import BenchEvent, WallTimeEvent
+
+# dtypes.default_float = dtypes.half
+Context(FUSE_ARANGE=1).__enter__()
 
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
@@ -209,8 +212,31 @@ def train_cifar():
     X_cropped = Tensor(X.numpy()[mask.numpy()])
     return X_cropped.reshape((-1, 3, crop_size, crop_size))
 
+  def gather(x:Tensor, indices:Tensor, axis:int=0):
+    # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
+    return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
+
+  def make_square_mask2(shape, mask_size) -> Tensor:
+    BS, _, H, W = shape
+    low_x = Tensor.randint(BS, low=0, high=W-mask_size).reshape(BS,1,1,1)
+    low_y = Tensor.randint(BS, low=0, high=H-mask_size).reshape(BS,1,1,1)
+    idx_x = Tensor.arange(mask_size, dtype=dtypes.int32).reshape((1,1,1,mask_size))
+    idx_y = Tensor.arange(mask_size, dtype=dtypes.int32).reshape((1,1,mask_size,1))
+    return low_x, low_y, idx_x, idx_y
+
+  @TinyJit
+  def random_crop2(X:Tensor, crop_size=32):
+    Xs, Ys, Xi, Yi = make_square_mask2(X.shape, crop_size)
+    return X.gather(-1, (Xs + Xi).expand(-1, 3, X.shape[2], -1)).gather(-2, ((Ys+Yi).expand(-1, 3, crop_size, crop_size)))
+
+  @TinyJit
+  def rand_flip(X:Tensor)->Tensor:
+    x_b = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
+    return x_b
+
+
   # @TinyJit
-  def cutmix(X:Tensor, Y:Tensor, mask_size=3):
+  def cutmix_(X:Tensor, Y:Tensor, mask_size=3):
     # fill the square with randomly selected images from the same batch
     mask = make_square_mask(X.shape, mask_size)
     order = list(range(0, X.shape[0]))
@@ -222,33 +248,59 @@ def train_cifar():
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
     return X_cutmix, Y_cutmix
 
+  @TinyJit
+  def cutmix(X:Tensor, Y:Tensor, mask_size=3):
+    # fill the square with randomly selected images from the same batch
+    mask = make_square_mask(X.shape, mask_size)
+    order = Tensor.randperm(X.shape[0], device=X.device)
+    order_X = order.reshape(X.shape[0], 1, 1, 1).expand(X.shape)
+    X_patch = X.gather(0, order_X)
+    Y_patch = Y.gather(0, order.reshape(Y.shape[0], 1).expand(Y.shape))
+
+    X_cutmix = mask.where(X_patch, X)
+    mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
+    Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
+    return X_cutmix.realize(), Y_cutmix.realize()
+
   # the operations that remain inside batch fetcher is the ones that involves random operations
   def fetch_batches(X_in:Tensor, Y_in:Tensor, BS:int, is_train:bool):
     step, epoch = 0, 0
     while True:
       st = time.monotonic()
       X, Y = X_in, Y_in
+      order = Tensor.randperm(X.shape[0], device=X.device).reshape(-1, BS)
       if is_train:
-        # TODO: these are not jitted
-        if getenv("RANDOM_CROP", 1):
-          X = random_crop(X, crop_size=32)
-        if getenv("RANDOM_FLIP", 1):
-          X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
-        if getenv("CUTMIX", 1):
-          if step >= hyp['net']['cutmix_steps']:
-            X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
-        order = list(range(0, X.shape[0]))
-        random.shuffle(order)
-        X, Y = X.numpy()[order], Y.numpy()[order]
+        X_shuffled, Y_shuffled = X[order], Y[order]
       else:
-        X, Y = X.numpy(), Y.numpy()
+        X_shuffled, Y_shuffled = X, Y
+
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
-      for i in range(0, X.shape[0], BS*STEPSN):
+      vi = Variable("i", 0, order.shape[0]-1)
+      for i in range(0, order.shape[0], STEPSN):
+        vib = vi.bind(i)
         # pad the last batch  # TODO: not correct for test
-        batch_end = min(i+BS, Y.shape[0])
-        x = Tensor(X[batch_end-BS:batch_end], device=X_in.device, dtype=X_in.dtype)
-        y = Tensor(Y[batch_end-BS:batch_end], device=Y_in.device, dtype=Y_in.dtype)
+        @TinyJit
+        def foo():
+          x_b = X_shuffled[vib]
+          y_b = Y_shuffled[vib]
+
+          if is_train:
+            # TODO: these are not jitted
+            if getenv("RANDOM_CROP", 1):
+              x_b = random_crop2(x_b, crop_size=32)
+            if getenv("RANDOM_FLIP", 1):
+              x_b = rand_flip(x_b)
+            if getenv("CUTMIX", 1):
+              if step >= hyp['net']['cutmix_steps']:
+                x_b, y_b = cutmix(x_b, y_b, mask_size=hyp['net']['cutmix_size'])
+            # X, Y = gather(X, order, 0), Y[order]
+
+          x = x_b.contiguous()
+          y = y_b.contiguous()
+          return x.realize(), y.realize()
+        x, y = foo()
+
         step += STEPSN
         yield x, y
       epoch += 1
