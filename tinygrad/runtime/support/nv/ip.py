@@ -526,6 +526,15 @@ class NV_GSP:
     self.rpc_rm_alloc(hParent=0xcf000000, hObject=0xcf000002, hClass=nv_gpu.FERMI_VASPACE_A, params=vaspace_params)
 
     self.rpc_set_page_directory(device=0xcf000000, hVASpace=0xcf000002, pdir_paddr=0x600000)
+
+    channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
+    self.rpc_rm_alloc(hParent=0xcf000000, hObject=0xcf000003, hClass=nv_gpu.KEPLER_CHANNEL_GROUP_A, params=channel_params)
+
+    ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=0xcf000002, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
+    self.rpc_rm_alloc(hParent=0xcf000003, hObject=0xcf000004, hClass=nv_gpu.FERMI_CONTEXT_SHARE_A, params=ctxshare_params)
+
+    
+
     exit(0)
 
     # self.status_queue = RPCQueue(self, self.status_queue_va, self.status_queue_tx, self.status_queue_rx,
@@ -616,7 +625,7 @@ class NV_GSP:
     # 2           PDE1 (or 512M PTE)                  37:29
     # 3           PDE0 (dual 64k/4k PDE, or 2M PTE)   28:21
     # 4           PTE_64K / PTE_4K                    20:16 / 20:12
-    # So, top level is 4 entries (?). Flags is all channels, vid mem.
+    # So, top level is 4 entries (?). Flags field is all channels, vid mem.
     # subDeviceId = ID+1, 0 for BC
     params = nv.struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(physAddress=pdir_paddr,
       numEntries=4, flags=0x8, hVASpace=hVASpace, pasid=0xffffffff, subDeviceId=0+1)

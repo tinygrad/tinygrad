@@ -19,10 +19,10 @@ class NVReg:
 
   def write(self, _ini_val:int=0, **kwargs): self.nvdev.wreg(self.addr, _ini_val | self.encode(**kwargs))
 
-  def update(self, **kwargs): self.write(self.read() & ~self.mask(**kwargs), **kwargs)
+  def update(self, **kwargs): self.write(self.read() & ~self.mask(*kwargs.keys()), **kwargs)
 
-  def mask(self, **kwargs):
-    return functools.reduce(int.__or__, ((((1 << (self.fields[nm][1]-self.fields[nm][0] + 1)) - 1) << self.fields[nm][0]) for nm in kwargs.keys()), 0)
+  def mask(self, *names):
+    return functools.reduce(int.__or__, ((((1 << (self.fields[nm][1]-self.fields[nm][0] + 1)) - 1) << self.fields[nm][0]) for nm in names), 0)
 
   def encode(self, **kwargs) -> int: return functools.reduce(int.__or__, (value << self.fields[name][0] for name,value in kwargs.items()), 0)
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
