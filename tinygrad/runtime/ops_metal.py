@@ -1,4 +1,4 @@
-import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, threading
+import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
 from typing import Any, Union, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, cpu_profile, ProfileDeviceEvent, ProfileRangeEvent
@@ -79,7 +79,6 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight: list[Any] = []
     self.timeline_signal = msg("newSharedEvent", objc_instance)(self.sysdevice)
     self.timeline_value = 0
-    self._timeline_lock = threading.Lock()
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
 
@@ -97,11 +96,6 @@ class MetalDevice(Compiled):
         Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
     self.mtl_buffers_in_flight.clear()
 
-  def get_next_timeline_values(self) -> tuple[int, int]:
-    with self._timeline_lock:
-      current_value = self.timeline_value
-      self.timeline_value += 2
-      return current_value, current_value+1
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))
@@ -232,14 +226,13 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     msg("endEncoding")(encoder)
 
     if src_dev != dest_dev:
-      timeline_value, next_timeline_value = src_dev.get_next_timeline_values()
-      # Signal event on source with unique timeline value
-      msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, timeline_value)
-      msg("encodeWaitForEvent:value:")(src_command_buffer, src_dev.timeline_signal, next_timeline_value)
+      msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
+      msg("encodeWaitForEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value+1)
       dest_command_buffer = msg("commandBuffer", objc_instance)(dest_dev.mtl_queue)
-      msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, timeline_value)
-      msg("encodeSignalEvent:value:")(dest_command_buffer, src_dev.timeline_signal, next_timeline_value)
+      msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
+      msg("encodeSignalEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value+1)
       msg("commit")(dest_command_buffer)
+      src_dev.timeline_value+=2
       dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
     msg("setLabel:")(src_command_buffer, to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
     msg("commit")(src_command_buffer)
