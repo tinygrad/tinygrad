@@ -214,7 +214,6 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     msg("endEncoding")(encoder)
 
     if src_dev != dest_dev:
-      # Get unique timeline values in thread-safe manner
       timeline_value, next_timeline_value = src_dev.get_next_timeline_values()
       # Signal event on source with unique timeline value
       msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, timeline_value)
