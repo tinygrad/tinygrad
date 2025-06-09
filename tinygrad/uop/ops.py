@@ -990,48 +990,27 @@ class RewriteContext:
     self.pm: PatternMatcher = pm
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
-  # non-recursive
   def top_down_rewrite(self, root: UOp) -> UOp:
-    stack: list[tuple[UOp, int]] = [(root, 0)]   # (node, stage)
-    pending: dict[UOp, UOp] = {}                 # node  -> replacement­_candidate
-
+    stack: list[tuple[UOp, int, UOp | None]] = [(root, 0, None)]
     while stack:
-      node, stage = stack.pop()
+      node, stage, repl = stack.pop()
 
-      # Stage 0: first time we see this node --------------------------
+      # ---------------- Stage 0: first time we see the node ----------
       if stage == 0:
-        if node in self.replace:                        # already processed
-          continue
-        # Push a post-processing frame, then its children
-        stack.append((node, 1))
-        for child in reversed(node.src):                # reversed → original L-R order
-          if child not in self.replace:
-            stack.append((child, 0))
+        if node in self.replace: continue                                     # already rewritten, we're done
+        stack.append((node, 1, None))                                         # come back after children
+        stack.extend([(child, 0, None) for child in reversed(node.src)])      # keep L->R order for children
 
-      # Stage 1: all children done – compute local rewrite -----------
+      # ---------------- Stage 1: children done, try local rewrite ----
       elif stage == 1:
         new_src = tuple(self.replace[c] for c in node.src)
-
-        # Same logic as in the recursive code
         new_n = self.pm.rewrite(node, self.ctx) if new_src == node.src else UOp(node.op, node.dtype, new_src, node.arg)
+        if new_n is None: self.replace[node] = node                           # no change
+        elif new_n in self.replace: self.replace[node] = self.replace[new_n]  # replacement already done
+        else: stack.extend([(node, 2, new_n), (new_n, 0, None)])              # defer final mapping until *new_n* is fully processed
 
-        if new_n is None:                               # no change
-          self.replace[node] = node
-        else:
-          # Need final result of rewriting *new_n* before we
-          # know the final mapping for *node*
-          if new_n in self.replace:                   # already done
-            self.replace[node] = self.replace[new_n]
-          else:
-            pending[node] = new_n
-            # Stage 2 will run *after* new_n is processed
-            stack.append((node, 2))
-            stack.append((new_n, 0))
-
-      # Stage 2: new_n finished – finalise mapping -------------------
-      else:  # stage == 2
-        new_n = pending.pop(node)
-        self.replace[node] = self.replace[new_n]
+      # ---------------- Stage 2: deferred replacement is ready -------
+      else: self.replace[node] = self.replace[cast(UOp, repl)]                # stage == 2
 
     return self.replace[root]
   """
