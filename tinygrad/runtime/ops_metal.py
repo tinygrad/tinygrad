@@ -23,7 +23,7 @@ class objc_instance(objc_id): # method with name "new", "alloc" should be freed 
       try:
         self._release_func(self)
       except Exception as e:
-        raise (f"tinygrad/metal: ERROR releasing {self!r}: {e}")
+        raise RuntimeError(f"tinygrad/metal: ERROR releasing {self!r}: {e}")
 
 class MTLResourceOptions:
   MTLResourceCPUCacheModeDefaultCache = 0
@@ -216,7 +216,7 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
       try:
         self._release_func(opaque.buf)
       except Exception as e:
-        raise (f"tinygrad/metal: ERROR releasing buffer in MetalAllocator: {e}")
+        raise RuntimeError(f"tinygrad/metal: ERROR releasing buffer in MetalAllocator: {e}")
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = msg("commandBuffer", objc_instance)(src_dev.mtl_queue)
@@ -237,7 +237,7 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     msg("setLabel:")(src_command_buffer, to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
     msg("commit")(src_command_buffer)
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
-    #synchronize source right after appending
+    src_dev.synchronize()
   def _cp_mv(self, dst, src, prof_desc):
     with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
