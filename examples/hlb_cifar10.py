@@ -20,8 +20,6 @@ cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
 
 BS, STEPS = getenv("BS", 512), getenv("STEPS", 1000)
-STEPSN = getenv("STEPSN", 8)
-
 EVAL_BS = getenv("EVAL_BS", BS)
 GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
 assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
@@ -282,7 +280,7 @@ def train_cifar():
 
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
-      for i in range(0, X_shuffled.shape[0], STEPSN):
+      for i in range(0, X_shuffled.shape[0]):
         # pad the last batch  # TODO: not correct for test
         x_b = X_shuffled[i]
         y_b = Y_shuffled[i]
@@ -291,7 +289,7 @@ def train_cifar():
         x = x_b.contiguous()
         y = y_b.contiguous()
 
-        step += STEPSN
+        step += 1
         yield x, y
       epoch += 1
       if not is_train: break
@@ -460,7 +458,7 @@ def train_cifar():
       #  53  221.74 ms run,    2.22 ms python,  219.52 ms CL,  803.39 loss, 0.000807 LR, 4.66 GB used,   3042.49 GFLOPS,    674.65 GOPS
       print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
       st = cl
-      i += STEPSN
+      i += 1
 
   # verify eval acc
   if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):
