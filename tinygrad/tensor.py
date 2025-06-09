@@ -250,12 +250,13 @@ class Tensor(MathTrait):
     # create the schedule
     schedule, var_vals = create_schedule_with_vars(becomes_map[big_sink])
     schedule = memory_planner(schedule)
-    if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms")
 
     # apply final map to tensors
     remove_assign_map = {u:u.buf_uop for u in becomes_map[big_sink].toposort() if u.op is Ops.ASSIGN}
     for k,v in becomes_map.items(): remove_assign_map[k] = remove_assign_map.get(v,v)
     _apply_map_to_tensors(remove_assign_map, name="Apply Schedule Map")
+
+    if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms")
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
