@@ -1955,7 +1955,7 @@ class Tensor(MathTrait):
     0x8000000000008009, 0x8a, 0x88, 0x80008009, 0x8000000a, 0x8000808b, 0x800000000000008b, 0x8000000000008089, 0x8000000000008003,
     0x8000000000008002, 0x8000000000000080, 0x800a, 0x800000008000000a, 0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008)]
 
-    rate, dsbyte = { "sha3_224": (144, 6), "sha3_256": (136, 6), "shake_128": (168, 31) }[cfg] if isinstance(cfg, str) else cfg
+    rate, dsbyte = {"sha3_224": (144, 6), "sha3_256": (136, 6), "shake_128": (168, 31)}[cfg] if isinstance(cfg, str) else cfg
     data, data_pad = self.bitcast(dtypes.uint8).reshape(prod(self.shape[:-1]), self.shape[-1]), rate - (self.shape[-1] * self.dtype.itemsize % rate)
     # pad batches then pad blocks
     data = data.pad((None, (0, data_pad))).reshape(data.shape[0], -1, rate).pad((None, None, (0, 200 - rate)))
@@ -1976,18 +1976,12 @@ class Tensor(MathTrait):
         p = state.reshape(data.shape[0], 5, 5).transpose(2, 1)
         t1 = (p[:,:,0] ^ p[:,:,1] ^ p[:,:,2] ^ p[:,:,3] ^ p[:,:,4]).roll(-1, 1) # xor reduce
         state = state ^ (t1.roll(2, 1).bitwise_xor((t1 << 1) | (t1 >> 63)).unsqueeze(2).expand((data.shape[0], -1, 5)).transpose(2, 1).flatten(1))
-        print("a", state.reshape(2, 25).numpy())
         # ρ and π steps
         state = state[:, reorder_indexes]
-        print("b", state.reshape(2, 25).numpy())
         state = (state * rot_offsets_v0).bitwise_or(state // rot_offsets_v1).reshape(data.shape[0], 5, 5)
-        print("c", state.reshape(2, 25).numpy())
         # χ and ι step
         state = state.bitwise_xor((~state.roll(-1, 2)) & state.roll(-2, 2)).flatten(1)
-        print("d", state.reshape(2, 25).numpy())
-        print(rnd_const_masks[0].shape)
         state = state ^ rnd_const_masks[i].unsqueeze(0).expand(data.shape[0], 25)
-        print("e", state.reshape(2, 25).numpy())
     return state.bitcast(dtypes.uint8)[:, :(200 - rate) // 2].reshape(*self.shape[:-1], (200 - rate) // 2)
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
