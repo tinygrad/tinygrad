@@ -3,7 +3,7 @@ import functools, operator, itertools
 from dataclasses import dataclass
 from typing import Optional, cast, Sequence
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop, Ops
+from tinygrad.uop.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop, Ops, ssimplify
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
 
 @functools.cache
@@ -51,7 +51,7 @@ def _reshape_mask(_mask:Optional[tuple[tuple[sint, sint], ...]], old_shape:tuple
   curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
 
   while len(new_mask) < len(new_shape):
-    (l, r), next_stride = mask, new_dim * curr_stride
+    (l, r), next_stride = mask, ssimplify(new_dim * curr_stride)
 
     # need to split mask
     if old_dim == next_stride: # simply copy the mask and get next batch for merging
@@ -66,7 +66,7 @@ def _reshape_mask(_mask:Optional[tuple[tuple[sint, sint], ...]], old_shape:tuple
       next_mask = next(r_masks, (0, 1))
       # combine if the mask can unfold continuously
       if mask != (0, old_dim) and l != r and next_mask[1] - next_mask[0] != 1: return None
-      mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
+      mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), ssimplify(old_dim * next(r_shape, 1))
 
   return tuple(reversed(new_mask))
 
@@ -301,9 +301,6 @@ class View:
         if si != so: raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
       # all dimensions matched, return the new view directly
       return View(new_shape, self.strides, self.offset, self.mask, self.contiguous)
-
-    # TODO: reshape from symbolic to symbolic is incorrect so skip merging for now. reshape to (3*x,) vs to (x*3,) behave differently
-    if not self_all_int and not all_int(new_shape): return None
 
     r_strides, r_new_shape = [], reversed(new_shape)
     for merged_size, new_stride, real_size in reversed(merge_dims(self.shape, self.strides, self.mask)):
