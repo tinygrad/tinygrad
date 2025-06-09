@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Sequence
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
@@ -997,23 +997,46 @@ class RewriteContext:
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
 
-  def top_down_rewrite(self, root: UOp) -> UOp:
-    stack: list[tuple[UOp, int, UOp|None]] = [(root, 0, None)]
+  def top_down_rewrite(self, root:UOp) -> UOp:
+    stack: collections.deque[tuple[UOp, int, UOp|None]] = collections.deque([(root, 0, None)])
     while stack:
       n, stage, repl = stack.pop()
-      if n in self.replace: continue
-
+      if n in self.replace: continue  # skip any nodes we have seen
       if stage == 0:
+        # work on this nodes parents before rewriting this node
         stack.append((n, 1, None))
-        stack.extend([(x, 0, None) for x in reversed(n.src)])
+        for x in reversed(n.src): stack.append((x, 0, None))
       elif stage == 1:
+        # do the rewrite of this node
         new_src = tuple([self.replace[x] for x in n.src])
         new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
         if new_n is None: self.replace[n] = n
-        else: stack.extend([(n, 2, new_n), (new_n, 0, None)])
-      else:
-        self.replace[n] = self.replace[cast(UOp, repl)]
+        else:
+          stack.append((n, 2, new_n))     # n will be replaced with whatever new_n is replaced with
+          stack.append((new_n, 0, None))  # process new_n like normal
+      else: self.replace[n] = self.replace[cast(UOp, repl)]
+    return self.replace[root]
 
+  def bottom_up_rewrite(self, root:UOp) -> UOp:
+    stack: collections.deque[tuple[UOp, int, UOp|None]] = collections.deque([(root, 0, None)])
+    while stack:
+      n, stage, repl = stack.pop()
+      if n in self.replace: continue  # skip any nodes we have seen
+      if stage == 0:
+        # rewrite this node right away, then work on its parents
+        new_n = self.pm.fixed_point_rewrite(n, self.ctx)
+        stack.append((n, 1, new_n))
+        for x in reversed(new_n.src): stack.append((x, 0, None))
+      elif stage == 1:
+        # check if node srcs were rewritten, if not we're done, otherwise add it back
+        new_n = cast(UOp, repl)
+        new_src = tuple([self.replace[x] for x in new_n.src])
+        if new_src == new_n.src: self.replace[n] = new_n
+        else:
+          new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg)
+          stack.append((n, 2, new_src_n))
+          stack.append((new_src_n, 0, None))
+      else: self.replace[n] = self.replace[cast(UOp, repl)]
     return self.replace[root]
 
   """
@@ -1023,47 +1046,13 @@ class RewriteContext:
     new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
     self.replace[n] = ret = n if new_n is None else self.top_down_rewrite(new_n)
     return ret
-  """
-
-  """
-  def bottom_up_rewrite(self, root: UOp) -> UOp:
-    stack: list[tuple[UOp, int, UOp | None]] = [(root, 0, None)]
-    while stack:
-      node, stage, repl = stack.pop()
-
-      # ---------------- Stage 0: local fixed-point rewrite -------------
-      if stage == 0:
-        if node in self.replace: continue                                 # already done
-
-        # ---- copy of the recursive fp-loop ----------------------------
-        new_n: UOp | None = node
-        while new_n is not None: last_n, new_n = new_n, self.pm.rewrite(new_n, self.ctx)
-        # ----------------------------------------------------------------
-
-        stack.append((node, 1, last_n))                                   # come back later
-        stack.extend((child, 0, None) for child in reversed(last_n.src))  # process children L→R
-
-      # ---------------- Stage 1: children finished ---------------------
-      elif stage == 1:
-        last_n = cast(UOp, repl)
-        new_src = tuple(self.replace[c] for c in last_n.src)
-        new_n  = last_n if new_src == last_n.src else UOp(last_n.op, last_n.dtype, new_src, last_n.arg)
-
-        if new_src == last_n.src: self.replace[node] = last_n                  # no child change
-        elif new_n in self.replace: self.replace[node] = self.replace[new_n]   # replacement done
-        else: stack.extend([(node, 2, new_n), (new_n, 0, None)])               # defer until new_n solved
-
-      # ---------------- Stage 2: deferred mapping ----------------------
-      else: self.replace[node] = self.replace[cast(UOp, repl)]                # stage == 2
-
-    return self.replace[root]
-  """
   def bottom_up_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_n = self.pm.fixed_point_rewrite(n, self.ctx)
     new_src = tuple([self.bottom_up_rewrite(x) for x in new_n.src])
     self.replace[n] = ret = new_n if new_src == new_n.src else self.bottom_up_rewrite(UOp(new_n.op, new_n.dtype, new_src, new_n.arg))
     return ret
+  """
 
 @track_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> UOp:
