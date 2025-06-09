@@ -990,12 +990,58 @@ class RewriteContext:
     self.pm: PatternMatcher = pm
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
+  # non-recursive
+  def top_down_rewrite(self, root: UOp) -> UOp:
+    stack: list[tuple[UOp, int]] = [(root, 0)]   # (node, stage)
+    pending: dict[UOp, UOp] = {}                 # node  -> replacement­_candidate
+
+    while stack:
+      node, stage = stack.pop()
+
+      # Stage 0: first time we see this node --------------------------
+      if stage == 0:
+        if node in self.replace:                        # already processed
+          continue
+        # Push a post-processing frame, then its children
+        stack.append((node, 1))
+        for child in reversed(node.src):                # reversed → original L-R order
+          if child not in self.replace:
+            stack.append((child, 0))
+
+      # Stage 1: all children done – compute local rewrite -----------
+      elif stage == 1:
+        new_src = tuple(self.replace[c] for c in node.src)
+
+        # Same logic as in the recursive code
+        new_n = self.pm.rewrite(node, self.ctx) if new_src == node.src else UOp(node.op, node.dtype, new_src, node.arg)
+
+        if new_n is None:                               # no change
+          self.replace[node] = node
+        else:
+          # Need final result of rewriting *new_n* before we
+          # know the final mapping for *node*
+          if new_n in self.replace:                   # already done
+            self.replace[node] = self.replace[new_n]
+          else:
+            pending[node] = new_n
+            # Stage 2 will run *after* new_n is processed
+            stack.append((node, 2))
+            stack.append((new_n, 0))
+
+      # Stage 2: new_n finished – finalise mapping -------------------
+      else:  # stage == 2
+        new_n = pending.pop(node)
+        self.replace[node] = self.replace[new_n]
+
+    return self.replace[root]
+  """
   def top_down_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_src = tuple([self.top_down_rewrite(x) for x in n.src])
     new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
     self.replace[n] = ret = n if new_n is None else self.top_down_rewrite(new_n)
     return ret
+  """
   def bottom_up_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_n: UOp|None = n
