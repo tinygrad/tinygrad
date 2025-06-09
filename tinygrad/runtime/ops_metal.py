@@ -9,11 +9,22 @@ class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response 
   def __eq__(self, other): return self.value == other.value
 
 class objc_instance(objc_id): # method with name "new", "alloc" should be freed after use
+  def __init__(self, value=None):
+    super().__init__(value)
+    try:
+      self._release_func = msg("release") if msg is not None else None
+    except Exception:
+      self._release_func = None
   def __del__(self):
     # CPython doesn't make any guarantees about order in which globals (like `msg` or `libobjc`) are destroyed when the interpreter shuts down
     # https://github.com/tinygrad/tinygrad/pull/8949 triggered the unlucky ordering which lead to a bunch of errors at exit
     # TODO: Why isn't `sys.is_finalizing` working?
-    if msg is not None and libobjc is not None: msg("release")(self)
+    if hasattr(self, '_release_func') and self._release_func is not None:
+      try:
+        self._release_func(self)
+      except Exception:
+        # Silently ignore errors during shutdown
+        pass
 
 class MTLResourceOptions:
   MTLResourceCPUCacheModeDefaultCache = 0
