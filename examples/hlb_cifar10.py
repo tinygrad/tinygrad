@@ -7,10 +7,10 @@ import random, time
 import numpy as np
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
-from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit, Variable
+from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
-from tinygrad.helpers import Context, Profiling, BEAM, WINO, getenv, colored, prod
+from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
 from extra.bench_log import BenchEvent, WallTimeEvent
 
 # dtypes.default_float = dtypes.half
@@ -204,7 +204,7 @@ def train_cifar():
     idx_y = Tensor.arange(H, dtype=dtypes.int32).reshape((1,1,H,1))
     return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
 
-  def make_square_mask2(shape, mask_size) -> Tensor:
+  def make_random_crop_indices(shape, mask_size) -> Tensor:
     BS, _, H, W = shape
     low_x = Tensor.randint(BS, low=0, high=W-mask_size).reshape(BS,1,1,1)
     low_y = Tensor.randint(BS, low=0, high=H-mask_size).reshape(BS,1,1,1)
@@ -212,8 +212,8 @@ def train_cifar():
     idx_y = Tensor.arange(mask_size, dtype=dtypes.int32).reshape((1,1,mask_size,1))
     return low_x.contiguous(), low_y.contiguous(), idx_x.contiguous(), idx_y.contiguous()
 
-  def random_crop2(X:Tensor, crop_size=32):
-    Xs, Ys, Xi, Yi = make_square_mask2(X.shape, crop_size)
+  def random_crop(X:Tensor, crop_size=32):
+    Xs, Ys, Xi, Yi = make_random_crop_indices(X.shape, crop_size)
     return X.gather(-1, (Xs + Xi).expand(-1, 3, X.shape[2], -1)).gather(-2, ((Ys+Yi).expand(-1, 3, crop_size, crop_size))).contiguous()
 
   def rand_flip(X:Tensor)->Tensor:
@@ -236,7 +236,7 @@ def train_cifar():
   def augment(X, Y, step):
     X_augmented, Y_augmented = X, Y
     if getenv("RANDOM_CROP", 1):
-      X_augmented = random_crop2(X_augmented, crop_size=32)
+      X_augmented = random_crop(X_augmented, crop_size=32)
     if getenv("RANDOM_FLIP", 1):
       X_augmented = rand_flip(X_augmented)
     if getenv("CUTMIX", 1):
