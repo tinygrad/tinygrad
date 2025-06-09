@@ -1140,7 +1140,9 @@ class Tensor(MathTrait):
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
         case slice():
           if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
-          if all(isinstance(s, int) or s is None for s in (index.start,index.stop,index.step)):
+          if all(s is None for s in (index.start,index.stop,index.step)):
+            boundary, stride = [0, size], 1
+          elif all(isinstance(s, int) or s is None for s in (index.start,index.stop,index.step)):
             # handle int slicing
             *boundary, stride = index.indices(cast(SupportsIndex, size))
             if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
