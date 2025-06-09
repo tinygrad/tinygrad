@@ -997,45 +997,30 @@ class RewriteContext:
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
 
-  def top_down_rewrite(self, root:UOp) -> UOp:
+  def unified_rewrite(self, root:UOp, bottom_up=False) -> UOp:
     stack: collections.deque[tuple[UOp, int, UOp|None]] = collections.deque([(root, 0, None)])
     while stack:
       n, stage, repl = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
       if stage == 0:
-        # work on this nodes parents before rewriting this node
-        stack.append((n, 1, None))
-        for x in reversed(n.src): stack.append((x, 0, None))
-      elif stage == 1:
-        # do the rewrite of this node
-        new_src = tuple([self.replace[x] for x in n.src])
-        new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
-        if new_n is None: self.replace[n] = n
-        else:
-          stack.append((n, 2, new_n))     # n will be replaced with whatever new_n is replaced with
-          stack.append((new_n, 0, None))  # process new_n like normal
-      else: self.replace[n] = self.replace[cast(UOp, repl)]
-    return self.replace[root]
-
-  def bottom_up_rewrite(self, root:UOp) -> UOp:
-    stack: collections.deque[tuple[UOp, int, UOp|None]] = collections.deque([(root, 0, None)])
-    while stack:
-      n, stage, repl = stack.pop()
-      if n in self.replace: continue  # skip any nodes we have seen
-      if stage == 0:
-        # rewrite this node right away, then work on its parents
-        new_n = self.pm.fixed_point_rewrite(n, self.ctx)
+        # if bottom up, we rewrite this node early. in both cases, we add parents to the stack
+        new_n = self.pm.fixed_point_rewrite(n, self.ctx) if bottom_up else n
         stack.append((n, 1, new_n))
         for x in reversed(new_n.src): stack.append((x, 0, None))
       elif stage == 1:
-        # check if node srcs were rewritten, if not we're done, otherwise add it back
+        # if srcs changed from rewrites, construct a new UOp with the new srcs.
         new_n = cast(UOp, repl)
         new_src = tuple([self.replace[x] for x in new_n.src])
-        if new_src == new_n.src: self.replace[n] = new_n
+        if new_src == new_n.src:
+          # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node
+          if bottom_up or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
+            self.replace[n] = new_n
+            continue
         else:
           new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg)
-          stack.append((n, 2, new_src_n))
-          stack.append((new_src_n, 0, None))
+        # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
+        stack.append((n, 2, new_src_n))
+        stack.append((new_src_n, 0, None))
       else: self.replace[n] = self.replace[cast(UOp, repl)]
     return self.replace[root]
 
@@ -1057,14 +1042,14 @@ class RewriteContext:
 @track_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> UOp:
   rewrite_ctx = RewriteContext(pm, ctx)
-  return rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.top_down_rewrite(sink)
+  return rewrite_ctx.unified_rewrite(sink, bottom_up)
 
 @track_matches
 def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, input_map:dict[UOp, UOp]|None=None) -> dict[UOp, UOp]:
   rewrite_ctx = RewriteContext(pm, ctx)
   new_map: dict[UOp, UOp] = {}
   for k in sink.toposort():
-    new_map[k] = v = rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)
+    new_map[k] = v = rewrite_ctx.unified_rewrite(k, bottom_up=bottom_up)
     if k.metadata is not None: all_metadata[v] = tuple(dedup(all_metadata.get(v, ())))+k.metadata
   if input_map is not None:
     for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
