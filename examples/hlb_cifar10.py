@@ -274,10 +274,7 @@ def train_cifar():
       pad = pad_ceil(X.shape[0], BS)
       order = Tensor.randperm(X.shape[0], device=X.device)
       order = Tensor.cat(order, Tensor.randint(pad, high=X.shape[0], device=X.device)).reshape(-1, BS).contiguous()
-      if is_train:
-        X_shuffled, Y_shuffled = X[order], Y[order]
-      else:
-        X_shuffled, Y_shuffled = X, Y
+      X_shuffled, Y_shuffled = X[order], Y[order]
 
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
