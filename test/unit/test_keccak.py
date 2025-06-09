@@ -40,10 +40,10 @@ class TestKeccak(unittest.TestCase):
     self.assertEqual(bytes(out.tolist()), bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
 
   def test_variable_bs(self):
-    # bs = UOp.variable("bs", 1, 4096).bind(1)
-    # data = Tensor([b"abc"], dtype=dtypes.uint8)
-    # out = data.reshape(bs, data.shape[-1]).keccak().reshape(1, 32)
-    # self.assertEqual(bytes(out[0].tolist()), bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
+    bs = UOp.variable("bs", 1, 4096).bind(1)
+    data = Tensor([b"abc"], dtype=dtypes.uint8)
+    out = data.reshape(bs, data.shape[-1]).keccak().reshape(1, 32)
+    self.assertEqual(bytes(out[0].tolist()), bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
 
     bs = UOp.variable("bs", 1, 4096).bind(2)
     data = Tensor([b"abc", b"abc"], dtype=dtypes.uint8)
