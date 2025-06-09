@@ -207,6 +207,9 @@ class MetalBuffer:
   def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
 
 class MetalAllocator(LRUAllocator[MetalDevice]):
+  def __init__(self, dev: MetalDevice):
+    super().__init__(dev)
+    self._release_func = msg("release")
   def _alloc(self, size:int, options) -> MetalBuffer:
     if options.external_ptr: return MetalBuffer(objc_id(options.external_ptr), size)
 
@@ -214,7 +217,12 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     ret = msg("newBufferWithLength:options:", objc_id)(self.dev.sysdevice, ctypes.c_ulong(size), MTLResourceOptions.MTLResourceStorageModeShared)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
-  def _free(self, opaque:MetalBuffer, options): msg("release")(opaque.buf)
+  def _free(self, opaque:MetalBuffer, options):
+    if hasattr(self, '_release_func') and self._release_func is not None:
+      try:
+        self._release_func(opaque.buf)
+      except Exception as e:
+        print(f"tinygrad/metal: ERROR releasing buffer in MetalAllocator: {e}")
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = msg("commandBuffer", objc_instance)(src_dev.mtl_queue)
