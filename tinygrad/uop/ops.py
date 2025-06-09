@@ -1000,10 +1000,10 @@ class RewriteContext:
     stack: list[tuple[UOp, int, UOp | None]] = [(root, 0, None)]
     while stack:
       node, stage, repl = stack.pop()
+      if node in self.replace: continue                                       # already rewritten, we're done
 
       # ---------------- Stage 0: first time we see the node ----------
       if stage == 0:
-        if node in self.replace: continue                                     # already rewritten, we're done
         stack.append((node, 1, None))                                         # come back after parents
         stack.extend([(parent, 0, None) for parent in reversed(node.src)])    # keep L->R order for parents
 
@@ -1020,6 +1020,7 @@ class RewriteContext:
 
     return self.replace[root]
 
+  """
   def bottom_up_rewrite(self, root: UOp) -> UOp:
     stack: list[tuple[UOp, int, UOp | None]] = [(root, 0, None)]
     while stack:
@@ -1051,7 +1052,7 @@ class RewriteContext:
       else: self.replace[node] = self.replace[cast(UOp, repl)]                # stage == 2
 
     return self.replace[root]
-
+  """
   """
   def top_down_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
@@ -1059,13 +1060,13 @@ class RewriteContext:
     new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
     self.replace[n] = ret = n if new_n is None else self.top_down_rewrite(new_n)
     return ret
+  """
   def bottom_up_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_n = self.pm.fixed_point_rewrite(n, self.ctx)
     new_src = tuple([self.bottom_up_rewrite(x) for x in new_n.src])
     self.replace[n] = ret = new_n if new_src == new_n.src else self.bottom_up_rewrite(UOp(new_n.op, new_n.dtype, new_src, new_n.arg))
     return ret
-  """
 
 @track_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> UOp:
