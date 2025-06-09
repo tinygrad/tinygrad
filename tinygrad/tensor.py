@@ -227,11 +227,10 @@ class Tensor(MathTrait):
     NOTE: Kernelize can be called multiple times on a Tensor
     """
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
-
-    # verify Tensors match the spec
     if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
-
     becomes_map = get_kernelize_map(big_sink)
+
+    # apply final map to tensors
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
     return self
 
@@ -242,17 +241,21 @@ class Tensor(MathTrait):
     NOTE: A Tensor can only be scheduled once.
     """
     st = time.perf_counter()
-    self.kernelize(*lst)
-    sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
-    # remove all ASSIGNs, after scheduling, the tensors are just buffers
-    remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.ASSIGN}
-    _apply_map_to_tensors(remove_assign_map, name="Remove Assigns")
+    # copied from kernelize
+    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
+    becomes_map = get_kernelize_map(big_sink)
 
     # create the schedule
-    schedule, var_vals = create_schedule_with_vars(sink)
+    schedule, var_vals = create_schedule_with_vars(becomes_map[big_sink])
     schedule = memory_planner(schedule)
     if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms")
+
+    # apply final map to tensors
+    remove_assign_map = {u:u.buf_uop for u in becomes_map[big_sink].toposort() if u.op is Ops.ASSIGN}
+    for k,v in becomes_map.items(): remove_assign_map[k] = remove_assign_map.get(v,v)
+    _apply_map_to_tensors(remove_assign_map, name="Apply Schedule Map")
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
