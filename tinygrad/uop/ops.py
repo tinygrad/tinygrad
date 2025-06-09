@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Sequence
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
@@ -998,20 +998,18 @@ class RewriteContext:
     self.replace: dict[UOp, UOp] = {}
 
   def unified_rewrite(self, root:UOp, bottom_up=False) -> UOp:
-    stack: collections.deque[tuple[UOp, int, UOp|None]] = collections.deque([(root, 0, None)])
+    stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
     while stack:
-      n, stage, repl = stack.pop()
+      n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
       if stage == 0:
         # if bottom up, we rewrite this node early. in both cases, we add parents to the stack
-        new_n = self.pm.fixed_point_rewrite(n, self.ctx) if bottom_up else n
+        if bottom_up: new_n = self.pm.fixed_point_rewrite(new_n, self.ctx)
         stack.append((n, 1, new_n))
-        for x in reversed(new_n.src): stack.append((x, 0, None))
+        for x in reversed(new_n.src): stack.append((x, 0, x))
       elif stage == 1:
         # if srcs changed from rewrites, construct a new UOp with the new srcs.
-        new_n = cast(UOp, repl)
-        new_src = tuple([self.replace[x] for x in new_n.src])
-        if new_src == new_n.src:
+        if (new_src:=tuple([self.replace[x] for x in new_n.src])) == new_n.src:
           # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node
           if bottom_up or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
             self.replace[n] = new_n
@@ -1020,8 +1018,8 @@ class RewriteContext:
           new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg)
         # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
         stack.append((n, 2, new_src_n))
-        stack.append((new_src_n, 0, None))
-      else: self.replace[n] = self.replace[cast(UOp, repl)]
+        stack.append((new_src_n, 0, new_src_n))
+      else: self.replace[n] = self.replace[new_n]
     return self.replace[root]
 
   """
