@@ -998,21 +998,54 @@ class RewriteContext:
       # ---------------- Stage 0: first time we see the node ----------
       if stage == 0:
         if node in self.replace: continue                                     # already rewritten, we're done
-        stack.append((node, 1, None))                                         # come back after children
-        stack.extend([(child, 0, None) for child in reversed(node.src)])      # keep L->R order for children
+        stack.append((node, 1, None))                                         # come back after parents
+        stack.extend([(parent, 0, None) for parent in reversed(node.src)])    # keep L->R order for parents
 
-      # ---------------- Stage 1: children done, try local rewrite ----
+      # ---------------- Stage 1: parents done, try local rewrite ----
       elif stage == 1:
         new_src = tuple(self.replace[c] for c in node.src)
         new_n = self.pm.rewrite(node, self.ctx) if new_src == node.src else UOp(node.op, node.dtype, new_src, node.arg)
         if new_n is None: self.replace[node] = node                           # no change
-        elif new_n in self.replace: self.replace[node] = self.replace[new_n]  # replacement already done
+        elif new_n in self.replace: self.replace[node] = self.replace[new_n]  # replacement already done, just use it
         else: stack.extend([(node, 2, new_n), (new_n, 0, None)])              # defer final mapping until *new_n* is fully processed
 
       # ---------------- Stage 2: deferred replacement is ready -------
       else: self.replace[node] = self.replace[cast(UOp, repl)]                # stage == 2
 
     return self.replace[root]
+
+  def bottom_up_rewrite(self, root: UOp) -> UOp:
+    stack: list[tuple[UOp, int, UOp | None]] = [(root, 0, None)]
+    while stack:
+      node, stage, repl = stack.pop()
+
+      # ---------------- Stage 0: local fixed-point rewrite -------------
+      if stage == 0:
+        if node in self.replace: continue                                 # already done
+
+        # ---- copy of the recursive fp-loop ----------------------------
+        new_n: UOp | None = node
+        while new_n is not None: last_n, new_n = new_n, self.pm.rewrite(new_n, self.ctx)
+        # ----------------------------------------------------------------
+
+        stack.append((node, 1, last_n))                                   # come back later
+        stack.extend((child, 0, None) for child in reversed(last_n.src))  # process children L→R
+
+      # ---------------- Stage 1: children finished ---------------------
+      elif stage == 1:
+        last_n = cast(UOp, repl)
+        new_src = tuple(self.replace[c] for c in last_n.src)
+        new_n  = last_n if new_src == last_n.src else UOp(last_n.op, last_n.dtype, new_src, last_n.arg)
+
+        if new_src == last_n.src: self.replace[node] = last_n                  # no child change
+        elif new_n in self.replace: self.replace[node] = self.replace[new_n]   # replacement done
+        else: stack.extend([(node, 2, new_n), (new_n, 0, None)])               # defer until new_n solved
+
+      # ---------------- Stage 2: deferred mapping ----------------------
+      else: self.replace[node] = self.replace[cast(UOp, repl)]                # stage == 2
+
+    return self.replace[root]
+
   """
   def top_down_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
@@ -1020,7 +1053,6 @@ class RewriteContext:
     new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
     self.replace[n] = ret = n if new_n is None else self.top_down_rewrite(new_n)
     return ret
-  """
   def bottom_up_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_n: UOp|None = n
@@ -1028,6 +1060,7 @@ class RewriteContext:
     new_src = tuple([self.bottom_up_rewrite(x) for x in last_n.src])
     self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
     return ret
+  """
 
 @track_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> UOp:
