@@ -69,7 +69,7 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight: list[Any] = []
     self.timeline_signal = msg("newSharedEvent", objc_instance)(self.sysdevice)
     self.timeline_value = 0
-    self.timeline_lock = threading.Lock()
+    self._timeline_lock = threading.Lock()
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
 
@@ -88,7 +88,7 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight.clear()
 
   def get_next_timeline_values(self) -> tuple[int, int]:
-    with self.timeline_lock:
+    with self._timeline_lock:
       current_value = self.timeline_value
       self.timeline_value += 2
       return current_value, current_value+1
