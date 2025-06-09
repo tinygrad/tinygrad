@@ -226,14 +226,12 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     msg("endEncoding")(encoder)
 
     if src_dev != dest_dev:
-      msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
-      msg("encodeWaitForEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value+1)
+      msg("encodeWaitForEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
       dest_command_buffer = msg("commandBuffer", objc_instance)(dest_dev.mtl_queue)
-      msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
-      msg("encodeSignalEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value+1)
+      msg("encodeSignalEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
       msg("commit")(dest_command_buffer)
-      src_dev.timeline_value+=2
       dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
+      src_dev.timeline_value+=1
     msg("setLabel:")(src_command_buffer, to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
     msg("commit")(src_command_buffer)
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
