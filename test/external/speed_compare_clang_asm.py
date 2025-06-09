@@ -29,7 +29,7 @@ if __name__ == "__main__":
 
     bufs = bufs_from_lin(lin)
 
-    # x86 compile
+    # asm compile
     dev.compiler = ClangJITCompiler(lang_args=['assembler'] + (['-masm=intel']) if isinstance(asm, X86Renderer) else [])
     lin = ast_str_to_lin(ast, opts=asm)
     lin.apply_opts(hand_coded_optimizations(lin))
@@ -54,10 +54,3 @@ if __name__ == "__main__":
     average_tm_asm += min(tm_asm)
     ratio = min(tm_asm)/min(tm_clang)
     print(f"{average_tm_asm/average_tm_clang:5.2f}x -- {num:4d} {colorize_float(ratio)}  {min(tm_asm)*1e6:7.2f} us", lin.name)
-    #if ratio > 1.5:
-    #  def fix(x): return x.replace('\t', ' ').strip()
-    #  ll1, ll2 = clang_prg.lib.decode().split('\n'), x86_prg.lib.decode().split('\n')
-    #  if single != -1:
-    #    for ln, (l1, l2) in enumerate(itertools.zip_longest(ll1, ll2, fillvalue='')):
-    #      print(f"{ln:5d} | {fix(l1):80s} | {fix(l2):80s}")
-    #  print(len(ll1), len(ll2), "RATIO", ratio, "us", min(tm_x86)*1e6)

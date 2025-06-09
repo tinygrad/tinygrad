@@ -104,15 +104,20 @@ class AsmRenderer(Renderer):
     spill_place: dict[UOp, UOp] = {}
     stack_size: int = 0
     inst_map: dict[UOp, list[str]] = {}
-    # interval in which a var is live meaning its value is needed,
-    # void dtypes don't hold values, consts aren't instructions, noop and assign use location of src[0]
-    live_range = {self.bypass(var):i for i,u in enumerate(uops) \
-                  for var in (v for v in (u,) + u.src if v.dtype != dtypes.void and v.op != Ops.CONST)}
-    # a var defined before a range and used inside it is needed for the whole range
+    # first pass updates start of range
+    live_range: dict[UOp, list[int]] = {}
     for i,u in enumerate(uops):
-      if u.op is Ops.RANGE:
-        for x in flatten([srcs(x) for x in uops[i:live_range[u]]]):
-          if x in live_range and uops.index(x) < i: live_range[x] = max(live_range[x], live_range[u])
+      # void dtypes don't hold values, consts aren't instructions, noop and assign use location of src[0]
+      u = self.bypass(u)
+      if u.dtype != dtypes.void and u.op != Ops.CONST: live_range[u] = [i, i]
+    # second pass updates end of range, a var defined before a range and used inside it is needed for the whole range
+    ranges: list[UOp] = []
+    for i,u in enumerate(reversed(uops)):
+      for s in (s for s in srcs(u) if s in live_range):
+        end = next((live_range[rng][1] for rng in ranges if live_range[s][0] < live_range[rng][0]), len(uops)-i-1)
+        live_range[s][1] = max(live_range[s][1], end)
+      if u.op is Ops.ENDRANGE: ranges.append(u.src[0])
+      if u.op is Ops.RANGE: ranges.pop()
 
     def reg_class(x:UOp): return regs[x.dtype.scalar()]
     def _alloc(x:UOp, cons:list[str]):
@@ -120,7 +125,8 @@ class AsmRenderer(Renderer):
       if (free:=next((r for r in reg_class(x) if r in cons), None)) is not None: return reg_class(x).pop(reg_class(x).index(free))
       # we choose the var whose next use is the latest, in case no next use we use the uop(endrange) that kills the var
       # this prioritizes vars defined outside loops
-      spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next((j for j,u in enumerate(uops[i:]) if k in srcs(u)), live_range[k]-i))
+      spilled = max([k for k,v in live.items() if v in cons],
+                    key=lambda k: next((j for j,u in enumerate(uops[i:live_range[k][1]]) if k in srcs(u)), live_range[k][1]-i))
       if spilled not in mem:
         nonlocal stack_size
         stack_size += 16
@@ -152,7 +158,7 @@ class AsmRenderer(Renderer):
         if u.arg is not None: name = u.arg.name
         continue
       # free dead registers
-      for v in [v for v in live if live_range[v] < i]: reg_class(v).insert(0, live.pop(v))
+      for v in [v for v in live if live_range[v][1] < i]: reg_class(v).insert(0, live.pop(v))
       # reload necessary vars
       if u.op is Ops.ENDRANGE:
         for k,v in live_at_range.pop(u.src[0], {}).items():
@@ -164,7 +170,7 @@ class AsmRenderer(Renderer):
         if s in loc and loc[s] not in cons:
           # if var first use in range is a load we don't need to reload
           cr = list(live_at_range)[-1] if live_at_range else None
-          if cr is not None and s in live_at_range[cr] and not self.is_reg(loc[s]) and not any(s in srcs(x) for x in uops[uops.index(cr):i-1]):
+          if cr is not None and s in live_at_range[cr] and not self.is_reg(loc[s]) and not any(s in srcs(x) for x in uops[live_range[cr][0]:i-1]):
             live_at_range[cr].pop(s)
           loc[s] = alloc(s, cons)
       # free srcs before assigning destination to coalesce when valid
@@ -176,7 +182,7 @@ class AsmRenderer(Renderer):
           if u.op is Ops.WHERE and s is not u.src[1]: continue
           if u.op is Ops.MULACC and s is not u.src[0]: continue
           if u.op in GroupOp.Binary - {Ops.CMPLT, Ops.CMPNE} and u.dtype in dtypes.ints + (dtypes.bool,) and s is not u.src[0]: continue
-        if s in live and live_range[s] == i: reg_class(s).insert(0, live.pop(s))
+        if s in live and live_range[s][1] == i: reg_class(s).insert(0, live.pop(s))
       # assign destination
       if u in live_range: loc[u] = alloc(u, self.constraints(u))
       # save live vars at loop entry
@@ -290,7 +296,6 @@ arm64_matcher = asm_matcher + PatternMatcher([
 class Arm64Renderer(AsmRenderer):
   device = "ARM64"
   has_local = False
-  has_shared = False
   global_max = None
   extra_matcher = arm64_matcher
   string_rewrite = arm64_rewrite
@@ -477,7 +482,6 @@ class X86Renderer(AsmRenderer):
   device = "X86"
   #supports_float4 = False
   has_local = False
-  has_shared = False
   global_max = None
   extra_matcher = x86_matcher
   string_rewrite = x86_rewrite
