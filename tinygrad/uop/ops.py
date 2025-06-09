@@ -1008,13 +1008,13 @@ class RewriteContext:
         stack.append((n, 1, new_n))
         for x in reversed(new_n.src): stack.append((x, 0, x))
       elif stage == 1:
-        # if srcs changed from rewrites, construct a new UOp with the new srcs
         if (new_src:=tuple([self.replace[x] for x in new_n.src])) == new_n.src:
           # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
           if bottom_up or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
             self.replace[n] = new_n
             continue
         else:
+          # if srcs changed from rewrites, construct a new UOp with the new srcs
           new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg)
         # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
         stack.append((n, 2, new_src_n))
