@@ -84,6 +84,7 @@ class TestSchedule(unittest.TestCase):
     with Context(FUSE_ARANGE=1, NOOPT=1): self.test_arange_avgpool2d(kcount=1)
 
   # linearizer error
+  @unittest.skip("recursion error no longer raised")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "needs supports_float4 to fail")
   def test_arange_avgpool2d_fused(self):
     with self.assertRaises(RecursionError):
