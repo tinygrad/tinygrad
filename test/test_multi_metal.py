@@ -5,7 +5,7 @@ from tinygrad.device import Device
 
 # Helper to get available Metal device IDs.
 def get_metal_device_ids():
-  return [d for d in Device.devices if d.startswith("METAL")]
+  return [d for d in Device._devices if d.startswith("METAL")]
 
 @unittest.skipIf(len(get_metal_device_ids()) < 2, "Requires at least two Metal devices")
 class TestMetalMultiDeviceSync(unittest.TestCase):
