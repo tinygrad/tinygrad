@@ -226,6 +226,13 @@ class TestSymbolicExpand(unittest.TestCase):
       a = a + 1
       self.assertTupleEqual(a.shape, (3, vi))
 
+  def test_pad_then_expand_into_symbols(self):
+    vi = Variable("i", 1, 10).bind(3)
+    a = Tensor(1).unsqueeze(0).pad((0, 24)).unsqueeze(0).expand((vi, 25))
+    self.assertEqual(a.shape, (vi, 25))
+    self.assertEqual(a.reshape(25*vi).shape, (vi*25,))
+    self.assertEqual(a.reshape(vi*25).shape, (vi*25,))
+
 class TestSymbolicShrink(unittest.TestCase):
   def test_shrink_symbols(self):
     vi = Variable("i", 1, 5)
