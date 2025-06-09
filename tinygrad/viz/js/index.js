@@ -318,21 +318,21 @@ async function main() {
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
   const step = ctx.steps[currentStep];
-  const cacheKey = `ctx=${currentCtx}&idx=${currentStep}`;
+  const ckey = `ctx=${currentCtx}&idx=${currentStep}`;
   // close any pending event sources
   let activeSrc = null;
   for (const e of evtSources) {
-    if (e.url.split("?")[1] !== cacheKey) e.close();
+    if (e.url.split("?")[1] !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
-  if (cacheKey in cache) {
-    ret = cache[cacheKey];
+  if (ckey in cache) {
+    ret = cache[ckey];
   }
   // if we don't have a complete cache yet we start streaming rewrites in this step
-  if (!(cacheKey in cache) || (cache[cacheKey].length !== step.match_count+1 && activeSrc == null)) {
+  if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
     ret = [];
-    cache[cacheKey] = ret;
-    const eventSource = new EventSource(`/ctxs?ctx=${currentCtx}&idx=${currentStep}`);
+    cache[ckey] = ret;
+    const eventSource = new EventSource(`/ctxs?${ckey}`);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
       if (e.data === "END") return eventSource.close();
