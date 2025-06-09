@@ -20,7 +20,7 @@ class TestArange(unittest.TestCase):
     p = k.to_program()
     print(p.name)
     #print(p.src)
-    ExecItem(CompiledRunner(p), [tt.lazydata.buffer]).run()
+    ExecItem(CompiledRunner(p), [tt.uop.buffer]).run()
     np.testing.assert_equal(tt.numpy(), np.arange(N))
     return p.estimates.ops
 

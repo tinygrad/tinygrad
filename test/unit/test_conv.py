@@ -5,7 +5,7 @@ from tinygrad.helpers import Context
 
 class TestConv(unittest.TestCase):
   def test_simple(self):
-    x = Tensor.ones(1,12,128,256).contiguous().realize()
+    x = Tensor.ones(1,12,16,32).contiguous().realize()
     w = Tensor.ones(32,12,3,3).contiguous().realize()
     ret = x.conv2d(w, stride=(2,2), padding=(1,1)).numpy()
     # it's not 108 around the padding
@@ -14,7 +14,7 @@ class TestConv(unittest.TestCase):
     assert ret[0,0,0,1] == 72
 
   def test_simple_rand(self):
-    x = Tensor.rand(1,12,128,256)
+    x = Tensor.rand(1,12,16,32)
     w = Tensor.rand(32,12,3,3)
     x.conv2d(w, stride=(2,2), padding=(1,1)).numpy()
 
@@ -47,7 +47,7 @@ class TestConv(unittest.TestCase):
     np.testing.assert_allclose(out.relu().numpy(), np.maximum(out.numpy(), 0))
 
   def test_two_binops_no_rerun(self):
-    x = Tensor.randn(1,12,128,256)
+    x = Tensor.randn(1,12,16,32)
     w = Tensor.randn(32,12,3,3)
     out = x.conv2d(w, stride=(2,2), padding=(1,1))
     r1, r2 = out.relu(), (out-1)
@@ -55,7 +55,7 @@ class TestConv(unittest.TestCase):
     np.testing.assert_allclose(r2.numpy(), out.numpy() - 1)
 
   def test_two_overlapping_binops_no_rerun(self):
-    x = Tensor.randn(1,12,128,256)
+    x = Tensor.randn(1,12,16,32)
     w = Tensor.randn(32,12,3,3)
     out = x.conv2d(w, stride=(2,2), padding=(1,1))
     r1, r2 = out.relu(), out.elu()
@@ -72,7 +72,7 @@ class TestConv(unittest.TestCase):
       np.testing.assert_allclose(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)), atol=1e-5)
 
   def test_first_three(self):
-    x = Tensor.rand(1,12,128,256)
+    x = Tensor.rand(1,12,16,32)
 
     w = Tensor.rand(32,12,3,3)
     x = x.conv2d(w, stride=(2,2), padding=(1,1)).elu()
@@ -87,7 +87,7 @@ class TestConv(unittest.TestCase):
     print(x.shape)
 
   def test_elu(self):
-    x = Tensor.rand(1,12,128,256)
+    x = Tensor.rand(1,12,16,32)
 
     w = Tensor.rand(32,12,3,3)
     x = x.conv2d(w, stride=(2,2), padding=(1,1))
@@ -99,13 +99,13 @@ class TestConv(unittest.TestCase):
     x.numpy()
 
   def test_reduce_relu(self):
-    x = Tensor.rand(1,12,128,256)
+    x = Tensor.rand(1,12,16,32)
     x = x.sum(keepdim=True).relu()
     x.numpy()
 
   def test_bias(self):
     from tinygrad.nn import Conv2d
-    x = Tensor.rand(1,12,128,256)
+    x = Tensor.rand(1,12,16,32)
     c = Conv2d(12, 32, 3)
     x = c(x).relu()
     w = Tensor.uniform(32, 1, 3, 3)
@@ -118,14 +118,14 @@ class TestConv(unittest.TestCase):
     (w+x).numpy()
 
   def test_reorder(self):
-    x = Tensor.rand(1,12,128,256)
+    x = Tensor.rand(1,12,16,32)
     w = Tensor.rand(12,12,3,3)
     x = x.conv2d(w, padding=(1,1))
     print(x.shape)
-    x = x.reshape((1, 12, 256, 128))
+    x = x.reshape((1, 12, 32, 16))
     x += 1
     x += 1
-    x = x.reshape((1, 12, 128, 256))
+    x = x.reshape((1, 12, 16, 32))
     x.numpy()
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 from typing import cast
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, unwrap
-from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp
+from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, resolve
 
 # *** allreduce implementation ***
 
@@ -55,18 +55,33 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
-def mselect_reorder_view(ms:UOp, view:UOp, base:UOp):
-  st = unwrap(view.st)
+def _replace_dnum(st, val):
   # replace dnum in ShapeTracker with literal const for this mselect
-  if (dnums:=[x for x in st.vars() if x.arg[0] == '_device_num']):
+  if (dnums:=[x for x in st.vars() if x.op is Ops.DEFINE_VAR and x.arg[0] == '_device_num']):
     assert len(dnums) == 1, f"view must have exactly 0 or 1 dnum, got {dnums}"
-    st = st.substitute({dnums[0]:dnums[0].const_like(ms.arg)})
-  return base.mselect(ms.arg).view(st)
+    st = st.substitute({dnums[0]:dnums[0].const_like(val)})
+  return st
 
 def mstack_reorder_view(ms:UOp):
   args = [x.arg for x in ms.src]
-  assert all_same(args) and len([x for x in args[0].vars() if x.arg[0] == '_device_num']) == 0
+  if not all_same(args) or len([x for x in args[0].vars() if x.arg[0] == '_device_num']) != 0: return None
   return UOp(Ops.MSTACK, ms.dtype, tuple(x.src[0] for x in ms.src)).view(args[0])
+
+def mstack_early_shrink(view:UOp, ms:UOp):
+  if resolve(prod(view.shape) >= prod(ms.shape)) or _replace_dnum(view.st, 0) == view.st: return None
+  ret = []
+  for i, x in enumerate(ms.src):
+    new_view = _replace_dnum(view.st, i)
+    if x.op is Ops.COPY:
+      # if src device doesn't have a renderer, we have to view after the copy
+      # TODO: a way to understand this
+      if x.src[0].device in {"DISK", "NPY"}:
+        ret.append(x.view(new_view))
+      else:
+        ret.append(x.src[0].view(new_view).copy_to_device(x.device))
+    else:
+      ret.append(x.view(new_view).contiguous())
+  return ms.replace(src=tuple(ret))
 
 replace_allreduce = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
@@ -79,9 +94,12 @@ replace_allreduce = PatternMatcher([
   # MSELECT on MSTACK is replaced with nothing
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
   # MSELECT must select a base, if there are views apply them after selecting the base
-  (UPat(Ops.MSELECT, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"),), name="ms"), mselect_reorder_view),
+  (UPat(Ops.MSELECT, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"),), name="ms"), lambda ms, view, base:
+    base.mselect(ms.arg).view(_replace_dnum(unwrap(view.st), ms.arg))),
   # move view through MSTACK
   (UPat(Ops.MSTACK, src=UPat(Ops.VIEW), name="ms"), mstack_reorder_view),
+  # move shrink before MSTACK
+  (UPat(Ops.VIEW, src=(UPat(Ops.MSTACK, name="ms"),), name="view"), mstack_early_shrink),
 ])
 
 # ***** multi functions *****
