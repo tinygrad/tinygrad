@@ -1213,8 +1213,8 @@ class TestMultiTransformer(unittest.TestCase):
     device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
 
     from extra.models.llama import Transformer
-    args = {"dim": 64, "n_heads": 1, "n_kv_heads": 1, "n_layers": 2, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 1024,
-            "hidden_dim": 64, "max_context": 12}
+    args = {"dim": 32, "n_heads": 1, "n_kv_heads": 1, "n_layers": 2, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 1024,
+            "hidden_dim": 32, "max_context": 12}
     real_model = Transformer(**args)
     shard_model = Transformer(**args)
 

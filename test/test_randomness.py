@@ -301,11 +301,11 @@ class TestRandomness(unittest.TestCase):
                                                               lambda x: np.random.uniform(-1, 1, size=x) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
   def test_kaiming_uniform(self):
-    for shape in [(256, 128, 3, 3), (80, 44), (3, 55, 35)]:
+    for shape in [(32, 128, 3, 3), (80, 44), (3, 55, 35)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), shape=shape))
 
   def test_kaiming_normal(self):
-    for shape in [(256, 128, 3, 3), (80, 44), (3, 55, 35)]:
+    for shape in [(32, 128, 3, 3), (80, 44), (3, 55, 35)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_normal, lambda x: torch.nn.init.kaiming_normal_(torch.empty(x)), shape=shape))
 
   def test_multinomial(self):

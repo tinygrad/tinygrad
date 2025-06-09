@@ -169,6 +169,9 @@ function renderMemoryGraph(graph) {
     b.y.push(b.y.at(-1));
   }
   // ** render traces
+  // clear existing groups
+  document.querySelector(".progress-message").style.display = "none";
+  for (c of document.getElementById("render").children) c.innerHTML = "";
   const render = d3.select("#bars");
   const yscale = d3.scaleLinear().domain([0, peak]).range([576, 0]);
   const xscale = d3.scaleLinear().domain([0, timestep]).range([0, 1024]);
@@ -202,10 +205,7 @@ function renderMemoryGraph(graph) {
     d3.select(e.currentTarget).attr("stroke", null).attr("stroke-width", null);
     document.getElementById("current-buf")?.remove()
   });
-  // TODO: add the toposort graph here
-  document.querySelector(".progress-message").style.display = "none";
-  d3.select("#nodes").html("");
-  d3.select("#edges").html("");
+  // TODO: add the kernel line here
   document.getElementById("zoom-to-fit-btn").click();
 }
 
@@ -225,7 +225,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const r = rect("#render");
   if (r.width === 0) return;
   const scale = Math.min(R.width/r.width, R.height/r.height);
-  const [tx, ty] = [R.x+(R.width-r.width*scale)/2, R.y+(R.height-r.height*scale)/2];
+  const [tx, ty] = [R.x+(R.width-r.width*scale)/2-r.left*scale, R.y+(R.height-r.height*scale)/2];
   svg.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
 });
 
@@ -318,21 +318,21 @@ async function main() {
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
   const step = ctx.steps[currentStep];
-  const cacheKey = `ctx=${currentCtx}&idx=${currentStep}`;
+  const ckey = `ctx=${currentCtx}&idx=${currentStep}`;
   // close any pending event sources
   let activeSrc = null;
   for (const e of evtSources) {
-    if (e.url.split("?")[1] !== cacheKey) e.close();
+    if (e.url.split("?")[1] !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
-  if (cacheKey in cache) {
-    ret = cache[cacheKey];
+  if (ckey in cache) {
+    ret = cache[ckey];
   }
   // if we don't have a complete cache yet we start streaming rewrites in this step
-  if (!(cacheKey in cache) || (cache[cacheKey].length !== step.match_count+1 && activeSrc == null)) {
+  if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
     ret = [];
-    cache[cacheKey] = ret;
-    const eventSource = new EventSource(`/ctxs?ctx=${currentCtx}&idx=${currentStep}`);
+    cache[ckey] = ret;
+    const eventSource = new EventSource(`/ctxs?${ckey}`);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
       if (e.data === "END") return eventSource.close();
@@ -346,7 +346,7 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
-  if (ctx.name == "View Memory Graph") {
+  if (step.name == "View Memory Graph") {
     renderMemoryGraph(ret[currentRewrite].graph);
   } else {
     renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);

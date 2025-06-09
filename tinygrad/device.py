@@ -149,9 +149,9 @@ class Buffer:
     return self
   def deallocate(self):
     assert self.is_allocated(), "buffer must be allocated to deallocate"
-    if DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
+    if DEBUG is not None and DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None and (self.options is None or self.options.external_ptr is None):
-      if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
+      if GlobalCounters is not None and not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
     del self._buf
@@ -205,12 +205,15 @@ DeviceType = TypeVar('DeviceType', bound='Compiled')
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator(Generic[DeviceType]):
-  def __init__(self, dev:DeviceType): self.dev: DeviceType = dev
+  def __init__(self, dev:DeviceType):
+    self.dev: DeviceType = dev
+    self.default_buffer_spec: BufferSpec = BufferSpec()
   # overridden in LRUAllocator
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
-    return self._alloc(size, options if options is not None else BufferSpec())
-  def free(self, opaque, size:int, options:Optional[BufferSpec]=None): self._free(opaque, options if options is not None else BufferSpec())
+    return self._alloc(size, options if options is not None else self.default_buffer_spec)
+  def free(self, opaque, size:int, options:Optional[BufferSpec]=None):
+    self._free(opaque, options if options is not None else self.default_buffer_spec)
 
   # implemented by the runtime
   def _alloc(self, size:int, options:BufferSpec): raise NotImplementedError("need alloc")
