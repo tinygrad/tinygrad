@@ -22,8 +22,8 @@ class objc_instance(objc_id): # method with name "new", "alloc" should be freed 
     if hasattr(self, '_release_func') and self._release_func is not None:
       try:
         self._release_func(self)
-      except Exception:
-        raise ("not working as expected unable to release", Exception)
+      except Exception as e:
+        print(f"tinygrad/metal: ERROR releasing {self!r}: {e}")
 
 class MTLResourceOptions:
   MTLResourceCPUCacheModeDefaultCache = 0
