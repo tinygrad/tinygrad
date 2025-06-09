@@ -8,7 +8,6 @@ from tinygrad.uop.spec import type_verify
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(lst:list[UOp]) -> list[UOp]:
-  if not getenv("BLOCK_REORDER", 1): return lst
   in_this_block = set(lst)
   local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
@@ -159,7 +158,8 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
     base_block = UOp(Ops.BLOCKSTART, src=tuple(v), arg=(new_ctx, new_child_ctx))
     srcs.append(add_blockends(base_block, new_ctx, current_ctx))
 
-  lst = block_reorder(lst[::-1])
+  lst = lst[::-1]
+  if getenv("BLOCK_REORDER", 1): lst = block_reorder(lst)
   bb = BasicBlock(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
