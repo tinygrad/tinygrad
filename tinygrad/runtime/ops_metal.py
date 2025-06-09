@@ -23,8 +23,7 @@ class objc_instance(objc_id): # method with name "new", "alloc" should be freed 
       try:
         self._release_func(self)
       except Exception:
-        # Silently ignore errors during shutdown
-        pass
+        raise ("not working as expected unable to release", Exception)
 
 class MTLResourceOptions:
   MTLResourceCPUCacheModeDefaultCache = 0
