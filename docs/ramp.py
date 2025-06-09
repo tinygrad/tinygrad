@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# accompanying video: https://youtu.be/QUry9dHC-bk
+
 # this file is a "ramp" for people new to tinygrad to think about how to approach it
 # it is runnable and editable.
 # whenever you see stuff like DEBUG=2 or CPU=1 discussed, these are environment variables
