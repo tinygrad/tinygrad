@@ -302,6 +302,9 @@ class View:
       # all dimensions matched, return the new view directly
       return View(new_shape, self.strides, self.offset, self.mask, self.contiguous)
 
+    # TODO: reshape from symbolic to symbolic is incorrect so skip merging for now. reshape to (3*x,) vs to (x*3,) behave differently
+    if not self_all_int and not all_int(new_shape): return None
+
     r_strides, r_new_shape = [], reversed(new_shape)
     for merged_size, new_stride, real_size in reversed(merge_dims(self.shape, self.strides, self.mask)):
       # TODO: write with get_contraction
