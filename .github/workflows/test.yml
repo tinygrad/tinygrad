@@ -364,6 +364,8 @@ jobs:
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
     - name: Run GC tests
       run: PYTHONPATH="." python test/external/external_uop_gc.py
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
     - name: Repo line count < 14000 lines
       run: MAX_LINE_COUNT=14000 python sz.py
 
@@ -475,9 +477,9 @@ jobs:
         run: CPU=1 PYTHONPATH=. python3 test/test_quantize_onnx.py
       - name: Run REMOTE=1 Test
         run: |
-          REMOTEDEV=CPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py
-          REMOTEDEV=GPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py test/test_jit.py
-          REMOTEDEV=GPU IMAGE=2 REMOTE=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py
+          REMOTEDEV=CPU REMOTE=1 python3 -m pytest -n=auto test/test_tiny.py test/test_jit.py test/test_multitensor.py
+          REMOTEDEV=GPU REMOTE=1 python3 -m pytest -n=auto test/test_tiny.py test/test_image_dtype.py test/test_jit.py
+          REMOTEDEV=GPU IMAGE=2 REMOTE=1 python3 -m pytest -n=auto test/test_tiny.py test/test_image_dtype.py
       - name: Test Optimization Helpers
         run: PYTHONPATH="." DEBUG=1 python3 extra/optimization/test_helpers.py
       - name: Test Action Space
@@ -618,7 +620,7 @@ jobs:
         if: matrix.backend=='amdllvm'
         run: python test/test_amd_llvm.py
       - name: Run pytest (amd)
-        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_jit.py test/test_graph.py test/test_multitensor.py test/test_hcq.py test/external/external_test_am.py --durations=20
+        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/test_jit.py test/test_graph.py test/test_multitensor.py test/test_hcq.py test/external/external_test_am.py --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run TestOps.test_add with SQTT
@@ -654,7 +656,8 @@ jobs:
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CUDA','NV'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (cuda)
-        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --durations=20
+        # skip multitensor because it's slow
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 

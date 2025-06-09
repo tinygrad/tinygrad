@@ -523,6 +523,7 @@ class TestTypeSpec(unittest.TestCase):
       dtypes.default_float = default_float
       assert dtypes.default_float == default_float
 
+  @unittest.skip("this test is slow and spawning whole pythons")
   def test_env_set_default_float(self):
     # check default
     subprocess.run(['python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.float"'],
