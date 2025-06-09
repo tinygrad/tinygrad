@@ -1958,16 +1958,15 @@ class Tensor(MathTrait):
     rate, dsbyte = { "sha3_224": (144, 6), "sha3_256": (136, 6), "shake_128": (168, 31) }[cfg] if isinstance(cfg, str) else cfg
     data, data_pad = self.bitcast(dtypes.uint8).reshape(prod(self.shape[:-1]), self.shape[-1]), rate - (self.shape[-1] * self.dtype.itemsize % rate)
     # pad batches then pad blocks
-    data = data.pad((None, (0, data_pad))).reshape(data.shape[0], -1, rate).pad((None, None, (0, 200 - rate))).flatten(1)
+    data = data.pad((None, (0, data_pad))).reshape(data.shape[0], -1, rate).pad((None, None, (0, 200 - rate)))
 
     # create pad mask
-    lbe = data.shape[1] + rate - data_pad - 200
-    if data_pad == 1: mb = [(lbe, 0), (1, dsbyte ^ 0x80), (data.shape[-1] - lbe - 1, 0)]
-    else: mb = [(lbe, 0), (1, dsbyte), (data.shape[-1] + rate - lbe - 202, 0), (1, 0x80), (200 - rate, 0)]
-    pad_mask = Tensor.cat(*(Tensor(v, dtype=dtypes.uint8, device=data.device).expand(l) for l, v in mb if l > 0))
+    lbe = (blen := prod(data.shape[1:])) + rate - data_pad - 200
+    if data_pad == 1: mb = [(lbe, 0), (1, dsbyte ^ 0x80), (blen - lbe - 1, 0)]
+    else: mb = [(lbe, 0), (1, dsbyte), (blen + rate - lbe - 202, 0), (1, 0x80), (200 - rate, 0)]
+    pad_mask = Tensor.cat(*(Tensor(v, dtype=dtypes.uint8, device=data.device).expand(l) for l, v in mb if l > 0)).unsqueeze(0)
 
-    data = (data ^ pad_mask).reshape(data.shape[0], -1, 200).bitcast(dtypes.uint64)
-    print(data.reshape(2, 1, 25).numpy())
+    data = (data.flatten(1) ^ pad_mask).reshape(*data.shape[:2], 200).bitcast(dtypes.uint64)
 
     state = Tensor.zeros((data.shape[0], 25), device=self.device, dtype=dtypes.uint64)
     for k in range(int(data.shape[1])):
