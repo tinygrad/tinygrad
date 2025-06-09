@@ -1967,21 +1967,29 @@ class Tensor(MathTrait):
     pad_mask = Tensor.cat(*(Tensor(v, dtype=dtypes.uint8, device=data.device).expand(l) for l, v in mb if l > 0))
 
     data = (data ^ pad_mask).reshape(data.shape[0], -1, 200).bitcast(dtypes.uint64)
+    print(data.reshape(2, 1, 25).numpy())
 
     state = Tensor.zeros((data.shape[0], 25), device=self.device, dtype=dtypes.uint64)
     for k in range(int(data.shape[1])):
       state = state.bitwise_xor(data.shrink((None, (k, k+1), None)).reshape(-1, 25))
       for i in range(24): # f1600
         # θ step
-        p = state.reshape((-1, 5, 5)).transpose(2, 1)
+        p = state.reshape(data.shape[0], 5, 5).transpose(2, 1)
         t1 = (p[:,:,0] ^ p[:,:,1] ^ p[:,:,2] ^ p[:,:,3] ^ p[:,:,4]).roll(-1, 1) # xor reduce
-        state = state ^ (t1.roll(2, 1).bitwise_xor((t1 << 1) ^ (t1 >> 63)).unsqueeze(2).expand((-1, -1, 5)).transpose(2, 1).flatten(1))
+        state = state ^ (t1.roll(2, 1).bitwise_xor((t1 << 1) | (t1 >> 63)).unsqueeze(2).expand((data.shape[0], -1, 5)).transpose(2, 1).flatten(1))
+        print("a", state.reshape(2, 25).numpy())
         # ρ and π steps
-        state = state[:,reorder_indexes]
-        state = (state * rot_offsets_v0).bitwise_or(state // rot_offsets_v1).reshape((-1, 5, 5))
+        state = state[:, reorder_indexes]
+        print("b", state.reshape(2, 25).numpy())
+        state = (state * rot_offsets_v0).bitwise_or(state // rot_offsets_v1).reshape(data.shape[0], 5, 5)
+        print("c", state.reshape(2, 25).numpy())
         # χ and ι step
-        state = state.bitwise_xor((state.roll(shifts=-1, dims=2) ^ -1) & state.roll(shifts=-2, dims=2)).flatten(1) ^ rnd_const_masks[i]
-    return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], self.shape[-1])
+        state = state.bitwise_xor((~state.roll(-1, 2)) & state.roll(-2, 2)).flatten(1)
+        print("d", state.reshape(2, 25).numpy())
+        print(rnd_const_masks[0].shape)
+        state = state ^ rnd_const_masks[i].unsqueeze(0).expand(data.shape[0], 25)
+        print("e", state.reshape(2, 25).numpy())
+    return state.bitcast(dtypes.uint8)[:, :(200 - rate) // 2].reshape(*self.shape[:-1], (200 - rate) // 2)
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
     m = self - self.max(axis=axis, keepdim=True).detach()
