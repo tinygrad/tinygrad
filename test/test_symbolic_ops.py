@@ -175,7 +175,6 @@ class TestSymbolicOps(unittest.TestCase):
       expected = a[3:5, i:i+2].numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  @unittest.expectedFailure
   def test_expand_padded(self):
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)

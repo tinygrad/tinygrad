@@ -260,8 +260,8 @@ class View:
     # NOTE: does not check multiple of symbolic shape
     assert all(resolve(s == ns) or s == 1 for s,ns in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
     if 0 in self.shape: return View.create(new_shape)
-    # TODO: this resolve may not be needed, but it's hard because vars need to be sorted
-    mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if resolve(s != ns, False) else m) \
+    # TODO: resolve may not be needed, but it's hard because vars need to be canonicalized
+    mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if resolve(s != ns) and resolve(s == 1, False) else m) \
                   for m,s,ns in zip(self.mask, self.shape, new_shape)]) if self.mask else None
     return View.create(new_shape, self.strides, self.offset, mask)
 
