@@ -548,7 +548,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[big_sink], finalize_gbarrier, input_map=tensor_map, name="finalize_gbarrier")
   tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
 
-  # TODO: move view_left/view_right here
+  # do view_left/view_right here
   tensor_map = graph_rewrite_map(tensor_map[big_sink], view_left, input_map=tensor_map, name="Main View Left")
   tensor_map = graph_rewrite_map(tensor_map[big_sink], view_right, input_map=tensor_map, name="Main View Right")
 
