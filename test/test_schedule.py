@@ -1053,9 +1053,9 @@ class TestSchedule(unittest.TestCase):
 
   def test_scaled_dot_product_attention_multireduce_fusion(self):
     Tensor.manual_seed(0)
-    q = Tensor.randn(32,8,16,64).realize()
-    k = Tensor.randn(32,8,16,64).realize()
-    v = Tensor.randn(32,8,16,64).realize()
+    q = Tensor.randn(32,8,16,8).realize()
+    k = Tensor.randn(32,8,16,8).realize()
+    v = Tensor.randn(32,8,16,8).realize()
     out = Tensor.scaled_dot_product_attention(q,k,v)
     run_schedule(check_schedule(out, 5))
     if getenv("CHECK", 1):
@@ -1233,8 +1233,8 @@ class TestSchedule(unittest.TestCase):
 
   def test_adam_step_fusion(self):
     with Tensor.train():
-      x = Tensor.empty(4, 64, 768)
-      layer = nn.Linear(768, 768*4)
+      x = Tensor.empty(4, 64, 32)
+      layer = nn.Linear(32, 32*4)
       _realize_weights(layer)
       opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
       layer(x).relu().sum().backward()
@@ -1296,7 +1296,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_sgd_4convs_fuse(self):
     with Tensor.train():
-      img = Tensor.empty(2,3,64,64)
+      img = Tensor.empty(2,3,16,16)
       c1 = nn.Conv2d(3,4,3,bias=False)
       c2 = nn.Conv2d(4,8,3,bias=False)
       c3 = nn.Conv2d(8,16,3,bias=False)
@@ -1309,7 +1309,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_sgd_4convs_fuse_conv_bw(self):
     with Tensor.train():
-      img = Tensor.empty(2,3,64,64)
+      img = Tensor.empty(2,3,16,16)
       c1 = nn.Conv2d(3,4,3,bias=False)
       c2 = nn.Conv2d(4,8,3,bias=False)
       c3 = nn.Conv2d(8,16,3,bias=False)

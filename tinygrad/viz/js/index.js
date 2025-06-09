@@ -169,6 +169,9 @@ function renderMemoryGraph(graph) {
     b.y.push(b.y.at(-1));
   }
   // ** render traces
+  // clear existing groups
+  document.querySelector(".progress-message").style.display = "none";
+  for (c of document.getElementById("render").children) c.innerHTML = "";
   const render = d3.select("#bars");
   const yscale = d3.scaleLinear().domain([0, peak]).range([576, 0]);
   const xscale = d3.scaleLinear().domain([0, timestep]).range([0, 1024]);
@@ -202,10 +205,7 @@ function renderMemoryGraph(graph) {
     d3.select(e.currentTarget).attr("stroke", null).attr("stroke-width", null);
     document.getElementById("current-buf")?.remove()
   });
-  // TODO: add the toposort graph here
-  document.querySelector(".progress-message").style.display = "none";
-  d3.select("#nodes").html("");
-  d3.select("#edges").html("");
+  // TODO: add the kernel line here
   document.getElementById("zoom-to-fit-btn").click();
 }
 
@@ -225,7 +225,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const r = rect("#render");
   if (r.width === 0) return;
   const scale = Math.min(R.width/r.width, R.height/r.height);
-  const [tx, ty] = [R.x+(R.width-r.width*scale)/2, R.y+(R.height-r.height*scale)/2];
+  const [tx, ty] = [R.x+(R.width-r.width*scale)/2-r.left*scale, R.y+(R.height-r.height*scale)/2];
   svg.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
 });
 
@@ -346,7 +346,7 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
-  if (ctx.name == "View Memory Graph") {
+  if (step.name == "View Memory Graph") {
     renderMemoryGraph(ret[currentRewrite].graph);
   } else {
     renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
