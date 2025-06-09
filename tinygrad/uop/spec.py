@@ -118,6 +118,8 @@ def validate_index(idx:UOp, mask:UOp|None=None):
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
 spec = PatternMatcher([
+  # no pointers in ASM
+  (UPat(Ops.DEFINE_GLOBAL, dtypes.uint64), lambda: True),
   (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
   (UPat(Ops.DEFINE_ACC, src=(UPat.var("c"),), name="x", allow_any_len=True),
@@ -191,10 +193,10 @@ spec = PatternMatcher([
   (UPat(Ops.SINK, dtypes.void), lambda: True),
   (UPat((Ops.NOOP, Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
-  # PTX LOAD/STORE
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
-  # X86 LOAD/STORE we use lea for index for now
-  (UPat((Ops.LOAD, Ops.STORE), allow_any_len=True), lambda: True),
+  # PTX/ASM LOAD/STORE
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=(dtypes.int64, dtypes.uint64)),), allow_any_len=True), lambda: True),
+  # ASM LOAD can load a constant
+  (UPat(Ops.LOAD, src=(UPat.cvar(),)), lambda: True),
 ])
 
 # *** this is the UOp AST spec ***
