@@ -3,11 +3,12 @@ import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
-from tinygrad.helpers import dedup, partition, all_same, flatten
+from tinygrad.helpers import dedup, partition, all_same, flatten, getenv
 from tinygrad.uop.spec import type_verify
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(lst:list[UOp]) -> list[UOp]:
+  if not getenv("BLOCK_REORDER", 1): return lst
   in_this_block = set(lst)
   local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
