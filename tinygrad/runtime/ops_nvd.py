@@ -434,6 +434,7 @@ class NVDDevice(HCQCompiled[NVSignal]):
       if vendor == 0x10de and device == 0x2684: dev = pcibus
 
     pcibus = dev
+    self.pcibus = pcibus
 
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{pcibus}/driver"):
       FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/driver/unbind", os.O_WRONLY).write(pcibus)
@@ -442,6 +443,10 @@ class NVDDevice(HCQCompiled[NVSignal]):
     # FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
     # FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(pcibus)
 
+    supported_sizes = int(FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource1_resize", os.O_RDONLY).read(), 16)
+    try: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource1_resize", os.O_RDWR).write(str(supported_sizes.bit_length() - 1))
+    except OSError as e: raise RuntimeError(f"Cannot resize BAR: {e}. Ensure the resizable BAR option is enabled on your system.") from e
+
     FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/enable", os.O_RDWR).write("1")
 
     cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
@@ -449,6 +454,7 @@ class NVDDevice(HCQCompiled[NVSignal]):
 
     bar_info = FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/resource", os.O_RDONLY).read().splitlines()
     bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
+    print(bar_info)
 
     cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
     pci_cmd = int.from_bytes(cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER

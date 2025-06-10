@@ -62,7 +62,7 @@ class NVRpcQueue:
 
       print(f"RPC message: {x.function:x}, {x.length}, {x.rpc_result}, {x.rpc_result_private} {self.tx.writePtr} {self.rx.readPtr}")
 
-      if x.function == cmd and x.rpc_result == 0: return to_mv(self.content_va+off+0x50, x.length)
+      if x.function == cmd: return x.rpc_result, to_mv(self.content_va+off+0x50, x.length)
 
 class NV_FLCN:
   def __init__(self, nvdev): self.nvdev = nvdev
@@ -343,7 +343,7 @@ class NV_GSP:
     self.command_q = NVRpcQueue(self, self.command_queue_va, self.command_queue_tx, None) # will be set later
 
     data = nv.GspSystemInfo(gpuPhysAddr=0xf2000000, gpuPhysFbAddr=0x38060000000, gpuPhysInstAddr=0x38070000000,
-      pciConfigMirrorBase=0x88000, pciConfigMirrorSize=0x1000, nvDomainBusDeviceFunc=0x100,
+      pciConfigMirrorBase=0x88000, pciConfigMirrorSize=0x1000, nvDomainBusDeviceFunc=0x100, bIsPassthru=1,
       PCIDeviceID=0x268410de, PCISubDeviceID=0x13b3196e, PCIRevisionID=0xa1, maxUserVa=0x7ffffffff000)
     self.command_q.send_rpc(72, bytes(data))
     self.rpc_set_registry_table()
@@ -505,7 +505,13 @@ class NV_GSP:
     self.wpr_meta.magic = nv.GSP_FW_WPR_META_MAGIC
 
   def init_hw(self):
+    self.nvdev.vram[0x100000] = 0x10
+    print(self.nvdev.vram[0x100000])
+    hexdump(self.nvdev.vram[0x100000:0x100000 + 0x20])
+
     while self.status_queue_tx.entryOff != 0x1000: pass
+
+    hexdump(self.nvdev.vram[0x100000:0x100000 + 0x20])
 
     self.status_queue_va = self.status_queue_st_va + self.status_queue_tx.entryOff
     self.status_queue_rx = nv.msgqRxHeader.from_address(self.status_queue_st_va + self.status_queue_tx.rxHdrOff)
@@ -514,6 +520,15 @@ class NV_GSP:
     self.status_q = NVRpcQueue(self, self.status_queue_va, self.status_queue_tx, self.command_queue_rx)
     self.status_q.wait_resp(0x1001)
     print("GSP init done")
+
+    hexdump(self.nvdev.vram[0x100000:0x100000 + 0x20])
+
+    # self.nvdev.vram[0x300000] = 0x10
+    # hexdump(self.nvdev.vram[0x5ff200000:0x5ff200000 + 0x1000])
+
+    # self.nvdev.vram[0x10] = 0xcc
+    # hexdump(self.nvdev.vram[:0x100])
+    # exit(0)
 
     self.rpc_get_gsp_static_info()
     self.rpc_rm_alloc(hParent=0x0, hObject=0x0, hClass=0x0, params=nv_gpu.NV0000_ALLOC_PARAMETERS())
@@ -524,8 +539,8 @@ class NV_GSP:
     vaspace_params = nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS(vaBase=0x1000, vaSize=0x1fffffb000000,
       flags=nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_ENABLE_PAGE_FAULTING | nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_IS_EXTERNALLY_OWNED)
     self.rpc_rm_alloc(hParent=0xcf000000, hObject=0xcf000002, hClass=nv_gpu.FERMI_VASPACE_A, params=vaspace_params)
-
-    self.rpc_set_page_directory(device=0xcf000000, hVASpace=0xcf000002, pdir_paddr=0x600000)
+    
+    self.rpc_set_page_directory(device=0xcf000000, hVASpace=0xcf000002, pdir_paddr=self.nvdev.mm.root_page_table.paddr)
 
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
     self.rpc_rm_alloc(hParent=0xcf000000, hObject=0xcf000003, hClass=nv_gpu.KEPLER_CHANNEL_GROUP_A, params=channel_params)
@@ -533,7 +548,16 @@ class NV_GSP:
     ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=0xcf000002, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     self.rpc_rm_alloc(hParent=0xcf000003, hObject=0xcf000004, hClass=nv_gpu.FERMI_CONTEXT_SHARE_A, params=ctxshare_params)
 
-    
+    # gg_params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=0xcf100004, hObjectBuffer=0x0,
+    #   gpFifoOffset=(4 << 20), gpFifoEntries=0x400, hContextShare=0xcf000004,
+    #   hUserdMemory=(ctypes.c_uint32*8)(0xcf000004), userdOffset=(ctypes.c_uint64*8)(0x400*8))
+    # print(hex(ctypes.sizeof(nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS)))
+    # self.rpc_rm_alloc(hParent=0xcf000003, hObject=0xcf000005, hClass=nv_gpu.AMPERE_CHANNEL_GPFIFO_A, params=gg_params)
+    # self.rpc_rm_alloc(hParent=0xcf000005, hObject=0xcf000006, hClass=nv_gpu.ADA_COMPUTE_A, params=None)
+
+    # self.nvdev.vram[0x100000] = 0x10
+    # print(self.nvdev.vram[0x100000])
+    # hexdump(self.nvdev.vram[0x100000:0x100000 + 0x1000])
 
     exit(0)
 
@@ -607,7 +631,7 @@ class NV_GSP:
   def rpc_get_gsp_static_info(self):
     # TODO: nv.GspStaticConfigInfo is parsed wrong, size does not match C impl.
     self.command_q.send_rpc(65, bytes(0x8b0))
-    resp = self.status_q.wait_resp(65)
+    stat, resp = self.status_q.wait_resp(65)
     self.client = 0xc1e00004 # int.from_bytes(resp[0x888:0x888+4], 'little')
     # print(hex(self.client))
 
@@ -615,7 +639,7 @@ class NV_GSP:
     alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=0xc1e00004, hParent=hParent, hObject=hObject, hClass=hClass, flags=0x0,
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.command_q.send_rpc(103, bytes(alloc_args) + bytes(params) if params is not None else b'')
-    resp = self.status_q.wait_resp(103)
+    stat, resp = self.status_q.wait_resp(103)
     hexdump(resp[:0x80])
 
   def rpc_set_page_directory(self, device, hVASpace, pdir_paddr):
@@ -631,5 +655,5 @@ class NV_GSP:
       numEntries=4, flags=0x8, hVASpace=hVASpace, pasid=0xffffffff, subDeviceId=0+1)
     alloc_args = nv.rpc_set_page_directory_v(hClient=0xc1e00004, hDevice=device, pasid=0xffffffff, params=params)
     self.command_q.send_rpc(54, bytes(alloc_args))
-    resp = self.status_q.wait_resp(54)
+    stat, resp = self.status_q.wait_resp(54)
     hexdump(resp[:0x80])
