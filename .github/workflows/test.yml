@@ -352,6 +352,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: unittest-12
+        pydeps: "pillow"
         deps: testing_unit
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
@@ -359,6 +360,8 @@ jobs:
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/ --durations=20
     - name: Run targetted tests on NULL backend
       run: PYTHONPATH="." NULL=1 python3 test/test_multitensor.py TestMultiTensor.test_data_parallel_resnet_train_step
+    - name: Run SDXL on NULL backend
+      run: MAX_BUFFER_SIZE=0 PYTHONPATH="." NULL=1 DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
     # TODO: support fake weights
     #- name: Run LLaMA 7B on 4 fake devices
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
@@ -446,8 +449,39 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
+  testonnxcpu:
+    name: 'ONNX (CPU) Tests'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      IGNORE_OOB: 0
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: onnxoptc
+          deps: testing
+          python-version: '3.11'
+          llvm: 'true'
+      - name: Test ONNX (CPU)
+        run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - name: Test ONNX (LLVM)
+        run: LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - name: Test Additional ONNX Ops (CPU)
+        run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_ops.py
+      - name: Test Quantize ONNX
+        run: CPU=1 PYTHONPATH=. python3 test/test_quantize_onnx.py
+      - name: Run REMOTE=1 Test
+        run: |
+          REMOTEDEV=CPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py
+      - name: Run process replay tests
+        uses: ./.github/actions/process-replay
+
   testopencl:
-    name: 'ONNX+Optimization Tests'
+    name: 'ONNX (GPU)+Optimization Tests'
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
@@ -464,20 +498,10 @@ jobs:
           pydeps: "tensorflow==2.15.1 tensorflow_addons"
           python-version: '3.11'
           opencl: 'true'
-          llvm: 'true'
       - name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - name: Test ONNX (CPU)
-        run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - name: Test ONNX (LLVM)
-        run: LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - name: Test Additional ONNX Ops (CPU)
-        run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_ops.py
-      - name: Test Quantize ONNX
-        run: CPU=1 PYTHONPATH=. python3 test/test_quantize_onnx.py
       - name: Run REMOTE=1 Test
         run: |
-          REMOTEDEV=CPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py
           REMOTEDEV=GPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py test/test_jit.py
           REMOTEDEV=GPU IMAGE=2 REMOTE=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py
       - name: Test Optimization Helpers

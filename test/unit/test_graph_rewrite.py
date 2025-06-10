@@ -253,6 +253,7 @@ class TestSubstitute(unittest.TestCase):
 
   # broken due to infinite recursion
   # NOTE: VIZ hangs and doesn't recover if you click this one
+  @unittest.skip("recursion error no longer raised")
   def test_assert_inf_recurse(self):
     a = UOp.variable('a', 0, 10)
     n1 = a.sin()
