@@ -5,7 +5,7 @@ from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.codegen.lowerer import get_contraction_with_reduce
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize
-from tinygrad.helpers import FUSE_CONV_BW, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.multi import multi_pm, replace_allreduce
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -478,10 +478,14 @@ fuse_removes_gbarrier = PatternMatcher([
   (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="c").fuse(), lambda c: c.replace(src=tuple([x.fuse() for x in c.src]))),
 ])
 
+def is_bufferless(u): return all(x.op is not Ops.BUFFER for x in u.toposort())
 
-def fuse_arange(f, v): return f.src[0].view(v.arg).fuse()
+def fuse_arange(f, v):
+  if not FUSE_ARANGE or not is_bufferless(f): return None
+  assert len(v.src) == 1
+  return v.replace(src=(f.src[0],)).fuse()
 pm_fuse_arange = PatternMatcher([
-  (UPat(Ops.VIEW, src=(UPat(Ops.FUSE, name="f"),), name="v"), fuse_arange),
+  (UPat((Ops.VIEW, Ops.CAST), src=(UPat(Ops.FUSE, name="f"),), name="v"), fuse_arange),
 ])
 
 @track_rewrites(name_fxn=lambda big_sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[big_sink].toposort() if u.op is Ops.KERNEL]))}")
