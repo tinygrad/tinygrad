@@ -26,6 +26,7 @@ jobs:
       with:
         key: llvm-speed
         deps: testing_minimal
+        pydeps: "pillow"
         llvm: 'true'
     - name: External Benchmark Schedule
       run: PYTHONPATH="." python3 test/external/external_benchmark_schedule.py
@@ -496,7 +497,7 @@ jobs:
           deps: testing
           pydeps: "tensorflow==2.15.1 tensorflow_addons"
           python-version: '3.11'
-          llvm: 'true'
+          opencl: 'true'
       - name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Run REMOTE=1 Test
