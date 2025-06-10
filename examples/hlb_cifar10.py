@@ -188,8 +188,10 @@ def train_cifar():
 
   # ========== Preprocessing ==========
   # NOTE: this only works for RGB in format of NxCxHxW and pads the HxW
-  def pad_reflect(X:Tensor, size=2) -> Tensor:
-    return X.pad(((0,0), (0,0), (size,size), (size,size)), mode='reflect')
+  def pad_reflect(X, size=2) -> Tensor:
+    X = X[...,:,1:size+1].flip(-1).cat(X, X[...,:,-(size+1):-1].flip(-1), dim=-1)
+    X = X[...,1:size+1,:].flip(-2).cat(X, X[...,-(size+1):-1,:].flip(-2), dim=-2)
+    return X
 
   # return a binary mask in the format of BS x C x H x W where H x W contains a random square mask
   def make_square_mask(shape, mask_size) -> Tensor:
