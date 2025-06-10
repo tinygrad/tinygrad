@@ -3,7 +3,7 @@
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
-import random, time
+import time
 import numpy as np
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
@@ -21,6 +21,8 @@ EVAL_BS = getenv("EVAL_BS", BS)
 GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
 assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 assert EVAL_BS % len(GPUS) == 0, f"{EVAL_BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
+
+Context(FUSE_ARANGE=1, WINO=1).__enter__()
 
 class UnsyncedBatchNorm:
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, num_devices=len(GPUS)):
@@ -149,7 +151,6 @@ def train_cifar():
 
   def set_seed(seed):
     Tensor.manual_seed(seed)
-    random.seed(seed)
 
   # ========== Model ==========
   def whitening(X, kernel_size=hyp['net']['kernel_size']):
@@ -187,10 +188,8 @@ def train_cifar():
 
   # ========== Preprocessing ==========
   # NOTE: this only works for RGB in format of NxCxHxW and pads the HxW
-  def pad_reflect(X, size=2) -> Tensor:
-    X = X[...,:,1:size+1].flip(-1).cat(X, X[...,:,-(size+1):-1].flip(-1), dim=-1)
-    X = X[...,1:size+1,:].flip(-2).cat(X, X[...,-(size+1):-1,:].flip(-2), dim=-2)
-    return X
+  def pad_reflect(X:Tensor, size=2) -> Tensor:
+    return X.pad(((0,0), (0,0), (size,size), (size,size)), mode='reflect')
 
   # return a binary mask in the format of BS x C x H x W where H x W contains a random square mask
   def make_square_mask(shape, mask_size) -> Tensor:
@@ -202,22 +201,24 @@ def train_cifar():
     return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
 
   def random_crop(X:Tensor, crop_size=32):
-    mask = make_square_mask(X.shape, crop_size)
-    mask = mask.expand((-1,3,-1,-1))
-    X_cropped = Tensor(X.numpy()[mask.numpy()])
-    return X_cropped.reshape((-1, 3, crop_size, crop_size))
+    BS, C, H, W = X.shape
+    low_x = Tensor.randint(BS, low=0, high=W-crop_size).reshape(BS,1,1,1)
+    low_y = Tensor.randint(BS, low=0, high=H-crop_size).reshape(BS,1,1,1)
+    idx_h = Tensor.arange(crop_size).reshape(1,1,crop_size,1)
+    idx_w = Tensor.arange(crop_size).reshape(1,1,1,crop_size)
+    idx_x = (idx_w + low_x).expand(BS,C,crop_size,crop_size)
+    idx_y = (idx_h + low_y).expand(BS,C,crop_size,crop_size)
+    return X.gather(2, idx_y).gather(3, idx_x).contiguous()
 
   def cutmix(X:Tensor, Y:Tensor, mask_size=3):
     # fill the square with randomly selected images from the same batch
     mask = make_square_mask(X.shape, mask_size)
-    order = list(range(0, X.shape[0]))
-    random.shuffle(order)
-    X_patch = Tensor(X.numpy()[order], device=X.device, dtype=X.dtype)
-    Y_patch = Tensor(Y.numpy()[order], device=Y.device, dtype=Y.dtype)
+    order = Tensor.randperm(X.shape[0])
+    X_patch, Y_patch = X[order], Y[order]
     X_cutmix = mask.where(X_patch, X)
     mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
-    return X_cutmix, Y_cutmix
+    return X_cutmix.contiguous(), Y_cutmix.contiguous()
 
   # the operations that remain inside batch fetcher is the ones that involves random operations
   def fetch_batches(X_in:Tensor, Y_in:Tensor, BS:int, is_train:bool):
@@ -230,22 +231,19 @@ def train_cifar():
         if getenv("RANDOM_CROP", 1):
           X = random_crop(X, crop_size=32)
         if getenv("RANDOM_FLIP", 1):
-          X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
+          X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X).contiguous() # flip LR
         if getenv("CUTMIX", 1):
           if step >= hyp['net']['cutmix_steps']:
             X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
-        order = list(range(0, X.shape[0]))
-        random.shuffle(order)
-        X, Y = X.numpy()[order], Y.numpy()[order]
-      else:
-        X, Y = X.numpy(), Y.numpy()
+        order = Tensor.randperm(X.shape[0])
+        X, Y = X[order], Y[order]
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X.shape[0], BS):
         # pad the last batch  # TODO: not correct for test
         batch_end = min(i+BS, Y.shape[0])
-        x = Tensor(X[batch_end-BS:batch_end], device=X_in.device, dtype=X_in.dtype)
-        y = Tensor(Y[batch_end-BS:batch_end], device=Y_in.device, dtype=Y_in.dtype)
+        x = X[batch_end-BS:batch_end].contiguous()
+        y = Y[batch_end-BS:batch_end].contiguous()
         step += 1
         yield x, y
       epoch += 1
