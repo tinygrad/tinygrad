@@ -88,7 +88,10 @@ class TestMainOnnxOps(TestOnnxOps):
     attributes = {"detect_negative":1, "detect_positive":1}
     outputs = ["y"]
     model = self.helper_build_model("IsInf", inputs, attributes, outputs)
-    outputs = OnnxRunner(model)(inputs)
+    with tempfile.NamedTemporaryFile(suffix='.onnx', delete=True) as f:
+      onnx.save(model, f.name)
+      run_onnx = OnnxRunner(f.name)
+    outputs = run_onnx(inputs)
     assert outputs["y"].dtype is dtypes.bool
 
   def test_quantize_linear(self):
@@ -203,7 +206,9 @@ class TestTrainingOnnxOps(TestOnnxOps):
   def _validate_training(self, op:str, onnx_fxn, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str]):
     model = self.helper_build_model(op, inps, opts, outs)
     if op == "Momentum": del opts['mode']
-    runner = OnnxRunner(model)
+    with tempfile.NamedTemporaryFile(suffix='.onnx', delete=True) as f:
+      onnx.save(model, f.name)
+      runner = OnnxRunner(f.name)
     tiny_out = runner(inps)
     onnx_out = onnx_fxn(**inps, **opts)
     for (nm, t_out), o_out in  zip(tiny_out.items(), onnx_out):
