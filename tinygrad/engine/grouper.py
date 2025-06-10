@@ -84,7 +84,7 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="root", src=(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),)),
    lambda root,view,buf: view if view.st.contiguous and view.size == buf.size else None),
   # contiguous/buffer/copy/assign is already contiguous
-  #(UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
+  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat.var("x"),), name="t"), lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,),
     (t.size, x.st.views[0].offset)).reshape(t.shape) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
@@ -478,10 +478,16 @@ fuse_removes_gbarrier = PatternMatcher([
   (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="c").fuse(), lambda c: c.replace(src=tuple([x.fuse() for x in c.src]))),
 ])
 
+
+def fuse_arange(f, v): return f.src[0].view(v.arg).fuse()
+pm_fuse_arange = PatternMatcher([
+  (UPat(Ops.VIEW, src=(UPat(Ops.FUSE, name="f"),), name="v"), fuse_arange),
+])
+
 @track_rewrites(name_fxn=lambda big_sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[big_sink].toposort() if u.op is Ops.KERNEL]))}")
 def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # multi + merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, multi_pm+replace_allreduce+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
+  tensor_map = graph_rewrite_map(big_sink, multi_pm+replace_allreduce+merge_views+sym+replace_contiguous+pm_fuse_arange, ctx={}, name="merge_views")
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")

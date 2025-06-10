@@ -622,8 +622,7 @@ class Tensor(MathTrait):
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
-    ret = (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
-    return ret.fuse() if FUSE_ARANGE else ret
+    return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype).fuse()
 
   @staticmethod
   def linspace(start:int|float, stop:int|float, steps:int, **kwargs) -> Tensor:
