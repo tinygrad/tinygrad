@@ -15,8 +15,10 @@ from extra.bench_log import BenchEvent, WallTimeEvent
 
 timestamp = time.monotonic if sys.platform != "win32" else time.perf_counter
 
-# dtypes.default_float = dtypes.half
-Context(FUSE_ARANGE=1).__enter__()
+# NOTE(irwin): could this result in failing one test in 3 CI actions???
+#   test/test_schedule.py::TestSchedule::test_reduceop_reshape_dont_push
+#   Linux(llvm), MacOS(llvm) and MacOS(cpu)
+# Context(FUSE_ARANGE=1).__enter__()
 
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
