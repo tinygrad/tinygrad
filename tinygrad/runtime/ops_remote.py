@@ -16,6 +16,7 @@ from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferXfer
 from tinygrad.device import Compiled, Buffer, Allocator, Compiler, Device, BufferSpec
+from tinygrad.runtime.graph.cpu import CPUGraph
 
 # ***** API *****
 
@@ -170,7 +171,8 @@ class RemoteHandler:
           case SessionFree(): del self.sessions[unwrap(c.session)]
           case GetProperties():
             cls, args = dev.renderer.__reduce__()
-            graph_cls = graph_class(Device[self.base_device])
+            # CPUGraph re-renders kernel from uops specified in CompiledRunner, this is not supported
+            graph_cls = gt if (gt:=graph_class(Device[self.base_device])) is not CPUGraph else None
             rp = RemoteProperties(
               real_device=dev.device, renderer=(cls.__module__, cls.__name__, args),
               graph_supported=graph_cls is not None, graph_supports_multi=graph_cls is not None and issubclass(graph_cls, MultiGraphRunner),
