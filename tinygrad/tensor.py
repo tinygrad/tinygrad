@@ -1983,6 +1983,17 @@ class Tensor(MathTrait):
         state = state.bitwise_xor((state.roll(shifts=-1, dims=2) ^ -1) & state.roll(shifts=-2, dims=2)).flatten(1) ^ rnd_const_masks[i]
     return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], -1)
 
+  def hash(self) -> Tensor:
+    """
+    Calculates a 16-byte hash of the tensor over the last dimension.
+
+    ```python exec="false source="above" session="tensor" result="python"
+    t = Tensor(b"Hello World!").hash()
+    print(t.data().hex())
+    ```
+    """
+    return self[*self.shape[:-1], 16]
+
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
     m = self - self.max(axis=axis, keepdim=True).detach()
     if dtype is not None: m = m.cast(dtype)
