@@ -1,5 +1,11 @@
 // **** graph renderers
 
+function switchRender(visible) {
+  for (const c of document.querySelector(".main-container").children) {
+    c.style.display = (c.className.includes("container") || c.className === visible) ? "flex" : "none";
+  }
+}
+
 // ** UOp graph
 
 function intersectRect(r1, r2) {
@@ -16,6 +22,7 @@ const rect = (s) => document.querySelector(s).getBoundingClientRect();
 
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
+  switchRender("graph");
   // start calculating the new layout (non-blocking)
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
@@ -96,6 +103,7 @@ function pluralize(num, name, alt=null) {
 }
 
 function renderMemoryGraph(graph) {
+  switchRender("graph");
   // ** construct alloc/free traces
   // we can map reads/writes from the kernel graph
   const actions = [];
@@ -209,6 +217,31 @@ function renderMemoryGraph(graph) {
   });
   // TODO: add the kernel line here
   document.getElementById("zoom-to-fit-btn").click();
+}
+
+function formatTime(ts, duration) {
+  if (dur<=1e3) return `${ts}us`;
+  if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
+  return `${(ts*1e-6).toFixed(2)}s`;
+}
+
+var traceEvents;
+function renderProfiler() {
+  switchRender("profiler");
+  if (traceEvents == null) traceEvents = (await (await fetch("/get_profile")).json()).traceEvents;
+  // setup base svg
+  const root = d3.select(".profiler").html("");
+  const timeline = root.append("div").attr("style", "width: 100%; height: 100%;");
+  const { width } = timeline.node().getBoundingClientRect();
+  const svg = timeline.append("svg").attr("id", "profiler-svg").attr("viewBox", `0 0 ${width} ${height}`)
+    .attr("style", "width: 100%; height: auto;").attr("preserveAspectRatio", "xMinYMin meet");
+  // get start and end times
+  const timestamps = traceEvents.map(t => t.ts).filter(t => t);
+  let [st, et] = [Math.min(...timestamps), Math.max(...timestamps)];
+  et += Math.max(...traceEvents.filter((t) => t.ts === et).map(t => t.dur));
+  const duration = et-st;
+  const x = d3.scaleLinear().domain([0, duration]).range([0, width]);
+  const xAxis = d3.axisBottom(x).tickFormat(t => formatTime(t, duration));
 }
 
 // ** zoom and recentering
