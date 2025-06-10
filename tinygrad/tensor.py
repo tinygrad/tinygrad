@@ -3514,19 +3514,6 @@ class Tensor(MathTrait):
     a, b = self._broadcasted(x, reverse)
     return a + (-b)
 
-  def idiv(self, x:Tensor|ConstType, reverse=False) -> Tensor:
-    """
-    Divides `self` by `x`.
-    Equivalent to `self // x`.
-    Supports broadcasting to a common shape, type promotion, and integer inputs.
-    `idiv` performs integer division (truncate towards zero).
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-4, 7, 5, 4, -7, 8]).idiv(Tensor([2, -3, 8, -2, 3, 5])).numpy())
-    ```
-    """
-    return self._apply_broadcasted_uop(UOp.idiv, x, reverse)
-
   def div(self, x:Tensor|ConstType, reverse=False, rounding_mode:Literal["trunc", "floor"]|None=None) -> Tensor:
     """
     Divides `self` by `x`.
