@@ -76,7 +76,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
     # NOTE: kernel already has metadata in arg
     if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+repr(u.metadata)
     graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff"),
-                    "ref":id(u.arg.ast) if u.op is Ops.KERNEL else None}
+                    "ref":id(u.arg.ast) if u.op is Ops.KERNEL else None, "tag":u.tag}
   return graph
 
 def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
