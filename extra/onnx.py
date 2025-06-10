@@ -1,4 +1,4 @@
-from typing import Any, Sequence, cast, Literal, Callable, IO
+from typing import Any, Sequence, cast, Literal, Callable
 import dataclasses, functools, io, math, types, os, pathlib, struct, enum
 from io import BufferedReader
 from tinygrad.nn.state import TensorIO
