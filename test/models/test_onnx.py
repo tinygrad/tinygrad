@@ -3,7 +3,6 @@ import os
 import time
 import unittest
 import numpy as np
-# TODO: just choose which backends to test this on instead of import error
 try:
   import onnx # noqa: F401 # pylint: disable=unused-import
 except ModuleNotFoundError:

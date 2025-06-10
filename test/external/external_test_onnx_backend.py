@@ -30,7 +30,7 @@ class TinygradBackend(Backend):
     input_initializer = [x.name for x in model.graph.initializer]
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
-    with tempfile.NamedTemporaryFile(suffix='.onnx', delete=True) as f:
+    with tempfile.NamedTemporaryFile(suffix='.onnx') as f:
       onnx.save(model, f.name)
       run_onnx = OnnxRunner(f.name)
     return TinygradModel(run_onnx, net_feed_input)

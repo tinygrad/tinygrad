@@ -9,8 +9,8 @@ from extra.bench_log import BenchEvent, WallTimeEvent
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
 if __name__ == "__main__":
-  onnx_model = fetch(OPENPILOT_MODEL)
-  run_onnx = OnnxRunner(onnx_model)
+  onnx_path = fetch(OPENPILOT_MODEL)
+  run_onnx = OnnxRunner(onnx_path)
 
   Tensor.manual_seed(100)
   input_shapes = {name:spec.shape for name, spec in run_onnx.graph_inputs.items()}
