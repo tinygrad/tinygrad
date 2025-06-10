@@ -1987,6 +1987,7 @@ class Tensor(MathTrait):
     return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], -1)
 
   def _hash_1mb(self) -> Tensor:
+    assert self.dtype == dtypes.uint8, "only support uint8 tensors for hashing"
     assert self.ndim == 2, "only support batched 1d tensors"
     assert self.shape[1] == 1024 * 1024, "only support messages of 1mb"
 
@@ -2005,17 +2006,14 @@ class Tensor(MathTrait):
     print(t.data().hex())
     ```
     """
-    # calculates hashes in blocks of 1mb
-
-    # pad to a multiple of 1mb
+    # calculate hashes in blocks of 1mb
     data = self.bitcast(dtypes.uint8).flatten()
-    if data.shape[0] % (1024 * 1024) != 0: data = data.pad(((0, (1024 * 1024) - data.shape[0] % (1024 * 1024))))
 
-    # split into 1mb blocks
-    blocks, first = data.shape[0] // (1024 * 1024), True
+    blocks, first = math.ceil(data.shape[0] / (1024 * 1024)), True
     while blocks >= 1 or first:
+      if data.shape[0] % (1024 * 1024) != 0: data = data.pad(((0, (1024 * 1024) - data.shape[0] % (1024 * 1024))))
       data = data.reshape(blocks, 1024 * 1024)
-      data = data._hash_1mb().reshape(blocks, 16).flatten()
+      data = data._hash_1mb().reshape(blocks, 16).flatten().kernelize()
       blocks, first = data.shape[0] // (1024 * 1024), False
 
     return data.reshape(16)
