@@ -41,6 +41,7 @@ runs:
   using: "composite"
   steps:
     - name: Set up Python ${{ inputs.python-version }}
+      id: setup-python
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
@@ -51,8 +52,8 @@ runs:
       id: restore-venv
       uses: actions/cache@v4
       with:
-        path: .venv
-        key: venv-${{ runner.os }}-python-${{ inputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ hashFiles('**/setup.py') }}-${{ env.PYTHON_CACHE_VERSION }}
+        path: ${{ github.workspace }}/.venv
+        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ hashFiles('**/setup.py') }}-${{ env.PYTHON_CACHE_VERSION }}
 
     # **** Caching downloads ****
 
@@ -75,22 +76,22 @@ runs:
       if: inputs.deps != '' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        python -m venv .venv
+        python -m venv ${{ github.workspace }}/.venv
         if [[ "$RUNNER_OS" == "Windows" ]]; then
-          source .venv/Scripts/activate
+          source ${{ github.workspace }}/.venv/Scripts/activate
         else
-          . .venv/bin/activate
+          . ${{ github.workspace }}/.venv/bin/activate
         fi
         python -m pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies in venv (without extra)
       if: inputs.deps == '' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        python -m venv .venv
+        python -m venv ${{ github.workspace }}/.venv
         if [[ "$RUNNER_OS" == "Windows" ]]; then
-          source .venv/Scripts/activate
+          source ${{ github.workspace }}/.venv/Scripts/activate
         else
-          . .venv/bin/activate
+          . ${{ github.workspace }}/.venv/bin/activate
         fi
         python -m pip install -e . ${{ inputs.pydeps }}
     - name: Set up venv environment
