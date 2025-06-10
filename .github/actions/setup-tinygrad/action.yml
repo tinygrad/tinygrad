@@ -76,22 +76,22 @@ runs:
       if: inputs.deps != '' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        python -m venv ${{ github.workspace }}/.venv
+        python -m venv .venv
         if [[ "$RUNNER_OS" == "Windows" ]]; then
           source .venv/Scripts/activate
         else
-          . ${{ github.workspace }}/.venv/bin/activate
+          . .venv/bin/activate
         fi
         python -m pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies in venv (without extra)
       if: inputs.deps == '' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        python -m venv ${{ github.workspace }}/.venv
+        python -m venv .venv
         if [[ "$RUNNER_OS" == "Windows" ]]; then
           source .venv/Scripts/activate
         else
-          . ${{ github.workspace }}/.venv/bin/activate
+          . .venv/bin/activate
         fi
         python -m pip install -e . ${{ inputs.pydeps }}
     - name: Set up venv environment
