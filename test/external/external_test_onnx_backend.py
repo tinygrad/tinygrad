@@ -32,6 +32,7 @@ class TinygradBackend(Backend):
     print("prepare", cls, device, net_feed_input)
     with tempfile.NamedTemporaryFile(suffix='.onnx') as f:
       onnx.save(model, f.name)
+      f.flush()
       new_model = onnx_load(f.name)
     run_onnx = OnnxRunner(new_model)
     return TinygradModel(run_onnx, net_feed_input)
