@@ -5,7 +5,7 @@ from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.codegen.lowerer import get_contraction_with_reduce
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
+from tinygrad.helpers import FUSE_CONV_BW, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.multi import multi_pm, replace_allreduce
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -433,75 +433,6 @@ def append_metadata(root:UOp, k:UOp):
 
 replace_metadata = PatternMatcher([(UPat(Ops.ASSIGN, src=(UPat(), UPat(Ops.KERNEL, name="k")), name="root", allow_any_len=True), append_metadata),])
 
-pm_fuse = PatternMatcher([
-  # FUSE on CONTIGUOUS removes FUSE
-  (UPat(Ops.CONTIGUOUS, name="c").fuse(), lambda c: c),
-
-  # FUSE triggers swizzle on reduceop
-  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").or_casted(),), name="view").fuse(),
-   lambda r,src,view: ret.cast(view.dtype) if (ret:=swizzle_reduceop(r, src, view, fuse=True)) is not None else None),
-
-  # FUSE on reduce (without view) adds fuse marker to grouper
-  (UPat(Ops.REDUCE_AXIS, name="r").fuse(),
-   lambda r: r.replace(src=(r.src[0].fuse(),), arg=r.arg+(True,)) if len(r.arg) == 2 else None),
-
-  # remove FUSE and insert CONTIGUOUS if it's an unsafe pad
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="alu"),), name="view").fuse(),
-   lambda alu, view: alu.contiguous().view(view.st) if any(v.mask is not None for v in view.st.views) else None),
-
-  # FUSE elementwise.
-  (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST}, name="alu"),), name="view").fuse(),
-   lambda alu, view: alu.replace(src=tuple(apply_swizzle(x.view(view.arg)).fuse() for x in alu.src))),
-
-  # push FUSE through to srcs
-  (UPat(Ops.FUSE, name="x"), lambda x: x.src[0].replace(src=tuple(y.fuse() for y in x.src[0].src))),
-])
-
-def do_fusion(x:UOp):
-  found_contiguous = {}
-  def gate_contiguous(x):
-    if is_contiguous:=(x.op is Ops.CONTIGUOUS): found_contiguous[x] = x.replace(src=(UOp(Ops.VIEW, arg=x.st),))
-    return not is_contiguous
-  x.toposort(gate=gate_contiguous)
-  del gate_contiguous
-  return graph_rewrite(x.substitute(found_contiguous), pm_fuse, name="local fusion").substitute({v:k for k,v in found_contiguous.items()})
-
-def fuse_arange(root:UOp):
-  # skip if root is arange
-  if not FUSE_ARANGE or root.src[0].base.op is Ops.CONST: return None
-  # gather all local aranges (including any fused ones)
-  local_arange: list[UOp] = []
-  def gate_reduce(u):
-    if u.op is Ops.REDUCE_AXIS and u.src[0].base.op is Ops.CONST: local_arange.append(u)
-    return u.op not in {*ALWAYS_CONTIGUOUS, Ops.REDUCE_AXIS} or u is root
-  toposort = root.toposort(gate=gate_reduce)
-  if not local_arange: return None
-  # fuse the nearest expand child of arange
-  local_children: dict[UOp, list[UOp]] = {}
-  for u in toposort:
-    for s in u.src: local_children.setdefault(s, []).append(u)
-  fuse_rep: dict[UOp, UOp] = {}
-  # skip if root depends on aranges with different ndims. This can be improved
-  if any(len(set(dims)) > 1 for dims in zip(*[r.src[0].shape for r in local_arange])): return
-  for r in local_arange:
-    # skip if already fused
-    if len(r.arg) > 2: continue
-    q = list(local_children[r])
-    while q:
-      u = q.pop()
-      if not (curr_children:=local_children.get(u, [])): continue
-      for child in curr_children:
-        other_paths = {s for s in child.toposort() if s.op in {Ops.REDUCE_AXIS, Ops.BUFFER} and s not in {root, r}}
-        fuse_rep[child] = child.replace(src=tuple(s.fuse() if s is u else s for s in child.src))
-        if other_paths: break
-      else: q.extend(curr_children)
-  return root.substitute(fuse_rep, name="fuse_arange") if fuse_rep else None
-
-do_fuse = PatternMatcher([
-  (UPat(Ops.FUSE, name="x"), do_fusion),
-  (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
-])
-
 add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"),
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
 
@@ -535,10 +466,19 @@ finalize_gbarrier = PatternMatcher([
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
+fuse_removes_gbarrier = PatternMatcher([
+  # FUSE on CONTIGUOUS removes FUSE
+  (UPat(Ops.CONTIGUOUS, name="c").fuse(), lambda c: c),
+  # FUSE on GBARRIER removes GBARRIER
+  (UPat(Ops.GBARRIER, name="c").fuse(), lambda c: c.src[0].fuse()),
+  # FUSE on anything else pushes FUSE to srcs
+  (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="c").fuse(), lambda c: c.replace(src=tuple([x.fuse() for x in c.src]))),
+])
+
 @track_rewrites(name_fxn=lambda big_sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[big_sink].toposort() if u.op is Ops.KERNEL]))}")
 def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # multi + merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, multi_pm+replace_allreduce+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
+  tensor_map = graph_rewrite_map(big_sink, multi_pm+replace_allreduce+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
@@ -548,7 +488,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
   # optionally reorder gbarriers or insert more (top down)
   tensor_map = graph_rewrite_map(tensor_map[big_sink], finalize_gbarrier, input_map=tensor_map, name="finalize_gbarrier")
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags+fuse_removes_gbarrier, input_map=tensor_map, name="fuse_removes_gbarrier")
 
   # TODO: move view_left/view_right here
 
