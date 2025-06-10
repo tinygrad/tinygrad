@@ -3,22 +3,27 @@ import dataclasses, functools, io, math, types, os, pathlib, struct, enum
 from io import BufferedReader
 from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
-from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
+from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, get_single_element
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported, Device
 
+debug = int(getenv("DEBUGONNX", "0"))
+limit = int(getenv("ONNXLIMIT", "-1"))
+
 # https://github.com/onnx/onnx/blob/main/onnx/onnx.proto3
 
-# Protobuf Wire Types
-WIRETYPE_VARINT = 0; WIRETYPE_FIXED64 = 1; WIRETYPE_LENGTH_DELIMITED = 2; WIRETYPE_START_GROUP = 3; WIRETYPE_END_GROUP = 4; WIRETYPE_FIXED32 = 5 # noqa: E702
-class PBType: FLOAT = 1; INT = 2; STRING = 3; FLOATS = 4; INTS = 5; STRINGS = 6; BYTES = 7; SUB = 8 # noqa: E702
+# https://github.com/protocolbuffers/protobuf/blob/main/python/google/protobuf/internal/wire_format.py#L24-L29
+class WireType(enum.Enum):
+  WIRETYPE_VARINT = 0; WIRETYPE_FIXED64 = 1; WIRETYPE_LENGTH_DELIMITED = 2; WIRETYPE_START_GROUP = 3; WIRETYPE_END_GROUP = 4; WIRETYPE_FIXED32 = 5 # noqa: E702
+class PBType(enum.Enum):
+  FLOAT = 1; INT = 2; STRING = 3; FLOATS = 4; INTS = 5; STRINGS = 6; BYTES = 7; SUB = 8 # noqa: E702
 
 PB_INFOS = {
   "OperatorSetIdProto": {1: ("domain", PBType.STRING), 2: ("version", PBType.INT)},
   "StringStringEntryProto": {1: ("key", PBType.STRING), 2: ("value", PBType.STRING)},
   "TensorProto": {1: ("dims", PBType.INT, True), 2: ("data_type", PBType.INT), 4: ("float_data", PBType.FLOATS),
-    13: ("external_data", PBType.SUB, True, "StringStringEntryProto"), 14: ("data_location", PBType.INT),
-    5: ("int32_data", PBType.INTS), 7: ("int64_data", PBType.INTS), 8: ("name", PBType.STRING), 9: ("raw_data", PBType.BYTES)},
+    5: ("int32_data", PBType.INTS), 7: ("int64_data", PBType.INTS), 8: ("name", PBType.STRING), 9: ("raw_data", PBType.BYTES),
+    13: ("external_data", PBType.SUB, True, "StringStringEntryProto"), 14: ("data_location", PBType.INT)},
   "TensorShapeProtoDimension": {1: ("dim_value", PBType.INT), 2: ("dim_param", PBType.STRING)},
   "TensorShapeProto": {1: ("dim", PBType.SUB, True, "TensorShapeProtoDimension")},
   "ModelProto": {1: ("ir_version", PBType.INT), 5: ("model_version", PBType.INT),
@@ -30,13 +35,14 @@ PB_INFOS = {
     5: ("initializer", PBType.SUB, True, ("TensorProto", lambda: {"dims": [], "float_data": [], "int32_data": [], "string_data": [],
                                                                   "int64_data": [], "double_data": [], "uint64_data": []})),
     11: ("input", PBType.SUB, True, "ValueInfoProto"), 12: ("output", PBType.SUB, True, "ValueInfoProto")},
-  "NodeProto": { 1: ("input", PBType.STRING, True), 2: ("output", PBType.STRING, True), 3: ("name", PBType.STRING),
-    4: ("op_type", PBType.STRING), 6: ("doc_string", PBType.STRING), 7: ("domain", PBType.STRING),
-    5: ("attribute", PBType.SUB, True, ("AttributeProto", lambda: {"floats": [], "ints": [], "strings": []}))},
-  "AttributeProto": {1: ("name", PBType.STRING), 20: ("type", PBType.INT), 3: ("i", PBType.INT), 8: ("ints", PBType.INT, True),
-    2: ("f", PBType.FLOAT), 7: ("floats", PBType.FLOAT, True), 4: ("s", PBType.BYTES), 9: ("strings", PBType.BYTES, True),
+  "NodeProto": {1: ("input", PBType.STRING, True), 2: ("output", PBType.STRING, True), 3: ("name", PBType.STRING),
+    4: ("op_type", PBType.STRING), 5: ("attribute", PBType.SUB, True, ("AttributeProto", lambda: {"floats": [], "ints": [], "strings": []})),
+    6: ("doc_string", PBType.STRING), 7: ("domain", PBType.STRING),},
+  "AttributeProto": {1: ("name", PBType.STRING), 2: ("f", PBType.FLOAT), 3: ("i", PBType.INT), 4: ("s", PBType.BYTES),
     5:("t", PBType.SUB, False, ("TensorProto", lambda: {"dims": [], "float_data": [], "int32_data": [], "string_data": [], "int64_data": [],
-                                                        "double_data": [], "uint64_data": []}))},
+                                                        "double_data": [], "uint64_data": []})),
+    7: ("floats", PBType.FLOAT, True), 8: ("ints", PBType.INT, True), 9: ("strings", PBType.BYTES, True),
+    20: ("type", PBType.INT)},
   "ValueInfoProto": {1: ("name", PBType.STRING), 2: ("type", PBType.SUB, False, "TypeProto"), 3: ("doc_string", PBType.STRING)},
   "TypeProto": {1: ("tensor_type", PBType.SUB, False, "TypeProtoTensor"), 4: ("sequence_type", PBType.SUB, False, "TypeProtoSequence"),
     9: ("optional_type", PBType.SUB, False, "TypeProtoOptional"), 6: ("denotation", PBType.STRING)},
@@ -72,25 +78,38 @@ _ATTR_TYPE_ENUM_TO_HANDLER_MAP: dict[str, Callable[[dict], Any]] = {
   AttributeType.STRINGS: lambda a: tuple(s.data().tobytes().decode('utf-8') for s in a.get('strings', []))
 }
 
-def onnx_load(fn: Tensor | str | pathlib.Path, load_external_data: bool=True):
-  parser = OnnxParser(fn, load_external_data)
-  return parser.parse()
-
 def gen_result(obj: dict, key_name, val, repeated: bool):
   if repeated: obj.setdefault(key_name, []).append(val)
   else: obj[key_name] = val
 
+def decode_varint(reader: BufferedReader) -> int:
+  result = 0
+  shift = 0
+  while True:
+    data = reader.read(1)
+    if data == b"": raise EOFError("decode_varint EOF")
+    result |= (data[0] & 0x7F) << shift
+    if not (data[0] & 0x80): return result
+    shift += 7
+    if shift >= 70: raise ValueError("Varint too long")
+
+def skip_field_value(reader: BufferedReader, wire_type):
+  if wire_type == WireType.WIRETYPE_VARINT: decode_varint(reader)
+  elif wire_type == WireType.WIRETYPE_FIXED64: reader.seek(8, os.SEEK_CUR)
+  elif wire_type == WireType.WIRETYPE_FIXED32: reader.seek(4, os.SEEK_CUR)
+  elif wire_type == WireType.WIRETYPE_LENGTH_DELIMITED: reader.seek(decode_varint(reader), os.SEEK_CUR)
+  else: raise ValueError(f"Unknown wire type: {wire_type}")
+
 class OnnxParser:
-  def __init__(self, inp: Tensor | str | pathlib.Path, load_external_data: bool=True):
-    self.file_path: pathlib.Path | None = None
+  def __init__(self, model: pathlib.Path, load_external_data: bool=True):
+    self.file_path = model
+    self.model = Tensor(model)
     self.load_external_data = load_external_data
-    if not isinstance(inp, Tensor):
-      self.file_path = pathlib.Path(inp)
-      self.tensor = Tensor(self.file_path)
-    else: self.tensor = inp
-    self.attr_func_dict = { PBType.BYTES: self._handle_bytes, PBType.SUB: self._handle_sub_message, PBType.FLOATS: self._handle_packed_floats,
+
+    attr_func_dict = {PBType.BYTES: self._handle_bytes, PBType.SUB: self._handle_sub_message, PBType.FLOATS: self._handle_packed_floats,
       PBType.INT: self._handle_int64, PBType.INTS: self._handle_packed_int64s, PBType.STRING: self._handle_string, PBType.FLOAT: self._handle_float}
-    self.registered_handles = {}
+
+    registered_handles = {}
     for pb_name in PB_INFOS:
       res = {}
       for fid, config in PB_INFOS[pb_name].items():
@@ -98,93 +117,80 @@ class OnnxParser:
         if len(config) == 2: name, attr = config
         elif len(config) == 3: name, attr, repeated = config
         elif len(config) == 4: name, attr, repeated, parser_fn = config
-        handler_fn = self.attr_func_dict[attr]
+        handler_fn = attr_func_dict[attr]
         def _wrapper_handler(obj, reader, wt, h=handler_fn, n=name, p=parser_fn, r=repeated): return h(obj, n, reader, wt, parser_func=p, repeated=r)
         _wrapper_handler._debug_info = f"{fid}, {name} => {handler_fn}"
         res[fid] = _wrapper_handler
-      self.registered_handles[pb_name] = res
+      registered_handles[pb_name] = res
+    self.registered_handles = registered_handles
 
   def parse(self):
-    reader = BufferedReader(TensorIO(self.tensor))
+    reader = BufferedReader(TensorIO(self.model))
     return self._parse_message(reader, "ModelProto", lambda: {"opset_import": [], "domain": None, "graph": None})
-
-  def decode_varint(self, reader: BufferedReader) -> int:
-    result = 0
-    shift = 0
-    while True:
-      data = reader.read(1)
-      if data == b"": raise EOFError("decode_varint EOF")
-      result |= (data[0] & 0x7F) << shift
-      if not (data[0] & 0x80): return result
-      shift += 7
-      if shift >= 70: raise ValueError("Varint too long")
-
-  def skip_field_value(self, reader: BufferedReader, wire_type):
-    if wire_type == WIRETYPE_VARINT: self.decode_varint(reader)
-    elif wire_type == WIRETYPE_FIXED64: reader.seek(8, os.SEEK_CUR)
-    elif wire_type == WIRETYPE_FIXED32: reader.seek(4, os.SEEK_CUR)
-    elif wire_type == WIRETYPE_LENGTH_DELIMITED: reader.seek(self.decode_varint(reader), os.SEEK_CUR)
-    else: raise ValueError(f"Unknown wire type: {wire_type}")
 
   def _parse_message(self, reader, message_field_handlers_name, initial_obj_factory=lambda: {}):
     message_field_handlers = self.registered_handles[message_field_handlers_name]
     obj = initial_obj_factory()
     while True:
       try:
-        tag_val = self.decode_varint(reader)
+        tag_val = decode_varint(reader)
         field_number = tag_val >> 3
-        wire_type = tag_val & 0x07
+        wire_type = WireType(tag_val & 0x07)
         if handler := message_field_handlers.get(field_number):
+          if debug >= 2: print(handler._debug_info)
           handler(obj, reader, wire_type)
-        else: self.skip_field_value(reader, wire_type)
+        else: skip_field_value(reader, wire_type)
       except EOFError: break
-    if message_field_handlers_name == "TensorProto" and self.load_external_data and obj.get("data_location", 0) == 1: self._parse_external_data(obj)
+    if message_field_handlers_name == "TensorProto" and self.load_external_data and obj.get("data_location", 0) == 1:
+      self._parse_external_data(obj)
     return obj
 
-  def _handle_delimited(self, reader:BufferedReader, use_tensor=False) -> tuple[bytes, Tensor]:
-    str_len = self.decode_varint(reader)
+  def _handle_delimited(self, reader:BufferedReader, use_tensor=False) -> bytes | Tensor:
+    str_len = decode_varint(reader)
     if not use_tensor: return reader.read(str_len)
     res = reader.raw._tensor[reader.tell():(reader.tell()+str_len)]
     reader.seek(str_len, os.SEEK_CUR)
     return res
 
   def _handle_string(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for string field '{key_name}'")
-    value = self._handle_delimited(reader)
-    gen_result(obj, key_name, value.decode("utf-8"), repeated)
+    if wire_type != WireType.WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for string field '{key_name}'")
+    val = self._handle_delimited(reader)
+    val = val.decode("utf-8")
+    gen_result(obj, key_name, val, repeated)
 
   def _handle_bytes(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for bytes field '{key_name}'")
-    value = self._handle_delimited(reader, use_tensor=True)
-    gen_result(obj, key_name, value, repeated)
+    if wire_type != WireType.WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for bytes field '{key_name}'")
+    val = self._handle_delimited(reader, use_tensor=True)
+    gen_result(obj, key_name, val, repeated)
 
   def _handle_int64(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_VARINT: raise ValueError(f"Expected varint for int64 field '{key_name}'")
-    val = self.decode_varint(reader)
-    gen_result(obj, key_name, val - 2**64 if val & (1 << 63) else val, repeated)
+    if wire_type != WireType.WIRETYPE_VARINT: raise ValueError(f"Expected varint for int64 field '{key_name}'")
+    val = decode_varint(reader)
+    val = val - 2**64 if val & (1 << 63) else val
+    gen_result(obj, key_name, val, repeated)
 
   def _handle_float(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_FIXED32: raise ValueError(f"Expected fixed32 for float field '{key_name}'")
-    val, = struct.unpack("<f", reader.read(4))
+    if wire_type != WireType.WIRETYPE_FIXED32: raise ValueError(f"Expected fixed32 for float field '{key_name}'")
+    val = get_single_element(struct.unpack("<f", reader.read(4)))
     gen_result(obj, key_name, val, repeated)
 
   def _handle_packed_int64s(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError("Packed int64s expected length_delimited")
-    total_bytes_len = self.decode_varint(reader)
+    if wire_type != WireType.WIRETYPE_LENGTH_DELIMITED: raise ValueError("Packed int64s expected length_delimited")
+    total_bytes_len = decode_varint(reader)
     old_pos = reader.tell()
     values = []
     while reader.tell() < total_bytes_len + old_pos:
-      val = self.decode_varint(reader) # need copy here because packed ints are varint
+      val = decode_varint(reader) # need copy here because packed ints are varint
       values.append(val - 2**64 if val & (1 << 63) else val)
     obj[key_name] = Tensor(values, dtype=dtypes.int64)
 
   def _handle_packed_floats(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError("Packed floats expected length_delimited")
+    if wire_type != WireType.WIRETYPE_LENGTH_DELIMITED: raise ValueError("Packed floats expected length_delimited")
     value = self._handle_delimited(reader, use_tensor=True)
     obj[key_name] = value.bitcast(dtypes.float32)
 
   def _handle_sub_message(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for sub-message field '{key_name}'")
+    if wire_type != WireType.WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for sub-message field '{key_name}'")
     value = self._handle_delimited(reader, use_tensor=True)
     if isinstance(parser_func, str): sub_obj = self._parse_message(BufferedReader(TensorIO(value)), parser_func)
     elif isinstance(parser_func, tuple): sub_obj = self._parse_message(BufferedReader(TensorIO(value)), parser_func[0], parser_func[1])
@@ -193,6 +199,7 @@ class OnnxParser:
 
   def _parse_external_data(self, obj):
     if "external_data" not in obj: raise ValueError("no external_data")
+    if self.file_path.suffix != ".onnx": raise ValueError("External data requires the input model path to have `.onnx` as extension")
     location = None
     length = None
     offset = 0
@@ -201,23 +208,13 @@ class OnnxParser:
       if kv["key"] == "offset": offset = int(kv["value"])
       if kv["key"] == "length": length = int(kv["value"])
     if location is None: raise ValueError("no location in external_data")
-    if self.file_path is None:
-      # get onnx file path from Tensor
-      if isinstance(self.tensor.device, str) and self.tensor.device.startswith("DISK:"):
-        self.file_path = self.tensor.device[5:]
-        if not (ext_path := self.file_path.parent.joinpath(location)).exists():
-          raise Exception(f"external location not exists: {ext_path}, may caused by symbolic link, try passing onnx file path to onnx_load")
-      else: raise Exception("onnx external_data need the origin file path, try passing onnx file path to onnx_load")
     ext_path = self.file_path.parent.joinpath(location)
-    if not ext_path.exists(): raise Exception(f"external location not exists: {ext_path}")
+    if not ext_path.exists(): raise RuntimeError("External data must be placed in the same folder as the onnx model")
     ext_tensor = Tensor(ext_path)
     obj["raw_data"] = ext_tensor[offset:offset+length] if length is not None else ext_tensor[offset:]
     obj["data_location"] = 0
 
 # ***** onnx protobuf parsing ******
-from onnx import helper
-import numpy as np
-
 def buffer_parse(onnx_tensor: dict) -> Tensor:
   if onnx_tensor["string_data"]: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
   dtype, shape = dtype_parse(onnx_tensor["data_type"]), tuple(onnx_tensor["dims"])
@@ -283,9 +280,6 @@ def model_parse(onnx_model: dict):
   nodes = tuple(nodes_list)
   return is_training, values, inputs, outputs, nodes, opset_version
 
-def model_load(model:Tensor | str | os.PathLike) -> dict :
-  return onnx_load(model)
-
 # ***** onnx spec *****
 @dataclasses.dataclass(frozen=True)
 class OnnxValue:
@@ -329,17 +323,16 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
   return ret
 
 # ***** runner ******
-debug = int(getenv("DEBUGONNX", "0"))
-limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
   """
   `OnnxRunner` executes an ONNX model using Tinygrad as backend.
 
   Args:
-    model: The ONNX model, provided either as a file path (a string or path-like object), a file-like object, or as raw bytes.
+    model: The ONNX model, provided as a file path (a string or path-like object).
   """
-  def __init__(self, model:Tensor | str | os.PathLike):
-    self.is_training, self.graph_values, self.graph_inputs, self.graph_outputs, self.graph_nodes, self.opset_version = model_parse(model_load(model))
+  def __init__(self, model:str | os.PathLike):
+    model = OnnxParser(pathlib.Path(model)).parse()
+    self.is_training, self.graph_values, self.graph_inputs, self.graph_outputs, self.graph_nodes, self.opset_version = model_parse(model)
     self.old_training = Tensor.training
     Tensor.training = True if self.is_training else False
     self.variable_dims: dict[str, int] = {}
@@ -809,6 +802,8 @@ def get_onnx_ops():
 
   # Reimplemented here because you need legacy RNG for passing ONNX tests.
   def Dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
+    # TODO figure this np import out
+    import numpy as np
     if not training_mode: return data, Tensor.ones(data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
     mask = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)) >= ratio, requires_grad=False, device=data.device)
     return data * mask * (1/(1.0 - ratio)), mask
