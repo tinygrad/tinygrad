@@ -310,7 +310,7 @@ class TestLocalAccess(unittest.TestCase):
     sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
 
-  # NOTE: webgpu specific, since only webgpu performs bitpacking for uchar
+  # NOTE: webgpu specific, since only webgpu performs bitpacking
   @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Test local access with packed data type")
   def test_local_packed(self):
     uops = []
@@ -319,6 +319,19 @@ class TestLocalAccess(unittest.TestCase):
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
     sres = uop(uops, Ops.LOAD, dtypes.uint8, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
     self.assertEqual(_test_uops_result(dtypes.uint8, uops, sres), 42)
+
+  # NOTE: webgpu specific, since only webgpu performs bitpacking
+  @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Test local memory size for packed data types")
+  def test_packed_smem_size(self):
+    _dtypes = [dtypes.char, dtypes.uchar, dtypes.short, dtypes.ushort, dtypes.half]
+    size = 16
+    for dtype in _dtypes:
+      temp = UOp(Ops.DEFINE_LOCAL, dtype.ptr(size=size, local=True), (), 'smem')
+      uops = to_uops_list([temp], opts=Device[Device.DEFAULT].renderer)
+      out = Device[Device.DEFAULT].renderer.render(uops)
+      # half is supported in wgsl, so it doesn't have to be packed
+      corrected_size = size//(4//dtype.itemsize) if dtype != dtypes.half else size
+      self.assertIn(f"temp0: array<{Device[Device.DEFAULT].renderer.buf_map(dtype)},{corrected_size}>;", out)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   @unittest.skip("tinygrad doesn't support this behavior")
@@ -463,7 +476,7 @@ class TestUOpStr(unittest.TestCase):
     assert str(eval(str(device))) == str(device)
 
   def test_reduceop_arg(self):
-    sum_uop = Tensor.empty(32, 32).sum().lazydata
+    sum_uop = Tensor.empty(32, 32).sum().uop
     assert str(eval(str(sum_uop))) == str(sum_uop)
 
 @unittest.skip("uop no longer has order like this")
@@ -536,9 +549,9 @@ class TestShapeSpec(unittest.TestCase):
   # ** CONST is CONST(VIEW(DEVICE)) -> RESHPAE -> EXPAND
 
   def test_expanded_const(self):
-    a = Tensor(1).lazydata
+    a = Tensor(1).uop
     self.assertEqual(a.st, ShapeTracker.from_shape(()))
-    a = Tensor.ones((4, 4)).lazydata
+    a = Tensor.ones((4, 4)).uop
     self.assertEqual(a.st, ShapeTracker.from_shape(()).reshape((1,1)).expand((4,4)))
 
   def test_padded_const(self):
@@ -556,12 +569,12 @@ class TestShapeSpec(unittest.TestCase):
 
   # NOTE: CONST ShapeTracker comes from its source
   def test_scalar_const(self):
-    a = Tensor(0).lazydata
+    a = Tensor(0).uop
     self.assertEqual(a.st, ShapeTracker.from_shape(()))
 
   def test_scalar_var(self):
     vv = UOp.variable("a", 1, 4).bind(2)
-    t = Tensor(vv).lazydata
+    t = Tensor(vv).uop
     self.assertEqual(t.st, ShapeTracker.from_shape(()))
 
   # ** ASSIGN is ASSIGN(VIEW(BUFFER), new_val)
@@ -570,7 +583,7 @@ class TestShapeSpec(unittest.TestCase):
     buffer = Tensor.arange(4).realize()
     a = buffer.assign(Tensor.zeros((4,), dtype=dtypes.int))
     assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat()))
-    assert assign_pattern.match(a.lazydata, {})
+    assert assign_pattern.match(a.uop, {})
     a.realize()
     self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
 
@@ -584,7 +597,7 @@ class TestShapeSpec(unittest.TestCase):
     buffer = Tensor.ones((4,)).contiguous().realize()
     a = buffer.reshape((2, 2)).assign(Tensor.zeros((2, 2)))
     assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER))), UPat()))
-    assert assign_pattern.match(a.lazydata, {})
+    assert assign_pattern.match(a.uop, {})
     a.realize()
     self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
 
@@ -593,13 +606,13 @@ class TestShapeSpec(unittest.TestCase):
     a = Tensor.ones((4,)).contiguous().realize()
     assign = a.shrink(((1, 2),)).assign(Tensor.zeros((1,)))
     # the ASSIGN UOp has size=1
-    self.assertEqual(assign.lazydata.size, 1)
+    self.assertEqual(assign.uop.size, 1)
     # the ASSIGN views the buffer with a shrunk st
-    self.assertEqual(assign.lazydata.src[0].st, ShapeTracker.from_shape((4,)).shrink(((1, 2),)))
+    self.assertEqual(assign.uop.src[0].st, ShapeTracker.from_shape((4,)).shrink(((1, 2),)))
     # the underlying BUFFER has a size=4
-    self.assertEqual(assign.lazydata.buf_uop.size, 4)
+    self.assertEqual(assign.uop.buf_uop.size, 4)
     # NOTE: output shape is different from the BUFFER shape
-    self.assertNotEqual(assign.lazydata.shape, a.lazydata.shape)
+    self.assertNotEqual(assign.uop.shape, a.uop.shape)
     assign.realize()
     self.assertEqual(a.tolist(), [1, 0, 1, 1])
 
@@ -609,13 +622,13 @@ class TestShapeSpec(unittest.TestCase):
 
   def test_ops_st(self):
     # view / mop
-    a = Tensor.empty(4, 2, 1).permute((1, 2, 0)).lazydata
+    a = Tensor.empty(4, 2, 1).permute((1, 2, 0)).uop
     self.assertEqual(a.st, ShapeTracker.from_shape((4, 2, 1)).permute((1, 2, 0)))
     # alu / reduce
     alu = a*2
     self.assertEqual(alu.st, ShapeTracker.from_shape((2, 1, 4)))
     r = Tensor.empty(4, 4).sum(axis=1)
-    self.assertEqual(r.lazydata.st, ShapeTracker.from_shape((4,)))
+    self.assertEqual(r.uop.st, ShapeTracker.from_shape((4,)))
 
   def test_st_wmma_none(self):
     A = UOp(Ops.DEFINE_VAR, dtypes.float.vec(16), arg=('a', UOp.const(dtypes.float, 0), UOp.const(dtypes.float, 1)))

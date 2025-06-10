@@ -32,7 +32,7 @@ def get_available_cast_dtypes(dtype: DType) -> List[DType]:
 def _test_to_np(a:Tensor, np_dtype, target):
   if DEBUG >= 2: print(a)
   na = a.numpy()
-  if DEBUG >= 2: print(na, na.dtype, a.lazydata.base.realized)
+  if DEBUG >= 2: print(na, na.dtype, a.uop.base.realized)
   try:
     assert na.dtype == np_dtype
     np.testing.assert_allclose(na, target)
@@ -523,6 +523,7 @@ class TestTypeSpec(unittest.TestCase):
       dtypes.default_float = default_float
       assert dtypes.default_float == default_float
 
+  @unittest.skip("this test is slow and spawning whole pythons")
   def test_env_set_default_float(self):
     # check default
     subprocess.run(['python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.float"'],

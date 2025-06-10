@@ -3,6 +3,7 @@ import os
 import time
 import unittest
 import numpy as np
+# TODO: just choose which backends to test this on instead of import error
 try:
   import onnx # noqa: F401 # pylint: disable=unused-import
 except ModuleNotFoundError:
@@ -92,9 +93,8 @@ class TestOnnxModel(unittest.TestCase):
     et = time.monotonic()
     print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
-    Tensor.no_grad = True
-    torch_out = run_onnx_torch(onnx_fp, inputs).numpy()
-    Tensor.no_grad = False
+    onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
+    torch_out = run_onnx_torch(onnx_model, inputs).numpy()
     print(tinygrad_out, torch_out)
     np.testing.assert_allclose(tinygrad_out, torch_out, atol=1e-4, rtol=1e-2)
 

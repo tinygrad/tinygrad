@@ -1,6 +1,6 @@
 import gzip, unittest
 from tinygrad import Variable
-from tinygrad.helpers import Context, ContextVar
+from tinygrad.helpers import Context, ContextVar, argfix
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
 from tinygrad.tensor import get_shape
 from tinygrad.codegen.lowerer import get_contraction, get_contraction_with_reduce
@@ -154,6 +154,10 @@ class TestFetch(unittest.TestCase):
     no_gzip_url: str = 'https://ftp.gnu.org/gnu/gzip/gzip-1.13.zip'
     with self.assertRaises(gzip.BadGzipFile):
       fetch(no_gzip_url, gunzip=True)
+
+  def test_fetch_user_agent(self):
+    fetch("https://csrc.nist.gov/CSRC/media/Projects/lightweight-cryptography/documents/finalist-round/updated-submissions/sparkle.zip",
+          allow_caching=False)
 
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
@@ -347,6 +351,17 @@ class TestGetBits(unittest.TestCase):
 
   def test_single_bit(self):
     self.assertEqual(getbits(0b100000000, 8, 8), 1)
+
+class TestArgFix(unittest.TestCase):
+  def test_none(self):
+    self.assertEqual(argfix(None), (None, ))
+    self.assertEqual(argfix(None, None), (None, None))
+  def test_positional_arguments(self):
+    self.assertEqual(argfix(1, 2, 3), (1, 2, 3))
+  def test_tuple(self):
+    self.assertEqual(argfix((1., 2., 3.)), (1., 2., 3.))
+  def test_list(self):
+    self.assertEqual(argfix([True, False]), (True, False))
 
 if __name__ == '__main__':
   unittest.main()

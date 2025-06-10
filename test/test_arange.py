@@ -20,7 +20,7 @@ class TestArange(unittest.TestCase):
     p = k.to_program()
     print(p.name)
     #print(p.src)
-    ExecItem(CompiledRunner(p), [tt.lazydata.buffer]).run()
+    ExecItem(CompiledRunner(p), [tt.uop.buffer]).run()
     np.testing.assert_equal(tt.numpy(), np.arange(N))
     return p.estimates.ops
 
@@ -176,6 +176,8 @@ class TestIndexing(unittest.TestCase):
 
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_index_mnist(self, noopt=1, op_limit=512*784*13, split_reduceop=0):
+    # WEBGPU generates more ops due to bitpacking of < 4-byte dtypes
+    if Device.DEFAULT == "WEBGPU": op_limit *= 15
     from tinygrad.nn.datasets import mnist
     X_train, Y_train, _, _ = mnist()
     with Context(NOOPT=noopt, FUSE_ARANGE=1, SPLIT_REDUCEOP=split_reduceop):
@@ -187,12 +189,8 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(X_train.numpy()[samples.numpy()], x)
     np.testing.assert_allclose(Y_train.numpy()[samples.numpy()], y)
 
-  # TODO: fix these on WEBGPU, it looks like it has to do with packed stuff
-  @unittest.skipIf(getenv("WEBGPU"), "broken on webgpu for some reason")
   def test_index_mnist_opt(self): self.test_index_mnist(0)
-  @unittest.skipIf(getenv("WEBGPU"), "broken on webgpu for some reason")
   def test_index_mnist_split(self): self.test_index_mnist(1, split_reduceop=1)
-  @unittest.skipIf(getenv("WEBGPU"), "broken on webgpu for some reason")
   def test_index_mnist_opt_split(self): self.test_index_mnist(0, split_reduceop=1)
 
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")

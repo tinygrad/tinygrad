@@ -264,12 +264,10 @@ class TestUOpValidationIssue(unittest.TestCase):
     np.testing.assert_equal(big[idx].numpy(), np.array([1, 1]))
 
   def test_float_floordiv_scalar(self):
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      (Tensor.arange(4, dtype=dtypes.float32) // 2).realize()
+    (Tensor.arange(4, dtype=dtypes.float32) // 2).realize()
 
   def test_float_floordiv_tensor(self):
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      (Tensor.arange(4, dtype=dtypes.float32) // Tensor.ones(4, dtype=dtypes.float32)).realize()
+    (Tensor.arange(4, dtype=dtypes.float32) // Tensor.ones(4, dtype=dtypes.float32)).realize()
 
 class TestEdgeCases(unittest.TestCase):
   # add tests exposing new and diverse kinds of bugs that might impact real users here

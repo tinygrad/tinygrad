@@ -2,7 +2,7 @@ from typing import List
 import unittest, pytest
 from tinygrad import dtypes, Variable
 from tinygrad.helpers import DEBUG, Context
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp
 from tinygrad.codegen.symbolic import sym
 from tinygrad.codegen import full_rewrite, full_rewrite_to_sink
 from tinygrad.codegen.expander import expander
@@ -727,6 +727,20 @@ class TestIFUOps(unittest.TestCase):
     for st in sink.src:
       self.assertEqual(len(st.src), 2)
 
+class TestUOpTags(unittest.TestCase):
+  def test_inc_by_one(self):
+    g = UOp.const(dtypes.int, 1) + UOp.const(dtypes.int, 1)
+    assert g.ssimplify() == 2
+    pm_plus_1 = PatternMatcher([(UPat(Ops.CONST, name="x"), lambda x: x.replace(arg=x.arg+1, tag=1) if x.tag is None else None)])
+    pm_strip_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
+    g = graph_rewrite(g, pm_plus_1)
+    assert g.ssimplify() == 4
+    g = graph_rewrite(g, pm_plus_1)
+    assert g.ssimplify() == 4
+    g = graph_rewrite(g, pm_strip_tags)
+    assert g.ssimplify() == 4
+    g = graph_rewrite(g, pm_plus_1)
+    assert g.ssimplify() == 6
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

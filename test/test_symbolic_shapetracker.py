@@ -49,11 +49,11 @@ class TestSymbolic(unittest.TestCase):
     j = Variable("j", 1, 5).bind(3)
     k = Variable("k", 1, 5).bind(3)
     t = Tensor.rand(3, 4).reshape(i, 4).cat(Tensor.rand(3, 4).reshape(j, 4), dim=0).cat(Tensor.rand(3, 4).reshape(k, 4), dim=0)
-    st = t.lazydata.st
+    st = t.uop.st
     self.assert_tuple_equal(st.shape, (i+j+k, 4))
     assert st.real_strides() == (4, 1)
     t = Tensor.rand(3, 3).reshape(i, 3).cat(Tensor.rand(3, 3).reshape(i, 3), dim=0).cat(Tensor.rand(3, 3), dim=0)
-    st = t.lazydata.st
+    st = t.uop.st
     self.assert_tuple_equal(st.shape, (2*i+3, 3))
     assert st.real_strides() == (3, 1)
 
@@ -62,7 +62,7 @@ class TestSymbolic(unittest.TestCase):
     j = Variable("j", 1, 5).bind(4)
     k = Variable("k", 1, 5).bind(4)
     t = Tensor.rand(3, 4).reshape(3, i).cat(Tensor.rand(3, 4).reshape(3, j), dim=1).cat(Tensor.rand(3, 4).reshape(3, k), dim=1)
-    st = t.lazydata.st
+    st = t.uop.st
     self.assert_tuple_equal(st.shape, (3, i+j+k))
     self.assert_tuple_equal(st.real_strides(), (i+j+k, 1))
 
@@ -113,7 +113,7 @@ class TestShapeTrackerUnbind(unittest.TestCase):
     v = Variable("v", 1, 100)
     bv = Variable("v", 1, 100).bind(3)
     t = Tensor.rand(3, 4).reshape(bv, 4)
-    unbound_st, var_val = t.lazydata.st.unbind()
+    unbound_st, var_val = t.uop.st.unbind()
     assert unbound_st == ShapeTracker((View.create(shape=(v, 4)),))
     assert var_val == {v: 3}
 
@@ -121,7 +121,7 @@ class TestShapeTrackerUnbind(unittest.TestCase):
     v = Variable("v", 1, 100)
     bv = Variable("v", 1, 100).bind(2)
     t = Tensor.rand(3, 4).shrink(((bv, bv+1), (0, 4)))
-    unbound_st, var_val = t.lazydata.st.unbind()
+    unbound_st, var_val = t.uop.st.unbind()
     assert unbound_st == ShapeTracker((View.create(shape=(1, 4), offset=4*v),))
     assert var_val == {v: 2}
 
@@ -180,8 +180,8 @@ class TestSymbolicReshapeFromNonContiguous(unittest.TestCase):
     vi = Variable("i", 1, 5).bind(4)
     t = Tensor.ones(3, 4).reshape(3, vi)
     assert t.shape == (3, vi)
-    assert not t.lazydata.st.contiguous
-    assert len(t.lazydata.st.views) == 1
+    assert not t.uop.st.contiguous
+    assert len(t.uop.st.views) == 1
 
   def test_reshape_not_allowed(self):
     vi = Variable("i", 1, 5).bind(4)
@@ -195,12 +195,12 @@ class TestSymbolicReshapeFromNonContiguous(unittest.TestCase):
   def test_reshape_from_padded(self):
     vi = Variable("i", 1, 5).bind(4)
     t = Tensor.ones(3, 4).contiguous().expand(2, 3, 4).pad(((1, 1), None, None)).shrink((None, None, (1, 3)))
-    st = t.lazydata.st
+    st = t.uop.st
     assert len(st.views) == 1
     view = st.views[0]
     assert view.shape == (4, 3, 2)
     t = t.reshape(vi, 3, 2)
-    st2 = t.lazydata.st
+    st2 = t.uop.st
     assert len(st2.views) == 1
     view2 = st2.views[0]
     # check only shape changed. strides, offset, mask, contiguous remained the same
@@ -226,6 +226,13 @@ class TestSymbolicExpand(unittest.TestCase):
       a = a + 1
       self.assertTupleEqual(a.shape, (3, vi))
 
+  def test_pad_then_expand_into_symbols(self):
+    vi = Variable("i", 1, 10).bind(3)
+    a = Tensor(1).unsqueeze(0).pad((0, 24)).unsqueeze(0).expand((vi, 25))
+    self.assertEqual(a.shape, (vi, 25))
+    self.assertEqual(a.reshape(25*vi).shape, (vi*25,))
+    self.assertEqual(a.reshape(vi*25).shape, (vi*25,))
+
 class TestSymbolicShrink(unittest.TestCase):
   def test_shrink_symbols(self):
     vi = Variable("i", 1, 5)
@@ -237,7 +244,7 @@ class TestSymbolicPad(unittest.TestCase):
     v = Variable("v", 1, 100).bind(5)
     t = Tensor.ones(5).reshape(v).pad(((4, 0),)).reshape(9)
     assert t.shape == (9,)
-    st = t.lazydata.st
+    st = t.uop.st
     print(st)
 
 if __name__ == '__main__':

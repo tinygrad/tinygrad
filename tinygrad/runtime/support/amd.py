@@ -12,12 +12,16 @@ class AMDReg:
   def encode(self, **kwargs) -> int: return functools.reduce(int.__or__, (value << self.fields[name][0] for name,value in kwargs.items()), 0)
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
 
+  def fields_mask(self, *names) -> int:
+    return functools.reduce(int.__or__, ((((1 << (self.fields[nm][1]-self.fields[nm][0]+1)) - 1) << self.fields[nm][0]) for nm in names), 0)
+
   @property
   def addr(self): return self.bases[self.segment] + self.offset
 
-@dataclass(frozen=True)
+@dataclass
 class AMDIP:
   name:str; version:tuple[int, ...]; bases:tuple[int, ...] # noqa: E702
+  def __post_init__(self): self.version = fixup_ip_version(self.name, self.version)[0]
 
   @functools.cached_property
   def regs(self): return import_asic_regs(self.name, self.version, cls=functools.partial(AMDReg, bases=self.bases))
@@ -38,7 +42,7 @@ def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
   if ip in ['nbio', 'nbif']: version = _apply_ovrd({(3,3): (2,3,0)})
   elif ip == 'mp': version = _apply_ovrd({(14,0,3): (14,0,2)})
 
-  return [version, version[:2]+(0,), version[:1]+(0, 0)]
+  return [version, version[:2], version[:2]+(0,), version[:1]+(0, 0)]
 
 def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
   for ver in fixup_ip_version(name, version):
