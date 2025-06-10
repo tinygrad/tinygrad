@@ -1983,16 +1983,39 @@ class Tensor(MathTrait):
         state = state.bitwise_xor((state.roll(shifts=-1, dims=2) ^ -1) & state.roll(shifts=-2, dims=2)).flatten(1) ^ rnd_const_masks[i]
     return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], -1)
 
+  def _hash_1mb(self) -> Tensor:
+    assert self.ndim == 2, "only support batched 1d tensors"
+    assert self.shape[1] == 1024 * 1024, "only support messages of 1mb"
+
+    bs = self.shape[0]
+    blocks = bs * self.shape[1] // 4096
+    data = self.reshape(blocks, 4096)
+    block_hashes = data.keccak("shake_128").reshape(blocks, 16)
+    return block_hashes.reshape(bs, 4096).keccak("shake_128").reshape(bs, 16)
+
   def hash(self) -> Tensor:
     """
-    Calculates a 16-byte hash of the tensor over the last dimension.
+    Calculates a 16-byte hash of the tensor.
 
     ```python exec="false source="above" session="tensor" result="python"
     t = Tensor(b"Hello World!").hash()
     print(t.data().hex())
     ```
     """
-    return self[*self.shape[:-1], 16]
+    # calculates hashes in blocks of 1mb
+
+    # pad to a multiple of 1mb
+    data = self.bitcast(dtypes.uint8).flatten()
+    if data.shape[0] % (1024 * 1024) != 0: data = data.pad(((0, (1024 * 1024) - data.shape[0] % (1024 * 1024))))
+
+    # split into 1mb blocks
+    blocks, first = data.shape[0] // (1024 * 1024), True
+    while blocks >= 1 or first:
+      data = data.reshape(blocks, 1024 * 1024)
+      data = data._hash_1mb().reshape(blocks, 16).flatten()
+      blocks, first = data.shape[0] // (1024 * 1024), False
+
+    return data.reshape(16)
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
     m = self - self.max(axis=axis, keepdim=True).detach()
