@@ -478,6 +478,20 @@ class TestHelpers(unittest.TestCase):
         np.testing.assert_equal(dtypes.min(dt), False)
         np.testing.assert_equal(dtypes.max(dt), True)
 
+  def test_dtype_range_property(self):
+    for dt in core_dtypes:
+      if dtypes.is_float(dt):
+        np.testing.assert_equal(dt.min, -math.inf)
+        np.testing.assert_equal(dt.max, math.inf)
+      elif dtypes.is_int(dt):
+        info = np.iinfo(_to_np_dtype(dt))
+        np.testing.assert_equal(dt.min, info.min)
+        np.testing.assert_equal(dt.max, info.max)
+      else:
+        assert dt == dtypes.bool, dt
+        np.testing.assert_equal(dt.min, False)
+        np.testing.assert_equal(dt.max, True)
+
   def test_truncate_fp16(self):
     self.assertEqual(truncate_fp16(1), 1)
     self.assertEqual(truncate_fp16(65504), 65504)
