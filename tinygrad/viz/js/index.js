@@ -219,29 +219,49 @@ function renderMemoryGraph(graph) {
   document.getElementById("zoom-to-fit-btn").click();
 }
 
-function formatTime(ts, duration) {
+function formatTime(ts, dur) {
   if (dur<=1e3) return `${ts}us`;
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
   return `${(ts*1e-6).toFixed(2)}s`;
 }
 
+// prevent scrolling then apply the default filter
+// https://observablehq.com/@d3/pan-zoom-axes
+function filter(event) {
+  event.preventDefault();
+  return (!event.ctrlKey || event.type === 'wheel') && !event.button;
+}
+
 var traceEvents;
-function renderProfiler() {
+async function renderProfiler() {
   switchRender("profiler");
   if (traceEvents == null) traceEvents = (await (await fetch("/get_profile")).json()).traceEvents;
   // setup base svg
   const root = d3.select(".profiler").html("");
   const timeline = root.append("div").attr("style", "width: 100%; height: 100%;");
-  const { width } = timeline.node().getBoundingClientRect();
+  const { width, height } = timeline.node().getBoundingClientRect();
   const svg = timeline.append("svg").attr("id", "profiler-svg").attr("viewBox", `0 0 ${width} ${height}`)
     .attr("style", "width: 100%; height: auto;").attr("preserveAspectRatio", "xMinYMin meet");
   // get start and end times
   const timestamps = traceEvents.map(t => t.ts).filter(t => t);
+  console.log(timestamps);
   let [st, et] = [Math.min(...timestamps), Math.max(...timestamps)];
   et += Math.max(...traceEvents.filter((t) => t.ts === et).map(t => t.dur));
   const duration = et-st;
-  const x = d3.scaleLinear().domain([0, duration]).range([0, width]);
+  const marginLeft = 30;
+  const x = d3.scaleLinear().domain([0, duration]).range([marginLeft, width-marginLeft]);
   const xAxis = d3.axisBottom(x).tickFormat(t => formatTime(t, duration));
+  const gX = svg.append("g").call(xAxis).attr("transform", `translate(${marginLeft}, 0)`);
+  const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width, height]]).filter(filter).on("zoom", (e) => {
+    gX.call(xAxis.scale(e.transform.rescaleX(x)));
+  });
+  svg.call(zoom);
+  for (const e of traceEvents) {
+    if (e.name === "process_name") {
+    } else if (e.name === "thread_name") {
+    } else if (e.ph === "X") {
+    }
+  }
 }
 
 // ** zoom and recentering
@@ -306,7 +326,7 @@ const evtSources = [];
 // rewrite: a single UOp transformation
 // step: collection of rewrites
 // context: collection of steps
-const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
+const state = {currentCtx:0, currentStep:0, currentRewrite:0, expandSteps:false};
 function setState(ns) {
   Object.assign(state, ns);
   main();
@@ -315,8 +335,8 @@ async function main() {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // ** left sidebar context list
   if (ctxs == null) {
-    ctxs = await (await fetch("/ctxs")).json();
-    setState({ currentCtx:-1 });
+    ctxs = [{name: "Profiler", steps:[]}, ...(await (await fetch("/ctxs")).json())];
+    // setState({ currentCtx:-1 });
   }
   const ctxList = document.querySelector(".ctx-list");
   ctxList.innerHTML = "";
@@ -352,8 +372,9 @@ async function main() {
   // ** center graph
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
+  if (ctx.name === "Profiler") return renderProfiler();
   const step = ctx.steps[currentStep];
-  const ckey = `ctx=${currentCtx}&idx=${currentStep}`;
+  const ckey = `ctx=${currentCtx-1}&idx=${currentStep}`;
   // close any pending event sources
   let activeSrc = null;
   for (const e of evtSources) {
