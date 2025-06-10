@@ -78,7 +78,7 @@ runs:
       run: |
         python -m venv ${{ github.workspace }}/.venv
         if [[ "$RUNNER_OS" == "Windows" ]]; then
-          source ${{ github.workspace }}/.venv/Scripts/activate
+          source .venv/Scripts/activate
         else
           . ${{ github.workspace }}/.venv/bin/activate
         fi
@@ -89,7 +89,7 @@ runs:
       run: |
         python -m venv ${{ github.workspace }}/.venv
         if [[ "$RUNNER_OS" == "Windows" ]]; then
-          source ${{ github.workspace }}/.venv/Scripts/activate
+          source .venv/Scripts/activate
         else
           . ${{ github.workspace }}/.venv/bin/activate
         fi
