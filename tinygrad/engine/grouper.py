@@ -471,6 +471,9 @@ fuse_removes_gbarrier = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="c").fuse(), lambda c: c),
   # FUSE on GBARRIER removes GBARRIER
   (UPat(Ops.GBARRIER, name="c").fuse(), lambda c: c.src[0].fuse()),
+  # FUSE on reduce adds fuse marker to grouper to push views left through this reduce
+  (UPat(Ops.REDUCE_AXIS, name="r").fuse(),
+   lambda r: r.replace(src=(r.src[0].fuse(),), arg=r.arg+(True,)) if len(r.arg) == 2 else None),
   # FUSE on anything else pushes FUSE to srcs
   (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="c").fuse(), lambda c: c.replace(src=tuple([x.fuse() for x in c.src]))),
 ])
