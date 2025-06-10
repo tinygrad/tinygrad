@@ -175,6 +175,22 @@ class TestSymbolicOps(unittest.TestCase):
       expected = a[3:5, i:i+2].numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  def test_expand_padded(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      a = Tensor(1).unsqueeze(0).pad((0, 1)).unsqueeze(0)
+      symbolic = a.expand(vi, 2).reshape(i, 2).numpy()
+      expected = a.expand(i, 2).numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+  def test_slice_var_shape(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      a = Tensor.ones(vi, 11).contiguous()
+      symbolic = a[:, 1:2].reshape(i, 1).numpy()
+      expected = a.reshape(i, 11)[:, 1:2].numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
   def test_ones_sum(self):
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)

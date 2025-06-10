@@ -83,7 +83,6 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
 class IndexContext:
   idxs: list[UOp]
   ridxs: list[UOp]
-  acc_num: int = 0
 
 def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
