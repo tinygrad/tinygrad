@@ -394,6 +394,8 @@ jobs:
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
         PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
+    - name: Fuzz Test shape ops
+      run: python test/external/fuzz_shape_ops.py
 
   testgpuimage:
     name: 'GPU IMAGE Tests'
