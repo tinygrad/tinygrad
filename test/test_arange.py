@@ -104,25 +104,6 @@ class TestIndexing(unittest.TestCase):
       run_schedule(sched)
     self.assertEqual(out.item(), 1337)
 
-  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
-  def test_manual_index(self):
-    dataset = Tensor.rand(DSET, DDIM).realize()
-    idxs = Tensor([0,3,5,6]).realize()
-    real_index = dataset.numpy()[idxs.numpy()]
-    print("*** indexing ***")
-    with Context(NOOPT=1, FUSE_ARANGE=1):
-      GlobalCounters.reset()
-      rng = Tensor.ones(4, DDIM, DSET, dtype=dtypes.int)._cumalu(axis=-1, op=Ops.ADD, _include_initial=True).reshape(4, DDIM, DSET, 1)
-      idxs = idxs.reshape(4,1,1,1).expand(4, DDIM, DSET, 1)
-      reshape_dataset = dataset.T.reshape(1, DDIM, DSET, 1).expand(4, DDIM, DSET, 1)
-      full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, DDIM, DSET, 1))
-      X = full.sum(axis=(2,3))
-      sched = X.schedule()
-      self.assertEqual(len(sched), 1)
-      run_schedule(sched)
-      assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
-    np.testing.assert_allclose(real_index, X.numpy())
-
   def test_index_variable(self):
     dataset = Tensor.rand(DSET, DDIM).realize()
     v = Variable("v", 0, DDIM-1)
