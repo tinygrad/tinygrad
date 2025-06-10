@@ -215,6 +215,9 @@ class OnnxParser:
     obj["data_location"] = 0
 
 # ***** onnx protobuf parsing ******
+import numpy as np
+from onnx import helper
+
 def buffer_parse(onnx_tensor: dict) -> Tensor:
   if onnx_tensor["string_data"]: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
   dtype, shape = dtype_parse(onnx_tensor["data_type"]), tuple(onnx_tensor["dims"])
@@ -227,12 +230,11 @@ def buffer_parse(onnx_tensor: dict) -> Tensor:
   if isinstance(data, Tensor):
     if len(data) == 1: return Tensor(data.tolist()[0], dtype=dtype).reshape(shape)
     return data.cast(dtype).reshape(shape).to(Device.DEFAULT)
-  if isinstance(data := onnx_tensor.get("raw_data"), Tensor):
+  if isinstance(onnx_tensor.get("raw_data"), Tensor):
     if TensorDataType(onnx_tensor["data_type"]) is TensorDataType.FLOAT16:
-      import numpy as np
       np_buffer = np.frombuffer(onnx_tensor["raw_data"].data().tobytes(),
                                 dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor["data_type"])).copy().reshape(shape)
-      if shape == (): return Tensor(data.item(), dtype=dtype).reshape(shape)
+      if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
       return Tensor(np_buffer, dtype=dtype)
     ret = onnx_tensor["raw_data"].bitcast(dtype).reshape(shape).to(Device.DEFAULT)
     if shape == (): ret = Tensor(ret.item(), dtype=dtype).reshape(shape)
@@ -803,8 +805,6 @@ def get_onnx_ops():
 
   # Reimplemented here because you need legacy RNG for passing ONNX tests.
   def Dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
-    # TODO figure this np import out
-    import numpy as np
     if not training_mode: return data, Tensor.ones(data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
     mask = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)) >= ratio, requires_grad=False, device=data.device)
     return data * mask * (1/(1.0 - ratio)), mask
