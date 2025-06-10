@@ -232,19 +232,6 @@ function filter(event) {
   return (!event.ctrlKey || event.type === 'wheel' || event.type === 'mousedown') && !event.button;
 }
 
-let isDragging = false;
-document.addEventListener("mousedown", e => {
- isDragging = true;
-});
-document.addEventListener("mouseup", () => {
-  isDragging = false;
-});
-
-// TODO: this globally disables right click, not what we wan:
-document.addEventListener("contextmenu", e => {
-  e.preventDefault();
-});
-
 var traceEvents;
 async function renderProfiler() {
   switchRender("profiler");
@@ -271,12 +258,10 @@ async function renderProfiler() {
   axisGroup.call(xAxis);
   // draw trace events
   const xh = axisGroup.node().getBoundingClientRect().height;
-  for (const e of traceEvents) {
-    if (e.name === "process_name") {
-    } else if (e.name === "thread_name") {
-    } else if (e.ph === "X") {
-      traceGroup.append("rect").attr("fill", "red").attr("width", x(e.dur)).attr("height", 10).attr("x", x(e.ts-st)).attr("y", xh)
-    }
+  const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
+  const traces = traceEvents.filter(e => e.ph === "X");
+  for (const [i,e] of traces.entries()) {
+    traceGroup.append("rect").attr("fill", `#${colors[i%colors.length]}`).attr("width", x(e.dur)).attr("height", 10).attr("x", x(e.ts-st)).attr("y", xh)
   }
   // zoom
   const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width, height]]).filter(filter).on("zoom", (e) => {
@@ -286,6 +271,20 @@ async function renderProfiler() {
   svg.call(zoom);
   document.getElementById("zoom-to-fit-btn").addEventListener("click", () => svg.call(zoom.transform, d3.zoomIdentity));
 }
+
+// TODO: remove this, it's trying to make the right click menu not open when dragging through time and holding ctrl
+// there is a better way to solve this
+let isDragging = false;
+document.addEventListener("mousedown", e => {
+ isDragging = true;
+});
+document.addEventListener("mouseup", () => {
+  isDragging = false;
+});
+document.addEventListener("contextmenu", e => {
+  e.preventDefault();
+});
+
 
 // ** zoom and recentering
 
