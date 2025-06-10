@@ -253,13 +253,6 @@ def image_fixup(ls:UOp):
 
   return None
 
-correct_load_store = PatternMatcher([
-  # split LOAD/STORE
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ls", allow_any_len=True), split_load_store),
-  # image indexing, including unfoldable images
-  (UPat((Ops.LOAD, Ops.STORE), name="ls"), image_fixup),
-])
-
 # *** uop expander ***
 
 # TODO: there's a lot shared with gep_through_wmma here
