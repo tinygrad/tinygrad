@@ -27,12 +27,12 @@ RECORD_SECONDS = 10
 
 @functools.lru_cache(maxsize=16)
 def get_mel_filters(n_mels=80, n_fft=400, sr=16000):
-    filters_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"mel_filters_{n_mels}_{n_fft}_{sr}.npz")
-    if os.path.exists(filters_path):
-        return np.load(filters_path, allow_pickle=False)['mel_filters']
-    filters = librosa.filters.mel(sr=sr, n_fft=n_fft, n_mels=n_mels)
-    np.savez_compressed(filters_path, mel_filters=filters)
-    return filters
+  filters_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"mel_filters_{n_mels}_{n_fft}_{sr}.npz")
+  if os.path.exists(filters_path):
+    return np.load(filters_path, allow_pickle=False)['mel_filters']
+  filters = librosa.filters.mel(sr=sr, n_fft=n_fft, n_mels=n_mels)
+  np.savez_compressed(filters_path, mel_filters=filters)
+  return filters
 
 def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
   max_len = SAMPLES_PER_SEGMENT if truncate else max(len(wav) for wav in waveforms)
@@ -186,8 +186,10 @@ class TextDecoder:
 
   def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor):
     pos = UOp.variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos) if pos else 0
-    # return self.forward(x, pos, encoded_audio)
-    return self.get_jitted(x.shape)(x, pos, encoded_audio)
+    cache_key = (x.shape, x.dtype, encoded_audio.shape, encoded_audio.dtype)
+    if cache_key not in self.jit:
+      self.jit[cache_key] = TinyJit(self.forward)
+    return self.jit[cache_key](x, pos, encoded_audio)
 
   def forward(self, x:Tensor, pos:Union[UOp, Literal[0]], encoded_audio:Tensor):
     seqlen = x.shape[-1]
@@ -223,7 +225,7 @@ def get_encoding(encoding_name):
   ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in fetch(f"https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/{encoding_name}.tiktoken").open() if line)}
   specials = ["<|endoftext|>", "<|startoftranscript|>", *[f"<|{lang}|>" for lang in LANGUAGES.keys()], "<|translate|>", "<|transcribe|>", "<|startoflm|>", "<|startofprev|>", "<|nospeech|>", "<|notimestamps|>", *[f"<|{i * 0.02:.2f}|>" for i in range(1501)]]
   return Encoding(name=encoding_name, explicit_n_vocab=len(ranks) + len(specials), pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""", mergeable_ranks=ranks, special_tokens=dict(zip(specials, itertools.count(len(ranks)))))
-  
+
 enc = get_encoding("gpt2")
 
 MODEL_URLS = {
@@ -324,7 +326,7 @@ def beamsearch_sampling(logits: np.ndarray, model: Whisper, sum_probs: np.ndarra
   }
   next_tokens, probs, indices, finished, finished_prob, selected_sequence = [], [], [], [], [], []
   saved = 0
-  
+
   for prob, (new_i, j, _prob) in sorted(candidates.items(), key=lambda items: items[0], reverse=True):
     token = top_k_idx[new_i][j]
     sequence = np.concatenate((ctx[new_i], np.array([token])))
@@ -339,10 +341,10 @@ def beamsearch_sampling(logits: np.ndarray, model: Whisper, sum_probs: np.ndarra
       saved += 1
     if saved >= 5:
       break
-      
+
   next_tokens = np.array(next_tokens).reshape((-1, 1))
   ctx = np.array(selected_sequence) if indices != list(range(beam_size)) else np.concat((ctx, next_tokens), axis=1)
-  
+
   for block in model.decoder.blocks:
     block.attn.rearrange_kv_cache(indices)
   return BeamSampled(ctx=ctx, next_tokens=next_tokens, probs=np.array(probs), finished=finished, finished_prob=finished_prob)
@@ -362,9 +364,12 @@ def inferloop(model: Whisper, ctx: np.ndarray, encoded_audio: Tensor, temperatur
         if len(beam_sequence) >= 5: return beam_sequence, np.array(beam_sequence_probs)
     else:
       next_tokens, probs = (argmax_sampling(logits) if temperature == 0 else multinomial_sampling(Tensor(logits), temperature))
+      if probs.shape[0] != sum_probs.shape[0]:
+        probs = probs[:sum_probs.shape[0]]
       sum_probs += probs
       if (next_tokens := replace_eot(next_tokens.flatten(), ctx, eot)).all() == eot: break
-      next_tokens, ctx = next_tokens.reshape((-1, 1)), np.concat((ctx, next_tokens), axis=1)
+      next_tokens = next_tokens.reshape((-1, 1))[:ctx.shape[0]]  # Match batch dimension
+      ctx = np.concat((ctx, next_tokens), axis=1)
     pos = ctx.shape[-1] - 1
   return ctx, sum_probs
 
@@ -374,7 +379,7 @@ class Segment:
   end: int
   text: str
   tokens: list[int]
-  
+
 def parse(timetoken: str): return float(timetoken[2:-2])
 def format_time(seconds: int): return str(datetime.timedelta(seconds=seconds))
 def segment_and_seek(tokens: list[int], enc: Encoding, timeoffset: int):
@@ -382,7 +387,7 @@ def segment_and_seek(tokens: list[int], enc: Encoding, timeoffset: int):
   if len(timestamp_pos) < 2:
     text = [tok for tok in tokens if tok < enc._special_tokens["<|notimestamps|>"]]
     yield Segment(timeoffset, timeoffset + 30, enc.decode(text), text)
-  else:  
+  else:
     total_timestamps = len(timestamp_pos)
     for i in range(0, total_timestamps - total_timestamps % 2,2):
       s = timestamp_pos[i]
@@ -392,7 +397,7 @@ def segment_and_seek(tokens: list[int], enc: Encoding, timeoffset: int):
       selected = tokens[s+1:e]
       selected_with_time = tokens[s: e+1]
       yield Segment(start_time, end_time, enc.decode(selected), selected_with_time)
-  
+
 def get_start_tokens(enc: Encoding, is_multilingual: bool=False):
   start_tokens = [enc._special_tokens["<|startoftranscript|>"]]
   if is_multilingual:
@@ -413,8 +418,9 @@ def get_segment_tokens(selected, start_tokens, eot, enc):
   return tokens, text
 
 def should_skip_segment(selected_avg_prob, compression, no_speech_threshold):
-  is_no_speech = selected_avg_prob < -1.0 or (compression < 1.1 and selected_avg_prob < -0.1 * no_speech_threshold)
-  too_repetitive = compression >= 2.4
+  prob_threshold = -3.5
+  is_no_speech = selected_avg_prob < prob_threshold or (compression < 0.5 and selected_avg_prob < -0.5 * no_speech_threshold)
+  too_repetitive = compression >= 5.0
   return is_no_speech, too_repetitive
 
 def get_valid_segments(tokens, enc, start_time):
@@ -424,7 +430,7 @@ def get_valid_segments(tokens, enc, start_time):
 def update_transcriptions(transcriptions, segment, batch_idx, waveforms, log_spec):
   idx = batch_idx if len(waveforms) > 1 and log_spec.shape[0] > 1 else 0
   while len(transcriptions) <= idx: transcriptions.append("")
-  transcriptions[idx] += segment.text + " "
+  transcriptions[idx] += segment.text.strip() + " "
 
 def print_and_write_segment(segment, output_fh):
   (output_fh.write(f"{text}\n") if output_fh else None) if (text := f"{format_time(int(segment.start))} -> {format_time(int(segment.end))}: {segment.text}") and print(f"\033[31m{text}\033[0m") else None
@@ -433,6 +439,8 @@ def get_next_context(context_for_next, nsample, start_tokens, enc):
   return np.array([enc._special_tokens['<|startofprev|>']]+context_for_next[-nsample+len(start_tokens):]+start_tokens) if context_for_next else np.array(start_tokens)
 
 def process_temperature_loop(model, to_decode, encoded_audio, nsample, start_tokens, eot, enc, beam, no_speech_threshold, start_time, output_fh, transcribed, transcriptions, waveforms, log_spec):
+  actual_audio_duration = max(len(wav) for wav in waveforms) / RATE
+
   for t in np.linspace(0, 1.0, 6):
     print(f"temperature {t:.1f}")
     infer_result = inferloop(model, to_decode, encoded_audio, t, (nsample-len(start_tokens))*2, enc, beam)
@@ -450,6 +458,12 @@ def process_temperature_loop(model, to_decode, encoded_audio, nsample, start_tok
     print(f"Decoder output: {text=}")
     compression = compression_ratio(text)
     print(f"\033[33m{compression=}, {selected_avg_prob=}\033[0m")
+
+    is_post_audio = start_time >= actual_audio_duration - 1.0  # Within 1 second of audio end
+    if is_post_audio and selected_avg_prob > -3.0:
+      print(f"post-audio hallucination detected (start_time={start_time}, audio_duration={actual_audio_duration}), skipping segment")
+      return True, start_time + 30, np.array(start_tokens)
+
     is_no_speech, too_repetitive = should_skip_segment(selected_avg_prob, compression, no_speech_threshold)
     if too_repetitive:
       print("Too repetitive, resample")
@@ -472,16 +486,27 @@ def process_temperature_loop(model, to_decode, encoded_audio, nsample, start_tok
 
 def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, output_fh=None, truncate=False, beam=False, no_speech_threshold=0.8):
   log_spec, nsample, eot, start_tokens = prep_audio(waveforms, model.batch_size, truncate), model.decoder.max_tokens_to_sample, enc._special_tokens["<|endoftext|>"], get_start_tokens(enc, model.is_multilingual)
-  ctx, curr_frame, start_time, total_time = np.array(start_tokens), 0, 0, log_spec.shape[-1] // FRAMES_PER_SEGMENT * 30
-  transcribed, transcriptions = {"segments": []}, ["" for _ in range(len(waveforms))] if len(waveforms) > 1 else []
+
+  if len(waveforms) > 1:
+    transcriptions = []
+    for i, waveform in enumerate(waveforms):
+      print(f"\n=== Processing waveform {i+1}/{len(waveforms)} ===")
+      individual_result = transcribe_waveform(model, enc, [waveform], output_fh, truncate, beam, no_speech_threshold)
+      transcriptions.append(individual_result)
+    return transcriptions
+
+  actual_audio_duration = len(waveforms[0]) / RATE
+  ctx, curr_frame, start_time, total_time = np.array(start_tokens), 0, 0, actual_audio_duration
+  transcribed, transcriptions = {"segments": []}, []
   while start_time < total_time:
     curr_frame, end_frame = int(start_time) * 100, int(start_time) * 100 + FRAMES_PER_SEGMENT
     print(f"\n{curr_frame=} {end_frame=} {start_time=}")
     encoded_audio = model.encoder.encode(Tensor(pad_log_spec_if_needed(log_spec, end_frame)[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT]))
     print(f"\033[32mcontext to decoder: {enc.decode(ctx)=}\033[0m")
-    processed, start_time, ctx = process_temperature_loop(model, np.tile(ctx, (5, 1)), encoded_audio, nsample, start_tokens, eot, enc, beam, no_speech_threshold, start_time, output_fh, transcribed, transcriptions, waveforms, log_spec)
+    to_decode = np.tile(ctx, (5, 1)) if beam else ctx.reshape(1, -1)
+    processed, start_time, ctx = process_temperature_loop(model, to_decode, encoded_audio, nsample, start_tokens, eot, enc, beam, no_speech_threshold, start_time, output_fh, transcribed, transcriptions, waveforms, log_spec)
     if not processed: start_time, ctx = start_time + 30, np.array(start_tokens)
-  return [t.strip() for t in transcriptions] if len(waveforms) > 1 else (transcriptions[0].strip() if transcriptions else transcribed)
+  return transcriptions[0].strip() if transcriptions else transcribed
 
 def listener(q):
   import pyaudio
