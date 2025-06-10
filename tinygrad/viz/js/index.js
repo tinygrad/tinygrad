@@ -242,26 +242,35 @@ async function renderProfiler() {
   const { width, height } = timeline.node().getBoundingClientRect();
   const svg = timeline.append("svg").attr("id", "profiler-svg").attr("viewBox", `0 0 ${width} ${height}`)
     .attr("style", "width: 100%; height: auto;").attr("preserveAspectRatio", "xMinYMin meet");
+  // group structure:
+  // svg -> render -> [axisGroup, traceGroup]
+  const render = svg.append("g");
+  const axisGroup = render.append("g").attr("id", "axis-group");
+  const traceGroup = render.append("g").attr("id", "trace-group");
   // get start and end times
   const timestamps = traceEvents.map(t => t.ts).filter(t => t);
-  console.log(timestamps);
   let [st, et] = [Math.min(...timestamps), Math.max(...timestamps)];
   et += Math.max(...traceEvents.filter((t) => t.ts === et).map(t => t.dur));
   const duration = et-st;
-  const marginLeft = 30;
-  const x = d3.scaleLinear().domain([0, duration]).range([marginLeft, width-marginLeft]);
+  // time axis
+  const x = d3.scaleLinear().domain([0, duration]).range([0, width]);
   const xAxis = d3.axisBottom(x).tickFormat(t => formatTime(t, duration));
-  const gX = svg.append("g").call(xAxis).attr("transform", `translate(${marginLeft}, 0)`);
-  const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width, height]]).filter(filter).on("zoom", (e) => {
-    gX.call(xAxis.scale(e.transform.rescaleX(x)));
-  });
-  svg.call(zoom);
+  axisGroup.call(xAxis);
+  // draw trace events
+  const xh = axisGroup.node().getBoundingClientRect().height;
   for (const e of traceEvents) {
     if (e.name === "process_name") {
     } else if (e.name === "thread_name") {
     } else if (e.ph === "X") {
+      traceGroup.append("rect").attr("fill", "red").attr("width", x(e.dur)).attr("height", 10).attr("x", x(e.ts-st)).attr("y", xh)
     }
   }
+  // zoom
+  const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width, height]]).filter(filter).on("zoom", (e) => {
+    axisGroup.call(xAxis.scale(e.transform.rescaleX(x)));
+    traceGroup.attr("transform", `translate(${e.transform.x},0) scale(${e.transform.k},1)`);
+  });
+  svg.call(zoom);
 }
 
 // ** zoom and recentering
