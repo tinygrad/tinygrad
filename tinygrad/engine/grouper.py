@@ -410,6 +410,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # replace global memory ops with the BUFFER they write to
   ast = graph_rewrite(k.arg.ast, replace_globals, bottom_up=True, name="replace globals")
   # push views to edges
+  #ast = graph_rewrite(ast, view_left, name="Main View Left")
   ast = graph_rewrite(ast, view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
   bufs = []
@@ -552,6 +553,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # TODO: move view_left/view_right here
   tensor_map = graph_rewrite_map(tensor_map[big_sink], view_left, input_map=tensor_map, name="Global View Left")
+  #tensor_map = graph_rewrite_map(tensor_map[big_sink], view_right, input_map=tensor_map, name="Global View Right")
 
   # group into kernels (this is context-free)
   tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, input_map=tensor_map, name="create_kernels")
