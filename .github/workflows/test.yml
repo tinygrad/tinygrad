@@ -83,7 +83,7 @@ jobs:
 
   autogen:
     name: Autogen
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -96,8 +96,6 @@ jobs:
         cuda: 'true'
         webgpu: 'true'
         llvm: 'true'
-    - name: Install autogen support packages
-      run: sudo apt-get install -y --no-install-recommends llvm-14-dev libclang-14-dev
     - name: Verify OpenCL autogen
       run: |
         cp tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
