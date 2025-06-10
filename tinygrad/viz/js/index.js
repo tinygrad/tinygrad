@@ -271,6 +271,7 @@ async function renderProfiler() {
     traceGroup.attr("transform", `translate(${e.transform.x},0) scale(${e.transform.k},1)`);
   });
   svg.call(zoom);
+  document.getElementById("zoom-to-fit-btn").addEventListener("click", () => svg.call(zoom.transform, d3.zoomIdentity));
 }
 
 // ** zoom and recentering
