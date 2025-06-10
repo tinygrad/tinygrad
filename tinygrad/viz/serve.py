@@ -76,10 +76,10 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
     # NOTE: kernel already has metadata in arg
     if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+repr(u.metadata)
     graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff"),
-                    "ref":id(u.arg.ast) if u.op is Ops.KERNEL else None}
+                    "ref":id(u.arg.ast) if u.op is Ops.KERNEL else None, "tag":u.tag}
   return graph
 
-def get_details(k:Any, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
+def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   yield {"graph":uop_to_json(next_sink:=ctx.sink), "uop":str(ctx.sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0,u1,upat in tqdm(ctx.matches):
@@ -142,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
           self.send_header("Content-Type", "text/event-stream")
           self.send_header("Cache-Control", "no-cache")
           self.end_headers()
-          for r in get_details(contexts[0][kidx], contexts[1][kidx][ridx]):
+          for r in get_details(contexts[1][kidx][ridx]):
             self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
             self.wfile.flush()
           self.wfile.write("data: END\n\n".encode("utf-8"))
