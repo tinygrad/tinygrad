@@ -498,6 +498,13 @@ class TestJit(unittest.TestCase):
     b = f(Tensor([2.0]))
     assert abs((a - b).item()) > 0.5
 
+  def test_jit_unrelated_input_rawbuffers_bug(self):
+    @TinyJit
+    def f(a, unused_numpy): return a.sum() + a[:200].sum() # Any code with more than 1 kernel should trigger the bug
+    a = Tensor.randn(320).realize()
+    b = Tensor(np.random.randint(0, 30, size=50), dtype=dtypes.int, device="NPY")
+    for _ in range(5): f(a, b)
+
 @unittest.skip("Pending multioutput implementation #3607")
 class TestMultioutputJit(unittest.TestCase):
   def _test(self, f):

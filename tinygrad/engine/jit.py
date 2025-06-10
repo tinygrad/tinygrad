@@ -28,10 +28,12 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
     try:
       if current_device is None: raise GraphException("no device for graph")
       if len(current_batch) <= 1 and not getenv("GRAPH_ONE_KERNEL"): raise GraphException("only one kernel doesn't graph")
-      graph_runner = current_device.graph(current_batch, input_rawbuffers, var_vals)
+      used_rawbuffers = {b.base for ji in current_batch for b in ji.bufs if b is not None}
+      batch_input_rawbuffers = [x for x in input_rawbuffers if x in used_rawbuffers]
+      graph_runner = current_device.graph(current_batch, batch_input_rawbuffers, var_vals)
       # clear jit inputs to allow their memory to be freed/reused
       for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
-      graphed_jit_cache.append(ExecItem(graph_runner, cast(list[Optional[Buffer]], input_rawbuffers)))
+      graphed_jit_cache.append(ExecItem(graph_runner, cast(list[Optional[Buffer]], batch_input_rawbuffers)))
       max_batch_size *= 2
       if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
     except GraphException as e:
