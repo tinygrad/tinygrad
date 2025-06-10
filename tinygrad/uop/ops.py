@@ -843,7 +843,7 @@ class RewriteContext:
             continue
         else:
           # if srcs changed from rewrites, construct a new UOp with the new srcs
-          new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg)
+          new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg, new_n.tag)
         # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
         stack.append((n, 2, new_src_n))
         stack.append((new_src_n, 0, new_src_n))
