@@ -14,8 +14,43 @@ class MathTrait:
   def neg(self):
     if (dtype:=getattr(self, 'dtype')) is None: raise TypeError(f"MathTraits __neg__ requires a dtype, {self=}")
     return self.logical_not() if dtype.scalar() == dtypes.bool else self*(-1)
-  def add(self, x, reverse=False): return self._binop(Ops.ADD, x, reverse)
-  def mul(self, x, reverse=False): return self._binop(Ops.MUL, x, reverse)
+  def add(self, x, reverse=False):
+    """
+    Adds `self` and `x`.
+    Equivalent to `self + x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.add(20).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.add(Tensor([[2.0], [3.5]])).numpy())
+    ```
+    """
+    return self._binop(Ops.ADD, x, reverse)
+  def mul(self, x, reverse=False):
+    """
+    Multiplies `self` and `x`.
+    Equivalent to `self * x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.mul(3).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.mul(Tensor([[-1.0], [2.0]])).numpy())
+    ```
+    """
+    return self._binop(Ops.MUL, x, reverse)
   def bitwise_and(self, x, reverse=False): return self._binop(Ops.AND, x, reverse)
   def bitwise_or(self, x, reverse=False): return self._binop(Ops.OR, x, reverse)
   def bitwise_xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse)
