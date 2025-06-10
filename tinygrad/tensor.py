@@ -186,6 +186,9 @@ class Tensor(MathTrait):
     lhs,rhs = self._broadcasted(x, reverse)
     return lhs._apply_uop(fxn, rhs)
 
+  # _binop is used by MathTrait
+  def _binop(self, op, x, reverse): return self._apply_broadcasted_uop({Ops.ADD: UOp.add}[op], x, reverse)
+
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
     return self
@@ -3489,26 +3492,6 @@ class Tensor(MathTrait):
 
     # broadcast
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
-
-  def add(self, x:Tensor|ConstType, reverse=False) -> Tensor:
-    """
-    Adds `self` and `x`.
-    Equivalent to `self + x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.add(20).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.add(Tensor([[2.0], [3.5]])).numpy())
-    ```
-    """
-    return self._apply_broadcasted_uop(UOp.add, x, reverse)
 
   def sub(self, x:Tensor|ConstType, reverse=False) -> Tensor:
     """
