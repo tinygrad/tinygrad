@@ -284,10 +284,10 @@ For the composite function $z = \log(x^2 + 1)$, we need to apply the chain rule:
    Set $g(x)=x^{2}+1$. Then $z = \log(g(x))$.
 
 2. Apply the chain rule:  
-     $\displaystyle\frac{dz}{dx}= \frac{1}{g(x)}\;g'(x) = \frac{1}{x^{2}+1}\cdot 2x = \frac{2x}{x^{2}+1}.$
+   $\frac{dz}{dx} = \frac{1}{g(x)} \cdot g'(x) = \frac{1}{x^2+1} \cdot 2x = \frac{2x}{x^2+1}$
 
 3. Evaluate at $x=2$:  
-     $\displaystyle\frac{dz}{dx}\Big|_{x=2}= \frac{2\cdot2}{2^{2}+1}= \frac{4}{5}=0.8.$
+   $\frac{dz}{dx}|_{x=2} = \frac{2 \cdot 2}{2^2+1} = \frac{4}{5} = 0.8$
 
 Tinygrad handles all the chain rule complexity automatically:
 
