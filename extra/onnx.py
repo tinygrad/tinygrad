@@ -28,6 +28,13 @@ def dtype_parse(onnx_dtype: int) -> DType:
   if onnx_dtype in unsupported: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
   return supported[onnx_dtype]
 
+def ensure_supported_dtype(dtype: DType, context: str):
+  if not is_dtype_supported(dtype):
+    default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
+    warnings.warn(f"from '{context}': dtype {dtype} on {Device.DEFAULT} is not supported, falling back to {default_dtype}")
+    return default_dtype
+  return dtype
+
 def attribute_parse(onnx_attribute: AttributeProto):
   supported: dict[AttributeProto.AttributeType, Callable[[AttributeProto], Any]] = {
     AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i),
@@ -46,9 +53,7 @@ def attribute_parse(onnx_attribute: AttributeProto):
 
 def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   def prepare_data(data: Tensor):
-    if not is_dtype_supported(data.dtype):
-      default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
-      warnings.warn(f"dtype {dtype} on {Device.DEFAULT} is not supported, falling back to {default_dtype}")
+    if data.dtype is not (default_dtype:=ensure_supported_dtype(data.dtype, "buffer parse")):
       return data.to("CPU").cast(default_dtype).to(Device.DEFAULT)
     return data.to(Device.DEFAULT)
   if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
@@ -145,18 +150,18 @@ class OnnxRunner:
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
     if spec.is_sequence:
-      if not isinstance(value, Sequence): raise RuntimeError(f"{name} received {value}, expected a sequence type")
+      if not isinstance(value, Sequence): raise RuntimeError(f"input {name} received {value}, expected a sequence type")
       sequence = [Tensor(v, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(v, Tensor) else v for v in value]
-      if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for {name} sequence must be homogeneous")
-      if not all(t.dtype is spec.dtype for t in sequence): warnings.warn(f"Dtypes for {name} sequence aren't all {spec.dtype}")
+      if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for input {name} sequence must be homogeneous")
+      if not all(t.dtype is spec.dtype for t in sequence): warnings.warn(f"Dtypes for input {name} sequence aren't all {spec.dtype}")
       return sequence
     dtype = _from_np_dtype(value.dtype) if str(type(value)) == "<class 'numpy.ndarray'>" else spec.dtype
     tensor = Tensor(value, dtype=dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
-    if tensor.dtype is not spec.dtype: warnings.warn(f"{name} has mismatch on dtype. Expected {spec.dtype}, received {tensor.dtype}.")
+    if tensor.dtype is not spec.dtype: warnings.warn(f"input {name} has mismatch on dtype. Expected {spec.dtype}, received {tensor.dtype}.")
     for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):
       if isinstance(onnx_dim, str):
         onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, int(user_dim_input))
-      if user_dim_input != onnx_dim: raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
+      if user_dim_input != onnx_dim: raise RuntimeError(f"input {name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
     return tensor
 
   def _dispatch_op(self, op, inps, opts):
@@ -287,7 +292,7 @@ def get_onnx_ops():
     raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
   def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
-    ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_parse(dtype) if dtype is not None else x.dtype)
+    ret = Tensor.eye(cast(int, min(x.shape)), dtype=ensure_supported_dtype(dtype_parse(dtype), "EyeLike op") if dtype is not None else x.dtype)
     return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.shape[0]-k) for d in x.shape))
 
   def OptionalHasElement(x:Tensor|None=None): return Tensor(x is not None and x.numel() > 0)
@@ -341,7 +346,7 @@ def get_onnx_ops():
 
   # ***** Casting Ops *****
   # TODO: saturate
-  def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_parse(to))
+  def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(ensure_supported_dtype(dtype_parse(to), "Cast op"))
   def CastLike(x:Tensor, target_type:Tensor, saturate:int=1): return x.cast(target_type.dtype)
 
   # ***** Reduce Ops *****
@@ -734,7 +739,9 @@ def get_onnx_ops():
 
   # ***** Quantization Ops *****
   def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
-    out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
+    if isinstance(y_zero_point, Tensor): out_dtype = y_zero_point.dtype
+    elif output_dtype != 0: out_dtype = ensure_supported_dtype(dtype_parse(output_dtype), "QuantizeLinear op")
+    else: out_dtype = dtypes.uint8
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
     if out_dtype == dtypes.uchar:
       # this appears to work in practice, at least for uchar out_dtype. it folds with the quantize stuff
