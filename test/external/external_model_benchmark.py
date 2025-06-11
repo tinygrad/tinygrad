@@ -113,6 +113,7 @@ def benchmark_model(m, devices, validate_outs=False):
         inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
       tinygrad_model = OnnxRunner(onnx_model)
       tinygrad_out = tinygrad_model(inputs)
+
       ort_sess = ort.InferenceSession(str(fn), ort_options, ["CPUExecutionProvider"])
       onnx_out = ort_sess.run(output_names, np_inputs)
       onnx_out = dict([*list(zip(output_names, onnx_out))])
