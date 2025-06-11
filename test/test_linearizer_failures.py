@@ -1723,5 +1723,30 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.LOCAL, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=1, arg=3), Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.PADTO, axis=2, arg=32), Opt(op=OptOps.UPCAST, axis=2, arg=4), Opt(op=OptOps.UPCAST, axis=2, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=0)]
     helper_test_lin(Kernel(ast), opts, failed_platforms=["AMD", "HIP", "NV", "CUDA"])
 
+  def test_failure_63(self):
+    # this hangs with AMD_LLVM on llvm19
+    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.VIEW, dtypes.float.ptr(8388608), arg=ShapeTracker(views=(View(shape=(512, 32, 1, 16, 32, 1, 1, 1), strides=(16384, 512, 0, 32, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)), src=(
+          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(8388608), arg=0, src=()),)),
+        UOp(Ops.ADD, dtypes.float, arg=None, src=(
+          UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+            UOp(Ops.VIEW, dtypes.float.ptr(8388608), arg=ShapeTracker(views=(View(shape=(512, 32, 1, 16, 32, 1, 1, 1), strides=(16384, 512, 0, 32, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)), src=(
+              UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(8388608), arg=1, src=()),)),)),
+          UOp(Ops.ADD, dtypes.float, arg=None, src=(
+            UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (6, 7)), src=(
+              UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                  UOp(Ops.VIEW, dtypes.float.ptr(8388608), arg=ShapeTracker(views=(View(shape=(1, 512, 1, 32, 8, 22, 8, 38), strides=(0, 16384, 0, 512, 0, 32, 0, 1), offset=-99, mask=((0, 1), (0, 512), (0, 1), (0, 32), (0, 8), (3, 19), (0, 8), (3, 35)), contiguous=False), View(shape=(512, 32, 1, 16, 32, 1, 7, 7), strides=(1712128, 53504, 0, 304, 1, 0, 6992, 39), offset=0, mask=None, contiguous=False))), src=(
+                    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(8388608), arg=2, src=()),)),)),
+                UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                  UOp(Ops.VIEW, dtypes.float.ptr(1568), arg=ShapeTracker(views=(View(shape=(512, 32, 1, 16, 32, 1, 7, 7), strides=(0, 49, 0, 0, 0, 0, 7, 1), offset=0, mask=None, contiguous=False),)), src=(
+                    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(1568), arg=3, src=()),)),)),)),)),
+            UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+              UOp(Ops.VIEW, dtypes.float.ptr(8388608), arg=ShapeTracker(views=(View(shape=(512, 32, 1, 16, 32, 1, 1, 1), strides=(16384, 512, 0, 32, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)), src=(
+                UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(8388608), arg=4, src=()),)),)),)),)),)),))
+    opts = [Opt(op=OptOps.LOCAL, axis=3, arg=8), Opt(op=OptOps.LOCAL, axis=3, arg=4), Opt(op=OptOps.UPCAST, axis=2, arg=0), Opt(op=OptOps.UPCAST, axis=1, arg=2)]
+    helper_test_lin(Kernel(ast), opts, failed_platforms=["AMD"])
+
 if __name__ == '__main__':
   unittest.main()
