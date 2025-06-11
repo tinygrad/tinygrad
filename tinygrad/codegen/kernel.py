@@ -65,7 +65,7 @@ class Kernel:
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
     permute = tuple([i for i,(s,n) in reduce if not resolve(s != n)] + [i for i,(s,n) in reduce if resolve(s != n)])
-    self.reshape_and_permute(None, permute)
+    assert permute == tuple(range(len(permute))), f"reduce axis must already be in order, {permute} isn't"
 
     # parameters for optimization
     self.applied_opts: list[Opt] = []
