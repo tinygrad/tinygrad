@@ -186,7 +186,8 @@ class TextDecoder:
 
   def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor):
     max_pos = min(447, (self.max_self_attn_cache_len - x.shape[1]) // 2)
-    pos = UOp.variable("self_attn_cache_len", 1, max_pos).bind(pos) if pos else 0
+    clamped_pos = min(pos, max_pos) if pos else 0
+    pos = UOp.variable("self_attn_cache_len", 1, max_pos).bind(clamped_pos) if clamped_pos else 0
     cache_key = (x.shape, x.dtype, encoded_audio.shape, encoded_audio.dtype)
     if cache_key not in self.jit:
       self.jit[cache_key] = TinyJit(self.forward)
