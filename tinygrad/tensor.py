@@ -1153,7 +1153,7 @@ class Tensor(MathTrait):
             elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
             # update size for slice
             size = ceildiv((boundary[1] - boundary[0]), abs(stride))
-          elif (step == 1) and all(isinstance(s,(int,UOp)) for s in (start, stop, step)) and resolve((stop-start) > 0, False):
+          elif (step == 1) and isinstance(step, int) and all(isinstance(s,(int,UOp)) for s in (start, stop)) and resolve((stop-start) > 0, False):
             # simple symbolic slice
             size = (stop - start).ssimplify()
           else: raise TypeError(f"slice {index=} is not supported")
