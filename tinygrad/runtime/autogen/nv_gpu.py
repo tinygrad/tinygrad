@@ -6210,8 +6210,6 @@ struct_NV_CHANNEL_ALLOC_PARAMS._fields_ = [
     ('encryptIv', ctypes.c_uint32 * 3),
     ('decryptIv', ctypes.c_uint32 * 3),
     ('hmacNonce', ctypes.c_uint32 * 8),
-    ('tpcConfigID', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
 ]
 
 NV_CHANNEL_ALLOC_PARAMS = struct_NV_CHANNEL_ALLOC_PARAMS

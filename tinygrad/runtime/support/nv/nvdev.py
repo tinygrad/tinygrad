@@ -49,19 +49,20 @@ class NVPageTableEntry:
     print(entry_id, paddr, table, uncached, system, snooped, frag, valid)
 
     if self.lv == 3:
-      x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=uncached)
+      x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=uncached)
       self.entries[2*entry_id] = x & 0xffffffffffffffff
       self.entries[2*entry_id+1] = x >> 32
+      assert entry_id < 256
     elif self.lv == 4:
       aper = 2 if system else 1
-      x = self.nvdev.NV_MMU_VER2_PTE.encode(valie=True, address_sys=paddr >> 12, aperture=aper, vol=uncached)
+      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=True, address_sys=paddr >> 12, aperture=aper, vol=uncached)
       self.entries[entry_id] = x
     else:
       x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_sys=paddr >> 12, aperture=1 if valid else 0, vol=uncached)
       self.entries[entry_id] = x
 
   def entry(self, entry_id:int) -> int:
-    return (self.entries[entry_id*2]<<32) | self.entries[entry_id] if self.lv == 3 else self.entries[entry_id]
+    return (self.entries[2*entry_id+1]<<32) | self.entries[2*entry_id] if self.lv == 3 else self.entries[entry_id]
 
   def read_fields(self, entry_id:int) -> dict:
     if self.lv == 3: return self.nvdev.NV_MMU_VER2_DUAL_PDE.decode(self.entry(entry_id))
@@ -95,6 +96,7 @@ class NVPageTableTraverseContext:
       pt.set_entry(pte_idx, self.nvdev.mm.palloc(0x1000, zero=True, boot=self.boot), table=True, valid=True)
 
     assert not pt.is_pte(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
+    print('level_down', hex(pt.address(pte_idx)))
     child_page_table = NVPageTableEntry(self.nvdev, pt.address(pte_idx), lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
@@ -102,6 +104,7 @@ class NVPageTableTraverseContext:
 
   def level_up(self):
     while self.pt_stack[-1][1] == self._pt_pte_cnt(len(self.pt_stack) - 1):
+      print("level_up")
       _, pt_cnt, _ = self.pt_stack.pop()
       if pt_cnt == self._pt_pte_cnt(len(self.pt_stack) - 1):
         self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
@@ -123,7 +126,7 @@ class NVPageTableTraverseContext:
       self.level_up()
 
 class NVMemoryManager:
-  va_allocator = TLSFAllocator((1 << 49), base=0x200000000000) # global for all devices.
+  va_allocator = TLSFAllocator((1 << 49), base=0x1000000) # global for all devices.
 
   def __init__(self, nvdev:NVDev, vram_size:int):
     self.nvdev, self.vram_size = nvdev, vram_size
@@ -205,6 +208,7 @@ class NVDev:
   def _early_init(self):
     for name in ['NV_MMU_VER2_PTE', 'NV_MMU_VER2_PDE', 'NV_MMU_VER2_DUAL_PDE']: self.__dict__[name] = NVReg(self, 0, 0, fields={})
     self.include("kernel-open/nvidia-uvm/hwref/turing/tu102/dev_mmu.h")
+    self.include("src/common/inc/swref/published/turing/tu102/dev_vm.h")
     self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island.h")
     self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island_addendum.h")
 
@@ -229,7 +233,8 @@ class NVDev:
     BITFLD = re.compile(r'#define\s+(\w+)\s+([0-9\+\-\*\(\)]+):([0-9\+\-\*\(\)]+)')
 
     regs_off = {'NV_PFALCON_FALCON': (None, 0x0), 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': (None, 0x1000), 'NV_PGC6_AON': 0x0,
-      'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': (None, 0x600), 'NV_PFALCON2_FALCON': (None, 0x1000), 'NV_PBUS': 0x0, 'NV_PFB': 0x0}
+      'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': (None, 0x600), 'NV_PFALCON2_FALCON': (None, 0x1000), 'NV_PBUS': 0x0, 'NV_PFB': 0x0,
+      'NV_VIRTUAL_FUNCTION':0x00B80000}
 
     for raw in txt.splitlines():
       if raw.startswith("#define "):
