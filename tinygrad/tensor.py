@@ -1155,7 +1155,7 @@ class Tensor(MathTrait):
             size = ceildiv((boundary[1] - boundary[0]), abs(stride))
           elif (step == 1) and isinstance(step, int) and all(isinstance(s,(int,UOp)) for s in (start, stop)) and resolve((stop-start) > 0, False):
             # simple symbolic slice
-            size = cast(UOp, (stop - start)).ssimplify()
+            size = cast(UOp|int, cast(UOp, (stop - start)).ssimplify())
           else: raise TypeError(f"slice {index=} is not supported")
         case None: pass # do nothing
         case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
