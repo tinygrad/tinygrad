@@ -238,20 +238,16 @@ var traceEvents;
 async function renderProfiler() {
   switchRender("profiler");
   if (traceEvents == null) traceEvents = (await (await fetch("/get_profile")).json()).traceEvents;
-  // setup base svg
+  // base layout
   const root = d3.select(".profiler").html("");
   const procList = root.append("div").attr("style", "width: 20%; height: 100%;");
   const timeline = root.append("div").attr("style", "width: 80%; height: 100%;");
   const { width } = rect(timeline);
   const svg = timeline.append("svg").attr("id", "profiler-svg").attr("style", `width: ${width}; height: auto;`);
-  if (rect(svg).width !== width) {
-    throw new Error("svg must take all the space");
-  }
-  // group layout:
-  // svg -> render -> [axisGroup, traceGroup]
+  // svg -> render -> [axisGroup, rectGroup]
   const render = svg.append("g");
   const axisGroup = render.append("g").attr("id", "axis-group");
-  const traceGroup = render.append("g").attr("id", "trace-group");
+  const rectGroup = render.append("g").attr("id", "rect-group");
   // get start and end times
   const timestamps = traceEvents.map(t => t.ts).filter(t => t);
   let [st, et] = [Math.min(...timestamps), Math.max(...timestamps)];
@@ -265,20 +261,26 @@ async function renderProfiler() {
   const xh = rect(axisGroup).height;
   procList.node().style.paddingTop = `${xh}px`;
   const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
-  const tg = rect(traceGroup).top;
+  const tg = rect(rectGroup).top;
   for (const [i,e] of traceEvents.entries()) {
     if (e.name === "process_name") procList.append("div").text(e.args.name).attr("id", `proc-${e.pid}`);
     if (e.ph === "X") {
       const proc = rect(`#proc-${e.pid}`);
-      const rectHeight = proc.height/2;
-      traceGroup.append("rect").attr("fill",`#${colors[i%colors.length]}`).attr("width", x(e.dur)).attr("height", rectHeight).attr("x", x(e.ts-st))
-        .attr("y", proc.top-tg+(e.tid*rectHeight));
+      // Width = duration
+      const rw = x(e.dur);
+      // Height = thread height
+      const rh = proc.height/2;
+      // X = start time
+      const rx = x(e.ts-st);
+      // Y = thread position
+      const ry = proc.top-tg+(e.tid*rh);
+      rectGroup.append("rect").attr("fill",`#${colors[i%colors.length]}`).attr("width", rw).attr("height", rh).attr("x", rx).attr("y", ry);
     }
   }
   // zoom
   const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width, 0]]).filter(filter).on("zoom", (e) => {
     axisGroup.call(xAxis.scale(e.transform.rescaleX(x)));
-    traceGroup.attr("transform", `translate(${e.transform.x},0) scale(${e.transform.k},1)`);
+    rectGroup.attr("transform", `translate(${e.transform.x},0) scale(${e.transform.k},1)`);
   });
   svg.call(zoom);
   document.getElementById("zoom-to-fit-btn").addEventListener("click", () => svg.call(zoom.transform, d3.zoomIdentity));
