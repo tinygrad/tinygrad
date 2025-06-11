@@ -265,12 +265,14 @@ async function renderProfiler() {
   const xh = rect(axisGroup).height;
   procList.node().style.paddingTop = `${xh}px`;
   const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
+  const tg = rect(traceGroup).top;
   for (const [i,e] of traceEvents.entries()) {
     if (e.name === "process_name") procList.append("div").text(e.args.name).attr("id", `proc-${e.pid}`);
     if (e.ph === "X") {
       const proc = rect(`#proc-${e.pid}`);
-      traceGroup.append("rect").attr("fill",`#${colors[i%colors.length]}`).attr("width", x(e.dur)).attr("height", proc.height/2).attr("x", x(e.ts-st))
-        .attr("y", proc.y-proc.height-xh+(e.tid*proc.height/2));
+      const rectHeight = proc.height/2;
+      traceGroup.append("rect").attr("fill",`#${colors[i%colors.length]}`).attr("width", x(e.dur)).attr("height", rectHeight).attr("x", x(e.ts-st))
+        .attr("y", proc.top-tg+(e.tid*rectHeight));
     }
   }
   // zoom
