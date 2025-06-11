@@ -32,6 +32,7 @@ def ensure_supported_dtype(dtype: DType, context: str):
   if not is_dtype_supported(dtype):
     default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
     warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {context} is not supported, falling back to {default_dtype}")
+    assert is_dtype_supported(default_dtype), "default dtype must be supported"
     return default_dtype
   return dtype
 
@@ -53,8 +54,8 @@ def attribute_parse(onnx_attribute: AttributeProto):
 
 def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   def prepare_data(data: Tensor):
-    if data.dtype is not (default_dtype:=ensure_supported_dtype(data.dtype, "buffer parse")):
-      return data.to("CPU").cast(default_dtype).to(Device.DEFAULT)
+    if data.dtype is not (device_supported_dtype:=ensure_supported_dtype(data.dtype, "buffer parse")):
+      return data.to("CPU").cast(device_supported_dtype).to(Device.DEFAULT)
     return data.to(Device.DEFAULT)
   if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
   dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
