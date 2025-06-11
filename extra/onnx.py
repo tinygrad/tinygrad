@@ -7,7 +7,7 @@ from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
 from tinygrad.device import is_dtype_supported, Device
 
 # ***** protobuf parsing ******
-from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, helper
+from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
 import numpy as np
 
 def has_field(onnx_type: TypeProto|SimpleNamespace, field):
@@ -61,11 +61,6 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
     if len(data) == 1: return Tensor(data.tolist()[0], dtype=dtype).reshape(shape)
     return data.cast(dtype).reshape(shape).to(Device.DEFAULT)
   if has_field(onnx_tensor, "raw_data"):
-    if onnx_tensor.data_type == TensorProto.FLOAT16:
-      np_buffer = np.frombuffer(onnx_tensor.raw_data.data().tobytes(),
-                                dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
-      if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
-      return Tensor(np_buffer, dtype=dtype)
     ret = onnx_tensor.raw_data.bitcast(dtype).reshape(shape).to(Device.DEFAULT)
     if shape == (): ret = Tensor(ret.item(), dtype=dtype).reshape(shape)
     return ret
