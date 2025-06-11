@@ -250,7 +250,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
   def r(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
-    return self if len(axis) == 0 else UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
+    if len(axis) == 0: return self
+    ret = self.permute(tuple([i for i in range(len(self.shape)) if i not in axis])+axis)
+    ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, tuple(range(len(self.shape)-len(axis), len(self.shape)))))
+    return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
