@@ -7,7 +7,7 @@ from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
 from tinygrad.codegen.lowerer import pm_quant, pm_lowerer, get_index
-from tinygrad.codegen.symbolic import sym, symbolic_simple, gep_pushing
+from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
 from tinygrad.codegen.expander import migrate_indexing, pm_store_ignore, pm_move_ignore, pm_delete_ignore, expander
 from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexing, devectorize, \
   pm_reduce, ReduceContext, correct_load_store, pm_render, get_late_rewrite_patterns

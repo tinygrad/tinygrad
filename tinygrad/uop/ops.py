@@ -171,7 +171,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def simplify(self):
     # late import!
-    from tinygrad.codegen.symbolic import symbolic
+    from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0):
       return graph_rewrite(self, symbolic)
   def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
