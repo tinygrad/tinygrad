@@ -173,7 +173,7 @@ class AudioEncoder:
 class TextDecoder:
   def __init__(self, n_vocab, n_text_ctx, n_text_state, n_text_head, n_text_layer, **_):
     self.max_tokens_to_sample = n_text_ctx // 2
-    self.max_self_attn_cache_len = self.max_tokens_to_sample * 3 + 5  # inferloop upper range + n_text_ctx + start_tokens
+    self.max_self_attn_cache_len = self.max_tokens_to_sample * 4 + 10  # extra buffer
 
     self.token_embedding = nn.Embedding(n_vocab, n_text_state)
     self.positional_embedding = Tensor.empty(n_text_ctx, n_text_state)
