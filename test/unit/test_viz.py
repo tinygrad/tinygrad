@@ -1,7 +1,7 @@
 import unittest, decimal, json
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import TRACK_MATCH_STATS, TrackedPatternMatcher, UOp, graph_rewrite, track_rewrites, UPat, Ops
-from tinygrad.codegen.symbolic import symbolic
+from tinygrad.uop.symbolic import symbolic
 from tinygrad.uop.ops import tracked_ctxs as contexts, tracked_keys as keys, _name_cnt, _substitute
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_metadata, get_details, uop_to_json, to_perfetto
