@@ -203,18 +203,18 @@ def train_cifar():
 
 
   def negative_pad_grid(n=4):
-      # Generate all possible padding combinations that sum to biting n elements from h and w.
-      pad_options = [(-i, i-n) for i in range(n+1)]
+    # Generate all possible padding combinations that sum to biting n elements from h and w.
+    pad_options = [(-i, i-n) for i in range(n+1)]
 
-      # Create all possible combinations of padding for left/right and top/bottom
-      return [(pad_options[x % len(pad_options)], pad_options[y % len(pad_options)])
-              for x in range(n) for y in range(n)]
+    # Create all possible combinations of padding for left/right and top/bottom
+    return [(pad_options[x % len(pad_options)], pad_options[y % len(pad_options)])
+            for x in range(n) for y in range(n)]
 
   def random_crop(X:Tensor, crop_size:int=32) -> Tensor:
-      assert X.shape[-1] >= crop_size
-      Xl = X.split(X.shape[0]//16) # XXX This results in B=3125, which is prob not great for performance, not sure if matters.
-      Xp = [ x.pad(((0,0),(0, 0), *npad)) for x, npad in zip(Xl, negative_pad_grid(X.shape[-1] - crop_size)) ]
-      return Tensor.cat(*Xp)
+    assert X.shape[-1] >= crop_size
+    Xl = X.split(X.shape[0]//16) # XXX This results in B=3125, which is prob not great for performance, not sure if matters.
+    Xp = [ x.pad(((0,0),(0, 0), *npad)) for x, npad in zip(Xl, negative_pad_grid(X.shape[-1] - crop_size)) ]
+    return Tensor.cat(*Xp)
 
   def cutmix(X, Y, mask_size=3):
     mask = make_square_mask(X.shape, mask_size)
