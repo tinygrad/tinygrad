@@ -91,8 +91,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
-  def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
+  def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}{x.tagstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else repr(self.arg)
+  def tagstr(self): return f", tag={self.tag}" if self.tag is not None else ""
 
   @functools.cached_property
   def parents(self:UOp) -> dict[UOp, None]:
@@ -170,7 +171,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def simplify(self):
     # late import!
-    from tinygrad.codegen.symbolic import symbolic
+    from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0):
       return graph_rewrite(self, symbolic)
   def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
