@@ -20,7 +20,7 @@ jobs:
       run: python extra/amdpci/am_smi.py --pids --kill
     - name: Run SDXL with new search
       run: |
-        BENCHMARK_LOG=search_sdxl BEAM_DEBUG=1 PYTHONPATH=. AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 DISABLE_COMPILER_CACHE=1 python examples/sdxl.py --noshow --timing --seed 0
+        BENCHMARK_LOG=search_sdxl BEAM_DEBUG=1 PARALLEL=0 PYTHONPATH=. AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 DISABLE_COMPILER_CACHE=1 python examples/sdxl.py --noshow --timing --seed 0
     - name: Run SDXL with cached search
       run: |
         BENCHMARK_LOG=search_sdxl_cached PYTHONPATH=. AMD=1 JITBEAM=2 python examples/sdxl.py --noshow --timing --seed 0
