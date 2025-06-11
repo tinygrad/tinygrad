@@ -185,7 +185,7 @@ class TextDecoder:
   def get_jitted(self, shape): return self.jit[shape] if shape in self.jit else self.jit.setdefault(shape, TinyJit(self.forward))
 
   def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor):
-    max_pos = self.max_self_attn_cache_len - x.shape[1] 
+    max_pos = (self.max_self_attn_cache_len - x.shape[1]) // 2  # Much more conservative approach
     pos = UOp.variable("self_attn_cache_len", 1, max_pos).bind(pos) if pos else 0
     cache_key = (x.shape, x.dtype, encoded_audio.shape, encoded_audio.dtype)
     if cache_key not in self.jit:
