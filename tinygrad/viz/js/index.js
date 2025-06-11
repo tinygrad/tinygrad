@@ -250,6 +250,7 @@ async function renderProfiler() {
   const rectGroup = render.append("g").attr("id", "rect-group");
   // get start and end times
   const timestamps = traceEvents.map(t => t.ts).filter(t => t);
+  console.log(timestamps.length);
   let [st, et] = [Math.min(...timestamps), Math.max(...timestamps)];
   et += Math.max(...traceEvents.filter((t) => t.ts === et).map(t => t.dur));
   const duration = et-st;

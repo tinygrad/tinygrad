@@ -29,7 +29,7 @@ def render_program(k:Kernel):
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
   ret = []
   for k,v in zip(keys, contexts):
-    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":lines(s.loc[0])[s.loc[1]-1].strip()} for s in v]
+    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":""} for s in v]
     if isinstance(k, Kernel): ret.append({"name":k.name, "kernel_code":render_program(k), "ref":id(k.ast), "steps":steps})
     else: ret.append({"name":str(k), "steps":steps})
   return ret
@@ -117,7 +117,7 @@ def to_perfetto(profile:list[ProfileEvent]):
   for ev in tqdm(profile, desc="preparing profile"):
     if isinstance(ev, ProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)
     elif isinstance(ev, ProfileGraphEvent): prof_json += graph_ev_to_perfetto_json(ev, reccnt=len(prof_json))
-  return json.dumps({"traceEvents": prof_json}).encode() if len(prof_json) > 0 else None
+  return json.dumps({"traceEvents": prof_json[:2_200_000]}).encode() if len(prof_json) > 0 else None
 
 # ** HTTP server
 
@@ -191,6 +191,7 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
+  print(args.profile)
   contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
 
   # NOTE: this context is a tuple of list[keys] and list[values]
