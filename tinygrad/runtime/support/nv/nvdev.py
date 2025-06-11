@@ -46,20 +46,22 @@ class NVPageTableEntry:
   def __init__(self, nvdev, paddr, lv): self.nvdev, self.paddr, self.lv, self.entries = nvdev, paddr, lv, nvdev.vram.view(paddr, 0x1000, fmt='Q')
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
-    print(entry_id, paddr, table, uncached, system, snooped, frag, valid)
+    if not table:
+      aper = 2 if system else 0
+      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=True, address_sys=paddr >> 12, aperture=aper, vol=uncached, kind=0)
+      self.entries[entry_id] = x
 
-    if self.lv == 3:
+      assert self.lv != 3, 'dont know about this yet'
+    elif self.lv == 3:
       x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=uncached)
       self.entries[2*entry_id] = x & 0xffffffffffffffff
       self.entries[2*entry_id+1] = x >> 32
       assert entry_id < 256
-    elif self.lv == 4:
-      aper = 2 if system else 1
-      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=True, address_sys=paddr >> 12, aperture=aper, vol=uncached)
-      self.entries[entry_id] = x
     else:
       x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_sys=paddr >> 12, aperture=1 if valid else 0, vol=uncached)
       self.entries[entry_id] = x
+    
+    print(entry_id, paddr, table, uncached, system, snooped, frag, valid, hex(x))
 
   def entry(self, entry_id:int) -> int:
     return (self.entries[2*entry_id+1]<<32) | self.entries[2*entry_id] if self.lv == 3 else self.entries[entry_id]
@@ -113,7 +115,7 @@ class NVPageTableTraverseContext:
     while size > 0:
       pt, pte_idx, pte_covers = self.pt_stack[-1]
       if self.create_pts:
-        while pte_covers != 0x1000: pt, pte_idx, pte_covers = self.level_down()
+        while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
       # else:
       #   while pt.lv!=am.AMDGPU_VM_PTB and not self.nvdev.gmc.is_pte_huge_page(pt.entries[pte_idx]): pt, pte_idx, pte_covers = self.level_down()
 
@@ -126,11 +128,11 @@ class NVPageTableTraverseContext:
       self.level_up()
 
 class NVMemoryManager:
-  va_allocator = TLSFAllocator((1 << 49), base=0x1000000) # global for all devices.
+  va_allocator = TLSFAllocator((1 << 49), base=0x20000000) # global for all devices.
 
   def __init__(self, nvdev:NVDev, vram_size:int):
     self.nvdev, self.vram_size = nvdev, vram_size
-    self.boot_allocator = TLSFAllocator(32 << 20, base=0x0) # per device
+    self.boot_allocator = TLSFAllocator(64 << 20, base=128<<20) # per device
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.base + self.boot_allocator.size) # per device
     self.root_page_table = NVPageTableEntry(self.nvdev, self.palloc(0x1000, zero=not self.nvdev.smi_dev, boot=True), lv=0)
 

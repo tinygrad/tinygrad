@@ -538,17 +538,19 @@ class NV_GSP:
       vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES))
     self.rpc_rm_alloc(hParent=0xcf000000, hObject=0xcf000001, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS(subDeviceId=0x0)) 
 
-    vaspace_params = nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS(vaBase=0x1000000, vaSize=0x1fffffb000000,
-      flags=nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_ENABLE_PAGE_FAULTING | nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_IS_EXTERNALLY_OWNED)
+    vaspace_params = nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS(vaBase=0x0, vaSize=0x1bffffb000000,
+      flags=nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_ENABLE_PAGE_FAULTING | nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_ALLOW_ZERO_ADDRESS | nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_IS_EXTERNALLY_OWNED)
     self.rpc_rm_alloc(hParent=0xcf000000, hObject=0xcf000002, hClass=nv_gpu.FERMI_VASPACE_A, params=vaspace_params)
     
-    self.rpc_set_page_directory(device=0xcf000000, hVASpace=0xcf000002, pdir_paddr=self.nvdev.mm.root_page_table.paddr)
-
-    # hexdump(self.nvdev.vram[self.nvdev.mm.root_page_table.paddr:self.nvdev.mm.root_page_table.paddr + 0x20])
-
+    self.nvdev.wreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_MMU_FAULT_INFO, 0x0)
+    self.nvdev.wreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_MMU_FAULT_ADDR_LO, 0x0)
+    self.nvdev.wreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_MMU_FAULT_ADDR_HI, 0x0)
+    
     print(hex(self.nvdev.rreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_MMU_FAULT_INFO)))
     print(hex(self.nvdev.rreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_MMU_FAULT_ADDR_LO)))
     print(hex(self.nvdev.rreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_MMU_FAULT_ADDR_HI)))
+    
+    self.rpc_set_page_directory(device=0xcf000000, hVASpace=0xcf000002, pdir_paddr=self.nvdev.mm.root_page_table.paddr)
 
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
     self.rpc_rm_alloc(hParent=0xcf000000, hObject=0xcf000003, hClass=nv_gpu.KEPLER_CHANNEL_GROUP_A, params=channel_params)
@@ -556,7 +558,7 @@ class NV_GSP:
     ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=0xcf000002, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     self.rpc_rm_alloc(hParent=0xcf000003, hObject=0xcf000004, hClass=nv_gpu.FERMI_CONTEXT_SHARE_A, params=ctxshare_params)
 
-    gpfifo_area = self.nvdev.mm.valloc(0x200000, contigous=True)
+    gpfifo_area = self.nvdev.mm.valloc(512<<20, contigous=True)
     
     # userd_alloc = self.nvdev.mm.valloc(0x1000, contigous=True)
     userd = nv_gpu.NV_MEMORY_DESC_PARAMS(base=gpfifo_area.paddrs[0][0] + 0x400 * 8, size=0x200, addressSpace=2, cacheAttrib=0)
@@ -564,12 +566,14 @@ class NV_GSP:
     notifier_va, notifier_sysmem = alloc_sysmem(0x1000, contigous=True)
     notifier = nv_gpu.NV_MEMORY_DESC_PARAMS(base=notifier_sysmem[0], size=0x3000000ECC, addressSpace=1, cacheAttrib=0)
 
-    ramfc_alloc = self.nvdev.mm.valloc(0x1000, contigous=True)
+    ramfc_alloc = self.nvdev.mm.valloc(512<<20, contigous=True)
     ramfc = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x200, addressSpace=1, cacheAttrib=0)
     instblock = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x1000, addressSpace=1, cacheAttrib=0)
 
     method_va, method_sysmem = alloc_sysmem(0x5000, contigous=True)
     method_buffer = nv_gpu.NV_MEMORY_DESC_PARAMS(base=method_sysmem[0], size=0x5000, addressSpace=2, cacheAttrib=0)
+
+    hexdump(self.nvdev.vram[self.nvdev.mm.root_page_table.paddr:self.nvdev.mm.root_page_table.paddr + 0x20])
 
     gg_params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=0x0, hObjectBuffer=0x0,
       gpFifoOffset=gpfifo_area.va_addr, gpFifoEntries=0x400, hContextShare=0xcf000004, engineType=0x0,
@@ -580,29 +584,32 @@ class NV_GSP:
     self.rpc_rm_alloc(hParent=0xcf000005, hObject=0xcf000006, hClass=nv_gpu.ADA_COMPUTE_A, params=None)
     self.rpc_rm_alloc(hParent=0xcf000005, hObject=0xcf000007, hClass=nv_gpu.AMPERE_DMA_COPY_B, params=None)
 
+    # NVA06C_CTRL_CMD_GPFIFO_SCHEDULE
+    # self.rpc_rm_control(hParent=0xcf000005, hObject=0xcf000008, hClass=nv_gpu.AMPERE_CHANNEL_GPFIFO_USERD_A,)
+
     params = nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS(workSubmitToken=-1)
     z = self.rpc_rm_control(hObject=0xcf000005, cmd=nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN, params=params)
     dbell = nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS.from_buffer_copy(z).workSubmitToken
 
+    params = nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
+    z = self.rpc_rm_control(hObject=0xcf000003, cmd=nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, params=params)
+    nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS.from_buffer_copy(z)
+    
     print(hex(self.nvdev.rreg(0x00B80000 + 0x30094)))
 
-    self.nvdev.vram[userd_alloc.paddrs[0][0] + 0x8c] = 0x1
+    self.nvdev.vram[gpfifo_area.paddrs[0][0] + 0x400 * 8 + 0x8c] = 0x1
     # self.nvdev.wreg(self.nvdev.NV_VIRTUAL_FUNCTION_FULL_PHYS_OFFSET + 0x30090, dbell)
     self.nvdev.wreg(0x00B80000 + 0x30090, dbell)
     # self.nvdev.wreg(0x00030000 + 0x30090, dbell)
     # self.nvdev.wreg(self.nvdev.NV_VIRTUAL_FUNCTION_FULL_PHYS_OFFSET + 0x30090, dbell)
-    # print(hex(self.nvdev.rreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_MMU_FAULT_INFO)))
-    # print(hex(self.nvdev.rreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_MMU_FAULT_ADDR_LO)))
-    # print(hex(self.nvdev.rreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_MMU_FAULT_ADDR_HI)))
 
-    # print(hex(self.nvdev.rreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_TIMER)))
+    print(hex(self.nvdev.rreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_MMU_FAULT_INFO)))
+    print(hex(self.nvdev.rreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_MMU_FAULT_ADDR_LO)))
+    print(hex(self.nvdev.rreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_MMU_FAULT_ADDR_HI)))
+    # print(hex(self.nvdev.rreg(0x00B80000 + 0x30080)))
+    # print(hex(self.nvdev.rreg(0x00B80000 + 0x30084)))
 
-    print(hex(self.nvdev.rreg(0x00B80000 + 0x30080)))
-    print(hex(self.nvdev.rreg(0x00B80000 + 0x30084)))
-    print(hex(self.nvdev.rreg(0x00B80000 + 0x30090)))
-    print(hex(self.nvdev.rreg(0x00B80000 + 0x30094)))
-
-    time.sleep(3)
+    print(self.nvdev.vram[gpfifo_area.paddrs[0][0] + 0x400 * 8 + 0x88], self.nvdev.vram[gpfifo_area.paddrs[0][0] + 0x400 * 8 + 0x8c])
 
     # hexdump(self.nvdev.vram[userd_alloc.paddrs[0][0]:userd_alloc.paddrs[0][0] + 0x200])
 
@@ -611,6 +618,10 @@ class NV_GSP:
     # print(hex(self.nvdev.rreg(0x00B80000 + self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_MMU_FAULT_ADDR_HI)))
     
     # NV_VIRTUAL_FUNCTION_FULL_PHYS_OFFSET
+
+    # params = nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS(workSubmitToken=-1)
+    # z = self.rpc_rm_control(hObject=0xcf000005, cmd=nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN, params=params)
+    # dbell = nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS.from_buffer_copy(z).workSubmitToken
 
     exit(0)
 
@@ -686,6 +697,7 @@ class NV_GSP:
     self.command_q.send_rpc(65, bytes(0x8b0))
     stat, resp = self.status_q.wait_resp(65)
     self.client = 0xc1e00004 # int.from_bytes(resp[0x888:0x888+4], 'little')
+    assert stat == 0
     # print(hex(self.client))
 
   def rpc_rm_alloc(self, hParent, hObject, hClass, params):
@@ -693,13 +705,15 @@ class NV_GSP:
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.command_q.send_rpc(103, bytes(alloc_args) + (bytes(params) if params is not None else b''))
     stat, resp = self.status_q.wait_resp(103)
-    hexdump(resp[:0x80])
+    assert stat == 0
+    # hexdump(resp[:0x80])
 
   def rpc_rm_control(self, hObject, cmd, params):
     control_args = nv.rpc_gsp_rm_control_v(hClient=0xc1e00004, hObject=hObject, cmd=cmd, flags=0x0,
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.command_q.send_rpc(76, bytes(control_args) + (bytes(params) if params is not None else b''))
     stat, resp = self.status_q.wait_resp(76)
+    assert stat == 0
     return resp[len(bytes(control_args)):]
 
   def rpc_set_page_directory(self, device, hVASpace, pdir_paddr):
@@ -716,4 +730,5 @@ class NV_GSP:
     alloc_args = nv.rpc_set_page_directory_v(hClient=0xc1e00004, hDevice=device, pasid=0xffffffff, params=params)
     self.command_q.send_rpc(54, bytes(alloc_args))
     stat, resp = self.status_q.wait_resp(54)
-    hexdump(resp[:0x80])
+    assert stat == 0
+    # hexdump(resp[:0x80])
