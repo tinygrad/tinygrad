@@ -18,7 +18,7 @@ function intersectRect(r1, r2) {
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
 
-const rect = (s) => document.querySelector(s).getBoundingClientRect();
+const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s instanceof d3.selection ? s.node() : s).getBoundingClientRect();
 
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
@@ -241,10 +241,13 @@ async function renderProfiler() {
   // setup base svg
   const root = d3.select(".profiler").html("");
   const timeline = root.append("div").attr("style", "width: 100%; height: 100%;");
-  const { width, height } = timeline.node().getBoundingClientRect();
+  const { width, height } = rect(timeline);
   const svg = timeline.append("svg").attr("id", "profiler-svg").attr("viewBox", `0 0 ${width} ${height}`)
     .attr("style", "width: 100%; height: auto;").attr("preserveAspectRatio", "xMinYMin meet");
-  // group structure:
+  if (rect(svg).width !== width) {
+    throw new Error("svg must take all the space");
+  }
+  // group layout:
   // svg -> render -> [axisGroup, traceGroup]
   const render = svg.append("g");
   const axisGroup = render.append("g").attr("id", "axis-group");
@@ -257,13 +260,13 @@ async function renderProfiler() {
   // time axis
   const x = d3.scaleLinear().domain([0, duration]).range([0, width]);
   const xAxis = d3.axisBottom(x).tickFormat(t => formatTime(t, duration));
-  axisGroup.call(xAxis);
+  axisGroup.call(xAxis).attr("text-anchor", "start");
   // draw trace events
   const xh = axisGroup.node().getBoundingClientRect().height;
   const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
   const traces = traceEvents.filter(e => e.ph === "X");
   for (const [i,e] of traces.entries()) {
-    traceGroup.append("rect").attr("fill", `#${colors[i%colors.length]}`).attr("width", x(e.dur)).attr("height", 10).attr("x", x(e.ts-st)).attr("y", xh)
+    traceGroup.append("rect").attr("fill", `#${colors[i%colors.length]}`).attr("width", x(e.dur)).attr("height", 10).attr("x", x(e.ts-st)).attr("y", xh);
   }
   // zoom
   const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width, height]]).filter(filter).on("zoom", (e) => {
