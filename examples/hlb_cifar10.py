@@ -245,15 +245,14 @@ def train_cifar():
       if is_train:
         X, Y = jittable_transforms(X, Y)
         if getenv("CUTMIX", 1) and step >= hyp['net']['cutmix_steps']:
-            X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
+          X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X.shape[0], BS):
-        # pad the last batch  # TODO: not correct for test
-        batch_end = min(i+BS, Y.shape[0])
         step += 1
+        if i+BS > X.shape[0]: break
         # This needs to be contiguous, or the jitted consumer will fail.
-        yield X[batch_end-BS:batch_end].contiguous(), Y[batch_end-BS:batch_end].contiguous()
+        yield X[i:i+BS].contiguous(), Y[i:i+BS].contiguous()
       epoch += 1
       if not is_train: break
 
