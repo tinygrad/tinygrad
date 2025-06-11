@@ -265,14 +265,13 @@ async function renderProfiler() {
   const xh = rect(axisGroup).height;
   procList.node().style.paddingTop = `${xh}px`;
   const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
-  for (const e of traceEvents) {
+  for (const [i,e] of traceEvents.entries()) {
     if (e.name === "process_name") procList.append("div").text(e.args.name).attr("id", `proc-${e.pid}`);
-  }
-  const traces = traceEvents.filter(e => e.ph === "X");
-  for (const [i,e] of traces.entries()) {
-    const proc = rect(`#proc-${e.pid}`);
-    traceGroup.append("rect").attr("fill", `#${colors[i%colors.length]}`).attr("width", x(e.dur)).attr("height", proc.height/2).attr("x", x(e.ts-st))
-      .attr("y", proc.y-proc.height-xh+(e.tid*proc.height/2));
+    if (e.ph === "X") {
+      const proc = rect(`#proc-${e.pid}`);
+      traceGroup.append("rect").attr("fill",`#${colors[i%colors.length]}`).attr("width", x(e.dur)).attr("height", proc.height/2).attr("x", x(e.ts-st))
+        .attr("y", proc.y-proc.height-xh+(e.tid*proc.height/2));
+    }
   }
   // zoom
   const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width, 0]]).filter(filter).on("zoom", (e) => {
