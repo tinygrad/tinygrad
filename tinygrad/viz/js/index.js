@@ -262,21 +262,24 @@ async function renderProfiler() {
   procList.node().style.paddingTop = `${xh}px`;
   const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
   const tg = rect(rectGroup).top;
+  const data = [];
   for (const [i,e] of traceEvents.entries()) {
     if (e.name === "process_name") procList.append("div").text(e.args.name).attr("id", `proc-${e.pid}`);
     if (e.ph === "X") {
       const proc = rect(`#proc-${e.pid}`);
       // Width = duration
-      const rw = x(e.dur);
+      const w = x(e.dur);
       // Height = thread height
-      const rh = proc.height/2;
+      const h = proc.height/2;
       // X = start time
       const rx = x(e.ts-st);
       // Y = thread position
-      const ry = proc.top-tg+(e.tid*rh);
-      rectGroup.append("rect").attr("fill",`#${colors[i%colors.length]}`).attr("width", rw).attr("height", rh).attr("x", rx).attr("y", ry);
+      const y = proc.top-tg+(e.tid*h);
+      data.push({ w, h, x:rx, y, color:colors[i%colors.length], ...e });
     }
   }
+  const cell = rectGroup.selectAll("g").data(data).join("g").attr("transform", d => `translate(${d.x},${d.y})`);
+  cell.append("rect").attr("width", d => d.w).attr("height", d => d.h).attr("fill", d => `#${d.color}`);
   // zoom
   const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width, 0]]).filter(filter).on("zoom", (e) => {
     axisGroup.call(xAxis.scale(e.transform.rescaleX(x)));
