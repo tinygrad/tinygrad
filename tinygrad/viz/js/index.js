@@ -225,12 +225,14 @@ function formatTime(ts, dur) {
   return `${(ts*1e-6).toFixed(2)}s`;
 }
 
-// prevent scrolling then apply the default filter
 // https://observablehq.com/@d3/pan-zoom-axes
-function filter(event) {
-  event.preventDefault();
-  return (!event.ctrlKey || event.type === 'wheel' || event.type === 'mousedown') && !event.button;
+function filter(e) {
+  e.preventDefault();
+  // wheel up and down scale
+  // drag left and right move through time
+  return (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button;
 }
+document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault())
 
 var traceEvents;
 async function renderProfiler() {
@@ -271,20 +273,6 @@ async function renderProfiler() {
   svg.call(zoom);
   document.getElementById("zoom-to-fit-btn").addEventListener("click", () => svg.call(zoom.transform, d3.zoomIdentity));
 }
-
-// TODO: remove this, it's trying to make the right click menu not open when dragging through time and holding ctrl
-// there is a better way to solve this
-let isDragging = false;
-document.addEventListener("mousedown", e => {
- isDragging = true;
-});
-document.addEventListener("mouseup", () => {
-  isDragging = false;
-});
-document.addEventListener("contextmenu", e => {
-  e.preventDefault();
-});
-
 
 // ** zoom and recentering
 
