@@ -38,47 +38,68 @@ def apply_mop(st: Any|ShapeTracker, mop_arg: tuple[Ops, tuple]) -> ShapeTracker:
   raise ValueError("invalid mop")
 
 @functools.cache
-def st_to_movement_ops(st) -> list[tuple[Ops, Any]]:
+def st_to_movement_ops(st: "ShapeTracker") -> list[tuple[Ops, Any]]:
   if 0 in st.shape: return []
-  ops:list[tuple[Ops, tuple]] = []
-  for i, v in enumerate(st.views):
-    shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-    offset = v.offset + sum(st*(s-1) for s,st in zip(shape, v.strides) if st<0)
-    pos = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
-    dims = [s for s,st in zip(shape, v.strides) if st]
-    strides: list[int] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
-    buffer = sum((s-1)*st for s,st in zip(dims,strides)) + 1
-    if i: buffer = prod(st.views[i-1].shape) - pos if dims else 1
-    order, pairs = map(list, zip(*sorted(enumerate(zip(dims, strides)), key=lambda p: (p[1][1], -p[1][0]), reverse=True))) if dims else ([], [])
-    ops.extend([(Ops.RESHAPE, (-1,)), (Ops.SHRINK, ((pos, pos+buffer),))])
+  ops: list[tuple[Ops, Any]] = []
+
+  for i, view in enumerate(st.views):
+    # resolve the eff shape for this view
+    shape = tuple(b - a for a, b in view.mask) if view.mask else view.shape
+
+    # compute the starting position within the underlying buffer
+    offset = view.offset + sum(strd * (dim - 1) for dim, strd in zip(shape, view.strides) if strd < 0)
+    pos = offset + (sum(beg * strd for (beg, _), strd in zip(view.mask, view.strides)) if view.mask else 0)
+
+    # collect (dim, stride) pairs for non-zero strides
+    strides = [(dim, abs(strd) if isinstance(strd, int) else strd) for dim, strd in zip(shape, view.strides) if strd]
+    buffer = sum((d - 1) * s for d, s in strides) + 1 if strides else 1
+    if i: buffer = (prod(st.views[i - 1].shape) - pos) if strides else 1
+
+    # initial reshape + shrink to isolate the relevant window
+    ops.extend([(Ops.RESHAPE, (-1,)),
+                (Ops.SHRINK, ((pos, pos + buffer),))])
+
     if strides:
-      if (pairs[0][0]*pairs[0][1]) - buffer > 0:
-        ops.append((Ops.PAD, ((0, (pairs[0][0] * pairs[0][1]) - buffer),)))
-      for j, shape_stride in enumerate(pairs):
-        if j<len(pairs)-1 and shape_stride[1] < pairs[j+1][0]*pairs[j+1][1]:
-          remaining_buffer = pairs[j-1][1] if j>0 else buffer
-          ops.append((Ops.EXPAND, (shape_stride[0], *(s[0] for s in pairs[:j]), remaining_buffer)))
-          ops.append((Ops.PERMUTE, (*range(1,j+1), 0, j+1)))
-          ops.append((Ops.RESHAPE, (*(s[0] for s in pairs[:j]), shape_stride[0]*remaining_buffer)))
-          ops.append((Ops.PAD, (*((0,0) for _ in range(j)), (0, shape_stride[0]*shape_stride[1]))))
-          ops.append((Ops.RESHAPE, (*(s[0] for s in pairs[:j+1]), remaining_buffer+shape_stride[1])))
-          pairs[j] = (pairs[j][0], remaining_buffer+shape_stride[1])
-        else:
-          ops.append((Ops.SHRINK, (*((0, s[0]) for s in pairs[:j]), (0, shape_stride[0]*shape_stride[1]))))
-          ops.append((Ops.RESHAPE, (*[s[0] for s in pairs[:j+1]], shape_stride[1])))
-      ops.extend([(Ops.SHRINK, (*[(0, s[0]) for s in pairs], (0,1))), (Ops.RESHAPE, tuple(s[0] for s in pairs))])
-      if order != list(range(len(order))): ops.append((Ops.PERMUTE, tuple(order.index(i) for i in range(len(strides)))))
-    ops.append((Ops.RESHAPE, tuple(s if st else 1 for s,st in zip(shape, v.strides))))
-    if any(i<0 for i in v.strides): ops.append((Ops.FLIP, tuple(-1 if st<0 else 1 for st in v.strides)))
-    # then, we apply pre expand pads
-    if v.mask is not None:
-      pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-      post_expand_pads = tuple((x,s-y) if st == 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-      if any(x != (0,0) for x in pre_expand_pads):
-        ops.append((Ops.PAD, pre_expand_pads))
-        shape = tuple(x+s[0]+s[1] for x,s in zip(shape, pre_expand_pads))
-    if any(s != 1 and st == 0 for s,st in zip(shape, v.strides)): ops.append((Ops.EXPAND, shape))
-    if v.mask is not None and any(x != (0,0) for x in post_expand_pads): ops.append((Ops.PAD, post_expand_pads))
+      order, pairs = zip(*sorted(enumerate(strides), key=lambda p: (p[1][1], -p[1][0]), reverse=True))
+      order, pairs = list(order), list(pairs)
+      extra = pairs[0][0] * pairs[0][1] - buffer
+      if extra > 0: ops.append((Ops.PAD, ((0, extra),)))
+
+      for j, (dim, stride) in enumerate(pairs):
+        if j < len(pairs) - 1 and stride < pairs[j + 1][0] * pairs[j + 1][1]:
+          remaining = pairs[j - 1][1] if j else buffer
+          ops.extend([(Ops.EXPAND, (dim, *(p[0] for p in pairs[:j]), remaining)),
+                      (Ops.PERMUTE, (*range(1, j + 1), 0, j + 1)),
+                      (Ops.RESHAPE, (*(p[0] for p in pairs[:j]), dim * remaining)),
+                      (Ops.PAD, (*((0, 0) for _ in range(j)), (0, dim * stride))),
+                      (Ops.RESHAPE, (*(p[0] for p in pairs[:j + 1]), remaining + stride)),])
+          pairs[j] = (dim, remaining + stride)
+        else: ops.extend([(Ops.SHRINK, (*((0, p[0]) for p in pairs[:j]), (0, dim * stride))),
+                          (Ops.RESHAPE, (*[p[0] for p in pairs[:j + 1]], stride)),])
+
+      ops.extend([(Ops.SHRINK, (*[(0, p[0]) for p in pairs], (0, 1))),
+                  (Ops.RESHAPE, tuple(p[0] for p in pairs)),])
+
+      # restore original axis order if needed
+      if order != list(range(len(order))): ops.append((Ops.PERMUTE, tuple(order.index(k) for k in range(len(order)))))
+
+    # final reshape to the intended shape
+    ops.append((Ops.RESHAPE, tuple(dim if strd else 1 for dim, strd in zip(shape, view.strides))))
+    # handle negative strides via flip
+    if any(strd < 0 for strd in view.strides): ops.append((Ops.FLIP, tuple(-1 if strd < 0 else 1 for strd in view.strides)))
+
+    # mask-related padding
+    if view.mask is not None:
+      pre_pad = tuple((beg, dim - end) if strd != 0 else (0, 0) for (beg, end), dim, strd in zip(view.mask, view.shape, view.strides))
+      post_pad = tuple((beg, dim - end) if strd == 0 else (0, 0) for (beg, end), dim, strd in zip(view.mask, view.shape, view.strides))
+      if any(p != (0, 0) for p in pre_pad):
+        ops.append((Ops.PAD, pre_pad))
+        shape = tuple(dim + l + r for dim, (l, r) in zip(shape, pre_pad))
+    else: post_pad = ()
+
+    # expand axes and pad
+    if any(dim != 1 and strd == 0 for dim, strd in zip(shape, view.strides)): ops.append((Ops.EXPAND, shape))
+    if view.mask is not None and any(p != (0, 0) for p in post_pad): ops.append((Ops.PAD, post_pad))
   return ops
 
 @functools.cache
