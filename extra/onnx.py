@@ -26,11 +26,7 @@ def dtype_parse(onnx_dtype: int) -> DType:
     TensorProto.FLOAT8E5M2, TensorProto.FLOAT8E5M2FNUZ, TensorProto.UINT4, TensorProto.INT4
   }
   if onnx_dtype in unsupported: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
-  if not is_dtype_supported(dtype := supported[onnx_dtype]):
-    default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
-    warnings.warn(f"dtype {dtype} on {Device.DEFAULT} is not supported, falling back to {default_dtype}")
-    return default_dtype
-  return dtype
+  return supported[onnx_dtype]
 
 def attribute_parse(onnx_attribute: AttributeProto):
   supported: dict[AttributeProto.AttributeType, Callable[[AttributeProto], Any]] = {
@@ -49,6 +45,12 @@ def attribute_parse(onnx_attribute: AttributeProto):
   return supported[onnx_attribute.type](onnx_attribute)
 
 def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
+  def prepare_data(data: Tensor):
+    if not is_dtype_supported(data.dtype):
+      default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
+      warnings.warn(f"dtype {dtype} on {Device.DEFAULT} is not supported, falling back to {default_dtype}")
+      return data.to("CPU").cast(default_dtype).to(Device.DEFAULT)
+    return data.to(Device.DEFAULT)
   if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
   dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
   data = None
@@ -58,12 +60,12 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   elif len(onnx_tensor.double_data): data = onnx_tensor.double_data
   elif len(onnx_tensor.uint64_data): data = onnx_tensor.uint64_data
   if isinstance(data, Tensor):
-    if len(data) == 1: return Tensor(data.tolist()[0], dtype=dtype).reshape(shape)
-    return data.cast(dtype).reshape(shape).to(Device.DEFAULT)
+    if len(data) == 1: return prepare_data(Tensor(data.tolist()[0], dtype=dtype).reshape(shape))
+    return prepare_data(data.cast(dtype).reshape(shape))
   if has_field(onnx_tensor, "raw_data"):
-    ret = onnx_tensor.raw_data.bitcast(dtype).reshape(shape).to(Device.DEFAULT)
+    ret = onnx_tensor.raw_data.bitcast(dtype).reshape(shape)
     if shape == (): ret = Tensor(ret.item(), dtype=dtype).reshape(shape)
-    return ret
+    return prepare_data(ret)
   return Tensor(None)
 
 def type_parse(onnx_type: TypeProto):
