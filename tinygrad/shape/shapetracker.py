@@ -38,11 +38,11 @@ def apply_mop(st: Any|ShapeTracker, mop_arg: tuple[Ops, tuple]) -> ShapeTracker:
   raise ValueError("invalid mop")
 
 @functools.cache
-def st_to_movement_ops(st: "ShapeTracker") -> list[tuple[Ops, Any]]:
-  if 0 in st.shape: return []
+def views_to_movement_ops(views: tuple["View", ...]) -> list[tuple[Ops, Any]]:
+  if 0 in views[-1].shape: return []
   ops: list[tuple[Ops, Any]] = []
 
-  for i, view in enumerate(st.views):
+  for i, view in enumerate(views):
     # resolve the eff shape for this view
     shape = tuple(b - a for a, b in view.mask) if view.mask else view.shape
 
@@ -53,7 +53,7 @@ def st_to_movement_ops(st: "ShapeTracker") -> list[tuple[Ops, Any]]:
     # collect (dim, stride) pairs for non-zero strides
     strides = [(dim, abs(strd) if isinstance(strd, int) else strd) for dim, strd in zip(shape, view.strides) if strd]
     buffer = sum((d - 1) * s for d, s in strides) + 1 if strides else 1
-    if i: buffer = (prod(st.views[i - 1].shape) - pos) if strides else 1
+    if i: buffer = (prod(views[i - 1].shape) - pos) if strides else 1
 
     # initial reshape + shrink to isolate the relevant window
     ops.extend([(Ops.RESHAPE, (-1,)),
@@ -168,8 +168,7 @@ class ShapeTracker:
   def to_uop(self) -> UOp: return UOp(Ops.VIEW, dtypes.void, (), self)
   def to_indexed_uops(self, _idxs:Optional[list[UOp]|tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
     return views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
-
-  def to_movement_ops(self) -> list[tuple[Ops, Any]]: return st_to_movement_ops(self)
+  def to_movement_ops(self) -> list[tuple[Ops, Any]]: return views_to_movement_ops(self.views)
   # upper bound on buffer size required to fit this shapetracker
   def real_size(self) -> int:
     if 0 in self.shape: return 0
