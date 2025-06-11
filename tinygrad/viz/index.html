@@ -83,11 +83,13 @@
   }
   .main-container {
     display: flex;
+    align-items: stretch;
     width: 100%;
     height: 100%;
     position: relative;
   }
   .container {
+    flex: 0 0 auto;
     background-color: #0f1018;
     padding: 20px;
     z-index: 2;
@@ -106,7 +108,8 @@
     z-index: 1;
   }
   .profiler {
-    flex: 1;
+    flex: 1 1 auto;
+    min-width: 0;
     width: 100%;
     height: 100%;
     padding-top: 50px;

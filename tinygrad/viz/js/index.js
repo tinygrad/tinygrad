@@ -240,7 +240,8 @@ async function renderProfiler() {
   if (traceEvents == null) traceEvents = (await (await fetch("/get_profile")).json()).traceEvents;
   // setup base svg
   const root = d3.select(".profiler").html("");
-  const timeline = root.append("div").attr("style", "width: 100%; height: 100%;");
+  const procList = root.append("div").attr("style", "width: 20%; height: 100%; background: red;");
+  const timeline = root.append("div").attr("style", "width: 80%; height: 100%;");
   const { width } = rect(timeline);
   const svg = timeline.append("svg").attr("id", "profiler-svg").attr("style", `width: ${width}; height: auto;`);
   if (rect(svg).width !== width) {
@@ -261,7 +262,7 @@ async function renderProfiler() {
   const xAxis = d3.axisBottom(x).tickFormat(t => formatTime(t, duration));
   axisGroup.call(xAxis).attr("text-anchor", "start");
   // draw trace events
-  const xh = axisGroup.node().getBoundingClientRect().height;
+  const xh = rect(axisGroup).height;
   const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
   const traces = traceEvents.filter(e => e.ph === "X");
   for (const [i,e] of traces.entries()) {
