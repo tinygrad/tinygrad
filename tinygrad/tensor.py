@@ -437,6 +437,245 @@ class Tensor(MathTrait):
     return Tensor(UOp.new_buffer(device, size, dtype), device, dtype, **kwargs).reshape(shape)
 
   @staticmethod
+  def svd(A: Tensor, full_matrices: bool = True) -> tuple[Tensor, Tensor, Tensor]:
+    """
+    Computes the singular value decomposition (SVD) of a matrix.
+    
+    For a matrix A, computes A = U @ diag(S) @ Vh where U and Vh are orthogonal matrices and S contains singular values in descending order.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    A = Tensor([[1., 2.], [3., 4.], [5., 6.]])
+    U, S, Vh = Tensor.svd(A, full_matrices=False)
+    print("U shape:", U.shape)
+    print("S shape:", S.shape) 
+    print("Vh shape:", Vh.shape)
+    print("Singular values:", S.numpy())
+    ```
+    """
+    if A.ndim < 2: raise ValueError(f"Input must be at least 2-dimensional, got {A.ndim}D")
+    
+    *batch_dims, m, n = A.shape
+    k = min(m, n)
+    
+    def _compute_svd_single(matrix):
+      m, n = matrix.shape
+      k = min(m, n)
+      
+      if m == 1 and n == 1:
+        S = matrix.abs().squeeze().unsqueeze(0)
+        U = Tensor.ones(1, 1, device=matrix.device, dtype=matrix.dtype)
+        Vh = (matrix / (matrix.abs() + 1e-10)).sign()
+        return U, S, Vh
+      
+      if m == 1:
+        S = (matrix * matrix).sum().sqrt()
+        U = Tensor.ones(1, 1, device=matrix.device, dtype=matrix.dtype)
+        Vh = matrix / (S + 1e-10)
+        if full_matrices:
+          U_full = Tensor.eye(m, device=matrix.device, dtype=matrix.dtype)
+          Vh_full = Tensor.eye(n, device=matrix.device, dtype=matrix.dtype).contiguous()
+          Vh_full[0:1] = Vh
+          return U_full, S.squeeze(), Vh_full
+        return U, S.squeeze(), Vh
+      
+      if n == 1:
+        S = (matrix * matrix).sum().sqrt()
+        U = matrix / (S + 1e-10)
+        Vh = Tensor.ones(1, 1, device=matrix.device, dtype=matrix.dtype)
+        if full_matrices:
+          U_full = Tensor.eye(m, device=matrix.device, dtype=matrix.dtype).contiguous()
+          U_full[:, 0:1] = U
+          Vh_full = Tensor.eye(n, device=matrix.device, dtype=matrix.dtype)
+          return U_full, S.squeeze(), Vh_full
+        return U, S.squeeze(), Vh
+      
+      if m == 2 and n == 2:
+        a11, a12 = matrix[0, 0], matrix[0, 1]
+        a21, a22 = matrix[1, 0], matrix[1, 1]
+        
+        ata11 = a11*a11 + a21*a21
+        ata12 = a11*a12 + a21*a22
+        ata22 = a12*a12 + a22*a22
+        
+        trace = ata11 + ata22
+        det = ata11 * ata22 - ata12 * ata12
+        
+        discriminant = trace*trace - 4*det
+        sqrt_disc = discriminant.sqrt()
+        
+        lambda1 = (trace + sqrt_disc) / 2
+        lambda2 = (trace - sqrt_disc) / 2
+        
+        s1 = lambda1.sqrt()
+        s2 = lambda2.sqrt()
+        
+        if s2.item() > s1.item(): s1, s2 = s2, s1
+        
+        S = Tensor.stack(s1, s2)
+        
+        if ata12.abs().item() > 1e-10:
+          v1 = Tensor.stack(ata12, lambda1 - ata11)
+          v1 = v1 / (v1 * v1).sum().sqrt()
+          v2 = Tensor.stack(ata12, lambda2 - ata11)
+          v2 = v2 / (v2 * v2).sum().sqrt()
+        else:
+          v1 = Tensor([1., 0.], device=matrix.device, dtype=matrix.dtype)
+          v2 = Tensor([0., 1.], device=matrix.device, dtype=matrix.dtype)
+        
+        if s2.item() > s1.item(): v1, v2 = v2, v1
+        
+        Vh = Tensor.stack(v1, v2, dim=0)
+        
+        u1 = (matrix @ v1) / (s1 + 1e-10)
+        u2 = (matrix @ v2) / (s2 + 1e-10)
+        
+        U = Tensor.stack(u1, u2, dim=1)
+        
+        return U, S, Vh
+      
+      if m >= n:
+        AtA = matrix.transpose() @ matrix
+        
+        singular_values = []
+        V_vectors = []
+        
+        AtA_work = AtA
+        
+        for i in range(k):
+          v = Tensor.randn(n, device=matrix.device, dtype=matrix.dtype)
+          v = v / (v * v).sum().sqrt()
+          
+          for _ in range(150):
+            v_new = AtA_work @ v
+            v_norm_sq = (v_new * v_new).sum()
+            
+            if v_norm_sq.item() < 1e-20: break
+              
+            v_new = v_new / v_norm_sq.sqrt()
+            
+            if (v_new - v).abs().sum().item() < 1e-15: break
+            v = v_new
+          
+          eigenval = (v.unsqueeze(0) @ AtA_work @ v.unsqueeze(1)).squeeze()
+          
+          if eigenval.item() < 1e-20: break
+            
+          singular_values.append(eigenval.sqrt())
+          V_vectors.append(v)
+          
+          vvt = v.unsqueeze(1) @ v.unsqueeze(0)
+          AtA_work = AtA_work - eigenval * vvt
+        
+        while len(singular_values) < k:
+          singular_values.append(Tensor.zeros((), device=matrix.device, dtype=matrix.dtype))
+          V_vectors.append(Tensor.zeros(n, device=matrix.device, dtype=matrix.dtype))
+        
+        S = Tensor.stack(*singular_values)
+        Vh = Tensor.stack(*V_vectors, dim=0)
+        
+        U_vectors = []
+        for i in range(k):
+          if S[i].item() > 1e-15:
+            u = (matrix @ Vh[i]) / S[i]
+          else:
+            u = Tensor.zeros(m, device=matrix.device, dtype=matrix.dtype)
+          U_vectors.append(u)
+        
+        U = Tensor.stack(*U_vectors, dim=1)
+        
+        S_sorted, indices = S.sort(descending=True)
+        S = S_sorted
+        U = U[:, indices]
+        Vh = Vh[indices]
+        
+      else:
+        AAt = matrix @ matrix.transpose()
+        
+        singular_values = []
+        U_vectors = []
+        
+        AAt_work = AAt
+        
+        for i in range(k):
+          u = Tensor.randn(m, device=matrix.device, dtype=matrix.dtype)
+          u = u / (u * u).sum().sqrt()
+          
+          for _ in range(150):
+            u_new = AAt_work @ u
+            u_norm_sq = (u_new * u_new).sum()
+            
+            if u_norm_sq.item() < 1e-20: break
+              
+            u_new = u_new / u_norm_sq.sqrt()
+            
+            if (u_new - u).abs().sum().item() < 1e-15: break
+            u = u_new
+          
+          eigenval = (u.unsqueeze(0) @ AAt_work @ u.unsqueeze(1)).squeeze()
+          
+          if eigenval.item() < 1e-20: break
+            
+          singular_values.append(eigenval.sqrt())
+          U_vectors.append(u)
+          
+          uut = u.unsqueeze(1) @ u.unsqueeze(0)
+          AAt_work = AAt_work - eigenval * uut
+        
+        while len(singular_values) < k:
+          singular_values.append(Tensor.zeros((), device=matrix.device, dtype=matrix.dtype))
+          U_vectors.append(Tensor.zeros(m, device=matrix.device, dtype=matrix.dtype))
+        
+        S = Tensor.stack(*singular_values)
+        U = Tensor.stack(*U_vectors, dim=1)
+        
+        Vh_vectors = []
+        for i in range(k):
+          if S[i].item() > 1e-15:
+            v = (U[:, i].unsqueeze(0) @ matrix).squeeze() / S[i]
+          else:
+            v = Tensor.zeros(n, device=matrix.device, dtype=matrix.dtype)
+          Vh_vectors.append(v)
+        
+        Vh = Tensor.stack(*Vh_vectors, dim=0)
+        
+        S_sorted, indices = S.sort(descending=True)
+        S = S_sorted
+        U = U[:, indices]
+        Vh = Vh[indices]
+      
+      if full_matrices:
+        U_full = Tensor.eye(m, device=matrix.device, dtype=matrix.dtype).contiguous()
+        U_full[:, :k] = U
+        
+        Vh_full = Tensor.eye(n, device=matrix.device, dtype=matrix.dtype).contiguous()
+        Vh_full[:k, :] = Vh
+        
+        return U_full, S, Vh_full
+      else:
+        return U, S, Vh
+    
+    if not batch_dims: return _compute_svd_single(A)
+    
+    batch_shape = tuple(batch_dims)
+    batch_size = prod(batch_dims)
+    A_reshaped = A.reshape(batch_size, m, n)
+    
+    U_list, S_list, Vh_list = [], [], []
+    
+    for batch_idx in range(batch_size):
+      A_single = A_reshaped[batch_idx]
+      U_single, S_single, Vh_single = _compute_svd_single(A_single)
+      U_list.append(U_single)
+      S_list.append(S_single)
+      Vh_list.append(Vh_single)
+    
+    U = Tensor.stack(*U_list, dim=0).reshape(batch_shape + U_list[0].shape)
+    S = Tensor.stack(*S_list, dim=0).reshape(batch_shape + S_list[0].shape)
+    Vh = Tensor.stack(*Vh_list, dim=0).reshape(batch_shape + Vh_list[0].shape)
+    
+    return U, S, Vh
+
+  @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:
     """
     Exposes the pointer as a Tensor without taking ownership of the original data.
