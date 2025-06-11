@@ -330,10 +330,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
-  def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
+  def reshape(self, arg:tuple[sint, ...]):
+    if self.shape == arg: return self
+    return self._mop(Ops.RESHAPE, arg)
   def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg)
   def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg)
-  def permute(self, arg:tuple[sint, ...]): return self._mop(Ops.PERMUTE, arg)
+  def permute(self, arg:tuple[sint, ...]):
+    if arg == tuple(range(len(arg))): return self
+    return self._mop(Ops.PERMUTE, arg)
   def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg)
   def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg)
 
