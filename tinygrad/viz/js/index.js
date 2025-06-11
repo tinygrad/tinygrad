@@ -249,10 +249,21 @@ async function renderProfiler() {
   const axisGroup = render.append("g").attr("id", "axis-group");
   const rectGroup = render.append("g").attr("id", "rect-group");
   // get start and end times
-  const timestamps = traceEvents.map(t => t.ts).filter(t => t);
-  console.log(timestamps.length);
-  let [st, et] = [Math.min(...timestamps), Math.max(...timestamps)];
-  et += Math.max(...traceEvents.filter((t) => t.ts === et).map(t => t.dur));
+  // Math.max is slow
+  let st, et, maxDur;
+  for (const e of traceEvents) {
+    if (e.ts == null) continue;
+    if (e.ts < st || st == null) st = e.ts;
+    if (e.ts > et || et == null) {
+      et = e.ts;
+      maxDur = e.dur;
+    }
+    else {
+      et = e.ts;
+      if (e.dur > maxDur) maxDur = e.dur;
+    }
+  }
+  et += maxDur;
   const duration = et-st;
   // time axis
   const x = d3.scaleLinear().domain([0, duration]).range([0, width]);
@@ -280,7 +291,7 @@ async function renderProfiler() {
     }
   }
   function labelVisible(d) {
-    console.log(d); // TODO: to make this work, we should show/hide the text when it's scaled enough
+    // TODO: to make this work, we should show/hide the text when it's scaled enough
     // the zooming should also be fixed to not scale the text, it should only scale the rect widths
     // changing rect widths makes things slower, transform is fast.
     return 0;

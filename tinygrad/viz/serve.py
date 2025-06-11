@@ -117,7 +117,7 @@ def to_perfetto(profile:list[ProfileEvent]):
   for ev in tqdm(profile, desc="preparing profile"):
     if isinstance(ev, ProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)
     elif isinstance(ev, ProfileGraphEvent): prof_json += graph_ev_to_perfetto_json(ev, reccnt=len(prof_json))
-  return json.dumps({"traceEvents": prof_json[:2_200_000]}).encode() if len(prof_json) > 0 else None
+  return json.dumps({"traceEvents": prof_json}).encode() if len(prof_json) > 0 else None
 
 # ** HTTP server
 
