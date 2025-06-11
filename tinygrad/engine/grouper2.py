@@ -20,6 +20,11 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # optimize the graph at the tensor level
   tensor_map = graph_rewrite_map(big_sink, merge_views, name="Merge Views")
 
+  # 1. replace REDUCE_AXIS with REDUCE_CHOMP (arg is number of axes to chomp)
+  # 2. move all views (except expand) left, even through reduces.
+  # 3. those expands can either be realized or put in a kernel
+  # 4. nothing else should have to be realized, right?
+
   # place GBARRIERS
   tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, input_map=tensor_map, name="Add GBARRIERs")
   tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
