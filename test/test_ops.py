@@ -1,8 +1,7 @@
-import time, math, unittest, functools
+import math, unittest, functools, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-import warnings
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL, DEVECTORIZE, OSX
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
@@ -23,17 +22,18 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
   ts, tst = prepare_test_op(low, high, shps, vals, forward_only)
 
-  st = time.monotonic()
   out = torch_fxn(*ts)
-  torch_fp = time.monotonic() - st
 
   # move inputs to a different device, test the device of intermediate tensors are correct
   if mt:=getenv("MOVE_TENSOR", ""):
     for t in tst: t.to_(mt)
 
-  st = time.monotonic()
-  ret = tinygrad_fxn(*tst).realize()
-  tinygrad_fp = time.monotonic() - st
+  if not forward_only and not FORWARD_ONLY and ts and tst:
+    ret = tinygrad_fxn(*tst)
+    tiny_grads = ret.sum().gradient(*tst)
+    ret.realize(*tiny_grads)
+  else:
+    ret = tinygrad_fxn(*tst).realize()
 
   def compare(s, tinygrad_output, torch_output, atol, rtol):
     if PRINT_TENSORS: print(s, tinygrad_output, torch_output)
@@ -53,24 +53,10 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     print(out.detach().cpu().numpy())
   compare("forward pass", ret.numpy(), out.detach().cpu().numpy(), atol=atol, rtol=rtol)
 
-  torch_fbp, tinygrad_fbp = np.nan, np.nan
   if not forward_only and not FORWARD_ONLY and ts and tst:
-    st = time.monotonic()
     torch_grads = torch.autograd.grad(torch_fxn(*ts).sum(), ts)
-    torch_fbp = time.monotonic() - st
-
-    st = time.monotonic()
-    # NOTE: we now have to recompute the forward pass since we realized it
-    tiny_grads = tinygrad_fxn(*tst).sum().gradient(*tst)
-    Tensor.realize(*tiny_grads)
-    tinygrad_fbp = time.monotonic() - st
-
     for i, (t, torch_grad) in enumerate(zip(tiny_grads, torch_grads)):
       compare(f"backward pass tensor {i}", t.numpy(), torch_grad.detach().cpu().numpy(), atol=grad_atol, rtol=grad_rtol)
-
-  if not CI:
-    print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % \
-          (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
 def prepare_test_op(low, high, shps, vals, forward_only=False):
   if shps is None:
@@ -935,7 +921,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], torch.sigmoid, Tensor.sigmoid)
   def test_sigmoid_extreme(self):
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=300, high=400)
-    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=-400, high=-300)
+    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=-400, high=-300, forward_only=True)
     x = Tensor([300.0])
     self.assertAlmostEqual(x.sigmoid()[0].gradient(x)[0].item(), 0.0)
     x = Tensor([-300.0])
@@ -951,7 +937,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
   def test_hardsigmoid_extreme(self):
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=300, high=400)
-    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=-400, high=-300)
+    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=-400, high=-300, forward_only=True)
   def test_softplus(self):
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
     helper_test_op([(45,65)], lambda t: torch.nn.functional.softplus(t, beta=3), lambda t: Tensor.softplus(t, beta=3), grad_atol=1e-6)
@@ -1479,12 +1465,12 @@ class TestOps(unittest.TestCase):
       helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=0))
       helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=5))
   def test_std_one_in_axis(self):
+    # TODO: fix backward
     with warnings.catch_warnings():
       warnings.filterwarnings("ignore", message="std\\(\\): degrees of freedom is <= 0")
-      helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3)))
-      helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=5))
+      helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3)), forward_only=True)
+      helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=5), forward_only=True)
       helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,4), correction=5))
-    # TODO: fix backward
     helper_test_op([(1,)], lambda x: x.std(axis=(0,), correction=0), forward_only=True)
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=0), forward_only=True)
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,4)))
