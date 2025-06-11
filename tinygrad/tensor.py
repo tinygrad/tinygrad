@@ -407,6 +407,42 @@ class Tensor(MathTrait):
     """
     return self.replace(self.shard(devices, axis))
 
+  def tinyfs_load(self, size:int) -> Tensor:
+    """
+    Load a tensor from a tinyfs filesystem.
+
+    self should be a tensor of the hash to load
+    """
+    assert self.dtype == dtypes.uint8, "hash is expected to be uint8"
+    h = self.flatten()
+
+    # pad to a multiple of 1mb
+    tsize = h.shape[0]
+    if tsize % 1024**2 != 0: h = h.pad((0, 1024**2 - tsize % 1024**2))
+
+    # load the tensor from tinyfs
+    data = h.to("tinyfs:load").to(self.device)
+
+    # slice to size
+    return data[:size]
+
+  def tinyfs_store(self) -> Tensor:
+    """
+    Store a tensor to a tinyfs filesystem.
+    """
+    assert self.dtype == dtypes.uint8, f"tinyfs_store only works with uint8 tensors, got {self.dtype}"
+    data = self.flatten()
+
+    # pad to a multiple of 1mb
+    tsize = data.shape[0]
+    if tsize % 1024**2 != 0: data = data.pad((0, 1024**2 - tsize % 1024**2))
+
+    # store to tinyfs
+    h = data.to("tinyfs:store").to(self.device)
+
+    # slice to hash size
+    return h[:16]
+
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
     if y.op is Ops.BIND: return Tensor(y, **kwargs, requires_grad=False)
