@@ -278,10 +278,17 @@ async function renderProfiler() {
       data.push({ w, h, x:rx, y, color:colors[i%colors.length], ...e });
     }
   }
+  function labelVisible(d) {
+    console.log(d); // TODO: to make this work, we should show/hide the text when it's scaled enough
+    // the zooming should also be fixed to not scale the text, it should only scale the rect widths
+    // changing rect widths makes things slower, transform is fast.
+    return 0;
+  }
   const cell = rectGroup.selectAll("g").data(data).join("g").attr("transform", d => `translate(${d.x},${d.y})`);
-  cell.append("rect").attr("width", d => d.w).attr("height", d => d.h).attr("fill", d => `#${d.color}`);
+  cell.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.w).attr("height", d => d.h).attr("fill", d => `#${d.color}`);
+  cell.selectAll("text").data(d => [d]).join("text").text(d => d.name).attr("fill-opacity", d => +labelVisible(d));
   // zoom
-  const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width, 0]]).filter(filter).on("zoom", (e) => {
+  const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width,0]]).filter(filter).on("zoom", (e) => {
     axisGroup.call(xAxis.scale(e.transform.rescaleX(x)));
     rectGroup.attr("transform", `translate(${e.transform.x},0) scale(${e.transform.k},1)`);
   });
