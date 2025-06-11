@@ -241,9 +241,8 @@ async function renderProfiler() {
   // setup base svg
   const root = d3.select(".profiler").html("");
   const timeline = root.append("div").attr("style", "width: 100%; height: 100%;");
-  const { width, height } = rect(timeline);
-  const svg = timeline.append("svg").attr("id", "profiler-svg").attr("viewBox", `0 0 ${width} ${height}`)
-    .attr("style", "width: 100%; height: auto;").attr("preserveAspectRatio", "xMinYMin meet");
+  const { width } = rect(timeline);
+  const svg = timeline.append("svg").attr("id", "profiler-svg").attr("style", `width: ${width}; height: auto;`);
   if (rect(svg).width !== width) {
     throw new Error("svg must take all the space");
   }
@@ -269,7 +268,7 @@ async function renderProfiler() {
     traceGroup.append("rect").attr("fill", `#${colors[i%colors.length]}`).attr("width", x(e.dur)).attr("height", 10).attr("x", x(e.ts-st)).attr("y", xh);
   }
   // zoom
-  const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width, height]]).filter(filter).on("zoom", (e) => {
+  const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width, 0]]).filter(filter).on("zoom", (e) => {
     axisGroup.call(xAxis.scale(e.transform.rescaleX(x)));
     traceGroup.attr("transform", `translate(${e.transform.x},0) scale(${e.transform.k},1)`);
   });
