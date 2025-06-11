@@ -556,10 +556,10 @@ class NV_GSP:
     ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=0xcf000002, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     self.rpc_rm_alloc(hParent=0xcf000003, hObject=0xcf000004, hClass=nv_gpu.FERMI_CONTEXT_SHARE_A, params=ctxshare_params)
 
-    gpfifo_area = self.nvdev.mm.valloc(0x200000)
+    gpfifo_area = self.nvdev.mm.valloc(0x200000, contigous=True)
     
-    userd_alloc = self.nvdev.mm.valloc(0x1000, contigous=True)
-    userd = nv_gpu.NV_MEMORY_DESC_PARAMS(base=userd_alloc.paddrs[0][0], size=0x200, addressSpace=2, cacheAttrib=0)
+    # userd_alloc = self.nvdev.mm.valloc(0x1000, contigous=True)
+    userd = nv_gpu.NV_MEMORY_DESC_PARAMS(base=gpfifo_area.paddrs[0][0] + 0x400 * 8, size=0x200, addressSpace=2, cacheAttrib=0)
 
     notifier_va, notifier_sysmem = alloc_sysmem(0x1000, contigous=True)
     notifier = nv_gpu.NV_MEMORY_DESC_PARAMS(base=notifier_sysmem[0], size=0x3000000ECC, addressSpace=1, cacheAttrib=0)
