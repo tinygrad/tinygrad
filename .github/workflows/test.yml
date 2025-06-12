@@ -2,7 +2,7 @@ name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
   DOWNLOAD_CACHE_VERSION: '10'
-  PYTHON_CACHE_VERSION: '1'
+  PYTHON_CACHE_VERSION: '2'
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -394,6 +394,8 @@ jobs:
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
         PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
+    - name: Fuzz Test shape ops
+      run: python test/external/fuzz_shape_ops.py
 
   testgpuimage:
     name: 'GPU IMAGE Tests'
@@ -576,7 +578,7 @@ jobs:
     - name: Run test_tiny on DSP
       run: DEBUG=2 DSP=1 python test/test_tiny.py
     - name: Test transcendentals
-      run: CC=clang-19 PYTHONPATH="." DEBUG=2 DSP=1 python test/test_transcendental.py TestTranscendentalVectorized
+      run: CC=clang-20 PYTHONPATH="." DEBUG=2 DSP=1 python test/test_transcendental.py TestTranscendentalVectorized
     - name: Test quantize onnx
       run: PYTHONPATH="." DEBUG=2 DSP=1 python3 test/test_quantize_onnx.py
     - name: Test LLVM=1 DEVECTORIZE=0
@@ -746,7 +748,7 @@ jobs:
     - name: Run real world test
       run: METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Test models (Metal)
-      run: METAL=1 python -m pytest test/models -v --durations=20
+      run: METAL=1 python -m pytest -n=auto test/models -v --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
