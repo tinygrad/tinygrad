@@ -69,6 +69,10 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
     if len(data) == 1: return prepare_data(Tensor(data.tolist()[0], dtype=dtype).reshape(shape))
     return prepare_data(data.cast(dtype).reshape(shape))
   if has_field(onnx_tensor, "raw_data"):
+    if onnx_tensor.data_type == TensorProto.FLOAT16:
+      ret = onnx_tensor.raw_data.bitcast(dtypes.float16).reshape(shape)
+      if shape == (): return Tensor(ret.item(), dtype=dtypes.float32)
+      return ret.to("CPU").cast(dtypes.float32).to(Device.DEFAULT)
     ret = onnx_tensor.raw_data.bitcast(dtype).reshape(shape)
     if shape == (): ret = Tensor(ret.item(), dtype=dtype).reshape(shape)
     return prepare_data(ret)
@@ -152,15 +156,15 @@ class OnnxRunner:
     if spec.is_optional and value is None: return None
     # TODO: need true float16 for dtype checking
     if spec.is_sequence:
-      if not isinstance(value, Sequence): raise RuntimeError(f"{name} received {value}, expected a sequence type")
+      if not isinstance(value, Sequence): raise RuntimeError(f"input {name} received {value}, expected a sequence type")
       sequence = [Tensor(v, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(v, Tensor) else v for v in value]
-      if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for {name} sequence must be homogeneous")
+      if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for input {name} sequence must be homogeneous")
       return sequence
     tensor = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
     for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):
       if isinstance(onnx_dim, str):
         onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, int(user_dim_input))
-      if user_dim_input != onnx_dim: raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
+      if user_dim_input != onnx_dim: raise RuntimeError(f"input {name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
     return tensor
 
   def _dispatch_op(self, op, inps, opts):
