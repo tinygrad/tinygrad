@@ -242,11 +242,7 @@ function filter(e) {
 document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault())
 
 var traceEvents;
-const LINE_HEIGHT = 14;
-const canvas = new OffscreenCanvas(0, 0);
-const ctx = canvas.getContext("2d");
-ctx.font = `${LINE_HEIGHT}px sans-serif`;
-async function renderProfiler() {
+async function renderProfilerSVG() {
   switchRender("profiler");
   if (traceEvents == null) traceEvents = (await (await fetch("/get_profile")).json()).traceEvents;
   // base layout
@@ -287,6 +283,10 @@ async function renderProfiler() {
   const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
   const rectTop = rect(rectGroup).top;
   const data = [];
+  const LINE_HEIGHT = 14;
+  const canvas = new OffscreenCanvas(0, 0);
+  const ctx = canvas.getContext("2d");
+  ctx.font = `${LINE_HEIGHT}px sans-serif`;
   for (const [i,e] of traceEvents.entries()) {
     if (e.name === "process_name") procList.append("div").text(e.args.name).attr("id", `proc-${e.pid}`);
     if (e.ph === "X") {
@@ -330,6 +330,18 @@ async function renderProfiler() {
   svg.call(zoom);
   document.getElementById("zoom-to-fit-btn").addEventListener("click", () => svg.call(zoom.transform, d3.zoomIdentity));
 }
+
+var traceEvents;
+async function renderProfilerCanvas() {
+  if (traceEvents == null) {
+    const st = performance.now();
+    traceEvents = (await (await fetch("/get_profile")).json()).traceEvents;
+    console.log(`%c server responded in ${(performance.now()-st).toFixed(2)} ms with ${traceEvents.length.toLocaleString()} traceEvents.`, "color: green");
+  }
+}
+
+let renderProfiler = renderProfilerSVG;
+renderProfiler = renderProfilerCanvas;
 
 // ** zoom and recentering
 
