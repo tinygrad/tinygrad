@@ -135,6 +135,7 @@ class OnnxRunner:
   """
   def __init__(self, model:str | os.PathLike):
     # parse model protobuf
+    self.model_path = model
     model = onnx_load(model)
     self.is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model.graph.node)
     self.old_training = Tensor.training
