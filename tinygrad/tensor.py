@@ -414,14 +414,14 @@ class Tensor(MathTrait):
     self should be a tensor of the hash to load
     """
     assert self.dtype == dtypes.uint8, "hash is expected to be uint8"
-    h = self.flatten()
+    h = self.contiguous().flatten()
 
-    # pad to a multiple of 1mb
-    tsize = h.shape[0]
-    if tsize % 1024**2 != 0: h = h.pad((0, 1024**2 - tsize % 1024**2))
+    # pad size to a multiple of 1mb and larger than size
+    if (tsize := h.shape[0]) < size: h = h.pad((0, size - tsize))
+    if size % 1024**2 != 0: h = h.pad((0, 1024**2 - size % 1024**2))
 
     # load the tensor from tinyfs
-    data = h.to("tinyfs:load").to(self.device)
+    data = h.to("tinyfs:load")[:size].contiguous().to(self.device)
 
     # slice to size
     return data[:size]
@@ -430,18 +430,16 @@ class Tensor(MathTrait):
     """
     Store a tensor to a tinyfs filesystem.
     """
-    assert self.dtype == dtypes.uint8, f"tinyfs_store only works with uint8 tensors, got {self.dtype}"
-    data = self.flatten()
+    data = self.contiguous().flatten().bitcast(dtypes.uint8)
 
     # pad to a multiple of 1mb
-    tsize = data.shape[0]
-    if tsize % 1024**2 != 0: data = data.pad((0, 1024**2 - tsize % 1024**2))
+    if (tsize := data.shape[0]) % 1024**2 != 0: data = data.pad((0, 1024**2 - tsize % 1024**2))
 
     # store to tinyfs
-    h = data.to("tinyfs:store").to(self.device)
+    h = data.to("tinyfs:store")[:16].contiguous().to(self.device)
 
     # slice to hash size
-    return h[:16]
+    return h
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
