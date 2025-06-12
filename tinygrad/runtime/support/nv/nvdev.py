@@ -46,12 +46,17 @@ class NVPageTableEntry:
   def __init__(self, nvdev, paddr, lv): self.nvdev, self.paddr, self.lv, self.entries = nvdev, paddr, lv, nvdev.vram.view(paddr, 0x1000, fmt='Q')
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
+    uncached = True
+
     if not table:
+      # x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=True, address_sys=paddr >> 12, aperture=1, vol=uncached)
+
       aper = 2 if system else 0
       x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=True, address_sys=paddr >> 12, aperture=aper, vol=uncached, kind=0)
-      self.entries[entry_id] = x
+      
+      if self.lv !=3: self.entries[entry_id] = x
+      else: self.entries[2*entry_id] = x
 
-      assert self.lv != 3, 'dont know about this yet'
     elif self.lv == 3:
       x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=uncached)
       self.entries[2*entry_id] = x & 0xffffffffffffffff
@@ -61,7 +66,7 @@ class NVPageTableEntry:
       x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_sys=paddr >> 12, aperture=1 if valid else 0, vol=uncached)
       self.entries[entry_id] = x
     
-    print(entry_id, paddr, table, uncached, system, snooped, frag, valid, hex(x))
+    print(entry_id, hex(paddr), table, uncached, system, snooped, frag, valid, hex(x))
 
   def entry(self, entry_id:int) -> int:
     return (self.entries[2*entry_id+1]<<32) | self.entries[2*entry_id] if self.lv == 3 else self.entries[entry_id]
@@ -108,7 +113,7 @@ class NVPageTableTraverseContext:
     while self.pt_stack[-1][1] == self._pt_pte_cnt(len(self.pt_stack) - 1):
       print("level_up")
       _, pt_cnt, _ = self.pt_stack.pop()
-      if pt_cnt == self._pt_pte_cnt(len(self.pt_stack) - 1):
+      if pt_cnt == self._pt_pte_cnt(len(self.pt_stack)):
         self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
 
   def next(self, size:int, off=0):
@@ -116,6 +121,7 @@ class NVPageTableTraverseContext:
       pt, pte_idx, pte_covers = self.pt_stack[-1]
       if self.create_pts:
         while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
+        # while pte_covers != 0x1000: pt, pte_idx, pte_covers = self.level_down() # test deep tables
       # else:
       #   while pt.lv!=am.AMDGPU_VM_PTB and not self.nvdev.gmc.is_pte_huge_page(pt.entries[pte_idx]): pt, pte_idx, pte_covers = self.level_down()
 
@@ -128,12 +134,12 @@ class NVPageTableTraverseContext:
       self.level_up()
 
 class NVMemoryManager:
-  va_allocator = TLSFAllocator((1 << 49), base=0x20000000) # global for all devices.
+  va_allocator = TLSFAllocator((1 << 49), base=0x0) # global for all devices.
 
   def __init__(self, nvdev:NVDev, vram_size:int):
     self.nvdev, self.vram_size = nvdev, vram_size
-    self.boot_allocator = TLSFAllocator(64 << 20, base=128<<20) # per device
-    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.base + self.boot_allocator.size) # per device
+    # self.boot_allocator = TLSFAllocator(64 << 20, base=128<<20) # per device
+    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=0x0) # per device
     self.root_page_table = NVPageTableEntry(self.nvdev, self.palloc(0x1000, zero=not self.nvdev.smi_dev, boot=True), lv=0)
 
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False) -> NVMapping:
@@ -178,7 +184,8 @@ class NVMemoryManager:
 
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
     # assert self.nvdev.is_booting == boot, "During booting, only boot memory can be allocated"
-    paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
+    # paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
+    paddr = self.pa_allocator.alloc(round_up(size, 0x1000), align)
     if zero: self.nvdev.vram[paddr:paddr+size] = bytes(size)
     return paddr
 

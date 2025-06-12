@@ -184,7 +184,7 @@ class NVComputeQueue(NVCommandQueue):
     self.active_qmd, self.active_qmd_buf = qmd, qmd_buf
     return self
 
-  def signal(self, signal:NVSignal, value:sint=0):
+  def signal(self, signal:NVSignal, value:sint=0, addr=0x0):
     if self.active_qmd is not None:
       for i in range(2):
         if self.active_qmd.read(f'release{i}_enable') == 0:
@@ -194,7 +194,7 @@ class NVComputeQueue(NVCommandQueue):
           self.bind_sints_to_mem(value, mem=self.active_qmd_buf.cpu_view(), fmt='Q', offset=self.active_qmd.field_offset(f'release{i}_payload_lower'))
           return self
 
-    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(signal.value_addr), *data64_le(value),
+    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(addr), *data64_le(value),
              (1 << 0) | (1 << 20) | (1 << 24) | (1 << 25)) # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
     self.nvm(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 0x0)
     self.active_qmd = None
@@ -210,8 +210,14 @@ class NVCopyQueue(NVCommandQueue):
       self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, 0x182) # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
     return self
 
-  def signal(self, signal:NVSignal, value:sint=0):
-    self.nvm(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, *data64(signal.value_addr), value)
+  def signal(self, signal:NVSignal, value:sint=0, addr1=0x0, addr2=0x0):
+    # self.nvm(4, nv_gpu.NVC6B5_NOP)
+
+    # self.nvm(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, *data64(addr1), *data64(addr2))
+    # self.nvm(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 4)
+    # self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, 0x182) # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
+
+    self.nvm(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, *data64(addr1), value)
     self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, 0x14)
     return self
 
