@@ -175,6 +175,15 @@ class TestSymbolicOps(unittest.TestCase):
       expected = a[3:5, i:i+2].numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  def test_slice_no_start(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      a = Tensor.rand(7, 11)
+      symbolic = a[3:5, :vi:1].reshape(2,i)
+      symbolic = symbolic.numpy()
+      expected = a[3:5, :i:1].numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
   def test_expand_padded(self):
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)

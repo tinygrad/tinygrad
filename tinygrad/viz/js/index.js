@@ -423,20 +423,21 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 document.addEventListener("keydown", async function(event) {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // up and down change the step or context from the list
+  const changeStep = expandSteps && ctxs[currentCtx].steps?.length;
   if (event.key == "ArrowUp") {
     event.preventDefault();
-    if (expandSteps) {
+    if (changeStep) {
       return setState({ currentRewrite:0, currentStep:Math.max(0, currentStep-1) });
     }
-    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1) });
+    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1), expandSteps:false });
   }
   if (event.key == "ArrowDown") {
     event.preventDefault();
-    if (expandSteps) {
+    if (changeStep) {
       const totalUOps = ctxs[currentCtx].steps.length-1;
       return setState({ currentRewrite:0, currentStep:Math.min(totalUOps, currentStep+1) });
     }
-    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1) });
+    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1), expandSteps:false });
   }
   // enter toggles focus on a single rewrite stage
   if (event.key == "Enter") {
