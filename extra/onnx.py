@@ -30,9 +30,8 @@ def dtype_parse(onnx_dtype: int) -> DType:
 
 def ensure_supported_dtype(dtype: DType, context: str):
   if not is_dtype_supported(dtype):
-    default_dtype = dtypes.float32
+    default_dtype = dtypes.float
     warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {context} is not supported, falling back to {default_dtype}")
-    assert is_dtype_supported(default_dtype), "default dtype must be supported"
     return default_dtype
   return dtype
 
