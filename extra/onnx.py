@@ -1,13 +1,14 @@
 from types import SimpleNamespace
 from typing import Any, Sequence, cast, Literal, Callable
-import dataclasses, functools, io, math, types
+import dataclasses, functools, io, math, types, os
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported, Device
+from onnx_parser import onnx_load
 
 # ***** protobuf parsing ******
-from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, helper
+from onnx import AttributeProto, TensorProto, TypeProto, helper
 import numpy as np
 
 def has_field(onnx_type: TypeProto|SimpleNamespace, field):
@@ -126,8 +127,15 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
 debug = int(getenv("DEBUGONNX", "0"))
 limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
-  def __init__(self, model: ModelProto|SimpleNamespace):
+  """
+  `OnnxRunner` executes an ONNX model using Tinygrad as backend.
+
+  Args:
+    model: The ONNX model, provided as a file path (a string or path-like object).
+  """
+  def __init__(self, model:str | os.PathLike):
     # parse model protobuf
+    model = onnx_load(model)
     self.is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model.graph.node)
     self.old_training = Tensor.training
     Tensor.training = True if self.is_training else False

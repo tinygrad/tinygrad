@@ -1,6 +1,6 @@
-import sys, onnx
+import sys
 from tinygrad import Tensor, fetch, GlobalCounters
-from tinygrad.uop import UOp
+from tinygrad.uop.ops import UOp
 from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.engine.grouper import get_kernelize_map
 from tinygrad.engine.schedule import create_schedule_with_vars
@@ -14,8 +14,7 @@ OUTPUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/openpilot.pkl"
 if __name__ == "__main__":
   fn = fetch(OPENPILOT_MODEL)
   onnx_file = fetch(OPENPILOT_MODEL)
-  onnx_model = onnx.load(onnx_file)
-  run_onnx = OnnxRunner(onnx_model)
+  run_onnx = OnnxRunner(onnx_file)
 
   inputs = run_onnx.get_empty_input_data("npy")
   out: Tensor = next(iter(run_onnx({k:v.to(None) for k,v in inputs.items()}).values())).to('cpu')

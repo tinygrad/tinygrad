@@ -8,9 +8,9 @@ import numpy as np
 import subprocess
 import tensorflow as tf
 import tf2onnx
-from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
 from extra.export_model import export_model_clang, compile_net, jit_model
+from extra.onnx_helpers import modelproto_to_onnxrunner
 
 def get_uncompiled_model2(dataset_size=32, output_size=4):
   inputs = tf.keras.Input(shape=(dataset_size,), name="inputs")
@@ -25,7 +25,7 @@ class TinyOnnx:
   def __init__(self, keras_model):
     input_signature = [tf.TensorSpec([1,32], tf.float32, name='x')]
     onnx_model, _ = tf2onnx.convert.from_keras(keras_model, input_signature, opset=13)
-    self.run_onnx = OnnxRunner(onnx_model)
+    self.run_onnx = modelproto_to_onnxrunner(onnx_model)
 
   def forward(self, x):
     return self.run_onnx({"x": x}, debug=False)['predictions']
