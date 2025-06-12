@@ -14,9 +14,10 @@ class MathTrait:
   def neg(self):
     if (dtype:=getattr(self, 'dtype')) is None: raise TypeError(f"MathTraits __neg__ requires a dtype, {self=}")
     return self.logical_not() if dtype.scalar() == dtypes.bool else self*(-1)
-  def _check_dtype(self, dtype):
-    if isinstance(dtype, tuple): dtype = dtype[0]
-    if not (dtypes.is_bool(dtype) or dtypes.is_int(dtype)): raise RuntimeError(f"{dtype} is not supported")
+  def _check_dtype(self):
+    if (dtype:=getattr(self, 'dtype')) is not None:
+      if isinstance(dtype, tuple): dtype = dtype[0]
+      if not (dtypes.is_bool(dtype) or dtypes.is_int(dtype)): raise RuntimeError(f"{dtype} is not supported")
   def add(self, x, reverse=False):
     """
     Adds `self` and `x`.
@@ -66,7 +67,7 @@ class MathTrait:
     print(Tensor([True, True, False, False]).bitwise_and(Tensor([True, False, True, False])).numpy())
     ```
     """
-    if (dtype:=getattr(self, 'dtype')) is not None: self._check_dtype(dtype)
+    self._check_dtype()
     return self._binop(Ops.AND, x, reverse)
   def bitwise_or(self, x, reverse=False):
     """
@@ -80,7 +81,7 @@ class MathTrait:
     print(Tensor([True, True, False, False]).bitwise_or(Tensor([True, False, True, False])).numpy())
     ```
     """
-    if (dtype:=getattr(self, 'dtype')) is not None: self._check_dtype(dtype)
+    self._check_dtype()
     return self._binop(Ops.OR, x, reverse)
   def bitwise_xor(self, x, reverse=False):
     """
@@ -95,7 +96,7 @@ class MathTrait:
     print(Tensor([True, True, False, False]).bitwise_xor(Tensor([True, False, True, False])).numpy())
     ```
     """
-    if (dtype:=getattr(self, 'dtype')) is not None: self._check_dtype(dtype)
+    self._check_dtype()
     return self._binop(Ops.XOR, x, reverse)
   def idiv(self, x, reverse=False):
     """
