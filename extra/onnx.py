@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported, Device
-from onnx_parser import onnx_load
+from extra.onnx_parser import onnx_load
 
 # ***** protobuf parsing ******
 from onnx import AttributeProto, TensorProto, TypeProto, helper
