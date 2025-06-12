@@ -7,7 +7,7 @@ from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported, Device
 
 # ***** protobuf parsing ******
-from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
+from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, helper
 import numpy as np
 
 def has_field(onnx_type: TypeProto|SimpleNamespace, field):
@@ -30,7 +30,7 @@ def dtype_parse(onnx_dtype: int) -> DType:
 
 def ensure_supported_dtype(dtype: DType, context: str):
   if not is_dtype_supported(dtype):
-    default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
+    default_dtype = dtypes.float32
     warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {context} is not supported, falling back to {default_dtype}")
     assert is_dtype_supported(default_dtype), "default dtype must be supported"
     return default_dtype
@@ -53,12 +53,8 @@ def attribute_parse(onnx_attribute: AttributeProto):
   return supported[onnx_attribute.type](onnx_attribute)
 
 def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
-  def prepare_data(data: Tensor):
-    if data.dtype is not (device_supported_dtype:=ensure_supported_dtype(data.dtype, "buffer parse")):
-      return data.to("CPU").cast(device_supported_dtype).to(Device.DEFAULT)
-    return data.to(Device.DEFAULT)
   if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
-  dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
+  dtype, shape = ensure_supported_dtype(dtype_parse(onnx_tensor.data_type), "buffer parse"), tuple(onnx_tensor.dims)
   data = None
   if len(onnx_tensor.float_data): data = onnx_tensor.float_data
   elif len(onnx_tensor.int32_data): data = onnx_tensor.int32_data
@@ -66,17 +62,17 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   elif len(onnx_tensor.double_data): data = onnx_tensor.double_data
   elif len(onnx_tensor.uint64_data): data = onnx_tensor.uint64_data
   if isinstance(data, Tensor):
-    if len(data) == 1: return prepare_data(Tensor(data.tolist()[0], dtype=dtype).reshape(shape))
-    return prepare_data(data.cast(dtype).reshape(shape))
+    if len(data) == 1: return Tensor(data.tolist()[0], dtype=dtype).reshape(shape)
+    return data.cast(dtype).reshape(shape).to(Device.DEFAULT)
   if has_field(onnx_tensor, "raw_data"):
     if onnx_tensor.data_type == TensorProto.FLOAT16:
-      ret = onnx_tensor.raw_data.bitcast(dtypes.float16).reshape(shape).to(Device.DEFAULT)
-      if shape == (): return Tensor(ret.item(), dtype=dtypes.float32)
-      if not is_dtype_supported(dtypes.float16): return ret.to("CPU").cast(dtypes.float32).to(Device.DEFAULT)
-      return ret.cast(dtypes.float32)
+      np_buffer = np.frombuffer(onnx_tensor.raw_data.data().tobytes(),
+                                dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
+      if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
+      return Tensor(np_buffer, dtype=dtype)
     ret = onnx_tensor.raw_data.bitcast(dtype).reshape(shape).to(Device.DEFAULT)
     if shape == (): ret = Tensor(ret.item(), dtype=dtype).reshape(shape)
-    return prepare_data(ret)
+    return ret
   return Tensor(None)
 
 def type_parse(onnx_type: TypeProto):
@@ -88,7 +84,7 @@ def type_parse(onnx_type: TypeProto):
   if has_field(elem_type, "tensor_type"):
     shape = tuple(getattr(d, "dim_param", None) or getattr(d, "dim_value") for d in elem_type.tensor_type.shape.dim) \
       if has_field(elem_type.tensor_type, "shape") else None # test_identity_sequence_cpu
-    dtype = dtype_parse(elem_type.tensor_type.elem_type)
+    dtype = ensure_supported_dtype(dtype_parse(elem_type.tensor_type.elem_type), "input type spec parse")
     return OnnxValue(shape, dtype, is_optional, is_sequence)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 
