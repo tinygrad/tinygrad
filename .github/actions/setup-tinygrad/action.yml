@@ -129,7 +129,7 @@ runs:
       shell: bash
       run: |
         wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-        echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-19 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+        echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
 
     - name: apt-get update + install
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
@@ -162,7 +162,7 @@ runs:
         fi
         # **** LLVM ****
         if [[ "${{ inputs.llvm }}" == "true" ]]; then
-          pkgs+=" libllvm19 clang-19 lld-19"
+          pkgs+=" libllvm20 clang-20 lld-20"
         fi
 
         # ******** do install ********
@@ -246,4 +246,4 @@ runs:
     - name: Install LLVM (macOS)
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
-      run: brew install llvm@19
+      run: brew install llvm@20
