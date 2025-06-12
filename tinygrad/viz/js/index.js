@@ -40,6 +40,9 @@ async function renderDag(graph, additions, recenter=false) {
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null)
       .on("click", (_,d) => {
         if (d.ref != null) {
+          // NOTE: browser does a structured clone, passing a mutable object is safe.
+          history.replaceState(state, "");
+          history.pushState(state, "");
           setState({ expandSteps: true, currentCtx:d.ref, currentStep:0, currentRewrite:0 });
         }
       });
@@ -282,6 +285,10 @@ function setState(ns) {
   Object.assign(state, ns);
   main();
 }
+window.addEventListener("popstate", (e) => {
+  if (e.state != null) setState(e.state);
+});
+
 async function main() {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // ** left sidebar context list
