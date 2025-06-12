@@ -261,7 +261,7 @@ async function renderProfiler() {
   const rectGroup = render.append("g").attr("id", "rect-group");
   const textGroup = render.append("g").attr("id", "text-group");
   // get start and end times
-  // Math.max is slow
+  // Math.max with spread operator causes max stack size exceptions if the array we're spreading is too big
   let st, et, maxDur;
   for (const e of traceEvents) {
     if (e.ts == null) continue;
@@ -310,6 +310,7 @@ async function renderProfiler() {
     const newWidth = d.w*scale;
     if (newWidth < d.textWidth) return false;
     // does d exist in x?
+    // TODO: this part doesn't work
     // if (d.x > startX) return false;
     // return true
     return false;
