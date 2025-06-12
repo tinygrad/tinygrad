@@ -456,7 +456,7 @@ document.addEventListener("keydown", async function(event) {
     if (currentCtx === -1) {
       return setState({ currentCtx:0, expandSteps:true });
     }
-    return setState({ currentStep:0, currentRewrite:0, expandSteps:!expandSteps });
+    return setState({ expandSteps:!expandSteps });
   }
   // left and right go through rewrites in a single UOp
   if (event.key == "ArrowLeft") {
