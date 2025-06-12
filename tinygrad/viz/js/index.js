@@ -332,12 +332,40 @@ async function renderProfilerSVG() {
 }
 
 var traceEvents;
+
 async function renderProfilerCanvas() {
   if (traceEvents == null) {
     const st = performance.now();
-    traceEvents = (await (await fetch("/get_profile")).json()).traceEvents;
-    console.log(`%c server responded in ${(performance.now()-st).toFixed(2)} ms with ${traceEvents.length.toLocaleString()} traceEvents.`, "color: green");
+    traceEvents = []; // (await (await fetch("/get_profile")).json()).traceEvents;
+    // console.log(`%c server responded in ${(performance.now()-st).toFixed(2)} ms with ${traceEvents.length.toLocaleString()} traceEvents.`, "color: green");
   }
+  const root = document.querySelector(".profiler");
+  const canvas = document.createElement("canvas");
+  const logicalHeight = 57;
+  canvas.style.background = "#6E56CF";
+  canvas.style.width = "100%";
+  canvas.style.height = `${logicalHeight}px`;
+  root.replaceChildren(canvas);
+  const ctx = canvas.getContext("2d");
+  function render() {
+    ctx.clearRect(0, 0, canvas.clientWidth, logicalHeight/2);
+    ctx.fillStyle = "#FF8DCC";
+    ctx.fillRect(0, 0, canvas.clientWidth, logicalHeight/2);
+    ctx.fillStyle = "white";
+    ctx.font = "16px sans-serif";
+    ctx.fillText("Hello world", 5, 20);
+  }
+  const DPR = window.devicePixelRatio || 1;
+  function resize() {
+    const logicalWidth = canvas.clientWidth;
+    canvas.width = logicalWidth*DPR;
+    canvas.height = logicalHeight*DPR;
+    ctx.resetTransform?.();
+    ctx.scale(DPR, DPR);
+    render();
+  }
+  resize();
+  window.addEventListener("resize", resize);
 }
 
 let renderProfiler = renderProfilerSVG;
