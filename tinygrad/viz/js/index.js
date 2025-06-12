@@ -242,6 +242,10 @@ function filter(e) {
 document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault())
 
 var traceEvents;
+const LINE_HEIGHT = 14;
+const canvas = new OffscreenCanvas(0, 0);
+const ctx = canvas.getContext("2d");
+ctx.font = `${LINE_HEIGHT}px sans-serif`;
 async function renderProfiler() {
   switchRender("profiler");
   if (traceEvents == null) traceEvents = (await (await fetch("/get_profile")).json()).traceEvents;
@@ -295,28 +299,28 @@ async function renderProfiler() {
       const rx = x(e.ts-st);
       // Y = thread position
       const y = proc.top-rectTop+(e.tid*h);
-      data.push({ w, h, x:rx, y, color:colors[i%colors.length], ...e });
+      // text width for toggling visibility
+      const textWidth = ctx.measureText(e.name).width;
+      data.push({ w, h, x:rx, y, color:colors[i%colors.length], textWidth, ...e });
     }
   }
   // drawing
-  function labelVisible(d) {
-    console.log(d);
-    // TODO: to make this work, we should show/hide the text when it's scaled enough
-    // the zooming should also be fixed to not scale the text, it should only scale the rect widths
-    // changing rect widths makes things slower, transform is fast.
-    return 0;
+  function labelVisible(d, scale) {
+    // is it wide enough to hold the text?
+    const newWidth = d.w*scale;
+    return newWidth >= d.textWidth;
   }
   // <g> elements are so much easier to reason about, this may be slower
   const rg = rectGroup.selectAll("g").data(data).join("g").attr("transform", d => `translate(${d.x},${d.y})`);
   rg.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.w).attr("height", d => d.h).attr("fill", d => `#${d.color}`);
   const tg = textGroup.selectAll("g").data(data).join("g").attr("transform", d => `translate(${d.x},${d.y})`);
-  const text = tg.selectAll("text").data(d => [d]).join("text").text(d => d.name).attr("fill-opacity", d => +labelVisible(d)).attr("dy", 14);
+  const text = tg.selectAll("text").data(d => [d]).join("text").text(d => d.name).attr("fill-opacity", d => +labelVisible(d, 1)).attr("dy", 14);
   // zoom
   const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width,0]]).filter(filter).on("zoom", (e) => {
     axisGroup.call(xAxis.scale(e.transform.rescaleX(x)));
     rectGroup.attr("transform", `translate(${e.transform.x},0) scale(${e.transform.k},1)`);
     // https://observablehq.com/@d3/zoomable-icicle
-    text.attr("fill-opacity", d => +labelVisible(d));
+    text.attr("fill-opacity", d => +labelVisible(d, e.transform.k));
   });
   svg.call(zoom);
   document.getElementById("zoom-to-fit-btn").addEventListener("click", () => svg.call(zoom.transform, d3.zoomIdentity));
