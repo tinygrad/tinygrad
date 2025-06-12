@@ -251,10 +251,11 @@ async function renderProfiler() {
   const timeline = root.append("div").attr("style", "width: 80%; height: 100%;");
   const { width } = rect(timeline);
   const svg = timeline.append("svg").attr("id", "profiler-svg").attr("style", `width: ${width}; height: auto;`);
-  // svg -> render -> [axisGroup, rectGroup]
+  // svg -> render -> [axisGroup, rectGroup, textGroup]
   const render = svg.append("g");
   const axisGroup = render.append("g").attr("id", "axis-group");
   const rectGroup = render.append("g").attr("id", "rect-group");
+  const textGroup = render.append("g").attr("id", "text-group");
   // get start and end times
   // Math.max is slow
   let st, et, maxDur;
@@ -276,11 +277,11 @@ async function renderProfiler() {
   const x = d3.scaleLinear().domain([0, duration]).range([0, width]);
   const xAxis = d3.axisBottom(x).tickFormat(t => formatTime(t, duration));
   axisGroup.call(xAxis).attr("text-anchor", "start");
-  // draw trace events
+  // "layout algorithm"
   const xh = rect(axisGroup).height;
   procList.node().style.paddingTop = `${xh}px`;
   const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
-  const tg = rect(rectGroup).top;
+  const rectTop = rect(rectGroup).top;
   const data = [];
   for (const [i,e] of traceEvents.entries()) {
     if (e.name === "process_name") procList.append("div").text(e.args.name).attr("id", `proc-${e.pid}`);
@@ -293,23 +294,29 @@ async function renderProfiler() {
       // X = start time
       const rx = x(e.ts-st);
       // Y = thread position
-      const y = proc.top-tg+(e.tid*h);
+      const y = proc.top-rectTop+(e.tid*h);
       data.push({ w, h, x:rx, y, color:colors[i%colors.length], ...e });
     }
   }
+  // drawing
   function labelVisible(d) {
+    console.log(d);
     // TODO: to make this work, we should show/hide the text when it's scaled enough
     // the zooming should also be fixed to not scale the text, it should only scale the rect widths
     // changing rect widths makes things slower, transform is fast.
     return 0;
   }
-  const cell = rectGroup.selectAll("g").data(data).join("g").attr("transform", d => `translate(${d.x},${d.y})`);
-  cell.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.w).attr("height", d => d.h).attr("fill", d => `#${d.color}`);
-  cell.selectAll("text").data(d => [d]).join("text").text(d => d.name).attr("fill-opacity", d => +labelVisible(d));
+  // <g> elements are so much easier to reason about, this may be slower
+  const rg = rectGroup.selectAll("g").data(data).join("g").attr("transform", d => `translate(${d.x},${d.y})`);
+  rg.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.w).attr("height", d => d.h).attr("fill", d => `#${d.color}`);
+  const tg = textGroup.selectAll("g").data(data).join("g").attr("transform", d => `translate(${d.x},${d.y})`);
+  const text = tg.selectAll("text").data(d => [d]).join("text").text(d => d.name).attr("fill-opacity", d => +labelVisible(d)).attr("dy", 14);
   // zoom
   const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[width,0]]).filter(filter).on("zoom", (e) => {
     axisGroup.call(xAxis.scale(e.transform.rescaleX(x)));
     rectGroup.attr("transform", `translate(${e.transform.x},0) scale(${e.transform.k},1)`);
+    // https://observablehq.com/@d3/zoomable-icicle
+    text.attr("fill-opacity", d => +labelVisible(d));
   });
   svg.call(zoom);
   document.getElementById("zoom-to-fit-btn").addEventListener("click", () => svg.call(zoom.transform, d3.zoomIdentity));
