@@ -128,15 +128,14 @@ debug = int(getenv("DEBUGONNX", "0"))
 limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
   """
-  `OnnxRunner` executes an ONNX model using Tinygrad as backend.
+  `OnnxRunner` executes an ONNX model using Tinygrad.
 
   Args:
-    model: The ONNX model, provided as a file path (a string or path-like object).
+    model_path: The ONNX model, provided as a file path (a string or path-like object).
   """
-  def __init__(self, model:str | os.PathLike):
-    # parse model protobuf
-    self.model_path = model
-    model = onnx_load(model)
+  def __init__(self, model_path:str | os.PathLike):
+    self.model_path = model_path
+    model = onnx_load(model_path)
     self.is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model.graph.node)
     self.old_training = Tensor.training
     Tensor.training = True if self.is_training else False
