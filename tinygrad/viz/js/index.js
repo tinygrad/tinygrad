@@ -253,7 +253,7 @@ async function renderProfiler() {
   const root = d3.select(".profiler").html("");
   const procList = root.append("div").attr("style", "width: 20%; height: 100%;");
   const timeline = root.append("div").attr("style", "width: 80%; height: 100%;");
-  const { width } = rect(timeline);
+  const { width, x:startX } = rect(timeline);
   const svg = timeline.append("svg").attr("id", "profiler-svg").attr("style", `width: ${width}; height: auto;`);
   // svg -> render -> [axisGroup, rectGroup, textGroup]
   const render = svg.append("g");
@@ -308,7 +308,11 @@ async function renderProfiler() {
   function labelVisible(d, scale) {
     // is it wide enough to hold the text?
     const newWidth = d.w*scale;
-    return newWidth >= d.textWidth;
+    if (newWidth < d.textWidth) return false;
+    // does d exist in x?
+    // if (d.x > startX) return false;
+    // return true
+    return false;
   }
   // <g> elements are so much easier to reason about, this may be slower
   const rg = rectGroup.selectAll("g").data(data).join("g").attr("transform", d => `translate(${d.x},${d.y})`);
