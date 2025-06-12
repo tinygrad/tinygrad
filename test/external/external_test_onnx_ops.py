@@ -6,7 +6,7 @@ from typing import Any
 import unittest, onnx, tempfile
 from tinygrad import dtypes
 import numpy as np
-from extra.onnx_helpers import validate, modelproto_to_onnxrunner
+from extra.onnx_helpers import validate, modelproto_to_runner
 from onnx.defs import ONNX_DOMAIN, AI_ONNX_PREVIEW_TRAINING_DOMAIN
 MICROSOFT_CONTRIB_OPS_DOMAIN = "com.microsoft"
 
@@ -88,7 +88,7 @@ class TestMainOnnxOps(TestOnnxOps):
     attributes = {"detect_negative":1, "detect_positive":1}
     outputs = ["y"]
     model = self.helper_build_model("IsInf", inputs, attributes, outputs)
-    outputs = modelproto_to_onnxrunner(model)(inputs)
+    outputs = modelproto_to_runner(model)(inputs)
     assert outputs["y"].dtype is dtypes.bool
 
   def test_quantize_linear(self):
@@ -203,7 +203,7 @@ class TestTrainingOnnxOps(TestOnnxOps):
   def _validate_training(self, op:str, onnx_fxn, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str]):
     model = self.helper_build_model(op, inps, opts, outs)
     if op == "Momentum": del opts['mode']
-    runner = modelproto_to_onnxrunner(model)
+    runner = modelproto_to_runner(model)
     tiny_out = runner(inps)
     onnx_out = onnx_fxn(**inps, **opts)
     for (nm, t_out), o_out in  zip(tiny_out.items(), onnx_out):

@@ -1,6 +1,6 @@
 from tinygrad import Tensor
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.frontend.onnx import OnnxRunner, onnx_load
+from tinygrad.frontend.onnx import OnnxRunner
 from extra.onnx import OnnxValue
 import tempfile
 import numpy as np
@@ -47,12 +47,11 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
     ret.update({name:value})
   return ret
 
-def modelproto_to_onnxrunner(model:onnx.ModelProto):
+def modelproto_to_runner(model:onnx.ModelProto) -> OnnxRunner:
   f = tempfile.NamedTemporaryFile(suffix='.onnx')
   onnx.save(model, f.name)
   f.flush()
-  runner = OnnxRunner(f.name)
-  return runner
+  return OnnxRunner(f.name)
 
 def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
   run_onnx = OnnxRunner(onnx_file)

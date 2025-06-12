@@ -6,7 +6,7 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import getenv, OSX
 from tinygrad.device import is_dtype_supported
-from extra.onnx_helpers import modelproto_to_onnxrunner
+from extra.onnx_helpers import modelproto_to_runner
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
@@ -29,7 +29,7 @@ class TinygradBackend(Backend):
     input_initializer = [x.name for x in model.graph.initializer]
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
-    run_onnx = modelproto_to_onnxrunner(model)
+    run_onnx = modelproto_to_runner(model)
     return TinygradModel(run_onnx, net_feed_input)
 
   @classmethod
