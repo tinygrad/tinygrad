@@ -254,7 +254,7 @@ async function renderProfiler() {
   const procList = root.append("div").attr("style", "width: 20%; height: 100%;");
   const timeline = root.append("div").attr("style", "width: 80%; height: 100%;");
   const { width, x:startX } = rect(timeline);
-  const svg = timeline.append("svg").attr("id", "profiler-svg").attr("style", `width: ${width}; height: auto;`);
+  const svg = timeline.append("svg").attr("id", "profiler-svg").attr("style", `width: ${width}; height: 100%;`);
   // svg -> render -> [axisGroup, rectGroup, textGroup]
   const render = svg.append("g");
   const axisGroup = render.append("g").attr("id", "axis-group");
