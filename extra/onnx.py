@@ -70,11 +70,11 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
     return prepare_data(data.cast(dtype).reshape(shape))
   if has_field(onnx_tensor, "raw_data"):
     if onnx_tensor.data_type == TensorProto.FLOAT16:
-      ret = onnx_tensor.raw_data.bitcast(dtypes.float16).reshape(shape)
+      ret = onnx_tensor.raw_data.bitcast(dtypes.float16).reshape(shape).to(Device.DEFAULT)
       if shape == (): return Tensor(ret.item(), dtype=dtypes.float32)
       if not is_dtype_supported(dtypes.float16): return ret.to("CPU").cast(dtypes.float32).to(Device.DEFAULT)
-      return ret.to(Device.DEFAULT).cast(dtypes.float32)
-    ret = onnx_tensor.raw_data.bitcast(dtype).reshape(shape)
+      return ret.cast(dtypes.float32)
+    ret = onnx_tensor.raw_data.bitcast(dtype).reshape(shape).to(Device.DEFAULT)
     if shape == (): ret = Tensor(ret.item(), dtype=dtype).reshape(shape)
     return prepare_data(ret)
   return Tensor(None)
