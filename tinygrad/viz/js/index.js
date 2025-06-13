@@ -332,6 +332,7 @@ async function renderProfilerSVG() {
 }
 
 var traceEvents;
+const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
 async function renderProfilerCanvas() {
   switchRender("profiler");
   if (traceEvents == null) {
@@ -356,7 +357,7 @@ async function renderProfilerCanvas() {
   const canvas = root.appendChild(document.createElement("canvas"));
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
-  const logicalHeight = 24;
+  const logicalHeight = rect(".profiler").height;
   function render(transform=null) {
     ctx.save();
     ctx.clearRect(0, 0, canvas.width/dpr, canvas.height/dpr);
@@ -364,12 +365,15 @@ async function renderProfilerCanvas() {
     if (transform != null) {
       scale = transform.rescaleX(scale)
     }
+    // *** time axis
+    // line
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.lineTo(canvas.width/dpr, 0);
     ctx.strokeStyle = "#4a4b57";
     ctx.lineWidth = 1.8;
     ctx.stroke();
+    // ticks
     const ticks = scale.ticks();
     for (let i = 0; i < ticks.length; i++) {
       const x = (i / (ticks.length - 1)) * (canvas.width / dpr);
@@ -385,6 +389,18 @@ async function renderProfilerCanvas() {
       ctx.textAlign = i === ticks.length - 1 ? "right" : "left";
       ctx.textBaseline = "top";
       ctx.fillText(formatTime(ticks[i], duration), x, 7);
+    }
+    // rects
+    for (const [i, e] of traceEvents.entries()) {
+      if (e.ph === "X") {
+        const x = scale(e.ts-st);
+        const width = scale(e.dur);
+        const height = 20;
+        const y = 20;
+        if (width < 0.5) continue;
+        ctx.fillStyle = `#${colors[i%colors.length]}`;
+        ctx.fillRect(x, y, width, height);
+      }
     }
     ctx.restore();
   }
