@@ -1629,10 +1629,38 @@ class Tensor(MathTrait):
     """
     if not dtypes.is_bool(mask.dtype): raise RuntimeError(f"masked_select expects bool mask tensor, got {mask.dtype}")
     x, mask = self.flatten(), mask._broadcast_to(self.shape).flatten()
-    mask_cumsum = mask.cumsum()
-    counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32)
-    idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
-    return x[idxs]
+    chunk_size = 1024 * 1024
+    if mask.numel() <= chunk_size:
+      if mask.numel() == 0: return Tensor.zeros(0, device=self.device, dtype=self.dtype)
+      mask_cumsum = mask.cumsum()
+      total_selected = mask_cumsum[-1].item()
+      if total_selected == 0: return Tensor.zeros(0, device=self.device, dtype=self.dtype)
+      counts = Tensor.zeros(total_selected, dtype=dtypes.int32)
+      idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
+      return x[idxs]
+
+    # chunked implementation for large tensors
+    total_size = mask.numel()
+    num_chunks = ceildiv(total_size, chunk_size)
+    results = []
+    for i in range(num_chunks):
+      start_idx = i * chunk_size
+      end_idx = min((i + 1) * chunk_size, total_size)
+
+      x_chunk = x[start_idx:end_idx]
+      mask_chunk = mask[start_idx:end_idx]
+
+      mask_cumsum = mask_chunk.cumsum()
+      chunk_count = mask_cumsum[-1].item()
+
+      if chunk_count > 0:
+        counts = Tensor.zeros(chunk_count, dtype=dtypes.int32)
+        idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
+        results.append(x_chunk[idxs])
+
+    if len(results) == 0: return Tensor.zeros(0, device=self.device, dtype=self.dtype)
+    if len(results) == 1: return results[0]
+    return Tensor.cat(results[0], *results[1:])
 
   def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor:
     """
