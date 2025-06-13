@@ -33,6 +33,7 @@ wgsl_matcher = PatternMatcher([
   (UPat.load(UPat.var("b"), name='l', allow_any_len=True), lambda l,b: packed_load(l, b, l.dtype) if is_packed(l.dtype) else None),
   (UPat.store(UPat.var("bidx"), UPat.var("var"), allow_any_len=True), lambda bidx,var: packed_store(bidx,var) if is_packed(var.dtype) else None),
   (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None)
+  (UPat.var("x") >> UPat.var("y"), lambda x,y: x>>y.cast(dtypes.uint) if y.dtype != dtypes.uint else None),
   ]) + extra_pm
 
 class WGSLRenderer(CStyleLanguage):
