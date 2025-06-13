@@ -423,8 +423,7 @@ class Tensor(MathTrait):
     # load the tensor from tinyfs
     data = h.to("tinyfs:load")[:size].contiguous().to(self.device)
 
-    # slice to size
-    return data[:size]
+    return data
 
   def tinyfs_store(self) -> Tensor:
     """
@@ -438,7 +437,6 @@ class Tensor(MathTrait):
     # store to tinyfs
     h = data.to("tinyfs:store")[:16].contiguous().to(self.device)
 
-    # slice to hash size
     return h
 
   @staticmethod
