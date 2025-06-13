@@ -24,10 +24,6 @@ def resolve(x:UOp|bool, default:bool=True):
   # NOTE: generating the text for the exception is expensive, so we do this
   return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
 
-def sresolve(x:UOp) -> UOp:
-  assert x.dtype == dtypes.bool, "UOp in sresolve must be bool"
-  return UOp.const(dtypes.bool, x.vmin) if x.vmin == x.vmax else x
-
 # smax/smin are replacements for max/min that preserve symbolic
 def _suop(lst, uop_fxn, python_fxn):
   uops, nums = partition(lst, lambda x: isinstance(x, UOp))
@@ -173,9 +169,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop evaluation ***
 
-  def simplify(self):
+  def simplify(self, no_rewrite=False):
     # late import!
     from tinygrad.uop.symbolic import symbolic
+    if no_rewrite: return UOp.const(self.dtype, self.vmin) if self.vmin == self.vmax else self
     with Context(TRACK_MATCH_STATS=0):
       return graph_rewrite(self, symbolic)
   def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
