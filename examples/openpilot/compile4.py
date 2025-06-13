@@ -12,7 +12,6 @@ OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/comm
 OUTPUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/openpilot.pkl"
 
 if __name__ == "__main__":
-  fn = fetch(OPENPILOT_MODEL)
   onnx_file = fetch(OPENPILOT_MODEL)
   run_onnx = OnnxRunner(onnx_file)
 
@@ -36,12 +35,12 @@ if __name__ == "__main__":
   independent = UOp.sink(*independent_set.keys())
   kernelized = get_kernelize_map(independent)
   independent = independent.substitute(kernelized)
-  schedule, var_vals, becomes_map = create_schedule_with_vars(independent)
+  schedule, var_vals = create_schedule_with_vars(independent)
   run_schedule(schedule)
 
   print("**** real ****")
   GlobalCounters.reset()
-  out.uop = root.substitute(kernelized).substitute(becomes_map)
+  out.uop = root.substitute(kernelized)
   out.kernelize()
 
   # realize
