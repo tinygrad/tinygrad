@@ -413,6 +413,8 @@ class Tensor(MathTrait):
 
     self should be a tensor of the hash to load
     """
+    # TODO: hash here or server side?
+
     assert self.dtype == dtypes.uint8, "hash is expected to be uint8"
     h = self.contiguous().flatten()
 
