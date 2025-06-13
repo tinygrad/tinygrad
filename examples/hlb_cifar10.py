@@ -15,11 +15,6 @@ from extra.bench_log import BenchEvent, WallTimeEvent
 
 timestamp = time.monotonic if sys.platform != "win32" else time.perf_counter
 
-# NOTE(irwin): could this result in failing one test in 3 CI actions???
-#   test/test_schedule.py::TestSchedule::test_reduceop_reshape_dont_push
-#   Linux(llvm), MacOS(llvm) and MacOS(cpu)
-# Context(FUSE_ARANGE=1).__enter__()
-
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
 
@@ -293,16 +288,8 @@ def train_cifar():
       et = timestamp()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X_shuffled.shape[0]):
-        # pad the last batch  # TODO: not correct for test
-        x_b = X_shuffled[i]
-        y_b = Y_shuffled[i]
-
-
-        x = x_b.contiguous()
-        y = y_b.contiguous()
-
         step += 1
-        yield x, y
+        yield X_shuffled[i].contiguous(), Y_shuffled[i].contiguous()
       epoch += 1
       if not is_train: break
 
