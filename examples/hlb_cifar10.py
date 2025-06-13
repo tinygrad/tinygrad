@@ -224,10 +224,17 @@ def train_cifar():
     x_b = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
     return x_b.contiguous()
 
-  def cutmix(X:Tensor, Y:Tensor, mask_size=3) -> tuple[Tensor, Tensor]:
+  @TinyJit
+  def randperm(N):
+    return Tensor.randperm(N).realize()
+
+  @TinyJit
+  def arange(N):
+    return Tensor.arange(N).realize()
+
+  def cutmix(X:Tensor, Y:Tensor, order:Tensor, mask_size=3) -> tuple[Tensor, Tensor]:
     # fill the square with randomly selected images from the same batch
     mask = make_square_mask(X.shape, mask_size)
-    order = Tensor.randperm(X.shape[0], device=X.device)
     order_X = order.reshape(X.shape[0], 1, 1, 1).expand(X.shape)
     X_patch = X.gather(0, order_X)
     Y_patch = Y.gather(0, order.reshape(Y.shape[0], 1).expand(Y.shape))
@@ -237,48 +244,49 @@ def train_cifar():
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
     return X_cutmix.contiguous(), Y_cutmix.contiguous()
 
-  def augment(X, Y, step):
+  def augment(X, Y, cutmix_order):
     X_augmented, Y_augmented = X, Y
     if getenv("RANDOM_CROP", 1):
       X_augmented = random_crop(X_augmented, crop_size=32)
     if getenv("RANDOM_FLIP", 1):
       X_augmented = rand_flip(X_augmented)
     if getenv("CUTMIX", 1):
-      if step >= hyp['net']['cutmix_steps']:
-        X_augmented, Y_augmented = cutmix(X_augmented, Y_augmented, mask_size=hyp['net']['cutmix_size'])
+      X_augmented, Y_augmented = cutmix(X_augmented, Y_augmented, cutmix_order, mask_size=hyp['net']['cutmix_size'])
     return X_augmented.contiguous(), Y_augmented.contiguous()
 
-  def shuffle(X, Y):
-    def pad_ceil(product, denom):
-      pad_i = product - (product // denom * denom)
-      return (denom - pad_i) * bool(pad_i)
+  def shuffle(X, Y, order):
+    # NOTE(irwin): skip last incomplete batch
+    order = order[:(X.shape[0] // BS) * BS].reshape(-1, BS).contiguous()
 
-    # NOTE(irwin): pad for multiple of batches, alternative is skipping last batch if dataset count doesn't divide evenly
-    pad = pad_ceil(X.shape[0], BS)
-    order = Tensor.randperm(X.shape[0], device=X.device)
-    order = Tensor.cat(order, Tensor.randint(pad, high=X.shape[0], device=X.device)).reshape(-1, BS).contiguous()
     X_shuffled, Y_shuffled = X[order], Y[order]
     return X_shuffled.contiguous(), Y_shuffled.contiguous()
 
   @TinyJit
-  def prep_train(X:Tensor, Y:Tensor, step) -> tuple[Tensor, Tensor]:
-    X, Y = augment(X, Y, step)
-    X, Y = shuffle(X, Y)
+  def prep_train(X:Tensor, Y:Tensor, order:Tensor, cutmix_order:Tensor) -> tuple[Tensor, Tensor]:
+    X, Y = augment(X, Y, cutmix_order)
+    X, Y = shuffle(X, Y, order)
     return X.realize(), Y.realize()
 
   @TinyJit
   def prep_eval(X:Tensor, Y:Tensor) -> tuple[Tensor, Tensor]:
-    X, Y = shuffle(X, Y)
+    # NOTE(irwin): skip last incomplete batch
+    order = Tensor.arange((X.shape[0] // BS) * BS, device=X.device).reshape(-1, BS).contiguous()
+    X, Y = X[order], Y[order]
     return X.realize(), Y.realize()
 
   # the operations that remain inside batch fetcher is the ones that involves random operations
   def fetch_batches(X_in:Tensor, Y_in:Tensor, BS:int, is_train:bool):
     step, epoch = 0, 0
+    cutmix_order = arange(X_in.shape[0]).contiguous()
     while True:
       st = timestamp()
 
       if is_train:
-        X_shuffled, Y_shuffled = prep_train(X_in, Y_in, step)
+        order = randperm(X_in.shape[0])
+        if step >= hyp['net']['cutmix_steps']:
+          cutmix_order.assign(randperm(X_in.shape[0]))
+
+        X_shuffled, Y_shuffled = prep_train(X_in, Y_in, order, cutmix_order)
       else:
         X_shuffled, Y_shuffled = prep_eval(X_in, Y_in)
 
