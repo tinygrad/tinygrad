@@ -296,6 +296,7 @@ class NV_GSP:
   def init_sw(self):
     self.libos_desc_sysmem = self.init_libos_args()
     self.init_wpr_meta()
+    self.next_handle = 0xcf000000
 
   def init_rm_args(self):
     rm_args, rm_args_sysmem = self.nvdev._alloc_boot_struct(nv.GSP_ARGUMENTS_CACHED)
@@ -505,6 +506,10 @@ class NV_GSP:
     self.wpr_meta.revision = nv.GSP_FW_WPR_META_REVISION
     self.wpr_meta.magic = nv.GSP_FW_WPR_META_MAGIC
 
+  def _alloc_handle(self) -> int:
+    self.next_handle += 1
+    return self.next_handle
+
   def init_hw(self):
     while self.status_queue_tx.entryOff != 0x1000: pass
 
@@ -517,8 +522,12 @@ class NV_GSP:
     print("GSP init done")
 
     self.nvdev.NV_PBUS_BAR1_BLOCK.write(mode=0, target=0, ptr=0)
-    self.nvdev.wreg(0x00B80000 + 0x00000F40, 0x0)
+    self.nvdev.wreg(0x00B80000 + 0x00000F40, 0x0) # not sure this is needed.
     time.sleep(0.1)
+
+    self.rpc_get_gsp_static_info()
+    # self.nvdev.mm.valloc((2 << 20)) # TODO: forbid 0 allocs
+    return # exit...
 
     gpfifo_area = self.nvdev.mm.valloc(2<<20, contigous=True)
     ramfc_alloc = self.nvdev.mm.valloc(2<<20, contigous=True)
@@ -526,7 +535,6 @@ class NV_GSP:
 
     print('gpfifo', gpfifo_area.paddrs, gpfifo_area.va_addr)
 
-    self.rpc_get_gsp_static_info()
     self.rpc_rm_alloc(hParent=0x0, hObject=0xca000000, hClass=0x0, params=nv_gpu.NV0000_ALLOC_PARAMETERS())
 
     self.rpc_rm_alloc(hParent=self.client, hObject=0xcf000000, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=0x0, hClientShare=0xc1e00004,
@@ -556,8 +564,6 @@ class NV_GSP:
     method_va, method_sysmem = alloc_sysmem(0x5000, contigous=True)
     method_buffer = nv_gpu.NV_MEMORY_DESC_PARAMS(base=method_sysmem[0], size=0x5000, addressSpace=1, cacheAttrib=0)
 
-    self.nvdev.NV_PBUS_BAR1_BLOCK.write(mode=0, target=0, ptr=0) # turn back my lovely bar1
-
     # tlb invalidation
     self.nvdev.wreg(0x00B80000 + 0x000030B0, (1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
@@ -577,7 +583,7 @@ class NV_GSP:
     params = nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
     z = self.rpc_rm_control(hObject=0xcf000003, cmd=nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, params=params)
     nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS.from_buffer_copy(z)
-    
+
     # Write into ring
     from tinygrad.runtime.ops_nvd import NVComputeQueue, NVCopyQueue, NVSignal
     nvq = NVComputeQueue().signal(None, 0xdea1beef, ringbuf.va_addr + 0xe0)
@@ -660,9 +666,6 @@ class NV_GSP:
 
         print("core booted")
 
-        # self.nvdev.flcn.reset(self.nvdev.flcn.sec2)
-
-
       else: raise ValueError(f"Unknown op code {op_code} at index {cmd_idx}")
 
   ### RPCs
@@ -675,14 +678,27 @@ class NV_GSP:
     assert stat == 0
     # print(hex(self.client))
 
-  def rpc_rm_alloc(self, hParent, hObject, hClass, params):
-    alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=self.client, hParent=hParent, hObject=hObject, hClass=hClass, flags=0x0,
+  def rpc_rm_alloc(self, hParent, hClass, params) -> int:
+    alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=self.client, hParent=hParent, hObject=(obj:=self._alloc_handle()), hClass=hClass, flags=0x0,
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.command_q.send_rpc(103, bytes(alloc_args) + (bytes(params) if params is not None else b''))
     stat, resp = self.status_q.wait_resp(103)
     assert stat == 0
     # hexdump(resp[:0x80])
-    return resp[len(bytes(alloc_args)):]
+    # return resp[len(bytes(alloc_args)):]
+    if hClass == 0x0: return self.client # init root, return client
+    if hClass == nv_gpu.FERMI_VASPACE_A:
+      self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr)
+      
+    if hClass == nv_gpu.KEPLER_CHANNEL_GROUP_A:
+      fault_bufs_p = nv_gpu.NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS(numValidEntries=2)
+      self.fault_bufs = []
+      for i in range(2):
+        method_va, method_sysmem = alloc_sysmem(0x5000, contigous=True)
+        fault_bufs_p.methodBufferMemdesc[i] = nv_gpu.NV2080_CTRL_INTERNAL_MEMDESC_INFO(base=method_sysmem[0], size=0x5000, addressSpace=1, cpuCacheAttrib=0, alignment=1)
+        self.fault_bufs.append(to_mv(method_va, 0x5000))
+      self.rpc_rm_control(hObject=obj, cmd=nv_gpu.NVA06C_CTRL_CMD_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS, params=fault_bufs_p)
+    return obj
 
   def rpc_rm_control(self, hObject, cmd, params):
     control_args = nv.rpc_gsp_rm_control_v(hClient=self.client, hObject=hObject, cmd=cmd, flags=0x0,

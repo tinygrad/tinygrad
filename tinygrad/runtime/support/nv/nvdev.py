@@ -69,7 +69,7 @@ class NVPageTableEntry:
       x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_sys=paddr >> 12, aperture=1 if valid else 0, vol=uncached)
       self.entries[entry_id] = x
 
-    print(entry_id, hex(paddr), table, uncached, system, snooped, frag, valid, hex(x))
+    # print(entry_id, hex(paddr), table, uncached, system, snooped, frag, valid, hex(x))
 
   def entry(self, entry_id:int) -> int:
     return (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self.lv == 3 else self.entries[entry_id]
@@ -106,7 +106,7 @@ class NVPageTableTraverseContext:
       pt.set_entry(pte_idx, self.nvdev.mm.palloc(0x1000, zero=True, boot=self.boot), table=True, valid=True)
 
     assert not pt.is_pte(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
-    print('level_down', hex(pt.address(pte_idx)))
+    # print('level_down', hex(pt.address(pte_idx)))
     child_page_table = NVPageTableEntry(self.nvdev, pt.address(pte_idx), lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
@@ -114,7 +114,7 @@ class NVPageTableTraverseContext:
 
   def level_up(self):
     while self.pt_stack[-1][1] == self._pt_pte_cnt(len(self.pt_stack) - 1):
-      print("level_up")
+      # print("level_up")
       _, pt_cnt, _ = self.pt_stack.pop()
       if pt_cnt == self._pt_pte_cnt(len(self.pt_stack)):
         self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
@@ -137,7 +137,7 @@ class NVPageTableTraverseContext:
       self.level_up()
 
 class NVMemoryManager:
-  va_allocator = TLSFAllocator((1 << 49), base=0x0) # global for all devices.
+  va_allocator = TLSFAllocator((1 << 49), base=(512 << 20)) # global for all devices.
 
   def __init__(self, nvdev:NVDev, vram_size:int):
     self.nvdev, self.vram_size = nvdev, vram_size
@@ -159,7 +159,7 @@ class NVMemoryManager:
                       frag=0x0, valid=True)
 
     # Invalidate TLB after mappings.
-    pass
+    self.nvdev.wreg(0x00B80000 + 0x000030B0, (1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
     return NVMapping(vaddr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
 
@@ -208,9 +208,6 @@ class NVDev:
     self.mm = NVMemoryManager(self, self.vram_size)
     self.flcn = NV_FLCN(self)
     self.gsp = NV_GSP(self)
-
-    self.vram[(4 << 30)] = 0x10
-    print(hex(self.vram[(4 << 30)]))
 
     for ip in [self.flcn, self.gsp]: ip.init_sw()
     for ip in [self.flcn, self.gsp]: ip.init_hw()
