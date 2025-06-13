@@ -330,6 +330,7 @@ async function renderProfiler() {
     render(e.transform);
   })
   d3.select(canvas).call(zoom);
+  document.getElementById("zoom-to-fit-btn").addEventListener("click", () => d3.select(canvas).call(zoom.transform, d3.zoomIdentity));
 }
 
 // ** zoom and recentering
