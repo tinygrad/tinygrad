@@ -361,10 +361,10 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.MUL, ops)
 
   def test_division_power_of_two(self):
-    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
-    c = UOp(Ops.CONST, dtypes.uint, (), 2)
-    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
-    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
+    c = UOp(Ops.CONST, dtypes.int, (), 2)
+    l = UOp(Ops.LOAD, dtypes.int, (g.index(c),))
+    a = UOp(Ops.IDIV, dtypes.int, (l, c))
     uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
