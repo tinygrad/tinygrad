@@ -4274,6 +4274,73 @@ class Tensor(MathTrait):
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
+  
+  def qr_decompose(self, tol=1e-10):
+    """
+    Compute the QR_decompose using Gram-Schmidt algorithm
+    Args:
+        self (Tensor): The input matrix (TinyGrad Tensor).
+        tol (float): Tolerance for convergence.
+    """
+    m = self.shape[1]
+    Q, R = [], Tensor.zeros(m, m).contiguous()
+
+    for j in range(m):
+        v = self[:, j]
+        for i, q in enumerate(Q):
+            R[i, j] = (q * v).sum()
+            v = v - R[i, j] * q
+        R[j, j] = v.square().sum().sqrt()
+        if R[j, j].item() < tol: raise ValueError("Matrix is singular or not full rank.")
+        Q.append(v / R[j, j])
+    return Tensor.stack(*Q, dim=1), R
+
+  def eig(self, max_iter=1000, tol=1e-10)-> tuple[Tensor, Tensor]:
+    """
+    Compute the eigenvalues and eigenvectors of a matrix using QR algorithm.
+    Args:
+        self (Tensor): The input matrix (TinyGrad Tensor).
+        max_iter (int): Maximum number of iterations.
+        tol (float): Tolerance for convergence.
+    """
+    A = A.realize()
+    n = A.shape[0]
+    V = Tensor.eye(n)  # Accumulate eigenvectors here
+
+    for _ in range(max_iter):
+        Q, R = A.qr_decompose(tol = tol)
+        A_next = R @ Q
+        V = V @ Q  # Accumulate Qs
+
+        if (A_next - A).abs().sum().item() < tol: break
+        A = A_next.realize()
+    eigenvalues = Tensor([A[i, i].item() for i in range(n)])
+    return eigenvalues, V
+
+  
+  def svd(self) -> tuple[Tensor, Tensor, Tensor]:
+    """
+    Computes the Singular Value Decomposition (SVD) of `self`.
+
+    See: https://pytorch.org/docs/stable/generated/torch.linalg.svd.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2], [3, 4]])
+    u, s, v = t.svd()
+    print(u.numpy(), s.numpy(), v.numpy())
+
+    # Note that  full_matrices:bool=False, compute_uv:bool=True are not implemented yet
+    ```
+    """
+    AtA, AAt = self.transpose() @ self, self @ self.transpose()
+    eigvals_AtA, V = AtA.eig()
+    _eigvals_AAt, U = AAt.eig()
+
+    # Sort eigenvalues and eigenvectors
+    eigvals_AtA, sorted_indices = eigvals_AtA.sort(descending=True)
+
+    # Returns U, singular values, and V transpose
+    return U[:, sorted_indices], eigvals_AtA.sqrt(), V[:, sorted_indices].transpose()
 
 P = ParamSpec("P")
 T = TypeVar("T")
