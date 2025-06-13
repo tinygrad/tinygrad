@@ -3018,7 +3018,10 @@ class TestLinAlg(unittest.TestCase):
         np.testing.assert_allclose((U.transpose() @ U).numpy(), np.eye(U.shape[0]), rtol=1e-6, atol=1e-6)
         np.testing.assert_allclose((Vt @ Vt.transpose()).numpy(), np.eye(Vt.shape[0]), rtol=1e-6, atol=1e-6)
         U, S_matrix, Vt = A.svd(full_matrices = True)    
-        reconstructed = U @ S_matrix @ Vt
+        S_matrix = Tensor.zeros(A.shape[0], A.shape[1]).contiguous()
+        indices = Tensor.arange(len(S)) 
+        S_matrix[indices, indices] = S  # Need to reconstruct diagonal matrix S from singular values
+        reconstructed = U @ S_matrix @ Vt 
         np.testing.assert_allclose(reconstructed.numpy(), A.numpy(), rtol=1e-6, atol=1e-6)
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")

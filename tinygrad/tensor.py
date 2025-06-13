@@ -4337,14 +4337,7 @@ class Tensor(MathTrait):
     eigvals_AtA, V = AtA.eig()
     U = AAt.eig()[1]
     eigvals_AtA, sorted_indices = eigvals_AtA.sort(descending=True)
-    if full_matrices:
-      S = eigvals_AtA.sqrt()
-      S_matrix = Tensor.zeros(A.shape[0], A.shape[1]).contiguous()
-      indices = Tensor.arange(len(S)) 
-      S_matrix[indices, indices] = S 
-      return U[:, sorted_indices], S_matrix, V[:, sorted_indices].transpose()
-    else: 
-      return U[:, sorted_indices], eigvals_AtA.sqrt(), V[:, sorted_indices].transpose()
+    return U[:, sorted_indices], eigvals_AtA.sqrt(), V[:, sorted_indices].transpose()
       
 
 
