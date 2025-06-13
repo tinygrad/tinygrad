@@ -175,9 +175,8 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.arg, 0)) else None)]
   if Ops.SHR in ops:
-    # no reason to check x>=0 for uints
-    pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
-    pat += [(UPat.var("x", dtypes.sints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) and resolve(x>=0,False) else None)]
+    pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: (x+((x<0).where(x.const_like(c.arg)-1, 0))) >> v
+      if (v:=powers_of_two.get(c.arg, 0)) else None)]
     if not getenv("DISABLE_FAST_IDIV"):
       pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
       pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("d"), lambda ctx, x, d: x - d*f if (f:=fast_idiv(ctx, x, d.arg)) is not None else None)]
