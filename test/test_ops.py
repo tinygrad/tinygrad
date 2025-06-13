@@ -2994,7 +2994,36 @@ class TestOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
-  def test_svd(self):
+class TestLinAlg(unittest.TestCase):
+    def test_qr_decompose(self):
+        A = Tensor([[1.0, 2.0], [3.0, 4.0]])
+        Q, R = A.qr_decompose()
+        # Verify Q is orthogonal
+        np.testing.assert_allclose((Q.transpose() @ Q).numpy(), np.eye(Q.shape[0]), rtol=1e-7, atol=1e-6)
+
+        # Verify A = QR
+        np.testing.assert_allclose((Q @ R).numpy(), A.numpy(), rtol=1e-7)
+
+    def test_eig(self):
+        A = Tensor([[5.0, 4.0], [4.0, 5.0]])
+        eigenvalues, eigenvectors = A.eig()
+        # Verify eigenvalues and eigenvectors
+        for i in range(len(eigenvalues)):
+            np.testing.assert_allclose((A @ eigenvectors[:, i]).numpy(),(eigenvalues[i] * eigenvectors[:, i]).numpy(), rtol=1e-5, atol=1e-5)
+
+    def test_svd(self):
+        A = Tensor([[3, 6], [1, 10]])
+        U, S, Vt = A.svd()
+        # Verify A = U * S * Vt
+        # Need to reconstruct the S_Matrix, as both numpy and tinygrad just return singular values
+        S_matrix = Tensor.zeros(A.shape[0], A.shape[1]).contiguous()
+        for i in range(len(S)):
+            S_matrix[i, i] = S[i]
+        reconstructed = U @ S_matrix @ Vt
+        np.testing.assert_allclose(reconstructed.numpy(), A.numpy(), rtol=1e-6, atol=1e-6)
+        # Verify U and Vt are orthogonal
+        np.testing.assert_allclose((U.transpose() @ U).numpy(), np.eye(U.shape[0]), rtol=1e-6, atol=1e-6)
+        np.testing.assert_allclose((Vt @ Vt.transpose()).numpy(), np.eye(Vt.shape[0]), rtol=1e-6, atol=1e-6)
     
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")

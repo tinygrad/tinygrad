@@ -4285,7 +4285,7 @@ class Tensor(MathTrait):
     m = self.shape[1]
     Q, R = [], Tensor.zeros(m, m).contiguous()
 
-    for j in range(m):
+    for j in range(int(m)):
         v = self[:, j]
         for i, q in enumerate(Q):
             R[i, j] = (q * v).sum()
@@ -4314,7 +4314,7 @@ class Tensor(MathTrait):
 
         if (A_next - A).abs().sum().item() < tol: break
         A = A_next.realize()
-    eigenvalues = Tensor([A[i, i].item() for i in range(n)])
+    eigenvalues = Tensor([A[i, i].item() for i in range(int(n))])
     return eigenvalues, V
 
   
@@ -4335,7 +4335,7 @@ class Tensor(MathTrait):
     A = self.clone()
     AtA, AAt = self.transpose() @ A, A @ A.transpose()
     eigvals_AtA, V = AtA.eig()
-    _eigvals_AAt, U = AAt.eig()
+    U = AAt.eig()[1]
 
     # Sort eigenvalues and eigenvectors
     eigvals_AtA, sorted_indices = eigvals_AtA.sort(descending=True)
