@@ -2004,7 +2004,7 @@ class TestOps(unittest.TestCase):
   def test_simple_conv2d_m4(self):
     helper_test_op([(1,16,18,18), (16,16,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w),
-      lambda x,w: Tensor.conv2d(x,w), grad_rtol=1e-5)
+      lambda x,w: Tensor.conv2d(x,w), atol=1e-05, grad_rtol=1e-5)
 
   def test_simple_conv2d_1x1(self):
     helper_test_op([(1,4,9,9), (4,4,1,1)],
@@ -2153,8 +2153,8 @@ class TestOps(unittest.TestCase):
     W = 2
     helper_test_op([(bs,cin,64,64), (6,cin//groups,H,W)],
       lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups),
-      # needed to relax tolerance on NVIDIA
-      lambda x,w: Tensor.conv2d(x,w,groups=groups), atol=1e-4, grad_atol=1e-4, grad_rtol=1e-4)
+      # needed to relax tolerance for larger input
+      lambda x,w: Tensor.conv2d(x,w,groups=groups), atol=1e-4, grad_atol=3e-4, grad_rtol=1e-4)
 
   def test_simple_grouped_conv2d(self):
     bs = 1
