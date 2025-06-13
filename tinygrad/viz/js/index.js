@@ -332,21 +332,55 @@ async function renderProfilerSVG() {
 }
 
 var traceEvents;
-
 async function renderProfilerCanvas() {
   if (traceEvents == null) {
     const st = performance.now();
-    traceEvents = []; // (await (await fetch("/get_profile")).json()).traceEvents;
-    // console.log(`%c server responded in ${(performance.now()-st).toFixed(2)} ms with ${traceEvents.length.toLocaleString()} traceEvents.`, "color: green");
+    traceEvents = (await (await fetch("/get_profile")).json()).traceEvents;
+    console.log(`%c server responded in ${(performance.now()-st).toFixed(2)} ms with ${traceEvents.length.toLocaleString()} traceEvents.`, "color: green");
   }
   const root = document.querySelector(".profiler");
   root.innerHTML = "";
+  // ** time axis
+  // 1. time counters
+  // NOTE: Using Math.min/max can lead to "max callstack size exceeded" errors if there are a lot of traceEvents
+  let st, et;
+  for (const e of traceEvents) {
+    if (e.ts == null) continue;
+    if (st == null || e.ts < st) st = e.ts;
+    const localEnd = e.ts+e.dur;
+    if (et == null || localEnd > et) et = localEnd;
+  }
+  const duration = et-st;
+  // 2. tick drawing
   const canvas = root.appendChild(document.createElement("canvas"));
-  canvas.style.background = "red";
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
   const logicalHeight = 24;
   function render() {
+    ctx.clearRect(0, 0, canvas.width/dpr, canvas.height/dpr);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(canvas.width/dpr, 0);
+    ctx.strokeStyle = "#4a4b57";
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+    const scale = d3.scaleLinear().domain([0, duration]).range([0, canvas.width]);
+    const ticks = scale.ticks();
+    for (let i = 0; i < ticks.length; i++) {
+      const x = (i / (ticks.length - 1)) * (canvas.width / dpr);
+      // tick line
+      ctx.beginPath();
+      ctx.lineWidth = 0.5;
+      ctx.moveTo(x + 0.5, 0);
+      ctx.lineTo(x + 0.5, 5.5);
+      ctx.stroke();
+      // tick label
+      ctx.font = "10px sans-serif";
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.textAlign = i === ticks.length - 1 ? "right" : "left";
+      ctx.textBaseline = "top";
+      ctx.fillText(formatTime(ticks[i], duration), x, 7);
+    }
   }
   function resize() {
     const logicalWidth = rect(".profiler").width;
