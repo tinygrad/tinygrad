@@ -769,8 +769,8 @@ def track_matches(func):
     if tracking:=(TRACK_MATCH_STATS >= 2 and tracked_ctxs):
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
       depth = len(active_rewrites)
-      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, weakref.ref(args[0]), [], 
-                                                        kwargs.get("name", None), depth, 
+      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, weakref.ref(args[0]), [],
+                                                        kwargs.get("name", None), depth,
                                                         kwargs.get("bottom_up", False)))
       active_rewrites.append(ctx)
     ret = func(*args, **kwargs)
@@ -793,7 +793,7 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: 
+        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
           active_rewrites[-1].matches.append((weakref.ref(uop), weakref.ref(ret), p))
         return ret
       match_stats[p][2] += time.perf_counter()-st
