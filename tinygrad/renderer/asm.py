@@ -382,7 +382,7 @@ def float_cast(x:DType, s:DType) -> str:
   return f"cvt{cfrom}2{cto}"
 
 x86_rewrite = PatternMatcher([
-  # loads/stores   
+  # loads/stores
   (UPat(Ops.INDEX, src=(UPat(), UPat.cvar(name="c")), name="x"),
    lambda ctx,x,c: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx[c]}*{x.src[0].dtype.itemsize}]"),
   (UPat(Ops.INDEX, name="x"), lambda ctx,x: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx.r[x.src[1]]}*{x.src[0].dtype.itemsize}]"),
