@@ -7,7 +7,7 @@ TINYFS_ENDPOINT = getenv("TINYFS_ENDPOINT", "localhost:6767")
 
 class TinyFSDevice(Compiled):
   def __init__(self, device:str):
-    self.op = device[len("tinyfs:"):]
+    self.op = device[len("tinyfs:"):].upper()
     super().__init__(device, TinyFSAllocator(self), None, None, None)
 
 class TinyFSBuffer:
@@ -16,7 +16,6 @@ class TinyFSBuffer:
     if sock is None:
       self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
       self.sock.connect((TINYFS_ENDPOINT.split(":")[0], int(TINYFS_ENDPOINT.split(":")[1])))
-      print("tinyfs connect", self.sock.getsockname(), "->", self.sock.getpeername())
     else:
       self.sock = sock
   def __repr__(self): return f"<TinyFSBuffer size={self.size} offset={self.offset}>"
@@ -30,11 +29,15 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
     del opaque.sock
 
   def _copyin(self, dest:TinyFSBuffer, src:memoryview):
-    if DEBUG >= 2: print(f"tinyfs copyin: {self.dev.op} dest {dest}")
+    dest.sock.send(f"{dest.device.op}_IN {dest.size}\r\n".encode())
+    dest.sock.sendall(src)
 
   def _copyout(self, dest:memoryview, src:TinyFSBuffer):
-    if DEBUG >= 2: print(f"tinyfs copyout: {self.dev.op} src {src}")
+    src.sock.send(f"{src.device.op}_OUT {src.size}\r\n".encode())
+    recv = 0
+    while recv < src.size:
+      recv += src.sock.recv_into(dest[recv:], src.size - recv)
 
   def _offset(self, buf:TinyFSBuffer, size:int, offset:int):
-    print(f"tinyfs offset: {self.dev.op} buf {buf} size {size} offset {offset}")
+    assert offset == 0, f"only offset 0 supported, found offset {offset}"
     return TinyFSBuffer(buf.device, size, offset, buf.sock)
