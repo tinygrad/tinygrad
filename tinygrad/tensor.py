@@ -4295,7 +4295,7 @@ class Tensor(MathTrait):
         Q.append(v / R[j, j])
     return Tensor.stack(*Q, dim=1), R
 
-  def eig(self, max_iter=1000, tol=1e-10)-> tuple[Tensor, Tensor]:
+  def eig(self, max_iter=1000, tol=1e-12)-> tuple[Tensor, Tensor]:
     """
     Compute the eigenvalues and eigenvectors of a matrix using QR algorithm.
     Args:
@@ -4303,7 +4303,7 @@ class Tensor(MathTrait):
         max_iter (int): Maximum number of iterations.
         tol (float): Tolerance for convergence.
     """
-    A = A.realize()
+    A = self.clone().realize()
     n = A.shape[0]
     V = Tensor.eye(n)  # Accumulate eigenvectors here
 
@@ -4332,7 +4332,8 @@ class Tensor(MathTrait):
     # Note that  full_matrices:bool=False, compute_uv:bool=True are not implemented yet
     ```
     """
-    AtA, AAt = self.transpose() @ self, self @ self.transpose()
+    A = self.clone()
+    AtA, AAt = self.transpose() @ A, A @ A.transpose()
     eigvals_AtA, V = AtA.eig()
     _eigvals_AAt, U = AAt.eig()
 
