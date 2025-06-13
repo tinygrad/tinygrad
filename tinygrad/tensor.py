@@ -4318,7 +4318,7 @@ class Tensor(MathTrait):
     return eigenvalues, V
 
   
-  def svd(self) -> tuple[Tensor, Tensor, Tensor]:
+  def svd(self, full_matrices:bool=False) -> tuple[Tensor, Tensor, Tensor]:
     """
     Computes the Singular Value Decomposition (SVD) of `self`.
 
@@ -4329,19 +4329,24 @@ class Tensor(MathTrait):
     u, s, v = t.svd()
     print(u.numpy(), s.numpy(), v.numpy())
 
-    # Note that  full_matrices:bool=False, compute_uv:bool=True are not implemented yet
+    # Note that compute_uv:bool=True are not implemented yet
     ```
     """
     A = self.clone()
     AtA, AAt = self.transpose() @ A, A @ A.transpose()
     eigvals_AtA, V = AtA.eig()
     U = AAt.eig()[1]
-
-    # Sort eigenvalues and eigenvectors
     eigvals_AtA, sorted_indices = eigvals_AtA.sort(descending=True)
+    if full_matrices:
+      S = eigvals_AtA.sqrt()
+      S_matrix = Tensor.zeros(A.shape[0], A.shape[1]).contiguous()
+      indices = Tensor.arange(len(S)) 
+      S_matrix[indices, indices] = S 
+      return U[:, sorted_indices], S_matrix, V[:, sorted_indices].transpose()
+    else: 
+      return U[:, sorted_indices], eigvals_AtA.sqrt(), V[:, sorted_indices].transpose()
+      
 
-    # Returns U, singular values, and V transpose
-    return U[:, sorted_indices], eigvals_AtA.sqrt(), V[:, sorted_indices].transpose()
 
 P = ParamSpec("P")
 T = TypeVar("T")
