@@ -333,6 +333,7 @@ async function renderProfilerSVG() {
 
 var traceEvents;
 async function renderProfilerCanvas() {
+  switchRender("profiler");
   if (traceEvents == null) {
     const st = performance.now();
     traceEvents = (await (await fetch("/get_profile")).json()).traceEvents;
@@ -394,6 +395,10 @@ async function renderProfilerCanvas() {
   }
   resize();
   window.addEventListener("resize", resize);
+  const zoom = d3.zoom().on("zoom", e => {
+    console.log(e.transform);
+  })
+  d3.select(canvas).call(zoom);
 }
 
 let renderProfiler = renderProfilerSVG;
