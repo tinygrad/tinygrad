@@ -49,6 +49,7 @@ class NVPageTableEntry:
     uncached = True
 
     if not table:
+      assert self.lv >= 2
       # x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=True, address_sys=paddr >> 12, aperture=1, vol=uncached)
 
       aper = 2 if system else 0
@@ -58,18 +59,20 @@ class NVPageTableEntry:
       else: self.entries[2*entry_id] = x
 
     elif self.lv == 3:
+      # assert False
+      
       x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=uncached)
       self.entries[2*entry_id] = x & 0xffffffffffffffff
-      self.entries[2*entry_id+1] = x >> 32
+      self.entries[2*entry_id+1] = x >> 64
       assert entry_id < 256
     else:
       x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_sys=paddr >> 12, aperture=1 if valid else 0, vol=uncached)
       self.entries[entry_id] = x
-    
+
     print(entry_id, hex(paddr), table, uncached, system, snooped, frag, valid, hex(x))
 
   def entry(self, entry_id:int) -> int:
-    return (self.entries[2*entry_id+1]<<32) | self.entries[2*entry_id] if self.lv == 3 else self.entries[entry_id]
+    return (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self.lv == 3 else self.entries[entry_id]
 
   def read_fields(self, entry_id:int) -> dict:
     if self.lv == 3: return self.nvdev.NV_MMU_VER2_DUAL_PDE.decode(self.entry(entry_id))
@@ -88,7 +91,7 @@ class NVPageTableEntry:
 
 class NVPageTableTraverseContext:
   def __init__(self, nvdev, pt, vaddr, create_pts=False, free_pts=False, boot=False):
-    self.nvdev, self.vaddr, self.create_pts, self.free_pts, self.boot = nvdev, vaddr - nvdev.mm.va_allocator.base, create_pts, free_pts, boot
+    self.nvdev, self.vaddr, self.create_pts, self.free_pts, self.boot = nvdev, vaddr, create_pts, free_pts, boot
     self.pt_stack:list[tuple[NVPageTableEntry, int, int]] = [(pt, self._pt_pte_idx(pt, vaddr), self._pt_pte_size(pt))]
 
   def _pt_pte_cnt(self, lv): return [4, 512, 512, 256, 512][lv]
@@ -120,8 +123,8 @@ class NVPageTableTraverseContext:
     while size > 0:
       pt, pte_idx, pte_covers = self.pt_stack[-1]
       if self.create_pts:
-        while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
-        # while pte_covers != 0x1000: pt, pte_idx, pte_covers = self.level_down() # test deep tables
+        # while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
+        while pte_covers != 0x1000: pt, pte_idx, pte_covers = self.level_down() # test deep tables
       # else:
       #   while pt.lv!=am.AMDGPU_VM_PTB and not self.nvdev.gmc.is_pte_huge_page(pt.entries[pte_idx]): pt, pte_idx, pte_covers = self.level_down()
 
@@ -139,7 +142,7 @@ class NVMemoryManager:
   def __init__(self, nvdev:NVDev, vram_size:int):
     self.nvdev, self.vram_size = nvdev, vram_size
     # self.boot_allocator = TLSFAllocator(64 << 20, base=128<<20) # per device
-    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=0x0) # per device
+    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=(128 << 20)) # per device
     self.root_page_table = NVPageTableEntry(self.nvdev, self.palloc(0x1000, zero=not self.nvdev.smi_dev, boot=True), lv=0)
 
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False) -> NVMapping:
@@ -153,9 +156,11 @@ class NVMemoryManager:
         for pte_off in range(pte_cnt):
           assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
-                       frag=0x0, valid=True)
+                      frag=0x0, valid=True)
 
     # Invalidate TLB after mappings.
+    pass
+
     return NVMapping(vaddr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
 
   def unmap_range(self, vaddr:int, size:int):
@@ -203,6 +208,9 @@ class NVDev:
     self.mm = NVMemoryManager(self, self.vram_size)
     self.flcn = NV_FLCN(self)
     self.gsp = NV_GSP(self)
+
+    self.vram[(4 << 30)] = 0x10
+    print(hex(self.vram[(4 << 30)]))
 
     for ip in [self.flcn, self.gsp]: ip.init_sw()
     for ip in [self.flcn, self.gsp]: ip.init_hw()
