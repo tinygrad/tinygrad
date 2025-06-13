@@ -304,7 +304,7 @@ async function renderProfiler() {
     for (const [i, e] of traceEvents.entries()) {
       if (e.ph === "X") {
         const x = scale(e.ts-st);
-        const width = scale(e.dur);
+        const width = scale(e.ts+e.dur-st)-x;
         const height = 20;
         const y = 20;
         if (width < 0.5) continue;
