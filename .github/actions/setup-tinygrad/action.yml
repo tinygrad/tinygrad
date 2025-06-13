@@ -41,6 +41,7 @@ runs:
   using: "composite"
   steps:
     - name: Set up Python ${{ inputs.python-version }}
+      id: setup-python
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
@@ -51,8 +52,8 @@ runs:
       id: restore-venv
       uses: actions/cache@v4
       with:
-        path: .venv
-        key: venv-${{ runner.os }}-python-${{ inputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ hashFiles('**/setup.py') }}-${{ env.PYTHON_CACHE_VERSION }}
+        path: ${{ github.workspace }}/.venv
+        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ hashFiles('**/setup.py') }}-${{ env.PYTHON_CACHE_VERSION }}
 
     # **** Caching downloads ****
 
@@ -118,8 +119,8 @@ runs:
       shell: bash
       run: |
         wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
-        sudo tee /etc/apt/sources.list.d/rocm.list <<'EOF'
-        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.1.2 jammy main
+        sudo tee /etc/apt/sources.list.d/rocm.list <<EOF
+        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.2 $(lsb_release -cs) main
         EOF
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
 
@@ -128,7 +129,7 @@ runs:
       shell: bash
       run: |
         wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-        echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-19 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+        echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
 
     - name: apt-get update + install
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
@@ -157,11 +158,11 @@ runs:
         fi
         # **** WebGPU (dependencies for software-based vulkan) ****
         if [[ "${{ inputs.webgpu }}" == "true" ]]; then
-          pkgs+=" libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers"
+          pkgs+=" libgl1 libglx-mesa0 libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers"
         fi
         # **** LLVM ****
         if [[ "${{ inputs.llvm }}" == "true" ]]; then
-          pkgs+=" libllvm19 clang-19 lld-19"
+          pkgs+=" libllvm20 clang-20 lld-20"
         fi
 
         # ******** do install ********
@@ -245,4 +246,4 @@ runs:
     - name: Install LLVM (macOS)
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
-      run: brew install llvm@19
+      run: brew install llvm@20

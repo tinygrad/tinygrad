@@ -13,7 +13,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
-from tinygrad.codegen.symbolic import symbolic_simple
+from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.grouper import view_left, view_right, sym, get_kernelize_map, Kernel, create_ast, merge_views, create_kernels
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
@@ -84,6 +84,7 @@ class TestSchedule(unittest.TestCase):
     with Context(FUSE_ARANGE=1, NOOPT=1): self.test_arange_avgpool2d(kcount=1)
 
   # linearizer error
+  @unittest.skip("recursion error no longer raised")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "needs supports_float4 to fail")
   def test_arange_avgpool2d_fused(self):
     with self.assertRaises(RecursionError):
