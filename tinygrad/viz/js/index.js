@@ -400,7 +400,7 @@ async function renderProfilerCanvas() {
   }
   resize();
   window.addEventListener("resize", resize);
-  const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[canvas.width,0]]).on("zoom", e => {
+  const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[canvas.width,0]]).filter(filter).on("zoom", e => {
     render(e.transform);
   })
   d3.select(canvas).call(zoom);
