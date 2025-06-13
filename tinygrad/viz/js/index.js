@@ -357,15 +357,19 @@ async function renderProfilerCanvas() {
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
   const logicalHeight = 24;
-  function render() {
+  function render(transform=null) {
+    ctx.save();
     ctx.clearRect(0, 0, canvas.width/dpr, canvas.height/dpr);
+    var scale = d3.scaleLinear().domain([0, duration]).range([0, canvas.width]);
+    if (transform != null) {
+      scale = transform.rescaleX(scale)
+    }
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.lineTo(canvas.width/dpr, 0);
     ctx.strokeStyle = "#4a4b57";
     ctx.lineWidth = 1.8;
     ctx.stroke();
-    const scale = d3.scaleLinear().domain([0, duration]).range([0, canvas.width]);
     const ticks = scale.ticks();
     for (let i = 0; i < ticks.length; i++) {
       const x = (i / (ticks.length - 1)) * (canvas.width / dpr);
@@ -382,6 +386,7 @@ async function renderProfilerCanvas() {
       ctx.textBaseline = "top";
       ctx.fillText(formatTime(ticks[i], duration), x, 7);
     }
+    ctx.restore();
   }
   function resize() {
     const logicalWidth = rect(".profiler").width;
@@ -395,8 +400,8 @@ async function renderProfilerCanvas() {
   }
   resize();
   window.addEventListener("resize", resize);
-  const zoom = d3.zoom().on("zoom", e => {
-    console.log(e.transform);
+  const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[canvas.width,0]]).on("zoom", e => {
+    render(e.transform);
   })
   d3.select(canvas).call(zoom);
 }
