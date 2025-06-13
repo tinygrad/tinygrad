@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice, DType
-from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
+from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element, sresolve
 from tinygrad.uop.symbolic import split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
 from tinygrad.helpers import getenv, flatten, AMX, prod, partition
 from tinygrad.uop.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
@@ -177,7 +177,7 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   if Ops.SHR in ops:
     # no reason to check x<0 for uints
     pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
-    pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: (x+(x<0).simplify().where(x.const_like(c.arg)-1, 0)) >> v
+    pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: (x+sresolve(x<0).where(x.const_like(c.arg)-1, 0)) >> v
       if (v:=powers_of_two.get(c.arg, 0)) else None)]
     if not getenv("DISABLE_FAST_IDIV"):
       pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]

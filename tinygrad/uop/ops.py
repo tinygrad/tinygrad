@@ -24,6 +24,10 @@ def resolve(x:UOp|bool, default:bool=True):
   # NOTE: generating the text for the exception is expensive, so we do this
   return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
 
+def sresolve(x:UOp) -> UOp:
+  assert x.dtype == dtypes.bool, "UOp in sresolve must be bool"
+  return UOp.const(dtypes.bool, x.vmin) if x.vmin == x.vmax else x
+
 # smax/smin are replacements for max/min that preserve symbolic
 def _suop(lst, uop_fxn, python_fxn):
   uops, nums = partition(lst, lambda x: isinstance(x, UOp))
