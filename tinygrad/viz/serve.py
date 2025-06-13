@@ -29,7 +29,9 @@ def render_program(k:Kernel):
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
   ret = []
   for k,v in zip(keys, contexts):
-    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":lines(s.loc[0])[s.loc[1]-1].strip()} for s in v]
+    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, 
+              "match_count":len(s.get_valid_matches()) if hasattr(s, 'get_valid_matches') else len(s.matches), 
+              "code_line":lines(s.loc[0])[s.loc[1]-1].strip()} for s in v]
     if isinstance(k, Kernel): ret.append({"name":k.name, "kernel_code":render_program(k), "ref":id(k.ast), "steps":steps})
     else: ret.append({"name":str(k), "steps":steps})
   return ret
@@ -80,9 +82,17 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
   return graph
 
 def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
-  yield {"graph":uop_to_json(next_sink:=ctx.sink), "uop":str(ctx.sink), "changed_nodes":None, "diff":None, "upat":None}
+  sink = ctx.sink() if callable(ctx.sink) else ctx.sink
+  if sink is None: return
+  yield {"graph":uop_to_json(next_sink:=sink), "uop":str(sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
-  for u0,u1,upat in tqdm(ctx.matches):
+  for match in ctx.matches:
+    if len(match) == 3 and callable(match[0]):  # weak refs
+      u0, u1 = match[0](), match[1]()
+      if u0 is None or u1 is None: continue
+      upat = match[2]
+    else:  # regular refs
+      u0, u1, upat = match
     replaces[u0] = u1
     try: new_sink = next_sink.substitute(replaces)
     except RecursionError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
