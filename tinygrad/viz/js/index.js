@@ -345,12 +345,15 @@ async function renderProfilerCanvas() {
   canvas.style.background = "red";
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
+  const logicalHeight = 24;
   function render() {
   }
   function resize() {
-    const logicalWidth = canvas.clientWidth;
+    const logicalWidth = rect(".profiler").width;
     canvas.width = logicalWidth*dpr;
+    canvas.style.width = `${logicalWidth}px`;
     canvas.height = logicalHeight*dpr;
+    canvas.style.height = `${logicalHeight}px`;
     ctx.resetTransform?.();
     ctx.scale(dpr, dpr);
     render();
@@ -547,6 +550,7 @@ document.querySelector(".collapse-btn").addEventListener("click", (e) => {
   document.querySelector(".main-container").classList.toggle("collapsed", isCollapsed);
   e.currentTarget.blur();
   e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
+  window.dispatchEvent(new Event("resize"));
 });
 
 // **** resizer
@@ -569,6 +573,7 @@ function appendResizer(element, { minWidth, maxWidth }, left=false) {
       document.documentElement.removeEventListener("mousemove", resize, false);
       element.style.userSelect = "initial";
     }, { once: true });
+    window.dispatchEvent(new Event("resize"));
   });
 }
 appendResizer(document.querySelector(".ctx-list-parent"), { minWidth: 15, maxWidth: 50 }, left=true);
