@@ -277,6 +277,7 @@ async function renderProfiler() {
   const dpr = window.devicePixelRatio || 1;
   const logicalHeight = rect(".profiler").height;
   const textWidthCache = {}
+  const allRects = [];
   function render(transform=null) {
     ctx.save();
     ctx.clearRect(0, 0, canvas.width/dpr, canvas.height/dpr);
@@ -310,6 +311,7 @@ async function renderProfiler() {
       ctx.fillText(formatTime(ticks[i], duration), x, 7);
     }
     // rects
+    allRects.length = 0; // reset in-place
     for (const [i, e] of traceEvents.entries()) {
       if (e.ph === "X") {
         const x = scale(e.ts-st);
@@ -317,7 +319,9 @@ async function renderProfiler() {
         const height = 20;
         const procRect = rect(`#proc-${e.pid}`);
         const y = procRect.y-(Y_OFFSET*2);
-        if (width < 0.5) continue;
+        if (width > 0.5) {
+          allRects.push({ x, y, width, height, ...e });
+        }
         ctx.fillStyle = `#${colors[i%colors.length]}`;
         ctx.fillRect(x, y, width, height);
         // labels
@@ -354,7 +358,30 @@ async function renderProfiler() {
   })
   d3.select(canvas).call(zoom);
   document.getElementById("zoom-to-fit-btn").addEventListener("click", () => d3.select(canvas).call(zoom.transform, d3.zoomIdentity));
+  canvas.addEventListener("click", (e) => {
+    const { top, left, width, height } = rect(canvas);
+    const clickX = (e.clientX - left) * (canvas.width / width);
+    const clickY = (e.clientY - top) * (canvas.height / height);
+    const logicalX = clickX / dpr;
+    const logicalY = clickY / dpr;
+    for (const r of allRects) {
+      if (logicalX >= r.x && logicalX <= r.x + r.width && logicalY >= r.y && logicalY <= r.y + r.height) {
+        for (const [i,c] of ctxs.entries()) {
+          if (ansiStrip(c.name) == r.name) {
+            // TODO: this is copied from the kernelize code
+            history.replaceState(state, "");
+            history.pushState(state, "");
+            return setState({ expandSteps: true, currentCtx:i, currentStep:0, currentRewrite:0 });
+          }
+        }
+        break;
+      }
+    }
+  });
 }
+
+// TODO: this exists in worker.js too
+const ansiStrip = (name) => name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1");
 
 // ** zoom and recentering
 
