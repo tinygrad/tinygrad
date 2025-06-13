@@ -38,7 +38,14 @@ async function renderDag(graph, additions, recenter=false) {
     const STROKE_WIDTH = 1.4;
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null)
-      .on("click", (_,d) => d.ref != null && setState({ expandSteps: true, currentCtx:d.ref, currentStep:0, currentRewrite:0 }));
+      .on("click", (_,d) => {
+        if (d.ref != null) {
+          // NOTE: browser does a structured clone, passing a mutable object is safe.
+          history.replaceState(state, "");
+          history.pushState(state, "");
+          setState({ expandSteps: true, currentCtx:d.ref, currentStep:0, currentRewrite:0 });
+        }
+      });
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style ?? `stroke:#4a4b57; stroke-width:${STROKE_WIDTH}px;`);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
@@ -278,6 +285,10 @@ function setState(ns) {
   Object.assign(state, ns);
   main();
 }
+window.addEventListener("popstate", (e) => {
+  if (e.state != null) setState(e.state);
+});
+
 async function main() {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // ** left sidebar context list
@@ -423,20 +434,21 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 document.addEventListener("keydown", async function(event) {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // up and down change the step or context from the list
+  const changeStep = expandSteps && ctxs[currentCtx].steps?.length;
   if (event.key == "ArrowUp") {
     event.preventDefault();
-    if (expandSteps) {
+    if (changeStep) {
       return setState({ currentRewrite:0, currentStep:Math.max(0, currentStep-1) });
     }
-    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1) });
+    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1), expandSteps:false });
   }
   if (event.key == "ArrowDown") {
     event.preventDefault();
-    if (expandSteps) {
+    if (changeStep) {
       const totalUOps = ctxs[currentCtx].steps.length-1;
       return setState({ currentRewrite:0, currentStep:Math.min(totalUOps, currentStep+1) });
     }
-    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1) });
+    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1), expandSteps:false });
   }
   // enter toggles focus on a single rewrite stage
   if (event.key == "Enter") {
@@ -444,7 +456,7 @@ document.addEventListener("keydown", async function(event) {
     if (currentCtx === -1) {
       return setState({ currentCtx:0, expandSteps:true });
     }
-    return setState({ currentStep:0, currentRewrite:0, expandSteps:!expandSteps });
+    return setState({ expandSteps:!expandSteps });
   }
   // left and right go through rewrites in a single UOp
   if (event.key == "ArrowLeft") {

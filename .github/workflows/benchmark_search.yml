@@ -19,6 +19,7 @@ jobs:
     - name: Cleanup running AM processes
       run: python extra/amdpci/am_smi.py --pids --kill
     - name: Run SDXL with new search
+      # TODO: GCVM_L2_PROTECTION_FAULT_STATUS with llvm19
       run: |
         BENCHMARK_LOG=search_sdxl PYTHONPATH=. AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 DISABLE_COMPILER_CACHE=1 python examples/sdxl.py --noshow --timing --seed 0
     - name: Run SDXL with cached search
