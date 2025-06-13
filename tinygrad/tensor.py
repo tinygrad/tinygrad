@@ -4318,7 +4318,7 @@ class Tensor(MathTrait):
     return eigenvalues, V
 
   
-  def svd(self, full_matrices:bool=False) -> tuple[Tensor, Tensor, Tensor]:
+  def svd(self) -> tuple[Tensor, Tensor, Tensor]:
     """
     Computes the Singular Value Decomposition (SVD) of `self`.
 
@@ -4329,7 +4329,7 @@ class Tensor(MathTrait):
     u, s, v = t.svd()
     print(u.numpy(), s.numpy(), v.numpy())
 
-    # Note that compute_uv:bool=True are not implemented yet
+    # Note that compute_uv:bool=True, full_matrices:bool=False are not implemented yet
     ```
     """
     A = self.clone()
