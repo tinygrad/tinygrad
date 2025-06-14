@@ -16,7 +16,7 @@ async function main() {
     page = await browser.newPage();
     const res = await page.goto("http://localhost:8000", { waitUntil:"domcontentloaded" });
     if (res.status() !== 200) throw new Error("Failed to load page");
-    const scheduleSelector = await page.waitForSelector("ul");
+    const scheduleSelector = await page.waitForSelector("ul:nth-of-type(2)");
     scheduleSelector.click();
     await page.waitForSelector("rect");
     await page.waitForFunction(() => {
