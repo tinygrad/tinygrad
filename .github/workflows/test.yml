@@ -450,6 +450,8 @@ jobs:
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot LLVM compile
         run: PYTHONPATH="." LLVM=1 LLVMOPT=1 JIT=2 BEAM=0 IMAGE=0 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+      - name: Test openpilot compile4
+        run: PYTHONPATH="." NOLOCALS=1 GPU=1 IMAGE=2 FLOAT16=1 DEBUG=2 python3 examples/openpilot/compile4.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
