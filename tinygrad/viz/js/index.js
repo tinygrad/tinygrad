@@ -297,6 +297,7 @@ async function main() {
     const ctxList = document.querySelector(".ctx-list");
     for (const [i,{name, steps}] of ctxs.entries()) {
       const ul = ctxList.appendChild(document.createElement("ul"));
+      ul.id = `ctx-${i}`;
       const p = ul.appendChild(document.createElement("p"));
       p.innerHTML = name.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
         const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
@@ -307,6 +308,7 @@ async function main() {
       }
       for (const [j,u] of steps.entries()) {
         const inner = ul.appendChild(document.createElement("ul"));
+        inner.id = `step-${i}-${j}`;
         inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]} - ${u.match_count}`;
         inner.style.marginLeft = `${8*u.depth}px`;
         inner.onclick = (e) => {
