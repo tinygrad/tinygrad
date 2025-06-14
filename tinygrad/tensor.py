@@ -4275,6 +4275,70 @@ class Tensor(MathTrait):
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
+  def svd(self:Tensor, k:int|None=None) -> tuple[Tensor, Tensor, Tensor]:
+    """
+    Returns the SVD decomposition U, S, V such that A ≈ U @ diag(S) @ V.
+    k: Number of singular values to compute (default: min(m,n))
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.randn(5, 10)
+    U, S, V = t.svd()
+    print(U.numpy(), S.numpy(), V.numpy())
+    ```
+    """
+    A = self
+    batch_dims = A.shape[:-2]
+    A = A.reshape(-1, A.shape[-2], A.shape[-1])
+    B, m, n = A.shape
+    if k is None: k = min(m, n)
+    def power_iteration(M:Tensor, k:int, max_iter:int=15) -> Tensor:
+      B, n, _ = M.shape
+      Q = Tensor.randn(B, n, k)
+      Q = Tensor.householder_qr(Q)
+      for i in range(max_iter):
+        Q = M @ Q
+        Q = Tensor.householder_qr(Q)
+      return Q
+    if m >= n:
+      # Compute V from A^T A, then U = A @ V @ S^-1
+      AtA = A.transpose(-2, -1) @ A  # (B, n, n)
+      V = power_iteration(AtA, k)
+      AV = A @ V  # (B, m, k)
+      S = (AV * AV).sum(axis=-2).sqrt()  # (B, k)
+      S_safe = S.clamp(min_=1e-12)
+      U = AV / S_safe.unsqueeze(-2)
+    else:
+      # Compute U from A A^T, then V = A^T @ U @ S^-1  
+      AAt = A @ A.transpose(-2, -1)  # (B, m, m)
+      U = power_iteration(AAt, k)
+      AtU = A.transpose(-2, -1) @ U  # (B, n, k)
+      S = (AtU * AtU).sum(axis=-2).sqrt()  # (B, k)
+      S_safe = S.clamp(min_=1e-12)
+      V = AtU / S_safe.unsqueeze(-2)
+    
+    S, idx = S.sort(dim=-1, descending=True)
+    U = U.gather(-1, idx.unsqueeze(-2).expand(-1, m, -1))
+    V = V.gather(-1, idx.unsqueeze(-2).expand(-1, n, -1))
+    return U.reshape(*batch_dims, m, k), S.reshape(*batch_dims, k), V.reshape(*batch_dims, n, k).transpose(-2, -1)
+
+  def householder_qr(self: Tensor) -> Tensor:
+    # TODO: return R aswell, for QR decomposition
+    B, m, n = self.shape
+    Q = Tensor.eye(m).expand(B, m, m).clone()
+    for k in range(min(m, n)):
+      x = self[:, k:, k]  # (B, m-k)
+      norm_x = (x ** 2).sum(axis=1, keepdim=True).sqrt().clamp(min_=1e-12)
+      sign = x[:, :1].sign().clamp(min_=1e-12)
+      v = x + sign[:, 0:1] * norm_x
+      v = v / ((v ** 2).sum(axis=1, keepdim=True).sqrt().clamp(min_=1e-12))
+      v = v.unsqueeze(2)  # (B, m-k, 1)
+
+      Q_block = Q[:, :, k:].contiguous()  # (B, m, m-k)
+      proj = Q_block @ v
+      Q_block = Q_block - 2 * proj @ v.transpose(1, 2)
+    return Q
+
+
 P = ParamSpec("P")
 T = TypeVar("T")
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
