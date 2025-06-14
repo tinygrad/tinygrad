@@ -273,7 +273,11 @@ async function renderProfiler() {
   const canvas = root.append("canvas").node();
   const ctx = canvas.getContext("2d");
   const logicalHeight = rect(root.node()).height;
+  // basic stuff for naming, these should be shared across viz
   const textWidthCache = {}
+  const name_map = {};
+  for (const [idx,c] of ctxs.entries()) name_map[c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1")] = { ...c, idx };
+  // main render
   const allRects = [];
   const dpr = window.devicePixelRatio || 1;
   function render(transform=null) {
@@ -322,6 +326,7 @@ async function renderProfiler() {
       ctx.fillStyle = colors[i%colors.length];
       ctx.fillRect(x, y, width, height);
       // labels
+      // NOTE: label width is without the ansi colors
       let labelWidth = textWidthCache[e.name];
       if (labelWidth == null) {
         labelWidth = ctx.measureText(e.name).width
@@ -362,22 +367,19 @@ async function renderProfiler() {
     const logicalY = clickY / dpr;
     for (const r of allRects) {
       if (logicalX >= r.x && logicalX <= r.x + r.width && logicalY >= r.y && logicalY <= r.y + r.height) {
-        for (const [i,c] of ctxs.entries()) {
-          if (ansiStrip(c.name) == r.name) {
-            // TODO: this is copied from the kernelize code
-            history.replaceState(state, "");
-            history.pushState(state, "");
-            return setState({ expandSteps: true, currentCtx:i, currentStep:0, currentRewrite:0 });
-          }
+        const v = name_map[r.name];
+        if (v != null) {
+          // TODO: this is copied from the kernelize code
+          history.replaceState(state, "");
+          history.pushState(state, "");
+          return setState({ expandSteps: true, currentCtx:v.idx, currentStep:0, currentRewrite:0 });
         }
-        break;
+        break; // break anyways. some kernels like COPY do not have codegen rewrite.
+        // we should show this to the user in right sidebar
       }
     }
   });
 }
-
-// TODO: this exists in worker.js too
-const ansiStrip = (name) => name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1");
 
 // ** zoom and recentering
 
