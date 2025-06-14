@@ -608,7 +608,7 @@ def train_retinanet():
 
       if getenv("RESET_STEP", 1): _train_step.reset()
 
-      with Tensor.train(mode=False), Tensor.test():
+      with Tensor.train(mode=False):
         if not RUNMLPERF:
           i, proc = 0, _fake_data_get(EVAL_BS, val=(val:=True))
         else:

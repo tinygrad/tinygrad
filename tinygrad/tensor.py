@@ -20,7 +20,7 @@ from tinygrad.engine.grouper import get_kernelize_map
 
 all_tensors: set[weakref.ref[Tensor]] = set()
 def _find_all_tensors_for_uops(all_uops: set[UOp]) -> list[Tensor]:
-  return [t for tref in all_tensors if (t:=tref()) is not None and t.lazydata in all_uops]
+  return [t for tref in all_tensors if (t:=tref()) is not None and t.uop in all_uops]
 
 def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> None:
   # get all children of keys in applied_map
@@ -36,13 +36,13 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
   # NOTE: this uses all_tensors, but it's fast
   if len(fixed_tensors := _find_all_tensors_for_uops(all_uops)):
     # potentially rewrite all the discovered Tensors
-    sink = UOp.sink(*[t.lazydata for t in fixed_tensors])
+    sink = UOp.sink(*[t.uop for t in fixed_tensors])
     new_sink = sink.substitute(applied_map, name=name)
 
-    # set the relevant lazydata to the realized UOps
+    # set the relevant uop to the realized UOps
     for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
       if s is ns: continue
-      t.lazydata = ns
+      t.uop = ns
 
 # **** Tensor helper functions ****
 
@@ -119,7 +119,7 @@ class Tensor(MathTrait):
   np.set_printoptions(precision=4)
   ```
   """
-  __slots__ = "lazydata", "requires_grad", "grad"
+  __slots__ = "uop", "requires_grad", "grad"
   training: ClassVar[bool] = False
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'np.ndarray'|pathlib.Path|None,  # type: ignore [name-defined] # noqa: F821
@@ -150,7 +150,7 @@ class Tensor(MathTrait):
       if dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
         else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float  # NOTE: this works because all_int([True, False]) is True
-      if dtype in [dtypes.bfloat16, *dtypes.fp8s]: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtype).lazydata
+      if dtype in [dtypes.bfloat16, *dtypes.fp8s]: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtype).uop
       else: data = _frompy(data, dtype)
     elif str(type(data)) == "<class 'numpy.ndarray'>":
       import numpy as np
@@ -165,19 +165,19 @@ class Tensor(MathTrait):
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
     # data might be on a different device
-    if isinstance(device, str): self.lazydata:UOp = data if data.device == device else data.copy_to_device(device)
+    if isinstance(device, str): self.uop:UOp = data if data.device == device else data.copy_to_device(device)
     # if device is a tuple, we should have/construct a MultiLazyBuffer
-    elif isinstance(data.device, str): self.lazydata = Tensor(data).shard(device).lazydata
+    elif isinstance(data.device, str): self.uop = Tensor(data).shard(device).uop
     else:
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
-      self.lazydata = data
+      self.uop = data
 
     # add to all_tensors after construction succeeds
     all_tensors.add(weakref.ref(self))
   def __del__(self): all_tensors.discard(weakref.ref(self))
 
   def _apply_uop(self, fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
-    new_uop: UOp = fxn(*[t.lazydata for t in (self,)+x], **kwargs)
+    new_uop: UOp = fxn(*[t.uop for t in (self,)+x], **kwargs)
     if (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = (metadata,)
     needs_input_grad = [t.requires_grad for t in (self,)+x]
     return Tensor(new_uop, device=new_uop.device, requires_grad=True if any(needs_input_grad) else None if None in needs_input_grad else False)
@@ -185,6 +185,9 @@ class Tensor(MathTrait):
   def _apply_broadcasted_uop(self, fxn:Callable, x:Tensor|ConstType, reverse=False) -> Tensor:
     lhs,rhs = self._broadcasted(x, reverse)
     return lhs._apply_uop(fxn, rhs)
+
+  # _binop is used by MathTrait
+  def _binop(self, op, x, reverse): return self._apply_broadcasted_uop(lambda *u: UOp.alu(u[0], op, *u[1:]), x, reverse)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
@@ -196,9 +199,9 @@ class Tensor(MathTrait):
     def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
 
   def __repr__(self):
-    ld = self.lazydata
+    ld = self.uop
     ld_repr = f"<UOp {ld.device} {ld.shape} {str(ld.dtype)[7:]} {ld.st if ld.base is not ld else (ld.op, ld.realized)}>"
-    return f"<Tensor {ld_repr} on {self.device} with grad {(self.grad.lazydata if self.grad is not None else None)!r}>"
+    return f"<Tensor {ld_repr} on {self.device} with grad {(self.grad.uop if self.grad is not None else None)!r}>"
 
   # Python has a non moving GC, so this should be okay
   def __hash__(self): return id(self)
@@ -210,13 +213,13 @@ class Tensor(MathTrait):
     return self.shape[0]
 
   @property
-  def device(self) -> str|tuple[str, ...]: return self.lazydata.device
+  def device(self) -> str|tuple[str, ...]: return self.uop.device
 
   @property
-  def shape(self) -> tuple[sint, ...]: return self.lazydata.shape
+  def shape(self) -> tuple[sint, ...]: return self.uop.shape
 
   @property
-  def dtype(self) -> DType: return self.lazydata.dtype
+  def dtype(self) -> DType: return self.uop.dtype
 
   # ***** data handlers ****
 
@@ -226,7 +229,7 @@ class Tensor(MathTrait):
 
     NOTE: Kernelize can be called multiple times on a Tensor
     """
-    big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
+    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
     # verify Tensors match the spec
     if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
@@ -243,7 +246,7 @@ class Tensor(MathTrait):
     """
     st = time.perf_counter()
     self.kernelize(*lst)
-    sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
+    sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
     # remove all ASSIGNs, after scheduling, the tensors are just buffers
     remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.ASSIGN}
@@ -272,31 +275,31 @@ class Tensor(MathTrait):
     """
     # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
     assert self.shape == x.shape or allow_shape_mismatch, f"replace shape mismatch {self.shape} != {x.shape}"
-    self.lazydata = x.lazydata
+    self.uop = x.uop
     return self
 
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      cast(Buffer, self.contiguous().realize().lazydata.base.buffer).ensure_allocated().copyin(x._data())
+      cast(Buffer, self.contiguous().realize().uop.base.buffer).ensure_allocated().copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
-    if self.lazydata is x.lazydata: return self  # a self assign is a NOOP
+    if self.uop is x.uop: return self  # a self assign is a NOOP
     # NOTE: we allow cross device assign
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
-    self.lazydata = self.lazydata.assign(x.lazydata)
+    self.uop = self.uop.assign(x.uop)
     return self
 
   def detach(self) -> Tensor:
     """
     Returns a new tensor with the same data as this tensor, but detached from the autograd graph.
     """
-    return Tensor(self.lazydata.detach(), device=self.device, requires_grad=False)
+    return Tensor(self.uop.detach(), device=self.device, requires_grad=False)
 
-  def _buffer(self) -> Buffer: return cast(Buffer, self.cast(self.dtype.base).contiguous().to("CPU").realize().lazydata.base.buffer)
+  def _buffer(self) -> Buffer: return cast(Buffer, self.cast(self.dtype.base).contiguous().to("CPU").realize().uop.base.buffer)
   def _data(self) -> memoryview: return self._buffer().as_buffer()
 
   def data(self) -> memoryview:
@@ -372,7 +375,7 @@ class Tensor(MathTrait):
     device = tuple(Device.canonicalize(x) for x in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
     if device == self.device: return self
     if not isinstance(device, str): return self.shard(device)
-    ret = Tensor(self.lazydata, device, requires_grad=self.requires_grad)
+    ret = Tensor(self.uop, device, requires_grad=self.requires_grad)
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret
 
@@ -390,12 +393,12 @@ class Tensor(MathTrait):
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.empty(2, 4)
-    print(t.shard((t.device, t.device), axis=1).lazydata)
+    print(t.shard((t.device, t.device), axis=1).uop)
     ```
     """
     assert isinstance(self.device, str), "can't shard a MultiLazyBuffer"
     devices = tuple(Device.canonicalize(x) for x in devices)
-    mlb = self.lazydata.shard(devices, self._resolve_dim(axis)) if axis is not None else self.lazydata.copy_to_device(devices)
+    mlb = self.uop.shard(devices, self._resolve_dim(axis)) if axis is not None else self.uop.copy_to_device(devices)
     return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:tuple[str, ...], axis:int|None=None) -> Tensor:
@@ -444,7 +447,7 @@ class Tensor(MathTrait):
     """
     r = Tensor.empty(*shape, **kwargs)
     assert isinstance(r.device, str)
-    cast(Buffer, r.lazydata.buffer).allocate(external_ptr=ptr)
+    cast(Buffer, r.uop.buffer).allocate(external_ptr=ptr)
     return r
 
   @staticmethod
@@ -719,7 +722,7 @@ class Tensor(MathTrait):
     dtype = kwargs.pop("dtype", self.dtype)
     if isinstance(self.device, tuple):
       if kwargs.get("device") is not None: raise RuntimeError("cannot specify `device` on `rand_like` of a multi device tensor")
-      return Tensor.rand(*self.shape, dtype=dtype, **kwargs).shard(self.device, self.lazydata.axis)
+      return Tensor.rand(*self.shape, dtype=dtype, **kwargs).shard(self.device, self.uop.axis)
     return Tensor.rand(*self.shape, device=kwargs.pop("device", self.device), dtype=dtype, **kwargs)
 
   # ***** rng hlops *****
@@ -923,13 +926,13 @@ class Tensor(MathTrait):
     assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
     if not (self.is_floating_point() and all(t.is_floating_point() for t in targets)): raise RuntimeError("only float Tensors have gradient")
     if gradient is None: gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
-    target_uops = [x.lazydata for x in targets]
-    grads = compute_gradient(self.lazydata, gradient.lazydata, set(target_uops))
+    target_uops = [x.uop for x in targets]
+    grads = compute_gradient(self.uop, gradient.uop, set(target_uops))
     ret = []
     for x in target_uops:
       if (y:=grads.get(x)) is None:
         if materialize_grads: y = x.const_like(0)
-        else: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}")
+        else: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.uop}")
       ret.append(y)
     # create returned Tensors
     return [Tensor(u, device=t.device) for t,u in zip(targets, ret)]
@@ -944,9 +947,9 @@ class Tensor(MathTrait):
     print(t.grad.numpy())
     ```
     """
-    all_uops = self.lazydata.toposort()
+    all_uops = self.uop.toposort()
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
-                                       t.lazydata in all_uops and t.requires_grad]
+                                       t.uop in all_uops and t.requires_grad]
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient, materialize_grads=True)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
@@ -957,7 +960,7 @@ class Tensor(MathTrait):
 
   def view(self, shape:tuple[sint, ...], *args) -> Tensor:
     """`.view` is an alias for `.reshape`."""
-    return self.reshape(argfix(shape, *args))
+    return self.reshape(shape, *args)
 
   def reshape(self, shape, *args) -> Tensor:
     """
@@ -1140,17 +1143,19 @@ class Tensor(MathTrait):
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
         case slice():
           if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
-          if all(isinstance(s, int) or s is None for s in (index.start,index.stop,index.step)):
+          start, stop = 0 if index.start is None else index.start, size if index.stop is None else index.stop
+          step = 1 if index.step is None else index.step
+          boundary, stride = [start, stop], step
+          if all(isinstance(s, int) for s in (start,stop,step)):
             # handle int slicing
             *boundary, stride = index.indices(cast(SupportsIndex, size))
             if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
             elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
             # update size for slice
             size = ceildiv((boundary[1] - boundary[0]), abs(stride))
-          elif index.step is None and all(isinstance(s,(int,UOp))for s in (index.start,index.stop)) and resolve((index.stop-index.start) > 0, False):
+          elif (step == 1) and isinstance(step, int) and all(isinstance(s,(int,UOp)) for s in (start, stop)) and resolve((stop-start) > 0, False):
             # simple symbolic slice
-            boundary = [index.start, index.stop]
-            size = (index.stop - index.start).ssimplify()
+            size = cast(UOp|int, cast(UOp, (stop - start)).ssimplify())
           else: raise TypeError(f"slice {index=} is not supported")
         case None: pass # do nothing
         case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
@@ -1253,14 +1258,14 @@ class Tensor(MathTrait):
       self.realize()._getitem(indices).assign(v)
       return
     # NOTE: check that setitem target is valid first
-    if not unwrap(self.lazydata.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
+    if not unwrap(self.uop.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
     if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
     res = self.realize()._getitem(indices, v)
     # if shapes match and data is not shared it's a copy and we assign to self
-    if res.shape == self.shape and res.lazydata is not self.lazydata:
+    if res.shape == self.shape and res.uop is not self.uop:
       self.assign(res).realize()
     else: # no copy, basic setitem
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
@@ -3488,26 +3493,6 @@ class Tensor(MathTrait):
     # broadcast
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
 
-  def add(self, x:Tensor|ConstType, reverse=False) -> Tensor:
-    """
-    Adds `self` and `x`.
-    Equivalent to `self + x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.add(20).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.add(Tensor([[2.0], [3.5]])).numpy())
-    ```
-    """
-    return self._apply_broadcasted_uop(UOp.add, x, reverse)
-
   def sub(self, x:Tensor|ConstType, reverse=False) -> Tensor:
     """
     Subtracts `x` from `self`.
@@ -3528,39 +3513,6 @@ class Tensor(MathTrait):
     """
     a, b = self._broadcasted(x, reverse)
     return a + (-b)
-
-  def mul(self, x:Tensor|ConstType, reverse=False) -> Tensor:
-    """
-    Multiplies `self` and `x`.
-    Equivalent to `self * x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.mul(3).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.mul(Tensor([[-1.0], [2.0]])).numpy())
-    ```
-    """
-    return self._apply_broadcasted_uop(UOp.mul, x, reverse)
-
-  def idiv(self, x:Tensor|ConstType, reverse=False) -> Tensor:
-    """
-    Divides `self` by `x`.
-    Equivalent to `self // x`.
-    Supports broadcasting to a common shape, type promotion, and integer inputs.
-    `idiv` performs integer division (truncate towards zero).
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-4, 7, 5, 4, -7, 8]).idiv(Tensor([2, -3, 8, -2, 3, 5])).numpy())
-    ```
-    """
-    return self._apply_broadcasted_uop(UOp.idiv, x, reverse)
 
   def div(self, x:Tensor|ConstType, reverse=False, rounding_mode:Literal["trunc", "floor"]|None=None) -> Tensor:
     """

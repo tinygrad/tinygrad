@@ -44,7 +44,7 @@ class TestTimeLinearizer(unittest.TestCase):
 
   # Ensure that the kernel count is not incremented by time_linearizer when clearing l2
   def test_kernel_count(self):
-    ast = Tensor.zeros(16).contiguous().kernelize().lazydata.src[1].arg.ast
+    ast = Tensor.zeros(16).contiguous().kernelize().uop.src[1].arg.ast
     lin = Kernel(ast)
     bufs = bufs_from_lin(lin)
 

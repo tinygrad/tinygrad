@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import time, mmap, sys, shutil, os, glob, subprocess, argparse
+import time, mmap, sys, shutil, os, glob, subprocess, argparse, collections
 from tinygrad.helpers import DEBUG, colored, ansilen
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.am import am
@@ -291,9 +291,18 @@ if __name__ == "__main__":
 
       try:
         if args.kill:
-          pid = subprocess.check_output(['sudo', 'lsof', '-t', dev]).decode('utf-8').split('\n')[0]
-          os.system(f'sudo kill -9 {pid}')
-          print(f"{dev[8:-5]}: killed process {pid}")
+          stopped_pids = collections.defaultdict(int)
+          while True:
+            try: pid = subprocess.check_output(['sudo', 'lsof', '-t', dev]).decode('utf-8').split('\n')[0]
+            except subprocess.CalledProcessError: break
+            if stopped_pids[pid] > 0: time.sleep(0.5)
+            if stopped_pids[pid] == 10:
+              print(f"{dev[8:-5]}: can't stop process {pid}, exitting")
+              exit(1)
+
+            print(f"{dev[8:-5]}: killing process {pid}")
+            os.system(f'sudo pkill -g -9 {pid}')
+            stopped_pids[pid] += 1
         else:
           pid = subprocess.check_output(['sudo', 'lsof', dev]).decode('utf-8').strip().split('\n')[1].split()[1]
           print(f"{dev[8:-5]}: {pid}")

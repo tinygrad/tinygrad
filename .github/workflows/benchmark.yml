@@ -62,6 +62,8 @@ jobs:
       run: BENCHMARK_LOG=stable_diffusion_xl CAPTURE_PROCESS_REPLAY=0 JIT=1 python3.11 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
     - name: Run model inference benchmark
       run: METAL=1 python3.11 test/external/external_model_benchmark.py
+    - name: Run huggingface_onnx test
+      run: METAL=1 python3.11 extra/huggingface_onnx/run_models.py test --debug FacebookAI/xlm-roberta-large
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3.11 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Test tensor cores
