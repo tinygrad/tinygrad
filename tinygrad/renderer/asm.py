@@ -422,17 +422,14 @@ x86_rewrite = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
    lambda ctx,x: f"{ctx.ops[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{x86_cflag(x)} {ctx[x]}"),
    # TODO: get rid of push/pop somehow, some new constraint maybe
-  (UPat((Ops.IDIV,), dtypes.sints, name="x"), lambda ctx,x:
-   f"{ctx.two_address(x, x.src[0])}push rdx\n{idiv_signex[x.dtype.itemsize]}\n{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rdx"),
-  (UPat((Ops.MOD,), dtypes.sints, name="x"), lambda ctx,x:
-   f"push rax\n{ctx.ops[x.dtype][Ops.ASSIGN]} rax, {ctx.r[x.src[0]]}\n"
-   f"{idiv_signex[x.dtype.itemsize]}\n{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rax"),
-  (UPat((Ops.IDIV,), dtypes.uints, name="x"), lambda ctx,x:
-   f"{ctx.two_address(x, x.src[0])}push rdx\nxor {'rdx, rdx' if x.dtype.itemsize > 1 else 'ah, ah'}\n"
+  (UPat((Ops.IDIV,), name="x"), lambda ctx,x:
+   f"{ctx.two_address(x, x.src[0])}push rdx\n"
+   f"{('xor rdx, rdx' if x.dtype.itemsize > 1 else 'xor ah, ah') if x.dtype in dtypes.uints else idiv_signex[x.dtype.itemsize]}\n"
    f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rdx"),
-  (UPat((Ops.MOD,), dtypes.uints, name="x"), lambda ctx,x:
-   f"push rax\n{ctx.ops[x.dtype][Ops.ASSIGN]} rax, {ctx.r[x.src[0]]}\nxor {'rdx, rdx' if x.dtype.itemsize > 1 else 'ah, ah'}\n"
-   f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rax"),
+  (UPat((Ops.MOD,), name="x"), lambda ctx,x:
+   f"push rax\nmov rax, {ctx.r[x.src[0]]}\n"
+   f"{('xor rdx, rdx' if x.dtype.itemsize > 1 else 'xor ah, ah') if x.dtype in dtypes.uints else idiv_signex[x.dtype.itemsize]}\n"
+   f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\n{"mov dl, ah\n" if x.dtype.itemsize == 1 else ""}pop rax"),
   (UPat(GroupOp.Binary, dtypes.ints + (dtypes.bool,), name="x"),
    lambda ctx,x: f"{ctx.two_address(x, x.src[0])}{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
   # endrange
@@ -453,7 +450,7 @@ def x86_load_consts(x:UOp) -> UOp|None:
   return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
 
 x86_matcher = asm_matcher + PatternMatcher([
-  # int64 and floats can't be immediates
+  # some consts can't be immediates
   (UPat(GroupOp.All, name="x"), x86_load_consts),
   # some ops can't take imm in srcs
   (UPat((Ops.WHERE, Ops.IDIV, Ops.MOD), name="x"),
