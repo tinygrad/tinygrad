@@ -2994,6 +2994,62 @@ class TestOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
+class TestLinAlg(unittest.TestCase):
+  def test_qr_decompose(self):
+    with Context(NOOPT=1):
+      A = Tensor([[1.0, 2.0], [3.0, 4.0]])
+      Q, R = A.qr_decompose()
+      # Verify Q is orthogonal
+      np.testing.assert_allclose((Q.transpose() @ Q).numpy(), np.eye(Q.shape[0]), rtol=1e-6, atol=1e-6)
+      # Verify A = QR
+      np.testing.assert_allclose((Q @ R).numpy(), A.numpy(), rtol=1e-6)
+
+  def test_eig(self):
+    # Verify eigenvalues and eigenvectors
+    with Context(NOOPT=1):
+      A = Tensor([[5.0, 4.0], [4.0, 5.0]])
+      eigenvalues, eigenvectors = A.eig()
+      for i in range(len(eigenvalues)):
+        np.testing.assert_allclose(
+          (A @ eigenvectors[:, i]).numpy(),
+          (eigenvalues[i] * eigenvectors[:, i]).numpy(),
+          rtol=1e-3,
+          atol=1e-3,
+        )
+
+  def test_svd(self):
+    with Context(NOOPT=1):
+
+      tensors = [
+          Tensor([[3, 6], [1, 10]]),
+          Tensor([[1,2], [3,4]]),
+          Tensor([[5.0, 6.0], [7.0, 8.0]]),
+          Tensor([[9.0, 10.0], [11.0, 12.0]]),
+          Tensor([[9.0, 10.0, 323, 9], [11.0, 12.0, 40, 38]]),
+          Tensor([[9.0, 10.0], [11.0, 12.0],  [5, 35]])
+      ]
+
+      for tensor in tensors:
+          U, S, Vt = tensor.svd()
+          np.testing.assert_allclose((U.transpose() @ U).numpy(), np.eye(U.shape[0]), rtol=1e-5, atol=1e-5)
+          np.testing.assert_allclose((Vt @ Vt.transpose()).numpy(), np.eye(Vt.shape[0]), rtol=1e-5, atol=1e-5)
+          S_matrix = Tensor.zeros(tensor.shape[0], tensor.shape[1]).contiguous()
+          indices = Tensor.arange(len(S))
+          S_matrix[indices, indices] = S
+          reconstructed = U @ S_matrix @ Vt
+          np.testing.assert_allclose(reconstructed.numpy(), tensor.numpy(), rtol=1e-1, atol=1e-1)
+
+  def test_norm(self):
+    helper_test_op([(3,)], lambda x: x.norm(), lambda x: x.norm(), forward_only=True)
+    helper_test_op([(3, 3)], lambda x: x.norm(), lambda x: x.norm(), forward_only=True)
+    helper_test_op([(3, 3, 3)], lambda x: x.norm(), lambda x: x.norm(), forward_only=True)
+    helper_test_op([(3, 3)], lambda x: Tensor.zeros_like(x).norm(), lambda x: Tensor.zeros_like(x).norm(), forward_only=True)
+    helper_test_op([(3, 3)], lambda x: (x * 1e6).norm(), lambda x: (x * 1e6).norm(), forward_only=True)
+    helper_test_op([(3, 3)], lambda x: (-x).norm(), lambda x: (-x).norm(), forward_only=True)
+    helper_test_op([(1,)], lambda x: x.norm(), lambda x: x.norm(), forward_only=True)
+    with self.assertRaises(ValueError):
+      Tensor([]).norm()
+
 @unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
 class TestOpsUint8(unittest.TestCase):
   def test_cast(self):
