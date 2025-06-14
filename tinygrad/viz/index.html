@@ -93,6 +93,7 @@
     position: relative;
   }
   .container {
+    flex: 0 0 auto;
     background-color: #0f1018;
     padding: 20px;
     z-index: 2;
@@ -109,6 +110,21 @@
     position: absolute;
     inset: 0;
     z-index: 1;
+  }
+  .profiler {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    height: 100%;
+    padding-top: 50px;
+  }
+  .profiler div[id^="proc-"] {
+    padding: 10px;
+    border: 1px solid rgba(200, 200, 200, 0.5);
+    background-color: rgba(15, 16, 24, 0.5);
+    height: 32px;
+    display: flex;
+    align-items: center;
   }
   .ctx-list-parent {
     width: 15%;
@@ -211,7 +227,8 @@
       </button>
     </div>
     <div class="container ctx-list-parent"><div class="ctx-list"></div></div>
-    <div class="graph">
+    <div class="view profiler"></div>
+    <div class="view graph">
       <div class="progress-message">Rendering new layout...</div>
       <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
         <g id="render">

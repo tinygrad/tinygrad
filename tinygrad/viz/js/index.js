@@ -1,5 +1,10 @@
 // **** graph renderers
 
+const displayGraph = (g) => {
+  d3.selectAll(".view").filter(`:not(${g})`).style("display", "none");
+  return d3.select(g).style("display", "flex");
+}
+
 // ** UOp graph
 
 function intersectRect(r1, r2) {
@@ -12,7 +17,7 @@ function intersectRect(r1, r2) {
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
 
-const rect = (s) => document.querySelector(s).getBoundingClientRect();
+const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
@@ -32,7 +37,7 @@ async function renderDag(graph, additions, recenter=false) {
   worker.onmessage = (e) => {
     progressMessage.style.display = "none";
     clearTimeout(timeout);
-    d3.select("#bars").html("");
+    displayGraph(".graph").select("#bars").html("");
     const g = dagre.graphlib.json.read(e.data);
     // draw nodes
     const STROKE_WIDTH = 1.4;
@@ -181,7 +186,7 @@ function renderMemoryGraph(graph) {
   // clear existing groups
   document.querySelector(".progress-message").style.display = "none";
   for (c of document.getElementById("render").children) c.innerHTML = "";
-  const render = d3.select("#bars");
+  const render = displayGraph(".graph").select("#bars");
   const yscale = d3.scaleLinear().domain([0, peak]).range([576, 0]);
   const xscale = d3.scaleLinear().domain([0, timestep]).range([0, 1024]);
   const axesGroup = render.append("g").attr("id", "axes");
@@ -217,6 +222,156 @@ function renderMemoryGraph(graph) {
   // TODO: add the kernel line here
   document.getElementById("zoom-to-fit-btn").click();
 }
+
+function formatTime(ts, dur) {
+  if (dur<=1e3) return `${ts}us`;
+  if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
+  return `${(ts*1e-6).toFixed(2)}s`;
+}
+
+// https://observablehq.com/@d3/pan-zoom-axes
+function filter(e) {
+  e.preventDefault();
+  // wheel up and down scale
+  // drag left and right move through time
+  return (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button;
+}
+document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
+
+const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
+
+var traceEvents;
+async function renderProfiler() {
+  // fetch timing events
+  if (traceEvents == null) traceEvents = (await (await fetch("/get_profile")).json()).traceEvents;
+  let st, et;
+  const timingEvents = [];
+  for (const e of traceEvents) {
+    if (e.ts == null) continue;
+    if (st == null || e.ts < st) st = e.ts;
+    const localEnd = e.ts+e.dur;
+    if (et == null || localEnd > et) et = localEnd;
+    timingEvents.push(e);
+  }
+  const duration = et-st;
+  // draw on the canvas
+  const root = displayGraph(".profiler").html("");
+  const Y_OFFSET = 20;
+  // ** devices on the y axis
+  const procList = root.append("div").attr("style", `width: 20%; height: 100%; padding-top: ${Y_OFFSET}px;`);
+  for (const e of traceEvents) {
+    if (e.name === "process_name") {
+      procList.append("div").text(e.args.name).attr("id", `proc-${e.pid}`);
+    }
+  }
+  const canvas = root.append("canvas").node();
+  const ctx = canvas.getContext("2d");
+  const logicalHeight = rect(root.node()).height;
+  const textWidthCache = {}
+  const allRects = [];
+  const dpr = window.devicePixelRatio || 1;
+  function render(transform=null) {
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width/dpr, canvas.height/dpr);
+    var scale = d3.scaleLinear().domain([0, duration]).range([0, canvas.width]);
+    if (transform != null) {
+      scale = transform.rescaleX(scale)
+    }
+    // *** time axis
+    // line
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(canvas.width/dpr, 0);
+    ctx.strokeStyle = "#4a4b57";
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+    // ticks
+    const ticks = scale.ticks();
+    for (let i = 0; i < ticks.length; i++) {
+      const x = (i / (ticks.length - 1)) * (canvas.width / dpr);
+      // tick line
+      ctx.beginPath();
+      ctx.lineWidth = 0.5;
+      ctx.moveTo(x + 0.5, 0);
+      ctx.lineTo(x + 0.5, 5.5);
+      ctx.stroke();
+      // tick label
+      ctx.font = "10px sans-serif";
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.textAlign = i === ticks.length - 1 ? "right" : "left";
+      ctx.textBaseline = "top";
+      ctx.fillText(formatTime(ticks[i], duration), x, 7);
+    }
+    // rects
+    allRects.length = 0; // reset in-place
+    for (const [i, e] of timingEvents.entries()) {
+      const x = scale(e.ts-st);
+      const width = scale(e.ts+e.dur-st)-x;
+      const height = 20;
+      const procRect = rect(`#proc-${e.pid}`);
+      const y = procRect.y-(Y_OFFSET*2);
+      if (width > 0.5) {
+        allRects.push({ x, y, width, height, ...e });
+      }
+      ctx.fillStyle = `#${colors[i%colors.length]}`;
+      ctx.fillRect(x, y, width, height);
+      // labels
+      let labelWidth = textWidthCache[e.name];
+      if (labelWidth == null) {
+        labelWidth = ctx.measureText(e.name).width
+        textWidthCache[e.name] = labelWidth;
+      }
+      if (labelWidth<width) {
+        ctx.fillStyle = "white";
+        ctx.font = "10px sans-serif";
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "left";
+        ctx.fillText(e.name, x+2, y+height/2);
+      }
+    }
+    ctx.restore();
+  }
+  function resize() {
+    const logicalWidth = rect(".profiler").width;
+    canvas.width = logicalWidth*dpr;
+    canvas.style.width = `${logicalWidth}px`;
+    canvas.height = logicalHeight*dpr;
+    canvas.style.height = `${logicalHeight}px`;
+    ctx.resetTransform?.();
+    ctx.scale(dpr, dpr);
+    render();
+  }
+  resize();
+  window.addEventListener("resize", resize);
+  const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[canvas.width,0]]).filter(filter).on("zoom", e => {
+    render(e.transform);
+  })
+  d3.select(canvas).call(zoom);
+  document.getElementById("zoom-to-fit-btn").addEventListener("click", () => d3.select(canvas).call(zoom.transform, d3.zoomIdentity));
+  canvas.addEventListener("click", (e) => {
+    const { top, left, width, height } = rect(canvas);
+    const clickX = (e.clientX - left) * (canvas.width / width);
+    const clickY = (e.clientY - top) * (canvas.height / height);
+    const logicalX = clickX / dpr;
+    const logicalY = clickY / dpr;
+    for (const r of allRects) {
+      if (logicalX >= r.x && logicalX <= r.x + r.width && logicalY >= r.y && logicalY <= r.y + r.height) {
+        for (const [i,c] of ctxs.entries()) {
+          if (ansiStrip(c.name) == r.name) {
+            // TODO: this is copied from the kernelize code
+            history.replaceState(state, "");
+            history.pushState(state, "");
+            return setState({ expandSteps: true, currentCtx:i, currentStep:0, currentRewrite:0 });
+          }
+        }
+        break;
+      }
+    }
+  });
+}
+
+// TODO: this exists in worker.js too
+const ansiStrip = (name) => name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1");
 
 // ** zoom and recentering
 
@@ -256,6 +411,7 @@ function codeBlock(st, language, { loc, wrap }) {
 }
 
 function setActive(e) {
+  if (e == null) return;
   e.classList.add("active");
   requestAnimationFrame(() => e.scrollIntoView({ behavior: "auto", block: "nearest" }));
 }
@@ -309,7 +465,8 @@ window.addEventListener("popstate", (e) => {
 async function main() {
   // ** left sidebar context list
   if (ctxs == null) {
-    ctxs = await (await fetch("/ctxs")).json();
+    ctxs = [{ name:"Profiler", steps:[] }];
+    for (const r of (await (await fetch("/ctxs")).json())) ctxs.push(r);
     const ctxList = document.querySelector(".ctx-list");
     for (const [i,{name, steps}] of ctxs.entries()) {
       const ul = ctxList.appendChild(document.createElement("ul"));
@@ -333,14 +490,15 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
+  if (ctx.name === "Profiler") return renderProfiler();
   const step = ctx.steps[currentStep];
-  const ckey = `ctx=${currentCtx}&idx=${currentStep}`;
+  const ckey = `ctx=${currentCtx-1}&idx=${currentStep}`;
   // close any pending event sources
   let activeSrc = null;
   for (const e of evtSources) {
