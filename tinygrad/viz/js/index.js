@@ -1,11 +1,5 @@
 // **** graph renderers
 
-function switchRender(visible) {
-  for (const c of document.querySelector(".main-container").children) {
-    c.style.display = (c.className.includes("container") || c.className === visible) ? "flex" : "none";
-  }
-}
-
 // ** UOp graph
 
 function intersectRect(r1, r2) {
@@ -18,11 +12,10 @@ function intersectRect(r1, r2) {
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
 
-const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s instanceof d3.selection ? s.node() : s).getBoundingClientRect();
+const rect = (s) => document.querySelector(s).getBoundingClientRect();
 
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
-  switchRender("graph");
   // start calculating the new layout (non-blocking)
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
@@ -110,7 +103,6 @@ function pluralize(num, name, alt=null) {
 }
 
 function renderMemoryGraph(graph) {
-  switchRender("graph");
   // ** construct alloc/free traces
   // we can map reads/writes from the kernel graph
   const actions = [];
@@ -226,163 +218,6 @@ function renderMemoryGraph(graph) {
   document.getElementById("zoom-to-fit-btn").click();
 }
 
-function formatTime(ts, dur) {
-  if (dur<=1e3) return `${ts}us`;
-  if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
-  return `${(ts*1e-6).toFixed(2)}s`;
-}
-
-// https://observablehq.com/@d3/pan-zoom-axes
-function filter(e) {
-  e.preventDefault();
-  // wheel up and down scale
-  // drag left and right move through time
-  return (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button;
-}
-document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault())
-
-var traceEvents;
-const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
-async function renderProfiler() {
-  switchRender("profiler");
-  if (traceEvents == null) {
-    const st = performance.now();
-    traceEvents = (await (await fetch("/get_profile")).json()).traceEvents;
-    console.log(`%c server responded in ${(performance.now()-st).toFixed(2)} ms with ${traceEvents.length.toLocaleString()} traceEvents.`, "color: green");
-  }
-  const root = document.querySelector(".profiler");
-  root.innerHTML = "";
-  const Y_OFFSET = 20;
-  // ** devices on the y axis
-  const procList = d3.select(root).append("div").attr("style", `width: 20%; height: 100%; padding-top: ${Y_OFFSET}px;`);
-  for (const e of traceEvents) {
-    if (e.name === "process_name") {
-      procList.append("div").text(e.args.name).attr("id", `proc-${e.pid}`);
-    }
-  }
-  // ** time axis
-  // 1. time counters
-  // NOTE: Using Math.min/max can lead to "max callstack size exceeded" errors if there are a lot of traceEvents
-  let st, et;
-  for (const e of traceEvents) {
-    if (e.ts == null) continue;
-    if (st == null || e.ts < st) st = e.ts;
-    const localEnd = e.ts+e.dur;
-    if (et == null || localEnd > et) et = localEnd;
-  }
-  const duration = et-st;
-  // 2. tick drawing
-  const canvas = root.appendChild(document.createElement("canvas"));
-  const ctx = canvas.getContext("2d");
-  const dpr = window.devicePixelRatio || 1;
-  const logicalHeight = rect(".profiler").height;
-  const textWidthCache = {}
-  const allRects = [];
-  function render(transform=null) {
-    ctx.save();
-    ctx.clearRect(0, 0, canvas.width/dpr, canvas.height/dpr);
-    var scale = d3.scaleLinear().domain([0, duration]).range([0, canvas.width]);
-    if (transform != null) {
-      scale = transform.rescaleX(scale)
-    }
-    // *** time axis
-    // line
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(canvas.width/dpr, 0);
-    ctx.strokeStyle = "#4a4b57";
-    ctx.lineWidth = 1.8;
-    ctx.stroke();
-    // ticks
-    const ticks = scale.ticks();
-    for (let i = 0; i < ticks.length; i++) {
-      const x = (i / (ticks.length - 1)) * (canvas.width / dpr);
-      // tick line
-      ctx.beginPath();
-      ctx.lineWidth = 0.5;
-      ctx.moveTo(x + 0.5, 0);
-      ctx.lineTo(x + 0.5, 5.5);
-      ctx.stroke();
-      // tick label
-      ctx.font = "10px sans-serif";
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.textAlign = i === ticks.length - 1 ? "right" : "left";
-      ctx.textBaseline = "top";
-      ctx.fillText(formatTime(ticks[i], duration), x, 7);
-    }
-    // rects
-    allRects.length = 0; // reset in-place
-    for (const [i, e] of traceEvents.entries()) {
-      if (e.ph === "X") {
-        const x = scale(e.ts-st);
-        const width = scale(e.ts+e.dur-st)-x;
-        const height = 20;
-        const procRect = rect(`#proc-${e.pid}`);
-        const y = procRect.y-(Y_OFFSET*2);
-        if (width > 0.5) {
-          allRects.push({ x, y, width, height, ...e });
-        }
-        ctx.fillStyle = `#${colors[i%colors.length]}`;
-        ctx.fillRect(x, y, width, height);
-        // labels
-        let labelWidth = textWidthCache[e.name];
-        if (labelWidth == null) {
-          labelWidth = ctx.measureText(e.name).width
-          textWidthCache[e.name] = labelWidth;
-        }
-        if (labelWidth<width) {
-          ctx.fillStyle = "white";
-          ctx.font = "10px sans-serif";
-          ctx.textBaseline = "middle";
-          ctx.textAlign = "left";
-          ctx.fillText(e.name, x+2, y+height/2);
-        }
-      }
-    }
-    ctx.restore();
-  }
-  function resize() {
-    const logicalWidth = rect(".profiler").width;
-    canvas.width = logicalWidth*dpr;
-    canvas.style.width = `${logicalWidth}px`;
-    canvas.height = logicalHeight*dpr;
-    canvas.style.height = `${logicalHeight}px`;
-    ctx.resetTransform?.();
-    ctx.scale(dpr, dpr);
-    render();
-  }
-  resize();
-  window.addEventListener("resize", resize);
-  const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[canvas.width,0]]).filter(filter).on("zoom", e => {
-    render(e.transform);
-  })
-  d3.select(canvas).call(zoom);
-  document.getElementById("zoom-to-fit-btn").addEventListener("click", () => d3.select(canvas).call(zoom.transform, d3.zoomIdentity));
-  canvas.addEventListener("click", (e) => {
-    const { top, left, width, height } = rect(canvas);
-    const clickX = (e.clientX - left) * (canvas.width / width);
-    const clickY = (e.clientY - top) * (canvas.height / height);
-    const logicalX = clickX / dpr;
-    const logicalY = clickY / dpr;
-    for (const r of allRects) {
-      if (logicalX >= r.x && logicalX <= r.x + r.width && logicalY >= r.y && logicalY <= r.y + r.height) {
-        for (const [i,c] of ctxs.entries()) {
-          if (ansiStrip(c.name) == r.name) {
-            // TODO: this is copied from the kernelize code
-            history.replaceState(state, "");
-            history.pushState(state, "");
-            return setState({ expandSteps: true, currentCtx:i, currentStep:0, currentRewrite:0 });
-          }
-        }
-        break;
-      }
-    }
-  });
-}
-
-// TODO: this exists in worker.js too
-const ansiStrip = (name) => name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1");
-
 // ** zoom and recentering
 
 const zoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
@@ -460,7 +295,7 @@ function setState(ns) {
     document.getElementById(`ctx-${prevCtx}`)?.classList.remove("active", "expanded");
     setActive(document.getElementById(`ctx-${state.currentCtx}`));
   }
-  if (ctxs[state.currentCtx].steps.length && (state.currentCtx !== prevCtx || state.currentStep !== prevStep)) {
+  if (state.currentCtx !== prevCtx || state.currentStep !== prevStep) {
     document.getElementById(`step-${prevCtx}-${prevStep}`)?.classList.remove("active");
     setActive(document.getElementById(`step-${state.currentCtx}-${state.currentStep}`));
   }
@@ -474,8 +309,7 @@ window.addEventListener("popstate", (e) => {
 async function main() {
   // ** left sidebar context list
   if (ctxs == null) {
-    ctxs = [{ name:"Profiler", steps:[] }];
-    for (const r of (await (await fetch("/ctxs")).json())) ctxs.push(r);
+    ctxs = await (await fetch("/ctxs")).json();
     const ctxList = document.querySelector(".ctx-list");
     for (const [i,{name, steps}] of ctxs.entries()) {
       const ul = ctxList.appendChild(document.createElement("ul"));
@@ -499,15 +333,14 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:0 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
-  if (ctx.name === "Profiler") return renderProfiler();
   const step = ctx.steps[currentStep];
-  const ckey = `ctx=${currentCtx-1}&idx=${currentStep}`;
+  const ckey = `ctx=${currentCtx}&idx=${currentStep}`;
   // close any pending event sources
   let activeSrc = null;
   for (const e of evtSources) {
@@ -578,7 +411,6 @@ document.querySelector(".collapse-btn").addEventListener("click", (e) => {
   document.querySelector(".main-container").classList.toggle("collapsed", isCollapsed);
   e.currentTarget.blur();
   e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
-  window.dispatchEvent(new Event("resize"));
 });
 
 // **** resizer
@@ -601,7 +433,6 @@ function appendResizer(element, { minWidth, maxWidth }, left=false) {
       document.documentElement.removeEventListener("mousemove", resize, false);
       element.style.userSelect = "initial";
     }, { once: true });
-    window.dispatchEvent(new Event("resize"));
   });
 }
 appendResizer(document.querySelector(".ctx-list-parent"), { minWidth: 15, maxWidth: 50 }, left=true);
