@@ -255,6 +255,11 @@ function codeBlock(st, language, { loc, wrap }) {
   return ret;
 }
 
+function setActive(e) {
+  e.classList.add("active");
+  requestAnimationFrame(() => e.scrollIntoView({ behavior: "auto", block: "nearest" }));
+}
+
 // ** hljs extra definitions for UOps and float4
 hljs.registerLanguage("python", (hljs) => ({
   ...hljs.getLanguage("python"),
@@ -288,20 +293,15 @@ function setState(ns) {
   document.getElementById(`ctx-${state.currentCtx}`)?.classList.toggle("expanded", state.expandSteps);
   if (state.currentCtx !== prevCtx) {
     document.getElementById(`ctx-${prevCtx}`)?.classList.remove("active", "expanded");
-    const newCtx = document.getElementById(`ctx-${state.currentCtx}`);
-    newCtx.classList.add("active");
-    requestAnimationFrame(() => newCtx.scrollIntoView({ behavior:'auto', block:'nearest' }));
+    setActive(document.getElementById(`ctx-${state.currentCtx}`));
   }
   if (state.currentCtx !== prevCtx || state.currentStep !== prevStep) {
     document.getElementById(`step-${prevCtx}-${prevStep}`)?.classList.remove("active");
-    const newStep = document.getElementById(`step-${state.currentCtx}-${state.currentStep}`);
-    newStep.classList.add("active");
-    requestAnimationFrame(() => newStep.scrollIntoView({ behavior:'auto', block:'nearest' }));
+    setActive(document.getElementById(`step-${state.currentCtx}-${state.currentStep}`));
   }
   // re-render
   main();
 }
-
 window.addEventListener("popstate", (e) => {
   if (e.state != null) setState(e.state);
 });
