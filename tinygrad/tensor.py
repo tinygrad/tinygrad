@@ -4275,6 +4275,74 @@ class Tensor(MathTrait):
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
+
+  def svd(self:Tensor, k:int=None, max_iter:int=15) -> tuple[Tensor, Tensor, Tensor]:
+    """
+    Args:
+        A: Input matrix (..., m, n)
+        k: Number of singular values to compute (default: min(m,n))
+        max_iter: Power iterations
+    
+    Returns:
+        U, S, V: SVD where A ≈ U @ diag(S) @ V.T
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.randn(5, 10)
+    U, S, V = t.svd()
+    print(U.numpy(), S.numpy(), V.numpy())
+    ```
+    """
+    batch_dims = self.shape[:-2]
+    A = self.reshape(-1, self.shape[-2], self.shape[-1])
+    batch_size, m, n = A.shape
+    if k is None: k = min(m, n)
+
+    def _power_iteration(M:Tensor, k:int, max_iter:int) -> Tensor:
+      batch_size, n, _ = M.shape
+      Q = Tensor.randn(batch_size, n, k)
+      Q = _gram_schmidt(Q)
+      for i in range(max_iter):
+        Q = M @ Q
+        Q = _gram_schmidt(Q)
+      return Q
+    if m >= n:
+      # Compute V from A^T A, then U = A @ V @ S^-1
+      AtA = A.transpose(-2, -1) @ A  # (batch, n, n)
+      V = _power_iteration(AtA, k, max_iter)
+      AV = A @ V  # (batch, m, k)
+      S = (AV * AV).sum(axis=-2).sqrt()  # (batch, k)
+      S_safe = S.clamp(min_=1e-12)
+      U = AV / S_safe.unsqueeze(-2)
+    else:
+      # Compute U from A A^T, then V = A^T @ U @ S^-1  
+      AAt = A @ A.transpose(-2, -1)  # (batch, m, m)
+      U = _power_iteration(AAt, k, max_iter)
+      AtU = A.transpose(-2, -1) @ U  # (batch, n, k)
+      S = (AtU * AtU).sum(axis=-2).sqrt()  # (batch, k)
+      S_safe = S.clamp(min_=1e-12)
+      V = AtU / S_safe.unsqueeze(-2)
+    
+    S_sorted, idx = S.sort(dim=-1, descending=True)
+    U_sorted = U.gather(-1, idx.unsqueeze(-2).expand(-1, m, -1))
+    V_sorted = V.gather(-1, idx.unsqueeze(-2).expand(-1, n, -1))
+    # TODO: transpose V here to be consistent with torch api?
+    return U_sorted.reshape(*batch_dims, m, k), S_sorted.reshape(*batch_dims, k), V_sorted.reshape(*batch_dims, n, k)
+
+  def _gram_schmidt(self: Tensor) -> Tensor:
+    Q = self
+    batch_size, n, k = Q.shape
+    R_list = []
+    for i in range(k):
+      r = Q[:, :, i:i+1]  # shape: [B, N, 1]
+      for j in range(i):
+        # Project r onto each previous basis vector
+        proj = (r * R_list[j]).sum(axis=1, keepdim=True)  # [B, 1, 1]
+        r = r - proj * R_list[j]
+
+      norm = (r * r).sum(axis=1, keepdim=True).sqrt().clamp(min_=1e-12)
+      R_list.append(r / norm)
+    return Tensor.cat(*R_list, dim=2)
+
 P = ParamSpec("P")
 T = TypeVar("T")
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
