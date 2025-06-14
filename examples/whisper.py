@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Optional, Union, Literal, List
 from tinygrad import Tensor, TinyJit, nn, Variable
 from tinygrad.nn.state import torch_load, load_state_dict
-from tinygrad.helpers import DEBUG, fetch, trange
+from tinygrad.helpers import fetch, trange
 from tinygrad.uop.ops import UOp
 import numpy as np
 import librosa
@@ -17,11 +17,11 @@ import os
 
 RATE = 16000
 SEGMENT_SECONDS = 30
-SAMPLES_PER_SEGMENT = RATE * SEGMENT_SECONDS  # 480000
+SAMPLES_PER_SEGMENT = RATE * SEGMENT_SECONDS 
 N_FFT = 400
 HOP_LENGTH = 160
 N_MELS = 80
-FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH  # 3000
+FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH
 CHUNK = 1600
 RECORD_SECONDS = 10
 
@@ -66,19 +66,16 @@ def multinomial_sampling(logits: Tensor, temperature: int):
   return next_tokens.numpy().astype(np.int64), selected_probs.numpy().astype(np.int64)
 
 class CacheDict(collections.OrderedDict):
-  """Dict with a limited length, ejecting LRUs as needed."""
   def __init__(self, *args, cache_len: int = 10, **kwargs):
     assert cache_len > 0
     self.cache_len = cache_len
     super().__init__(*args, **kwargs)
-
   def __setitem__(self, key, value):
     super().__setitem__(key, value)
     super().move_to_end(key)
     while len(self) > self.cache_len:
       oldkey = next(iter(self))
       super().__delitem__(oldkey)
-
   def __getitem__(self, key):
     val = super().__getitem__(key)
     super().move_to_end(key)
@@ -257,7 +254,7 @@ def load_file_waveform(filename): return librosa.load(filename, sr=RATE)[0]
 def transcribe_file(model, enc: Encoding, filename, output_fh=None, beam=False, no_speech_threshold=0.8):
   return transcribe_waveform(model, enc, [load_file_waveform(filename)], output_fh, beam=beam, no_speech_threshold=no_speech_threshold)
 
-def timestamp_filter(logits: np.ndarray, enc: Encoding):
+def timestamp_gen(logits: np.ndarray, enc: Encoding):
   logits[:, np.array([enc._special_tokens["<|notimestamps|>"]])] = -math.inf
   timestamp = enc._special_tokens["<|0.00|>"]
   log_probs: np.ndarray = log_softmax(logits, axis=-1)
@@ -266,37 +263,18 @@ def timestamp_filter(logits: np.ndarray, enc: Encoding):
   comparison = (timestamp_probs > text_probs)
   logits[comparison, :timestamp] = -math.inf
 
-def timestamp_filter2(logits: np.ndarray, enc: Encoding, ctx: np.ndarray, sample_begin: int):
+def timestamp_rules(logits: np.ndarray, enc: Encoding, ctx: np.ndarray, sample_begin: int):
   timestamp_begin = enc._special_tokens["<|0.00|>"]
   for k in range(ctx.shape[0]):
-    sampled_tokens = ctx[k, sample_begin:]
-    seq = sampled_tokens.tolist()
-    timestamp_token = enc._special_tokens["<|0.00|>"]
-    last_was_timestamp = bool(seq and seq[-1] >= timestamp_token)
-    penultimate_was_timestamp = len(seq) < 2 or seq[-2] >= timestamp_token
-    if last_was_timestamp:
-      if penultimate_was_timestamp:  # has to be non-timestamp
-        logits[k, timestamp_begin :] = -np.inf
-      else:  # cannot be normal text tokens
-        logits[k, : enc._special_tokens["<|endoftext|>"]] = -np.inf
-    timestamps = sampled_tokens[sampled_tokens >= timestamp_begin]
-    if timestamps.size > 0:
-        # timestamps shouldn't decrease; forbid timestamp tokens smaller than the last
-        # also force each segment to have a nonzero length, to prevent infinite looping
-      if last_was_timestamp and not penultimate_was_timestamp:
-        timestamp_last = timestamps[-1]
-      else:
-        timestamp_last = timestamps[-1] + 1
-      logits[k, timestamp_begin : timestamp_last] = -np.inf
-
+    seq = ctx[k, sample_begin:].tolist()
+    last_was_timestamp = bool(seq and seq[-1] >= timestamp_begin)
+    penultimate_was_timestamp = len(seq) < 2 or seq[-2] >= timestamp_begin
+    if last_was_timestamp: logits[k, slice(timestamp_begin if penultimate_was_timestamp else 0, None if penultimate_was_timestamp else enc._special_tokens["<|endoftext|>"])] = -np.inf
+    timestamps = ctx[k, sample_begin:][ctx[k, sample_begin:] >= timestamp_begin]
+    if timestamps.size > 0: logits[k, timestamp_begin:timestamps[-1] + (0 if last_was_timestamp and not penultimate_was_timestamp else 1)] = -np.inf
   if ctx.shape[1] == sample_begin:
-      # suppress generating non-timestamp tokens at the beginning
-    logits[:, : timestamp_begin] = -np.inf
-
-    # apply the `max_initial_timestamp` option
-    max_initial_timestamp_index = 50
-    last_allowed = timestamp_begin + max_initial_timestamp_index
-    logits[:, last_allowed + 1 :] = -np.inf
+    logits[:, :timestamp_begin] = -np.inf
+    logits[:, timestamp_begin + 50 + 1:] = -np.inf
 
 def non_speech_filter(logits: np.ndarray):
   tokens = np.array([1, 2, 7, 8, 9, 10, 14, 25, 26, 27, 28, 29, 31, 58, 59, 60, 61, 62, 63, 90, 91, 92, 93, 357, 366, 438, 532, 685, 705, 796, 930, 1058, 1220, 1267, 1279, 1303, 1343, 1377, 1391, 1635, 1782, 1875, 2162, 2361, 2488, 3467, 4008, 4211, 4600, 4808, 5299, 5855, 6329, 7203, 9609, 9959, 10563, 10786, 11420, 11709, 11907, 13163, 13697, 13700, 14808, 15306, 16410, 16791, 17992, 19203, 19510, 20724, 22305, 22935, 27007, 30109, 30420, 33409, 34949, 40283, 40493, 40549, 47282, 49146, 50358, 50357, 50257, 50360, 50359, 50361])
@@ -357,7 +335,7 @@ def inferloop(model: Whisper, ctx: np.ndarray, encoded_audio: Tensor, temperatur
   for i in trange(num_sample):
     logits = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1].contiguous().numpy()
     if i == 0: suppress_blank(logits, enc)
-    non_speech_filter(logits), timestamp_filter2(logits, enc, ctx, sample_begin), timestamp_filter(logits, enc)
+    non_speech_filter(logits), timestamp_rules(logits, enc, ctx, sample_begin), timestamp_gen(logits, enc)
     if beam and temperature == 0:
       sampled = beamsearch_sampling(logits, model, sum_probs, ctx)
       ctx, next_tokens, sum_probs = sampled.ctx, sampled.next_tokens, sampled.probs
