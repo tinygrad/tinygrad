@@ -14,6 +14,10 @@ class MathTrait:
   def neg(self):
     if (dtype:=getattr(self, 'dtype')) is None: raise TypeError(f"MathTraits __neg__ requires a dtype, {self=}")
     return self.logical_not() if dtype.scalar() == dtypes.bool else self*(-1)
+  def _check_dtype(self):
+    if (dtype:=getattr(self, 'dtype')) is not None:
+      if isinstance(dtype, tuple): dtype = dtype[0]
+      if not (dtypes.is_bool(dtype) or dtypes.is_int(dtype)): raise RuntimeError(f"{dtype} is not supported")
   def add(self, x, reverse=False):
     """
     Adds `self` and `x`.
@@ -51,9 +55,49 @@ class MathTrait:
     ```
     """
     return self._binop(Ops.MUL, x, reverse)
-  def bitwise_and(self, x, reverse=False): return self._binop(Ops.AND, x, reverse)
-  def bitwise_or(self, x, reverse=False): return self._binop(Ops.OR, x, reverse)
-  def bitwise_xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse)
+  def bitwise_and(self, x, reverse=False):
+    """
+    Computes the bitwise AND of `self` and `x`.
+    Equivalent to `self & x`.
+    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([2, 5, 255]).bitwise_and(Tensor([3, 14, 16])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([True, True, False, False]).bitwise_and(Tensor([True, False, True, False])).numpy())
+    ```
+    """
+    self._check_dtype()
+    return self._binop(Ops.AND, x, reverse)
+  def bitwise_or(self, x, reverse=False):
+    """
+    Computes the bitwise OR of `self` and `x`.
+    Equivalent to `self | x`.
+    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([2, 5, 255]).bitwise_or(Tensor([4, 4, 4])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([True, True, False, False]).bitwise_or(Tensor([True, False, True, False])).numpy())
+    ```
+    """
+    self._check_dtype()
+    return self._binop(Ops.OR, x, reverse)
+  def bitwise_xor(self, x, reverse=False):
+    """
+    Computes bitwise xor of `self` and `x`.
+    Equivalent to `self ^ x`.
+    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, -2, 3]).bitwise_xor(Tensor([1, 0, 3])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([True, True, False, False]).bitwise_xor(Tensor([True, False, True, False])).numpy())
+    ```
+    """
+    self._check_dtype()
+    return self._binop(Ops.XOR, x, reverse)
   def idiv(self, x, reverse=False):
     """
     Divides `self` by `x`.
