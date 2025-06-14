@@ -124,7 +124,7 @@ def validate_index(idx:UOp, mask:UOp|None=None):
 # matcher functions returns True or False (or None to not match)
 spec = PatternMatcher([
   # no pointers in ASM
-  (UPat(Ops.DEFINE_GLOBAL, dtypes.uint64), lambda: True),
+  (UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), dtypes.uint64), lambda: True),
   (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
   (UPat(Ops.DEFINE_ACC, src=(UPat.var("c"),), name="x", allow_any_len=True),
