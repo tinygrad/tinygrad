@@ -294,38 +294,28 @@ async function main() {
   // ** left sidebar context list
   if (ctxs == null) {
     ctxs = await (await fetch("/ctxs")).json();
-    setState({ currentCtx:-1 });
-  }
-  const ctxList = document.querySelector(".ctx-list");
-  ctxList.innerHTML = "";
-  for (const [i,{name, steps}] of ctxs.entries()) {
-    const ul = ctxList.appendChild(document.createElement("ul"));
-    if (i === currentCtx) {
-      ul.className = "active";
-      requestAnimationFrame(() => ul.scrollIntoView({ behavior: "auto", block: "nearest" }));
-      if (expandSteps) ul.classList.add("expanded");
-    }
-    const p = ul.appendChild(document.createElement("p"));
-    p.innerHTML = name.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
-      const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
-      return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
-    });
-    p.onclick = () => {
-      setState(i === currentCtx ? { expandSteps:!expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
-    }
-    for (const [j,u] of steps.entries()) {
-      const inner = ul.appendChild(document.createElement("ul"));
-      if (i === currentCtx && j === currentStep) {
-        inner.className = "active";
-        requestAnimationFrame(() => inner.scrollIntoView({ behavior: "auto", block: "nearest" }));
+    const ctxList = document.querySelector(".ctx-list");
+    for (const [i,{name, steps}] of ctxs.entries()) {
+      const ul = ctxList.appendChild(document.createElement("ul"));
+      const p = ul.appendChild(document.createElement("p"));
+      p.innerHTML = name.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
+        const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
+        return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
+      });
+      p.onclick = () => {
+        setState(i === currentCtx ? { expandSteps:!expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
-      inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]} - ${u.match_count}`;
-      inner.style.marginLeft = `${8*u.depth}px`;
-      inner.onclick = (e) => {
-        e.stopPropagation();
-        setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
+      for (const [j,u] of steps.entries()) {
+        const inner = ul.appendChild(document.createElement("ul"));
+        inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]} - ${u.match_count}`;
+        inner.style.marginLeft = `${8*u.depth}px`;
+        inner.onclick = (e) => {
+          e.stopPropagation();
+          setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
+        }
       }
     }
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   if (currentCtx == -1) return;
