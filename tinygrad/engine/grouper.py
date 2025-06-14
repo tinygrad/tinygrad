@@ -3,7 +3,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewr
 from tinygrad.uop.ops import track_rewrites, _substitute
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.codegen.lowerer import get_contraction_with_reduce
-from tinygrad.codegen.symbolic import symbolic_simple
+from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
@@ -50,7 +50,8 @@ def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
   if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
   return base.copy_to_device(copy.device).view(view.arg)
 
-ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK}
+ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
+                     Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.GBARRIER}
 
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
@@ -356,7 +357,7 @@ view_right = merge_views+PatternMatcher([
   # apply view after reduceops
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="src"),), name="v"),), name="r"), reduceop_view_right),
   # apply view after elementwise ops
-  (UPat(GroupOp.All-{Ops.SINK}, name="root"), elementwise_view_right),
+  (UPat(GroupOp.All-{Ops.SINK, Ops.GBARRIER}, name="root"), elementwise_view_right),
   # merge axes for double reduce (invert of SPLIT_REDUCEOP=1)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="r1"),), name="r2"),
    lambda r1,r2: r1.replace(arg=(r1.arg[0], r2.arg[1]+r1.arg[1])) if r1.arg[0] is r2.arg[0] else None),
@@ -501,10 +502,6 @@ do_fuse = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
 ])
 
-def get_name(becomes_map:dict[UOp, UOp]) -> str:
-  assigned_kernels = {u.base.buf_uop:u.base.src[1] for u in becomes_map.values() if u.base.op is Ops.ASSIGN}.values()
-  return f"Schedule {pluralize('Kernel', len(set(assigned_kernels)))}"
-
 add_gbarrier = PatternMatcher([(UPat(GroupOp.All-{Ops.GBARRIER, Ops.ASSIGN}, name="x"),
                                 lambda ctx,x: x.replace(tag=1).gbarrier() if x in ctx and x.tag is None else None)])
 
@@ -538,7 +535,7 @@ finalize_gbarrier = PatternMatcher([
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
-@track_rewrites(name_fxn=get_name)
+@track_rewrites(name_fxn=lambda big_sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[big_sink].toposort() if u.op is Ops.KERNEL]))}")
 def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # multi + merge_views + simplify
   tensor_map = graph_rewrite_map(big_sink, multi_pm+replace_allreduce+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")

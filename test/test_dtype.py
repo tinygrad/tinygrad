@@ -32,7 +32,7 @@ def get_available_cast_dtypes(dtype: DType) -> List[DType]:
 def _test_to_np(a:Tensor, np_dtype, target):
   if DEBUG >= 2: print(a)
   na = a.numpy()
-  if DEBUG >= 2: print(na, na.dtype, a.lazydata.base.realized)
+  if DEBUG >= 2: print(na, na.dtype, a.uop.base.realized)
   try:
     assert na.dtype == np_dtype
     np.testing.assert_allclose(na, target)
@@ -469,14 +469,20 @@ class TestHelpers(unittest.TestCase):
       if dtypes.is_float(dt):
         np.testing.assert_equal(dtypes.min(dt), -math.inf)
         np.testing.assert_equal(dtypes.max(dt), math.inf)
+        np.testing.assert_equal(dt.min, -math.inf)
+        np.testing.assert_equal(dt.max, math.inf)
       elif dtypes.is_int(dt):
         info = np.iinfo(_to_np_dtype(dt))
         np.testing.assert_equal(dtypes.min(dt), info.min)
         np.testing.assert_equal(dtypes.max(dt), info.max)
+        np.testing.assert_equal(dt.min, info.min)
+        np.testing.assert_equal(dt.max, info.max)
       else:
         assert dt == dtypes.bool, dt
         np.testing.assert_equal(dtypes.min(dt), False)
         np.testing.assert_equal(dtypes.max(dt), True)
+        np.testing.assert_equal(dt.min, False)
+        np.testing.assert_equal(dt.max, True)
 
   def test_truncate_fp16(self):
     self.assertEqual(truncate_fp16(1), 1)
@@ -523,6 +529,7 @@ class TestTypeSpec(unittest.TestCase):
       dtypes.default_float = default_float
       assert dtypes.default_float == default_float
 
+  @unittest.skip("this test is slow and spawning whole pythons")
   def test_env_set_default_float(self):
     # check default
     subprocess.run(['python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.float"'],

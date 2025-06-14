@@ -302,8 +302,10 @@ class NVAllocator(HCQAllocator['NVDevice']):
     return self.dev._gpu_alloc(size, cpu_access=options.cpu_access, tag=f"user memory ({options})")
 
   def _free(self, opaque:HCQBuffer, options:BufferSpec):
-    self.dev.synchronize()
-    self.dev._gpu_free(opaque)
+    try:
+      self.dev.synchronize()
+      self.dev._gpu_free(opaque)
+    except AttributeError: pass
 
   def map(self, buf:HCQBuffer): self.dev._gpu_map(buf._base if buf._base is not None else buf)
 

@@ -6,7 +6,7 @@ from tinygrad.dtype import dtypes, PtrDType, least_upper_dtype
 from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint, sint_to_uop
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
-from tinygrad.codegen.symbolic import symbolic
+from tinygrad.uop.symbolic import symbolic
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> list[list[int]]|None:
@@ -83,7 +83,6 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
 class IndexContext:
   idxs: list[UOp]
   ridxs: list[UOp]
-  acc_num: int = 0
 
 def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
