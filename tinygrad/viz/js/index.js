@@ -290,7 +290,6 @@ window.addEventListener("popstate", (e) => {
 });
 
 async function main() {
-  const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // ** left sidebar context list
   if (ctxs == null) {
     ctxs = await (await fetch("/ctxs")).json();
@@ -304,7 +303,7 @@ async function main() {
         return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
       });
       p.onclick = () => {
-        setState(i === currentCtx ? { expandSteps:!expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
+        setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
       for (const [j,u] of steps.entries()) {
         const inner = ul.appendChild(document.createElement("ul"));
@@ -320,6 +319,7 @@ async function main() {
     return setState({ currentCtx:-1 });
   }
   // ** center graph
+  const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
   const step = ctx.steps[currentStep];
