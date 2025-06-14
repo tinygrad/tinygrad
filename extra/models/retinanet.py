@@ -46,10 +46,9 @@ def decode_bbox2(offsets, anchors):
   return Tensor.stack(pred_x1, pred_y1, pred_x2, pred_y2, dim=1)
 
 def _unique(x:Tensor) -> Tensor:
-  assert len(x.shape) == 1, "does not work on multi-dimensional Tensors"
-  x = x.sort()
-  unique_mask = Tensor.cat(Tensor([True]), x[1:] != x[:-1])
-  return x.masked_select(unique_mask)
+  x = x.sort()[0]
+  mask = Tensor([True]).cat(x[1:] != x[:-1])
+  return x.masked_select(mask)
 
 class RetinaNet:
   def __init__(self, backbone:ResNet, num_classes:int=264, num_anchors:int=9, scales:list[int]|None=None, aspect_ratios:list[float]|None=None):
