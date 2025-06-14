@@ -1635,6 +1635,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (1, 1)
 
+  @unittest.skipIf(Device.DEFAULT == "X86", "float16 vec4 not supported for now")
   def test_half4_load_unrolled(self):
     # from llama 7B shard 4 gpus
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
