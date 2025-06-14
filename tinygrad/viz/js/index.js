@@ -273,9 +273,9 @@ async function renderProfiler() {
   function render(transform=null) {
     ctx.save();
     ctx.clearRect(0, 0, canvas.width/dpr, canvas.height/dpr);
-    var scale = d3.scaleLinear().domain([0, duration]).range([0, canvas.width]);
+    const scale = d3.scaleLinear().domain([0, duration]).range([0, canvas.width]);
     if (transform != null) {
-      scale = transform.rescaleX(scale)
+      scale.domain(scale.range().map(transform.invertX, transform).map(scale.invert, scale));
     }
     // *** time axis
     // line
