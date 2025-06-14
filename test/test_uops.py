@@ -361,15 +361,16 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.MUL, ops)
 
   def test_division_power_of_two(self):
-    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
-    c = UOp(Ops.CONST, dtypes.uint, (), 2)
-    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
-    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
-    uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
-    Device[Device.DEFAULT].renderer.render(uops)
-    ops = [x.op for x in uops]
-    self.assertIn(Ops.SHR, ops)
-    self.assertNotIn(Ops.IDIV, ops)
+    for dt in (dtypes.int32, dtypes.uint32):
+      g = UOp(Ops.DEFINE_GLOBAL, dt.ptr(), (), 0)
+      c = UOp(Ops.CONST, dt, (), 2)
+      l = UOp(Ops.LOAD, dt, (g.index(c),))
+      a = UOp(Ops.IDIV, dt, (l, c))
+      uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
+      Device[Device.DEFAULT].renderer.render(uops)
+      ops = [x.op for x in uops]
+      self.assertIn(Ops.SHR, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
+      self.assertNotIn(Ops.IDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
 
   def test_fast_idiv_and_mod(self):
     g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
