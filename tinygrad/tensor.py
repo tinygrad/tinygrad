@@ -4294,10 +4294,10 @@ class Tensor(MathTrait):
     def power_iteration(M:Tensor, k:int, max_iter:int=15) -> Tensor:
       B, n, _ = M.shape
       Q = Tensor.randn(B, n, k)
-      Q = householder_qr(Q)
+      Q = Tensor.householder_qr(Q)
       for i in range(max_iter):
         Q = M @ Q
-        Q = householder_qr(Q)
+        Q = Tensor.householder_qr(Q)
       return Q
     if m >= n:
       # Compute V from A^T A, then U = A @ V @ S^-1
@@ -4321,12 +4321,12 @@ class Tensor(MathTrait):
     V = V.gather(-1, idx.unsqueeze(-2).expand(-1, n, -1))
     return U.reshape(*batch_dims, m, k), S.reshape(*batch_dims, k), V.reshape(*batch_dims, n, k).transpose(-2, -1)
 
-  def householder_qr(A: Tensor) -> Tensor:
+  def householder_qr(self: Tensor) -> Tensor:
     # TODO: return R aswell, for QR decomposition
-    B, m, n = A.shape
+    B, m, n = self.shape
     Q = Tensor.eye(m).expand(B, m, m).clone()
     for k in range(min(m, n)):
-      x = A[:, k:, k]  # (B, m-k)
+      x = self[:, k:, k]  # (B, m-k)
       norm_x = (x ** 2).sum(axis=1, keepdim=True).sqrt().clamp(min_=1e-12)
       sign = x[:, :1].sign().clamp(min_=1e-12)
       v = x + sign[:, 0:1] * norm_x
