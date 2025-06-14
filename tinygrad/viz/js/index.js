@@ -238,7 +238,13 @@ function filter(e) {
 }
 document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
-const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
+const colors = [
+  "#b6ccfe", "#74c69d", "#f1c0e8", "#90dbf4", "#5ca98c",
+  "#adc3f5", "#fde4cf", "#8eecf5", "#85c9a7", "#cfbaf0",
+  "#9eb8f0", "#52b788", "#ffcfd2", "#98f5e1", "#4c8d6e",
+  "#b6ceea", "#e7e2b6", "#96e5a5", "#3a5f4a", "#d8f3dc",
+  "#c3d2ee", "#3d6c5b", "#cfdaf0", "#c1d3fe"
+];
 
 var traceEvents;
 async function renderProfiler() {
@@ -282,7 +288,7 @@ async function renderProfiler() {
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.lineTo(canvas.width/dpr, 0);
-    ctx.strokeStyle = "#4a4b57";
+    ctx.strokeStyle = "#f0f0f5";
     ctx.lineWidth = 1.8;
     ctx.stroke();
     // ticks
@@ -313,7 +319,7 @@ async function renderProfiler() {
       if (width > 0.5) {
         allRects.push({ x, y, width, height, ...e });
       }
-      ctx.fillStyle = `#${colors[i%colors.length]}`;
+      ctx.fillStyle = colors[i%colors.length];
       ctx.fillRect(x, y, width, height);
       // labels
       let labelWidth = textWidthCache[e.name];
@@ -322,7 +328,7 @@ async function renderProfiler() {
         textWidthCache[e.name] = labelWidth;
       }
       if (labelWidth<width) {
-        ctx.fillStyle = "white";
+        ctx.fillStyle = "black";
         ctx.font = "10px sans-serif";
         ctx.textBaseline = "middle";
         ctx.textAlign = "left";
