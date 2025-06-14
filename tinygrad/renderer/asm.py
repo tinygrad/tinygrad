@@ -15,7 +15,7 @@ def to_hex(x, dt:DType) -> str:
 
 base_rewrite = PatternMatcher([
   # load/store
-  (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]"),
+  (UPat(Ops.LOAD, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[x.src[0]]}]"),
   # accumulator
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}" if ctx[x] != ctx[x.src[1]] else None),
@@ -31,9 +31,10 @@ base_rewrite = PatternMatcher([
 ])
 
 asm_matcher = PatternMatcher([
-  # load/store use pointer arithmetic and we get rid of the buf pointer
+  # load/store use pointer arithmetic and we get rid of the buf pointer, size in arg for define local
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))),
-   lambda buf,idx: buf.replace(dtype=dtypes.uint64) + idx.cast(dtypes.uint64)*buf.dtype.itemsize),
+   lambda buf,idx: buf.replace(dtype=dtypes.uint64, arg=(buf.dtype.size*buf.dtype.itemsize) if buf.dtype.local else buf.arg) +
+    idx.cast(dtypes.uint64)*buf.dtype.itemsize),
   # move mask from INDEX to the load/store
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat.var("gate"))), UPat.var("alt"))),
    lambda buf,idx,gate,alt: UOp(Ops.LOAD, alt.dtype, (buf.index(idx), alt, gate))),
@@ -107,7 +108,7 @@ class AsmRenderer(Renderer):
     self.mem = mem
     live_at_range: dict[UOp, dict[UOp, str]] = {}
     spill_place: dict[UOp, UOp] = {}
-    stack_size: int = 0
+    self.stack_size: int = 0
     inst_map: dict[UOp, list[str]] = {}
     # live ranges, first pass updates start of range
     live_range: dict[UOp, list[int]] = {}
@@ -133,9 +134,8 @@ class AsmRenderer(Renderer):
       spilled = max([k for k,v in live.items() if v in cons],
                     key=lambda k: next((j for j,u in enumerate(uops[i:live_range[k][1]]) if k in self.srcs(u)), live_range[k][1]-i))
       if spilled not in mem:
-        nonlocal stack_size
-        offset = stack_size + (spilled.dtype.itemsize - stack_size % spilled.dtype.itemsize) % spilled.dtype.itemsize
-        stack_size = offset + spilled.dtype.itemsize
+        offset = self.stack_size + (spilled.dtype.itemsize - self.stack_size % spilled.dtype.itemsize) % spilled.dtype.itemsize
+        self.stack_size = offset + spilled.dtype.itemsize
         mem[spilled] = self.render_mem(offset)
         inst = spill_place.get(spilled, spilled)
         inst_map[inst].append(self.render_spill(spilled))
@@ -192,19 +192,21 @@ class AsmRenderer(Renderer):
         if s in live and live_range[s][1] == i: reg_class(s).insert(0, live.pop(s))
       # assign destination
       if u in live_range: loc[u] = alloc(u, self.constraints(u))
-      # save live vars at loop entry
-      if u.op is Ops.RANGE: live_at_range[u] = live.copy()
-      if u.op not in (Ops.NOOP, Ops.CONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
+      if u.op not in (Ops.NOOP, Ops.CONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.BARRIER):
         # render assembly
         if (l:=self.string_rewrite.rewrite(u, ctx=self)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         inst_map[u].append(cast(str, l))
+      # define local allocates stack space
+      if u.op is Ops.DEFINE_LOCAL: self.stack_size += u.arg
+      # save live vars at loop entry
+      if u.op is Ops.RANGE: live_at_range[u] = live.copy()
       # making sure nothing got lost
       assert len(set(live.values()) | set(regs[dtypes.int]) | set(regs[dtypes.float])) == len(self.regs[dtypes.int] + self.regs[dtypes.float])
 
     for u in uops: kernel.extend(inst_map[u])
     # stack must be aligned to 16 bytes
-    return (name, kernel, stack_size + (16 - (stack_size + len(callee_saved)*8) % 16) % 16, callee_saved)
+    return (name, kernel, self.stack_size + (16 - (self.stack_size + len(callee_saved)*8) % 16) % 16, callee_saved)
 
   def render_kernel(self, name:str, kernel:list[str], stack_size:int, called_saved:list[UOp]): raise NotImplementedError("arch specific")
   def render(self, uops:list[UOp]): return self.render_kernel(*self._render(uops))
@@ -382,6 +384,8 @@ def float_cast(x:DType, s:DType) -> str:
   return f"cvt{cfrom}2{cto}"
 
 x86_rewrite = PatternMatcher([
+  # define local points to the start of the next stack slot, NOTE: unaligned, could cause issues
+  (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"mov {ctx[x]}, rsp\nadd {ctx[x]}, {ctx.stack_size}"),
   # loads/stores
   (UPat(Ops.INDEX, src=(UPat(), UPat.cvar(name="c")), name="x"),
    lambda ctx,x,c: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx[c]}*{x.src[0].dtype.itemsize}]"),
@@ -422,14 +426,14 @@ x86_rewrite = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
    lambda ctx,x: f"{ctx.ops[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{x86_cflag(x)} {ctx[x]}"),
    # TODO: get rid of push/pop somehow, some new constraint maybe
-  (UPat((Ops.IDIV,), name="x"), lambda ctx,x:
+  (UPat(Ops.IDIV, name="x"), lambda ctx,x:
    f"{ctx.two_address(x, x.src[0])}push rdx\n"
    f"{('xor rdx, rdx' if x.dtype.itemsize > 1 else 'xor ah, ah') if x.dtype in dtypes.uints else idiv_signex[x.dtype.itemsize]}\n"
    f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rdx"),
-  (UPat((Ops.MOD,), name="x"), lambda ctx,x:
+  (UPat(Ops.MOD, name="x"), lambda ctx,x:
    f"push rax\nmov rax, {ctx.r[x.src[0]]}\n"
    f"{('xor rdx, rdx' if x.dtype.itemsize > 1 else 'xor ah, ah') if x.dtype in dtypes.uints else idiv_signex[x.dtype.itemsize]}\n"
-   f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\n{"mov dl, ah\n" if x.dtype.itemsize == 1 else ""}pop rax"),
+   f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\n{'mov dl, ah\n' if x.dtype.itemsize == 1 else ''}pop rax"),
   (UPat(GroupOp.Binary, dtypes.ints + (dtypes.bool,), name="x"),
    lambda ctx,x: f"{ctx.two_address(x, x.src[0])}{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
   # endrange
