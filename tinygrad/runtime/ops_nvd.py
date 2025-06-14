@@ -352,7 +352,7 @@ class NVDDevice(HCQCompiled[NVSignal]):
     #     view=MMIOInterface(am_mapping.va_addr, size, fmt='B'))
 
     cpu_access = True
-    nv_mapping = self.nvdev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
+    nv_mapping = self.nvdev.mm.valloc(size:=round_up(size, 2 << 20), uncached=uncached, contigous=cpu_access)
     if cpu_access: self._map_pci_range(bar=1, off=nv_mapping.paddrs[0][0], addr=nv_mapping.va_addr, size=nv_mapping.size)
     return HCQBuffer(nv_mapping.va_addr, size, meta=NVAllocationMeta(self, [self], nv_mapping, has_cpu_mapping=cpu_access),
       view=MMIOInterface(nv_mapping.va_addr, size, fmt='B') if cpu_access else None)
@@ -412,7 +412,7 @@ class NVDDevice(HCQCompiled[NVSignal]):
     subdevice_params = nv_gpu.NV2080_ALLOC_PARAMETERS(subDeviceId=0x0)
     self.subdevice = rm_alloc(self.nvdev, nv_gpu.NV20_SUBDEVICE_0, self.root, self.nvdevice, subdevice_params)
 
-    vaspace_params = nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS(vaBase=0x0, vaSize=0x1fffffb000000,
+    vaspace_params = nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS(vaBase=0x1000, vaSize=0x1fffffb000000,
       flags=nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_ENABLE_PAGE_FAULTING | nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_IS_EXTERNALLY_OWNED | \
             nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_ALLOW_ZERO_ADDRESS)
     vaspace = rm_alloc(self.nvdev, nv_gpu.FERMI_VASPACE_A, self.root, self.nvdevice, vaspace_params)
@@ -434,9 +434,9 @@ class NVDDevice(HCQCompiled[NVSignal]):
 
     rmctrl.gpfifo_schedule(self.nvdev, self.root, channel_group, bEnable=1)
 
-    self.cmdq_page:HCQBuffer = self._gpu_alloc(0x4000, cpu_access=True, tag="cmdq")
+    self.cmdq_page:HCQBuffer = self._gpu_alloc(0x200000, cpu_access=True, tag="cmdq")
     self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, base=cast(int, self.cmdq_page.va_addr), wrap=True)
-    self.cmdq = MMIOInterface(cast(int, self.cmdq_page.va_addr), 0x4000, fmt='I')
+    self.cmdq = MMIOInterface(cast(int, self.cmdq_page.va_addr), 0x200000, fmt='I')
 
     self.arch = "sm_89"
 
@@ -450,10 +450,10 @@ class NVDDevice(HCQCompiled[NVSignal]):
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400, enable_debug=False) -> GPFifo:
     userd = nv_gpu.NV_MEMORY_DESC_PARAMS(base=gpfifo_area.meta.mapping.paddrs[0][0] + offset + entries * 8, size=0x400, addressSpace=2, cacheAttrib=0)
 
-    print(hex(gpfifo_area.meta.mapping.paddrs[0][0] + offset + entries * 8))
+    # print(hex(gpfifo_area.meta.mapping.va_addr), hex(gpfifo_area.meta.mapping.paddrs[0][0]))
 
     notifier_va, notifier_sysmem = alloc_sysmem(0x1000, contigous=True)
-    notifier = nv_gpu.NV_MEMORY_DESC_PARAMS(base=notifier_sysmem[0], size=0x0000000ECC, addressSpace=1, cacheAttrib=0)
+    notifier = nv_gpu.NV_MEMORY_DESC_PARAMS(base=notifier_sysmem[0], size=0x000000ECC, addressSpace=1, cacheAttrib=0)
     self.notifier = to_mv(notifier_va, 0x1000)
 
     ramfc_alloc = self._gpu_alloc(0x1000, contiguous=True, tag="ramfc")
@@ -463,12 +463,12 @@ class NVDDevice(HCQCompiled[NVSignal]):
     method_va, method_sysmem = alloc_sysmem(0x5000, contigous=True)
     method_buffer = nv_gpu.NV_MEMORY_DESC_PARAMS(base=method_sysmem[0], size=0x5000, addressSpace=1, cacheAttrib=0)
 
-    print("OK", hex(gpfifo_area.va_addr))
+    # print("OK", hex(gpfifo_area.va_addr))
 
-    cid = 8 if offset == 0 else 9
+    cid = 0
 
     params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=0x0, hObjectBuffer=0x0,
-      gpFifoOffset=gpfifo_area.va_addr+offset, gpFifoEntries=entries, hContextShare=ctxshare, engineType=0x1, cid=cid,
+      gpFifoOffset=gpfifo_area.va_addr+offset, gpFifoEntries=entries, hContextShare=ctxshare, engineType=0x0, cid=cid,
       userdOffset=(ctypes.c_uint64*8)(entries * 8), userdMem=userd, errorNotifierMem=notifier, instanceMem=instblock, ramfcMem=ramfc,
       mthdbufMem=method_buffer, internalFlags=0x1d, flags=0x201020, ProcessID=1, SubProcessID=1)
     gpfifo = rm_alloc(self.nvdev, nv_gpu.AMPERE_CHANNEL_GPFIFO_A, self.root, channel_group, params)
@@ -496,16 +496,30 @@ class NVDDevice(HCQCompiled[NVSignal]):
     self.shared_mem_window = 0x729400000000 if self.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else 0xfe000000
     self.local_mem_window = 0x729300000000 if self.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else 0xff000000
 
-    NVComputeQueue().setup(copy_class=self.compute_class) \
+    # NVComputeQueue().signal(self.timeline_signal, self.timeline_value).submit(self)
+    # self.timeline_value += 1
+    # time.sleep(0.4)
+    # hexdump(self.notifier[:0x20])
+    # self.synchronize()
+
+    NVComputeQueue().setup(compute_class=self.compute_class) \
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
     time.sleep(0.4)
     hexdump(self.notifier[:0x20])
-    sys.exit(0)
+    self.synchronize()
+
+    # NVComputeQueue().setup(compute_class=self.compute_class) \
+    #                 .signal(self.timeline_signal, self.timeline_value).submit(self)
+    # time.sleep(0.4)
+    # hexdump(self.notifier[:0x20])
+    # self.synchronize()
+
+    # # sys.exit(0)
 
     # self.synchronize()
 
-    # print("ok")
+    # # print("ok")
 
     cast(NVCopyQueue, NVCopyQueue().wait(self.timeline_signal, self.timeline_value - 1)) \
                                    .setup(copy_class=self.dma_class) \

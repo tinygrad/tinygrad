@@ -248,7 +248,7 @@ class HCQSignal(Generic[HCQDeviceType]):
     Optional function which can implement sleep functionality for the signal.
     """
 
-  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
+  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 5000)):
     """
     Waits the signal is greater than or equal to a specific value.
 
@@ -353,7 +353,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   signal_pool: ClassVar[list[HCQBuffer]] = []
 
   def __init__(self, device:str, allocator:HCQAllocatorBase, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
-               comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None, kernargs_size=(0x1000), sigalloc_size=0x1000):
+               comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None, kernargs_size=(2 << 20), sigalloc_size=2 << 20):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
 
     from tinygrad.runtime.graph.hcq import HCQGraph

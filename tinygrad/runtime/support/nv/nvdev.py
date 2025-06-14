@@ -81,6 +81,7 @@ class NVPageTableEntry:
 
   def is_pte(self, entry_id) -> bool: return self.read_fields(entry_id)['is_pte'] if self.lv <= 3 else True
   def valid(self, entry_id):
+    # print(entry_id, hex(self.paddr), self.lv, self.read_fields(entry_id))
     if self.is_pte(entry_id): return self.read_fields(entry_id)['valid']
     elif self.lv == 3: return self.read_fields(entry_id)['aperture_small'] != 0
     return self.read_fields(entry_id)['aperture'] != 0
@@ -103,7 +104,7 @@ class NVPageTableTraverseContext:
 
     if not pt.valid(pte_idx):
       assert self.create_pts, "Not allowed to create new page table"
-      pt.set_entry(pte_idx, self.nvdev.mm.palloc(0x1000, zero=True, boot=self.boot), table=True, valid=True)
+      pt.set_entry(pte_idx, self.nvdev.mm.palloc(0x1000, zero=True, boot=True), table=True, valid=True)
 
     assert not pt.is_pte(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
     # print('level_down', hex(pt.address(pte_idx)))
@@ -137,16 +138,16 @@ class NVPageTableTraverseContext:
       self.level_up()
 
 class NVMemoryManager:
-  va_allocator = TLSFAllocator((1 << 49), base=(512 << 20)) # global for all devices.
+  va_allocator = TLSFAllocator((1 << 49), base=(2 << 30)) # global for all devices.
 
   def __init__(self, nvdev:NVDev, vram_size:int):
     self.nvdev, self.vram_size = nvdev, vram_size
-    # self.boot_allocator = TLSFAllocator(64 << 20, base=128<<20) # per device
-    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=(128 << 20)) # per device
+    self.boot_allocator = TLSFAllocator(64 << 20, base=8<<30) # per device
+    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=2 << 30) # per device
     self.root_page_table = NVPageTableEntry(self.nvdev, self.palloc(0x1000, zero=not self.nvdev.smi_dev, boot=True), lv=0)
 
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False) -> NVMapping:
-    if NV_DEBUG >= 2: print(f"nv {self.nvdev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
+    print(f"nv {self.nvdev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
 
     assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
 
@@ -154,7 +155,7 @@ class NVMemoryManager:
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
-          assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
+          assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x} {pt.valid(pte_idx + pte_off)}"
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
                       frag=0x0, valid=True)
 
@@ -189,8 +190,8 @@ class NVMemoryManager:
 
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
     # assert self.nvdev.is_booting == boot, "During booting, only boot memory can be allocated"
-    # paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
-    paddr = self.pa_allocator.alloc(round_up(size, 0x1000), align)
+    paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
+    # paddr = self.pa_allocator.alloc(round_up(size, 0x1000), align)
     if zero: self.nvdev.vram[paddr:paddr+size] = bytes(size)
     return paddr
 
