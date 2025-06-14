@@ -89,13 +89,13 @@ class AsmRenderer(Renderer):
   def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
   def reg_class(self, x:UOp) -> list[str]: return self.regs[x.dtype.scalar()]
   def bypass(self, x:UOp) -> UOp: return self.bypass(x.src[0]) if x.op in (Ops.ASSIGN, Ops.NOOP) else x
+  def srcs(self, x:UOp) -> tuple[UOp, ...]: return tuple(self.bypass(s) for s in x.src)
   def is_reg(self, r:str) -> bool: return r in self.all_regs
   def __getitem__(self, x:UOp) -> str: # hacky helper
     if x.op is Ops.CONST: return self.render_imm(to_hex(x.arg, x.dtype))
     r, dt = self.r[self.bypass(x)], x.dtype
     return self.render_reg(r, dt, x.op is Ops.LOAD) if self.is_reg(r) else r
   def _render(self, uops:list[UOp]):
-    def srcs(x:UOp) -> tuple[UOp, ...]: return tuple(self.bypass(s) for s in x.src)
     self.uops = uops
     regs = copy.deepcopy(self.regs)
     callee_saved: list[str] = []
@@ -118,7 +118,7 @@ class AsmRenderer(Renderer):
     # second pass updates end of range, a var defined before a range and used inside it is needed for the whole range
     ranges: list[UOp] = []
     for i,u in enumerate(reversed(uops)):
-      for s in (s for s in srcs(u) if s in live_range):
+      for s in (s for s in self.srcs(u) if s in live_range):
         end = next((live_range[rng][1] for rng in ranges if live_range[s][0] < live_range[rng][0]), len(uops)-i-1)
         live_range[s][1] = max(live_range[s][1], end)
       if u.op is Ops.ENDRANGE: ranges.append(u.src[0])
@@ -131,7 +131,7 @@ class AsmRenderer(Renderer):
       # we choose the var whose next use is the latest, in case no next use we use the uop(endrange) that kills the var
       # this prioritizes vars defined outside loops
       spilled = max([k for k,v in live.items() if v in cons],
-                    key=lambda k: next((j for j,u in enumerate(uops[i:live_range[k][1]]) if k in srcs(u)), live_range[k][1]-i))
+                    key=lambda k: next((j for j,u in enumerate(uops[i:live_range[k][1]]) if k in self.srcs(u)), live_range[k][1]-i))
       if spilled not in mem:
         nonlocal stack_size
         offset = stack_size + (spilled.dtype.itemsize - stack_size % spilled.dtype.itemsize) % spilled.dtype.itemsize
@@ -171,13 +171,13 @@ class AsmRenderer(Renderer):
         for k,v in live_at_range.pop(u.src[0], {}).items():
           if loc[k] != v: loc[k] = alloc(k, [v])
       # assign srcs, ignore srcs without live ranges
-      src = tuple(s for s in srcs(u) if s in live_range)
+      src = tuple(s for s in self.srcs(u) if s in live_range)
       for s in src:
         cons = self.constraints(u, s)
         if s in loc and loc[s] not in cons:
           # if var first use in range is a load we don't need to reload
           cr = list(live_at_range)[-1] if live_at_range else None
-          if cr is not None and s in live_at_range[cr] and not self.is_reg(loc[s]) and not any(s in srcs(x) for x in uops[live_range[cr][0]:i-1]):
+          if cr is not None and s in live_at_range[cr] and not self.is_reg(loc[s]) and not any(s in self.srcs(x) for x in uops[live_range[cr][0]:i-1]):
             live_at_range[cr].pop(s)
           loc[s] = alloc(s, cons)
       # free srcs before assigning destination to coalesce when valid
@@ -500,10 +500,10 @@ class X86Renderer(AsmRenderer):
 
   def constraints(self, u:UOp, s:UOp|None=None) -> list[str]:
     # constraints for srcs
-    if u.op in (Ops.IDIV, Ops.MOD) and s in u.src: return [r for r in self.reg_class(s) if r not in ("rdx", "rax")]
-    if u.op in (Ops.SHL, Ops.SHR) and s is u.src[1] and s.op != Ops.CONST: return ["rcx"]
+    if u.op in (Ops.IDIV, Ops.MOD) and s in self.srcs(u): return [r for r in self.reg_class(s) if r not in ("rdx", "rax")]
+    if u.op in (Ops.SHL, Ops.SHR) and s is self.srcs(u)[1] and s.op != Ops.CONST: return ["rcx"]
     # because of spill hoisting need to ensure acc is in memory before assign if it was spilled
-    if u.op is Ops.ASSIGN and s is u.src[0] and s in self.mem: return [self.mem[s]]
+    if u.op is Ops.ASSIGN and s is self.srcs(u)[0] and s in self.mem: return [self.mem[s]]
     if s is not None: return self.reg_class(s)
     # constraints for destination
     # abi constraints, stack args are offset by 8
@@ -514,7 +514,7 @@ class X86Renderer(AsmRenderer):
     if u.op is Ops.IDIV: return ["rax"]
     if u.op is Ops.MOD: return ["rdx"]
     # float cmp requires nan check, to avoid reserving temp reg we constrain dest to regs that have a high 8 bit portion
-    if u.op in (Ops.CMPLT, Ops.CMPNE) and u.src[0].dtype in dtypes.floats: return ["rax", "rbx", "rcx", "rdx"]
+    if u.op in (Ops.CMPLT, Ops.CMPNE) and self.srcs(u)[0].dtype in dtypes.floats: return ["rax", "rbx", "rcx", "rdx"]
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return imm
   def render_mem(self, sz:int) -> str: return f"[rsp + {sz}]"
