@@ -282,9 +282,26 @@ const evtSources = [];
 // context: collection of steps
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
 function setState(ns) {
+  const { currentCtx:prevCtx, currentStep:prevStep } = state;
   Object.assign(state, ns);
+  // update element styles if needed
+  document.getElementById(`ctx-${state.currentCtx}`)?.classList.toggle("expanded", state.expandSteps);
+  if (state.currentCtx !== prevCtx) {
+    document.getElementById(`ctx-${prevCtx}`)?.classList.remove("active", "expanded");
+    const newCtx = document.getElementById(`ctx-${state.currentCtx}`);
+    newCtx.classList.add("active");
+    requestAnimationFrame(() => newCtx.scrollIntoView({ behavior:'auto', block:'nearest' }));
+  }
+  if (state.currentCtx !== prevCtx || state.currentStep !== prevStep) {
+    document.getElementById(`step-${prevCtx}-${prevStep}`)?.classList.remove("active");
+    const newStep = document.getElementById(`step-${state.currentCtx}-${state.currentStep}`);
+    newStep.classList.add("active");
+    requestAnimationFrame(() => newStep.scrollIntoView({ behavior:'auto', block:'nearest' }));
+  }
+  // re-render
   main();
 }
+
 window.addEventListener("popstate", (e) => {
   if (e.state != null) setState(e.state);
 });
