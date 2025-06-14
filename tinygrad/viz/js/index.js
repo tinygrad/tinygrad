@@ -569,6 +569,7 @@ document.querySelector(".collapse-btn").addEventListener("click", (e) => {
   document.querySelector(".main-container").classList.toggle("collapsed", isCollapsed);
   e.currentTarget.blur();
   e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
+  window.dispatchEvent(new Event("resize"));
 });
 
 // **** resizer
