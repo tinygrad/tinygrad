@@ -169,10 +169,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop evaluation ***
 
-  def simplify(self, no_rewrite=False):
+  def simplify(self):
     # late import!
     from tinygrad.uop.symbolic import symbolic
-    if no_rewrite: return UOp.const(self.dtype, self.vmin) if self.vmin == self.vmax else self
     with Context(TRACK_MATCH_STATS=0):
       return graph_rewrite(self, symbolic)
   def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
