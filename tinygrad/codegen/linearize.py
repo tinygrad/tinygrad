@@ -2,12 +2,16 @@ from __future__ import annotations
 import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, dtypes
 from tinygrad.helpers import dedup, partition, all_same, flatten, getenv
 from tinygrad.uop.spec import type_verify
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(lst:list[UOp]) -> list[UOp]:
+  add_count = 0
+  for l in lst:
+    if l.op is Ops.ADD and l.dtype == dtypes.float and l.src[1].op in (Ops.CAST, Ops.MUL): add_count += 1
+  if add_count > 900: return lst
   in_this_block = set(lst)
   local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
