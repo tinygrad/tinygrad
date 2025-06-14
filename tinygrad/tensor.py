@@ -4274,28 +4274,46 @@ class Tensor(MathTrait):
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
-  
-  def qr_decompose(self, tol=1e-10):
+
+  def norm(self) -> Tensor:
     """
-    Compute the QR_decompose using Gram-Schmidt algorithm
+    Computes the norm of the tensor.
+
+    The norm is calculated as the square root of the sum of the squares of the tensor's elements.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([3, 4])
+    print(t.norm().item())  # Returns 5.0
+    ```
+    """
+    return self.square().sum().sqrt()
+
+  def qr_decompose(self) -> tuple[Tensor, Tensor]:
+    """
+    Compute the QR_decompose using Household-Reflectors algorithm
+    Based off https://www.quantstart.com/articles/QR-Decomposition-with-Python-and-NumPy/
     Args:
         self (Tensor): The input matrix (TinyGrad Tensor).
         tol (float): Tolerance for convergence.
     """
-    m = self.shape[1]
-    Q, R = [], Tensor.zeros(m, m).contiguous()
+    R = self.clone()
+    n = R.shape[0]
+    I = Tensor.eye(n, dtype=R.dtype)
+    Q = Tensor.eye(n, dtype=self.dtype)
+    for k in range(n-1):
+        x = R[k:, k]
+        e = I[k:,k]
+        alpha =  Tensor([-1 if x[0].item() > 0 else 1 if x[0].item() < 0 else 0]) * x.norm()
+        u = x + alpha * e
+        v = u/u.norm()
+        Q_min = Tensor.eye(n-k) - 2.0 * v.unsqueeze(1).expand(-1, n-k) * v.repeat(n-k, 1)
+        Q_t = Tensor.eye(n).contiguous()
+        Q_t[k:, k:] = Q_min
+        Q = Q_t @ Q
+        R = Q_t @ R
+    return Q.transpose(), R
 
-    for j in range(int(m)):
-        v = self[:, j]
-        for i, q in enumerate(Q):
-            R[i, j] = (q * v).sum()
-            v = v - R[i, j] * q
-        R[j, j] = v.square().sum().sqrt()
-        if R[j, j].item() < tol: raise ValueError("Matrix is singular or not full rank.")
-        Q.append(v / R[j, j])
-    return Tensor.stack(*Q, dim=1), R
-
-  def eig(self, max_iter=1000, tol=1e-12)-> tuple[Tensor, Tensor]:
+  def eig(self, max_iter=100, tol=1e-12)-> tuple[Tensor, Tensor]:
     """
     Compute the eigenvalues and eigenvectors of a matrix using QR algorithm.
     Args:
@@ -4306,40 +4324,74 @@ class Tensor(MathTrait):
     A = self.clone().realize()
     n = A.shape[0]
     V = Tensor.eye(n)  # Accumulate eigenvectors here
-
+    previous_abs_diff = float('inf')
     for _ in range(max_iter):
-        Q, R = A.qr_decompose(tol = tol)
+        Q, R = A.qr_decompose() # tol = tol
         A_next = R @ Q
         V = V @ Q  # Accumulate Qs
+        new_abs_diff = (A_next - A).abs().sum().item()
+        # if new_abs_diff < tol: break
 
-        if (A_next - A).abs().sum().item() < tol: break
+        if previous_abs_diff == new_abs_diff or new_abs_diff < tol: break
+        previous_abs_diff = new_abs_diff
         A = A_next.realize()
     eigenvalues = Tensor([A[i, i].item() for i in range(int(n))])
     return eigenvalues, V
 
-  
-  def svd(self) -> tuple[Tensor, Tensor, Tensor]:
+  def svd(self, compute_uv: bool = True, full_matrices: bool = True) -> tuple[Tensor, Tensor, Tensor]:
     """
     Computes the Singular Value Decomposition (SVD) of `self`.
+    # Note not handling case for hermitian from numpy(), as I'm not using seperate algorithms for symmetric
 
-    See: https://pytorch.org/docs/stable/generated/torch.linalg.svd.html
+    Args:
+        compute_uv (bool): Whether or not to compute `u` and `vh` in addition to `s`. True by default.
+        full_matrices (bool): If True (default), `u` and `vh` have the shapes ``(..., M, M)`` and ``(..., N, N)``, respectively. 
+                Otherwise, the shapes are ``(..., M, K)`` and ``(..., K, N)``, respectively, where ``K = min(M, N)``.
 
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2], [3, 4]])
-    u, s, v = t.svd()
-    print(u.numpy(), s.numpy(), v.numpy())
-
-    # Note that compute_uv:bool=True, full_matrices:bool=False are not implemented yet
-    ```
+    Returns:
+        U (Tensor): Left singular vectors.
+        S (Tensor): Singular values.
+        Vt (Tensor): Right singular vectors (transposed).
     """
     A = self.clone()
     AtA, AAt = self.transpose() @ A, A @ A.transpose()
     eigvals_AtA, V = AtA.eig()
     U = AAt.eig()[1]
     eigvals_AtA, sorted_indices = eigvals_AtA.sort(descending=True)
-    return U[:, sorted_indices], eigvals_AtA.sqrt(), V[:, sorted_indices].transpose()
-      
 
+    if compute_uv:
+        # Using Householder Transformations to pad U and V to full matrices
+        if full_matrices:
+            M, N = A.shape
+            K = min(M, N)
+            if U.shape[1] < M:
+                U_full = Tensor.eye(M, dtype=U.dtype)
+                U_full[:, :K] = U[:, sorted_indices]
+                for i in range(K, M):
+                    v = Tensor.eye(M)[:, i]
+                    for j in range(i):
+                        # Apply Householder transformation
+                        u = U_full[:, j]
+                        v -= 2 * (u @ v) * u
+                    U_full[:, i] = v / v.norm()
+                U = U_full
+
+            if V.shape[1] < N:
+                V_full = Tensor.eye(N, dtype=V.dtype)
+                V_full[:, :K] = V[:, sorted_indices]
+                for i in range(K, N):
+                    v = Tensor.eye(N)[:, i]
+                    for j in range(i):
+                        u = V_full[:, j]
+                        v -= 2 * (u @ v) * u
+                    V_full[:, i] = v / v.norm()
+                V = V_full
+
+            return U, eigvals_AtA.sqrt(), V.transpose()
+        else:
+            return U[:, sorted_indices], eigvals_AtA.sqrt(), V[:, sorted_indices].transpose()
+    else:
+        return eigvals_AtA.sqrt()
 
 P = ParamSpec("P")
 T = TypeVar("T")
