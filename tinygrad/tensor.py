@@ -4340,7 +4340,6 @@ class Tensor(MathTrait):
     return U.reshape(*b_dims, m, k), S.reshape(*b_dims, k), V.reshape(*b_dims, n, k).transpose(-2, -1)
 
   def householder_qr(self:Tensor) -> Tensor:
-    #return Tensor(torch.linalg.qr(torch.tensor(A.numpy()))[0].numpy())
     assert self.ndim == 3, "Input must be a 3D tensor"
     b, m, n = self.shape
     Q = Tensor.eye(m).expand(b, m, m).contiguous()
