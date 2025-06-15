@@ -326,6 +326,7 @@ async function renderProfiler() {
 
   // ** rendering and interactions
   resize();
+  window.addEventListener("resize", resize);
 }
 
 // ** zoom and recentering
