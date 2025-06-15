@@ -220,9 +220,9 @@ arm64_reg_map = {**{f"x{i}": {4: f"w{i}"} for i in range(31)}, **{f"v{i}": {16: 
 
 arm64_mov_ops = {Ops.STORE: "str", Ops.LOAD: "ldr", Ops.ASSIGN: "mov"}
 arm64_branch_ops = {Ops.ENDRANGE: "b.lt", Ops.IF: "b.eq"}
-arm64_unsigned_ops = {**arm64_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "mul", Ops.MULACC: "madd", Ops.IDIV: "udiv", Ops.MOD: "udiv",
+arm64_unsigned_ops = {**arm64_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "mul", Ops.MULACC: "madd", Ops.IDIV: "udiv",
                 Ops.CMPNE: "cmp", Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "orr", Ops.XOR: "eor", Ops.SHL: "lsl", Ops.SHR: "lsr", Ops.WHERE: "csel"}
-arm64_signed_ops = {**arm64_unsigned_ops, Ops.IDIV: "sdiv", Ops.MOD: "sdiv", Ops.SHR: "asr"}
+arm64_signed_ops = {**arm64_unsigned_ops, Ops.IDIV: "sdiv", Ops.SHR: "asr"}
 # NOTE: int16/int8 alus are casted to int32
 arm64_16bit_ops = {Ops.STORE: "strh", Ops.LOAD: "ldrh", Ops.ASSIGN: "mov"}
 arm64_8bit_ops = {Ops.STORE: "strb", Ops.LOAD: "ldrb", Ops.ASSIGN: "mov"}
@@ -318,9 +318,9 @@ class Arm64Renderer(AsmRenderer):
 
   def constraints(self, u:UOp, s:UOp|None=None) -> list[str]:
     if s is not None: return self.reg_class(s)
+    # stack args are offset by 8
     if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
-      # TODO: stack offset is wrong needs to include stack size
-      return [("x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7")[i]] if (i:=self.uops.index(u)) < 8 else [f"{(i-8)*8}"]
+      return [("x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7")[i]] if (i:=self.uops.index(u)) < 8 else [f"[x29, #{(i-7)*8+8}]"]
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return f"#{imm}"
   def render_mem(self, sz:int) -> str: return f"[sp, #{sz}]"
@@ -335,6 +335,7 @@ class Arm64Renderer(AsmRenderer):
     return "\n".join([".text", f".global {name}", f"{name}:", "stp x29, x30, [sp, #-16]!", "mov x29, sp", f"sub sp, sp, #{stack_size}"] + \
                       kernel + [f"add sp, sp, #{stack_size}", "ldp x29, x30, [sp], #16", "ret", "\n"])
 
+# rbp is frame pointer, kept for stack arg access
 x86_gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx", "r10", "r11", "r12", "r13", "r14", "r15"]
 x86_float_regs = ["xmm" + str(i) for i in range(0,16)]
 x86_regs = {**{x:x86_gen_regs for x in (dtypes.bool,)+dtypes.ints}, **{x:x86_float_regs for x in dtypes.floats}}
