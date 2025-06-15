@@ -4275,7 +4275,7 @@ class Tensor(MathTrait):
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
-  def svd(self:Tensor, full_matrices:bool=True, k:int|None=None) -> tuple[Tensor, Tensor, Tensor]:
+  def svd(self:Tensor, k:int|None=None) -> tuple[Tensor, Tensor, Tensor]:
     """
     Returns the SVD decomposition U, S, V such that A ≈ U @ diag(S) @ V.
     k: Number of singular values to compute (default: min(m,n))
@@ -4292,23 +4292,10 @@ class Tensor(MathTrait):
     if k is None: k = min(m, n)
     def power_iteration(M:Tensor, k:int, max_iter:int=15) -> Tensor:
       B, n, _ = M.shape
-      Q = Tensor.randn(B, n, k)
-      Q, _ = Tensor._householder_qr(Q)
-      for i in range(max_iter):
-        Q = M @ Q
-        Q, _ = Tensor._householder_qr(Q)
+      Q, _ = Tensor.randn(B, n, k).qr()
+      for _ in range(max_iter):
+        Q, _ = (M @ Q).qr()
       return Q
-    def extend_orthogonal(Q:Tensor, target_dim:int) -> Tensor:
-      B, current_dim, k = Q.shape
-      if k >= target_dim: return Q
-      R = Tensor.randn(B, current_dim, target_dim - k)
-      return Tensor._householder_qr(Tensor.cat(Q, R, dim=-1))[0]
-    def extra_cols(X: Tensor, k:int, dim:int) -> Tensor:
-      signs_prev = X[:, 0, :k].sign()
-      X = extend_orthogonal(X, dim)
-      signs = X[:, 0, :k].sign() * signs_prev
-      X[:, :, :k] = X[:, :, :k] * signs.unsqueeze(-2)
-      return X
     if m >= n:
       # Compute V from A^T A, then U = A @ V @ S^-1
       AtA = A.transpose(-2, -1) @ A
@@ -4327,24 +4314,29 @@ class Tensor(MathTrait):
     S, idx = S.sort(dim=-1, descending=True)
     U = U.gather(-1, idx.unsqueeze(-2).expand(-1, m, -1))
     V = V.gather(-1, idx.unsqueeze(-2).expand(-1, n, -1))
-    if full_matrices:
-      if k < m: U = extra_cols(U, k, m)
-      elif k < n: V = extra_cols(V, k, n)
-      return U.reshape(*b_dims, m, m), S.reshape(*b_dims, k), V.reshape(*b_dims, n, n).transpose(-2, -1)
     return U.reshape(*b_dims, m, k), S.reshape(*b_dims, k), V.reshape(*b_dims, n, k).transpose(-2, -1)
 
-  def _householder_qr(self:Tensor) -> Tensor:
-    assert self.ndim == 3, "Input must be a 3D tensor"
-    b, m, n = self.shape
+  def qr(self:Tensor) -> tuple[Tensor, Tensor]:
+    """
+    Returns the QR decomposition Q, R such that A = Q @ R.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    A = Tensor.randn(5, 10)
+    Q, R = A.qr()
+    print(Q.numpy(), R.numpy())
+    ```
+    """
+    assert self.ndim in {2, 3}, "Input must be a 2D or 3D Tensor"
+    R = self.clone() if self.ndim == 3 else self.clone().unsqueeze(0)
+    b, m, n = R.shape
     Q = Tensor.eye(m).expand(b, m, m).contiguous()
-    R = self.clone()
     for k in range(min(m-1, n)):
       v = R[:, k:, k:k+1].clone()
       v[:, 0, 0] += v[:, 0, 0].sign() * (v ** 2).sum(axis=(1,2)).sqrt()
       v /= (v ** 2).sum(axis=1, keepdim=True).sqrt()
       R[:, k:, k:] -= 2 * v @ (v.transpose(1, 2) @ R[:, k:, k:])
       Q[:, :, k:] -= 2 * (Q[:, :, k:] @ v) @ v.transpose(1, 2)
-    return Q, R
+    return (Q, R) if self.ndim == 3 else (Q.squeeze(), R.squeeze())
 
 P = ParamSpec("P")
 T = TypeVar("T")
