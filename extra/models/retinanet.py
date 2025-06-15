@@ -1,7 +1,7 @@
 import math
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import flatten, get_child
-from examples.mlperf.helpers import generate_anchors, BoxCoder
+from examples.mlperf.helpers import generate_anchors, BoxCoder, generate_anchors2
 from examples.mlperf.losses import sigmoid_focal_loss, l1_loss
 from extra.models.resnet import ResNet
 import tinygrad.nn as nn
@@ -35,6 +35,21 @@ def decode_bbox(offsets, anchors):
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 
+def decode_bbox2(offsets, anchors):
+  dx, dy, dw, dh = offsets.permute(1,0)
+  widths, heights = anchors[:, 2] - anchors[:, 0], anchors[:, 3] - anchors[:, 1]
+  cx, cy = anchors[:, 0] + 0.5 * widths, anchors[:, 1] + 0.5 * heights
+  pred_cx, pred_cy = dx * widths + cx, dy * heights + cy
+  pred_w, pred_h = dw.exp() * widths, dh.exp() * heights
+  pred_x1, pred_y1 = pred_cx - 0.5 * pred_w, pred_cy - 0.5 * pred_h
+  pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
+  return Tensor.stack(pred_x1, pred_y1, pred_x2, pred_y2, dim=1)
+
+def _unique(x:Tensor) -> Tensor:
+  x = x.sort()[0]
+  mask = Tensor([True]).cat(x[1:] != x[:-1])
+  return x.masked_select(mask)
+
 class RetinaNet:
   def __init__(self, backbone:ResNet, num_classes:int=264, num_anchors:int=9, scales:list[int]|None=None, aspect_ratios:list[float]|None=None):
     assert isinstance(backbone, ResNet)
@@ -49,8 +64,12 @@ class RetinaNet:
   def __call__(self, x:Tensor, **kwargs):
     return self.forward(x, **kwargs)
 
-  def forward(self, x:Tensor, **kwargs):
-    return self.head(self.backbone(x), **kwargs)
+  def forward(self, x:Tensor, **kwargs) -> Tensor|tuple[Tensor, list[tuple[int, int]]]:
+    x = self.backbone(x)
+    if Tensor.training:
+      return self.head(x, **kwargs)
+    else:
+      return self.head(x, **kwargs), [xs.shape[-2:] for xs in x]
 
   def load_from_pretrained(self):
     model_urls = {
@@ -68,9 +87,67 @@ class RetinaNet:
       obj.assign(dat)
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
-  def postprocess_detections(self, predictions, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
+  def postprocess_detections2(self, predictions:Tensor, grid_sizes:list[tuple[int, int]],
+                              input_size:tuple[int, int]=(800, 800), image_sizes:list[tuple[int, int]]|None=None,
+                              orig_image_sizes:list[tuple[int, int]]|None=None, score_thresh=0.05,
+                              topk_candidates=1000, nms_thresh=0.5):
+    anchors = generate_anchors2(input_size, grid_sizes)
+    num_anchors_per_level = [h * w for h, w in grid_sizes]
+    HW = 0
+    for v in num_anchors_per_level:
+      HW += v
+    HWA = predictions.shape[1]
+    A = HWA // HW
+    num_anchors_per_level = [hw * A for hw in num_anchors_per_level]
+
+    detections = []
+    for i, pred_img in enumerate(predictions):
+      height, width = input_size if image_sizes is None else image_sizes[i]
+      pred_img = pred_img.split(num_anchors_per_level)
+      offsets_img, scores_img = [br[:, :4] for br in pred_img], [cl[:, 4:] for cl in pred_img]
+      img_boxes, img_scores, img_labels = [], [], []
+
+      for offsets_level, scores_level, anchors_level in zip(offsets_img, scores_img, anchors):
+        # remove low scoring boxes
+        scores_level = scores_level.flatten()
+        topk_idxs_cumsum = (scores_level > score_thresh).cumsum()
+        topk_idxs = Tensor.zeros(topk_idxs_cumsum[-1].item(), dtype=dtypes.int32)
+        topk_idxs = topk_idxs.scatter(0, topk_idxs_cumsum, 1, reduce="add").cumsum()
+        scores_level = scores_level[topk_idxs]
+
+        # keep topk
+        if scores_level.numel() > 0:
+          num_topk = min(scores_level.shape[0], topk_candidates)
+          scores_level, idxs = scores_level.topk(num_topk)
+          topk_idxs = topk_idxs[idxs]
+
+        # bbox coords from offsets
+        anchor_idxs = topk_idxs.div(self.num_classes, rounding_mode="floor")
+        labels_level = topk_idxs % self.num_classes
+        boxes_level = decode_bbox2(offsets_level[anchor_idxs], anchors_level[anchor_idxs])
+
+        # clip to image size
+        clipped_x = boxes_level[:, 0::2].clamp(0, width)
+        clipped_y = boxes_level[:, 1::2].clamp(0, height)
+        boxes_level = Tensor.stack(clipped_x, clipped_y, dim=2).reshape(-1, 4)
+
+        img_boxes.append(boxes_level)
+        img_scores.append(scores_level)
+        img_labels.append(labels_level)
+
+      img_boxes = Tensor.cat(*img_boxes)
+      img_scores = Tensor.cat(*img_scores)
+      img_labels = Tensor.cat(*img_labels)
+
+      # nms for each class
+      unique_img_labels = _unique(img_labels)
+      detections.append(unique_img_labels)
+
+    return detections
+
+  # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
+  def postprocess_detections(self, predictions, grid_sizes, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
     anchors = generate_anchors(input_size)
-    grid_sizes = self.backbone.compute_grid_sizes(input_size)
     split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
     detections = []
     for i, predictions_per_image in enumerate(predictions):
@@ -97,6 +174,7 @@ class RetinaNet:
         anchor_idxs = topk_idxs // self.num_classes
         labels_per_level = topk_idxs % self.num_classes
         boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level[anchor_idxs])
+
         # clip to image size
         clipped_x = boxes_per_level[:, 0::2].clip(0, w)
         clipped_y = boxes_per_level[:, 1::2].clip(0, h)
@@ -111,24 +189,27 @@ class RetinaNet:
       image_labels = np.concatenate(image_labels)
 
       # nms for each class
-      keep_mask = np.zeros_like(image_scores, dtype=bool)
-      for class_id in np.unique(image_labels):
-        curr_indices = np.where(image_labels == class_id)[0]
-        curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
-        keep_mask[curr_indices[curr_keep_indices]] = True
-      keep = np.where(keep_mask)[0]
-      keep = keep[image_scores[keep].argsort()[::-1]]
+      unique_image_labels = np.unique(image_labels)
+      detections.append(unique_image_labels)
+      # keep_mask = np.zeros_like(image_scores, dtype=bool)
+      # print(f"---unique: {image_labels.shape=} {np.unique(image_labels).shape=}")
+      # for class_id in np.unique(image_labels):
+      #   curr_indices = np.where(image_labels == class_id)[0]
+      #   curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
+      #   keep_mask[curr_indices[curr_keep_indices]] = True
+      # keep = np.where(keep_mask)[0]
+      # keep = keep[image_scores[keep].argsort()[::-1]]
 
-      # resize bboxes back to original size
-      image_boxes = image_boxes[keep]
-      if orig_image_sizes is not None:
-        resized_x = image_boxes[:, 0::2] * orig_image_sizes[i][1] / w
-        resized_y = image_boxes[:, 1::2] * orig_image_sizes[i][0] / h
-        image_boxes = np.stack([resized_x, resized_y], axis=2).reshape(-1, 4)
-      # xywh format
-      image_boxes = np.concatenate([image_boxes[:, :2], image_boxes[:, 2:] - image_boxes[:, :2]], axis=1)
+    #   # resize bboxes back to original size
+    #   image_boxes = image_boxes[keep]
+    #   if orig_image_sizes is not None:
+    #     resized_x = image_boxes[:, 0::2] * orig_image_sizes[i][1] / w
+    #     resized_y = image_boxes[:, 1::2] * orig_image_sizes[i][0] / h
+    #     image_boxes = np.stack([resized_x, resized_y], axis=2).reshape(-1, 4)
+    #   # xywh format
+    #   image_boxes = np.concatenate([image_boxes[:, :2], image_boxes[:, 2:] - image_boxes[:, :2]], axis=1)
 
-      detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
+    #   detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
     return detections
 
 class ClassificationHead:
@@ -203,10 +284,6 @@ class ResNetFPN:
     self.body = resnet
     in_channels_list = [(self.body.in_planes // 8) * 2 ** (i - 1) for i in returned_layers]
     self.fpn = FPN(in_channels_list, out_channels)
-
-  # this is needed to decouple inference from postprocessing (anchors generation)
-  def compute_grid_sizes(self, input_size):
-    return np.ceil(np.array(input_size)[None, :] / 2 ** np.arange(3, 8)[:, None])
 
   def __call__(self, x:Tensor):
     out = self.body.bn1(self.body.conv1(x)).relu()
