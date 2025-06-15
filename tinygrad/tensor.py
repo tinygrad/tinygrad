@@ -4281,14 +4281,13 @@ class Tensor(MathTrait):
     k: Number of singular values to compute (default: min(m,n))
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.randn(5, 10)
-    U, S, V = t.svd()
+    A = Tensor.randn(5, 10)
+    U, S, V = A.svd()
     print(U.numpy(), S.numpy(), V.numpy())
     ```
     """
-    A = self
-    *b_dims, m, n = A.shape
-    A = A.reshape(-1, m, n)
+    *b_dims, m, n = self.shape
+    A = self.reshape(-1, m, n)
     if k is None: k = min(m, n)
     def power_iteration(M:Tensor, k:int, max_iter:int=15) -> Tensor:
       B, n, _ = M.shape
