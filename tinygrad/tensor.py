@@ -912,6 +912,38 @@ class Tensor(MathTrait):
     indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
+  @staticmethod
+  def stft(x:Tensor, weight:Tensor, n_fft, stride, pad)->Tensor:
+      cutoff = int(n_fft // 2) + 1
+      tg_stft_raw = x.pad(pad, "reflect").unsqueeze(1).conv2d(weight, stride=stride)
+      tg_stft_out = (tg_stft_raw[:, :cutoff, :]**2 + tg_stft_raw[:, cutoff:, :]**2).sqrt()
+      return tg_stft_out
+
+  @staticmethod
+  def make_basis_buffers_tg(N, k, window):
+      n = Tensor.arange(N).float()
+      angle = 2 * math.pi * k * n / N
+
+      w = window
+      cos_basis = w * angle.cos()
+      sin_basis = w * -angle.sin()
+      return cos_basis, sin_basis
+
+  @staticmethod
+  def make_stft_basis_buffers(n_fft):
+      return Tensor.cat(*Tensor.make_basis_buffers_tg(n_fft, Tensor.arange((n_fft // 2) + 1)[None].T, Tensor.hann_tg(n_fft))).reshape(n_fft+2, 1, n_fft)
+
+  @staticmethod
+  def stft_full(x, n_fft, stride, pad):
+      bb = Tensor.make_stft_basis_buffers(n_fft)
+      res = Tensor.stft(x, bb, n_fft, stride, pad)
+      return res
+
+  @staticmethod
+  def hann_tg(N, periodic=True):
+      M = N+(periodic*1)
+      return ((1.0 - (Tensor.arange(M) * 2.0 * math.pi / (M - 1)).cos()) * 0.5)[:N]
+
   # ***** toposort and backward pass *****
 
   def gradient(self, *targets:Tensor, gradient:Tensor|None=None, materialize_grads=False) -> list[Tensor]:
