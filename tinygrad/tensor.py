@@ -2838,6 +2838,43 @@ class Tensor(MathTrait):
     shrink_to_k = tuple((0, k) if i == dim else None for i in range(self.ndim))
     return x.shrink(shrink_to_k), idx.shrink(shrink_to_k)
 
+  def svd(self, iters:int=20) -> tuple[Tensor, Tensor, Tensor]:
+    """
+    Computes the singular value decomposition of a 2D tensor using power iteration.
+
+    Returns `U`, `S`, and `Vh` such that `self` is approximately equal to
+    `(U * S.unsqueeze(0)) @ Vh`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[3.0, 1.0], [1.0, 3.0]])
+    U, S, Vh = t.svd()
+    print((U * S.unsqueeze(0) @ Vh).round().tolist())
+    ```
+    """
+    if self.ndim != 2: raise NotImplementedError("svd only supports 2D tensors")
+    A = self.clone()
+    m, n = A.shape
+    k = min(m, n)
+    U: list[Tensor] = []
+    S: list[Tensor] = []
+    V: list[Tensor] = []
+    for _ in range(k):
+      v = Tensor.randn(n, device=self.device)
+      for _ in range(iters):
+        u = (A @ v)
+        u = u / (u.square().sum().sqrt() + 1e-6)
+        v = (A.T @ u)
+        v = v / (v.square().sum().sqrt() + 1e-6)
+      sigma = (A @ v).square().sum().sqrt()
+      U.append(u)
+      S.append(sigma)
+      V.append(v)
+      A = A - sigma * (u.unsqueeze(1) @ v.unsqueeze(0))
+    U = Tensor.stack(*U, dim=1)
+    S = Tensor.stack(*S)
+    Vh = Tensor.stack(*V, dim=1).T
+    return U, S, Vh
+
   # ***** unary ops *****
 
   def logical_not(self) -> Tensor:
