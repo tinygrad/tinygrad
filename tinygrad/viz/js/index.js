@@ -290,7 +290,7 @@ async function renderProfiler() {
     const scale = d3.scaleLinear().domain([0, data.duration]).range([0, canvas.clientWidth]);
     const ticks = scale.ticks();
     const [tickHeight, tickFontSize] = [16, 10];
-    document.getElementById("device-list").style.paddingTop = `${tickHeight}px`;
+    document.getElementById("device-list").style.paddingTop = `${tickHeight+8}px`;
     for (const [i, tick] of ticks.entries()) {
       ctx.beginPath();
       const x = (i/(ticks.length-1))*canvas.clientWidth;
@@ -303,7 +303,7 @@ async function renderProfiler() {
       const padding = i === ticks.length-1 ? -1 : 1;
       ctx.fillText(formatTime(tick, data.duration), x+(ctx.lineWidth+2)*padding, tickHeight-tickFontSize);
     }
-    const { top: canvasTop } = rect(canvas);
+    const canvasTop = rect(canvas).top;
     for (const [i, e] of data.events.entries()) {
       const x = scale(e.ts-data.st);
       const width = scale(e.ts+e.dur-data.st)-x;
@@ -316,7 +316,7 @@ async function renderProfiler() {
 
   function resize() {
     let { width, height } = rect(".profiler");
-    width -= rect("#device-list").width+10;
+    width -= rect("#device-list").width;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
