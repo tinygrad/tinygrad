@@ -574,6 +574,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
                                         "device": _from_torch_device(device) if device else None}.items() if v is not None}),
   "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64)),
   "aten.unfold": Tensor.unfold,
+  "aten.linalg_svd": lambda self, full_matrices=False: self.svd(),
 }}
 
 def wrap_fxn(k,f):
