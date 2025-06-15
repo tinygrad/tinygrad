@@ -4275,7 +4275,7 @@ class Tensor(MathTrait):
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
-  def svd(self:Tensor, k:int|None=None) -> tuple[Tensor, Tensor, Tensor]:
+  def svd(self:Tensor, full_matrices:bool=True, k:int|None=None) -> tuple[Tensor, Tensor, Tensor]:
     """
     Returns the SVD decomposition U, S, V such that A ≈ U @ diag(S) @ V.
     k: Number of singular values to compute (default: min(m,n))
@@ -4299,6 +4299,20 @@ class Tensor(MathTrait):
         Q = M @ Q
         Q = Tensor.householder_qr(Q)
       return Q
+    def extend_orthogonal(Q:Tensor, target_dim:int) -> Tensor:
+      B, current_dim, k = Q.shape
+      if k >= target_dim: return Q
+      remaining = target_dim - k
+      R = Tensor.randn(B, current_dim, remaining)
+      extended = Tensor.cat(Q, R, dim=-1)
+      Q_full = Tensor.householder_qr(extended)
+      return Q_full
+    def extra_cols(X: Tensor, k:int, dim:int) -> Tensor:
+      signs_prev = X[:, 0, :k].sign()
+      X = extend_orthogonal(X, dim)
+      signs = X[:, 0, :k].sign() * signs_prev
+      X[:, :, :k] = X[:, :, :k] * signs.unsqueeze(-2)
+      return X
     if m >= n:
       # Compute V from A^T A, then U = A @ V @ S^-1
       AtA = A.transpose(-2, -1) @ A  # (B, n, n)
@@ -4317,6 +4331,12 @@ class Tensor(MathTrait):
     S, idx = S.sort(dim=-1, descending=True)
     U = U.gather(-1, idx.unsqueeze(-2).expand(-1, m, -1))
     V = V.gather(-1, idx.unsqueeze(-2).expand(-1, n, -1))
+    if full_matrices:
+      if k < m:
+        U = extra_cols(U, k, m)
+      elif k < n:
+        V = extra_cols(V, k, n)
+      return U.reshape(*b_dims, m, m), S.reshape(*b_dims, k), V.reshape(*b_dims, n, n).transpose(-2, -1)
     return U.reshape(*b_dims, m, k), S.reshape(*b_dims, k), V.reshape(*b_dims, n, k).transpose(-2, -1)
 
   def householder_qr(self:Tensor) -> Tensor:
