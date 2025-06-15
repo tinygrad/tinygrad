@@ -240,6 +240,7 @@ const colors = [
 ];
 
 var data, canvasZoom;
+const [laneHeight, tickHeight, tickFontSize] = [32, 16, 10];
 async function renderProfiler() {
   // ** fetch timing and setup layout
   if (data == null) {
@@ -255,13 +256,13 @@ async function renderProfiler() {
       const localEnd = e.ts+e.dur;
       if (et == null || localEnd > et) et = localEnd;
       if (document.getElementById(`pid-${e.pid}`) == null) {
-        d3.select(deviceList).append("div").attr("id", `pid-${e.pid}`).text(devices[e.pid]);
+        d3.select(deviceList).append("div").attr("id", `pid-${e.pid}`).text(devices[e.pid]).style("height", laneHeight);
       }
       events.push(e);
     }
     const duration = et-st;
     const kernelMap = {};
-    for (const [i, c] of ctxs.entries()) kernelMap[c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1")] = { ...c, idx:i };
+    for (const [i, c] of ctxs.entries()) kernelMap[c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1")] = i;
     data = { events, duration, st, et, kernelMap };
 
     // zoom/drag on the time axis
@@ -294,7 +295,6 @@ async function renderProfiler() {
     const scale = d3.scaleLinear().domain([0, data.duration]).range([0, canvas.clientWidth]);
     if (transform != null) scale.domain(scale.range().map(transform.invertX, transform).map(scale.invert, scale))
     const ticks = scale.ticks();
-    const [tickHeight, tickFontSize] = [16, 10];
     document.getElementById("device-list").style.paddingTop = `${tickHeight+8}px`;
     for (const [i, tick] of ticks.entries()) {
       ctx.beginPath();
@@ -317,9 +317,8 @@ async function renderProfiler() {
       ctx.fillStyle = colors[i%colors.length];
       ctx.fillRect(x, ry, width, height-10);
       if (!grid.has(ry)) grid.set(ry, []);
-      grid.get(ry).push(i);
+      grid.get(ry).push({ x, y:ry, width, data:e });
     }
-    console.log("hi");
     ctx.restore();
   }
 
@@ -336,15 +335,30 @@ async function renderProfiler() {
 
   // ** rendering and interactions
   resize();
-  /*
   canvas.addEventListener("click", e => {
     e.preventDefault();
-    const point = { x:e.clientX, y:e.clientY };
-    const surface = rect(canvas);
-    const found = rectMap[point]
-    console.log(found);
+    const { top, left, width, height } = rect(canvas);
+    const clickX = ((e.clientX-left) * (canvas.width/width))/dpr;
+    const clickY = ((e.clientY-top) * (canvas.height/height))/dpr;
+    for ([lane, rects] of grid) {
+      if (clickY >= lane && clickY <= lane+laneHeight) {
+        for (r of rects) {
+          if (clickX >= r.x && clickX <= r.x+r.width) {
+            const ref = data.kernelMap[r.data.name];
+            if (ref != null) {
+              const { x, y, k } = d3.zoomTransform(e.target);
+              const canvasState = { ...state, zoom: { x, y, k, id:e.target.id } };
+              history.replaceState(canvasState, "");
+              history.pushState(canvasState, "");
+              return setState({ expandSteps: true, currentCtx:ref, currentStep:0, currentRewrite:0 });
+            }
+            break;
+          }
+        }
+        break;
+      }
+    }
   });
-  */
 }
 
 // ** zoom and recentering
