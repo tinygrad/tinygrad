@@ -214,7 +214,8 @@ def remove_blockend(x:UOp):
   if (parent_blocks := [y for y in x.src if y.op is Ops.BLOCK and y.arg.child_ctx is not None and x.arg.end in y.arg.child_ctx]):
     assert all_same(parent_blocks), f"should never have two parent blocks (has {len(parent_blocks)})"
     parent_block = parent_blocks[0]
-    assert len(parent_blocks) == parent_block.arg.cnt
+    if len(parent_blocks) != parent_block.arg.cnt:
+      parent_block = parent_block.replace(arg=replace(parent_block.arg, cnt=len(parent_blocks)))
     # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
     early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
     # NOTE: we have to add a barrier at the start if barrier is used in the range
