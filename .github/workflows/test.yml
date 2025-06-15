@@ -450,6 +450,8 @@ jobs:
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot LLVM compile
         run: PYTHONPATH="." LLVM=1 LLVMOPT=1 JIT=2 BEAM=0 IMAGE=0 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+      - name: Test openpilot compile4
+        run: PYTHONPATH="." NOLOCALS=1 GPU=1 IMAGE=2 FLOAT16=1 DEBUG=2 python3 examples/openpilot/compile4.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -578,7 +580,7 @@ jobs:
     - name: Run test_tiny on DSP
       run: DEBUG=2 DSP=1 python test/test_tiny.py
     - name: Test transcendentals
-      run: CC=clang-19 PYTHONPATH="." DEBUG=2 DSP=1 python test/test_transcendental.py TestTranscendentalVectorized
+      run: CC=clang-20 PYTHONPATH="." DEBUG=2 DSP=1 python test/test_transcendental.py TestTranscendentalVectorized
     - name: Test quantize onnx
       run: PYTHONPATH="." DEBUG=2 DSP=1 python3 test/test_quantize_onnx.py
     - name: Test LLVM=1 DEVECTORIZE=0
@@ -677,6 +679,7 @@ jobs:
           key: ${{ matrix.backend }}-minimal
           deps: testing_minimal
           cuda: 'true'
+          ocelot: 'true'
       - name: Set env
         run: printf "${{ matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
@@ -744,6 +747,7 @@ jobs:
         python-version: '3.11'
         amd: 'true'
         cuda: 'true'
+        ocelot: 'true'
         llvm: 'true'
     - name: Run real world test
       run: METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20

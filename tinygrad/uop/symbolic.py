@@ -25,6 +25,7 @@ symbolic_simple = PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
+  (UPat.var("x", dtype=dtypes.ints) ^ 0, lambda x: x), # x^0 -> x
   (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
   (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
   (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x

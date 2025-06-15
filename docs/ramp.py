@@ -239,7 +239,7 @@ print("******* PART 3 *******")
 # it's much simpler than what's in LLVM or MLIR
 
 from tinygrad import dtypes
-from tinygrad.uop import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 
 # first, we'll construct some const UOps
 a = UOp(Ops.CONST, dtypes.int, arg=2)
