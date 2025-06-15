@@ -272,6 +272,7 @@ async function renderProfiler() {
       render(e.transform)
     });
     d3.select("#timeline").call(canvasZoom);
+    window.addEventListener("resize", resize);
   }
 
   // ** canvas painting
@@ -335,7 +336,6 @@ async function renderProfiler() {
 
   // ** rendering and interactions
   resize();
-  window.addEventListener("resize", resize);
   /*
   canvas.addEventListener("click", e => {
     e.preventDefault();
