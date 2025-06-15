@@ -912,35 +912,45 @@ class Tensor(MathTrait):
     indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
+  # ***** WIP stft helpers *****
+  # TODO(irwin): pick a more suitable place for these
+  # TODO(irwin): asserts
+  # TODO(irwin): tinygrad.nn.STFT class
   @staticmethod
   def stft(x:Tensor, weight:Tensor, n_fft, stride, pad)->Tensor:
       cutoff = int(n_fft // 2) + 1
-      tg_stft_raw = x.pad(pad, "reflect").unsqueeze(1).conv2d(weight, stride=stride)
-      tg_stft_out = (tg_stft_raw[:, :cutoff, :]**2 + tg_stft_raw[:, cutoff:, :]**2).sqrt()
-      return tg_stft_out
+      # TODO(irwin): dehardcode padding
+      stft_raw = x.pad(pad, "reflect").unsqueeze(1).conv2d(weight, stride=stride)
 
+      # NOTE(irwin): magnitudes only atm
+      magnitudes = (stft_raw[:, :cutoff, :]**2 + stft_raw[:, cutoff:, :]**2).sqrt()
+      return magnitudes
+
+  # TODO(irwin): functools.rlu_cache?
   @staticmethod
-  def make_basis_buffers_tg(N, k, window):
-      n = Tensor.arange(N).float()
-      angle = 2 * math.pi * k * n / N
+  def make_basis_buffers_tg(N_FFT: int, k_freq_bin: int|Tensor, window:Tensor) -> tuple[Tensor, Tensor]:
+      # NOTE(irwin): do we even need this .float()?
+      n = Tensor.arange(N_FFT).float()
+      angle = 2 * math.pi * k_freq_bin * n / N_FFT
 
       w = window
       cos_basis = w * angle.cos()
+      # NOTE(irwin): negate sin_basis to match torch
       sin_basis = w * -angle.sin()
       return cos_basis, sin_basis
 
   @staticmethod
-  def make_stft_basis_buffers(n_fft):
+  def make_stft_basis_buffers(n_fft:int) -> Tensor:
       return Tensor.cat(*Tensor.make_basis_buffers_tg(n_fft, Tensor.arange((n_fft // 2) + 1)[None].T, Tensor.hann_tg(n_fft))).reshape(n_fft+2, 1, n_fft)
 
   @staticmethod
-  def stft_full(x, n_fft, stride, pad):
+  def stft_full(x:Tensor, n_fft:int, stride:int, pad:tuple[int, int]) -> Tensor:
       bb = Tensor.make_stft_basis_buffers(n_fft)
       res = Tensor.stft(x, bb, n_fft, stride, pad)
       return res
 
   @staticmethod
-  def hann_tg(N, periodic=True):
+  def hann_tg(N:int, periodic=True) -> Tensor:
       M = N+(periodic*1)
       return ((1.0 - (Tensor.arange(M) * 2.0 * math.pi / (M - 1)).cos()) * 0.5)[:N]
 
