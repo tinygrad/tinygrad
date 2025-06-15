@@ -251,15 +251,19 @@ async function renderProfiler() {
   // ** fetch timing and setup layout
   if (data == null) {
     const { traceEvents } = await (await fetch("/get_profile")).json();
-    const procList = d3.select("#procs-list");
+    const deviceList = document.getElementById("device-list");
     let et, st;
     const events = [];
+    const devices = [];
     for (const e of traceEvents) {
-      if (e.name === "process_name") procList.append("div").text(e.args.name).attr("id", `proc-${e.pid}`);
+      if (e.name === "process_name") devices[e.pid] = e.args.name;
       if (e.ts == null) continue;
       if (st == null || e.ts < st) st = e.ts;
       const localEnd = e.ts+e.dur;
       if (et == null || localEnd > et) et = localEnd;
+      if (document.getElementById(`pid-${e.pid}`) == null) {
+        d3.select(deviceList).append("div").attr("id", `pid-${e.pid}`).text(devices[e.pid]);
+      }
       events.push(e);
     }
     const duration = et-st;
@@ -286,6 +290,7 @@ async function renderProfiler() {
     const scale = d3.scaleLinear().domain([0, data.duration]).range([0, canvas.clientWidth]);
     const ticks = scale.ticks();
     const [tickHeight, tickFontSize] = [16, 10];
+    document.getElementById("device-list").style.paddingTop = `${tickHeight}px`;
     for (const [i, tick] of ticks.entries()) {
       ctx.beginPath();
       const x = (i/(ticks.length-1))*canvas.clientWidth;
@@ -301,7 +306,7 @@ async function renderProfiler() {
     for (const [i, e] of data.events.entries()) {
       const x = scale(e.ts-data.st);
       const width = scale(e.ts+e.dur-data.st)-x;
-      const { height, y } = rect(`#proc-${e.pid}`);
+      const { height, y } = rect(`#pid-${e.pid}`);
       ctx.fillStyle = colors[i%colors.length];
       ctx.fillRect(x, y, width, height);
     }
@@ -310,7 +315,7 @@ async function renderProfiler() {
 
   function resize() {
     let { width, height } = rect(".profiler");
-    width -= rect("#procs-list").width+10;
+    width -= rect("#device-list").width+10;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
