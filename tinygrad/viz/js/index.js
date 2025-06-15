@@ -369,7 +369,7 @@ d3.select("#graph-svg").call(zoom);
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const canvas = d3.select("#timeline");
   if (rect(canvas.node()).width !== 0) {
-    return canvas.call(canvasZoom.transform, d3.zoomIdentity)
+    return canvas.call(canvasZoom.transform, d3.zoomIdentity);
   }
   const svg = d3.select("#graph-svg");
   svg.call(zoom.transform, d3.zoomIdentity);
@@ -451,15 +451,13 @@ function setState(ns) {
   main();
 }
 window.addEventListener("popstate", (e) => {
-  console.log(e.state);
   const { zoom, ...state } = e.state;
   if (state != null) setState(state);
   if (zoom != null) {
     const { x, y, k, id } = zoom;
     const selection = d3.select(`#${id}`);
     const transform = d3.zoomIdentity.translate(x, y).scale(k);
-    selection.property("__zoom", transform);
-    selection.dispatch("zoom");
+    selection.call(canvasZoom.transform, transform);
   }
 });
 
