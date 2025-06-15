@@ -201,19 +201,22 @@ def train_cifar():
     idx_y = Tensor.arange(H, dtype=dtypes.int32).reshape((1,1,H,1))
     return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
 
-  def random_crop(X:Tensor, crop_size=32):
-    mask = make_square_mask(X.shape, crop_size)
-    mask = mask.expand((-1,3,-1,-1))
-    X_cropped = Tensor(X.numpy()[mask.numpy()])
-    return X_cropped.reshape((-1, 3, crop_size, crop_size))
+  def random_crop(X:Tensor, pad_size:int):
+    BS, C, H_padded, W_padded = X.shape
+    H, W = H_padded - 2*pad_size, W_padded - 2*pad_size
+    low_x = Tensor.randint(BS, low=0, high=2*pad_size).reshape(BS,1,1,1)
+    low_y = Tensor.randint(BS, low=0, high=2*pad_size).reshape(BS,1,1,1)
+    idx_x = Tensor.arange(W, dtype=dtypes.int32).reshape(1,1,1,W)
+    idx_y = Tensor.arange(H, dtype=dtypes.int32).reshape(1,1,H,1)
+    mask_idx_x = (idx_x + low_x).expand(BS, C, H_padded, W)
+    mask_idx_y = (idx_y + low_y).expand(BS, C, H, W)
+    return X.gather(3, mask_idx_x).gather(2, mask_idx_y)
 
   def cutmix(X:Tensor, Y:Tensor, mask_size=3):
     # fill the square with randomly selected images from the same batch
     mask = make_square_mask(X.shape, mask_size)
-    order = list(range(0, X.shape[0]))
-    random.shuffle(order)
-    X_patch = Tensor(X.numpy()[order], device=X.device, dtype=X.dtype)
-    Y_patch = Tensor(Y.numpy()[order], device=Y.device, dtype=Y.dtype)
+    order = Tensor.randperm(X.shape[0], device=X.device, dtype=dtypes.int32)
+    X_patch, Y_patch = X[order], Y[order]
     X_cutmix = mask.where(X_patch, X)
     mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
@@ -228,24 +231,21 @@ def train_cifar():
       if is_train:
         # TODO: these are not jitted
         if getenv("RANDOM_CROP", 1):
-          X = random_crop(X, crop_size=32)
+          X = random_crop(X, pad_size=hyp['net']['pad_amount'])
         if getenv("RANDOM_FLIP", 1):
           X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
         if getenv("CUTMIX", 1):
           if step >= hyp['net']['cutmix_steps']:
             X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
-        order = list(range(0, X.shape[0]))
-        random.shuffle(order)
-        X, Y = X.numpy()[order], Y.numpy()[order]
-      else:
-        X, Y = X.numpy(), Y.numpy()
+        order = Tensor.randperm(X.shape[0], device=X_in.device, dtype=dtypes.int32)
+        X, Y = X[order], Y[order]
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X.shape[0], BS):
         # pad the last batch  # TODO: not correct for test
         batch_end = min(i+BS, Y.shape[0])
-        x = Tensor(X[batch_end-BS:batch_end], device=X_in.device, dtype=X_in.dtype)
-        y = Tensor(Y[batch_end-BS:batch_end], device=Y_in.device, dtype=Y_in.dtype)
+        x = X[batch_end-BS:batch_end].contiguous()
+        y = Y[batch_end-BS:batch_end].contiguous()
         step += 1
         yield x, y
       epoch += 1
