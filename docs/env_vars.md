@@ -22,7 +22,7 @@ with Context(DEBUG=0):
 ```
 
 ## Global Variables
-The columns of this list are are: Variable, Possible Value(s) and Description.
+The columns of this list are: Variable, Possible Value(s) and Description.
 
 - A `#` means that the variable can take any integer value.
 
@@ -50,6 +50,7 @@ VIZ                 | [1]        | 0=disabled, 1=[viz enabled](https://github.co
 ALLOW_TF32          | [1]        | enable TensorFloat-32 tensor cores on Ampere or newer GPUs.
 WEBGPU_BACKEND      | [WGPUBackendType_Metal, ...]          | Force select a backend for WebGPU (Metal, DirectX, OpenGL, Vulkan...)
 CUDA_PATH           | str        | Use `CUDA_PATH/include` for CUDA headers for CUDA and NV backends. If not set, TinyGrad will use `/usr/local/cuda/include`, `/usr/include` and `/opt/cuda/include`.
+MERGE_VIEW          | [0-1]      | 0=disabled, 1=enabled (default). if enabled calling `reshape` on a ShapeTracker instance will reshape the last view instead of creating an additional view
 
 ## Debug breakdown
 
