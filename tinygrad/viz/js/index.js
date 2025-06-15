@@ -223,13 +223,13 @@ function renderMemoryGraph(graph) {
   document.getElementById("zoom-to-fit-btn").click();
 }
 
+// ** profiler graph
+
 function formatTime(ts, dur) {
   if (dur<=1e3) return `${ts}us`;
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
   return `${(ts*1e-6).toFixed(2)}s`;
 }
-
-document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
 const colors = [
   "#b6ccfe", "#74c69d", "#f1c0e8", "#90dbf4", "#5ca98c",
@@ -239,77 +239,71 @@ const colors = [
   "#c3d2ee", "#3d6c5b", "#cfdaf0", "#c1d3fe"
 ];
 
-var data, canvasZoom;
-const [laneHeight, tickHeight, tickFontSize] = [32, 16, 10];
+var data;
 async function renderProfiler() {
-  // ** fetch timing and setup layout
-  if (data == null) {
-    const { traceEvents } = await (await fetch("/get_profile")).json();
-    const deviceList = document.getElementById("device-list");
-    let et, st;
-    const events = [];
-    const devices = [];
-    for (const e of traceEvents) {
-      if (e.name === "process_name") devices[e.pid] = e.args.name;
-      if (e.ts == null) continue;
-      if (st == null || e.ts < st) st = e.ts;
-      const localEnd = e.ts+e.dur;
-      if (et == null || localEnd > et) et = localEnd;
-      if (document.getElementById(`pid-${e.pid}`) == null) {
-        d3.select(deviceList).append("div").attr("id", `pid-${e.pid}`).text(devices[e.pid]).style("height", laneHeight);
-      }
-      events.push(e);
+  displayGraph(".profiler");
+  if (data != null) return;
+  // fetch and process data
+  const { traceEvents } = await (await fetch("/get_profile")).json();
+  let st, et;
+  const deviceMap = new Map();
+  data = [];
+  for (const e of traceEvents) {
+    if (e.name === "process_name") deviceMap.set(e.pid, { name:e.args.name, events:0 });
+    if (e.ts == null) continue;
+    if (st == null) [st, et] = [e.ts, e.ts+e.dur];
+    else {
+      st = Math.min(st, e.ts);
+      et = Math.max(et, e.ts+e.dur);
     }
-    const duration = et-st;
-    const kernelMap = {};
-    for (const [i, c] of ctxs.entries()) kernelMap[c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1")] = i;
-    data = { events, duration, st, et, kernelMap };
-
-    // zoom/drag on the time axis
-    canvasZoom = d3.zoom().filter(e => {
-      e.preventDefault();
-      return (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button;
-    }).scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => {
-      render(e.transform)
-    });
-    d3.select("#timeline").call(canvasZoom);
-    window.addEventListener("resize", resize);
+    deviceMap.get(e.pid).events += 1;
+    data.push(e);
   }
-
-  // ** canvas painting
-  const root = displayGraph(".profiler")
+  const kernelMap = new Map();
+  for (const [i, c] of ctxs.entries()) kernelMap.set(c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1"), { name:c.name, i });
+  // place devices on the y axis
+  const [tickSize] = [10];
+  const deviceList = document.getElementById("device-list");
+  deviceList.style.paddingTop = `${tickSize}px`;
+  for (const [k, v] of deviceMap.entries()) {
+    if (v.events === 0) continue;
+    const div = deviceList.appendChild(document.createElement("div"));
+    div.id = `pid-${k}`;
+    div.innerText = v.name;
+  }
+  // draw events on a timeline
   const canvas = document.getElementById("timeline");
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
+  const scale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
   const grid = new Map();
-  function render(transform=null) {
+  function render() {
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-    // draw the time axis
+    // time axis
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.lineTo(canvas.clientWidth, 0);
     ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
     ctx.lineWidth = 1;
     ctx.stroke();
-    const scale = d3.scaleLinear().domain([0, data.duration]).range([0, canvas.clientWidth]);
-    if (transform != null) scale.domain(scale.range().map(transform.invertX, transform).map(scale.invert, scale))
+    // xticks
     const ticks = scale.ticks();
-    document.getElementById("device-list").style.paddingTop = `${tickHeight+8}px`;
     for (const [i, tick] of ticks.entries()) {
       ctx.beginPath();
       const x = (i/(ticks.length-1))*canvas.clientWidth;
       ctx.moveTo(x, ctx.lineWidth);
-      ctx.lineTo(x, tickHeight+ctx.lineWidth);
+      ctx.lineTo(x, tickSize+ctx.lineWidth);
       ctx.stroke();
-      ctx.fontSize = `${tickFontSize}px`;
+      ctx.fontSize = "10px";
       ctx.textBaseline = "top";
       ctx.textAlign = i === ticks.length-1 ? "right" : "left";
       const padding = i === ticks.length-1 ? -1 : 1;
-      ctx.fillText(formatTime(tick, data.duration), x+(ctx.lineWidth+2)*padding, tickHeight-tickFontSize);
+      ctx.fillText(formatTime(tick, et-st), x+(ctx.lineWidth+2)*padding, tickSize);
     }
+    // events
     const canvasTop = rect(canvas).top;
-    for (const [i, e] of data.events.entries()) {
+    for (const [i, e] of data.entries()) {
       const x = scale(e.ts-data.st);
       const width = scale(e.ts+e.dur-data.st)-x;
       const { height, y } = rect(`#pid-${e.pid}`);
@@ -323,8 +317,7 @@ async function renderProfiler() {
   }
 
   function resize() {
-    let { width, height } = rect(".profiler");
-    width -= rect("#device-list").width;
+    const { width, height } = rect("canvas");
     canvas.width = width*dpr;
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
@@ -333,32 +326,7 @@ async function renderProfiler() {
     render();
   }
 
-  // ** rendering and interactions
   resize();
-  canvas.addEventListener("click", e => {
-    e.preventDefault();
-    const { top, left, width, height } = rect(canvas);
-    const clickX = ((e.clientX-left) * (canvas.width/width))/dpr;
-    const clickY = ((e.clientY-top) * (canvas.height/height))/dpr;
-    for ([lane, rects] of grid) {
-      if (clickY >= lane && clickY <= lane+laneHeight) {
-        for (r of rects) {
-          if (clickX >= r.x && clickX <= r.x+r.width) {
-            const ref = data.kernelMap[r.data.name];
-            if (ref != null) {
-              const { x, y, k } = d3.zoomTransform(e.target);
-              const canvasState = { ...state, zoom: { x, y, k, id:e.target.id } };
-              history.replaceState(canvasState, "");
-              history.pushState(canvasState, "");
-              return setState({ expandSteps: true, currentCtx:ref, currentStep:0, currentRewrite:0 });
-            }
-            break;
-          }
-        }
-        break;
-      }
-    }
-  });
 }
 
 // ** zoom and recentering
