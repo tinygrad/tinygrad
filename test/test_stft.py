@@ -3,8 +3,7 @@ import numpy as np
 import torch
 import importlib.util
 
-from tinygrad import Tensor, Variable, Device
-from tinygrad.helpers import OSX
+from tinygrad import Tensor
 
 
 class TestSample(unittest.TestCase):
