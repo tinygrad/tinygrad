@@ -41,6 +41,14 @@ class TestTiny(unittest.TestCase):
       self.assertGreaterEqual(x, 0.0)
       self.assertLessEqual(x, 1.0)
 
+  def test_svd(self):
+    t = Tensor([[3.0, 1.0], [1.0, 3.0]])
+    U, S, Vh = t.svd()
+    recon = (U * S.unsqueeze(0)) @ Vh
+    for ra, rb in zip(t.tolist(), recon.tolist()):
+      for a, b in zip(ra, rb):
+        self.assertAlmostEqual(a, b, places=4)
+
   # *** JIT (for Python speed) ***
 
   def test_jit(self):
