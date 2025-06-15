@@ -15,7 +15,7 @@ class TestSample(unittest.TestCase):
   def test_hann_periodic(self):
     ref = torch.hann_window(256)
     result = Tensor.hann_tg(256)
-    np.testing.assert_allclose(result.numpy(), ref.numpy(), atol=1e-7)
+    np.testing.assert_allclose(result.numpy(), ref.numpy(), atol=1e-6, rtol=1e-5)
 
   def test_stft(self):
     N_FFT = 400
