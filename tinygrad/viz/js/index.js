@@ -1,5 +1,10 @@
 // **** graph renderers
 
+const displayGraph = (g) => {
+  d3.selectAll(".view").filter(`:not(${g})`).style("display", "none");
+  return d3.select(g).style("display", "flex");
+}
+
 // ** UOp graph
 
 function intersectRect(r1, r2) {
@@ -12,10 +17,11 @@ function intersectRect(r1, r2) {
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
 
-const rect = (s) => document.querySelector(s).getBoundingClientRect();
+const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
+  displayGraph(".graph");
   // start calculating the new layout (non-blocking)
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
@@ -103,6 +109,7 @@ function pluralize(num, name, alt=null) {
 }
 
 function renderMemoryGraph(graph) {
+  displayGraph(".graph");
   // ** construct alloc/free traces
   // we can map reads/writes from the kernel graph
   const actions = [];
@@ -218,12 +225,159 @@ function renderMemoryGraph(graph) {
   document.getElementById("zoom-to-fit-btn").click();
 }
 
+// ** profiler graph
+
+function formatTime(ts, dur) {
+  if (dur<=1e3) return `${ts}us`;
+  if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
+  return `${(ts*1e-6).toFixed(2)}s`;
+}
+
+const colors = [
+  "#b6ccfe", "#74c69d", "#f1c0e8", "#90dbf4", "#5ca98c",
+  "#adc3f5", "#fde4cf", "#8eecf5", "#85c9a7", "#cfbaf0",
+  "#9eb8f0", "#52b788", "#ffcfd2", "#98f5e1", "#4c8d6e",
+  "#b6ceea", "#e7e2b6", "#96e5a5", "#3a5f4a", "#d8f3dc",
+  "#c3d2ee", "#3d6c5b", "#cfdaf0", "#c1d3fe"
+];
+
+var data, canvasZoom;
+async function renderProfiler() {
+  displayGraph(".profiler");
+  if (data != null) return;
+  // fetch and process data
+  const { traceEvents } = await (await fetch("/get_profile")).json();
+  let st, et;
+  const deviceMap = new Map();
+  data = [];
+  for (const e of traceEvents) {
+    if (e.name === "process_name") deviceMap.set(e.pid, { name:e.args.name, events:0 });
+    if (e.ts == null) continue;
+    if (st == null) [st, et] = [e.ts, e.ts+e.dur];
+    else {
+      st = Math.min(st, e.ts);
+      et = Math.max(et, e.ts+e.dur);
+    }
+    deviceMap.get(e.pid).events += 1;
+    data.push(e);
+  }
+  const kernelMap = new Map();
+  for (const [i, c] of ctxs.entries()) kernelMap.set(c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1"), { name:c.name, i });
+  // place devices on the y axis
+  const [tickSize, padding] = [10, 8];
+  const deviceList = document.getElementById("device-list");
+  deviceList.style.paddingTop = `${tickSize+padding}px`;
+  for (const [k, v] of deviceMap.entries()) {
+    if (v.events === 0) continue;
+    const div = deviceList.appendChild(document.createElement("div"));
+    div.id = `pid-${k}`;
+    div.innerText = v.name;
+  }
+  // draw events on a timeline
+  const canvas = document.getElementById("timeline");
+  const ctx = canvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const nameMap = new Map();
+  const rectLst = [];
+  function render(transform=null) {
+    rectLst.length = 0;
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    // time axis
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(canvas.clientWidth, 0);
+    ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // xticks
+    const scale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
+    if (transform != null) scale.domain(scale.range().map(transform.invertX, transform).map(scale.invert, scale));
+    const ticks = scale.ticks();
+    for (const [i, tick] of ticks.entries()) {
+      ctx.beginPath();
+      const x = (i/(ticks.length-1))*canvas.clientWidth;
+      ctx.moveTo(x, ctx.lineWidth);
+      ctx.lineTo(x, tickSize+ctx.lineWidth);
+      ctx.stroke();
+      ctx.fontSize = "10px";
+      ctx.textBaseline = "top";
+      ctx.textAlign = i === ticks.length-1 ? "right" : "left";
+      const padding = i === ticks.length-1 ? -1 : 1;
+      ctx.fillText(formatTime(tick, et-st), x+(ctx.lineWidth+2)*padding, tickSize);
+    }
+    // programs
+    const canvasTop = rect(canvas).top;
+    for (const [i, e] of data.entries()) {
+      const x = scale(e.ts-st);
+      const width = scale(e.ts-st+e.dur)-x;
+      let { y, height } = rect(`#pid-${e.pid}`);
+      y -= canvasTop-padding/2;
+      height -= padding;
+      if (!nameMap.has(e.name)) nameMap.set(e.name, { color:colors[i%colors.length], labelWidth:ctx.measureText(e.name).width })
+      const { color, labelWidth } = nameMap.get(e.name);
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y, width, height);
+      rectLst.push({ y0:y, y1:y+height, x0:x, x1:x+width, name:e.name });
+      if (width>labelWidth) {
+        ctx.fillStyle = "black";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(e.name, x+2, y+height/2);
+      }
+    }
+    ctx.restore();
+  }
+
+  function resize() {
+    let { width, height } = rect(".profiler");
+    width -= rect("#device-list").width+padding;
+    canvas.width = width*dpr;
+    canvas.height = height*dpr;
+    canvas.style.height = `${height}px`;
+    canvas.style.width = `${width}px`;
+    ctx.scale(dpr, dpr);
+    render();
+  }
+
+  resize();
+  window.addEventListener("resize", resize);
+  canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
+    .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
+  d3.select(canvas).call(canvasZoom);
+  document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
+
+  canvas.addEventListener("click", e => {
+    e.preventDefault();
+    const { top, left, width, height } = rect(canvas);
+    const clickX = ((e.clientX-left) * (canvas.width/width))/dpr;
+    const clickY = ((e.clientY-top) * (canvas.height/height))/dpr;
+    for (const r of rectLst) {
+      if (clickY>=r.y0 && clickY<=r.y1 && clickX>=r.x0 && clickX<=r.x1) {
+        const ref = kernelMap.get(r.name);
+        if (ref != null) {
+          const { x, y, k } = d3.zoomTransform(e.target);
+          const canvasState = { ...state, zoom: { x, y, k, id:e.target.id } };
+          history.replaceState(canvasState, "");
+          history.pushState(canvasState, "");
+          setState({ expandSteps: true, currentCtx:ref.i, currentStep:0, currentRewrite:0 });
+        }
+        break;
+      }
+    }
+  });
+}
+
 // ** zoom and recentering
 
 const zoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
 d3.select("#graph-svg").call(zoom);
 // zoom to fit into view
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
+  const canvas = d3.select("#timeline");
+  if (rect(canvas.node()).width !== 0) {
+    return canvas.call(canvasZoom.transform, d3.zoomIdentity);
+  }
   const svg = d3.select("#graph-svg");
   svg.call(zoom.transform, d3.zoomIdentity);
   const mainRect = rect(".main-container");
@@ -256,6 +410,7 @@ function codeBlock(st, language, { loc, wrap }) {
 }
 
 function setActive(e) {
+  if (e == null) return;
   e.classList.add("active");
   requestAnimationFrame(() => e.scrollIntoView({ behavior: "auto", block: "nearest" }));
 }
@@ -303,13 +458,21 @@ function setState(ns) {
   main();
 }
 window.addEventListener("popstate", (e) => {
-  if (e.state != null) setState(e.state);
+  const { zoom, ...state } = e.state;
+  if (state != null) setState(state);
+  if (zoom != null) {
+    const { x, y, k, id } = zoom;
+    const selection = d3.select(`#${id}`);
+    const transform = d3.zoomIdentity.translate(x, y).scale(k);
+    selection.call(canvasZoom.transform, transform);
+  }
 });
 
 async function main() {
   // ** left sidebar context list
   if (ctxs == null) {
-    ctxs = await (await fetch("/ctxs")).json();
+    ctxs = [{ name:"Profiler", steps:[] }];
+    for (const r of (await (await fetch("/ctxs")).json())) ctxs.push(r);
     const ctxList = document.querySelector(".ctx-list");
     for (const [i,{name, steps}] of ctxs.entries()) {
       const ul = ctxList.appendChild(document.createElement("ul"));
@@ -333,14 +496,15 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
+  if (ctx.name === "Profiler") return renderProfiler();
   const step = ctx.steps[currentStep];
-  const ckey = `ctx=${currentCtx}&idx=${currentStep}`;
+  const ckey = `ctx=${currentCtx-1}&idx=${currentStep}`;
   // close any pending event sources
   let activeSrc = null;
   for (const e of evtSources) {
@@ -411,6 +575,7 @@ document.querySelector(".collapse-btn").addEventListener("click", (e) => {
   document.querySelector(".main-container").classList.toggle("collapsed", isCollapsed);
   e.currentTarget.blur();
   e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
+  window.dispatchEvent(new Event("resize"));
 });
 
 // **** resizer
