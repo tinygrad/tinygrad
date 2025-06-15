@@ -1,6 +1,9 @@
 # ruff: noqa: E501
 import unittest, random
-import numpy as np
+try:
+  import numpy as np
+except ModuleNotFoundError:
+  raise unittest.SkipTest("numpy is required for linearizer tests")
 from tinygrad.codegen.kernel import Kernel, KernelOptError
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp, Ops
