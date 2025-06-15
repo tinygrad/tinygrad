@@ -39,6 +39,7 @@ class TestSample(unittest.TestCase):
     reference = librosa.stft(X.numpy(), n_fft=N_FFT, hop_length=HOP_LENGTH, center=False, window="hann", dtype=np.csingle)
     reference = np.abs(reference)
     result = Tensor.stft_full(X, N_FFT, HOP_LENGTH, (0, 0))
+    # NOTE(irwin): why do we pass at atol=1e-7 here? it's much lower with librosa than torch.stft
     np.testing.assert_allclose(result.numpy(), reference, atol=1e-7, rtol=1e-2)
 
 if __name__ == '__main__':
