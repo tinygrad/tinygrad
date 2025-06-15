@@ -277,18 +277,18 @@ async function renderProfiler() {
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // draw the time axis
-    const scale = d3.scaleLinear().domain([0, data.duration]).range([0, canvas.clientWidtj]);
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.lineTo(canvas.clientWidth, 0);
     ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
     ctx.lineWidth = 1;
     ctx.stroke();
+    const scale = d3.scaleLinear().domain([0, data.duration]).range([0, canvas.clientWidth]);
     const ticks = scale.ticks();
+    const [tickHeight, tickFontSize] = [16, 10];
     for (const [i, tick] of ticks.entries()) {
       ctx.beginPath();
       const x = (i/(ticks.length-1))*canvas.clientWidth;
-      const [tickHeight, tickFontSize] = [16, 10];
       ctx.moveTo(x, 0);
       ctx.lineTo(x, tickHeight);
       ctx.stroke();
