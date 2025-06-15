@@ -4321,21 +4321,18 @@ class Tensor(MathTrait):
     V = V.gather(-1, idx.unsqueeze(-2).expand(-1, n, -1))
     return U.reshape(*batch_dims, m, k), S.reshape(*batch_dims, k), V.reshape(*batch_dims, n, k).transpose(-2, -1)
 
-  def householder_qr(self: Tensor) -> Tensor:
-    # TODO: return R aswell, for QR decomposition
-    B, m, n = self.shape
-    Q = Tensor.eye(m).expand(B, m, m).clone()
-    for k in range(min(m, n)):
-      x = self[:, k:, k]  # (B, m-k)
-      norm_x = (x ** 2).sum(axis=1, keepdim=True).sqrt().clamp(min_=1e-12)
-      sign = x[:, :1].sign().clamp(min_=1e-12)
-      v = x + sign[:, 0:1] * norm_x
-      v = v / ((v ** 2).sum(axis=1, keepdim=True).sqrt().clamp(min_=1e-12))
-      v = v.unsqueeze(2)  # (B, m-k, 1)
-
-      Q_block = Q[:, :, k:].contiguous()  # (B, m, m-k)
-      proj = Q_block @ v
-      Q_block = Q_block - 2 * proj @ v.transpose(1, 2)
+  def householder_qr(self:Tensor) -> Tensor:
+    #return Tensor(torch.linalg.qr(torch.tensor(A.numpy()))[0].numpy())
+    assert self.ndim == 3, "Input must be a 3D tensor"
+    b, m, n = self.shape
+    Q = Tensor.eye(m).expand(b, m, m).contiguous()
+    R = self.clone()
+    for k in range(min(m-1, n)):
+      v = R[:, k:, k:k+1].clone()
+      v[:, 0, 0] += v[:, 0, 0].sign() * (v ** 2).sum(axis=(1,2)).sqrt()
+      v /= (v ** 2).sum(axis=1, keepdim=True).sqrt()
+      R[:, k:, k:] -= 2 * v @ (v.transpose(1, 2) @ R[:, k:, k:])
+      Q[:, :, k:] -= 2 * (Q[:, :, k:] @ v) @ v.transpose(1, 2)
     return Q
 
 
