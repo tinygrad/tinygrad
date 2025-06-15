@@ -303,7 +303,7 @@ async function renderProfiler() {
       const width = scale(e.ts+e.dur-data.st)-x;
       const { height, y } = rect(`#pid-${e.pid}`);
       ctx.fillStyle = colors[i%colors.length];
-      ctx.fillRect(x, y-canvasTop, width, height);
+      ctx.fillRect(x, y-canvasTop+5, width, height-10);
     }
     ctx.restore();
   }
