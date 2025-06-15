@@ -246,140 +246,80 @@ const colors = [
   "#c3d2ee", "#3d6c5b", "#cfdaf0", "#c1d3fe"
 ];
 
-var traceEvents;
+var data;
 async function renderProfiler() {
-  // fetch timing events
-  if (traceEvents == null) traceEvents = (await (await fetch("/get_profile")).json()).traceEvents;
-  let st, et;
-  const timingEvents = [];
-  for (const e of traceEvents) {
-    if (e.ts == null) continue;
-    if (st == null || e.ts < st) st = e.ts;
-    const localEnd = e.ts+e.dur;
-    if (et == null || localEnd > et) et = localEnd;
-    timingEvents.push(e);
-  }
-  const duration = et-st;
-  // draw on the canvas
-  const root = displayGraph(".profiler").html("");
-  const Y_OFFSET = 20;
-  // ** devices on the y axis
-  const procList = root.append("div").attr("style", `width: 20%; height: 100%; padding-top: ${Y_OFFSET}px;`);
-  for (const e of traceEvents) {
-    if (e.name === "process_name") {
-      procList.append("div").text(e.args.name).attr("id", `proc-${e.pid}`);
+  // ** fetch timing and setup layout
+  if (data == null) {
+    const { traceEvents } = await (await fetch("/get_profile")).json();
+    const procList = d3.select("#procs-list");
+    let et, st;
+    const events = [];
+    for (const e of traceEvents) {
+      if (e.name === "process_name") procList.append("div").text(e.args.name).attr("id", `proc-${e.pid}`);
+      if (e.ts == null) continue;
+      if (st == null || e.ts < st) st = e.ts;
+      const localEnd = e.ts+e.dur;
+      if (et == null || localEnd > et) et = localEnd;
+      events.push(e);
     }
+    const duration = et-st;
+    const kernelMap = {};
+    for (const [i, c] of ctxs.entries()) kernelMap[c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1")] = { ...c, idx:i };
+    data = { events, duration, st, et, kernelMap };
   }
-  const canvas = root.append("canvas").attr("id", "canvas-profiler").node();
+
+  // ** canvas painting
+  const root = displayGraph(".profiler")
+  const canvas = document.getElementById("timeline");
   const ctx = canvas.getContext("2d");
-  const logicalHeight = rect(root.node()).height;
-  // basic stuff for naming, these should be shared across viz
-  const textWidthCache = {}
-  const name_map = {};
-  for (const [idx,c] of ctxs.entries()) name_map[c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1")] = { ...c, idx };
-  // main render
-  const allRects = [];
   const dpr = window.devicePixelRatio || 1;
-  function render(transform=null) {
+  function render() {
     ctx.save();
-    ctx.clearRect(0, 0, canvas.width/dpr, canvas.height/dpr);
-    const scale = d3.scaleLinear().domain([0, duration]).range([0, canvas.width]);
-    if (transform != null) {
-      scale.domain(scale.range().map(transform.invertX, transform).map(scale.invert, scale));
-    }
-    // *** time axis
-    // line
+    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    // draw the time axis
+    const scale = d3.scaleLinear().domain([0, data.duration]).range([0, canvas.clientWidtj]);
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.lineTo(canvas.width/dpr, 0);
-    ctx.strokeStyle = "#f0f0f5";
-    ctx.lineWidth = 1.8;
+    ctx.lineTo(canvas.clientWidth, 0);
+    ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
+    ctx.lineWidth = 1;
     ctx.stroke();
-    // ticks
     const ticks = scale.ticks();
-    for (let i = 0; i < ticks.length; i++) {
-      const x = (i / (ticks.length - 1)) * (canvas.width / dpr);
-      // tick line
+    for (const [i, tick] of ticks.entries()) {
       ctx.beginPath();
-      ctx.lineWidth = 0.5;
-      ctx.moveTo(x + 0.5, 0);
-      ctx.lineTo(x + 0.5, 5.5);
+      const x = (i/(ticks.length-1))*canvas.clientWidth;
+      const [tickHeight, tickFontSize] = [16, 10];
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, tickHeight);
       ctx.stroke();
-      // tick label
-      ctx.font = "10px sans-serif";
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.textAlign = i === ticks.length - 1 ? "right" : "left";
+      ctx.fontSize = `${tickFontSize}px`;
       ctx.textBaseline = "top";
-      ctx.fillText(formatTime(ticks[i], duration), x, 7);
+      ctx.textAlign = i === ticks.length-1 ? "right" : "left";
+      const padding = i === ticks.length-1 ? -1 : 1;
+      ctx.fillText(formatTime(tick, data.duration), x+(ctx.lineWidth+4)*padding, tickHeight-tickFontSize);
     }
-    // rects
-    allRects.length = 0; // reset in-place
-    for (const [i, e] of timingEvents.entries()) {
-      const x = scale(e.ts-st);
-      const width = scale(e.ts+e.dur-st)-x;
-      const height = 20;
-      const procRect = rect(`#proc-${e.pid}`);
-      const y = procRect.y-(Y_OFFSET*2);
-      if (width > 0.5) {
-        allRects.push({ x, y, width, height, ...e });
-      }
+    for (const [i, e] of data.events.entries()) {
+      const x = scale(e.ts-data.st);
+      const width = scale(e.ts+e.dur-data.st)-x;
+      const { height, y } = rect(`#proc-${e.pid}`);
       ctx.fillStyle = colors[i%colors.length];
       ctx.fillRect(x, y, width, height);
-      // labels
-      // NOTE: label width is without the ansi colors
-      let labelWidth = textWidthCache[e.name];
-      if (labelWidth == null) {
-        labelWidth = ctx.measureText(e.name).width
-        textWidthCache[e.name] = labelWidth;
-      }
-      if (labelWidth<width) {
-        ctx.fillStyle = "black";
-        ctx.font = "10px sans-serif";
-        ctx.textBaseline = "middle";
-        ctx.textAlign = "left";
-        ctx.fillText(e.name, x+2, y+height/2);
-      }
     }
     ctx.restore();
   }
+
   function resize() {
-    const logicalWidth = rect(".profiler").width;
-    canvas.width = logicalWidth*dpr;
-    canvas.style.width = `${logicalWidth}px`;
-    canvas.height = logicalHeight*dpr;
-    canvas.style.height = `${logicalHeight}px`;
-    ctx.resetTransform?.();
-    ctx.scale(dpr, dpr);
+    let { width, height } = rect(".profiler");
+    width -= rect("#procs-list").width+10;
+    canvas.width = width*dpr;
+    canvas.height = height*dpr;
+    canvas.style.height = `${height}px`;
+    canvas.style.width = `${width}px`;
     render();
   }
+
+  // ** rendering and interactions
   resize();
-  window.addEventListener("resize", resize);
-  const zoom = d3.zoom().scaleExtent([1, Infinity]).translateExtent([[0,0],[canvas.width,0]]).filter(filter).on("zoom", e => {
-    render(e.transform);
-  })
-  d3.select(canvas).call(zoom);
-  document.getElementById("zoom-to-fit-btn").addEventListener("click", () => d3.select(canvas).call(zoom.transform, d3.zoomIdentity));
-  canvas.addEventListener("click", (e) => {
-    const { top, left, width, height } = rect(canvas);
-    const clickX = (e.clientX - left) * (canvas.width / width);
-    const clickY = (e.clientY - top) * (canvas.height / height);
-    const logicalX = clickX / dpr;
-    const logicalY = clickY / dpr;
-    for (const r of allRects) {
-      if (logicalX >= r.x && logicalX <= r.x + r.width && logicalY >= r.y && logicalY <= r.y + r.height) {
-        const v = name_map[r.name];
-        if (v != null) {
-          const { x, y, k } = d3.zoomTransform(e.target);
-          const canvasState = { ...state, zoom: { x, y, k, id:e.target.id } };
-          history.replaceState(canvasState, "");
-          history.pushState(canvasState, "");
-          return setState({ expandSteps: true, currentCtx:v.idx, currentStep:0, currentRewrite:0 });
-        }
-        break; // break anyways. some kernels like COPY do not have codegen rewrite.
-        // we should show this to the user in right sidebar
-      }
-    }
-  });
 }
 
 // ** zoom and recentering
