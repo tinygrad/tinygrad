@@ -29,8 +29,9 @@ def dtype_parse(onnx_dtype: int, fallback_context: str | None = None) -> DType:
   if is_dtype_supported(dtype := supported[onnx_dtype]): return dtype
   # if fallback_context is provided, we can fall back to a default dtype
   if fallback_context is not None:
-    default_dtype = dtypes.float
+    default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
     warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {fallback_context} is not supported, falling back to {default_dtype}")
+    assert is_dtype_supported(default_dtype), f"dtype {default_dtype} must be supported on {Device.DEFAULT}"
     return default_dtype
   raise RuntimeError(f"dtype {dtype} on device {Device.DEFAULT} is not supported")
 
