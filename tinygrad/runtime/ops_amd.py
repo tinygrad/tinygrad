@@ -24,6 +24,16 @@ WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
 WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
+def parse_xccs(props:dict[str, int]) -> int:
+  env = getenv("XCCS", "")
+  if env == "": return props.get('num_xcc', 1)
+  try:
+    val = int(env)
+    if val <= 0: return 1
+    return min(val, props.get('num_xcc', 1))
+  except ValueError:
+    return props.get('num_xcc', 1)
+
 class AMDSignal(HCQSignal):
   def __init__(self, base_buf:HCQBuffer|None=None, **kwargs):
     super().__init__(base_buf, **kwargs, timestamp_divider=100, dev_t=AMDDevice)
@@ -862,7 +872,7 @@ class AMDDevice(HCQCompiled):
     self.max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] // self.dev_iface.props.get('num_xcc', 1) - 1
     self.max_wave_id = (self.dev_iface.props['max_waves_per_simd'] * self.dev_iface.props['simd_per_cu'] - 1) if self.target >= (10,1,0) else \
                        (min((self.max_cu_id+1)*40, self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine'] * 512) - 1)
-    self.xccs = self.dev_iface.props.get('num_xcc', 1) if getenv("XCCS", 1) else 1
+    self.xccs = parse_xccs(self.dev_iface.props)
     self.has_scratch_base_registers = self.target >= (11,0,0) or self.target == (9,4,2) # this is what llvm refers to as "architected flat scratch"
 
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
