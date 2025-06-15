@@ -209,7 +209,7 @@ class AsmRenderer(Renderer):
     # stack must be aligned to 16 bytes
     return (name, kernel, self.stack_size + (16 - (self.stack_size + len(callee_saved)*8) % 16) % 16, callee_saved)
 
-  def render_kernel(self, name:str, kernel:list[str], stack_size:int, called_saved:list[UOp]): raise NotImplementedError("arch specific")
+  def render_kernel(self, name:str, kernel:list[str], stack_size:int, called_saved:list[str]): raise NotImplementedError("arch specific")
   def render(self, uops:list[UOp]): return self.render_kernel(*self._render(uops))
 
 # x18 clobbered on macos/windows, x29 is frame pointer, kept for stack arg access
@@ -321,7 +321,7 @@ class Arm64Renderer(AsmRenderer):
       return [("x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7")[i]] if (i:=self.uops.index(u)) < 8 else [f"{(i-8)*8}"]
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return f"#{imm}"
-  def render_mem(self, sz:int) -> str: return f"[x29, #{sz}]"
+  def render_mem(self, sz:int) -> str: return f"[sp, #{sz}]"
   # arm64 vec load/store use q/d instead of v.suffix
   def render_reg(self, reg:str, dt:DType, alias:bool=False) -> str:
     if dt.count > 1 and not alias: return f"{reg}.{dt.count}{arm64_vec[dt.scalar().itemsize]}"
@@ -329,9 +329,9 @@ class Arm64Renderer(AsmRenderer):
     return reg if dt.itemsize == 8 else arm64_reg_map[reg][max(dt.itemsize, dtypes.int32.itemsize)]
   def render_spill(self, x:UOp) -> str:
     return f"{self.ops[x.dtype][Ops.STORE]} {self.render_reg(self.r[x], x.dtype, True)}, {self.mem[x]}"
-  def render_kernel(self, name:str, kernel:list[str], stack_size:int) -> str:
-    return "\n".join([".text", f".global {name}", f"{name}:", f"sub sp, sp, #{stack_size}", "stp x29, x30, [sp]", "mov x29, sp"] + \
-                      kernel + ["ldp x29, x30, [sp]", f"add sp, sp, #{stack_size}", "ret", "\n"])
+  def render_kernel(self, name:str, kernel:list[str], stack_size:int, callee_saved:list[str]) -> str:
+    return "\n".join([".text", f".global {name}", f"{name}:", "stp x29, x30, [sp, #-16]!", "mov x29, sp", f"sub sp, sp, #{stack_size}"] + \
+                      kernel + [f"add sp, sp, #{stack_size}", "ldp x29, x30, [sp], #16", "ret", "\n"])
 
 x86_gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx", "r10", "r11", "r12", "r13", "r14", "r15"]
 x86_float_regs = ["xmm" + str(i) for i in range(0,16)]
