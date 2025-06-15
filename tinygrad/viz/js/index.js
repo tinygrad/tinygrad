@@ -229,13 +229,6 @@ function formatTime(ts, dur) {
   return `${(ts*1e-6).toFixed(2)}s`;
 }
 
-// https://observablehq.com/@d3/pan-zoom-axes
-function filter(e) {
-  e.preventDefault();
-  // wheel up and down scale
-  // drag left and right move through time
-  return (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button;
-}
 document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
 const colors = [
@@ -277,7 +270,7 @@ async function renderProfiler() {
   const canvas = document.getElementById("timeline");
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
-  function render() {
+  function render(transform=null) {
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // draw the time axis
@@ -288,6 +281,7 @@ async function renderProfiler() {
     ctx.lineWidth = 1;
     ctx.stroke();
     const scale = d3.scaleLinear().domain([0, data.duration]).range([0, canvas.clientWidth]);
+    if (transform != null) scale.domain(scale.range().map(transform.invertX, transform).map(scale.invert, scale))
     const ticks = scale.ticks();
     const [tickHeight, tickFontSize] = [16, 10];
     document.getElementById("device-list").style.paddingTop = `${tickHeight+8}px`;
@@ -327,6 +321,13 @@ async function renderProfiler() {
   // ** rendering and interactions
   resize();
   window.addEventListener("resize", resize);
+  // zoom/drag on the time axis
+  const zoom = d3.zoom().filter(e => {
+    e.preventDefault();
+    return (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button;
+  }).scaleExtent([1, Infinity]).translateExtent([[0,0], [canvas.width,0]]).on("zoom", e => render(e.transform));
+  d3.select(canvas).call(zoom);
+  document.getElementById("zoom-to-fit-btn").addEventListener("click", () => d3.select(canvas).call(zoom.transform, d3.zoomIdentity));
 }
 
 // ** zoom and recentering
