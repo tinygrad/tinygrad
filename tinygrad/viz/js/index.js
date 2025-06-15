@@ -239,7 +239,7 @@ const colors = [
   "#c3d2ee", "#3d6c5b", "#cfdaf0", "#c1d3fe"
 ];
 
-var data;
+var data, canvasZoom;
 async function renderProfiler() {
   displayGraph(".profiler");
   if (data != null) return;
@@ -262,9 +262,9 @@ async function renderProfiler() {
   const kernelMap = new Map();
   for (const [i, c] of ctxs.entries()) kernelMap.set(c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1"), { name:c.name, i });
   // place devices on the y axis
-  const [tickSize] = [10];
+  const [tickSize, padding, laneHeight] = [10, 8, 32];
   const deviceList = document.getElementById("device-list");
-  deviceList.style.paddingTop = `${tickSize}px`;
+  deviceList.style.paddingTop = `${tickSize+padding}px`;
   for (const [k, v] of deviceMap.entries()) {
     if (v.events === 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
@@ -275,9 +275,8 @@ async function renderProfiler() {
   const canvas = document.getElementById("timeline");
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
-  const scale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
   const grid = new Map();
-  function render() {
+  function render(transform=null) {
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // time axis
@@ -288,6 +287,8 @@ async function renderProfiler() {
     ctx.lineWidth = 1;
     ctx.stroke();
     // xticks
+    const scale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
+    if (transform != null) scale.domain(scale.range().map(transform.invertX, transform).map(scale.invert, scale));
     const ticks = scale.ticks();
     for (const [i, tick] of ticks.entries()) {
       ctx.beginPath();
@@ -301,15 +302,15 @@ async function renderProfiler() {
       const padding = i === ticks.length-1 ? -1 : 1;
       ctx.fillText(formatTime(tick, et-st), x+(ctx.lineWidth+2)*padding, tickSize);
     }
-    // events
+    // programs
     const canvasTop = rect(canvas).top;
     for (const [i, e] of data.entries()) {
-      const x = scale(e.ts-data.st);
-      const width = scale(e.ts+e.dur-data.st)-x;
+      const x = scale(e.ts-st);
+      const width = scale(e.ts+e.dur-st)-x;
       const { height, y } = rect(`#pid-${e.pid}`);
-      const ry = y-canvasTop+5;
+      const ry = y-canvasTop+padding/2;
       ctx.fillStyle = colors[i%colors.length];
-      ctx.fillRect(x, ry, width, height-10);
+      ctx.fillRect(x, ry, width, height-padding);
       if (!grid.has(ry)) grid.set(ry, []);
       grid.get(ry).push({ x, y:ry, width, data:e });
     }
@@ -317,7 +318,8 @@ async function renderProfiler() {
   }
 
   function resize() {
-    const { width, height } = rect("canvas");
+    let { width, height } = rect(".profiler");
+    width -= rect("#device-list").width+padding;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
@@ -327,6 +329,35 @@ async function renderProfiler() {
   }
 
   resize();
+  window.addEventListener("resize", resize);
+  canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
+    .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
+  d3.select(canvas).call(canvasZoom);
+
+  canvas.addEventListener("click", e => {
+    e.preventDefault();
+    const { top, left, width, height } = rect(canvas);
+    const clickX = ((e.clientX-left) * (canvas.width/width))/dpr;
+    const clickY = ((e.clientY-top) * (canvas.height/height))/dpr;
+    for ([lane, rects] of grid) {
+      if (clickY >= lane && clickY <= lane+laneHeight) {
+        for (r of rects) {
+          if (clickX >= r.x && clickX <= r.x+r.width) {
+            const ref = kernelMap.get(r.data.name);
+            if (ref != null) {
+              const { x, y, k } = d3.zoomTransform(e.target);
+              const canvasState = { ...state, zoom: { x, y, k, id:e.target.id } };
+              history.replaceState(canvasState, "");
+              history.pushState(canvasState, "");
+              return setState({ expandSteps: true, currentCtx:ref.r, currentStep:0, currentRewrite:0 });
+            }
+            break;
+          }
+        }
+        break;
+      }
+    }
+  });
 }
 
 // ** zoom and recentering
