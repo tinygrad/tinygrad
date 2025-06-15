@@ -303,12 +303,13 @@ async function renderProfiler() {
       const padding = i === ticks.length-1 ? -1 : 1;
       ctx.fillText(formatTime(tick, data.duration), x+(ctx.lineWidth+4)*padding, tickHeight-tickFontSize);
     }
+    const { top: canvasTop } = rect(canvas);
     for (const [i, e] of data.events.entries()) {
       const x = scale(e.ts-data.st);
       const width = scale(e.ts+e.dur-data.st)-x;
       const { height, y } = rect(`#pid-${e.pid}`);
       ctx.fillStyle = colors[i%colors.length];
-      ctx.fillRect(x, y, width, height);
+      ctx.fillRect(x, y-canvasTop, width, height);
     }
     ctx.restore();
   }
