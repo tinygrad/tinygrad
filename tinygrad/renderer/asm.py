@@ -96,7 +96,7 @@ class AsmRenderer(Renderer):
   def __getitem__(self, x:UOp) -> str: # hacky helper
     if x.op is Ops.CONST: return self.render_imm(to_hex(x.arg, x.dtype))
     r, dt = self.r[self.bypass(x)], x.dtype
-    return self.render_reg(r, dt, x.op is Ops.LOAD) if self.is_reg(r) else r
+    return self.render_reg(r, dt) if self.is_reg(r) else r
   def _render(self, uops:list[UOp]):
     self.uops = uops
     regs = copy.deepcopy(self.regs)
@@ -241,8 +241,9 @@ arm64_rewrite = PatternMatcher([
   # loads/stores/movs
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"{ctx.two_address(x, alt)}tst {ctx[mask]}, #1\n"
-   f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
+   f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx.render_reg(ctx.r[x], x.dtype, True)}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
   (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, ={ctx[idx][1:]}"),
+  (UPat(Ops.LOAD, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx.render_reg(ctx.r[x], x.dtype, True)}, [{ctx[x.src[0]]}]"),
   (UPat(Ops.STORE, name="x"),
    lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {ctx.render_reg(ctx.r[ctx.bypass(x.src[1])], x.src[1].dtype, True)}, [{ctx[x.src[0]]}]"),
   # devectorize/vectorize
