@@ -80,6 +80,12 @@ jobs:
       run: DEBUG=2 SHOULD_USE_TC=1 BFLOAT16=1 python3.11 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
     - name: Fuzz Padded Tensor Core GEMM
       run: METAL=1 M_START=6 M_STOP=10 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=6 K_STOP=24 K_STEP=1 TC_OPT=2 DEBUG=2 python3.11 ./extra/gemm/fuzz_matmul.py
+    - name: Test LDS
+      # NOTE: the METAL test is broken, likely due to a compiler bug on M2. passes locally on M3
+      # METAL=1 python3.11 test/test_lds.py
+      run: |
+        LLVM=1 AMX=1 python3.11 test/test_lds.py
+        CPU=1 AMX=1 python3.11 test/test_lds.py
     - name: Run LLaMA
       run: |
         BENCHMARK_LOG=llama_nojit JIT=0 python3.11 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
@@ -211,6 +217,11 @@ jobs:
       run: DEBUG=2 NV=1 python -m pytest -rA test/test_tiny.py
     - name: Test CUDA=1
       run: DEBUG=2 CUDA=1 python -m pytest -rA test/test_tiny.py
+    - name: Test LDS
+      run: |
+        NV=1 python3 -m pytest -rA test/test_lds.py
+        CUDA=1 python3 -m pytest -rA test/test_lds.py
+        PTX=1 NV=1 python3 -m pytest -rA test/test_lds.py
     - name: Run Stable Diffusion
       run: BENCHMARK_LOG=stable_diffusion NV=1 python3 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd.txt
     - name: Run SDXL
@@ -405,6 +416,10 @@ jobs:
       run: DEBUG=2 AMD=1 python -m pytest -rA test/test_tiny.py
     #- name: Test HIP=1
     #  run: DEBUG=2 HIP=1 python -m pytest -rA test/test_tiny.py
+    - name: Test LDS
+      run: |
+        DEBUG=2 AMD=1 python3 -m pytest -rA test/test_lds.py -s
+        DEBUG=2 AMD=1 AMD_LLVM=1 python3 -m pytest -rA test/test_lds.py -s
     # TODO: AMD compiler bug causes this to fail
     #- name: Fuzz Padded Tensor Core GEMM
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
