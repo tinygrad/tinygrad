@@ -262,7 +262,7 @@ async function renderProfiler() {
   const kernelMap = new Map();
   for (const [i, c] of ctxs.entries()) kernelMap.set(c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1"), { name:c.name, i });
   // place devices on the y axis
-  const [tickSize, padding, laneHeight] = [10, 8, 32];
+  const [tickSize, padding] = [10, 8];
   const deviceList = document.getElementById("device-list");
   deviceList.style.paddingTop = `${tickSize+padding}px`;
   for (const [k, v] of deviceMap.entries()) {
@@ -275,8 +275,10 @@ async function renderProfiler() {
   const canvas = document.getElementById("timeline");
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
-  const grid = new Map();
+  const nameMap = new Map();
+  const rectLst = [];
   function render(transform=null) {
+    rectLst.length = 0;
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // time axis
@@ -306,13 +308,21 @@ async function renderProfiler() {
     const canvasTop = rect(canvas).top;
     for (const [i, e] of data.entries()) {
       const x = scale(e.ts-st);
-      const width = scale(e.ts+e.dur-st)-x;
-      const { height, y } = rect(`#pid-${e.pid}`);
-      const ry = y-canvasTop+padding/2;
-      ctx.fillStyle = colors[i%colors.length];
-      ctx.fillRect(x, ry, width, height-padding);
-      if (!grid.has(ry)) grid.set(ry, []);
-      grid.get(ry).push({ x, y:ry, width, data:e });
+      const width = scale(e.ts-st+e.dur)-x;
+      let { y, height } = rect(`#pid-${e.pid}`);
+      y -= canvasTop-padding/2;
+      height -= padding;
+      if (!nameMap.has(e.name)) nameMap.set(e.name, { color:colors[i%colors.length], labelWidth:ctx.measureText(e.name).width })
+      const { color, labelWidth } = nameMap.get(e.name);
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y, width, height);
+      rectLst.push({ y0:y, y1:y+height, x0:x, x1:x+width, name:e.name });
+      if (width>labelWidth) {
+        ctx.fillStyle = "white";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(e.name, x+2, y+height/2);
+      }
     }
     ctx.restore();
   }
@@ -340,20 +350,15 @@ async function renderProfiler() {
     const { top, left, width, height } = rect(canvas);
     const clickX = ((e.clientX-left) * (canvas.width/width))/dpr;
     const clickY = ((e.clientY-top) * (canvas.height/height))/dpr;
-    for ([lane, rects] of grid) {
-      if (clickY >= lane && clickY <= lane+laneHeight) {
-        for (r of rects) {
-          if (clickX >= r.x && clickX <= r.x+r.width) {
-            const ref = kernelMap.get(r.data.name);
-            if (ref != null) {
-              const { x, y, k } = d3.zoomTransform(e.target);
-              const canvasState = { ...state, zoom: { x, y, k, id:e.target.id } };
-              history.replaceState(canvasState, "");
-              history.pushState(canvasState, "");
-              return setState({ expandSteps: true, currentCtx:ref.r, currentStep:0, currentRewrite:0 });
-            }
-            break;
-          }
+    for (const r of rectLst) {
+      if (clickY>=r.y0 && clickY<=r.y1 && clickX>=r.x0 && clickX<=r.x1) {
+        const ref = kernelMap.get(r.name);
+        if (ref != null) {
+          const { x, y, k } = d3.zoomTransform(e.target);
+          const canvasState = { ...state, zoom: { x, y, k, id:e.target.id } };
+          history.replaceState(canvasState, "");
+          history.pushState(canvasState, "");
+          setState({ expandSteps: true, currentCtx:ref.i, currentStep:0, currentRewrite:0 });
         }
         break;
       }
