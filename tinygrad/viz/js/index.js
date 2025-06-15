@@ -294,14 +294,14 @@ async function renderProfiler() {
     for (const [i, tick] of ticks.entries()) {
       ctx.beginPath();
       const x = (i/(ticks.length-1))*canvas.clientWidth;
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, tickHeight);
+      ctx.moveTo(x, ctx.lineWidth);
+      ctx.lineTo(x, tickHeight+ctx.lineWidth);
       ctx.stroke();
       ctx.fontSize = `${tickFontSize}px`;
       ctx.textBaseline = "top";
       ctx.textAlign = i === ticks.length-1 ? "right" : "left";
       const padding = i === ticks.length-1 ? -1 : 1;
-      ctx.fillText(formatTime(tick, data.duration), x+(ctx.lineWidth+4)*padding, tickHeight-tickFontSize);
+      ctx.fillText(formatTime(tick, data.duration), x+(ctx.lineWidth+2)*padding, tickHeight-tickFontSize);
     }
     const { top: canvasTop } = rect(canvas);
     for (const [i, e] of data.events.entries()) {
