@@ -4287,7 +4287,7 @@ class Tensor(MathTrait):
     ```
     """
     A = self
-    batch_dims = A.shape[:-2]
+    b_dims = A.shape[:-2]
     A = A.reshape(-1, A.shape[-2], A.shape[-1])
     B, m, n = A.shape
     if k is None: k = min(m, n)
@@ -4304,22 +4304,20 @@ class Tensor(MathTrait):
       AtA = A.transpose(-2, -1) @ A  # (B, n, n)
       V = power_iteration(AtA, k)
       AV = A @ V  # (B, m, k)
-      S = (AV * AV).sum(axis=-2).sqrt()  # (B, k)
-      S_safe = S.clamp(min_=1e-12)
-      U = AV / S_safe.unsqueeze(-2)
+      S = (AV * AV).sum(axis=-2).sqrt().clamp(min_=1e-12)  # (B, k)
+      U = AV / S.unsqueeze(-2)
     else:
       # Compute U from A A^T, then V = A^T @ U @ S^-1  
       AAt = A @ A.transpose(-2, -1)  # (B, m, m)
       U = power_iteration(AAt, k)
       AtU = A.transpose(-2, -1) @ U  # (B, n, k)
-      S = (AtU * AtU).sum(axis=-2).sqrt()  # (B, k)
-      S_safe = S.clamp(min_=1e-12)
-      V = AtU / S_safe.unsqueeze(-2)
+      S = (AtU * AtU).sum(axis=-2).sqrt().clamp(min_=1e-12)  # (B, k)
+      V = AtU / S.unsqueeze(-2)
     
     S, idx = S.sort(dim=-1, descending=True)
     U = U.gather(-1, idx.unsqueeze(-2).expand(-1, m, -1))
     V = V.gather(-1, idx.unsqueeze(-2).expand(-1, n, -1))
-    return U.reshape(*batch_dims, m, k), S.reshape(*batch_dims, k), V.reshape(*batch_dims, n, k).transpose(-2, -1)
+    return U.reshape(*b_dims, m, k), S.reshape(*b_dims, k), V.reshape(*b_dims, n, k).transpose(-2, -1)
 
   def householder_qr(self:Tensor) -> Tensor:
     #return Tensor(torch.linalg.qr(torch.tensor(A.numpy()))[0].numpy())
