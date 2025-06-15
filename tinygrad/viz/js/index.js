@@ -21,6 +21,7 @@ const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getB
 
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
+  displayGraph(".graph");
   // start calculating the new layout (non-blocking)
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
@@ -37,7 +38,7 @@ async function renderDag(graph, additions, recenter=false) {
   worker.onmessage = (e) => {
     progressMessage.style.display = "none";
     clearTimeout(timeout);
-    displayGraph(".graph").select("#bars").html("");
+    d3.select("#bars").html("");
     const g = dagre.graphlib.json.read(e.data);
     // draw nodes
     const STROKE_WIDTH = 1.4;
@@ -108,6 +109,7 @@ function pluralize(num, name, alt=null) {
 }
 
 function renderMemoryGraph(graph) {
+  displayGraph(".graph");
   // ** construct alloc/free traces
   // we can map reads/writes from the kernel graph
   const actions = [];
@@ -186,7 +188,7 @@ function renderMemoryGraph(graph) {
   // clear existing groups
   document.querySelector(".progress-message").style.display = "none";
   for (c of document.getElementById("render").children) c.innerHTML = "";
-  const render = displayGraph(".graph").select("#bars");
+  const render = d3.select("#bars");
   const yscale = d3.scaleLinear().domain([0, peak]).range([576, 0]);
   const xscale = d3.scaleLinear().domain([0, timestep]).range([0, 1024]);
   const axesGroup = render.append("g").attr("id", "axes");
