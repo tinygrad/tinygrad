@@ -239,7 +239,7 @@ const colors = [
   "#c3d2ee", "#3d6c5b", "#cfdaf0", "#c1d3fe"
 ];
 
-var data;
+var data, canvasZoom;
 async function renderProfiler() {
   // ** fetch timing and setup layout
   if (data == null) {
@@ -263,6 +263,15 @@ async function renderProfiler() {
     const kernelMap = {};
     for (const [i, c] of ctxs.entries()) kernelMap[c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1")] = { ...c, idx:i };
     data = { events, duration, st, et, kernelMap };
+
+    // zoom/drag on the time axis
+    canvasZoom = d3.zoom().filter(e => {
+      e.preventDefault();
+      return (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button;
+    }).scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => {
+      render(e.transform)
+    });
+    d3.select("#timeline").call(canvasZoom);
   }
 
   // ** canvas painting
@@ -270,6 +279,7 @@ async function renderProfiler() {
   const canvas = document.getElementById("timeline");
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
+  const grid = new Map();
   function render(transform=null) {
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
@@ -302,9 +312,13 @@ async function renderProfiler() {
       const x = scale(e.ts-data.st);
       const width = scale(e.ts+e.dur-data.st)-x;
       const { height, y } = rect(`#pid-${e.pid}`);
+      const ry = y-canvasTop+5;
       ctx.fillStyle = colors[i%colors.length];
-      ctx.fillRect(x, y-canvasTop+5, width, height-10);
+      ctx.fillRect(x, ry, width, height-10);
+      if (!grid.has(ry)) grid.set(ry, []);
+      grid.get(ry).push(i);
     }
+    console.log("hi");
     ctx.restore();
   }
 
@@ -315,19 +329,22 @@ async function renderProfiler() {
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
+    ctx.scale(dpr, dpr);
     render();
   }
 
   // ** rendering and interactions
   resize();
   window.addEventListener("resize", resize);
-  // zoom/drag on the time axis
-  const zoom = d3.zoom().filter(e => {
+  /*
+  canvas.addEventListener("click", e => {
     e.preventDefault();
-    return (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button;
-  }).scaleExtent([1, Infinity]).translateExtent([[0,0], [canvas.width,0]]).on("zoom", e => render(e.transform));
-  d3.select(canvas).call(zoom);
-  document.getElementById("zoom-to-fit-btn").addEventListener("click", () => d3.select(canvas).call(zoom.transform, d3.zoomIdentity));
+    const point = { x:e.clientX, y:e.clientY };
+    const surface = rect(canvas);
+    const found = rectMap[point]
+    console.log(found);
+  });
+  */
 }
 
 // ** zoom and recentering
@@ -336,6 +353,10 @@ const zoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", 
 d3.select("#graph-svg").call(zoom);
 // zoom to fit into view
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
+  const canvas = d3.select("#timeline");
+  if (rect(canvas.node()).width !== 0) {
+    return canvas.call(canvasZoom.transform, d3.zoomIdentity)
+  }
   const svg = d3.select("#graph-svg");
   svg.call(zoom.transform, d3.zoomIdentity);
   const mainRect = rect(".main-container");
