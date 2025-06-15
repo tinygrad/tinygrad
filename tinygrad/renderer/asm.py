@@ -223,17 +223,15 @@ arm64_branch_ops = {Ops.ENDRANGE: "b.lt", Ops.IF: "b.eq"}
 arm64_unsigned_ops = {**arm64_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "mul", Ops.MULACC: "madd", Ops.IDIV: "udiv", Ops.MOD: "udiv",
                 Ops.CMPNE: "cmp", Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "orr", Ops.XOR: "eor", Ops.SHL: "lsl", Ops.SHR: "lsr", Ops.WHERE: "csel"}
 arm64_signed_ops = {**arm64_unsigned_ops, Ops.IDIV: "sdiv", Ops.MOD: "sdiv", Ops.SHR: "asr"}
-# NOTE: int16/int8 alus need to be casted to int32 then casted back to original dtype
-arm64_16bit_unsigned_ops = {**arm64_unsigned_ops, Ops.STORE: "strh", Ops.LOAD: "ldrh"}
-arm64_16bit_signed_ops = {**arm64_signed_ops, Ops.STORE: "strh", Ops.LOAD: "ldrh"}
-arm64_8bit_unsigned_ops = {**arm64_unsigned_ops, Ops.STORE: "strb", Ops.LOAD: "ldrb"}
-arm64_8bit_signed_ops = {**arm64_signed_ops, Ops.STORE: "strb", Ops.LOAD: "ldrb"}
+# NOTE: int16/int8 alus are casted to int32
+arm64_16bit_ops = {Ops.STORE: "strh", Ops.LOAD: "ldrh", Ops.ASSIGN: "mov"}
+arm64_8bit_ops = {Ops.STORE: "strb", Ops.LOAD: "ldrb", Ops.ASSIGN: "mov"}
 arm64_float_ops = {Ops.ADD: "fadd", Ops.SUB: "fsub", Ops.MUL: "fmul", Ops.FDIV: "fdiv", Ops.CMPLT: "fcmp", Ops.CMPNE: "fcmp",
                   Ops.SQRT: "fsqrt", Ops.MULACC: "fmadd", Ops.WHERE: "fcsel", Ops.STORE: "str", Ops.LOAD: "ldr", Ops.ASSIGN: "fmov"}
 arm64_vec_ops = arm64_mov_ops
 arm64_ops = {**{x:arm64_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:arm64_signed_ops for x in dtypes.sints},
-             **{x:arm64_float_ops for x in dtypes.floats}, dtypes.uint16:arm64_16bit_unsigned_ops, dtypes.int16:arm64_16bit_signed_ops,
-             dtypes.uint8:arm64_8bit_unsigned_ops, dtypes.int8:arm64_8bit_signed_ops, dtypes.float32.vec(2):arm64_vec_ops,
+             **{x:arm64_float_ops for x in dtypes.floats}, **{x:arm64_16bit_ops for x in (dtypes.int16, dtypes.uint16)},
+             **{x:arm64_8bit_ops for x in (dtypes.int8, dtypes.uint8, dtypes.bool)}, dtypes.float32.vec(2):arm64_vec_ops,
              dtypes.float32.vec(4):arm64_vec_ops, dtypes.float64.vec(2):arm64_vec_ops, dtypes.void:arm64_branch_ops}
 arm64_vec = {1: "b", 2: "h", 4: "s", 8: "d"}
 arm64_cast_suffix = {1: "b", 2: "h", 4: "w"}
@@ -246,7 +244,7 @@ arm64_rewrite = PatternMatcher([
    f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
   (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, ={ctx[idx][1:]}"),
   (UPat(Ops.STORE, name="x"),
-   lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {ctx.render_reg(ctx.r[x.src[1]], x.src[1].dtype, True)}, [{ctx[x.src[0]]}]"),
+   lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {ctx.render_reg(ctx.r[ctx.bypass(x.src[1])], x.src[1].dtype, True)}, [{ctx[x.src[0]]}]"),
   # devectorize/vectorize
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx.r[x.src[0]]}.{arm64_vec[x.dtype.itemsize]}[{x.arg[0]}]"),
   (UPat(Ops.VECTORIZE, name="x"),
