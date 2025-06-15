@@ -318,7 +318,7 @@ async function renderProfiler() {
       ctx.fillRect(x, y, width, height);
       rectLst.push({ y0:y, y1:y+height, x0:x, x1:x+width, name:e.name });
       if (width>labelWidth) {
-        ctx.fillStyle = "white";
+        ctx.fillStyle = "black";
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         ctx.fillText(e.name, x+2, y+height/2);
