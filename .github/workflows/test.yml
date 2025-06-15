@@ -679,6 +679,7 @@ jobs:
           key: ${{ matrix.backend }}-minimal
           deps: testing_minimal
           cuda: 'true'
+          ocelot: 'true'
       - name: Set env
         run: printf "${{ matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
@@ -746,6 +747,7 @@ jobs:
         python-version: '3.11'
         amd: 'true'
         cuda: 'true'
+        ocelot: 'true'
         llvm: 'true'
     - name: Run real world test
       run: METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
