@@ -1,6 +1,8 @@
 import unittest
 import numpy as np
 import torch
+import importlib.util
+
 from tinygrad import Tensor, Variable, Device
 from tinygrad.helpers import OSX
 
@@ -28,6 +30,7 @@ class TestSample(unittest.TestCase):
     result = Tensor.stft_full(X, N_FFT, HOP_LENGTH, (0, 0))
     np.testing.assert_allclose(result.numpy(), reference.numpy(), atol=1e-4, rtol=1e-2)
 
+  @unittest.skipUnless(importlib.util.find_spec("librosa") is not None)
   def test_stft_librosa(self):
     import librosa
     N_FFT = 400
