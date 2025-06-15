@@ -226,12 +226,13 @@ arm64_signed_ops = {**arm64_unsigned_ops, Ops.IDIV: "sdiv", Ops.MOD: "sdiv", Ops
 # NOTE: int16/int8 alus are casted to int32
 arm64_16bit_ops = {Ops.STORE: "strh", Ops.LOAD: "ldrh", Ops.ASSIGN: "mov"}
 arm64_8bit_ops = {Ops.STORE: "strb", Ops.LOAD: "ldrb", Ops.ASSIGN: "mov"}
+arm64_bool_ops = {**arm64_unsigned_ops, **arm64_8bit_ops}
 arm64_float_ops = {Ops.ADD: "fadd", Ops.SUB: "fsub", Ops.MUL: "fmul", Ops.FDIV: "fdiv", Ops.CMPLT: "fcmp", Ops.CMPNE: "fcmp",
                   Ops.SQRT: "fsqrt", Ops.MULACC: "fmadd", Ops.WHERE: "fcsel", Ops.STORE: "str", Ops.LOAD: "ldr", Ops.ASSIGN: "fmov"}
 arm64_vec_ops = arm64_mov_ops
-arm64_ops = {**{x:arm64_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:arm64_signed_ops for x in dtypes.sints},
+arm64_ops = {**{x:arm64_unsigned_ops for x in dtypes.uints}, **{x:arm64_signed_ops for x in dtypes.sints},
              **{x:arm64_float_ops for x in dtypes.floats}, **{x:arm64_16bit_ops for x in (dtypes.int16, dtypes.uint16)},
-             **{x:arm64_8bit_ops for x in (dtypes.int8, dtypes.uint8, dtypes.bool)}, dtypes.float32.vec(2):arm64_vec_ops,
+             **{x:arm64_8bit_ops for x in (dtypes.int8, dtypes.uint8)}, dtypes.bool:arm64_bool_ops, dtypes.float32.vec(2):arm64_vec_ops,
              dtypes.float32.vec(4):arm64_vec_ops, dtypes.float64.vec(2):arm64_vec_ops, dtypes.void:arm64_branch_ops}
 arm64_vec = {1: "b", 2: "h", 4: "s", 8: "d"}
 arm64_cast_suffix = {1: "b", 2: "h", 4: "w"}
@@ -242,7 +243,7 @@ arm64_rewrite = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"{ctx.two_address(x, alt)}tst {ctx[mask]}, #1\n"
    f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx.render_reg(ctx.r[x], x.dtype, True)}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
-  (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, ={ctx[idx][1:]}"),
+  (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"ldr {ctx[x]}, ={ctx[idx][1:]}"),
   (UPat(Ops.LOAD, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx.render_reg(ctx.r[x], x.dtype, True)}, [{ctx[x.src[0]]}]"),
   (UPat(Ops.STORE, name="x"),
    lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {ctx.render_reg(ctx.r[ctx.bypass(x.src[1])], x.src[1].dtype, True)}, [{ctx[x.src[0]]}]"),
@@ -289,8 +290,10 @@ def arm64_load_consts(x:UOp) -> UOp|None:
 arm64_matcher = asm_matcher + PatternMatcher([
   (UPat(GroupOp.All, name="x"), arm64_load_consts),
   # some ops can't take imm in srcs
-  (UPat((Ops.IDIV, Ops.MUL, Ops.MULACC, Ops.WHERE), name="x"),
+  (UPat((Ops.XOR, Ops.IDIV, Ops.MUL, Ops.MULACC, Ops.WHERE, Ops.STORE), name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
+  # no modulo in arm64
+  (UPat(Ops.MOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - (a // b) * b),
   # TODO: uint16/int16 to float16 bitcast and vice versa is different from x86 need to use vector reg and just move
   # int8/int16 alus perform instruction in int32
   (UPat(GroupOp.ALU, dtype=(dtypes.int8, dtypes.int16), name="x"),
