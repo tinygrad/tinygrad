@@ -270,7 +270,7 @@ async function renderProfiler() {
       procList.append("div").text(e.args.name).attr("id", `proc-${e.pid}`);
     }
   }
-  const canvas = root.append("canvas").node();
+  const canvas = root.append("canvas").attr("id", "canvas-profiler").node();
   const ctx = canvas.getContext("2d");
   const logicalHeight = rect(root.node()).height;
   // basic stuff for naming, these should be shared across viz
@@ -369,9 +369,10 @@ async function renderProfiler() {
       if (logicalX >= r.x && logicalX <= r.x + r.width && logicalY >= r.y && logicalY <= r.y + r.height) {
         const v = name_map[r.name];
         if (v != null) {
-          // TODO: this is copied from the kernelize code
-          history.replaceState(state, "");
-          history.pushState(state, "");
+          const { x, y, k } = d3.zoomTransform(e.target);
+          const canvasState = { ...state, zoom: { x, y, k, id:e.target.id } };
+          history.replaceState(canvasState, "");
+          history.pushState(canvasState, "");
           return setState({ expandSteps: true, currentCtx:v.idx, currentStep:0, currentRewrite:0 });
         }
         break; // break anyways. some kernels like COPY do not have codegen rewrite.
@@ -467,7 +468,16 @@ function setState(ns) {
   main();
 }
 window.addEventListener("popstate", (e) => {
-  if (e.state != null) setState(e.state);
+  console.log(e.state);
+  const { zoom, ...state } = e.state;
+  if (state != null) setState(state);
+  if (zoom != null) {
+    const { x, y, k, id } = zoom;
+    const selection = d3.select(`#${id}`);
+    const transform = d3.zoomIdentity.translate(x, y).scale(k);
+    selection.property("__zoom", transform);
+    selection.dispatch("zoom");
+  }
 });
 
 async function main() {
