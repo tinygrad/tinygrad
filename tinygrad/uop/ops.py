@@ -553,7 +553,8 @@ def print_uops(uops:list[UOp]):
 def get_location() -> tuple[str, int]:
   frm = sys._getframe(1)
   # skip over ops.py/mathtraits.py (unless there's nothing but ops.py/mathtraits.py)
-  while pathlib.Path(frm.f_code.co_filename).name in ("ops.py", "mathtraits.py") and frm.f_back is not None and not frm.f_back.f_code.co_filename.startswith("<frozen"):
+  while pathlib.Path(frm.f_code.co_filename).name in ("ops.py", "mathtraits.py") and frm.f_back is not None and \
+      not frm.f_back.f_code.co_filename.startswith("<frozen"):
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 
