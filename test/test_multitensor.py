@@ -73,6 +73,10 @@ class TestMultiTensor(unittest.TestCase):
     sharded_arange.realize()
     np.testing.assert_equal(sharded_arange.numpy(), np.arange(1000))
 
+  def test_metadata(self):
+    t = Tensor.arange(4).realize().shard(devices_2, 0)
+    self.assertEqual(t.uop.metadata[0].name, "shard")
+
   # TODO: fix this to not copy on the src device
   @unittest.expectedFailure
   def test_shard_no_recompile(self):
