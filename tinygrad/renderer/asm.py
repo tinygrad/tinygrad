@@ -51,8 +51,6 @@ asm_matcher = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=(dtypes.bool, dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16)),), name="c"),
     lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
   # some cast/bitcast are noops
-  (UPat(Ops.CAST, dtypes.int64, src=(UPat.var("y"),), name="x"),
-   lambda x,y: UOp(Ops.NOOP, x.dtype, x.src) if isinstance(y.dtype, PtrDType) else None),
   (UPat(Ops.CAST, dtypes.ints, src=(UPat.var("y", dtypes.ints + (dtypes.bool,)),), name="x"),
    lambda x,y: UOp(Ops.NOOP, x.dtype, x.src) if x.dtype.itemsize <= y.dtype.itemsize or y.dtype is dtypes.uint32 else None),
   (UPat(Ops.BITCAST, dtypes.ints, src=(UPat.var("y", dtypes.ints),), name="x"),
@@ -78,7 +76,10 @@ class AsmRenderer(Renderer):
   string_rewrite = base_rewrite
   @cached_property
   def all_regs(self) -> set[str]: return {reg for regs in self.regs.values() for reg in regs}
-  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]: raise NotImplementedError("arch specific")
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]:
+    # because of spill hoisting need to ensure acc is in memory before assign if it was spilled
+    if u.op is Ops.ASSIGN and s is self.srcs(u)[0] and s in self.mem: return [self.mem[s]]
+    return []
   def render_imm(self, imm:str): raise NotImplementedError("arch specific")
   def render_mem(self, sz:int): raise NotImplementedError("arch specific")
   def render_reg(self, reg:str, dt:DType, alias:bool=False): raise NotImplementedError("arch specific")
@@ -387,9 +388,6 @@ x86_rewrite = PatternMatcher([
   # define local points to the start of the next stack slot, NOTE: unaligned, could cause issues
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"mov {ctx[x]}, rsp\nadd {ctx[x]}, {ctx.stack_size}"),
   # loads/stores
-  (UPat(Ops.INDEX, src=(UPat(), UPat.cvar(name="c")), name="x"),
-   lambda ctx,x,c: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx[c]}*{x.src[0].dtype.itemsize}]"),
-  (UPat(Ops.INDEX, name="x"), lambda ctx,x: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx.r[x.src[1]]}*{x.src[0].dtype.itemsize}]"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"{ctx.two_address(x, alt)}test {ctx[mask]}, 1\n"
    f"je .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
@@ -459,8 +457,7 @@ x86_matcher = asm_matcher + PatternMatcher([
   # some ops can't take imm in srcs
   (UPat((Ops.WHERE, Ops.IDIV, Ops.MOD), name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
-  (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.cvar("c"), UPat()), name="x"),
-   lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1])) if c.op is Ops.CONST else None),
+  (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.cvar("c"), UPat()), name="x"), lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
   # we use general registers to load/store the 2 bytes of float16
   (UPat(Ops.LOAD, dtypes.float16, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"),
    lambda x,idx,alt,mask: idx.load(alt.bitcast(dtypes.int16), mask, dtype=dtypes.int16).bitcast(x.dtype)),
@@ -503,11 +500,10 @@ class X86Renderer(AsmRenderer):
   callee_saved = ["rbx", "rsi", "rdi", "r12", "r13", "r14", "r15"] if sys.platform == "win32" else []
 
   def constraints(self, u:UOp, s:UOp|None=None) -> list[str]:
+    if (base:=super().constraints(u, s)): return base
     # constraints for srcs
     if u.op in (Ops.IDIV, Ops.MOD) and s in self.srcs(u): return [r for r in self.reg_class(s) if r not in ("rdx", "rax")]
     if u.op in (Ops.SHL, Ops.SHR) and s is self.srcs(u)[1] and s.op != Ops.CONST: return ["rcx"]
-    # because of spill hoisting need to ensure acc is in memory before assign if it was spilled
-    if u.op is Ops.ASSIGN and s is self.srcs(u)[0] and s in self.mem: return [self.mem[s]]
     if s is not None: return self.reg_class(s)
     # constraints for destination
     # abi constraints, stack args are offset by 8
