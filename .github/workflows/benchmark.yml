@@ -94,8 +94,8 @@ jobs:
       run: |
         BENCHMARK_LOG=llama3_int8 python3.11 examples/llama3.py --size 8B --temperature 0 --benchmark --quantize int8 | tee llama3_int8.txt
         BENCHMARK_LOG=llama3_nf4 python3.11 examples/llama3.py --size 8B --temperature 0 --benchmark --quantize nf4 | tee llama3_nf4.txt
-    #- name: Run LLaMA 7B on 4 (virtual) GPUs
-    #  run: python3.11 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
+    - name: Run LLaMA 7B on 4 (virtual) GPUs
+      run: python3.11 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run GPT2
       run: |
         BENCHMARK_LOG=gpt2_nojit JIT=0 python3.11 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
@@ -221,8 +221,8 @@ jobs:
         BENCHMARK_LOG=llama NV=1 JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run LLaMA with BEAM
       run: BENCHMARK_LOG=llama_beam NV=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
-    # - name: Run LLaMA 7B on 4 GPUs
-    #   run: NV=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
+    - name: Run LLaMA 7B on 4 GPUs
+      run: NV=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     # - name: Run LLaMA 7B on 6 GPUs
     #   run: NV=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
     - name: Run LLaMA-3 8B BEAM
@@ -424,8 +424,8 @@ jobs:
         BENCHMARK_LOG=llama AMD=1 JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run LLaMA 7B with BEAM
       run: BENCHMARK_LOG=llama_beam AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
-    # - name: Run LLaMA 7B on 4 GPUs
-    #   run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
+    - name: Run LLaMA 7B on 4 GPUs
+      run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     # - name: Run LLaMA 7B on 6 GPUs
     #   run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
     - name: Run LLaMA-3 8B BEAM
