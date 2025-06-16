@@ -1,6 +1,6 @@
-import onnx, json, sys, time
+import json, sys, time
 from pathlib import Path
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 from extra.onnx_helpers import validate, get_example_inputs
 from huggingface_hub import snapshot_download
 
@@ -28,7 +28,7 @@ def get_config(root_path: Path) -> dict:
   return ret
 
 def run_huggingface_validate(onnx_model_path: Path, config: dict, rtol: float, atol: float):
-  onnx_model = onnx.load(onnx_model_path)
+  onnx_model = onnx_load(onnx_model_path)
   onnx_runner = OnnxRunner(onnx_model)
   inputs = get_example_inputs(onnx_runner.graph_inputs, config)
   validate(onnx_model_path, inputs, rtol=rtol, atol=atol)
