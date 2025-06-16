@@ -43,15 +43,7 @@ async function renderDag(graph, additions, recenter=false) {
     // draw nodes
     const STROKE_WIDTH = 1.4;
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
-      .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null)
-      .on("click", (_,d) => {
-        if (d.ref != null) {
-          // NOTE: browser does a structured clone, passing a mutable object is safe.
-          history.replaceState(state, "");
-          history.pushState(state, "");
-          setState({ expandSteps: true, currentCtx:d.ref, currentStep:0, currentRewrite:0 });
-        }
-      });
+      .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (_,d) => pushContext(d.ref));
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style ?? `stroke:#4a4b57; stroke-width:${STROKE_WIDTH}px;`);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
@@ -241,7 +233,7 @@ const colors = [
   "#c3d2ee", "#3d6c5b", "#cfdaf0", "#c1d3fe"
 ];
 
-var data, canvasZoom;
+var data, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph(".profiler");
   if (data != null) return;
@@ -281,6 +273,7 @@ async function renderProfiler() {
   const nameMap = new Map();
   const rectLst = [];
   function render(transform=null) {
+    if (transform != null) zoomLevel = transform;
     rectLst.length = 0;
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
@@ -293,7 +286,7 @@ async function renderProfiler() {
     ctx.stroke();
     // xticks
     const scale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
-    if (transform != null) scale.domain(scale.range().map(transform.invertX, transform).map(scale.invert, scale));
+    scale.domain(scale.range().map(zoomLevel.invertX, zoomLevel).map(scale.invert, scale));
     const ticks = scale.ticks();
     for (const [i, tick] of ticks.entries()) {
       ctx.beginPath();
@@ -355,15 +348,7 @@ async function renderProfiler() {
     const clickY = ((e.clientY-top) * (canvas.height/height))/dpr;
     for (const r of rectLst) {
       if (clickY>=r.y0 && clickY<=r.y1 && clickX>=r.x0 && clickX<=r.x1) {
-        const ref = kernelMap.get(r.name);
-        if (ref != null) {
-          const { x, y, k } = d3.zoomTransform(e.target);
-          const canvasState = { ...state, zoom: { x, y, k, id:e.target.id } };
-          history.replaceState(canvasState, "");
-          history.pushState(canvasState, "");
-          setState({ expandSteps: true, currentCtx:ref.i, currentStep:0, currentRewrite:0 });
-        }
-        break;
+        return pushContext(kernelMap.get(r.name)?.i);
       }
     }
   });
@@ -458,15 +443,17 @@ function setState(ns) {
   // re-render
   main();
 }
+
+const pushContext = (newCtx) => {
+  if (newCtx == null) return;
+  // NOTE: browser does a structured clone, passing a mutable object is safe.
+  history.replaceState(state, "");
+  history.pushState(state, "");
+  setState({ expandSteps:true, currentCtx:newCtx, currentStep:0, currentRewrite:0 });
+}
+
 window.addEventListener("popstate", (e) => {
-  const { zoom, ...state } = e.state;
-  if (state != null) setState(state);
-  if (zoom != null) {
-    const { x, y, k, id } = zoom;
-    const selection = d3.select(`#${id}`);
-    const transform = d3.zoomIdentity.translate(x, y).scale(k);
-    selection.call(canvasZoom.transform, transform);
-  }
+  if (e.state != null) setState(e.state);
 });
 
 async function main() {
