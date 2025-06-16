@@ -38,14 +38,7 @@ async function renderDag(graph, additions, recenter=false) {
     const STROKE_WIDTH = 1.4;
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null)
-      .on("click", (_,d) => {
-        if (d.ref != null) {
-          // NOTE: browser does a structured clone, passing a mutable object is safe.
-          history.replaceState(state, "");
-          history.pushState(state, "");
-          setState({ expandSteps: true, currentCtx:d.ref, currentStep:0, currentRewrite:0 });
-        }
-      });
+      .on("click", (_,d) => setCtxWithHistory(d.ref));
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style ?? `stroke:#4a4b57; stroke-width:${STROKE_WIDTH}px;`);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
@@ -220,12 +213,13 @@ function renderMemoryGraph(graph) {
 
 // ** zoom and recentering
 
-const zoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
-d3.select("#graph-svg").call(zoom);
+const svgZoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
+d3.select("#graph-svg").call(svgZoom);
+
 // zoom to fit into view
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const svg = d3.select("#graph-svg");
-  svg.call(zoom.transform, d3.zoomIdentity);
+  svg.call(svgZoom.transform, d3.zoomIdentity);
   const mainRect = rect(".main-container");
   const x0 = rect(".ctx-list-parent").right;
   const x1 = rect(".metadata-parent").left;
@@ -235,7 +229,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   if (r.width === 0) return;
   const scale = Math.min(R.width/r.width, R.height/r.height);
   const [tx, ty] = [R.x+(R.width-r.width*scale)/2-r.left*scale, R.y+(R.height-r.height*scale)/2];
-  svg.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+  svg.call(svgZoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
 });
 
 // **** main VIZ interfacae
@@ -302,6 +296,16 @@ function setState(ns) {
   // re-render
   main();
 }
+
+// set a new context and keep the old one in browser history
+function setCtxWithHistory(newCtx) {
+  if (newCtx == null) return;
+  // NOTE: browser does a structured clone, passing a mutable object is safe.
+  history.replaceState(state, "");
+  history.pushState(state, "");
+  setState({ expandSteps:true, currentCtx:newCtx, currentStep:0, currentRewrite:0 });
+}
+
 window.addEventListener("popstate", (e) => {
   if (e.state != null) setState(e.state);
 });
