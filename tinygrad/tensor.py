@@ -4277,13 +4277,13 @@ class Tensor(MathTrait):
 
   def svd(self:Tensor, k:int|None=None) -> tuple[Tensor, Tensor, Tensor]:
     """
-    Returns the SVD decomposition U, S, V such that A ≈ U @ diag(S) @ V.
+    Returns the SVD decomposition U, S, Vt such that A ≈ U @ diag(S) @ Vt.
     k: Number of singular values to compute (default: min(m,n))
 
     ```python exec="true" source="above" session="tensor" result="python"
     A = Tensor.randn(5, 10)
-    U, S, V = A.svd()
-    print(U.numpy(), S.numpy(), V.numpy())
+    U, S, Vt = A.svd()
+    print(U.numpy(), S.numpy(), Vt.numpy())
     ```
     """
     *b, m, n = self.shape
