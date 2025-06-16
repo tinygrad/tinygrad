@@ -315,6 +315,7 @@ async function renderProfiler() {
       if (!nameMap.has(e.name)) nameMap.set(e.name, { color:colors[i%colors.length], labelWidth:ctx.measureText(e.name).width });
       rectArgs.push({ width, height, x, minY, label:e.name, ...nameMap.get(e.name), pid:e.pid });
     }
+    /*
     // assign levels to each of the rects
     for (const [pid, group] of Object.entries(rectArgs.reduce((m,r) => (m[r.pid] = m[r.pid]||[]).push(r)&&m, {}))) {
       group.sort((a,b) => a.x - b.x);
@@ -333,10 +334,11 @@ async function renderProfiler() {
         r.levels = levels.length;
       }
     }
+    */
 
     // draw rects
     for (const r of rectArgs) {
-      const y = r.minY+r.depth*r.height;
+      const y = r.minY+(r.depth || 0)*r.height;
       ctx.fillStyle = r.color;
       ctx.fillRect(r.x, y, r.width, r.height);
       if (r.width > r.labelWidth) {
