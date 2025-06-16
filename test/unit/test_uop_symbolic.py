@@ -271,6 +271,16 @@ class TestSymbolic(unittest.TestCase):
     a = Variable("a", 0, 124)
     self.helper_test_variable(((a-10)//2+10)//2, 2, 33, "((((a+-10)//2)+10)//2)")
 
+  def test_neg_div(self):
+    a = Variable("a", 0, 124)
+    self.helper_test_variable((-a)//2, -62, 0, "((a//2)*-1)")
+    self.helper_test_variable(a//-2, -62, 0, "((a//2)*-1)")
+
+  def test_neg_mod(self):
+    a = Variable("a", 0, 124)
+    self.helper_test_variable((-a)%4, -3, 0, "((a%4)*-1)")
+    self.helper_test_variable(a%-4, 0, 3, "(a%-4)")
+
   def test_distribute_mul(self):
     self.helper_test_variable(usum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
     self.helper_test_variable((1+Variable("a", 0, 3))*(-2)+12, 4, 10, "((a*-2)+10)")
