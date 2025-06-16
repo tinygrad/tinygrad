@@ -241,18 +241,16 @@ async function renderProfiler() {
   // fetch and process data
   const { traceEvents } = await (await fetch("/get_profile")).json();
   let st, et;
-  const deviceMap = new Map();
-  data = [];
+  data = new Map();
   for (const e of traceEvents) {
-    if (e.name === "process_name") deviceMap.set(e.pid, { name:e.args.name, events:0 });
+    if (e.name === "process_name") data.set(e.pid, { name:e.args.name, events:[] });
     if (e.ph === "X") {
       if (st == null) [st, et] = [e.ts, e.ts+e.dur];
       else {
         st = Math.min(st, e.ts);
         et = Math.max(et, e.ts+e.dur);
       }
-      deviceMap.get(e.pid).events += 1;
-      data.push(e);
+      data.get(e.pid).events.push(e);
     }
   }
   const kernelMap = new Map();
@@ -261,8 +259,8 @@ async function renderProfiler() {
   const [tickSize, padding] = [10, 8];
   const deviceList = document.getElementById("device-list");
   deviceList.style.paddingTop = `${tickSize+padding}px`;
-  for (const [k, v] of deviceMap.entries()) {
-    if (v.events === 0) continue;
+  for (const [k, v] of data) {
+    if (v.events.length === 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
     div.id = `pid-${k}`;
     div.innerText = v.name;
@@ -303,51 +301,26 @@ async function renderProfiler() {
     }
     // programs
     const canvasTop = rect(canvas).top;
-    const rectArgs = [];
-    for (const [i, e] of data.entries()) {
-      // base rect coordinates and dims
-      const x = scale(e.ts-st);
-      const width = scale(e.ts-st+e.dur)-x;
-      const pidRect = rect(`#pid-${e.pid}`);
-      const minY = pidRect.y-canvasTop+padding/2;
-      const height = pidRect.height-padding;
-      // label and coloring
-      if (!nameMap.has(e.name)) nameMap.set(e.name, { color:colors[i%colors.length], labelWidth:ctx.measureText(e.name).width });
-      rectArgs.push({ width, height, x, minY, label:e.name, ...nameMap.get(e.name), pid:e.pid });
-    }
-    /*
-    // assign levels to each of the rects
-    for (const [pid, group] of Object.entries(rectArgs.reduce((m,r) => (m[r.pid] = m[r.pid]||[]).push(r)&&m, {}))) {
-      group.sort((a,b) => a.x - b.x);
-      const levels = [];
-      for (const r of group) {
-        const endX = r.x + r.width;
-        // find first level that is free
-        let depth = levels.findIndex(le => r.x >= le);
-        if (depth === -1) {
-          depth = levels.length;
-          levels.push(endX);
-        } else {
-          levels[depth] = endX;
+    for (const [pid, v] of data) {
+      if (v.events.length === 0) continue;
+      let { y, height } = rect(`#pid-${pid}`);
+      y -= canvasTop-padding/2;
+      height -= padding;
+      for (const [i, e] of v.events.entries()) {
+        const x = scale(e.ts-st);
+        const width = scale(e.ts-st+e.dur)-x;
+        if (!nameMap.has(e.name)) nameMap.set(e.name, { color:colors[i%colors.length], labelWidth:ctx.measureText(e.name).width })
+        const { color, labelWidth } = nameMap.get(e.name);
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, width, height);
+        rectLst.push({ y0:y, y1:y+height, x0:x, x1:x+width, name:e.name });
+        if (width>labelWidth) {
+          ctx.fillStyle = "black";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "middle";
+          ctx.fillText(e.name, x+2, y+height/2);
         }
-        r.depth = depth;
-        r.levels = levels.length;
       }
-    }
-    */
-
-    // draw rects
-    for (const r of rectArgs) {
-      const y = r.minY+(r.depth || 0)*r.height;
-      ctx.fillStyle = r.color;
-      ctx.fillRect(r.x, y, r.width, r.height);
-      if (r.width > r.labelWidth) {
-        ctx.fillStyle = "black";
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        ctx.fillText(r.label, r.x+2, y+r.height/2);
-      }
-      rectLst.push({ y0:y, y1:y+r.height, x0:r.x, x1:r.x+r.width, name:r.label });
     }
     ctx.restore();
   }
