@@ -3036,6 +3036,18 @@ class TestOpsBFloat16(unittest.TestCase):
     data = [60000.0, 70000.0, 80000.0]
     np.testing.assert_allclose(Tensor(data).cast("bfloat16").numpy(), torch.tensor(data).type(torch.bfloat16).float().numpy())
 
+class TestLinAlg(unittest.TestCase):
+  def test_svd_shapes(self):
+    for *b, m, n in [(10,2), (10, 5,5), (2, 5,3,5), (7,12,3)]:  # batch, square, wide, tall
+      U, S, V = (A := Tensor.randn(*b, m, n)).svd()
+      At, Ut, St, Vt = map(lambda x: torch.tensor(x.numpy()), [A, U, S, V])
+      recon = Ut @ torch.diag_embed(St) @ Vt
+      np.testing.assert_allclose(A.numpy(), recon.numpy(), rtol=1e-3, atol=1e-3)
+      np.testing.assert_allclose((Ut.mT @ Ut).numpy(), torch.eye(min(m, n)).expand(*b, -1, -1).numpy(), atol=1e-1)
+      np.testing.assert_allclose((Vt @ Vt.mT).numpy(), torch.eye(min(m, n)).expand(*b, -1, -1).numpy(), atol=1e-1)
+      _, S_torch, _ = torch.linalg.svd(At, full_matrices=False)
+      np.testing.assert_allclose(St.numpy(), S_torch.numpy(), rtol=1e-2, atol=1e-1)
+
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)
