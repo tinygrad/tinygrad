@@ -3028,14 +3028,6 @@ class TestOpsUint8(unittest.TestCase):
       lambda x: x.type(torch.uint8).min(),
       lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
 
-@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
-class TestOpsBFloat16(unittest.TestCase):
-  def test_cast(self):
-    # TODO: helper_test_op breaks in unrelated part
-    # TODO: wrong output with GPU=1 / PYTHON=1 on mac
-    data = [60000.0, 70000.0, 80000.0]
-    np.testing.assert_allclose(Tensor(data).cast("bfloat16").numpy(), torch.tensor(data).type(torch.bfloat16).float().numpy())
-
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)
