@@ -4006,6 +4006,50 @@ class Tensor(MathTrait):
     masked_weight = weight if ignore_index is None else weight * (Y != ignore_index)
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
+  
+  def svd(self,num_iterations=1000):
+   U = self.clone().contiguous().realize()
+   num = min(U.shape)
+   V = Tensor.eye(num).cast(U.dtype).contiguous().realize()
+   tolerance = 1.0e-7
+   permute = Tensor.arange(0,num)
+   permute[num//2:num] = permute[num//2:num].flip(0)
+   num_iterations  = int(num * (num -1) / 2 * 2)
+   from tinygrad import TinyJit
+   @TinyJit
+   def helper():
+     p_perm ,q_perm = permute[0:num//2],permute[num//2:num]
+    
+     pp_qq = (U[:,permute] * U[:,permute]).sum(0)
+     gamma = (U[:,p_perm] * U[:,q_perm]).sum(0)
+
+     alpha,beta = pp_qq[0:num//2], pp_qq[num//2:num]
+     conv = gamma.abs() / (alpha * beta).sqrt()
+
+     tau = (beta-alpha) / (2 * gamma)
+     t = tau.sign() / (tau.abs() + (1  + tau.square()).sqrt())
+     c = 1 / (1+t.square()).sqrt()
+     s = c * t
+
+     partial_Uq,partial_Up  = U[:,q_perm].realize(),U[:,p_perm].realize()
+     
+     U[:,p_perm] = c * U[:,p_perm] - s*partial_Uq
+     U[:,q_perm] = s*partial_Up + c * U[:,q_perm]
+
+     partial_Vq ,partial_Vp=V[:,q_perm].realize(), V[:,p_perm].realize()
+     V[:,p_perm] = c * V[:,p_perm] - s * partial_Vq
+     V[:,q_perm] = s * partial_Vp + c * V[:,q_perm]
+
+     permute[1:num] = ((permute[1:num] - 2) % (num - 1)) + 1 #round robin rotation
+     return (conv < tolerance).cast(dtypes.int).sum()
+    
+   for i in range(num_iterations):
+     conv = helper()
+    #  if conv.item() == num//2:
+    #    break
+   S = (U * U).sum(0).sqrt()
+   U = U / S
+   return U,S,V
 
   # ***** Tensor Properties *****
 
