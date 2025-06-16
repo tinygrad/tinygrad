@@ -271,6 +271,10 @@ class TestSymbolic(unittest.TestCase):
     a = Variable("a", 0, 124)
     self.helper_test_variable(((a-10)//2+10)//2, 2, 33, "((((a+-10)//2)+10)//2)")
 
+  def test_div_const_div_wrong_sign_divisor(self):
+    a = Variable("a", 0, 124)
+    self.helper_test_variable(((a+10)//-2+10)//-4, -1, 14, "(((((a//2)*-1)+5)//4)*-1)")
+
   def test_distribute_mul(self):
     self.helper_test_variable(usum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
     self.helper_test_variable((1+Variable("a", 0, 3))*(-2)+12, 4, 10, "((a*-2)+10)")
