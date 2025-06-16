@@ -38,7 +38,7 @@ async function renderDag(graph, additions, recenter=false) {
     const STROKE_WIDTH = 1.4;
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null)
-      .on("click", (_,d) => d.ref != null && setState({ expandSteps: true, currentCtx:d.ref, currentStep:0, currentRewrite:0 }));
+      .on("click", (_,d) => setCtxWithHistory(d.ref));
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style ?? `stroke:#4a4b57; stroke-width:${STROKE_WIDTH}px;`);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
@@ -47,6 +47,10 @@ async function renderDag(graph, additions, recenter=false) {
       return `translate(-${x}, -${y})`;
     }).selectAll("text").data(d => [d.label.split("\n")]).join("text").selectAll("tspan").data(d => d).join("tspan").text(d => d).attr("x", "0")
       .attr("dy", 14).attr("xml:space", "preserve");
+    const tags = nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
+      .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`);
+    tags.selectAll("circle").data(d => [d]).join("circle");
+    tags.selectAll("text").data(d => [d.tag]).join("text").text(d => d).attr("dy", "0.35em");
     // draw edges
     const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis);
     d3.select("#edges").selectAll("path.edgePath").data(g.edges()).join("path").attr("class", "edgePath").attr("d", (e) => {
@@ -70,11 +74,9 @@ async function renderDag(graph, additions, recenter=false) {
       const x = p2.x - ux * offset;
       const y = p2.y - uy * offset;
       return `translate(${x}, ${y})`
-    });
-    edgeLabels.selectAll("circle").data(e => [g.edge(e).label]).join("circle").attr("r", 5).attr("fill", "#FFD700").attr("stroke", "#B8860B")
-      .attr("stroke-width", 0.8);
-    edgeLabels.selectAll("text").data(e => [g.edge(e).label]).join("text").text(d => d).attr("text-anchor", "middle").attr("dy", "0.35em")
-      .attr("font-size", "6px").attr("fill", "black");
+    }).attr("class", "tag");
+    edgeLabels.selectAll("circle").data(e => [g.edge(e).label]).join("circle");
+    edgeLabels.selectAll("text").data(e => [g.edge(e).label]).join("text").text(d => d).attr("dy", "0.35em");
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
 
@@ -211,12 +213,13 @@ function renderMemoryGraph(graph) {
 
 // ** zoom and recentering
 
-const zoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
-d3.select("#graph-svg").call(zoom);
+const svgZoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
+d3.select("#graph-svg").call(svgZoom);
+
 // zoom to fit into view
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const svg = d3.select("#graph-svg");
-  svg.call(zoom.transform, d3.zoomIdentity);
+  svg.call(svgZoom.transform, d3.zoomIdentity);
   const mainRect = rect(".main-container");
   const x0 = rect(".ctx-list-parent").right;
   const x1 = rect(".metadata-parent").left;
@@ -226,7 +229,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   if (r.width === 0) return;
   const scale = Math.min(R.width/r.width, R.height/r.height);
   const [tx, ty] = [R.x+(R.width-r.width*scale)/2-r.left*scale, R.y+(R.height-r.height*scale)/2];
-  svg.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+  svg.call(svgZoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
 });
 
 // **** main VIZ interfacae
@@ -244,6 +247,11 @@ function codeBlock(st, language, { loc, wrap }) {
   }
   ret.appendChild(code);
   return ret;
+}
+
+function setActive(e) {
+  e.classList.add("active");
+  requestAnimationFrame(() => e.scrollIntoView({ behavior: "auto", block: "nearest" }));
 }
 
 // ** hljs extra definitions for UOps and float4
@@ -273,48 +281,66 @@ const evtSources = [];
 // context: collection of steps
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
 function setState(ns) {
+  const { currentCtx:prevCtx, currentStep:prevStep } = state;
   Object.assign(state, ns);
+  // update element styles if needed
+  document.getElementById(`ctx-${state.currentCtx}`)?.classList.toggle("expanded", state.expandSteps);
+  if (state.currentCtx !== prevCtx) {
+    document.getElementById(`ctx-${prevCtx}`)?.classList.remove("active", "expanded");
+    setActive(document.getElementById(`ctx-${state.currentCtx}`));
+  }
+  if (state.currentCtx !== prevCtx || state.currentStep !== prevStep) {
+    document.getElementById(`step-${prevCtx}-${prevStep}`)?.classList.remove("active");
+    setActive(document.getElementById(`step-${state.currentCtx}-${state.currentStep}`));
+  }
+  // re-render
   main();
 }
+
+// set a new context and keep the old one in browser history
+function setCtxWithHistory(newCtx) {
+  if (newCtx == null) return;
+  // NOTE: browser does a structured clone, passing a mutable object is safe.
+  history.replaceState(state, "");
+  history.pushState(state, "");
+  setState({ expandSteps:true, currentCtx:newCtx, currentStep:0, currentRewrite:0 });
+}
+
+window.addEventListener("popstate", (e) => {
+  if (e.state != null) setState(e.state);
+});
+
 async function main() {
-  const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // ** left sidebar context list
   if (ctxs == null) {
     ctxs = await (await fetch("/ctxs")).json();
-    setState({ currentCtx:-1 });
-  }
-  const ctxList = document.querySelector(".ctx-list");
-  ctxList.innerHTML = "";
-  for (const [i,{name, steps}] of ctxs.entries()) {
-    const ul = ctxList.appendChild(document.createElement("ul"));
-    if (i === currentCtx) {
-      ul.className = "active";
-      requestAnimationFrame(() => ul.scrollIntoView({ behavior: "auto", block: "nearest" }));
-    }
-    const p = ul.appendChild(document.createElement("p"));
-    p.innerHTML = name.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
-      const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
-      return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
-    });
-    p.onclick = () => {
-      setState(i === currentCtx ? { expandSteps:!expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
-    }
-    for (const [j,u] of steps.entries()) {
-      const inner = ul.appendChild(document.createElement("ul"));
-      if (i === currentCtx && j === currentStep) {
-        inner.className = "active";
-        requestAnimationFrame(() => inner.scrollIntoView({ behavior: "auto", block: "nearest" }));
+    const ctxList = document.querySelector(".ctx-list");
+    for (const [i,{name, steps}] of ctxs.entries()) {
+      const ul = ctxList.appendChild(document.createElement("ul"));
+      ul.id = `ctx-${i}`;
+      const p = ul.appendChild(document.createElement("p"));
+      p.innerHTML = name.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
+        const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
+        return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
+      });
+      p.onclick = () => {
+        setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
-      inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]} - ${u.match_count}`;
-      inner.style.marginLeft = `${8*u.depth}px`;
-      inner.style.display = i === currentCtx && expandSteps ? "block" : "none";
-      inner.onclick = (e) => {
-        e.stopPropagation();
-        setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
+      for (const [j,u] of steps.entries()) {
+        const inner = ul.appendChild(document.createElement("ul"));
+        inner.id = `step-${i}-${j}`;
+        inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]} - ${u.match_count}`;
+        inner.style.marginLeft = `${8*u.depth}px`;
+        inner.onclick = (e) => {
+          e.stopPropagation();
+          setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
+        }
       }
     }
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
+  const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
   const step = ctx.steps[currentStep];
@@ -421,20 +447,21 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 document.addEventListener("keydown", async function(event) {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // up and down change the step or context from the list
+  const changeStep = expandSteps && ctxs[currentCtx].steps?.length;
   if (event.key == "ArrowUp") {
     event.preventDefault();
-    if (expandSteps) {
+    if (changeStep) {
       return setState({ currentRewrite:0, currentStep:Math.max(0, currentStep-1) });
     }
-    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1) });
+    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1), expandSteps:false });
   }
   if (event.key == "ArrowDown") {
     event.preventDefault();
-    if (expandSteps) {
+    if (changeStep) {
       const totalUOps = ctxs[currentCtx].steps.length-1;
       return setState({ currentRewrite:0, currentStep:Math.min(totalUOps, currentStep+1) });
     }
-    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1) });
+    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1), expandSteps:false });
   }
   // enter toggles focus on a single rewrite stage
   if (event.key == "Enter") {
@@ -442,7 +469,7 @@ document.addEventListener("keydown", async function(event) {
     if (currentCtx === -1) {
       return setState({ currentCtx:0, expandSteps:true });
     }
-    return setState({ currentStep:0, currentRewrite:0, expandSteps:!expandSteps });
+    return setState({ expandSteps:!expandSteps });
   }
   // left and right go through rewrites in a single UOp
   if (event.key == "ArrowLeft") {
