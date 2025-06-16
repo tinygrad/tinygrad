@@ -4289,14 +4289,13 @@ class Tensor(MathTrait):
     *b, m, n = self.shape
     A = self.reshape(-1, m, n)
     if k is None: k = min(m, n)
-    # Assume A is tall
-    if m < n: A = A.transpose(-2, -1)
     def power_iteration(M:Tensor, k:int, max_iter:int=20) -> Tensor:
       B, n, _ = M.shape
       Q, _ = Tensor.randn(B, n, k).qr()
       for _ in range(max_iter): Q, _ = (M @ Q).qr()
       return Q
-
+    # Assume A is tall
+    if m < n: A = A.transpose(-2, -1)
     V = power_iteration(A.transpose(-2, -1) @ A, k)
     AV = A @ V
     S = (AV * AV).sum(axis=-2).sqrt().clamp(min_=1e-12)
