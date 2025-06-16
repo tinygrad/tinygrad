@@ -38,7 +38,7 @@ async function renderDag(graph, additions, recenter=false) {
     const STROKE_WIDTH = 1.4;
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null)
-      .on("click", (_,d) => setCtxWithHistory(d.ref));
+      .on("click", (event,d) => setCtxWithHistory(d.ref, d3.zoomTransform(event.target)));
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style ?? `stroke:#4a4b57; stroke-width:${STROKE_WIDTH}px;`);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
@@ -77,7 +77,11 @@ async function renderDag(graph, additions, recenter=false) {
     }).attr("class", "tag");
     edgeLabels.selectAll("circle").data(e => [g.edge(e).label]).join("circle");
     edgeLabels.selectAll("text").data(e => [g.edge(e).label]).join("text").text(d => d).attr("dy", "0.35em");
-    if (recenter) document.getElementById("zoom-to-fit-btn").click();
+    if (state.zoomLevel != null) {
+      const { x, y, k } = state.zoomLevel;
+      d3.select("#graph-svg").call(svgZoom.transform, d3.zoomIdentity.translate(x, y).scale(k));
+      state.zoomLevel = null;
+    } else if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
 
 }
@@ -298,11 +302,12 @@ function setState(ns) {
 }
 
 // set a new context and keep the old one in browser history
-function setCtxWithHistory(newCtx) {
+function setCtxWithHistory(newCtx, zoomLevel) {
   if (newCtx == null) return;
   // NOTE: browser does a structured clone, passing a mutable object is safe.
-  history.replaceState(state, "");
-  history.pushState(state, "");
+  const newState = { ...state, zoomLevel };
+  history.replaceState(newState, "");
+  history.pushState(newState, "");
   setState({ expandSteps:true, currentCtx:newCtx, currentStep:0, currentRewrite:0 });
 }
 
