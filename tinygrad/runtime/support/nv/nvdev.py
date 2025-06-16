@@ -53,7 +53,7 @@ class NVPageTableEntry:
       # x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=True, address_sys=paddr >> 12, aperture=1, vol=uncached)
 
       aper = 2 if system else 0
-      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=True, address_sys=paddr >> 12, aperture=aper, vol=uncached, kind=0)
+      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=True, address_sys=paddr >> 12, aperture=aper, vol=uncached, kind=6)
       
       if self.lv !=3: self.entries[entry_id] = x
       else: self.entries[2*entry_id] = x
@@ -61,12 +61,12 @@ class NVPageTableEntry:
     elif self.lv == 3:
       # assert False
       
-      x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=uncached)
+      x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=uncached, no_ats=1)
       self.entries[2*entry_id] = x & 0xffffffffffffffff
       self.entries[2*entry_id+1] = x >> 64
       assert entry_id < 256
     else:
-      x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_sys=paddr >> 12, aperture=1 if valid else 0, vol=uncached)
+      x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_sys=paddr >> 12, aperture=1 if valid else 0, vol=uncached, no_ats=1)
       self.entries[entry_id] = x
 
     # print(entry_id, hex(paddr), table, uncached, system, snooped, frag, valid, hex(x))
@@ -138,15 +138,15 @@ class NVPageTableTraverseContext:
       self.level_up()
 
 class NVMemoryManager:
-  va_allocator = TLSFAllocator((1 << 49), base=(2 << 30)) # global for all devices.
+  va_allocator = TLSFAllocator((1 << 49), base=(512<<20)) # global for all devices.
 
   def __init__(self, nvdev:NVDev, vram_size:int):
     self.nvdev, self.vram_size = nvdev, vram_size
     self.boot_allocator = TLSFAllocator(64 << 20, base=8<<30) # per device
-    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=2 << 30) # per device
+    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=512<<20) # per device
     self.root_page_table = NVPageTableEntry(self.nvdev, self.palloc(0x1000, zero=not self.nvdev.smi_dev, boot=True), lv=0)
 
-  def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False) -> NVMapping:
+  def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False, nomap=False) -> NVMapping:
     print(f"nv {self.nvdev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
 
     assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
@@ -156,6 +156,7 @@ class NVMemoryManager:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
           assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x} {pt.valid(pte_idx + pte_off)}"
+          if nomap: continue
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
                       frag=0x0, valid=True)
 
@@ -176,12 +177,12 @@ class NVMemoryManager:
   @staticmethod
   def alloc_vaddr(size:int, align=0x1000) -> int: return NVMemoryManager.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
-  def valloc(self, size:int, align=0x1000, uncached=False, contigous=False) -> NVMapping:
+  def valloc(self, size:int, align=0x1000, uncached=False, contigous=False, nomap=False) -> NVMapping:
     # Alloc physical memory and map it to the virtual address
     va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
 
     paddrs = [(self.palloc(size, zero=True), size)]
-    return self.map_range(va, size, paddrs, uncached=uncached)
+    return self.map_range(va, size, paddrs, uncached=uncached, nomap=nomap)
 
   def vfree(self, vm:AMMapping):
     self.unmap_range(vm.va_addr, vm.size)

@@ -506,6 +506,6 @@ class AMDRenderer(CStyleLanguage):
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock})))"
 
-class NVRenderer(CUDARenderer): device = "NV"
+class NVRenderer(CUDARenderer): device = "NVD"
 class HIPRenderer(AMDRenderer): device = "HIP"
 class QCOMRenderer(OpenCLRenderer): device = "QCOM"

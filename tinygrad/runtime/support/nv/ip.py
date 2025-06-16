@@ -527,31 +527,46 @@ class NV_GSP:
 
     self.rpc_get_gsp_static_info()
     # self.nvdev.mm.valloc((1 << 20)) # TODO: forbid 0 allocs
-    return # exit...
+    # return # exit...
+
+    self.root_class = self.rpc_rm_alloc(hParent=0x0, hClass=0x0, params=nv_gpu.NV0000_ALLOC_PARAMETERS())
+
+    self.device = self.rpc_rm_alloc(hParent=self.client, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=0x0, hClientShare=self.client,
+      vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES))
+    self.subdevice = self.rpc_rm_alloc(hParent=self.device, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS(subDeviceId=0x0)) 
+    self.disp_common = self.rpc_rm_alloc(hParent=self.device, hClass=0x00000073, params=None)
+
+    vaspace_params = nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS()
+    self.vaspace = self.rpc_rm_alloc(hParent=self.device, hClass=nv_gpu.FERMI_VASPACE_A, params=vaspace_params)
+
+    resv = self.nvdev.mm.valloc(512 << 20, contigous=True, nomap=True) # reserve 512MB for the reserved PDES
 
     gpfifo_area = self.nvdev.mm.valloc(2<<20, contigous=True)
     ramfc_alloc = self.nvdev.mm.valloc(2<<20, contigous=True)
     ringbuf = self.nvdev.mm.valloc(4<<20, contigous=True)
 
-    print('gpfifo', gpfifo_area.paddrs, gpfifo_area.va_addr)
+    # set internally-owned page table
+    bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=(512<<20), virtAddrLo=resv.va_addr, virtAddrHi=resv.va_addr+(512<<20)-1,
+      numLevelsToCopy=3)
+    bufs_p.levels[0] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=self.nvdev.mm.root_page_table.paddr, size=0x20, pageShift=47, aperture=1)
+    bufs_p.levels[1] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=(8<<30)+0x1000, size=0x1000, pageShift=38, aperture=1)
+    bufs_p.levels[2] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=(8<<30)+0x2000, size=0x1000, pageShift=29, aperture=1)
+    self.rpc_rm_control(hObject=self.vaspace, cmd=0x90f10106, params=bufs_p)
+    # self.rpc_set_page_directory(device=self.device, hVASpace=self.vaspace, pdir_paddr=self.nvdev.mm.root_page_table.paddr)
 
-    self.rpc_rm_alloc(hParent=0x0, hObject=0xca000000, hClass=0x0, params=nv_gpu.NV0000_ALLOC_PARAMETERS())
+    # channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
+    # self.chgr = self.rpc_rm_alloc(hParent=self.device, hClass=nv_gpu.KEPLER_CHANNEL_GROUP_A, params=channel_params)
 
-    self.rpc_rm_alloc(hParent=self.client, hObject=0xcf000000, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=0x0, hClientShare=0xc1e00004,
-      vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES))
-    self.rpc_rm_alloc(hParent=0xcf000000, hObject=0xcf000001, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS(subDeviceId=0x0)) 
+    # fault_bufs_p = nv_gpu.NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS(numValidEntries=2)
+    # self.fault_bufs = []
+    # for i in range(2):
+    #   method_va, method_sysmem = alloc_sysmem(0x5000, contigous=True)
+    #   fault_bufs_p.methodBufferMemdesc[i] = nv_gpu.NV2080_CTRL_INTERNAL_MEMDESC_INFO(base=method_sysmem[0], size=0x5000, addressSpace=1, cpuCacheAttrib=0, alignment=1)
+    #   self.fault_bufs.append(to_mv(method_va, 0x5000))
+    # self.rpc_rm_control(hObject=self.device, cmd=nv_gpu.NVA06C_CTRL_CMD_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS, params=fault_bufs_p)
 
-    vaspace_params = nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS(index=0, vaBase=0x0, vaSize=0x1fffffb000000-(512<<20), bigPageSize=64*1024,
-      flags=nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_ENABLE_PAGE_FAULTING | nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_IS_EXTERNALLY_OWNED | nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_ALLOW_ZERO_ADDRESS)
-    x = self.rpc_rm_alloc(hParent=0xcf000000, hObject=0xcf000002, hClass=nv_gpu.FERMI_VASPACE_A, params=vaspace_params)
-
-    self.rpc_set_page_directory(device=0xcf000000, hVASpace=0xcf000002, pdir_paddr=self.nvdev.mm.root_page_table.paddr)
-
-    channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
-    self.rpc_rm_alloc(hParent=0xcf000000, hObject=0xcf000003, hClass=nv_gpu.KEPLER_CHANNEL_GROUP_A, params=channel_params)
-
-    ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=0xcf000002, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
-    self.rpc_rm_alloc(hParent=0xcf000003, hObject=0xcf000004, hClass=nv_gpu.FERMI_CONTEXT_SHARE_A, params=ctxshare_params)
+    # ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=self.vaspace, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
+    # self.ctx_share = self.rpc_rm_alloc(hParent=self.chgr, hClass=nv_gpu.FERMI_CONTEXT_SHARE_A, params=ctxshare_params)
 
     userd = nv_gpu.NV_MEMORY_DESC_PARAMS(base=gpfifo_area.paddrs[0][0] + 0x400 * 8, size=0x400, addressSpace=2, cacheAttrib=0)
 
@@ -567,35 +582,60 @@ class NV_GSP:
     # tlb invalidation
     self.nvdev.wreg(0x00B80000 + 0x000030B0, (1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
-    gg_params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=0x0, hObjectBuffer=0x0,
-      gpFifoOffset=gpfifo_area.va_addr, gpFifoEntries=0x400, hContextShare=0xcf000004, engineType=0x1, cid=8, hVASpace=0x0,
+    gg_params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=0x0, hObjectBuffer=0x0, hPhysChannelGroup=0x0,
+      gpFifoOffset=gpfifo_area.va_addr, gpFifoEntries=0x400, engineType=0x1, cid=3, hVASpace=self.vaspace, hContextShare=0x0,
       userdOffset=(ctypes.c_uint64*8)(0x400 * 8), userdMem=userd, errorNotifierMem=notifier, instanceMem=instblock, ramfcMem=ramfc,
-      mthdbufMem=method_buffer, internalFlags=0x1d, flags=0x201020, ProcessID=1, SubProcessID=1)
-    self.rpc_rm_alloc(hParent=0xcf000003, hObject=0xcf000005, hClass=nv_gpu.AMPERE_CHANNEL_GPFIFO_A, params=gg_params)
+      mthdbufMem=method_buffer, internalFlags=0x1a, flags=0x200320, ProcessID=1, SubProcessID=1)
+    self.ch_gpfifo = self.rpc_rm_alloc(hParent=self.device, hClass=nv_gpu.AMPERE_CHANNEL_GPFIFO_A, params=gg_params)
 
-    self.rpc_rm_alloc(hParent=0xcf000005, hObject=0xcf000006, hClass=nv_gpu.ADA_COMPUTE_A, params=None)
-    self.rpc_rm_alloc(hParent=0xcf000005, hObject=0xcf000007, hClass=nv_gpu.AMPERE_DMA_COPY_B, params=None)
+    bufs_info = [(0, 0x237000), (2, 24576), (3, 12288),  (4, 131072), (5, 39845888), (6, 524288), (9, 65536), (10, 524288), (11, 524288)]
+    self.pro_bufs_info = []
+    
+    prom = nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(entryCount=len(bufs_info), engineType=0x1, hChanClient=self.client, hObject=self.ch_gpfifo)
+    for i,(buf,size) in enumerate(bufs_info):
+      x = self.nvdev.mm.valloc(size, contigous=True) # reserve buffers
+      self.pro_bufs_info.append((buf, x))  # store for later use
+      # x = wb[buf].va_addr if buf in wb else self.nvdev.mm.alloc_vaddr(round_up(size, 2<<20))
+      prom.promoteEntry[i].gpuVirtAddr = x.va_addr if buf not in [10] else 0
+      prom.promoteEntry[i].gpuPhysAddr = x.paddrs[0][0] if buf not in [3,4,5,6] else 0
+      prom.promoteEntry[i].size = size if prom.promoteEntry[i].gpuPhysAddr != 0 else 0
+      prom.promoteEntry[i].bufferId = buf
+      prom.promoteEntry[i].physAttr = 0x4 if prom.promoteEntry[i].gpuPhysAddr != 0 else 0x0
+      prom.promoteEntry[i].bInitialize = prom.promoteEntry[i].gpuPhysAddr != 0
+      prom.promoteEntry[i].bNonmapped = (prom.promoteEntry[i].gpuPhysAddr != 0 and prom.promoteEntry[i].gpuVirtAddr == 0)
+
+      print(f"Buffer {buf} - GPU Virt Addr: {hex(prom.promoteEntry[i].gpuVirtAddr)}, GPU Phys Addr: {hex(prom.promoteEntry[i].gpuPhysAddr)}, Size: {size}, Phys Attr: {prom.promoteEntry[i].physAttr}, bInitialize: {prom.promoteEntry[i].bInitialize}, bNonmapped: {prom.promoteEntry[i].bNonmapped}")
+    self.rpc_rm_control(hObject=self.subdevice, cmd=nv_gpu.NV2080_CTRL_CMD_GPU_PROMOTE_CTX, params=prom)
+
+    self.rpc_rm_alloc(hParent=self.ch_gpfifo, hClass=nv_gpu.ADA_COMPUTE_A, params=None)
+    self.rpc_rm_alloc(hParent=self.ch_gpfifo, hClass=nv_gpu.AMPERE_DMA_COPY_B, params=None)
 
     params = nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS(workSubmitToken=-1)
-    z = self.rpc_rm_control(hObject=0xcf000005, cmd=nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN, params=params)
+    z = self.rpc_rm_control(hObject=self.ch_gpfifo, cmd=nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN, params=params)
     dbell = nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS.from_buffer_copy(z).workSubmitToken
+    print(hex(dbell))
+    # dbell = 3
 
     params = nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
-    z = self.rpc_rm_control(hObject=0xcf000003, cmd=nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, params=params)
+    z = self.rpc_rm_control(hObject=self.ch_gpfifo, cmd=nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, params=params)
     nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS.from_buffer_copy(z)
+
+    return
 
     # Write into ring
     from tinygrad.runtime.ops_nvd import NVComputeQueue, NVCopyQueue, NVSignal
-    nvq = NVComputeQueue().signal(None, 0xdea1beef, ringbuf.va_addr + 0xe0)
+    # nvq = NVComputeQueue().setup(compute_class=nv_gpu.ADA_COMPUTE_A)
+    nvq = NVComputeQueue().signal_2(ringbuf.va_addr+0xe0, 0xdeadbeef)
     cmd_bytes = bytes(array.array('I', nvq._q))
-    self.nvdev.vram[ringbuf.paddrs[0][0]:ringbuf.paddrs[0][0] + len(cmd_bytes)] = cmd_bytes
+    # self.nvdev.vram[ringbuf.paddrs[0][0]:ringbuf.paddrs[0][0] + len(cmd_bytes)] = cmd_bytes
 
     cmdq_addr = ringbuf.va_addr
     lenq = len(nvq._q)
 
     # Write simple command to execute
-    self.nvdev.vram[gpfifo_area.paddrs[0][0]:gpfifo_area.paddrs[0][0]+8] = bytes(array.array('Q', [(cmdq_addr//4 << 2) | (lenq << 42) | (1 << 41)]))
+    # self.nvdev.vram[gpfifo_area.paddrs[0][0]:gpfifo_area.paddrs[0][0]+8] = bytes(array.array('Q', [(cmdq_addr//4 << 2) | (lenq << 42) | (1 << 41)]))
     self.nvdev.vram[gpfifo_area.paddrs[0][0] + 0x400 * 8 + 0x8c] = 0x1 # move gpput
+    self.nvdev.vram[gpfifo_area.paddrs[0][0] + 0x8c] = 0x1 # move gpput
     self.nvdev.wreg(0x00B80000 + 0x30090, dbell)
 
     print("sleeping")
@@ -607,7 +647,13 @@ class NV_GSP:
     print("signal ringed:")
     hexdump(self.nvdev.vram[ringbuf.paddrs[0][0]+0xe0:ringbuf.paddrs[0][0]+0xe0 + 0x10])
 
-    exit(0)
+    print(self.nvdev.vram[gpfifo_area.paddrs[0][0] + 0x400 * 8 + 0x88])
+    print(self.nvdev.vram[gpfifo_area.paddrs[0][0] + 0x400 * 8 + 0x8c])
+
+    # print(self.nvdev.vram[gpfifo_area.paddrs[0][0] + 0x88])
+    # print(self.nvdev.vram[gpfifo_area.paddrs[0][0] + 0x8c])
+
+    # exit(0)
 
   def run_cpu_seq(self, seq_buf):
     hdr = nv.rpc_run_cpu_sequencer_v17_00.from_address(mv_address(seq_buf))
@@ -687,64 +733,55 @@ class NV_GSP:
     # hexdump(resp[:0x80])
     # return resp[len(bytes(alloc_args)):]
     if hClass == 0x0: return self.client # init root, return client
-    if hClass == nv_gpu.FERMI_VASPACE_A:
+    if hClass == nv_gpu.FERMI_VASPACE_A and self.client == 0xdead0000:
       self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr)
 
-      # bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=(512<<20), virtAddrLo=512<<20, virtAddrHi=((512<<20)*2)-1,
-      #   numLevelsToCopy=3)
-      # bufs_p.levels[0] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=0x3332000, size=0x20, pageShift=47, aperture=1)
-      # bufs_p.levels[1] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=0x3333000, size=0x1000, pageShift=38, aperture=1)
-      # bufs_p.levels[2] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=0x3334000, size=0x1000, pageShift=29, aperture=1)
-      # self.rpc_rm_control(hObject=obj, cmd=0x90f10106, params=bufs_p)
+    #   bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=(512<<20), virtAddrLo=512<<20, virtAddrHi=((512<<20)*2)-1,
+    #     numLevelsToCopy=3)
+    #   bufs_p.levels[0] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=0x3332000, size=0x20, pageShift=47, aperture=1)
+    #   bufs_p.levels[1] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=0x3333000, size=0x1000, pageShift=38, aperture=1)
+    #   bufs_p.levels[2] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=0x3334000, size=0x1000, pageShift=29, aperture=1)
+    #   self.rpc_rm_control(hObject=obj, cmd=0x90f10106, params=bufs_p)
       
     if hClass == nv_gpu.NV20_SUBDEVICE_0: self.subdevice = obj # save subdevice handle
     if hClass == nv_gpu.KEPLER_CHANNEL_GROUP_A:
-      fault_bufs_p = nv_gpu.NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS(numValidEntries=2)
-      self.fault_bufs = []
-      for i in range(2):
-        method_va, method_sysmem = alloc_sysmem(0x5000, contigous=True)
-        fault_bufs_p.methodBufferMemdesc[i] = nv_gpu.NV2080_CTRL_INTERNAL_MEMDESC_INFO(base=method_sysmem[0], size=0x5000, addressSpace=1, cpuCacheAttrib=0, alignment=1)
-        self.fault_bufs.append(to_mv(method_va, 0x5000))
-      self.rpc_rm_control(hObject=obj, cmd=nv_gpu.NVA06C_CTRL_CMD_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS, params=fault_bufs_p)
       self.channel_group = obj # save channel group handle
+    #   fault_bufs_p = nv_gpu.NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS(numValidEntries=2)
+    #   self.fault_bufs = []
+    #   for i in range(2):
+    #     method_va, method_sysmem = alloc_sysmem(0x5000, contigous=True)
+    #     fault_bufs_p.methodBufferMemdesc[i] = nv_gpu.NV2080_CTRL_INTERNAL_MEMDESC_INFO(base=method_sysmem[0], size=0x5000, addressSpace=1, cpuCacheAttrib=0, alignment=1)
+    #     self.fault_bufs.append(to_mv(method_va, 0x5000))
+    #   self.rpc_rm_control(hObject=obj, cmd=nv_gpu.NVA06C_CTRL_CMD_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS, params=fault_bufs_p)
+    # self.channel_group = obj # save channel group handle
 
-    if hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A:
-      # self.nvdev.mm.valloc(39845888)
-      gr_bufs = [(0, 0x237000, None), (1, 0x18700, None), (2, 0x6000, None), (9, 0x10000, None), (10, 0x80000, None), (11, 0x80000, None),]
-      prom = nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(entryCount=len(gr_bufs), engineType=0x1, hChanClient=obj, hObject=self.channel_group)
-      for i,(buf,size,_) in enumerate(gr_bufs):
-        x = self.nvdev.mm.valloc(round_up(size, 2<<20), contigous=True) # reserve buffers
-        prom.promoteEntry[i].gpuVirtAddr = x.va_addr
+    if hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A and self.client == 0xdead0000:
+      xx = {}
+      bufs_info = [(0, 0x237000), (1, 0x18700), (2, 0x6000)]
+
+      prom = nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(entryCount=len(bufs_info), engineType=0x1, hChanClient=self.client, hObject=obj)
+      for i,(buf,size) in enumerate(bufs_info):
+        x = self.nvdev.mm.valloc(size, contigous=True) # reserve buffers
+        xx[buf] = x
+        prom.promoteEntry[i].gpuVirtAddr = 0x0
         prom.promoteEntry[i].gpuPhysAddr = x.paddrs[0][0]
         prom.promoteEntry[i].size = size
         prom.promoteEntry[i].bufferId = buf
+        prom.promoteEntry[i].bInitialize = 0x1
+        prom.promoteEntry[i].bNonmapped = 0x1
         prom.promoteEntry[i].physAttr = 0x4
-        prom.promoteEntry[i].bInitialize = 1
-        prom.promoteEntry[i].bNonmapped = 0
       self.rpc_rm_control(hObject=self.subdevice, cmd=nv_gpu.NV2080_CTRL_CMD_GPU_PROMOTE_CTX, params=prom)
 
-      # bufs_info = [(5, 39845888), (4, 131072), (6, 524288), (9, 65536), (10, 524288), (11, 524288),
-      #              (0, 2322432), (2, 24576), (1, 102400), (3, 12288)]
-    
-      # prom = nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(hClient=self.client, entryCount=len(bufs_info), engineType=0x1, hChanClient=obj, hObject=self.channel_group)
-      # for i,(buf,size) in enumerate(bufs_info):
-      #   x = self.nvdev.mm.valloc(size, contigous=True) # reserve buffers
-      #   prom.promoteEntry[i].gpuVirtAddr = x.va_addr
-      #   prom.promoteEntry[i].gpuPhysAddr = x.paddrs[0][0]
-      #   prom.promoteEntry[i].size = size
-      #   prom.promoteEntry[i].bufferId = buf
-      #   prom.promoteEntry[i].physAttr = 0x4
-      #   prom.promoteEntry[i].bInitialize = 1
-      # self.rpc_rm_control(hObject=self.subdevice, cmd=nv_gpu.NV2080_CTRL_CMD_GPU_PROMOTE_CTX, params=prom)
-      # self.nvdev.mm.valloc(39845888)
+      bufs_info = [(0, 0x237000), (1, 0x18700), (2, 24576), (3, 12288),  (4, 131072), (5, 39845888), (6, 524288), (9, 65536), (10, 524288), (11, 524288)]
+      prom = nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(entryCount=len(bufs_info), engineType=0x1, hChanClient=self.client, hObject=obj)
+      for i,(buf,size) in enumerate(bufs_info):
+        x = xx[buf] if buf in xx else self.nvdev.mm.valloc(size, contigous=True) # reserve buffers
 
-      # bufs_info = nv_gpu.NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS(hChannel=self.channel_group, hUserClient=self.client)
-      # bufs_info = self.rpc_rm_control(hObject=self.subdevice, cmd=nv_gpu.NV2080_CTRL_CMD_GR_GET_CTX_BUFFER_INFO, params=bufs_info)
-      # bufs_info = nv_gpu.NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS.from_buffer_copy(bufs_info)
-      # print(hex(bufs_info.bufferCount))
-
-      # for i in range(bufs_info.bufferCount):
-      #   print(i, hex(bufs_info.ctxBufferInfo[i].size), hex(bufs_info.ctxBufferInfo[i].physAddr), hex(bufs_info.ctxBufferInfo[i].pageSize))
+        prom.promoteEntry[i].gpuVirtAddr = x.va_addr
+        prom.promoteEntry[i].gpuPhysAddr = 0x0
+        prom.promoteEntry[i].size = 0x0
+        prom.promoteEntry[i].bufferId = buf
+      self.rpc_rm_control(hObject=self.subdevice, cmd=nv_gpu.NV2080_CTRL_CMD_GPU_PROMOTE_CTX, params=prom)
 
     return obj
 

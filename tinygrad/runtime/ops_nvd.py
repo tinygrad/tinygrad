@@ -152,7 +152,7 @@ class NVCommandQueue(HWQueue[NVSignal, 'NVDDevice', 'NVProgram', 'NVArgsState'])
 
 class NVComputeQueue(NVCommandQueue):
   def memory_barrier(self):
-    # self.nvm(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, (1 << 12) | (1 << 4) | (1 << 0))
+    self.nvm(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, (1 << 12) | (1 << 4) | (1 << 0))
     self.active_qmd:QMD|None = None
     return self
 
@@ -171,15 +171,19 @@ class NVComputeQueue(NVCommandQueue):
     qmd.set_constant_buf_addr(0, args_state.buf.va_addr)
 
     if self.active_qmd is None:
-      # self.nvm(1, nv_gpu.NVC6C0_SEND_PCAS_A, qmd_buf.va_addr >> 8)
-      # self.nvm(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 9)
-      pass
+      self.nvm(1, nv_gpu.NVC6C0_SEND_PCAS_A, qmd_buf.va_addr >> 8)
+      self.nvm(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 9)
     else:
       self.active_qmd.write(dependent_qmd0_pointer=qmd_buf.va_addr >> 8, dependent_qmd0_action=1, dependent_qmd0_prefetch=1, dependent_qmd0_enable=1)
 
-    # self.active_qmd, self.active_qmd_buf = qmd, qmd_buf
+    self.active_qmd, self.active_qmd_buf = qmd, qmd_buf
     return self
 
+  # def signal_2(self, addr:int, value:sint=0):
+  #   self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(addr), *data64_le(value),
+  #            (1 << 0) | (1 << 20) | (1 << 24) | (1 << 25)) # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
+  #   return self
+  
   def signal(self, signal:NVSignal, value:sint=0):
     if self.active_qmd is not None:
       for i in range(2):
@@ -403,7 +407,9 @@ class NVDDevice(HCQCompiled[NVSignal]):
 
     self.nvdev = NVDev(pcibus, regs, fb, None)
 
+    self.nvdev.gsp.client = 0xdead0000
     NVDDevice.root = rm_alloc(self.nvdev, nv_gpu.NV01_ROOT, 0, 0, nv_gpu.NV0000_ALLOC_PARAMETERS())
+    # NVDDevice.root = self.nvdev.gsp.client
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=0x0, hClientShare=self.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
@@ -412,12 +418,12 @@ class NVDDevice(HCQCompiled[NVSignal]):
     subdevice_params = nv_gpu.NV2080_ALLOC_PARAMETERS(subDeviceId=0x0)
     self.subdevice = rm_alloc(self.nvdev, nv_gpu.NV20_SUBDEVICE_0, self.root, self.nvdevice, subdevice_params)
 
-    vaspace_params = nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS(vaBase=0x1000, vaSize=0x1fffffb000000,
+    vaspace_params = nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS(vaBase=0x0, vaSize=0x1fffffb000000,
       flags=nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_ENABLE_PAGE_FAULTING | nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_IS_EXTERNALLY_OWNED | \
             nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_ALLOW_ZERO_ADDRESS)
     vaspace = rm_alloc(self.nvdev, nv_gpu.FERMI_VASPACE_A, self.root, self.nvdevice, vaspace_params)
 
-    channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS, hVASpace=vaspace)
+    channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
     channel_group = rm_alloc(self.nvdev, nv_gpu.KEPLER_CHANNEL_GROUP_A, self.root, self.nvdevice, channel_params)
 
     ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=vaspace, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
@@ -502,7 +508,7 @@ class NVDDevice(HCQCompiled[NVSignal]):
     # hexdump(self.notifier[:0x20])
     # self.synchronize()
 
-    NVComputeQueue().setup(compute_class=self.compute_class) \
+    NVComputeQueue().setup(compute_class=self.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
     time.sleep(0.4)
