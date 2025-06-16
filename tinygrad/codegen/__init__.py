@@ -3,6 +3,7 @@ import functools
 from dataclasses import dataclass
 from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp
+from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
@@ -72,4 +73,8 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
 
 def full_rewrite_to_sink(sink:UOp, opts:Renderer|None=None, linearizer:bool=False) -> UOp:
   return apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer(), linearizer))
-def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]: return list(full_rewrite_to_sink(sink, opts, linearizer=True).arg.lst)
+
+def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
+  lst = list(full_rewrite_to_sink(sink, opts, linearizer=True).arg.lst)
+  if __debug__: type_verify(lst)
+  return lst
