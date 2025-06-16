@@ -4275,6 +4275,59 @@ class Tensor(MathTrait):
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
+  def svd(self:Tensor, k:int|None=None) -> tuple[Tensor, Tensor, Tensor]:
+    """
+    Returns the SVD decomposition U, S, Vt such that A ≈ U @ diag(S) @ Vt.
+    k: Number of singular values to compute (default: min(m,n))
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    A = Tensor.randn(5, 10)
+    U, S, Vt = A.svd()
+    print(U.numpy(), S.numpy(), Vt.numpy())
+    ```
+    """
+    *b, m, n = self.shape
+    A = self.reshape(-1, m, n)
+    if k is None: k = min(m, n)
+    def power_iteration(M:Tensor, k:int, max_iter:int=20) -> Tensor:
+      B, n, _ = M.shape
+      Q, _ = Tensor.randn(B, n, k).qr()
+      for _ in range(max_iter): Q, _ = (M @ Q).qr()
+      return Q
+    # Assume A is tall
+    if m < n: A = A.transpose(-2, -1)
+    V = power_iteration(A.transpose(-2, -1) @ A, k)
+    AV = A @ V
+    S = (AV * AV).sum(axis=-2).sqrt().clamp(min_=1e-12)
+    U = AV / S.unsqueeze(-2)
+    if m < n: U, V = V, U
+    S, idx = S.sort(dim=-1, descending=True)
+    U = U.gather(-1, idx.unsqueeze(-2).expand(-1, m, -1))
+    V = V.gather(-1, idx.unsqueeze(-2).expand(-1, n, -1))
+    return U.reshape(*b, m, k), S.reshape(*b, k), V.reshape(*b, n, k).transpose(-2, -1)
+
+  def qr(self:Tensor) -> tuple[Tensor, Tensor]:
+    """
+    Returns the QR decomposition Q, R such that A = Q @ R.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    A = Tensor.randn(5, 10)
+    Q, R = A.qr()
+    print(Q.numpy(), R.numpy())
+    ```
+    """
+    assert self.ndim in {2, 3}, "Input must be a 2D or 3D Tensor"
+    R = self.clone() if self.ndim == 3 else self.clone().unsqueeze(0)
+    b, m, n = R.shape
+    Q = Tensor.eye(m).expand(b, m, m).contiguous()
+    for k in range(min(m-1, n)):
+      v = R[:, k:, k:k+1].clone()
+      v[:, 0, 0] += v[:, 0, 0].sign() * (v ** 2).sum(axis=(1,2)).sqrt()
+      v /= (v ** 2).sum(axis=1, keepdim=True).sqrt()
+      R[:, k:, k:] -= 2 * v @ (v.transpose(1, 2) @ R[:, k:, k:])
+      Q[:, :, k:] -= 2 * (Q[:, :, k:] @ v) @ v.transpose(1, 2)
+    return (Q, R) if self.ndim == 3 else (Q.squeeze(), R.squeeze())
+
 P = ParamSpec("P")
 T = TypeVar("T")
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
