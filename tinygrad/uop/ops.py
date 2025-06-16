@@ -552,8 +552,9 @@ def print_uops(uops:list[UOp]):
 
 def get_location() -> tuple[str, int]:
   frm = sys._getframe(1)
-  # skip over ops.py (unless there's nothing but ops.py)
-  while pathlib.Path(frm.f_code.co_filename).name == "ops.py" and frm.f_back is not None and not frm.f_back.f_code.co_filename.startswith("<frozen"):
+  # skip over ops.py/mathtraits.py (unless there's nothing but ops.py/mathtraits.py)
+  while pathlib.Path(frm.f_code.co_filename).name in ("ops.py", "mathtraits.py") and frm.f_back is not None and \
+      not frm.f_back.f_code.co_filename.startswith("<frozen"):
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 
@@ -809,6 +810,7 @@ if TRACK_MATCH_STATS:
         if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:20s}", k.printable())
         ret = [x+y for x,y in zip(ret, v)]
       print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {(ret[2]+ret[3])*1000.:9.2f} ms -- TOTAL")
+      print(f"{len(match_stats)} rules, {sum(v[0] > 0 for v in match_stats.values())} matched once")
 
 def launch_viz(env_str:str, data:str):
   os.environ[env_str] = "0"
