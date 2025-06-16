@@ -12,11 +12,10 @@ import multiprocessing, functools, itertools, asyncio, http, http.client, hashli
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
 from tinygrad.uop.ops import UOp, Ops, Variable, sint
-from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
+from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, LazySeq, Timing
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferXfer
 from tinygrad.device import Compiled, Buffer, Allocator, Compiler, Device, BufferSpec
-from tinygrad.runtime.graph.cpu import CPUGraph
 
 # ***** API *****
 
@@ -171,8 +170,7 @@ class RemoteHandler:
           case SessionFree(): del self.sessions[unwrap(c.session)]
           case GetProperties():
             cls, args = dev.renderer.__reduce__()
-            # CPUGraph re-renders kernel from uops specified in CompiledRunner, this is not supported
-            graph_cls = gt if (gt:=graph_class(Device[self.base_device])) is not CPUGraph else None
+            graph_cls = graph_class(Device[self.base_device])
             rp = RemoteProperties(
               real_device=dev.device, renderer=(cls.__module__, cls.__name__, args),
               graph_supported=graph_cls is not None, graph_supports_multi=graph_cls is not None and issubclass(graph_cls, MultiGraphRunner),
@@ -303,12 +301,22 @@ class RemoteConnection:
     self.req = BatchRequest()
     return ret
 
-class RemoteDevice(Compiled):
-  def __init__(self, device:str):
-    self.conn: RemoteConnection = RemoteConnection(getenv("HOST", "") or RemoteDevice.local_server())
+def parse_hosts(hs:str) -> list[tuple[str, int]]|LazySeq[tuple[str, int]]:
+  hosts = [(unwrap(h), int(c) if c is not None else c) for h,c in ((h.split("*", maxsplit=1)+[None,])[:2] for h in hs.split(","))]
+  if len(hosts) == 1 and hosts[0][1] is None: return LazySeq(lambda idx: (hosts[0][0], idx))
+  return [(h, i) for h,c in hosts for i in range(unwrap(c))]
 
-    # state for the connection
-    self.session = (binascii.hexlify(os.urandom(0x10)).decode(), int(device.split(":")[1]) if ":" in device else 0)
+class RemoteDevice(Compiled):
+  devices = parse_hosts(getenv("HOST", ""))
+
+  def __init__(self, device:str):
+    host, idx = RemoteDevice.devices[int(device.split(":")[1]) if ":" in device else 0]
+
+    # connection is shared between sessions on the same host
+    self.conn: RemoteConnection = RemoteConnection(host or RemoteDevice.local_server())
+
+    # state for the session
+    self.session = (binascii.hexlify(os.urandom(0x10)).decode(), idx)
     self.buffer_num: Iterator[int] = itertools.count(0)
     self.graph_num: Iterator[int] = itertools.count(0)
 
