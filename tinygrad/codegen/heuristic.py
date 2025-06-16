@@ -2,11 +2,11 @@ import itertools
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv, DEBUG, all_int, prod
 from tinygrad.dtype import ImageDType
-from tinygrad.ops import Ops, resolve
+from tinygrad.uop.ops import Ops, resolve
 
-def hand_coded_optimizations(k:Kernel) -> Kernel:
+def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # make a copy so it does not mutate the input
-  k = k.copy().required_optimizations()
+  k = k.copy()
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
@@ -24,7 +24,7 @@ def hand_coded_optimizations(k:Kernel) -> Kernel:
           if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
           if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
           if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
-          return k
+          return k.applied_opts
 
   if k.opts.has_local and k.opts.has_shared and all_int(k.sts[0].shape[:k.first_reduce]):
     # are we grouping? (requires local shape support)
@@ -50,7 +50,7 @@ def hand_coded_optimizations(k:Kernel) -> Kernel:
           k.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-k.first_reduce, 4))
 
   # no more opt if we are grouping
-  if k.group_for_reduces: return k
+  if k.group_for_reduces: return k.applied_opts
 
   # **** below this line need to be optional and benchmarked ****
 
@@ -91,7 +91,8 @@ def hand_coded_optimizations(k:Kernel) -> Kernel:
 
   # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast.
   if k.first_reduce < k.first_upcast and (prod(k.full_shape[k.first_upcast:]) <= 4 or \
-    not any(r for _,_,r in k.upcasted_axis(k.full_buf_index))) and (k.upcasted == 0 or prod(k.full_shape[-k.upcasted:]) < 64):
+    not any(x!=y for x,y in zip(k.sts[0].shape[k.first_upcast:], k.full_shape[k.first_upcast:]))) and \
+      (k.upcasted == 0 or prod(k.full_shape[-k.upcasted:]) < 64):
     if isinstance(s:=k.full_unupcasted_shape[-1], int) and s <= 32:  # NOTE: cannot loop unroll symbolic axis
       k.apply_opt(Opt(OptOps.UNROLL, len(k.full_unupcasted_shape)-1-k.first_reduce, 0))
       # if it's small, upcast a second reduce dimension too
@@ -129,4 +130,4 @@ def hand_coded_optimizations(k:Kernel) -> Kernel:
         k.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
         if will_delete_shape: deleted_shape += 1
 
-  return k
+  return k.applied_opts

@@ -1,4 +1,4 @@
-import collections
+import collections, functools
 from tinygrad.helpers import round_up
 
 class TLSFAllocator:
@@ -20,7 +20,10 @@ class TLSFAllocator:
     self.blocks:dict[int, tuple[int, int|None, int|None, bool]] = {0: (size, None, None, True)} # size, next, prev, is_free
     self._insert_block(0, size)
 
+  @functools.cache
   def lv1(self, size): return size.bit_length()
+
+  @functools.cache
   def lv2(self, size): return (size - (1 << (size.bit_length() - 1))) // (1 << max(0, size.bit_length() - self.l2_cnt))
 
   def _insert_block(self, start:int, size:int, prev:int|None=None):

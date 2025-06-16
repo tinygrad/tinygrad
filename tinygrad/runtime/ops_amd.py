@@ -1,12 +1,13 @@
 from __future__ import annotations
 from typing import Any, cast, ClassVar
-import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select
+import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select, weakref, traceback
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
-from tinygrad.ops import sint
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
+from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, all_same, flatten, DEBUG, OSX
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, all_same, flatten, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, libc, pci, vfio, sqtt
@@ -14,7 +15,8 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
-from tinygrad.runtime.support.amd import AMDRegBase, collect_registers, import_module
+from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, setup_pci_bars
+from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 EVENT_INDEX_PARTIAL_FLUSH = 4 # based on a comment in nvd.h
@@ -23,8 +25,8 @@ WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
 class AMDSignal(HCQSignal):
-  def __init__(self, base_addr:int|None=None, **kwargs):
-    super().__init__(base_addr, **kwargs, timestamp_divider=100, dev_t=AMDDevice)
+  def __init__(self, base_buf:HCQBuffer|None=None, **kwargs):
+    super().__init__(base_buf, **kwargs, timestamp_divider=100, dev_t=AMDDevice)
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
@@ -126,7 +128,7 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_TG_CHUNK_SIZE, 1)
     for xcc_id in range(self.dev.xccs):
       with self.pred_exec(xcc_mask=1 << xcc_id):
-        self.wreg(self.gc.regCOMPUTE_CURRENT_LOGIC_XCC_ID, xcc_id)
+        self.wreg(self.dev.regCOMPUTE_CURRENT_LOGIC_XCC_ID, xcc_id)
     return self
 
   def spi_config(self, tracing:bool):
@@ -188,15 +190,15 @@ class AMDComputeQueue(HWQueue):
       self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, instance_broadcast_writes=1)
       # Wait for FINISH_PENDING==0
       self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
-                self.gc.regSQ_THREAD_TRACE_STATUS.addr, 0, 0, self.gc.SQ_THREAD_TRACE_STATUS__FINISH_PENDING_MASK, 4)
+                self.gc.regSQ_THREAD_TRACE_STATUS.addr, 0, 0, self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('finish_pending'), 4)
       # Wait for FINISH_DONE!=0
       self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_NEQ),
-                self.gc.regSQ_THREAD_TRACE_STATUS.addr, 0, 0, self.gc.SQ_THREAD_TRACE_STATUS__FINISH_DONE_MASK, 4)
+                self.gc.regSQ_THREAD_TRACE_STATUS.addr, 0, 0, self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('finish_done'), 4)
       # Disable SQTT
       self.sqtt_config(tracing=False)
       # Wait for BUSY==0
       self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
-                self.gc.regSQ_THREAD_TRACE_STATUS.addr, 0, 0, self.gc.SQ_THREAD_TRACE_STATUS__BUSY_MASK, 4)
+                self.gc.regSQ_THREAD_TRACE_STATUS.addr, 0, 0, self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('busy'), 4)
       # Copy WPTR to memory (src_sel = perf, dst_sel = tc_l2, wr_confirm = True)
       self.pkt3(self.pm4.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, self.gc.regSQ_THREAD_TRACE_WPTR.addr, 0, *data64_le(wptrs.va_addr+(se*4)))
     # Restore global broadcasting
@@ -233,14 +235,14 @@ class AMDComputeQueue(HWQueue):
       user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000]
 
     if prg.enable_dispatch_ptr:
-      dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=args_state.ptr + prg.kernargs_segment_size)
+      dp = (dp_t:=hsa.hsa_kernel_dispatch_packet_t).from_address(cast(int, (disp_buf:=args_state.buf.offset(prg.kernargs_segment_size)).va_addr))
 
-      self.bind_sints(*local_size, struct=dp, start_field='workgroup_size_x', fmt='H')
-      self.bind_sints(*[g*l for g,l in zip(global_size, local_size)], struct=dp, start_field='grid_size_x', fmt='I')
-      dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, args_state.ptr
-      user_regs += [*data64_le(dp_addr)]
+      self.bind_sints(*local_size, mem=disp_buf.cpu_view(), struct_t=dp_t, start_field='workgroup_size_x', fmt='H')
+      self.bind_sints(*[g*l for g,l in zip(global_size, local_size)], mem=disp_buf.cpu_view(), struct_t=dp_t, start_field='grid_size_x', fmt='I')
+      dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, args_state.buf.va_addr
+      user_regs += [*data64_le(disp_buf.va_addr)]
 
-    user_regs += [*data64_le(args_state.ptr)]
+    user_regs += [*data64_le(args_state.buf.va_addr)]
 
     if prg.dev.sqtt_enabled: self.sqtt_prg_marker(prg, global_size)
 
@@ -296,7 +298,7 @@ class AMDComputeQueue(HWQueue):
       self.release_mem(signal.value_addr, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
                        self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
 
-      if not AMDDevice.driverless and (dev:=signal.timeline_for_device) is not None:
+      if (dev:=signal.timeline_for_device) is not None and not dev.is_am():
         self.release_mem(dev.queue_event_mailbox_ptr, dev.queue_event.event_id, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
                          self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, ctxid=dev.queue_event.event_id)
     return self
@@ -304,7 +306,7 @@ class AMDComputeQueue(HWQueue):
   def bind(self, dev:AMDDevice):
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
-    hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
+    hw_view = self.hw_page.cpu_view().view(fmt='I')
     for i, value in enumerate(self._q): hw_view[i] = value
 
     self.indirect_cmd = [self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(self.hw_page.va_addr),
@@ -318,7 +320,7 @@ class AMDComputeQueue(HWQueue):
     if self.dev.xccs > 1 and dev != self.binded_device:
       ib_end = ((dev.compute_queue.put_value + 5) % len(dev.compute_queue.ring)) + len(cmds)
       ib_pad = len(dev.compute_queue.ring) - (ib_end - len(cmds)) if ib_end > len(dev.compute_queue.ring) else 0
-      ib_ptr = mv_address(dev.compute_queue.ring) + ((dev.compute_queue.put_value + 5 + ib_pad) % len(dev.compute_queue.ring)) * 4
+      ib_ptr = dev.compute_queue.ring.addr + ((dev.compute_queue.put_value + 5 + ib_pad) % len(dev.compute_queue.ring)) * 4
       cmds = [self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(ib_ptr), len(cmds) | self.pm4.INDIRECT_BUFFER_VALID,
               self.pm4.PACKET3(self.pm4.PACKET3_NOP, ib_pad + len(cmds) - 1), *((0,) * ib_pad), *cmds]
 
@@ -352,10 +354,10 @@ class AMDCopyQueue(HWQueue):
     fence_flags = self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.dev.target >= (10,0,0) else 0
     self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(signal.value_addr), value)
 
-    if not AMDDevice.driverless and (dev:=signal.timeline_for_device) is not None:
+    if (dev:=signal.timeline_for_device) is not None and not dev.is_am():
       self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
       self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id))
-    elif AMDDevice.driverless: self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(0))
+    elif dev is not None and dev.is_am(): self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(0))
 
     return self
 
@@ -371,11 +373,11 @@ class AMDCopyQueue(HWQueue):
     return self
 
   def bind(self, dev:AMDDevice):
-    if not getenv("AMD_SDMA_BIND", 0) or not dev.driverless: return
+    if not getenv("AMD_SDMA_BIND", 0) or not dev.is_am(): return
 
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc((qsz:=round_up(len(self._q), 8)) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
-    hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
+    hw_view = self.hw_page.cpu_view().view(fmt='I')
     for i in range(qsz): hw_view[i] = self._q[i] if i < len(self._q) else 0
 
     self.indirect_cmd = [self.sdma.SDMA_OP_INDIRECT | self.sdma.SDMA_PKT_INDIRECT_HEADER_VMID(0), *data64_le(self.hw_page.va_addr), qsz,
@@ -383,7 +385,8 @@ class AMDCopyQueue(HWQueue):
     self._q, self.cmd_sizes = hw_view, [len(self.indirect_cmd)]
 
   def _submit(self, dev:AMDDevice):
-    if dev.sdma_queue.put_value - dev.sdma_queue.read_ptr > dev.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
+    # usb devices run in single-step mode, so they can't overrun the queue.
+    if not dev.is_usb() and dev.sdma_queue.put_value - dev.sdma_queue.read_ptr > dev.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
 
     if self.binded_device == dev:
       # An IB packet must end on a 8 DW boundary.
@@ -399,13 +402,16 @@ class AMDCopyQueue(HWQueue):
       if (tail_blit_dword + cmdsz) * 4 >= dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes: break
       tail_blit_dword += cmdsz
 
+    # Force align of submits to hit our usb layer write cache.
+    if dev.is_usb() and (rem_packet_cnt := len(cmds) - tail_blit_dword) > 0: tail_blit_dword = 0
+
     start_idx = (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes) // 4
     dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', cmds[:tail_blit_dword])
     dev.sdma_queue.put_value += tail_blit_dword * 4
 
     if (rem_packet_cnt := len(cmds) - tail_blit_dword) > 0:
       zero_fill = dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes
-      ctypes.memset(mv_address(dev.sdma_queue.ring) + (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes), 0, zero_fill)
+      dev.sdma_queue.ring.view(dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes, zero_fill, fmt='B')[:] = bytes(zero_fill)
       dev.sdma_queue.put_value += zero_fill
 
       dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
@@ -416,11 +422,13 @@ class AMDCopyQueue(HWQueue):
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
-    self.dev: AMDDevice = dev
-    self.name, self.lib = name, lib
+    self.dev, self.name, self.lib = dev, name, lib
+
     image, sections, _ = elf_loader(self.lib)
-    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), BufferSpec(cpu_access=True, nolru=True))
-    ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
+    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(cpu_access=True, nolru=True))
+    self.dev.allocator._copyin(self.lib_gpu, image)
+    self.dev.synchronize()
+
     rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
     text_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".text"), -1)
     assert rodata_entry >= 0 and text_entry >= 0, ".text or .rodata section not found"
@@ -433,7 +441,8 @@ class AMDProgram(HCQProgram):
     # Ensure scratch size
     self.dev._ensure_has_local_memory(self.private_segment_size)
 
-    code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + rodata_entry) # NOTE: this is wrong, it's not this object
+    # NOTE: this is wrong, it's not this object. pad it, since it might be smaller than the struct
+    code = hsa.amd_kernel_code_t.from_buffer_copy(bytes(image[rodata_entry:rodata_entry+256]) + b'\x00'*256)
     self.wave32: bool = code.kernel_code_properties & 0x400 == 0x400
 
     # Set rsrc1.priv=1 on gfx11 to workaround cwsr.
@@ -452,31 +461,34 @@ class AMDProgram(HCQProgram):
 
     super().__init__(CLikeArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, lib=self.lib,
                      base=self.lib_gpu.va_addr)
-
-  def __del__(self):
-    if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))
+    weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
+  def __init__(self, dev:AMDDevice):
+    super().__init__(dev, copy_bufs=getattr(dev.dev_iface, 'copy_bufs', None), max_copyout_size=0x1000 if dev.is_usb() else None)
+
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.dev_iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
 
   def _free(self, opaque, options:BufferSpec):
-    self.dev.synchronize()
-    self.dev.dev_iface.free(opaque)
+    try:
+      self.dev.synchronize()
+      self.dev.dev_iface.free(opaque)
+    except AttributeError: pass
 
   def map(self, buf:HCQBuffer): self.dev.dev_iface.map(buf._base if buf._base is not None else buf)
 
-MAP_FIXED, MAP_NORESERVE, MAP_LOCKED = 0x10, 0x400, 0 if OSX else 0x2000
+MAP_FIXED, MAP_NORESERVE, MAP_LOCKED, MAP_POPULATE = 0x10, 0x400, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 
 @dataclass(frozen=True)
 class ProfileSQTTEvent(ProfileEvent): device:str; se:int; blob:bytes; itrace:bool # noqa: E702
 
 @dataclass
 class AMDQueueDesc:
-  ring: memoryview
-  read_ptrs: list[memoryview]
-  write_ptrs: list[memoryview]
-  doorbells: list[memoryview]
+  ring: MMIOInterface
+  read_ptrs: list[MMIOInterface]
+  write_ptrs: list[MMIOInterface]
+  doorbells: list[MMIOInterface]
   put_value: int = 0
 
   @property
@@ -484,7 +496,7 @@ class AMDQueueDesc:
 
   @classmethod
   def multi(cls, *queues: AMDQueueDesc):
-    assert all_same([(mv_address(q.ring), q.put_value) for q in queues]), f"All queues must have the same ring and put_value: {queues}"
+    assert all_same([(q.ring.addr, q.put_value) for q in queues]), f"All queues must have the same ring and put_value: {queues}"
     return cls(ring=queues[0].ring, put_value=queues[0].put_value, doorbells=flatten(q.doorbells for q in queues),
                read_ptrs=flatten(q.read_ptrs for q in queues), write_ptrs=flatten(q.write_ptrs for q in queues))
 
@@ -495,34 +507,13 @@ class AMDQueueDesc:
     if CPUProgram.atomic_lib is not None: CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
 
     # Flush hdp if queue is in dev mem.
-    if dev.driverless and getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1): dev.dev_iface.adev.gmc.flush_hdp()
+    if dev.is_am() and not dev.is_usb(): dev.dev_iface.adev.gmc.flush_hdp()
     for doorbell in self.doorbells: doorbell[0] = self.put_value
 
-@dataclass(frozen=True)
-class AMDReg(AMDRegBase):
-  ip: AMDIP
-  @property
-  def addr(self): return self.ip.bases[self.segment] + self.offset
-
-@dataclass(frozen=True)
-class AMDIP:
-  name: str
-  version: tuple[int, ...]
-  bases: tuple[int, ...]
-  @functools.cached_property
-  def module(self): return import_module(self.name, self.version)
-  @functools.cached_property
-  def regs(self): return collect_registers(self.module, cls=functools.partial(AMDReg, ip=self))
-  def __getattr__(self, name:str):
-    if name in self.regs: return self.regs[name]
-    # NOTE: gfx10 gc registers always start with mm, no reg prefix
-    if (mmname:=name.replace('reg', 'mm')) in self.regs: return self.regs[mmname]
-    return getattr(self.module, name)
-
 class KFDIface:
-  kfd:HWInterface|None = None
+  kfd:FileIOInterface|None = None
   event_page:HCQBuffer|None = None
-  gpus:list[HWInterface] = []
+  gpus:list[FileIOInterface] = []
 
   def _is_usable_gpu(self, gpu_id):
     with contextlib.suppress(OSError): return int(gpu_id.read()) != 0
@@ -535,23 +526,23 @@ class KFDIface:
 
     # Initialize KFD interface during first run
     if KFDIface.kfd is None:
-      KFDIface.kfd = HWInterface("/dev/kfd", os.O_RDWR)
-      gpus = [g for g in HWInterface(kfd_topo_path).listdir() if self._is_usable_gpu(HWInterface(f"{kfd_topo_path}/{g}/gpu_id"))]
+      KFDIface.kfd = FileIOInterface("/dev/kfd", os.O_RDWR)
+      gpus = [g for g in FileIOInterface(kfd_topo_path).listdir() if self._is_usable_gpu(FileIOInterface(f"{kfd_topo_path}/{g}/gpu_id"))]
       gpus = sorted(gpus, key=lambda x: int(x.split('/')[-1]))
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
       KFDIface.gpus = [gpus[x] for x in visible_devices] if visible_devices else gpus
 
     if device_id >= len(KFDIface.gpus): raise RuntimeError(f"No device found for {device_id}. Requesting more devices than the system has?")
 
-    self.gpu_id = int(HWInterface(f"{kfd_topo_path}/{KFDIface.gpus[device_id]}/gpu_id").read())
-    self.props = {l.split()[0]: int(l.split()[1]) for l in HWInterface(f"{kfd_topo_path}/{KFDIface.gpus[device_id]}/properties").read().splitlines()}
+    self.gpu_id = int(FileIOInterface(f"{kfd_topo_path}/{KFDIface.gpus[device_id]}/gpu_id").read())
+    self.props = {(p:=l.split())[0]: int(p[1]) for l in FileIOInterface(f"{kfd_topo_path}/{KFDIface.gpus[device_id]}/properties").read().splitlines()}
     ip_base = f"/sys/class/drm/renderD{self.props['drm_render_minor']}/device/ip_discovery/die/0"
     id2ip = {am.GC_HWID: am.GC_HWIP, am.SDMA0_HWID: am.SDMA0_HWIP, am.NBIF_HWID: am.NBIF_HWIP}
-    self.ip_versions = {id2ip[int(hwid)]:tuple(int(HWInterface(f'{ip_base}/{hwid}/0/{part}').read()) for part in ['major', 'minor', 'revision'])
-                        for hwid in HWInterface(ip_base).listdir() if hwid.isnumeric() and int(hwid) in id2ip}
-    self.ip_offsets = {id2ip[int(hwid)]:tuple(int(x, 16) for x in HWInterface(f'{ip_base}/{hwid}/0/base_addr').read().splitlines())
-                        for hwid in HWInterface(ip_base).listdir() if hwid.isnumeric() and int(hwid) in id2ip}
-    self.drm_fd = HWInterface(f"/dev/dri/renderD{self.props['drm_render_minor']}", os.O_RDWR)
+    self.ip_versions = {id2ip[int(hwid)]:tuple(int(FileIOInterface(f'{ip_base}/{hwid}/0/{part}').read()) for part in ['major', 'minor', 'revision'])
+                        for hwid in FileIOInterface(ip_base).listdir() if hwid.isnumeric() and int(hwid) in id2ip}
+    self.ip_offsets = {id2ip[int(hwid)]:tuple(int(x, 16) for x in FileIOInterface(f'{ip_base}/{hwid}/0/base_addr').read().splitlines())
+                        for hwid in FileIOInterface(ip_base).listdir() if hwid.isnumeric() and int(hwid) in id2ip}
+    self.drm_fd = FileIOInterface(f"/dev/dri/renderD{self.props['drm_render_minor']}", os.O_RDWR)
 
     kfd.AMDKFD_IOC_ACQUIRE_VM(KFDIface.kfd, drm_fd=self.drm_fd.fd, gpu_id=self.gpu_id)
 
@@ -580,23 +571,22 @@ class KFDIface:
     if cpu_access or host: flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC
 
     if flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR:
-      buf = addr = HWInterface.anon_mmap(0, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, 0)
-    else: buf, addr = 0, HWInterface.anon_mmap(0, size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE, 0)
-    assert addr != 0xffffffffffffffff
+      buf = addr = FileIOInterface.anon_mmap(0, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, 0)
+    else: buf, addr = 0, FileIOInterface.anon_mmap(0, size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE, 0)
 
     try: mem = kfd.AMDKFD_IOC_ALLOC_MEMORY_OF_GPU(self.kfd, va_addr=addr, size=size, base=addr, length=size, gpu_id=self.gpu_id,
                                                   flags=flags, mmap_offset=buf)
     except OSError as e:
       if e.errno == errno.EINVAL and (flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) and cpu_access:
         raise MemoryError("Cannot allocate host-visible VRAM. Ensure the resizable BAR option is enabled on your system.") from e
-      if e.errno == errno.ENOMEM: raise MemoryError("Cannot allocate memory: no memory is available.") from e
+      if e.errno == errno.ENOMEM: raise MemoryError(f"Cannot allocate {size} bytes: no memory is available.") from e
       raise
 
     if not (flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR):
       buf = self.drm_fd.mmap(mem.va_addr, mem.size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_FIXED, mem.mmap_offset)
       assert addr == buf == mem.va_addr
 
-    self.map(hcqbuf:=HCQBuffer(mem.va_addr, mem.size, meta=mem))
+    self.map(hcqbuf:=HCQBuffer(mem.va_addr, mem.size, meta=mem, view=MMIOInterface(mem.va_addr, mem.size, fmt='B') if cpu_access or host else None))
     return hcqbuf
 
   def free(self, mem):
@@ -604,7 +594,7 @@ class KFDIface:
       c_gpus = (ctypes.c_int32 * len(gpus))(*gpus)
       stm = kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(gpus))
       assert stm.n_success == len(gpus)
-    if mem.va_addr: HWInterface.munmap(mem.va_addr, mem.size)
+    if mem.va_addr: FileIOInterface.munmap(mem.va_addr, mem.size)
     kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
 
   def map(self, mem):
@@ -624,11 +614,11 @@ class KFDIface:
 
     if not hasattr(self, 'doorbells'):
       self.doorbells_base = queue.doorbell_offset & (~0x1fff) # doorbell is two pages
-      self.doorbells = cast(HWInterface, KFDIface.kfd).mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, self.doorbells_base)
+      self.doorbells = cast(FileIOInterface, KFDIface.kfd).mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, self.doorbells_base)
 
-    return AMDQueueDesc(ring=to_mv(ring.va_addr, ring.size).cast("I"),
-                        read_ptrs=[to_mv(queue.read_pointer_address, 8).cast("Q")], write_ptrs=[to_mv(queue.write_pointer_address, 8).cast("Q")],
-                        doorbells=[to_mv(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8).cast("Q")])
+    return AMDQueueDesc(ring=MMIOInterface(ring.va_addr, ring.size, fmt='I'), read_ptrs=[MMIOInterface(queue.read_pointer_address, 8, fmt='Q')],
+                        write_ptrs=[MMIOInterface(queue.write_pointer_address, 8, fmt='Q')],
+                        doorbells=[MMIOInterface(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8, fmt='Q')])
 
   def sleep(self, tm:int): kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=1, wait_for_all=1, timeout=tm)
 
@@ -646,21 +636,20 @@ class KFDIface:
     raise RuntimeError("\n".join(report))
 
 @dataclass
-class AMAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:AMMapping # noqa: E702
+class AMAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:AMMapping; has_cpu_mapping:bool # noqa: E702
 
 class PCIIface:
   supported_devs:list[int] = [0x744c, 0x7480, 0x7550]
-  vfio:bool = getenv("VFIO", 1) and HWInterface.exists("/dev/vfio/vfio")
-  vfio_fd:HWInterface
+  vfio_fd:FileIOInterface|None = None
   gpus:list[Any] = []
 
   def __init__(self, dev, dev_id):
     self.dev = dev
 
     if first_dev:=len(PCIIface.gpus) == 0:
-      for pcibus in HWInterface("/sys/bus/pci/devices").listdir():
-        vendor = int(HWInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16)
-        device = int(HWInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
+      for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
+        vendor = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16)
+        device = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
         if vendor == 0x1002 and device in PCIIface.supported_devs: PCIIface.gpus.append(pcibus)
       PCIIface.gpus = sorted(PCIIface.gpus)
 
@@ -671,60 +660,73 @@ class PCIIface:
     self.pcibus = PCIIface.gpus[dev_id]
 
     # Unbind the device from the kernel driver
-    if HWInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
-      HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
+    if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
+      FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
 
-    supported_sizes = int(HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDONLY).read(), 16)
-    try: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write(str(supported_sizes.bit_length() - 1))
+    supported_sizes = int(FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDONLY).read(), 16)
+    try: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write(str(supported_sizes.bit_length() - 1))
     except OSError as e: raise RuntimeError(f"Cannot resize BAR: {e}. Ensure the resizable BAR option is enabled on your system.") from e
 
+    # Disable migartion of locked pages.
+    if first_dev and FileIOInterface(reloc_sysfs:="/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read()[0] != "0":
+      os.system(cmd:=f"sudo sh -c 'echo 0 > {reloc_sysfs}'")
+      assert FileIOInterface(reloc_sysfs, os.O_RDONLY).read()[0] == "0", f"Failed to disable migration of locked pages. Please run {cmd} manually."
+
     # Try to init vfio. Use it if success.
-    if PCIIface.vfio:
+    if getenv("VFIO", 0):
       try:
         if first_dev:
-          HWInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
-          PCIIface.vfio_fd = HWInterface("/dev/vfio/vfio", os.O_RDWR)
-        vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
+          if not FileIOInterface.exists("/sys/module/vfio"): os.system("sudo modprobe vfio-pci disable_idle_d3=1")
 
-        HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
-        HWInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
+          FileIOInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
+          PCIIface.vfio_fd = FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
+          vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
 
-        iommu_group = HWInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
-      except OSError:
-        if DEBUG >= 1: print(f"am {self.pcibus}: failed to init vfio-pci module (run `sudo modprobe vfio-pci`).")
-        PCIIface.vfio = False
+        FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
+        FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
+
+        iommu_group = FileIOInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
+      except OSError as e:
+        if DEBUG >= 1: print(f"am {self.pcibus}: failed to init vfio-pci module (run `sudo modprobe vfio-pci`): {e}.")
+        PCIIface.vfio_fd = None
 
     # Init vfio for the device
-    if PCIIface.vfio:
-      self.vfio_group = HWInterface(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
+    if PCIIface.vfio_fd is not None:
+      self.vfio_group = FileIOInterface(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
       vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(PCIIface.vfio_fd.fd))
 
       if first_dev: vfio.VFIO_SET_IOMMU(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
-      self.vfio_dev = HWInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode())))
+      self.vfio_dev = FileIOInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode())))
 
-      self.irq_fd = HWInterface.eventfd(0, 0)
+      self.irq_fd = FileIOInterface.eventfd(0, 0)
       self.irq_poller = select.poll()
       self.irq_poller.register(self.irq_fd.fd, select.POLLIN)
 
       irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
         argsz=ctypes.sizeof(vfio.struct_vfio_irq_set), count=1, data=(ctypes.c_int * 1)(self.irq_fd.fd))
       vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
-    else: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR).write("1")
+    else: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR).write("1")
 
-    self.pagemap = HWInterface("/proc/self/pagemap", os.O_RDONLY)
-    self.cfg_fd = HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
-    self.bar_fds = {bar: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC) for bar in [0, 2, 5]}
+    self.pagemap = FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
+    self.cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
+    self.bar_fds = {b: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{b}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC) for b in [0, 2, 5]}
 
-    bar_info = HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
+    bar_info = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
     self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
-    self.adev = AMDev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
-    self.ip_versions = self.adev.ip_ver
-    self.ip_offsets = {hwip: tuple(instances[0]) for hwip,instances in self.adev.regs_offset.items()}
-    self.doorbell_cpu_addr = mv_address(dbell)
+    self._setup_adev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2, fmt='Q'), self._map_pci_range(5, fmt='I'))
+    self.doorbell_cpu_addr = dbell.addr
+
+    if first_dev:
+      FileIOInterface.anon_mmap((alloc:=self.adev.mm.va_allocator).base, alloc.size, 0, mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS|MAP_NORESERVE, 0)
 
     pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
     self.cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=pci.PCI_COMMAND)
+
+  def _setup_adev(self, name, vram:MMIOInterface, doorbell:MMIOInterface, mmio:MMIOInterface, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
+    self.adev = AMDev(name, vram, doorbell, mmio, dma_regions)
+    self.ip_versions = self.adev.ip_ver
+    self.ip_offsets = {hwip: tuple(instances[0]) for hwip,instances in self.adev.regs_offset.items()}
 
     gfxver = int(f"{self.adev.ip_ver[am.GC_HWIP][0]:02d}{self.adev.ip_ver[am.GC_HWIP][1]:02d}{self.adev.ip_ver[am.GC_HWIP][2]:02d}")
     array_count = self.adev.gc_info.gc_num_sa_per_se * self.adev.gc_info.gc_num_se
@@ -733,29 +735,32 @@ class PCIIface:
       'max_slots_scratch_cu': self.adev.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.adev.gc_info.gc_max_waves_per_simd,
       'simd_arrays_per_engine': self.adev.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.adev.gc_info.gc_lds_size}
 
-  def _map_pci_range(self, bar, off=0, addr=0, size=None):
+  def _map_pci_range(self, bar, off=0, addr=0, size=None, fmt='B'):
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
-    return to_mv(loc, sz)
+    return MMIOInterface(loc, sz, fmt=fmt)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     if host or (not getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1) and uncached and cpu_access): # host or gtt-like memory.
       vaddr = self.adev.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
-      va = HWInterface.anon_mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | MAP_FIXED, 0)
+      FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|MAP_FIXED, 0)
 
       # Read pagemap to get the physical address of each page. The pages are locked.
-      self.pagemap.seek(va // mmap.PAGESIZE * 8)
+      self.pagemap.seek(vaddr // mmap.PAGESIZE * 8)
       paddrs = [((x & ((1<<55) - 1)) * mmap.PAGESIZE, mmap.PAGESIZE) for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
       am_mapping = self.adev.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping))
+      return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=True),
+        view=MMIOInterface(am_mapping.va_addr, size, fmt='B'))
 
     am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
     if cpu_access: self._map_pci_range(bar=0, off=am_mapping.paddrs[0][0], addr=am_mapping.va_addr, size=am_mapping.size)
-    return HCQBuffer(am_mapping.va_addr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping))
+    return HCQBuffer(am_mapping.va_addr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=cpu_access),
+      view=MMIOInterface(am_mapping.va_addr, size, fmt='B') if cpu_access else None)
 
   def free(self, mem):
     for dev in mem.meta.mapped_devs[1:]: dev.dev_iface.adev.mm.unmap_range(mem.va_addr, mem.size)
     if not mem.meta.mapping.system: self.adev.mm.vfree(mem.meta.mapping)
+    if mem.meta.owner == self.dev and mem.meta.has_cpu_mapping: FileIOInterface.munmap(mem.va_addr, mem.size)
 
   def map(self, mem):
     # Check if the memory is already mapped on this device
@@ -766,6 +771,8 @@ class PCIIface:
     self.adev.mm.map_range(mem.va_addr, mem.size, paddrs, system=True, snooped=mem.meta.mapping.snooped, uncached=mem.meta.mapping.uncached)
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
+    assert cwsr_buffer is None, "no cwsr buffer for am"
+
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
       self.adev.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
                                 doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0), pipe=0, queue=0)
@@ -773,10 +780,11 @@ class PCIIface:
       self.adev.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
         eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=0)
 
-    return AMDQueueDesc(ring=to_mv(ring.va_addr, ring.size).cast("I"), doorbells=[to_mv(self.doorbell_cpu_addr + doorbell_index * 8, 8).cast("Q")],
-                        read_ptrs=[to_mv(gart.va_addr, 8).cast("Q")], write_ptrs=[to_mv(gart.va_addr+0x10, 8).cast("Q")])
+    return AMDQueueDesc(ring=MMIOInterface(ring.va_addr, ring.size, fmt='I'), read_ptrs=[MMIOInterface(gart.va_addr, 8, fmt='Q')],
+      write_ptrs=[MMIOInterface(gart.va_addr+0x10, 8, fmt='Q')], doorbells=[MMIOInterface(self.doorbell_cpu_addr + doorbell_index * 8, 8, fmt='Q')])
+
   def sleep(self, timeout):
-    if PCIIface.vfio and (events_cnt:=len(self.irq_poller.poll(timeout))):
+    if PCIIface.vfio_fd is not None and (events_cnt:=len(self.irq_poller.poll(timeout))):
       self.irq_fd.read(8 * events_cnt)
       self.adev.ih.interrupt_handler()
 
@@ -786,16 +794,66 @@ class PCIIface:
 
   def device_fini(self): self.adev.fini()
 
+class USBIface(PCIIface):
+  def __init__(self, dev, dev_id):
+    self.dev = dev
+    self.usb = ASM24Controller()
+    self.bars = setup_pci_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
+
+    self._setup_adev(f"usb:{dev_id}", USBMMIOInterface(self.usb, *self.bars[0], fmt='B'), USBMMIOInterface(self.usb, *self.bars[2], fmt='Q'),
+      USBMMIOInterface(self.usb, *self.bars[5], fmt='I'), dma_regions=[(0x200000, self._dma_view(0xf000, 0x80000))])
+    self.usb._pci_cacheable += [self.bars[2]] # doorbell region is cacheable
+
+    # special regions
+    self.copy_bufs = [self._dma_region(ctrl_addr=0xf000, sys_addr=0x200000, size=0x80000)]
+    self.sys_buf, self.sys_next_off = self._dma_region(ctrl_addr=0xa000, sys_addr=0x820000, size=0x1000), 0x800
+
+  def _dma_view(self, ctrl_addr, size): return USBMMIOInterface(self.usb, ctrl_addr, size, fmt='B', pcimem=False)
+  def _dma_region(self, ctrl_addr, sys_addr, size):
+    region = self.adev.mm.map_range(vaddr:=self.adev.mm.alloc_vaddr(size=size), size, [(sys_addr, size)], system=True, snooped=False, uncached=True)
+    return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], region, has_cpu_mapping=False), view=self._dma_view(ctrl_addr, size))
+
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
+    if (host or (uncached and cpu_access)) and self.sys_next_off + size < self.sys_buf.size:
+      self.sys_next_off += size
+      return self.sys_buf.offset(self.sys_next_off - size, size)
+
+    am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
+    return HCQBuffer(am_mapping.va_addr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=False),
+      view=USBMMIOInterface(self.usb, self.bars[0][0] + am_mapping.paddrs[0][0], size, fmt='B') if cpu_access else None)
+
+  def create_queue(self, queue_type, ring, gart, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
+    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
+      self.adev.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
+                                doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0), pipe=0, queue=0)
+    else:
+      self.adev.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
+        eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=0)
+      self.usb._pci_cacheable += [(ring.cpu_view().addr, ring.size)]
+
+    return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbells=[self.adev.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
+      read_ptrs=[gart.cpu_view().view(size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=0x10, size=8, fmt='Q')])
+
 class AMDDevice(HCQCompiled):
   devices: ClassVar[list[HCQCompiled]] = []
-  signal_pages: ClassVar[list[Any]] = []
-  signal_pool: ClassVar[list[int]] = []
+  signal_pages: ClassVar[list[HCQBuffer]] = []
+  signal_pool: ClassVar[list[HCQBuffer]] = []
 
-  driverless:bool = not HWInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
+  def is_am(self) -> bool: return isinstance(self.dev_iface, (PCIIface, USBIface))
+  def is_usb(self) -> bool: return isinstance(self.dev_iface, USBIface)
+
+  def _select_iface(self):
+    if len(nm:=getenv("AMD_IFACE", "")) > 0: return getattr(sys.modules[__name__], f"{nm.upper()}Iface")(self, self.device_id)
+
+    errs:str = ""
+    for iface_t in (KFDIface, PCIIface, USBIface):
+      try: return iface_t(self, self.device_id)
+      except Exception: errs += f"\n{iface_t.__name__}: {traceback.format_exc()}"
+    raise RuntimeError(f"Cannot find a usable interface for AMD:{self.device_id}:\n{errs}")
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
+    self.dev_iface = self._select_iface()
     self.target:tuple[int, ...] = ((trgt:=self.dev_iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
     if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")
@@ -821,21 +879,24 @@ class AMDDevice(HCQCompiled):
     self.pm4 = importlib.import_module(f"tinygrad.runtime.autogen.am.pm4_{'nv' if self.target[0] >= 10 else 'soc15'}")
     self.sdma = import_module('sdma', min(self.dev_iface.ip_versions[am.SDMA0_HWIP], (6, 0, 0)))
     self.gc = AMDIP('gc', self.dev_iface.ip_versions[am.GC_HWIP], self.dev_iface.ip_offsets[am.GC_HWIP])
-    nbio_ver = self.dev_iface.ip_versions[am.NBIF_HWIP]
-    if nbio_ver[:2] == (3, 3):
-      nbio_ver = (2, 3, 0)
-    nbio_pad = (0,) if self.target[0] == 9 else ()
-    self.nbio = AMDIP('nbio' if self.target[0]<12 else 'nbif', nbio_ver, nbio_pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
 
-    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x800000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
-                                           eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
+    # Define the regCOMPUTE_CURRENT_LOGIC_XCC_ID register, which is missing from the asic_regs files.
+    if self.target[:2] == (9,4): self.regCOMPUTE_CURRENT_LOGIC_XCC_ID = AMDReg("regCOMPUTE_CURRENT_LOGIC_XCC_ID", 0xe25, 0, {}, self.gc.bases)
+
+    nbio_name = 'nbio' if self.target[0] < 12 else 'nbif'
+    nbio_pad = (0,) if self.target[0] == 9 else ()
+    self.nbio = AMDIP(nbio_name, self.dev_iface.ip_versions[am.NBIF_HWIP], nbio_pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
+
+    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x2000 if self.is_usb() else 0x800000, eop_buffer_size=0x1000,
+      ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     max_copy_size = 0x40000000 if self.dev_iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
-    self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
+    self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else 0x800000)
 
-    super().__init__(device, AMDAllocator(self), AMDLLVMRenderer(self.arch) if getenv("AMD_LLVM", 0) else AMDRenderer(self.arch),
-                     AMDLLVMCompiler(self.arch) if getenv("AMD_LLVM", 0) else HIPCompiler(self.arch), functools.partial(AMDProgram, self),
-                     AMDSignal, functools.partial(AMDComputeQueue, self), functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size))
+    super().__init__(device, AMDAllocator(self), AMDLLVMRenderer(self.arch) if getenv("AMD_LLVM", 1) else AMDRenderer(self.arch),
+                     AMDLLVMCompiler(self.arch) if getenv("AMD_LLVM", 1) else HIPCompiler(self.arch), functools.partial(AMDProgram, self),
+                     AMDSignal, functools.partial(AMDComputeQueue, self), functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size),
+                     kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000)
 
     # Scratch setup
     self.max_private_segment_size = 0
@@ -844,16 +905,16 @@ class AMDDevice(HCQCompiled):
     # XCC setup
     self.xcc_sync: tuple[AMDSignal, AMDSignal]|None = None
     if self.xccs > 1:
-      self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True))
-      self.xcc_sync = (AMDSignal(base_addr=self.xcc_sync_area.va_addr), AMDSignal(base_addr=self.xcc_sync_area.va_addr + 256))
+      self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, cpu_access=True))
+      self.xcc_sync = (AMDSignal(base_buf=self.xcc_sync_area), AMDSignal(base_buf=self.xcc_sync_area.offset(256)))
       AMDComputeQueue(self).xcc_config().submit(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.sqtt_enabled = PROFILE and bool(getenv("SQTT", 0))
     if self.sqtt_enabled:
       if self.arch != 'gfx1100': raise RuntimeError('SQ Thread Tracing is only supported on 7900XTX')
-      if not self.driverless and (ppfeaturemask:=int(HWInterface('/sys/module/amdgpu/parameters/ppfeaturemask', os.O_RDONLY).read(), 16)) & 0x8000:
-        raise RuntimeError("SQTT can't be enabled because of hardware bug, to workaround either use driverless or add "
+      if not self.is_am() and (ppfeaturemask:=int(FileIOInterface('/sys/module/amdgpu/parameters/ppfeaturemask', os.O_RDONLY).read(), 16))&0x8000:
+        raise RuntimeError("SQTT can't be enabled because of hardware bug, to workaround either use AMD_IFACE=PCI or add "
                            f"ppfeaturemask={(ppfeaturemask&~0x8000):#x} (current {ppfeaturemask=:#x} & ~PP_GFXOFF_MASK) to amdgpu module parameters\n"
                            "For more information read https://github.com/tinygrad/tinygrad/blob/master/extra/sqtt/README.md")
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
@@ -865,12 +926,14 @@ class AMDDevice(HCQCompiled):
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
-    gart = self.dev_iface.alloc(0x1000, uncached=True, cpu_access=True)
-    eop_buffer = self.dev_iface.alloc(eop_buffer_size) if eop_buffer_size else None
+    gart = self.dev_iface.alloc(0x100, uncached=True, cpu_access=True)
+
     cwsr_buffer_size = round_up((ctx_save_restore_size + debug_memory_size) * self.dev_iface.props.get('num_xcc', 1), mmap.PAGESIZE)
-    return AMDQueueDesc.multi(*(self.dev_iface.create_queue(queue_type, ring, gart, eop_buffer=eop_buffer, xcc_id=xcc_id,
-                                                            ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size,
-                                                            cwsr_buffer=(self.dev_iface.alloc(cwsr_buffer_size) if ctx_save_restore_size else None))
+    cwsr_buffer = self.dev_iface.alloc(cwsr_buffer_size) if ctx_save_restore_size else None
+    eop_buffer = self.dev_iface.alloc(eop_buffer_size) if eop_buffer_size else None
+
+    return AMDQueueDesc.multi(*(self.dev_iface.create_queue(queue_type, ring, gart, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer, xcc_id=xcc_id,
+                                                            ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size)
                                 for xcc_id in range(self.xccs if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE else 1)))
 
   def _ensure_has_local_memory(self, required):
@@ -913,5 +976,6 @@ class AMDDevice(HCQCompiled):
     super()._at_profile_finalize()
 
   def finalize(self):
-    self.synchronize()
+    try: self.synchronize() # Try to finalize device in any case.
+    except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
     if hasattr(self.dev_iface, 'device_fini'): self.dev_iface.device_fini()

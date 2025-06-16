@@ -1,6 +1,7 @@
 #!/bin/bash
+set -e  # Exit on any error
 
-export PYTHONPATH="."
+export PYTHONPATH="." AMD=1
 export MODEL="bert"
 export SUBMISSION_PLATFORM="tinybox_8xMI300X"
 export DEFAULT_FLOAT="HALF" GPUS=8 BS=1024 EVAL_BS=1024

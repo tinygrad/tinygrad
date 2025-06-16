@@ -3,6 +3,7 @@ os.environ["NVIDIA_TF32_OVERRIDE"] = "0"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 import unittest
 import torch
 torch.set_num_threads(1)
@@ -47,14 +48,16 @@ def helper_test_speed(f1, *args):
     cache_defeat += 1
 
     # manual pre sync
-    if isinstance(args[0], Tensor): Device[args[0].device].synchronize()
+    if isinstance(args[0], Tensor):
+      local_device = Device[args[0].device]
+      local_device.synchronize()
     else: sync()
 
     GlobalCounters.global_ops = 0
     GlobalCounters.global_mem = 0
     st = time.perf_counter()
     ret = f1(*args)
-    if isinstance(ret, Tensor): Device[ret.device].synchronize()
+    if isinstance(ret, Tensor): local_device.synchronize()
     else: sync()
     et = (time.perf_counter() - st) * 1000
     if i >= 1: ets.append(et)

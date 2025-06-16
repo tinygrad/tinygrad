@@ -54,7 +54,7 @@ if __name__ == "__main__":
     return loss
 
   test_acc = float('nan')
-  for i in (t:=trange(70)):
+  for i in (t:=trange(getenv("STEPS", 70))):
     samples = torch.randint(0, X_train.shape[0], (512,))  # putting this in JIT didn't work well
     loss = step(samples)
     if i%10 == 9: test_acc = ((model(X_test).argmax(axis=-1) == Y_test).sum() * 100 / X_test.shape[0]).item()

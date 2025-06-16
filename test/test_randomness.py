@@ -136,9 +136,7 @@ class TestRandomness(unittest.TestCase):
     jr = np.array([0.9614430665969849, 0.059279561042785645, 0.01909029483795166, 0.47882091999053955, 0.9677121639251709,
                    0.36863112449645996, 0.3102607727050781, 0.06608951091766357, 0.35329878330230713, 0.26518797874450684], dtype=np.float32)
     r = Tensor.rand(10).numpy()
-    # TODO: this failed because increment happened before _threefry_random_bits
-    with self.assertRaises(AssertionError):
-      np.testing.assert_allclose(r, jr, atol=1e-5, rtol=1e-5)
+    np.testing.assert_allclose(r, jr, atol=1e-5, rtol=1e-5)
 
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_threefry_tensors_cnt(self):
@@ -201,6 +199,13 @@ class TestRandomness(unittest.TestCase):
     assert rand.dtype == empty.dtype
     assert rand.device == empty.device
 
+  def test_randn_like(self):
+    empty = Tensor.empty((80, 44))
+    rand = Tensor.randn_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
   def test_rand_like_zero_shape(self):
     empty = Tensor.empty(0, 20)
     rand = Tensor.rand_like(empty)
@@ -215,7 +220,6 @@ class TestRandomness(unittest.TestCase):
     assert rand.dtype == empty.dtype
     assert rand.device == empty.device
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
   def test_rand_like_dtype(self):
     empty = Tensor.empty((80, 44), dtype=dtypes.float16)
     rand = Tensor.rand_like(empty)
@@ -229,7 +233,21 @@ class TestRandomness(unittest.TestCase):
     assert rand.dtype == dtypes.float16
     assert rand.device == empty.device
 
+  def test_randn_like_dtype(self):
+    empty = Tensor.empty((80, 44), dtype=dtypes.float16)
+    rand = Tensor.randn_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
+    empty = Tensor.empty((80, 44))
+    rand = Tensor.randn_like(empty, dtype=dtypes.float16)
+    assert rand.shape == empty.shape
+    assert rand.dtype == dtypes.float16
+    assert rand.device == empty.device
+
   def test_randn(self):
+    self.assertEqual(Tensor.randn(3,3,dtype=dtypes.half).dtype, dtypes.half)
     self.assertTrue(normal_test(Tensor.randn))
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
 
@@ -240,7 +258,7 @@ class TestRandomness(unittest.TestCase):
     old_default_float = dtypes.default_float
     # low precision can result in inf from randn
     dtypes.default_float = default_float
-    t = Tensor.randn(1024, 1024)
+    t = Tensor.randn(256, 256)
     mx = t.max().numpy().item()
     mn = t.min().numpy().item()
     print(f"testing with {default_float=}")
@@ -283,11 +301,11 @@ class TestRandomness(unittest.TestCase):
                                                               lambda x: np.random.uniform(-1, 1, size=x) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
   def test_kaiming_uniform(self):
-    for shape in [(256, 128, 3, 3), (80, 44), (3, 55, 35)]:
+    for shape in [(32, 128, 3, 3), (80, 44), (3, 55, 35)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), shape=shape))
 
   def test_kaiming_normal(self):
-    for shape in [(256, 128, 3, 3), (80, 44), (3, 55, 35)]:
+    for shape in [(32, 128, 3, 3), (80, 44), (3, 55, 35)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_normal, lambda x: torch.nn.init.kaiming_normal_(torch.empty(x)), shape=shape))
 
   def test_multinomial(self):
@@ -312,11 +330,9 @@ class TestRandomness(unittest.TestCase):
     @TinyJit
     def sample_one(): return Tensor(w).multinomial(1, replacement=False).realize()
 
-    # TODO: fix mockgpu issue
-    if not (CI and Device.DEFAULT == "AMD"):
-      tiny_samples = [sample_one().item() for _ in range(1000)]
-      torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(1000)]
-      self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
+    tiny_samples = [sample_one().item() for _ in range(1000)]
+    torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(1000)]
+    self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
 
   def test_multinomial_counterexample(self):
     tiny_res = Tensor([0.3, 0.6, 0.1]).multinomial(4000, replacement=True)

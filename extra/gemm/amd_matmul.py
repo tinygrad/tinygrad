@@ -6,7 +6,7 @@ from tinygrad import Tensor, Device, Context
 from tinygrad.helpers import getenv
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem
-from tinygrad.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp
+from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp
 
 # TODO: on METAL for `DEBUG=4 python3 extra/gemm/amd_matmul.py`
 #  * fix load grouping (like float4). idk why it's not working, need new devectorizer (this is a Monday project)
@@ -82,7 +82,7 @@ if __name__ == "__main__":
           #Opt(op=OptOps.UPCAST, axis=1, arg=4),
           Opt(op=OptOps.LOCAL, axis=1, arg=LN),
           Opt(op=OptOps.LOCAL, axis=0, arg=LN)]
-  for opt in opts: k.apply_opt(opt)
+  k.apply_opts(opts)
   prg = k.to_program(ast_transform=ast_transform)
   if getenv("FAST", 1) and Device.DEFAULT == "AMD":
     #src = (pathlib.Path(__file__).parent / "fp32_sgemm_amd" / "src" / "kernel8_batched_gmem.s").read_text()

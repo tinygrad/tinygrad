@@ -9,7 +9,7 @@ if [[ ! $(clang2py -V) ]]; then
   pip install clang==14.0.6
   git clone https://github.com/nimlgen/ctypeslib.git
   cd ctypeslib
-  pip install --user .
+  pip install .
   clang2py -V
   popd
 fi
@@ -35,7 +35,7 @@ def _try_dlopen_$name():
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
     except OSError: pass
-  raise RuntimeError("library $name not found")
+  return None
 EOF
 }
 
@@ -80,14 +80,15 @@ generate_kfd() {
   fixup $BASE/kfd.py
   sed -i "s/import ctypes/import ctypes, os/g" $BASE/kfd.py
   sed -i "s/import fcntl, functools/import functools/g" $BASE/kfd.py
-  sed -i "/import functools/a from tinygrad.runtime.support.hcq import HWInterface" $BASE/kfd.py
-  sed -i "s/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, \*\*kwargs):/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:HWInterface, \*\*kwargs):/g" $BASE/kfd.py
+  sed -i "/import functools/a from tinygrad.runtime.support.hcq import FileIOInterface" $BASE/kfd.py
+  sed -i "s/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, \*\*kwargs):/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:FileIOInterface, \*\*kwargs):/g" $BASE/kfd.py
   sed -i "s/fcntl.ioctl(__fd, (__idir<<30)/__fd.ioctl((__idir<<30)/g" $BASE/kfd.py
+  sed -i "s/!!/not not /g" $BASE/kfd.py
   python3 -c "import tinygrad.runtime.autogen.kfd"
 }
 
 generate_cuda() {
-  clang2py /usr/include/cuda.h -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so
+  clang2py /usr/include/cuda.h --clang-args="-D__CUDA_API_VERSION_INTERNAL" -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/cuda.py
   sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libcuda.so')\ctypes.CDLL(ctypes.util.find_library('cuda'))\g" $BASE/cuda.py
   fixup $BASE/cuda.py
@@ -104,10 +105,10 @@ generate_nvrtc() {
 }
 
 generate_nv() {
-  NVKERN_COMMIT_HASH=d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6
+  NVKERN_COMMIT_HASH=81fe4fb417c8ac3b9bdcc1d56827d116743892a5
   NVKERN_SRC=/tmp/open-gpu-kernel-modules-$NVKERN_COMMIT_HASH
   if [ ! -d "$NVKERN_SRC" ]; then
-    git clone https://github.com/tinygrad/open-gpu-kernel-modules $NVKERN_SRC
+    git clone https://github.com/NVIDIA/open-gpu-kernel-modules $NVKERN_SRC
     pushd .
     cd $NVKERN_SRC
     git reset --hard $NVKERN_COMMIT_HASH
@@ -116,15 +117,19 @@ generate_nv() {
 
   clang2py -k cdefstum \
     extra/nv_gpu_driver/clc6c0qmd.h \
+    extra/nv_gpu_driver/clcec0qmd.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl0080.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl2080_notification.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
-    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
-    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc86f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc96f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc761.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl83de.h \
     $NVKERN_SRC/src/nvidia/generated/g_allclasses.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc6c0.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clcdc0.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/clc6b5.h \
+    $NVKERN_SRC/kernel-open/nvidia-uvm/clc9b5.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_ioctl.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_linux_ioctl.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/hwref/ampere/ga100/dev_fault.h \
@@ -149,6 +154,8 @@ generate_nv() {
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/nv_gpu.py
   sed -i 's/#\?\s\([A-Za-z0-9_]\+\) = MW ( \([0-9]\+\) : \([0-9]\+\) )/\1 = (\2 , \3)/' $BASE/nv_gpu.py # NVC6C0_QMDV03_00 processing
   sed -i 's/#\sdef NVC6C0_QMD\([A-Za-z0-9_()]\+\):/def NVC6C0_QMD\1:/' $BASE/nv_gpu.py
+  sed -i 's/#\sdef NVCEC0_QMD\([A-Za-z0-9_()]\+\):/def NVCEC0_QMD\1:/' $BASE/nv_gpu.py
+  sed -E -i -n '/^def (NVCEC0_QMDV05_00_RELEASE)(_ENABLE)\(i\):/{p;s//\1'"0"'\2=\1\2(0)\n\1'"1"'\2=\1\2(1)/;H;b};p;${x;s/^\n//;p}' "$BASE/nv_gpu.py"
   sed -i 's/#\s*return MW(\([0-9i()*+]\+\):\([0-9i()*+]\+\))/    return (\1 , \2)/' $BASE/nv_gpu.py
   sed -i 's/#\?\s*\(.*\)\s*=\s*\(NV\)\?BIT\(32\)\?\s*(\s*\([0-9]\+\)\s*)/\1 = (1 << \4)/' $BASE/nv_gpu.py # name = BIT(x) -> name = (1 << x)
   sed -i "s/UVM_\([A-Za-z0-9_]\+\) = \['i', '(', '\([0-9]\+\)', ')'\]/UVM_\1 = \2/" $BASE/nv_gpu.py # UVM_name = ['i', '(', '<num>', ')'] -> UVM_name = <num>
@@ -220,7 +227,7 @@ generate_libc() {
 
   sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/libc.py
   sed -i "s\FIXME_STUB\libc\g" $BASE/libc.py
-  sed -i "s\FunctionFactoryStub()\None if (libc_path := ctypes.util.find_library('c')) is None else ctypes.CDLL(libc_path)\g" $BASE/libc.py
+  sed -i "s\FunctionFactoryStub()\None if (libc_path := ctypes.util.find_library('c')) is None else ctypes.CDLL(libc_path, use_errno=True)\g" $BASE/libc.py
 
   fixup $BASE/libc.py
 }
@@ -287,7 +294,7 @@ generate_vfio() {
   fixup $BASE/vfio.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/vfio.py
   sed -i "s\import fcntl, functools\import functools" $BASE/vfio.py
-  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import HWInterface\g" $BASE/vfio.py
+  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import FileIOInterface\g" $BASE/vfio.py
   sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\return __fd.ioctl((__idir<<30)\g" $BASE/vfio.py
 }
 
@@ -350,50 +357,6 @@ generate_am() {
   fixup $BASE/am/soc24.py
 
   clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/mp/mp_13_0_0_offset.h \
-    $AMKERN_INC/asic_reg/mp/mp_13_0_0_sh_mask.h \
-    -o $BASE/am/mp_13_0_0.py
-  fixup $BASE/am/mp_13_0_0.py
-
-  # 14_0_3 reuses 14_0_2
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/mp/mp_14_0_2_offset.h \
-    $AMKERN_INC/asic_reg/mp/mp_14_0_2_sh_mask.h \
-    -o $BASE/am/mp_14_0_3.py
-  fixup $BASE/am/mp_14_0_3.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/mp/mp_11_0_offset.h \
-    $AMKERN_INC/asic_reg/mp/mp_11_0_sh_mask.h \
-    -o $BASE/am/mp_11_0.py
-  fixup $BASE/am/mp_11_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/gc/gc_9_4_3_offset.h \
-    $AMKERN_INC/asic_reg/gc/gc_9_4_3_sh_mask.h \
-    extra/amdpci/overlay/gc_9_4_3.h \
-    -o $BASE/am/gc_9_4_3.py
-  fixup $BASE/am/gc_9_4_3.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/gc/gc_10_3_0_offset.h \
-    $AMKERN_INC/asic_reg/gc/gc_10_3_0_sh_mask.h \
-    -o $BASE/am/gc_10_3_0.py
-  fixup $BASE/am/gc_10_3_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/gc/gc_11_0_0_offset.h \
-    $AMKERN_INC/asic_reg/gc/gc_11_0_0_sh_mask.h \
-    -o $BASE/am/gc_11_0_0.py
-  fixup $BASE/am/gc_11_0_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/gc/gc_12_0_0_offset.h \
-    $AMKERN_INC/asic_reg/gc/gc_12_0_0_sh_mask.h \
-    -o $BASE/am/gc_12_0_0.py
-  fixup $BASE/am/gc_12_0_0.py
-
-  clang2py -k cdefstum \
     extra/hip_gpu_driver/sdma_registers.h \
     $AMKERN_AMD/amdgpu/vega10_sdma_pkt_open.h \
     --clang-args="-I/opt/rocm/include -x c++" \
@@ -415,66 +378,6 @@ generate_am() {
   fixup $BASE/am/sdma_6_0_0.py
 
   clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/mmhub/mmhub_3_0_0_offset.h \
-    $AMKERN_INC/asic_reg/mmhub/mmhub_3_0_0_sh_mask.h \
-    -o $BASE/am/mmhub_3_0_0.py
-  fixup $BASE/am/mmhub_3_0_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/mmhub/mmhub_3_0_2_offset.h \
-    $AMKERN_INC/asic_reg/mmhub/mmhub_3_0_2_sh_mask.h \
-    -o $BASE/am/mmhub_3_0_2.py
-  fixup $BASE/am/mmhub_3_0_2.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/nbio/nbio_2_3_offset.h \
-    $AMKERN_INC/asic_reg/nbio/nbio_2_3_sh_mask.h \
-    -o $BASE/am/nbio_2_3_0.py
-  fixup $BASE/am/nbio_2_3_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/mmhub/mmhub_4_1_0_offset.h \
-    $AMKERN_INC/asic_reg/mmhub/mmhub_4_1_0_sh_mask.h \
-    -o $BASE/am/mmhub_4_1_0.py
-  fixup $BASE/am/mmhub_4_1_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/nbio/nbio_4_3_0_offset.h \
-    $AMKERN_INC/asic_reg/nbio/nbio_4_3_0_sh_mask.h \
-    -o $BASE/am/nbio_4_3_0.py
-  fixup $BASE/am/nbio_4_3_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/nbif/nbif_6_3_1_offset.h \
-    $AMKERN_INC/asic_reg/nbif/nbif_6_3_1_sh_mask.h \
-    -o $BASE/am/nbif_6_3_1.py
-  fixup $BASE/am/nbif_6_3_1.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/nbio/nbio_7_9_0_offset.h \
-    $AMKERN_INC/asic_reg/nbio/nbio_7_9_0_sh_mask.h \
-    -o $BASE/am/nbio_7_9_0.py
-  fixup $BASE/am/nbio_7_9_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/nbio/nbio_7_11_0_offset.h \
-    $AMKERN_INC/asic_reg/nbio/nbio_7_11_0_sh_mask.h \
-    -o $BASE/am/nbio_7_11_0.py
-  fixup $BASE/am/nbio_7_11_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/oss/osssys_6_0_0_offset.h \
-    $AMKERN_INC/asic_reg/oss/osssys_6_0_0_sh_mask.h \
-    -o $BASE/am/osssys_6_0_0.py
-  fixup $BASE/am/osssys_6_0_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/oss/osssys_7_0_0_offset.h \
-    $AMKERN_INC/asic_reg/oss/osssys_7_0_0_sh_mask.h \
-    -o $BASE/am/osssys_7_0_0.py
-  fixup $BASE/am/osssys_7_0_0.py
-
-  clang2py -k cdefstum \
     $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu_v13_0_0_ppsmc.h \
     $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu13_driver_if_v13_0_0.h \
     extra/amdpci/headers/amdgpu_smu.h \
@@ -487,20 +390,8 @@ generate_am() {
     $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu14_driver_if_v14_0.h \
     extra/amdpci/headers/amdgpu_smu.h \
     --clang-args="-include stdint.h" \
-    -o $BASE/am/smu_v14_0_3.py
-  fixup $BASE/am/smu_v14_0_3.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/hdp/hdp_6_0_0_offset.h \
-    $AMKERN_INC/asic_reg/hdp/hdp_6_0_0_sh_mask.h \
-    -o $BASE/am/hdp_6_0_0.py
-  fixup $BASE/am/hdp_6_0_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/asic_reg/hdp/hdp_7_0_0_offset.h \
-    $AMKERN_INC/asic_reg/hdp/hdp_7_0_0_sh_mask.h \
-    -o $BASE/am/hdp_7_0_0.py
-  fixup $BASE/am/hdp_7_0_0.py
+    -o $BASE/am/smu_v14_0_2.py
+  fixup $BASE/am/smu_v14_0_2.py
 }
 
 generate_sqtt() {
@@ -520,6 +411,19 @@ generate_webgpu() {
   sed -i "s/FunctionFactoryStub()/ctypes.CDLL(webgpu_support.WEBGPU_PATH)/g" "$BASE/webgpu.py"
   sed -i "s/import ctypes/import ctypes, tinygrad.runtime.support.webgpu as webgpu_support/g" "$BASE/webgpu.py"
   python3 -c "import tinygrad.runtime.autogen.webgpu"
+}
+
+generate_libusb() {
+  clang2py -k cdefstum \
+    /usr/include/libusb-1.0/libusb.h \
+    -o $BASE/libusb.py
+
+  fixup $BASE/libusb.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/libusb.py
+  sed -i "s/FIXME_STUB/libusb/g" "$BASE/libusb.py"
+  sed -i "s/libusb_le16_to_cpu = libusb_cpu_to_le16//g" "$BASE/libusb.py"
+  sed -i "s/FunctionFactoryStub()/None if (lib_path:=os.getenv('LIBUSB_PATH', ctypes.util.find_library('usb-1.0'))) is None else ctypes.CDLL(lib_path)/g" "$BASE/libusb.py"
+  python3 -c "import tinygrad.runtime.autogen.libusb"
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
@@ -542,6 +446,7 @@ elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "pci" ]; then generate_pci
 elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "webgpu" ]; then generate_webgpu
+elif [ "$1" == "libusb" ]; then generate_libusb
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am; generate_webgpu
 else echo "usage: $0 <type>"
 fi

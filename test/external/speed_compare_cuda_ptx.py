@@ -24,7 +24,7 @@ if __name__ == "__main__":
     # cuda compile
     dev.compiler = CUDACompiler(dev.arch)
     lin = ast_str_to_lin(ast, opts=dev.renderer)
-    lin = hand_coded_optimizations(lin)
+    lin.apply_opts(hand_coded_optimizations(lin))
     cuda_prg = CompiledRunner(lin.to_program())
 
     bufs = bufs_from_lin(lin)
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     # ptx compile
     dev.compiler = PTXCompiler(dev.arch)
     lin = ast_str_to_lin(ast, opts=ptx)
-    lin = hand_coded_optimizations(lin)
+    lin.apply_opts(hand_coded_optimizations(lin))
     lin.linearize()
     ptx_prg = CompiledRunner(lin.to_program())
 

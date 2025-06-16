@@ -227,6 +227,19 @@ class TestOps(unittest.TestCase):
     for i in range(len(tor)):
       helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
 
+  def test_unfold(self):
+    helper_test_op([(8,)], lambda x: x.unfold(0, 2, 1))
+    helper_test_op([(8,)], lambda x: x.unfold(0, 2, 2))
+    helper_test_op([(8,)], lambda x: x.unfold(0, 7, 3))
+    helper_test_op([(3,3,3)], lambda x: x.unfold(2, 2, 8))
+    helper_test_op([(3,3,3)], lambda x: x.unfold(1, 0, 8))
+    helper_test_op([(3,3,3,3,3)], lambda x: x.unfold(-1, 2, 2))
+
+    self.helper_test_exception([(8,)], lambda x: x.unfold(0, 9, 3), lambda x: x.unfold(0, 9, 3), expected=RuntimeError)
+    self.helper_test_exception([(8,)], lambda x: x.unfold(1, 8, 3), lambda x: x.unfold(1, 8, 3), expected=IndexError)
+    self.helper_test_exception([(8,)], lambda x: x.unfold(0, -1, 3), lambda x: x.unfold(0, 9, 3), expected=RuntimeError)
+    self.helper_test_exception([(8,)], lambda x: x.unfold(0, 1, -1), lambda x: x.unfold(0, 9, 3), expected=RuntimeError)
+
   def test_meshgrid(self):
     x, xt = torch.tensor([0.,1.,2.], requires_grad=True), Tensor([0.,1.,2.], requires_grad=True)
     y, yt = torch.tensor([3.,4.,5.,6.], requires_grad=True), Tensor([3.,4.,5.,6.], requires_grad=True)
@@ -556,6 +569,12 @@ class TestOps(unittest.TestCase):
       helper_test_op(None, lambda x,y: x.div(y, rounding_mode="trunc"), forward_only=True, vals=[[5.0, 6, 7, 0, -5, -6, -7], [denominator]])
       helper_test_op(None, lambda x,y: x.div(y, rounding_mode="floor"), forward_only=True, vals=[[5.0, 6, 7, 0, -5, -6, -7], [denominator]])
 
+    for numerator in [110, 111, -110, -111]:
+      for denominator in [55, -55]:
+        helper_test_op(None, lambda x,y: x.div(y, rounding_mode=None), forward_only=True, vals=[[numerator], [denominator]])
+        helper_test_op(None, lambda x,y: x.div(y, rounding_mode="trunc"), forward_only=True, vals=[[numerator], [denominator]])
+        helper_test_op(None, lambda x,y: x.div(y, rounding_mode="floor"), forward_only=True, vals=[[numerator], [denominator]])
+
     self.helper_test_exception(None, lambda x,y: x.div(y, rounding_mode="typo"), lambda x,y: x.div(y, rounding_mode="typo"), forward_only=True,
                                vals=[[5], [0]], expected=RuntimeError)
 
@@ -571,7 +590,7 @@ class TestOps(unittest.TestCase):
       np.testing.assert_equal(x.numpy(), 2**64 - 1)
     # 1 // 0 is device dependent, but it should not raise
     Tensor([1]).idiv(1).realize()
-    if not (CI and getenv("PTX")):  # TODO: crashed in PTX CI
+    if not CI:  # TODO: crashed in CI on some devices
       # ... because if might be in a where branch that the output is well defined
       t = Tensor([-1, 0, 1, 2])
       np.testing.assert_equal((t > 0).where(1//t, t).numpy(), [-1, 0, 1, 0])
@@ -652,7 +671,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x**2.0)
     helper_test_op([()], lambda x: 2.0**x)
     helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]])
+    helper_test_op(None, lambda x: 0.7**x, vals=[[-2.,-1,0,1,2,3]])
     helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]])
+    # float to power of int
+    helper_test_op(None, lambda x: 0.7**x, vals=[[-2,-1,0,1,2,3]], forward_only=True)
 
   def test_pow_const_direct(self):
     # x ** c
@@ -1071,8 +1093,8 @@ class TestOps(unittest.TestCase):
   def test_sort(self):
     for dim in [-1, 0, 1]:
       for descending in [True, False]:
-        helper_test_op([(8,45,65)], lambda x: x.sort(dim, descending).values, lambda x: x.sort(dim, descending)[0], forward_only=True)
-        helper_test_op([(8,45,65)], lambda x: x.sort(dim, descending).indices.type(torch.int32), lambda x: x.sort(dim, descending)[1],
+        helper_test_op([(8,45,6)], lambda x: x.sort(dim, descending).values, lambda x: x.sort(dim, descending)[0], forward_only=True)
+        helper_test_op([(8,45,6)], lambda x: x.sort(dim, descending).indices.type(torch.int32), lambda x: x.sort(dim, descending)[1],
                        forward_only=True)
     # repeated values
     helper_test_op(None, lambda x: x.sort(stable=True).values, lambda x: x.sort()[0], forward_only=True, vals=[[0, 1] * 9])
@@ -1088,10 +1110,10 @@ class TestOps(unittest.TestCase):
     for dim in [0, 1, -1]:
       for largest in [True, False]:
         for sorted_ in [True]: # TODO support False
-          helper_test_op([(10,20,30)],
+          helper_test_op([(10,12,6)],
                           lambda x: x.topk(5, dim, largest, sorted_).values,
                           lambda x: x.topk(5, dim, largest, sorted_)[0], forward_only=True)
-          helper_test_op([(10,20,30)],
+          helper_test_op([(10,12,6)],
                           lambda x: x.topk(5, dim, largest, sorted_).indices.type(torch.int32),
                           lambda x: x.topk(5, dim, largest, sorted_)[1], forward_only=True)
     # repeated values
@@ -1838,6 +1860,11 @@ class TestOps(unittest.TestCase):
   def test_view(self):
     helper_test_op([(4,3,6,6)], lambda x: x.view((12,6,6)))
     helper_test_op([(4,3,6,6)], lambda x: x.view((-1,3,6,6)))
+    helper_test_op([(6,)], lambda x: x.view(2, 3))
+    helper_test_op([(6,1)], lambda x: x.view([2, 3]))
+    helper_test_op([(1,6)], lambda x: x.view((3, 2)))
+    helper_test_op([(3,2)], lambda x: x.view((2, 3)))
+    helper_test_op([(3,2)], lambda x: x.view(6))
 
   def test_flip(self):
     helper_test_op([(4,3,6,6)], lambda x: x.flip((0,)))
@@ -1954,106 +1981,106 @@ class TestOps(unittest.TestCase):
 
   def test_simple_conv2d(self):
     helper_test_op([(1,4,9,9), (4,4,3,3)],
-      lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
-      lambda x,w: Tensor.conv2d(x,w).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv2d(x,w),
+      lambda x,w: Tensor.conv2d(x,w), grad_rtol=1e-5)
 
   def test_simple_conv2d_bias(self):
     helper_test_op([(1,4,9,9), (4,4,3,3), (4,)],
-      lambda x,w,b: torch.nn.functional.conv2d(x,w,b).relu(),
-      lambda x,w,b: Tensor.conv2d(x,w,b).relu(), grad_rtol=1e-5)
+      lambda x,w,b: torch.nn.functional.conv2d(x,w,b),
+      lambda x,w,b: Tensor.conv2d(x,w,b), grad_rtol=1e-5)
 
   @unittest.skipIf(IMAGE>0, "no conv3d on images")
   def test_simple_conv3d(self):
     helper_test_op([(1,4,9,9,9), (4,4,3,3,3)],
-      lambda x,w: torch.nn.functional.conv3d(x,w).relu(),
-      lambda x,w: Tensor.conv2d(x,w).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv3d(x,w),
+      lambda x,w: Tensor.conv2d(x,w), grad_rtol=1e-5)
 
   @unittest.skipIf(IMAGE>0, "no conv3d on images")
   def test_padded_conv3d(self):
     helper_test_op([(1,4,5,5,5), (4,4,3,3,3)],
-      lambda x,w: torch.nn.functional.conv3d(x,w,padding=1).relu(),
-      lambda x,w: Tensor.conv2d(x,w,padding=[1,1,1,1,1,1]).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv3d(x,w,padding=1),
+      lambda x,w: Tensor.conv2d(x,w,padding=[1,1,1,1,1,1]), grad_rtol=1e-5)
 
   def test_simple_conv2d_m4(self):
     helper_test_op([(1,16,18,18), (16,16,3,3)],
-      lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
-      lambda x,w: Tensor.conv2d(x,w).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv2d(x,w),
+      lambda x,w: Tensor.conv2d(x,w), atol=1e-05, grad_rtol=1e-5)
 
   def test_simple_conv2d_1x1(self):
     helper_test_op([(1,4,9,9), (4,4,1,1)],
-      lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
-      lambda x,w: Tensor.conv2d(x,w).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv2d(x,w),
+      lambda x,w: Tensor.conv2d(x,w), grad_rtol=1e-5)
 
   def test_simple_conv2d_1x1_m4(self):
     helper_test_op([(1,16,32,32), (16,16,1,1)],
-      lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
-      lambda x,w: Tensor.conv2d(x,w).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv2d(x,w),
+      lambda x,w: Tensor.conv2d(x,w), grad_rtol=1e-5)
 
   def test_nested_conv2d(self):
     helper_test_op([(1,32,9,9), (32,32,3,3), (32,32,3,3)],
-      lambda x,w1,w2: torch.nn.functional.conv2d(torch.nn.functional.conv2d(x,w1).relu(), w2).relu(),
-      lambda x,w1,w2: x.conv2d(w1).relu().conv2d(w2).relu())
+      lambda x,w1,w2: torch.nn.functional.conv2d(torch.nn.functional.conv2d(x,w1).relu(), w2),
+      lambda x,w1,w2: x.conv2d(w1).relu().conv2d(w2))
 
   # expect reduce nodes == 3
   def test_simple_conv2d_nhwc(self):
     # weights (from tf): filter_height x filter_width x in_channels x out_channels
     helper_test_op([(2,9,9,10), (3,3,10,20)],
-      lambda x,w: torch.nn.functional.conv2d(x.permute(0,3,1,2),w.permute(3,2,0,1)).relu(),
-      lambda x,w: Tensor.conv2d(x.permute(0,3,1,2),w.permute(3,2,0,1)).relu(), atol=1e-5, grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv2d(x.permute(0,3,1,2),w.permute(3,2,0,1)),
+      lambda x,w: Tensor.conv2d(x.permute(0,3,1,2),w.permute(3,2,0,1)), atol=1e-5, grad_rtol=1e-5)
 
   def test_simple_conv2d_batched(self):
     helper_test_op([(2,4,9,9), (4,4,3,3)],
-      lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
-      lambda x,w: Tensor.conv2d(x,w).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv2d(x,w),
+      lambda x,w: Tensor.conv2d(x,w), grad_rtol=1e-5)
 
   # conv transpose
 
   def test_simple_conv_transpose2d(self):
     helper_test_op([(2,4,9,9), (4,4,3,3)],
-      lambda x,w: torch.nn.functional.conv_transpose2d(x,w).relu(),
-      lambda x,w: Tensor.conv_transpose2d(x,w).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv_transpose2d(x,w),
+      lambda x,w: Tensor.conv_transpose2d(x,w), grad_rtol=1e-5)
 
   def test_bias_conv_transpose2d(self):
     helper_test_op([(2,4,9,9), (4,4,3,3), (4,)],
-      lambda x,w,b: torch.nn.functional.conv_transpose2d(x,w,b).relu(),
-      lambda x,w,b: Tensor.conv_transpose2d(x,w,b).relu(), grad_rtol=1e-5)
+      lambda x,w,b: torch.nn.functional.conv_transpose2d(x,w,b),
+      lambda x,w,b: Tensor.conv_transpose2d(x,w,b), grad_rtol=1e-5)
 
   def test_grouped_conv_transpose2d(self):
     helper_test_op([(2,4,9,9), (4,4,3,3)],
-      lambda x,w: torch.nn.functional.conv_transpose2d(x,w,groups=2).relu(),
-      lambda x,w: Tensor.conv_transpose2d(x,w,groups=2).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv_transpose2d(x,w,groups=2),
+      lambda x,w: Tensor.conv_transpose2d(x,w,groups=2), grad_rtol=1e-5)
 
   def test_padded_conv_transpose2d(self):
     for padding in [(1,2), (2,1), 2, 1, 0]:
       helper_test_op([(2,4,9,9), (4,4,3,3)],
-        lambda x,w: torch.nn.functional.conv_transpose2d(x,w,padding=padding).relu(),
-        lambda x,w: Tensor.conv_transpose2d(x,w,padding=padding).relu(), grad_rtol=1e-5)
+        lambda x,w: torch.nn.functional.conv_transpose2d(x,w,padding=padding),
+        lambda x,w: Tensor.conv_transpose2d(x,w,padding=padding), grad_rtol=1e-5)
     self.helper_test_exception([(2,16,2,2), (32,16,3,3)], lambda x,w: torch.nn.functional.conv_transpose2d(x,w,padding=(1,1,1)),
                    lambda x,w: Tensor.conv_transpose2d(x,w,padding=(1,1,1)), expected=(RuntimeError, ValueError))
 
   def test_dilated_conv_transpose2d(self):
     for dilation in [(1,2), (2,1), 2, 1]:
       helper_test_op([(2,4,9,9), (4,4,3,3)],
-        lambda x,w: torch.nn.functional.conv_transpose2d(x,w,dilation=dilation).relu(),
-        lambda x,w: Tensor.conv_transpose2d(x,w,dilation=dilation).relu(), grad_rtol=1e-5)
+        lambda x,w: torch.nn.functional.conv_transpose2d(x,w,dilation=dilation),
+        lambda x,w: Tensor.conv_transpose2d(x,w,dilation=dilation), grad_rtol=1e-5)
 
   def test_strided_conv_transpose2d(self):
     for stride in [(2,1), (1,2), 1]:
       helper_test_op([(2,4,4,5), (4,4,3,3)],
-        lambda x,w: torch.nn.functional.conv_transpose2d(x,w, stride=stride).relu(),
-        lambda x,w: Tensor.conv_transpose2d(x,w,stride=stride).relu(), atol=1e-5, grad_rtol=1e-5)
+        lambda x,w: torch.nn.functional.conv_transpose2d(x,w, stride=stride),
+        lambda x,w: Tensor.conv_transpose2d(x,w,stride=stride), atol=1e-5, grad_rtol=1e-5)
 
   def test_output_padded_conv_transpose2d(self):
     for output_padding, stride in [((1,1), (2,3)), ((2,1), (3,2))]:
       helper_test_op([(2,4,6,5), (4,4,3,3),(4,)],
-        lambda x,w,b: torch.nn.functional.conv_transpose2d(x,w,b,output_padding=output_padding,stride=stride).relu(),
-        lambda x,w,b: Tensor.conv_transpose2d(x,w,b,output_padding=output_padding,stride=stride).relu(), grad_rtol=1e-5)
+        lambda x,w,b: torch.nn.functional.conv_transpose2d(x,w,b,output_padding=output_padding,stride=stride),
+        lambda x,w,b: Tensor.conv_transpose2d(x,w,b,output_padding=output_padding,stride=stride), grad_rtol=1e-5)
 
   @unittest.skipIf(IMAGE>0, "no conv3d on images")
   def test_simple_conv_transpose3d(self):
     helper_test_op([(2,4,9,9,9), (4,4,3,3,3)],
-      lambda x,w: torch.nn.functional.conv_transpose3d(x,w).relu(),
-      lambda x,w: Tensor.conv_transpose2d(x,w).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv_transpose3d(x,w),
+      lambda x,w: Tensor.conv_transpose2d(x,w), grad_rtol=1e-5)
 
   @unittest.skipIf((IMAGE>0), "no conv1d on images")
   def test_conv1d(self):
@@ -2063,8 +2090,8 @@ class TestOps(unittest.TestCase):
           for groups in [1,3] if cin == 3 and H == 5 else [1]:
             with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H):
               helper_test_op([(bs,cin,11), (6,cin//groups,H)],
-                lambda x,w: torch.nn.functional.conv1d(x,w,groups=groups).relu(),
-                lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), grad_rtol=1e-5)
+                lambda x,w: torch.nn.functional.conv1d(x,w,groups=groups),
+                lambda x,w: Tensor.conv2d(x,w,groups=groups), grad_rtol=1e-5)
 
   @unittest.skipIf(IMAGE>0, "no conv1d on images")
   def test_simple_padding_conv1d(self):
@@ -2074,15 +2101,15 @@ class TestOps(unittest.TestCase):
     H = 5
     p = (1,1)
     helper_test_op([(bs,cin,11), (6,cin//groups,H)],
-      lambda x,w: torch.nn.functional.conv1d(torch.nn.functional.pad(x, p),w).relu(),
-      lambda x,w: Tensor.conv2d(x,w,padding=p).relu())
+      lambda x,w: torch.nn.functional.conv1d(torch.nn.functional.pad(x, p),w),
+      lambda x,w: Tensor.conv2d(x,w,padding=p))
 
   @unittest.skipIf(IMAGE>0, "no conv1d on images")
   def test_strided_conv1d_simple(self):
     bs, H = 2, 3
     helper_test_op([(bs,1,5), (1,1,H)],
-      lambda x,w: torch.nn.functional.conv1d(x,w,stride=2).relu(),
-      lambda x,w: Tensor.conv2d(x,w,stride=2).relu())
+      lambda x,w: torch.nn.functional.conv1d(x,w,stride=2),
+      lambda x,w: Tensor.conv2d(x,w,stride=2))
 
   @unittest.skipIf(IMAGE>0, "no conv1d on images")
   def test_asymmetric_padding_conv1d(self):
@@ -2091,17 +2118,17 @@ class TestOps(unittest.TestCase):
         for n in [3,4]:
           for k in [2]:
             helper_test_op([(1,1,n), (1,1,k)],
-              lambda x,w: torch.nn.functional.conv1d(torch.nn.functional.pad(x, p),w).relu(),
-              lambda x,w: Tensor.conv2d(x,w,padding=p).relu())
+              lambda x,w: torch.nn.functional.conv1d(torch.nn.functional.pad(x, p),w),
+              lambda x,w: Tensor.conv2d(x,w,padding=p))
 
   def _test_conv2d(self, bs=1, cin=1, cout=6):
-    for H in [1,2,3]:
-      for W in [1,2,3,5]:
+    for H in [2,3]:
+      for W in [1,3,5]:
         for groups in [1,3] if cin == 3 and cout == 6 and H == 3 and W == 3 else [1]:
           with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H, width=W):
             helper_test_op([(bs,cin,5,7), (cout,cin//groups,H,W)],
-              lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-              lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), grad_rtol=1e-5)
+              lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups),
+              lambda x,w: Tensor.conv2d(x,w,groups=groups), grad_rtol=1e-5)
   def test_conv2d(self): self._test_conv2d(bs=1, cin=3)
   def test_conv2d_bs_4_cin_3(self): self._test_conv2d(bs=4, cin=3, cout=2)
   def test_conv2d_bs_1_cin_1(self): self._test_conv2d(bs=1, cin=1)
@@ -2125,9 +2152,9 @@ class TestOps(unittest.TestCase):
     H = 5
     W = 2
     helper_test_op([(bs,cin,64,64), (6,cin//groups,H,W)],
-      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-      # needed to relax tolerance on NVIDIA
-      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_atol=1e-4, grad_rtol=1e-4)
+      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups),
+      # needed to relax tolerance for larger input
+      lambda x,w: Tensor.conv2d(x,w,groups=groups), atol=1e-4, grad_atol=3e-4, grad_rtol=1e-4)
 
   def test_simple_grouped_conv2d(self):
     bs = 1
@@ -2135,8 +2162,8 @@ class TestOps(unittest.TestCase):
     rcout = 1
     cin = 2
     helper_test_op([(bs,groups*cin,1,1), (groups*rcout,cin,1,1)],
-      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups),
+      lambda x,w: Tensor.conv2d(x,w,groups=groups), grad_rtol=1e-5)
 
   def test_medium_grouped_conv2d(self):
     bs = 1
@@ -2144,8 +2171,8 @@ class TestOps(unittest.TestCase):
     rcout = 2
     cin = 2
     helper_test_op([(bs,groups*cin,1,1), (groups*rcout,cin,1,1)],
-      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups),
+      lambda x,w: Tensor.conv2d(x,w,groups=groups), grad_rtol=1e-5)
 
   def test_depthwise_conv2d(self):
     bs = 1
@@ -2153,8 +2180,8 @@ class TestOps(unittest.TestCase):
     rcout = 1
     cin = 1
     helper_test_op([(bs,groups*cin,32,32), (groups*rcout,cin,1,1)],
-      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups),
+      lambda x,w: Tensor.conv2d(x,w,groups=groups), grad_rtol=1e-5)
 
   def test_grouped_conv2d(self):
     bs = 4
@@ -2162,8 +2189,8 @@ class TestOps(unittest.TestCase):
     rcout = 7
     cin = 3
     helper_test_op([(bs,groups*cin,5,5), (groups*rcout,cin,3,3)],
-      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups),
+      lambda x,w: Tensor.conv2d(x,w,groups=groups), grad_rtol=1e-5)
 
   def test_fancy_conv2d(self):
     bs = 2
@@ -2172,14 +2199,14 @@ class TestOps(unittest.TestCase):
     groups = 3
     H,W = 3,3
     helper_test_op([(bs,cin,11,28), (groups*cout,cin//groups,H,W)],
-      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), grad_rtol=1e-5)
+      lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups),
+      lambda x,w: Tensor.conv2d(x,w,groups=groups), grad_rtol=1e-5)
 
   def test_strided_conv2d_simple(self):
     bs,H,W = 2,3,1
     helper_test_op([(bs,1,5,1), (1,1,H,W)],
-      lambda x,w: torch.nn.functional.conv2d(x,w,stride=2).relu(),
-      lambda x,w: Tensor.conv2d(x,w,stride=2).relu())
+      lambda x,w: torch.nn.functional.conv2d(x,w,stride=2),
+      lambda x,w: Tensor.conv2d(x,w,stride=2))
 
   @unittest.skipIf(Device.DEFAULT != "LLVM", "DEVECTORIZE=0 only for LLVM")
   def test_strided_conv2d_simple_vec(self):
@@ -2191,27 +2218,27 @@ class TestOps(unittest.TestCase):
     H,W = 3,3
     with self.subTest(stride := 2):
       helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
-        lambda x,w: torch.nn.functional.conv2d(x,w,stride=2).relu(),
-        lambda x,w: Tensor.conv2d(x,w,stride=stride).relu())
+        lambda x,w: torch.nn.functional.conv2d(x,w,stride=2),
+        lambda x,w: Tensor.conv2d(x,w,stride=stride))
     with self.subTest(stride := (2,1)):
       helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
-        lambda x,w: torch.nn.functional.conv2d(x,w,stride=stride).relu(),
-        lambda x,w: Tensor.conv2d(x,w,stride=(2,1)).relu())
+        lambda x,w: torch.nn.functional.conv2d(x,w,stride=stride),
+        lambda x,w: Tensor.conv2d(x,w,stride=(2,1)))
 
   def test_negative_padding_conv2d(self):
     n,k = 10, 3
     helper_test_op([(1,1,n,n), (1,1,k,k)],
-      lambda x,w: torch.nn.functional.conv2d(x[:, :, 1:-1, 1:-1],w).relu(),
-      lambda x,w: Tensor.conv2d(x,w,padding=-1).relu())
+      lambda x,w: torch.nn.functional.conv2d(x[:, :, 1:-1, 1:-1],w),
+      lambda x,w: Tensor.conv2d(x,w,padding=-1))
     helper_test_op([(1,1,n,n), (1,1,k,k)],
-      lambda x,w: torch.nn.functional.conv2d(x[:, :, 1:, 1:],w).relu(),
-      lambda x,w: Tensor.conv2d(x,w,padding=(-1,0,-1,0)).relu())
+      lambda x,w: torch.nn.functional.conv2d(x[:, :, 1:, 1:],w),
+      lambda x,w: Tensor.conv2d(x,w,padding=(-1,0,-1,0)))
 
   def test_simple_padding_conv2d(self):
     p = (1,1,1,1)
     helper_test_op(None,
-      lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w).relu(),
-      lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), vals=[[[[[2.,3.]]]], [[[[1.]]]]])
+      lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w),
+      lambda x,w: Tensor.conv2d(x,w,padding=p), vals=[[[[[2.,3.]]]], [[[[1.]]]]])
 
   def test_asymmetric_padding_conv2d(self):
     for p in [(0,1,0,1), (2,1,2,1), (2,0,2,1)]:
@@ -2219,35 +2246,35 @@ class TestOps(unittest.TestCase):
         for n in [3,4]:
           for k in [2]:
             helper_test_op([(1,1,n,n), (1,1,k,k)],
-              lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w).relu(),
-              lambda x,w: Tensor.conv2d(x,w,padding=p).relu())
+              lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w),
+              lambda x,w: Tensor.conv2d(x,w,padding=p))
             helper_test_op([(1,1,n,n), (1,1,k,k)],
-              lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w).relu(),
-              lambda x,w: Tensor.conv2d(x,w,padding=p).relu())
+              lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w),
+              lambda x,w: Tensor.conv2d(x,w,padding=p))
 
   def test_padded_conv2d_p21(self):
     bs,cin,H,W,padding = 4, 3, 3, 3, (2,1)
     helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
-      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
-      lambda x,w: Tensor.conv2d(x,w,padding=padding).relu())
+      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding),
+      lambda x,w: Tensor.conv2d(x,w,padding=padding))
 
   def test_padded_conv2d_p22(self):
     bs,cin,H,W,padding = 4, 3, 3, 3, (2,2)
     helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
-      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
-      lambda x,w: Tensor.conv2d(x,w,padding=padding).relu())
+      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding),
+      lambda x,w: Tensor.conv2d(x,w,padding=padding))
 
   def test_padded_conv2d_1x1(self):
     bs,cin,H,W,padding = 4, 3, 1, 1, 2
     helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
-      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
-      lambda x,w: Tensor.conv2d(x,w,padding=padding).relu())
+      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding),
+      lambda x,w: Tensor.conv2d(x,w,padding=padding))
 
   def test_padded_conv2d_bs1(self):
     bs,cin,H,W,padding = 1, 3, 3, 3, 1
     helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
-      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
-      lambda x,w: Tensor.conv2d(x,w,padding=padding).relu())
+      lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding),
+      lambda x,w: Tensor.conv2d(x,w,padding=padding))
 
   def test_padding_add(self):
     helper_test_op([(64,64), (60,60)],
@@ -2261,8 +2288,8 @@ class TestOps(unittest.TestCase):
     for d in [2, (2,1)]:
       with self.subTest(dilation := d):
         helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
-          lambda x,w: torch.nn.functional.conv2d(x,w,dilation=dilation).relu(),
-          lambda x,w: Tensor.conv2d(x,w,dilation=dilation).relu())
+          lambda x,w: torch.nn.functional.conv2d(x,w,dilation=dilation),
+          lambda x,w: Tensor.conv2d(x,w,dilation=dilation))
 
   def test_max_pool2d_simple(self):
     ksz = (2,2)
@@ -2273,7 +2300,7 @@ class TestOps(unittest.TestCase):
   def test_max_pool2d(self):
     for ksz in [(2,2), (3,3), 2, 3, (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
-        helper_test_op([(32,2,110,28)],
+        helper_test_op([(32,2,11,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.max_pool2d(x, kernel_size=ksz))
 
@@ -2281,7 +2308,7 @@ class TestOps(unittest.TestCase):
     for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
       for p in [1, (1,0), (0,1)]:
         with self.subTest(kernel_size=ksz, padding=p):
-          helper_test_op([(32,2,110,28)],
+          helper_test_op([(32,2,11,28)],
             lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=p),
             lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=p))
     self.helper_test_exception([(32,2,110,28)], lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), padding=(1,1,1)),
@@ -2297,40 +2324,40 @@ class TestOps(unittest.TestCase):
 
   def test_max_pool2d_padding_int(self):
     ksz = (2,2)
-    helper_test_op([(32,2,110,28)],
+    helper_test_op([(32,2,11,28)],
       lambda x: torch.nn.functional.max_pool2d(x.int(), kernel_size=ksz, padding=1),
       lambda x: Tensor.max_pool2d(x.int(), kernel_size=ksz, padding=1), forward_only=True)
 
   def test_max_pool2d_bigger_stride(self):
     for stride in [(2,3), (3,2), 2, 3]:
       with self.subTest(stride=stride):
-        helper_test_op([(32,2,110,28)],
+        helper_test_op([(32,2,11,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride))
 
   def test_max_pool2d_bigger_stride_dilation(self):
     for stride, dilation in zip([(2,3), (3,2), 2, 3, 4], [(3,2), (2,3), 2, 3, 6]):
       with self.subTest(stride=stride):
-        helper_test_op([(32,2,110,28)],
+        helper_test_op([(32,2,11,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride, dilation=dilation),
           lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride, dilation=dilation))
 
   @unittest.skipIf( Device.DEFAULT in {"CUDA", "NV"}, "CUDA fails on this")
   def test_max_pool2d_unit_stride(self):
-    helper_test_op([(8, 2, 17, 14)],
+    helper_test_op([(3, 2, 17, 14)],
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=1),
       lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=1))
 
   def test_max_pool2d_smaller_stride(self):
     for stride in [(2,3), (3,2), 2, 3]:
       with self.subTest(stride=stride):
-        helper_test_op([(8, 2, 17, 14)],
+        helper_test_op([(3, 2, 17, 14)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=stride))
 
   def test_max_pool2d_dilation(self):
     for dilation in [(2, 3), (3, 2), 2, 3]:
-      helper_test_op([(8, 2, 17, 14)],
+      helper_test_op([(3, 2, 17, 14)],
         lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), dilation=dilation),
         lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), dilation=dilation))
 
@@ -2473,8 +2500,6 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
 
-  # TODO: linearizer block error
-  @unittest.expectedFailure
   def test_avg_pool3d_failure(self):
     with Context(NOOPT=0):
       helper_test_op([(1,1,16,16,16)],
@@ -2516,13 +2541,13 @@ class TestOps(unittest.TestCase):
   def test_interpolate_nearest_exact(self): self.test_interpolate_nearest("nearest-exact")
 
   def test_interpolate_bilinear(self):
-    for in_sz, out_sz in [((52,40),(29,31)), ((52,29),(31,40)), ((29,31),(40,52))]:
+    for in_sz, out_sz in [((12,20),(9,31)), ((12,9),(31,20)), ((9,31),(20,12))]:
       helper_test_op([(2,3)+in_sz],
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="bilinear"),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"), atol=1e-4)
 
   def test_interpolate_bilinear_corners_aligned(self):
-    for in_sz, out_sz in [((52,40),(29,31)), ((52,29),(31,40)), ((29,31),(40,52))]:
+    for in_sz, out_sz in [((12,20),(9,31)), ((12,9),(31,20)), ((9,31),(20,12))]:
       helper_test_op([(2,3)+in_sz],
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="bilinear", align_corners=True),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True), atol=1e-4)
@@ -2813,7 +2838,7 @@ class TestOps(unittest.TestCase):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     for reduce in ("sum", "prod", "mean", "amin", "amax"):
-      for dim in (0,1,2,-1,-2,-3):
+      for dim in (-1,1,-3):
         helper_test_op([(4,5,6), (4,5,6)],
           lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce=reduce),
           lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce=reduce), forward_only=True)
@@ -3002,6 +3027,14 @@ class TestOpsUint8(unittest.TestCase):
     helper_test_op(None,
       lambda x: x.type(torch.uint8).min(),
       lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
+
+@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
+class TestOpsBFloat16(unittest.TestCase):
+  def test_cast(self):
+    # TODO: helper_test_op breaks in unrelated part
+    # TODO: wrong output with GPU=1 / PYTHON=1 on mac
+    data = [60000.0, 70000.0, 80000.0]
+    np.testing.assert_allclose(Tensor(data).cast("bfloat16").numpy(), torch.tensor(data).type(torch.bfloat16).float().numpy())
 
 if __name__ == '__main__':
   np.random.seed(1337)

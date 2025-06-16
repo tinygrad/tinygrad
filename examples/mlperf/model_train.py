@@ -1,14 +1,15 @@
-import os, time, math, functools, random
+import os, time, math, functools, random, contextlib
 from pathlib import Path
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW, Profiling
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam
 
 from extra.lr_scheduler import LRSchedulerGroup
 from examples.mlperf.helpers import get_training_state, load_training_state
+from extra.bench_log import BenchEvent, WallTimeEvent
 # TODO: fix benchmark logging and use tinygrad tqdm
 from tqdm import tqdm
 
@@ -205,24 +206,25 @@ def train_resnet():
     st = time.perf_counter()
     while proc is not None:
       GlobalCounters.reset()
-      (loss, top_1), y, proc = train_step(proc[0], proc[1]), proc[2], proc[3]
+      with WallTimeEvent(BenchEvent.STEP):
+        (loss, top_1), y, proc = train_step(proc[0], proc[1]), proc[2], proc[3]
 
-      pt = time.perf_counter()
+        pt = time.perf_counter()
 
-      if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
-      try:
-        if INITMLPERF:
-          next_proc = fake_data_get(BS)
-        else:
-          next_proc = data_get(it)
-      except StopIteration:
-        next_proc = None
+        if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
+        try:
+          if INITMLPERF:
+            next_proc = fake_data_get(BS)
+          else:
+            next_proc = data_get(it)
+        except StopIteration:
+          next_proc = None
 
-      dt = time.perf_counter()
+        dt = time.perf_counter()
 
-      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-      loss, top_1 = loss.numpy().item(), top_1.numpy().item()
-      top_1_acc = top_1 / sum(yi != -1 for yi in y)
+        device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+        loss, top_1 = loss.numpy().item(), top_1.numpy().item()
+        top_1_acc = top_1 / sum(yi != -1 for yi in y)
 
       cl = time.perf_counter()
       if BENCHMARK:
@@ -346,21 +348,56 @@ def train_retinanet():
   from contextlib import redirect_stdout
   from examples.mlperf.dataloader import batch_load_retinanet
   from examples.mlperf.initializers import FrozenBatchNorm2dRetinaNet, Conv2dNormalRetinaNet, Conv2dKaimingUniformRetinaNet, Linear, Conv2dRetinaNet
-  from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize
-  from extra.models import resnet
+  from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize, get_dataset_count
+  from extra.models import resnet, retinanet
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
-  from tinygrad.helpers import colored, Context
+  from tinygrad.helpers import colored
   from typing import Iterator
-  import extra.models.retinanet as retinanet
-  
+
   import numpy as np
 
   config, target_metric = {}, 0.34
 
+  config["SEED"] = SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
+  Tensor.manual_seed(SEED)
+
   NUM_CLASSES = len(MLPERF_CLASSES)
-  BASE_DIR = getenv("BASE_DIR", BASEDIR)
+  BASEDIR = getenv("BASEDIR", BASEDIR)
   BENCHMARK = getenv("BENCHMARK")
+  INITMLPERF = getenv("INITMLPERF")
+  RUNMLPERF = getenv("RUNMLPERF")
+
+  if INITMLPERF:
+    diskcache_clear()
+
+  if getenv("LOGMLPERF"):
+    from mlperf_logging import mllog
+    import mlperf_logging.mllog.constants as mllog_constants
+
+    mllog.config(filename=f"result_retinanet_{SEED}.log")
+    mllog.config(root_dir=Path(__file__).parents[3].as_posix())
+    MLLOGGER = mllog.get_mllogger()
+    MLLOGGER.logger.propagate = False
+
+    if INITMLPERF:
+      assert BENCHMARK, "BENCHMARK must be set for INITMLPERF"
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_ORG, value="tinycorp")
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_DIVISION, value=mllog_constants.CLOSED)
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_STATUS, value=mllog_constants.ONPREM)
+
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_BENCHMARK, value=mllog_constants.RETINANET)
+
+      MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
+      MLLOGGER.start(key=mllog_constants.INIT_START)
+
+    if RUNMLPERF:
+      MLLOGGER.start(key=mllog_constants.RUN_START)
+      MLLOGGER.event(key=mllog_constants.SEED, value=SEED)
+  else:
+    MLLOGGER = None
+
   config["gpus"] = GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 6))]
 
   for x in GPUS: Device[x]
@@ -375,45 +412,58 @@ def train_retinanet():
   def _data_get(it:Iterator[tuple[Tensor, ...]], val:bool=False):
     if val:
       x, img_ids, img_sizes, cookie = next(it)
-      return x.shard(GPUS, axis=0).realize(), img_ids, img_sizes, cookie
+      return x.shard(GPUS, axis=0), img_ids, img_sizes, cookie
 
     x, y_boxes, y_labels, matches, anchors, cookie = next(it)
-    return x.shard(GPUS, axis=0).realize(), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), cookie
+    return x.shard(GPUS, axis=0), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), cookie
+
+  def _fake_data_get(bs:int, val:bool=False):
+    x = Tensor.empty(bs, 800, 800, 3, dtype=dtypes.uint8)
+    if val:
+      img_ids, img_sizes = [0] * bs, [(800, 800)] * bs
+      return x.shard(GPUS, axis=0), img_ids, img_sizes, None
+
+    y_boxes = Tensor.empty(bs, 120087, 4, dtype=dtypes.float32)
+    y_labels = Tensor.empty(bs, 120087, dtype=dtypes.int64)
+    matches = Tensor.empty(bs, 120087, dtype=dtypes.int64)
+    anchors = Tensor.empty(bs, 120087, 4, dtype=dtypes.float64)
+    return x.shard(GPUS, axis=0), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), None
 
   @TinyJit
   def _train_step(model, optim, loss_scaler, x, **kwargs):
-    with Context(BEAM=TRAIN_BEAM):
-      optim.zero_grad()
+    optim.zero_grad()
 
-      losses = model(normalize(x, GPUS), **kwargs)
-      loss = sum([l for l in losses.values()])
+    losses = model(normalize(x, GPUS), **kwargs)
+    loss = sum(losses.values())
 
-      (loss * loss_scaler).backward()
-      for t in optim.params: t.grad = t.grad / loss_scaler
+    (loss * loss_scaler).backward()
+    for t in optim.params: t.grad = t.grad / loss_scaler
 
-      optim.step()
+    optim.step()
 
-      return loss.realize(), losses
-  
+    return loss.realize(), losses
+
   @TinyJit
   def _eval_step(model, x, **kwargs):
-    with Context(BEAM=EVAL_BEAM):
-      out = model(normalize(x, GPUS), **kwargs)
-      return out.realize()
+    out = model(normalize(x, GPUS), **kwargs)
+    # reassemble on GPUS[0] before sending back to CPU for speed
+    return out.to(GPUS[0]).realize()
 
   # ** hyperparameters **
-  config["seed"] = SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
-  config["bs"] = BS = getenv("BS", 16 * len(GPUS) if dtypes.default_float == dtypes.float16 else 12 * len(GPUS))
-  config["eval_bs"] = EVAL_BS = getenv("EVAL_BS", BS)
-  config["epochs"] = EPOCHS = getenv("EPOCHS", 4)
-  config["train_beam"] = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
-  config["eval_beam"] = EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
-  config["lr"] = lr = getenv("LR", 8.5e-5 * (BS / 96))
-  config["loss_scaler"] = loss_scaler = getenv("LOSS_SCALER", 2**11 if dtypes.default_float == dtypes.float16 else 1.0)
-  config["default_float"] = dtypes.default_float.name
-  config["eval_freq"] = eval_freq = getenv("EVAL_FREQ", 1)
+  config["BS"] = BS = getenv("BS", 16 * len(GPUS) if dtypes.default_float == dtypes.float16 else 12 * len(GPUS))
+  config["EVAL_BS"] = EVAL_BS = getenv("EVAL_BS", BS)
+  config["EPOCHS"] = EPOCHS = getenv("EPOCHS", 4)
+  config["TRAIN_BEAM"] = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
+  config["EVAL_BEAM"] = EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
+  config["LR"] = lr = getenv("LR", 9.5e-5 * (BS / 96))
+  config["LOSS_SCALER"] = loss_scaler = getenv("LOSS_SCALER", 2**11 if dtypes.default_float == dtypes.float16 else 1.0)
+  config["DEFAULT_FLOAT"] = dtypes.default_float.name
+  config["EVAL_FREQ"] = eval_freq = getenv("EVAL_FREQ", 1)
 
-  if SEED: Tensor.manual_seed(SEED)
+  # ** initialize wandb **
+  if (WANDB:=getenv("WANDB")):
+    import wandb
+    wandb.init(config=config, project="MLPerf-RetinaNet")
 
   # ** model initializers **
   resnet.BatchNorm = FrozenBatchNorm2dRetinaNet
@@ -426,13 +476,20 @@ def train_retinanet():
 
   # ** model setup **
   backbone = resnet.ResNeXt50_32X4D(num_classes=None)
-  backbone.load_from_pretrained()
+  if RUNMLPERF:
+    backbone.load_from_pretrained()
   _freeze_backbone_layers(backbone, 3)
 
   model = retinanet.RetinaNet(backbone, num_classes=NUM_CLASSES)
   params = get_parameters(model)
 
-  for p in params: p.to_(GPUS)
+  if not RUNMLPERF:
+    # for init, zero out all weights
+    for p in params:
+      p = p.assign(Tensor.zeros_like(p).contiguous()).realize()
+
+  if len(GPUS) > 1:
+    for p in params: p.to_(GPUS)
 
   step_times, start_epoch = [], 0
 
@@ -440,27 +497,45 @@ def train_retinanet():
   optim = Adam(params, lr=lr)
 
   # ** dataset **
-  train_dataset = COCO(download_dataset(BASE_DIR, "train"))
-  val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
-  coco_val = COCOeval(cocoGt=val_dataset, iouType="bbox")
+  config["STEPS_IN_TRAIN_EPOCH"] = steps_in_train_epoch = round_up(get_dataset_count((base_dir_path:=Path(BASEDIR)), False), BS) // BS
+  config["STEPS_IN_VAL_EPOCH"] = steps_in_val_epoch = (round_up(get_dataset_count(base_dir_path, True), EVAL_BS) // EVAL_BS)
 
-  # ** lr scheduler **
-  config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(len(train_dataset.imgs.keys()), BS) // BS
-  config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(len(val_dataset.imgs.keys()), BS) // BS)
-  start_iter = start_epoch * steps_in_train_epoch
+  # log mlperf hparams
+  if MLLOGGER:
+    if RUNMLPERF:
+      MLLOGGER.event(key=mllog_constants.GLOBAL_BATCH_SIZE, value=config["BS"])
+      MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=config["STEPS_IN_TRAIN_EPOCH"])
+      MLLOGGER.event(key=mllog_constants.EVAL_SAMPLES, value=config["STEPS_IN_VAL_EPOCH"])
+      MLLOGGER.event(key=mllog_constants.EPOCH_COUNT, value=config["EPOCHS"])
+      MLLOGGER.event(key=mllog_constants.FIRST_EPOCH_NUM, value=start_epoch)
 
-  # ** initialize wandb **
-  if (WANDB:=getenv("WANDB")):
-    import wandb
-    wandb.init(config=config, project="MLPerf-RetinaNet")
+      MLLOGGER.event(key=mllog_constants.OPT_NAME, value=mllog_constants.ADAM)
+      MLLOGGER.event(key=mllog_constants.OPT_BASE_LR, value=config["LR"])
+      MLLOGGER.event(key=mllog_constants.OPT_WEIGHT_DECAY, value=0)
+      MLLOGGER.event(key=mllog_constants.OPT_LR_WARMUP_EPOCHS, value=0)
+      MLLOGGER.event(key=mllog_constants.OPT_LR_WARMUP_FACTOR, value=0)
+      MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
+
+  if RUNMLPERF:
+    train_dataset = COCO(download_dataset(BASEDIR, "train"))
+    val_dataset = COCO(download_dataset(BASEDIR, "validation"))
+    coco_val = COCOeval(cocoGt=val_dataset, iouType="bbox")
 
   print(f"training with batch size {BS} for {EPOCHS} epochs")
 
   for e in range(start_epoch, EPOCHS):
     # ** training loop **
-    train_dataloader = batch_load_retinanet(train_dataset, False, Path(BASE_DIR), batch_size=BS, seed=SEED)
-    it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
-    i, proc = 0, _data_get(it)
+    if MLLOGGER and RUNMLPERF:
+      MLLOGGER.start(key=mllog_constants.EPOCH_START, value=e + 1, metadata={"epoch_num": e + 1})
+
+    BEAM.value = TRAIN_BEAM
+
+    if not RUNMLPERF:
+      i, proc = 0, _fake_data_get(BS)
+    else:
+      train_dataloader = batch_load_retinanet(train_dataset, False, base_dir_path, batch_size=BS, seed=SEED)
+      it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e + 1}", disable=BENCHMARK))
+      i, proc = 0, _data_get(it)
 
     prev_cookies = []
     st = time.perf_counter()
@@ -475,7 +550,10 @@ def train_retinanet():
 
       if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:
-        next_proc = _data_get(it)
+        if not RUNMLPERF:
+          next_proc = _fake_data_get(BS)
+        else:
+          next_proc = _data_get(it)
       except StopIteration:
         next_proc = None
 
@@ -517,39 +595,55 @@ def train_retinanet():
         # if we are doing beam search, run the first eval too
         if (TRAIN_BEAM or EVAL_BEAM) and e == start_epoch: break
         return
-      
+
+    if MLLOGGER and RUNMLPERF:
+      MLLOGGER.event(key=mllog_constants.EPOCH_STOP, value=e + 1, metadata={"epoch_num": e + 1})
+
     # ** eval loop **
     if (e + 1) % eval_freq == 0:
+      if MLLOGGER and RUNMLPERF:
+        MLLOGGER.start(key=mllog_constants.EVAL_START, value=e + 1, metadata={"epoch_num": e + 1})
+
+      BEAM.value = EVAL_BEAM
+
       if getenv("RESET_STEP", 1): _train_step.reset()
 
-      with Tensor.train(mode=False), Tensor.test():
-        val_dataloader = batch_load_retinanet(val_dataset, (val:=True), Path(BASE_DIR), batch_size=EVAL_BS, shuffle=False, seed=SEED)
-        it = iter(tqdm(val_dataloader, total=steps_in_val_epoch))
-        i, proc = 0, _data_get(it, val=val)
+      with Tensor.train(mode=False):
+        if not RUNMLPERF:
+          i, proc = 0, _fake_data_get(EVAL_BS, val=(val:=True))
+        else:
+          val_dataloader = batch_load_retinanet(val_dataset, (val:=True), Path(BASEDIR), batch_size=EVAL_BS, shuffle=False, seed=SEED)
+          it = iter(tqdm(val_dataloader, total=steps_in_val_epoch))
+          i, proc = 0, _data_get(it, val=val)
+          val_img_ids, val_imgs, ncats, narea = [], [], len(coco_val.params.catIds), len(coco_val.params.areaRng)
 
         eval_times, prev_cookies = [], []
-        val_img_ids, val_imgs, ncats, narea = [], [], len(coco_val.params.catIds), len(coco_val.params.areaRng)
 
         while proc is not None:
           GlobalCounters.reset()
           st = time.time()
 
           out, img_ids, img_sizes, proc = _eval_step(model, (x:=proc[0])).numpy(), proc[1], proc[2], proc[3]
-          out = model.postprocess_detections(out, input_size=x.shape[1:3], orig_image_sizes=img_sizes)
-          coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
-            for i, prediction in enumerate(out) for box, score, label in zip(*prediction.values())]
 
-          with redirect_stdout(None):
-            coco_val.cocoDt = val_dataset.loadRes(coco_results)
-            coco_val.params.imgIds = img_ids
-            coco_val.evaluate()
+          if RUNMLPERF:
+            out = model.postprocess_detections(out, input_size=x.shape[1:3], orig_image_sizes=img_sizes)
+            coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
+              for i, prediction in enumerate(out) for box, score, label in zip(*prediction.values())]
 
-          val_img_ids.extend(img_ids)
-          val_imgs.append(np.array(coco_val.evalImgs).reshape(ncats, narea, len(img_ids)))
+            with redirect_stdout(None):
+              coco_val.cocoDt = val_dataset.loadRes(coco_results)
+              coco_val.params.imgIds = img_ids
+              coco_val.evaluate()
+
+            val_img_ids.extend(img_ids)
+            val_imgs.append(np.array(coco_val.evalImgs).reshape(ncats, narea, len(img_ids)))
 
           if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
           try:
-            next_proc = _data_get(it, val=val)
+            if not RUNMLPERF:
+              next_proc = _fake_data_get(EVAL_BS, val=val)
+            else:
+              next_proc = _data_get(it, val=val)
           except StopIteration:
             next_proc = None
 
@@ -557,31 +651,43 @@ def train_retinanet():
           proc, next_proc = next_proc, None
           i += 1
 
-          if i == BENCHMARK:
-            return
-
           et = time.time()
           eval_times.append(et - st)
+
+          if i == BENCHMARK:
+            # assume INITMLPERF has BENCHMARK set
+            if MLLOGGER and INITMLPERF:
+              MLLOGGER.event(key=mllog_constants.INIT_STOP)
+            return
 
         if getenv("RESET_STEP", 1): _eval_step.reset()
         total_fw_time = sum(eval_times) / len(eval_times)
 
-        coco_val.params.imgIds = val_img_ids
-        coco_val._paramsEval.imgIds = val_img_ids
-        coco_val.evalImgs = list(np.concatenate(val_imgs, -1).flatten())
-        coco_val.accumulate()
-        coco_val.summarize()
+        if RUNMLPERF:
+          coco_val.params.imgIds = val_img_ids
+          coco_val._paramsEval.imgIds = val_img_ids
+          coco_val.evalImgs = list(np.concatenate(val_imgs, -1).flatten())
+          coco_val.accumulate()
+          coco_val.summarize()
 
-        val_metric = coco_val.stats[0]
+          val_metric = coco_val.stats[0]
 
-        tqdm.write(f"eval time: {total_fw_time:.2f}, eval metric: {val_metric:.4f}")
+          tqdm.write(f"eval time: {total_fw_time:.2f}, eval metric: {val_metric:.4f}")
 
-        if WANDB:
-          wandb.log({"eval/forward_time": total_fw_time, "eval/metric": val_metric, "epoch": e + 1})
+          if WANDB:
+            wandb.log({"eval/forward_time": total_fw_time, "eval/metric": val_metric, "epoch": e + 1})
 
-        if val_metric >= target_metric:
-          print(colored(f"target metric reached: {val_metric:.2f}/{target_metric:.2f}", color="green"))
-          break
+          if MLLOGGER:
+            MLLOGGER.event(key=mllog_constants.EVAL_ACCURACY, value=val_metric, metadata={"epoch_num": e + 1}, clear_line=True)
+            MLLOGGER.end(key=mllog_constants.EVAL_STOP, value=e + 1, metadata={"epoch_num": e + 1})
+
+          if val_metric >= target_metric:
+            print(colored(f"target metric reached: {val_metric:.2f}/{target_metric:.2f}", color="green"))
+
+            if MLLOGGER:
+              MLLOGGER.end(key=mllog_constants.RUN_STOP, metadata={"status": mllog_constants.SUCCESS})
+
+            break
 
 def train_unet3d():
   """
@@ -685,7 +791,6 @@ def train_unet3d():
     return loss.realize()
 
   @Tensor.train(mode=False)
-  @Tensor.test()
   def eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
     y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
@@ -788,7 +893,7 @@ def train_unet3d():
 
         if mean_dice >= TARGET_METRIC:
           is_successful = True
-          save_checkpoint(get_state_dict(model), f"./ckpts/unet3d.safe")
+          save_checkpoint(get_state_dict(model), "./ckpts/unet3d.safe")
         elif mean_dice < 1e-6:
           print("Model diverging. Aborting.")
           diverged = True
@@ -875,7 +980,7 @@ def train_bert():
     MLLOGGER.logger.propagate = False
 
     if INITMLPERF:
-      assert BENCHMARK, f"BENCHMARK must be set for INITMLPERF"
+      assert BENCHMARK, "BENCHMARK must be set for INITMLPERF"
       MLLOGGER.event(key=mllog_constants.SUBMISSION_ORG, value="tinycorp")
       MLLOGGER.event(key=mllog_constants.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
       MLLOGGER.event(key=mllog_constants.SUBMISSION_DIVISION, value=mllog_constants.CLOSED)
@@ -1022,23 +1127,24 @@ def train_bert():
       BEAM.value = TRAIN_BEAM
       st = time.perf_counter()
       GlobalCounters.reset()
-      loss, global_norm, lr = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler,
-        train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
-        train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"], GPUS)
+      with WallTimeEvent(BenchEvent.STEP):
+        loss, global_norm, lr = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler,
+          train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
+          train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"], GPUS)
 
-      pt = time.perf_counter()
+        pt = time.perf_counter()
 
-      try:
-        next_data = next(train_it)
-      except StopIteration:
-        next_data = None
+        try:
+          next_data = next(train_it)
+        except StopIteration:
+          next_data = None
 
-      dt = time.perf_counter()
+        dt = time.perf_counter()
 
-      device_str = parameters[0].device if isinstance(parameters[0].device, str) else f"{parameters[0].device[0]} * {len(parameters[0].device)}"
-      loss = loss.item()
-      assert not math.isnan(loss)
-      lr = lr.item()
+        device_str = parameters[0].device if isinstance(parameters[0].device, str) else f"{parameters[0].device[0]} * {len(parameters[0].device)}"
+        loss = loss.item()
+        assert not math.isnan(loss)
+        lr = lr.item()
 
       cl = time.perf_counter()
       if BENCHMARK: step_times.append(cl - st)
@@ -1149,7 +1255,7 @@ def train_bert():
       if MLLOGGER and RUNMLPERF:
         if previous_step:
           MLLOGGER.end(key=mllog_constants.BLOCK_STOP, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "first_step_num": i, "step_num": i, "step_count": i - previous_step})
-        MLLOGGER.start(key="checkpoint_start", value=None, metadata={"step_num" : i})
+        MLLOGGER.start(key="checkpoint_start", value=None, metadata={"step_num": i})
       if not os.path.exists(ckpt_dir := save_ckpt_dir): os.mkdir(ckpt_dir)
       if WANDB and wandb.run is not None:
         fn = f"{ckpt_dir}/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}.safe"
@@ -1174,9 +1280,15 @@ def train_maskrcnn():
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
+
+  if getenv("INITMLPERF"): bench_log_manager = WallTimeEvent(BenchEvent.MLPERF_INIT)
+  elif getenv("RUNMLPERF"): bench_log_manager = WallTimeEvent(BenchEvent.MLPERF_RUN)
+  else: bench_log_manager = contextlib.nullcontext()
+
   with Tensor.train():
     for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
       nm = f"train_{m}"
       if nm in globals():
         print(f"training {m}")
-        globals()[nm]()
+        with bench_log_manager:
+          with Profiling(enabled=getenv("PYPROFILE")): globals()[nm]()

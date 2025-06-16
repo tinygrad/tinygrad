@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from dataclasses import replace
 from tinygrad import Tensor, Context, Device, dtypes
-from tinygrad.ops import Ops, UOp # noqa: F401 # pylint: disable=unused-import
+from tinygrad.uop.ops import Ops, UOp # noqa: F401 # pylint: disable=unused-import
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, lower_schedule_item
 from tinygrad.engine.search import bufs_from_lin
@@ -40,7 +40,7 @@ def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
   si = out.schedule()[-1]
   k = Kernel(si.ast, opts=Device[Device.DEFAULT].renderer)
   #opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128)] #, Opt(op=OptOps.UNROLL, axis=0, arg=4)]
-  for opt in opts: k.apply_opt(opt)
+  k.apply_opts(opts)
   prg = k.to_program()
   if replace_src is not None:
     old_name = prg.src.split("__attribute__((noinline)) void ")[1].split("(")[0]
@@ -67,12 +67,12 @@ def get_quantized_model(sz):
 class TestQuantizeOnnxCPU(unittest.TestCase):
   def test_quant_128(self, sz=128):
     try:
-      import onnx
+      import onnx # noqa: F401 # pylint: disable=unused-import
     except ImportError:
       raise unittest.SkipTest()
-    from tinygrad.frontend.onnx import OnnxRunner
+    from tinygrad.frontend.onnx import OnnxRunner, onnx_load
     out_file = get_quantized_model(sz)
-    onnx_model = onnx.load(out_file)
+    onnx_model = onnx_load(out_file)
     run_onnx = OnnxRunner(onnx_model)
     inp = Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32))
     with Context(DONT_REALIZE_EXPAND=1, QUANTIZE=1):
@@ -215,7 +215,7 @@ class TestQuantizeOnnx(unittest.TestCase):
       opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)] if opts is None else opts
       sexec(out, opts, replace_src, run_count=1)
     tout = out.numpy()
-    mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) / 1000)
+    mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) // 1000)
     if clip: mout = mout.clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype))
     mout = mout.astype(xi)
     print(tout)
@@ -243,8 +243,8 @@ class TestDSPCache(unittest.TestCase):
     # string becuase this breaks Python language server for syntax highlight for some reason
     ast = eval("""UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(25088), arg=0, src=()),
-        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 1), strides=(0, 896, 32, 1, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(Ops.VIEW, dtypes.uchar.ptr(25088), arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 1), strides=(0, 896, 32, 1, 0), offset=0, mask=None, contiguous=True),)), src=(
+          UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(25088), arg=0, src=()),)),
         UOp(Ops.CAST, dtypes.uchar, arg=None, src=(
           UOp(Ops.XOR, dtypes.int, arg=None, src=(
             UOp(Ops.MAX, dtypes.int, arg=None, src=(
@@ -261,23 +261,23 @@ class TestDSPCache(unittest.TestCase):
                                   UOp(Ops.CAST, dtypes.float, arg=None, src=(
                                     UOp(Ops.CAST, dtypes.int, arg=None, src=(
                                       UOp(Ops.LOAD, dtypes.uchar, arg=None, src=(
-                                        UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(150528), arg=1, src=()),
-                                        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 192), strides=(0, 5376, 192, 0, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+                                        UOp(Ops.VIEW, dtypes.uchar.ptr(150528), arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 192), strides=(0, 5376, 192, 0, 1), offset=0, mask=None, contiguous=False),)), src=(
+                                          UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(150528), arg=1, src=()),)),)),)),)),
                                   UOp(Ops.CONST, dtypes.float, arg=0.012368360534310341, src=(
                                     x22:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 192), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
                                 UOp(Ops.MUL, dtypes.float, arg=None, src=(
                                   UOp(Ops.CAST, dtypes.float, arg=None, src=(
                                     UOp(Ops.CAST, dtypes.int, arg=None, src=(
                                       UOp(Ops.LOAD, dtypes.char, arg=None, src=(
-                                        UOp(Ops.DEFINE_GLOBAL, dtypes.char.ptr(6144), arg=2, src=()),
-                                        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(32, 48, 4), strides=(4, 128, 1), offset=0, mask=None, contiguous=False), View(shape=(1, 28, 28, 32, 192), strides=(0, 0, 0, 192, 1), offset=0, mask=None, contiguous=False))), src=()),)),)),)),
+                                        UOp(Ops.VIEW, dtypes.char.ptr(6144), arg=ShapeTracker(views=(View(shape=(32, 48, 4), strides=(4, 128, 1), offset=0, mask=None, contiguous=False), View(shape=(1, 28, 28, 32, 192), strides=(0, 0, 0, 192, 1), offset=0, mask=None, contiguous=False))), src=(
+                                          UOp(Ops.DEFINE_GLOBAL, dtypes.char.ptr(6144), arg=2, src=()),)),)),)),)),
                                   UOp(Ops.CONST, dtypes.float, arg=0.007441135589033365, src=(
                                     x22,)),)),)),)),
                             UOp(Ops.MUL, dtypes.float, arg=None, src=(
                               UOp(Ops.CAST, dtypes.float, arg=None, src=(
                                 UOp(Ops.LOAD, dtypes.int, arg=None, src=(
-                                  UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(32), arg=3, src=()),
-                                  UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 1), strides=(0, 0, 0, 1, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
+                                  UOp(Ops.VIEW, dtypes.int.ptr(32), arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 1), strides=(0, 0, 0, 1, 0), offset=0, mask=None, contiguous=False),)), src=(
+                                    UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(32), arg=3, src=()),)),)),)),
                               UOp(Ops.CONST, dtypes.float, arg=9.203465015161783e-05, src=(
                                 x36:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 1), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
                           UOp(Ops.CONST, dtypes.float, arg=33.812857328652136, src=(
@@ -296,7 +296,7 @@ class TestDSPCache(unittest.TestCase):
     opts = [Opt(op=OptOps.UNROLL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=1, arg=32), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
     with Context(DEVECTORIZE=0, QUANTIZE=1):
       k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-      for opt in opts: k.apply_opt(opt)
+      k.apply_opts(opts)
       prg = k.to_program()
       #print(prg.src)
 

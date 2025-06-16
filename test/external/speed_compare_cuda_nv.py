@@ -22,7 +22,7 @@ if __name__ == "__main__":
   for num,ast in enumerate(ast_strs):
     # cuda compile
     culin = ast_str_to_lin(ast, opts=cudev.renderer)
-    culin = hand_coded_optimizations(culin)
+    culin.apply_opts(hand_coded_optimizations(culin))
     has_bf16 = any(b.dtype == dtypes.bfloat16 for b in culin.membufs)
 
     cuda_prg = CompiledRunner(culin.to_program())
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     rdr = nvdev.renderer
     rdr.device = "NV"
     nvlin = ast_str_to_lin(ast, opts=rdr)
-    nvlin = hand_coded_optimizations(nvlin)
+    nvlin.apply_opts(hand_coded_optimizations(nvlin))
     nv_prg = CompiledRunner(nvlin.to_program())
     nvbufs = bufs_from_lin(nvlin)
     test_nvbufs = get_fuzz_rawbufs(nvlin) if not has_bf16 else nvbufs

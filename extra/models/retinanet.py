@@ -160,7 +160,7 @@ class RegressionHead:
     self.bbox_reg = ConvHead(in_channels, num_anchors * 4, kernel_size=3, padding=1)
 
     if box_coder is None:
-      box_coder = BoxCoder((1.0, 1.0, 1.0, 1.0), apply_to_remove=False)
+      box_coder = BoxCoder((1.0, 1.0, 1.0, 1.0))
     self.box_coder = box_coder
 
   def __call__(self, x:Tensor, bboxes:Tensor|None=None, matches:Tensor|None=None, anchors:Tensor|None=None):

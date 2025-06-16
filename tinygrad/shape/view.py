@@ -3,7 +3,7 @@ import functools, operator, itertools
 from dataclasses import dataclass
 from typing import Optional, cast, Sequence
 from tinygrad.dtype import dtypes
-from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop
+from tinygrad.uop.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop, Ops, ssimplify
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
 
 @functools.cache
@@ -51,7 +51,7 @@ def _reshape_mask(_mask:Optional[tuple[tuple[sint, sint], ...]], old_shape:tuple
   curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
 
   while len(new_mask) < len(new_shape):
-    (l, r), next_stride = mask, new_dim * curr_stride
+    (l, r), next_stride = mask, ssimplify(new_dim * curr_stride)
 
     # need to split mask
     if old_dim == next_stride: # simply copy the mask and get next batch for merging
@@ -66,7 +66,7 @@ def _reshape_mask(_mask:Optional[tuple[tuple[sint, sint], ...]], old_shape:tuple
       next_mask = next(r_masks, (0, 1))
       # combine if the mask can unfold continuously
       if mask != (0, old_dim) and l != r and next_mask[1] - next_mask[0] != 1: return None
-      mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
+      mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), ssimplify(old_dim * next(r_shape, 1))
 
   return tuple(reversed(new_mask))
 
@@ -89,7 +89,7 @@ class View:
 
   def to_indexed_uops(self:View, idxs:Optional[Sequence[UOp]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> tuple[UOp, UOp]:
     """(idx, valid)"""
-    if idxs is None: idxs = [UOp.range(dtypes.int, 0, s, i) for i,s in enumerate(self.shape)]
+    if idxs is None: idxs = [UOp.range(dtypes.int, s, i) for i,s in enumerate(self.shape)]
     iexpr = sint_to_uop(self.offset)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
       if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
@@ -107,7 +107,8 @@ class View:
   @staticmethod
   @functools.cache
   def create(shape:tuple[sint, ...], strides:Optional[tuple[sint, ...]]=None, offset:sint=0, mask:Optional[tuple[tuple[sint, sint], ...]]=None):
-    if not all(s >= 0 for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
+    # TODO: resolve shouldn't be needed here
+    if not all(resolve(s >= 0) for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
     # canonicalize 0 in shape
     if 0 in shape: return View(shape, (0,) * len(shape), offset=0, mask=None, contiguous=True)
@@ -138,14 +139,17 @@ class View:
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def unbind(self) -> tuple[View, dict[Variable, int]]:
-    var_unboundvar_val = [(v, v.unbind()) for v in self.vars()]
+    var_unboundvar_val = [(v, v.unbind()) for v in self.vars() if v.op is Ops.BIND]
     unbound_vars = {v:uv for v,(uv,_) in var_unboundvar_val}
-    def substitute(x:sint): return x if isinstance(x, int) else x.substitute(unbound_vars)
-    new_shape = tuple(map(substitute, self.shape))
-    new_strides = tuple(map(substitute, self.strides))
-    new_offset = substitute(self.offset)
-    new_mask = tuple((substitute(x[0]), substitute(x[1])) for x in self.mask) if self.mask is not None else None
-    return View.create(new_shape, new_strides, new_offset, new_mask), dict(x[1] for x in var_unboundvar_val)
+    return self.substitute(unbound_vars), dict(x[1] for x in var_unboundvar_val)
+
+  def substitute(self, dvars:dict[UOp, UOp]):
+    def _substitute(x:sint): return x if isinstance(x, int) else x.substitute(dvars)
+    new_shape = tuple(map(_substitute, self.shape))
+    new_strides = tuple(map(_substitute, self.strides))
+    new_offset = _substitute(self.offset)
+    new_mask = tuple((_substitute(x[0]), _substitute(x[1])) for x in self.mask) if self.mask is not None else None
+    return View.create(new_shape, new_strides, new_offset, new_mask)
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, vm1:View) -> Optional[View]:
@@ -156,7 +160,11 @@ class View:
     if vm1.mask:
       if (new_vm1 := vm1.shrink(vm1.mask)) == vm1 or (merged := vm2 + new_vm1) is None: return None
       return merged.pad(tuple((b,s-e) for (b,e),s in zip(vm1.mask, vm1.shape)))
-    if not all_int(vm1.shape): return None
+    if not all_int(vm1.shape):
+      # if all strides are 0 and vm2 is unmasked, return vm1
+      if all(x == 0 for x in vm2.strides+vm1.strides) and vm2.mask is None: return vm1
+      # TODO: handle more cases
+      return None
 
     # Project vm1's offset and strides on to vm2.
     origin = unravel(vm2.shape, vm1.offset)
@@ -196,8 +204,8 @@ class View:
           else: bad = True
           continue
         d1, s1 = term[0]
-        newb[d1] = max(newb[d1], ceildiv(b - o if s1 > 0 else e - o - 1, s1))
-        newe[d1] = min(newe[d1], (b - o if s1 < 0 else e - o - 1) // s1 + 1)
+        newb[d1] = smax(newb[d1], ceildiv(b - o if s1 > 0 else e - o - 1, s1))
+        newe[d1] = smin(newe[d1], (b - o if s1 < 0 else e - o - 1) // s1 + 1)
 
       # If any of vm1 was masked off, try again with that mask in place.
       if any((b, e) != (0, s) for b, e, s in zip(newb, newe, vm1.shape)):
@@ -252,8 +260,8 @@ class View:
     # NOTE: does not check multiple of symbolic shape
     assert all(resolve(s == ns) or s == 1 for s,ns in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
     if 0 in self.shape: return View.create(new_shape)
-    # TODO: this resolve may not be needed, but it's hard because vars need to be sorted
-    mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if resolve(s != ns, False) else m) \
+    # TODO: resolve may not be needed, but it's hard because vars need to be canonicalized
+    mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if resolve(s != ns) and resolve(s == 1, False) else m) \
                   for m,s,ns in zip(self.mask, self.shape, new_shape)]) if self.mask else None
     return View.create(new_shape, self.strides, self.offset, mask)
 

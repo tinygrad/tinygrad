@@ -28,7 +28,7 @@ def alloc_rawbuffer(device, fill=False):
   if fill:
     with Context(DEBUG=0):
       data = np.random.randint(-10000, 10000, size=rawbuf.size, dtype=_to_np_dtype(rawbuf.dtype))
-      rawbuf.copyin(Tensor(data).realize().lazydata.base.realized.as_buffer())
+      rawbuf.copyin(Tensor(data).realize().uop.base.realized.as_buffer())
   return rawbuf
 
 def gen_kernel_ji(device, deps):
@@ -121,7 +121,7 @@ if __name__ == "__main__":
   np.random.seed(SEED)
 
   next_graph_id = 0
-  while True:
+  for i in range(getenv("ITERS", 1000)):
     print("Running graph", next_graph_id)
     jis, all_buffers, input_buffers = gen_graph()
     fuzz_graph(jis, all_buffers, input_buffers)

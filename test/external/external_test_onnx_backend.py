@@ -1,4 +1,4 @@
-import unittest
+import tempfile, unittest
 from typing import Any, Tuple
 from onnx.backend.base import Backend, BackendRep
 import onnx.backend.test
@@ -10,7 +10,7 @@ from tinygrad.device import is_dtype_supported
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
 
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 
 class TinygradModel(BackendRep):
   def __init__(self, run_onnx, input_names):
@@ -25,12 +25,16 @@ class TinygradModel(BackendRep):
 
 class TinygradBackend(Backend):
   @classmethod
-  def prepare(cls, model, device):
+  def prepare(cls, model: onnx.ModelProto, device):
     input_all = [x.name for x in model.graph.input]
     input_initializer = [x.name for x in model.graph.initializer]
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
-    run_onnx = OnnxRunner(model)
+    with tempfile.NamedTemporaryFile(suffix='.onnx') as f:
+      onnx.save(model, f.name)
+      f.flush()
+      new_model = onnx_load(f.name)
+    run_onnx = OnnxRunner(new_model)
     return TinygradModel(run_onnx, net_feed_input)
 
   @classmethod
@@ -42,20 +46,29 @@ backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
 # BUG: buggy onnx tests
 backend_test.exclude('test_adam_multiple_cpu')
-backend_test.exclude('test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True_cpu')
 
-# BUG: onnxruntime 1.20.1 fails these tests too
-backend_test.exclude('test_qlinearmatmul_2D_int8_float16_cpu')
-backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
-backend_test.exclude('test_qlinearmatmul_2D_int8_float32_cpu')
-backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
+# BUG: ORT fails these with runtime error
+backend_test.exclude('test_PReLU_1d_multiparam_cpu')
+backend_test.exclude('test_PReLU_2d_multiparam_cpu')
+backend_test.exclude('test_PReLU_3d_multiparam_cpu')
 
 # BUG: we don't match ORT here due to some div inaccuracy with floats
 backend_test.exclude('test_dynamicquantizelinear_cpu')
 backend_test.exclude('test_dynamicquantizelinear_expanded_cpu')
 
-# BUG: we match ORT, tested in TestMainOnnxOps.test_maxunpool
+# BUG: ORT fails these with numerical error but we match ORT numerically
+# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_qlinearmatmul_2D_int8_float16
+backend_test.exclude('test_qlinearmatmul_2D_int8_float16_cpu')
+# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_qlinearmatmul_3D_int8_float16
+backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
+# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_qlinearmatmul_2D_int8_float32
+backend_test.exclude('test_qlinearmatmul_2D_int8_float32_cpu')
+# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_qlinearmatmul_3D_int8_float32
+backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
+# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_maxunpool_export_with_output_shape
 backend_test.exclude('test_maxunpool_export_with_output_shape_cpu')
+# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True
+backend_test.exclude('test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True_cpu')
 
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):

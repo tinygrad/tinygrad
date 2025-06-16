@@ -4,19 +4,19 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
-from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, print_uops, PatternMatcher
-from tinygrad.spec import type_verify, shape_spec
+from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, print_uops
+from tinygrad.uop.ops import PatternMatcher, smax
+from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap, ContextVar
-from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, USE_TC, AMX, CAPTURE_PROCESS_REPLAY
+from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, unwrap
+from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
-from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.devectorizer import full_graph_rewrite
-from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
+from tinygrad.codegen.lowerer import get_contraction
 from tinygrad.engine.grouper import view_left
+from tinygrad.codegen import full_rewrite
 
 class KernelOptError(Exception): pass
 
@@ -42,19 +42,13 @@ class Kernel:
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     # verify AST matches the spec
-    if __debug__: type_verify(list(self.ast.toposort), shape_spec)
+    if __debug__: type_verify(list(self.ast.toposort()), ast_spec)
 
-    self.reduceops = [x for x in self.ast.toposort if x.op is Ops.REDUCE_AXIS]
+    self.reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE_AXIS]
 
     self.vars: list[Variable] = self.ast.variables()
     # NOTE: this requires a specific order with the [::-1], this is likely a bug
-    self.bufs: list[UOp] = [x for x in self.ast.toposort if x.op in GroupOp.Buffer][::-1]
-
-    # get earlybufs, before any reduceops
-    earlybufs: list[UOp] = sorted([x for reduceop in self.reduceops for x in reduceop.src[0].toposort if x.op in GroupOp.Buffer],
-                                  key=lambda x: -prod(x.shape))
-    self.full_buf_index: int = self.bufs.index(earlybufs[0]) if earlybufs else 0
-    # NOTE: full_shape can be wrong if there's a tree of reduces
+    self.bufs: list[UOp] = [x for x in self.ast.toposort() if x.op in GroupOp.Buffer][::-1]
 
     # create new shapetrackers inside this kernel, we will permute them
     self.sts: list[ShapeTracker] = [x.st_arg for x in self.bufs]
@@ -64,6 +58,9 @@ class Kernel:
     for x in self.reduceops:
       self.sts.append(unwrap(x.st))
       self.sts.append(unwrap(x.src[0].st))
+
+    # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
+    self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*self.shape_len))
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
@@ -91,8 +88,8 @@ class Kernel:
     ret.opts, ret.ast = self.opts, self.ast
 
     # things downstream of the AST
-    ret.reduceops, ret.vars, ret.bufs, ret.full_buf_index = self.reduceops, self.vars, self.bufs, self.full_buf_index
-    ret.sts = self.sts[:len(ret.bufs)+len(ret.reduceops)*2] # NOTE: must redo the local buffers with TC in beam
+    ret.reduceops, ret.vars, ret.bufs = self.reduceops, self.vars, self.bufs
+    ret.sts = self.sts[:]
 
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
@@ -102,7 +99,7 @@ class Kernel:
     return ret
 
   @property
-  def membufs(self) -> list[UOp]: return dedup([x.src[0] for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
+  def membufs(self) -> list[UOp]: return dedup([x.src[0].base for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
 
   def upcasted_axis(self, i:int) -> list[tuple[int, Optional[sint], bool]]:
     upcasted_shape, upcasted_stride = self.sts[i].shape[self.first_upcast:], self.sts[i].real_strides()[self.first_upcast:]
@@ -124,7 +121,7 @@ class Kernel:
   def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
 
   @property
-  def full_shape(self) -> tuple[sint, ...]: return self.sts[self.full_buf_index].shape
+  def full_shape(self) -> tuple[sint, ...]: return self.sts[-1].shape
 
   @property
   def full_unupcasted_shape(self) -> tuple[sint, ...]: return self.full_shape[:self.first_upcast]
@@ -302,6 +299,7 @@ class Kernel:
       0: will disable any tensor core matching
       1: enable tensor cores
       2: apply tensor core shape but don't use UOp.WMMA
+      3: emulate tensor cores with local memory
     extra_opts -- additional Opt's to apply after the tensor core instead of the hand-coded additional Opt's (default None)
     tc_select -- specifies which tensor core(s) to use for optimization (default -1)
       -1: iterates through all available tensor cores in order and uses the first one that matches the requirements (dims and dtypes)
@@ -313,13 +311,12 @@ class Kernel:
     """
     if tc_select is None: tc_select = TC_SELECT.value
     if tc_opt is None: tc_opt = TC_OPT.value
-    if not self.opts.tensor_cores and use_tensor_cores != 2: return False
+    if not self.opts.tensor_cores: return False
     try: # check TC first and apply hand-coded opts if successful
-      self.apply_opt(Opt(OptOps.TC, axis, (tc_select, tc_opt)))
+      self.apply_opt(Opt(OptOps.TC, axis, (tc_select, tc_opt, use_tensor_cores)))
 
       if (tc_opts:=self.tensor_core_opts) is not None:
-        if extra_opts is not None:
-          for opt in extra_opts: self.apply_opt(opt)
+        if extra_opts is not None: self.apply_opts(extra_opts)
         else:
           if AMX: return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
           # hand-coded TC opts
@@ -344,11 +341,12 @@ class Kernel:
 
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
-      check((use_tensor_cores:=USE_TC.value) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
+      check(len(self.opts.tensor_cores) > 0, "must have tensor cores")
       check(opt.axis is not None, "tensor core opts must have an axis")
-      check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 2, "tensor core opts must have tc_select and tc_opt")
+      check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 3, "tensor core opts must have valid arg")
       check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.opts.tensor_cores), "tensor core opts must have valid tc_select")
       check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
+      check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 3, "use_tensor_cores value is not valid")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
       self.applied_opts.append(opt)
       return
@@ -415,7 +413,7 @@ class Kernel:
       check(not self.vars, "does not work with symbolic shape")
       check(axis < self.first_upcast, "cannot pad upcasted")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
-      if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}, cache={}), f"cannot pad {r}")
+      if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")
       padded = False
       for i,st in enumerate(self.sts):
         if (s:=st.shape[axis]) == 1: continue  # reduced
@@ -430,11 +428,8 @@ class Kernel:
     if self.simplify_ones() and self.tensor_core_opts:
       self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
 
-  def required_optimizations(self) -> Kernel:
-    if isinstance(self.membufs[0].dtype, ImageDType):
-      unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
-      assert unit_stride_axes_mul_4, f"needs a unit stride axis in {self.bufs[0]}"
-      if all(x < self.first_upcast for x in unit_stride_axes_mul_4): self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
+  def apply_opts(self, opts:Sequence[Opt]) -> Kernel:
+    for opt in opts: self.apply_opt(opt)
     return self
 
   # **** kernel outputs ****
@@ -443,7 +438,7 @@ class Kernel:
   @functools.cached_property
   def name(self) -> str:
     # kernel name (before late upcast)
-    kernel_type = "r" if self.reduceop is not None else ("C" if all(x.op is Ops.SINK or x.op in GroupOp.Buffer for x in self.ast.toposort) else "E")
+    kernel_type = "r" if self.reduceop is not None else ("C" if all(x.op is Ops.SINK or x.op in GroupOp.Buffer for x in self.ast.toposort()) else "E")
     suffix = colored('_', 'BLACK').join([colored(x.render() if isinstance(x, UOp) else str(x), c) for x,c in zip(self.full_shape, self.colors())])
     name = kernel_type + (f"{len(self.ast.src)}" if len(self.ast.src) > 1 else "") + "_" + suffix
 
@@ -457,11 +452,11 @@ class Kernel:
     def fixup_ast(op:UOp) -> UOp:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src)) # noqa: F821
       if op.op in GroupOp.Buffer and op in self.bufs:
-        st_uop = self.sts[self.bufs.index(op)].to_uop()
+        st = self.sts[self.bufs.index(op)]
         # NOTE: if CONST got masked after applying opts, we create a new VALID
-        if op.op is Ops.CONST and any(v.mask is not None for v in unwrap(st_uop.st).views): return op.valid(unwrap(st_uop.st))
+        if op.op is Ops.CONST and any(v.mask is not None for v in st.views): return op.view(st).valid()
         # otherwise we just replace the VIEW source
-        return ret.replace(src=(st_uop,)) if len(op.src) == 1 else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
+        return ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
       if op.op is Ops.SINK:
         return ret.replace(arg = KernelInfo(to_function_name(self.name) if name_override is None else name_override,
                                             self.local_dims, self.upcasted, self.dont_use_locals))
@@ -496,8 +491,8 @@ class Kernel:
               st = store_st = ShapeTracker.from_shape(local_shape)
               local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), f"temp{i}")
               if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
-              local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
-              srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
+              local_store = UOp.store(local_buffer.view(store_st), srcs[i])
+              srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer.view(st), local_store))
 
           tc_reduce_axes = tuple(tcd + ax for ax, _ in tc.get_reduce_axes())
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
@@ -520,19 +515,19 @@ class Kernel:
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
               for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
-          st_uop = ShapeTracker.from_shape(local_shape).to_uop()
-          local_size = st_uop.arg.real_size()
+          st = ShapeTracker.from_shape(local_shape)
+          local_size = st.real_size()
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), f"temp{self.reduceops.index(op)}")
-          local_load = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, ret)))
+          local_load = UOp(Ops.LOAD, op.dtype, (local_buffer.view(st), UOp.store(local_buffer.view(st), ret)))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
           if op is self.reduceops[-1]: return grouped_reduce
-          st_uop = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else a for i,a in enumerate(local_shape)])).to_uop()
-          return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
+          st = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else a for i,a in enumerate(local_shape)]))
+          return UOp(Ops.LOAD, op.dtype, (local_buffer.view(st), UOp.store(local_buffer.view(st), grouped_reduce)))
 
       return ret
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
-    return graph_rewrite(fixed_ast, view_left)
+    return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
 
   # **** this is the lowerer ****
 
@@ -553,30 +548,28 @@ class Kernel:
       print(self.applied_opts)
       if DEBUG >= 5: print(modified_ast)
     # verify AST matches the spec after applying opts
-    if __debug__: type_verify(list(modified_ast.toposort))
+    if __debug__: type_verify(list(modified_ast.toposort()))
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
-    #if __debug__: type_verify(list(modified_ast.toposort), shape_spec)
+    #if __debug__: type_verify(list(modified_ast.toposort()), ast_spec)
 
-    self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
+    try:
+      self.uops:list[UOp] = full_rewrite(modified_ast, self.opts)
+    except RuntimeError:
+      print("***** LINEARIZE FAILURE *****")
+      print(f"ast = {self.ast}")
+      print(f"opts = {self.applied_opts}")
+      raise
     if DEBUG >= 6: print_uops(self.uops)
     return self
 
   def to_program(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> ProgramSpec:
     self.linearize(name_override, ast_transform)
-    assert self.uops[0].op is Ops.NAME, "first uop must be name"
+    assert self.uops[-1].op is Ops.SINK, "last uop must be sink"
     src = self.opts.render(self.uops)
-
-    if CAPTURE_PROCESS_REPLAY:
-      import sys
-      frm = sys._getframe(1)
-      while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
-      loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, loc, ContextVar._cache, src))
-
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
-    mem_bytes = sum(max(x.src[0].dtype.itemsize * x.st_arg.real_size() for x in group)
-      for _, group in itertools.groupby([x for x in self.ast.toposort if x.op in GroupOp.Buffer and x.src[0].op is Ops.DEFINE_GLOBAL],
-                        key=lambda x: (x.op, x.src[0].arg)))
+    mem_bytes = sum(max(x.src[0].dtype.nbytes() for x in group)
+      for _, group in itertools.groupby([x for x in self.ast.toposort() if x.op in GroupOp.Buffer and x.src[0].base.op is Ops.DEFINE_GLOBAL],
+                        key=lambda x: (x.op, x.src[0].base.arg)))
     return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops, self.applied_opts, mem_bytes,
                        global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)

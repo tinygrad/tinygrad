@@ -5,7 +5,7 @@ from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict, Self
 
 # for copied uops
 from tinygrad.codegen.kernel import Kernel, KernelOptError
-from tinygrad.ops import UOp, Ops, BinaryOps, UnaryOps, TernaryOps, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, BinaryOps, UnaryOps, TernaryOps, KernelInfo
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.dtype import PtrDType, DType, DTYPES_DICT
@@ -54,9 +54,7 @@ def randoms():
 
 def ast_to_cuda_prog(compiler, ast, opts):
   k = Kernel(ast)
-  k.required_optimizations()
-  for opt in opts:
-    k.apply_opt(opt)
+  k.apply_opts(opts)
   p = k.to_program()
   return CUDAProgram(device, p.function_name, compiler.compile(p.src))
 

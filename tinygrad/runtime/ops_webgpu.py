@@ -175,8 +175,7 @@ class WebGPUProgram:
       return time
     return None
 
-class WebGpuAllocator(Allocator):
-  def __init__(self, dev:WGPUDevPtr): self.dev = dev
+class WebGpuAllocator(Allocator['WGPUDevPtr']):
   def _alloc(self, size:int, options:BufferSpec) -> WGPUBufPtr:
     # WebGPU buffers have to be 4-byte aligned
     return webgpu.wgpuDeviceCreateBuffer(self.dev, webgpu.WGPUBufferDescriptor(size=round_up(size, 4),
@@ -190,7 +189,8 @@ class WebGpuAllocator(Allocator):
     buffer_data = read_buffer(self.dev, src)
     dest[:] = buffer_data[:dest.nbytes] if webgpu.wgpuBufferGetSize(src)  > dest.nbytes else buffer_data
   def _free(self, opaque:WGPUBufPtr, options:BufferSpec):
-    webgpu.wgpuBufferDestroy(opaque)
+    try: webgpu.wgpuBufferDestroy(opaque)
+    except AttributeError: pass
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):

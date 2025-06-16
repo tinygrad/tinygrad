@@ -76,7 +76,7 @@ if __name__ == "__main__":
   for num,ast in enumerate(ast_strs):
     with run_amd():
       amdlin = ast_str_to_lin(ast, opts=amddev.renderer)
-      amdlin = hand_coded_optimizations(amdlin)
+      amdlin.apply_opts(hand_coded_optimizations(amdlin))
       has_bf16 = any(b.dtype == dtypes.bfloat16 for b in amdlin.membufs)
 
       amd_prg = CompiledRunner(amdlin.to_program())
@@ -88,7 +88,7 @@ if __name__ == "__main__":
       rdr = amdev.renderer
       rdr.device = "AMD:1"
       amlin = ast_str_to_lin(ast, opts=amdev.renderer)
-      amlin = hand_coded_optimizations(amlin)
+      amlin.apply_opts(hand_coded_optimizations(amlin))
       am_prg = CompiledRunner(amlin.to_program())
       ambufs = bufs_from_lin(amlin)
       test_ambufs = get_fuzz_rawbufs(amlin) if not has_bf16 else ambufs
@@ -99,7 +99,7 @@ if __name__ == "__main__":
       cpu_rdr = cpudev.renderer
       cpu_rdr.device = "CPU"
       cpulin = ast_str_to_lin(ast, opts=cpu_rdr)
-      cpulin = hand_coded_optimizations(cpulin)
+      cpulin.apply_opts(hand_coded_optimizations(cpulin))
       cpu_prg = CompiledRunner(cpulin.to_program())
       cpubufs = bufs_from_lin(cpulin)
       test_cpubufs = get_fuzz_rawbufs(cpulin) if not has_bf16 else ambufs
