@@ -1,6 +1,6 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
-import sys, base64, multiprocessing, itertools, collections
+import sys, base64, multiprocessing, itertools, collections, math
 from typing import Optional, Union, Literal, List
 
 from tinygrad import Tensor, TinyJit, Variable, nn
@@ -9,6 +9,45 @@ from tinygrad.helpers import getenv, DEBUG, fetch
 
 import numpy as np
 import librosa
+
+# ***** WIP stft helpers *****
+# TODO(irwin): pick a more suitable place for these
+# TODO(irwin): asserts
+# TODO(irwin): tinygrad.nn.STFT class
+
+def stft(x:Tensor, weight:Tensor, n_fft, stride, pad, pad_mode="constant")->Tensor:
+  cutoff = int(n_fft // 2) + 1
+  x_padded = x.pad(pad, mode=pad_mode)
+  stft_raw = x_padded.unsqueeze(1).conv2d(weight, stride=stride)
+
+  # NOTE(irwin): magnitudes only atm
+  magnitudes = (stft_raw[:, :cutoff, :]**2 + stft_raw[:, cutoff:, :]**2).sqrt()
+  return magnitudes
+
+# TODO(irwin): functools.rlu_cache?
+def make_basis_buffers(N_FFT: int, k_freq_bin: int|Tensor, window:Tensor) -> tuple[Tensor, Tensor]:
+  # NOTE(irwin): do we even need this .float()?
+  n = Tensor.arange(N_FFT).float()
+  angle = 2 * math.pi * k_freq_bin * n / N_FFT
+
+  w = window
+  cos_basis = w * angle.cos()
+  # NOTE(irwin): negate sin_basis to match torch
+  sin_basis = w * -angle.sin()
+  return cos_basis, sin_basis
+
+def hann_window(N:int, periodic=True) -> Tensor:
+  M = N+(periodic*1)
+  return ((1.0 - (Tensor.arange(M) * 2.0 * math.pi / (M - 1)).cos()) * 0.5)[:N]
+
+def make_stft_basis_buffers(n_fft:int, window:Tensor) -> Tensor:
+  return Tensor.cat(*make_basis_buffers(n_fft, Tensor.arange((n_fft // 2) + 1)[None].T, window)).reshape(n_fft+2, 1, n_fft)
+
+def stft_full(x:Tensor, n_fft:int, stride:int, pad:tuple[int, int], window="hann", pad_mode="constant") -> Tensor:
+  assert window == "hann", "other window types not implemented yet"
+  bb = make_stft_basis_buffers(n_fft, hann_window(n_fft))
+  res = stft(x, bb, n_fft, stride, pad, pad_mode)
+  return res
 
 class MultiHeadAttention:
   def __init__(self, n_state, n_head, kv_caching: Literal['cross', 'self']=None, max_self_attn_cache_len=None):
@@ -161,8 +200,8 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
     stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
     magnitudes = np.absolute(stft[..., :-1]) ** 2
   else:
-    stft = Tensor.stft_full(Tensor(waveforms), N_FFT, stride=HOP_LENGTH, pad=(0, 0))
-    magnitudes = (stft ** 2).numpy()
+    stft = stft_full(Tensor(waveforms), N_FFT, stride=HOP_LENGTH, pad=(200, 200))
+    magnitudes = (stft[..., :-1] ** 2).numpy()
   mel_spec = librosa.filters.mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
 
   log_spec = np.log10(np.clip(mel_spec, 1e-10, None))
