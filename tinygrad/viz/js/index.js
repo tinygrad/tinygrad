@@ -213,12 +213,13 @@ function renderMemoryGraph(graph) {
 
 // ** zoom and recentering
 
-const zoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
-d3.select("#graph-svg").call(zoom);
+const svgZoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
+d3.select("#graph-svg").call(svgZoom);
+
 // zoom to fit into view
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const svg = d3.select("#graph-svg");
-  svg.call(zoom.transform, d3.zoomIdentity);
+  svg.call(svgZoom.transform, d3.zoomIdentity);
   const mainRect = rect(".main-container");
   const x0 = rect(".ctx-list-parent").right;
   const x1 = rect(".metadata-parent").left;
@@ -228,7 +229,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   if (r.width === 0) return;
   const scale = Math.min(R.width/r.width, R.height/r.height);
   const [tx, ty] = [R.x+(R.width-r.width*scale)/2-r.left*scale, R.y+(R.height-r.height*scale)/2];
-  svg.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+  svg.call(svgZoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
 });
 
 // **** main VIZ interfacae
