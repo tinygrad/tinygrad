@@ -252,14 +252,15 @@ async function renderProfiler() {
   data = [];
   for (const e of traceEvents) {
     if (e.name === "process_name") deviceMap.set(e.pid, { name:e.args.name, events:0 });
-    if (e.ts == null) continue;
-    if (st == null) [st, et] = [e.ts, e.ts+e.dur];
-    else {
-      st = Math.min(st, e.ts);
-      et = Math.max(et, e.ts+e.dur);
+    if (e.ph === "X") {
+      if (st == null) [st, et] = [e.ts, e.ts+e.dur];
+      else {
+        st = Math.min(st, e.ts);
+        et = Math.max(et, e.ts+e.dur);
+      }
+      deviceMap.get(e.pid).events += 1;
+      data.push(e);
     }
-    deviceMap.get(e.pid).events += 1;
-    data.push(e);
   }
   const kernelMap = new Map();
   for (const [i, c] of ctxs.entries()) kernelMap.set(c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1"), { name:c.name, i });
