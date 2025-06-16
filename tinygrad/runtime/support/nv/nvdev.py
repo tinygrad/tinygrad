@@ -1,6 +1,6 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib, re
-from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch, getbits
+import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib, re, gzip, struct
+from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch, getbits, to_mv
 from tinygrad.runtime.autogen.nv import nv
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.allocator import TLSFAllocator
@@ -53,14 +53,14 @@ class NVPageTableEntry:
       # x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=True, address_sys=paddr >> 12, aperture=1, vol=uncached)
 
       aper = 2 if system else 0
-      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=True, address_sys=paddr >> 12, aperture=aper, vol=uncached, kind=6)
-      
+      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=True, address_sys=paddr >> 12, aperture=aper, vol=uncached, kind=0)
+
       if self.lv !=3: self.entries[entry_id] = x
       else: self.entries[2*entry_id] = x
 
     elif self.lv == 3:
       # assert False
-      
+
       x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=uncached, no_ats=1)
       self.entries[2*entry_id] = x & 0xffffffffffffffff
       self.entries[2*entry_id+1] = x >> 64
@@ -234,9 +234,20 @@ class NVDev:
     va, paddrs = alloc_sysmem(ctypes.sizeof(typ), contigous=True)
     return typ.from_address(va), paddrs[0]
 
+  def _alloc_boot_struct_2(self, struct):
+    va, paddrs = alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contigous=True)
+    to_mv(va, sz)[:] = bytes(struct)
+    return struct, paddrs[0]
+
   def _download(self, file) -> str:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/ed4be649623435ebb04f5e93f859bf46d977daa4/{file}"
     return fetch(url, subdir="defines").read_text()
+
+  def extract_fw(self, text, name):
+    # Extracts the firmware binary from the given header
+    info, sl = text[text[:text.index(name)].rindex("COMPRESSION:"):][:16], text[text.index(name) + len(name) + 7:]
+    image = bytes.fromhex(sl[:sl.find("};")].strip().replace("0x", "").replace(",", "").replace(" ", "").replace("\n", ""))
+    return gzip.decompress(struct.pack("<4BL2B", 0x1f, 0x8b, 8, 0, 0, 0, 3) + image) if "COMPRESSION: YES" in info else image
 
   def include(self, file) -> str:
     if file in self.included_files: return
