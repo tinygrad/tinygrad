@@ -8,8 +8,9 @@ try:
 except ModuleNotFoundError:
   raise unittest.SkipTest("onnx not installed, skipping onnx test")
 from tinygrad.frontend.onnx import OnnxRunner, onnx_load
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, Device
 from tinygrad.helpers import CI, fetch, temp
+from extra.huggingface_onnx.run import validate_repos
 
 def run_onnx_torch(onnx_model, inputs):
   import torch
@@ -136,6 +137,29 @@ class TestOnnxModel(unittest.TestCase):
     cls = run(car_img)
     print(cls, _LABELS[cls])
     assert "car" in _LABELS[cls] or _LABELS[cls] == "convertible"
+
+@unittest.skipUnless(Device.DEFAULT == "METAL", "only run on metal")
+class TestHuggingfaceOnnxModel(unittest.TestCase):
+  def test_facebookai_xlm_roberta_large(self):
+    validate_repos(["facebookai/xlm-roberta-large"])
+
+  def test_long_t5_tglobal_base(self):
+    validate_repos(["pszemraj/long-t5-tglobal-base-sci-simplify"])
+
+  def test_fashion_clip(self):
+    validate_repos(["patrickjohncyh/fashion-clip"])
+
+  def test_mxbai_rerank(self):
+    validate_repos(["mixedbread-ai/mxbai-rerank-base-v1"])
+
+  def test_rmbg(self):
+    validate_repos(["briaai/RMBG-1.4"])
+
+  def test_paraphrase_multilingual(self):
+    validate_repos(["sentence-transformers/paraphrase-multilingual-mpnet-base-v2"])
+
+  def test_smollm(self):
+    validate_repos(["HuggingFaceTB/SmolLM-135M"])
 
 if __name__ == "__main__":
   unittest.main()

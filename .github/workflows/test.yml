@@ -909,27 +909,6 @@ jobs:
         if: matrix.backend == 'cpu'
         run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated
 
-  osxhuggingface:
-    name: Models Huggingface ONNX
-    runs-on: macos-15
-    timeout-minutes: 20
-    env:
-      METAL: '1'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: huggingface
-          pydeps: "onnx==1.17.0 onnxruntime pillow huggingface_hub[hf_xet]"
-      - name: Check Device.DEFAULT and print some source
-        run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
-          DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
-      - name: Download and Validate HuggingFace Models
-        run: PYTHONPATH=. MAX_BUFFER_SIZE=0 python3 -u extra/huggingface_onnx/run.py FacebookAI/xlm-roberta-large/onnx/model.onnx pszemraj/long-t5-tglobal-base-sci-simplify/model.onnx patrickjohncyh/fashion-clip/onnx/model.onnx mixedbread-ai/mxbai-rerank-base-v1/onnx/model.onnx briaai/RMBG-1.4/onnx/model.onnx sentence-transformers/paraphrase-multilingual-mpnet-base-v2/onnx/model_O2.onnx HuggingFaceTB/SmolLM-135M/onnx/model.onnx
-
 # ****** Windows Tests ******
 
   wintests:
