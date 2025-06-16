@@ -4060,7 +4060,8 @@ class Tensor(MathTrait):
       U_left,U_right  =  c * partial_Up - s * partial_Uq, s * partial_Up + c * partial_Uq
       U = U_left.cat( U_right.cat(runoff_U,dim=1) if num%2==1 else U_right ,dim=1)[:,inverse_permute].realize()
       #prepare the next round robin pairings
-      permute[1:num] = ((permute[1:num] - 2) % (num - 1)) + 1
+      if num%2==1: permute[0:num] = ((permute[0:num] - 1) % (num))
+      else: permute[1:num] = ((permute[1:num] - 2) % (num - 1)) + 1
       return U,V
     for i in range(iterations_per_round):
       U,V = one_round_jacobi(U,V)
