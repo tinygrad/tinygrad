@@ -4295,21 +4295,15 @@ class Tensor(MathTrait):
       for _ in range(max_iter):
         Q, _ = (M @ Q).qr()
       return Q
-    if m >= n:
-      # Compute V from A^T A, then U = A @ V @ S^-1
-      AtA = A.transpose(-2, -1) @ A
-      V = power_iteration(AtA, k)
-      AV = A @ V
-      S = (AV * AV).sum(axis=-2).sqrt().clamp(min_=1e-12)
-      U = AV / S.unsqueeze(-2)
-    else:
-      # Compute U from A A^T, then V = A^T @ U @ S^-1  
-      AAt = A @ A.transpose(-2, -1)
-      U = power_iteration(AAt, k)
-      AtU = A.transpose(-2, -1) @ U
-      S = (AtU * AtU).sum(axis=-2).sqrt().clamp(min_=1e-12)
-      V = AtU / S.unsqueeze(-2)
-    
+    if m < n: # Assume A is tall
+      A = A.transpose(-2, -1)
+
+    V = power_iteration(A.transpose(-2, -1) @ A, k)
+    AV = A @ V
+    S = (AV * AV).sum(axis=-2).sqrt().clamp(min_=1e-12)
+    U = AV / S.unsqueeze(-2)
+    if m < n:
+      U, V = V, U
     S, idx = S.sort(dim=-1, descending=True)
     U = U.gather(-1, idx.unsqueeze(-2).expand(-1, m, -1))
     V = V.gather(-1, idx.unsqueeze(-2).expand(-1, n, -1))
