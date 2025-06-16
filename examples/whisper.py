@@ -254,14 +254,15 @@ def load_file_waveform(filename): return librosa.load(filename, sr=RATE)[0]
 def transcribe_file(model, enc: Encoding, filename, output_fh=None, beam=False, no_speech_threshold=0.8):
   return transcribe_waveform(model, enc, [load_file_waveform(filename)], output_fh, beam=beam, no_speech_threshold=no_speech_threshold)
 
-def timestamp_gen(logits: np.ndarray, enc: Encoding):
-  logits[:, np.array([enc._special_tokens["<|notimestamps|>"]])] = -math.inf
+def timestamp_gen(logits: Tensor, enc: Encoding):
+  notimestamps_token = enc._special_tokens["<|notimestamps|>"]
+  logits[:, notimestamps_token] = -math.inf
   timestamp = enc._special_tokens["<|0.00|>"]
-  log_probs: np.ndarray = log_softmax(logits, axis=-1)
-  timestamp_probs = logsumexp(log_probs[:, timestamp:], axis=-1)
-  text_probs = logsumexp(log_probs[:, :timestamp], axis=-1)
-  comparison = (timestamp_probs > text_probs)
-  logits[comparison, :timestamp] = -math.inf
+  log_probs: Tensor = logits.log_softmax(axis=-1)
+  timestamp_probs = log_probs[:, timestamp:].logsumexp(axis=-1)
+  text_probs = log_probs[:, :timestamp].logsumexp(axis=-1)
+  mask = (timestamp_probs > text_probs).unsqueeze(-1).expand(-1, timestamp)
+  logits[:, :timestamp] = logits[:, :timestamp].masked_fill(mask, -math.inf)
 
 def timestamp_rules(logits: np.ndarray, enc: Encoding, ctx: np.ndarray, sample_begin: int):
   timestamp_begin = enc._special_tokens["<|0.00|>"]
@@ -335,7 +336,7 @@ def inferloop(model: Whisper, ctx: np.ndarray, encoded_audio: Tensor, temperatur
   for i in trange(num_sample):
     logits = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1].contiguous().numpy()
     if i == 0: suppress_blank(logits, enc)
-    non_speech_filter(logits), timestamp_rules(logits, enc, ctx, sample_begin), timestamp_gen(logits, enc)
+    non_speech_filter(logits), timestamp_rules(logits, enc, ctx, sample_begin), timestamp_gen(Tensor(logits), enc)
     if beam and temperature == 0:
       sampled = beamsearch_sampling(logits, model, sum_probs, ctx)
       ctx, next_tokens, sum_probs = sampled.ctx, sampled.next_tokens, sampled.probs
