@@ -303,23 +303,49 @@ async function renderProfiler() {
     }
     // programs
     const canvasTop = rect(canvas).top;
+    const rectArgs = [];
     for (const [i, e] of data.entries()) {
+      // base rect coordinates and dims
       const x = scale(e.ts-st);
       const width = scale(e.ts-st+e.dur)-x;
-      let { y, height } = rect(`#pid-${e.pid}`);
-      y -= canvasTop-padding/2;
-      height -= padding;
-      if (!nameMap.has(e.name)) nameMap.set(e.name, { color:colors[i%colors.length], labelWidth:ctx.measureText(e.name).width })
-      const { color, labelWidth } = nameMap.get(e.name);
-      ctx.fillStyle = color;
-      ctx.fillRect(x, y, width, height);
-      rectLst.push({ y0:y, y1:y+height, x0:x, x1:x+width, name:e.name });
-      if (width>labelWidth) {
+      const pidRect = rect(`#pid-${e.pid}`);
+      const minY = pidRect.y-canvasTop+padding/2;
+      const height = pidRect.height-padding;
+      // label and coloring
+      if (!nameMap.has(e.name)) nameMap.set(e.name, { color:colors[i%colors.length], labelWidth:ctx.measureText(e.name).width });
+      rectArgs.push({ width, height, x, minY, label:e.name, ...nameMap.get(e.name), pid:e.pid });
+    }
+    // assign levels to each of the rects
+    for (const [pid, group] of Object.entries(rectArgs.reduce((m,r) => (m[r.pid] = m[r.pid]||[]).push(r)&&m, {}))) {
+      group.sort((a,b) => a.x - b.x);
+      const levels = [];
+      for (const r of group) {
+        const endX = r.x + r.width;
+        // find first level that is free
+        let depth = levels.findIndex(le => r.x >= le);
+        if (depth === -1) {
+          depth = levels.length;
+          levels.push(endX);
+        } else {
+          levels[depth] = endX;
+        }
+        r.depth = depth;
+        r.levels = levels.length;
+      }
+    }
+
+    // draw rects
+    for (const r of rectArgs) {
+      const y = r.minY+r.depth*r.height;
+      ctx.fillStyle = r.color;
+      ctx.fillRect(r.x, y, r.width, r.height);
+      if (r.width > r.labelWidth) {
         ctx.fillStyle = "black";
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText(e.name, x+2, y+height/2);
+        ctx.fillText(r.label, r.x+2, y+r.height/2);
       }
+      rectLst.push({ y0:y, y1:y+r.height, x0:r.x, x1:r.x+r.width, name:r.label });
     }
     ctx.restore();
   }
