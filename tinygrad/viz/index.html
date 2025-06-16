@@ -44,6 +44,12 @@
   ul.active {
     opacity: 1;
   }
+  ul > ul {
+    display: none;
+  }
+  ul.expanded > ul {
+    display: block;
+  }
   ul.disabled {
     opacity: 0.4;
     pointer-events: none;

@@ -1,7 +1,7 @@
 import unittest, decimal, json
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import TRACK_MATCH_STATS, TrackedPatternMatcher, UOp, graph_rewrite, track_rewrites, UPat, Ops
-from tinygrad.uop.symbolic import symbolic
+from tinygrad.uop.symbolic import symbolic, symbolic_simple
 from tinygrad.uop.ops import tracked_ctxs as contexts, tracked_keys as keys, _name_cnt, _substitute
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_metadata, get_details, uop_to_json, to_perfetto
@@ -159,6 +159,10 @@ class TestViz(unittest.TestCase):
     fp, lineno = contexts[0][0].loc
     self.assertEqual(lineno, inner_rewrite.__code__.co_firstlineno)
     self.assertEqual(fp, inner_rewrite.__code__.co_filename)
+
+  def test_upat_location(self):
+    for (pat, fn) in symbolic_simple.patterns:
+      self.assertIn("symbolic.py", pat.location[0])
 
   def test_nested_rewrite(self):
     def make_float(x:UOp, y:UOp):

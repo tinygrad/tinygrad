@@ -29,6 +29,10 @@ inputs:
     description: "Install CUDA?"
     required: false
     default: 'false'
+  ocelot:
+    description: "Install gpuocelot?"
+    required: false
+    default: 'false'
   webgpu:
     description: "Install webgpu?"
     required: false
@@ -193,14 +197,14 @@ runs:
           sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
         cargo build --release --manifest-path ./extra/remu/Cargo.toml
 
-    # **** CUDA ****
+    # **** gpuocelot ****
 
     - name: Install gpuocelot dependencies (MacOS)
-      if: inputs.cuda == 'true' && runner.os == 'macOS'
+      if: inputs.ocelot == 'true' && runner.os == 'macOS'
       shell: bash
       run: brew install --quiet cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
     - name: Cache gpuocelot
-      if: inputs.cuda == 'true'
+      if: inputs.ocelot == 'true'
       id: cache-build
       uses: actions/cache@v4
       env:
@@ -209,7 +213,7 @@ runs:
         path: ${{ github.workspace }}/gpuocelot/ocelot
         key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-0
     - name: Clone/compile gpuocelot
-      if: inputs.cuda == 'true' && steps.cache-build.outputs.cache-hit != 'true'
+      if: inputs.ocelot == 'true' && steps.cache-build.outputs.cache-hit != 'true'
       shell: bash
       run: |
         git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
@@ -220,7 +224,7 @@ runs:
         cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         ninja
     - name: Install gpuocelot
-      if: inputs.cuda == 'true'
+      if: inputs.ocelot == 'true'
       shell: bash
       run: |
         cd ${{ github.workspace }}/gpuocelot/ocelot/build

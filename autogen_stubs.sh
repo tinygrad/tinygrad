@@ -390,8 +390,8 @@ generate_am() {
     $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu14_driver_if_v14_0.h \
     extra/amdpci/headers/amdgpu_smu.h \
     --clang-args="-include stdint.h" \
-    -o $BASE/am/smu_v14_0_3.py
-  fixup $BASE/am/smu_v14_0_3.py
+    -o $BASE/am/smu_v14_0_2.py
+  fixup $BASE/am/smu_v14_0_2.py
 }
 
 generate_sqtt() {
