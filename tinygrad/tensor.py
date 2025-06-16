@@ -4286,28 +4286,26 @@ class Tensor(MathTrait):
     print(U.numpy(), S.numpy(), V.numpy())
     ```
     """
-    *b_dims, m, n = self.shape
+    *b, m, n = self.shape
     A = self.reshape(-1, m, n)
     if k is None: k = min(m, n)
-    def power_iteration(M:Tensor, k:int, max_iter:int=15) -> Tensor:
+    # Assume A is tall
+    if m < n: A = A.transpose(-2, -1)
+    def power_iteration(M:Tensor, k:int, max_iter:int=20) -> Tensor:
       B, n, _ = M.shape
       Q, _ = Tensor.randn(B, n, k).qr()
-      for _ in range(max_iter):
-        Q, _ = (M @ Q).qr()
+      for _ in range(max_iter): Q, _ = (M @ Q).qr()
       return Q
-    if m < n: # Assume A is tall
-      A = A.transpose(-2, -1)
 
     V = power_iteration(A.transpose(-2, -1) @ A, k)
     AV = A @ V
     S = (AV * AV).sum(axis=-2).sqrt().clamp(min_=1e-12)
     U = AV / S.unsqueeze(-2)
-    if m < n:
-      U, V = V, U
+    if m < n: U, V = V, U
     S, idx = S.sort(dim=-1, descending=True)
     U = U.gather(-1, idx.unsqueeze(-2).expand(-1, m, -1))
     V = V.gather(-1, idx.unsqueeze(-2).expand(-1, n, -1))
-    return U.reshape(*b_dims, m, k), S.reshape(*b_dims, k), V.reshape(*b_dims, n, k).transpose(-2, -1)
+    return U.reshape(*b, m, k), S.reshape(*b, k), V.reshape(*b, n, k).transpose(-2, -1)
 
   def qr(self:Tensor) -> tuple[Tensor, Tensor]:
     """
