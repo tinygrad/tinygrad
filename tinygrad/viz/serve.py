@@ -114,6 +114,10 @@ def graph_ev_to_perfetto_json(ev:ProfileGraphEvent, reccnt):
 def to_perfetto(profile:list[ProfileEvent]):
   # Start json with devices.
   prof_json = [x for ev in profile if isinstance(ev, ProfileDeviceEvent) for x in dev_ev_to_perfetto_json(ev)]
+  if isinstance(profile, dict) and "traceEvents" in profile:
+    prof_json = [{ "name":"process_name", "pid":1, "args": {"name": "METAL"} }]
+    prof_json += profile["traceEvents"]
+    return json.dumps({"traceEvents": prof_json }).encode()
   for ev in tqdm(profile, desc="preparing profile"):
     if isinstance(ev, ProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)
     elif isinstance(ev, ProfileGraphEvent): prof_json += graph_ev_to_perfetto_json(ev, reccnt=len(prof_json))
