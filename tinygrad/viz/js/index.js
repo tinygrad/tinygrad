@@ -270,14 +270,32 @@ async function renderProfiler() {
     const div = deviceList.appendChild(document.createElement("div"));
     div.id = `pid-${k}`;
     div.innerText = v.name;
-    let { y, height } = rect(`#pid-${k}`);
-    y -= canvasTop-padding/2;
-    height -= padding;
-    const divRect = rect(div);
+    const { y:baseY, height:baseHeight } = rect(`#pid-${k}`);
+    // position events on the y axis, stack ones that overlap
+    const levels = [];
+    v.events.sort((a,b) => (a.ts-st) - (b.ts-st));
     for (const [i,e] of v.events.entries()) {
-      if (!nameMap.has(e.name)) nameMap.set(e.name, { color:colors[i%colors.length], labelWidth:ctx.measureText(e.name).width });
-      data.push({ x:e.ts-st, dur:e.dur, name:e.name, height, y, ...nameMap.get(e.name) });
+      // assign to the first free depth
+      const start = e.ts-st;
+      const end = start+e.dur;
+      let depth = levels.findIndex(l => start >= l);
+      if (depth === -1) {
+        depth = levels.length;
+        levels.push(end);
+      } else {
+        levels[depth] = end;
+      }
+      // offset y by depth
+      const height = baseHeight-padding;
+      const y = (baseY-canvasTop+padding/2)+height*depth;
+      if (!nameMap.has(e.name)) {
+        const color = colors[i%colors.length];
+        nameMap.set(e.name, { color, labelWidth:ctx.measureText(e.name).width });
+      }
+      data.push({ x:start, dur:e.dur, name:e.name, height, y, ...nameMap.get(e.name) });
     }
+    // lastly, adjust device rect by number of levels
+    div.style.height = `${baseHeight*levels.length}px`;
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
