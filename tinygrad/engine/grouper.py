@@ -11,10 +11,6 @@ from tinygrad.engine.multi import multi_pm
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 
-# creation can recurse a lot
-import sys
-sys.setrecursionlimit(10000)
-
 # **** schedule simplifier
 
 def simplify_stride0_reduce(reduce:UOp, x:UOp):
