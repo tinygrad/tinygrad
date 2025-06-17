@@ -3047,6 +3047,14 @@ class TestLinAlg(unittest.TestCase):
       np.testing.assert_allclose((Vt @ Vt.mT).numpy(), torch.eye(min(m, n)).expand(*b, -1, -1).numpy(), atol=1e-1)
       _, S_torch, _ = torch.linalg.svd(At, full_matrices=False)
       np.testing.assert_allclose(St.numpy(), S_torch.numpy(), rtol=1e-2, atol=1e-1)
+  
+  def test_qr(self):
+    for *b, m, n in [(10, 50, 50), (100,199), (5,30,50), (7,12,3)]:
+      Q, R = (A := Tensor.randn(*b, m, n)).qr()
+      At, Qt, Rt = map(lambda x: torch.tensor(x.numpy()), [A, Q, R])
+      np.testing.assert_allclose(A.numpy(), (Qt @ Rt).numpy(), rtol=1e-3, atol=1e-3)
+      np.testing.assert_allclose((Qt.mT @ Qt).numpy(), torch.eye(m).expand(*b, -1, -1).numpy(), atol=1e-3)
+      np.testing.assert_allclose(Rt.numpy(), np.triu(Rt.numpy()), rtol=1e-3, atol=1e-4)
 
 if __name__ == '__main__':
   np.random.seed(1337)
