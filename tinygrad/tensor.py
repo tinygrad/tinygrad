@@ -4027,14 +4027,12 @@ class Tensor(MathTrait):
     return Q,R
   def svd(self,full_matrices=True):
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
-    m,n = self.shape[-2],self.shape[-1]
-    p_shape = self.shape[:-2]
+    b_shape,m,n = self.shape[:-2],self.shape[-2],self.shape[-1]
     #preprocess the matrix
     Q,R = (Tensor.qr(self) if m >= n else Tensor.qr(self.transpose(-2,-1)))
     num = min(m,n)
     U = R.triu().shrink(tuple([(0,self.shape[i]) for i in range(self.ndim-2)] + [(0,num), (0,num)])).contiguous()
-    # V = Tensor.eye(num).cast(U.dtype).contiguous()
-    V=Tensor.eye(num).cast(self.dtype).reshape((1,)*(self.ndim-2)+(num,num)).expand(p_shape+(m,m)).contiguous()
+    V=Tensor.eye(num).cast(self.dtype).reshape((1,)*(self.ndim-2)+(num,num)).expand(b_shape+(num,num)).contiguous()
     #prepare round robin pairing
     permute = Tensor.arange(0,num)
     permute[num//2:num] = permute[num//2:num].flip(0)
@@ -4042,7 +4040,8 @@ class Tensor(MathTrait):
       #compute the jacobi rotations for each pairing
       U_permuted,runoff_U = (U[...,permute].split(num-1,-1)) if num%2==1 else (U[...,permute],None)
       partial_Up,partial_Uq = U_permuted.split(num//2,-1)
-      gamma = (partial_Up * partial_Uq).sum(-2).reshape(p_shape+(1,num//2))
+
+      gamma = (partial_Up * partial_Uq).sum(-2).reshape(b_shape+(1,num//2))
       alpha,beta = U_permuted.square().sum(-2).unsqueeze(-2).split(num//2,-1)
       tau = (beta-alpha) / (2 * gamma+1.0e-20)#prevents 0/0
       t = tau.sign() / (tau.abs() + (1 + tau.square()).sqrt())
@@ -4066,13 +4065,14 @@ class Tensor(MathTrait):
     for _ in range(iterations_per_round:=10): U,V = one_round_jacobi(U,V)
     #extract singular values and sort. construct U from Q
     S,indices = U.square().sum(-2).sqrt().sort(dim=-1,descending=True)
-    U_s = U.gather(-1, indices.unsqueeze(-2).reshape(p_shape+(1,indices.shape[-1])).expand(U.shape))
-    V_s = V.gather(-1, indices.unsqueeze(-2).reshape(p_shape+(1,indices.shape[-1])).expand(V.shape))
-    U,V = U_s/S.unsqueeze(-2),V_s
-    q_dim = Q.shape[0]
-    temp = Tensor.eye(q_dim).reshape((1,)*(self.ndim-2)+(q_dim,q_dim)).expand(p_shape+(q_dim,q_dim)).contiguous()
-    temp[...,0:num,0:num] = U
-    U = Q @ temp
+
+    new_indices = Tensor.arange(num).reshape((1,)*(self.ndim-1)+(num,)).expand(b_shape+2*(num,)).contiguous()
+    new_indices[...,:num] = indices.reshape(b_shape + (1,)+ (U.shape[0],)).expand(b_shape+(num,num))
+    U,V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2),V.gather(-1, new_indices[...,0:num,0:num])
+
+    padded_u = Tensor.eye(max(m,n)).reshape((1,)*(self.ndim-2)+(max(m,n),max(m,n))).expand(b_shape+(max(m,n),max(m,n))).contiguous()
+    padded_u[...,0:num,0:num] = U
+    U = Q @ padded_u
     if not full_matrices: U,V = U[...,0:num],V[...,0:num]
     return (U,S,V) if m >= n else (V,S,U)
 
