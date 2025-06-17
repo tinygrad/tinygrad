@@ -97,7 +97,7 @@ jobs:
         webgpu: 'true'
         llvm: 'true'
     - name: Install autogen support packages
-      run: sudo apt-get install -y --no-install-recommends llvm-14-dev libclang-14-dev
+      run: sudo apt-get install -y --no-install-recommends llvm-18-dev libclang-14-dev
     - name: Verify OpenCL autogen
       run: |
         cp tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
