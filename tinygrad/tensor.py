@@ -4009,22 +4009,23 @@ class Tensor(MathTrait):
   def qr(U): #4,4
   #https://www.cs.utexas.edu/~flame/pubs/p169-joffrain.pdf
   #https://www.netlib.org/lapack/lawnspdf/lawn169.pdf
-    Q = Tensor.eye(U.shape[0]).contiguous()
+    assert len(U.shape) > 1, f"expected two or more dimensions, got {len(U.shape)}"
     R = U.clone()
-    m,n = R.shape
-    for i in range(n):
-      x = R[i:m,i]
-      s = -x[0].sign()
-      a = s * x.square().sum().sqrt()
-      u1 = x[0] - a
-      w = x.clone() / u1
-      w[0] = 1
-      w = w.reshape(x.shape[0],1)
-      tau = -s * u1 / x.square().sum().sqrt()
-      old_R = R[i:m,:].realize()
-      R[i:m,:] = old_R - (tau * w) @ (w.transpose() @ old_R )
-      Q_old = Q[:,i:m].realize()
-      Q[:,i:m] = Q_old -  (Q_old @ w) @ (tau * w.transpose())
+    m,n = R.shape[-2],R.shape[-1]
+    prefix_shape = U.shape[0:len(U.shape)-2]
+    Q = Tensor.eye(m).reshape((1,)*(len(U.shape)-2)+(m,m)).expand(prefix_shape+(m,m)).contiguous() #a,b -> (1,1,1,a,b)
+    for i in range(min(m,n)):
+      x = R[...,i:m,i]
+      s = -x[...,0].sign()
+      a = s * x.square().sum(-1).sqrt()
+      u1 = x[...,0] - a
+      w = x.clone().unsqueeze(-1) / u1.reshape(prefix_shape+(1,1))
+      w[...,0,0] = 1
+      tau = (-s * u1 / x.square().sum(-1).sqrt()).reshape(prefix_shape+(1,1)).expand(w.shape)
+      old_R = R[...,i:m,:].realize()
+      R[...,i:m,:] = old_R - (w * tau) @ (w.transpose(-2,-1) @ old_R )
+      Q_old = Q[...,:,i:m].realize()
+      Q[...,:,i:m] = Q_old -  (Q_old @ w) @ (tau.transpose(-2,-1) * w.transpose(-2,-1))
     return Q,R
   def svd(self,full_matrices=True):
     m,n = self.shape
