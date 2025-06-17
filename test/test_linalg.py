@@ -18,6 +18,25 @@ class TestLinAlg(unittest.TestCase):
       np.testing.assert_allclose(reconstructed_tensor.numpy(), a.numpy() , atol=1e-5, rtol=1e-5)
       np.testing.assert_allclose((U @ U.transpose(-2,-1)).numpy(),u_identity.numpy(),atol=1e-5,rtol=1e-5)
       np.testing.assert_allclose((V @ V.transpose(-2,-1)).numpy(),v_identity.numpy(),atol=1e-5,rtol=1e-5)
+  def test_svd_nonfull(self):
+    sizes = [(2,2),(5,3),(3,5),(2,2,2,2,3)]
+    for size in sizes:
+      a = Tensor.randn(size).realize()
+      U,S,V = Tensor.svd(a,full_matrices=False)
+      b_shape,m,n = size[0:-2],size[-2],size[-1]
+      k = min(m,n)
+      s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,)*len(b_shape)+(k,k)).expand(b_shape+(k,k)))
+      reconstructed_tensor = U @ s_diag @ V.transpose(-2,-1)
+      u_identity = (Tensor.eye(k).reshape((1,)*len(b_shape)+(k,k)).expand(b_shape+(k,k)))
+      v_identity = (Tensor.eye(k).reshape((1,)*len(b_shape)+(k,k)).expand(b_shape+(k,k)))
+
+      np.testing.assert_allclose(reconstructed_tensor.numpy(), a.numpy() , atol=1e-5, rtol=1e-5)
+      if (m < n): #u,v is only orthogonal along the smaller dimension for non full matrices
+        np.testing.assert_allclose((U @ U.transpose(-2,-1)).numpy(),u_identity.numpy(),atol=1e-5,rtol=1e-5)
+        np.testing.assert_allclose((V.transpose(-2,-1) @ V).numpy(),v_identity.numpy(),atol=1e-5,rtol=1e-5)
+      else:
+        np.testing.assert_allclose((U.transpose(-2,-1) @ U).numpy(),u_identity.numpy(),atol=1e-5,rtol=1e-5)
+        np.testing.assert_allclose((V @ V.transpose(-2,-1)).numpy(),v_identity.numpy(),atol=1e-5,rtol=1e-5)
   def test_qr_general(self):
     sizes = [(3,3),(3,6),(6,3),(2,2,2,2,2)]
     for size in sizes:
