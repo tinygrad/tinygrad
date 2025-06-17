@@ -4,18 +4,20 @@ from tinygrad import Tensor
 
 class TestLinAlg(unittest.TestCase):
   def test_svd_general(self): 
-    sizes = [(2,2),(3,3),(3,6),(6,3)]
-    #sizes = [(2,2),(4,2),(2,4),(5,3),(3,5),(2,2,2),(2,2,4),(2,4,2)]
+    sizes = [(2,2),(5,3),(3,5),(2,2,2,2,3)]
     for size in sizes:
       a = Tensor.randn(size).realize()
       U,S,V = Tensor.svd(a)
-      num_single_values= min(size[0],size[1])
-      m,n = size
-      S_diag = (Tensor.eye(min(m,n)) * S).pad(((0,m-num_single_values),(0,n-num_single_values)))
-      reconstructed_tensor = U @ S_diag @ V.transpose()
+      b_shape,m,n = size[0:-2],size[-2],size[-1]
+      k= min(m,n)
+      s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,)*len(b_shape)+(k,k)))
+      s_diag= s_diag.expand(b_shape+(k,k)).pad(tuple([(0,0) for i in range(len(size)-2)] + [(0,m-k), (0,n-k)]))
+      reconstructed_tensor = U @ s_diag @ V.transpose(-2,-1)
+      u_identity = (Tensor.eye(m).reshape((1,)*len(b_shape)+(m,m)).expand(b_shape+(m,m)))
+      v_identity = (Tensor.eye(n).reshape((1,)*len(b_shape)+(n,n)).expand(b_shape+(n,n)))
       np.testing.assert_allclose(reconstructed_tensor.numpy(), a.numpy() , atol=1e-5, rtol=1e-5)
-      np.testing.assert_allclose((U @ U.transpose()).numpy(),Tensor.eye(m).numpy(),atol=1e-5,rtol=1e-5)
-      np.testing.assert_allclose((V @ V.transpose()).numpy(),Tensor.eye(n).numpy(),atol=1e-5,rtol=1e-5)
+      np.testing.assert_allclose((U @ U.transpose(-2,-1)).numpy(),u_identity.numpy(),atol=1e-5,rtol=1e-5)
+      np.testing.assert_allclose((V @ V.transpose(-2,-1)).numpy(),v_identity.numpy(),atol=1e-5,rtol=1e-5)
   def test_qr_general(self):
     sizes = [(3,3),(3,6),(6,3),(2,2,2,2,2)]
     for size in sizes:
