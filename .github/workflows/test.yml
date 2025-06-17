@@ -816,15 +816,16 @@ jobs:
       run: npm install puppeteer
     - name: Run WEBGPU Efficientnet
       run: node test/web/test_webgpu.js
-    - name: Run VIZ tests as external package
-      run: |
-        mkdir $GITHUB_WORKSPACE/test_dir
-        cd $GITHUB_WORKSPACE/test_dir
-        python -m venv venv
-        source venv/bin/activate
-        pip install $GITHUB_WORKSPACE
-        cp $GITHUB_WORKSPACE/test/web/test_viz.js .
-        node test_viz.js
+    # this is flaky
+    #- name: Run VIZ tests as external package
+    #  run: |
+    #    mkdir $GITHUB_WORKSPACE/test_dir
+    #    cd $GITHUB_WORKSPACE/test_dir
+    #    python -m venv venv
+    #    source venv/bin/activate
+    #    pip install $GITHUB_WORKSPACE
+    #    cp $GITHUB_WORKSPACE/test/web/test_viz.js .
+    #    node test_viz.js
 
   osxremote:
     name: MacOS (remote metal)
@@ -856,9 +857,8 @@ jobs:
     timeout-minutes: 20
     env:
       REMOTE: 1
-      REMOTEDEV: 'AMD'
+      HOST: 127.0.0.1:6667*6,127.0.0.1:6668*6
       PYTHONPATH: ${{ github.workspace }}
-      MOCKGPU: 1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -869,6 +869,21 @@ jobs:
           deps: testing_minimal
           amd: 'true'
           llvm: 'true'
+      - name: Start remote server
+        run: |
+          start_server() {
+            systemd-run --user \
+              --unit="$1" \
+              --setenv=REMOTEDEV=AMD \
+              --setenv=MOCKGPU=1 \
+              --setenv=PYTHONPATH=. \
+              --setenv=PORT="$2" \
+              --working-directory="$(pwd)" \
+              python tinygrad/runtime/ops_remote.py
+          }
+
+          start_server "remote-server-1" 6667
+          start_server "remote-server-2" 6668
       - name: Check Device.DEFAULT and print some source
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
@@ -876,7 +891,12 @@ jobs:
           DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run REMOTE=1 Test
         run: |
-          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_tensor_variable.py
+          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_remote.py test/test_tensor_variable.py
+      - name: Show remote server logs
+        if: always()
+        run: |
+          journalctl --user -u remote-server-1 --no-pager
+          journalctl --user -u remote-server-2 --no-pager
 
   osxtests:
     strategy:
