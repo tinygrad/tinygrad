@@ -4301,13 +4301,12 @@ class Tensor(MathTrait):
     Based off https://www.quantstart.com/articles/QR-Decomposition-with-Python-and-NumPy/
     Args:
         self (Tensor): The input matrix (TinyGrad Tensor).
-        tol (float): Tolerance for convergence.
     """
     R = self.clone()
     n = R.shape[0]
     I = Tensor.eye(n, dtype=R.dtype)
     Q = Tensor.eye(n, dtype=self.dtype)
-    for k in range(n-1):
+    for k in range(int(n-1)):
       x = R[k:, k]
       u = x - x[0].sign() * x.norm().clamp(min_=1.0e-10) * I[k:,k]
       v = u/u.norm().clamp(min_=1.0e-10)
@@ -4317,13 +4316,12 @@ class Tensor(MathTrait):
       R = Q_t @ R
     return Q.transpose(), R
 
-  def eig(self, max_iter=20)-> tuple[Tensor, Tensor]:
+  def eig(self, max_iter=30)-> tuple[Tensor, Tensor]:
     """
     Compute the eigenvalues and eigenvectors of a matrix using QR algorithm.
     Args:
         self (Tensor): The input matrix (TinyGrad Tensor).
         max_iter (int): Maximum number of iterations.
-        tol (float): Tolerance for convergence.
     Returns:
         E (Tensor): Eigen values.
         V (Tensor): Eigen vectors
@@ -4338,14 +4336,14 @@ class Tensor(MathTrait):
 
   @staticmethod
   def _orthonormal_basis(Q: Tensor, dim: int, sorted_indices=None) -> Tensor:
-    k = Q.shape[1]
-    full = Tensor.eye(dim, dtype=Q.dtype)
+    k:int = Q.shape[1]
+    full = Tensor.eye(int(dim), dtype=Q.dtype)
     if sorted_indices is not None: full[:, :k] = Q[:, sorted_indices]
     else:full[:, :k] = Q
     # Complete the basis via Gram–Schmidt (Householder‑style two‑projection).
-    for i in range(k, dim):
-      v = Tensor.eye(dim, dtype=Q.dtype)[:, i]
-      for j in range(i):
+    for i in range(k, int(dim)):
+      v = Tensor.eye(int(dim), dtype=Q.dtype)[:, i]
+      for j in range(int(i)):
         u = full[:, j]
         v -= 2 * (u @ v) * u
       full[:, i] = v / v.norm().clamp(min_=1.0e-10)
