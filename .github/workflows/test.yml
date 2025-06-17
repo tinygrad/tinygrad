@@ -924,6 +924,9 @@ jobs:
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == '${{ matrix.backend }}'.upper(), Device.DEFAULT"
           DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
+      - name: print llvm
+        if: matrix.backend == 'llvm'
+        run: DEBUG=7 python3 test/test_disassembly.py
       - name: Run pytest (${{ matrix.backend }})
         run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
       - name: Run process replay tests
@@ -931,9 +934,6 @@ jobs:
       - name: Run macOS-specific unit test
         if: matrix.backend == 'cpu'
         run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated
-      - name: print llvm
-        if: matrix.backend == 'llvm'
-        run: DEBUG=7 python3 test/test_disassembly.py
 
 # ****** Windows Tests ******
 
