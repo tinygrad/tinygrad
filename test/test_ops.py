@@ -3055,7 +3055,7 @@ class TestLinAlg(unittest.TestCase):
         Tensor([[9.0, 10.0], [11.0, 12.0], [5, 35]])
     ]
     for tensor in tensors:
-      for full_matrices in [True]:
+      for full_matrices in [True, False]:
         U, S, Vt = tensor.svd(full_matrices=full_matrices)
         np_U, np_S, np_Vt = np.linalg.svd(tensor.numpy(), full_matrices=full_matrices)
         # Using the absolute value, due to sign differences between numpy and tinygrad implementations
@@ -3063,6 +3063,9 @@ class TestLinAlg(unittest.TestCase):
           np.testing.assert_allclose(U.abs().numpy(), np.abs(np_U), rtol=1e-4, atol=0.8)
           np.testing.assert_allclose(S.abs().numpy(), np.abs(np_S), rtol=1e-4, atol=0.5)
           np.testing.assert_allclose(Vt.abs().numpy(), np.abs(np_Vt), rtol=1e-4, atol=0.8)
+          # Compare U, s, VT to compare accuracy with abs, but we will confirm A = U @ S @ Vt correctly reconstructs A by making sure the signs are correct
+          reconstructed_tensor = U @ S.diag() @ Vt
+          np.testing.assert_allclose(reconstructed_tensor.sign().numpy(), tensor.sign().numpy())
         else:
           np.testing.assert_allclose(U.abs().numpy(), np.abs(np_U), rtol=1e-4, atol=1e-4)
           np.testing.assert_allclose(S.abs().numpy(), np.abs(np_S), rtol=1e-4, atol=1e-4)

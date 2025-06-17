@@ -4289,10 +4289,9 @@ class Tensor(MathTrait):
     • If `t` is 1-D → return a square matrix with `t` on the main diagonal.
     • If `t` is 2-D → return a 1-D tensor containing the main diagonal of `t`.
     """
-    if self.ndim == 1: return Tensor.eye(int(self.shape[0]), dtype=self.dtype) * self
-    if self.ndim == 2:
-      n: int = min(self.shape)
-      return (self[:n, :n] * Tensor.eye(n, dtype=self.dtype)).sum(axis=1)
+    n = int(min(self.shape))
+    if self.ndim == 1: return Tensor.eye(int(sn), dtype=self.dtype) * self
+    if self.ndim == 2: return (self[:n, :n] * Tensor.eye(n, dtype=self.dtype)).sum(axis=1)
     raise ValueError("diag expects a 1-D or 2-D tensor")
 
   def qr_decompose(self) -> tuple[Tensor, Tensor]:
@@ -4337,12 +4336,12 @@ class Tensor(MathTrait):
   @staticmethod
   def _orthonormal_basis(Q: Tensor, dim: int, sorted_indices: Tensor | None = None) -> Tensor:
     k = int(Q.shape[1])
-    full = Tensor.eye(int(dim), dtype=Q.dtype)
+    full = Tensor.eye(dim, dtype=Q.dtype)
     if sorted_indices is not None: full[:, :k] = Q[:, sorted_indices]
     else:full[:, :k] = Q
     # Complete the basis via Gram–Schmidt (Householder‑style two‑projection).
-    for i in range(k, int(dim)):
-      v = Tensor.eye(int(dim), dtype=Q.dtype)[:, i]
+    for i in range(k, dim):
+      v = Tensor.eye(dim, dtype=Q.dtype)[:, i]
       for j in range(int(i)):
         u = full[:, j]
         v -= 2 * (u @ v) * u
@@ -4367,7 +4366,7 @@ class Tensor(MathTrait):
     eigvals_AtA, V = AtA.eig()
     U = AAt.eig()[1]
     eigvals_AtA, sorted_indices = eigvals_AtA.sort(descending=True)
-    M, N = A.shape
+    M, N = map(int, A.shape)
     K = int(min(M, N))
     if compute_uv:
       # Pad U and V to full matrices
