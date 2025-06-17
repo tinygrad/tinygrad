@@ -3,7 +3,6 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat
 from tinygrad.renderer import Renderer
 from tinygrad import dtypes
 from tinygrad.dtype import DType, PtrDType, truncate
-from tinygrad.helpers import flatten
 from functools import cached_property
 import struct, copy, sys
 
@@ -14,8 +13,12 @@ def to_hex(x, dt:DType) -> str:
   return cast(str, int(truncate[dt](x)))
 
 base_rewrite = PatternMatcher([
-  # load/store
-  (UPat(Ops.LOAD, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[x.src[0]]}]"),
+  # local/global load
+  (UPat(Ops.LOAD, src=(UPat.var("x"),), name="ld"), lambda ctx,x,ld:
+   f"{ctx.ops[ld.dtype][ld.op]} {ctx[ld]}, {ctx[x]}" if not ctx.is_reg(ctx.r[x]) else None),
+  (UPat(Ops.LOAD, src=(UPat.var("x"),), name="ld"), lambda ctx,x,ld: f"{ctx.ops[ld.dtype][ld.op]} {ctx[ld]}, [{ctx[x]}]"),
+  # register move
+  (UPat(Ops.COPY, src=(UPat.var("x"),), name="cp"), lambda ctx,x,cp: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[cp]}, {ctx[x]}"),
   # accumulator
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}" if ctx[x] != ctx[x.src[1]] else None),
@@ -83,10 +86,6 @@ class AsmRenderer(Renderer):
   def render_imm(self, imm:str): raise NotImplementedError("arch specific")
   def render_mem(self, sz:int): raise NotImplementedError("arch specific")
   def render_reg(self, reg:str, dt:DType, alias:bool=False): raise NotImplementedError("arch specific")
-  def render_spill(self, x:UOp): raise NotImplementedError("arch specific")
-  def render_fill(self, x:UOp, reg:str) -> str:
-    op = Ops.ASSIGN if self.is_reg(self.r[x]) else Ops.LOAD
-    return f"{self.ops[x.dtype][op]} {self.render_reg(reg, x.dtype, op is Ops.LOAD)}, {self[x]}"
   #def two_address(self, x:UOp, y:UOp) -> str: return cast(str, l)+"\n" if (l:=self.string_rewrite.rewrite(x.assign(y), self)) is not None else ""
   def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
   def reg_class(self, x:UOp) -> list[str]: return self.regs[x.dtype.scalar()]
@@ -139,7 +138,7 @@ class AsmRenderer(Renderer):
         self.stack_size = offset + spilled.dtype.itemsize
         mem[spilled] = self.render_mem(offset)
         inst = spill_place.get(spilled, spilled)
-        inst_map[inst].append(self.render_spill(spilled))
+        inst_map[inst].append(self.string_rewrite.rewrite(spilled.store(), ctx=self))
       loc[spilled] = mem[spilled]
       return live.pop(spilled)
 
@@ -155,7 +154,9 @@ class AsmRenderer(Renderer):
       if x in loc:
         # if x already in reg and we move to another reg the spill place changes
         if self.is_reg(loc[x]): spill_place[x] = u
-        inst_map[u].append(self.render_fill(x, ret))
+        move = UOp(Ops.COPY, x.dtype, (x,)) if self.is_reg(self.r[x]) else x.load()
+        loc[move] = ret
+        inst_map[u].append(self.string_rewrite.rewrite(move, ctx=self))
       if ret in self.callee_saved and ret not in callee_saved: callee_saved.append(ret)
       return ret
 
@@ -239,14 +240,18 @@ arm64_cast_suffix = {1: "b", 2: "h", 4: "w"}
 def arm64_cflag(x:UOp) -> str: return "ne" if x.op is Ops.CMPNE else "lo" if x.src[0].dtype in dtypes.uints else "lt"
 
 arm64_rewrite = PatternMatcher([
-  # loads/stores/movs
+  # const load
+  (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"ldr {ctx[x]}, ={ctx[idx][1:]}"),
+  # global load
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"{ctx.two_address(x, alt)}tst {ctx[mask]}, #1\n"
    f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx.render_reg(ctx.r[x], x.dtype, True)}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
-  (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"ldr {ctx[x]}, ={ctx[idx][1:]}"),
   (UPat(Ops.LOAD, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx.render_reg(ctx.r[x], x.dtype, True)}, [{ctx[x.src[0]]}]"),
-  (UPat(Ops.STORE, name="x"),
-   lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} {ctx.render_reg(ctx.r[ctx.bypass(x.src[1])], x.src[1].dtype, True)}, [{ctx[x.src[0]]}]"),
+  # local/global store
+  (UPat(Ops.STORE, src=(UPat.var("x")), name="st"), lambda ctx,x,st:
+   f"{ctx.ops[x.dtype][st.op]} {ctx.render_reg(ctx.r[ctx.bypass(x)], x.dtype, True)}, {ctx.mem[ctx.bypass(x)]}"),
+  (UPat(Ops.STORE, name="x"), lambda ctx,x:
+   f"{ctx.ops[x.src[1].dtype][x.op]} {ctx.render_reg(ctx.r[ctx.bypass(x.src[1])], x.src[1].dtype, True)}, [{ctx[x.src[0]]}]"),
   # devectorize/vectorize
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx.r[x.src[0]]}.{arm64_vec[x.dtype.itemsize]}[{x.arg[0]}]"),
   (UPat(Ops.VECTORIZE, name="x"),
@@ -281,9 +286,9 @@ def arm64_load_consts(x:UOp) -> UOp|None:
     if s.op is Ops.CONST:
       # NOTE: apparently just loading the consts works cause the assembler generates the correct instructions
       if s.dtype is dtypes.float16: s = s.load(dtype=dtypes.int16).bitcast(dtypes.float16)
-      if s.dtype is dtypes.float32: s = s.load(dtype=dtypes.int32).bitcast(dtypes.float32)
+      elif s.dtype is dtypes.float32: s = s.load(dtype=dtypes.int32).bitcast(dtypes.float32)
       elif s.dtype is dtypes.float64: s = s.load(dtype=dtypes.int64).bitcast(dtypes.float64)
-      elif abs(s.arg) > (2 ** 12) - 1: s = s.load(dtype=s.dtype)
+      elif abs(int(truncate[s.dtype](s.arg))) > (2 ** 12) - 1: s = s.load(dtype=s.dtype)
     nsrc.append(s)
   return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
 
@@ -318,6 +323,7 @@ class Arm64Renderer(AsmRenderer):
   regs = arm64_regs
 
   def constraints(self, u:UOp, s:UOp|None=None) -> list[str]:
+    if (base:=super().constraints(u, s)): return base
     if s is not None: return self.reg_class(s)
     # stack args are offset by 8
     if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
@@ -330,8 +336,6 @@ class Arm64Renderer(AsmRenderer):
     if dt.count > 1 and not alias: return f"{reg}.{dt.count}{arm64_vec[dt.scalar().itemsize]}"
     if dtypes.is_float(dt): return arm64_reg_map[reg][dt.itemsize]
     return reg if dt.itemsize == 8 else arm64_reg_map[reg][max(dt.itemsize, dtypes.int32.itemsize)]
-  def render_spill(self, x:UOp) -> str:
-    return f"{self.ops[x.dtype][Ops.STORE]} {self.render_reg(self.r[x], x.dtype, True)}, {self.mem[x]}"
   def render_kernel(self, name:str, kernel:list[str], stack_size:int, callee_saved:list[str]) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", "stp x29, x30, [sp, #-16]!", "mov x29, sp", f"sub sp, sp, #{stack_size}"] + \
                       kernel + [f"add sp, sp, #{stack_size}", "ldp x29, x30, [sp], #16", "ret", "\n"])
@@ -391,11 +395,14 @@ def float_cast(x:DType, s:DType) -> str:
 x86_rewrite = PatternMatcher([
   # define local points to the start of the next stack slot, NOTE: unaligned, could cause issues
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"mov {ctx[x]}, rsp\nadd {ctx[x]}, {ctx.stack_size}"),
-  # loads/stores
+  # const load
+  (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[idx]}"),
+  # gated load
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"{ctx.two_address(x, alt)}test {ctx[mask]}, 1\n"
    f"je .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
-  (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[idx]}"),
+  # local/global store
+  (UPat(Ops.STORE, src=(UPat.var("x"),), name="st"), lambda ctx,x,st: f"{ctx.ops[x.dtype][st.op]} {ctx.mem[x]}, {ctx[x]}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x:
    f"{ctx.ops[x.src[1].dtype][x.op]} {size_prefix[x.src[1].dtype.itemsize]} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
   # devectorize
@@ -524,7 +531,6 @@ class X86Renderer(AsmRenderer):
   def render_mem(self, sz:int) -> str: return f"[rsp + {sz}]"
   def render_reg(self, reg:str, dt:DType, alias:bool=False) -> str:
     return reg if dt.itemsize == 8 or dtypes.is_float(dt) else x86_reg_map[reg][dt.itemsize]
-  def render_spill(self, x:UOp) -> str: return f"{self.ops[x.dtype][Ops.STORE]} {self.mem[x]}, {self[x]}"
   def render_kernel(self, name:str, kernel:list[str], stack_size:int, callee_saved:list[str]) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:"] + ["push rbp", "mov rbp, rsp"] + [f"push {r}" for r in reversed(callee_saved)] +
                     [f"sub rsp, {stack_size}"] + kernel + [f"add rsp, {stack_size}"] + [f"pop {r}" for r in callee_saved] + ["pop rbp", "ret", "\n"])
