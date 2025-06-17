@@ -4006,9 +4006,7 @@ class Tensor(MathTrait):
     masked_weight = weight if ignore_index is None else weight * (Y != ignore_index)
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
-  def qr(U): #4,4
-  #https://www.cs.utexas.edu/~flame/pubs/p169-joffrain.pdf
-  #https://www.netlib.org/lapack/lawnspdf/lawn169.pdf
+  def qr(U):
     assert len(U.shape) > 1, f"expected two or more dimensions, got {len(U.shape)}"
     R = U.clone()
     m,n = R.shape[-2],R.shape[-1]
@@ -4027,53 +4025,56 @@ class Tensor(MathTrait):
       Q_old = Q[...,:,i:m].realize()
       Q[...,:,i:m] = Q_old -  (Q_old @ w) @ (tau.transpose(-2,-1) * w.transpose(-2,-1))
     return Q,R
-  def svd(self,full_matrices=True):
-    m,n = self.shape
-    #preprocess the matrix
-    Q,R = (Tensor.qr(self) if m >= n else Tensor.qr(self.transpose()))
-    num = min(m,n)  
-    U = R.triu().shrink(((0,num),(0,num))).contiguous().realize()
-    V = Tensor.eye(num).cast(U.dtype).contiguous().realize()
-    iterations_per_round,max_num_iterations = 10,10
-    #prepare round robin pairing
-    permute = Tensor.arange(0,num)
-    permute[num//2:num] = permute[num//2:num].flip(0)
-    def one_round_jacobi(U,V):
-      #compute the jacobi rotations for each pairing. TODO:accomodate odd numbered pairs
-      U_permuted,runoff_U = (U[:,permute].split(num-1,1)) if num%2==1 else (U[:,permute],-1)
-      partial_Up,partial_Uq = U_permuted.split(num//2,1)
+def svd(self,full_matrices=True):
+  assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
+  m,n = self.shape[-2],self.shape[-1]
+  p_shape = self.shape[:-2]
+  #preprocess the matrix
+  Q,R = (qr(self) if m >= n else qr(self.transpose(-2,-1)))
+  num = min(m,n)
+  U = R.triu().shrink(tuple([(0,self.shape[i]) for i in range(self.ndim-2)] + [(0,num), (0,num)])).contiguous()
+  # V = Tensor.eye(num).cast(U.dtype).contiguous()
+  V=Tensor.eye(num).cast(self.dtype).reshape((1,)*(self.ndim-2)+(num,num)).expand(p_shape+(m,m)).contiguous()
+  #prepare round robin pairing
+  permute = Tensor.arange(0,num)
+  permute[num//2:num] = permute[num//2:num].flip(0)
+  def one_round_jacobi(U,V):
+    #compute the jacobi rotations for each pairing
+    U_permuted,runoff_U = (U[...,permute].split(num-1,-1)) if num%2==1 else (U[...,permute],None)
+    partial_Up,partial_Uq = U_permuted.split(num//2,-1)
+    gamma = (partial_Up * partial_Uq).sum(-2).reshape(p_shape+(1,num//2))
+    alpha,beta = U_permuted.square().sum(-2).unsqueeze(-2).split(num//2,-1)
+    tau = (beta-alpha) / (2 * gamma+1.0e-20)#prevents 0/0
+    t = tau.sign() / (tau.abs() + (1 + tau.square()).sqrt())
+    c = 1 / (1+t.square()).sqrt()
+    s = c * t
+    #apply the rotations
+    inverse_permute = Tensor.zeros(num,dtype=dtypes.int).contiguous()
+    inverse_permute[permute] = Tensor.arange(num).contiguous()
 
-      gamma = (partial_Up * partial_Uq).sum(0)
-      alpha,beta = U_permuted.square().sum(0).split(num//2,0)
-      tau = (beta-alpha) / (2 * gamma+1.0e-30)#prevents 0/0
-      t = tau.sign() / (tau.abs() + (1  + tau.square()).sqrt())
-      c = 1 / (1+t.square()).sqrt()
-      s = c * t
-      #apply the rotations
-      inverse_permute = Tensor.zeros(num,dtype=dtypes.int).contiguous()
-      inverse_permute[permute] = Tensor.arange(num).contiguous()
-
-      V_permuted,runoff_V = (V[:,permute].split(num-1,1)) if num%2==1 else (V[:,permute],-1)
-      V_left,V_right = V_permuted.split(num//2,1)
-      V_left,V_right = c * V_left - s * V_right, s * V_left + c * V_right
-      V = V_left.cat(V_right.cat(runoff_V,dim=1) if num%2==1 else V_right,dim=1)[:,inverse_permute].realize()
-      
-      U_left,U_right  =  c * partial_Up - s * partial_Uq, s * partial_Up + c * partial_Uq
-      U = U_left.cat( U_right.cat(runoff_U,dim=1) if num%2==1 else U_right ,dim=1)[:,inverse_permute].realize()
-      #prepare the next round robin pairings
-      if num%2==1: permute[0:num] = ((permute[0:num] - 1) % (num))
-      else: permute[1:num] = ((permute[1:num] - 2) % (num - 1)) + 1
-      return U,V
-    for i in range(iterations_per_round):
-      U,V = one_round_jacobi(U,V)
-    S = U.square().sum(0).sqrt()
-    S,indices = S.sort(descending=True) #torch returns singular values in descending order
-    U,V = U[:,indices]/S,V[:,indices] 
-    temp = Tensor.eye(Q.shape[0]).contiguous()
-    temp[0:U.shape[0],0:U.shape[0]] = U
-    U = temp
-    U = Q @ U
-    return (U,S,V) if m >= n else (V,S,U)
+    V_permuted,runoff_V = (V[...,permute].split(num-1,-1)) if num%2==1 else (V[...,permute],None)
+    V_left,V_right = V_permuted.split(num//2,-1)
+    V_left,V_right = c * V_left - s * V_right, s * V_left + c * V_right
+    V = V_left.cat(V_right.cat(runoff_V,dim=-1) if num%2==1 else V_right,dim=-1)[...,inverse_permute].realize()
+    
+    U_left,U_right  =  c * partial_Up - s * partial_Uq, s * partial_Up + c * partial_Uq
+    U = U_left.cat(U_right.cat(runoff_U,dim=-1) if num%2==1 else U_right,dim=-1)[...,inverse_permute].realize()
+    #prepare the next round robin pairings
+    if num%2==1: permute[0:num] = ((permute[0:num] - 1) % (num))
+    else: permute[1:num] = ((permute[1:num] - 2) % (num - 1)) + 1
+    return U,V
+  for _ in range(iterations_per_round:=4): U,V = one_round_jacobi(U,V)
+  #extract singular values and sort. construct U from Q
+  S,indices = U.square().sum(-2).sqrt().sort(dim=-1,descending=True)
+  U_s = U.gather(-1, indices.unsqueeze(-2).reshape(p_shape+(1,indices.shape[-1])).expand(U.shape))
+  V_s = V.gather(-1, indices.unsqueeze(-2).reshape(p_shape+(1,indices.shape[-1])).expand(V.shape))
+  U,V = U_s/S.unsqueeze(-2),V_s
+  q_dim = Q.shape[0]
+  temp = Tensor.eye(q_dim).reshape((1,)*(self.ndim-2)+(q_dim,q_dim)).expand(p_shape+(q_dim,q_dim)).contiguous()
+  temp[...,0:num,0:num] = U
+  U = Q @ temp
+  if not full_matrices: U,V = U[...,0:num],V[...,0:num]
+  return (U,S,V) if m >= n else (V,S,U)
 
   # ***** Tensor Properties *****
 
