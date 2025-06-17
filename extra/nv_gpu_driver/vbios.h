@@ -51,6 +51,91 @@ typedef struct
 #define FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3_CMD_FRTS (0x15)
 #define FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3_CMD_SB   (0x19)
 
+#define BIT_HEADER_ID                     0xB8FF
+#define BIT_HEADER_SIGNATURE              0x00544942  // "BIT\0"
+#define BIT_HEADER_SIZE_OFFSET            8
+
+struct BIT_HEADER_V1_00
+{
+    unsigned short Id;
+    unsigned int Signature;
+    unsigned short BCD_Version;
+    unsigned char HeaderSize;
+    unsigned char TokenSize;
+    unsigned char TokenEntries;
+    unsigned char HeaderChksum;
+};
+#define BIT_HEADER_V1_00_FMT "1w1d1w4b"
+typedef struct BIT_HEADER_V1_00 BIT_HEADER_V1_00;
+
+struct BIT_TOKEN_V1_00
+{
+    unsigned char TokenId;
+    unsigned char DataVersion;
+    unsigned short DataSize;
+    unsigned int DataPtr;
+};
+
+#define BIT_TOKEN_V1_00_SIZE_6     6U
+#define BIT_TOKEN_V1_00_SIZE_8     8U
+
+#define BIT_TOKEN_V1_00_FMT_SIZE_6 "2b2w"
+#define BIT_TOKEN_V1_00_FMT_SIZE_8 "2b1w1d"
+typedef struct BIT_TOKEN_V1_00 BIT_TOKEN_V1_00;
+
+#define BIT_TOKEN_BIOSDATA          0x42
+
+// structure for only version info from BIT_DATA_BIOSDATA_V1 and BIT_DATA_BIOSDATA_V2
+typedef struct
+{
+    unsigned int Version;     // BIOS Binary Version Ex. 5.40.00.01.12 = 0x05400001
+    unsigned char OemVersion;  // OEM Version Number  Ex. 5.40.00.01.12 = 0x12
+} BIT_DATA_BIOSDATA_BINVER;
+
+#define BIT_DATA_BIOSDATA_VERSION_1         0x1
+#define BIT_DATA_BIOSDATA_VERSION_2         0x2
+
+#define BIT_DATA_BIOSDATA_BINVER_FMT "1d1b"
+#define BIT_DATA_BIOSDATA_BINVER_SIZE_5    5
+
+#define BIT_TOKEN_FALCON_DATA       0x70
+
+typedef struct
+{
+    unsigned int FalconUcodeTablePtr;
+} BIT_DATA_FALCON_DATA_V2;
+
+#define BIT_DATA_FALCON_DATA_V2_4_FMT       "1d"
+#define BIT_DATA_FALCON_DATA_V2_SIZE_4      4
+
+typedef struct
+{
+    unsigned char Version;
+    unsigned char HeaderSize;
+    unsigned char EntrySize;
+    unsigned char EntryCount;
+    unsigned char DescVersion;
+    unsigned char DescSize;
+} FALCON_UCODE_TABLE_HDR_V1;
+
+#define FALCON_UCODE_TABLE_HDR_V1_VERSION   1
+#define FALCON_UCODE_TABLE_HDR_V1_SIZE_6    6
+#define FALCON_UCODE_TABLE_HDR_V1_6_FMT     "6b"
+
+typedef struct
+{
+    unsigned char ApplicationID;
+    unsigned char TargetID;
+    unsigned int DescPtr;
+} FALCON_UCODE_TABLE_ENTRY_V1;
+
+#define FALCON_UCODE_TABLE_ENTRY_V1_VERSION             1
+#define FALCON_UCODE_TABLE_ENTRY_V1_SIZE_6              6
+#define FALCON_UCODE_TABLE_ENTRY_V1_6_FMT               "2b1d"
+
+#define FALCON_UCODE_ENTRY_APPID_FIRMWARE_SEC_LIC       0x05
+#define FALCON_UCODE_ENTRY_APPID_FWSEC_DBG              0x45
+#define FALCON_UCODE_ENTRY_APPID_FWSEC_PROD             0x85
 
 #define NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_VERSION                0:0
 #define NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_VERSION_UNAVAILABLE    0x00

@@ -1,5 +1,4 @@
 # mypy: ignore-errors
-# mypy: ignore-errors
 # -*- coding: utf-8 -*-
 #
 # TARGET arch is: ['-DRPC_MESSAGE_STRUCTURES', '-DRPC_STRUCTURES', '-include', '/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/common/sdk/nvidia/inc/nvtypes.h', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/generated', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/common/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/interface/', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/inc/kernel', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/inc/libraries', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/arch/nvalloc/common/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/kernel-open/nvidia-uvm', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/kernel-open/common/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/common/sdk/nvidia/inc', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/nvidia/arch/nvalloc/unix/include', '-I/tmp/open-gpu-kernel-modules-81fe4fb417c8ac3b9bdcc1d56827d116743892a5/src/common/sdk/nvidia/inc/ctrl']
@@ -6577,6 +6576,31 @@ VBIOS_H = True # macro
 FALCON_APPLICATION_INTERFACE_ENTRY_ID_DMEMMAPPER = (0x4) # macro
 FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3_CMD_FRTS = (0x15) # macro
 FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3_CMD_SB = (0x19) # macro
+BIT_HEADER_ID = 0xB8FF # macro
+BIT_HEADER_SIGNATURE = 0x00544942 # macro
+BIT_HEADER_SIZE_OFFSET = 8 # macro
+BIT_HEADER_V1_00_FMT = "1w1d1w4b" # macro
+BIT_TOKEN_V1_00_SIZE_6 = 6 # macro
+BIT_TOKEN_V1_00_SIZE_8 = 8 # macro
+BIT_TOKEN_V1_00_FMT_SIZE_6 = "2b2w" # macro
+BIT_TOKEN_V1_00_FMT_SIZE_8 = "2b1w1d" # macro
+BIT_TOKEN_BIOSDATA = 0x42 # macro
+BIT_DATA_BIOSDATA_VERSION_1 = 0x1 # macro
+BIT_DATA_BIOSDATA_VERSION_2 = 0x2 # macro
+BIT_DATA_BIOSDATA_BINVER_FMT = "1d1b" # macro
+BIT_DATA_BIOSDATA_BINVER_SIZE_5 = 5 # macro
+BIT_TOKEN_FALCON_DATA = 0x70 # macro
+BIT_DATA_FALCON_DATA_V2_4_FMT = "1d" # macro
+BIT_DATA_FALCON_DATA_V2_SIZE_4 = 4 # macro
+FALCON_UCODE_TABLE_HDR_V1_VERSION = 1 # macro
+FALCON_UCODE_TABLE_HDR_V1_SIZE_6 = 6 # macro
+FALCON_UCODE_TABLE_HDR_V1_6_FMT = "6b" # macro
+FALCON_UCODE_TABLE_ENTRY_V1_VERSION = 1 # macro
+FALCON_UCODE_TABLE_ENTRY_V1_SIZE_6 = 6 # macro
+FALCON_UCODE_TABLE_ENTRY_V1_6_FMT = "2b1d" # macro
+FALCON_UCODE_ENTRY_APPID_FIRMWARE_SEC_LIC = 0x05 # macro
+FALCON_UCODE_ENTRY_APPID_FWSEC_DBG = 0x45 # macro
+FALCON_UCODE_ENTRY_APPID_FWSEC_PROD = 0x85 # macro
 # NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_VERSION = 0 : 0 # macro
 NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_VERSION_UNAVAILABLE = 0x00 # macro
 NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_VERSION_AVAILABLE = 0x01 # macro
@@ -6621,6 +6645,79 @@ struct_c__SA_FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3._fields_ = [
 ]
 
 FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3 = struct_c__SA_FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3
+class struct_BIT_HEADER_V1_00(Structure):
+    pass
+
+struct_BIT_HEADER_V1_00._pack_ = 1 # source:False
+struct_BIT_HEADER_V1_00._fields_ = [
+    ('Id', ctypes.c_uint16),
+    ('Signature', ctypes.c_uint32),
+    ('BCD_Version', ctypes.c_uint16),
+    ('HeaderSize', ctypes.c_ubyte),
+    ('TokenSize', ctypes.c_ubyte),
+    ('TokenEntries', ctypes.c_ubyte),
+    ('HeaderChksum', ctypes.c_ubyte),
+    ('PADDING_1', ctypes.c_ubyte * 2),
+]
+
+BIT_HEADER_V1_00 = struct_BIT_HEADER_V1_00
+class struct_BIT_TOKEN_V1_00(Structure):
+    pass
+
+struct_BIT_TOKEN_V1_00._pack_ = 1 # source:False
+struct_BIT_TOKEN_V1_00._fields_ = [
+    ('TokenId', ctypes.c_ubyte),
+    ('DataVersion', ctypes.c_ubyte),
+    ('DataSize', ctypes.c_uint16),
+    ('DataPtr', ctypes.c_uint32),
+]
+
+BIT_TOKEN_V1_00 = struct_BIT_TOKEN_V1_00
+class struct_c__SA_BIT_DATA_BIOSDATA_BINVER(Structure):
+    pass
+
+struct_c__SA_BIT_DATA_BIOSDATA_BINVER._pack_ = 1 # source:False
+struct_c__SA_BIT_DATA_BIOSDATA_BINVER._fields_ = [
+    ('Version', ctypes.c_uint32),
+    ('OemVersion', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+BIT_DATA_BIOSDATA_BINVER = struct_c__SA_BIT_DATA_BIOSDATA_BINVER
+class struct_c__SA_BIT_DATA_FALCON_DATA_V2(Structure):
+    pass
+
+struct_c__SA_BIT_DATA_FALCON_DATA_V2._pack_ = 1 # source:False
+struct_c__SA_BIT_DATA_FALCON_DATA_V2._fields_ = [
+    ('FalconUcodeTablePtr', ctypes.c_uint32),
+]
+
+BIT_DATA_FALCON_DATA_V2 = struct_c__SA_BIT_DATA_FALCON_DATA_V2
+class struct_c__SA_FALCON_UCODE_TABLE_HDR_V1(Structure):
+    pass
+
+struct_c__SA_FALCON_UCODE_TABLE_HDR_V1._pack_ = 1 # source:False
+struct_c__SA_FALCON_UCODE_TABLE_HDR_V1._fields_ = [
+    ('Version', ctypes.c_ubyte),
+    ('HeaderSize', ctypes.c_ubyte),
+    ('EntrySize', ctypes.c_ubyte),
+    ('EntryCount', ctypes.c_ubyte),
+    ('DescVersion', ctypes.c_ubyte),
+    ('DescSize', ctypes.c_ubyte),
+]
+
+FALCON_UCODE_TABLE_HDR_V1 = struct_c__SA_FALCON_UCODE_TABLE_HDR_V1
+class struct_c__SA_FALCON_UCODE_TABLE_ENTRY_V1(Structure):
+    pass
+
+struct_c__SA_FALCON_UCODE_TABLE_ENTRY_V1._pack_ = 1 # source:False
+struct_c__SA_FALCON_UCODE_TABLE_ENTRY_V1._fields_ = [
+    ('ApplicationID', ctypes.c_ubyte),
+    ('TargetID', ctypes.c_ubyte),
+    ('DescPtr', ctypes.c_uint32),
+]
+
+FALCON_UCODE_TABLE_ENTRY_V1 = struct_c__SA_FALCON_UCODE_TABLE_ENTRY_V1
 class struct_c__SA_FALCON_UCODE_DESC_HEADER(Structure):
     pass
 
@@ -6698,7 +6795,16 @@ __all__ = \
     'ACPI_DSM_FUNCTION_NVHG', 'ACPI_DSM_FUNCTION_NVOP',
     'ACPI_DSM_FUNCTION_NVPCF', 'ACPI_DSM_FUNCTION_NVPCF_2X',
     'ACPI_DSM_FUNCTION_PCFG', 'ACPI_DSM_FUNCTION_PEX',
-    'ACPI_METHOD_DATA', 'BCRT30_RSA3K_SIG_SIZE', 'BUSINFO',
+    'ACPI_METHOD_DATA', 'BCRT30_RSA3K_SIG_SIZE',
+    'BIT_DATA_BIOSDATA_BINVER', 'BIT_DATA_BIOSDATA_BINVER_FMT',
+    'BIT_DATA_BIOSDATA_BINVER_SIZE_5', 'BIT_DATA_BIOSDATA_VERSION_1',
+    'BIT_DATA_BIOSDATA_VERSION_2', 'BIT_DATA_FALCON_DATA_V2',
+    'BIT_DATA_FALCON_DATA_V2_4_FMT', 'BIT_DATA_FALCON_DATA_V2_SIZE_4',
+    'BIT_HEADER_ID', 'BIT_HEADER_SIGNATURE', 'BIT_HEADER_SIZE_OFFSET',
+    'BIT_HEADER_V1_00', 'BIT_HEADER_V1_00_FMT', 'BIT_TOKEN_BIOSDATA',
+    'BIT_TOKEN_FALCON_DATA', 'BIT_TOKEN_V1_00',
+    'BIT_TOKEN_V1_00_FMT_SIZE_6', 'BIT_TOKEN_V1_00_FMT_SIZE_8',
+    'BIT_TOKEN_V1_00_SIZE_6', 'BIT_TOKEN_V1_00_SIZE_8', 'BUSINFO',
     'CAPS_METHOD_DATA', 'DISPMUXSTATE', 'DISPMUXSTATE__enumvalues',
     'DOD_METHOD_DATA', 'EcidManufacturingInfo',
     'FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3',
@@ -6707,7 +6813,17 @@ __all__ = \
     'FALCON_APPLICATION_INTERFACE_ENTRY_ID_DMEMMAPPER',
     'FALCON_UCODE_DESC_HEADER', 'FALCON_UCODE_DESC_HEADER_FORMAT',
     'FALCON_UCODE_DESC_V3', 'FALCON_UCODE_DESC_V3_44_FMT',
-    'FALCON_UCODE_DESC_V3_SIZE_44', 'FECS_ERROR_EVENT_TYPE',
+    'FALCON_UCODE_DESC_V3_SIZE_44',
+    'FALCON_UCODE_ENTRY_APPID_FIRMWARE_SEC_LIC',
+    'FALCON_UCODE_ENTRY_APPID_FWSEC_DBG',
+    'FALCON_UCODE_ENTRY_APPID_FWSEC_PROD',
+    'FALCON_UCODE_TABLE_ENTRY_V1',
+    'FALCON_UCODE_TABLE_ENTRY_V1_6_FMT',
+    'FALCON_UCODE_TABLE_ENTRY_V1_SIZE_6',
+    'FALCON_UCODE_TABLE_ENTRY_V1_VERSION',
+    'FALCON_UCODE_TABLE_HDR_V1', 'FALCON_UCODE_TABLE_HDR_V1_6_FMT',
+    'FALCON_UCODE_TABLE_HDR_V1_SIZE_6',
+    'FALCON_UCODE_TABLE_HDR_V1_VERSION', 'FECS_ERROR_EVENT_TYPE',
     'FECS_ERROR_EVENT_TYPE_BUFFER_FULL',
     'FECS_ERROR_EVENT_TYPE_BUFFER_RESET_REQUIRED',
     'FECS_ERROR_EVENT_TYPE_MAX', 'FECS_ERROR_EVENT_TYPE_NONE',
@@ -7184,7 +7300,8 @@ __all__ = \
     'rpc_vgpu_gsp_plugin_triggered_v',
     'rpc_vgpu_gsp_plugin_triggered_v17_00',
     'rpc_vgpu_pf_reg_read32_v', 'rpc_vgpu_pf_reg_read32_v15_00',
-    'struct_ACPI_METHOD_DATA', 'struct_CAPS_METHOD_DATA',
+    'struct_ACPI_METHOD_DATA', 'struct_BIT_HEADER_V1_00',
+    'struct_BIT_TOKEN_V1_00', 'struct_CAPS_METHOD_DATA',
     'struct_DOD_METHOD_DATA', 'struct_GSP_ACR_BOOT_GSP_RM_PARAMS',
     'struct_GSP_FMC_BOOT_PARAMS', 'struct_GSP_FMC_INIT_PARAMS',
     'struct_GSP_MSG_QUEUE_ELEMENT', 'struct_GSP_RM_PARAMS',
@@ -7416,10 +7533,14 @@ __all__ = \
     'struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02',
     'struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B',
     'struct_c__SA_ACPI_DATA', 'struct_c__SA_ACPI_DSM_CACHE',
-    'struct_c__SA_BUSINFO', 'struct_c__SA_EcidManufacturingInfo',
+    'struct_c__SA_BIT_DATA_BIOSDATA_BINVER',
+    'struct_c__SA_BIT_DATA_FALCON_DATA_V2', 'struct_c__SA_BUSINFO',
+    'struct_c__SA_EcidManufacturingInfo',
     'struct_c__SA_FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3',
     'struct_c__SA_FALCON_UCODE_DESC_HEADER',
     'struct_c__SA_FALCON_UCODE_DESC_V3',
+    'struct_c__SA_FALCON_UCODE_TABLE_ENTRY_V1',
+    'struct_c__SA_FALCON_UCODE_TABLE_HDR_V1',
     'struct_c__SA_FWSECLIC_FRTS_CMD',
     'struct_c__SA_FWSECLIC_FRTS_REGION_DESC',
     'struct_c__SA_FWSECLIC_READ_VBIOS_DESC',

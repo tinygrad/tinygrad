@@ -76,102 +76,71 @@ class NV_FLCN:
     self.nvdev.include("src/common/inc/swref/published/turing/tu102/dev_bus.h")
     self.nvdev.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
 
-    self.prep_ucode_v3()
+    self.prep_ucode()
     self.prep_booter()
 
-  def prep_ucode_v3(self):
-    # TODO: these are hardcoded for now, need to be read from the ROM
-    vbios_fd = FileIOInterface("/home/nimlgen/tinygrad/bios_4090.rom", os.O_RDONLY | os.O_SYNC | os.O_CLOEXEC)
-    vbios_bytes = vbios_fd.read(size=0x98e00, binary=True, offset=0x9400)
+  def prep_ucode(self):
+    expansion_rom_off, bit_addr = 0x14e00, 0x1b0
+    vbios_bytes = bytes(array.array('I', self.nvdev.mmio[0x00300000//4:(0x00300000+0x98e00)//4]))
 
-    # hexdump(vbios_bytes[:0x1000])
+    bit_header = nv.BIT_HEADER_V1_00.from_buffer_copy(vbios_bytes[bit_addr:bit_addr + ctypes.sizeof(nv.BIT_HEADER_V1_00)])
+    assert bit_header.Signature == 0x00544942, f"Invalid BIT header signature {hex(bit_header.Signature)}"
 
-    # # bit_addr = 0x1b0
-    # # ucodeDescVersion = 0x3
-    ucodeDescOffset, ucodeDescSize = 0x4515c, 0x32c
-    self.desc_v3 = nv.FALCON_UCODE_DESC_V3.from_buffer_copy(vbios_bytes[ucodeDescOffset:ucodeDescOffset + ucodeDescSize])
+    for i in range(bit_header.TokenEntries):
+      bit = nv.BIT_TOKEN_V1_00.from_buffer_copy(vbios_bytes[bit_addr + bit_header.HeaderSize + i * bit_header.TokenSize:])
+      if bit.TokenId != nv.BIT_TOKEN_FALCON_DATA or bit.DataVersion != 2 or bit.DataSize < nv.BIT_DATA_FALCON_DATA_V2_SIZE_4: continue
 
-    sig_total_size = ucodeDescSize - nv.FALCON_UCODE_DESC_V3_SIZE_44
-    signature = vbios_bytes[ucodeDescOffset + nv.FALCON_UCODE_DESC_V3_SIZE_44:][:sig_total_size]
-    image = vbios_bytes[0x45488:][:round_up(self.desc_v3.StoredSize, 256)]
+      falcon_data = nv.BIT_DATA_FALCON_DATA_V2.from_buffer_copy(vbios_bytes[bit.DataPtr & 0xffff:])
+      ucode_hdr = nv.FALCON_UCODE_TABLE_HDR_V1.from_buffer_copy(vbios_bytes[(table_ptr:=expansion_rom_off + falcon_data.FalconUcodeTablePtr):])
+      for j in range(ucode_hdr.EntryCount):
+        ucode_entry = nv.FALCON_UCODE_TABLE_ENTRY_V1.from_buffer_copy(vbios_bytes[table_ptr + ucode_hdr.HeaderSize + j * ucode_hdr.EntrySize:])
+        if ucode_entry.ApplicationID != nv.FALCON_UCODE_ENTRY_APPID_FWSEC_PROD: continue
+        
+        ucode_desc_hdr = nv.FALCON_UCODE_DESC_HEADER.from_buffer_copy(vbios_bytes[expansion_rom_off + ucode_entry.DescPtr:])
+        ucode_desc_off = expansion_rom_off + ucode_entry.DescPtr
+        ucode_desc_size = ucode_desc_hdr.vDesc >> 16
+    
+    self.desc_v3 = nv.FALCON_UCODE_DESC_V3.from_buffer_copy(vbios_bytes[ucode_desc_off:ucode_desc_off + ucode_desc_size])
 
+    sig_total_size = ucode_desc_size - nv.FALCON_UCODE_DESC_V3_SIZE_44
+    signature = vbios_bytes[ucode_desc_off + nv.FALCON_UCODE_DESC_V3_SIZE_44:][:sig_total_size]
+    image = vbios_bytes[ucode_desc_off + ucode_desc_size:][:round_up(self.desc_v3.StoredSize, 256)]
+    assert ucode_desc_off + ucode_desc_size == 0x45488
     assert len(signature) == 0x300 and len(image) == 0x10300
-    # self.image_va, self.image_sysmem = alloc_sysmem(len(image), contigous=True, data=image)
-    # self.signature_va, self.signature_sysmem = alloc_sysmem(len(signature), contigous=True, data=signature)
 
     self.frts_offset = 0x5ff200000
-
     read_vbios_desc = nv.FWSECLIC_READ_VBIOS_DESC(version=0x1, size=ctypes.sizeof(nv.FWSECLIC_READ_VBIOS_DESC), flags=2)
-
-    frts_cmd = nv.FWSECLIC_FRTS_CMD()
-    frts_cmd.frtsRegionDesc.version = 0x1
-    frts_cmd.frtsRegionDesc.size = ctypes.sizeof(nv.FWSECLIC_FRTS_REGION_DESC)
-    frts_cmd.frtsRegionDesc.frtsRegionOffset4K = self.frts_offset >> 12
-    frts_cmd.frtsRegionDesc.frtsRegionSize = 0x100
-    frts_cmd.frtsRegionDesc.frtsRegionMediaType = 2
-    frts_cmd.readVbiosDesc = read_vbios_desc
+    frst_reg_desc = nv.FWSECLIC_FRTS_REGION_DESC(version=0x1, size=ctypes.sizeof(nv.FWSECLIC_FRTS_REGION_DESC),
+      frtsRegionOffset4K=self.frts_offset >> 12, frtsRegionSize=0x100, frtsRegionMediaType=2)
+    frts_cmd = nv.FWSECLIC_FRTS_CMD(readVbiosDesc=read_vbios_desc, frtsRegionDesc=frst_reg_desc)
 
     def __patch(cmd_id, cmd):
-      data_offset = self.desc_v3.IMEMLoadSize
-      # print(hex(self.desc_v3.IMEMLoadSize))
-      dmem_mapper_offset = data_offset + 0xae0
-      
-      dmem = nv.FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3.from_buffer_copy(image[dmem_mapper_offset:][:ctypes.sizeof(nv.FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3)])
-      dmem.init_cmd = cmd_id
-      cmd_in_buffer_offset = data_offset + dmem.cmd_in_buffer_offset
-      # print(hex(dmem.cmd_in_buffer_offset))
-
-      cmd = bytes(cmd)
-      if cmd_id == 0x15:
-        x = memoryview(bytearray(bytes(cmd))).cast('I')
-        x[11] = 0xffffffff
-        cmd = bytes(x)
-
       patched_image = bytearray(image)
-      patched_image[dmem_mapper_offset:dmem_mapper_offset+ctypes.sizeof(nv.FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3)] = bytes(dmem)
-      patched_image[cmd_in_buffer_offset:cmd_in_buffer_offset+len(cmd)] = bytes(cmd)
-      # print(hex(cmd_in_buffer_offset), bytes(cmd))
-      patched_image[data_offset+self.desc_v3.PKCDataOffset:data_offset+self.desc_v3.PKCDataOffset+0x180] = signature[0x180:]
-      assert self.desc_v3.PKCDataOffset == 0xb24
 
-      x = memoryview(patched_image).cast('I')
-      checksum = 0
-      for i in range(0x10300 // 4): checksum = (checksum + (x[i] * i)) % (int(1e9) + 7)
-      print(f"Checksum: {checksum:08x}")
+      # Patch image
+      dmem = nv.FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3.from_buffer_copy(image[(dmem_mapper_offset:=self.desc_v3.IMEMLoadSize+0xae0):])
+      dmem.init_cmd = cmd_id
+      patched_image[dmem_mapper_offset : dmem_mapper_offset+len(bytes(dmem))] = bytes(dmem)
+      patched_image[(cmd_off:=self.desc_v3.IMEMLoadSize+dmem.cmd_in_buffer_offset) : cmd_off+len(cmd)] = cmd
+      patched_image[(sig_off:=self.desc_v3.IMEMLoadSize+self.desc_v3.PKCDataOffset) : sig_off+0x180] = signature[0x180:]
+
       return alloc_sysmem(len(patched_image), contigous=True, data=patched_image)
 
-    self.frts_image_va, self.frts_image_sysmem = __patch(0x15, frts_cmd)
-    # self.sb_image_va, self.sb_image_sysmem = __patch(0x19, read_vbios_desc)
+    self.frts_image_va, self.frts_image_sysmem = __patch(0x15, bytes(frts_cmd))
 
   def prep_booter(self):
     text = self.nvdev._download("src/nvidia/generated/g_bindata_kgspGetBinArchiveBooterLoadUcode_AD102.c")
 
     image = self.nvdev.extract_fw(text, "kgspBinArchiveBooterLoadUcode_AD102_image_prod_data")
-    header = self.nvdev.extract_fw(text, "kgspBinArchiveBooterLoadUcode_AD102_header_prod_data")
     sig = self.nvdev.extract_fw(text, "kgspBinArchiveBooterLoadUcode_AD102_sig_prod_data")
     patch_loc = int.from_bytes(self.nvdev.extract_fw(text, "kgspBinArchiveBooterLoadUcode_AD102_patch_loc_data"), 'little')
-    patch_sig = self.nvdev.extract_fw(text, "kgspBinArchiveBooterLoadUcode_AD102_patch_sig_data")
-    patch_md = self.nvdev.extract_fw(text, "kgspBinArchiveBooterLoadUcode_AD102_patch_meta_data")
-    num_sigs = int.from_bytes(self.nvdev.extract_fw(text, "kgspBinArchiveBooterLoadUcode_AD102_num_sigs_data"), 'little')
-
-    sig_len = len(sig) // num_sigs
+    sig_len = len(sig) // int.from_bytes(self.nvdev.extract_fw(text, "kgspBinArchiveBooterLoadUcode_AD102_num_sigs_data"), 'little')
 
     patched_image = bytearray(image)
     patched_image[patch_loc:patch_loc+sig_len] = sig[:sig_len]
-
     self.booter_image_va, self.booter_image_sysmem = alloc_sysmem(len(patched_image), contigous=True, data=patched_image)
-    
 
   def init_hw(self):
-    self.nvdev.wreg(0x00100c40, 0x00000000)
-    # self.nvdev.wreg(0x00100c10, 0x01637ea0)
-
-    self.nvdev.wreg(0x00088080, 0x00002937)
-    self.nvdev.wreg(0x00088080, 0x00002937)
-
-    self.nvdev.wreg(0x00009410, 0x1846cedb)
-    self.nvdev.wreg(0x00009400, 0x70dc2a48)
-
     self.falcon, self.sec2 = 0x00110000, 0x00840000
 
     self.reset(self.falcon)
@@ -179,10 +148,6 @@ class NV_FLCN:
       imemPa=self.desc_v3.IMEMPhysBase, imemVa=self.desc_v3.IMEMVirtBase, imemSz=self.desc_v3.IMEMLoadSize,
       dmemPa=self.desc_v3.DMEMPhysBase, dmemVa=0x0, dmemSz=self.desc_v3.DMEMLoadSize,
       pkc_off=self.desc_v3.PKCDataOffset, engid=self.desc_v3.EngineIdMask, ucodeid=self.desc_v3.UcodeId)
-
-    print(hex(self.nvdev.NV_PBUS_VBIOS_SCRATCH[0xe].read()))
-    print(hex(self.nvdev.NV_PFB_PRI_MMU_WPR2_ADDR_HI.read()))
-    print(hex(self.nvdev.NV_PFB_PRI_MMU_WPR2_ADDR_LO.read()))
 
     self.reset(self.falcon, riscv=True)
 
@@ -375,6 +340,25 @@ class NV_GSP:
       bootloaderManifestOffset=self.booter_desc.manifestOffset, sizeOfSignature=0x1000)
     self.wpr_meta, self.wpr_meta_sysmem = self.nvdev._alloc_boot_struct_2(m)
 
+  def init_golden_image(self):
+    self.root_class = self.rpc_rm_alloc(hParent=0x0, hClass=0x0, params=nv_gpu.NV0000_ALLOC_PARAMETERS())
+    self.device = self.rpc_rm_alloc(hParent=self.client, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(hClientShare=self.client))
+    self.subdevice = self.rpc_rm_alloc(hParent=self.device, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS()) 
+    self.vaspace = self.rpc_rm_alloc(hParent=self.device, hClass=nv_gpu.FERMI_VASPACE_A, params=nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS())
+
+    # reserve 512MB for the reserved PDES
+    resv = self.nvdev.mm.valloc(512 << 20, contigous=True, nomap=True)
+
+    bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=(512<<20), numLevelsToCopy=3,
+      virtAddrLo=resv.va_addr, virtAddrHi=resv.va_addr+(512<<20)-1)
+    bufs_p.levels[0] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=self.nvdev.mm.root_page_table.paddr, size=0x20, pageShift=47, aperture=1)
+    bufs_p.levels[1] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=(8<<30)+0x1000, size=0x1000, pageShift=38, aperture=1)
+    bufs_p.levels[2] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=(8<<30)+0x2000, size=0x1000, pageShift=29, aperture=1)
+    self.rpc_rm_control(hObject=self.vaspace, cmd=0x90f10106, params=bufs_p)
+
+
+
+
   def init_hw(self):
     self.stat_q = NVRpcQueue2(self, self.stat_q_va, self.cmd_q_va)
     self.cmd_q.rx = nv.msgqRxHeader.from_address(self.stat_q.va + self.stat_q.tx.rxHdrOff)
@@ -384,36 +368,31 @@ class NV_GSP:
     print("GSP init done")
 
     self.nvdev.NV_PBUS_BAR1_BLOCK.write(mode=0, target=0, ptr=0)
-    self.nvdev.wreg(0x00B80000 + 0x00000F40, 0x0) # not sure this is needed.
-    time.sleep(0.1)
-
     self.rpc_get_gsp_static_info()
+
+    self.init_golden_image()
     # self.nvdev.mm.valloc((1 << 20)) # TODO: forbid 0 allocs
     # return # exit...
 
-    self.root_class = self.rpc_rm_alloc(hParent=0x0, hClass=0x0, params=nv_gpu.NV0000_ALLOC_PARAMETERS())
+    # self.root_class = self.rpc_rm_alloc(hParent=0x0, hClass=0x0, params=nv_gpu.NV0000_ALLOC_PARAMETERS())
 
-    self.device = self.rpc_rm_alloc(hParent=self.client, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=0x0, hClientShare=self.client,
-      vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES))
-    self.subdevice = self.rpc_rm_alloc(hParent=self.device, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS(subDeviceId=0x0)) 
-    self.disp_common = self.rpc_rm_alloc(hParent=self.device, hClass=0x00000073, params=None)
+    # self.device = self.rpc_rm_alloc(hParent=self.client, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(hClientShare=self.client))
+    # self.subdevice = self.rpc_rm_alloc(hParent=self.device, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS()) 
+    # self.vaspace = self.rpc_rm_alloc(hParent=self.device, hClass=nv_gpu.FERMI_VASPACE_A, params=nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS())
 
-    vaspace_params = nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS()
-    self.vaspace = self.rpc_rm_alloc(hParent=self.device, hClass=nv_gpu.FERMI_VASPACE_A, params=vaspace_params)
-
-    resv = self.nvdev.mm.valloc(512 << 20, contigous=True, nomap=True) # reserve 512MB for the reserved PDES
+    # resv = self.nvdev.mm.valloc(512 << 20, contigous=True, nomap=True) # reserve 512MB for the reserved PDES
 
     gpfifo_area = self.nvdev.mm.valloc(2<<20, contigous=True)
     ramfc_alloc = self.nvdev.mm.valloc(2<<20, contigous=True)
     ringbuf = self.nvdev.mm.valloc(4<<20, contigous=True)
 
     # set internally-owned page table
-    bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=(512<<20), virtAddrLo=resv.va_addr, virtAddrHi=resv.va_addr+(512<<20)-1,
-      numLevelsToCopy=3)
-    bufs_p.levels[0] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=self.nvdev.mm.root_page_table.paddr, size=0x20, pageShift=47, aperture=1)
-    bufs_p.levels[1] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=(8<<30)+0x1000, size=0x1000, pageShift=38, aperture=1)
-    bufs_p.levels[2] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=(8<<30)+0x2000, size=0x1000, pageShift=29, aperture=1)
-    self.rpc_rm_control(hObject=self.vaspace, cmd=0x90f10106, params=bufs_p)
+    # bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=(512<<20), virtAddrLo=resv.va_addr, virtAddrHi=resv.va_addr+(512<<20)-1,
+    #   numLevelsToCopy=3)
+    # bufs_p.levels[0] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=self.nvdev.mm.root_page_table.paddr, size=0x20, pageShift=47, aperture=1)
+    # bufs_p.levels[1] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=(8<<30)+0x1000, size=0x1000, pageShift=38, aperture=1)
+    # bufs_p.levels[2] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=(8<<30)+0x2000, size=0x1000, pageShift=29, aperture=1)
+    # self.rpc_rm_control(hObject=self.vaspace, cmd=0x90f10106, params=bufs_p)
     # self.rpc_set_page_directory(device=self.device, hVASpace=self.vaspace, pdir_paddr=self.nvdev.mm.root_page_table.paddr)
 
     # channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
@@ -452,7 +431,7 @@ class NV_GSP:
 
     bufs_info = [(0, 0x237000), (2, 24576), (3, 12288),  (4, 131072), (5, 39845888), (6, 524288), (9, 65536), (10, 524288), (11, 524288)]
     self.pro_bufs_info = []
-    
+
     prom = nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(entryCount=len(bufs_info), engineType=0x1, hChanClient=self.client, hObject=self.ch_gpfifo)
     for i,(buf,size) in enumerate(bufs_info):
       x = self.nvdev.mm.valloc(size, contigous=True) # reserve buffers
