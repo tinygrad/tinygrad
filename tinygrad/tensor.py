@@ -4349,7 +4349,7 @@ class Tensor(MathTrait):
       full[:, i] = v / v.norm().clamp(min_=1.0e-10)
     return full
 
-  def svd(self, compute_uv: bool = True, full_matrices: bool = True) -> tuple[Tensor, Tensor, Tensor]:
+  def svd(self, compute_uv: bool = True, full_matrices: bool = True) -> tuple[Tensor, Tensor, Tensor] | Tensor:
     """
     Computes the Singular Value Decomposition (SVD) of `self`.
     # Note not handling case for hermitian from numpy(), as I'm not using seperate algorithms for symmetric
