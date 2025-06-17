@@ -44,6 +44,43 @@ In this case: with recompute (6 reads + 2 writes), no recompute (6 reads + 3 wri
 
 ## Kernel Speed (codegen)
 
+### Accelerator Setup Instructions
+
+To effectively utilize accelerators like CUDA and OpenCL with tinygrad, ensure you have the necessary dependencies installed. For CUDA, you need to have the NVIDIA CUDA Toolkit installed, and for OpenCL, ensure you have the appropriate drivers for your hardware. Refer to the installation guide for detailed steps.
+
+### Performance Comparison Examples
+
+When using different accelerators, performance can vary significantly. For instance, using Tensor Cores on NVIDIA GPUs can lead to substantial speedups for matrix operations. Below is a simple comparison of execution times for CPU vs. CUDA:
+
+```python
+import time
+
+# CPU example
+start = time.time()
+# Your CPU code here
+end = time.time()
+print(f'CPU execution time: {end - start}')
+
+# CUDA example
+start = time.time()
+# Your CUDA code here
+end = time.time()
+print(f'CUDA execution time: {end - start}')
+```
+
+### Backend-Specific Optimization Guides
+
+For optimal performance, consider the following backend-specific tips:
+- **CUDA**: Utilize Tensor Cores for matrix multiplications to enhance performance.
+- **OpenCL**: Optimize memory access patterns to reduce latency.
+
+### Troubleshooting Common Accelerator Issues
+
+If you encounter issues with your accelerator setup, check the following:
+- Ensure that your drivers are up to date.
+- Verify that the correct environment variables are set for your chosen backend.
+- Consult the troubleshooting section in the installation guide for common pitfalls.
+
 Given that you have decided how the model ops will be grouped and what will be written to memory, kernel speed determines how fast that operation is done. This is what BEAM changes, it searches over a set of equivalent kernels which all perform the same operation and finds the one which performs the task the fastest.
 
 In `kernel.py` we have a set of `OptOps`, these control the parameters of the speed optimizations applied to the kernel.

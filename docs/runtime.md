@@ -16,6 +16,18 @@ tinygrad supports various runtimes, enabling your code to scale across a wide ra
 
 ## Interoperability
 
+### Switching Between Backends
+
+To switch between different backends in tinygrad, you can set the appropriate environment variable for the desired backend. For example:
+
+- For CUDA: Set `BACKEND=CUDA`
+- For OpenCL: Set `BACKEND=OPENCL`
+- For METAL: Set `BACKEND=METAL`
+
+Ensure that the necessary dependencies for each backend are installed. Refer to the installation guide for specific requirements for each backend.
+
+After setting the backend, you can initialize your tensors and operations as usual, and tinygrad will handle the rest.
+
 tinygrad provides interoperability with OpenCL and PyTorch, allowing efficient tensor data sharing between frameworks through the `Tensor.from_blob` API. This enables zero-copy operations by working directly with external memory pointers.
 
 **Important**: When using external memory pointers with tinygrad tensors, you must ensure these pointers remain valid throughout the entire lifetime of the tinygrad tensor to prevent memory corruption.

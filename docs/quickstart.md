@@ -228,6 +228,42 @@ with Timing("Time: "):
 
 ## And that's it
 
+## Accelerator Setup
+
+To utilize hardware accelerators with tinygrad, ensure you have the necessary dependencies installed. For CUDA, you will need to install the NVIDIA CUDA Toolkit and ensure your GPU drivers are up to date. For OpenCL, install the appropriate drivers for your hardware.
+
+## Performance Comparison Examples
+
+When running neural networks on different backends, you may notice performance differences. For instance, using CUDA may yield faster training times compared to CPU. Below is an example of how to run a simple neural network on a CUDA-enabled GPU:
+
+```python
+# Example of running on CUDA
+import numpy as np
+from tinygrad import Tensor
+from tinygrad.nn.optim import SGD
+
+# Assuming net is your neural network
+X_train, Y_train = ... # Load your data
+
+with Tensor.train():
+  for step in range(1000):
+    # Your training loop here
+```
+
+## Backend-Specific Optimization Guides
+
+To optimize performance for different backends, consider the following:
+- **CUDA**: Use cuDNN for optimized operations.
+- **OpenCL**: Ensure your kernels are optimized for your specific hardware.
+- **METAL**: Leverage Metal Performance Shaders for better performance.
+
+## Troubleshooting Common Accelerator Issues
+
+If you encounter issues when using accelerators, check the following:
+- Ensure your drivers are up to date.
+- Verify that your environment variables are set correctly for the desired backend.
+- Consult the tinygrad community for common issues and solutions.
+
 Highly recommend you check out the [examples/](https://github.com/tinygrad/tinygrad/blob/master/examples) folder for more examples of using tinygrad.
 Reading the source code of tinygrad is also a great way to learn how it works.
 Specifically the tests in [test/](https://github.com/tinygrad/tinygrad/blob/master/test) are a great place to see how to use and the semantics of the different operations.
