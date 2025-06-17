@@ -4303,7 +4303,7 @@ class Tensor(MathTrait):
         self (Tensor): The input matrix (TinyGrad Tensor).
     """
     R = self.clone()
-    n: int = R.shape[0]
+    n = int(R.shape[0])
     I = Tensor.eye(n, dtype=R.dtype)
     Q = Tensor.eye(n, dtype=self.dtype)
     for k in range(int(n-1)):
@@ -4327,7 +4327,7 @@ class Tensor(MathTrait):
         V (Tensor): Eigen vectors
     """
     A = self.clone()
-    V = Tensor.eye(A.shape[0])
+    V = Tensor.eye(int(A.shape[0]))
     for _ in range(max_iter):
       Q, R = A.qr_decompose()
       A = R @ Q
@@ -4335,8 +4335,8 @@ class Tensor(MathTrait):
     return A.diag(), V
 
   @staticmethod
-  def _orthonormal_basis(Q: Tensor, dim: int, sorted_indices=None) -> Tensor:
-    k:int = Q.shape[1]
+  def _orthonormal_basis(Q: Tensor, dim: int, sorted_indices: Tensor | None = None) -> Tensor:
+    k = int(Q.shape[1])
     full = Tensor.eye(int(dim), dtype=Q.dtype)
     if sorted_indices is not None: full[:, :k] = Q[:, sorted_indices]
     else:full[:, :k] = Q
@@ -4368,7 +4368,7 @@ class Tensor(MathTrait):
     U = AAt.eig()[1]
     eigvals_AtA, sorted_indices = eigvals_AtA.sort(descending=True)
     M, N = A.shape
-    K = min(M, N)
+    K = int(min(M, N))
     if compute_uv:
       # Pad U and V to full matrices
       if full_matrices:
