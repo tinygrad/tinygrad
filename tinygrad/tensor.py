@@ -4274,69 +4274,67 @@ class Tensor(MathTrait):
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
+  
+  # *** Linalg functions ***
 
-  def norm(self) -> Tensor:
-    """
-    Computes the norm of the tensor.
+  def norm(self) -> Tensor: return self.square().sum().sqrt()
 
-    The norm is calculated as the square root of the sum of the squares of the tensor's elements.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([3, 4])
-    print(t.norm().item())  # Returns 5.0
-    ```
-    """
-    return self.square().sum().sqrt()
+  def diag(t: Tensor) -> Tensor:
+      """
+      • If `t` is 1-D → return a square matrix with `t` on the main diagonal.
+      • If `t` is 2-D → return a 1-D tensor containing the main diagonal of `t`.
+      """
+      if t.ndim == 1:                              # vector → diagonal matrix
+          n = t.shape[0]
+          # broadcast multiply: eye(n,n) * t (shape (n,)) → diag matrix
+          return Tensor.eye(n, dtype=t.dtype, device=t.device) * t
+      elif t.ndim == 2:                            # matrix → diagonal vector
+          n = min(t.shape[0], t.shape[1])
+          mask = Tensor.eye(n, dtype=t.dtype, device=t.device)
+          return (t[:n, :n] * mask).sum(axis=1)
+      else:
+          raise ValueError("diag expects a 1-D or 2-D tensor")
 
   def qr_decompose(self) -> tuple[Tensor, Tensor]:
-    """
-    Compute the QR_decompose using Household-Reflectors algorithm
-    Based off https://www.quantstart.com/articles/QR-Decomposition-with-Python-and-NumPy/
-    Args:
-        self (Tensor): The input matrix (TinyGrad Tensor).
-        tol (float): Tolerance for convergence.
-    """
-    R = self.clone()
-    n = R.shape[0]
-    I = Tensor.eye(n, dtype=R.dtype)
-    Q = Tensor.eye(n, dtype=self.dtype)
-    for k in range(n-1):
-        x = R[k:, k]
-        e = I[k:,k]
-        alpha =  Tensor([-1 if x[0].item() > 0 else 1 if x[0].item() < 0 else 0]) * x.norm()
-        u = x + alpha * e
-        v = u/u.norm()
-        Q_min = Tensor.eye(n-k) - 2.0 * v.unsqueeze(1).expand(-1, n-k) * v.repeat(n-k, 1)
-        Q_t = Tensor.eye(n).contiguous()
-        Q_t[k:, k:] = Q_min
-        Q = Q_t @ Q
-        R = Q_t @ R
-    return Q.transpose(), R
-
-  def eig(self, max_iter=100, tol=1e-12)-> tuple[Tensor, Tensor]:
+      """
+      Compute the QR_decompose using Household-Reflectors algorithm
+      Based off https://www.quantstart.com/articles/QR-Decomposition-with-Python-and-NumPy/
+      Args:
+          self (Tensor): The input matrix (TinyGrad Tensor).
+          tol (float): Tolerance for convergence.
+      """
+      R = self.clone()
+      n = R.shape[0]
+      I = Tensor.eye(n, dtype=R.dtype)
+      Q = Tensor.eye(n, dtype=self.dtype)
+      for k in range(n-1):
+          x = R[k:, k]
+          u = x - x[0].sign() * x.norm().clamp(min_=1e-12) * I[k:,k]
+          v = u/u.norm().clamp(min_=1e-12)
+          Q_t = Tensor.eye(n).contiguous()
+          Q_t[k:, k:] = Tensor.eye(n-k) - 2.0 * v.unsqueeze(1).expand(-1, n-k) * v.repeat(n-k, 1)
+          Q = Q_t @ Q
+          R = Q_t @ R
+      return Q.transpose(), R
+  def eig(self, max_iter=20)-> tuple[Tensor, Tensor]:
     """
     Compute the eigenvalues and eigenvectors of a matrix using QR algorithm.
     Args:
         self (Tensor): The input matrix (TinyGrad Tensor).
         max_iter (int): Maximum number of iterations.
         tol (float): Tolerance for convergence.
+    Returns:
+        E (Tensor): Eigen values.
+        V (Tensor): Eigen vectors
     """
-    A = self.clone().realize()
-    n = A.shape[0]
-    V = Tensor.eye(n)  # Accumulate eigenvectors here
-    previous_abs_diff = float('inf')
+    A = self.clone()
+    V = Tensor.eye(A.shape[0]) 
     for _ in range(max_iter):
-        Q, R = A.qr_decompose() # tol = tol
+        Q, R = A.qr_decompose()
         A_next = R @ Q
-        V = V @ Q  # Accumulate Qs
-        new_abs_diff = (A_next - A).abs().sum().item()
-        # if new_abs_diff < tol: break
-
-        if previous_abs_diff == new_abs_diff or new_abs_diff < tol: break
-        previous_abs_diff = new_abs_diff
-        A = A_next.realize()
-    eigenvalues = Tensor([A[i, i].item() for i in range(int(n))])
-    return eigenvalues, V
+        V = V @ Q 
+        A = A_next
+    return A.diag(), V
 
   def svd(self, compute_uv: bool = True, full_matrices: bool = True) -> tuple[Tensor, Tensor, Tensor]:
     """
@@ -4360,32 +4358,27 @@ class Tensor(MathTrait):
     eigvals_AtA, sorted_indices = eigvals_AtA.sort(descending=True)
 
     if compute_uv:
-        # Using Householder Transformations to pad U and V to full matrices
+        # Pad U and V to full matrices
         if full_matrices:
+            
+            def complete_orthonormal_basis(Q: Tensor, dim: int, sorted_indices=None) -> Tensor:
+              k = Q.shape[1]
+              full = Tensor.eye(dim, dtype=Q.dtype)
+              if sorted_indices is not None: full[:, :k] = Q[:, sorted_indices]
+              else:full[:, :k] = Q
+              # Complete the basis via Gram–Schmidt (Householder‑style two‑projection).
+              for i in range(k, dim):
+                  v = Tensor.eye(dim, dtype=Q.dtype)[:, i]
+                  for j in range(i):
+                      u = full[:, j]
+                      v -= 2 * (u @ v) * u
+                  full[:, i] = v / v.norm().clamp(min_=1e-12)
+              return full
+
             M, N = A.shape
             K = min(M, N)
-            if U.shape[1] < M:
-                U_full = Tensor.eye(M, dtype=U.dtype)
-                U_full[:, :K] = U[:, sorted_indices]
-                for i in range(K, M):
-                    v = Tensor.eye(M)[:, i]
-                    for j in range(i):
-                        # Apply Householder transformation
-                        u = U_full[:, j]
-                        v -= 2 * (u @ v) * u
-                    U_full[:, i] = v / v.norm()
-                U = U_full
-
-            if V.shape[1] < N:
-                V_full = Tensor.eye(N, dtype=V.dtype)
-                V_full[:, :K] = V[:, sorted_indices]
-                for i in range(K, N):
-                    v = Tensor.eye(N)[:, i]
-                    for j in range(i):
-                        u = V_full[:, j]
-                        v -= 2 * (u @ v) * u
-                    V_full[:, i] = v / v.norm()
-                V = V_full
+            if U.shape[1] < M: U = complete_orthonormal_basis(U, M, sorted_indices)
+            if V.shape[1] < N: V = complete_orthonormal_basis(V, N, sorted_indices)
 
             return U, eigvals_AtA.sqrt(), V.transpose()
         else:
