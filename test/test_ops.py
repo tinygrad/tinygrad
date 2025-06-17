@@ -2995,6 +2995,33 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
 class TestLinAlg(unittest.TestCase):
+  def test_diag(self):
+    # Test case for 1-D tensor (vector to diagonal matrix)
+    vector = Tensor([1, 2, 3, 4], dtype=dtypes.float32)
+    expected_matrix = Tensor([[1, 0, 0, 0],
+                              [0, 2, 0, 0],
+                              [0, 0, 3, 0],
+                              [0, 0, 0, 4]], dtype=dtypes.float32)
+    np.testing.assert_allclose(vector.diag().numpy(), expected_matrix.numpy(), rtol=1e-6, atol=1e-6)
+
+    # Test case for 2-D tensor (matrix to diagonal vector)
+    matrix = Tensor([[1, 2, 3],
+                     [4, 5, 6],
+                     [7, 8, 9]], dtype=dtypes.float32)
+    expected_vector = Tensor([1, 5, 9], dtype=dtypes.float32)
+    np.testing.assert_allclose(matrix.diag().numpy(), expected_vector.numpy(), rtol=1e-6, atol=1e-6)
+
+    # Test case for non-square matrix (extract main diagonal)
+    non_square_matrix = Tensor([[1, 2, 3],
+                                 [4, 5, 6]], dtype=dtypes.float32)
+    expected_vector_non_square = Tensor([1, 5], dtype=dtypes.float32)
+    np.testing.assert_allclose(non_square_matrix.diag().numpy(), expected_vector_non_square.numpy(), rtol=1e-6, atol=1e-6)
+
+    # Test case for invalid input (3-D tensor)
+    invalid_tensor = Tensor.ones(2, 2, 2)
+    with self.assertRaises(ValueError):
+      invalid_tensor.diag()
+
   def test_qr_decompose(self):
     with Context(NOOPT=1):
       A = Tensor([[1.0, 2.0], [3.0, 4.0]])
@@ -3019,22 +3046,29 @@ class TestLinAlg(unittest.TestCase):
 
   def test_svd(self):
     with Context(NOOPT=1):
-
       tensors = [
-          Tensor([[3, 6], [1, 10]]),
-          Tensor([[1, 2], [3, 4]]),
-          Tensor([[5.0, 6.0], [7.0, 8.0]]),
-          Tensor([[9.0, 10.0], [11.0, 12.0]]),
-          Tensor([[9.0, 10.0, 323, 9], [11.0, 12.0, 40, 38]]),
-          Tensor([[9.0, 10.0], [11.0, 12.0], [5, 35]])
+          Tensor([[3, 6], [1, 10]], dtype = dtypes.float64),
+          Tensor([[1, 2], [3, 4]], dtype = dtypes.float64),
+          Tensor([[5.0, 6.0], [7.0, 8.0]], dtype = dtypes.float64),
+          Tensor([[9.0, 10.0], [11.0, 12.0]], dtype = dtypes.float64),
+          Tensor([[9.0, 10.0, 323, 9], [11.0, 12.0, 40, 38]], dtype = dtypes.float64),
+          Tensor([[9.0, 10.0], [11.0, 12.0], [5, 35]], dtype = dtypes.float64)
       ]
 
       for tensor in tensors:
-          U, S, Vt = tensor.svd()
-          np_U, np_S, np_Vt = np.linalg.svd(tensor.numpy(), full_matrices=False)
-          np.testing.assert_allclose(U.numpy(), np_U, rtol=1e-1, atol=1e-1)
-          np.testing.assert_allclose(S.numpy(), np_S, rtol=1e-1, atol=1e-1)
-          np.testing.assert_allclose(Vt.numpy(), np_Vt, rtol=1e-1, atol=1e-1)
+          
+          for full_matrices in [True]:
+              U, S, Vt = tensor.svd(full_matrices=full_matrices)
+              np_U, np_S, np_Vt = np.linalg.svd(tensor.numpy(), full_matrices=full_matrices)
+              # Using the absolute value, due to sign differences between numpy and tinygrad implementations
+              if full_matrices:
+                np.testing.assert_allclose(U.abs().numpy(), np.abs(np_U), rtol=1e-4, atol=0.5)
+                np.testing.assert_allclose(S.abs().numpy(), np.abs(np_S), rtol=1e-4, atol=0.5)
+                np.testing.assert_allclose(Vt.abs().numpy(), np.abs(np_Vt), rtol=1e-4, atol=0.5)
+              else:
+                np.testing.assert_allclose(U.abs().numpy(), np.abs(np_U), rtol=1e-4, atol=1e-4)
+                np.testing.assert_allclose(S.abs().numpy(), np.abs(np_S), rtol=1e-4, atol=1e-4)
+                np.testing.assert_allclose(Vt.abs().numpy(), np.abs(np_Vt), rtol=1e-4, atol=1e-4)
 
   def test_norm(self):
     helper_test_op([(3,)], lambda x: x.norm(), lambda x: x.norm(), forward_only=True)

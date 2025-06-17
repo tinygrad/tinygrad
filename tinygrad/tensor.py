@@ -4356,7 +4356,8 @@ class Tensor(MathTrait):
     eigvals_AtA, V = AtA.eig()
     U = AAt.eig()[1]
     eigvals_AtA, sorted_indices = eigvals_AtA.sort(descending=True)
-
+    M, N = A.shape
+    K = min(M, N)
     if compute_uv:
         # Pad U and V to full matrices
         if full_matrices:
@@ -4375,14 +4376,13 @@ class Tensor(MathTrait):
                   full[:, i] = v / v.norm().clamp(min_=1e-12)
               return full
 
-            M, N = A.shape
-            K = min(M, N)
             if U.shape[1] < M: U = complete_orthonormal_basis(U, M, sorted_indices)
             if V.shape[1] < N: V = complete_orthonormal_basis(V, N, sorted_indices)
 
-            return U, eigvals_AtA.sqrt(), V.transpose()
+            return U, eigvals_AtA.sqrt()[:K], V.transpose()
         else:
-            return U[:, sorted_indices], eigvals_AtA.sqrt(), V[:, sorted_indices].transpose()
+            sorted_indices = sorted_indices[:K]
+            return U[:, sorted_indices], eigvals_AtA.sqrt()[:K], V[:, sorted_indices].transpose()
     else:
         return eigvals_AtA.sqrt()
 
