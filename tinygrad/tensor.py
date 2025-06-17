@@ -4289,7 +4289,7 @@ class Tensor(MathTrait):
           eye = Tensor.eye(t.shape[0], dtype=t.dtype, device=t.device)
           return eye * t
       if self.ndim == 2:
-          n = min(t.shape)
+          n = min(self.shape)
           eye = Tensor.eye(n, dtype=t.dtype, device=t.device)
           return (self[:n, :n] * eye).sum(axis=1)
       raise ValueError("diag expects a 1-D or 2-D tensor")
