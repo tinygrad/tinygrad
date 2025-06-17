@@ -4307,8 +4307,8 @@ class Tensor(MathTrait):
       Q = Tensor.eye(n, dtype=self.dtype)
       for k in range(n-1):
           x = R[k:, k]
-          u = x - x[0].sign() * x.norm().clamp(min_=1e-12) * I[k:,k]
-          v = u/u.norm().clamp(min_=1e-12)
+          u = x - x[0].sign() * x.norm().clamp(min_=1.0e-12) * I[k:,k]
+          v = u/u.norm().clamp(min_=1.0e-12)
           Q_t = Tensor.eye(n).contiguous()
           Q_t[k:, k:] = Tensor.eye(n-k) - 2.0 * v.unsqueeze(1).expand(-1, n-k) * v.repeat(n-k, 1)
           Q = Q_t @ Q
@@ -4371,7 +4371,7 @@ class Tensor(MathTrait):
                   for j in range(i):
                       u = full[:, j]
                       v -= 2 * (u @ v) * u
-                  full[:, i] = v / v.norm().clamp(min_=1e-12)
+                  full[:, i] = v / v.norm().clamp(min_=1.0e-12)
               return full
 
             if U.shape[1] < M: U = complete_orthonormal_basis(U, M, sorted_indices)

@@ -3046,13 +3046,15 @@ class TestLinAlg(unittest.TestCase):
 
   def test_svd(self):
     with Context(NOOPT=1):
+      if Device.DEFAULT == "METAL": dtype = dtypes.float32
+      else: dtype = dtypes.float64
       tensors = [
-          Tensor([[3, 6], [1, 10]], dtype = dtypes.float64),
-          Tensor([[1, 2], [3, 4]], dtype = dtypes.float64),
-          Tensor([[5.0, 6.0], [7.0, 8.0]], dtype = dtypes.float64),
-          Tensor([[9.0, 10.0], [11.0, 12.0]], dtype = dtypes.float64),
-          Tensor([[9.0, 10.0, 323, 9], [11.0, 12.0, 40, 38]], dtype = dtypes.float64),
-          Tensor([[9.0, 10.0], [11.0, 12.0], [5, 35]], dtype = dtypes.float64)
+          Tensor([[3, 6], [1, 10]], dtype = dtype),
+          Tensor([[1, 2], [3, 4]], dtype = dtype),
+          Tensor([[5.0, 6.0], [7.0, 8.0]], dtype = dtype),
+          Tensor([[9.0, 10.0], [11.0, 12.0]], dtype = dtype),
+          Tensor([[9.0, 10.0, 323, 9], [11.0, 12.0, 40, 38]], dtype = dtype),
+          Tensor([[9.0, 10.0], [11.0, 12.0], [5, 35]], dtype = dtype)
       ]
 
       for tensor in tensors:
