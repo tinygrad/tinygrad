@@ -201,35 +201,31 @@ def train_cifar():
     idx_y = Tensor.arange(H, dtype=dtypes.int32).reshape((1,1,H,1))
     return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
 
+  # Similar, but different enough.
+  def make_random_crop_indices(shape, mask_size) -> Tensor:
+    BS, _, H, W = shape
+    low_x = Tensor.randint(BS, low=0, high=W-mask_size).reshape(BS,1,1,1)
+    low_y = Tensor.randint(BS, low=0, high=H-mask_size).reshape(BS,1,1,1)
+    idx_x = Tensor.arange(mask_size, dtype=dtypes.int32).reshape((1,1,1,mask_size))
+    idx_y = Tensor.arange(mask_size, dtype=dtypes.int32).reshape((1,1,mask_size,1))
+    return low_x, low_y, idx_x, idx_y
 
-  def negative_pad_grid(n=4):
-    # Generate all possible padding combinations that sum to biting n elements from h and w.
-    pad_options = [(-i, i-n) for i in range(n+1)]
-
-    # Create all possible combinations of padding for left/right and top/bottom
-    return [(pad_options[x % len(pad_options)], pad_options[y % len(pad_options)])
-            for x in range(n) for y in range(n)]
-
-  def random_crop(X:Tensor, crop_size:int=32) -> Tensor:
-    assert X.shape[-1] >= crop_size
-    Xl = X.split(X.shape[0]//16) # XXX This results in B=3125, which is prob not great for performance, not sure if matters.
-    Xp = [ x.pad(((0,0),(0, 0), *npad)) for x, npad in zip(Xl, negative_pad_grid(X.shape[-1] - crop_size)) ]
-    return Tensor.cat(*Xp)
+  def random_crop(X:Tensor, crop_size=32):
+    Xs, Ys, Xi, Yi = make_random_crop_indices(X.shape, crop_size)
+    return X.gather(-1, (Xs + Xi).expand(-1, 3, X.shape[2], -1)).gather(-2, ((Ys+Yi).expand(-1, 3, crop_size, crop_size)))
 
   @TinyJit
   def jittable_transforms(X:Tensor, Y:Tensor):
     perms = Tensor.randperm(X.shape[0], device=X.device)
     if getenv("RANDOM_CROP", 1):
-      X, Y = X[perms], Y[perms] #
       X = random_crop(X, crop_size=32)
     if getenv("RANDOM_FLIP", 1):
       X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
-    return X[perms], Y[perms]
+    return X[perms], Y[perms], perms # perms is expensive to calculate, and we can reuse it.
 
   @TinyJit
-  def cutmix(X, Y, mask_size=3):
+  def cutmix(X, Y, order, mask_size=3):
     mask = make_square_mask(X.shape, mask_size)
-    order = Tensor.randperm(X.shape[0], device=X.device)
     X_patch, Y_patch = X[order], Y[order]
     X_cutmix = mask.where(X_patch, X)
     mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
@@ -243,9 +239,9 @@ def train_cifar():
       st = time.monotonic()
       X, Y = X_in, Y_in
       if is_train:
-        X, Y = jittable_transforms(X, Y)
+        X, Y, perms = jittable_transforms(X, Y)
         if getenv("CUTMIX", 1) and step >= hyp['net']['cutmix_steps']:
-          X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
+          X, Y = cutmix(X, Y, perms, mask_size=hyp['net']['cutmix_size'])
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X.shape[0], BS):
