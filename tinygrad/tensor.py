@@ -4329,9 +4329,8 @@ class Tensor(MathTrait):
     V = Tensor.eye(A.shape[0])
     for _ in range(max_iter):
         Q, R = A.qr_decompose()
-        A_next = R @ Q
+        A = R @ Q
         V = V @ Q
-        A = A_next
     return A.diag(), V
 
   def svd(self, compute_uv: bool = True, full_matrices: bool = True) -> tuple[Tensor, Tensor, Tensor]:
