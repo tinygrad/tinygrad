@@ -4290,7 +4290,7 @@ class Tensor(MathTrait):
     • If `t` is 2-D → return a 1-D tensor containing the main diagonal of `t`.
     """
     n = int(min(self.shape))
-    if self.ndim == 1: return Tensor.eye(int(sn), dtype=self.dtype) * self
+    if self.ndim == 1: return Tensor.eye(n, dtype=self.dtype) * self
     if self.ndim == 2: return (self[:n, :n] * Tensor.eye(n, dtype=self.dtype)).sum(axis=1)
     raise ValueError("diag expects a 1-D or 2-D tensor")
 

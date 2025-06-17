@@ -3063,7 +3063,7 @@ class TestLinAlg(unittest.TestCase):
           np.testing.assert_allclose(U.abs().numpy(), np.abs(np_U), rtol=1e-4, atol=0.8)
           np.testing.assert_allclose(S.abs().numpy(), np.abs(np_S), rtol=1e-4, atol=0.5)
           np.testing.assert_allclose(Vt.abs().numpy(), np.abs(np_Vt), rtol=1e-4, atol=0.8)
-          # Compare U, s, VT to compare accuracy with abs, but we will confirm A = U @ S @ Vt correctly reconstructs A by making sure the signs are correct
+          # Confirm A = U @ S @ Vt correctly reconstructs A by making sure the signs are correct.
           reconstructed_tensor = U @ S.diag() @ Vt
           np.testing.assert_allclose(reconstructed_tensor.sign().numpy(), tensor.sign().numpy())
         else:
