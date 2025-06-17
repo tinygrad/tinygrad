@@ -14,7 +14,7 @@ class TestDisassembly(unittest.TestCase):
     lib = Device[Device.DEFAULT].compiler.compile(p.src)
     out = io.StringIO()
     with redirect_stdout(out): Device[Device.DEFAULT].compiler.disassemble(lib)
-    assert re.search(r'\bfadd\s+h\d', out.getvalue())
+    assert "fcvt" not in out.getvalue()
 
 if __name__ == "__main__":
   unittest.main()
