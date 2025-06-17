@@ -349,5 +349,4 @@ def _serialize_code(code:types.CodeType):
 copyreg.pickle(types.CodeType, _serialize_code)
 
 def _serialize_module(module:types.ModuleType): return importlib.import_module, (module.__name__,)
-
 copyreg.pickle(types.ModuleType, _serialize_module)
