@@ -3,7 +3,7 @@
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
-import random, time, sys
+import random, time
 import numpy as np
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
@@ -13,7 +13,6 @@ from tinygrad.nn import optim
 from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
 from extra.bench_log import BenchEvent, WallTimeEvent
 
-timestamp = time.monotonic if sys.platform != "win32" else time.perf_counter
 
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
@@ -274,7 +273,7 @@ def train_cifar():
     step, epoch = 0, 0
     cutmix_order = arange(X_in.shape[0]).contiguous()
     while True:
-      st = timestamp()
+      st = time.monotonic()
 
       if is_train:
         order = randperm(X_in.shape[0])
@@ -285,7 +284,7 @@ def train_cifar():
       else:
         X_shuffled, Y_shuffled = prep_eval(X_in, Y_in)
 
-      et = timestamp()
+      et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X_shuffled.shape[0]):
         step += 1
@@ -402,7 +401,7 @@ def train_cifar():
   eval_acc_pct = 0.0
   batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
   with Tensor.train():
-    st = timestamp()
+    st = time.monotonic()
     while i <= STEPS:
       if i % getenv("EVAL_STEPS", STEPS) == 0 and i > 1 and not getenv("DISABLE_BACKWARD"):
         # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
@@ -429,7 +428,7 @@ def train_cifar():
 
         eval_acc_pct = correct_sum/correct_len*100.0
         if model_ema: acc_ema = correct_sum_ema/correct_len_ema*100.0
-        print(f"eval     {correct_sum}/{correct_len} {eval_acc_pct:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i} (in {(timestamp()-st)*1e3:.2f} ms)")
+        print(f"eval     {correct_sum}/{correct_len} {eval_acc_pct:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
         if model_ema: print(f"eval ema {correct_sum_ema}/{correct_len_ema} {acc_ema:.2f}%, {(sum(losses_ema)/len(losses_ema)):7.2f} val_loss STEP={i}")
 
       if STEPS == 0 or i == STEPS: break
@@ -444,7 +443,7 @@ def train_cifar():
 
         with Context(BEAM=getenv("LATEBEAM", BEAM.value), WINO=getenv("LATEWINO", WINO.value)):
           loss = train_step_jitted(model, optim.OptimizerGroup(opt_bias, opt_non_bias), [lr_sched_bias, lr_sched_non_bias], X, Y)
-          et = timestamp()
+          et = time.monotonic()
           loss_cpu = loss.numpy()
         # EMA for network weights
         if getenv("EMA") and i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
@@ -452,7 +451,7 @@ def train_cifar():
             model_ema = modelEMA(W, model)
           model_ema.update(model, Tensor([projected_ema_decay_val*(i/STEPS)**hyp['ema']['decay_pow']]))
 
-      cl = timestamp()
+      cl = time.monotonic()
       device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
       #  53  221.74 ms run,    2.22 ms python,  219.52 ms CL,  803.39 loss, 0.000807 LR, 4.66 GB used,   3042.49 GFLOPS,    674.65 GOPS
       print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
