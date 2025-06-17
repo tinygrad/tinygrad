@@ -1,4 +1,4 @@
-import unittest, io, re
+import unittest, io
 from tinygrad import Tensor, dtypes
 from contextlib import redirect_stdout
 from tinygrad.device import Device
