@@ -346,8 +346,8 @@ def _reconstruct_code(*args): return types.CodeType(*args)
 def _serialize_code(code:types.CodeType):
   args = inspect.signature(types.CodeType).parameters  # NOTE: this works in Python 3.10 and up
   return _reconstruct_code, tuple(code.__getattribute__('co_'+x.replace('codestring', 'code').replace('constants', 'consts')) for x in args)
-
 copyreg.pickle(types.CodeType, _serialize_code)
 
 def _serialize_module(module:types.ModuleType): return importlib.import_module, (module.__name__,)
+
 copyreg.pickle(types.ModuleType, _serialize_module)
