@@ -4285,37 +4285,37 @@ class Tensor(MathTrait):
   def norm(self) -> Tensor: return self.square().sum().sqrt()
 
   def diag(self: Tensor) -> Tensor:
-      """
-      • If `t` is 1-D → return a square matrix with `t` on the main diagonal.
-      • If `t` is 2-D → return a 1-D tensor containing the main diagonal of `t`.
-      """
-      if self.ndim == 1: return Tensor.eye(self.shape[0]) * self
-      if self.ndim == 2:
-          n = min(self.shape)
-          return (self[:n, :n] * Tensor.eye(n)).sum(axis=1)
-      raise ValueError("diag expects a 1-D or 2-D tensor")
+    """
+    • If `t` is 1-D → return a square matrix with `t` on the main diagonal.
+    • If `t` is 2-D → return a 1-D tensor containing the main diagonal of `t`.
+    """
+    if self.ndim == 1: return Tensor.eye(self.shape[0]) * self
+    if self.ndim == 2:
+      n = min(self.shape)
+      return (self[:n, :n] * Tensor.eye(n)).sum(axis=1)
+    raise ValueError("diag expects a 1-D or 2-D tensor")
 
   def qr_decompose(self) -> tuple[Tensor, Tensor]:
-      """
-      Compute the QR_decompose using Household-Reflectors algorithm
-      Based off https://www.quantstart.com/articles/QR-Decomposition-with-Python-and-NumPy/
-      Args:
-          self (Tensor): The input matrix (TinyGrad Tensor).
-          tol (float): Tolerance for convergence.
-      """
-      R = self.clone()
-      n = R.shape[0]
-      I = Tensor.eye(n, dtype=R.dtype)
-      Q = Tensor.eye(n, dtype=self.dtype)
-      for k in range(n-1):
-          x = R[k:, k]
-          u = x - x[0].sign() * x.norm().clamp(min_=1.0e-12) * I[k:,k]
-          v = u/u.norm().clamp(min_=1.0e-12)
-          Q_t = Tensor.eye(n).contiguous()
-          Q_t[k:, k:] = Tensor.eye(n-k) - 2.0 * v.unsqueeze(1).expand(-1, n-k) * v.repeat(n-k, 1)
-          Q = Q_t @ Q
-          R = Q_t @ R
-      return Q.transpose(), R
+    """
+    Compute the QR_decompose using Household-Reflectors algorithm
+    Based off https://www.quantstart.com/articles/QR-Decomposition-with-Python-and-NumPy/
+    Args:
+        self (Tensor): The input matrix (TinyGrad Tensor).
+        tol (float): Tolerance for convergence.
+    """
+    R = self.clone()
+    n = R.shape[0]
+    I = Tensor.eye(n, dtype=R.dtype)
+    Q = Tensor.eye(n, dtype=self.dtype)
+    for k in range(n-1):
+      x = R[k:, k]
+      u = x - x[0].sign() * x.norm().clamp(min_=1.0e-10) * I[k:,k]
+      v = u/u.norm().clamp(min_=1.0e-10)
+      Q_t = Tensor.eye(n).contiguous()
+      Q_t[k:, k:] = Tensor.eye(n-k) - 2.0 * v.unsqueeze(1).expand(-1, n-k) * v.repeat(n-k, 1)
+      Q = Q_t @ Q
+      R = Q_t @ R
+    return Q.transpose(), R
 
   def eig(self, max_iter=20)-> tuple[Tensor, Tensor]:
     """
@@ -4331,9 +4331,9 @@ class Tensor(MathTrait):
     A = self.clone()
     V = Tensor.eye(A.shape[0])
     for _ in range(max_iter):
-        Q, R = A.qr_decompose()
-        A = R @ Q
-        V = V @ Q
+      Q, R = A.qr_decompose()
+      A = R @ Q
+      V = V @ Q
     return A.diag(), V
 
   @staticmethod
@@ -4344,23 +4344,21 @@ class Tensor(MathTrait):
     else:full[:, :k] = Q
     # Complete the basis via Gram–Schmidt (Householder‑style two‑projection).
     for i in range(k, dim):
-        v = Tensor.eye(dim, dtype=Q.dtype)[:, i]
-        for j in range(i):
-            u = full[:, j]
-            v -= 2 * (u @ v) * u
-        full[:, i] = v / v.norm().clamp(min_=1.0e-12)
+      v = Tensor.eye(dim, dtype=Q.dtype)[:, i]
+      for j in range(i):
+        u = full[:, j]
+        v -= 2 * (u @ v) * u
+      full[:, i] = v / v.norm().clamp(min_=1.0e-10)
     return full
 
   def svd(self, compute_uv: bool = True, full_matrices: bool = True) -> tuple[Tensor, Tensor, Tensor]:
     """
     Computes the Singular Value Decomposition (SVD) of `self`.
     # Note not handling case for hermitian from numpy(), as I'm not using seperate algorithms for symmetric
-
     Args:
         compute_uv (bool): Whether or not to compute `u` and `vh` in addition to `s`. True by default.
         full_matrices (bool): If True (default), `u` and `vh` have the shapes ``(..., M, M)`` and ``(..., N, N)``, respectively.
                 Otherwise, the shapes are ``(..., M, K)`` and ``(..., K, N)``, respectively, where ``K = min(M, N)``.
-
     Returns:
         U (Tensor): Left singular vectors.
         S (Tensor): Singular values.
@@ -4374,17 +4372,14 @@ class Tensor(MathTrait):
     M, N = A.shape
     K = min(M, N)
     if compute_uv:
-        # Pad U and V to full matrices
-        if full_matrices:
-            if U.shape[1] < M: U = Tensor._orthonormal_basis(U, M, sorted_indices)
-            if V.shape[1] < N: V = Tensor._orthonormal_basis(V, N, sorted_indices)
-
-            return U, eigvals_AtA.sqrt()[:K], V.transpose()
-        else:
-            sorted_indices = sorted_indices[:K]
-            return U[:, sorted_indices], eigvals_AtA.sqrt()[:K], V[:, sorted_indices].transpose()
-    else:
-        return eigvals_AtA.sqrt()
+      # Pad U and V to full matrices
+      if full_matrices:
+        if U.shape[1] < M: U = Tensor._orthonormal_basis(U, M, sorted_indices)
+        if V.shape[1] < N: V = Tensor._orthonormal_basis(V, N, sorted_indices)
+        return U, eigvals_AtA.sqrt()[:K], V.transpose()
+      sorted_indices = sorted_indices[:K]
+      return U[:, sorted_indices], eigvals_AtA.sqrt()[:K], V[:, sorted_indices].transpose()
+    return eigvals_AtA.sqrt()
 
 P = ParamSpec("P")
 T = TypeVar("T")
