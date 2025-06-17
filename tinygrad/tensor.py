@@ -4030,7 +4030,7 @@ class Tensor(MathTrait):
     b_shape,m,n = self.shape[:-2],self.shape[-2],self.shape[-1]
     #preprocess the matrix
     Q,R = (Tensor.qr(self) if m >= n else Tensor.qr(self.transpose(-2,-1)))
-    num = min(m,n)
+    num,q_num = min(m,n),max(m,n)
     U = R.triu().shrink(tuple([(0,self.shape[i]) for i in range(self.ndim-2)] + [(0,num), (0,num)])).contiguous()
     V=Tensor.eye(num).cast(self.dtype).reshape((1,)*(self.ndim-2)+(num,num)).expand(b_shape+(num,num)).contiguous()
     #prepare round robin pairing
@@ -4070,7 +4070,7 @@ class Tensor(MathTrait):
     new_indices[...,:num] = indices.reshape(b_shape + (1,)+ (U.shape[0],)).expand(b_shape+(num,num))
     U,V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2),V.gather(-1, new_indices[...,0:num,0:num])
 
-    padded_u = Tensor.eye(max(m,n)).reshape((1,)*(self.ndim-2)+(max(m,n),max(m,n))).expand(b_shape+(max(m,n),max(m,n))).contiguous()
+    padded_u = Tensor.eye(q_num).reshape((1,)*(self.ndim-2)+(q_num,q_num)).expand(b_shape+(q_num,q_num)).contiguous()
     padded_u[...,0:num,0:num] = U
     U = Q @ padded_u
     if not full_matrices: U,V = U[...,0:num],V[...,0:num]
