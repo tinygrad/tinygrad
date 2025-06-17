@@ -3023,54 +3023,54 @@ class TestLinAlg(unittest.TestCase):
       invalid_tensor.diag()
 
   def test_qr_decompose(self):
-    with Context(NOOPT=1):
-      A = Tensor([[1.0, 2.0], [3.0, 4.0]])
-      Q, R = A.qr_decompose()
-      # Verify Q is orthogonal
-      np.testing.assert_allclose((Q.transpose() @ Q).numpy(), np.eye(Q.shape[0]), rtol=1e-6, atol=1e-6)
-      # Verify A = QR
-      np.testing.assert_allclose((Q @ R).numpy(), A.numpy(), rtol=1e-6)
+    # with Context(NOOPT=1):
+    A = Tensor([[1.0, 2.0], [3.0, 4.0]])
+    Q, R = A.qr_decompose()
+    # Verify Q is orthogonal
+    np.testing.assert_allclose((Q.transpose() @ Q).numpy(), np.eye(Q.shape[0]), rtol=1e-6, atol=1e-6)
+    # Verify A = QR
+    np.testing.assert_allclose((Q @ R).numpy(), A.numpy(), rtol=1e-6)
 
   def test_eig(self):
     # Verify eigenvalues and eigenvectors
-    with Context(NOOPT=1):
-      A = Tensor([[5.0, 4.0], [4.0, 5.0]])
-      eigenvalues, eigenvectors = A.eig()
-      for i in range(len(eigenvalues)):
-        np.testing.assert_allclose(
-          (A @ eigenvectors[:, i]).numpy(),
-          (eigenvalues[i] * eigenvectors[:, i]).numpy(),
-          rtol=1e-3,
-          atol=1e-3,
-        )
+    # with Context(NOOPT=1):
+    A = Tensor([[5.0, 4.0], [4.0, 5.0]])
+    eigenvalues, eigenvectors = A.eig()
+    for i in range(len(eigenvalues)):
+      np.testing.assert_allclose(
+        (A @ eigenvectors[:, i]).numpy(),
+        (eigenvalues[i] * eigenvectors[:, i]).numpy(),
+        rtol=1e-3,
+        atol=1e-3,
+      )
 
   def test_svd(self):
-    with Context(NOOPT=1):
-      if Device.DEFAULT == "METAL": dtype = dtypes.float32
-      else: dtype = dtypes.float64
-      tensors = [
-          Tensor([[3, 6], [1, 10]], dtype = dtype),
-          Tensor([[1, 2], [3, 4]], dtype = dtype),
-          Tensor([[5.0, 6.0], [7.0, 8.0]], dtype = dtype),
-          Tensor([[9.0, 10.0], [11.0, 12.0]], dtype = dtype),
-          Tensor([[9.0, 10.0, 323, 9], [11.0, 12.0, 40, 38]], dtype = dtype),
-          Tensor([[9.0, 10.0], [11.0, 12.0], [5, 35]], dtype = dtype)
-      ]
+    # with Context(NOOPT=1):
+    if Device.DEFAULT == "METAL": dtype = dtypes.float32
+    else: dtype = dtypes.float64
+    tensors = [
+        Tensor([[3, 6], [1, 10]], dtype = dtype),
+        Tensor([[1, 2], [3, 4]], dtype = dtype),
+        Tensor([[5.0, 6.0], [7.0, 8.0]], dtype = dtype),
+        Tensor([[9.0, 10.0], [11.0, 12.0]], dtype = dtype),
+        Tensor([[9.0, 10.0, 323, 9], [11.0, 12.0, 40, 38]], dtype = dtype),
+        Tensor([[9.0, 10.0], [11.0, 12.0], [5, 35]], dtype = dtype)
+    ]
 
-      for tensor in tensors:
+    for tensor in tensors:
 
-          for full_matrices in [True]:
-              U, S, Vt = tensor.svd(full_matrices=full_matrices)
-              np_U, np_S, np_Vt = np.linalg.svd(tensor.numpy(), full_matrices=full_matrices)
-              # Using the absolute value, due to sign differences between numpy and tinygrad implementations
-              if full_matrices:
-                np.testing.assert_allclose(U.abs().numpy(), np.abs(np_U), rtol=1e-4, atol=0.5)
-                np.testing.assert_allclose(S.abs().numpy(), np.abs(np_S), rtol=1e-4, atol=0.5)
-                np.testing.assert_allclose(Vt.abs().numpy(), np.abs(np_Vt), rtol=1e-4, atol=0.5)
-              else:
-                np.testing.assert_allclose(U.abs().numpy(), np.abs(np_U), rtol=1e-4, atol=1e-4)
-                np.testing.assert_allclose(S.abs().numpy(), np.abs(np_S), rtol=1e-4, atol=1e-4)
-                np.testing.assert_allclose(Vt.abs().numpy(), np.abs(np_Vt), rtol=1e-4, atol=1e-4)
+        for full_matrices in [True]:
+            U, S, Vt = tensor.svd(full_matrices=full_matrices)
+            np_U, np_S, np_Vt = np.linalg.svd(tensor.numpy(), full_matrices=full_matrices)
+            # Using the absolute value, due to sign differences between numpy and tinygrad implementations
+            if full_matrices:
+              np.testing.assert_allclose(U.abs().numpy(), np.abs(np_U), rtol=1e-4, atol=0.5)
+              np.testing.assert_allclose(S.abs().numpy(), np.abs(np_S), rtol=1e-4, atol=0.5)
+              np.testing.assert_allclose(Vt.abs().numpy(), np.abs(np_Vt), rtol=1e-4, atol=0.5)
+            else:
+              np.testing.assert_allclose(U.abs().numpy(), np.abs(np_U), rtol=1e-4, atol=1e-4)
+              np.testing.assert_allclose(S.abs().numpy(), np.abs(np_S), rtol=1e-4, atol=1e-4)
+              np.testing.assert_allclose(Vt.abs().numpy(), np.abs(np_Vt), rtol=1e-4, atol=1e-4)
 
   def test_norm(self):
     helper_test_op([(3,)], lambda x: x.norm(), lambda x: x.norm(), forward_only=True)

@@ -4279,18 +4279,19 @@ class Tensor(MathTrait):
 
   def norm(self) -> Tensor: return self.square().sum().sqrt()
 
-  def diag(t: Tensor) -> Tensor:
+  def diag(self: Tensor) -> Tensor:
       """
       • If `t` is 1-D → return a square matrix with `t` on the main diagonal.
       • If `t` is 2-D → return a 1-D tensor containing the main diagonal of `t`.
       """
-      if t.ndim == 1:
+      if self.ndim == 1:
+          t = self.clone()
           eye = Tensor.eye(t.shape[0], dtype=t.dtype, device=t.device)
           return eye * t
-      if t.ndim == 2:
+      if self.ndim == 2:
           n = min(t.shape)
           eye = Tensor.eye(n, dtype=t.dtype, device=t.device)
-          return (t[:n, :n] * eye).sum(axis=1)
+          return (self[:n, :n] * eye).sum(axis=1)
       raise ValueError("diag expects a 1-D or 2-D tensor")
 
   def qr_decompose(self) -> tuple[Tensor, Tensor]:
@@ -4314,6 +4315,7 @@ class Tensor(MathTrait):
           Q = Q_t @ Q
           R = Q_t @ R
       return Q.transpose(), R
+
   def eig(self, max_iter=20)-> tuple[Tensor, Tensor]:
     """
     Compute the eigenvalues and eigenvectors of a matrix using QR algorithm.
@@ -4332,6 +4334,21 @@ class Tensor(MathTrait):
         A = R @ Q
         V = V @ Q
     return A.diag(), V
+
+  @staticmethod
+  def _orthonormal_basis(Q: Tensor, dim: int, sorted_indices=None) -> Tensor:
+    k = Q.shape[1]
+    full = Tensor.eye(dim, dtype=Q.dtype)
+    if sorted_indices is not None: full[:, :k] = Q[:, sorted_indices]
+    else:full[:, :k] = Q
+    # Complete the basis via Gram–Schmidt (Householder‑style two‑projection).
+    for i in range(k, dim):
+        v = Tensor.eye(dim, dtype=Q.dtype)[:, i]
+        for j in range(i):
+            u = full[:, j]
+            v -= 2 * (u @ v) * u
+        full[:, i] = v / v.norm().clamp(min_=1.0e-12)
+    return full
 
   def svd(self, compute_uv: bool = True, full_matrices: bool = True) -> tuple[Tensor, Tensor, Tensor]:
     """
@@ -4358,23 +4375,8 @@ class Tensor(MathTrait):
     if compute_uv:
         # Pad U and V to full matrices
         if full_matrices:
-
-            def complete_orthonormal_basis(Q: Tensor, dim: int, sorted_indices=None) -> Tensor:
-              k = Q.shape[1]
-              full = Tensor.eye(dim, dtype=Q.dtype)
-              if sorted_indices is not None: full[:, :k] = Q[:, sorted_indices]
-              else:full[:, :k] = Q
-              # Complete the basis via Gram–Schmidt (Householder‑style two‑projection).
-              for i in range(k, dim):
-                  v = Tensor.eye(dim, dtype=Q.dtype)[:, i]
-                  for j in range(i):
-                      u = full[:, j]
-                      v -= 2 * (u @ v) * u
-                  full[:, i] = v / v.norm().clamp(min_=1.0e-12)
-              return full
-
-            if U.shape[1] < M: U = complete_orthonormal_basis(U, M, sorted_indices)
-            if V.shape[1] < N: V = complete_orthonormal_basis(V, N, sorted_indices)
+            if U.shape[1] < M: U = Tensor._orthonormal_basis(U, M, sorted_indices)
+            if V.shape[1] < N: V = Tensor._orthonormal_basis(V, N, sorted_indices)
 
             return U, eigvals_AtA.sqrt()[:K], V.transpose()
         else:
