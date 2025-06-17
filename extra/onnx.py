@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from typing import Any, Sequence, cast, Literal, Callable
-import dataclasses, functools, io, math, types, warnings, os
+import dataclasses, functools, io, math, types, warnings, pathlib
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
@@ -139,10 +139,9 @@ class OnnxRunner:
   `OnnxRunner` executes an ONNX model using Tinygrad.
 
   Args:
-    model_path: The ONNX model, provided as a file path (a string or path-like object).
+    model_path: The ONNX model, provided as a file path (a string or Path object) or a Tensor.
   """
-  def __init__(self, model_path:str | os.PathLike):
-    self.model_path = model_path
+  def __init__(self, model_path: Tensor | str | pathlib.Path):
     model = onnx_load(model_path)
     self.is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model.graph.node)
     self.old_training = Tensor.training
