@@ -1,8 +1,7 @@
 // **** graph renderers
 
-const displayGraph = (g) => {
-  d3.selectAll(".view").filter(`:not(${g})`).style("display", "none");
-  return d3.select(g).style("display", "flex");
+const displayGraph = (cls) => {
+  for (const e of document.getElementsByClassName("view")) e.style.display = e.classList.contains(cls) ? "flex" : "none";
 }
 
 // ** UOp graph
@@ -21,7 +20,6 @@ const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getB
 
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
-  displayGraph(".graph");
   // start calculating the new layout (non-blocking)
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
@@ -36,6 +34,7 @@ async function renderDag(graph, additions, recenter=false) {
   timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   worker.postMessage({graph, additions, ctxs});
   worker.onmessage = (e) => {
+    displayGraph("graph");
     progressMessage.style.display = "none";
     clearTimeout(timeout);
     d3.select("#bars").html("");
@@ -102,7 +101,7 @@ function pluralize(num, name, alt=null) {
 }
 
 function renderMemoryGraph(graph) {
-  displayGraph(".graph");
+  displayGraph("graph");
   // ** construct alloc/free traces
   // we can map reads/writes from the kernel graph
   const actions = [];
@@ -236,7 +235,8 @@ const colors = [
 
 var data, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
-  displayGraph(".profiler");
+  displayGraph("profiler");
+  d3.select(".metadata").html("");
   if (data != null) return;
   // fetch and process data
   const { traceEvents } = await (await fetch("/get_profile")).json();
@@ -270,6 +270,7 @@ async function renderProfiler() {
     const div = deviceList.appendChild(document.createElement("div"));
     div.id = `pid-${k}`;
     div.innerText = v.name;
+    div.style.padding = `${padding}px`;
     const { y:baseY, height:baseHeight } = rect(`#pid-${k}`);
     // position events on the y axis, stack ones that overlap
     const levels = [];
@@ -509,7 +510,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:0 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
