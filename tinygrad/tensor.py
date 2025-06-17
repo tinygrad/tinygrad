@@ -4289,10 +4289,10 @@ class Tensor(MathTrait):
     • If `t` is 1-D → return a square matrix with `t` on the main diagonal.
     • If `t` is 2-D → return a 1-D tensor containing the main diagonal of `t`.
     """
-    if self.ndim == 1: return Tensor.eye(self.shape[0]) * self
+    if self.ndim == 1: return Tensor.eye(self.shape[0], dtype=self.dtype) * self
     if self.ndim == 2:
       n = min(self.shape)
-      return (self[:n, :n] * Tensor.eye(n)).sum(axis=1)
+      return (self[:n, :n] * Tensor.eye(n, dtype=self.dtype)).sum(axis=1)
     raise ValueError("diag expects a 1-D or 2-D tensor")
 
   def qr_decompose(self) -> tuple[Tensor, Tensor]:
