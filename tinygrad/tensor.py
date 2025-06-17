@@ -4274,7 +4274,7 @@ class Tensor(MathTrait):
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
-  
+
   # *** Linalg functions ***
 
   def norm(self) -> Tensor: return self.square().sum().sqrt()
@@ -4284,16 +4284,14 @@ class Tensor(MathTrait):
       • If `t` is 1-D → return a square matrix with `t` on the main diagonal.
       • If `t` is 2-D → return a 1-D tensor containing the main diagonal of `t`.
       """
-      if t.ndim == 1:                              # vector → diagonal matrix
-          n = t.shape[0]
-          # broadcast multiply: eye(n,n) * t (shape (n,)) → diag matrix
-          return Tensor.eye(n, dtype=t.dtype, device=t.device) * t
-      elif t.ndim == 2:                            # matrix → diagonal vector
-          n = min(t.shape[0], t.shape[1])
-          mask = Tensor.eye(n, dtype=t.dtype, device=t.device)
-          return (t[:n, :n] * mask).sum(axis=1)
-      else:
-          raise ValueError("diag expects a 1-D or 2-D tensor")
+      if t.ndim == 1:
+          eye = Tensor.eye(t.shape[0], dtype=t.dtype, device=t.device)
+          return eye * t
+      if t.ndim == 2:
+          n = min(t.shape)
+          eye = Tensor.eye(n, dtype=t.dtype, device=t.device)
+          return (t[:n, :n] * eye).sum(axis=1)
+      raise ValueError("diag expects a 1-D or 2-D tensor")
 
   def qr_decompose(self) -> tuple[Tensor, Tensor]:
       """
@@ -4328,11 +4326,11 @@ class Tensor(MathTrait):
         V (Tensor): Eigen vectors
     """
     A = self.clone()
-    V = Tensor.eye(A.shape[0]) 
+    V = Tensor.eye(A.shape[0])
     for _ in range(max_iter):
         Q, R = A.qr_decompose()
         A_next = R @ Q
-        V = V @ Q 
+        V = V @ Q
         A = A_next
     return A.diag(), V
 
@@ -4343,7 +4341,7 @@ class Tensor(MathTrait):
 
     Args:
         compute_uv (bool): Whether or not to compute `u` and `vh` in addition to `s`. True by default.
-        full_matrices (bool): If True (default), `u` and `vh` have the shapes ``(..., M, M)`` and ``(..., N, N)``, respectively. 
+        full_matrices (bool): If True (default), `u` and `vh` have the shapes ``(..., M, M)`` and ``(..., N, N)``, respectively.
                 Otherwise, the shapes are ``(..., M, K)`` and ``(..., K, N)``, respectively, where ``K = min(M, N)``.
 
     Returns:
@@ -4361,7 +4359,7 @@ class Tensor(MathTrait):
     if compute_uv:
         # Pad U and V to full matrices
         if full_matrices:
-            
+
             def complete_orthonormal_basis(Q: Tensor, dim: int, sorted_indices=None) -> Tensor:
               k = Q.shape[1]
               full = Tensor.eye(dim, dtype=Q.dtype)

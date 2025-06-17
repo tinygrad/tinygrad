@@ -3056,7 +3056,7 @@ class TestLinAlg(unittest.TestCase):
       ]
 
       for tensor in tensors:
-          
+
           for full_matrices in [True]:
               U, S, Vt = tensor.svd(full_matrices=full_matrices)
               np_U, np_S, np_Vt = np.linalg.svd(tensor.numpy(), full_matrices=full_matrices)
@@ -3074,7 +3074,6 @@ class TestLinAlg(unittest.TestCase):
     helper_test_op([(3,)], lambda x: x.norm(), lambda x: x.norm(), forward_only=True)
     helper_test_op([(3, 3)], lambda x: x.norm(), lambda x: x.norm(), forward_only=True)
     helper_test_op([(3, 3, 3)], lambda x: x.norm(), lambda x: x.norm(), forward_only=True)
-
 
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
