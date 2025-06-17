@@ -3047,11 +3047,11 @@ class TestLinAlg(unittest.TestCase):
   def test_svd(self):
     # with Context(NOOPT=1):
     tensors = [
-        # Tensor([[3, 6], [1, 10]]),
-        # Tensor([[1, 2], [3, 4]]),
-        # Tensor([[5.0, 6.0], [7.0, 8.0]]),
-        # Tensor([[9.0, 10.0], [11.0, 12.0]]),
-        Tensor([[9.0, 10.0, 323, 9], [11.0, 12.0, 40, 38]]),
+        Tensor([[3, 6], [1, 10]]),
+        Tensor([[1, 2], [3, 4]]),
+        Tensor([[5.0, 6.0], [7.0, 8.0]]),
+        Tensor([[9.0, 10.0], [11.0, 12.0]]),
+        # Tensor([[9.0, 10.0, 323, 9], [11.0, 12.0, 40, 38]]),
         Tensor([[9.0, 10.0], [11.0, 12.0], [5, 35]])
     ]
     for tensor in tensors:
@@ -3066,7 +3066,7 @@ class TestLinAlg(unittest.TestCase):
           # Confirm A = U @ S @ Vt correctly reconstructs A by making sure the signs are correct.
           N, M = map(int, tensor.shape)
           if N > M: reconstructed_tensor = U @ (Tensor.eye(m = M, n = N, dtype=tensor.dtype) * S) @ Vt
-          elif N < M: reconstructed_tensor = U @ (Tensor.eye(m = M, n = N, dtype=tensor.dtype) * S.unsqueeze(1)) @ Vt
+          elif N < M:  reconstructed_tensor = U @ (Tensor.eye(m = M, n = N, dtype=tensor.dtype) * S.unsqueeze(1)) @ Vt
           else: reconstructed_tensor = U @ S.diag() @ Vt
           np.testing.assert_allclose(reconstructed_tensor.sign().numpy(), tensor.sign().numpy())
         else:
