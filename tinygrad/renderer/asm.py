@@ -232,8 +232,8 @@ arm64_float_ops = {Ops.ADD: "fadd", Ops.SUB: "fsub", Ops.MUL: "fmul", Ops.FDIV: 
 arm64_vec_ops = arm64_mov_ops
 arm64_ops = {**{x:arm64_unsigned_ops for x in dtypes.uints}, **{x:arm64_signed_ops for x in dtypes.sints},
              **{x:arm64_float_ops for x in dtypes.floats}, **{x:arm64_16bit_ops for x in (dtypes.int16, dtypes.uint16)},
-             **{x:arm64_8bit_ops for x in (dtypes.int8, dtypes.uint8)}, dtypes.bool:arm64_bool_ops, dtypes.float32.vec(2):arm64_vec_ops,
-             dtypes.float32.vec(4):arm64_vec_ops, dtypes.float64.vec(2):arm64_vec_ops, dtypes.void:arm64_branch_ops}
+             **{x:arm64_8bit_ops for x in (dtypes.int8, dtypes.uint8)}, dtypes.bool:arm64_bool_ops, dtypes.void:arm64_branch_ops,
+             **{x:arm64_vec_ops for x in (dtypes.float16.vec(2), dtypes.float16.vec(4), dtypes.float32.vec(2), dtypes.float32.vec(4))}}
 arm64_vec = {1: "b", 2: "h", 4: "s", 8: "d"}
 arm64_cast_suffix = {1: "b", 2: "h", 4: "w"}
 def arm64_cflag(x:UOp) -> str: return "ne" if x.op is Ops.CMPNE else "lo" if x.src[0].dtype in dtypes.uints else "lt"
@@ -280,6 +280,7 @@ def arm64_load_consts(x:UOp) -> UOp|None:
   for s in x.src:
     if s.op is Ops.CONST:
       # NOTE: apparently just loading the consts works cause the assembler generates the correct instructions
+      if s.dtype is dtypes.float16: s = s.load(dtype=dtypes.int16).bitcast(dtypes.float16)
       if s.dtype is dtypes.float32: s = s.load(dtype=dtypes.int32).bitcast(dtypes.float32)
       elif s.dtype is dtypes.float64: s = s.load(dtype=dtypes.int64).bitcast(dtypes.float64)
       elif abs(s.arg) > (2 ** 12) - 1: s = s.load(dtype=s.dtype)
@@ -290,7 +291,7 @@ def arm64_load_consts(x:UOp) -> UOp|None:
 arm64_matcher = asm_matcher + PatternMatcher([
   (UPat(GroupOp.All, name="x"), arm64_load_consts),
   # some ops can't take imm in srcs
-  (UPat((Ops.XOR, Ops.IDIV, Ops.MUL, Ops.MULACC, Ops.WHERE, Ops.STORE), name="x"),
+  (UPat((Ops.CMPNE, Ops.CMPLT, Ops.XOR, Ops.IDIV, Ops.MUL, Ops.MULACC, Ops.WHERE, Ops.STORE), name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   # no modulo in arm64
   (UPat(Ops.MOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - (a // b) * b),
