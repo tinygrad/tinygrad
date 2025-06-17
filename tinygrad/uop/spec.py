@@ -121,6 +121,13 @@ def validate_index(idx:UOp, cond:UOp=UOp.const(dtypes.bool, True)):
     return False
   return True
 
+def validate_store(idx:UOp, val:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
+  if gate.op is Ops.IF: gate = gate.src[0]
+  # we need to find the implicit gates, inverse of delete_redundant_gates
+  for u in val.toposort():
+    if u.op is Ops.IF: gate &= u.src[0]
+  return validate_index(idx, gate)
+
 index_pat = UPat.any(UPat(Ops.INDEX, name="idx"), UPat(Ops.CAST, src=(UPat(Ops.INDEX, name="idx"),)))
 
 # this is the matcher for the final rendered UOps
@@ -163,9 +170,9 @@ spec = PatternMatcher([
   (UPat(Ops.LOAD, src=(index_pat, UPat.var("alt")), name="ld"), lambda ld,alt,idx: ld.dtype == alt.dtype and validate_index(idx)),
 
   # STORE takes a <bufidx, val, gate?>
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat())), validate_index),
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(), UPat(dtype=dtypes.bool, name="cond"))), validate_index),
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(), UPat(Ops.IF, name="cond"))), lambda idx,cond: validate_index(idx,cond.src[0])),
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"))), validate_store),
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"), UPat(dtype=dtypes.bool, name="gate"))), validate_store),
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate"))), validate_store),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
