@@ -795,7 +795,7 @@ class TrackedPatternMatcher(PatternMatcher):
 
 if TRACK_MATCH_STATS:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
-  import atexit
+  import atexit, multiprocessing
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
@@ -815,7 +815,7 @@ if TRACK_MATCH_STATS:
 def launch_viz(env_str:str, data:str):
   os.environ[env_str] = "0"
   os.environ[f"{env_str}_DATA"] = data
-  if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")):
+  if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")) and multiprocessing.current_process().name == "MainProcess":
     args = ['--kernels', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
     args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
     os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), "../", "viz", "serve.py")] + args)
