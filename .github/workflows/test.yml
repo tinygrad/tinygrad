@@ -931,6 +931,9 @@ jobs:
       - name: Run macOS-specific unit test
         if: matrix.backend == 'cpu'
         run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated
+      - name: print llvm
+        if: matrix.backend == 'llvm'
+        run: DEBUG=7 python3 test/test_disassembly.py
 
 # ****** Windows Tests ******
 
