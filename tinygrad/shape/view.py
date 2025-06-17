@@ -154,7 +154,7 @@ class View:
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, vm1:View) -> Optional[View]:
     vm2 = self
-    if vm2.contiguous: return vm1
+    if vm2.contiguous or vm1.size() == 0: return vm1
     if vm1.contiguous and vm1.shape == vm2.shape: return vm2
     if vm1.contiguous and vm1.size() == vm2.size() and (ret := vm2.reshape(vm1.shape)) is not None: return ret
     if vm1.mask:
