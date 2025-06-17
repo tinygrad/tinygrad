@@ -1725,6 +1725,7 @@ class TestLinearizerFailures(unittest.TestCase):
 
   def test_failure_63(self):
     # BEAM=2 python3 examples/beautiful_mnist.py
+    # fails index_validation if implicit gate on store is not considered
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
         UOp(Ops.VIEW, dtypes.uint.ptr(400), arg=ShapeTracker(views=(View(shape=(400, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=(
