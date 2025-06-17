@@ -116,7 +116,7 @@ def validate_index(idx:UOp, cond:UOp=UOp.const(dtypes.bool, True)):
   solver.add(z3_sink.src[1].arg)
   if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
     print(f"idx={idx.src[1].render(simplify=False)}")
-    print(f"mask & if-cond={mask.render(simplify=False)}")
+    print(f"mask & cond={mask.render(simplify=False)}")
     print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz}\nconstraints = {solver}")
     return False
   return True
@@ -165,7 +165,7 @@ spec = PatternMatcher([
   # STORE takes a <bufidx, val, gate?>
   (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat())), validate_index),
   (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(), UPat(dtype=dtypes.bool, name="cond"))), validate_index),
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(), UPat(Ops.IF))), lambda idx,cond: validate_index(idx,cond.src[0])),
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(), UPat(Ops.IF, name="cond"))), lambda idx,cond: validate_index(idx,cond.src[0])),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
