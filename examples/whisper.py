@@ -1,7 +1,7 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
 import sys, base64, multiprocessing, itertools, collections, zlib, datetime, math, argparse, json
-from scipy.special import log_softmax, logsumexp
+from scipy.special import log_softmax
 from dataclasses import dataclass
 from typing import Optional, Union, Literal, List
 from tinygrad import Tensor, TinyJit, nn, Variable
@@ -250,7 +250,6 @@ def init_whisper(model_name="tiny.en", batch_size=1):
   return model, enc
 
 def load_file_waveform(filename): return librosa.load(filename, sr=RATE)[0]
-
 def transcribe_file(model, enc: Encoding, filename, output_fh=None, beam=False, no_speech_threshold=0.8):
   return transcribe_waveform(model, enc, [load_file_waveform(filename)], output_fh, beam=beam, no_speech_threshold=no_speech_threshold)
 
