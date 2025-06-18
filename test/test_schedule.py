@@ -2366,7 +2366,6 @@ class TestCopyFolding(unittest.TestCase):
     add = schedule_graph_rewrite(add)
     assert all_same([x.device for x in add.src]), f"ALU has different devices! {[x.device for x in add.src]}"
 
-  @unittest.skip("this is just clone now")
   def test_copy_to_same_device(self):
     a = Tensor.empty(4).uop
     b = a.copy_to_device(a.device)
@@ -2376,7 +2375,6 @@ class TestCopyFolding(unittest.TestCase):
     # in the scheduler because buffer already has shape (4,)
     self.assertIs(b, a.base)
 
-  @unittest.skip("this is just clone now")
   def test_copy_to_same_device_alt(self):
     a = Tensor.empty(4, 4).uop
     b = a.copy_to_device(a.device)
