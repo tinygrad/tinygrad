@@ -145,6 +145,7 @@ hyp = {
   },
 }
 
+@Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1))
 def train_cifar():
 
   def set_seed(seed):
