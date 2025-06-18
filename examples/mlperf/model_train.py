@@ -930,6 +930,8 @@ def train_step_bert(model, optimizer, scheduler, loss_scaler:float, GPUS, grad_a
     lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
     loss = model.loss(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
     (loss * loss_scaler).backward()
+    # TODO: OOM without this realize with large grad_acc
+    Tensor.realize(*[p.grad for p in optimizer.params])
 
   global_norm = Tensor([0.0], dtype=dtypes.float32, device=optimizer[0].device)
   for p in optimizer.params:
