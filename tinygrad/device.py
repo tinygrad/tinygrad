@@ -132,10 +132,8 @@ class Buffer:
   @property
   def _buf(self) -> Any:
     self.ensure_allocated()
-    if hasattr(self, '_underlying_buf'): return self._underlying_buf
-    assert self._base is not None
-    assert hasattr(self.allocator, "_offset"), "offset function required for view"
-    return self.allocator._offset(self.base._buf, self.nbytes, self.offset)
+    if self._base is not None and not hasattr(self, '_underlying_buf'): self.allocate()
+    return self._underlying_buf
   def ref(self, cnt):
     self.base._lb_refcount += cnt
     return self
