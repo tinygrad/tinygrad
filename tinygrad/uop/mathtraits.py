@@ -18,6 +18,7 @@ class MathTrait:
     if (dtype:=getattr(self, 'dtype')) is not None:
       if isinstance(dtype, tuple): dtype = dtype[0]
       if not (dtypes.is_bool(dtype) or dtypes.is_int(dtype)): raise RuntimeError(f"{dtype} is not supported")
+  def _broadcasted(self, x, reverse): return (x, self) if reverse else (self, x)
   def add(self, x, reverse=False):
     """
     Adds `self` and `x`.
@@ -111,7 +112,26 @@ class MathTrait:
     """
     return self._binop(Ops.IDIV, x, reverse)
   def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
-  def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
+  def sub(self, x, reverse=False):
+    """
+    Subtracts `x` from `self`.
+    Equivalent to `self - x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.sub(20).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.sub(Tensor([[2.0], [3.5]])).numpy())
+    ```
+    """
+    a, b = self._broadcasted(x, reverse)
+    return (-b).add(a) if reverse else a.add(-b)
   def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
 
   def __neg__(self): return self.neg()
@@ -153,8 +173,31 @@ class MathTrait:
   def __rlshift__(self, x): return self.lshift(x, True)
   def __rrshift__(self, x): return self.rshift(x, True)
 
-  def maximum(self, x): return self.alu(Ops.MAX, self.ufix(x))
-  def minimum(self, x): return -(-self).maximum(-x)
+  def maximum(self, x):
+    """
+    Computes element-wise maximum of `self` and `x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).maximum(1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
+    ```
+    """
+    return self._binop(Ops.MAX, x, reverse=False)
+  def minimum(self, x):
+    """
+    Computes element-wise minimum of `self` and `x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).minimum(1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
+    ```
+    """
+    t, x = self._broadcasted(x, reverse=False)
+    return -(-t).maximum(-x)
   def where(self, x, y):
     if type(self) is type(x): return self.alu(Ops.WHERE, x, x.ufix(y))
     if type(self) is type(y): return self.alu(Ops.WHERE, y.ufix(x), y)
