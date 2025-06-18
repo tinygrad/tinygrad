@@ -462,21 +462,9 @@ class NVDDevice(HCQCompiled[NVSignal]):
     notifier = nv_gpu.NV_MEMORY_DESC_PARAMS(base=notifier_sysmem[0], size=0x000000ECC, addressSpace=1, cacheAttrib=0)
     self.notifier = to_mv(notifier_va, 0x1000)
 
-    ramfc_alloc = self._gpu_alloc(0x1000, contiguous=True, tag="ramfc")
-    ramfc = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.meta.mapping.paddrs[0][0], size=0x200, addressSpace=2, cacheAttrib=0)
-    instblock = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.meta.mapping.paddrs[0][0], size=0x1000, addressSpace=2, cacheAttrib=0)
-
-    method_va, method_sysmem = alloc_sysmem(0x5000, contigous=True)
-    method_buffer = nv_gpu.NV_MEMORY_DESC_PARAMS(base=method_sysmem[0], size=0x5000, addressSpace=1, cacheAttrib=0)
-
-    # print("OK", hex(gpfifo_area.va_addr))
-
-    cid = 0
-
     params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=0x0, hObjectBuffer=0x0,
-      gpFifoOffset=gpfifo_area.va_addr+offset, gpFifoEntries=entries, hContextShare=ctxshare, engineType=0x0, cid=cid,
-      userdOffset=(ctypes.c_uint64*8)(entries * 8), userdMem=userd, errorNotifierMem=notifier, instanceMem=instblock, ramfcMem=ramfc,
-      mthdbufMem=method_buffer, internalFlags=0x1d, flags=0x201020, ProcessID=1, SubProcessID=1)
+      gpFifoOffset=gpfifo_area.va_addr+offset, gpFifoEntries=entries, hContextShare=ctxshare, engineType=0x0, cid=0,
+      userdOffset=(ctypes.c_uint64*8)(entries * 8), userdMem=userd, errorNotifierMem=notifier, internalFlags=0x1d, flags=0x201020)
     gpfifo = rm_alloc(self.nvdev, nv_gpu.AMPERE_CHANNEL_GPFIFO_A, self.root, channel_group, params)
     comp = rm_alloc(self.nvdev, nv_gpu.ADA_COMPUTE_A, self.root, gpfifo, None)
     rm_alloc(self.nvdev, nv_gpu.AMPERE_DMA_COPY_B, self.root, gpfifo, None)
