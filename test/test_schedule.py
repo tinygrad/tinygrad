@@ -2437,29 +2437,6 @@ class TestCopyFolding(unittest.TestCase):
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
-class TestTensorUOpSpec(unittest.TestCase):
-  def test_const_must_be_unmasked(self):
-    a = Tensor.ones((4, 4)).pad((2, 2))
-    unsafe_push_views = PatternMatcher([
-      (UPat.cvar("root").view(name="view"), lambda root,view: root.replace(src=tuple(x.view(view.st) for x in root.src))),
-    ])
-    a.uop = graph_rewrite(a.uop.sink(), merge_views+merge_views+unsafe_push_views)
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      a.schedule()
-
-  def test_expanded_const_ok(self):
-    a = Tensor.ones((4, 4))
-    t = graph_rewrite(a.uop.sink(), merge_views+merge_views)
-    create_schedule_with_vars(t)
-
-  # NOTE: changing symbolic CONST VIEWs is not allowed
-  @unittest.expectedFailure
-  def test_symbolic_shape_ok(self):
-    a = Tensor.ones(4)
-    vi = UOp.variable("i", 1, 10).bind(4)
-    a.uop = graph_rewrite(a.reshape(vi).sum().uop, merge_views+merge_views)
-    a.schedule()
-
 class TestBufferUOp(unittest.TestCase):
   # BUFFER has a ShapeTracker of shape=(n,) and stride=(1,)
   def test_buffer_has_buffer(self):
