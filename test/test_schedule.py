@@ -15,7 +15,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.engine.kernelize import view_left, view_right, sym, get_kernelize_map, Kernel, create_ast, merge_views, create_kernels
+from tinygrad.engine.kernelize import merge_views, get_kernelize_map, Kernel
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 
@@ -67,7 +67,7 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
     np.testing.assert_allclose(w.grad.numpy(), ref_w.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
 
 @track_rewrites(named=True)
-def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, merge_views+sym, {})
+def schedule_graph_rewrite(big_sink:UOp): return get_kernelize_map(big_sink)[big_sink]
 
 class TestSchedule(unittest.TestCase):
   def test_arange_avgpool2d(self, kcount=2):
@@ -181,20 +181,6 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.rand(32)
     with Context(DONT_GROUP_REDUCES=1):
       check_schedule(x, 3, [Tensor._device_rng_counters[x.device]])
-
-  @unittest.skip("TODO: do not divide by zero given x.idiv(VALID)")
-  def test_rand_handcoded(self):
-    Tensor.manual_seed(0)
-    x = Tensor.rand(32)
-    # pre-realize shared seed
-    Tensor._device_rng_counters[x.device].realize()
-    # run custom kernelized kernel
-    sched_sink = graph_rewrite(x.uop, create_kernels, ctx={u:None for u in x.uop.toposort() if u.op is Ops.COPY}, bottom_up=True)
-    y = Tensor(graph_rewrite(sched_sink, create_ast, bottom_up=True))
-    run_schedule(check_schedule(y, 1))
-    # compare against reference
-    run_schedule(check_schedule(x, 3))
-    np.testing.assert_allclose(y.numpy(), x.numpy())
 
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
@@ -722,7 +708,6 @@ class TestSchedule(unittest.TestCase):
     c = Tensor.arange(4).realize().uop
     kernel = UOp(Ops.KERNEL, src=(a, b, c.base), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
     assert all(s.op is Ops.BUFFER for s in kernel.src), f"views are not allowed here {kernel}"
-    kernel = graph_rewrite(kernel, create_ast)
     run_schedule(check_schedule(UOp.sink(a.assign(kernel), b.assign(kernel)), 1))
     self.assertEqual(a.buffer.numpy(), [7])
     self.assertEqual(b.buffer.numpy(), [12])
@@ -1999,7 +1984,7 @@ class TestIndexing(unittest.TestCase):
   def test_recursive_swizzle(self):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
-    new_uop = swizzle_rewrite(a.uop.reshape((4, 1)))
+    new_uop = a.reshape(4,1).realize().uop
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
     self.assertEqual(swizzle_cnt(new_uop), 0)
 
@@ -2021,10 +2006,8 @@ class TestIndexing(unittest.TestCase):
     self.assertEqual(ast.shape, (32, 1))
     self.assertEqual(a.uop.shape, (32,))
 
-@track_rewrites(named=True)
-def swizzle_rewrite(u:UOp) -> UOp: return graph_rewrite(graph_rewrite(u, view_left), view_right)
 def swizzle_cnt(u:UOp) -> int:
-  return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL}])
+  return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL, Ops.ASSIGN}])
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
@@ -2360,11 +2343,11 @@ class TestCopyFolding(unittest.TestCase):
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
   def test_alu_after_copy(self):
-    a = Tensor.ones((4,)).to("CPU").uop
-    b = Tensor.empty(4, device="CPU").uop
+    a = Tensor.ones((4,)).to("CPU")
+    b = Tensor.empty(4, device="CPU")
     add = a+b
-    add = schedule_graph_rewrite(add)
-    assert all_same([x.device for x in add.src]), f"ALU has different devices! {[x.device for x in add.src]}"
+    add.kernelize()
+    assert all_same([x.device for x in add.uop.src]), f"ALU has different devices! {[x.device for x in add.src]}"
 
   @unittest.skip("this is just clone now")
   def test_copy_to_same_device(self):
