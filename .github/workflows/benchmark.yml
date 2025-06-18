@@ -607,12 +607,8 @@ jobs:
       run: test/external/process_replay/reset.py
     - name: validate openpilot 0.9.7
       run: PYTHONPATH=. FLOAT16=0 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_7.txt
-    - name: benchmark openpilot 0.9.4
-      run: BENCHMARK_LOG=openpilot_0_9_4 PYTHONPATH=. QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_4.txt
     - name: benchmark openpilot 0.9.7
       run: BENCHMARK_LOG=openpilot_0_9_7 PYTHONPATH=. QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_7.txt
-    - name: benchmark openpilot w IMAGE=2 0.9.4
-      run: BENCHMARK_LOG=openpilot_0_9_4_image PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_4.txt
     - name: benchmark openpilot w IMAGE=2 0.9.7
       run: BENCHMARK_LOG=openpilot_0_9_7_image PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_7.txt
     - name: openpilot compile3 0.9.7
