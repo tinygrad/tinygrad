@@ -1,6 +1,7 @@
 from lm_eval import simple_evaluate
 from lm_eval.api.instance import Instance
 from lm_eval.api.model import LM
+from lm_eval.tasks import TaskManager
 from pathlib import Path
 import json, argparse
 
@@ -79,7 +80,7 @@ if __name__ == '__main__':
   parser.add_argument('--chat', action='store_true', help="Use chat model")
   parser.add_argument('--ctx', type=int, default=8192, help="Max context length")
   parser.add_argument('--quantize', type=str, default=None, help="Quantize the weights to int8 or int4 in memory")
-  parser.add_argument('--eval', type=str, default="gsm8k", help="Run in evaluation mode")
+  parser.add_argument('--eval', type=str, default="mgsm_en_cot_sglang", help="Run in evaluation mode")
   parser.add_argument('--limit', type=int, default=None, help="Limit tests in eval")
   parser.add_argument('--num_fewshot', type=int, default=None, help="Number of examples to add to context")
   parser.add_argument('--model', type=Path, default="./weights/LLaMa/", help="Location of the weights")
@@ -89,7 +90,8 @@ if __name__ == '__main__':
   # run eval and exit
   adaptor = LLaMaAdaptor(model_size=args.size, quantize=args.quantize,
                          checkpoint_path=args.model, max_length=args.ctx)
-  results = simple_evaluate(model=adaptor, tasks=args.eval.split(","), apply_chat_template=args.chat,
+  task_manager = TaskManager(include_path="./")
+  results = simple_evaluate(model=adaptor, tasks=args.eval.split(","), task_manager=task_manager, apply_chat_template=args.chat,
                             num_fewshot=args.num_fewshot, limit=args.limit, system_instruction="You are a helpful assistant")
 
   if args.output_path: args.output_path.write_text(json.dumps(results, indent=2))
