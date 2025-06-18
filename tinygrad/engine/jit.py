@@ -232,7 +232,7 @@ class TinyJit(Generic[ReturnType]):
 
   def add_buffer(self, b:Buffer) -> Buffer:
     if found:=self._buffer_replace.get(b, None): return found
-    if b.is_allocated() or b.lb_refcount > 0: return b
+    if b.is_allocated() or b.uop_refcount > 0: return b
     if b._base is not None:
       self._buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, base=self.add_buffer(b._base), offset=b.offset)
     else:
