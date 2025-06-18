@@ -215,16 +215,6 @@ def train_cifar():
     Xs, Ys, Xi, Yi = make_random_crop_indices(X.shape, crop_size)
     return X.gather(-1, (Xs + Xi).expand(-1, 3, X.shape[2], -1)).gather(-2, ((Ys+Yi).expand(-1, 3, crop_size, crop_size)))
 
-  @TinyJit
-  def jittable_transforms(X:Tensor, Y:Tensor):
-    perms = Tensor.randperm(X.shape[0], device=X.device)
-    if getenv("RANDOM_CROP", 1):
-      X = random_crop(X, crop_size=32)
-    if getenv("RANDOM_FLIP", 1):
-      X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
-    return X[perms], Y[perms], perms # perms is expensive to calculate, and we can reuse it.
-
-  @TinyJit
   def cutmix(X, Y, order, mask_size=3):
     mask = make_square_mask(X.shape, mask_size)
     X_patch, Y_patch = X[order], Y[order]
@@ -233,6 +223,16 @@ def train_cifar():
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
     return X_cutmix, Y_cutmix
 
+  @TinyJit
+  def augmentations(X:Tensor, Y:Tensor):
+    perms = Tensor.randperm(X.shape[0], device=X.device) # We reuse perms for cutmix, because they are expensivne to generate
+    if getenv("RANDOM_CROP", 1):
+      X = random_crop(X, crop_size=32)
+    if getenv("RANDOM_FLIP", 1):
+      X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
+    X, Y = X[perms], Y[perms]
+    return X, Y, *cutmix(X, Y, perms, mask_size=hyp['net']['cutmix_size'])
+
   # the operations that remain inside batch fetcher is the ones that involves random operations
   def fetch_batches(X_in:Tensor, Y_in:Tensor, BS:int, is_train:bool):
     step, epoch = 0, 0
@@ -240,9 +240,8 @@ def train_cifar():
       st = time.monotonic()
       X, Y = X_in, Y_in
       if is_train:
-        X, Y, perms = jittable_transforms(X, Y)
-        if getenv("CUTMIX", 1) and step >= hyp['net']['cutmix_steps']:
-          X, Y = cutmix(X, Y, perms, mask_size=hyp['net']['cutmix_size'])
+        X, Y, X_cm, Y_cm = augmentations(X, Y)
+        if getenv("CUTMIX", 1) and step >= hyp['net']['cutmix_steps']: X, Y = X_cm, Y_cm
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X.shape[0], BS):
