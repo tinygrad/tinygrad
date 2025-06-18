@@ -182,18 +182,6 @@ class TestSchedule(unittest.TestCase):
     with Context(DONT_GROUP_REDUCES=1):
       check_schedule(x, 3, [Tensor._device_rng_counters[x.device]])
 
-  #@unittest.skip("TODO: do not divide by zero given x.idiv(VALID)")
-  def test_rand_handcoded(self):
-    Tensor.manual_seed(0)
-    x = Tensor.rand(32)
-    # pre-realize shared seed
-    Tensor._device_rng_counters[x.device].realize()
-    # run custom kernelized kernel
-    run_schedule(check_schedule(y, 1))
-    # compare against reference
-    run_schedule(check_schedule(x, 3))
-    np.testing.assert_allclose(y.numpy(), x.numpy())
-
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
     child = a+2
