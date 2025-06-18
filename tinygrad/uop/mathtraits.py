@@ -18,7 +18,8 @@ class MathTrait:
     if (dtype:=getattr(self, 'dtype')) is not None:
       if isinstance(dtype, tuple): dtype = dtype[0]
       if not (dtypes.is_bool(dtype) or dtypes.is_int(dtype)): raise RuntimeError(f"{dtype} is not supported")
-  def _broadcasted(self, y, reverse:bool=False, match_dtype:bool=True): return (y, self) if reverse else (self, y)
+  def _broadcasted(self, y, reverse:bool=False, match_dtype:bool=True): return (self.ufix(y), self) if reverse else (self, self.ufix(y))
+  def _inverse(self): return -self if dtypes.is_float(self.dtype) or dtypes.is_int(self.dtype) else self.logical_not()
   def add(self, x, reverse=False):
     """
     Adds `self` and `x`.
@@ -196,8 +197,8 @@ class MathTrait:
     print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
     ```
     """
-    t, x = self._broadcasted(x, reverse=False)
-    return -(-t).maximum(-x)
+    a, b = self._broadcasted(x)
+    return a._inverse().maximum(b._inverse())._inverse()
   def where(self, x, y):
     if type(self) is type(x): return self.alu(Ops.WHERE, x, x.ufix(y))
     if type(self) is type(y): return self.alu(Ops.WHERE, y.ufix(x), y)
