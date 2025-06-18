@@ -23,7 +23,7 @@ def helper_test_verify_ast(*stores:UOp) -> Kernel:
   if DEBUG >= 4: print(k.to_program().src)
   return k
 
-class TestVerifyAST(unittest.TestCase):
+class TestUOpSpec(unittest.TestCase):
   def test_tiny_add(self):
     dtype = dtypes.int
     buf_0 = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 0)
