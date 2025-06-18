@@ -244,10 +244,10 @@ def train_cifar():
         if getenv("CUTMIX", 1) and step >= hyp['net']['cutmix_steps']: X, Y = X_cm, Y_cm
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
-      vi = Variable("i", 0, X.shape[0]-1)
-      for i in range(0, X.shape[0], BS):
+
+      vi = Variable("i", 0, (full_batches := (X.shape[0] // BS) * BS) - BS)
+      for i in range(0, full_batches, BS):
         step += 1
-        if i+BS > X.shape[0]: break
         vib = vi.bind(i)
         yield X[vib:vib+BS], Y[vib:vib+BS]
       epoch += 1
