@@ -1,4 +1,4 @@
-import socket
+import socket, uuid
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.runtime.ops_null import NullRenderer, NullProgram
@@ -13,6 +13,7 @@ class TinyFSDevice(Compiled):
 class TinyFSBuffer:
   def __init__(self, device:TinyFSDevice, size:int, offset=0, sock=None):
     self.device, self.size, self.offset = device, size, offset
+    self.request_id: uuid.UUID|None = None
     if sock is None:
       self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
       self.sock.connect((TINYFS_ENDPOINT.split(":")[0], int(TINYFS_ENDPOINT.split(":")[1])))
@@ -30,6 +31,12 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
 
   def _copyin(self, dest:TinyFSBuffer, src:memoryview):
     dest.sock.send(f"{dest.device.op}_IN {dest.size}\r\n".encode())
+
+    # read the response uuid
+    if dest.device.op == "STORE":
+      dest.request_id = uuid.UUID(bytes=dest.sock.recv(16))
+      print(f"Request ID: {dest.request_id}")
+
     dest.sock.sendall(src)
 
   def _copyout(self, dest:memoryview, src:TinyFSBuffer):
