@@ -29,7 +29,7 @@ class AMPTFuzzer:
         self.d.vram[pte['paddr']] = pattern # Mark this page
         assert pte['valid'] == 1
 
-        # If page has contigous fragment, all range should be this valid memory
+        # If page has contiguous fragment, all range should be this valid memory
         frags_cnt = pte['fragment']
         contig_range = (1 << (frags_cnt + 12))
         start_vaddr = _vaddr & ~(contig_range - 1)
