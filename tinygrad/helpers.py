@@ -64,7 +64,7 @@ def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
 def get_single_element(x:Sequence[T]) -> T:
-  assert len(x) == 1, f"sequence {x} must only have 1 element"
+  assert len(x) == 1, f"{x} must only have 1 element"
   return x[0]
 def get_child(obj, key):
   for k in key.split('.'):
