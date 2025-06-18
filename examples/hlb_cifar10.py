@@ -7,7 +7,7 @@ import random, time
 import numpy as np
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
-from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
+from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit, Variable
 from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
@@ -244,11 +244,12 @@ def train_cifar():
         if getenv("CUTMIX", 1) and step >= hyp['net']['cutmix_steps']: X, Y = X_cm, Y_cm
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
+      vi = Variable("i", 0, X.shape[0]-1)
       for i in range(0, X.shape[0], BS):
         step += 1
         if i+BS > X.shape[0]: break
-        # This needs to be contiguous, or the jitted consumer will fail.
-        yield X[i:i+BS].contiguous(), Y[i:i+BS].contiguous()
+        vib = vi.bind(i)
+        yield X[vib:vib+BS], Y[vib:vib+BS]
       epoch += 1
       if not is_train: break
 
