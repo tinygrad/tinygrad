@@ -19,7 +19,9 @@ class MathTrait:
       if isinstance(dtype, tuple): dtype = dtype[0]
       if not (dtypes.is_bool(dtype) or dtypes.is_int(dtype)): raise RuntimeError(f"{dtype} is not supported")
   def _broadcasted(self, y, reverse:bool=False, match_dtype:bool=True): return (self.ufix(y), self) if reverse else (self, self.ufix(y))
-  def _inverse(self): return -self if dtypes.is_float(self.dtype) or dtypes.is_int(self.dtype) else self.logical_not()
+  def _inverse(self):
+    if (dtype:=getattr(self, 'dtype')) is None: raise TypeError(f"MathTraits minimum requires a dtype, {self=}")
+    return -self if dtypes.is_float(dtype) or dtypes.is_int(dtype) else self.logical_not()
   def add(self, x, reverse=False):
     """
     Adds `self` and `x`.
