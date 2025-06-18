@@ -722,7 +722,6 @@ class TestSchedule(unittest.TestCase):
     c = Tensor.arange(4).realize().uop
     kernel = UOp(Ops.KERNEL, src=(a, b, c.base), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
     assert all(s.op is Ops.BUFFER for s in kernel.src), f"views are not allowed here {kernel}"
-    kernel = graph_rewrite(kernel, create_ast)
     run_schedule(check_schedule(UOp.sink(a.assign(kernel), b.assign(kernel)), 1))
     self.assertEqual(a.buffer.numpy(), [7])
     self.assertEqual(b.buffer.numpy(), [12])
