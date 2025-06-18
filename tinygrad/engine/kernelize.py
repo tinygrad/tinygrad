@@ -430,10 +430,8 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # insert gbarriers in places determined by the realize map
   realize_map = group_realizes(tensor_map[big_sink])
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
-  # optionally reorder gbarriers or insert more (top down)
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], finalize_gbarrier, input_map=tensor_map, name="finalize_gbarrier")
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], finalize_gbarrier+remove_tags, input_map=tensor_map, name="finalize_gbarrier")
 
   # TODO: move view_left/view_right here
 
