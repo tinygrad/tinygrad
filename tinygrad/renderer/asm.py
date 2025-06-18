@@ -300,7 +300,6 @@ arm64_matcher = asm_matcher + PatternMatcher([
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   # no modulo in arm64
   (UPat(Ops.MOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - (a // b) * b),
-  # TODO: uint16/int16 to float16 bitcast and vice versa is different from x86 need to use vector reg and just move
   # int8/int16 alus perform instruction in int32
   (UPat(GroupOp.ALU, dtype=(dtypes.int8, dtypes.int16), name="x"),
    lambda x: UOp(x.op, dtypes.int32, tuple(s.cast(dtypes.int32) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
