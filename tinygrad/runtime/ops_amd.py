@@ -741,7 +741,7 @@ class PCIIface:
     return MMIOInterface(loc, sz, fmt=fmt)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
-    if host or (not getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1) and uncached and cpu_access): # host or gtt-like memory.
+    if host or (not getenv("AMD_ALLOC_QUEUE_DEV_MEM", 0) and uncached and cpu_access): # host or gtt-like memory.
       vaddr = self.adev.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|MAP_FIXED, 0)
 
