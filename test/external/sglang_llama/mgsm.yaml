@@ -13,8 +13,7 @@ doc_to_text: >-
 generation_kwargs:
   do_sample: false
   temperature: 0.0
-  until:
-    - <|eot_id|>
+  until: []
 metric_list:
   - metric: exact_match
     aggregation: mean
