@@ -18,7 +18,7 @@ class MathTrait:
     if (dtype:=getattr(self, 'dtype')) is not None:
       if isinstance(dtype, tuple): dtype = dtype[0]
       if not (dtypes.is_bool(dtype) or dtypes.is_int(dtype)): raise RuntimeError(f"{dtype} is not supported")
-  def _broadcasted(self, x, reverse): return (x, self) if reverse else (self, x)
+  def _broadcasted(self, y, reverse:bool=False, match_dtype:bool=True): return (y, self) if reverse else (self, y)
   def add(self, x, reverse=False):
     """
     Adds `self` and `x`.
