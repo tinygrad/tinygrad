@@ -33,10 +33,10 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Remove amdgpu
-      run: sudo rmmod amdgpu || true
     - name: Cleanup running AM processes
       run: python extra/amdpci/am_smi.py --pids --kill
+    - name: ADD amdgpu
+      run: sudo modprobe amdgpu
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -70,6 +70,8 @@ jobs:
       run: time BENCHMARK_LOG=cifar_6gpu AMD=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
     - name: Run full CIFAR training steps w 6 GPUS (REMOTE)
       run: time BENCHMARK_LOG=cifar_6gpu_remote REMOTE=1 REMOTEDEV=AMD DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu_remote.txt
+    - name: Remove amdgpu
+      run: sudo rmmod amdgpu || true
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)
@@ -96,10 +98,10 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Remove amdgpu
-      run: sudo rmmod amdgpu || true
     - name: Cleanup running AM processes
       run: python extra/amdpci/am_smi.py --pids --kill
+    - name: ADD amdgpu
+      run: sudo modprobe amdgpu
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -133,6 +135,8 @@ jobs:
       run: time BENCHMARK_LOG=cifar_6gpu AMD=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
     - name: Run full CIFAR training steps w 6 GPUS (REMOTE)
       run: time BENCHMARK_LOG=cifar_6gpu_remote REMOTE=1 REMOTEDEV=AMD DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu_remote.txt
+    - name: Remove amdgpu
+      run: sudo rmmod amdgpu || true
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)
