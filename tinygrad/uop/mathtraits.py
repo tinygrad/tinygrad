@@ -134,7 +134,7 @@ class MathTrait:
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    return (-b).add(a) if reverse else a.add(-b)
+    return a.add(-b)
   def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
 
   def __neg__(self): return self.neg()
