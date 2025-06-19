@@ -14,13 +14,13 @@ def to_hex(x, dt:DType) -> str:
 
 base_rewrite = PatternMatcher([
   # local/global load
-  (UPat(Ops.LOAD, src=(UPat.var("x"),), name="ld"), lambda ctx,x,ld:
-   f"{ctx.ops[ld.dtype][ld.op]} {ctx[ld]}, {ctx[x]}" if not ctx.is_reg(ctx.r[x]) else None),
   (UPat(Ops.LOAD, src=(UPat.var("x"),), name="ld"), lambda ctx,x,ld: f"{ctx.ops[ld.dtype][ld.op]} {ctx[ld]}, [{ctx[x]}]"),
   # register move
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="cp"), lambda ctx,x,cp: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[cp]}, {ctx[x]}"),
   # accumulator
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}"),
+  # a bit hacky, if an assign moves to memory it's a store
+  (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: ctx.string_rewrite.rewrite(x.src[0].store(x.src[1]), ctx) if not ctx.is_reg(ctx.r[x.src[0]]) else None),
   (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}" if ctx[x] != ctx[x.src[1]] else None),
   # binary ops
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
@@ -242,14 +242,15 @@ def arm64_cflag(x:UOp) -> str: return "ne" if x.op is Ops.CMPNE else "lo" if x.s
 arm64_rewrite = PatternMatcher([
   # const load
   (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"ldr {ctx[x]}, ={ctx[idx][1:]}"),
-  # global load
+  # gated load
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"{ctx.two_address(x, alt)}tst {ctx[mask]}, #1\n"
    f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx.render_reg(ctx.r[x], x.dtype, True)}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
+  # local/global load
   (UPat(Ops.LOAD, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx.render_reg(ctx.r[x], x.dtype, True)}, [{ctx[x.src[0]]}]"),
   # local/global store
-  (UPat(Ops.STORE, src=(UPat.var("x")), name="st"), lambda ctx,x,st:
-   f"{ctx.ops[x.dtype][st.op]} {ctx.render_reg(ctx.r[ctx.bypass(x)], x.dtype, True)}, {ctx.mem[ctx.bypass(x)]}"),
+  (UPat(Ops.STORE, src=(UPat.var("x"),), name="st"), lambda ctx,x,st:
+   f"{ctx.ops[x.dtype][st.op]} {ctx.render_reg(ctx.r[ctx.bypass(x)], x.dtype, True)}, [{ctx.mem[ctx.bypass(x)]}]"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x:
    f"{ctx.ops[x.src[1].dtype][x.op]} {ctx.render_reg(ctx.r[ctx.bypass(x.src[1])], x.src[1].dtype, True)}, [{ctx[x.src[0]]}]"),
   # devectorize/vectorize
@@ -326,10 +327,10 @@ class Arm64Renderer(AsmRenderer):
     if s is not None: return self.reg_class(s)
     # stack args are offset by 8
     if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
-      return [("x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7")[i]] if (i:=self.uops.index(u)) < 8 else [f"[x29, #{(i-7)*8+8}]"]
+      return [("x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7")[i]] if (i:=self.uops.index(u)) < 8 else [f"x29, #{(i-7)*8+8}"]
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return f"#{imm}"
-  def render_mem(self, sz:int) -> str: return f"[sp, #{sz}]"
+  def render_mem(self, sz:int) -> str: return f"sp, #{sz}"
   # arm64 vec load/store use q/d instead of v.suffix
   def render_reg(self, reg:str, dt:DType, alias:bool=False) -> str:
     if dt.count > 1 and not alias: return f"{reg}.{dt.count}{arm64_vec[dt.scalar().itemsize]}"
@@ -401,7 +402,7 @@ x86_rewrite = PatternMatcher([
    f"{ctx.two_address(x, alt)}test {ctx[mask]}, 1\n"
    f"je .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
   # local/global store
-  (UPat(Ops.STORE, src=(UPat.var("x"),), name="st"), lambda ctx,x,st: f"{ctx.ops[x.dtype][st.op]} {ctx.mem[x]}, {ctx[x]}"),
+  (UPat(Ops.STORE, src=(UPat.var("x"),), name="st"), lambda ctx,x,st: f"{ctx.ops[x.dtype][st.op]} [{ctx.mem[x]}], {ctx[x]}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x:
    f"{ctx.ops[x.src[1].dtype][x.op]} {size_prefix[x.src[1].dtype.itemsize]} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
   # devectorize
@@ -519,15 +520,15 @@ class X86Renderer(AsmRenderer):
     # abi constraints, stack args are offset by 8
     if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
       # on windows, caller reserves 32 bytes for arg registers
-      if sys.platform == "win32": return [("rcx", "rdx", "r8", "r9")[i]] if (i:=self.uops.index(u)) < 4 else [f"[rbp + {(i-3)*8+40}]"]
-      return [("rdi", "rsi", "rdx", "rcx", "r8", "r9")[i]] if (i:=self.uops.index(u)) < 6 else [f"[rbp + {(i-5)*8+8}]"]
+      if sys.platform == "win32": return [("rcx", "rdx", "r8", "r9")[i]] if (i:=self.uops.index(u)) < 4 else [f"rbp + {(i-3)*8+40}"]
+      return [("rdi", "rsi", "rdx", "rcx", "r8", "r9")[i]] if (i:=self.uops.index(u)) < 6 else [f"rbp + {(i-5)*8+8}"]
     if u.op is Ops.IDIV: return ["rax"]
     if u.op is Ops.MOD: return ["rdx"]
     # float cmp requires nan check, to avoid reserving temp reg we constrain dest to regs that have a high 8 bit portion
     if u.op in (Ops.CMPLT, Ops.CMPNE) and self.srcs(u)[0].dtype in dtypes.floats: return ["rax", "rbx", "rcx", "rdx"]
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return imm
-  def render_mem(self, sz:int) -> str: return f"[rsp + {sz}]"
+  def render_mem(self, sz:int) -> str: return f"rsp + {sz}"
   def render_reg(self, reg:str, dt:DType, alias:bool=False) -> str:
     return reg if dt.itemsize == 8 or dtypes.is_float(dt) else x86_reg_map[reg][dt.itemsize]
   def render_kernel(self, name:str, kernel:list[str], stack_size:int, callee_saved:list[str]) -> str:
