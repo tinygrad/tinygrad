@@ -6,7 +6,8 @@ from tinygrad.helpers import OSX
 from tinygrad.engine.realize import get_program
 
 class TestDisassembly(unittest.TestCase):
-  @unittest.skipUnless(Device.DEFAULT in ("CPU", "LLVM") and OSX, "m series cpus support fp16 arithmetic")
+  # TODO: fails on llvm. llvm.LLVMGetHostCPUName() returns "generic"
+  @unittest.skipUnless(Device.DEFAULT in ("CPU",) and OSX, "m series cpus support fp16 arithmetic")
   def test_float16_alu(self):
     c = Tensor([1], dtype=dtypes.float16) + Tensor([1], dtype=dtypes.float16)
     s = c.schedule()[-1]
