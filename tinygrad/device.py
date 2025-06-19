@@ -106,14 +106,14 @@ class MultiBuffer:
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,
-               lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
+               uop_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
     if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
     self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = device, size, dtype, options, offset, 0
     if base is None:
       assert offset == 0, "base buffers can't have offset"
       self._base = None
-      self._lb_refcount = lb_refcount
+      self._uop_refcount = uop_refcount
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
@@ -126,9 +126,9 @@ class Buffer:
   @property
   def base(self) -> Buffer: return self._base if self._base is not None else self
   @property
-  def lb_refcount(self): return self.base._lb_refcount
+  def uop_refcount(self): return self.base._uop_refcount
   def ref(self, cnt):
-    self.base._lb_refcount += cnt
+    self.base._uop_refcount += cnt
     return self
   def is_allocated(self) -> bool: return hasattr(self, '_buf')
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
@@ -160,11 +160,11 @@ class Buffer:
     buf = None
     if self._base is not None:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
-    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
+    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.uop_refcount)
     if self.is_allocated():
       buf = bytearray(self.nbytes)
       self.copyout(memoryview(buf))
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
+    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.uop_refcount)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self): (not self.is_allocated()) or self.deallocate()

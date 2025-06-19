@@ -16,7 +16,7 @@ class TLSFAllocator:
     self.storage:list = [collections.defaultdict(list) for _ in range(size.bit_length() + 1)]
     self.lv1_entries:list[int] = [0] * len(self.storage)
 
-    # self.blocks is more like a linked list, where each entry is a contigous block.
+    # self.blocks is more like a linked list, where each entry is a contiguous block.
     self.blocks:dict[int, tuple[int, int|None, int|None, bool]] = {0: (size, None, None, True)} # size, next, prev, is_free
     self._insert_block(0, size)
 

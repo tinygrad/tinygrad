@@ -63,8 +63,8 @@ def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> tuple[list[T], list[T]
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
-def get_single_element(x:list[T]) -> T:
-  assert len(x) == 1, f"list {x} must only have 1 element"
+def get_single_element(x:Sequence[T]) -> T:
+  assert len(x) == 1, f"{x} must only have 1 element"
   return x[0]
 def get_child(obj, key):
   for k in key.split('.'):
@@ -74,6 +74,10 @@ def get_child(obj, key):
   return obj
 def word_wrap(x, wrap=80): return x if len(x) <= wrap or '\n' in x[0:wrap] else (x[0:wrap] + "\n" + word_wrap(x[wrap:], wrap))
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
+
+class LazySeq(Generic[T]): # NOTE: Mapping requires __iter__ and __len__, Sequence requires supporting __len__ and slicing in __getitem__
+  def __init__(self, gen:Callable[[int], T]): self.gen = gen
+  def __getitem__(self, idx:int) -> T: return self.gen(idx)
 
 # for length N coefficients `p`, returns p[0] * x**(N-1) + p[1] * x**(N-2) + ... + p[-2] * x + p[-1]
 def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
@@ -294,7 +298,7 @@ def mv_address(mv): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
 def to_char_p_p(options: list[bytes], to_type=ctypes.c_char):
   return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
 @functools.cache
-def init_c_struct_t(fields: tuple[tuple[str, ctypes._SimpleCData], ...]):
+def init_c_struct_t(fields: tuple[tuple[str, type[ctypes._SimpleCData]], ...]):
   class CStruct(ctypes.Structure):
     _pack_, _fields_ = 1, fields
   return CStruct

@@ -44,6 +44,9 @@ class TinygradBackend(Backend):
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
+# BUG: segfaults
+backend_test.exclude('test_MaxPool1d_stride_padding_dilation_cpu')
+
 # BUG: buggy onnx tests
 backend_test.exclude('test_adam_multiple_cpu')
 

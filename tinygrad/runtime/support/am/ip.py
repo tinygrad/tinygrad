@@ -225,7 +225,7 @@ class AM_GFX(AM_IP):
     self.adev.regGCVM_CONTEXT0_CNTL.write(0)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int):
-    mqd = self.adev.mm.valloc(0x1000, uncached=True, contigous=True)
+    mqd = self.adev.mm.valloc(0x1000, uncached=True, contiguous=True)
 
     struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}_compute_mqd")
     mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(mqd.va_addr), cp_mqd_base_addr_hi=hi32(mqd.va_addr),

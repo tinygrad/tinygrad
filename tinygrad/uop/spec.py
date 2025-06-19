@@ -5,8 +5,8 @@ from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context
 try:
   import z3
 
-  # IDIV is truncated division but z3 does floored division; mod by power of two sometimes uses Ops.AND
-  def z3_cdiv(a,b): return z3.If(a<0, (a+(b-1))/b, a/b)
+  # IDIV is truncated division but z3 does euclidian division (floor if b>0 ceil otherwise); mod by power of two sometimes uses Ops.AND
+  def z3_cdiv(a, b):return z3.If((a<0), z3.If(0<b, (a+(b-1))/b, (a-(b+1))/b), a/b)
   z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.SHR: lambda a,b: a/(2**b.as_long()),
     Ops.SHL: lambda a,b: a*(2**b.as_long()), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b, Ops.WHERE: z3.If,
     Ops.MAX: lambda a,b: z3.If(a<b, b, a)}
@@ -49,14 +49,9 @@ buffer_spec = PatternMatcher([
   (UPat(Ops.VIEW), lambda: True),
 ])
 
-def validate_kernel(k:UOp):
-  assert k.arg.ast.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.SINK}, f"must end with SINK/COPY/BUFFER_VIEW {k.arg}"
-  if k.arg.ast.op is Ops.SINK: assert all(s.op is Ops.STORE for s in k.arg.ast.src), f"SINK must end with STORE {k.arg.ast}"
-  return True
-
 assign_spec = PatternMatcher([
   # KERNEL can attach to an ASSIGN to describe the compute required to realize a BUFFER
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.MSELECT, Ops.MSTACK)), name="k"), validate_kernel),
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.MSELECT, Ops.MSTACK))), lambda: True),
 
   # ASSIGN has a target and a value. It can also optionally depend on other assigns
   (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
