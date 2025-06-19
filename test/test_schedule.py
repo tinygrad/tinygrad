@@ -66,7 +66,7 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
     np.testing.assert_allclose(img.grad.numpy(), ref_img.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
     np.testing.assert_allclose(w.grad.numpy(), ref_w.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
 
-@track_rewrites(named=True)
+@track_rewrites(name=True)
 def schedule_graph_rewrite(big_sink:UOp): return get_kernelize_map(big_sink)[big_sink]
 
 class TestSchedule(unittest.TestCase):
