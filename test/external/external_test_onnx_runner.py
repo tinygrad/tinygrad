@@ -2,10 +2,14 @@ import unittest, onnx, tempfile
 from tinygrad import dtypes
 from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 from tinygrad.device import is_dtype_supported
-from extra.onnx import supported_dtypes, TensorDataType
+from extra.onnx import supported_dtypes, TensorDataType, AttributeType
 import numpy as np
 
 class TestOnnxRunner(unittest.TestCase):
+  def test_onnx_definition_drift(self):
+    assert set(onnx.TensorProto.DataType.values()) == set(TensorDataType.__members__.values())
+    assert set(onnx.AttributeProto.AttributeType.values()) == set(AttributeType.__members__.values())
+
   def _test_input_spec_dtype_parsing(self, onnx_tensor_dtype, tinygrad_dtype):
     input_tensor = onnx.helper.make_tensor_value_info('input', onnx_tensor_dtype, ())
     output_tensor = onnx.helper.make_tensor_value_info('output', onnx_tensor_dtype, ())
@@ -23,8 +27,6 @@ class TestOnnxRunner(unittest.TestCase):
 
   def test_input_spec_dtype_parsing(self):
     """ tests correct onnx_load parsing and dtype loading """
-    if set(onnx.TensorProto.DataType.values()) != set(TensorDataType.__members__.values()):
-      raise Exception("Official onnx datatypes and defined datatypes are out of sync, onnx vers changed, go update")
     for onnx_tensor_dtype in onnx.TensorProto.DataType.values():
       tensor_name = TensorDataType(onnx_tensor_dtype).name
       if onnx_tensor_dtype in supported_dtypes and is_dtype_supported(supported_dtypes[onnx_tensor_dtype]):
