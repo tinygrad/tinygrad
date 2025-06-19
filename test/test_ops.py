@@ -3037,28 +3037,23 @@ class TestLinAlg(unittest.TestCase):
         np.testing.assert_allclose((A @ eigenvectors[:, i]).numpy(), (eigenvalues[i] * eigenvectors[:, i]).numpy(),rtol=1e-3,atol=1e-3)
 
   def test_svd(self):
-    with Context(NOOPT=1):
-      tensors = [
-          Tensor([[3.0, 6.0], [1.0, 10.0]], dtype=dtypes.float64),
-          Tensor([[1.0, 2.0], [3.0, 4.0]], dtype=dtypes.float64),
-          Tensor([[5.0, 6.0], [7.0, 8.0]], dtype=dtypes.float64),
-          Tensor([[9.0, 10.0], [11.0, 12.0]], dtype=dtypes.float64),
-          Tensor([[9.0, 10.0, 69, 9], [11.0, 12.0, 40, 38]], dtype=dtypes.float64),
-          Tensor([[9.0, 10.0], [11.0, 12.0], [5, 35]], dtype=dtypes.float64)
-      ]
-      for tensor in tensors:
-        for full_matrices in [True, False]:
-          U, S, Vt = tensor.svd(full_matrices=full_matrices)
-          np_U, np_S, np_Vt = np.linalg.svd(tensor.numpy(), full_matrices=full_matrices)
-          # Using the absolute value, due to sign differences between numpy and tinygrad implementations
-          if full_matrices:
-            np.testing.assert_allclose(U.abs().numpy(), np.abs(np_U), rtol=1e-4, atol=0.8)
-            np.testing.assert_allclose(S.abs().numpy(), np.abs(np_S), rtol=1e-4, atol=0.5)
-            np.testing.assert_allclose(Vt.abs().numpy(), np.abs(np_Vt), rtol=1e-4, atol=0.8)
-          else:
-            np.testing.assert_allclose(U.abs().numpy(), np.abs(np_U), rtol=1e-4, atol=1e-4)
-            np.testing.assert_allclose(S.abs().numpy(), np.abs(np_S), rtol=1e-4, atol=1e-4)
-            np.testing.assert_allclose(Vt.abs().numpy(), np.abs(np_Vt), rtol=1e-4, atol=1e-4)
+    tensors = [
+        Tensor([[3.0, 6.0], [1.0, 10.0]], dtype=dtypes.float64),
+        Tensor([[1.0, 2.0], [3.0, 4.0]], dtype=dtypes.float64),
+        Tensor([[5.0, 6.0], [7.0, 8.0]], dtype=dtypes.float64),
+        Tensor([[9.0, 10.0], [11.0, 12.0]], dtype=dtypes.float64),
+        Tensor([[9.0, 10.0, 69, 9], [11.0, 12.0, 40, 38]], dtype=dtypes.float64),
+        Tensor([[9.0, 10.0], [11.0, 12.0], [5, 35]], dtype=dtypes.float64)
+    ]
+    for tensor in tensors:
+      for full_matrices in [True, False]:
+        U, S, Vt = tensor.svd(full_matrices=full_matrices)
+        np_U, np_S, np_Vt = np.linalg.svd(tensor.numpy(), full_matrices=full_matrices)
+        # Using the absolute value, due to sign differences between numpy and tinygrad implementations
+        np.testing.assert_allclose(U.abs().numpy(), np.abs(np_U), rtol=1e-4, atol=0.8)
+        np.testing.assert_allclose(S.abs().numpy(), np.abs(np_S), rtol=1e-4, atol=0.5)
+        np.testing.assert_allclose(Vt.abs().numpy(), np.abs(np_Vt), rtol=1e-4, atol=0.8)
+
 
   def test_norm(self):
     helper_test_op([(3,)], lambda x: x.norm(), lambda x: x.norm(), forward_only=True)
