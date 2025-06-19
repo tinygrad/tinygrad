@@ -4052,7 +4052,7 @@ class Tensor(MathTrait):
       s = c * t
       #apply the rotations
       inverse_permute = Tensor.zeros(num, dtype = dtypes.int).contiguous()
-      inverse_permute[permute] = Tensor.arange(num, dtypes = dtypes.int32).contiguous()
+      inverse_permute[permute] = Tensor.arange(num, dtype = dtypes.int).contiguous()
 
       V_permuted,runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[...,permute], None)
       V_left, V_right = V_permuted.split(num//2, -1)
