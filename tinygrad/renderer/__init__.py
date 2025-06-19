@@ -26,7 +26,7 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   elements_per_thread: tuple[int, int, int] # elements per-thread to load/store from A/B/C
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
-  opts: tuple[str, ...] # ordered tuple of "ux" or "lx" specifing kernel opts to perform. "ux" upcasts dim x and "lx" localizes dim x
+  opts: tuple[str, ...] # ordered tuple of "ux" or "lx" specifying kernel opts to perform. "ux" upcasts dim x and "lx" localizes dim x
   swizzle: tuple[Optional[tuple[tuple[int, ...], tuple[int, ...]]], Optional[tuple[tuple[int, ...], tuple[int, ...]]]] = (None, None)
   def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
   def get_upcast_axes(self): return [opt for opt in self.opts if opt[0] == "u"]
