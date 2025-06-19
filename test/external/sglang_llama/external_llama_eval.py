@@ -92,7 +92,7 @@ if __name__ == '__main__':
                          checkpoint_path=args.model, max_length=args.ctx)
   task_manager = TaskManager(include_path="./")
   results = simple_evaluate(model=adaptor, tasks=args.eval.split(","), task_manager=task_manager, apply_chat_template=args.chat,
-                            num_fewshot=args.num_fewshot, limit=args.limit, system_instruction="You are a helpful assistant")
+                            num_fewshot=args.num_fewshot, limit=args.limit)
 
   if args.output_path: args.output_path.write_text(json.dumps(results, indent=2))
   for task_name, val in results["results"].items():
