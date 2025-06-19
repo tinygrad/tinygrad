@@ -79,7 +79,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(key, "do_rewrite n1")
     self.assertEqual(m[0]["match_count"], 1)
     key, m = ret[1]["name"], ret[1]["steps"]
-    self.assertEqual(key, "do_rewrite_2")
+    self.assertEqual(key, "do_rewrite n2")
     self.assertEqual(m[0]["match_count"], 0)
 
   def test_track_rewrites_with_exception(self):
