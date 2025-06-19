@@ -3,7 +3,8 @@ import time, pprint
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, track_rewrites
+from tinygrad.codegen import full_rewrite
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.codegen.kernel import Kernel
@@ -12,6 +13,7 @@ from tinygrad.engine.schedule import ScheduleItem
 
 # **************** Program Creation ****************
 
+"""
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
   k = Kernel(ast, opts=renderer)
@@ -24,6 +26,12 @@ def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
       k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
   if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
   return k.to_program()
+"""
+
+@track_rewrites()
+def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
+  linearized = full_rewrite(ast, renderer)
+  return ProgramSpec("test", renderer.render(linearized), renderer.device, ast, linearized)
 
 # **************** Runners ****************
 
