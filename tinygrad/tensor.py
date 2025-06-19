@@ -3967,12 +3967,12 @@ class Tensor(MathTrait):
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
   def qr(self):
-    assert len(self.shape) > 1, f"expected two or more dimensions, got {self.shape}"
+    assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     R = self.clone()
-    m,n = R.shape[-2], R.shape[-1]
+    m,n = int(R.shape[-2]), int(R.shape[-1])
     prefix_shape = self.shape[0:len(self.shape) - 2]
-    Q = Tensor.eye(m,dtype = self.dtype).reshape((1,)*(len(self.shape) - 2) + (m, m)).expand(prefix_shape + (m, m)).contiguous()
-    for i in range(min(m, n)):
+    Q = Tensor.eye(m, dtype = self.dtype).reshape((1,)*(len(self.shape) - 2) + (m, m)).expand(prefix_shape + (m, m)).contiguous()
+    for i in range(int(min(m, n))):
       x = R[..., i:m, i]
       s = -x[..., 0].sign()
       a = s * x.square().sum(-1).sqrt()
@@ -3986,13 +3986,13 @@ class Tensor(MathTrait):
       Q[..., :, i:m] = Q_old -  (Q_old @ w) @ (tau.transpose(-2, -1) * w.transpose(-2, -1))
     return Q,R
 
-  def svd(self,full_matrices=True):
+  def svd(self, full_matrices=True):
     #partial implementation of https://www.netlib.org/lapack/lawnspdf/lawn169.pdf
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
-    b_shape,m,n = self.shape[:-2], self.shape[-2], self.shape[-1]
+    b_shape,m,n = int(self.shape[:-2]), int(self.shape[-2]), int(self.shape[-1])
     #preprocess the matrix
     Q, R = (Tensor.qr(self) if m >= n else Tensor.qr(self.transpose(-2, -1)))
-    num, q_num = min(m, n), max(m, n)
+    num, q_num = int(min(m, n)), int(max(m, n))
     U = R.shrink(tuple([(0, self.shape[i]) for i in range(self.ndim - 2)] + [(0, num), (0, num)])).contiguous()
     V = Tensor.eye(num, dtype=self.dtype).reshape((1,)*(self.ndim - 2)+(num, num)).expand(b_shape + (num, num)).contiguous()
     #prepare round robin pairing
