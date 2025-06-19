@@ -681,13 +681,15 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(d0_rand, d1_rand_flip)
     self.assertEqual(d1_rand, d0_rand_flip)
 
-  def test_rand_like_on_shard(self):
-    t = Tensor.empty((16, 16)).shard(devices_2)
+  def test_rand_like_on_shard(self, axis=None):
+    t = Tensor.empty((16, 16)).shard(devices_2, axis=axis)
     t2 = Tensor.rand_like(t)
     self.assertEqual(t.shape, t2.shape)
     self.assertEqual(t.device, t2.device)
     self.assertEqual(t.dtype, t2.dtype)
     self.assertEqual(t.uop.axis, t2.uop.axis)
+    t2.realize()
+  def test_rand_like_on_shard_axis(self): self.test_rand_like_on_shard(0)
 
   def test_rand_like_from_alu(self):
     a = Tensor.ones(4, 4).shard(devices_4, axis=0)
