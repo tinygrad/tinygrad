@@ -1,11 +1,11 @@
 # original implementation: https://github.com/svc-develop-team/so-vits-svc
 from __future__ import annotations
-import sys, logging, time, io, math, argparse, operator, numpy as np
+import sys, os, logging, time, io, math, argparse, operator, numpy as np
 from functools import partial, reduce
 from pathlib import Path
 from typing import Tuple, Optional, Type
 from tinygrad import nn, dtypes, Tensor
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, fetch
 from tinygrad.nn.state import torch_load
 from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, get_hparams_from_file, load_checkpoint, weight_norm, HParams
 from examples.sovits_helpers import preprocess
@@ -20,7 +20,7 @@ F0_MEL_MIN = 1127 * np.log(1 + F0_MIN / 700)
 F0_MEL_MAX = 1127 * np.log(1 + F0_MAX / 700)
 
 def download_if_not_present(file_path: Path, url: str):
-  if not os.path.isfile(file_path): download_file(url, file_path)
+  if not os.path.isfile(file_path): fetch(url, file_path)
   return file_path
 
 class SpeechEncoder:
