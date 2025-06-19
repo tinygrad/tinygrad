@@ -4289,9 +4289,12 @@ class Tensor(MathTrait):
     • If `t` is 1-D → return a square matrix with `t` on the main diagonal.
     • If `t` is 2-D → return a 1-D tensor containing the main diagonal of `t`.
     """
-    n = int(min(self.shape))
-    if self.ndim == 1: return Tensor.eye(n, dtype=self.dtype) * self
-    if self.ndim == 2: return (self[:n, :n] * Tensor.eye(n, dtype=self.dtype)).sum(axis=1)
+
+    if self.ndim == 1:
+      return Tensor.eye(int(self.shape[0]), dtype=self.dtype) * self
+    if self.ndim == 2:
+      n: int = min(self.shape)
+      return (self[:n, :n] * Tensor.eye(n, dtype=self.dtype)).sum(axis=1)
     raise ValueError("diag expects a 1-D or 2-D tensor")
 
   def qr_decompose(self) -> tuple[Tensor, Tensor]:
@@ -4371,8 +4374,10 @@ class Tensor(MathTrait):
     if compute_uv:
       # Pad U and V to full matrices
       if full_matrices:
-        if U.shape[1] < M: U = Tensor._orthonormal_basis(U, M, sorted_indices)
-        if V.shape[1] < N: V = Tensor._orthonormal_basis(V, N, sorted_indices)
+        if U.shape[1] < M:
+          U = Tensor._orthonormal_basis(U, M, sorted_indices)
+        if V.shape[1] < N:
+          V = Tensor._orthonormal_basis(V, N, sorted_indices)
         return U, eigvals_AtA.sqrt()[:K], V.transpose()
       sorted_indices = sorted_indices[:K]
       return U[:, sorted_indices], eigvals_AtA.sqrt()[:K], V[:, sorted_indices].transpose()
