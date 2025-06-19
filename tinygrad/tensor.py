@@ -4307,11 +4307,10 @@ class Tensor(MathTrait):
     eigvals_AtA, sorted_indices = eigvals_AtA.sort(descending=True)
     M, N = map(int, A.shape)
     K = int(min(M, N))
-    if compute_uv:
-      if full_matrices: return U, eigvals_AtA.sqrt()[:K], V.transpose()
-      else:
-        sorted_indices = sorted_indices[:K]
-        return U[:, sorted_indices], eigvals_AtA.sqrt()[:K], V[:, sorted_indices].transpose()
+    if compute_uv and full_matrices: return U, eigvals_AtA.sqrt()[:K], V.transpose()
+    elif compute_uv and not full_matrices:
+      sorted_indices = sorted_indices[:K]
+      return U[:, sorted_indices], eigvals_AtA.sqrt()[:K], V[:, sorted_indices].transpose()
     else: return eigvals_AtA.sqrt()
 
 P = ParamSpec("P")
