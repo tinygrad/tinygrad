@@ -5,7 +5,7 @@ from tinygrad import Tensor
 Tensor.manual_seed(42)
 
 class TestLinAlg(unittest.TestCase):
-  def test_svd_general(self): 
+  def test_svd_general(self):
     sizes = [(2,2),(5,3),(3,5),(2,2,2,2,3)]
     for size in sizes:
       a = Tensor.randn(size).realize()
