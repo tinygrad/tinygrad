@@ -937,7 +937,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, cpu]
+        backend: [llvm, cpu, webgpu]
 
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
@@ -954,7 +954,7 @@ jobs:
           deps: testing_unit
       - name: Set env
         shell: bash
-        run:  printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1'}}" >> $GITHUB_ENV
+        run:  printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'webgpu' && 'WEBGPU=1'}}" >> $GITHUB_ENV
       - name: Run unit tests
         if: matrix.backend=='llvm'
         run: python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_elf.py --ignore=test/unit/test_tar.py

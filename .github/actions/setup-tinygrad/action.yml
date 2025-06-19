@@ -244,6 +244,11 @@ runs:
       run: |
         brew tap wpmed92/dawn
         brew install dawn
+    - name: Install WebGPU dawn (Windows)
+      if: inputs.webgpu == 'true' && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        pip install dawn-python
 
     # **** LLVM ****
 
