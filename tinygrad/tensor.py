@@ -3989,7 +3989,7 @@ class Tensor(MathTrait):
   def svd(self, full_matrices=True):
     #partial implementation of https://www.netlib.org/lapack/lawnspdf/lawn169.pdf
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
-    b_shape,m,n = int(self.shape[:-2]), int(self.shape[-2]), int(self.shape[-1])
+    b_shape,m,n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
     #preprocess the matrix
     Q, R = (Tensor.qr(self) if m >= n else Tensor.qr(self.transpose(-2, -1)))
     num, q_num = int(min(m, n)), int(max(m, n))
