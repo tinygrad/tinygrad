@@ -356,7 +356,7 @@ class NVDDevice(HCQCompiled[NVSignal]):
     #     view=MMIOInterface(am_mapping.va_addr, size, fmt='B'))
 
     cpu_access = True
-    nv_mapping = self.nvdev.mm.valloc(size:=round_up(size, 2 << 20), uncached=uncached, contigous=cpu_access)
+    nv_mapping = self.nvdev.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contigous=cpu_access)
     if cpu_access: self._map_pci_range(bar=1, off=nv_mapping.paddrs[0][0], addr=nv_mapping.va_addr, size=nv_mapping.size)
     return HCQBuffer(nv_mapping.va_addr, size, meta=NVAllocationMeta(self, [self], nv_mapping, has_cpu_mapping=cpu_access),
       view=MMIOInterface(nv_mapping.va_addr, size, fmt='B') if cpu_access else None)
@@ -405,7 +405,10 @@ class NVDDevice(HCQCompiled[NVSignal]):
     regs = self._map_pci_range(0, fmt='I')
     fb = self._map_pci_range(1)
 
-    self.nvdev = NVDev(pcibus, regs, fb, None)
+    # hexdump(bytes(array.array('I', regs[0x00300000:0x00310000])))
+    # exit(0)
+
+    self.nvdev = NVDev(pcibus, regs, fb)
 
     self.nvdev.gsp.client = 0xdead0000
     NVDDevice.root = rm_alloc(self.nvdev, nv_gpu.NV01_ROOT, 0, 0, nv_gpu.NV0000_ALLOC_PARAMETERS())

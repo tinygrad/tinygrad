@@ -32,7 +32,6 @@ class NVRpcQueue:
     header = nv.rpc_message_header_v(signature=nv.NV_VGPU_MSG_SIGNATURE_VALID, rpc_result=nv.NV_VGPU_MSG_RESULT_RPC_PENDING,
       rpc_result_private=nv.NV_VGPU_MSG_RESULT_RPC_PENDING, header_version=(3<<24), function=func, length=len(msg) + 0x20)
 
-    # simple put rpc
     msg = bytes(header) + msg
     phdr = nv.GSP_MSG_QUEUE_ELEMENT(elemCount=round_up(len(msg), self.tx.msgSize) // self.tx.msgSize, seqNum=self.seq)
     phdr.checkSum = self._checksum(bytes(phdr) + msg)
@@ -44,26 +43,28 @@ class NVRpcQueue:
     CPUProgram.atomic_lib.atomic_thread_fence(5)
 
     self.seq += 1
-    self.gsp.nvdev.wreg(0x110c00, 0x0) # TODO
+    self.gsp.nvdev.NV_PGSP_QUEUE_HEAD[0].write(0x0)
 
-  def wait_resp(self, cmd) -> tuple[int, memoryview]:
+  def wait_resp(self, cmd) -> memoryview:
     while True:
       CPUProgram.atomic_lib.atomic_thread_fence(5)
       if self.rx.readPtr == self.tx.writePtr: continue
 
       off = self.rx.readPtr * self.tx.msgSize
-      x = nv.rpc_message_header_v.from_address(self.queue_va + off + 0x30)
+      hdr = nv.rpc_message_header_v.from_address(self.queue_va + off + 0x30)
+      msg = self.queue_mv[off + 0x50 : off + 0x50 + hdr.length]
 
       # Handling special functions
-      if x.function == 0x1002: self.gsp.run_cpu_seq(self.queue_mv[off+0x50:off+0x50+x.length])
-      # if x.function == 0x1020: hexdump(to_mv(self.content_va+off+0x50, x.length))
+      if hdr.function == 0x1002: self.gsp.run_cpu_seq(msg)
 
-      self.rx.readPtr = (self.rx.readPtr + round_up(x.length, self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
+      # Update the read pointer
+      self.rx.readPtr = (self.rx.readPtr + round_up(hdr.length, self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
       CPUProgram.atomic_lib.atomic_thread_fence(5)
 
-      print(f"RPC message: {x.function:x}, {x.length}, {x.rpc_result}, {x.rpc_result_private} {self.tx.writePtr} {self.rx.readPtr}")
+      print(f"RPC message: {hdr.function:x}, {hdr.length}, {hdr.rpc_result} / {self.tx.writePtr} - {self.rx.readPtr}")
 
-      if x.function == cmd: return x.rpc_result, self.queue_mv[off+0x50:off+0x50+x.length]
+      if hdr.rpc_result != 0: raise RuntimeError(f"RPC call {hdr.function} failed with result {hdr.rpc_result}")
+      if hdr.function == cmd: return msg
 
 class NV_FLCN:
   def __init__(self, nvdev): self.nvdev = nvdev
@@ -111,7 +112,7 @@ class NV_FLCN:
     assert ucode_desc_off + ucode_desc_size == 0x45488
     assert len(signature) == 0x300 and len(image) == 0x10300
 
-    self.frts_offset = 0x5ff200000
+    self.frts_offset = self.nvdev.vram_size - 0x100000 - 0x100000
     read_vbios_desc = nv.FWSECLIC_READ_VBIOS_DESC(version=0x1, size=ctypes.sizeof(nv.FWSECLIC_READ_VBIOS_DESC), flags=2)
     frst_reg_desc = nv.FWSECLIC_FRTS_REGION_DESC(version=0x1, size=ctypes.sizeof(nv.FWSECLIC_FRTS_REGION_DESC),
       frtsRegionOffset4K=self.frts_offset >> 12, frtsRegionSize=0x100, frtsRegionMediaType=2)
@@ -132,16 +133,16 @@ class NV_FLCN:
     self.frts_image_va, self.frts_image_sysmem = __patch(0x15, bytes(frts_cmd))
 
   def prep_booter(self):
-    text = self.nvdev._download("src/nvidia/generated/g_bindata_kgspGetBinArchiveBooterLoadUcode_AD102.c")
-
-    image = self.nvdev.extract_fw(text, "kgspBinArchiveBooterLoadUcode_AD102_image_prod_data")
-    sig = self.nvdev.extract_fw(text, "kgspBinArchiveBooterLoadUcode_AD102_sig_prod_data")
-    patch_loc = int.from_bytes(self.nvdev.extract_fw(text, "kgspBinArchiveBooterLoadUcode_AD102_patch_loc_data"), 'little')
-    sig_len = len(sig) // int.from_bytes(self.nvdev.extract_fw(text, "kgspBinArchiveBooterLoadUcode_AD102_num_sigs_data"), 'little')
+    image = self.nvdev.extract_fw("kgspBinArchiveBooterLoadUcode", "image_prod_data")
+    sig = self.nvdev.extract_fw("kgspBinArchiveBooterLoadUcode", "sig_prod_data")
+    header = self.nvdev.extract_fw("kgspBinArchiveBooterLoadUcode", "header_prod_data")
+    patch_loc = int.from_bytes(self.nvdev.extract_fw("kgspBinArchiveBooterLoadUcode", "patch_loc_data"), 'little')
+    sig_len = len(sig) // int.from_bytes(self.nvdev.extract_fw("kgspBinArchiveBooterLoadUcode", "num_sigs_data"), 'little')
 
     patched_image = bytearray(image)
     patched_image[patch_loc:patch_loc+sig_len] = sig[:sig_len]
     self.booter_image_va, self.booter_image_sysmem = alloc_sysmem(len(patched_image), contigous=True, data=patched_image)
+    _, _, self.booter_data_off, self.booter_data_sz, _, self.booter_code_off, self.booter_code_sz, _, _ = struct.unpack("9I", header)
 
   def init_hw(self):
     self.falcon, self.sec2 = 0x00110000, 0x00840000
@@ -161,9 +162,8 @@ class NV_FLCN:
     # booter
     print("---- booter -----")
     self.reset(self.sec2)
-    mbx = self.execute_hs(self.sec2, self.booter_image_sysmem[0], code_off=256, data_off=32256,
-      imemPa=0x0, imemVa=0x100, imemSz=32000,
-      dmemPa=0x0, dmemVa=0x0, dmemSz=24576,
+    mbx = self.execute_hs(self.sec2, self.booter_image_sysmem[0], code_off=self.booter_code_off, data_off=self.booter_data_off,
+      imemPa=0x0, imemVa=self.booter_code_off, imemSz=self.booter_code_sz, dmemPa=0x0, dmemVa=0x0, dmemSz=self.booter_data_sz,
       pkc_off=0x10, engid=1, ucodeid=3, mailbox=self.nvdev.gsp.wpr_meta_sysmem)
     assert mbx[0] == 0x0, f"Booster failed to execute, mailbox is {mbx[0]:08x}, {mbx[1]:08x}"
 
@@ -249,7 +249,7 @@ class NV_FLCN:
     elif self.nvdev.NV_PFALCON_FALCON_HWCFG2.with_base(base).read_bitfields()['riscv'] == 1:
       self.nvdev.NV_PRISCV_RISCV_BCR_CTRL.with_base(base).write(core_select=0)
       while self.nvdev.NV_PRISCV_RISCV_BCR_CTRL.with_base(base).read_bitfields()['valid'] != 1: pass
-      self.nvdev.NV_PFALCON_FALCON_RM.with_base(base).write(0x192000a1) # TODO: put real chip id here
+      self.nvdev.NV_PFALCON_FALCON_RM.with_base(base).write(self.nvdev.chip_id)
 
 class NV_GSP:
   def __init__(self, nvdev): self.nvdev = nvdev
@@ -325,10 +325,8 @@ class NV_GSP:
     self.gsp_signature_va, self.gsp_signature_sysmem = alloc_sysmem(len(signature), contigous=True, data=signature)
 
   def init_boot_binary_image(self):
-    text = self.nvdev._download("src/nvidia/generated/g_bindata_kgspGetBinArchiveGspRmBoot_AD102.c")
-
-    self.booter_image = self.nvdev.extract_fw(text, "kgspBinArchiveGspRmBoot_AD102_ucode_image_prod_data")
-    self.booter_desc = nv.RM_RISCV_UCODE_DESC.from_buffer_copy(self.nvdev.extract_fw(text, "kgspBinArchiveGspRmBoot_AD102_ucode_desc_prod_data"))
+    self.booter_image = self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "ucode_image_prod_data")
+    self.booter_desc = nv.RM_RISCV_UCODE_DESC.from_buffer_copy(self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "ucode_desc_prod_data"))
     _, self.booter_sysmem = alloc_sysmem(len(self.booter_image), contigous=True, data=self.booter_image)
 
   def init_wpr_meta(self):
@@ -346,6 +344,7 @@ class NV_GSP:
       bootloaderCodeOffset=self.booter_desc.monitorCodeOffset, bootloaderDataOffset=self.booter_desc.monitorDataOffset,
       bootloaderManifestOffset=self.booter_desc.manifestOffset, sizeOfSignature=0x1000)
     self.wpr_meta, self.wpr_meta_sysmem = self.nvdev._alloc_boot_struct_2(m)
+    assert self.nvdev.flcn.frts_offset == self.wpr_meta.frtsOffset, f"FRTS mismatch: {self.nvdev.flcn.frts_offset} != {self.wpr_meta.frtsOffset}"
 
   def promote_ctx(self, client, subdevice, obj, ctxbufs, bufs=None, virt=None, phys=None):
     res, prom = {}, nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(entryCount=len(ctxbufs), engineType=0x1, hChanClient=client, hObject=obj)
@@ -369,9 +368,9 @@ class NV_GSP:
 
     bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=(512<<20), numLevelsToCopy=3,
       virtAddrLo=resv.va_addr, virtAddrHi=resv.va_addr+(512<<20)-1)
-    bufs_p.levels[0] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=self.nvdev.mm.root_page_table.paddr, size=0x20, pageShift=47, aperture=1)
-    bufs_p.levels[1] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=(8<<30)+0x1000, size=0x1000, pageShift=38, aperture=1)
-    bufs_p.levels[2] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=(8<<30)+0x2000, size=0x1000, pageShift=29, aperture=1)
+    for i,pt in enumerate(self.nvdev.mm.page_tables(resv.va_addr)[:3]):
+      bufs_p.levels[i] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=pt.paddr, size=0x20 if i == 0 else 0x1000,
+        pageShift=47 - (9 * i), aperture=1)
     self.rpc_rm_control(hObject=self.vaspace, cmd=0x90f10106, params=bufs_p)
 
     gpfifo_area = self.nvdev.mm.valloc(2<<20, contigous=True)
@@ -399,6 +398,76 @@ class NV_GSP:
     self.nvdev.NV_PBUS_BAR1_BLOCK.write(mode=0, target=0, ptr=0)
     self.client = 0xc1e00004
     self.init_golden_image()
+
+  ### RPCs
+
+  def rpc_rm_alloc(self, hParent, hClass, params) -> int:
+    if hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A:
+      ramfc_alloc = self.nvdev.mm.valloc(0x1000, contigous=True)
+      params.ramfcMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x200, addressSpace=2, cacheAttrib=0)
+      params.instanceMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x1000, addressSpace=2, cacheAttrib=0)
+
+      method_va, method_sysmem = alloc_sysmem(0x5000, contigous=True)
+      params.mthdbufMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=method_sysmem[0], size=0x5000, addressSpace=1, cacheAttrib=0)
+
+    alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=self.client, hParent=hParent, hObject=(obj:=next(self.handle_gen)), hClass=hClass, flags=0x0,
+      paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
+    self.cmd_q.send_rpc(103, bytes(alloc_args) + (bytes(params) if params is not None else b''))
+    self.stat_q.wait_resp(103)
+
+    if hClass == 0x0: return self.client # init root, return client
+    if hClass == nv_gpu.FERMI_VASPACE_A and self.client == 0xdead0000:
+      self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr)
+    if hClass == nv_gpu.NV20_SUBDEVICE_0: self.subdevice = obj # save subdevice handle
+    if hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A and self.client == 0xdead0000:
+      phys_gr_ctx = self.promote_ctx(self.client, self.subdevice, obj, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
+      self.promote_ctx(self.client, self.subdevice, obj, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
+    return obj
+
+  def rpc_rm_control(self, hObject, cmd, params):
+    control_args = nv.rpc_gsp_rm_control_v(hClient=self.client, hObject=hObject, cmd=cmd, flags=0x0,
+      paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
+    self.cmd_q.send_rpc(76, bytes(control_args) + (bytes(params) if params is not None else b''))
+    return self.stat_q.wait_resp(76)[len(bytes(control_args)):]
+
+  def rpc_rm_dup(self, hParent, hObjectSrc, hObject):
+    params = nv.struct_NVOS55_PARAMETERS_v03_00(hClient=self.client, hClientSrc=self.client, hParent=hParent, hObject=hObject, hObjectSrc=hObjectSrc, flags=0)
+    alloc_args = nv.rpc_dup_object_v(params=params)
+    self.cmd_q.send_rpc(21, bytes(alloc_args))
+    self.stat_q.wait_resp(21)
+
+  def rpc_set_page_directory(self, device, hVASpace, pdir_paddr):
+    # UVM depth   HW level                            VA bits
+    # 0           PDE3                                48:47
+    # 1           PDE2                                46:38
+    # 2           PDE1 (or 512M PTE)                  37:29
+    # 3           PDE0 (dual 64k/4k PDE, or 2M PTE)   28:21
+    # 4           PTE_64K / PTE_4K                    20:16 / 20:12
+    # So, top level is 4 entries. Flags field is all channels, vid mem.
+    params = nv.struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(physAddress=pdir_paddr,
+      numEntries=4, flags=0x8, hVASpace=hVASpace, pasid=0xffffffff, subDeviceId=1, chId=0)
+    alloc_args = nv.rpc_set_page_directory_v(hClient=self.client, hDevice=device, pasid=0xffffffff, params=params)
+    self.cmd_q.send_rpc(54, bytes(alloc_args))
+    self.stat_q.wait_resp(54)
+
+  def rpc_set_gsp_system_info(self):
+    data = nv.GspSystemInfo(gpuPhysAddr=0xf2000000, gpuPhysFbAddr=0x38060000000, gpuPhysInstAddr=0x38070000000,
+      pciConfigMirrorBase=0x88000, pciConfigMirrorSize=0x1000, nvDomainBusDeviceFunc=0x100, bIsPassthru=1,
+      PCIDeviceID=0x268410de, PCISubDeviceID=0x13b3196e, PCIRevisionID=0xa1, maxUserVa=0x7ffffffff000)
+    self.cmd_q.send_rpc(72, bytes(data))
+
+  def rpc_set_registry_table(self):
+    table = {'RMForcePcieConfigSave': 0x1, 'RMSecBusResetEnable': 0x1}
+    entries_bytes, data_bytes = bytes(), bytes()
+    hdr_size, entries_size = ctypes.sizeof(nv.PACKED_REGISTRY_TABLE), ctypes.sizeof(nv.PACKED_REGISTRY_ENTRY) * len(table)
+
+    for k,v in table.items():
+      entries_bytes += bytes(nv.PACKED_REGISTRY_ENTRY(nameOffset=hdr_size + entries_size + len(data_bytes),
+                                                      type=nv.REGISTRY_TABLE_ENTRY_TYPE_DWORD, data=v, length=4))
+      data_bytes += k.encode('utf-8') + b'\x00'
+
+    header = nv.PACKED_REGISTRY_TABLE(size=hdr_size + len(entries_bytes) + len(data_bytes), numEntries=len(table))
+    self.cmd_q.send_rpc(73, bytes(header) + entries_bytes + data_bytes)
 
   def run_cpu_seq(self, seq_buf):
     hdr = nv.rpc_run_cpu_sequencer_v17_00.from_address(mv_address(seq_buf))
@@ -444,80 +513,3 @@ class NV_GSP:
         mailbox = self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(self.nvdev.flcn.sec2).read()
         assert mailbox == 0x0, f"Falcon SEC2 failed to execute, mailbox is {mailbox:08x}"
       else: raise ValueError(f"Unknown op code {op_code} at index {cmd_idx}")
-
-  ### RPCs
-
-  def rpc_rm_alloc(self, hParent, hClass, params) -> int:
-    if hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A:
-      ramfc_alloc = self.nvdev.mm.valloc(0x1000, contigous=True)
-      params.ramfcMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x200, addressSpace=2, cacheAttrib=0)
-      params.instanceMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x1000, addressSpace=2, cacheAttrib=0)
-
-      method_va, method_sysmem = alloc_sysmem(0x5000, contigous=True)
-      params.mthdbufMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=method_sysmem[0], size=0x5000, addressSpace=1, cacheAttrib=0)
-
-    alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=self.client, hParent=hParent, hObject=(obj:=next(self.handle_gen)), hClass=hClass, flags=0x0,
-      paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
-    self.cmd_q.send_rpc(103, bytes(alloc_args) + (bytes(params) if params is not None else b''))
-    stat, resp = self.stat_q.wait_resp(103)
-    assert stat == 0
-
-    if hClass == 0x0: return self.client # init root, return client
-    if hClass == nv_gpu.FERMI_VASPACE_A and self.client == 0xdead0000:
-      self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr)
-    if hClass == nv_gpu.NV20_SUBDEVICE_0: self.subdevice = obj # save subdevice handle
-    if hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A and self.client == 0xdead0000:
-      phys_gr_ctx = self.promote_ctx(self.client, self.subdevice, obj, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
-      self.promote_ctx(self.client, self.subdevice, obj, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
-    return obj
-
-  def rpc_rm_control(self, hObject, cmd, params):
-    control_args = nv.rpc_gsp_rm_control_v(hClient=self.client, hObject=hObject, cmd=cmd, flags=0x0,
-      paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
-    self.cmd_q.send_rpc(76, bytes(control_args) + (bytes(params) if params is not None else b''))
-    stat, resp = self.stat_q.wait_resp(76)
-    assert stat == 0
-    return resp[len(bytes(control_args)):]
-
-  def rpc_rm_dup(self, hParent, hObjectSrc, hObject):
-    params = nv.struct_NVOS55_PARAMETERS_v03_00(hClient=self.client, hClientSrc=self.client, hParent=hParent, hObject=hObject, hObjectSrc=hObjectSrc, flags=0)
-    alloc_args = nv.rpc_dup_object_v(params=params)
-    self.cmd_q.send_rpc(21, bytes(alloc_args))
-    stat, resp = self.stat_q.wait_resp(21)
-    assert stat == 0
-  
-  def rpc_set_page_directory(self, device, hVASpace, pdir_paddr):
-    # UVM depth   HW level                            VA bits
-    # 0           PDE3                                48:47
-    # 1           PDE2                                46:38
-    # 2           PDE1 (or 512M PTE)                  37:29
-    # 3           PDE0 (dual 64k/4k PDE, or 2M PTE)   28:21
-    # 4           PTE_64K / PTE_4K                    20:16 / 20:12
-    # So, top level is 4 entries (?). Flags field is all channels, vid mem.
-    # subDeviceId = ID+1, 0 for BC
-    params = nv.struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(physAddress=pdir_paddr,
-      numEntries=4, flags=0x8, hVASpace=hVASpace, pasid=0xffffffff, subDeviceId=1, chId=0)
-    alloc_args = nv.rpc_set_page_directory_v(hClient=self.client, hDevice=device, pasid=0xffffffff, params=params)
-    self.cmd_q.send_rpc(54, bytes(alloc_args))
-    stat, resp = self.stat_q.wait_resp(54)
-    assert stat == 0
-    # hexdump(resp[:0x80])
-
-  def rpc_set_gsp_system_info(self):
-    data = nv.GspSystemInfo(gpuPhysAddr=0xf2000000, gpuPhysFbAddr=0x38060000000, gpuPhysInstAddr=0x38070000000,
-      pciConfigMirrorBase=0x88000, pciConfigMirrorSize=0x1000, nvDomainBusDeviceFunc=0x100, bIsPassthru=1,
-      PCIDeviceID=0x268410de, PCISubDeviceID=0x13b3196e, PCIRevisionID=0xa1, maxUserVa=0x7ffffffff000)
-    self.cmd_q.send_rpc(72, bytes(data))
-
-  def rpc_set_registry_table(self):
-    table = {'RMForcePcieConfigSave': 0x1, 'RMSecBusResetEnable': 0x1}
-    entries_bytes, data_bytes = bytes(), bytes()
-    hdr_size, entries_size = ctypes.sizeof(nv.PACKED_REGISTRY_TABLE), ctypes.sizeof(nv.PACKED_REGISTRY_ENTRY) * len(table)
-
-    for k,v in table.items():
-      entries_bytes += bytes(nv.PACKED_REGISTRY_ENTRY(nameOffset=hdr_size + entries_size + len(data_bytes),
-                                                      type=nv.REGISTRY_TABLE_ENTRY_TYPE_DWORD, data=v, length=4))
-      data_bytes += k.encode('utf-8') + b'\x00'
-
-    header = nv.PACKED_REGISTRY_TABLE(size=hdr_size + len(entries_bytes) + len(data_bytes), numEntries=len(table))
-    self.cmd_q.send_rpc(73, bytes(header) + entries_bytes + data_bytes)

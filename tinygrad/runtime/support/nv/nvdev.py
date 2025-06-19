@@ -49,24 +49,24 @@ class NVPageTableEntry:
     uncached = True
 
     if not table:
-      assert self.lv >= 2
+      assert self.lv >= 3
       # x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=True, address_sys=paddr >> 12, aperture=1, vol=uncached)
 
       aper = 2 if system else 0
-      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=True, address_sys=paddr >> 12, aperture=aper, vol=uncached, kind=0)
+      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=True, address_sys=paddr >> 12, aperture=aper, vol=uncached, kind=6)
 
       if self.lv !=3: self.entries[entry_id] = x
-      else: self.entries[2*entry_id] = x
-
+      else:
+        self.entries[2*entry_id] = x
+        self.entries[2*entry_id+1] = 0
     elif self.lv == 3:
       # assert False
 
-      x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=uncached, no_ats=1)
+      x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=0)
       self.entries[2*entry_id] = x & 0xffffffffffffffff
       self.entries[2*entry_id+1] = x >> 64
-      assert entry_id < 256
     else:
-      x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_sys=paddr >> 12, aperture=1 if valid else 0, vol=uncached, no_ats=1)
+      x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_sys=paddr >> 12, aperture=1 if valid else 0, vol=0)
       self.entries[entry_id] = x
 
     # print(entry_id, hex(paddr), table, uncached, system, snooped, frag, valid, hex(x))
@@ -125,9 +125,10 @@ class NVPageTableTraverseContext:
       pt, pte_idx, pte_covers = self.pt_stack[-1]
       if self.create_pts:
         # while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
+        # while pte_covers > size or self.vaddr & (pte_covers-1) != 0: pt, pte_idx, pte_covers = self.level_down()
         while pte_covers != 0x1000: pt, pte_idx, pte_covers = self.level_down() # test deep tables
-      # else:
-      #   while pt.lv!=am.AMDGPU_VM_PTB and not self.nvdev.gmc.is_pte_huge_page(pt.entries[pte_idx]): pt, pte_idx, pte_covers = self.level_down()
+      else:
+        while not pt.is_pte(pte_idx): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, self._pt_pte_cnt(len(self.pt_stack) - 1) - pte_idx)
       assert entries > 0, "Invalid entries"
@@ -146,6 +147,10 @@ class NVMemoryManager:
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=512<<20) # per device
     self.root_page_table = NVPageTableEntry(self.nvdev, self.palloc(0x1000, zero=not self.nvdev.smi_dev, boot=True), lv=0)
 
+  def page_tables(self, vaddr:int):
+    ctx = NVPageTableTraverseContext(self.nvdev, self.root_page_table, vaddr)
+    for _ in ctx.next(1 << 30): return [pt for pt, _, _ in ctx.pt_stack]
+
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False, nomap=False) -> NVMapping:
     print(f"nv {self.nvdev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
 
@@ -156,7 +161,6 @@ class NVMemoryManager:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
           assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x} {pt.valid(pte_idx + pte_off)}"
-          if nomap: continue
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
                       frag=0x0, valid=True)
 
@@ -199,8 +203,8 @@ class NVMemoryManager:
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)
 
 class NVDev:
-  def __init__(self, devfmt, mmio:MMIOInterface, vram:MMIOInterface, rom:bytes):
-    self.devfmt, self.mmio, self.vram, self.rom = devfmt, mmio, vram, rom
+  def __init__(self, devfmt, mmio:MMIOInterface, vram:MMIOInterface):
+    self.devfmt, self.mmio, self.vram = devfmt, mmio, vram
     self.included_files, self.reg_names, self.reg_offsets = set(), set(), {}
 
     self.smi_dev = False
@@ -217,22 +221,22 @@ class NVDev:
   def wreg(self, addr, value):
     self.mmio[addr // 4] = value
     if NV_DEBUG >= 4: print(f"wreg: {hex(addr)} = {hex(value)}")
-  def rreg(self, addr):
-    return self.mmio[addr // 4]
-    if NV_DEBUG >= 5: print(f"wreg: {hex(addr)} = {hex(value)}")
+  def rreg(self, addr): return self.mmio[addr // 4]
 
   def _early_init(self):
-    for name in ['NV_MMU_VER2_PTE', 'NV_MMU_VER2_PDE', 'NV_MMU_VER2_DUAL_PDE']: self.__dict__[name] = NVReg(self, 0, 0, fields={})
-    self.include("kernel-open/nvidia-uvm/hwref/turing/tu102/dev_mmu.h")
+    self.include("src/common/inc/swref/published/nv_ref.h")
     self.include("src/common/inc/swref/published/turing/tu102/dev_vm.h")
     self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island.h")
     self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island_addendum.h")
 
-    self.vram_size = self.NV_PGC6_AON_SECURE_SCRATCH_GROUP_42.read() << 20
+    # MMU Init
+    for name in ['NV_MMU_VER2_PTE', 'NV_MMU_VER2_PDE', 'NV_MMU_VER2_DUAL_PDE']: self.__dict__[name] = NVReg(self, 0, 0, fields={})
+    self.include("kernel-open/nvidia-uvm/hwref/turing/tu102/dev_mmu.h")
 
-  def _alloc_boot_struct(self, typ):
-    va, paddrs = alloc_sysmem(ctypes.sizeof(typ), contigous=True)
-    return typ.from_address(va), paddrs[0]
+    self.vram_size = self.NV_PGC6_AON_SECURE_SCRATCH_GROUP_42.read() << 20
+    self.chip_id = self.NV_PMC_BOOT_0.read()
+    self.chip_details = self.NV_PMC_BOOT_42.read_bitfields()
+    self.chip_name = {0x17: "GA", 0x18: "GH", 0x19: "AD", 0x1A: "GB"}[self.chip_details['architecture']] + str(100+self.chip_details['implementation'])
 
   def _alloc_boot_struct_2(self, struct):
     va, paddrs = alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contigous=True)
@@ -243,9 +247,10 @@ class NVDev:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/ed4be649623435ebb04f5e93f859bf46d977daa4/{file}"
     return fetch(url, subdir="defines").read_text()
 
-  def extract_fw(self, text, name):
+  def extract_fw(self, file, dname):
     # Extracts the firmware binary from the given header
-    info, sl = text[text[:text.index(name)].rindex("COMPRESSION:"):][:16], text[text.index(name) + len(name) + 7:]
+    text = self._download(f"src/nvidia/generated/g_bindata_{file.replace("kgsp", "kgspGet")}_{self.chip_name}.c")
+    info, sl = text[text[:text.index(dnm:=f'{file}_{self.chip_name}_{dname}')].rindex("COMPRESSION:"):][:16], text[text.index(dnm) + len(dnm) + 7:]
     image = bytes.fromhex(sl[:sl.find("};")].strip().replace("0x", "").replace(",", "").replace(" ", "").replace("\n", ""))
     return gzip.decompress(struct.pack("<4BL2B", 0x1f, 0x8b, 8, 0, 0, 0, 3) + image) if "COMPRESSION: YES" in info else image
 
@@ -261,7 +266,7 @@ class NVDev:
 
     regs_off = {'NV_PFALCON_FALCON': (None, 0x0), 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': (None, 0x1000), 'NV_PGC6_AON': 0x0,
       'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': (None, 0x600), 'NV_PFALCON2_FALCON': (None, 0x1000), 'NV_PBUS': 0x0, 'NV_PFB': 0x0,
-      'NV_VIRTUAL_FUNCTION':0x00B80000}
+      'NV_VIRTUAL_FUNCTION':0x00B80000, 'NV_PMC': 0x0, 'NV_PGSP_QUEUE': 0x0}
 
     for raw in txt.splitlines():
       if raw.startswith("#define "):
@@ -291,7 +296,7 @@ class NVDev:
               self.__dict__[name] = NVRegSet(self, regs_off[reg_pref], eval(f"lambda {param}: {expr}"), fields=fields)
             self.reg_names.add(name)
           else:
-            assert self.__dict__.get(name) is None, f"Duplicate definition for {name} in {file}"
+            # assert self.__dict__.get(name) is None, f"Duplicate definition for {name} in {file}"
             self.__dict__[name] = eval(f"lambda {param}: {expr}")
         elif (m := CONST.match(raw)):
           name, value = m.groups()
