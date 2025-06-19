@@ -2,8 +2,8 @@ from typing import Optional, cast, Generator
 import time, pprint, itertools
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, track_rewrites, GroupOp
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, dedup
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, track_rewrites, GroupOp, KernelInfo, resolve
 from tinygrad.codegen import full_rewrite
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -30,6 +30,13 @@ def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
 
 @track_rewrites(name=True)
 def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
+  assert ast.op is Ops.SINK, "last uop must be sink"
+  rr = sorted(dedup([x.shape for x in ast.toposort() if x.st is not None]))
+  dims = [colored(x, 'blue') for x in rr[0] if resolve(x != 1)]
+  dims += [colored(x, 'red') for x in rr[-1][len(dims):] if resolve(x != 1)]
+  ast = ast.replace(arg=KernelInfo(name='k_'+colored('_', 'BLACK').join(dims)))
+
+  # codegen
   uops = full_rewrite(ast, renderer)
   assert uops[-1].op is Ops.SINK, "last uop must be sink"
 
@@ -43,7 +50,7 @@ def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
   mem_bytes = sum(max(x.src[0].dtype.nbytes() for x in group)
     for _, group in itertools.groupby([x for x in ast.toposort() if x.op in GroupOp.Buffer and x.src[0].base.op is Ops.DEFINE_GLOBAL],
                       key=lambda x: (x.op, x.src[0].base.arg)))
-  return ProgramSpec("test", src, renderer.device, ast, uops, applied_opts, mem_bytes,
+  return ProgramSpec(uops[-1].arg.name, src, renderer.device, ast, uops, applied_opts, mem_bytes,
                      global_size=[1,1,1] if renderer.has_local else None, local_size=[1,1,1] if renderer.has_local else None)
 
 # **************** Runners ****************
