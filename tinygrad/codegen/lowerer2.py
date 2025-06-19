@@ -20,13 +20,17 @@ def add_store_indexing(ctx:LowererContext, store:UOp, buf:UOp):
   return store.replace(src=(buf.index(idx, valid),)+store.src[1:])
 
 def add_reduce_indexing(ctx:LowererContext, red:UOp):
-  more_shape = red.src[0].shape[len(ctx.current_range):]
-  reduce_range = [UOp.range(dtypes.int, s, ctx.range_number+i) if s != 1 else UOp.const(dtypes.int, 1) for i,s in enumerate(more_shape)]
-  lc = LowererContext(ctx.current_range+reduce_range, ctx.range_number+_count_ranges(reduce_range))
+  # NOTE: should never be range 1 by earlier rule
+  reduce_range = ctx.current_range[:]
+  final_reduce_ranges = []
+  for i,axis in enumerate(red.arg[1]):
+    final_reduce_ranges.append(UOp.range(dtypes.int, red.src[0].shape[axis], ctx.range_number+i))
+    reduce_range[axis] = final_reduce_ranges[-1]
+  lc = LowererContext(reduce_range, ctx.range_number+len(final_reduce_ranges))
   from tinygrad.codegen.lowerer2 import pm_lowerer  # TODO: better way to do this?
   ret = graph_rewrite(red.src[0], pm_lowerer, lc, name="subreduce", bottom_up=True)
   ctx.range_number = lc.range_number
-  return ret.reduce(*reduce_range, arg=red.arg[0])
+  return ret.reduce(*final_reduce_ranges, arg=red.arg[0])
 
 def view_const(ctx:LowererContext, view:UOp, c:UOp):
   if all(x.mask is None for x in view.arg.views): return c
