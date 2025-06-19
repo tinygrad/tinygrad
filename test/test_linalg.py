@@ -49,4 +49,4 @@ class TestLinAlg(unittest.TestCase):
       np.testing.assert_allclose((Q @ Q.transpose(-2,-1)).numpy(),identity.numpy(),atol=1e-5,rtol=1e-5)
 
 if __name__ == "__main__":
-  unittest.main() 
+  unittest.main()
