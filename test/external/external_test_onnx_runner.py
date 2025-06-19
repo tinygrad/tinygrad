@@ -6,9 +6,9 @@ from extra.onnx import supported_dtypes, TensorDataType, AttributeType
 import numpy as np
 
 class TestOnnxRunner(unittest.TestCase):
-  def test_onnx_definition_drift(self):
-    assert set(onnx.TensorProto.DataType.values()) == set(TensorDataType.__members__.values())
-    assert set(onnx.AttributeProto.AttributeType.values()) == set(AttributeType.__members__.values())
+  def test_definition_parity_with_onnx(self):
+    self.assertDictEqual(dict(onnx.TensorProto.DataType.items()), dict(TensorDataType.__members__.items()))
+    self.assertDictEqual(dict(onnx.AttributeProto.AttributeType.items()), dict(AttributeType.__members__.items()))
 
   def _test_input_spec_dtype_parsing(self, onnx_tensor_dtype, tinygrad_dtype):
     input_tensor = onnx.helper.make_tensor_value_info('input', onnx_tensor_dtype, ())
@@ -22,8 +22,8 @@ class TestOnnxRunner(unittest.TestCase):
       tmp.flush()
       model = onnx_load(tmp.name)
       runner = OnnxRunner(model)
-    assert len(runner.graph_inputs) == 1
-    assert runner.graph_inputs['input'].dtype is tinygrad_dtype
+    self.assertEqual(len(runner.graph_inputs), 1)
+    self.assertEqual(runner.graph_inputs['input'].dtype, tinygrad_dtype)
 
   def test_input_spec_dtype_parsing(self):
     """ tests correct onnx_load parsing and dtype loading """
