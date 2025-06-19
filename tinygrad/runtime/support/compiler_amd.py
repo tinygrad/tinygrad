@@ -10,7 +10,6 @@ try:
 except AttributeError: pass  # ignore if ROCm isn't installed
 from tinygrad.device import Compiler, CompileError
 from tinygrad.runtime.ops_llvm import LLVMCompiler
-import tinygrad.runtime.autogen.llvm as llvm
 from tinygrad.helpers import OSX, to_char_p_p
 
 def amdgpu_disassemble(lib:bytes):
