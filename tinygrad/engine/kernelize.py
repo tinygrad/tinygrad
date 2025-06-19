@@ -420,6 +420,77 @@ finalize_gbarrier = PatternMatcher([
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
+# from testgrad
+
+gbarrier_to_buffer = merge_views+PatternMatcher([
+  # delete GBARRIERs on GBARRIERs or BUFFERs
+  (UPat(Ops.GBARRIER, src=(UPat((Ops.GBARRIER, Ops.BUFFER), name="x"),)), lambda x: x),
+  # others (worst case) have to be a real BUFFER
+  (UPat(Ops.GBARRIER, name="x"), lambda x: UOp.new_buffer(x.device, prod(x.shape), x.dtype).assign(x.src[0]).reshape(x.shape)),
+])
+
+kernel_fixup = PatternMatcher([
+  # always put view before load
+  (UPat(Ops.VIEW, src=(UPat.var("x").load(),), name="v"), lambda x,v: x.view(v.arg).load()),
+  # assign to a load is a store
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.LOAD, src=(UPat.var("buf"),)), UPat.var("val"))), lambda val, buf: buf.view(val.st).store(val)),
+  # remove CONTIGUOUS
+  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.src[0]),
+])
+
+def do_kernelize(x:UOp):
+  const_replace = {}
+  view_replace = {}
+  unbound_dicts = []
+  srcs = []
+  def gate(y:UOp):
+    if y.op in {Ops.ASSIGN, Ops.BUFFER, Ops.BUFFER_VIEW}:
+      srcs.append(y)
+      return False
+    # unbind all VIEWs
+    if y.op is Ops.VIEW:
+      unbound_view, unbound_dict = y.arg.unbind()
+      if unbound_view != y.arg:
+        unbound_dicts.append(unbound_dict)
+        view_replace[y] = y.replace(arg=unbound_view)
+    # remove DEVICE from CONST
+    if y.op is Ops.CONST and len(y.src):
+      assert y.src[0].op is Ops.DEVICE
+      const_replace[y] = y.replace(src=()).view(ShapeTracker.from_shape(y.shape))
+    return True
+  srcs.append(x.src[0])
+  x.src[1].toposort(gate)
+  srcs = dedup(srcs)  # 0 should always stay at 0
+
+  bufs_replace = {}
+  for i,y in enumerate(srcs):
+    dg = UOp(Ops.DEFINE_GLOBAL, y.dtype.ptr(y.buffer.size), arg=len(bufs_replace))
+    assert y not in bufs_replace
+    bufs_replace[y] = dg.view(ShapeTracker.from_shape((y.buffer.size,))).load() if i != 0 else dg.load()
+  bufs_replace.update(const_replace)
+  bufs_replace.update(view_replace)
+  if len(unbound_dicts):
+    for k,v in merge_dicts(unbound_dicts).items(): srcs.append(k.bind(v))
+
+  # this is a normal kernel
+  if len(srcs) == 2 and srcs[0].device != srcs[1].device:
+    kast = UOp(Ops.COPY)
+  else:
+    kast = graph_rewrite(x, _substitute+merge_views+kernel_fixup, ctx=bufs_replace, name="fixup kernel", bottom_up=True).sink()
+    """
+    rr = sorted(dedup([x.shape for x in kast.toposort() if x.st is not None]))
+    dims = [colored(x, 'blue') for x in rr[0] if resolve(x != 1)]
+    dims += [colored(x, 'red') for x in rr[-1][len(dims):] if resolve(x != 1)]
+    info = KernelInfo(name='k_'+colored('_', 'BLACK').join(dims))
+    kast = kast.sink(arg=info)
+    """
+  return x.src[0].assign(UOp(Ops.KERNEL, src=tuple(srcs), arg=Kernel(kast)))
+
+kernelize = PatternMatcher([
+  # kernels come from ASSIGN
+  (UPat(Ops.ASSIGN, src=(UPat(), UPat(GroupOp.All - {Ops.KERNEL})), name="x"), do_kernelize),
+])
+
 @track_rewrites(name=lambda big_sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[big_sink].toposort() if u.op is Ops.KERNEL]))}")
 def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
   # multi + merge_views + simplify
@@ -435,6 +506,14 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # TODO: move view_left/view_right here
 
+  # create buffers
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], gbarrier_to_buffer, input_map=tensor_map, name="create buffers")
+
+  # group into kernels
+  tensor_map = graph_rewrite_map(tensor_map[big_sink], kernelize, input_map=tensor_map, name="create kernels")
+
+
+  """
   # group into kernels (this is context-free)
   tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, input_map=tensor_map, name="create_kernels")
 
@@ -455,6 +534,7 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
 
   # finally, create the AST for kernels
   tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast+replace_metadata, bottom_up=True, input_map=tensor_map, name="create_ast")
+  """
 
   # display the final graph
   sched_sink = tensor_map[big_sink]
