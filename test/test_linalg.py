@@ -12,7 +12,7 @@ class TestLinAlg(unittest.TestCase):
       U,S,V = Tensor.svd(a)
       b_shape,m,n = size[0:-2],size[-2],size[-1]
       k = min(m,n)
-      s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,)*len(b_shape) + (k,k)))
+      s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,) * len(b_shape) + (k,k)))
       s_diag = s_diag.expand(b_shape + (k,k)).pad(tuple([(0,0) for _ in range(len(size)-2)] + [(0,m-k), (0,n-k)]))
       reconstructed_tensor = U @ s_diag @ V
       u_identity = (Tensor.eye(m).reshape((1,) * len(b_shape)+(m,m)).expand(b_shape+(m,m)))
@@ -27,12 +27,12 @@ class TestLinAlg(unittest.TestCase):
       U,S,V = Tensor.svd(a,full_matrices=False)
       b_shape,m,n = size[0:-2],size[-2],size[-1]
       k = min(m,n)
-      s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,) * len(b_shape)+(k,k)).expand(b_shape+(k,k)))
+      s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,) * len(b_shape) + (k,k)).expand(b_shape + (k,k)))
       reconstructed_tensor = U @ s_diag @ V
-      u_identity = (Tensor.eye(k).reshape((1,)*len(b_shape)+(k,k)).expand(b_shape+(k,k)))
-      v_identity = (Tensor.eye(k).reshape((1,)*len(b_shape)+(k,k)).expand(b_shape+(k,k)))
+      u_identity = (Tensor.eye(k).reshape((1,) * len(b_shape)+(k,k)).expand(b_shape + (k,k)))
+      v_identity = (Tensor.eye(k).reshape((1,) * len(b_shape)+(k,k)).expand(b_shape + (k,k)))
       #reduced U,V is only orthogonal along smaller dim
-      if (m < n): U_r,V_r = U @ U.transpose(-2,-1),V @ V.transpose(-2,-1)
+      if (m < n): U_r,V_r = U @ U.transpose(-2,-1), V @ V.transpose(-2,-1)
       else: U_r,V_r = U.transpose(-2,-1) @ U, V.transpose(-2,-1) @ V
       np.testing.assert_allclose(reconstructed_tensor.numpy(),a.numpy(),atol=1e-5,rtol=1e-5)
       np.testing.assert_allclose(U_r.numpy(),u_identity.numpy(),atol=1e-5,rtol=1e-5)
