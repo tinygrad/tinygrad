@@ -1,14 +1,14 @@
 from typing import Optional, cast, Generator
-import time, pprint
+import time, pprint, itertools
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, track_rewrites
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, track_rewrites, GroupOp
 from tinygrad.codegen import full_rewrite
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
-from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.heuristic import hand_coded_optimizations
+#from tinygrad.codegen.kernel import Kernel
+#from tinygrad.codegen.heuristic import hand_coded_optimizations
 from tinygrad.engine.schedule import ScheduleItem
 
 # **************** Program Creation ****************
@@ -28,10 +28,23 @@ def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
   return k.to_program()
 """
 
-@track_rewrites()
+@track_rewrites(name=True)
 def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
-  linearized = full_rewrite(ast, renderer)
-  return ProgramSpec("test", renderer.render(linearized), renderer.device, ast, linearized)
+  uops = full_rewrite(ast, renderer)
+  assert uops[-1].op is Ops.SINK, "last uop must be sink"
+
+  # TODO: make this work
+  applied_opts: list = []
+
+  src = renderer.render(uops)
+
+  # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
+  # TODO: these max and min don't work on symbolic, and results are very wrong.
+  mem_bytes = sum(max(x.src[0].dtype.nbytes() for x in group)
+    for _, group in itertools.groupby([x for x in ast.toposort() if x.op in GroupOp.Buffer and x.src[0].base.op is Ops.DEFINE_GLOBAL],
+                      key=lambda x: (x.op, x.src[0].base.arg)))
+  return ProgramSpec("test", src, renderer.device, ast, uops, applied_opts, mem_bytes,
+                     global_size=[1,1,1] if renderer.has_local else None, local_size=[1,1,1] if renderer.has_local else None)
 
 # **************** Runners ****************
 
