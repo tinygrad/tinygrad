@@ -5,6 +5,7 @@ from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.codegen.lowerer import get_contraction_with_reduce
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
+from tinygrad.helpers import merge_dicts
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.multi import multi_pm
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -162,8 +163,8 @@ merge_views = PatternMatcher([
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}).view(name="view"),
    lambda view: view.const_like(0) if (mask:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
   # only unmaksed VIEW on CONST replaces the ShapeTracker
-  (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),), name="view"),
-   lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
+  #(UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),), name="view"),
+  # lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
 ])
 
 def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
@@ -433,7 +434,8 @@ kernel_fixup = PatternMatcher([
   # always put view before load
   (UPat(Ops.VIEW, src=(UPat.var("x").load(),), name="v"), lambda x,v: x.view(v.arg).load()),
   # assign to a load is a store
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.LOAD, src=(UPat.var("buf"),)), UPat.var("val"))), lambda val, buf: buf.view(val.st).store(val)),
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.LOAD, src=(UPat.var("buf"),)), UPat.var("val"))),
+   lambda val, buf: buf.view(ShapeTracker.from_shape(val.shape)).store(val)),
   # remove CONTIGUOUS
   (UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.src[0]),
 ])
