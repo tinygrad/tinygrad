@@ -3966,7 +3966,7 @@ class Tensor(MathTrait):
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
-  def qr(self):
+  def qr(self) -> tuple[Tensor, Tensor]:
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     R = self.clone()
     m,n = int(R.shape[-2]), int(R.shape[-1])
@@ -3986,7 +3986,7 @@ class Tensor(MathTrait):
       Q[..., :, i:m] = Q_old - (Q_old @ w) @ (tau.transpose(-2, -1) * w.transpose(-2, -1))
     return Q,R
 
-  def svd(self, full_matrices=True):
+  def svd(self, full_matrices = True) -> tuple[Tensor, Tensor, Tensor]:
     #partial implementation of https://www.netlib.org/lapack/lawnspdf/lawn169.pdf , pg 26
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
