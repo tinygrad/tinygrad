@@ -4,8 +4,6 @@ const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext("2d");
 ctx.font = `${LINE_HEIGHT}px sans-serif`;
 
-const ansiStrip = (st, tag) => st.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_,__,st) => st);
-
 onmessage = (e) => {
   const { graph, additions, ctxs } = e.data;
   const g = new dagre.graphlib.Graph({ compound: true });
@@ -13,7 +11,8 @@ onmessage = (e) => {
   if (additions.length !== 0) g.setNode("addition", {label:"", style:"fill: rgba(26, 27, 38, 0.5);", padding:0});
   for (let [k, {label, src, ref, ...rest }] of Object.entries(graph)) {
     const idx = ref ? ctxs.findIndex(k => k.ref === ref) : -1;
-    if (idx != -1) label += `\ncodegen@${ansiStrip(ctxs[idx].name)}`;
+    // replace colors in label
+    if (idx != -1) label += `\ncodegen@${ctxs[idx].name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1")}`;
     // adjust node dims by label size + add padding
     let [width, height] = [0, 0];
     for (line of label.split("\n")) {
