@@ -30,7 +30,7 @@ class TestViz(unittest.TestCase):
 
   def test_viz_simple(self):
     a = UOp.variable("a", 0, 10)
-    @track_rewrites(named=True)
+    @track_rewrites(name=True)
     def test(sink): return graph_rewrite(sink, symbolic)
     test(a*1)
     ret = get_metadata(keys, contexts)
@@ -41,7 +41,7 @@ class TestViz(unittest.TestCase):
 
   def test_track_two_rewrites(self):
     a = UOp.variable("a", 0, 10)
-    @track_rewrites(named=True)
+    @track_rewrites(name=True)
     def test(sink): return graph_rewrite(sink, symbolic)
     test((a+a)*1)
     ret = get_metadata(keys, contexts)
@@ -53,7 +53,7 @@ class TestViz(unittest.TestCase):
 
   def test_track_multiple_calls_one_ctx(self):
     a = UOp.variable("a", 0, 10)
-    @track_rewrites(named=True)
+    @track_rewrites(name=True)
     def test(a, b):
       a = graph_rewrite(a, symbolic)
       b = graph_rewrite(b, symbolic)
@@ -67,7 +67,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(val[1]["match_count"], 0) # no rewrites for a*5
 
   def test_track_rewrites(self):
-    @track_rewrites(named=True)
+    @track_rewrites(name=True)
     def do_rewrite(x:UOp): return graph_rewrite(x, symbolic)
     a = UOp.variable("a", 0, 10)
     b = UOp.variable("b", 0, 4)
@@ -93,7 +93,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(ret), 1)
 
   def test_track_rewrites_name_fxn(self):
-    @track_rewrites(name_fxn=lambda _,ret: f"output_{ret}")
+    @track_rewrites(name=lambda _,ret: f"output_{ret}")
     def do_rewrite(x:UOp):
       x = graph_rewrite(x, symbolic)
       return x.render()
@@ -109,7 +109,7 @@ class TestViz(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_name_in_positional_arg(self):
-    @track_rewrites(named=True)
+    @track_rewrites(name=True)
     def test(sink): return graph_rewrite(sink, symbolic, None, False, "name")
     test(UOp.variable("a", 0, 1))
     self.assertEqual(contexts[0].pop().name, "name")
@@ -125,7 +125,7 @@ class TestViz(unittest.TestCase):
     a = UOp.variable("a", 0, 10)
     b = UOp.variable("b", 0, 10)
     c = UOp.variable("c", 0, 10)
-    @track_rewrites(named=True)
+    @track_rewrites(name=True)
     def fxn(sink): return graph_rewrite(sink, substitute, ctx={a+b:c}, bottom_up=True)
     fxn(a+b)
     #UOp.substitute(a+b, {a+b:c})
@@ -137,7 +137,7 @@ class TestViz(unittest.TestCase):
   # NOTE: calling graph_rewrite when the function isn't decorated with track_rewrites should not VIZ
   def test_rewrite_without_context(self):
     def untracked_graph_rewrite(sink): return graph_rewrite(sink, symbolic)
-    @track_rewrites(named=True)
+    @track_rewrites(name=True)
     def tracked_graph_rewrite(sink): return graph_rewrite(sink, symbolic)
     # test
     add = UOp.const(dtypes.int, 2) + UOp.const(dtypes.int, 1)
@@ -149,7 +149,7 @@ class TestViz(unittest.TestCase):
   def test_inner_rewrite_location(self):
     # inner rewrite gets tracked in another context
     def inner_rewrite(sink): return graph_rewrite(sink, symbolic)
-    @track_rewrites(named=True)
+    @track_rewrites(name=True)
     def tracked_graph_rewrite(sink): return inner_rewrite(sink)
     # test
     add = UOp.const(dtypes.int, 2) + UOp.const(dtypes.int, 1)
@@ -171,7 +171,7 @@ class TestViz(unittest.TestCase):
       y2 = graph_rewrite(y, inner_rewrite, name="inner_y")
       return None if (x2 is x and y2 is y) else x2+y2
     outer_rewrite = TrackedPatternMatcher([(UPat.cvar("x")+UPat.cvar("y"), make_float),])
-    @track_rewrites(named=True)
+    @track_rewrites(name=True)
     def rewrite(u:UOp): return graph_rewrite(u, outer_rewrite, name="outer")
     a = UOp.const(dtypes.int, 1)+UOp.const(dtypes.int, 2)
     rewrite(a)
@@ -186,7 +186,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual([len(x.matches) for x in tracked], [1, 1, 1])
 
   def test_depth_level(self):
-    @track_rewrites(named=True)
+    @track_rewrites(name=True)
     def fxn(u:UOp): return graph_rewrite(u, l0)
     ret = fxn(UOp(Ops.CUSTOM, arg=0))
     assert ret is UOp(Ops.CUSTOM, arg=3)
@@ -216,10 +216,10 @@ class TestViz(unittest.TestCase):
   @unittest.skip("TODO: doesn't work")
   def test_recursion_err(self):
     inf = TrackedPatternMatcher([
-      (UPat.const(dtypes.int, 0).named("a"), lambda a: a.const_like(1)),
-      (UPat.const(dtypes.int, 1).named("b"), lambda b: b.const_like(0)),
+      (UPat.const(dtypes.int, 0).name("a"), lambda a: a.const_like(1)),
+      (UPat.const(dtypes.int, 1).name("b"), lambda b: b.const_like(0)),
     ])
-    @track_rewrites(named=True)
+    @track_rewrites(name=True)
     def func(u): return graph_rewrite(u, inf)
     with self.assertRaises(RecursionError): func(UOp.const(dtypes.int, 0))
     _ = list(get_details(keys[0], contexts[0][0]))
