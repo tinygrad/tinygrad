@@ -4243,26 +4243,23 @@ class Tensor(MathTrait):
     • If `t` is 1-D → return a square matrix with `t` on the main diagonal.
     • If `t` is 2-D → return a 1-D tensor containing the main diagonal of `t`.
     """
-
-    if self.ndim == 1:
-      return Tensor.eye(int(self.shape[0]), dtype=self.dtype) * self
-    if self.ndim == 2:
-      n: int = min(self.shape)
-      return (self[:n, :n] * Tensor.eye(n, dtype=self.dtype)).sum(axis=1)
+    n= int(min(self.shape))
+    if self.ndim == 1: return Tensor.eye(n, dtype=self.dtype) * self
+    if self.ndim == 2: return (self[:n, :n] * Tensor.eye(n, dtype=self.dtype)).sum(axis=1)
     raise ValueError("diag expects a 1-D or 2-D tensor")
 
   def qr_decompose(self) -> tuple[Tensor, Tensor]:
     """
-    Compute the QR_decompose using Household-Reflectors algorithm
+    Compute the QRdecompose using Household-Reflectors algorithm
     Based off https://www.quantstart.com/articles/QR-Decomposition-with-Python-and-NumPy/
     Args:
-        self (Tensor): The input matrix (TinyGrad Tensor).
+    self (Tensor): The input matrix (TinyGrad Tensor).
     """
     R = self.clone()
     n = int(R.shape[0])
     I = Tensor.eye(n, dtype=R.dtype)
     Q = Tensor.eye(n, dtype=self.dtype)
-    for k in range(int(n-1)):
+    for k in range(int(min(R.shape))):
       x = R[k:, k]
       u = x - x[0].sign() * x.norm().clamp(min_=1.0e-10) * I[k:,k]
       v = u/u.norm().clamp(min_=1.0e-10)
@@ -4290,21 +4287,6 @@ class Tensor(MathTrait):
       V = V @ Q
     return A.diag(), V
 
-  @staticmethod
-  def _orthonormal_basis(Q: Tensor, dim: int, sorted_indices: Tensor | None = None) -> Tensor:
-    k = int(Q.shape[1])
-    full = Tensor.eye(dim, dtype=Q.dtype)
-    if sorted_indices is not None: full[:, :k] = Q[:, sorted_indices]
-    else:full[:, :k] = Q
-    # Complete the basis via Gram–Schmidt (Householder‑style two‑projection).
-    for i in range(k, dim):
-      v = Tensor.eye(dim, dtype=Q.dtype)[:, i]
-      for j in range(int(i)):
-        u = full[:, j]
-        v -= 2 * (u @ v) * u
-      full[:, i] = v / v.norm().clamp(min_=1.0e-10)
-    return full
-
   def svd(self, compute_uv: bool = True, full_matrices: bool = True) -> tuple[Tensor, Tensor, Tensor] | Tensor:
     """
     Computes the Singular Value Decomposition (SVD) of `self`.
@@ -4319,23 +4301,18 @@ class Tensor(MathTrait):
         Vt (Tensor): Right singular vectors (transposed).
     """
     A = self.clone()
-    AtA, AAt = self.transpose() @ A, A @ A.transpose()
+    AtA= self.transpose() @ A
     eigvals_AtA, V = AtA.eig()
-    U = AAt.eig()[1]
+    U = (A @ A.transpose()).eig()[1]
     eigvals_AtA, sorted_indices = eigvals_AtA.sort(descending=True)
     M, N = map(int, A.shape)
     K = int(min(M, N))
     if compute_uv:
-      # Pad U and V to full matrices
-      if full_matrices:
-        if U.shape[1] < M:
-          U = Tensor._orthonormal_basis(U, M, sorted_indices)
-        if V.shape[1] < N:
-          V = Tensor._orthonormal_basis(V, N, sorted_indices)
-        return U, eigvals_AtA.sqrt()[:K], V.transpose()
-      sorted_indices = sorted_indices[:K]
-      return U[:, sorted_indices], eigvals_AtA.sqrt()[:K], V[:, sorted_indices].transpose()
-    return eigvals_AtA.sqrt()
+      if full_matrices: return U, eigvals_AtA.sqrt()[:K], V.transpose()
+      else:
+        sorted_indices = sorted_indices[:K]
+        return U[:, sorted_indices], eigvals_AtA.sqrt()[:K], V[:, sorted_indices].transpose()
+    else: return eigvals_AtA.sqrt()
 
 P = ParamSpec("P")
 T = TypeVar("T")
