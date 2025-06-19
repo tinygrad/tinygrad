@@ -1,6 +1,6 @@
 # original implementation: https://github.com/svc-develop-team/so-vits-svc
 from __future__ import annotations
-import sys, os, logging, time, io, math, argparse, operator, numpy as np
+import sys, logging, time, io, math, argparse, operator, numpy as np
 from functools import partial, reduce
 from pathlib import Path
 from typing import Tuple, Optional, Type
@@ -93,7 +93,7 @@ class ContentVec:
     return res, padding_mask
   @classmethod
   def load_from_pretrained(cls, checkpoint_path:str, checkpoint_url:str) -> ContentVec:
-    if not os.path.isfile(checkpoint_path): fetch(checkpoint_url, checkpoint_path)
+    fetch(checkpoint_url, checkpoint_path)
     cfg = load_fairseq_cfg(checkpoint_path)
     enc = cls(cfg.model)
     _ = load_checkpoint_enc(checkpoint_path, enc, None)
@@ -320,9 +320,9 @@ class Synthesizer:
     return f0_coarse
   @classmethod
   def load_from_pretrained(cls, config_path:str, config_url:str, weights_path:str, weights_url:str) -> Synthesizer:
-    if not os.path.isfile(config_path): fetch(config_url, config_path)
+    fetch(config_url, config_path)
     hps = get_hparams_from_file(config_path)
-    if not os.path.isfile(weights_path): fetch(weights_url, weights_path)
+    fetch(weights_url, weights_path)
     net_g = cls(hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, **hps.model)
     _ = load_checkpoint(weights_path, net_g, None, skip_list=["f0_decoder"])
     logging.debug(f"{cls.__name__}:Loaded model with hps: {hps}")
@@ -598,7 +598,7 @@ if __name__=="__main__":
   speaker = args.speaker if args.speaker is not None else list(hps.spk.__dict__.keys())[0]
 
   ### Loading audio and slicing ###
-  if audio_path == DEMO_PATH and not os.path.isfile(DEMO_PATH): fetch(DEMO_URL, DEMO_PATH)
+  if audio_path == DEMO_PATH: fetch(DEMO_URL, DEMO_PATH)
   assert Path(audio_path).is_file() and Path(audio_path).suffix == ".wav"
   chunks = preprocess.cut(audio_path, db_thresh=slice_db)
   audio_data, audio_sr = preprocess.chunks2audio(audio_path, chunks)
