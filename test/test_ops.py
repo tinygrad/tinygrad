@@ -3054,7 +3054,6 @@ class TestLinAlg(unittest.TestCase):
         np.testing.assert_allclose(S.abs().numpy(), np.abs(np_S), rtol=1e-4, atol=0.5)
         np.testing.assert_allclose(Vt.abs().numpy(), np.abs(np_Vt), rtol=1e-4, atol=0.8)
 
-
   def test_norm(self):
     helper_test_op([(3,)], lambda x: x.norm(), lambda x: x.norm(), forward_only=True)
     helper_test_op([(3, 3)], lambda x: x.norm(), lambda x: x.norm(), forward_only=True)

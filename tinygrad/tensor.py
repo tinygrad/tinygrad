@@ -4308,7 +4308,7 @@ class Tensor(MathTrait):
     M, N = map(int, A.shape)
     K = int(min(M, N))
     if compute_uv and full_matrices: return U, eigvals_AtA.sqrt()[:K], V.transpose()
-    elif compute_uv and not full_matrices: 
+    elif compute_uv and not full_matrices:
       sorted_indices = sorted_indices[:K]
       return U[:, sorted_indices], eigvals_AtA.sqrt()[:K], V[:, sorted_indices].transpose()
     return eigvals_AtA.sqrt()
