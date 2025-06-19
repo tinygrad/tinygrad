@@ -3996,7 +3996,7 @@ class Tensor(MathTrait):
     U = R.shrink(tuple([(0, self.shape[i]) for i in range(self.ndim - 2)] + [(0, num), (0, num)])).contiguous()
     V = Tensor.eye(num, dtype = self.dtype).reshape((1,) * (self.ndim - 2) + (num, num)).expand(b_shape + (num, num)).contiguous()
     #prepare round robin pairing
-    permute = Tensor.arange(0, num)
+    permute, inverse_permute = Tensor.arange(0, num, dtype = dtypes.int), Tensor.zeros(num, dtype = dtypes.int).contiguous()
     permute[num//2:num] = permute[num//2:num].flip(0)
     def one_round_jacobi(U, V):
       #compute the jacobi rotations for each pairing
@@ -4010,7 +4010,6 @@ class Tensor(MathTrait):
       c = 1 / (1 + t.square()).sqrt()
       s = c * t
       #apply the rotations
-      inverse_permute = Tensor.zeros(num, dtype = dtypes.int).contiguous()
       inverse_permute[permute] = Tensor.arange(num, dtype = dtypes.int).contiguous()
 
       V_permuted, runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[...,permute], None)
