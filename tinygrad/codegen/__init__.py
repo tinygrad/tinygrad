@@ -7,7 +7,8 @@ from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
-from tinygrad.codegen.lowerer import pm_quant, pm_lowerer, get_index
+#from tinygrad.codegen.lowerer import pm_quant, pm_lowerer, get_index
+from tinygrad.codegen.lowerer2 import pm_lowerer, LowererContext
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
 from tinygrad.codegen.expander import migrate_indexing, expander
 from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexing, devectorize, \
@@ -39,8 +40,9 @@ def get_rewrites_for_renderer(opts:Renderer, linearizer:bool=True) -> list[Rewri
 def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
-  if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
-  ret.append(RewriteStep(pm_lowerer, lambda ast: get_index(ast, opts), name="lowerer"))
+  #if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
+  #ret.append(RewriteStep(pm_lowerer, lambda ast: get_index(ast, opts), name="lowerer"))
+  ret.append(RewriteStep(pm_lowerer, lambda _: LowererContext(), name="lowerer", bottom_up=True))
 
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing, name="initial symbolic"))
