@@ -14,7 +14,7 @@ def to_hex(x, dt:DType) -> str:
 
 base_rewrite = PatternMatcher([
   # local/global load
-  (UPat(Ops.LOAD, src=(UPat.var("x"),), name="ld"), lambda ctx,x,ld: f"{ctx.ops[ld.dtype][ld.op]} {ctx[ld]}, [{ctx[x]}]"),
+  (UPat(Ops.LOAD, name="ld"), lambda ctx,ld: f"{ctx.ops[ld.dtype][ld.op]} {ctx[ld]}, [{ctx[ld.src[0]]}]"),
   # register move
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="cp"), lambda ctx,x,cp: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[cp]}, {ctx[x]}"),
   # accumulator
@@ -353,8 +353,9 @@ x86_branch_ops = {Ops.ENDRANGE: "jl", Ops.IF: "je"}
 x86_unsigned_ops = {**x86_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "div", Ops.MOD: "div", Ops.CMPNE: "cmp",
                     Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor", Ops.SHL: "shl", Ops.SHR: "shr", Ops.WHERE: "cmove"}
 x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR: "sar"}
-# NOTE: float16 alus are done in float32, load/store are done with general regs unless vectorized these are just for spill/fill
-x86_float16_ops = {Ops.STORE:"movss", Ops.LOAD:"movss", Ops.ASSIGN: "movss"}
+# NOTE: float16 alus are done in float32, load/store are done with general regs unless vectorized these are just for spill/fill,
+# these are just for local moves
+x86_float16_ops = {Ops.STORE: "movss", Ops.LOAD: "movss", Ops.ASSIGN: "movss"}
 # TODO: switch all float load/store to movd/q instead of moss/sd
 # TODO: add full float16/64 vec support, mainly need to change vectorize/gep
 x86_vec2_float16_ops = {Ops.STORE: "vmovd", Ops.LOAD: "vmovd", Ops.ASSIGN: "movss"}
@@ -380,7 +381,7 @@ gep_imm = {0: "0x00", 1: "0x40", 2: "0x80", 3: "0xC0"}
 #bcast_imm = {0: "0x00", 1: "0x55", 2: "0xAA", 3: "0xFF"}
 vec_imm = {0: "0x00", 1: "0x10", 2: "0x20", 3: "0x30"}
 vec_imm = {0: "0x00", 1: "0x10", 2: "0x20", 3: "0x30"}
-size_prefix = {1: "byte ptr", 2: "word ptr", 4: "dword ptr", 8: "qword ptr", 16: "xmmword ptr"}
+#size_prefix = {1: "byte ptr", 2: "word ptr", 4: "dword ptr", 8: "qword ptr", 16: "xmmword ptr"}
 idiv_signex = {1: "cbw", 2: "cwd", 4: "cdq", 8: "cqo"}
 def x86_cflag(x:UOp) -> str: return "setne" if x.op is Ops.CMPNE else "setl" if x.src[0].dtype in dtypes.sints else "setb"
 
@@ -403,8 +404,7 @@ x86_rewrite = PatternMatcher([
    f"je .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
   # local/global store
   (UPat(Ops.STORE, src=(UPat.var("x"),), name="st"), lambda ctx,x,st: f"{ctx.ops[x.dtype][st.op]} [{ctx.mem[x]}], {ctx[x]}"),
-  (UPat(Ops.STORE, name="x"), lambda ctx,x:
-   f"{ctx.ops[x.src[1].dtype][x.op]} {size_prefix[x.src[1].dtype.itemsize]} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
+  (UPat(Ops.STORE, name="x"), lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
   # devectorize
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"insertps {ctx[x]}, {ctx[x.src[0]]}, {gep_imm[x.arg[0]]}"),
   # broadcast
@@ -466,7 +466,7 @@ x86_matcher = asm_matcher + PatternMatcher([
   # some consts can't be immediates
   (UPat(GroupOp.All, name="x"), x86_load_consts),
   # some ops can't take imm in srcs
-  (UPat((Ops.WHERE, Ops.IDIV, Ops.MOD), name="x"),
+  (UPat((Ops.WHERE, Ops.IDIV, Ops.MOD, Ops.STORE), name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.cvar("c"), UPat()), name="x"), lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
   # we use general registers to load/store the 2 bytes of float16
@@ -474,9 +474,13 @@ x86_matcher = asm_matcher + PatternMatcher([
    lambda x,idx,alt,mask: idx.load(alt.bitcast(dtypes.int16), mask, dtype=dtypes.int16).bitcast(x.dtype)),
   (UPat(Ops.LOAD, dtypes.float16, name="x"), lambda x: x.replace(dtype=dtypes.int16).bitcast(x.dtype)),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("x", dtypes.float16))), lambda idx,x: idx.store(x.bitcast(dtypes.int16))),
-  # float16 alus perform instruction in float32
-  (UPat(GroupOp.ALU, dtype=dtypes.float16, name="x"),
+  # float16 alus are done in float32
+  (UPat(GroupOp.ALU, dtypes.float16, name="x"),
    lambda x: UOp(x.op, dtypes.float32, tuple(s.cast(dtypes.float32) if s.dtype != dtypes.bool else s for s in x.src)).cast(dtypes.float16)),
+  # float16 accumulator are done in float32 as there's no register move for float16
+  (UPat(Ops.ASSIGN, dtypes.float16, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda a,b,x:
+   x.replace(dtype=dtypes.float32, src=(a.replace(dtype=dtypes.float32,
+    src=(a.src[0].cast(dtypes.float32),) + a.src[1:]), b.cast(dtypes.float32))).cast(dtypes.float16)),
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
    lambda x: UOp(x.op, x.dtype, tuple(s.cast(dtypes.float32) for s in x.src)) if any(s.dtype is dtypes.float16 for s in x.src) else None),
   # can't bitcast from uint16/int16 to float16 directly and vice versa
