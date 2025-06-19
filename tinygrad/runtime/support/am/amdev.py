@@ -199,11 +199,11 @@ class AMMemoryManager:
   @staticmethod
   def alloc_vaddr(size:int, align=0x1000) -> int: return AMMemoryManager.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
-  def valloc(self, size:int, align=0x1000, uncached=False, contigous=False) -> AMMapping:
+  def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False) -> AMMapping:
     # Alloc physical memory and map it to the virtual address
     va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
 
-    if contigous: paddrs = [(self.palloc(size, zero=True), size)]
+    if contiguous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
       # Traverse the PT to find the largest contiguous sizes we need to allocate. Try to allocate the longest segment to reduce TLB pressure.
       paddrs = []
