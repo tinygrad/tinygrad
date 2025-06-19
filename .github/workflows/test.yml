@@ -97,7 +97,7 @@ jobs:
         webgpu: 'true'
         llvm: 'true'
     - name: Install autogen support packages
-      run: sudo apt-get install -y --no-install-recommends llvm-18-dev libclang-18-dev
+      run: sudo apt-get install -y --no-install-recommends llvm-14-dev libclang-14-dev
     - name: Verify OpenCL autogen
       run: |
         cp tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
@@ -924,9 +924,6 @@ jobs:
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == '${{ matrix.backend }}'.upper(), Device.DEFAULT"
           DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
-      - name: print llvm
-        if: matrix.backend == 'llvm'
-        run: DEBUG=7 python3 test/test_disassembly.py
       - name: Run pytest (${{ matrix.backend }})
         run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
       - name: Run process replay tests

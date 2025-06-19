@@ -233,14 +233,14 @@ generate_libc() {
 }
 
 generate_llvm() {
-  INC="$(llvm-config-18 --includedir)"
+  INC="$(llvm-config-14 --includedir)"
   clang2py -k cdefstum \
     $(find "$INC/llvm-c/" -type f -name '*.h' | sort) \
     "$INC/llvm/Config/Targets.def" \
     "$INC/llvm/Config/AsmPrinters.def" \
     "$INC/llvm/Config/AsmParsers.def" \
     "$INC/llvm/Config/Disassemblers.def" \
-    --clang-args="$(llvm-config-18 --cflags)" \
+    --clang-args="$(llvm-config-14 --cflags)" \
     -o "$BASE/llvm.py"
 
   sed -i "s\import ctypes\import ctypes, tinygrad.runtime.support.llvm as llvm_support\g" "$BASE/llvm.py"
