@@ -110,6 +110,7 @@ class Buffer:
     if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
     self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = device, size, dtype, options, offset, 0
+    self.allocator: Allocator = Device[self.device].allocator
     if base is None:
       assert offset == 0, "base buffers can't have offset"
       self._base = None
@@ -127,20 +128,16 @@ class Buffer:
   def base(self) -> Buffer: return self._base if self._base is not None else self
   @property
   def lb_refcount(self): return self.base._lb_refcount
-  @property
-  def allocator(self) -> Allocator: return Device[self.device].allocator
-  @property
-  def _buf(self) -> Any:
-    self.ensure_allocated()
-    if self._base is not None and not hasattr(self, '_underlying_buf'): self.allocate()
-    return self._underlying_buf
   def ref(self, cnt):
     self.base._lb_refcount += cnt
     return self
-  def is_allocated(self) -> bool: return hasattr(self, '_underlying_buf') or (self._base is not None and self.base.is_allocated())
-  def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
+  # check if the underlying buffer is allocated and the current buffer/view is initialized
+  def is_initialized(self) -> bool: return self.is_allocated() and hasattr(self, '_buf')
+  # check if the underlying buffer is allocated, possibly from the base object
+  def is_allocated(self) -> bool: return self.base.is_allocated() if self._base is not None else hasattr(self, '_buf')
+  def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_initialized() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
-    assert not hasattr(self, '_underlying_buf'), "can't allocate already allocated buffer"
+    assert not self.is_initialized(), "can't allocate already allocated buffer"
     if DEBUG >= 7: print(f"buffer: allocate {self.nbytes} bytes on {self.device}")
     if (mbs:=getenv("MAX_BUFFER_SIZE", 0)) > 0 and self.size > mbs: raise RuntimeError(f"buffer of size {self.size/1e6:.2f}M is too large")
     if external_ptr is not None:
@@ -149,32 +146,31 @@ class Buffer:
       self._base.ensure_allocated()
       self._base.allocated_views += 1
       assert hasattr(self.allocator, "_offset"), "offset function required for view"
-      self._underlying_buf: Any = self.allocator._offset(self.base._buf, self.nbytes, self.offset)
+      self._buf: Any = self.allocator._offset(self.base._buf, self.nbytes, self.offset)
     else:
-      self._underlying_buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
+      self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
     return self
   def deallocate(self):
-    if not hasattr(self, '_underlying_buf'): return
+    assert hasattr(self, '_buf'), "buffer must be allocated to deallocate"
     if DEBUG is not None and DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if GlobalCounters is not None and not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
-      self.allocator.free(self._underlying_buf, self.nbytes, self.options)
+      self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
-    del self._underlying_buf
+    del self._buf
   def __reduce__(self):
     buf = None
     if self._base is not None:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
-    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._underlying_buf, self.options, None, self.lb_refcount)
+    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
     if self.is_allocated():
       buf = bytearray(self.nbytes)
       self.copyout(memoryview(buf))
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
-  def __del__(self):
-    if hasattr(self, '_underlying_buf'): self.deallocate()
+  def __del__(self): (not hasattr(self, '_buf')) or self.deallocate()
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
@@ -195,13 +191,13 @@ class Buffer:
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
-    assert self.is_allocated(), "can't copyin to unallocated buffer"
+    assert self.is_initialized(), "can't copyin to unallocated buffer"
     self.allocator._copyin(self._buf, mv)
     return self
   def copyout(self, mv:memoryview) -> memoryview:
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
-    assert self.is_allocated(), "can't copyout unallocated buffer"
+    assert self.is_initialized(), "can't copyout unallocated buffer"
     self.allocator._copyout(mv, self._buf)
     return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
