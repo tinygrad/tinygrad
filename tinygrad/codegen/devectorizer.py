@@ -153,7 +153,7 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
   assert False
 
 def fast_idiv(ctx: Renderer|None, x: UOp, d: int) -> UOp|None:
-  # idiv is truncated division, but arithmatic shift is floored division, so can only do non-negative numbers!
+  # idiv is truncated division, but arithmetic shift is floored division, so can only do non-negative numbers!
   if x.vmin<0: return None
   sign = 1 if d > 0 else -1
   m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))

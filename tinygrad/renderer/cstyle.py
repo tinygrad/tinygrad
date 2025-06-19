@@ -216,7 +216,7 @@ class ClangRenderer(CStyleLanguage):
         '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
       ]
       # 'static' in C roughly means that function symbol isn't exported. LLVM puts those symbols at the end of object file which allows Clang JIT
-      # to just jump at the start of a shellcode whithout having to deal with symbols or trampolines at all. This is better than having to inline
+      # to just jump at the start of a shellcode without having to deal with symbols or trampolines at all. This is better than having to inline
       # wmma function every time it is called or wasting complexity on a symbol parsing and a memory page on trampoline.
       prefix += [f"""static {(out := self.render_dtype(dtype_in.vec(N*N)))} __{name}({self.render_dtype(dtype_in.vec(N))} data1, {self.render_dtype(dtype_in.vec(M))} data2, {out} data0){{
   AMX_SET(0);\n  for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(4, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}

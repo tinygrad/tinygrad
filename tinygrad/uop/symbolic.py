@@ -337,7 +337,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     if v0 == v1:
       uop = uop.substitute({expr:expr.const_like(v0)}).simplify()
       continue
-    # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
+    # every candidate is a set of constrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
     candidates = []
     if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in split_uop(expr, Ops.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output

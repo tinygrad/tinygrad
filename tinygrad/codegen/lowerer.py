@@ -134,7 +134,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   ret = x.src[0]
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
     ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
-  # REDUCE supports both "horizonal" reduction and range reduction. the horizonal elements are taken in the nearest group
+  # REDUCE supports both "horizontal" reduction and range reduction. the horizontal elements are taken in the nearest group
   return UOp(Ops.REDUCE, x.dtype, (ret,)+tuple(reduce_range), alu_op)
 
 def lower_load_store(ctx: IndexContext, x: UOp, buf: UOp):
