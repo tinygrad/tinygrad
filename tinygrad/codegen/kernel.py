@@ -15,7 +15,7 @@ from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.lowerer import get_contraction
-from tinygrad.engine.grouper import view_left
+from tinygrad.engine.kernelize import view_left
 from tinygrad.codegen import full_rewrite
 
 class KernelOptError(Exception): pass
