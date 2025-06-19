@@ -27,6 +27,4 @@ sleep 5 && sudo rmmod amdgpu || true
 BENCHMARK=10 INITMLPERF=1 BERT_LAYERS=2 python3 examples/mlperf/model_train.py | tee $LOGFILE
 
 # run
-# TODO: AM driver resulted in nan
-sudo modprobe amdgpu
 PARALLEL=0 RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a $LOGFILE

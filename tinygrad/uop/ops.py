@@ -6,7 +6,7 @@ from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten
-from tinygrad.helpers import PICKLE_BUFFERS, dedup, cdiv, cmod, diskcache_put
+from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
@@ -74,10 +74,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   tag:Any = None
   children:set[weakref.ref[UOp]] = field(default_factory=set)
   def __del__(self):
-    if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
-    if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg, self.tag))) is not None:
-      for s in self.src: s.children.discard(ref)
-      del UOpMetaClass.ucache[k]
+    if Ops is not None and self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
+    try:
+      if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg, self.tag))) is not None:
+        for s in self.src: s.children.discard(ref)
+        del UOpMetaClass.ucache[k]
+    except AttributeError: pass
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
     if self.op is Ops.BUFFER and self.realized is not None and PICKLE_BUFFERS: args.append(self.realized)
@@ -729,7 +731,7 @@ class TrackedGraphRewrite:
   bottom_up: bool
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
-_name_cnt:dict[str, int] = {}
+_name_cnt:dict[str, itertools.count] = {}
 
 if getenv("CAPTURE_PROCESS_REPLAY"):
   replay_capture: dict[str, bytes] = {}
@@ -738,15 +740,14 @@ if getenv("CAPTURE_PROCESS_REPLAY"):
   def save_to_diskcache():
     for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
 
-def track_rewrites(named=False, name_fxn:Callable|None=None):
+def track_rewrites(name:Callable|bool|None=None):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
       if TRACK_MATCH_STATS >= 2:
-        if (count_names:=(named or name_fxn or not args)): _name_cnt[func.__name__] = _name_cnt.get(func.__name__, 0)+1
-        tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if count_names else args[0])
+        tracked_keys.append(args[0] if args and name is None else (fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}")
         tracked_ctxs.append([])
       ret = func(*args, **kwargs)
-      if TRACK_MATCH_STATS >= 2 and name_fxn is not None: tracked_keys[-1] = f"{name_fxn(*args, **kwargs, ret=ret)} n{_name_cnt[func.__name__]}"
+      if TRACK_MATCH_STATS >= 2 and callable(name): tracked_keys[-1] = tracked_keys[-1].replace(fn, name(*args, **kwargs, ret=ret))
       if getenv("CAPTURE_PROCESS_REPLAY"):
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
@@ -793,7 +794,7 @@ class TrackedPatternMatcher(PatternMatcher):
       match_stats[p][2] += time.perf_counter()-st
     return None
 
-if TRACK_MATCH_STATS:
+if TRACK_MATCH_STATS or PROFILE:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
   import atexit
   @atexit.register
@@ -810,14 +811,15 @@ if TRACK_MATCH_STATS:
         if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:20s}", k.printable())
         ret = [x+y for x,y in zip(ret, v)]
       print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {(ret[2]+ret[3])*1000.:9.2f} ms -- TOTAL")
+      print(f"{len(match_stats)} rules, {sum(v[0] > 0 for v in match_stats.values())} matched once")
 
-def launch_viz(env_str:str, data:str):
-  os.environ[env_str] = "0"
-  os.environ[f"{env_str}_DATA"] = data
-  if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")):
-    args = ['--kernels', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
-    args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
-    os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), "../", "viz", "serve.py")] + args)
+  def launch_viz(env_str:str, data:str):
+    os.environ[env_str] = "0"
+    os.environ[f"{env_str}_DATA"] = data
+    if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")):
+      args = ['--kernels', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
+      args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
+      os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), "../", "viz", "serve.py")] + args)
 
 # *** simple graph rewrite engine ***
 
