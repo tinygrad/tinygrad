@@ -3039,12 +3039,12 @@ class TestLinAlg(unittest.TestCase):
   def test_svd(self):
     with Context(NOOPT=1):
       tensors = [
-          Tensor([[3.0, 6.0], [1.0, 10.0]]),
-          Tensor([[1.0, 2.0], [3.0, 4.0]]),
-          Tensor([[5.0, 6.0], [7.0, 8.0]]),
-          Tensor([[9.0, 10.0], [11.0, 12.0]]),
-          Tensor([[9.0, 10.0, 69, 9], [11.0, 12.0, 40, 38]]),
-          Tensor([[9.0, 10.0], [11.0, 12.0], [5, 35]])
+          Tensor([[3.0, 6.0], [1.0, 10.0]], dtype=dtypes.float64),
+          Tensor([[1.0, 2.0], [3.0, 4.0]], dtype=dtypes.float64),
+          Tensor([[5.0, 6.0], [7.0, 8.0]], dtype=dtypes.float64),
+          Tensor([[9.0, 10.0], [11.0, 12.0]], dtype=dtypes.float64),
+          Tensor([[9.0, 10.0, 69, 9], [11.0, 12.0, 40, 38]], dtype=dtypes.float64),
+          Tensor([[9.0, 10.0], [11.0, 12.0], [5, 35]], dtype=dtypes.float64)
       ]
       for tensor in tensors:
         for full_matrices in [True, False]:
