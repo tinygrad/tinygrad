@@ -4046,13 +4046,13 @@ class Tensor(MathTrait):
 
       gamma = (partial_Up * partial_Uq).sum(-2).reshape(b_shape + (1, num//2))
       alpha,beta = U_permuted.square().sum(-2).unsqueeze(-2).split(num//2, -1)
-      tau = (beta - alpha) / (2 * gamma+1.0e-20)#prevents 0/0
+      tau = (beta - alpha) / (2 * gamma + 1.0e-8)#prevents 0/0
       t = tau.sign() / (tau.abs() + (1 + tau.square()).sqrt())
       c = 1 / (1+t.square()).sqrt()
       s = c * t
       #apply the rotations
-      inverse_permute = Tensor.zeros(num,dtype = dtypes.int).contiguous()
-      inverse_permute[permute] = Tensor.arange(num,dtypes = dtypes.int32).contiguous()
+      inverse_permute = Tensor.zeros(num, dtype = dtypes.int).contiguous()
+      inverse_permute[permute] = Tensor.arange(num, dtypes = dtypes.int32).contiguous()
 
       V_permuted,runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[...,permute], None)
       V_left, V_right = V_permuted.split(num//2, -1)
@@ -4068,7 +4068,7 @@ class Tensor(MathTrait):
     max_iterations, iterations_per_round = 8, int((num) * (num - 1) / 2)
     for _ in range(max_iterations * iterations_per_round): U, V = one_round_jacobi(U,V)
     #extract singular values and sort. construct U from Q
-    S,indices = U.square().sum(-2).sqrt().sort(dim = -1,descending=True)
+    S,indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
     new_indices = Tensor.arange(num).reshape((1,) * (self.ndim - 1) + (num,)).expand(b_shape + 2 * (num,)).contiguous()
     new_indices[..., :num] = indices.reshape(b_shape + (1,) + (U.shape[0],)).expand(b_shape + (num, num))
     U,V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2),V.gather(-1, new_indices[..., 0:num, 0:num])
