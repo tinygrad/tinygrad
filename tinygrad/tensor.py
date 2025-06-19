@@ -2073,7 +2073,7 @@ class Tensor(MathTrait):
     m = self.max(axis=axis, keepdim=True)
     return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + m.squeeze(axis)
 
-  def logcumsumexp(self, axis=0, mask_val:float=-1e4) -> Tensor:
+  def logcumsumexp(self, axis=0) -> Tensor:
     """
     Computes the log-cumsum-exp of the tensor along the specified axis or axes.
 
@@ -2105,7 +2105,7 @@ class Tensor(MathTrait):
     x_cummax = x_reshaped.cummax(-1).unsqueeze(-1)
     x_expand = x_reshaped.unsqueeze(1).expand(*x_reshaped.shape, last_dim_size)
     mask = Tensor.ones(last_dim_size, last_dim_size, requires_grad=False, device=self.device).tril().unsqueeze(0)
-    ret = mask.where(x_expand - x_cummax, mask_val).exp().sum(-1).log() + x_cummax.squeeze(-1)
+    ret = mask.where(x_expand - x_cummax, dtypes.min(self.dtype)).exp().sum(-1).log() + x_cummax.squeeze(-1)
     return ret.reshape(*x.shape).transpose(-1, axis)
 
   def argmax(self, axis=None, keepdim=False) -> Tensor:
