@@ -729,7 +729,7 @@ class TrackedGraphRewrite:
   bottom_up: bool
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
-_name_cnt:dict[str, int] = {}
+_name_cnt:dict[str, itertools.count] = {}
 
 if getenv("CAPTURE_PROCESS_REPLAY"):
   replay_capture: dict[str, bytes] = {}
@@ -742,11 +742,10 @@ def track_rewrites(name:Callable|bool|None=None):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
       if TRACK_MATCH_STATS >= 2:
-        if (count_names:=(name or not args)): _name_cnt[func.__name__] = _name_cnt.get(func.__name__, 0)+1
-        tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if count_names else args[0])
+        tracked_keys.append(args[0] if args and name is None else (fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}")
         tracked_ctxs.append([])
       ret = func(*args, **kwargs)
-      if TRACK_MATCH_STATS >= 2 and callable(name): tracked_keys[-1] = f"{name(*args, **kwargs, ret=ret)} n{_name_cnt[func.__name__]}"
+      if TRACK_MATCH_STATS >= 2 and callable(name): tracked_keys[-1] = tracked_keys[-1].replace(fn, name(*args, **kwargs, ret=ret))
       if getenv("CAPTURE_PROCESS_REPLAY"):
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
