@@ -13,8 +13,8 @@ try:
 
   z3_bitvec_signed_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-a/b*b, Ops.IDIV: lambda a,b: a/b, Ops.WHERE: z3.If,
     Ops.MAX: lambda a,b: z3.If(a<b, b, a)}
-  z3_bitvec_unsigned_alu: dict[Ops, Callable] = python_alu | {Ops.SHR: lambda a,b: z3.LShR(a, b), Ops.MOD: lambda a,b: a-z3.UDiv(a,b)*b,
-    Ops.IDIV: lambda a,b: z3.UDiv(a,b), Ops.CMPLT: lambda a,b: z3.ULT(a,b), Ops.MAX: lambda a,b: z3.If(z3.ULT(a,b), b, a), Ops.WHERE: z3.If}
+  z3_bitvec_unsigned_alu: dict[Ops, Callable] = python_alu | {Ops.SHR: z3.LShR, Ops.MOD: lambda a,b: a-z3.UDiv(a,b)*b,
+    Ops.IDIV: z3.UDiv, Ops.CMPLT: lambda a,b: z3.ULT(a,b), Ops.MAX: lambda a,b: z3.If(z3.ULT(a,b), b, a), Ops.WHERE: z3.If}
 
   def create_bounded(name:str, vmin, vmax, solver:z3.Solver, bitvec_dtype:None|DType=None) -> z3.ArithRef:
     s = z3.Int(name, ctx=solver.ctx) if bitvec_dtype is None else z3.BitVec(name, bitvec_dtype.itemsize*8, ctx=solver.ctx)
