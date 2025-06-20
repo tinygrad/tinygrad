@@ -82,8 +82,9 @@ def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tup
   return x[0], ret
 
 # workers should not open devices and should ignore ctrl c
+# TODO: add support for tracking graph rewrites in workers
 def _init_worker():
-  Context(ALLOW_DEVICE_USAGE=0).__enter__()
+  Context(ALLOW_DEVICE_USAGE=0, TRACK_MATCH_STATS=0).__enter__()
   signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_allocated() if buf is not None else buf for buf in bufs]

@@ -796,10 +796,10 @@ class TrackedPatternMatcher(PatternMatcher):
 
 if TRACK_MATCH_STATS or PROFILE:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
-  import atexit, multiprocessing
+  import atexit
   @atexit.register
   def print_match_stats():
-    if TRACK_MATCH_STATS >= 2 and multiprocessing.current_process().name == "MainProcess":
+    if TRACK_MATCH_STATS >= 2:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
