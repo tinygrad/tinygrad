@@ -566,10 +566,5 @@ class Kernel:
     self.linearize(name_override, ast_transform)
     assert self.uops[-1].op is Ops.SINK, "last uop must be sink"
     src = self.opts.render(self.uops)
-    # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
-    # TODO: these max and min don't work on symbolic, and results are very wrong.
-    mem_bytes = sum(max(x.src[0].dtype.nbytes() for x in group)
-      for _, group in itertools.groupby([x for x in self.ast.toposort() if x.op in GroupOp.Buffer and x.src[0].base.op is Ops.DEFINE_GLOBAL],
-                        key=lambda x: (x.op, x.src[0].base.arg)))
-    return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops, self.applied_opts, mem_bytes,
+    return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops, self.applied_opts,
                        global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
