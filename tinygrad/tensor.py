@@ -4023,7 +4023,7 @@ class Tensor(MathTrait):
       inverse_permute[permute] = Tensor.arange(num, dtype = dtypes.int)
       return U,V
     max_iterations, iterations_per_round = 5, int((num) * (num - 1) / 2)
-    for _ in range(max_iterations * iterations_per_round): 
+    for _ in range(max_iterations * iterations_per_round):
       U, V = one_round_jacobi(U,V)
     #extract singular values and sort. construct U from Q
     S, indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
