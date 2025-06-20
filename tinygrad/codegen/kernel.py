@@ -79,7 +79,7 @@ class Kernel:
 
     # group simplifies
     self.simplify_ones()
-    self.simplify_merge_adjacent()
+    #self.simplify_merge_adjacent()
 
   def copy(self):
     ret = type(self).__new__(type(self))
