@@ -87,6 +87,17 @@ generate_kfd() {
   python3 -c "import tinygrad.runtime.autogen.kfd"
 }
 
+generate_tdma() {
+  clang2py -k cdefstum ./extra/tdma/tdma.h -o $BASE/tdma.py
+
+  fixup $BASE/tdma.py
+  sed -i "s/import fcntl, functools/import functools/g" $BASE/tdma.py
+  sed -i "/import functools/a from tinygrad.runtime.support.hcq import FileIOInterface" $BASE/tdma.py
+  sed -i "s/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, \*\*kwargs):/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:FileIOInterface, \*\*kwargs):/g" $BASE/tdma.py
+  sed -i "s/fcntl.ioctl(__fd, (__idir<<30)/__fd.ioctl((__idir<<30)/g" $BASE/tdma.py
+  python3 -c "import tinygrad.runtime.autogen.tdma"
+}
+
 generate_cuda() {
   clang2py /usr/include/cuda.h --clang-args="-D__CUDA_API_VERSION_INTERNAL" -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/cuda.py
@@ -213,6 +224,21 @@ generate_io_uring() {
 
   sed -r '/^#define __NR_io_uring/ s/^#define __(NR_io_uring[^ ]+) (.*)$/\1 = \2/; t; d' /usr/include/asm-generic/unistd.h >> $BASE/io_uring.py # io_uring syscalls numbers
   fixup $BASE/io_uring.py
+}
+
+generate_ib() {
+  clang2py -k cdefstum \
+    /usr/include/infiniband/verbs.h \
+    /usr/include/infiniband/verbs_api.h \
+    /usr/include/infiniband/ib_user_ioctl_verbs.h \
+    /usr/include/rdma/ib_user_verbs.h \
+    -o $BASE/ib.py
+
+  sed -i "s\import ctypes\import ctypes\g" "$BASE/ib.py"
+  sed -i "s\FIXME_STUB\libibverbs\g" "$BASE/ib.py"
+  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(ctypes.util.find_library('ibverbs'), use_errno=True)\g" "$BASE/ib.py"
+
+  fixup $BASE/ib.py
 }
 
 generate_libc() {
@@ -433,12 +459,14 @@ elif [ "$1" == "cuda" ]; then generate_cuda
 elif [ "$1" == "nvrtc" ]; then generate_nvrtc
 elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
+elif [ "$1" == "tdma" ]; then generate_tdma
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "am" ]; then generate_am
 elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "io_uring" ]; then generate_io_uring
+elif [ "$1" == "ib" ]; then generate_ib
 elif [ "$1" == "libc" ]; then generate_libc
 elif [ "$1" == "llvm" ]; then generate_llvm
 elif [ "$1" == "kgsl" ]; then generate_kgsl
