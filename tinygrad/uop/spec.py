@@ -10,9 +10,16 @@ try:
   z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.SHR: lambda a,b: a/(2**b.as_long()),
     Ops.SHL: lambda a,b: a*(2**b.as_long()), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b, Ops.WHERE: z3.If,
     Ops.MAX: lambda a,b: z3.If(a<b, b, a)}
-  def create_bounded(name:str, vmin, vmax, solver:z3.Solver) -> z3.ArithRef:
-    s = z3.Int(name, ctx=solver.ctx)
-    solver.add(vmin <= s, s <= vmax)
+
+  z3_bitvec_signed_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-a/b*b, Ops.IDIV: lambda a,b: a/b, Ops.WHERE: z3.If,
+    Ops.MAX: lambda a,b: z3.If(a<b, b, a)}
+  z3_bitvec_unsigned_alu: dict[Ops, Callable] = python_alu | {Ops.SHR: lambda a,b: z3.LShR(a, b), Ops.MOD: lambda a,b: a-z3.UDiv(a,b)*b,
+    Ops.IDIV: lambda a,b: z3.UDiv(a,b), Ops.CMPLT: lambda a,b: z3.ULT(a,b), Ops.MAX: lambda a,b: z3.If(z3.ULT(a,b), b, a), Ops.WHERE: z3.If}
+
+  def create_bounded(name:str, vmin, vmax, solver:z3.Solver, bitvec_dtype:None|DType=None) -> z3.ArithRef:
+    s = z3.Int(name, ctx=solver.ctx) if bitvec_dtype is None else z3.BitVec(name, bitvec_dtype.itemsize*8, ctx=solver.ctx)
+    if bitvec_dtype is None or bitvec_dtype in dtypes.sints: solver.add(vmin <= s, s <= vmax)
+    else: solver.add(z3.ULT(vmin, s), z3.ULT(s, vmax))
     return s
 
   # ctx is (solver, load_number_dict)
@@ -30,6 +37,29 @@ try:
     (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=z3_alu[x.op](*(s.arg for s in x.src)))),
   ])
 
+  # ctx is (solver, load_number_dict)
+  z3_bitrenderer = PatternMatcher([
+    # Ops.SPECIAL can have symbolic arg but it wont be in the toposort beacuse its not a src, we need to add it manually
+    (UPat(Ops.SPECIAL, src=(), name="x"), lambda x: UOp(Ops.SPECIAL, x.dtype, arg=x.arg[0], src=(x.ufix(x.arg[1]),))),
+    (UPat(Ops.SPECIAL, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, x.dtype,
+      arg=create_bounded(x.arg, 0, x.src[0].arg-1, ctx[0], x.dtype))),
+    (UPat(Ops.DEFINE_VAR, name="x"), lambda x,ctx: UOp(Ops.NOOP, x.dtype, arg=create_bounded(x.arg[0], x.arg[1], x.arg[2], ctx[0], x.dtype))),
+    (UPat(Ops.RANGE, name="x"), lambda x,ctx: UOp(Ops.NOOP, x.dtype, arg=create_bounded(f"ridx{x.arg}", 0, x.src[0].arg-1, ctx[0], x.dtype))),
+    (UPat(Ops.LOAD, name="x"), lambda x,ctx: UOp(Ops.NOOP, x.dtype,
+      arg=create_bounded(f"load{ctx[1].setdefault(x, len(ctx[1]))}", x.vmin, x.vmax, ctx[0], x.dtype))),
+    (UPat(Ops.CONST, dtypes.ints, name="x"), lambda x,ctx: UOp(Ops.NOOP, x.dtype, arg=z3.BitVecVal(x.arg, x.dtype.itemsize*8,ctx=ctx[0].ctx))),
+    (UPat(Ops.CONST, dtypes.bool, name="x"), lambda x,ctx: UOp(Ops.NOOP, x.dtype, arg=z3.BoolVal(x.arg, ctx=ctx[0].ctx))),
+    (UPat(Ops.CAST, dtypes.bool, src=UPat(Ops.NOOP, dtypes.ints), name="x"), lambda x: UOp(Ops.NOOP, x.dtype, arg=x.src[0].arg != 0)),
+    (UPat(Ops.CAST, name="x"), lambda x: UOp(Ops.NOOP, x.dtype, arg=z3.Extract(new_sz-1, 0, x.src[0].arg) if (new_sz:=x.dtype.itemsize*8)<
+      (old_sz:=x.src[0].arg.size()) else (z3.SignExt if x.dtype in dtypes.sints else z3.ZeroExt)(new_sz-old_sz, x.src[0].arg))),
+    (UPat(GroupOp.ALU, src=UPat(Ops.NOOP, dtype=dtypes.sints), name="x"), lambda x: UOp(Ops.NOOP, x.dtype,
+      arg=z3_bitvec_signed_alu[x.op](*(s.arg for s in x.src)))),
+    (UPat(GroupOp.ALU, src=UPat(Ops.NOOP, dtype=dtypes.uints), name="x"), lambda x: UOp(Ops.NOOP, x.dtype,
+      arg=z3_bitvec_unsigned_alu[x.op](*(s.arg for s in x.src)))),
+    (UPat(GroupOp.ALU, src=UPat(Ops.NOOP, dtype=dtypes.bool), name="x"), lambda x: UOp(Ops.NOOP, x.dtype,
+      arg=python_alu[x.op](*(s.arg for s in x.src)))),
+    (UPat(Ops.WHERE, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, x.dtype, arg=z3.If(*(s.arg for s in x.src)))),
+  ])
   z3_imported = True
 except (ImportError, AttributeError): z3_imported = False
 
@@ -105,7 +135,7 @@ def validate_index(idx:UOp, mask:UOp|None=None):
 
   if not z3_imported: raise ImportError("z3 is required for bounds checking, try IGNORE_OOB=0 or \"pip install z3-solver\"")
   solver = z3.Solver(ctx=z3.Context())
-  z3_sink = graph_rewrite(idx.src[1].sink(mask), z3_renderer, ctx=(solver, {}))
+  z3_sink = graph_rewrite(idx.src[1].sink(mask), z3_bitrenderer, ctx=(solver, {}))
   z3_idx = z3_sink.src[0].arg
   if mask is not None: solver.add(z3_sink.src[1].arg)
   if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
