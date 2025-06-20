@@ -46,7 +46,7 @@ pm_lowerer = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="v"),), name="c"), lambda c,v: c.replace(src=()).view(v.arg)),
   # hack for old style VALID (now it's just VIEW(CONST))
   (UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v"),)).where(UPat.cvar("c"), UPat(Ops.CONST, arg=0)), lambda c,v: c.replace(src=()).view(v.arg)),
-
+  # hack for sometimes having a view on the store and sometimes not
   (UPat(Ops.STORE, src=(UPat.any(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat(Ops.DEFINE_GLOBAL, name="buf").view()), UPat()),
         name="store"), add_store_indexing),
   (UPat(Ops.REDUCE_AXIS, name="red"), add_reduce_indexing),

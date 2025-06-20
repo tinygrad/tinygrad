@@ -2,7 +2,7 @@ from typing import Optional, cast, Generator
 import time, pprint, itertools
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, dedup
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, dedup, flatten
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, track_rewrites, GroupOp, KernelInfo, resolve
 from tinygrad.codegen import full_rewrite
 from tinygrad.device import Device, Buffer
@@ -28,21 +28,24 @@ def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
   return k.to_program()
 """
 
-@track_rewrites(name=True)
+@track_rewrites(name=lambda _renderer,_ast,ret: ret.name)
 def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
   assert ast.op is Ops.SINK, "last uop must be sink"
-  rr = sorted(dedup([x.shape for x in ast.toposort() if x.st is not None]))
-  dims = [colored(x, 'blue') for x in rr[0] if resolve(x != 1)]
-  dims += [colored(x, 'red') for x in rr[-1][len(dims):] if resolve(x != 1)]
-  ast = ast.replace(arg=KernelInfo(name='k_'+colored('_', 'BLACK').join(dims)))
+
+  # TODO: make this work
+  applied_opts: list = []
 
   # codegen
   uops = full_rewrite(ast, renderer)
   assert uops[-1].op is Ops.SINK, "last uop must be sink"
 
-  # TODO: make this work
-  applied_opts: list = []
+  # add name after codegen based on ranges
+  ranges = sorted([u for u in uops if u.op is Ops.RANGE], key=lambda x: x.arg)
+  reduce_ranges = set(flatten([u.src[1:] for u in uops if u.op is Ops.DEFINE_ACC]))
+  dims = [colored(x.src[0].arg, 'red' if x in reduce_ranges else 'blue') for x in ranges]
+  uops[-1] = uops[-1].replace(arg=KernelInfo(name='k_'+colored('_', 'BLACK').join(dims)))
 
+  # render
   src = renderer.render(uops)
 
   # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
