@@ -7,61 +7,11 @@ from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
 from tinygrad.codegen import full_rewrite
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
+from tinygrad.uop.symbolic import sym
 #from tinygrad.codegen.kernel import Kernel
 #from tinygrad.codegen.heuristic import hand_coded_optimizations
 from tinygrad.engine.schedule import ScheduleItem
-
-# **************** Program Creation ****************
-
-"""
-logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
-  k = Kernel(ast, opts=renderer)
-  if not NOOPT:
-    if not k.apply_tensor_cores(getenv("TC", 1)): k.apply_opts(hand_coded_optimizations(k))
-    if BEAM >= 1:
-      from tinygrad.engine.search import beam_search, bufs_from_lin
-      kb = Kernel(ast, opts=renderer)
-      rawbufs = bufs_from_lin(kb, allocate=False)
-      k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-  if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
-  return k.to_program()
-"""
-
-from tinygrad.codegen.lowerer2 import pm_lowerer, LowererContext
-from tinygrad.uop.ops import graph_rewrite
-
-
-@track_rewrites(name=lambda _renderer,_ast,ret: ret.name)
-def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
-  assert ast.op is Ops.SINK, "last uop must be sink"
-
-  # TODO: make this work
-  applied_opts: list = []
-
-  # lowerer
-  ast = graph_rewrite(ast, pm_lowerer, name="lowerer", ctx=LowererContext(), bottom_up=True)
-
-  # codegen
-  uops = full_rewrite(ast, renderer)
-  assert uops[-1].op is Ops.SINK, "last uop must be sink"
-
-  # add name after codegen based on ranges
-  ranges = sorted([u for u in uops if u.op is Ops.RANGE], key=lambda x: x.arg)
-  reduce_ranges = set(flatten([u.src[1:] for u in uops if u.op is Ops.DEFINE_ACC]))
-  dims = [colored(x.src[0].arg, 'red' if x in reduce_ranges else 'blue') for x in ranges]
-  uops[-1] = uops[-1].replace(arg=KernelInfo(name=('r' if len(reduce_ranges) else 'E')+'_'+colored('_', 'BLACK').join(dims)))
-
-  # render
-  src = renderer.render(uops)
-
-  # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
-  # TODO: these max and min don't work on symbolic, and results are very wrong.
-  mem_bytes = sum(max(x.src[0].dtype.nbytes() for x in group)
-    for _, group in itertools.groupby([x for x in ast.toposort() if x.op in {Ops.LOAD, Ops.STORE} and x.src[0].base.op is Ops.DEFINE_GLOBAL],
-                      key=lambda x: (x.op, x.src[0].base.arg)))
-  return ProgramSpec(uops[-1].arg.name, src, renderer.device, ast, uops, applied_opts, mem_bytes,
-                     global_size=[1,1,1] if renderer.has_local else None, local_size=[1,1,1] if renderer.has_local else None)
+from tinygrad.engine.program import get_program
 
 # **************** Runners ****************
 
