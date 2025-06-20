@@ -23,7 +23,7 @@ class _System:
       vendor = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16)
       device = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
       if vendor == target_vendor and device in target_devices: result.append(pcibus)
-    return result
+    return sorted(result)
 
   @functools.cache
   def pagemap(self) -> FileIOInterface:
