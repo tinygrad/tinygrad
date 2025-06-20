@@ -457,7 +457,7 @@ class NVDevice(HCQCompiled[NVSignal]):
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.iface = DriverIface()
+    self.iface = DriverIface(self, self.device_id)
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.iface.gpu_instance, hClientShare=self.iface.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
