@@ -28,12 +28,19 @@ def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
   return k.to_program()
 """
 
+from tinygrad.codegen.lowerer2 import pm_lowerer, LowererContext
+from tinygrad.uop.ops import graph_rewrite
+
+
 @track_rewrites(name=lambda _renderer,_ast,ret: ret.name)
 def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
   assert ast.op is Ops.SINK, "last uop must be sink"
 
   # TODO: make this work
   applied_opts: list = []
+
+  # lowerer
+  ast = graph_rewrite(ast, pm_lowerer, name="lowerer", ctx=LowererContext(), bottom_up=True)
 
   # codegen
   uops = full_rewrite(ast, renderer)
@@ -43,7 +50,7 @@ def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
   ranges = sorted([u for u in uops if u.op is Ops.RANGE], key=lambda x: x.arg)
   reduce_ranges = set(flatten([u.src[1:] for u in uops if u.op is Ops.DEFINE_ACC]))
   dims = [colored(x.src[0].arg, 'red' if x in reduce_ranges else 'blue') for x in ranges]
-  uops[-1] = uops[-1].replace(arg=KernelInfo(name='k_'+colored('_', 'BLACK').join(dims)))
+  uops[-1] = uops[-1].replace(arg=KernelInfo(name=('r' if len(reduce_ranges) else 'E')+'_'+colored('_', 'BLACK').join(dims)))
 
   # render
   src = renderer.render(uops)
@@ -51,7 +58,7 @@ def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
   # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
   # TODO: these max and min don't work on symbolic, and results are very wrong.
   mem_bytes = sum(max(x.src[0].dtype.nbytes() for x in group)
-    for _, group in itertools.groupby([x for x in ast.toposort() if x.op in GroupOp.Buffer and x.src[0].base.op is Ops.DEFINE_GLOBAL],
+    for _, group in itertools.groupby([x for x in ast.toposort() if x.op in {Ops.LOAD, Ops.STORE} and x.src[0].base.op is Ops.DEFINE_GLOBAL],
                       key=lambda x: (x.op, x.src[0].base.arg)))
   return ProgramSpec(uops[-1].arg.name, src, renderer.device, ast, uops, applied_opts, mem_bytes,
                      global_size=[1,1,1] if renderer.has_local else None, local_size=[1,1,1] if renderer.has_local else None)

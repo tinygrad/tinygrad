@@ -42,7 +42,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   ret: list[RewriteStep] = []
   #if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
   #ret.append(RewriteStep(pm_lowerer, lambda ast: get_index(ast, opts), name="lowerer"))
-  ret.append(RewriteStep(pm_lowerer, lambda _: LowererContext(), name="lowerer", bottom_up=True))
+  #ret.append(RewriteStep(pm_lowerer, lambda _: LowererContext(), name="lowerer", bottom_up=True))
 
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing, name="initial symbolic"))
