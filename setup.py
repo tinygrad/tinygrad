@@ -4,6 +4,7 @@ from pathlib import Path
 from setuptools import setup
 
 directory = Path(__file__).resolve().parent
+
 with open(directory / 'README.md', encoding='utf-8') as f:
   long_description = f.read()
 
@@ -45,7 +46,6 @@ setup(name='tinygrad',
             "ruff",
             "numpy",
         ],
-        'webgpu': ['dawn-python'],
         #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@5.0.0-rc3"],
         'testing_minimal': testing_minimal,
         'testing_unit': testing_minimal + [
