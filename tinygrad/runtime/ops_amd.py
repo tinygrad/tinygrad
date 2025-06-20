@@ -1,16 +1,16 @@
 from __future__ import annotations
 from typing import Any, cast, ClassVar
-import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select, weakref, traceback
+import re, os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, select, weakref, traceback
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.uop.ops import sint
-from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
+from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, DMARef, DMAFdRef, PROFILE
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, all_same, flatten, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
-from tinygrad.runtime.autogen import kfd, hsa, libc, pci, vfio, sqtt
+from tinygrad.runtime.autogen import kfd, hsa, libc, pci, vfio, tdma, sqtt
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
@@ -466,6 +466,7 @@ class AMDProgram(HCQProgram):
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
     super().__init__(dev, copy_bufs=getattr(dev.dev_iface, 'copy_bufs', None), max_copyout_size=0x1000 if dev.is_usb() else None)
+    if hasattr(dev.dev_iface, "as_dmaref"): self._as_dmaref = dev.dev_iface.as_dmaref
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.dev_iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
@@ -597,6 +598,12 @@ class KFDIface:
     if mem.va_addr: FileIOInterface.munmap(mem.va_addr, mem.size)
     kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
 
+  def as_dmaref(self, mem:HCQBuffer) -> DMAFdRef:
+    base = mem._base if mem._base is not None else mem
+    dmaref = DMAFdRef(kfd.AMDKFD_IOC_EXPORT_DMABUF(KFDIface.kfd, handle=base.meta.handle, flags=0).dmabuf_fd, mem.va_addr-base.va_addr, mem.size)
+    weakref.finalize(dmaref, os.close, dmaref.fd)
+    return dmaref
+
   def map(self, mem):
     if self.gpu_id in getattr(mem.meta, "mapped_gpu_ids", []): return
     mem.meta.__setattr__("mapped_gpu_ids", getattr(mem.meta, "mapped_gpu_ids", []) + [self.gpu_id])
@@ -641,10 +648,14 @@ class AMAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:AM
 class PCIIface:
   supported_devs:list[int] = [0x744c, 0x7480, 0x7550]
   vfio_fd:FileIOInterface|None = None
+  tdma_fd:FileIOInterface|None = None
   gpus:list[Any] = []
 
   def __init__(self, dev, dev_id):
     self.dev = dev
+
+    if PCIIface.tdma_fd is None:
+      PCIIface.tdma_fd = FileIOInterface("/dev/tdma", os.O_RDWR)
 
     if first_dev:=len(PCIIface.gpus) == 0:
       for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
@@ -710,6 +721,8 @@ class PCIIface:
     self.pagemap = FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
     self.cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
     self.bar_fds = {b: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{b}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC) for b in [0, 2, 5]}
+    p_domain, p_bus, p_device, p_function = tuple(int(x, 16) if i < 3 else int(x) for i, x in enumerate(re.split('[:.]', self.pcibus)))
+    self.vram_dmabuf = tdma.TDMA_GET_DMABUF(PCIIface.tdma_fd, domain=p_domain, bus=p_bus, device=p_device, function=p_function, bar=0).out_fd
 
     bar_info = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
     self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
@@ -752,7 +765,7 @@ class PCIIface:
       return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=True),
         view=MMIOInterface(am_mapping.va_addr, size, fmt='B'))
 
-    am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
+    am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access or True) # TODO: fix this
     if cpu_access: self._map_pci_range(bar=0, off=am_mapping.paddrs[0][0], addr=am_mapping.va_addr, size=am_mapping.size)
     return HCQBuffer(am_mapping.va_addr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=cpu_access),
       view=MMIOInterface(am_mapping.va_addr, size, fmt='B') if cpu_access else None)
@@ -761,6 +774,10 @@ class PCIIface:
     for dev in mem.meta.mapped_devs[1:]: dev.dev_iface.adev.mm.unmap_range(mem.va_addr, mem.size)
     if not mem.meta.mapping.system: self.adev.mm.vfree(mem.meta.mapping)
     if mem.meta.owner == self.dev and mem.meta.has_cpu_mapping: FileIOInterface.munmap(mem.va_addr, mem.size)
+
+  def as_dmaref(self, mem:HCQBuffer) -> DMARef:
+    assert len(mem.meta.mapping.paddrs) == 1, "can't export non-contiguous yet"
+    return DMAFdRef(self.vram_dmabuf, *mem.meta.mapping.paddrs[0])
 
   def map(self, mem):
     # Check if the memory is already mapped on this device
