@@ -1,7 +1,7 @@
 import itertools
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, track_rewrites
 from tinygrad.codegen.lowerer2 import pm_lowerer, LowererContext
-from tinygrad.uop.ops import graph_rewrite, KernelInfo
+from tinygrad.uop.ops import graph_rewrite, KernelInfo, GroupOp
 from tinygrad.uop.symbolic import sym, symbolic_simple, constant_folding
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.codegen import full_rewrite
@@ -22,22 +22,28 @@ range_sym = constant_folding+PatternMatcher([
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST, arg=1),), name="r"), lambda r: r.const_like(0)),
   # common factor mul
   (UPat.var("x")*UPat.cvar("c1") + UPat.var("y")*UPat.cvar("c2"),
-   lambda x,y,c1,c2: (x*(c1//c2)+y)*c2 if c1.arg >= c2.arg and c1.arg%c2.arg == 0 else None)
+   lambda x,y,c1,c2: (x*(c1//c2)+y)*c2 if c1.arg >= c2.arg and c1.arg%c2.arg == 0 else None),
+  # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
+  ((UPat.var("x") + UPat.cvar("c1")) + UPat(GroupOp.All-{Ops.CONST, Ops.VCONST}, name="y"), lambda x,c1,y: (x+y)+c1),
 ])
+
+def simplify_merge_adjacent(ctx:dict[UOp, list[UOp]], r1, c, m, r2, x=None):
+  if not all([x not in ctx or len(ctx[x]) == 1 for x in [r1,m,r2]]): return None
+  ret = UOp(Ops.RANGE, dtypes.int, src=(r2.src[0]+c*(r1.src[0]-1),), arg=min(r1.arg, r2.arg))
+  return ret if x is None else ret+(x*c)
 
 pm_simplify_merge_adjacent = PatternMatcher([
   # merge ranges
-  ((UPat(Ops.RANGE, name="r1")*UPat.cvar("c")).named("m")+UPat(Ops.RANGE, name="r2"),
-   lambda ctx,r1,c,m,r2: UOp(Ops.RANGE, dtypes.int, src=(r2.src[0]+c*(r1.src[0]-1),), arg=min(r1.arg, r2.arg)) \
-     if all([x not in ctx or len(ctx[x]) == 1 for x in [r1,m,r2]]) else None),
+  ((UPat(Ops.RANGE, name="r1")*UPat.cvar("c")).named("m")+UPat(Ops.RANGE, name="r2"), simplify_merge_adjacent),
+  (((UPat(Ops.RANGE, name="r1")+UPat.var("x"))*UPat.cvar("c")).named("m")+UPat(Ops.RANGE, name="r2"), simplify_merge_adjacent),
 ])
 
 def apply_opt(ctx:tuple[LowererContext, list[Opt]], r:UOp):
   lc,opts = ctx
   for opt in opts:
-    assert opt.op is OptOps.UPCAST
+    assert opt.op in {OptOps.UPCAST, OptOps.UNROLL}
     if opt.axis == r.arg:
-      arg = opt.arg if opt.arg != 0 else (r.vmax+1)
+      arg = opt.arg
       assert (r.vmax+1) % arg == 0, f"can't upcast {r.vmax+1} with {arg}"
       unroll = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(arg), tuple(range(arg))),), ((lc.range_number, arg),))
       lc.range_number += 1
@@ -71,7 +77,7 @@ def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
   # get applied_opts on the old path
   k = Kernel(ast, opts=renderer)
   applied_opts: list[Opt] = hand_coded_optimizations(k)
-  print(applied_opts)
+  print(k.full_shape, applied_opts)
 
   # lowerer+sym
   ast: UOp = graph_rewrite(ast, pm_lowerer+range_sym, name="lowerer", ctx=(lc:=LowererContext()), bottom_up=True)
@@ -88,12 +94,13 @@ def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
   upcast_ranges, unroll_ranges = partition(ranges, lambda x: x not in reduce_ranges)
   new_applied_opts = []
   for opt in applied_opts:
-    if opt.op is OptOps.UPCAST: new_applied_opts.append(Opt(OptOps.UPCAST, upcast_ranges[opt.axis].arg, opt.arg))
-    elif opt.op is OptOps.UNROLL: new_applied_opts.append(Opt(OptOps.UPCAST, unroll_ranges[opt.axis].arg, opt.arg))
-    else:
-      raise RuntimeError(f"{opt.op} is not supported")
+    if opt.op is OptOps.UPCAST: lopt, lrange = OptOps.UPCAST, upcast_ranges[opt.axis]
+    elif opt.op is OptOps.UNROLL: lopt, lrange = OptOps.UNROLL, unroll_ranges[opt.axis]
+    else: raise RuntimeError(f"{opt.op} is not supported")
+    new_applied_opts.append(Opt(lopt, lrange.arg, opt.arg if opt.arg != 0 else lrange.vmax+1))
 
   # do opt apply
+  new_applied_opts_copy = new_applied_opts[:]
   ast = graph_rewrite(ast, pm_apply_opts+range_sym, name="apply_opts", ctx=(lc,new_applied_opts))
   assert len(new_applied_opts) == 0
 
@@ -135,6 +142,8 @@ def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
   ranges = sorted([u for u in uops if u.op is Ops.RANGE], key=lambda x: x.arg)
   reduce_ranges = set(flatten([u.src[1:] for u in uops if u.op is Ops.DEFINE_ACC]))
   dims = [colored(x.src[0].arg, 'red' if x in reduce_ranges else 'blue') for x in ranges]
+  for opt in new_applied_opts_copy:
+    dims.append(colored(opt.arg, 'yellow' if opt.op is OptOps.UPCAST else 'magenta'))
   uops[-1] = uops[-1].replace(arg=KernelInfo(name=('r' if len(reduce_ranges) else 'E')+'_'+colored('_', 'BLACK').join(dims)))
 
   # render
