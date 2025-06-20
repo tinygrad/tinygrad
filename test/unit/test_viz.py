@@ -36,7 +36,7 @@ class TestViz(unittest.TestCase):
     ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 1)
     key, val = ret[0]["name"], ret[0]["steps"]
-    self.assertEqual(key, "test_1")
+    self.assertEqual(key, "test n1")
     self.assertEqual(val[0]["match_count"], 1)
 
   def test_track_two_rewrites(self):
@@ -48,7 +48,7 @@ class TestViz(unittest.TestCase):
     key, val = ret[0]["name"], ret[0]["steps"]
     self.assertEqual(len(ret), 1)              # one context
     self.assertEqual(len(val), 1)              # one graph_rewrite call in context
-    self.assertEqual(key, "test_1")
+    self.assertEqual(key, "test n1")
     self.assertEqual(val[0]["match_count"], 2) # two upats applied
 
   def test_track_multiple_calls_one_ctx(self):
@@ -62,7 +62,7 @@ class TestViz(unittest.TestCase):
     key, val = ret[0]["name"], ret[0]["steps"]
     self.assertEqual(len(ret), 1)              # one context
     self.assertEqual(len(val), 2)              # two graph_rewrite calls in context
-    self.assertEqual(key, "test_1")
+    self.assertEqual(key, "test n1")
     self.assertEqual(val[0]["match_count"], 1) # one rewrite for a*0
     self.assertEqual(val[1]["match_count"], 0) # no rewrites for a*5
 
@@ -76,10 +76,10 @@ class TestViz(unittest.TestCase):
     ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 2)
     key, m = ret[0]["name"], ret[0]["steps"]
-    self.assertEqual(key, "do_rewrite_1")
+    self.assertEqual(key, "do_rewrite n1")
     self.assertEqual(m[0]["match_count"], 1)
     key, m = ret[1]["name"], ret[1]["steps"]
-    self.assertEqual(key, "do_rewrite_2")
+    self.assertEqual(key, "do_rewrite n2")
     self.assertEqual(m[0]["match_count"], 0)
 
   def test_track_rewrites_with_exception(self):
@@ -211,7 +211,7 @@ class TestViz(unittest.TestCase):
     @track_rewrites()
     def test_fxn(): return graph_rewrite(test, l0)
     assert test_fxn() is test
-    self.assertEqual(keys[0], "test_fxn_1")
+    self.assertEqual(keys[0], "test_fxn n1")
 
   @unittest.skip("TODO: doesn't work")
   def test_recursion_err(self):
