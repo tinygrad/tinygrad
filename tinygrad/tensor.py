@@ -3971,15 +3971,15 @@ class Tensor(MathTrait):
     R = self.clone()
     m,n = int(R.shape[-2]), int(R.shape[-1])
     b_shape = self.shape[0:len(self.shape) - 2]
-    Q = Tensor.eye(m, dtype = self.dtype).reshape((1,) * (len(self.shape) - 2) + (m, m)).expand(b_shape + (m, m)).contiguous()
+    Q = Tensor.eye(m, dtype = self.dtype).reshape((1,) * (len(self.shape) - 2) + 2 * (m,)).expand(b_shape + (m, m)).contiguous()
     for i in range(int(min(m, n))):
       x = R[..., i:m, i]
       s = -x[..., 0].sign()
       a = s * x.square().sum(-1).sqrt()
       u1 = x[..., 0] - a
-      w = x.clone().unsqueeze(-1) / u1.reshape(b_shape + (1, 1))
+      w = x.clone().unsqueeze(-1) / u1.reshape(b_shape + 2 * (1,))
       w[..., 0, 0] = 1
-      tau = (-s * u1 / x.square().sum(-1).sqrt()).reshape(b_shape + (1, 1)).expand(w.shape)
+      tau = (-s * u1 / x.square().sum(-1).sqrt()).reshape(b_shape + 2 * (1,)).expand(w.shape)
       old_R = R[..., i:m, :]
       R[..., i:m, :] = old_R - (w * tau) @ (w.transpose(-2, -1) @ old_R)
       Q_old = Q[..., :, i:m]
@@ -3994,12 +3994,12 @@ class Tensor(MathTrait):
     Q, R = (Tensor.qr(self) if m >= n else Tensor.qr(self.transpose(-2, -1)))
     num, q_num = int(min(m, n)), int(max(m, n))
     U = R.shrink(tuple([(0, self.shape[i]) for i in range(self.ndim - 2)] + [(0, num), (0, num)])).contiguous()
-    V = Tensor.eye(num, dtype = self.dtype).reshape((1,) * (self.ndim - 2) + (num, num)).expand(b_shape + (num, num)).contiguous()
+    V = Tensor.eye(num, dtype = self.dtype).reshape((1,) * (self.ndim - 2) + (num, num)).expand(b_shape + 2 * (num,)).contiguous()
     #prepare round robin pairing
     permute, inverse_permute = Tensor.arange(0, num, dtype = dtypes.int), Tensor.zeros(num, dtype = dtypes.int).contiguous()
     inverse_permute[permute] = Tensor.arange(num, dtype = dtypes.int)
     permute[num//2:num] = permute[num//2:num].flip(0)
-    def one_round_jacobi( U, V):
+    def one_round_jacobi(U, V):
       #pair all the columns
       V_permuted, runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[..., permute], None)
       V_left, V_right = V_permuted.split(num//2, -1)
@@ -4031,7 +4031,7 @@ class Tensor(MathTrait):
     new_indices[..., :num] = indices.reshape(b_shape + (1,) + (U.shape[0],)).expand(b_shape + (num, num))
     U,V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2),V.gather(-1, new_indices[..., 0:num, 0:num])
    
-    padded_u = Tensor.eye(q_num, dtype = U.dtype).reshape((1,) * (self.ndim - 2) + (q_num, q_num)).expand(b_shape + (q_num, q_num)).contiguous()
+    padded_u = Tensor.eye(q_num, dtype = U.dtype).reshape((1,) * (self.ndim - 2) + 2 * (q_num,)).expand(b_shape + 2 * (q_num,)).contiguous()
     padded_u[..., 0:num, 0:num] = U
     U = Q @ padded_u
     if not full_matrices: U, V = U[..., 0:num], V[..., 0:num]
