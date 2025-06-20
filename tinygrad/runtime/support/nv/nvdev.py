@@ -6,6 +6,7 @@ from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_GSP
 from tinygrad.runtime.support.system import System
+from tinygrad.runtime.support.driver_common import MemoryManager
 from hexdump import hexdump
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
@@ -38,9 +39,6 @@ class NVRegBased:
   def __init__(self, nvdev, cls, offset, fields=None): self.nvdev, self.cls, self.offset, self.fields = nvdev, cls, offset, fields or {}
   def add_field(self, name:str, start:int, end:int): self.fields[name] = (start, end)
   def with_base(self, base:int): return self.cls(self.nvdev, base, self.offset, self.fields)
-
-@dataclasses.dataclass(frozen=True)
-class NVMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
 
 class NVPageTableEntry:
   def __init__(self, nvdev, paddr, lv): self.nvdev, self.paddr, self.lv, self.entries = nvdev, paddr, lv, nvdev.vram.view(paddr, 0x1000, fmt='Q')
@@ -90,117 +88,8 @@ class NVPageTableEntry:
     if self.lv == 3: return self.read_fields(entry_id)['address_small_sys'] << 12
     return self.read_fields(entry_id)['address_sys'] << 12
 
-class NVPageTableTraverseContext:
-  def __init__(self, nvdev, pt, vaddr, create_pts=False, free_pts=False, boot=False):
-    self.nvdev, self.vaddr, self.create_pts, self.free_pts, self.boot = nvdev, vaddr, create_pts, free_pts, boot
-    self.pt_stack:list[tuple[NVPageTableEntry, int, int]] = [(pt, self._pt_pte_idx(pt, vaddr), self._pt_pte_size(pt))]
-
-  def _pt_pte_cnt(self, lv): return [4, 512, 512, 256, 512][lv]
-  def _pt_pte_size(self, pt): return [0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000][pt.lv]
-  def _pt_pte_idx(self, pt, va): return (va // self._pt_pte_size(pt)) % self._pt_pte_cnt(pt.lv)
-
-  def level_down(self):
-    pt, pte_idx, _ = self.pt_stack[-1]
-
-    if not pt.valid(pte_idx):
-      assert self.create_pts, "Not allowed to create new page table"
-      pt.set_entry(pte_idx, self.nvdev.mm.palloc(0x1000, zero=True, boot=True), table=True, valid=True)
-
-    assert not pt.is_pte(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
-    # print('level_down', hex(pt.address(pte_idx)))
-    child_page_table = NVPageTableEntry(self.nvdev, pt.address(pte_idx), lv=pt.lv+1)
-
-    self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
-    return self.pt_stack[-1]
-
-  def level_up(self):
-    while self.pt_stack[-1][1] == self._pt_pte_cnt(len(self.pt_stack) - 1):
-      # print("level_up")
-      _, pt_cnt, _ = self.pt_stack.pop()
-      if pt_cnt == self._pt_pte_cnt(len(self.pt_stack)):
-        self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
-
-  def next(self, size:int, off=0):
-    while size > 0:
-      pt, pte_idx, pte_covers = self.pt_stack[-1]
-      if self.create_pts:
-        # while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
-        # while pte_covers > size or self.vaddr & (pte_covers-1) != 0: pt, pte_idx, pte_covers = self.level_down()
-        while pte_covers != 0x1000: pt, pte_idx, pte_covers = self.level_down() # test deep tables
-      else:
-        while not pt.is_pte(pte_idx): pt, pte_idx, pte_covers = self.level_down()
-
-      entries = min(size // pte_covers, self._pt_pte_cnt(len(self.pt_stack) - 1) - pte_idx)
-      assert entries > 0, "Invalid entries"
-      yield off, pt, pte_idx, entries, pte_covers
-
-      size, off, self.vaddr = size - entries * pte_covers, off + entries * pte_covers, self.vaddr + entries * pte_covers
-      self.pt_stack[-1] = (pt, pte_idx + entries, pte_covers)
-      self.level_up()
-
-class NVMemoryManager:
+class NVMemoryManager(MemoryManager):
   va_allocator = TLSFAllocator((1 << 49), base=(512<<20)) # global for all devices.
-
-  def __init__(self, nvdev:NVDev, vram_size:int):
-    self.nvdev, self.vram_size = nvdev, vram_size
-    self.boot_allocator = TLSFAllocator(64 << 20, base=8<<30) # per device
-    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=512<<20) # per device
-    self.root_page_table = NVPageTableEntry(self.nvdev, self.palloc(0x1000, zero=not self.nvdev.smi_dev, boot=True), lv=0)
-
-  def page_tables(self, vaddr:int):
-    ctx = NVPageTableTraverseContext(self.nvdev, self.root_page_table, vaddr)
-    for _ in ctx.next(1 << 30): return [pt for pt, _, _ in ctx.pt_stack]
-
-  def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False, nomap=False) -> NVMapping:
-    print(f"nv {self.nvdev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
-
-    assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
-
-    ctx = NVPageTableTraverseContext(self.nvdev, self.root_page_table, vaddr, create_pts=True, boot=boot)
-    for paddr, psize in paddrs:
-      for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
-        for pte_off in range(pte_cnt):
-          assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x} {pt.valid(pte_idx + pte_off)}"
-          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
-                      frag=0x0, valid=True)
-
-    # Invalidate TLB after mappings.
-    self.nvdev.wreg(0x00B80000 + 0x000030B0, (1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
-
-    return NVMapping(vaddr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
-
-  def unmap_range(self, vaddr:int, size:int):
-    if NV_DEBUG >= 2: print(f"nv {self.nvdev.devfmt}: unmapping {vaddr=:#x} ({size=:#x})")
-
-    ctx = NVPageTableTraverseContext(self.nvdev, self.root_page_table, vaddr, free_pts=True)
-    for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
-      for pte_id in range(pte_idx, pte_idx + pte_cnt):
-        assert pt.entries[pte_id] & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, f"PTE not mapped: {pt.entries[pte_id]:#x}"
-        pt.set_entry(pte_id, paddr=0x0, valid=False)
-
-  @staticmethod
-  def alloc_vaddr(size:int, align=0x1000) -> int: return NVMemoryManager.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
-
-  def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False, nomap=False) -> NVMapping:
-    # Alloc physical memory and map it to the virtual address
-    va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
-
-    paddrs = [(self.palloc(size, zero=True), size)]
-    return self.map_range(va, size, paddrs, uncached=uncached, nomap=nomap)
-
-  def vfree(self, vm:AMMapping):
-    self.unmap_range(vm.va_addr, vm.size)
-    self.va_allocator.free(vm.va_addr)
-    for paddr, _ in vm.paddrs: self.pa_allocator.free(paddr)
-
-  def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
-    # assert self.nvdev.is_booting == boot, "During booting, only boot memory can be allocated"
-    paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
-    # paddr = self.pa_allocator.alloc(round_up(size, 0x1000), align)
-    if zero: self.nvdev.vram[paddr:paddr+size] = bytes(size)
-    return paddr
-
-  def pfree(self, paddr:int): self.pa_allocator.free(paddr)
 
 class NVDev:
   def __init__(self, devfmt, mmio:MMIOInterface, vram:MMIOInterface):
@@ -211,7 +100,8 @@ class NVDev:
     self.is_booting = False
     self._early_init()
 
-    self.mm = NVMemoryManager(self, self.vram_size)
+    self.mm = NVMemoryManager(self, self.vram_size, boot_partition_size=(64<<20), pt_t=NVPageTableEntry,
+      pte_cnt=[4, 512, 512, 256, 512], pte_covers=[0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000], first_page_lv=4)
     self.flcn = NV_FLCN(self)
     self.gsp = NV_GSP(self)
 
@@ -222,6 +112,8 @@ class NVDev:
     self.mmio[addr // 4] = value
     if NV_DEBUG >= 4: print(f"wreg: {hex(addr)} = {hex(value)}")
   def rreg(self, addr): return self.mmio[addr // 4]
+
+  def on_range_mapped(self): self.wreg(0x00B80000 + 0x000030B0, (1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
   def _early_init(self):
     self.include("src/common/inc/swref/published/nv_ref.h")

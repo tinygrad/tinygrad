@@ -13,12 +13,13 @@ from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
 from tinygrad.runtime.autogen import nv_gpu, pci, libc
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.support.nv.nvdev import NVDev, NVMapping
+from tinygrad.runtime.support.nv.nvdev import NVDev
+from tinygrad.runtime.support.driver_common import VirtMapping
 from tinygrad.runtime.support.system import System, PCIDevice
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
 @dataclass
-class NVAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:NVMapping; has_cpu_mapping:bool; hMemory:int # noqa: E702
+class NVAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int # noqa: E702
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
 
@@ -559,10 +560,10 @@ class NVDevice(HCQCompiled[NVSignal]):
     comp = self.iface.rm_alloc(gpfifo, self.iface.compute_class)
     self.iface.rm_alloc(gpfifo, self.iface.dma_class)
 
-    # if enable_debug:
-    #   self.debug_compute_obj, self.debug_channel = comp, gpfifo
-    #   debugger_params = nv_gpu.NV83DE_ALLOC_PARAMETERS(hAppClient=self.iface.root, hClass3dObject=self.debug_compute_obj)
-    #   self.debugger = self.iface.rm_alloc(self.nvdevice, nv_gpu.GT200_DEBUGGER, debugger_params)
+    if enable_debug:
+      self.debug_compute_obj, self.debug_channel = comp, gpfifo
+      debugger_params = nv_gpu.NV83DE_ALLOC_PARAMETERS(hAppClient=self.iface.root, hClass3dObject=self.debug_compute_obj)
+      self.debugger = self.iface.rm_alloc(self.nvdevice, nv_gpu.GT200_DEBUGGER, debugger_params)
 
     ws_token_params = self.iface.rm_control(gpfifo, nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN,
       nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS(workSubmitToken=-1))

@@ -412,8 +412,6 @@ class NV_GSP:
 
       if client is not None and client != self.priv_client and params.hObjectError != 0:
         params.errorNotifierMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=0, size=0xecc, addressSpace=0, cacheAttrib=0)
-
-        print(hex(params.hUserdMemory[0] + params.userdOffset[0]))
         params.userdMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=params.hUserdMemory[0] + params.userdOffset[0], size=0x400, addressSpace=2, cacheAttrib=0)
 
     alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=(client:=client or self.priv_client), hParent=hParent, hObject=(obj:=next(self.handle_gen)),
@@ -426,7 +424,6 @@ class NV_GSP:
       self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr, client=client)
     if hClass == nv_gpu.NV20_SUBDEVICE_0: self.subdevice = obj # save subdevice handle
     if hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A and client != self.priv_client:
-      print("xxx")
       phys_gr_ctx = self.promote_ctx(client, self.subdevice, obj, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
       self.promote_ctx(client, self.subdevice, obj, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
     return obj
