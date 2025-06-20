@@ -1,9 +1,10 @@
 import os, mmap, array, functools, ctypes, select, contextlib
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
-from tinygrad.helpers import to_mv, getenv, OSX
+from tinygrad.helpers import round_up, to_mv, getenv, OSX
 from tinygrad.runtime.autogen import libc, vfio
 
 MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
+
 class _System:
   def __init__(self): self.pagemap = None
 
@@ -16,7 +17,7 @@ class _System:
       self.pagemap = FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
 
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
-    flags = (libc.MAP_HUGETLB if contiguous and size > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
+    flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
     va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
 
     if data is not None: to_mv(va, len(data))[:] = data
@@ -25,7 +26,7 @@ class _System:
     self.pagemap.seek(va // mmap.PAGESIZE * 8)
     return va, [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
-  def pci_scan_bus(self, target_vendor, target_devices):
+  def pci_scan_bus(self, target_vendor:int, target_devices:list[int]) -> list[str]:
     result = []
     for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
       vendor = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16)
