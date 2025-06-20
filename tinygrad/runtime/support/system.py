@@ -1,6 +1,6 @@
 import os, mmap, array, functools, ctypes, select, contextlib
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
-from tinygrad.helpers import round_up, to_mv, getenv
+from tinygrad.helpers import to_mv, getenv, OSX
 from tinygrad.runtime.autogen import libc, vfio
 
 MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
