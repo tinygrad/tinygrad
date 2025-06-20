@@ -4008,7 +4008,7 @@ class Tensor(MathTrait):
       #compute the jacobi rotations for each pairing
       gamma = (U_left * U_right).sum(-2).reshape(b_shape + (1, num//2))
       alpha, beta = U_permuted.square().sum(-2).unsqueeze(-2).split(num//2, -1)
-      tau = (beta - alpha) / (2 * gamma + 1.0e-8)#prevents 0/0
+      tau = (beta - alpha) / (2 * gamma)
       t = tau.sign() / (tau.abs() + (1 + tau.square()).sqrt())
       c = 1 / (1 + t.square()).sqrt()
       s = c * t
