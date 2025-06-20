@@ -719,7 +719,8 @@ class PatternMatcher:
 
 # *** tracking pattern matcher ***
 
-TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
+VIZ = ContextVar("VIZ", 0)
+TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if VIZ else 0)
 match_stats:dict[UPat, list[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
@@ -803,7 +804,7 @@ if TRACK_MATCH_STATS or PROFILE:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
-    if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
+    if VIZ: launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
