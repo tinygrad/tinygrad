@@ -646,11 +646,31 @@ class PCIIface:
     self.dev = dev
 
     if first_dev:=len(PCIIface.gpus) == 0:
-      for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
-        vendor = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16)
-        device = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
-        if vendor == 0x1002 and device in PCIIface.supported_devs: PCIIface.gpus.append(pcibus)
-      PCIIface.gpus = sorted(PCIIface.gpus)
+      PCIIface.gpus = System.pci_scan_bus(vendor=0x1002, devices=[0x744c, 0x7480, 0x7550])
+      visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
+      PCIIface.gpus = [PCIIface.gpus[x] for x in visible_devices] if visible_devices else PCIIface.gpus
+
+    self.pcibus = PCIIface.gpus[dev_id]
+    System.pci_prepare_device(self.pcibus)
+    System.pci_resize_bar(self.pcibus, 0)
+    if getenv("VFIO", 0):
+      try: System.vfio_setup(self.pcibus, 0)
+      except OSError as e:
+        if DEBUG >= 1: print(f"am {self.pcibus}: failed to init vfio-pci module (run `sudo modprobe vfio-pci`): {e}.")
+        PCIIface.vfio_fd = None
+    
+    # System.alloc_sysmem()
+
+
+
+    # System.
+
+    if first_dev:=len(PCIIface.gpus) == 0:
+      # for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
+      #   vendor = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16)
+      #   device = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
+      #   if vendor == 0x1002 and device in PCIIface.supported_devs: PCIIface.gpus.append(pcibus)
+      # PCIIface.gpus = sorted(PCIIface.gpus)
 
       # TODO: visible_devices should be handled layer above this?
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]

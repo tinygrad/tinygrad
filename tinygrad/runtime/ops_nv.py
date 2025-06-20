@@ -13,6 +13,7 @@ from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
 from tinygrad.runtime.autogen import nv_gpu
 from tinygrad.runtime.support.elf import elf_loader
+from tinygrad.runtime.support.system import System, PCIDevice
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
@@ -445,6 +446,26 @@ class DriverIface:
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
     return DriverIface.low_uvm_vaddr_allocator.alloc(size, alignment) if force_low else DriverIface.uvm_vaddr_allocator.alloc(size, alignment)
 
+class PCIIface:
+  gpus = []
+
+  def __init__(self, dev, dev_id):
+    if len(PCIIface.gpus) == 0:
+      PCIIface.gpus = System.pci_scan_bus(0x10de, [0x2684])
+      visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('CUDA_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
+      PCIIface.gpus = [PCIIface.gpus[x] for x in visible_devices] if visible_devices else PCIIface.gpus
+
+    self.pci_dev = PCIDevice(PCIIface.gpus[dev_id], bars=[0, 1], resize_bars=[1])
+    self.nvdev = NVDev(self.pci_dev.pcibus, self.pci_dev.map_bar(0, fmt='I'), self.pci_dev.map_bar(1))
+    self.root, self.gpu_instance = 0xc1000000, 0
+
+  def _gpu_alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, map_flags=0, tag="") -> HCQBuffer:
+    cpu_access = True # HACK
+    nv_mapping = self.nvdev.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contigous=cpu_access)
+    if cpu_access: self._map_pci_range(bar=1, off=nv_mapping.paddrs[0][0], addr=nv_mapping.va_addr, size=nv_mapping.size)
+    return HCQBuffer(nv_mapping.va_addr, size, meta=NVAllocationMeta(self, [self], nv_mapping, has_cpu_mapping=cpu_access),
+      view=MMIOInterface(nv_mapping.va_addr, size, fmt='B') if cpu_access else None)
+
 class NVDevice(HCQCompiled[NVSignal]):
   devices: ClassVar[list[HCQCompiled]] = []
   signal_pages: ClassVar[list[HCQBuffer]] = []
@@ -454,7 +475,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     if len(nm:=getenv("NV_IFACE", "")) > 0: return getattr(sys.modules[__name__], f"{nm.upper()}Iface")(self, self.device_id)
 
     errs:str = ""
-    for iface_t in (DriverIface,):
+    for iface_t in (DriverIface, PCIIface):
       try: return iface_t(self, self.device_id)
       except Exception: errs += f"\n{iface_t.__name__}: {traceback.format_exc()}"
     raise RuntimeError(f"Cannot find a usable interface for NV:{self.device_id}:\n{errs}")
