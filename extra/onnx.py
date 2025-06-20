@@ -1,38 +1,26 @@
 from types import SimpleNamespace
 from typing import Any, Sequence, cast, Literal, Callable
-import dataclasses, functools, io, math, types, warnings, enum
+import dataclasses, functools, io, math, types, warnings
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported, Device
 
-# TensorProto.DataType
-class TensorDataType(enum.IntEnum):
-  UNDEFINED = 0; FLOAT = 1; UINT8 = 2; INT8 = 3; UINT16 = 4; INT16 = 5; INT32 = 6; INT64 = 7 # noqa: E702
-  STRING = 8; BOOL = 9; FLOAT16 = 10; DOUBLE = 11; UINT32 = 12; UINT64 = 13; COMPLEX64 = 14; COMPLEX128 = 15; BFLOAT16 = 16 # noqa: E702
-  FLOAT8E4M3FN = 17; FLOAT8E4M3FNUZ = 18; FLOAT8E5M2 = 19; FLOAT8E5M2FNUZ = 20; UINT4 = 21; INT4 = 22 # noqa: E702
-
-# AttributeProto.AttributeType
-class AttributeType(enum.IntEnum):
-  UNDEFINED = 0; FLOAT = 1; INT = 2; STRING = 3; TENSOR = 4; GRAPH = 5; FLOATS = 6; INTS = 7; STRINGS = 8; TENSORS = 9; GRAPHS = 10; # noqa: E702
-  SPARSE_TENSOR = 11; SPARSE_TENSORS = 12; TYPE_PROTO = 13; TYPE_PROTOS = 14 # noqa: E702
-
-supported_dtypes: dict[TensorDataType, DType] = {
-  TensorDataType.FLOAT: dtypes.float32, TensorDataType.UINT8: dtypes.uint8, TensorDataType.INT8: dtypes.int8,
-  TensorDataType.UINT16: dtypes.uint16, TensorDataType.INT16: dtypes.int16, TensorDataType.INT32: dtypes.int32,
-  TensorDataType.INT64: dtypes.int64, TensorDataType.BOOL: dtypes.bool, TensorDataType.FLOAT16: dtypes.float16,
-  TensorDataType.DOUBLE: dtypes.double, TensorDataType.UINT32: dtypes.uint32, TensorDataType.UINT64: dtypes.uint64,
-  TensorDataType.BFLOAT16: dtypes.bfloat16
+# https://github.com/onnx/onnx/blob/rel-1.7.0/onnx/onnx.proto#L450-L479
+data_types: dict[int, DType] = {
+  1:dtypes.float32, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:dtypes.int16, 6:dtypes.int32, 7:dtypes.int64,
+  9:dtypes.bool, 10:dtypes.float32, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
 }
 
-supported_attribute_types: dict[str, Callable[[dict], Any]] = {
-  AttributeType.FLOAT: lambda a: float(a.f),
-  AttributeType.INT: lambda a: int(a.i),
-  AttributeType.STRING: lambda a: a.s.data().tobytes().decode("utf8") if isinstance(a.s, Tensor) else a.s.decode("utf8"),
-  AttributeType.TENSOR: lambda a: buffer_parse(a.t),
-  AttributeType.FLOATS: lambda a: tuple(float(x) for x in a.floats),
-  AttributeType.INTS: lambda a: tuple(int(x) for x in a.ints),
-  AttributeType.STRINGS: lambda a: tuple(x.data().tobytes().decode("utf8") for x in a.strings)
+# https://github.com/onnx/onnx/blob/rel-1.7.0/onnx/onnx.proto#L117-L132
+attribute_types: dict[int, Callable] = {
+  1: lambda a: float(a.f),
+  2: lambda a: int(a.i),
+  3: lambda a: a.s.data().tobytes().decode("utf8") if isinstance(a.s, Tensor) else a.s.decode("utf8"),
+  4: lambda a: buffer_parse(a.t),
+  6: lambda a: tuple(float(x) for x in a.floats),
+  7: lambda a: tuple(int(x) for x in a.ints),
+  8: lambda a: tuple(x.data().tobytes().decode("utf8") for x in a.strings)
 }
 
 # ***** protobuf parsing ******
@@ -44,9 +32,8 @@ def has_field(onnx_type: TypeProto|SimpleNamespace, field):
   return hasattr(onnx_type, field)
 
 def dtype_parse(onnx_dtype: int, fallback_context: str | None = None) -> DType:
-  onnx_dtype = TensorDataType(onnx_dtype)
-  if onnx_dtype not in supported_dtypes: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
-  if is_dtype_supported(dtype := supported_dtypes[onnx_dtype]): return dtype
+  if onnx_dtype not in data_types: raise NotImplementedError(f"onnx dtype id {onnx_dtype} is not supported")
+  if is_dtype_supported(dtype := data_types[onnx_dtype]): return dtype
   # if fallback_context is provided, we can fall back to a default dtype
   if fallback_context is not None:
     default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
@@ -56,9 +43,8 @@ def dtype_parse(onnx_dtype: int, fallback_context: str | None = None) -> DType:
   raise RuntimeError(f"dtype {dtype} on device {Device.DEFAULT} is not supported")
 
 def attribute_parse(onnx_attribute: AttributeProto):
-  handler = supported_attribute_types.get(onnx_attribute.type)
-  if handler is None: raise NotImplementedError(f"handler for attribute type {onnx_attribute.type} is not implemented.")
-  return handler(onnx_attribute)
+  if onnx_attribute.type not in attribute_types: raise NotImplementedError(f"attribute type {onnx_attribute.type} is not supported")
+  return attribute_types[onnx_attribute.type](onnx_attribute)
 
 def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
