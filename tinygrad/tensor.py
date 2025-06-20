@@ -407,9 +407,9 @@ class Tensor(MathTrait):
     """
     return self.replace(self.shard(devices, axis))
 
-  def tinyfs_load(self, size:int) -> Tensor:
+  def cloud_load(self, size:int) -> Tensor:
     """
-    Load a tensor from a tinyfs filesystem.
+    Load a tensor from tinycloud.
 
     self should be a tensor of the hash to load
     """
@@ -425,9 +425,9 @@ class Tensor(MathTrait):
 
     return data
 
-  def tinyfs_store(self) -> Tensor:
+  def cloud_store(self) -> Tensor:
     """
-    Store a tensor to a tinyfs filesystem.
+    Store a tensor to tinycloud.
     """
     data = self.contiguous().flatten().bitcast(dtypes.uint8)
 
