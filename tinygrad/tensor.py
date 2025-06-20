@@ -3997,40 +3997,40 @@ class Tensor(MathTrait):
     V = Tensor.eye(num, dtype = self.dtype).reshape((1,) * (self.ndim - 2) + (num, num)).expand(b_shape + (num, num)).contiguous()
     #prepare round robin pairing
     permute, inverse_permute = Tensor.arange(0, num, dtype = dtypes.int), Tensor.zeros(num, dtype = dtypes.int).contiguous()
+    inverse_permute[permute] = Tensor.arange(num, dtype = dtypes.int)
     permute[num//2:num] = permute[num//2:num].flip(0)
-    def one_round_jacobi(U, V):
-      #compute the jacobi rotations for each pairing
+    def one_round_jacobi( U, V):
+      #pair all the columns
+      V_permuted, runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[..., permute], None)
+      V_left, V_right = V_permuted.split(num//2, -1)
       U_permuted, runoff_U = (U[..., permute].split(num - 1, -1)) if num % 2 == 1 else (U[..., permute], None)
-      partial_Up, partial_Uq = U_permuted.split(num//2, -1)
-
-      gamma = (partial_Up * partial_Uq).sum(-2).reshape(b_shape + (1, num//2))
+      U_left, U_right = U_permuted.split(num//2, -1)
+      #compute the jacobi rotations for each pairing
+      gamma = (U_left * U_right).sum(-2).reshape(b_shape + (1, num//2))
       alpha, beta = U_permuted.square().sum(-2).unsqueeze(-2).split(num//2, -1)
       tau = (beta - alpha) / (2 * gamma + 1.0e-8)#prevents 0/0
       t = tau.sign() / (tau.abs() + (1 + tau.square()).sqrt())
       c = 1 / (1 + t.square()).sqrt()
       s = c * t
       #apply the rotations
-      inverse_permute[permute] = Tensor.arange(num, dtype = dtypes.int).contiguous()
-
-      V_permuted, runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[...,permute], None)
-      V_left, V_right = V_permuted.split(num//2, -1)
+      U_left, U_right = c * U_left - s * U_right, s * U_left + c * U_right
+      U = U_left.cat(U_right.cat(runoff_U, dim = -1) if num % 2 == 1 else U_right, dim = -1)[..., inverse_permute]
       V_left, V_right = c * V_left - s * V_right, s * V_left + c * V_right
       V = V_left.cat(V_right.cat(runoff_V, dim = -1) if num % 2 == 1 else V_right, dim = -1)[..., inverse_permute].realize()
-
-      U_left,U_right  =  c * partial_Up - s * partial_Uq, s * partial_Up + c * partial_Uq
-      U = U_left.cat(U_right.cat(runoff_U, dim = -1) if num % 2 == 1 else U_right, dim = -1)[..., inverse_permute].realize()
       #prepare the next round robin pairings
       if num % 2 == 1: permute[0:num] = ((permute[0:num] - 1) % num)
       else: permute[1:num] = ((permute[1:num] - 2) % (num - 1)) + 1
+      inverse_permute[permute] = Tensor.arange(num, dtype = dtypes.int)
       return U,V
-    max_iterations, iterations_per_round = 8, int((num) * (num - 1) / 2)
-    for _ in range(max_iterations * iterations_per_round): U, V = one_round_jacobi(U,V)
+    max_iterations, iterations_per_round = 5, int((num) * (num - 1) / 2)
+    for _ in range(max_iterations * iterations_per_round): 
+      U, V = one_round_jacobi(U,V)
     #extract singular values and sort. construct U from Q
     S, indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
     new_indices = Tensor.arange(num).reshape((1,) * (self.ndim - 1) + (num,)).expand(b_shape + 2 * (num,)).contiguous()
     new_indices[..., :num] = indices.reshape(b_shape + (1,) + (U.shape[0],)).expand(b_shape + (num, num))
     U,V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2),V.gather(-1, new_indices[..., 0:num, 0:num])
-
+   
     padded_u = Tensor.eye(q_num, dtype = U.dtype).reshape((1,) * (self.ndim - 2) + (q_num, q_num)).expand(b_shape + (q_num, q_num)).contiguous()
     padded_u[..., 0:num, 0:num] = U
     U = Q @ padded_u
