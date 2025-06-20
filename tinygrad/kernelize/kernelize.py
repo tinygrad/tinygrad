@@ -2,13 +2,12 @@ from dataclasses import dataclass
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, sint
 from tinygrad.uop.ops import track_rewrites, _substitute
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
-from tinygrad.codegen.lowerer import get_contraction_with_reduce
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.kernelize.multi import multi_pm
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View, strides_for_shape
+from tinygrad.shape.view import View, strides_for_shape, get_contraction_with_reduce
 from tinygrad.kernelize.grouper import group_realizes, ALWAYS_CONTIGUOUS
 
 # creation can recurse a lot
@@ -422,6 +421,16 @@ remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(
 
 @track_rewrites(name=lambda big_sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[big_sink].toposort() if u.op is Ops.KERNEL]))}")
 def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
+  """
+  Function to transform the Tensor UOp graph into a version with Ops.KERNEL
+
+  Args:
+    big_sink: The Ops.SINK rooting the Tensor graph.
+
+  Returns:
+    Map transforming each UOp in the big_sink to the Ops.KERNEL graph.
+  """
+
   # multi + merge_views + simplify
   tensor_map = graph_rewrite_map(big_sink, multi_pm+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
 
