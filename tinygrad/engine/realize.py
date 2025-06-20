@@ -1,29 +1,17 @@
 from typing import Optional, cast, Generator
-import time, pprint
+import time, pprint, itertools
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
+from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, dedup, flatten
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, track_rewrites, GroupOp, KernelInfo, resolve
+from tinygrad.codegen import full_rewrite
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
-from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.heuristic import hand_coded_optimizations
+from tinygrad.uop.symbolic import sym
+#from tinygrad.codegen.kernel import Kernel
+#from tinygrad.codegen.heuristic import hand_coded_optimizations
 from tinygrad.engine.schedule import ScheduleItem
-
-# **************** Program Creation ****************
-
-logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
-  k = Kernel(ast, opts=renderer)
-  if not NOOPT:
-    if not k.apply_tensor_cores(getenv("TC", 1)): k.apply_opts(hand_coded_optimizations(k))
-    if BEAM >= 1:
-      from tinygrad.engine.search import beam_search, bufs_from_lin
-      kb = Kernel(ast, opts=renderer)
-      rawbufs = bufs_from_lin(kb, allocate=False)
-      k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-  if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
-  return k.to_program()
+from tinygrad.engine.program import get_program
 
 # **************** Runners ****************
 
