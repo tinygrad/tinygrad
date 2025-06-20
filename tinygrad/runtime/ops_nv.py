@@ -230,7 +230,7 @@ class NVProgram(HCQProgram):
 
     self.constbuffer_0 = [0] * (cbuf0_size // 4)
 
-    if dev.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A:
+    if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A:
       self.constbuffer_0[188:192], self.constbuffer_0[223] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window)], 0xfffdc0
       qmd = {'qmd_major_version':5, 'qmd_type':nv_gpu.NVCEC0_QMDV05_00_QMD_TYPE_GRID_CTA, 'register_count':self.regs_usage,
         'program_address_upper_shifted4':hi32(self.prog_addr>>4), 'program_address_lower_shifted4':lo32(self.prog_addr>>4),
@@ -323,7 +323,7 @@ class DriverIface:
 
     self.dev, self.device_id = dev, device_id
     if self.device_id >= len(DriverIface.gpus_info) or not DriverIface.gpus_info[self.device_id].valid:
-      raise RuntimeError(f"No device found for {device}. Requesting more devices than the system has?")
+      raise RuntimeError(f"No device found for {device_id}. Requesting more devices than the system has?")
 
     self.fd_dev = self._new_gpu_fd()
     self.gpu_info = self.rm_control(self.root, nv_gpu.NV0000_CTRL_CMD_GPU_GET_ID_INFO_V2,
@@ -455,18 +455,9 @@ class NVDevice(HCQCompiled[NVSignal]):
   signal_pages: ClassVar[list[HCQBuffer]] = []
   signal_pool: ClassVar[list[HCQBuffer]] = []
 
-  def _select_iface(self):
-    if len(nm:=getenv("NV_IFACE", "")) > 0: return getattr(sys.modules[__name__], f"{nm.upper()}Iface")(self, self.device_id)
-
-    errs:str = ""
-    for iface_t in (DriverIface,):
-      try: return iface_t(self, self.device_id)
-      except Exception: errs += f"\n{iface_t.__name__}: {traceback.format_exc()}"
-    raise RuntimeError(f"Cannot find a usable interface for NV:{self.device_id}:\n{errs}")
-
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.iface = self._select_iface()
+    self.iface = DriverIface()
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.iface.gpu_instance, hClientShare=self.iface.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
