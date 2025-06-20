@@ -7,7 +7,8 @@ from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
-from tinygrad.codegen.lowerer import pm_quant, pm_lowerer, get_index
+from tinygrad.codegen.lowerer import pm_lowerer, get_index
+from tinygrad.codegen.quantize import pm_quant
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
 from tinygrad.codegen.expander import migrate_indexing, expander
 from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexing, devectorize, \
