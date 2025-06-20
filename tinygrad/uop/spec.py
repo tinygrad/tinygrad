@@ -123,7 +123,7 @@ def validate_store(idx:UOp, val:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
     if u.op is Ops.IF: gate &= u.src[0]
   return validate_index(idx, gate)
 
-index_pat = UPat.any(UPat(Ops.INDEX, name="idx"), UPat(Ops.CAST, src=(UPat(Ops.INDEX, name="idx"),)))
+index_pat = UPat(Ops.INDEX, name="idx").or_casted()
 
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
