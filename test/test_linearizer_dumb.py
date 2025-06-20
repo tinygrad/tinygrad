@@ -8,8 +8,8 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import getenv
 from tinygrad.shape.shapetracker import ShapeTracker, View
-from tinygrad.engine.search import Opt, OptOps
-from tinygrad.codegen.kernel import Kernel
+from tinygrad.opt.search import Opt, OptOps
+from tinygrad.opt.kernel import Kernel
 
 class TestLinearizerDumb(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "METAL", "only tested on METAL")

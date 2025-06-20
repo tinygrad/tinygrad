@@ -3,8 +3,8 @@ import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, Context, nn
 from tinygrad.uop.ops import Ops
 from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG, getenv
-from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.heuristic import hand_coded_optimizations
+from tinygrad.opt.kernel import Kernel
+from tinygrad.opt.heuristic import hand_coded_optimizations
 
 class TestWinogradClose(unittest.TestCase):
   def test_close(self):

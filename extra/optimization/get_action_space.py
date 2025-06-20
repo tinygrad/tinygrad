@@ -1,8 +1,8 @@
 import random
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
-from tinygrad.engine.search import actions
-from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.heuristic import hand_coded_optimizations
+from tinygrad.opt.search import actions
+from tinygrad.opt.kernel import Kernel
+from tinygrad.opt.heuristic import hand_coded_optimizations
 from tinygrad.helpers import tqdm
 
 tactions = set()

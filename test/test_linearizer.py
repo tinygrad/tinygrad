@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 
 from test.helpers import ast_const
-from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
+from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
 from tinygrad.uop.ops import UOp, Ops, GroupOp
 from tinygrad.device import Device, Buffer, is_dtype_supported
@@ -12,7 +12,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
-from tinygrad.codegen.heuristic import hand_coded_optimizations
+from tinygrad.opt.heuristic import hand_coded_optimizations
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
 from tinygrad.dtype import DType, dtypes
 
@@ -1136,7 +1136,7 @@ class TestLinearizer(unittest.TestCase):
         np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.2)
 
       # check that get_kernel_actions produces all 9 options
-      from tinygrad.engine.search import get_kernel_actions
+      from tinygrad.opt.search import get_kernel_actions
       tc_actions = [k for i, k in get_kernel_actions(Kernel(realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
 
       available_tc = len([x for x in Device[Device.DEFAULT].renderer.tensor_cores if x.dtype_in == tc.dtype_in and x.dtype_out == tc.dtype_out])
