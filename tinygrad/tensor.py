@@ -3969,9 +3969,8 @@ class Tensor(MathTrait):
   def qr(self) -> tuple[Tensor, Tensor]:
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     R = self.clone()
-    m,n = int(R.shape[-2]), int(R.shape[-1])
-    b_shape = self.shape[0:len(self.shape) - 2]
-    Q = Tensor.eye(m, dtype = self.dtype).reshape((1,) * (len(self.shape) - 2) + 2 * (m,)).expand(b_shape + (m, m)).contiguous()
+    b_shape, m,n =self.shape[0:self.ndim - 2], int(R.shape[-2]), int(R.shape[-1])
+    Q = Tensor.eye(m, dtype = self.dtype).reshape((1,) * (len(self.shape) - 2) + 2 * (m,)).expand(b_shape + 2 * (m,)).contiguous()
     for i in range(int(min(m, n))):
       x = R[..., i:m, i]
       s = -x[..., 0].sign()
@@ -4021,14 +4020,13 @@ class Tensor(MathTrait):
       if num % 2 == 1: permute[0:num] = ((permute[0:num] - 1) % num)
       else: permute[1:num] = ((permute[1:num] - 2) % (num - 1)) + 1
       inverse_permute[permute] = Tensor.arange(num, dtype = dtypes.int)
-      return U,V
+      return U, V
     max_iterations, iterations_per_round = 5, int((num) * (num - 1) / 2)
-    for _ in range(max_iterations * iterations_per_round):
-      U, V = one_round_jacobi(U,V)
+    for _ in range(max_iterations * iterations_per_round): U, V = one_round_jacobi(U,V)
     #extract singular values and sort. construct U from Q
     S, indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
     new_indices = Tensor.arange(num).reshape((1,) * (self.ndim - 1) + (num,)).expand(b_shape + 2 * (num,)).contiguous()
-    new_indices[..., :num] = indices.reshape(b_shape + (1,) + (U.shape[0],)).expand(b_shape + (num, num))
+    new_indices[..., :num] = indices.reshape(b_shape + (1,) + (U.shape[0],)).expand(b_shape + 2 * (num,))
     U,V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2),V.gather(-1, new_indices[..., 0:num, 0:num])
 
     padded_u = Tensor.eye(q_num, dtype = U.dtype).reshape((1,) * (self.ndim - 2) + 2 * (q_num,)).expand(b_shape + 2 * (q_num,)).contiguous()
