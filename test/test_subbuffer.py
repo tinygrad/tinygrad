@@ -107,13 +107,19 @@ class TestSubBuffer(unittest.TestCase):
 
   def test_subbuffer_copy_in_out(self):
     sub_buf = self.buf.view(3, dtypes.uint8, offset=3).ensure_allocated() # [3:6]
-    sub_buf.copyin(memoryview(bytearray(range(3))))
     data_out_sub = bytearray([0]*3)
     sub_buf.copyout(memoryview(data_out_sub))
-    assert bytearray(range(3)) == data_out_sub
+    assert data_out_sub == bytearray(range(3, 6))
+    sub_buf.copyin(memoryview(bytearray(range(3))))
+    assert sub_buf.as_buffer().tolist() == list(range(3))
+    assert self.buf.as_buffer().tolist()[3:6] == list(range(3))
+    sub_buf.copyout(memoryview(data_out_sub))
+    assert data_out_sub == bytearray(range(3))
     data_out_base = bytearray([0]*10)
     self.buf.copyout(memoryview(data_out_base))
-    assert data_out_sub == data_out_base[3:6]
+    assert data_out_base[0:3] == bytearray(range(0, 3))
+    assert data_out_base[3:6] == data_out_sub
+    assert data_out_base[6:10] == bytearray(range(6, 10))
 
   def test_subbuffer_copy_in_out_view_of_view(self):
     view1 = self.buf.view(7, dtypes.uint8, offset=2).ensure_allocated() # [2:9]
