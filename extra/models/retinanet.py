@@ -9,6 +9,17 @@ import numpy as np
 
 ConvFPN = ConvHead = ConvClassificationHeadLogits = nn.Conv2d
 
+def _unique(x:Tensor) -> Tensor:
+  x = x.sort()[0]
+  mask = Tensor([True]).cat(x[1:] != x[:-1])
+  return x.masked_select(mask)
+
+def _masked_indices(mask:Tensor) -> Tensor:
+  mask_cumsum = mask.cumsum()
+  counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32)
+  idxs = counts.scatter(0, mask_cumsum, 1, reduce="add").cumsum()
+  return idxs
+
 def nms(boxes, scores, thresh=0.5):
   x1, y1, x2, y2 = np.rollaxis(boxes, 1)
   areas = (x2 - x1 + 1) * (y2 - y1 + 1)
@@ -25,6 +36,23 @@ def nms(boxes, scores, thresh=0.5):
     to_process = to_process[np.where(iou <= thresh)[0]]
   return keep
 
+def nms2(img_boxes:Tensor, img_scores:Tensor, thresh=0.5):
+  x1, y1, x2, y2 = img_boxes.permute(1, 0)
+  areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+  to_process, keep = (img_scores.sort()[1] if img_scores.numel() > 1 else img_scores)[::-1].cast(dtypes.int), []
+  while to_process.numel() > 0:
+    cur, to_process = to_process[0], to_process[1:]
+    keep.append(cur)
+    inter_x1 = x1[cur].maximum(x1[to_process])
+    inter_y1 = y1[cur].maximum(y1[to_process])
+    inter_x2 = x2[cur].minimum(x2[to_process])
+    inter_y2 = y2[cur].minimum(y2[to_process])
+    inter_area = (inter_x2 - inter_x1 + 1).maximum(0) * (inter_y2 - inter_y1 + 1).maximum(0)
+    iou = inter_area / (areas[cur] + areas[to_process] - inter_area)
+    if (mask:=iou <= thresh).numel() > 0:
+      to_process = to_process.masked_select(mask)
+  return keep
+
 def decode_bbox(offsets, anchors):
   dx, dy, dw, dh = np.rollaxis(offsets, 1)
   widths, heights = anchors[:, 2] - anchors[:, 0], anchors[:, 3] - anchors[:, 1]
@@ -36,7 +64,7 @@ def decode_bbox(offsets, anchors):
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 
 def decode_bbox2(offsets, anchors):
-  dx, dy, dw, dh = offsets.permute(1,0)
+  dx, dy, dw, dh = offsets.permute(1, 0)
   widths, heights = anchors[:, 2] - anchors[:, 0], anchors[:, 3] - anchors[:, 1]
   cx, cy = anchors[:, 0] + 0.5 * widths, anchors[:, 1] + 0.5 * heights
   pred_cx, pred_cy = dx * widths + cx, dy * heights + cy
@@ -45,10 +73,19 @@ def decode_bbox2(offsets, anchors):
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return Tensor.stack(pred_x1, pred_y1, pred_x2, pred_y2, dim=1)
 
-def _unique(x:Tensor) -> Tensor:
-  x = x.sort()[0]
-  mask = Tensor([True]).cat(x[1:] != x[:-1])
-  return x.masked_select(mask)
+def batched_nms(img_boxes:Tensor, img_scores:Tensor, img_labels:Tensor) -> Tensor:
+  keep_mask = Tensor.zeros_like(img_scores, dtype=dtypes.bool)
+  res = []
+  for class_id in _unique(img_labels):
+    # curr_mask = (img_labels == class_id).reshape(-1, 1).repeat(1, img_boxes.shape[-1])
+    curr_indices = _masked_indices(img_labels == class_id)
+    curr_keep_indices = nms2(img_boxes[curr_indices], img_scores[curr_indices])
+        # curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
+    res.append(curr_keep_indices)
+  #   keep_mask[curr_indices[curr_keep_indices]] = True
+  # keep = np.where(keep_mask)[0]
+  # keep = keep[image_scores[keep].argsort()[::-1]]
+  return res
 
 class RetinaNet:
   def __init__(self, backbone:ResNet, num_classes:int=264, num_anchors:int=9, scales:list[int]|None=None, aspect_ratios:list[float]|None=None):
@@ -110,9 +147,7 @@ class RetinaNet:
       for offsets_level, scores_level, anchors_level in zip(offsets_img, scores_img, anchors):
         # remove low scoring boxes
         scores_level = scores_level.flatten()
-        topk_idxs_cumsum = (scores_level > score_thresh).cumsum()
-        topk_idxs = Tensor.zeros(topk_idxs_cumsum[-1].item(), dtype=dtypes.int32)
-        topk_idxs = topk_idxs.scatter(0, topk_idxs_cumsum, 1, reduce="add").cumsum()
+        topk_idxs = _masked_indices(scores_level > score_thresh)
         scores_level = scores_level[topk_idxs]
 
         # keep topk
@@ -140,8 +175,7 @@ class RetinaNet:
       img_labels = Tensor.cat(*img_labels)
 
       # nms for each class
-      unique_img_labels = _unique(img_labels)
-      detections.append(unique_img_labels)
+      detections.extend(batched_nms(img_boxes, img_scores, img_labels))
 
     return detections
 
@@ -189,27 +223,25 @@ class RetinaNet:
       image_labels = np.concatenate(image_labels)
 
       # nms for each class
-      unique_image_labels = np.unique(image_labels)
-      detections.append(unique_image_labels)
-      # keep_mask = np.zeros_like(image_scores, dtype=bool)
-      # print(f"---unique: {image_labels.shape=} {np.unique(image_labels).shape=}")
-      # for class_id in np.unique(image_labels):
-      #   curr_indices = np.where(image_labels == class_id)[0]
-      #   curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
+      keep_mask = np.zeros_like(image_scores, dtype=bool)
+      for class_id in np.unique(image_labels):
+        curr_indices = np.where(image_labels == class_id)[0]
+        curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
+        detections.append(curr_keep_indices)
       #   keep_mask[curr_indices[curr_keep_indices]] = True
       # keep = np.where(keep_mask)[0]
       # keep = keep[image_scores[keep].argsort()[::-1]]
 
-    #   # resize bboxes back to original size
-    #   image_boxes = image_boxes[keep]
-    #   if orig_image_sizes is not None:
-    #     resized_x = image_boxes[:, 0::2] * orig_image_sizes[i][1] / w
-    #     resized_y = image_boxes[:, 1::2] * orig_image_sizes[i][0] / h
-    #     image_boxes = np.stack([resized_x, resized_y], axis=2).reshape(-1, 4)
-    #   # xywh format
-    #   image_boxes = np.concatenate([image_boxes[:, :2], image_boxes[:, 2:] - image_boxes[:, :2]], axis=1)
+      # # resize bboxes back to original size
+      # image_boxes = image_boxes[keep]
+      # if orig_image_sizes is not None:
+      #   resized_x = image_boxes[:, 0::2] * orig_image_sizes[i][1] / w
+      #   resized_y = image_boxes[:, 1::2] * orig_image_sizes[i][0] / h
+      #   image_boxes = np.stack([resized_x, resized_y], axis=2).reshape(-1, 4)
+      # # xywh format
+      # image_boxes = np.concatenate([image_boxes[:, :2], image_boxes[:, 2:] - image_boxes[:, :2]], axis=1)
 
-    #   detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
+      # detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
     return detections
 
 class ClassificationHead:
