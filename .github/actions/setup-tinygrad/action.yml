@@ -83,6 +83,7 @@ runs:
         python -m venv .venv
         if [[ "$RUNNER_OS" == "Windows" ]]; then
           source .venv/Scripts/activate
+          python -m pip install dawn-python
         else
           . .venv/bin/activate
         fi
@@ -94,6 +95,7 @@ runs:
         python -m venv .venv
         if [[ "$RUNNER_OS" == "Windows" ]]; then
           source .venv/Scripts/activate
+          python -m pip install dawn-python
         else
           . .venv/bin/activate
         fi
@@ -244,11 +246,6 @@ runs:
       run: |
         brew tap wpmed92/dawn
         brew install dawn
-    - name: Install WebGPU dawn (Windows)
-      if: inputs.webgpu == 'true' && runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        python -m pip install dawn-python
 
     # **** LLVM ****
 
