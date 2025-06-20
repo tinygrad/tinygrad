@@ -90,6 +90,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
     if (self.op, self.dtype, self.src, self.arg, self.tag) == new_args: return self
     return UOp(*new_args)
+  def rtag(self, tag=True): return self.replace(tag=tag)
   @functools.cached_property
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
@@ -708,7 +709,7 @@ class PatternMatcher:
     ler = {u.op for u in uop.src}
     for _,match,early_reject in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
-      if (ret:=match(uop, ctx)) is not None: return ret
+      if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
     return None
 
   def fixed_point_rewrite(self, uop:UOp, ctx=None) -> UOp:
