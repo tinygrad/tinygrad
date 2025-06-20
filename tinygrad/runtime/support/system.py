@@ -6,16 +6,7 @@ from tinygrad.runtime.autogen import libc, vfio
 MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
 
 class _System:
-  def __init__(self): self.pagemap = None
-
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[int, list[int]]:
-    if self.pagemap is None:
-      # Disable migration of locked pages
-      if FileIOInterface(reloc_sysfs:="/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read()[0] != "0":
-        os.system(cmd:=f"sudo sh -c 'echo 0 > {reloc_sysfs}'")
-        assert FileIOInterface(reloc_sysfs, os.O_RDONLY).read()[0] == "0", f"Failed to disable migration of locked pages. Please run {cmd} manually."
-      self.pagemap = FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
-
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
     flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
     va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
@@ -23,8 +14,8 @@ class _System:
     if data is not None: to_mv(va, len(data))[:] = data
 
     # Read pagemap to get the physical address of each page. The pages are locked.
-    self.pagemap.seek(va // mmap.PAGESIZE * 8)
-    return va, [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
+    self.pagemap().seek(va // mmap.PAGESIZE * 8)
+    return va, [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap().read(size//mmap.PAGESIZE*8, binary=True))]
 
   def pci_scan_bus(self, target_vendor:int, target_devices:list[int]) -> list[str]:
     result = []
@@ -33,6 +24,13 @@ class _System:
       device = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
       if vendor == target_vendor and device in target_devices: result.append(pcibus)
     return result
+
+  @functools.cache
+  def pagemap(self) -> FileIOInterface:
+    if FileIOInterface(reloc_sysfs:="/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read()[0] != "0":
+      os.system(cmd:=f"sudo sh -c 'echo 0 > {reloc_sysfs}'")
+      assert FileIOInterface(reloc_sysfs, os.O_RDONLY).read()[0] == "0", f"Failed to disable migration of locked pages. Please run {cmd} manually."
+    return FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
 
   @functools.cache
   def vfio(self) -> FileIOInterface|None:
