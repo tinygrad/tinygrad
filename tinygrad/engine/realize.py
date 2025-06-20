@@ -1,29 +1,32 @@
 from typing import Optional, cast, Generator
-import time, pprint
+import time, pprint, itertools
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
+from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
-from tinygrad.opt.kernel import Kernel
-from tinygrad.opt.heuristic import hand_coded_optimizations
 from tinygrad.engine.schedule import ScheduleItem
+from tinygrad.opt import get_optimized_ast
+from tinygrad.codegen import full_rewrite
 
 # **************** Program Creation ****************
 
-logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
-  k = Kernel(ast, opts=renderer)
-  if not NOOPT:
-    if not k.apply_tensor_cores(getenv("TC", 1)): k.apply_opts(hand_coded_optimizations(k))
-    if BEAM >= 1:
-      from tinygrad.opt.search import beam_search, bufs_from_lin
-      kb = Kernel(ast, opts=renderer)
-      rawbufs = bufs_from_lin(kb, allocate=False)
-      k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-  if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
-  return k.to_program()
+def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
+  oast, applied_opts = get_optimized_ast(ast, renderer)
+  uops = full_rewrite(oast, renderer)
+  assert uops[-1].op is Ops.SINK, "last uop must be sink"
+
+  # render
+  src = renderer.render(uops)
+
+  # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
+  # TODO: these max and min don't work on symbolic, and results are very wrong.
+  mem_bytes = sum(max(x.src[0].dtype.nbytes() for x in group)
+    for _, group in itertools.groupby([x for x in ast.toposort() if x.op in {Ops.LOAD, Ops.STORE} and x.src[0].base.op is Ops.DEFINE_GLOBAL],
+                                      key=lambda x: (x.op, x.src[0].base.arg)))
+  return ProgramSpec(uops[-1].arg.name, src, renderer.device, ast, uops, applied_opts, mem_bytes,
+                     global_size=[1,1,1] if renderer.has_local else None, local_size=[1,1,1] if renderer.has_local else None)
 
 # **************** Runners ****************
 
@@ -109,7 +112,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
-    prg: ProgramSpec = get_program(Device[device].renderer, ast)
+    prg: ProgramSpec = get_program(ast, Device[device].renderer)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
