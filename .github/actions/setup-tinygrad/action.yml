@@ -248,7 +248,7 @@ runs:
       if: inputs.webgpu == 'true' && runner.os == 'Windows'
       shell: pwsh
       run: |
-        pip install dawn-python
+        python -m pip install dawn-python
 
     # **** LLVM ****
 
