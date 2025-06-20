@@ -75,6 +75,17 @@ def full_rewrite_to_sink(sink:UOp, opts:Renderer|None=None, linearizer:bool=Fals
   return apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer(), linearizer))
 
 def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
+  """
+  Function to transform the Kernel UOp graph into a linearized program.
+
+  Args:
+    sink: The Ops.SINK rooting the Kernel graph.
+    opts: The Renderer (can change how things are processed, fix this).
+
+  Returns:
+    Linear program in UOps.
+  """
+
   lst = list(full_rewrite_to_sink(sink, opts, linearizer=True).arg.lst)
   if __debug__: type_verify(lst)
   return lst
