@@ -74,10 +74,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   tag:Any = None
   children:set[weakref.ref[UOp]] = field(default_factory=set)
   def __del__(self):
-    if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
-    if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg, self.tag))) is not None:
-      for s in self.src: s.children.discard(ref)
-      del UOpMetaClass.ucache[k]
+    if Ops is not None and self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
+    try:
+      if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg, self.tag))) is not None:
+        for s in self.src: s.children.discard(ref)
+        del UOpMetaClass.ucache[k]
+    except AttributeError: pass
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
     if self.op is Ops.BUFFER and self.realized is not None and PICKLE_BUFFERS: args.append(self.realized)
