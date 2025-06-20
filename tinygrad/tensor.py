@@ -2002,7 +2002,7 @@ class Tensor(MathTrait):
     block_hashes = data.keccak("shake_128").reshape(blocks, 16)
     return block_hashes.reshape(bs, 4096).keccak("shake_128").reshape(bs, 16)
 
-  def hash(self) -> Tensor:
+  def hash(self, return_tree:bool=False) -> Tensor|dict[int, Tensor]:
     """
     Calculates a 16-byte hash of the tensor.
 
@@ -2014,14 +2014,19 @@ class Tensor(MathTrait):
     # calculate hashes in blocks of 1mb
     data = self.bitcast(dtypes.uint8).flatten()
 
-    blocks, first = math.ceil(data.shape[0] / (1024 * 1024)), True
-    while blocks >= 1 or first:
+    base_chunks = math.ceil(data.shape[0] / (1024 * 1024))
+    tree_depth = math.ceil(math.log(base_chunks, 65536)) if base_chunks > 1 else 0
+
+    tree = {}
+    blocks = math.ceil(data.shape[0] / (1024 * 1024))
+    for i in range(tree_depth + 1):
       if data.shape[0] % (1024 * 1024) != 0: data = data.pad(((0, (1024 * 1024) - data.shape[0] % (1024 * 1024))))
       data = data.reshape(blocks, 1024 * 1024)
       data = data._hash_1mb().reshape(blocks, 16).flatten().kernelize()
-      blocks, first = data.shape[0] // (1024 * 1024), False
+      blocks = math.ceil(data.shape[0] / (1024 * 1024))
+      tree[i] = data.reshape(-1, 16)
 
-    return data.reshape(16)
+    return data.reshape(16) if not return_tree else tree
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
     m = self - self.max(axis=axis, keepdim=True).detach()

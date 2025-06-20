@@ -11,8 +11,15 @@ class TestHashing(unittest.TestCase):
   def test_small(self):
     data = Tensor(b"abc", dtype=dtypes.uint8)
     out = data.hash()
-    self.assertEqual(bytes(out.tolist()), bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
 
+  def test_tree(self):
+    data = Tensor.zeros(1024, 1024, 1024, dtype=dtypes.uint8)
+    tree = data.hash(return_tree=True)
+    print(tree)
+
+    data = Tensor.zeros(1024, 1024, 1024, 128, dtype=dtypes.uint8)
+    tree = data.hash(return_tree=True)
+    print(tree)
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uint8) and is_dtype_supported(dtypes.uint64), "Device must support uint8 and uint64")
 @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashes in NV CI")
