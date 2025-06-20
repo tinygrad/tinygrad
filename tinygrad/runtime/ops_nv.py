@@ -59,7 +59,7 @@ class QMD:
     self.mv[lo//8:hi//8+1] = int((num & ~mask) | ((value << (lo % 8)) & mask)).to_bytes((hi//8 - lo//8 + 1), "little")
 
   def write(self, **kwargs):
-    for k,val in kwargs.items(): self._rw_bits(*QMD.fields[self.pref][k.upper()], value=val)
+    for k,val in kwargs.items(): self._rw_bits(*QMD.fields[self.pref][k.upper()], val)
 
   def read(self, k, val=0): return self._rw_bits(*QMD.fields[self.pref][k.upper()])
 
@@ -281,7 +281,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
   def _free(self, opaque:HCQBuffer, options:BufferSpec):
     try:
       self.dev.synchronize()
-      self.dev._gpu_free(opaque)
+      self.dev.iface._gpu_free(opaque)
     except AttributeError: pass
 
   def map(self, buf:HCQBuffer): self.dev.iface._gpu_map(buf._base if buf._base is not None else buf)
