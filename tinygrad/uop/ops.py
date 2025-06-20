@@ -797,15 +797,19 @@ class TrackedPatternMatcher(PatternMatcher):
 
 if TRACK_MATCH_STATS or PROFILE:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
-  import atexit
+  import atexit, shutil, multiprocessing
+  # clean up the rewrites dir (TODO: do this without checking for MainProcess)
+  rewrites_dir = temp("rewrite_stats", append_user=True)
+  if multiprocessing.current_process().name == "MainProcess":
+    if os.path.isdir(rewrites_dir): shutil.rmtree(rewrites_dir)
+    os.makedirs(rewrites_dir)
   @atexit.register
   def print_match_stats():
-    if not TRACK_MATCH_STATS: return None
     if TRACK_MATCH_STATS >= 2:
-      with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
+      with open(fn:=os.path.join(rewrites_dir, f"pid_{os.getpid()}"), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
-    if VIZ: launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
+    if VIZ: launch_viz("VIZ", rewrites_dir)
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):

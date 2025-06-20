@@ -172,6 +172,13 @@ def reloader():
 
 def load_pickle(path:str):
   if path is None or not os.path.exists(path): return None
+  if os.path.isdir(path):
+    with os.scandir(path) as it:
+      ret = []
+      for e in it:
+        try: ret.append(load_pickle(e.path))
+        except EOFError: continue # skip incomplete files.
+    return ret
   with open(path, "rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
@@ -191,9 +198,10 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
+  all_ctxs, profile = load_pickle(args.kernels), load_pickle(args.profile)
 
   # NOTE: this context is a tuple of list[keys] and list[values]
+  contexts = [tuple(e for t in proc for e in t) for proc in zip(*all_ctxs)] if all_ctxs is not None else None
   ctxs = get_metadata(*contexts) if contexts is not None else []
 
   perfetto_profile = to_perfetto(profile) if profile is not None else None
