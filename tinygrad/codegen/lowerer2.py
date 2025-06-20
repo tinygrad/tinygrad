@@ -14,7 +14,7 @@ def add_store_indexing(ctx:LowererContext, store:UOp, buf:UOp):
   # this is always contiguous
   st = ShapeTracker.from_shape(store.src[1].shape)
   # create the output range
-  ctx.current_range = [UOp.range(dtypes.int, s, i) if s != 1 else UOp.const(dtypes.int, 1) for i,s in enumerate(st.shape)]
+  ctx.current_range = [UOp.range(dtypes.int, s, i) for i,s in enumerate(st.shape)]
   ctx.range_number = _count_ranges(ctx.current_range)
   idx, valid = st.to_indexed_uops(ctx.current_range)
   return store.replace(src=(buf.index(idx, valid),)+store.src[1:])
