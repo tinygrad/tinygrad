@@ -4,7 +4,7 @@ import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertoo
 from typing import Callable, Any
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm, to_function_name
 from tinygrad.engine.kernelize import get_kernelize_map
-from tinygrad.codegen.kernel import Kernel
+from tinygrad.opt.kernel import Kernel
 from tinygrad.uop.ops import UOp, Ops
 
 # *** process replay settings

@@ -3,7 +3,7 @@ from tinygrad.runtime.support.hip_comgr import compile_hip
 from tinygrad import Tensor
 from tinygrad.device import Device
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.codegen.kernel import Kernel
+from tinygrad.opt.kernel import Kernel
 
 class TestHIPCompileSpeed(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT != "HIP", "only run on HIP")
