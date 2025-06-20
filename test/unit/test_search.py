@@ -1,8 +1,8 @@
 import unittest
 from tinygrad import Tensor, Device
-from tinygrad.codegen.kernel import Kernel
+from tinygrad.opt.kernel import Kernel
 from tinygrad.device import Buffer
-from tinygrad.engine.search import get_test_global_size, bufs_from_lin
+from tinygrad.opt.search import get_test_global_size, bufs_from_lin
 from tinygrad.helpers import GlobalCounters
 from extra.optimization.helpers import time_linearizer
 
