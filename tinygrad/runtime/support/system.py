@@ -3,7 +3,7 @@ from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.helpers import round_up, to_mv, getenv
 from tinygrad.runtime.autogen import libc, vfio
 
-MAP_FIXED, MAP_LOCKED = 0x10, 0x2000
+MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
 class _System:
   def __init__(self): self.pagemap = None
 
@@ -13,16 +13,11 @@ class _System:
       if FileIOInterface(reloc_sysfs:="/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read()[0] != "0":
         os.system(cmd:=f"sudo sh -c 'echo 0 > {reloc_sysfs}'")
         assert FileIOInterface(reloc_sysfs, os.O_RDONLY).read()[0] == "0", f"Failed to disable migration of locked pages. Please run {cmd} manually."
-
       self.pagemap = FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
-    
-    size = round_up(size, mmap.PAGESIZE)
 
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
-
-    flags = libc.MAP_HUGETLB if contiguous and size > 0x1000 else 0
-    flags = MAP_FIXED if vaddr else 0
-    va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | flags, 0)
+    flags = (libc.MAP_HUGETLB if contiguous and size > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
+    va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
 
     if data is not None: to_mv(va, len(data))[:] = data
 
@@ -48,7 +43,7 @@ class _System:
       vfio.VFIO_CHECK_EXTENSION(vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
 
       return vfio_fd
-    except OSError as e: return None
+    except OSError: return None
 
 System = _System()
 
@@ -95,5 +90,4 @@ class PCIDevice:
   def map_bar(self, bar, off=0, addr=0, size=None, fmt='B') -> MMIOInterface:
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
-    assert loc != 0xffffffffffffffff, f"Failed to mmap {size} bytes at {hex(addr)}"
     return MMIOInterface(loc, sz, fmt=fmt)
