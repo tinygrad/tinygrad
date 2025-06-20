@@ -59,7 +59,7 @@ class QMD:
     self.mv[lo//8:hi//8+1] = int((num & ~mask) | ((value << (lo % 8)) & mask)).to_bytes((hi//8 - lo//8 + 1), "little")
 
   def write(self, **kwargs):
-    for k,val in kwargs.items(): self._rw_bits(*QMD.fields[self.pref][k.upper()], value=val) # type: ignore [call-arg]
+    for k,val in kwargs.items(): self._rw_bits(*QMD.fields[self.pref][k.upper()], value=val) # type: ignore [misc]
 
   def read(self, k, val=0): return self._rw_bits(*QMD.fields[self.pref][k.upper()])
 
