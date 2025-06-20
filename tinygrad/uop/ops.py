@@ -708,7 +708,7 @@ class PatternMatcher:
     ler = {u.op for u in uop.src}
     for _,match,early_reject in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
-      if (ret:=match(uop, ctx)) is not None: return ret
+      if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
     return None
 
   def fixed_point_rewrite(self, uop:UOp, ctx=None) -> UOp:
