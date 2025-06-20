@@ -63,8 +63,8 @@ def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> tuple[list[T], list[T]
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
-def get_single_element(x:list[T]) -> T:
-  assert len(x) == 1, f"list {x} must only have 1 element"
+def get_single_element(x:Sequence[T]) -> T:
+  assert len(x) == 1, f"{x} must only have 1 element"
   return x[0]
 def get_child(obj, key):
   for k in key.split('.'):
@@ -298,7 +298,7 @@ def mv_address(mv): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
 def to_char_p_p(options: list[bytes], to_type=ctypes.c_char):
   return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
 @functools.cache
-def init_c_struct_t(fields: tuple[tuple[str, ctypes._SimpleCData], ...]):
+def init_c_struct_t(fields: tuple[tuple[str, type[ctypes._SimpleCData]], ...]):
   class CStruct(ctypes.Structure):
     _pack_, _fields_ = 1, fields
   return CStruct
