@@ -3,7 +3,7 @@ import ctypes, time, contextlib, importlib, functools, os, array, gzip, struct, 
 from tinygrad.runtime.autogen.nv import nv
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, round_up, round_down, mv_address
 from tinygrad.runtime.support.hcq import FileIOInterface
-from tinygrad.runtime.support.nvd import alloc_sysmem
+from tinygrad.runtime.support.system import System
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.autogen import nv_gpu
 from tinygrad.device import CPUProgram
@@ -128,7 +128,7 @@ class NV_FLCN:
       patched_image[(cmd_off:=self.desc_v3.IMEMLoadSize+dmem.cmd_in_buffer_offset) : cmd_off+len(cmd)] = cmd
       patched_image[(sig_off:=self.desc_v3.IMEMLoadSize+self.desc_v3.PKCDataOffset) : sig_off+0x180] = signature[0x180:]
 
-      return alloc_sysmem(len(patched_image), contigous=True, data=patched_image)
+      return System.alloc_sysmem(len(patched_image), contiguous=True, data=patched_image)
 
     self.frts_image_va, self.frts_image_sysmem = __patch(0x15, bytes(frts_cmd))
 
@@ -141,7 +141,7 @@ class NV_FLCN:
 
     patched_image = bytearray(image)
     patched_image[patch_loc:patch_loc+sig_len] = sig[:sig_len]
-    self.booter_image_va, self.booter_image_sysmem = alloc_sysmem(len(patched_image), contigous=True, data=patched_image)
+    self.booter_image_va, self.booter_image_sysmem = System.alloc_sysmem(len(patched_image), contiguous=True, data=patched_image)
     _, _, self.booter_data_off, self.booter_data_sz, _, self.booter_code_off, self.booter_code_sz, _, _ = struct.unpack("9I", header)
 
   def init_hw(self):
@@ -268,7 +268,7 @@ class NV_GSP:
     # Alloc queues
     pte_cnt = ((queue_pte_cnt:=(queue_size * 2) // 0x1000)) + round_up(queue_pte_cnt * 8, 0x1000) // 0x1000
     pt_size = round_up(pte_cnt * 8, 0x1000)
-    queues_va, queues_sysmem = alloc_sysmem(pt_size + queue_size * 2, contigous=False)
+    queues_va, queues_sysmem = System.alloc_sysmem(pt_size + queue_size * 2, contiguous=False)
 
     # Fill up ptes
     for i, sysmem in enumerate(queues_sysmem): to_mv(queues_va + i * 0x8, 0x8).cast('Q')[0] = sysmem
@@ -288,8 +288,8 @@ class NV_GSP:
     self.cmd_q = NVRpcQueue(self, self.cmd_q_va, None)
 
   def init_libos_args(self):
-    _, logbuf_sysmem = alloc_sysmem((2 << 20), contigous=True)
-    libos_args_va, self.libos_args_sysmem = alloc_sysmem(0x1000, contigous=True)
+    _, logbuf_sysmem = System.alloc_sysmem((2 << 20), contiguous=True)
+    libos_args_va, self.libos_args_sysmem = System.alloc_sysmem(0x1000, contiguous=True)
 
     libos_structs = (nv.LibosMemoryRegionInitArgument * 6).from_address(libos_args_va)
     for i, name in enumerate(["INIT", "INTR", "RM", "MNOC", "KRNL"]):
@@ -311,7 +311,7 @@ class NV_GSP:
     for i in range(3, 0, -1): npages[i-1] = ((npages[i] - 1) >> (nv.LIBOS_MEMORY_REGION_RADIX_PAGE_LOG2 - 3)) + 1
 
     offsets = [sum(npages[:i]) * 0x1000 for i in range(4)]
-    radix_va, self.gsp_radix3_sysmem = alloc_sysmem(offsets[-1] + len(self.gsp_image), contigous=False)
+    radix_va, self.gsp_radix3_sysmem = System.alloc_sysmem(offsets[-1] + len(self.gsp_image), contiguous=False)
 
     # Copy image
     to_mv(radix_va + offsets[-1], len(self.gsp_image))[:] = self.gsp_image
@@ -322,12 +322,12 @@ class NV_GSP:
       to_mv(radix_va + offsets[i], npages[i+1] * 8).cast('Q')[:] = array.array('Q', self.gsp_radix3_sysmem[cur_offset:cur_offset+npages[i+1]])
 
     # Copy signature
-    self.gsp_signature_va, self.gsp_signature_sysmem = alloc_sysmem(len(signature), contigous=True, data=signature)
+    self.gsp_signature_va, self.gsp_signature_sysmem = System.alloc_sysmem(len(signature), contiguous=True, data=signature)
 
   def init_boot_binary_image(self):
     self.booter_image = self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "ucode_image_prod_data")
     self.booter_desc = nv.RM_RISCV_UCODE_DESC.from_buffer_copy(self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "ucode_desc_prod_data"))
-    _, self.booter_sysmem = alloc_sysmem(len(self.booter_image), contigous=True, data=self.booter_image)
+    _, self.booter_sysmem = System.alloc_sysmem(len(self.booter_image), contiguous=True, data=self.booter_image)
 
   def init_wpr_meta(self):
     self.init_gsp_image()
@@ -350,43 +350,43 @@ class NV_GSP:
     res, prom = {}, nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(entryCount=len(ctxbufs), engineType=0x1, hChanClient=client, hObject=obj)
     for i,(buf,desc) in enumerate(ctxbufs.items()):
       use_v, use_p = (desc.v if virt is None else virt), (desc.p if phys is None else phys)
-      x = (bufs or {}).get(buf, self.nvdev.mm.valloc(desc.size, contigous=True)) # allocate buffers
+      x = (bufs or {}).get(buf, self.nvdev.mm.valloc(desc.size, contiguous=True)) # allocate buffers
       prom.promoteEntry[i] = nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY(bufferId=buf, gpuVirtAddr=x.va_addr if use_v else 0, bInitialize=use_p,
         gpuPhysAddr=x.paddrs[0][0] if use_p else 0, size=desc.size if use_p else 0, physAttr=0x4 if use_p else 0, bNonmapped=(use_p and not use_v))
       res[buf] = x
-    self.rpc_rm_control(hObject=subdevice, cmd=nv_gpu.NV2080_CTRL_CMD_GPU_PROMOTE_CTX, params=prom)
+    self.rpc_rm_control(hObject=subdevice, cmd=nv_gpu.NV2080_CTRL_CMD_GPU_PROMOTE_CTX, params=prom, client=client)
     return res
 
   def init_golden_image(self):
-    self.root_class = self.rpc_rm_alloc(hParent=0x0, hClass=0x0, params=nv_gpu.NV0000_ALLOC_PARAMETERS())
-    self.device = self.rpc_rm_alloc(hParent=self.client, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(hClientShare=self.client))
-    self.subdevice = self.rpc_rm_alloc(hParent=self.device, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS()) 
-    self.vaspace = self.rpc_rm_alloc(hParent=self.device, hClass=nv_gpu.FERMI_VASPACE_A, params=nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS())
+    self.rpc_rm_alloc(hParent=0x0, hClass=0x0, params=nv_gpu.NV0000_ALLOC_PARAMETERS())
+    dev = self.rpc_rm_alloc(hParent=self.priv_client, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(hClientShare=self.priv_client))
+    subdev = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS()) 
+    vaspace = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.FERMI_VASPACE_A, params=nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS())
 
     # reserve 512MB for the reserved PDES
-    resv = self.nvdev.mm.valloc(512 << 20, contigous=True, nomap=True)
+    resv = self.nvdev.mm.valloc(512 << 20, contiguous=True, nomap=True)
 
     bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=(512<<20), numLevelsToCopy=3,
       virtAddrLo=resv.va_addr, virtAddrHi=resv.va_addr+(512<<20)-1)
     for i,pt in enumerate(self.nvdev.mm.page_tables(resv.va_addr)[:3]):
       bufs_p.levels[i] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=pt.paddr, size=0x20 if i == 0 else 0x1000,
         pageShift=47 - (9 * i), aperture=1)
-    self.rpc_rm_control(hObject=self.vaspace, cmd=0x90f10106, params=bufs_p)
+    self.rpc_rm_control(hObject=vaspace, cmd=0x90f10106, params=bufs_p)
 
-    gpfifo_area = self.nvdev.mm.valloc(2<<20, contigous=True)
+    gpfifo_area = self.nvdev.mm.valloc(2<<20, contiguous=True)
     userd = nv_gpu.NV_MEMORY_DESC_PARAMS(base=gpfifo_area.paddrs[0][0] + 0x400 * 8, size=0x400, addressSpace=2, cacheAttrib=0)
     gg_params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(gpFifoOffset=gpfifo_area.va_addr, gpFifoEntries=32, engineType=0x1, cid=3,
-      hVASpace=self.vaspace, userdOffset=(ctypes.c_uint64*8)(0x400 * 8), userdMem=userd, internalFlags=0x1a, flags=0x200320)
-    self.ch_gpfifo = self.rpc_rm_alloc(hParent=self.device, hClass=nv_gpu.AMPERE_CHANNEL_GPFIFO_A, params=gg_params)
+      hVASpace=vaspace, userdOffset=(ctypes.c_uint64*8)(0x400 * 8), userdMem=userd, internalFlags=0x1a, flags=0x200320)
+    ch_gpfifo = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.AMPERE_CHANNEL_GPFIFO_A, params=gg_params)
 
     self.grctx_bufs = {0: GRBufDesc(0x237000, p=1, v=1), 1: GRBufDesc(0x6000, p=1, v=1, lc=1), 2: GRBufDesc(0x6000, p=1, v=1),
       3: GRBufDesc(0x3000, p=0, v=1), 4: GRBufDesc(0x20000, p=0, v=1), 5: GRBufDesc(0x2600000, p=0, v=1), 6: GRBufDesc(0x80000, p=0, v=1),
       9: GRBufDesc(0x10000, p=1, v=1), 10: GRBufDesc(0x80000, p=1, v=0), 11: GRBufDesc(0x80000, p=1, v=1)}
 
-    self.promote_ctx(self.client, self.subdevice, self.ch_gpfifo, {k:v for k, v in self.grctx_bufs.items() if v.lc == 0})
+    self.promote_ctx(self.priv_client, subdev, ch_gpfifo, {k:v for k, v in self.grctx_bufs.items() if v.lc == 0})
 
-    self.rpc_rm_alloc(hParent=self.ch_gpfifo, hClass=nv_gpu.ADA_COMPUTE_A, params=None)
-    self.rpc_rm_alloc(hParent=self.ch_gpfifo, hClass=nv_gpu.AMPERE_DMA_COPY_B, params=None)
+    self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=nv_gpu.ADA_COMPUTE_A, params=None)
+    self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=nv_gpu.AMPERE_DMA_COPY_B, params=None)
 
   def init_hw(self):
     self.stat_q = NVRpcQueue(self, self.stat_q_va, self.cmd_q_va)
@@ -396,47 +396,48 @@ class NV_GSP:
     print("GSP init done")
 
     self.nvdev.NV_PBUS_BAR1_BLOCK.write(mode=0, target=0, ptr=0)
-    self.client = 0xc1e00004
+    self.priv_client = 0xc1e00004
     self.init_golden_image()
 
   ### RPCs
 
-  def rpc_rm_alloc(self, hParent, hClass, params) -> int:
+  def rpc_rm_alloc(self, hParent, hClass, params, client=None) -> int:
     if hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A:
-      ramfc_alloc = self.nvdev.mm.valloc(0x1000, contigous=True)
+      ramfc_alloc = self.nvdev.mm.valloc(0x1000, contiguous=True)
       params.ramfcMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x200, addressSpace=2, cacheAttrib=0)
       params.instanceMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x1000, addressSpace=2, cacheAttrib=0)
 
-      method_va, method_sysmem = alloc_sysmem(0x5000, contigous=True)
+      method_va, method_sysmem = System.alloc_sysmem(0x5000, contiguous=True)
       params.mthdbufMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=method_sysmem[0], size=0x5000, addressSpace=1, cacheAttrib=0)
 
-    alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=self.client, hParent=hParent, hObject=(obj:=next(self.handle_gen)), hClass=hClass, flags=0x0,
-      paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
+      if client is not None and client != self.priv_client and params.hObjectError != 0:
+        params.errorNotifierMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=0, size=0xecc, addressSpace=0, cacheAttrib=0)
+
+        print(hex(params.hUserdMemory[0] + params.userdOffset[0]))
+        params.userdMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=params.hUserdMemory[0] + params.userdOffset[0], size=0x400, addressSpace=2, cacheAttrib=0)
+
+    alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=(client:=client or self.priv_client), hParent=hParent, hObject=(obj:=next(self.handle_gen)),
+      hClass=hClass, flags=0x0, paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.cmd_q.send_rpc(103, bytes(alloc_args) + (bytes(params) if params is not None else b''))
     self.stat_q.wait_resp(103)
 
-    if hClass == 0x0: return self.client # init root, return client
-    if hClass == nv_gpu.FERMI_VASPACE_A and self.client == 0xdead0000:
-      self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr)
+    if hClass == 0x0: return client # init root, return client
+    if hClass == nv_gpu.FERMI_VASPACE_A and client != self.priv_client:
+      self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr, client=client)
     if hClass == nv_gpu.NV20_SUBDEVICE_0: self.subdevice = obj # save subdevice handle
-    if hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A and self.client == 0xdead0000:
-      phys_gr_ctx = self.promote_ctx(self.client, self.subdevice, obj, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
-      self.promote_ctx(self.client, self.subdevice, obj, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
+    if hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A and client != self.priv_client:
+      print("xxx")
+      phys_gr_ctx = self.promote_ctx(client, self.subdevice, obj, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
+      self.promote_ctx(client, self.subdevice, obj, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
     return obj
 
-  def rpc_rm_control(self, hObject, cmd, params):
-    control_args = nv.rpc_gsp_rm_control_v(hClient=self.client, hObject=hObject, cmd=cmd, flags=0x0,
+  def rpc_rm_control(self, hObject, cmd, params, client=None):
+    control_args = nv.rpc_gsp_rm_control_v(hClient=(client:=client or self.priv_client), hObject=hObject, cmd=cmd, flags=0x0,
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.cmd_q.send_rpc(76, bytes(control_args) + (bytes(params) if params is not None else b''))
     return self.stat_q.wait_resp(76)[len(bytes(control_args)):]
 
-  def rpc_rm_dup(self, hParent, hObjectSrc, hObject):
-    params = nv.struct_NVOS55_PARAMETERS_v03_00(hClient=self.client, hClientSrc=self.client, hParent=hParent, hObject=hObject, hObjectSrc=hObjectSrc, flags=0)
-    alloc_args = nv.rpc_dup_object_v(params=params)
-    self.cmd_q.send_rpc(21, bytes(alloc_args))
-    self.stat_q.wait_resp(21)
-
-  def rpc_set_page_directory(self, device, hVASpace, pdir_paddr):
+  def rpc_set_page_directory(self, device, hVASpace, pdir_paddr, client=None):
     # UVM depth   HW level                            VA bits
     # 0           PDE3                                48:47
     # 1           PDE2                                46:38
@@ -446,7 +447,7 @@ class NV_GSP:
     # So, top level is 4 entries. Flags field is all channels, vid mem.
     params = nv.struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(physAddress=pdir_paddr,
       numEntries=4, flags=0x8, hVASpace=hVASpace, pasid=0xffffffff, subDeviceId=1, chId=0)
-    alloc_args = nv.rpc_set_page_directory_v(hClient=self.client, hDevice=device, pasid=0xffffffff, params=params)
+    alloc_args = nv.rpc_set_page_directory_v(hClient=client or self.priv_client, hDevice=device, pasid=0xffffffff, params=params)
     self.cmd_q.send_rpc(54, bytes(alloc_args))
     self.stat_q.wait_resp(54)
 

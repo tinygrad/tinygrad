@@ -20,7 +20,7 @@ from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.autogen import libc, pci
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMapping
-from tinygrad.runtime.support.nvd import alloc_sysmem
+from tinygrad.runtime.support.system import System
 from hexdump import hexdump
 
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
@@ -37,11 +37,11 @@ NV_PFAULT_ACCESS_TYPE = {dt:name.split("_")[-1] for name,dt in nv_gpu.__dict__.i
 #   ret = fd.ioctl((3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord('F') & 0xFF) << 8 | (nr & 0xFF), args)
 #   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
 
-def rm_alloc(dev, clss, root, parent, params): return dev.gsp.rpc_rm_alloc(parent, clss, params)
+def rm_alloc(dev, clss, root, parent, params): return dev.gsp.rpc_rm_alloc(parent, clss, params, client=0xdead0000)
 
 def rm_control(cmd, sttyp, dev, client, obj, **kwargs):
   params = sttyp(**kwargs)
-  x = dev.gsp.rpc_rm_control(obj, cmd, params)
+  x = dev.gsp.rpc_rm_control(obj, cmd, params, client=0xdead0000)
   return type(params).from_buffer_copy(x)
 
 def make_rmctrl_type():
@@ -356,7 +356,7 @@ class NVDDevice(HCQCompiled[NVSignal]):
     #     view=MMIOInterface(am_mapping.va_addr, size, fmt='B'))
 
     cpu_access = True
-    nv_mapping = self.nvdev.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contigous=cpu_access)
+    nv_mapping = self.nvdev.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contiguous=cpu_access)
     if cpu_access: self._map_pci_range(bar=1, off=nv_mapping.paddrs[0][0], addr=nv_mapping.va_addr, size=nv_mapping.size)
     return HCQBuffer(nv_mapping.va_addr, size, meta=NVAllocationMeta(self, [self], nv_mapping, has_cpu_mapping=cpu_access),
       view=MMIOInterface(nv_mapping.va_addr, size, fmt='B') if cpu_access else None)
@@ -461,7 +461,7 @@ class NVDDevice(HCQCompiled[NVSignal]):
 
     # print(hex(gpfifo_area.meta.mapping.va_addr), hex(gpfifo_area.meta.mapping.paddrs[0][0]))
 
-    notifier_va, notifier_sysmem = alloc_sysmem(0x1000, contigous=True)
+    notifier_va, notifier_sysmem = System.alloc_sysmem(0x1000, contiguous=True)
     notifier = nv_gpu.NV_MEMORY_DESC_PARAMS(base=notifier_sysmem[0], size=0x000000ECC, addressSpace=1, cacheAttrib=0)
     self.notifier = to_mv(notifier_va, 0x1000)
 

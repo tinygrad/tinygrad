@@ -5,7 +5,7 @@ from tinygrad.runtime.autogen.nv import nv
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_GSP
-from tinygrad.runtime.support.nvd import alloc_sysmem
+from tinygrad.runtime.support.system import System
 from hexdump import hexdump
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
@@ -181,7 +181,7 @@ class NVMemoryManager:
   @staticmethod
   def alloc_vaddr(size:int, align=0x1000) -> int: return NVMemoryManager.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
-  def valloc(self, size:int, align=0x1000, uncached=False, contigous=False, nomap=False) -> NVMapping:
+  def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False, nomap=False) -> NVMapping:
     # Alloc physical memory and map it to the virtual address
     va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
 
@@ -239,7 +239,7 @@ class NVDev:
     self.chip_name = {0x17: "GA", 0x18: "GH", 0x19: "AD", 0x1A: "GB"}[self.chip_details['architecture']] + str(100+self.chip_details['implementation'])
 
   def _alloc_boot_struct_2(self, struct):
-    va, paddrs = alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contigous=True)
+    va, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
     to_mv(va, sz)[:] = bytes(struct)
     return struct, paddrs[0]
 

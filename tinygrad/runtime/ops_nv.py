@@ -11,10 +11,14 @@ from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, DE
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
-from tinygrad.runtime.autogen import nv_gpu
+from tinygrad.runtime.autogen import nv_gpu, pci, libc
 from tinygrad.runtime.support.elf import elf_loader
+from tinygrad.runtime.support.nv.nvdev import NVDev, NVMapping
 from tinygrad.runtime.support.system import System, PCIDevice
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
+
+@dataclass
+class NVAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:NVMapping; has_cpu_mapping:bool; hMemory:int # noqa: E702
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
 
@@ -451,20 +455,36 @@ class PCIIface:
 
   def __init__(self, dev, dev_id):
     if len(PCIIface.gpus) == 0:
+      System.reserve_hugepages(16)
+
       PCIIface.gpus = System.pci_scan_bus(0x10de, [0x2684])
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('CUDA_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
       PCIIface.gpus = [PCIIface.gpus[x] for x in visible_devices] if visible_devices else PCIIface.gpus
 
     self.pci_dev = PCIDevice(PCIIface.gpus[dev_id], bars=[0, 1], resize_bars=[1])
+    self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
     self.nvdev = NVDev(self.pci_dev.pcibus, self.pci_dev.map_bar(0, fmt='I'), self.pci_dev.map_bar(1))
     self.root, self.gpu_instance = 0xc1000000, 0
+    self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
+
+    # Setup classes for the GPU
+    self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_DMA_COPY_B
+
+  def setup_usermode(self): return 0xce000000, self.pci_dev.map_bar(bar=0, fmt='I', off=0xbb0000, size=0x10000)
+  def setup_vm(self, vaspace): pass
+  def setup_gpfifo_vm(self, gpfifo): pass
 
   def _gpu_alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, map_flags=0, tag="") -> HCQBuffer:
     cpu_access = True # HACK
-    nv_mapping = self.nvdev.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contigous=cpu_access)
-    if cpu_access: self._map_pci_range(bar=1, off=nv_mapping.paddrs[0][0], addr=nv_mapping.va_addr, size=nv_mapping.size)
-    return HCQBuffer(nv_mapping.va_addr, size, meta=NVAllocationMeta(self, [self], nv_mapping, has_cpu_mapping=cpu_access),
-      view=MMIOInterface(nv_mapping.va_addr, size, fmt='B') if cpu_access else None)
+    nv_mapping = self.nvdev.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contiguous=cpu_access)
+    if cpu_access: self.pci_dev.map_bar(bar=1, off=nv_mapping.paddrs[0][0], addr=nv_mapping.va_addr, size=nv_mapping.size)
+    return HCQBuffer(nv_mapping.va_addr, size, view=MMIOInterface(nv_mapping.va_addr, size, fmt='B') if cpu_access else None,
+      meta=NVAllocationMeta(self, [self], nv_mapping, has_cpu_mapping=cpu_access, hMemory=nv_mapping.paddrs[0][0]))
+
+  def _gpu_map(self, mem:HCQBuffer): pass
+
+  def rm_alloc(self, parent, clss, params=None, root=None) -> int: return self.nvdev.gsp.rpc_rm_alloc(parent, clss, params, client=self.root)
+  def rm_control(self, obj, cmd, params=None): return type(params).from_buffer_copy(self.nvdev.gsp.rpc_rm_control(obj, cmd, params, client=self.root))
 
 class NVDevice(HCQCompiled[NVSignal]):
   devices: ClassVar[list[HCQCompiled]] = []
@@ -487,7 +507,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.iface.gpu_instance, hClientShare=self.iface.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
     self.nvdevice = self.iface.rm_alloc(self.iface.root, nv_gpu.NV01_DEVICE_0, device_params)
-    self.subdevice = self.iface.rm_alloc(self.nvdevice, nv_gpu.NV20_SUBDEVICE_0)
+    self.subdevice = self.iface.rm_alloc(self.nvdevice, nv_gpu.NV20_SUBDEVICE_0, nv_gpu.NV2080_ALLOC_PARAMETERS())
     self.usermode, self.gpu_mmio = self.iface.setup_usermode()
     
     self.iface.rm_control(self.subdevice, nv_gpu.NV2080_CTRL_CMD_PERF_BOOST, nv_gpu.NV2080_CTRL_PERF_BOOST_PARAMS(duration=0xffffffff,
@@ -509,15 +529,17 @@ class NVDevice(HCQCompiled[NVSignal]):
     ctxshare = self.iface.rm_alloc(channel_group, nv_gpu.FERMI_CONTEXT_SHARE_A, ctxshare_params)
 
     self.compute_gpfifo = self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0, entries=0x10000, enable_debug=True)
-    self.dma_gpfifo = self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0x100000, entries=0x10000)
+    self.dma_gpfifo = self.compute_gpfifo # self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0x100000, entries=0x10000)
     self.iface.rm_control(channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
 
     self.cmdq_page:HCQBuffer = self.iface._gpu_alloc(0x200000, cpu_access=True)
     self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, base=cast(int, self.cmdq_page.va_addr), wrap=True)
     self.cmdq = MMIOInterface(cast(int, self.cmdq_page.va_addr), 0x200000, fmt='I')
 
-    self.num_gpcs, self.num_tpc_per_gpc, self.num_sm_per_tpc, self.max_warps_per_sm, self.sm_version = self._query_gpu_info('num_gpcs',
-      'num_tpc_per_gpc', 'num_sm_per_tpc', 'max_warps_per_sm', 'sm_version')
+    self.num_gpcs, self.num_tpc_per_gpc, self.num_sm_per_tpc, self.max_warps_per_sm, self.sm_version = 0xc, 0x6, 0x2, 0x30, 0x809
+    # self.num_gpcs, self.num_tpc_per_gpc, self.num_sm_per_tpc, self.max_warps_per_sm, self.sm_version = self._query_gpu_info('num_gpcs',
+    #   'num_tpc_per_gpc', 'num_sm_per_tpc', 'max_warps_per_sm', 'sm_version')
+    # print(hex(self.num_gpcs), hex(self.num_tpc_per_gpc), hex(self.num_sm_per_tpc), hex(self.max_warps_per_sm), hex(self.sm_version))
 
     # FIXME: no idea how to convert this for blackwells
     self.arch: str = "sm_120" if self.sm_version==0xa04 else f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
@@ -537,14 +559,16 @@ class NVDevice(HCQCompiled[NVSignal]):
     comp = self.iface.rm_alloc(gpfifo, self.iface.compute_class)
     self.iface.rm_alloc(gpfifo, self.iface.dma_class)
 
-    if enable_debug:
-      self.debug_compute_obj, self.debug_channel = comp, gpfifo
-      debugger_params = nv_gpu.NV83DE_ALLOC_PARAMETERS(hAppClient=self.iface.root, hClass3dObject=self.debug_compute_obj)
-      self.debugger = self.iface.rm_alloc(self.nvdevice, nv_gpu.GT200_DEBUGGER, debugger_params)
+    # if enable_debug:
+    #   self.debug_compute_obj, self.debug_channel = comp, gpfifo
+    #   debugger_params = nv_gpu.NV83DE_ALLOC_PARAMETERS(hAppClient=self.iface.root, hClass3dObject=self.debug_compute_obj)
+    #   self.debugger = self.iface.rm_alloc(self.nvdevice, nv_gpu.GT200_DEBUGGER, debugger_params)
 
-    self.iface.rm_control(gpfifo, nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN,
-      ws_token_params:=nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS(workSubmitToken=-1))
+    ws_token_params = self.iface.rm_control(gpfifo, nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN,
+      nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS(workSubmitToken=-1))
     self.iface.setup_gpfifo_vm(gpfifo)
+
+    print(hex(ws_token_params.workSubmitToken))
 
     return GPFifo(ring=MMIOInterface(gpfifo_area.va_addr + offset, entries*8, fmt='Q'), entries_count=entries, token=ws_token_params.workSubmitToken,
                   controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.va_addr + offset + entries * 8))

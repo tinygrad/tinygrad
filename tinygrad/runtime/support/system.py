@@ -3,12 +3,12 @@ from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.helpers import getenv, round_up, DEBUG, to_mv
 from tinygrad.runtime.autogen import libc
 
-MAP_LOCKED = 0x2000
+MAP_FIXED, MAP_LOCKED = 0x10, 0x2000
 class _System:
   def __init__(self): self.pagemap = None
 
-  def enable_hugepages(self, cnt): os.system(f"sudo sh -c 'echo {cnt} > /proc/sys/vm/nr_hugepages'")
-  def alloc_sysmem(self, size, contiguous=False, data:bytes=None) -> tuple[int, list[int]]:
+  def reserve_hugepages(self, cnt): os.system(f"sudo sh -c 'echo {cnt} > /proc/sys/vm/nr_hugepages'")
+  def alloc_sysmem(self, size, vaddr=0, contiguous=False, data:bytes=None) -> tuple[int, list[int]]:
     if self.pagemap is None:
       # Disable migration of locked pages
       if FileIOInterface(reloc_sysfs:="/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read()[0] != "0":
@@ -22,7 +22,9 @@ class _System:
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes <= 2 MiB"
 
     flags = libc.MAP_HUGETLB if contiguous and size > 0x1000 else 0
-    va = FileIOInterface.anon_mmap(0, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | flags, 0)
+    flags |= MAP_FIXED if vaddr else 0
+    va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | flags, 0)
+    assert va != 0xffffffffffffffff, f"Failed to mmap {size} bytes at {hex(va)}"
 
     # Read pagemap to get the physical address of each page. The pages are locked.
     self.pagemap.seek(va // mmap.PAGESIZE * 8)

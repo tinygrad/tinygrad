@@ -4,26 +4,26 @@ from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.helpers import getenv, round_up, DEBUG, to_mv
 from tinygrad.runtime.autogen import libc
 
-MAP_LOCKED = 0x2000
-def alloc_sysmem(size, contigous=False, data:bytes=None):
-  if getattr(alloc_sysmem, "pagemap", None) is None: alloc_sysmem.pagemap = FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
+# MAP_LOCKED = 0x2000
+# def alloc_sysmem(size, contigous=False, data:bytes=None):
+#   if getattr(alloc_sysmem, "pagemap", None) is None: alloc_sysmem.pagemap = FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
   
-  size = round_up(size, mmap.PAGESIZE)
+#   size = round_up(size, mmap.PAGESIZE)
 
-  assert not contigous or size <= (2 << 20), "Contiguous allocation is only supported for sizes <= 2 MiB"
-  flags = mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED
+#   assert not contigous or size <= (2 << 20), "Contiguous allocation is only supported for sizes <= 2 MiB"
+#   flags = mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED
 
-  if contigous and size > 0x1000: flags |= libc.MAP_HUGETLB
-  va = FileIOInterface.anon_mmap(0, size, mmap.PROT_READ | mmap.PROT_WRITE, flags, 0)
-  assert va != 0xffffffffffffffff, f"Failed to mmap {size} bytes at {hex(va)}"
+#   if contigous and size > 0x1000: flags |= libc.MAP_HUGETLB
+#   va = FileIOInterface.anon_mmap(0, size, mmap.PROT_READ | mmap.PROT_WRITE, flags, 0)
+#   assert va != 0xffffffffffffffff, f"Failed to mmap {size} bytes at {hex(va)}"
 
-  # Read pagemap to get the physical address of each page. The pages are locked.
-  alloc_sysmem.pagemap.seek(va // mmap.PAGESIZE * 8)
-  if data is not None:
-    assert len(data) <= size, f"Data size {len(data)} exceeds allocated size {size}"
-    to_mv(va, len(data))[:] = data
+#   # Read pagemap to get the physical address of each page. The pages are locked.
+#   alloc_sysmem.pagemap.seek(va // mmap.PAGESIZE * 8)
+#   if data is not None:
+#     assert len(data) <= size, f"Data size {len(data)} exceeds allocated size {size}"
+#     to_mv(va, len(data))[:] = data
 
-  return va, [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', alloc_sysmem.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
+#   return va, [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', alloc_sysmem.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
 # def _download(self, file) -> str:
 #   url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/e8113f665d936d9f30a6d508f3bacd1e148539be/{file}"
