@@ -366,7 +366,7 @@ class DriverIface:
 
     for dev in cast(list[NVDevice], self.dev.devices):
       try: uvm.enable_peer_access(self.fd_uvm, gpuUuidA=self.gpu_uuid, gpuUuidB=dev.iface.gpu_uuid)
-      except RuntimeError as e: raise RuntimeError(f"{e}. Make sure GPUs #{self.iface.gpu_minor} & #{dev.iface.gpu_minor} have P2P enabled.") from e
+      except RuntimeError as e: raise RuntimeError(f"{e}. Make sure GPUs #{self.gpu_minor} & #{dev.iface.gpu_minor} have P2P enabled.") from e
 
   def setup_gpfifo_vm(self, gpfifo):
     uvm.register_channel(self.fd_uvm, gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl.fd, hClient=self.root,
