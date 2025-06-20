@@ -7,7 +7,7 @@ MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000,
 class _System:
   def __init__(self): self.pagemap = None
 
-  def alloc_sysmem(self, size, vaddr=0, contiguous=False, data:bytes=None) -> tuple[int, list[int]]:
+  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[int, list[int]]:
     if self.pagemap is None:
       # Disable migration of locked pages
       if FileIOInterface(reloc_sysfs:="/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read()[0] != "0":
@@ -48,7 +48,7 @@ class _System:
 System = _System()
 
 class PCIDevice:
-  def __init__(self, pcibus, bars, resize_bars=None):
+  def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
     self.pcibus, self.irq_poller = pcibus, None
 
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
@@ -85,9 +85,9 @@ class PCIDevice:
     bar_info = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
     self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
-  def read_config(self, offset, size): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
-  def write_config(self, offset, value, size): self.cfg_fd.write(value.to_bytes(size, byteorder='little'), binary=True, offset=offset)
-  def map_bar(self, bar, off=0, addr=0, size=None, fmt='B') -> MMIOInterface:
+  def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
+  def write_config(self, offset:int, value:int, size:int): self.cfg_fd.write(value.to_bytes(size, byteorder='little'), binary=True, offset=offset)
+  def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
