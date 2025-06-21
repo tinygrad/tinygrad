@@ -6,13 +6,13 @@ from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple,
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported, Device
 
-# https://github.com/onnx/onnx/blob/rel-1.7.0/onnx/onnx.proto#L450-L479
+# https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L500-L544
 data_types: dict[int, DType] = {
   1:dtypes.float32, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:dtypes.int16, 6:dtypes.int32, 7:dtypes.int64,
   9:dtypes.bool, 10:dtypes.float32, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
 }
 
-# https://github.com/onnx/onnx/blob/rel-1.7.0/onnx/onnx.proto#L117-L132
+# https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L128-L145
 attribute_types: dict[int, Callable] = {
   1: lambda a: float(a.f),
   2: lambda a: int(a.i),

@@ -6,7 +6,7 @@ from extra.onnx import data_types
 from hypothesis import given, settings, strategies as st
 import numpy as np
 
-data_types.pop(16) # TODO: this is bf16. Need to add double parsing first.
+data_types.pop(16) # TODO: this is bf16, need to support double parsing first.
 device_supported_dtypes = [odt for odt, dtype in data_types.items() if is_dtype_supported(dtype)]
 device_unsupported_dtypes = [odt for odt, dtype in data_types.items() if not is_dtype_supported(dtype)]
 
