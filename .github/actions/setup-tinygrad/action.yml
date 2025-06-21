@@ -83,6 +83,7 @@ runs:
         python -m venv .venv
         if [[ "$RUNNER_OS" == "Windows" ]]; then
           source .venv/Scripts/activate
+          python -m pip install dawn-python
         else
           . .venv/bin/activate
         fi
@@ -94,6 +95,7 @@ runs:
         python -m venv .venv
         if [[ "$RUNNER_OS" == "Windows" ]]; then
           source .venv/Scripts/activate
+          python -m pip install dawn-python
         else
           . .venv/bin/activate
         fi
