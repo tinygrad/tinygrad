@@ -1,5 +1,5 @@
 import collections, functools, dataclasses
-from typing import Any
+from typing import Any, ClassVar
 from tinygrad.helpers import round_up, getenv
 
 class TLSFAllocator:
@@ -155,6 +155,8 @@ class PageTableTraverseContext:
       self.level_up()
 
 class MemoryManager:
+  va_allocator: ClassVar[TLSFAllocator|None] = None
+
   def __init__(self, dev, vram_size:int, boot_size:int, pt_t, pte_cnt:list[int], pte_covers:list[int], first_lv:int, first_page_lv:int, va_base:int):
     self.dev, self.vram_size, self.va_base = dev, vram_size, va_base
     self.pt_t, self.pte_cnt, self.pte_covers, self.first_page_lv = pt_t, pte_cnt, pte_covers, first_page_lv
@@ -197,8 +199,12 @@ class MemoryManager:
         assert pt.valid(pte_id), f"PTE not mapped: {pt.entry(pte_id):#x}"
         pt.set_entry(pte_id, paddr=0x0, valid=False)
 
+  def on_range_mapped(self): pass
+
   @classmethod
-  def alloc_vaddr(cls, size:int, align=0x1000) -> int: return cls.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
+  def alloc_vaddr(cls, size:int, align=0x1000) -> int:
+    assert cls.va_allocator is not None, "must be set it"
+    return cls.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
   def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False) -> VirtMapping:
     # Alloc physical memory and map it to the virtual address
@@ -228,6 +234,7 @@ class MemoryManager:
     return self.map_range(va, size, paddrs, uncached=uncached)
 
   def vfree(self, vm:VirtMapping):
+    assert self.va_allocator is not None, "must be set it"
     self.unmap_range(vm.va_addr, vm.size)
     self.va_allocator.free(vm.va_addr)
     for paddr, _ in vm.paddrs: self.pa_allocator.free(paddr)
