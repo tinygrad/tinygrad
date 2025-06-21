@@ -35,33 +35,20 @@ class NVPageTableEntry:
   def __init__(self, nvdev, paddr, lv): self.nvdev, self.paddr, self.lv, self.entries = nvdev, paddr, lv, nvdev.vram.view(paddr, 0x1000, fmt='Q')
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
-    uncached = True
-
     if not table:
       assert self.lv >= 3
-      # x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=True, address_sys=paddr >> 12, aperture=1, vol=uncached)
-
-      aper = 2 if system else 0
-      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=True, address_sys=paddr >> 12, aperture=aper, vol=uncached, kind=6)
-
-      if self.lv !=3: self.entries[entry_id] = x
-      else:
-        self.entries[2*entry_id] = x
-        self.entries[2*entry_id+1] = 0
+      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=True, address_sys=paddr >> 12, aperture=2 if system else 0, vol=uncached, kind=6)
     elif self.lv == 3:
-      # assert False
-
       x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=0)
-      self.entries[2*entry_id] = x & 0xffffffffffffffff
-      self.entries[2*entry_id+1] = x >> 64
     else:
       x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_sys=paddr >> 12, aperture=1 if valid else 0, vol=0)
-      self.entries[entry_id] = x
 
-    # print(entry_id, hex(paddr), table, uncached, system, snooped, frag, valid, hex(x))
+    if self.lv !=3: self.entries[entry_id] = x
+    else:
+      self.entries[2*entry_id] = x & 0xffffffffffffffff
+      self.entries[2*entry_id+1] = x >> 64
 
-  def entry(self, entry_id:int) -> int:
-    return (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self.lv == 3 else self.entries[entry_id]
+  def entry(self, entry_id:int) -> int: return (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self.lv == 3 else self.entries[entry_id]
 
   def read_fields(self, entry_id:int) -> dict:
     if self.lv == 3: return self.nvdev.NV_MMU_VER2_DUAL_PDE.decode(self.entry(entry_id))
@@ -69,15 +56,12 @@ class NVPageTableEntry:
     else: return self.nvdev.NV_MMU_VER2_PDE.decode(self.entry(entry_id))
 
   def is_pte(self, entry_id) -> bool: return self.read_fields(entry_id)['is_pte'] if self.lv <= 3 else True
-  def valid(self, entry_id):
-    # print(entry_id, hex(self.paddr), self.lv, self.read_fields(entry_id))
-    if self.is_pte(entry_id): return self.read_fields(entry_id)['valid']
-    elif self.lv == 3: return self.read_fields(entry_id)['aperture_small'] != 0
-    return self.read_fields(entry_id)['aperture'] != 0
 
-  def address(self, entry_id:int) -> int:
-    if self.lv == 3: return self.read_fields(entry_id)['address_small_sys'] << 12
-    return self.read_fields(entry_id)['address_sys'] << 12
+  def valid(self, entry_id):
+    if self.is_pte(entry_id): return self.read_fields(entry_id)['valid']
+    return self.read_fields(entry_id)['aperture_small' if self.lv == 3 else 'aperture'] != 0
+
+  def address(self, entry_id:int) -> int: return self.read_fields(entry_id)['address_small_sys' if self.lv == 3 else 'address_sys'] << 12
 
 class NVMemoryManager(MemoryManager):
   va_allocator = TLSFAllocator((1 << 49), base=1024 << 20) # global for all devices.
@@ -135,7 +119,7 @@ class NVDev:
     return struct, paddrs[0]
 
   def _download(self, file) -> str:
-    url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/ed4be649623435ebb04f5e93f859bf46d977daa4/{file}"
+    url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/e8113f665d936d9f30a6d508f3bacd1e148539be/{file}"
     return fetch(url, subdir="defines").read_text()
 
   def extract_fw(self, file:str, dname:str) -> bytes:

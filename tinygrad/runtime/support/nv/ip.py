@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, time, contextlib, importlib, functools, os, array, gzip, struct, itertools, dataclasses
 from tinygrad.runtime.autogen.nv import nv
-from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, round_up, round_down, mv_address
+from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, round_up, round_down, mv_address, fetch
 from tinygrad.runtime.support.hcq import FileIOInterface
 from tinygrad.runtime.support.system import System
 from tinygrad.runtime.support.elf import elf_loader
@@ -299,11 +299,11 @@ class NV_GSP:
         id8=int.from_bytes(bytes("RMARGS", 'utf-8'), 'big'), pa=self.rm_args_sysmem)
 
   def init_gsp_image(self):
-    fwbytes = FileIOInterface("/lib/firmware/nvidia/560.35.05/gsp_ga10x.bin", os.O_RDONLY).read(binary=True)
+    fw = fetch("https://github.com/NVIDIA/linux-firmware/raw/refs/heads/nvidia-staging/nvidia/ga102/gsp/gsp-570.144.bin", subdir="fw").read_bytes()
 
-    _, sections, _ = elf_loader(fwbytes)
+    _, sections, _ = elf_loader(fw)
     self.gsp_image = next((sh.content for sh in sections if sh.name == ".fwimage"))
-    signature = next((sh.content for sh in sections if sh.name == (".fwsignature_ad10x")))
+    signature = next((sh.content for sh in sections if sh.name == (f".fwsignature_{self.nvdev.chip_name[:4].lower()}x")))
 
     # Build radix3
     npages = [0, 0, 0, round_up(len(self.gsp_image), 0x1000) // 0x1000]
