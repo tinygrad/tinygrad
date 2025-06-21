@@ -28,8 +28,7 @@ PB_INFOS = {
   # TODO: support uint64 parsing (11: "uint64_data") and double parsing (10: "double_data")
   "TensorProto": {1: ("dims", PBType.INT, True), 2: ("data_type", PBType.INT), 4: ("float_data", PBType.FLOATS),
     13: ("external_data", PBType.SUB, True, "StringStringEntryProto"), 14: ("data_location", PBType.INT),
-    5: ("int32_data", PBType.INTS), 7: ("int64_data", PBType.INTS), 8: ("name", PBType.STRING), 9: ("raw_data", PBType.BYTES),
-    11: ("uint64_data", PBType.INTS)},
+    5: ("int32_data", PBType.INTS), 7: ("int64_data", PBType.INTS), 8: ("name", PBType.STRING), 9: ("raw_data", PBType.BYTES)},
   "TensorShapeProtoDimension": {1: ("dim_value", PBType.INT), 2: ("dim_param", PBType.STRING)},
   "TensorShapeProto": {1: ("dim", PBType.SUB, True, "TensorShapeProtoDimension")},
   "ModelProto": {1: ("ir_version", PBType.INT), 5: ("model_version", PBType.INT),
