@@ -3,10 +3,9 @@ import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib, re
 from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch, getbits, to_mv
 from tinygrad.runtime.autogen.nv import nv
 from tinygrad.runtime.support.hcq import MMIOInterface
-from tinygrad.runtime.support.allocator import TLSFAllocator
+from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_GSP
 from tinygrad.runtime.support.system import System
-from tinygrad.runtime.support.driver_common import MemoryManager
 from hexdump import hexdump
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
@@ -81,7 +80,9 @@ class NVPageTableEntry:
     return self.read_fields(entry_id)['address_sys'] << 12
 
 class NVMemoryManager(MemoryManager):
-  va_allocator = TLSFAllocator((1 << 49), base=(512<<20)) # global for all devices.
+  va_allocator = TLSFAllocator((1 << 49), base=1024 << 20) # global for all devices.
+
+  def on_range_mapped(self): self.dev.wreg(0x00B80000 + 0x000030B0, (1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
 class NVDev:
   def __init__(self, devfmt, mmio:MMIOInterface, vram:MMIOInterface):
@@ -92,8 +93,8 @@ class NVDev:
     self.is_booting = False
     self._early_init()
 
-    self.mm = NVMemoryManager(self, self.vram_size, boot_partition_size=(64<<20), pt_t=NVPageTableEntry,
-      pte_cnt=[4, 512, 512, 256, 512], pte_covers=[0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000], first_page_lv=4)
+    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=NVPageTableEntry, pte_cnt=[4, 512, 512, 256, 512],
+      pte_covers=[0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000], first_lv=0, first_page_lv=4, va_base=0)
     self.flcn = NV_FLCN(self)
     self.gsp = NV_GSP(self)
 
@@ -104,8 +105,6 @@ class NVDev:
     self.mmio[addr // 4] = value
     if NV_DEBUG >= 4: print(f"wreg: {hex(addr)} = {hex(value)}")
   def rreg(self, addr): return self.mmio[addr // 4]
-
-  def on_range_mapped(self): self.wreg(0x00B80000 + 0x000030B0, (1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
   def _early_init(self):
     self.include("src/common/inc/swref/published/nv_ref.h")
@@ -118,7 +117,8 @@ class NVDev:
     self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island_addendum.h")
 
     # MMU Init
-    for name in ['NV_MMU_VER2_PTE', 'NV_MMU_VER2_PDE', 'NV_MMU_VER2_DUAL_PDE']: self.__dict__[name] = NVReg(self, 0, 0, fields={})
+    self.reg_names.update(['NV_MMU_VER2_PTE', 'NV_MMU_VER2_PDE', 'NV_MMU_VER2_DUAL_PDE'])
+    for name in ['NV_MMU_VER2_PTE', 'NV_MMU_VER2_PDE', 'NV_MMU_VER2_DUAL_PDE']: self.__dict__[name] = NVReg(self, None, None, fields={})
     self.include("kernel-open/nvidia-uvm/hwref/turing/tu102/dev_mmu.h")
 
     self.vram_size = self.NV_PGC6_AON_SECURE_SCRATCH_GROUP_42.read() << 20
@@ -132,43 +132,35 @@ class NVDev:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/ed4be649623435ebb04f5e93f859bf46d977daa4/{file}"
     return fetch(url, subdir="defines").read_text()
 
-  def extract_fw(self, file, dname):
+  def extract_fw(self, file:str, dname:str) -> bytes:
     # Extracts the firmware binary from the given header
     text = self._download(f"src/nvidia/generated/g_bindata_{file.replace("kgsp", "kgspGet")}_{self.chip_name}.c")
     info, sl = text[text[:text.index(dnm:=f'{file}_{self.chip_name}_{dname}')].rindex("COMPRESSION:"):][:16], text[text.index(dnm) + len(dnm) + 7:]
     image = bytes.fromhex(sl[:sl.find("};")].strip().replace("0x", "").replace(",", "").replace(" ", "").replace("\n", ""))
     return gzip.decompress(struct.pack("<4BL2B", 0x1f, 0x8b, 8, 0, 0, 0, 3) + image) if "COMPRESSION: YES" in info else image
 
-  def include(self, file) -> str:
+  def include(self, file:str):
     if file in self.included_files: return
     self.included_files.add(file)
 
-    txt = self._download(file)
-
-    PARAM = re.compile(r'#define\s+(\w+)\s*\(\s*(\w+)\s*\)\s*(.+)')
-    CONST = re.compile(r'#define\s+(\w+)\s+([0-9A-Fa-fx]+)')
-    BITFLD = re.compile(r'#define\s+(\w+)\s+([0-9\+\-\*\(\)]+):([0-9\+\-\*\(\)]+)')
-
     regs_off = {'NV_PFALCON_FALCON': 0x0, 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': 0x1000, 'NV_PGC6_AON': 0x0,
-      'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': 0x600, 'NV_PFALCON2_FALCON': 0x1000, 'NV_PBUS': 0x0, 'NV_PFB': 0x0,
-      'NV_VIRTUAL_FUNCTION':0x00B80000, 'NV_PMC': 0x0, 'NV_PGSP_QUEUE': 0x0}
+      'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': 0x600, 'NV_PFALCON2_FALCON': 0x1000, 'NV_PBUS': 0x0, 'NV_PFB': 0x0, 'NV_PMC': 0x0, 'NV_PGSP_QUEUE': 0x0,
+      'NV_VIRTUAL_FUNCTION':0xb80000}
 
-    for raw in txt.splitlines():
+    for raw in self._download(file).splitlines():
       if not raw.startswith("#define "): continue
-      if (m := BITFLD.match(raw)): # bitfield match
+
+      if m:=re.match(r'#define\s+(\w+)\s+([0-9\+\-\*\(\)]+):([0-9\+\-\*\(\)]+)', raw): # bitfields
         name, hi, lo = m.groups()
-        for r in self.reg_names:
-          if name.startswith(r+"_"):
-            self.__dict__[r].add_field(name[len(r)+1:].lower(), eval(lo), eval(hi))
-            break
-        if name.startswith("NV_MMU_VER2_"):
-          for r in ['NV_MMU_VER2_PTE', 'NV_MMU_VER2_PDE', 'NV_MMU_VER2_DUAL_PDE']:
-            if name.startswith(r+"_"): self.__dict__[r].add_field(name[len(r)+1:].lower(), eval(lo), eval(hi))
+
+        reg = next((r for r in self.reg_names if name.startswith(r+"_")), None)
+        if reg is not None: self.__dict__[reg].add_field(name[len(reg)+1:].lower(), eval(lo), eval(hi))
         else: self.reg_offsets[name] = (eval(lo), eval(hi))
+
         continue
-      elif (m := PARAM.match(raw)):
+      elif m:=re.match(r'#define\s+(\w+)\s*\(\s*(\w+)\s*\)\s*(.+)', raw): # reg set
         name, value = m.groups()[0], eval(f"lambda {m.groups()[1]}: {m.groups()[2].strip().rstrip('\\').split('/*')[0].rstrip()}")
-      elif (m := CONST.match(raw)): name, value = m.groups()[0], int(m.groups()[1], 0)
+      elif m:=re.match(r'#define\s+(\w+)\s+([0-9A-Fa-fx]+)', raw): name, value = m.groups()[0], int(m.groups()[1], 0) # reg value
       else: continue
 
       reg_pref = next((prefix for prefix in regs_off.keys() if name.startswith(prefix)), None)
@@ -178,6 +170,4 @@ class NVDev:
         fields = {k[len(name)+1:]: v for k, v in self.reg_offsets.items() if k.startswith(name+'_')}
         self.__dict__[name] = NVReg(self, regs_off[reg_pref], value, fields=fields)
         self.reg_names.add(name)
-      else:
-        # assert self.__dict__.get(name) in [None, value], f"Duplicate definition for {name} in {file}"
-        self.__dict__[name] = value
+      else: self.__dict__[name] = value

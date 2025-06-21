@@ -364,7 +364,7 @@ class NV_GSP:
     vaspace = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.FERMI_VASPACE_A, params=nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS())
 
     # reserve 512MB for the reserved PDES
-    resv = self.nvdev.mm.valloc(512 << 20, contiguous=True, nomap=True)
+    resv = self.nvdev.mm.valloc(512 << 20, contiguous=True)
 
     bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=(512<<20), numLevelsToCopy=3,
       virtAddrLo=resv.va_addr, virtAddrHi=resv.va_addr+(512<<20)-1)
