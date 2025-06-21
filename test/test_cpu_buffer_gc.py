@@ -72,7 +72,8 @@ class TestGCCpu(unittest.TestCase):
 
   @skip_if_not_cpu
   def test_subbuffer_chain_gc(self):
-    Tensor.manual_seed(0); _ = Tensor.randn(1)
+    Tensor.manual_seed(0)
+    _ = Tensor.randn(1)
     baseline = bufs_allocated()
     base = Buffer("CPU", 4096, Tensor([0.0]).dtype).allocate()
     v1   = Buffer("CPU", 1024, base.dtype, base=base, offset=0)
@@ -96,7 +97,8 @@ class TestGCCpu(unittest.TestCase):
   def test_thread_buffer_gc(self):
     import threading
 
-    Tensor.manual_seed(0); _ = Tensor.randn(1)
+    Tensor.manual_seed(0)
+    _ = Tensor.randn(1)
     baseline = bufs_allocated()
 
     def worker():
@@ -104,8 +106,10 @@ class TestGCCpu(unittest.TestCase):
         Buffer("CPU", 2048, Tensor([0.0]).dtype).allocate()
 
     th = threading.Thread(target=worker)
-    th.start(); th.join()
-    gc.collect(); gc.collect()
+    th.start()
+    th.join()
+    gc.collect()
+    gc.collect()
 
     self.assertEqual(bufs_allocated() - baseline, 0)
 
