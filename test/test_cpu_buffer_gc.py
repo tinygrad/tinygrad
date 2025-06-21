@@ -54,21 +54,21 @@ class TestGCViz(unittest.TestCase):
     """Run a schedule under VIZ=1 and make sure *all* buffers are gone
     once both the output tensor *and* the schedule list are dropped."""
     with VizEnv("1"):
-        init = bufs_allocated()
+      init = bufs_allocated()
 
-        x  = Tensor.ones(256).contiguous()
-        y  = x + Tensor.ones(256).contiguous()
-        ys = y.schedule()
-        del x
-        run_schedule(ys)
+      x  = Tensor.ones(256).contiguous()
+      y  = x + Tensor.ones(256).contiguous()
+      ys = y.schedule()
+      del x
+      run_schedule(ys)
 
-        import numpy as np, numpy.testing as npt
-        npt.assert_equal(y.numpy(), np.full((256,), 2, dtype=np.float32))
+      import numpy as np, numpy.testing as npt
+      npt.assert_equal(y.numpy(), np.full((256,), 2, dtype=np.float32))
 
-        del y, ys
-        for _ in range(2): gc.collect()
+      del y, ys
+      for _ in range(2): gc.collect()
 
-        self.assertLessEqual(bufs_allocated() - init, 3)
+      self.assertLessEqual(bufs_allocated() - init, 3)
 
   def test_view_buffer_release(self):
     with VizEnv("1"):
