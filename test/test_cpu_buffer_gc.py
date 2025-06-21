@@ -13,8 +13,7 @@ def bufs_allocated() -> int:
 CPU_ONLY = Device.DEFAULT == "CPU"
 
 def skip_if_not_cpu(fn):
-    return unittest.skipUnless(CPU_ONLY, "GC tests run only on CPU backend")(fn)
-  
+  return unittest.skipUnless(CPU_ONLY, "GC tests run only on CPU backend")(fn)
 
 # ---------- tests ------------------------------------------------------------------
 class TestGCCpu(unittest.TestCase):
