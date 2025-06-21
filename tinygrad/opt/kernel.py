@@ -13,9 +13,8 @@ from tinygrad.dtype import ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, unwrap
 from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import strides_for_shape
-from tinygrad.codegen.lowerer import get_contraction
-from tinygrad.engine.kernelize import view_left
+from tinygrad.shape.view import strides_for_shape, get_contraction
+from tinygrad.kernelize.kernelize import view_left
 from tinygrad.codegen import full_rewrite
 
 class KernelOptError(Exception): pass
@@ -566,10 +565,5 @@ class Kernel:
     self.linearize(name_override, ast_transform)
     assert self.uops[-1].op is Ops.SINK, "last uop must be sink"
     src = self.opts.render(self.uops)
-    # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
-    # TODO: these max and min don't work on symbolic, and results are very wrong.
-    mem_bytes = sum(max(x.src[0].dtype.nbytes() for x in group)
-      for _, group in itertools.groupby([x for x in self.ast.toposort() if x.op in GroupOp.Buffer and x.src[0].base.op is Ops.DEFINE_GLOBAL],
-                        key=lambda x: (x.op, x.src[0].base.arg)))
-    return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops, self.applied_opts, mem_bytes,
+    return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops, self.applied_opts,
                        global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
