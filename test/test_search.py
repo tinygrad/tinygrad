@@ -1,8 +1,8 @@
 import unittest
 
-from tinygrad.codegen.kernel import Opt, OptOps, Kernel
+from tinygrad.opt.kernel import Opt, OptOps, Kernel
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.engine.search import bufs_from_lin, actions, beam_search
+from tinygrad.opt.search import bufs_from_lin, actions, beam_search
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
@@ -39,7 +39,7 @@ class TestBEAM(unittest.TestCase):
     a = Tensor.rand(4, 3)
     b = Tensor.rand(3)
     realized_ast, _ = helper_realized_ast(a @ b)
-    from tinygrad.engine.search import get_kernel_actions
+    from tinygrad.opt.search import get_kernel_actions
     lins = get_kernel_actions(Kernel(realized_ast), False).values()
 
     # ensure amt=0 are not duplicated
@@ -57,7 +57,7 @@ class TestBEAM(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_search_over_shape(self):
     from test.test_linearizer import helper_realized_ast
-    from tinygrad.engine.search import get_kernel_actions
+    from tinygrad.opt.search import get_kernel_actions
 
     dtype_pairs = [(tc.dtype_in, tc.dtype_out) for tc in Device[Device.DEFAULT].renderer.tensor_cores]
     multi_shape_dtype_pairs = [dts for dts in dtype_pairs if dtype_pairs.count(dts) > 1]
@@ -74,7 +74,7 @@ class TestBEAM(unittest.TestCase):
 
   def test_get_kernel_actions_preserves_actions_state(self):
     from test.test_linearizer import helper_realized_ast
-    from tinygrad.engine.search import get_kernel_actions
+    from tinygrad.opt.search import get_kernel_actions
     a = Tensor.rand(16, 16)
     b = Tensor.rand(16, 16)
     realized_ast, _ = helper_realized_ast(a @ b)
