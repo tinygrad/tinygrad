@@ -2098,7 +2098,6 @@ class Tensor(MathTrait):
     ```
     """
     if self.ndim == 0: return self
-    axis = self._resolve_dim(axis)
     x = self.transpose(axis, -1)
     last_dim_size = x.shape[-1]
     x_reshaped = x.reshape(-1, last_dim_size)
