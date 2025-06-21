@@ -134,9 +134,9 @@ class PageTableTraverseContext:
     return False
 
   def level_up(self):
-    while (freed:=self._try_free_pt()) or self.pt_stack[-1][1] == self._pt_pte_cnt(self.pt_stack[-1][0].lv):
-      _, pt_cnt, _ = self.pt_stack.pop()
-      if not freed: self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
+    while self._try_free_pt() or self.pt_stack[-1][1] == self._pt_pte_cnt(self.pt_stack[-1][0].lv):
+      pt, pt_cnt, _ = self.pt_stack.pop()
+      if pt_cnt == self._pt_pte_cnt(pt.lv): self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
 
   def next(self, size:int, off=0):
     while size > 0:
@@ -147,7 +147,7 @@ class PageTableTraverseContext:
         while not pt.is_pte(pte_idx): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, self._pt_pte_cnt(pt.lv) - pte_idx)
-      assert entries > 0, "Invalid entries"
+      assert entries > 0, f"Invalid entries {size=:#x}, {pte_covers=:#x}"
       yield off, pt, pte_idx, entries, pte_covers
 
       size, off, self.vaddr = size - entries * pte_covers, off + entries * pte_covers, self.vaddr + entries * pte_covers
