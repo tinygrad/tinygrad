@@ -41,7 +41,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     self.assertEqual(len(runner.graph_inputs), 1)
     self.assertEqual(runner.graph_values['initializer'].dtype, tinygrad_dtype)
 
-  def _test_tensor_attribute_dtype(self, onnx_data_type, tinygrad_dtype):
+  def _test_node_attribute_dtype(self, onnx_data_type, tinygrad_dtype):
     arr = np.array([0, 1], dtype=onnx.helper.tensor_dtype_to_np_dtype(onnx_data_type))
     output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, arr.shape)
     value_tensor = onnx.helper.make_tensor('value', onnx_data_type, arr.shape, arr.tobytes(), raw=True)
@@ -61,16 +61,16 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     tinygrad_dtype = data_types[onnx_data_type]
     self._test_input_spec_dtype(onnx_data_type, tinygrad_dtype)
     self._test_initializer_dtype(onnx_data_type, tinygrad_dtype)
-    self._test_tensor_attribute_dtype(onnx_data_type, tinygrad_dtype)
+    self._test_node_attribute_dtype(onnx_data_type, tinygrad_dtype)
 
-  @unittest.skipIf(not device_unsupported_dtypes, "No unsupported dtypes for this device to test.")
+  @unittest.skipUnless(device_unsupported_dtypes, "No unsupported dtypes for this device to test.")
   @settings(deadline=1000) # TODO investigate unreliable timing
   @given(onnx_data_type=st.sampled_from(device_unsupported_dtypes))
   def test_unsupported_dtype_spec(self, onnx_data_type):
     tinygrad_dtype = dtypes.default_int if dtypes.is_int(data_types[onnx_data_type]) else dtypes.is_float
     self._test_input_spec_dtype(onnx_data_type, tinygrad_dtype)
     self._test_initializer_dtype(onnx_data_type, tinygrad_dtype)
-    self._test_tensor_attribute_dtype(onnx_data_type, tinygrad_dtype)
+    self._test_node_attribute_dtype(onnx_data_type, tinygrad_dtype)
 
 if __name__ == '__main__':
   unittest.main()
