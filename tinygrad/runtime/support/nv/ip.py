@@ -56,6 +56,7 @@ class NVRpcQueue:
 
       # Handling special functions
       if hdr.function == 0x1002: self.gsp.run_cpu_seq(msg)
+      if hdr.function == 0x1006: print(f"GSP LOG: {msg[12:].tobytes().rstrip(b'\0').decode('utf-8', 'replace')}")
 
       # Update the read pointer
       self.rx.readPtr = (self.rx.readPtr + round_up(hdr.length, self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
