@@ -13,7 +13,7 @@ from tinygrad.engine.schedule import ScheduleItem
 # **************** Program Creation ****************
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_program(renderer:Renderer, ast:UOp) -> ProgramSpec:
+def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
   k = Kernel(ast, opts=renderer)
   if not NOOPT:
     if not k.apply_tensor_cores(getenv("TC", 1)): k.apply_opts(hand_coded_optimizations(k))
@@ -109,7 +109,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
-    prg: ProgramSpec = get_program(Device[device].renderer, ast)
+    prg: ProgramSpec = get_program(ast, Device[device].renderer)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
