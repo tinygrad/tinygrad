@@ -25,6 +25,7 @@ class PBType: FLOAT = 1; INT = 2; STRING = 3; FLOATS = 4; INTS = 5; STRINGS = 6;
 PB_INFOS = {
   "OperatorSetIdProto": {1: ("domain", PBType.STRING), 2: ("version", PBType.INT)},
   "StringStringEntryProto": {1: ("key", PBType.STRING), 2: ("value", PBType.STRING)},
+  # TODO: support double parsing, 10: "double_data"
   "TensorProto": {1: ("dims", PBType.INT, True), 2: ("data_type", PBType.INT), 4: ("float_data", PBType.FLOATS),
     13: ("external_data", PBType.SUB, True, "StringStringEntryProto"), 14: ("data_location", PBType.INT),
     5: ("int32_data", PBType.INTS), 7: ("int64_data", PBType.INTS), 8: ("name", PBType.STRING), 9: ("raw_data", PBType.BYTES),
@@ -171,7 +172,6 @@ class OnnxParser:
   def _handle_packed_floats(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
     if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError("Packed floats expected length_delimited")
     value = self._handle_delimited(reader, use_tensor=True)
-    obj[key_name] = value.bitcast(dtypes.float32)
 
   def _handle_sub_message(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
     if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for sub-message field '{key_name}'")
