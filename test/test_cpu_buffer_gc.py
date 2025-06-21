@@ -31,7 +31,8 @@ class TestGCViz(unittest.TestCase):
       base = bufs_allocated()
       t = Tensor.randn(512, 512)
       buf_ref = weakref.ref(t._buffer)
-      del t; gc.collect(); gc.collect()
+      del t; 
+      gc.collect()
       self.assertIsNone(buf_ref())
       self.assertEqual(bufs_allocated() - base, 0)
 
@@ -77,11 +78,11 @@ class TestGCViz(unittest.TestCase):
       view_buf = Buffer(t.device, t.size(), t.dtype,
                         offset=0)
       vref, bref = weakref.ref(view_buf), weakref.ref(base_buf)
-      del view_buf; gc.collect()
+      del view_buf
+      gc.collect()
       # child is freed, base stays
       self.assertIsNone(vref())
       self.assertIsNotNone(bref())
-      # note: we *don’t* assert base disappears immediately; tinygrad caches may hold it
 
   @unittest.skipIf(os.getenv("CI") == "1", "heavy local stress-test")
   def test_visualiser_stress(self):
