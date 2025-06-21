@@ -14,9 +14,10 @@ from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
+from tinygrad.runtime.support.am.amdev import AMDev
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, setup_pci_bars
 from tinygrad.runtime.support.system import System, PCIDevice, MAP_FIXED, MAP_NORESERVE
+from tinygrad.runtime.support.memory import VirtMapping
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -635,7 +636,7 @@ class KFDIface:
     raise RuntimeError("\n".join(report))
 
 @dataclass
-class AMAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:AMMapping; has_cpu_mapping:bool # noqa: E702
+class AMAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:VirtMapping; has_cpu_mapping:bool # noqa: E702
 
 class PCIIface:
   gpus:list[Any] = []
