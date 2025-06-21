@@ -95,10 +95,11 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
 
 # ***** uop type spec *****
 
-def validate_index(idx:UOp, mask:UOp|None=None):
+def validate_index(idx:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
   if IGNORE_OOB or isinstance(idx.dtype, ImageDType) or (sz := cast(PtrDType, idx.src[0].dtype).size) == -1: return True
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
   if 0<=idx.src[1].vmin and idx.src[1].vmax<sz: return True
+  mask = idx.src[2]&gate if len(idx.src)==3 else gate
 
   # WEBGPU has a BITCAST in the index. TODO: fix
   if any(x.op is Ops.BITCAST for x in idx.toposort()): return True
@@ -107,13 +108,22 @@ def validate_index(idx:UOp, mask:UOp|None=None):
   solver = z3.Solver(ctx=z3.Context())
   z3_sink = graph_rewrite(idx.src[1].sink(mask), z3_renderer, ctx=(solver, {}))
   z3_idx = z3_sink.src[0].arg
-  if mask is not None: solver.add(z3_sink.src[1].arg)
+  solver.add(z3_sink.src[1].arg)
   if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
     print(f"idx={idx.src[1].render(simplify=False)}")
-    if mask is not None: print(f"mask={mask.render(simplify=False)}")
+    print(f"mask & gate={mask.render(simplify=False)}")
     print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz}\nconstraints = {solver}")
     return False
   return True
+
+def validate_store(idx:UOp, val:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
+  if gate.op is Ops.IF: gate = gate.src[0]
+  # we need to find the implicit gates, inverse of delete_redundant_gates
+  for u in val.toposort():
+    if u.op is Ops.IF: gate &= u.src[0]
+  return validate_index(idx, gate)
+
+index_pat = UPat(Ops.INDEX, name="idx").or_casted()
 
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
@@ -145,18 +155,19 @@ spec = PatternMatcher([
 
   # INDEX is used in new style load/store
   # INDEX takes a <buf, alu, gate?>
-  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat()), name="idx"), validate_index),
-  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(), UPat(dtype=dtypes.bool, name="mask")), name="idx"), validate_index),
+  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat())), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
 
   # LOAD takes a <bufidx, alt?, barrier?>
-  (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)),)), lambda: True),
-  (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)), UPat((Ops.IF, Ops.BARRIER)))), lambda: True),
-  (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)), UPat.var("alt")), name="ld"), lambda ld,alt: ld.dtype == alt.dtype),
+  (UPat(Ops.LOAD, src=(index_pat,)), validate_index),
+  (UPat(Ops.LOAD, src=(index_pat, UPat(Ops.BARRIER))), validate_index),
+  (UPat(Ops.LOAD, src=(index_pat, UPat(Ops.IF, name="cond"))), lambda idx,cond: validate_index(idx,cond.src[0])),
+  (UPat(Ops.LOAD, src=(index_pat, UPat.var("alt")), name="ld"), lambda ld,alt,idx: ld.dtype == alt.dtype and validate_index(idx)),
 
   # STORE takes a <bufidx, val, gate?>
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat((Ops.INDEX, Ops.CAST)), UPat())), lambda: True),
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat((Ops.INDEX, Ops.CAST)), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat((Ops.INDEX, Ops.CAST)), UPat(), UPat(Ops.IF))), lambda: True),
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"))), validate_store),
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"), UPat(dtype=dtypes.bool, name="gate"))), validate_store),
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate"))), validate_store),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
