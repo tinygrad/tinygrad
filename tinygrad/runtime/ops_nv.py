@@ -301,7 +301,7 @@ class GPFifo:
   put_value: int = 0
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
-class DriverIface:
+class NVKIface:
   root = None
   fd_ctl: FileIOInterface
   fd_uvm: FileIOInterface
@@ -455,6 +455,42 @@ class DriverIface:
 
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
     return NVKIface.low_uvm_vaddr_allocator.alloc(size, alignment) if force_low else NVKIface.uvm_vaddr_allocator.alloc(size, alignment)
+
+class PCIIface:
+  gpus = []
+
+  def __init__(self, dev, dev_id):
+    if len(PCIIface.gpus) == 0:
+      System.reserve_hugepages(16)
+
+      PCIIface.gpus = System.pci_scan_bus(0x10de, [0x2684])
+      visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('CUDA_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
+      PCIIface.gpus = [PCIIface.gpus[x] for x in visible_devices] if visible_devices else PCIIface.gpus
+
+    self.pci_dev = PCIDevice(PCIIface.gpus[dev_id], bars=[0, 1], resize_bars=[1])
+    self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
+    self.nvdev = NVDev(self.pci_dev.pcibus, self.pci_dev.map_bar(0, fmt='I'), self.pci_dev.map_bar(1))
+    self.root, self.gpu_instance = 0xc1000000, 0
+    self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
+
+    # Setup classes for the GPU
+    self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_DMA_COPY_B
+
+  def setup_usermode(self): return 0xce000000, self.pci_dev.map_bar(bar=0, fmt='I', off=0xbb0000, size=0x10000)
+  def setup_vm(self, vaspace): pass
+  def setup_gpfifo_vm(self, gpfifo): pass
+
+  def _gpu_alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, map_flags=0, tag="") -> HCQBuffer:
+    cpu_access = True # HACK
+    nv_mapping = self.nvdev.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contiguous=cpu_access)
+    if cpu_access: self.pci_dev.map_bar(bar=1, off=nv_mapping.paddrs[0][0], addr=nv_mapping.va_addr, size=nv_mapping.size)
+    return HCQBuffer(nv_mapping.va_addr, size, view=MMIOInterface(nv_mapping.va_addr, size, fmt='B') if cpu_access else None,
+      meta=NVAllocationMeta(self, [self], nv_mapping, has_cpu_mapping=cpu_access, hMemory=nv_mapping.paddrs[0][0]))
+
+  def _gpu_map(self, mem:HCQBuffer): pass
+
+  def rm_alloc(self, parent, clss, params=None, root=None) -> int: return self.nvdev.gsp.rpc_rm_alloc(parent, clss, params, client=self.root)
+  def rm_control(self, obj, cmd, params=None): return type(params).from_buffer_copy(self.nvdev.gsp.rpc_rm_control(obj, cmd, params, client=self.root))
 
 class NVDevice(HCQCompiled[NVSignal]):
   devices: ClassVar[list[HCQCompiled]] = []

@@ -1767,6 +1767,23 @@ NVCEC0_QMDV04_01_OUTER_PUT = (3038 , 3008) # macro
 NVCEC0_QMDV04_01_OUTER_OVERFLOW = (3039 , 3039) # macro
 NVCEC0_QMDV04_01_OUTER_GET = (3070 , 3040) # macro
 NVCEC0_QMDV04_01_OUTER_STICKY_OVERFLOW = (3071 , 3071) # macro
+NV01_NULL_OBJECT = (0x0) # macro
+NV1_NULL_OBJECT = (0x0) # macro
+NV01_ROOT = (0x0) # macro
+NV0000_ALLOC_PARAMETERS_MESSAGE_ID = (0x0000) # macro
+class struct_NV0000_ALLOC_PARAMETERS(Structure):
+    pass
+
+struct_NV0000_ALLOC_PARAMETERS._pack_ = 1 # source:False
+struct_NV0000_ALLOC_PARAMETERS._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('processID', ctypes.c_uint32),
+    ('processName', ctypes.c_char * 100),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('pOsPidInfo', ctypes.POINTER(None)),
+]
+
+NV0000_ALLOC_PARAMETERS = struct_NV0000_ALLOC_PARAMETERS
 NV01_DEVICE_0 = (0x00000080) # macro
 # NV0080_MAX_DEVICES = NV_MAX_DEVICES # macro
 NV0080_ALLOC_PARAMETERS_MESSAGE_ID = (0x0080) # macro
