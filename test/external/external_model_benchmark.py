@@ -5,9 +5,10 @@ torch.set_num_threads(1)
 from onnx.helper import tensor_dtype_to_np_dtype
 import onnxruntime as ort
 from onnx2torch import convert
-from tinygrad.frontend.onnx import OnnxRunner, onnx_load
+from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.helpers import OSX, DEBUG, fetch, getenv
 from tinygrad import Tensor, Device
+from extra.onnx_parser import onnx_load
 
 MODELS = {
   "resnet50": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
@@ -63,7 +64,7 @@ def benchmark_model(m, devices, validate_outs=False):
   for device in devices:
     Device.DEFAULT = device
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-    tinygrad_model = OnnxRunner(onnx_model)
+    tinygrad_model = OnnxRunner(fn)
     benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
 
     from tinygrad.engine.jit import TinyJit
@@ -107,7 +108,7 @@ def benchmark_model(m, devices, validate_outs=False):
       rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
       Device.DEFAULT = device
       inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-      tinygrad_model = OnnxRunner(onnx_model)
+      tinygrad_model = OnnxRunner(fn)
       tinygrad_out = tinygrad_model(inputs)
 
       ort_sess = ort.InferenceSession(str(fn), ort_options, ["CPUExecutionProvider"])
