@@ -11,14 +11,15 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
     sink = graph_rewrite(sink, TrackedPatternMatcher(pm.patterns), name=names[i] if names else None)
   return sink
 
-# real VIZ=1 pickles these tracked_* values
+# real VIZ=1 pickles these tracked values
 from tinygrad.viz.serve import get_metadata
-from tinygrad.uop.ops import tracked_keys, tracked_ctxs, _name_cnt
+from tinygrad.uop.ops import tracked_keys, tracked_ctxs, active_rewrites, _name_cnt
 def get_viz_list(): return get_metadata(tracked_keys, tracked_ctxs)
 
 class TestViz(unittest.TestCase):
   def setUp(self):
-    for lst in [tracked_keys, tracked_ctxs, _name_cnt]: lst.clear()
+    # clear the global context
+    for lst in [tracked_keys, tracked_ctxs, active_rewrites, _name_cnt]: lst.clear()
     self.tms = TRACK_MATCH_STATS.value
     TRACK_MATCH_STATS.value = 2
   def tearDown(self): TRACK_MATCH_STATS.value = self.tms
@@ -108,28 +109,41 @@ def branch_rewrite(x:UOp, y:UOp):
   if x.tag is not None: return
   x2 = graph_rewrite(x, leaf, name="leaf_left")
   y2 = graph_rewrite(y, leaf, name="leaf_right")
-  return x2 + y2
+  return x2 * y2
 branch = TrackedPatternMatcher([(UPat.var("x")+UPat.var("y"), branch_rewrite)])
 
 def root_rewrite(root:UOp):
   new_src = tuple(graph_rewrite(b, branch, name=f"branch_{i}") for i,b in enumerate(root.src))
-  return root.replace(src=new_src) if new_src != root.src else None
+  return root.replace(src=new_src)
+root = TrackedPatternMatcher([(UPat(Ops.SINK, src=UPat(Ops.ADD), name="root"), root_rewrite),])
 
-root = PatternMatcher([(UPat(Ops.SINK, name="root"), root_rewrite),])
-@track_rewrites(name=True)
-def tree_rewrite(sink): return graph_rewrite(sink, root, name="root")
+class TestVizTree(TestViz):
+  def assertStepEqual(self, step:dict, want:dict):
+    for k,v in want.items():
+      self.assertEqual(step[k], v, f"failed at '{k}': {v} != {step[k]}\n{step=}")
 
-class TestVizTree(unittest.TestCase):
   def test_tree_view(self):
     a = UOp.variable("a",0,10)
     b = UOp.variable("b",0,10)
     c = UOp.variable("c",0,10)
     d = UOp.variable("d",0,10)
     sink = UOp.sink(a+b, c+d)
-    tree_rewrite(sink)
+    @track_rewrites()
+    def tree_rewrite(): return graph_rewrite(sink, root, name="root")
+    tree_rewrite()
+    lst = get_viz_list()
+    steps = lst[0]["steps"]
+    self.assertEqual(len(steps), 1+2+4)
+    self.assertStepEqual(steps[0], {"name":"root", "depth":0, "match_count":1})
+    self.assertStepEqual(steps[1], {"name":"branch_0", "depth":1, "match_count":1})
+    self.assertStepEqual(steps[2], {"name":"leaf_left", "depth":2, "match_count":1})
+    self.assertStepEqual(steps[3], {"name":"leaf_right", "depth":2, "match_count":1})
+    self.assertStepEqual(steps[4], {"name":"branch_1", "depth":1, "match_count":1})
+    self.assertStepEqual(steps[5], {"name":"leaf_left", "depth":2, "match_count":1})
+    self.assertStepEqual(steps[6], {"name":"leaf_right", "depth":2, "match_count":1})
 
-@track_rewrites(name=True)
-def rewrite(u:UOp): return graph_rewrite(u, root, name="root")
+from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
+from tinygrad.viz.serve import to_perfetto
 
 class TextVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
