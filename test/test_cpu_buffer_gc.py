@@ -33,7 +33,8 @@ class TestGCCpu(unittest.TestCase):
 
   def test_manual_buffer_gc(self):
     import numpy as np
-    Tensor.manual_seed(0); _ = Tensor.randn(1)
+    Tensor.manual_seed(0)
+    _ = Tensor.randn(1)
     baseline = bufs_allocated()
 
     dtype = Tensor([0.0]).dtype
@@ -58,7 +59,8 @@ class TestGCCpu(unittest.TestCase):
     base = t._buffer
     view = Buffer(t.device, t.size(), t.dtype, offset=0)
     vref, bref = weakref.ref(view), weakref.ref(base)
-    del view; gc.collect()
+    del view
+    gc.collect()
     self.assertIsNone(vref())
     self.assertIsNotNone(bref())
 
