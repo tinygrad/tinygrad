@@ -80,6 +80,7 @@ class AMDDriver(VirtDriver):
     self.gpus[gpu_id] = AMDGPU(gpu_id)
     self.tracked_files += [
       VirtFile('/sys/module/amdgpu', functools.partial(TextFileDesc, text="1")),
+      VirtFile('/sys/module/amdgpu/parameters/ppfeaturemask', functools.partial(TextFileDesc, text="0xffff3fff")),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}', functools.partial(DirFileDesc, child_names=['gpu_id', 'properties'])),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/gpu_id', functools.partial(TextFileDesc, text=f"{gpu_id}")),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/properties',

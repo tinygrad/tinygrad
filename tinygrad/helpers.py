@@ -64,8 +64,8 @@ def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> tuple[list[T], list[T]
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
-def get_single_element(x:list[T]) -> T:
-  assert len(x) == 1, f"list {x} must only have 1 element"
+def get_single_element(x:Sequence[T]) -> T:
+  assert len(x) == 1, f"{x} must only have 1 element"
   return x[0]
 def get_child(obj, key):
   for k in key.split('.'):
@@ -75,6 +75,10 @@ def get_child(obj, key):
   return obj
 def word_wrap(x, wrap=80): return x if len(x) <= wrap or '\n' in x[0:wrap] else (x[0:wrap] + "\n" + word_wrap(x[wrap:], wrap))
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
+
+class LazySeq(Generic[T]): # NOTE: Mapping requires __iter__ and __len__, Sequence requires supporting __len__ and slicing in __getitem__
+  def __init__(self, gen:Callable[[int], T]): self.gen = gen
+  def __getitem__(self, idx:int) -> T: return self.gen(idx)
 
 # for length N coefficients `p`, returns p[0] * x**(N-1) + p[1] * x**(N-2) + ... + p[-2] * x + p[-1]
 def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
@@ -118,8 +122,9 @@ PICKLE_BUFFERS, PROFILE, LRU = ContextVar("PICKLE_BUFFERS", 1), ContextVar("PROF
 CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0), ContextVar("DEVECTORIZE", 1)
 DISABLE_COMPILER_CACHE = ContextVar("DISABLE_COMPILER_CACHE", 0)
 DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES = ContextVar("DONT_REALIZE_EXPAND", 0), ContextVar("DONT_GROUP_REDUCES", 0)
-QUANTIZE, VALIDATE_WITH_CPU, IGNORE_OOB = ContextVar("QUANTIZE", 0), ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("IGNORE_OOB", 1)
-CORRECT_DIVMOD_FOLDING = ContextVar("CORRECT_DIVMOD_FOLDING", 0)
+QUANTIZE, VALIDATE_WITH_CPU = ContextVar("QUANTIZE", 0), ContextVar("VALIDATE_WITH_CPU", 0)
+CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
+ALLOW_DEVICE_USAGE = ContextVar("ALLOW_DEVICE_USAGE", 1)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -176,7 +181,7 @@ class Profiling(contextlib.ContextDecorator):
 cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 
-VERSION = 19
+VERSION = 20
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -221,16 +226,12 @@ def diskcache_put(table:str, key:Union[dict, str, int], val:Any, prepickled=Fals
   cur.close()
   return val
 
-def diskcache(func):
-  def wrapper(*args, **kwargs) -> bytes:
+def diskcache(func:Callable[..., T]):
+  def wrapper(*args, **kwargs) -> T:
     table, key = f"cache_{func.__name__}", hashlib.sha256(pickle.dumps((args, kwargs))).hexdigest()
     if (ret:=diskcache_get(table, key)) is not None: return ret
     return diskcache_put(table, key, func(*args, **kwargs))
   return wrapper
-
-# *** process replay ***
-
-CAPTURE_PROCESS_REPLAY = getenv("CAPTURE_PROCESS_REPLAY")
 
 # *** http support ***
 
@@ -291,14 +292,14 @@ def capstone_flatdump(lib: bytes):
 # *** ctypes helpers
 
 # TODO: make this work with read only memoryviews (if possible)
-def from_mv(mv:memoryview, to_type=ctypes.c_char):
+def from_mv(mv:memoryview, to_type:type[ctypes._SimpleCData]=ctypes.c_char) -> ctypes.Array:
   return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type * len(mv))).contents
 def to_mv(ptr:int, sz:int) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
 def mv_address(mv): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
 def to_char_p_p(options: list[bytes], to_type=ctypes.c_char):
   return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
 @functools.cache
-def init_c_struct_t(fields: tuple[tuple[str, ctypes._SimpleCData], ...]):
+def init_c_struct_t(fields: tuple[tuple[str, type[ctypes._SimpleCData]], ...]):
   class CStruct(ctypes.Structure):
     _pack_, _fields_ = 1, fields
   return CStruct

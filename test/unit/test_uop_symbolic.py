@@ -110,6 +110,9 @@ class TestSymbolic(unittest.TestCase):
   def test_neg(self):
     self.helper_test_variable(-Variable("a", 0, 8), -8, 0, "(a*-1)")
 
+  def test_xor_0(self):
+    self.helper_test_variable(Variable("a", 0, 8) ^ 0, 0, 8, "a")
+
   def test_add_1(self):
     self.helper_test_variable(Variable("a", 0, 8)+1, 1, 9, "(a+1)")
 
@@ -268,6 +271,15 @@ class TestSymbolic(unittest.TestCase):
     a = Variable("a", 0, 124)
     self.helper_test_variable(((a-10)//2+10)//2, 2, 33, "((((a+-10)//2)+10)//2)")
 
+  def test_div_const_div_wrong_sign_divisor(self):
+    a = Variable("a", 0, 124)
+    self.helper_test_variable(((a+10)//-2+10)//-4, -1, 14, "(((((a//2)*-1)+5)//4)*-1)")
+
+  def test_neg_mod(self):
+    a = Variable("a", 0, 124)
+    self.helper_test_variable((-a)%4, -3, 0, "((a%4)*-1)")
+    self.helper_test_variable(a%-4, 0, 3, "(a%-4)")
+
   def test_distribute_mul(self):
     self.helper_test_variable(usum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
     self.helper_test_variable((1+Variable("a", 0, 3))*(-2)+12, 4, 10, "((a*-2)+10)")
@@ -398,6 +410,8 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((-Variable("idx", 0, 100)+199)//-4 + 50, 1, 26, "((idx//4)+1)")
     self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "((idx+3)//4)")
     self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, 0, 25, "((idx+2)//4)")
+    self.helper_test_variable((-Variable("idx", 0, 100))//2, -50, 0, "((idx//2)*-1)")
+    self.helper_test_variable(Variable("idx", 0, 100)//-2, -50, 0, "((idx//2)*-1)")
 
   def test_sum_div_big_const(self):
     gidx0 = Variable("gidx0", 0, 24)
@@ -541,6 +555,8 @@ class TestSymbolic(unittest.TestCase):
   def test_idiv_lt(self):
     idx = Variable("idx", 0, 24)
     self.helper_test_variable((idx//4<3), 0, 1, "(idx<12)")
+    self.helper_test_variable(((idx-20)//4<-3), 0, 1, "(idx<5)")
+    self.helper_test_variable(((idx-10)//4<0), 0, 1, "(idx<7)")
     self.helper_test_variable((idx//-4<-3), 0, 1, "(((idx//4)*-1)<-3)")
 
   def test_simplex_lt(self):
@@ -854,6 +870,17 @@ class TestBounds(unittest.TestCase):
     assert (alu0+2559).vmin == 0 and (alu0+2559).vmax == 2559
     assert ((alu0+2559)//-4).vmin == -639 and ((alu0+2559)//-4).vmax == 0
     assert (((alu0+2559)//-4)*(-1)).vmin == 0 and (((alu0+2559)//-4)*(-1)).vmax == 639
+
+class TestFuzzFailure(unittest.TestCase):
+  def test_fuzz_failure1(self):
+    v1=Variable('v1', 0, 8)
+    v2=Variable('v2', 0, 2)
+    v3=Variable('v3', 0, 1)
+    expr = (((((((((((((((((((((((0//4)%2)//8)+-2)+-4)+-3)+v1)+-4)+v2)+-2)+v3)+v2)//3)%7)*1)//2)+v2)*-1)+2)+1)+0)+-3)+v3)
+    v1_val, v2_val, v3_val = v1.const_like(8), v2.const_like(0), v3.const_like(0)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    assert num==rn, f"{num} != {rn}"
 
 if __name__ == '__main__':
   unittest.main()
