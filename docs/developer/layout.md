@@ -20,7 +20,11 @@ Group UOps into kernels.
 
 Transforms the ast into an optimized ast. This is where BEAM search and heuristics live.
 
-When finished, this will just have a function that takes in the ast and returns the optimized ast.
+::: tinygrad.opt.get_optimized_ast
+    options:
+        members: false
+        show_labels: false
+        show_source: false
 
 ---
 
@@ -45,3 +49,9 @@ Transform the linearized list of UOps into a program.
 ## tinygrad/engine
 
 Abstracted high level interface to the runtimes.
+
+::: tinygrad.engine.realize.get_program
+    options:
+        members: false
+        show_labels: false
+        show_source: false
