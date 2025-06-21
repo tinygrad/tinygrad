@@ -4,7 +4,7 @@ from onnx.backend.base import Backend, BackendRep
 import onnx.backend.test
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.helpers import getenv, OSX, temp
+from tinygrad.helpers import getenv, OSX
 from tinygrad.device import is_dtype_supported
 
 # pip3 install tabulate
