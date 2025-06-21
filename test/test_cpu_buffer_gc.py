@@ -69,7 +69,7 @@ class TestGCCpu(unittest.TestCase):
     gc.collect()
     self.assertIsNone(vref())
     self.assertIsNotNone(bref())
-    
+
   @skip_if_not_cpu
   def test_subbuffer_chain_gc(self):
     Tensor.manual_seed(0); _ = Tensor.randn(1)
