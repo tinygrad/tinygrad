@@ -1,7 +1,7 @@
 import unittest, math
 from tinygrad import dtypes
 from tinygrad.helpers import all_same
-from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu
+from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu, PatternMatcher, UPat
 from tinygrad.codegen import full_rewrite_to_sink
 
 # Helper function to apply the graph rewrite
@@ -283,6 +283,12 @@ class TestSubstitute(unittest.TestCase):
     ret = substitute(ret, {a:b})
     # the srcs are rewritten but we keep tag
     self.assertIs(ret, (b+4).replace(tag=1))
+
+class TestRecurse(unittest.TestCase):
+  def test_no_inf_loop(self):
+    a = UOp.variable('a', 0, 10)
+    pm = PatternMatcher([(UPat(Ops.DEFINE_VAR, name="x"), lambda x: x)])
+    graph_rewrite(a, pm)
 
 if __name__ == '__main__':
   unittest.main()

@@ -1,15 +1,14 @@
 from dataclasses import dataclass
-from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, can_pad, sint
+from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, sint
 from tinygrad.uop.ops import track_rewrites, _substitute
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
-from tinygrad.codegen.lowerer import get_contraction_with_reduce
 from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
-from tinygrad.engine.multi import multi_pm, replace_allreduce
+from tinygrad.kernelize.multi import multi_pm
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View, strides_for_shape
+from tinygrad.shape.view import View, strides_for_shape, get_contraction_with_reduce
+from tinygrad.kernelize.grouper import group_realizes, ALWAYS_CONTIGUOUS
 
 # creation can recurse a lot
 import sys
@@ -49,9 +48,6 @@ def split_reduceop(reduce:UOp, x:UOp):
 def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
   if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
   return base.copy_to_device(copy.device).view(view.arg)
-
-ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
-                     Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.GBARRIER}
 
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
@@ -110,118 +106,6 @@ replace_contiguous = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.VIEW, name="src"),), name="contig"), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
-
-# **** Grouper decides which of the UOps realize
-
-def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
-
-def realize_parents(ctx:dict[UOp, None], rb:UOp) -> None:
-  for s in rb.src:
-    if s.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
-
-def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
-  st = unwrap(view.st)
-  # always realize unsafe pad ops before masked view
-  if any(v.mask is not None for v in st.views) and not can_pad(tr, ctx): return realize(ctx, tr)
-  # fold simple pads
-  if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(tr.shape) and resolve(prod(tr.shape) >= prod([y-x for x,y in m])): return
-  # realize before expand
-  if resolve(prod(tr.shape) < prod(st.shape)) and not DONT_REALIZE_EXPAND: return realize(ctx, tr)
-
-do_realize = PatternMatcher([
-  # always realize SINK parents
-  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
-  # always realize ASSIGN/CONTIGUOUS/GroupOp.Meta
-  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}, name="tr"), realize),
-  # realize before expand or unsafe pad ops
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), name="view"), realize_before_view),
-  # realize parents of COPY, MSELECT, MSTACK
-  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
-])
-
-def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:dict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
-                    reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]) -> None:
-  if (tr, st) in cache: return
-  cache.setdefault((tr, st))
-  rsize = unwrap(r.st).size
-  if tr in realizes and tr is not r:
-    # can only fuse contiguous
-    # max one reduceop per kernel
-    if not st.contiguous or st.size != rsize or tr in reduce_for_op: group.setdefault(r)
-    return group.setdefault(tr)
-  for tr_next in children.get(tr, {}):
-    # max one reduceop per kernel
-    if tr_next.op is Ops.REDUCE_AXIS: return group.setdefault(r)
-    # can only fuse contiguous
-    if len(st_childs:=dedup(unwrap(x.st) for x in tr_next.src if x.base == tr)) > 1: return group.setdefault(r)
-    recursive_group(tr_next, st+st_childs[0], r, children, realizes, reduce_for_op, group, cache)
-
-def group_realizes(sink:UOp) -> dict[UOp, None]:
-  # start by adding uops that always realize
-  realizes: dict[UOp, None] = {}
-  sink = graph_rewrite(sink, do_realize, ctx=realizes, name="do_realize")
-  if DONT_GROUP_REDUCES: return realizes
-
-  # construct children graph (only for bases)
-  children: dict[UOp, dict[UOp, None]] = {}
-  assigns: dict[UOp, None] = {}
-  for u in (toposort:=sink.toposort()):
-    if u.op in {Ops.VIEW, Ops.SINK}: continue
-    if u.op is Ops.ASSIGN: assigns[u.buf_uop] = None
-    for s in u.src: children.setdefault(s.base, {})[u] = None
-
-  # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
-  reduce_for_op: dict[UOp, UOp] = {}
-  double_reduces: list[UOp] = []
-  for r in toposort:
-    if r.op is not Ops.REDUCE_AXIS: continue
-    if len(r.arg) == 3 and r.arg[2] is True: continue
-    if FUSE_CONV_BW and r.src[0].base.op is Ops.REDUCE_AXIS and r.src[0] is not r.src[0].base: double_reduces.append(r)
-    if r in realizes: continue
-    group: dict[UOp, None] = {}
-    recursive_group(r, unwrap(r.st), r, children, realizes, reduce_for_op, group, cache={})
-    # max one reduceop per kernel
-    can_chase = all(tr not in reduce_for_op for tr in group)
-    for u in r.toposort(gate=lambda u: u not in realizes):
-      if u.op is Ops.REDUCE_AXIS and u.src[0].base.op is Ops.CONST:
-        can_chase = False
-        break
-    # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
-    forced_realize = r in group
-    # can only have one output
-    if not forced_realize and len(group) > 1: forced_realize = True
-    # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and (assign_targets:={x.buf_uop for x in group if x.op is Ops.ASSIGN}):
-      parents = [r, *group]
-      while parents and not forced_realize:
-        p = parents.pop().base
-        if p.op is Ops.BUFFER and p in assigns and p not in assign_targets: forced_realize, can_chase = True, False
-        if p in realizes: continue
-        parents.extend(p.src)
-    if forced_realize or not group:
-      tr = r
-      if can_chase:
-        # can chase this down to contiguous children
-        st = unwrap(tr.st)
-        while len(lst:=children.get(tr, {})) == 1:
-          tr_next = next(iter(lst))
-          st_childs = dedup(unwrap(s.st) for s in tr_next.src if s.base is tr)
-          if len(st_childs) > 1: break
-          if st.size != st_childs[0].size: break
-          st = st + st_childs[0]
-          if not st.contiguous or tr_next.op is Ops.REDUCE_AXIS: break
-          tr = tr_next
-        # don't cast to higher size before store (tr cannot be realized if forced_realize)
-        if tr.op is Ops.CAST and tr.dtype.itemsize > tr.src[0].dtype.itemsize:
-          tr = tr.src[0].base
-      group = {tr: None}
-      realizes[tr] = None
-    reduce_for_op.update((tr, r) for tr in group)
-  # fuse double reduces with no other child
-  for reduceop in double_reduces:
-    top_reduce = reduceop.src[0].base
-    if len(children.get(top_reduce, {})) == 1: del realizes[top_reduce]
-  return realizes
 
 # **** create kernels
 
@@ -535,30 +419,38 @@ finalize_gbarrier = PatternMatcher([
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
-@track_rewrites(name_fxn=lambda big_sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[big_sink].toposort() if u.op is Ops.KERNEL]))}")
-def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
+@track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}")
+def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
+  """
+  Function to transform the Tensor UOp graph into a version with Ops.KERNEL
+
+  Args:
+    sink: The Ops.SINK rooting the Tensor graph.
+
+  Returns:
+    Map transforming each UOp in the sink to the Ops.KERNEL graph.
+  """
+
   # multi + merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, multi_pm+replace_allreduce+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
+  tensor_map = graph_rewrite_map(sink, multi_pm+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
 
   # display the cleaned up tensor graph
-  if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
+  if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Tensor Graph")
 
   # insert gbarriers in places determined by the realize map
-  realize_map = group_realizes(tensor_map[big_sink])
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
-  # optionally reorder gbarriers or insert more (top down)
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], finalize_gbarrier, input_map=tensor_map, name="finalize_gbarrier")
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
+  realize_map = group_realizes(tensor_map[sink])
+  tensor_map = graph_rewrite_map(tensor_map[sink], add_gbarrier, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
+  tensor_map = graph_rewrite_map(tensor_map[sink], finalize_gbarrier+remove_tags, input_map=tensor_map, name="finalize_gbarrier")
 
   # TODO: move view_left/view_right here
 
   # group into kernels (this is context-free)
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, input_map=tensor_map, name="create_kernels")
+  tensor_map = graph_rewrite_map(tensor_map[sink], create_kernels, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
   assign_rep: dict[UOp, UOp] = {}
-  for u in tensor_map[big_sink].toposort():
+  for u in tensor_map[sink].toposort():
     if u.op is not Ops.ASSIGN: continue
     kernel_assign[u.buf_uop] = u
     for s in u.src[1].src:
@@ -568,13 +460,13 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
         raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on ASSIGN or BUFFER")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep:
-    tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, ctx=assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
+    tensor_map = graph_rewrite_map(tensor_map[sink], _substitute, ctx=assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
 
   # finally, create the AST for kernels
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast+replace_metadata, bottom_up=True, input_map=tensor_map, name="create_ast")
+  tensor_map = graph_rewrite_map(tensor_map[sink], create_ast+replace_metadata, bottom_up=True, input_map=tensor_map, name="create_ast")
 
   # display the final graph
-  sched_sink = tensor_map[big_sink]
+  sched_sink = tensor_map[sink]
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
 

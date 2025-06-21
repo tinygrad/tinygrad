@@ -3,9 +3,9 @@ import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import CI, Context, getenv
 from tinygrad.engine.realize import run_schedule
-from tinygrad.codegen.kernel import Opt, OptOps, Kernel, KernelOptError
+from tinygrad.opt.kernel import Opt, OptOps, Kernel, KernelOptError
 from tinygrad.engine.realize import CompiledRunner, ExecItem
-from tinygrad.engine.search import get_kernel_actions
+from tinygrad.opt.search import get_kernel_actions
 from tinygrad.uop.ops import Ops
 
 class TestArange(unittest.TestCase):
