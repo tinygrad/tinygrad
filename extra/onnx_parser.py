@@ -172,6 +172,7 @@ class OnnxParser:
   def _handle_packed_floats(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
     if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError("Packed floats expected length_delimited")
     value = self._handle_delimited(reader, use_tensor=True)
+    obj[key_name] = value.bitcast(dtypes.float32)
 
   def _handle_sub_message(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
     if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for sub-message field '{key_name}'")
