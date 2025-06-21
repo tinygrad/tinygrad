@@ -100,6 +100,15 @@ class TestViz(unittest.TestCase):
     lst = get_viz_list()
     self.assertEqual(lst[0]["name"], "(a+1) n1")
 
+  def test_gc(self):
+    from test.test_gc import bufs_allocated
+    init = bufs_allocated()
+    a = UOp.new_buffer("NULL", 10, dtypes.char)
+    a.buffer.allocate()
+    exec_rewrite(a, [PatternMatcher([])])
+    del a
+    self.assertEqual(bufs_allocated()-init, 0)
+
 # VIZ displays nested graph_rewrites in a tree view
 
 def leaf_rewrite(x:UOp): return x.rtag(1) if x.tag is None else None
