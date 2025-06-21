@@ -69,6 +69,70 @@ class TestGCCpu(unittest.TestCase):
     gc.collect()
     self.assertIsNone(vref())
     self.assertIsNotNone(bref())
+    
+  @skip_if_not_cpu
+  def test_subbuffer_chain_gc(self):
+    Tensor.manual_seed(0); _ = Tensor.randn(1)
+    baseline = bufs_allocated()
+    base = Buffer("CPU", 4096, Tensor([0.0]).dtype).allocate()
+    v1   = Buffer("CPU", 1024, base.dtype, base=base, offset=0)
+    v2   = Buffer("CPU", 1024, base.dtype, base=base, offset=2048)
+    r_base, r1, r2 = map(weakref.ref, (base, v1, v2))
+    del v1
+    gc.collect()
+    self.assertIsNone(r1())
+    self.assertIsNotNone(r_base())
+    del v2
+    gc.collect()
+    self.assertIsNone(r2())
+    self.assertIsNotNone(r_base())
+    del base
+    gc.collect()
+    gc.collect()
+    self.assertIsNone(r_base())
+    self.assertEqual(bufs_allocated() - baseline, 0)
+
+  @skip_if_not_cpu
+  def test_thread_buffer_gc(self):
+    import threading
+
+    Tensor.manual_seed(0); _ = Tensor.randn(1)
+    baseline = bufs_allocated()
+
+    def worker():
+      for _ in range(100):
+        Buffer("CPU", 2048, Tensor([0.0]).dtype).allocate()
+
+    th = threading.Thread(target=worker)
+    th.start(); th.join()
+    gc.collect(); gc.collect()
+
+    self.assertEqual(bufs_allocated() - baseline, 0)
+
+  @skip_if_not_cpu
+  def test_refcount_helpers(self):
+    buf = Buffer("CPU", 1024, Tensor([0.0]).dtype).allocate()
+    self.assertEqual(buf.uop_refcount, 0)
+    buf.ref(+2)
+    self.assertEqual(buf.uop_refcount, 2)
+    buf.ref(-2)
+    self.assertEqual(buf.uop_refcount, 0)
+    r = weakref.ref(buf)
+    del buf
+    gc.collect()
+    gc.collect()
+    self.assertIsNone(r())
+
+  @skip_if_not_cpu
+  def test_zero_length_buffer_gc(self):
+    baseline = bufs_allocated()
+    zb = Buffer("CPU", 1, Tensor([0.0]).dtype).allocate()
+    ref = weakref.ref(zb)
+    del zb
+    gc.collect()
+    gc.collect()
+    self.assertIsNone(ref())
+    self.assertEqual(bufs_allocated() - baseline, 0)
 
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
