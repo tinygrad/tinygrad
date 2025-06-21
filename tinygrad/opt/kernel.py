@@ -458,7 +458,7 @@ class Kernel:
         return ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
       if op.op is Ops.SINK:
         return ret.replace(arg = KernelInfo(to_function_name(self.name) if name_override is None else name_override,
-                                            self.local_dims, self.upcasted, self.dont_use_locals))
+                                            self.local_dims, self.upcasted, self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
 
@@ -565,5 +565,5 @@ class Kernel:
     self.linearize(name_override, ast_transform)
     assert self.uops[-1].op is Ops.SINK, "last uop must be sink"
     src = self.opts.render(self.uops)
-    return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops, self.applied_opts,
+    return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops,
                        global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)

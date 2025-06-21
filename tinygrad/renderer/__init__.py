@@ -87,7 +87,6 @@ class ProgramSpec:
   device:str
   ast:UOp  # save the base ast (this is method cache key)
   uops:Optional[list[UOp]]=None
-  applied_opts:Optional[list[Opt]]=None
 
   # filled in from uops (if we have uops)
   global_size:Optional[list[int]]=None
@@ -130,6 +129,10 @@ class ProgramSpec:
 
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
+
+  @property
+  def applied_opts(self) -> tuple[Opt, ...]|None: return self.uops[-1].arg.applied_opts if \
+    self.uops is not None and self.uops[-1].op is Ops.SINK and self.uops[-1].arg is not None else None
 
   def launch_dims(self, var_vals:dict[Variable, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
