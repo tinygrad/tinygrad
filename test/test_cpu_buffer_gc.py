@@ -31,7 +31,7 @@ class TestGCViz(unittest.TestCase):
       base = bufs_allocated()
       t = Tensor.randn(512, 512)
       buf_ref = weakref.ref(t._buffer)
-      del t; 
+      del t
       gc.collect()
       self.assertIsNone(buf_ref())
       self.assertEqual(bufs_allocated() - base, 0)
