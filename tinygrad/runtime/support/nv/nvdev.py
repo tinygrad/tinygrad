@@ -12,14 +12,17 @@ from hexdump import hexdump
 NV_DEBUG = getenv("NV_DEBUG", 0)
 
 class NVReg:
-  def __init__(self, nvdev, base, addr, fields=None): self.nvdev, self.addr, self.fields = nvdev, base + addr, fields
+  def __init__(self, nvdev, base, off, fields=None): self.nvdev, self.base, self.off, self.fields = nvdev, base, off, fields
+
+  def __getitem__(self, idx:int): return NVReg(self.nvdev, self.base, self.off(idx), fields=self.fields)
 
   def add_field(self, name:str, start:int, end:int): self.fields[name] = (start, end)
+  def with_base(self, base:int): return NVReg(self.nvdev, base + self.base, self.off, self.fields)
 
-  def read(self): return self.nvdev.rreg(self.addr)
+  def read(self): return self.nvdev.rreg(self.base + self.off)
   def read_bitfields(self) -> dict[str, int]: return self.decode(self.read())
 
-  def write(self, _ini_val:int=0, **kwargs): self.nvdev.wreg(self.addr, _ini_val | self.encode(**kwargs))
+  def write(self, _ini_val:int=0, **kwargs): self.nvdev.wreg(self.base + self.off, _ini_val | self.encode(**kwargs))
 
   def update(self, **kwargs): self.write(self.read() & ~self.mask(*kwargs.keys()), **kwargs)
 
@@ -28,17 +31,6 @@ class NVReg:
 
   def encode(self, **kwargs) -> int: return functools.reduce(int.__or__, (value << self.fields[name][0] for name,value in kwargs.items()), 0)
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
-
-# TODO: prob can optimize this
-class NVRegSet:
-  def __init__(self, nvdev, base, fn, fields=None): self.nvdev, self.base, self.fn, self.fields = nvdev, base, fn, fields or {}
-  def add_field(self, name:str, start:int, end:int): self.fields[name] = (start, end)
-  def __getitem__(self, idx:int): return NVReg(self.nvdev, self.base, self.fn(idx), fields=self.fields)
-
-class NVRegBased:
-  def __init__(self, nvdev, cls, offset, fields=None): self.nvdev, self.cls, self.offset, self.fields = nvdev, cls, offset, fields or {}
-  def add_field(self, name:str, start:int, end:int): self.fields[name] = (start, end)
-  def with_base(self, base:int): return self.cls(self.nvdev, base, self.offset, self.fields)
 
 class NVPageTableEntry:
   def __init__(self, nvdev, paddr, lv): self.nvdev, self.paddr, self.lv, self.entries = nvdev, paddr, lv, nvdev.vram.view(paddr, 0x1000, fmt='Q')
@@ -117,6 +109,10 @@ class NVDev:
 
   def _early_init(self):
     self.include("src/common/inc/swref/published/nv_ref.h")
+    self.chip_id = self.NV_PMC_BOOT_0.read()
+    self.chip_details = self.NV_PMC_BOOT_42.read_bitfields()
+    self.chip_name = {0x17: "GA", 0x19: "AD"}[self.chip_details['architecture']] + str(100+self.chip_details['implementation'])
+
     self.include("src/common/inc/swref/published/turing/tu102/dev_vm.h")
     self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island.h")
     self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island_addendum.h")
@@ -126,9 +122,6 @@ class NVDev:
     self.include("kernel-open/nvidia-uvm/hwref/turing/tu102/dev_mmu.h")
 
     self.vram_size = self.NV_PGC6_AON_SECURE_SCRATCH_GROUP_42.read() << 20
-    self.chip_id = self.NV_PMC_BOOT_0.read()
-    self.chip_details = self.NV_PMC_BOOT_42.read_bitfields()
-    self.chip_name = {0x17: "GA", 0x18: "GH", 0x19: "AD", 0x1A: "GB"}[self.chip_details['architecture']] + str(100+self.chip_details['implementation'])
 
   def _alloc_boot_struct_2(self, struct):
     va, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
@@ -156,55 +149,35 @@ class NVDev:
     CONST = re.compile(r'#define\s+(\w+)\s+([0-9A-Fa-fx]+)')
     BITFLD = re.compile(r'#define\s+(\w+)\s+([0-9\+\-\*\(\)]+):([0-9\+\-\*\(\)]+)')
 
-    regs_off = {'NV_PFALCON_FALCON': (None, 0x0), 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': (None, 0x1000), 'NV_PGC6_AON': 0x0,
-      'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': (None, 0x600), 'NV_PFALCON2_FALCON': (None, 0x1000), 'NV_PBUS': 0x0, 'NV_PFB': 0x0,
+    regs_off = {'NV_PFALCON_FALCON': 0x0, 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': 0x1000, 'NV_PGC6_AON': 0x0,
+      'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': 0x600, 'NV_PFALCON2_FALCON': 0x1000, 'NV_PBUS': 0x0, 'NV_PFB': 0x0,
       'NV_VIRTUAL_FUNCTION':0x00B80000, 'NV_PMC': 0x0, 'NV_PGSP_QUEUE': 0x0}
 
     for raw in txt.splitlines():
-      if raw.startswith("#define "):
-        if (m := BITFLD.match(raw)):
-          name, hi, lo = m.groups()
-          for r in self.reg_names:
-            if name.startswith(r+"_"):
-              self.__dict__[r].add_field(name[len(r)+1:].lower(), eval(lo), eval(hi))
-              break
-          if name.startswith("NV_MMU_VER2_"):
-            for r in ['NV_MMU_VER2_PTE', 'NV_MMU_VER2_PDE', 'NV_MMU_VER2_DUAL_PDE']:
-              if name.startswith(r+"_"): self.__dict__[r].add_field(name[len(r)+1:].lower(), eval(lo), eval(hi))
-          else: self.reg_offsets[name] = (eval(lo), eval(hi))
-        elif (m := PARAM.match(raw)):
-          name, param, expr = m.groups()
-          expr = expr.strip().rstrip('\\').split('/*')[0].rstrip()
-          reg_pref = next((prefix for prefix in regs_off.keys() if name.startswith(prefix)), None)
+      if not raw.startswith("#define "): continue
+      if (m := BITFLD.match(raw)): # bitfield match
+        name, hi, lo = m.groups()
+        for r in self.reg_names:
+          if name.startswith(r+"_"):
+            self.__dict__[r].add_field(name[len(r)+1:].lower(), eval(lo), eval(hi))
+            break
+        if name.startswith("NV_MMU_VER2_"):
+          for r in ['NV_MMU_VER2_PTE', 'NV_MMU_VER2_PDE', 'NV_MMU_VER2_DUAL_PDE']:
+            if name.startswith(r+"_"): self.__dict__[r].add_field(name[len(r)+1:].lower(), eval(lo), eval(hi))
+        else: self.reg_offsets[name] = (eval(lo), eval(hi))
+        continue
+      elif (m := PARAM.match(raw)):
+        name, value = m.groups()[0], eval(f"lambda {m.groups()[1]}: {m.groups()[2].strip().rstrip('\\').split('/*')[0].rstrip()}")
+      elif (m := CONST.match(raw)): name, value = m.groups()[0], int(m.groups()[1], 0)
+      else: continue
 
-          if reg_pref is not None:
-            fields = {}
-            for k, v in self.reg_offsets.items():
-              if k.startswith(name+'_'): fields[k[len(name)+1:]] = v
+      reg_pref = next((prefix for prefix in regs_off.keys() if name.startswith(prefix)), None)
+      not_already_reg = not any(name.startswith(r+"_") for r in self.reg_names)
 
-            if regs_off[reg_pref].__class__ is tuple:
-              self.__dict__[name] = NVRegBased(self, NVRegSet, eval(f"lambda {param}: {expr} + {regs_off[reg_pref][1]}"), fields=fields)
-            else:
-              self.__dict__[name] = NVRegSet(self, regs_off[reg_pref], eval(f"lambda {param}: {expr}"), fields=fields)
-            self.reg_names.add(name)
-          else:
-            # assert self.__dict__.get(name) is None, f"Duplicate definition for {name} in {file}"
-            self.__dict__[name] = eval(f"lambda {param}: {expr}")
-        elif (m := CONST.match(raw)):
-          name, value = m.groups()
-          reg_pref = next((prefix for prefix in regs_off.keys() if name.startswith(prefix)), None)
-          not_already_reg = not any(name.startswith(r+"_") for r in self.reg_names)
-
-          if reg_pref is not None and not_already_reg:
-            fields = {}
-            for k, v in self.reg_offsets.items():
-              if k.startswith(name+'_'): fields[k[len(name)+1:]] = v
-
-            if regs_off[reg_pref].__class__ is tuple:
-              self.__dict__[name] = NVRegBased(self, NVReg, int(value, 0) + regs_off[reg_pref][1], fields=fields)
-            else:
-              self.__dict__[name] = NVReg(self, regs_off[reg_pref], int(value, 0), fields=fields)
-            self.reg_names.add(name)
-          else:
-            assert self.__dict__.get(name) in [None, int(value, 0)], f"Duplicate definition for {name} in {file}"
-            self.__dict__[name] = int(value, 0)
+      if reg_pref is not None and not_already_reg:
+        fields = {k[len(name)+1:]: v for k, v in self.reg_offsets.items() if k.startswith(name+'_')}
+        self.__dict__[name] = NVReg(self, regs_off[reg_pref], value, fields=fields)
+        self.reg_names.add(name)
+      else:
+        # assert self.__dict__.get(name) in [None, value], f"Duplicate definition for {name} in {file}"
+        self.__dict__[name] = value
