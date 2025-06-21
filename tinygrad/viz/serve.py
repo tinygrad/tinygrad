@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
@@ -79,11 +80,17 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
                     "ref":id(u.arg.ast) if u.op is Ops.KERNEL else None, "tag":u.tag}
   return graph
 
+def _reconstruct_uop(num:int) -> UOp:
+  op, dtype, src_nums, arg, tag = contexts[2][num]
+  # mirror for KERNEL fixup
+  if op is Ops.KERNEL: arg = replace(arg, ast=_reconstruct_uop(arg.ast))
+  return UOp(op, dtype, tuple(_reconstruct_uop(s) for s in src_nums), arg, tag)
+
 def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
-  yield {"graph":uop_to_json(next_sink:=ctx.sink), "uop":str(ctx.sink), "changed_nodes":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(next_sink:=_reconstruct_uop(ctx.sink)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
-  for u0,u1,upat in tqdm(ctx.matches):
-    replaces[u0] = u1
+  for u0_num,u1_num,upat in tqdm(ctx.matches):
+    replaces[u0:=_reconstruct_uop(u0_num)] = u1 = _reconstruct_uop(u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RecursionError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
@@ -194,7 +201,7 @@ if __name__ == "__main__":
   contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
 
   # NOTE: this context is a tuple of list[keys] and list[values]
-  ctxs = get_metadata(*contexts) if contexts is not None else []
+  ctxs = get_metadata(*contexts[:2]) if contexts is not None else []
 
   perfetto_profile = to_perfetto(profile) if profile is not None else None
 
