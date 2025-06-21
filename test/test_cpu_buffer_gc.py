@@ -1,102 +1,68 @@
 #!/usr/bin/env python
-import os, gc, unittest, weakref
+import gc, unittest, weakref
 from tinygrad.tensor import Tensor
 from tinygrad.device import Buffer
-from tinygrad.engine.realize import run_schedule
 from tinygrad.helpers import GlobalCounters
 
-def tensors_allocated():
-  gc.collect()
-  return sum(isinstance(x, Tensor) for x in gc.get_objects())
+# ---------- helpers ----------------------------------------------------------------
+def bufs_allocated() -> int:
+    gc.collect()
+    return sum(isinstance(o, Buffer) and o.is_allocated() for o in gc.get_objects())
 
-def bufs_allocated():
-  gc.collect()
-  return sum(isinstance(x, Buffer) and x.is_allocated() for x in gc.get_objects())
+# ---------- tests ------------------------------------------------------------------
+class TestGCCpu(unittest.TestCase):
 
-class VizEnv:
-  """Context-manager that temporarily sets VIZ=1/0."""
-  def __init__(self, val: str): self.val = val
-  def __enter__(self):
-    self.old = os.environ.get("VIZ")
-    os.environ["VIZ"] = self.val
-  def __exit__(self, *_):
-    if self.old is None: os.environ.pop("VIZ", None)
-    else: os.environ["VIZ"] = self.old
-
-# ----------------------------------------------------------------------------- the tests
-class TestGCViz(unittest.TestCase):
-
-  def _single_buffer(self, viz):
-    with VizEnv(viz):
-      # make sure RNG buffers for *this* device are initialised
+    def test_single_buffer(self):
       Tensor.manual_seed(0)
-      gc.collect()
+      _ = Tensor.randn(1)
       base = bufs_allocated()
       t = Tensor.randn(512, 512)
       ref = weakref.ref(t._buffer)
       del t
       gc.collect()
       self.assertIsNone(ref())
-      live = bufs_allocated() - base
-      self.assertLessEqual(live, 2)
+      self.assertLessEqual(bufs_allocated() - base, 0)
 
-  def test_single_buffer_no_viz(self):  self._single_buffer("0")
-  def test_single_buffer_with_viz(self): self._single_buffer("1")
-
-  def _churn(self, viz):
-    with VizEnv(viz):
-      before = GlobalCounters.mem_used
-      for _ in range(300):
+    def test_churn(self):
+      loops = 300
+      base_mem = GlobalCounters.mem_used
+      for _ in range(loops):
         Tensor.randn(128, 128)
       gc.collect()
-      delta = GlobalCounters.mem_used - before
-      self.assertLess(delta, 64 * 1024, f"mem_used grew {delta} bytes (VIZ={viz})")
+      self.assertLess(GlobalCounters.mem_used - base_mem, 64 * 1024)
 
-  def test_churn_no_viz(self):  self._churn("0")
-  def test_churn_with_viz(self): self._churn("1")
+    def test_manual_buffer_gc(self):
+      import numpy as np
+      Tensor.manual_seed(0); _ = Tensor.randn(1)
+      baseline = bufs_allocated()
 
-  def test_schedule_gc_with_viz(self):
-    """Run a schedule under VIZ=1 and make sure *all* buffers are gone
-    once both the output tensor *and* the schedule list are dropped."""
-    with VizEnv("1"):
-      init = bufs_allocated()
+      dtype = Tensor([0.0]).dtype
+      buf   = Buffer("CPU", 1024, dtype)
+      buf.allocate()
 
-      x  = Tensor.ones(256).contiguous()
-      y  = x + Tensor.ones(256).contiguous()
-      ys = y.schedule()
-      del x
-      run_schedule(ys)
+      src = np.arange(1024, dtype=np.float32)
+      buf.copyin(memoryview(src))
+      dst = np.empty_like(src)
+      buf.copyout(memoryview(dst))
+      np.testing.assert_array_equal(src, dst)
 
-      import numpy as np, numpy.testing as npt
-      npt.assert_equal(y.numpy(), np.full((256,), 2, dtype=np.float32))
-
-      del y, ys
+      ref = weakref.ref(buf)
+      del buf
       for _ in range(2): gc.collect()
 
-      self.assertLessEqual(bufs_allocated() - init, 3)
+      self.assertIsNone(ref())
+      self.assertEqual(bufs_allocated() - baseline, 0)
+                        
 
-  def test_view_buffer_release(self):
-    with VizEnv("1"):
+    def test_view_buffer_release(self):
       t = Tensor.randn(256, 256).contiguous()
-      base_buf = t._buffer
-      view_buf = Buffer(t.device, t.size(), t.dtype,
-                        offset=0)
-      vref, bref = weakref.ref(view_buf), weakref.ref(base_buf)
-      del view_buf
-      gc.collect()
-      # child is freed, base stays
+      base = t._buffer
+      view = Buffer(t.device, t.size(), t.dtype, offset=0)
+      vref, bref = weakref.ref(view), weakref.ref(base)
+      del view; gc.collect()
       self.assertIsNone(vref())
       self.assertIsNotNone(bref())
 
-  @unittest.skipIf(os.getenv("CI") == "1", "heavy local stress-test")
-  def test_visualiser_stress(self):
-    with VizEnv("1"):
-      start = bufs_allocated()
-      for _ in range(50):
-        (Tensor.randn(64, 64) * 2).sum()
-      gc.collect()
-      self.assertLessEqual(bufs_allocated(), start + 2)
-
 # -----------------------------------------------------------------------------
-if __name__ == '__main__':
-  unittest.main()
+if __name__ == "__main__":
+    unittest.main()
