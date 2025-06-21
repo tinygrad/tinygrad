@@ -1,7 +1,7 @@
 import random
 from typing import Dict, Optional
 from tinygrad.helpers import getenv
-from tinygrad.runtime.support.allocator import TLSFAllocator
+from tinygrad.runtime.support.memory import TLSFAllocator
 
 class AllocatorFuzzer:
   def __init__(self, total_size):
