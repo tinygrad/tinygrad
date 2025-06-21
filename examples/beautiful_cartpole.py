@@ -93,7 +93,7 @@ if __name__ == "__main__":
       # TODO: what's the temperature here?
       act = get_action(Tensor(obs)).item()
 
-      obs_tensor = Tensor(obs) 
+      obs_tensor = Tensor(obs)
       Xn.append(obs_tensor)
       An.append(act)
       obs, rew, terminated, truncated, _ = env.step(act)
