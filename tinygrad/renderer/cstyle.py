@@ -135,7 +135,7 @@ class CStyleLanguage(Renderer):
     name = "test"
     for u in uops:
       if u.op is Ops.SINK:
-        if u.arg is not None: name = u.arg.name
+        if u.arg is not None: name = u.arg.function_name
         continue
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]

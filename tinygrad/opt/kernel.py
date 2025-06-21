@@ -457,7 +457,7 @@ class Kernel:
         # otherwise we just replace the VIEW source
         return ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
       if op.op is Ops.SINK:
-        return ret.replace(arg = KernelInfo(to_function_name(self.name) if name_override is None else name_override,
+        return ret.replace(arg = KernelInfo(self.name if name_override is None else name_override,
                                             self.local_dims, self.upcasted, self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
