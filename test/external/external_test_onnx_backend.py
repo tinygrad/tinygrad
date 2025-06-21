@@ -1,4 +1,4 @@
-import tempfile, unittest
+import unittest
 from typing import Any, Tuple
 from onnx.backend.base import Backend, BackendRep
 import onnx.backend.test
