@@ -729,7 +729,7 @@ def track_uop(u:UOp) -> int:
   if (cret:=uop_number.get(ref:=weakref.ref(u))) is not None: return cret
   uop_number[ref] = num = next(ucount)
   # KERNEL also has UOp in the arg, TODO: fix this to be generic.
-  arg = replace(arg, ast=track_uop(arg.ast)) u.arg if u.op is Ops.KERNEL else u.arg
+  arg = replace(u.arg, ast=track_uop(u.arg.ast)) if u.op is Ops.KERNEL else u.arg
   uop_fields[num] = (u.op, u.dtype, tuple(track_uop(s) for s in u.src), arg, u.tag)
   return num
 
