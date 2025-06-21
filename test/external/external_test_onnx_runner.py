@@ -63,6 +63,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     self._test_initializer_dtype(onnx_data_type, tinygrad_dtype)
     self._test_tensor_attribute_dtype(onnx_data_type, tinygrad_dtype)
 
+  @unittest.skipIf(not device_unsupported_dtypes, "No unsupported dtypes for this device to test.")
   @settings(deadline=1000) # TODO investigate unreliable timing
   @given(onnx_data_type=st.sampled_from(device_unsupported_dtypes))
   def test_unsupported_dtype_spec(self, onnx_data_type):
