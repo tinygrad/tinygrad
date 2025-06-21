@@ -52,7 +52,6 @@ class TestGCCpu(unittest.TestCase):
 
     self.assertIsNone(ref())
     self.assertEqual(bufs_allocated() - baseline, 0)
-                        
 
   def test_view_buffer_release(self):
     t = Tensor.randn(256, 256).contiguous()
@@ -65,4 +64,4 @@ class TestGCCpu(unittest.TestCase):
 
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    unittest.main()
+  unittest.main()
