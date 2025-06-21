@@ -1,10 +1,10 @@
-import unittest
+import unittest, tempfile, os
 from typing import Any, Tuple
 from onnx.backend.base import Backend, BackendRep
 import onnx.backend.test
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.helpers import getenv, OSX
+from tinygrad.helpers import getenv, OSX, temp
 from tinygrad.device import is_dtype_supported
 
 # pip3 install tabulate
@@ -30,7 +30,13 @@ class TinygradBackend(Backend):
     input_initializer = [x.name for x in model.graph.initializer]
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
-    run_onnx = OnnxRunner(onnx_load(Tensor(model.SerializeToString())))
+    fd, tmp = tempfile.mkstemp()
+    try:
+      model = Tensor(model.SerializeToString(), dtype=dtypes.uint8, device=f"disk:{tmp}")
+      run_onnx = OnnxRunner(onnx_load(model))
+    finally:
+      os.close(fd)
+      os.unlink(tmp)
     return TinygradModel(run_onnx, net_feed_input)
 
   @classmethod
