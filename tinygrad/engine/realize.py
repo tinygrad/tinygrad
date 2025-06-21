@@ -19,13 +19,7 @@ def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
 
   # render
   src = renderer.render(uops)
-
-  # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
-  # TODO: these max and min don't work on symbolic, and results are very wrong.
-  mem_bytes = sum(max(x.src[0].dtype.nbytes() for x in group)
-    for _, group in itertools.groupby([x for x in ast.toposort() if x.op in {Ops.LOAD, Ops.STORE} and x.src[0].base.op is Ops.DEFINE_GLOBAL],
-                                      key=lambda x: (x.op, x.src[0].base.arg)))
-  return ProgramSpec(uops[-1].arg.name, src, renderer.device, ast, uops, applied_opts, mem_bytes,
+  return ProgramSpec(uops[-1].arg.name, src, renderer.device, ast, uops, applied_opts,
                      global_size=[1,1,1] if renderer.has_local else None, local_size=[1,1,1] if renderer.has_local else None)
 
 # **************** Runners ****************
