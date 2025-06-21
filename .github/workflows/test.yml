@@ -369,6 +369,8 @@ jobs:
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
     - name: Run GC tests
       run: PYTHONPATH="." python test/external/external_uop_gc.py
+    - name: Run buffer-GC tests with VIZ=1
+      run: PYTHONPATH="." VIZ=1 python -m pytest -q test/test_cpu_buffer_gc.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
     - name: Repo line count < 14000 lines
