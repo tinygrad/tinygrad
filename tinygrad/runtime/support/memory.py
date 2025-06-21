@@ -1,6 +1,5 @@
 import collections, functools, dataclasses
 from tinygrad.helpers import round_up, getenv
-from tinygrad.runtime.autogen.am import am
 
 class TLSFAllocator:
   """
@@ -99,55 +98,54 @@ class TLSFAllocator:
 
 # Memory Managment
 
-AM_DEBUG = getenv("AM_DEBUG", 0)
-
 @dataclasses.dataclass(frozen=True)
-class AMMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
+class VirtMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
 
-class AMPageTableTraverseContext:
-  def __init__(self, adev, pt, vaddr, create_pts=False, free_pts=False, boot=False):
-    self.adev, self.vaddr, self.create_pts, self.free_pts, self.boot = adev, vaddr - adev.gmc.vm_base, create_pts, free_pts, boot
+class PageTableTraverseContext:
+  def __init__(self, dev, pt, vaddr, create_pts=False, free_pts=False, boot=False):
+    self.dev, self.vaddr, self.create_pts, self.free_pts, self.boot = dev, vaddr - dev.mm.va_base, create_pts, free_pts, boot
     self.pt_stack:list[tuple[Any, int, int]] = [(pt, self._pt_pte_idx(pt, vaddr), self._pt_pte_size(pt))]
 
-  def _pt_pte_size(self, pt): return (1 << ((9 * (3-pt.lv)) + 12))
-  def _pt_pte_idx(self, pt, va): return (va // self._pt_pte_size(pt)) % 512
+  def _pt_pte_cnt(self, lv): return self.dev.mm.pte_cnt[lv]
+  def _pt_pte_size(self, pt): return self.dev.mm.pte_covers[pt.lv]
+  def _pt_pte_idx(self, pt, va): return (va // self._pt_pte_size(pt)) % self._pt_pte_cnt(pt.lv)
 
   def level_down(self):
     pt, pte_idx, _ = self.pt_stack[-1]
-    if (entry:=pt.entries[pte_idx]) & am.AMDGPU_PTE_VALID == 0:
+    
+    if not pt.valid(pte_idx):
       assert self.create_pts, "Not allowed to create new page table"
-      pt.set_entry(pte_idx, self.adev.mm.palloc(0x1000, zero=True, boot=self.boot), table=True, valid=True)
-      entry = pt.entries[pte_idx]
+      pt.set_entry(pte_idx, self.dev.mm.palloc(0x1000, zero=True, boot=self.boot), table=True, valid=True)
 
-    assert not self.adev.gmc.is_pte_huge_page(entry), f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
-    child_page_table = self.adev.mm.pt_t(self.adev, entry & 0x0000FFFFFFFFF000, lv=pt.lv+1)
+    assert not pt.is_pte(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
+    child_page_table = self.dev.mm.pt_t(self.dev, pt.address(pte_idx), lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
     return self.pt_stack[-1]
 
   def _try_free_pt(self) -> bool:
     pt, _, _ = self.pt_stack[-1]
-    if self.free_pts and pt != self.adev.mm.root_page_table and all(pt.entries[i] & am.AMDGPU_PTE_VALID == 0 for i in range(512)):
-      self.adev.mm.pfree(pt.paddr)
+    if self.free_pts and pt != self.dev.mm.root_page_table and all(not pt.valid(i) for i in range(self._pt_pte_cnt(self.pt_stack[-1][0].lv))):
+      self.dev.mm.pfree(pt.paddr)
       parent_pt, parent_pte_idx, _ = self.pt_stack[-2]
       parent_pt.set_entry(parent_pte_idx, 0x0, valid=False)
       return True
     return False
 
   def level_up(self):
-    while self._try_free_pt() or self.pt_stack[-1][1] == 512:
+    while (freed:=self._try_free_pt()) or self.pt_stack[-1][1] == self._pt_pte_cnt(self.pt_stack[-1][0].lv):
       _, pt_cnt, _ = self.pt_stack.pop()
-      if pt_cnt == 512: self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
+      if not freed: self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
 
   def next(self, size:int, off=0):
     while size > 0:
       pt, pte_idx, pte_covers = self.pt_stack[-1]
       if self.create_pts:
-        while pte_covers > size or self.vaddr & (pte_covers-1) != 0: pt, pte_idx, pte_covers = self.level_down()
+        while pt.lv < self.dev.mm.first_page_lv or pte_covers > size or self.vaddr & (pte_covers-1) != 0: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while pt.lv!=am.AMDGPU_VM_PTB and not self.adev.gmc.is_pte_huge_page(pt.entries[pte_idx]): pt, pte_idx, pte_covers = self.level_down()
+        while not pt.is_pte(pte_idx): pt, pte_idx, pte_covers = self.level_down()
 
-      entries = min(size // pte_covers, 512 - pte_idx)
+      entries = min(size // pte_covers, self._pt_pte_cnt(pt.lv) - pte_idx)
       assert entries > 0, "Invalid entries"
       yield off, pt, pte_idx, entries, pte_covers
 
@@ -155,14 +153,14 @@ class AMPageTableTraverseContext:
       self.pt_stack[-1] = (pt, pte_idx + entries, pte_covers)
       self.level_up()
 
-class AMMemoryManager:
-  va_allocator = TLSFAllocator(512 * (1 << 30), base=0x200000000000) # global for all devices.
+class MemoryManager:
+  def __init__(self, dev, vram_size:int, boot_size:int, pt_t, pte_cnt:list[int], pte_covers:list[int], first_lv:int, first_page_lv:int, va_base:int):
+    self.dev, self.vram_size, self.va_base = dev, vram_size, va_base
+    self.pt_t, self.pte_cnt, self.pte_covers, self.first_page_lv = pt_t, pte_cnt, pte_covers, first_page_lv
 
-  def __init__(self, adev, vram_size:int, pt_t):
-    self.adev, self.vram_size, self.pt_t = adev, vram_size, pt_t
-    self.boot_allocator = TLSFAllocator(32 << 20, base=0) # per device
+    self.boot_allocator = TLSFAllocator(boot_size, base=0) # per device
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.size) # per device
-    self.root_page_table = pt_t(self.adev, self.palloc(0x1000, zero=not self.adev.smi_dev, boot=True), lv=am.AMDGPU_VM_PDB1)
+    self.root_page_table = pt_t(self.dev, self.palloc(0x1000, zero=not self.dev.smi_dev, boot=True), lv=first_lv)
 
   def _frag_size(self, va, sz, must_cover=True):
     """
@@ -173,37 +171,35 @@ class AMMemoryManager:
     va_pwr2_div, sz_pwr2_div, sz_pwr2_max = va & -(va) if va > 0 else (1 << 63), sz & -(sz), (1 << (sz.bit_length() - 1))
     return (min(va_pwr2_div, sz_pwr2_div) if must_cover else min(va_pwr2_div, sz_pwr2_max)).bit_length() - 1 - 12
 
-  def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False) -> AMMapping:
-    if AM_DEBUG >= 2: print(f"am {self.adev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
+  def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False) -> VirtMapping:
+    if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
 
     assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
 
-    ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, create_pts=True, boot=boot)
+    ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, create_pts=True, boot=boot)
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
-          assert pt.entries[pte_idx + pte_off] & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
+          assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
                        frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
-    # Invalidate TLB after mappings.
-    self.adev.gmc.flush_tlb(ip='GC', vmid=0)
-    self.adev.gmc.flush_tlb(ip='MM', vmid=0)
-    return AMMapping(vaddr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
+    self.on_range_mapped()
+    return VirtMapping(vaddr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
 
   def unmap_range(self, vaddr:int, size:int):
-    if AM_DEBUG >= 2: print(f"am {self.adev.devfmt}: unmapping {vaddr=:#x} ({size=:#x})")
+    if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: unmapping {vaddr=:#x} ({size=:#x})")
 
-    ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, free_pts=True)
+    ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, free_pts=True)
     for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
-        assert pt.entries[pte_id] & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, f"PTE not mapped: {pt.entries[pte_id]:#x}"
+        assert pt.valid(pte_id), f"PTE not mapped: {pt.entries[pte_id]:#x}"
         pt.set_entry(pte_id, paddr=0x0, valid=False)
 
-  @staticmethod
-  def alloc_vaddr(size:int, align=0x1000) -> int: return AMMemoryManager.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
+  @classmethod
+  def alloc_vaddr(cls, size:int, align=0x1000) -> int: return cls.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
-  def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False) -> AMMapping:
+  def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False) -> VirtMapping:
     # Alloc physical memory and map it to the virtual address
     va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
 
@@ -211,7 +207,7 @@ class AMMemoryManager:
     else:
       # Traverse the PT to find the largest contiguous sizes we need to allocate. Try to allocate the longest segment to reduce TLB pressure.
       paddrs = []
-      ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
+      ctx = PageTableTraverseContext(self.dev, self.root_page_table, va, create_pts=True)
       for off, _, _, seg_cnt, seg_size in ctx.next(size):
         rem_len = seg_cnt * seg_size
         while rem_len > 0:
@@ -230,15 +226,15 @@ class AMMemoryManager:
 
     return self.map_range(va, size, paddrs, uncached=uncached)
 
-  def vfree(self, vm:AMMapping):
+  def vfree(self, vm:VirtMapping):
     self.unmap_range(vm.va_addr, vm.size)
     self.va_allocator.free(vm.va_addr)
     for paddr, _ in vm.paddrs: self.pa_allocator.free(paddr)
 
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
-    assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
+    assert self.dev.is_booting == boot, "During booting, only boot memory can be allocated"
     paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
-    if zero: self.adev.vram[paddr:paddr+size] = bytes(size)
+    if zero: self.dev.vram[paddr:paddr+size] = bytes(size)
     return paddr
 
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)

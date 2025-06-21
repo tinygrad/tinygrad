@@ -4,7 +4,7 @@ from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
-from tinygrad.runtime.support.memory import TLSFAllocator, AMMemoryManager, AMMapping
+from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
@@ -97,6 +97,18 @@ class AMPageTableEntry:
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
     self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, system, snooped, valid) | (paddr & 0x0000FFFFFFFFF000)
 
+  def valid(self, entry_id:int) -> bool: return (self.entries[entry_id] & am.AMDGPU_PTE_VALID) != 0
+  def address(self, entry_id:int) -> int: return self.entries[entry_id] & 0x0000FFFFFFFFF000
+  def is_pte(self, entry_id:int) -> bool: return self.lv == am.AMDGPU_VM_PTB or self.adev.gmc.is_pte_huge_page(self.entries[entry_id])
+
+class AMMemoryManager(MemoryManager):
+  va_allocator = TLSFAllocator(512 * (1 << 30), base=0x200000000000) # global for all devices.
+
+  def on_range_mapped(self):
+    # Invalidate TLB after mappings.
+    self.dev.gmc.flush_tlb(ip='GC', vmid=0)
+    self.dev.gmc.flush_tlb(ip='MM', vmid=0)
+
 class AMDev:
   def __init__(self, devfmt, vram:MMIOInterface, doorbell:MMIOInterface, mmio:MMIOInterface, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
     self.devfmt, self.vram, self.doorbell64, self.mmio, self.dma_regions = devfmt, vram, doorbell, mmio, dma_regions
@@ -126,7 +138,9 @@ class AMDev:
     self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000005)) and (getenv("AM_RESET", 0) != 1)
 
     # Memory manager & firmware
-    self.mm = AMMemoryManager(self, self.vram_size, AMPageTableEntry)
+    self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, pte_cnt=[512, 512, 512, 512],
+      pte_covers=[(1 << ((9 * (3-lv)) + 12)) for lv in range(4)], first_lv=am.AMDGPU_VM_PDB1, first_page_lv=am.AMDGPU_VM_PDB2,
+      va_base=AMMemoryManager.va_allocator.base)
     self.fw = AMFirmware(self)
 
     # Initialize IP blocks
