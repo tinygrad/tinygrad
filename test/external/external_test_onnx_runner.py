@@ -4,7 +4,6 @@ from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 from tinygrad.device import is_dtype_supported
 from extra.onnx import data_types
 from hypothesis import given, settings, strategies as st
-# import numpy as np
 
 class TestOnnxRunnerDtypes(unittest.TestCase):
   def _test_input_spec_dtype(self, onnx_data_type, tinygrad_dtype):
