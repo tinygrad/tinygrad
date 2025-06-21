@@ -78,7 +78,6 @@ class NV_FLCN:
     self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_falcon_second_pri.h")
     self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_sec_pri.h")
     self.nvdev.include("src/common/inc/swref/published/turing/tu102/dev_bus.h")
-    self.nvdev.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
 
     self.prep_ucode()
     self.prep_booter()

@@ -112,6 +112,12 @@ class NVDev:
     self.chip_details = self.NV_PMC_BOOT_42.read_bitfields()
     self.chip_name = {0x17: "GA", 0x19: "AD"}[self.chip_details['architecture']] + str(100+self.chip_details['implementation'])
 
+    self.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
+    if self.NV_PFB_PRI_MMU_WPR2_ADDR_HI.read() != 0:
+      print("WPR2 is up, needs a reset")
+      System.pci_reset(self.devfmt)
+      time.sleep(0.5)
+
     self.include("src/common/inc/swref/published/turing/tu102/dev_vm.h")
     self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island.h")
     self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island_addendum.h")

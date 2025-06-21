@@ -3,8 +3,8 @@ import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, weakref,
 assert sys.platform != 'win32'
 from typing import cast, Union, ClassVar
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
-from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, HCQPCIIface
+from tinygrad.runtime.support.hcq import BumpAllocator, MMIOInterface, FileIOInterface, MOCKGPU
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferSpec, CPUProgram
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32
@@ -15,11 +15,8 @@ from tinygrad.runtime.autogen import nv_gpu, pci, libc
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev
 from tinygrad.runtime.support.memory import VirtMapping
-from tinygrad.runtime.support.system import System, PCIDevice
+from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
-
-@dataclass
-class NVAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int # noqa: E702
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
 
@@ -456,22 +453,13 @@ class NVKIface:
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
     return NVKIface.low_uvm_vaddr_allocator.alloc(size, alignment) if force_low else NVKIface.uvm_vaddr_allocator.alloc(size, alignment)
 
-class PCIIface:
-  gpus = []
-
+class PCIIface(HCQPCIIface):
   def __init__(self, dev, dev_id):
-    self.dev = dev
+    super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2684], bars=[0, 1], vram_bar=1)
+    System.reserve_hugepages(16)
 
-    if len(PCIIface.gpus) == 0:
-      System.reserve_hugepages(16)
-
-      PCIIface.gpus = System.pci_scan_bus(0x10de, [0x2684])
-      visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('CUDA_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
-      PCIIface.gpus = [PCIIface.gpus[x] for x in visible_devices] if visible_devices else PCIIface.gpus
-
-    self.pci_dev = PCIDevice(PCIIface.gpus[dev_id], bars=[0, 1], resize_bars=[1])
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
-    self.nvdev = NVDev(self.pci_dev.pcibus, self.pci_dev.map_bar(0, fmt='I'), self.pci_dev.map_bar(1))
+    self.dev_impl = NVDev(self.pci_dev.pcibus, self.pci_dev.map_bar(0, fmt='I'), self.pci_dev.map_bar(1))
     self.root, self.gpu_instance = 0xc1000000, 0
     self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
 
@@ -482,34 +470,8 @@ class PCIIface:
   def setup_vm(self, vaspace): pass
   def setup_gpfifo_vm(self, gpfifo): pass
 
-  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=True, map_flags=0):
-    if host or (uncached and cpu_access): # host or gtt-like memory.
-      vaddr = self.nvdev.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
-      paddrs = [(paddr, mmap.PAGESIZE) for paddr in System.alloc_sysmem(size, vaddr=vaddr, contiguous=cpu_access)[1]]
-      nv_mapping = self.nvdev.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=NVAllocationMeta(self.dev, [self.dev], nv_mapping, has_cpu_mapping=True, hMemory=paddrs[0]),
-        view=MMIOInterface(nv_mapping.va_addr, size, fmt='B'))
-
-    nv_mapping = self.nvdev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
-    if cpu_access: self.pci_dev.map_bar(bar=1, off=nv_mapping.paddrs[0][0], addr=nv_mapping.va_addr, size=nv_mapping.size)
-    return HCQBuffer(nv_mapping.va_addr, size, view=MMIOInterface(nv_mapping.va_addr, size, fmt='B') if cpu_access else None,
-      meta=NVAllocationMeta(self.dev, [self.dev], nv_mapping, has_cpu_mapping=cpu_access, hMemory=nv_mapping.paddrs[0][0]))
-
-  def free(self, mem):
-    for dev in mem.meta.mapped_devs[1:]: dev.dev_iface.adev.mm.unmap_range(mem.va_addr, mem.size)
-    if not mem.meta.mapping.system: self.nvdev.mm.vfree(mem.meta.mapping)
-    if mem.meta.owner == self.dev and mem.meta.has_cpu_mapping: FileIOInterface.munmap(mem.va_addr, mem.size)
-
-  def map(self, mem):
-    # Check if the memory is already mapped on this device
-    if self.dev in mem.meta.mapped_devs: return
-    mem.meta.mapped_devs.append(self.dev)
-
-    paddrs = [(paddr if mem.meta.mapping.system else (paddr+mem.meta.owner.dev_iface.p2p_base_addr), size) for paddr,size in mem.meta.mapping.paddrs]
-    self.nvdev.mm.map_range(mem.va_addr, mem.size, paddrs, system=True, snooped=mem.meta.mapping.snooped, uncached=mem.meta.mapping.uncached)
-
-  def rm_alloc(self, parent, clss, params=None, root=None) -> int: return self.nvdev.gsp.rpc_rm_alloc(parent, clss, params, client=self.root)
-  def rm_control(self, obj, cmd, params=None): return type(params).from_buffer_copy(self.nvdev.gsp.rpc_rm_control(obj, cmd, params, client=self.root))
+  def rm_alloc(self, parent, clss, params=None, root=None) -> int: return self.dev_impl.gsp.rpc_rm_alloc(parent, clss, params, self.root)
+  def rm_control(self, obj, cmd, params=None): return type(params).from_buffer_copy(self.dev_impl.gsp.rpc_rm_control(obj, cmd, params, self.root))
 
 class NVDevice(HCQCompiled[NVSignal]):
   devices: ClassVar[list[HCQCompiled]] = []

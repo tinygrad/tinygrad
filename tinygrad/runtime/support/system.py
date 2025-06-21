@@ -19,6 +19,7 @@ class _System:
     self.pagemap().seek(va // mmap.PAGESIZE * 8)
     return va, [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap().read(size//mmap.PAGESIZE*8, binary=True))]
 
+  def pci_reset(self, gpu): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{gpu}/reset'")
   def pci_scan_bus(self, target_vendor:int, target_devices:list[int]) -> list[str]:
     result = []
     for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
