@@ -4,6 +4,11 @@ from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 from tinygrad.device import is_dtype_supported
 from extra.onnx import data_types
 from hypothesis import given, settings, strategies as st
+import numpy as np
+
+supported_dtypes = list(data_types.keys())
+supported_dtypes.remove(16) # TODO: this is bf16. Need to add double parsing first.
+all_dtypes = onnx.TensorProto.DataType.values()
 
 class TestOnnxRunnerDtypes(unittest.TestCase):
   def _test_input_spec_dtype(self, onnx_data_type, tinygrad_dtype):
@@ -21,7 +26,8 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     self.assertEqual(runner.graph_inputs['input'].dtype, tinygrad_dtype)
 
   def _test_initializer_dtype(self, onnx_data_type, tinygrad_dtype):
-    initializer = onnx.helper.make_tensor('initializer', onnx_data_type, (), [1])
+    arr = np.array([0, 1], dtype=onnx.helper.tensor_dtype_to_np_dtype(onnx_data_type))
+    initializer = onnx.helper.make_tensor('initializer', onnx_data_type, arr.shape, arr.tobytes(), raw=True)
     input_tensor = onnx.helper.make_tensor_value_info('input', onnx_data_type, ())
     output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, ())
     node = onnx.helper.make_node('Identity', inputs=['input'], outputs=['output'])
@@ -36,8 +42,9 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     self.assertEqual(runner.graph_values['initializer'].dtype, tinygrad_dtype)
 
   def _test_tensor_attribute_dtype(self, onnx_data_type, tinygrad_dtype):
-    output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, ())
-    value_tensor = onnx.helper.make_tensor('value', onnx_data_type, (), [1])
+    arr = np.array([0, 1], dtype=onnx.helper.tensor_dtype_to_np_dtype(onnx_data_type))
+    output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, arr.shape)
+    value_tensor = onnx.helper.make_tensor('value', onnx_data_type, arr.shape, arr.tobytes(), raw=True)
     node = onnx.helper.make_node('Constant', inputs=[], outputs=['output'], value=value_tensor)
     graph = onnx.helper.make_graph([node], 'attribute_test', [], [output_tensor])
     model = onnx.helper.make_model(graph)
@@ -49,7 +56,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     self.assertEqual(runner.graph_nodes[0].opts['value'].dtype, tinygrad_dtype)
 
   @settings(deadline=1000) # TODO investigate unreliable timing
-  @given(onnx_data_type=st.sampled_from(list(data_types.keys())))
+  @given(onnx_data_type=st.sampled_from(supported_dtypes))
   def test_dtype_spec(self, onnx_data_type):
     tinygrad_dtype = data_types[onnx_data_type]
     if not is_dtype_supported(tinygrad_dtype):
