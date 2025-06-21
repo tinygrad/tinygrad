@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import os, gc, unittest, weakref
 from tinygrad.tensor import Tensor
-from tinygrad.device import Buffer             
+from tinygrad.device import Buffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.helpers import GlobalCounters
 
@@ -67,7 +67,7 @@ class TestGCViz(unittest.TestCase):
 
         del y, ys
         for _ in range(2): gc.collect()
-        
+
         self.assertLessEqual(bufs_allocated() - init, 3)
 
   def test_view_buffer_release(self):
