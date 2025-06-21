@@ -6,9 +6,9 @@ from extra.onnx import data_types
 from hypothesis import given, settings, strategies as st
 import numpy as np
 
-supported_dtypes = list(data_types.keys())
-supported_dtypes.remove(16) # TODO: this is bf16. Need to add double parsing first.
-all_dtypes = onnx.TensorProto.DataType.values()
+data_types.pop(16) # TODO: this is bf16. Need to add double parsing first.
+device_supported_dtypes = [odt for odt, dtype in data_types.items() if is_dtype_supported(dtype)]
+device_unsupported_dtypes = [odt for odt, dtype in data_types.items() if not is_dtype_supported(dtype)]
 
 class TestOnnxRunnerDtypes(unittest.TestCase):
   def _test_input_spec_dtype(self, onnx_data_type, tinygrad_dtype):
@@ -56,12 +56,17 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     self.assertEqual(runner.graph_nodes[0].opts['value'].dtype, tinygrad_dtype)
 
   @settings(deadline=1000) # TODO investigate unreliable timing
-  @given(onnx_data_type=st.sampled_from(supported_dtypes))
-  def test_dtype_spec(self, onnx_data_type):
+  @given(onnx_data_type=st.sampled_from(device_supported_dtypes))
+  def test_supported_dtype_spec(self, onnx_data_type):
     tinygrad_dtype = data_types[onnx_data_type]
-    if not is_dtype_supported(tinygrad_dtype):
-      tinygrad_dtype = dtypes.default_int if dtypes.is_int(tinygrad_dtype) else dtypes.default_float
+    self._test_input_spec_dtype(onnx_data_type, tinygrad_dtype)
+    self._test_initializer_dtype(onnx_data_type, tinygrad_dtype)
+    self._test_tensor_attribute_dtype(onnx_data_type, tinygrad_dtype)
 
+  @settings(deadline=1000) # TODO investigate unreliable timing
+  @given(onnx_data_type=st.sampled_from(device_unsupported_dtypes))
+  def test_unsupported_dtype_spec(self, onnx_data_type):
+    tinygrad_dtype = dtypes.default_int if dtypes.is_int(data_types[onnx_data_type]) else dtypes.is_float
     self._test_input_spec_dtype(onnx_data_type, tinygrad_dtype)
     self._test_initializer_dtype(onnx_data_type, tinygrad_dtype)
     self._test_tensor_attribute_dtype(onnx_data_type, tinygrad_dtype)
