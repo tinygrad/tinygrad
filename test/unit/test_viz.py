@@ -144,8 +144,7 @@ class TestVizTree(TestViz):
 
 # VIZ integrates with other parts of tinygrad
 
-from tinygrad import Tensor
-from tinygrad.renderer.cstyle import ClangRenderer
+from tinygrad import Tensor, Device
 from tinygrad.engine.realize import get_program
 
 class TestVizIntegration(TestViz):
@@ -159,8 +158,8 @@ class TestVizIntegration(TestViz):
 
   # codegen supports rendering of code blocks
   def test_codegen_tracing(self):
-    ast = (Tensor.empty(4)+Tensor.empty(4)).schedule()[0].ast
-    prg = get_program(ast, ClangRenderer())
+    ast = Tensor.schedule(Tensor.empty(4)+Tensor.empty(4))[0].ast
+    prg = get_program(ast, Device[Device.DEFAULT].renderer)
     lst = get_viz_list()
     self.assertEqual(len(lst), 2)
     self.assertEqual(lst[0]["name"], "Schedule 1 Kernel n1")
