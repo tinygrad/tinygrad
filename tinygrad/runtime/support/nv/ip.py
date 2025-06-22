@@ -359,7 +359,7 @@ class NV_GSP:
 
   def init_golden_image(self):
     self.rpc_rm_alloc(hParent=0x0, hClass=0x0, params=nv_gpu.NV0000_ALLOC_PARAMETERS())
-    dev = self.rpc_rm_alloc(hParent=self.priv_client, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(hClientShare=self.priv_client))
+    dev = self.rpc_rm_alloc(hParent=self.priv_root, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(hClientShare=self.priv_root))
     subdev = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS())
     vaspace = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.FERMI_VASPACE_A, params=nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS())
 
@@ -383,7 +383,7 @@ class NV_GSP:
       3: GRBufDesc(0x3000, p=0, v=1), 4: GRBufDesc(0x20000, p=0, v=1), 5: GRBufDesc(0x2600000, p=0, v=1), 6: GRBufDesc(0x80000, p=0, v=1),
       9: GRBufDesc(0x10000, p=1, v=1), 10: GRBufDesc(0x80000, p=1, v=0), 11: GRBufDesc(0x80000, p=1, v=1)}
 
-    self.promote_ctx(self.priv_client, subdev, ch_gpfifo, {k:v for k, v in self.grctx_bufs.items() if v.lc == 0})
+    self.promote_ctx(self.priv_root, subdev, ch_gpfifo, {k:v for k, v in self.grctx_bufs.items() if v.lc == 0})
 
     self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=nv_gpu.ADA_COMPUTE_A, params=None)
     self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=nv_gpu.AMPERE_DMA_COPY_B, params=None)
@@ -395,7 +395,7 @@ class NV_GSP:
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_EVENT_GSP_INIT_DONE)
 
     self.nvdev.NV_PBUS_BAR1_BLOCK.write(mode=0, target=0, ptr=0)
-    self.priv_client = 0xc1e00004
+    self.priv_root = 0xc1e00004
     self.init_golden_image()
 
   ### RPCs
@@ -409,26 +409,26 @@ class NV_GSP:
       method_va, method_sysmem = System.alloc_sysmem(0x5000, contiguous=True)
       params.mthdbufMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=method_sysmem[0], size=0x5000, addressSpace=1, cacheAttrib=0)
 
-      if client is not None and client != self.priv_client and params.hObjectError != 0:
+      if client is not None and client != self.priv_root and params.hObjectError != 0:
         params.errorNotifierMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=0, size=0xecc, addressSpace=0, cacheAttrib=0)
         params.userdMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=params.hUserdMemory[0] + params.userdOffset[0], size=0x400, addressSpace=2, cacheAttrib=0)
 
-    alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=(client:=client or self.priv_client), hParent=hParent, hObject=(obj:=next(self.handle_gen)),
+    alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=(client:=client or self.priv_root), hParent=hParent, hObject=(obj:=next(self.handle_gen)),
       hClass=hClass, flags=0x0, paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC, bytes(alloc_args) + (bytes(params) if params is not None else b''))
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC)
 
     if hClass == 0x0: return client # init root, return client
-    if hClass == nv_gpu.FERMI_VASPACE_A and client != self.priv_client:
+    if hClass == nv_gpu.FERMI_VASPACE_A and client != self.priv_root:
       self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr, client=client)
     if hClass == nv_gpu.NV20_SUBDEVICE_0: self.subdevice = obj # save subdevice handle
-    if hClass == nv_gpu.ADA_COMPUTE_A and client != self.priv_client:
+    if hClass == nv_gpu.ADA_COMPUTE_A and client != self.priv_root:
       phys_gr_ctx = self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
       self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
     return obj
 
   def rpc_rm_control(self, hObject, cmd, params, client=None):
-    control_args = nv.rpc_gsp_rm_control_v(hClient=(client:=client or self.priv_client), hObject=hObject, cmd=cmd, flags=0x0,
+    control_args = nv.rpc_gsp_rm_control_v(hClient=(client:=client or self.priv_root), hObject=hObject, cmd=cmd, flags=0x0,
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))
     return self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)[len(bytes(control_args)):]
@@ -443,7 +443,7 @@ class NV_GSP:
     # So, top level is 4 entries. Flags field is all channels, vid mem.
     params = nv.struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(physAddress=pdir_paddr,
       numEntries=4, flags=0x8, hVASpace=hVASpace, pasid=0xffffffff, subDeviceId=1, chId=0)
-    alloc_args = nv.rpc_set_page_directory_v(hClient=client or self.priv_client, hDevice=device, pasid=0xffffffff, params=params)
+    alloc_args = nv.rpc_set_page_directory_v(hClient=client or self.priv_root, hDevice=device, pasid=0xffffffff, params=params)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_SET_PAGE_DIRECTORY, bytes(alloc_args))
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_SET_PAGE_DIRECTORY)
 
