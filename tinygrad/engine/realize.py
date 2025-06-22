@@ -1,29 +1,51 @@
 from typing import Optional, cast, Generator
 import time, pprint
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
+from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
-from tinygrad.opt.kernel import Kernel
-from tinygrad.opt.heuristic import hand_coded_optimizations
 from tinygrad.engine.schedule import ScheduleItem
+from tinygrad.opt import get_optimized_ast
+from tinygrad.codegen import full_rewrite
+from tinygrad.uop.spec import type_verify
 
 # **************** Program Creation ****************
 
-logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
+@track_rewrites(name=lambda _ast,_renderer,ret:ret.name)
 def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
-  k = Kernel(ast, opts=renderer)
-  if not NOOPT:
-    if not k.apply_tensor_cores(getenv("TC", 1)): k.apply_opts(hand_coded_optimizations(k))
-    if BEAM >= 1:
-      from tinygrad.opt.search import beam_search, bufs_from_lin
-      kb = Kernel(ast, opts=renderer)
-      rawbufs = bufs_from_lin(kb, allocate=False)
-      k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-  if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
-  return k.to_program()
+  """
+  Transform an AST into a ProgramSpec. May trigger BEAM search.
+
+  Args:
+    ast: The Ops.SINK rooted AST
+    renderer: The renderer used to generate the code
+
+  Returns:
+    The ProgramSpec of the program.
+  """
+
+  if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
+  modified_ast = get_optimized_ast(ast, renderer) if ast.arg is None else ast
+  if __debug__: type_verify(list(modified_ast.toposort()))
+
+  # linearize
+  try:
+    uops = full_rewrite(modified_ast, renderer)
+  except RuntimeError:
+    print("***** LINEARIZE FAILURE *****")
+    print(f"ast = {ast}")
+    print(f"opts = {modified_ast.arg.applied_opts}")
+    raise
+  assert uops[-1].op is Ops.SINK, "last uop must be sink"
+
+  # print and render
+  if DEBUG >= 6: print_uops(uops)
+  src = renderer.render(uops)
+
+  return ProgramSpec(uops[-1].arg.name, src, renderer.device, ast, uops,
+                     global_size=[1,1,1] if renderer.has_local else None, local_size=[1,1,1] if renderer.has_local else None)
 
 # **************** Runners ****************
 
