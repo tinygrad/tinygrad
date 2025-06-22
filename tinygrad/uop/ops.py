@@ -752,7 +752,9 @@ def track_rewrites(name:Callable|bool|None=None):
         tracked_keys.append(args[0] if args and name is None else (fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}")
         tracked_ctxs.append([])
       ret = func(*args, **kwargs)
-      if TRACK_MATCH_STATS >= 2 and callable(name): tracked_keys[-1] = tracked_keys[-1].replace(fn, name(*args, **kwargs, ret=ret))
+      if TRACK_MATCH_STATS >= 2 and callable(name):
+        name_ret = name(*args, **kwargs, ret=ret)
+        tracked_keys[-1] = tracked_keys[-1].replace(fn, name_ret) if isinstance(name_ret, str) else name_ret
       if getenv("CAPTURE_PROCESS_REPLAY"):
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
