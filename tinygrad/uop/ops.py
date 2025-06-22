@@ -6,7 +6,7 @@ from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten
-from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put
+from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
@@ -519,6 +519,8 @@ class KernelInfo:
   upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to UNROLL)
   dont_use_locals: bool = False # don't use local indexing
   applied_opts: tuple = tuple()
+  @property
+  def function_name(self): return to_function_name(self.name)
 
 # ******** ops in python ********
 

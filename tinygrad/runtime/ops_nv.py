@@ -571,8 +571,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.slm_per_thread, self.shader_local_mem = 0, None
 
     # Set windows addresses to not collide with other allocated buffers.
-    self.shared_mem_window = 0x729400000000 if self.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else 0x729400000000
-    self.local_mem_window = 0x729300000000 if self.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else 0x729300000000
+    self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
     NVComputeQueue().setup(compute_class=self.iface.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
