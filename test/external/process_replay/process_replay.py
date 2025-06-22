@@ -2,7 +2,7 @@
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools
 from typing import Callable, Any
-from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm, to_function_name
+from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 from tinygrad.kernelize.kernelize import get_kernelize_map
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.engine.realize import get_program
