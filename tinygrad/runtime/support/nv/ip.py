@@ -188,7 +188,7 @@ class NV_FLCN:
       xfered += 256
 
     while self.nvdev.NV_PFALCON_FALCON_DMATRFCMD.with_base(base).read_bitfields()['idle'] != 1: pass
-  
+
   def start_cpu(self, base):
     if self.nvdev.NV_PFALCON_FALCON_CPUCTL.with_base(base).read_bitfields()['alias_en'] == 1:
       self.nvdev.wreg(base + self.nvdev.NV_PFALCON_FALCON_CPUCTL_ALIAS, 0x2)
@@ -340,7 +340,7 @@ class NV_GSP:
       gspFwOffset=(gsp_off:=round_down(boot_off-radix3_sz, 0x10000)), gspFwHeapSize=(gsp_heap_sz:=0x8100000),
       gspFwHeapOffset=(gsp_heap_off:=round_down(gsp_off-gsp_heap_sz, 0x100000)), gspFwWprStart=(wpr_start:=round_down(gsp_heap_off-0x1000, 0x100000)),
       nonWprHeapSize=(non_wpr_sz:=0x100000), nonWprHeapOffset=(non_wpr_off:=round_down(wpr_start-non_wpr_sz, 0x100000)), gspFwRsvdStart=non_wpr_off,
-      sysmemAddrOfRadix3Elf=self.gsp_radix3_sysmem[0], sysmemAddrOfBootloader=self.booter_sysmem[0],sysmemAddrOfSignature=self.gsp_signature_sysmem[0],
+      sysmemAddrOfRadix3Elf=self.gsp_radix3_sysmem[0],sysmemAddrOfBootloader=self.booter_sysmem[0],sysmemAddrOfSignature=self.gsp_signature_sysmem[0],
       bootloaderCodeOffset=self.booter_desc.monitorCodeOffset, bootloaderDataOffset=self.booter_desc.monitorDataOffset,
       bootloaderManifestOffset=self.booter_desc.manifestOffset, sizeOfSignature=0x1000)
     self.wpr_meta, self.wpr_meta_sysmem = self.nvdev._alloc_boot_struct(m)
@@ -359,7 +359,7 @@ class NV_GSP:
 
   def init_golden_image(self):
     self.rpc_rm_alloc(hParent=0x0, hClass=0x0, params=nv_gpu.NV0000_ALLOC_PARAMETERS())
-    dev = self.rpc_rm_alloc(hParent=self.priv_client, hClass=nv_gpu.NV01_DEVICE_0, nv_gpu.NV0080_ALLOC_PARAMETERS(hClientShare=self.priv_client))
+    dev = self.rpc_rm_alloc(hParent=self.priv_client, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(hClientShare=self.priv_client))
     subdev = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS())
     vaspace = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.FERMI_VASPACE_A, params=nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS())
 
