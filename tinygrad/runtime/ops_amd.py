@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, cast, ClassVar
+from typing import cast, ClassVar
 import os, ctypes, ctypes.util, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, traceback
 assert sys.platform != 'win32'
 from dataclasses import dataclass
@@ -16,8 +16,7 @@ from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, setup_pci_bars
-from tinygrad.runtime.support.system import System, PCIDevice, MAP_FIXED, MAP_NORESERVE, PCIIfaceBase, PCIAllocationMeta
-# from tinygrad.runtime.support.memory import VirtMapping
+from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
