@@ -150,7 +150,8 @@ class NVDev:
         continue
 
       if m:=re.match(r'#define\s+(\w+)\s*\(\s*(\w+)\s*\)\s*(.+)', raw): # reg set
-        name, value = m.groups()[0], eval(f"lambda {m.groups()[1]}: {m.groups()[2].strip().rstrip('\\').split('/*')[0].rstrip()}")
+        fn = m.groups()[2].strip().rstrip('\\').split('/*')[0].rstrip()
+        name, value = m.groups()[0], eval(f"lambda {m.groups()[1]}: {fn}")
       elif m:=re.match(r'#define\s+(\w+)\s+([0-9A-Fa-fx]+)(?![^\n]*:)', raw): name, value = m.groups()[0], int(m.groups()[1], 0) # reg value
       else: continue
 
