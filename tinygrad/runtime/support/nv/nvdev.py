@@ -1,12 +1,10 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib, re, gzip, struct
-from tinygrad.helpers import mv_address, getenv, round_up, DEBUG, temp, fetch, getbits, to_mv
-from tinygrad.runtime.autogen.nv import nv
+import ctypes, time, functools, re, gzip, struct
+from tinygrad.helpers import getenv, DEBUG, fetch, getbits, to_mv
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_GSP
 from tinygrad.runtime.support.system import System
-from hexdump import hexdump
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
 
@@ -148,9 +146,9 @@ class NVDev:
         reg = next((r for r in self.reg_names if name.startswith(r+"_")), None)
         if reg is not None: self.__dict__[reg].add_field(name[len(reg)+1:].lower(), eval(lo), eval(hi))
         else: self.reg_offsets[name] = (eval(lo), eval(hi))
-
         continue
-      elif m:=re.match(r'#define\s+(\w+)\s*\(\s*(\w+)\s*\)\s*(.+)', raw): # reg set
+
+      if m:=re.match(r'#define\s+(\w+)\s*\(\s*(\w+)\s*\)\s*(.+)', raw): # reg set
         name, value = m.groups()[0], eval(f"lambda {m.groups()[1]}: {m.groups()[2].strip().rstrip('\\').split('/*')[0].rstrip()}")
       elif m:=re.match(r'#define\s+(\w+)\s+([0-9A-Fa-fx]+)(?![^\n]*:)', raw): name, value = m.groups()[0], int(m.groups()[1], 0) # reg value
       else: continue
