@@ -30,13 +30,8 @@ class TinygradBackend(Backend):
     input_initializer = [x.name for x in model.graph.initializer]
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
-    fd, tmp = tempfile.mkstemp()
-    try:
-      model = Tensor(model.SerializeToString(), dtype=dtypes.uint8, device=f"disk:{tmp}")
-      run_onnx = OnnxRunner(onnx_load(model))
-    finally:
-      os.close(fd)
-      os.unlink(tmp)
+    model = Tensor(model.SerializeToString(), dtype=dtypes.uint8, device="PYTHON")
+    run_onnx = OnnxRunner(onnx_load(model))
     return TinygradModel(run_onnx, net_feed_input)
 
   @classmethod
