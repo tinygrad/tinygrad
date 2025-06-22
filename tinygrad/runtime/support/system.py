@@ -1,6 +1,8 @@
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses
 from typing import cast
 from tinygrad.helpers import round_up, to_mv, getenv, OSX
+from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQCompiled, HCQBuffer
+from tinygrad.runtime.support.memory import VirtMapping
 from tinygrad.runtime.autogen import libc, vfio
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQCompiled, HCQBuffer
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
@@ -100,7 +102,7 @@ class PCIDevImplBase:
   mm: MemoryManager
 
 @dataclasses.dataclass
-class PCIAllocationMeta: owner:HCQCompiled; mapped_devs:list; mapping:VirtMapping; has_cpu_mapping:bool # noqa: E702
+class PCIAllocationMeta: owner:HCQCompiled; mapped_devs:list; mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int # noqa: E702
 
 class PCIIfaceBase:
   dev_impl:PCIDevImplBase
@@ -122,13 +124,13 @@ class PCIIfaceBase:
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       paddrs = [(paddr, mmap.PAGESIZE) for paddr in System.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)[1]]
       mapping = self.dev_impl.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(self.dev, [self.dev], mapping, has_cpu_mapping=True),
+      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(self.dev, [self.dev], mapping, has_cpu_mapping=True, hMemory=paddrs[0]),
         view=MMIOInterface(mapping.va_addr, size, fmt='B'))
 
     mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
     if cpu_access: self.pci_dev.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], addr=mapping.va_addr, size=mapping.size)
     return HCQBuffer(mapping.va_addr, size, view=MMIOInterface(mapping.va_addr, size, fmt='B') if cpu_access else None,
-      meta=PCIAllocationMeta(self.dev, [self.dev], mapping, has_cpu_mapping=cpu_access))
+      meta=PCIAllocationMeta(self.dev, [self.dev], mapping, has_cpu_mapping=cpu_access, hMemory=mapping.paddrs[0][0]))
 
   def free(self, b:HCQBuffer):
     for dev in b.meta.mapped_devs[1:]: dev.dev_iface.dev_impl.mm.unmap_range(b.va_addr, b.size)

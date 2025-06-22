@@ -39,7 +39,7 @@ class NVRpcQueue:
 
     off = self.tx.writePtr * self.tx.msgSize
     self.queue_mv[off:off+len(msg)] = msg
-    self.tx.writePtr += round_up(len(msg), self.tx.msgSize) // self.tx.msgSize
+    self.tx.writePtr = (self.tx.writePtr + round_up(len(msg), self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
     CPUProgram.atomic_lib.atomic_thread_fence(5)
 
     self.seq += 1

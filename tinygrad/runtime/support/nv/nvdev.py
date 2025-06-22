@@ -64,7 +64,7 @@ class NVPageTableEntry:
   def address(self, entry_id:int) -> int: return self.read_fields(entry_id)['address_small_sys' if self.lv == 3 else 'address_sys'] << 12
 
 class NVMemoryManager(MemoryManager):
-  va_allocator = TLSFAllocator((1 << 49), base=1 << 30) # global for all devices.
+  va_allocator = TLSFAllocator((1 << 44), base=1 << 30) # global for all devices.
 
   def on_range_mapped(self): self.dev.NV_VIRTUAL_FUNCTION_PRIV_MMU_INVALIDATE.write((1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
