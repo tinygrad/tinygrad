@@ -244,7 +244,7 @@ class MemoryManager:
     for paddr, _ in vm.paddrs: self.pa_allocator.free(paddr)
 
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
-    # assert self.dev.is_booting == boot, "During booting, only boot memory can be allocated"
+    assert self.dev.is_booting == boot, "During booting, only boot memory can be allocated"
     paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
     if zero: self.dev.vram[paddr:paddr+size] = bytes(size)
     return paddr

@@ -46,7 +46,7 @@ typedef struct
     NvU32 ucode_cmd_mask0;
     NvU32 ucode_cmd_mask1;
     NvU32 multiTgtTbl;
-} FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3;
+} __attribute__((packed)) FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3;
 
 #define FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3_CMD_FRTS (0x15)
 #define FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3_CMD_SB   (0x19)
@@ -55,7 +55,7 @@ typedef struct
 #define BIT_HEADER_SIGNATURE              0x00544942  // "BIT\0"
 #define BIT_HEADER_SIZE_OFFSET            8
 
-struct BIT_HEADER_V1_00
+struct __attribute__((packed)) BIT_HEADER_V1_00
 {
     unsigned short Id;
     unsigned int Signature;
@@ -68,7 +68,7 @@ struct BIT_HEADER_V1_00
 #define BIT_HEADER_V1_00_FMT "1w1d1w4b"
 typedef struct BIT_HEADER_V1_00 BIT_HEADER_V1_00;
 
-struct BIT_TOKEN_V1_00
+struct __attribute__((packed)) BIT_TOKEN_V1_00
 {
     unsigned char TokenId;
     unsigned char DataVersion;
@@ -90,7 +90,7 @@ typedef struct
 {
     unsigned int Version;     // BIOS Binary Version Ex. 5.40.00.01.12 = 0x05400001
     unsigned char OemVersion;  // OEM Version Number  Ex. 5.40.00.01.12 = 0x12
-} BIT_DATA_BIOSDATA_BINVER;
+} __attribute__((packed)) BIT_DATA_BIOSDATA_BINVER;
 
 #define BIT_DATA_BIOSDATA_VERSION_1         0x1
 #define BIT_DATA_BIOSDATA_VERSION_2         0x2
@@ -103,7 +103,7 @@ typedef struct
 typedef struct
 {
     unsigned int FalconUcodeTablePtr;
-} BIT_DATA_FALCON_DATA_V2;
+} __attribute__((packed)) BIT_DATA_FALCON_DATA_V2;
 
 #define BIT_DATA_FALCON_DATA_V2_4_FMT       "1d"
 #define BIT_DATA_FALCON_DATA_V2_SIZE_4      4
@@ -116,7 +116,7 @@ typedef struct
     unsigned char EntryCount;
     unsigned char DescVersion;
     unsigned char DescSize;
-} FALCON_UCODE_TABLE_HDR_V1;
+} __attribute__((packed)) FALCON_UCODE_TABLE_HDR_V1;
 
 #define FALCON_UCODE_TABLE_HDR_V1_VERSION   1
 #define FALCON_UCODE_TABLE_HDR_V1_SIZE_6    6
@@ -127,7 +127,7 @@ typedef struct
     unsigned char ApplicationID;
     unsigned char TargetID;
     unsigned int DescPtr;
-} FALCON_UCODE_TABLE_ENTRY_V1;
+} __attribute__((packed)) FALCON_UCODE_TABLE_ENTRY_V1;
 
 #define FALCON_UCODE_TABLE_ENTRY_V1_VERSION             1
 #define FALCON_UCODE_TABLE_ENTRY_V1_SIZE_6              6
@@ -153,7 +153,7 @@ typedef struct
 typedef struct
 {
     unsigned int vDesc;
-} FALCON_UCODE_DESC_HEADER;
+} __attribute__((packed)) FALCON_UCODE_DESC_HEADER;
 #define FALCON_UCODE_DESC_HEADER_FORMAT   "1d"
 
 typedef struct {
@@ -184,7 +184,7 @@ typedef struct
     NvU64 gfwImageOffset;
     NvU32 gfwImageSize;
     NvU32 flags;
-} FWSECLIC_READ_VBIOS_DESC;
+} __attribute__((packed)) FWSECLIC_READ_VBIOS_DESC;
 
 #define FWSECLIC_READ_VBIOS_STRUCT_FLAGS (2)
 
@@ -195,7 +195,7 @@ typedef struct
     NvU32 frtsRegionOffset4K;
     NvU32 frtsRegionSize;
     NvU32 frtsRegionMediaType;
-} FWSECLIC_FRTS_REGION_DESC;
+} __attribute__((packed)) FWSECLIC_FRTS_REGION_DESC;
 
 #define FWSECLIC_FRTS_REGION_MEDIA_FB (2)
 #define FWSECLIC_FRTS_REGION_SIZE_1MB_IN_4K (0x100)
@@ -204,6 +204,6 @@ typedef struct
 {
     FWSECLIC_READ_VBIOS_DESC readVbiosDesc;
     FWSECLIC_FRTS_REGION_DESC frtsRegionDesc;
-} FWSECLIC_FRTS_CMD;
+} __attribute__((packed)) FWSECLIC_FRTS_CMD;
 
 #endif /* VBIOS_H */

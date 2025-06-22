@@ -64,7 +64,7 @@ class NVPageTableEntry:
   def address(self, entry_id:int) -> int: return self.read_fields(entry_id)['address_small_sys' if self.lv == 3 else 'address_sys'] << 12
 
 class NVMemoryManager(MemoryManager):
-  va_allocator = TLSFAllocator((1 << 49), base=1024 << 20) # global for all devices.
+  va_allocator = TLSFAllocator((1 << 49), base=1 << 30) # global for all devices.
 
   def on_range_mapped(self): self.dev.wreg(0x00B80000 + 0x000030B0, (1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
@@ -73,14 +73,16 @@ class NVDev:
     self.devfmt, self.mmio, self.vram = devfmt, mmio, vram
     self.included_files, self.reg_names, self.reg_offsets = set(), set(), {}
 
-    self.smi_dev = False
-    self.is_booting = False
+    self.smi_dev, self.is_booting = False, True
     self._early_init()
 
-    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=NVPageTableEntry, pte_cnt=[4, 512, 512, 256, 512],
+    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, pte_cnt=[4, 512, 512, 256, 512],
       pte_covers=[0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000], first_lv=0, first_page_lv=4, va_base=0)
     self.flcn = NV_FLCN(self)
     self.gsp = NV_GSP(self)
+
+    # Turn the booting early, gsp client is loaded from the clean.
+    self.is_booting = False
 
     for ip in [self.flcn, self.gsp]: ip.init_sw()
     for ip in [self.flcn, self.gsp]: ip.init_hw()
@@ -98,7 +100,7 @@ class NVDev:
 
     self.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
     if self.NV_PFB_PRI_MMU_WPR2_ADDR_HI.read() != 0:
-      print("WPR2 is up, needs a reset")
+      if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.")
       System.pci_reset(self.devfmt)
       time.sleep(0.5)
 

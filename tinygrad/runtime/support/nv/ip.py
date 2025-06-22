@@ -55,14 +55,16 @@ class NVRpcQueue:
       msg = self.queue_mv[off + 0x50 : off + 0x50 + hdr.length]
 
       # Handling special functions
-      if hdr.function == 0x1002: self.gsp.run_cpu_seq(msg)
-      if hdr.function == 0x1006: print(f"GSP LOG: {msg[12:].tobytes().rstrip(b'\0').decode('utf-8', 'replace')}")
+      if hdr.function == nv.NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER: self.gsp.run_cpu_seq(msg)
+      elif hdr.function == nv.NV_VGPU_MSG_EVENT_OS_ERROR_LOG: print(f"GSP LOG: {msg[12:].tobytes().rstrip(b'\0').decode('utf-8', 'replace')}")
 
       # Update the read pointer
       self.rx.readPtr = (self.rx.readPtr + round_up(hdr.length, self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
       CPUProgram.atomic_lib.atomic_thread_fence(5)
 
-      print(f"RPC message: {hdr.function:#x}, {hdr.length}, {hdr.rpc_result} / {self.tx.writePtr} - {self.rx.readPtr}")
+      if DEBUG >= 2:
+        rpc_names = {**nv.c__Ea_NV_VGPU_MSG_FUNCTION_NOP__enumvalues, **nv.c__Ea_NV_VGPU_MSG_EVENT_FIRST_EVENT__enumvalues}
+        print(f"nv {self.gsp.nvdev.devfmt}: in RPC: {rpc_names.get(hdr.function, f'ev:{hdr.function:x}')}, res:{hdr.rpc_result:#x}")
 
       if hdr.rpc_result != 0: raise RuntimeError(f"RPC call {hdr.function} failed with result {hdr.rpc_result}")
       if hdr.function == cmd: return msg
@@ -392,8 +394,7 @@ class NV_GSP:
     self.stat_q = NVRpcQueue(self, self.stat_q_va, self.cmd_q_va)
     self.cmd_q.rx = nv.msgqRxHeader.from_address(self.stat_q.va + self.stat_q.tx.rxHdrOff)
 
-    self.stat_q.wait_resp(0x1001)
-    print("GSP init done")
+    self.stat_q.wait_resp(nv.NV_VGPU_MSG_EVENT_GSP_INIT_DONE)
 
     self.nvdev.NV_PBUS_BAR1_BLOCK.write(mode=0, target=0, ptr=0)
     self.priv_client = 0xc1e00004
@@ -416,8 +417,8 @@ class NV_GSP:
 
     alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=(client:=client or self.priv_client), hParent=hParent, hObject=(obj:=next(self.handle_gen)),
       hClass=hClass, flags=0x0, paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
-    self.cmd_q.send_rpc(103, bytes(alloc_args) + (bytes(params) if params is not None else b''))
-    self.stat_q.wait_resp(103)
+    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC, bytes(alloc_args) + (bytes(params) if params is not None else b''))
+    self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC)
 
     if hClass == 0x0: return client # init root, return client
     if hClass == nv_gpu.FERMI_VASPACE_A and client != self.priv_client:
@@ -431,8 +432,8 @@ class NV_GSP:
   def rpc_rm_control(self, hObject, cmd, params, client=None):
     control_args = nv.rpc_gsp_rm_control_v(hClient=(client:=client or self.priv_client), hObject=hObject, cmd=cmd, flags=0x0,
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
-    self.cmd_q.send_rpc(76, bytes(control_args) + (bytes(params) if params is not None else b''))
-    return self.stat_q.wait_resp(76)[len(bytes(control_args)):]
+    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))
+    return self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)[len(bytes(control_args)):]
 
   def rpc_set_page_directory(self, device, hVASpace, pdir_paddr, client=None):
     # UVM depth   HW level                            VA bits
@@ -445,14 +446,14 @@ class NV_GSP:
     params = nv.struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(physAddress=pdir_paddr,
       numEntries=4, flags=0x8, hVASpace=hVASpace, pasid=0xffffffff, subDeviceId=1, chId=0)
     alloc_args = nv.rpc_set_page_directory_v(hClient=client or self.priv_client, hDevice=device, pasid=0xffffffff, params=params)
-    self.cmd_q.send_rpc(54, bytes(alloc_args))
-    self.stat_q.wait_resp(54)
+    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_SET_PAGE_DIRECTORY, bytes(alloc_args))
+    self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_SET_PAGE_DIRECTORY)
 
   def rpc_set_gsp_system_info(self):
     data = nv.GspSystemInfo(gpuPhysAddr=0xf2000000, gpuPhysFbAddr=0x38060000000, gpuPhysInstAddr=0x38070000000,
       pciConfigMirrorBase=0x88000, pciConfigMirrorSize=0x1000, nvDomainBusDeviceFunc=0x100, bIsPassthru=1,
       PCIDeviceID=0x268410de, PCISubDeviceID=0x13b3196e, PCIRevisionID=0xa1, maxUserVa=0x7ffffffff000)
-    self.cmd_q.send_rpc(72, bytes(data))
+    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO, bytes(data))
 
   def rpc_set_registry_table(self):
     table = {'RMForcePcieConfigSave': 0x1, 'RMSecBusResetEnable': 0x1}
@@ -465,7 +466,7 @@ class NV_GSP:
       data_bytes += k.encode('utf-8') + b'\x00'
 
     header = nv.PACKED_REGISTRY_TABLE(size=hdr_size + len(entries_bytes) + len(data_bytes), numEntries=len(table))
-    self.cmd_q.send_rpc(73, bytes(header) + entries_bytes + data_bytes)
+    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_SET_REGISTRY, bytes(header) + entries_bytes + data_bytes)
 
   def run_cpu_seq(self, seq_buf):
     hdr = nv.rpc_run_cpu_sequencer_v17_00.from_address(mv_address(seq_buf))
