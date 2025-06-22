@@ -483,8 +483,8 @@ class NVDevice(HCQCompiled[NVSignal]):
     ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=vaspace, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     ctxshare = self.iface.rm_alloc(channel_group, nv_gpu.FERMI_CONTEXT_SHARE_A, ctxshare_params)
 
-    self.compute_gpfifo = self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0, entries=0x10000, enable_debug=True)
-    self.dma_gpfifo = self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0x100000, entries=0x10000)
+    self.compute_gpfifo = self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0, entries=0x10000, compute=True)
+    self.dma_gpfifo = self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0x100000, entries=0x10000, compute=False)
     self.iface.rm_control(channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
 
     self.cmdq_page:HCQBuffer = self.iface._gpu_alloc(0x200000, cpu_access=True)
@@ -504,19 +504,18 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     self._setup_gpfifos()
 
-  def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400, enable_debug=False) -> GPFifo:
+  def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400, compute=False) -> GPFifo:
     notifier = self.iface._gpu_alloc(48 << 20, uncached=True)
     params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=notifier.meta.hMemory, hObjectBuffer=gpfifo_area.meta.hMemory,
       gpFifoOffset=gpfifo_area.va_addr+offset, gpFifoEntries=entries, hContextShare=ctxshare,
       hUserdMemory=(ctypes.c_uint32*8)(gpfifo_area.meta.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset))
     gpfifo = self.iface.rm_alloc(channel_group, self.iface.gpfifo_class, params)
-    comp = self.iface.rm_alloc(gpfifo, self.iface.compute_class)
-    self.iface.rm_alloc(gpfifo, self.iface.dma_class)
 
-    if enable_debug:
-      self.debug_compute_obj, self.debug_channel = comp, gpfifo
+    if compute:
+      self.debug_compute_obj, self.debug_channel = self.iface.rm_alloc(gpfifo, self.iface.compute_class), gpfifo
       debugger_params = nv_gpu.NV83DE_ALLOC_PARAMETERS(hAppClient=self.iface.root, hClass3dObject=self.debug_compute_obj)
       self.debugger = self.iface.rm_alloc(self.nvdevice, nv_gpu.GT200_DEBUGGER, debugger_params)
+    else: self.iface.rm_alloc(gpfifo, self.iface.dma_class)
 
     self.iface.rm_control(gpfifo, nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN,
       ws_token_params:=nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS(workSubmitToken=-1))
@@ -536,8 +535,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.slm_per_thread, self.shader_local_mem = 0, None
 
     # Set windows addresses to not collide with other allocated buffers.
-    self.shared_mem_window = 0x729400000000 if self.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else 0xfe000000
-    self.local_mem_window = 0x729300000000 if self.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else 0xff000000
+    self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
     NVComputeQueue().setup(compute_class=self.iface.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
