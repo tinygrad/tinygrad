@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver
-from dataclasses import fields, is_dataclass, replace
+from dataclasses import fields, is_dataclass
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
@@ -85,7 +85,7 @@ def _reconstruct(a:Any):
     op, dtype, src, arg, tag = contexts[2][a]
     return UOp(op, dtype, _reconstruct(src), _reconstruct(arg), tag)
   if isinstance(a, tuple): return type(a)(_reconstruct(i) for i in a)
-  if is_dataclass(a): return replace(a, **{f.name:_reconstruct(getattr(a, f.name)) for f in fields(a)})
+  if is_dataclass(a) and not isinstance(a, type): return type(a)(**{f.name:_reconstruct(getattr(a, f.name)) for f in fields(a)})
   return a
 
 def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:

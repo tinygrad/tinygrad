@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
-from dataclasses import dataclass, field, fields, is_dataclass, replace
+from dataclasses import dataclass, field, fields, is_dataclass
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
@@ -734,7 +734,7 @@ def track_uop(a:Any):
     uop_fields[num] = (a.op, a.dtype, track_uop(a.src), track_uop(a.arg), a.tag)
     return num
   if isinstance(a, tuple): return type(a)(track_uop(i) for i in a)
-  if is_dataclass(a): return replace(a, **{f.name:track_uop(getattr(a, f.name)) for f in fields(a)})
+  if is_dataclass(a) and not isinstance(a, type): return type(a)(**{f.name:track_uop(getattr(a, f.name)) for f in fields(a)})
   return a
 
 # *** tracking pattern matcher ***
