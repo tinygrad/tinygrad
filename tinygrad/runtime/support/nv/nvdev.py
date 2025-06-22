@@ -124,7 +124,8 @@ class NVDev:
 
   def extract_fw(self, file:str, dname:str) -> bytes:
     # Extracts the firmware binary from the given header
-    text = self._download(f"src/nvidia/generated/g_bindata_{file.replace("kgsp", "kgspGet")}_{self.chip_name}.c")
+    tname = file.replace("kgsp", "kgspGet")
+    text = self._download(f"src/nvidia/generated/g_bindata_{tname}_{self.chip_name}.c")
     info, sl = text[text[:text.index(dnm:=f'{file}_{self.chip_name}_{dname}')].rindex("COMPRESSION:"):][:16], text[text.index(dnm) + len(dnm) + 7:]
     image = bytes.fromhex(sl[:sl.find("};")].strip().replace("0x", "").replace(",", "").replace(" ", "").replace("\n", ""))
     return gzip.decompress(struct.pack("<4BL2B", 0x1f, 0x8b, 8, 0, 0, 0, 3) + image) if "COMPRESSION: YES" in info else image
