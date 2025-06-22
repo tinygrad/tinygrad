@@ -1,8 +1,9 @@
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses
+from typing import cast
 from tinygrad.helpers import round_up, to_mv, getenv, OSX
 from tinygrad.runtime.autogen import libc, vfio
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQCompiled, HCQBuffer
-from tinygrad.runtime.support.memory import VirtMapping
+from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
 
 MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
 
@@ -92,10 +93,14 @@ class PCIDevice:
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
 
+class PCIDevImplBase:
+  mm: MemoryManager
+
 @dataclasses.dataclass
 class PCIAllocationMeta: owner:HCQCompiled; mapped_devs:list; mapping:VirtMapping; has_cpu_mapping:bool # noqa: E702
 
 class PCIIfaceBase:
+  dev_impl:PCIDevImplBase
   gpus:list[str] = []
 
   def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
@@ -122,15 +127,15 @@ class PCIIfaceBase:
     return HCQBuffer(mapping.va_addr, size, view=MMIOInterface(mapping.va_addr, size, fmt='B') if cpu_access else None,
       meta=PCIAllocationMeta(self.dev, [self.dev], mapping, has_cpu_mapping=cpu_access))
 
-  def free(self, mem:HCQBuffer):
-    for dev in mem.meta.mapped_devs[1:]: dev.dev_iface.dev_impl.mm.unmap_range(mem.va_addr, mem.size)
-    if not mem.meta.mapping.system: self.dev_impl.mm.vfree(mem.meta.mapping)
-    if mem.meta.owner == self.dev and mem.meta.has_cpu_mapping: FileIOInterface.munmap(mem.va_addr, mem.size)
+  def free(self, b:HCQBuffer):
+    for dev in b.meta.mapped_devs[1:]: dev.dev_iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
+    if not b.meta.mapping.system: self.dev_impl.mm.vfree(b.meta.mapping)
+    if b.meta.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 
-  def map(self, mem:HCQBuffer):
+  def map(self, b:HCQBuffer):
     # Check if the memory is already mapped on this device
-    if self.dev in mem.meta.mapped_devs: return
-    mem.meta.mapped_devs.append(self.dev)
+    if self.dev in b.meta.mapped_devs: return
+    b.meta.mapped_devs.append(self.dev)
 
-    paddrs = [(paddr if mem.meta.mapping.system else (paddr+mem.meta.owner.dev_iface.p2p_base_addr), size) for paddr,size in mem.meta.mapping.paddrs]
-    self.dev_impl.mm.map_range(mem.va_addr, mem.size, paddrs, system=True, snooped=mem.meta.mapping.snooped, uncached=mem.meta.mapping.uncached)
+    paddrs = [(paddr if b.meta.mapping.system else (paddr+b.meta.owner.dev_iface.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
+    self.dev_impl.mm.map_range(cast(int, b.va_addr), b.size, paddrs, system=True, snooped=b.meta.mapping.snooped, uncached=b.meta.mapping.uncached)
