@@ -79,7 +79,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg, self.tag))) is not None:
         for s in self.src: s.children.discard(ref)
         del UOpMetaClass.ucache[k]
-        uop_number.pop(ref, None)
     except AttributeError: pass
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
@@ -725,7 +724,7 @@ class PatternMatcher:
 @dataclass(frozen=True)
 class UNum: n:int
 ucount = itertools.count()
-uop_number:dict[weakref.ReferenceType[UOp], UNum] = {}
+uop_number:weakref.WeakKeyDictionary[UOp, UNum] = {}
 uop_fields:dict[UNum, tuple] = {}
 def track_uop(a:Any):
   if isinstance(a, UOp):
