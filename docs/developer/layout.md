@@ -1,6 +1,8 @@
 # tinygrad directory layout
 
-Listed in order of how they are processed
+This explains the flow of a big graph down to programs.
+
+Directories are listed in order of how they are processed.
 
 ---
 
@@ -42,7 +44,14 @@ Transform the optimized ast into a linearized list of UOps.
 
 ## tinygrad/renderer
 
-Transform the linearized list of UOps into a program.
+Transform the linearized list of UOps into a program, represented as a string.
+
+::: tinygrad.renderer.Renderer
+    options:
+        members:
+            - render
+        show_labels: false
+        show_source: false
 
 ---
 

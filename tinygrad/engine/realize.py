@@ -15,6 +15,17 @@ from tinygrad.uop.spec import type_verify
 
 @track_rewrites(name=lambda _ast,_renderer,ret:ret.name)
 def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
+  """
+  Transform an AST into a ProgramSpec. May trigger BEAM search.
+
+  Args:
+    ast: The Ops.SINK rooted AST
+    renderer: The renderer used to generate the code
+
+  Returns:
+    The ProgramSpec of the program.
+  """
+
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   modified_ast = get_optimized_ast(ast, renderer) if ast.arg is None else ast
   if __debug__: type_verify(list(modified_ast.toposort()))

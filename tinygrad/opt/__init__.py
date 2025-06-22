@@ -7,6 +7,16 @@ from tinygrad.helpers import NOOPT, BEAM, getenv
 from tinygrad.renderer import Renderer
 
 def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp:
+  """
+  Optimize an AST based on heuristics or BEAM search.
+
+  Args:
+    ast: The Ops.SINK rooted AST
+    renderer: The renderer used to generate the code
+
+  Returns:
+    The Ops.SINK rooted AST transformed to apply the opts and with a KernelInfo in the arg.
+  """
   k = Kernel(ast, opts=renderer)
   if not NOOPT:
     if not k.apply_tensor_cores(getenv("TC", 1)): k.apply_opts(hand_coded_optimizations(k))
