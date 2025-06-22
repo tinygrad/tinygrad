@@ -298,7 +298,7 @@ async function renderProfiler() {
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
-  const ellipseWidth = ctx.measureText("...").width;
+  const ellipsisWidth = ctx.measureText("...").width;
   const rectLst = [];
   function render(transform=null) {
     if (transform != null) zoomLevel = transform;
@@ -342,7 +342,7 @@ async function renderProfiler() {
       let [labelX, labelWidth] = [x+2, 0];
       const labelY = e.y+e.height/2;
       for (const [i,l] of e.labelParts.entries()) {
-        if (labelWidth+l.width+(i===e.labelParts.length-1 ? 0 : ellipseWidth) > width) {
+        if (labelWidth+l.width+(i===e.labelParts.length-1 ? 0 : ellipsisWidth)+2 > width) {
           if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
           break;
         }
