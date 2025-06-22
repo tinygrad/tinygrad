@@ -154,7 +154,7 @@ class TestVizIntegration(TestViz):
     Tensor.kernelize(a+1, a+2)
     lst = get_viz_list()
     self.assertEqual(len(lst), 1)
-    self.assertEqual(lst[0]["name"], "Schedule 2 kernels n1")
+    self.assertEqual(lst[0]["name"], "Schedule 2 Kernels n1")
 
   # codegen supports rendering of code blocks
   def test_codegen_tracing(self):
