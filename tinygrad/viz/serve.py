@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver
-from dataclasses import replace
+from dataclasses import fields, is_dataclass, replace
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
-from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
+from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint, UNum
 from tinygrad.opt.kernel import Kernel
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
 from tinygrad.dtype import dtypes
@@ -80,17 +80,19 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
                     "ref":id(u.arg.ast) if u.op is Ops.KERNEL else None, "tag":u.tag}
   return graph
 
-def _reconstruct_uop(num:int) -> UOp:
-  op, dtype, src_nums, arg, tag = contexts[2][num]
-  # mirror for KERNEL fixup
-  if op is Ops.KERNEL: arg = replace(arg, ast=_reconstruct_uop(arg.ast))
-  return UOp(op, dtype, tuple(_reconstruct_uop(s) for s in src_nums), arg, tag)
+def _reconstruct(a:Any):
+  if isinstance(a, UNum):
+    op, dtype, src, arg, tag = contexts[2][a]
+    return UOp(op, dtype, _reconstruct(src), _reconstruct(arg), tag)
+  if isinstance(a, tuple): return type(a)(_reconstruct(i) for i in a)
+  if is_dataclass(a): return replace(a, **{f.name:_reconstruct(getattr(a, f.name)) for f in fields(a)})
+  return a
 
 def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
-  yield {"graph":uop_to_json(next_sink:=_reconstruct_uop(ctx.sink)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat in tqdm(ctx.matches):
-    replaces[u0:=_reconstruct_uop(u0_num)] = u1 = _reconstruct_uop(u1_num)
+    replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RecursionError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],

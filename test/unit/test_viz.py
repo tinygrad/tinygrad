@@ -100,15 +100,6 @@ class TestViz(unittest.TestCase):
     lst = get_viz_list()
     self.assertEqual(lst[0]["name"], "(a+1) n1")
 
-  def test_gc(self):
-    from test.test_gc import bufs_allocated
-    init = bufs_allocated()
-    a = UOp.new_buffer("NULL", 10, dtypes.char)
-    a.buffer.allocate()
-    exec_rewrite(a, [PatternMatcher([])])
-    del a
-    self.assertEqual(bufs_allocated()-init, 0)
-
 # VIZ displays nested graph_rewrites in a tree view
 
 def leaf_rewrite(x:UOp): return x.rtag(1) if x.tag is None else None
@@ -150,6 +141,34 @@ class TestVizTree(TestViz):
     self.assertStepEqual(steps[4], {"name":"branch_1", "depth":1, "match_count":1})
     self.assertStepEqual(steps[5], {"name":"leaf_left", "depth":2, "match_count":1})
     self.assertStepEqual(steps[6], {"name":"leaf_right", "depth":2, "match_count":1})
+
+import gc
+from tinygrad.device import Buffer
+
+def bufs_allocated() -> int:
+  gc.collect()
+  return sum([isinstance(x, Buffer) for x in gc.get_objects()])
+
+class TestVizGC(TestViz):
+  def test_gc(self):
+    init = bufs_allocated()
+    a = UOp.new_buffer("NULL", 10, dtypes.char)
+    a.buffer.allocate()
+    exec_rewrite(a, [PatternMatcher([])])
+    del a
+    self.assertEqual(bufs_allocated()-init, 0)
+    lst = get_viz_list()
+    self.assertEqual(len(lst), 1)
+
+  def test_gc_uop_in_arg(self):
+    init = bufs_allocated()
+    a = UOp.new_buffer("NULL", 10, dtypes.char)
+    a.buffer.allocate()
+    exec_rewrite(UOp(Ops.CUSTOM, src=(a,), arg=a), [PatternMatcher([])])
+    del a
+    self.assertEqual(bufs_allocated()-init, 0)
+    lst = get_viz_list()
+    self.assertEqual(len(lst), 1)
 
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import to_perfetto
