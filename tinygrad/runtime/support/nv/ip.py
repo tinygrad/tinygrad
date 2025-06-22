@@ -62,7 +62,7 @@ class NVRpcQueue:
       self.rx.readPtr = (self.rx.readPtr + round_up(hdr.length, self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
       CPUProgram.atomic_lib.atomic_thread_fence(5)
 
-      print(f"RPC message: {hdr.function:x}, {hdr.length}, {hdr.rpc_result} / {self.tx.writePtr} - {self.rx.readPtr}")
+      print(f"RPC message: {hdr.function:#x}, {hdr.length}, {hdr.rpc_result} / {self.tx.writePtr} - {self.rx.readPtr}")
 
       if hdr.rpc_result != 0: raise RuntimeError(f"RPC call {hdr.function} failed with result {hdr.rpc_result}")
       if hdr.function == cmd: return msg
@@ -423,9 +423,9 @@ class NV_GSP:
     if hClass == nv_gpu.FERMI_VASPACE_A and client != self.priv_client:
       self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr, client=client)
     if hClass == nv_gpu.NV20_SUBDEVICE_0: self.subdevice = obj # save subdevice handle
-    if hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A and client != self.priv_client:
-      phys_gr_ctx = self.promote_ctx(client, self.subdevice, obj, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
-      self.promote_ctx(client, self.subdevice, obj, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
+    if hClass == nv_gpu.ADA_COMPUTE_A and client != self.priv_client:
+      phys_gr_ctx = self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
+      self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
     return obj
 
   def rpc_rm_control(self, hObject, cmd, params, client=None):

@@ -37,7 +37,7 @@ class NVPageTableEntry:
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
     if not table:
       assert self.lv >= 3
-      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=True, address_sys=paddr >> 12, aperture=2 if system else 0, vol=uncached, kind=6)
+      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=valid, address_sys=paddr >> 12, aperture=2 if system else 0, vol=uncached, kind=6)
     elif self.lv == 3:
       x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=0)
     else:

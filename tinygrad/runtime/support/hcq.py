@@ -540,7 +540,7 @@ class HCQPCIIface:
       meta=PCIAllocationMeta(self.dev, [self.dev], mapping, has_cpu_mapping=cpu_access, hMemory=mapping.paddrs[0][0]))
 
   def free(self, mem:HCQBuffer):
-    for dev in mem.meta.mapped_devs[1:]: dev.dev_iface.adev.mm.unmap_range(mem.va_addr, mem.size)
+    for dev in mem.meta.mapped_devs[1:]: dev.iface.adev.mm.unmap_range(mem.va_addr, mem.size)
     if not mem.meta.mapping.system: self.dev_impl.mm.vfree(mem.meta.mapping)
     if mem.meta.owner == self.dev and mem.meta.has_cpu_mapping: FileIOInterface.munmap(mem.va_addr, mem.size)
 
@@ -549,5 +549,5 @@ class HCQPCIIface:
     if self.dev in mem.meta.mapped_devs: return
     mem.meta.mapped_devs.append(self.dev)
 
-    paddrs = [(paddr if mem.meta.mapping.system else (paddr+mem.meta.owner.dev_iface.p2p_base_addr), size) for paddr,size in mem.meta.mapping.paddrs]
+    paddrs = [(paddr if mem.meta.mapping.system else (paddr+mem.meta.owner.iface.p2p_base_addr), size) for paddr,size in mem.meta.mapping.paddrs]
     self.dev_impl.mm.map_range(mem.va_addr, mem.size, paddrs, system=True, snooped=mem.meta.mapping.snooped, uncached=mem.meta.mapping.uncached)
