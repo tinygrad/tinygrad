@@ -278,7 +278,7 @@ class NV_GSP:
     # Fill up arguments
     queue_args = nv.MESSAGE_QUEUE_INIT_ARGUMENTS(sharedMemPhysAddr=queues_sysmem[0], pageTableEntryCount=pte_cnt, cmdQueueOffset=pt_size,
       statQueueOffset=pt_size + queue_size)
-    rm_args, self.rm_args_sysmem = self.nvdev._alloc_boot_struct_2(nv.GSP_ARGUMENTS_CACHED(bDmemStack=True, messageQueueInitArguments=queue_args))
+    rm_args, self.rm_args_sysmem = self.nvdev._alloc_boot_struct(nv.GSP_ARGUMENTS_CACHED(bDmemStack=True, messageQueueInitArguments=queue_args))
 
     # Build command queue header
     self.cmd_q_va, self.stat_q_va = queues_va + pt_size, queues_va + pt_size + queue_size
@@ -345,7 +345,7 @@ class NV_GSP:
       sysmemAddrOfRadix3Elf=self.gsp_radix3_sysmem[0], sysmemAddrOfBootloader=self.booter_sysmem[0], sysmemAddrOfSignature=self.gsp_signature_sysmem[0],
       bootloaderCodeOffset=self.booter_desc.monitorCodeOffset, bootloaderDataOffset=self.booter_desc.monitorDataOffset,
       bootloaderManifestOffset=self.booter_desc.manifestOffset, sizeOfSignature=0x1000)
-    self.wpr_meta, self.wpr_meta_sysmem = self.nvdev._alloc_boot_struct_2(m)
+    self.wpr_meta, self.wpr_meta_sysmem = self.nvdev._alloc_boot_struct(m)
     assert self.nvdev.flcn.frts_offset == self.wpr_meta.frtsOffset, f"FRTS mismatch: {self.nvdev.flcn.frts_offset} != {self.wpr_meta.frtsOffset}"
 
   def promote_ctx(self, client, subdevice, obj, ctxbufs, bufs=None, virt=None, phys=None):
@@ -450,9 +450,10 @@ class NV_GSP:
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_SET_PAGE_DIRECTORY)
 
   def rpc_set_gsp_system_info(self):
-    data = nv.GspSystemInfo(gpuPhysAddr=0xf2000000, gpuPhysFbAddr=0x38060000000, gpuPhysInstAddr=0x38070000000,
-      pciConfigMirrorBase=0x88000, pciConfigMirrorSize=0x1000, nvDomainBusDeviceFunc=0x100, bIsPassthru=1,
-      PCIDeviceID=0x268410de, PCISubDeviceID=0x13b3196e, PCIRevisionID=0xa1, maxUserVa=0x7ffffffff000)
+    nvbdf = lambda s: (int(s[5:7],16)<<8) | (int(s[8:10],16)<<3) | int(s[-1],16)
+    data = nv.GspSystemInfo(gpuPhysAddr=self.nvdev.bars[0][0], gpuPhysFbAddr=self.nvdev.bars[1][0], gpuPhysInstAddr=self.nvdev.bars[3][0],
+      pciConfigMirrorBase=0x88000, pciConfigMirrorSize=0x1000, nvDomainBusDeviceFunc=nvbdf(self.nvdev.devfmt), bIsPassthru=1,
+      PCIDeviceID=self.nvdev.venid, PCISubDeviceID=self.nvdev.subvenid, PCIRevisionID=self.nvdev.rev, maxUserVa=0x7ffffffff000)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO, bytes(data))
 
   def rpc_set_registry_table(self):

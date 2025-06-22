@@ -66,11 +66,11 @@ class NVPageTableEntry:
 class NVMemoryManager(MemoryManager):
   va_allocator = TLSFAllocator((1 << 49), base=1 << 30) # global for all devices.
 
-  def on_range_mapped(self): self.dev.wreg(0x00B80000 + 0x000030B0, (1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
+  def on_range_mapped(self): self.dev.NV_VIRTUAL_FUNCTION_PRIV_MMU_INVALIDATE.write((1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
 class NVDev:
-  def __init__(self, devfmt, mmio:MMIOInterface, vram:MMIOInterface):
-    self.devfmt, self.mmio, self.vram = devfmt, mmio, vram
+  def __init__(self, devfmt, mmio:MMIOInterface, vram:MMIOInterface, venid:int, subvenid:int, rev:int, bars:dict):
+    self.devfmt, self.mmio, self.vram, self.venid, self.subvenid, self.rev, self.bars = devfmt, mmio, vram, venid, subvenid, rev, bars
     self.included_files, self.reg_names, self.reg_offsets = set(), set(), {}
 
     self.smi_dev, self.is_booting = False, True
@@ -115,7 +115,7 @@ class NVDev:
 
     self.vram_size = self.NV_PGC6_AON_SECURE_SCRATCH_GROUP_42.read() << 20
 
-  def _alloc_boot_struct_2(self, struct):
+  def _alloc_boot_struct(self, struct):
     va, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
     to_mv(va, sz)[:] = bytes(struct)
     return struct, paddrs[0]
@@ -152,7 +152,7 @@ class NVDev:
         continue
       elif m:=re.match(r'#define\s+(\w+)\s*\(\s*(\w+)\s*\)\s*(.+)', raw): # reg set
         name, value = m.groups()[0], eval(f"lambda {m.groups()[1]}: {m.groups()[2].strip().rstrip('\\').split('/*')[0].rstrip()}")
-      elif m:=re.match(r'#define\s+(\w+)\s+([0-9A-Fa-fx]+)', raw): name, value = m.groups()[0], int(m.groups()[1], 0) # reg value
+      elif m:=re.match(r'#define\s+(\w+)\s+([0-9A-Fa-fx]+)(?![^\n]*:)', raw): name, value = m.groups()[0], int(m.groups()[1], 0) # reg value
       else: continue
 
       reg_pref = next((prefix for prefix in regs_off.keys() if name.startswith(prefix)), None)
