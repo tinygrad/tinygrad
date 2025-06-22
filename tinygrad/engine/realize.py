@@ -2,24 +2,38 @@ from typing import Optional, cast, Generator
 import time, pprint
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.opt import get_optimized_ast
 from tinygrad.codegen import full_rewrite
+from tinygrad.uop.spec import type_verify
 
 # **************** Program Creation ****************
 
+@track_rewrites(name=lambda _ast,_renderer,ret:ret.name)
 def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
-  oast, applied_opts = get_optimized_ast(ast, renderer)
-  uops = full_rewrite(oast, renderer)
+  if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
+  modified_ast = get_optimized_ast(ast, renderer) if ast.arg is None else ast
+  if __debug__: type_verify(list(modified_ast.toposort()))
+
+  # linearize
+  try:
+    uops = full_rewrite(modified_ast, renderer)
+  except RuntimeError:
+    print("***** LINEARIZE FAILURE *****")
+    print(f"ast = {ast}")
+    print(f"opts = {modified_ast.arg.applied_opts}")
+    raise
   assert uops[-1].op is Ops.SINK, "last uop must be sink"
 
-  # render
+  # print and render
+  if DEBUG >= 6: print_uops(uops)
   src = renderer.render(uops)
-  return ProgramSpec(uops[-1].arg.name, src, renderer.device, ast, uops, applied_opts,
+
+  return ProgramSpec(uops[-1].arg.name, src, renderer.device, ast, uops,
                      global_size=[1,1,1] if renderer.has_local else None, local_size=[1,1,1] if renderer.has_local else None)
 
 # **************** Runners ****************
