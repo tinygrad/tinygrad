@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import dataclass, field
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
@@ -721,20 +721,16 @@ class PatternMatcher:
 
 # *** non-blocking UOp tracker ***
 
-@dataclass(frozen=True)
-class UNum: n:int
 ucount = itertools.count()
-uop_number:weakref.WeakKeyDictionary[UOp, UNum] = {}
-uop_fields:dict[UNum, tuple] = {}
-def track_uop(a:Any):
-  if isinstance(a, UOp):
-    if (cret:=uop_number.get(ref:=weakref.ref(a))) is not None: return cret
-    uop_number[ref] = num = UNum(next(ucount))
-    uop_fields[num] = (a.op, a.dtype, track_uop(a.src), track_uop(a.arg), a.tag)
-    return num
-  if isinstance(a, tuple): return type(a)(track_uop(i) for i in a)
-  if is_dataclass(a) and not isinstance(a, type): return type(a)(**{f.name:track_uop(getattr(a, f.name)) for f in fields(a)})
-  return a
+uop_number:weakref.WeakKeyDictionary[UOp, int] = weakref.WeakKeyDictionary()
+uop_fields:dict[int, tuple] = {}
+def track_uop(u:UOp):
+  if (cret:=uop_number.get(u)) is not None: return cret
+  uop_number[u] = num = next(ucount)
+  # KERNEL also has a UOp in the arg
+  arg = type(u.arg)(track_uop(u.arg.ast), u.arg.metadata) if u.op is Ops.KERNEL else u.arg
+  uop_fields[num] = (u.op, u.dtype, tuple(track_uop(s) for s in u.src), arg, u.tag)
+  return num
 
 # *** tracking pattern matcher ***
 

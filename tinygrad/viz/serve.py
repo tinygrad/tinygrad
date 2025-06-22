@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver
-from dataclasses import fields, is_dataclass
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
-from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint, UNum
+from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
 from tinygrad.opt.kernel import Kernel
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
 from tinygrad.dtype import dtypes
@@ -80,13 +79,10 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
                     "ref":id(u.arg.ast) if u.op is Ops.KERNEL else None, "tag":u.tag}
   return graph
 
-def _reconstruct(a:Any):
-  if isinstance(a, UNum):
-    op, dtype, src, arg, tag = contexts[2][a]
-    return UOp(op, dtype, _reconstruct(src), _reconstruct(arg), tag)
-  if isinstance(a, tuple): return type(a)(_reconstruct(i) for i in a)
-  if is_dataclass(a) and not isinstance(a, type): return type(a)(**{f.name:_reconstruct(getattr(a, f.name)) for f in fields(a)})
-  return a
+def _reconstruct(a:int):
+  op, dtype, src, arg, tag = contexts[2][a]
+  arg = type(arg)(_reconstruct(arg.ast), arg.metadata) if op is Ops.KERNEL else arg
+  return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, tag)
 
 def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}

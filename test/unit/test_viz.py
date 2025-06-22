@@ -160,6 +160,7 @@ class TestVizGC(TestViz):
     lst = get_viz_list()
     self.assertEqual(len(lst), 1)
 
+  @unittest.skip("it's not generic enough to handle arbitrary UOps in arg")
   def test_gc_uop_in_arg(self):
     init = bufs_allocated()
     a = UOp.new_buffer("NULL", 10, dtypes.char)
