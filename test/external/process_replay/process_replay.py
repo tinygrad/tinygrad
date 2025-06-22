@@ -2,7 +2,7 @@
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools
 from typing import Callable, Any
-from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
+from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm, to_function_name
 from tinygrad.kernelize.kernelize import get_kernelize_map
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.engine.realize import get_program
@@ -42,7 +42,7 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
 
 def replay_get_program(k:ProgramSpec, ast:UOp, renderer:Renderer) -> tuple[str, str, tuple[Any, ...]]:
   k2 = get_program(ast, renderer)
-  def to_str(ret:ProgramSpec) -> str: return ret.src.replace(ret.name, k.name)
+  def to_str(ret:ProgramSpec) -> str: return ret.src.replace(to_function_name(ret.name), k.name)
   return to_str(k2), to_str(k), (k.ast, renderer, k.applied_opts)
 
 replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_kernelize_map":replay_kernelize, "get_program":replay_get_program}
