@@ -111,8 +111,6 @@ class NV_FLCN(NV_IP):
     sig_total_size = ucode_desc_size - nv.FALCON_UCODE_DESC_V3_SIZE_44
     signature = vbios_bytes[ucode_desc_off + nv.FALCON_UCODE_DESC_V3_SIZE_44:][:sig_total_size]
     image = vbios_bytes[ucode_desc_off + ucode_desc_size:][:round_up(self.desc_v3.StoredSize, 256)]
-    assert ucode_desc_off + ucode_desc_size == 0x45488
-    assert len(signature) == 0x300 and len(image) == 0x10300
 
     self.frts_offset = self.nvdev.vram_size - 0x100000 - 0x100000
     read_vbios_desc = nv.FWSECLIC_READ_VBIOS_DESC(version=0x1, size=ctypes.sizeof(nv.FWSECLIC_READ_VBIOS_DESC), flags=2)
@@ -232,10 +230,6 @@ class NV_FLCN(NV_IP):
     self.nvdev.NV_PFALCON_FALCON_DMACTL.with_base(base).write(0x0)
 
   def reset(self, base, riscv=False):
-    # print(hex(self.nvdev.NV_PFALCON_FALCON_HWCFG2.read()))
-    # while not self.nvdev.NV_PFALCON_FALCON_HWCFG2.read_bitfields()['reset_ready']: time.sleep(0.1)
-    # time.sleep(1)
-
     engine_reg = self.nvdev.NV_PGSP_FALCON_ENGINE if base == self.falcon else self.nvdev.NV_PSEC_FALCON_ENGINE
     engine_reg.write(reset=1)
     time.sleep(0.1)
@@ -360,11 +354,11 @@ class NV_GSP(NV_IP):
     vaspace = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.FERMI_VASPACE_A, params=nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS())
 
     # reserve 512MB for the reserved PDES
-    resv = self.nvdev.mm.valloc(512 << 20, contiguous=True)
+    res_va = self.nvdev.mm.alloc_vaddr(512 << 20)
 
     bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=(512<<20), numLevelsToCopy=3,
-      virtAddrLo=resv.va_addr, virtAddrHi=resv.va_addr+(512<<20)-1)
-    for i,pt in enumerate(self.nvdev.mm.page_tables(resv.va_addr)[:3]):
+      virtAddrLo=res_va, virtAddrHi=res_va+(512<<20)-1)
+    for i,pt in enumerate(self.nvdev.mm.page_tables(res_va, size=512<<20)[:3]):
       bufs_p.levels[i] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=pt.paddr, size=0x20 if i == 0 else 0x1000,
         pageShift=47 - (9 * i), aperture=1)
     self.rpc_rm_control(hObject=vaspace, cmd=0x90f10106, params=bufs_p)
