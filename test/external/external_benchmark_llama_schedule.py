@@ -12,7 +12,6 @@ if __name__ == "__main__":
 
   with Timing("total "):
     with Timing("***** create model in    "):
-      # NOTE: max_context=None means no kv cache. kv cache has realize in the model
       model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=nn.Linear, embedding=nn.Embedding,
                           max_context=1024, jit=True, disable_kv_cache=True)
 
