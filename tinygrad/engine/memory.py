@@ -5,7 +5,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up
 from tinygrad.uop.ops import Ops
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.runtime.support.allocator import TLSFAllocator
+from tinygrad.runtime.support.memory import TLSFAllocator
 
 # **************** memory planning ****************
 

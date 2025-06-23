@@ -10,7 +10,7 @@ from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
 from tinygrad.uop.spec import spec
 from tinygrad.renderer import ProgramSpec
-from tinygrad.engine.kernelize import fix_kernel_ops
+from tinygrad.kernelize.kernelize import fix_kernel_ops
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
