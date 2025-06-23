@@ -2027,7 +2027,6 @@ class TestKernelOpts(unittest.TestCase):
         [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4)],
         [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)],
-        # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
@@ -2046,6 +2045,30 @@ class TestKernelOpts(unittest.TestCase):
         [Opt(OptOps.LOCAL, 0, 4)], # check local
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
         [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
+      ], apply_tc=True, atol=atol, rtol=rtol)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
+  # NOTE: the METAL test is broken, likely due to a compiler bug. passes on CI with -O0 and with default opt level locally on M3
+  @unittest.skipIf(CI and Device.DEFAULT == "METAL", "broken for METAL")
+  def test_tensor_core_opts_group(self):
+    N = 128
+    Tensor.manual_seed(1552)
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
+      # bf16 buffer returns float32 numpy outputs so test would fail. testing opt with half suffices.
+      if tc.dtype_in != dtypes.half and tc.dtype_out != dtypes.half: continue
+      a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
+      r = a.matmul(b, dtype=tc.dtype_out)
+      (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
+      helper_linearizer_opt(r, [
+        [Opt(OptOps.GROUP, 0, 2)],
+        [Opt(OptOps.GROUPTOP, 0, 4)],
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.GROUP, 0, 2)],
+        [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUP, 0, 2)],
+        [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.GROUP, 0, 2)],
+        [Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUP, 0, 2)],
+        [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 2)],
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
