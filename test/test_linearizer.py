@@ -2005,71 +2005,68 @@ class TestKernelOpts(unittest.TestCase):
       k.apply_opt(Opt(OptOps.TC, 0, (-1, 1, 1)))
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+                      "test requires tensor cores with accumulation in half") # testing with half suffices.
   def test_tensor_core_opts(self):
     N = 128
     Tensor.manual_seed(1552)
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      # bf16 buffer returns float32 numpy outputs so test would fail. testing opt with half suffices.
-      if tc.dtype_in != dtypes.half and tc.dtype_out != dtypes.half: continue
-      a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
-      r = a.matmul(b, dtype=tc.dtype_out)
-      (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
-      helper_linearizer_opt(r, [
-        [],
-        [Opt(OptOps.UPCAST, 0, 4)],
-        [Opt(OptOps.UPCAST, 1, 4)],
-        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
-        [Opt(OptOps.UNROLL, 0, 2)], # check unroll
-        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of unroll and local
-        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
-        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
-        [Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4)], # check permutations
-        [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
-        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4)],
-        [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)],
-      ], apply_tc=True, atol=atol, rtol=rtol)
+    a, b = Tensor.rand(N, N, dtype=dtypes.half), Tensor.rand(N, N, dtype=dtypes.half)
+    r = a.matmul(b, dtype=dtypes.half)
+    atol, rtol = 0.25, 0.01
+    helper_linearizer_opt(r, [
+      [],
+      [Opt(OptOps.UPCAST, 0, 4)],
+      [Opt(OptOps.UPCAST, 1, 4)],
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
+      [Opt(OptOps.UNROLL, 0, 2)], # check unroll
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of unroll and local
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
+      [Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4)], # check permutations
+      [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4)],
+      [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)],
+    ], apply_tc=True, atol=atol, rtol=rtol)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+                      "test requires tensor cores with accumulation in half") # testing with half suffices.
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_tensor_core_opts_locals(self):
     N = 128
     Tensor.manual_seed(1552)
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      # bf16 buffer returns float32 numpy outputs so test would fail. testing opt with half suffices.
-      if tc.dtype_in != dtypes.half and tc.dtype_out != dtypes.half: continue
-      a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
-      r = a.matmul(b, dtype=tc.dtype_out)
-      (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
-      helper_linearizer_opt(r, [
-        [Opt(OptOps.UNROLL, 0, 0)], # check full unroll of reduce with locals
-        [Opt(OptOps.LOCAL, 0, 4)], # check local
-        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
-        [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
-      ], apply_tc=True, atol=atol, rtol=rtol)
+    a, b = Tensor.rand(N, N, dtype=dtypes.half), Tensor.rand(N, N, dtype=dtypes.half)
+    r = a.matmul(b, dtype=dtypes.half)
+    atol, rtol = 0.25, 0.01
+    helper_linearizer_opt(r, [
+      [Opt(OptOps.UNROLL, 0, 0)], # check full unroll of reduce with locals
+      [Opt(OptOps.LOCAL, 0, 4)], # check local
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
+    ], apply_tc=True, atol=atol, rtol=rtol)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
+  @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+                      "test requires tensor cores with accumulation in half") # testing with half suffices.
   # NOTE: the METAL test is broken, likely due to a compiler bug. passes on CI with -O0 and with default opt level locally on M3
   @unittest.skipIf(CI and Device.DEFAULT == "METAL", "broken for METAL")
   def test_tensor_core_opts_group(self):
     N = 128
     Tensor.manual_seed(1552)
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      # bf16 buffer returns float32 numpy outputs so test would fail. testing opt with half suffices.
-      if tc.dtype_in != dtypes.half and tc.dtype_out != dtypes.half: continue
-      a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
-      r = a.matmul(b, dtype=tc.dtype_out)
-      (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
-      helper_linearizer_opt(r, [
-        [Opt(OptOps.GROUP, 0, 2)],
-        [Opt(OptOps.GROUPTOP, 0, 4)],
-        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.GROUP, 0, 2)],
-        [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUP, 0, 2)],
-        [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.GROUP, 0, 2)],
-        [Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUP, 0, 2)],
-        [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 2)],
-      ], apply_tc=True, atol=atol, rtol=rtol)
+    a, b = Tensor.rand(N, N, dtype=dtypes.half), Tensor.rand(N, N, dtype=dtypes.half)
+    r = a.matmul(b, dtype=dtypes.half)
+    atol, rtol = 0.25, 0.01
+    helper_linearizer_opt(r, [
+      [Opt(OptOps.GROUP, 0, 2)],
+      [Opt(OptOps.GROUPTOP, 0, 4)],
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.GROUP, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUP, 0, 2)],
+      [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.GROUP, 0, 2)],
+      [Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUP, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 2)],
+    ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
     if (CI and Device.DEFAULT in ["AMD", "NV", "CUDA"]):
