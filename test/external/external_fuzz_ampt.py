@@ -59,7 +59,7 @@ class AMPTFuzzer:
 
     return True
 
-  def random_alloc(self):
+  def random_alloc(self) -> Optional[int]:
     if self.total_size - self.alloc_payload < self.min_alloc_size: return None
 
     size = random.randint(self.min_alloc_size, min(self.max_alloc_size, self.total_size - self.alloc_payload))
