@@ -51,11 +51,15 @@ def create_report(dev, test, result, stdout, stderr):
   dmesg_output = subprocess.check_output(["sudo", "dmesg", "--ctime", "--color=never"], text=True)
   with open(dmesg_path, "w") as f: f.write(dmesg_output)
 
+  env_vars = " ".join(f"{k}={v}" for k, v in test.env.items())
+  reproduce_cmd = f"{env_vars} {test.cmd}"
+
   summary_path = os.path.join(report_path, "summary.txt")
   with open(summary_path, "w") as f:
     f.write(f"Test: {test.name()}\n")
     f.write(f"Dev params: {vars(dev)}\n")
     f.write(f"Test params: {vars(test)}\n")
+    f.write(f"Reproduce cmd: {reproduce_cmd}\n")
     f.write(f"Exit Code: {result}\n")
 
   print(f"Crash report saved to {report_path}")
