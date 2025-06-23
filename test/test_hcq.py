@@ -5,7 +5,7 @@ from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
 from tinygrad.runtime.autogen import libc
 from tinygrad.engine.realize import get_runner, CompiledRunner
-from tinygrad.codegen.kernel import Kernel, Opt, OptOps
+from tinygrad.opt.kernel import Kernel, Opt, OptOps
 from tinygrad import Variable
 
 MOCKGPU = getenv("MOCKGPU")

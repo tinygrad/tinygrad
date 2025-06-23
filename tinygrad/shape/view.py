@@ -6,6 +6,31 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop, Ops, ssimplify
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
 
+# returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
+def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> list[list[int]]|None:
+  acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
+  try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
+  except ValueError: return None
+  return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
+
+def get_contraction_with_reduce(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...], reduce_axis:tuple[int, ...]) -> list[list[int]]|None:
+  if (contraction:=get_contraction(old_shape, new_shape)) is None: return None
+  # contraction returns the 1s as right justified as possible
+  # normally this contraction is good, but sometimes the reduce dim is empty. borrow from the next one, leaving one
+  # this ensures there's always ones available in the reduce dimension. this is also a valid contraction
+  for i in range(len(contraction)):
+    if i in reduce_axis and len(contraction[i]) == 0:
+      take_from = i+1
+      while take_from < len(contraction) and len(contraction[take_from]) == 0:
+        assert new_shape[take_from] == 1
+        take_from += 1
+      if take_from == len(contraction) or new_shape[take_from] != 1: return None # nothing to take
+      for j in range(take_from, i, -1):
+        assert len(contraction[j]) > 0
+        contraction[j-1] = contraction[j][:-1]
+        contraction[j] = contraction[j][-1:]
+  return contraction
+
 @functools.cache
 def canonicalize_strides(shape:tuple[sint, ...], strides:tuple[sint, ...]) -> tuple[sint, ...]:
   return tuple(0 if s == 1 else st for s, st in zip(shape, strides))
