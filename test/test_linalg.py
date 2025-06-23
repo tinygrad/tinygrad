@@ -3,6 +3,7 @@ import unittest
 from tinygrad import Tensor
 
 class TestLinAlg(unittest.TestCase):
+
   def test_svd_general(self):
     sizes = [(2,2),(5,3),(3,5),(2,2,2,2,3)]
     for size in sizes:
@@ -18,6 +19,7 @@ class TestLinAlg(unittest.TestCase):
       np.testing.assert_allclose(reconstructed_tensor.numpy(),a.numpy(),atol=1e-5,rtol=1e-5)
       np.testing.assert_allclose((U @ U.transpose(-2,-1)).numpy(),u_identity.numpy(),atol=1e-5,rtol=1e-5)
       np.testing.assert_allclose((V @ V.transpose(-2,-1)).numpy(),v_identity.numpy(),atol=1e-5,rtol=1e-5)
+
   def test_svd_nonfull(self):
     sizes = [(2,2),(5,3),(3,5),(2,2,2,2,3)]
     for size in sizes:
@@ -35,6 +37,23 @@ class TestLinAlg(unittest.TestCase):
       np.testing.assert_allclose(reconstructed_tensor.numpy(),a.numpy(),atol=1e-5,rtol=1e-5)
       np.testing.assert_allclose(U_r.numpy(),u_identity.numpy(),atol=1e-5,rtol=1e-5)
       np.testing.assert_allclose(V_r.numpy(),v_identity.numpy(),atol=1e-5,rtol=1e-5)
+
+  @unittest.skip("very big. recommend wrapping with TinyJit around inner function")
+  def test_svd_large(self):
+      size = (1024,1024)
+      a = Tensor.randn(size).realize()
+      U,S,V = Tensor.svd(a)
+      b_shape,m,n = size[0:-2],size[-2],size[-1]
+      k = min(m,n)
+      s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,) * len(b_shape) + (k,k)))
+      s_diag = s_diag.expand(b_shape + (k,k)).pad(tuple([(0,0) for _ in range(len(size)-2)] + [(0,m-k), (0,n-k)]))
+      reconstructed_tensor = U @ s_diag @ V
+      u_identity = (Tensor.eye(m).reshape((1,) * len(b_shape)+(m,m)).expand(b_shape+(m,m)))
+      v_identity = (Tensor.eye(n).reshape((1,) * len(b_shape)+(n,n)).expand(b_shape+(n,n)))
+      np.testing.assert_allclose(reconstructed_tensor.numpy(),a.numpy(),atol=1e-3,rtol=1e-3)
+      np.testing.assert_allclose((U @ U.transpose(-2,-1)).numpy(),u_identity.numpy(),atol=1e-3,rtol=1e-3)
+      np.testing.assert_allclose((V @ V.transpose(-2,-1)).numpy(),v_identity.numpy(),atol=1e-3,rtol=1e-3)
+
   def test_qr_general(self):
     sizes = [(3,3),(3,6),(6,3),(2,2,2,2,2)]
     for size in sizes:
