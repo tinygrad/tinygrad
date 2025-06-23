@@ -29,7 +29,7 @@ if __name__ == "__main__":
     with Timing("***** backward in        "):
       out.mean().backward()
 
-    with Timing("***** realize in         "):
+    with Timing("***** realize in        "):
       out.realize()
 
     with Timing("***** step in           "):
