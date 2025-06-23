@@ -103,11 +103,11 @@ class TextDecoder:
     self.mask = Tensor.full((n_text_ctx, n_text_ctx), -np.inf).triu(1).realize()
     self.getjitted = collections.defaultdict(lambda: TinyJit(self.forward))
 
-  def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor):
+  def __call__(self, x: Tensor, encoded_audio: Tensor, pos: int=0):
     pos = Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len-1).bind(pos) if pos else 0
     return self.getjitted[x.shape](x, pos, encoded_audio)
 
-  def forward(self, x:Tensor, pos:Union[Variable, Literal[0]], encoded_audio:Tensor):
+  def forward(self, x:Tensor, encoded_audio:Tensor, pos:Union[Variable, Literal[0]]=0):
     seqlen = x.shape[-1]
     x = self.token_embedding(x) + self.positional_embedding.shrink(((pos, pos+seqlen), None, None))
     for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=pos)
@@ -248,7 +248,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
   def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
     pos, next_tokens = 0, ctx
     for i in range((nsample-len(start_tokens))*2):
-      next_tokens = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32).reshape(-1, 1)
+      next_tokens = model.decoder(Tensor(next_tokens), encoded_audio, pos=pos)[:, -1].argmax(axis=-1).numpy().astype(np.int32).reshape(-1, 1)
       next_tokens[ctx[:, -1] == eot] = eot
       ctx = np.concatenate((ctx, next_tokens), axis=1)
       pos = ctx.shape[-1] - 1
@@ -321,7 +321,7 @@ if __name__ == "__main__":
         log_spec = prep_audio(total.reshape(1, -1), model.batch_size, truncate=True)
         encoded_audio = model.encoder.encode(Tensor(log_spec))
       # pass the previously inferred tokens as 'prefix' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
-      out = model.decoder(Tensor([lst]), 0, encoded_audio, streaming=True).realize()
+      out = model.decoder(Tensor([lst]), encoded_audio, streaming=True).realize()
       idx = int(out[0,-1].argmax().numpy().item())
       lst.append(idx)
       dec = enc.decode(lst)
