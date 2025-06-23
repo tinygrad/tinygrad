@@ -142,6 +142,58 @@ class TestVizTree(TestViz):
     self.assertStepEqual(steps[5], {"name":"leaf_left", "depth":2, "match_count":1})
     self.assertStepEqual(steps[6], {"name":"leaf_right", "depth":2, "match_count":1})
 
+import gc
+from tinygrad.device import Buffer
+
+def bufs_allocated() -> int:
+  gc.collect()
+  return sum([isinstance(x, Buffer) for x in gc.get_objects()])
+
+class TestVizGC(TestViz):
+  def test_gc(self):
+    init = bufs_allocated()
+    a = UOp.new_buffer("NULL", 10, dtypes.char)
+    a.buffer.allocate()
+    exec_rewrite(a, [PatternMatcher([])])
+    del a
+    self.assertEqual(bufs_allocated()-init, 0)
+    lst = get_viz_list()
+    self.assertEqual(len(lst), 1)
+
+  @unittest.skip("it's not generic enough to handle arbitrary UOps in arg")
+  def test_gc_uop_in_arg(self):
+    init = bufs_allocated()
+    a = UOp.new_buffer("NULL", 10, dtypes.char)
+    a.buffer.allocate()
+    exec_rewrite(UOp(Ops.CUSTOM, src=(a,), arg=a), [PatternMatcher([])])
+    del a
+    self.assertEqual(bufs_allocated()-init, 0)
+    lst = get_viz_list()
+    self.assertEqual(len(lst), 1)
+
+# VIZ integrates with other parts of tinygrad
+
+from tinygrad import Tensor, Device
+from tinygrad.engine.realize import get_program
+
+class TestVizIntegration(TestViz):
+  # kernelize has a custom name function in VIZ
+  def test_kernelize_tracing(self):
+    a = Tensor.empty(4, 4)
+    Tensor.kernelize(a+1, a+2)
+    lst = get_viz_list()
+    self.assertEqual(len(lst), 1)
+    self.assertEqual(lst[0]["name"], "Schedule 2 Kernels n1")
+
+  # codegen supports rendering of code blocks
+  def test_codegen_tracing(self):
+    ast = Tensor.schedule(Tensor.empty(4)+Tensor.empty(4))[0].ast
+    prg = get_program(ast, Device[Device.DEFAULT].renderer)
+    lst = get_viz_list()
+    self.assertEqual(len(lst), 2)
+    self.assertEqual(lst[0]["name"], "Schedule 1 Kernel n1")
+    self.assertEqual(lst[1]["name"], prg.name)
+
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import to_perfetto
 

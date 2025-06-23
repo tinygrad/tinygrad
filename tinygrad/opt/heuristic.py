@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.opt.kernel import Kernel, Opt, OptOps, KernelOptError
-from tinygrad.helpers import getenv, DEBUG, all_int, prod
+from tinygrad.helpers import getenv, DEBUG, all_int, prod, NOLOCALS
 from tinygrad.dtype import ImageDType
 from tinygrad.uop.ops import Ops, resolve
 
@@ -112,7 +112,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # **** local groups ****
 
   if k.opts.has_local:
-    if getenv("NOLOCALS") and k.local_dims == 0 and not k.group_for_reduces:
+    if NOLOCALS and k.local_dims == 0 and not k.group_for_reduces:
       k.apply_opt(Opt(OptOps.NOLOCALS))
     else:
       # prioritize making expand axes local

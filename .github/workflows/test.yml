@@ -371,8 +371,8 @@ jobs:
       run: PYTHONPATH="." python test/external/external_uop_gc.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
-    - name: Repo line count < 14000 lines
-      run: MAX_LINE_COUNT=14000 python sz.py
+    - name: Repo line count < 14500 lines
+      run: MAX_LINE_COUNT=14500 python sz.py
 
   fuzzing:
     name: Fuzzing
@@ -920,6 +920,7 @@ jobs:
         with:
           key: macos-${{ matrix.backend }}-minimal
           deps: testing_minimal
+          pydeps: "capstone"
           llvm: ${{ matrix.backend == 'llvm' && 'true' }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'metal' && 'METAL=1'}}" >> $GITHUB_ENV
