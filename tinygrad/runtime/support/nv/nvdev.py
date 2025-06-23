@@ -67,7 +67,6 @@ class NVMemoryManager(MemoryManager):
 class NVDev(PCIDevImplBase):
   def __init__(self, devfmt, mmio:MMIOInterface, vram:MMIOInterface, venid:int, subvenid:int, rev:int, bars:dict):
     self.devfmt, self.mmio, self.vram, self.venid, self.subvenid, self.rev, self.bars = devfmt, mmio, vram, venid, subvenid, rev, bars
-    self.included_files, self.reg_names, self.reg_offsets = set(), set(), {}
 
     self.smi_dev, self.is_booting = False, True
     self._early_init()
@@ -96,6 +95,9 @@ class NVDev(PCIDevImplBase):
   def rreg(self, addr): return self.mmio[addr // 4]
 
   def _early_init(self):
+    self.reg_names:set[str] = set()
+    self.reg_offsets:dict[str, tuple[int, int]] = {}
+
     self.include("src/common/inc/swref/published/nv_ref.h")
     self.chip_id = self.reg("NV_PMC_BOOT_0").read()
     self.chip_details = self.reg("NV_PMC_BOOT_42").read_bitfields()
@@ -136,9 +138,6 @@ class NVDev(PCIDevImplBase):
     return gzip.decompress(struct.pack("<4BL2B", 0x1f, 0x8b, 8, 0, 0, 0, 3) + image) if "COMPRESSION: YES" in info else image
 
   def include(self, file:str):
-    if file in self.included_files: return
-    self.included_files.add(file)
-
     regs_off = {'NV_PFALCON_FALCON': 0x0, 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': 0x1000, 'NV_PGC6_AON': 0x0,
       'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': 0x600, 'NV_PFALCON2_FALCON': 0x1000, 'NV_PBUS': 0x0, 'NV_PFB': 0x0, 'NV_PMC': 0x0, 'NV_PGSP_QUEUE': 0x0,
       'NV_VIRTUAL_FUNCTION':0xb80000}

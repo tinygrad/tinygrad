@@ -11,6 +11,8 @@ class GRBufDesc: size:int; v:int; p:int; lc:int=0 # noqa: E702
 
 class NV_IP:
   def __init__(self, nvdev): self.nvdev = nvdev
+  def init_sw(self): pass # Prepare sw/allocations for this IP
+  def init_hw(self): pass # Initialize hw for this IP
 
 class NVRpcQueue:
   def __init__(self, gsp:NV_GSP, va:int, completion_q_va:int|None=None):
