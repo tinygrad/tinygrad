@@ -4,6 +4,7 @@ import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertoo
 from typing import Callable, Any
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 from tinygrad.kernelize.kernelize import get_kernelize_map
+from tinygrad.opt.kernel import Kernel
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.engine.realize import get_program
 from tinygrad.uop.ops import UOp, Ops
@@ -40,10 +41,13 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
     return "\n".join([f"{len(asts)} kernels", *asts])
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
-def replay_get_program(k:ProgramSpec, ast:UOp, renderer:Renderer) -> tuple[str, str, tuple[Any, ...]]:
-  k2 = get_program(ast, renderer, opts_override=k.applied_opts, name_override=k.name)
+def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer) -> tuple[str, str, tuple[Any, ...]]:
+  k2 = Kernel(ast, opts=renderer)
+  k2.apply_opts(p.applied_opts)
+  optimized_ast = k2.get_optimized_ast(name_override=p.name)
+  p2 = get_program(optimized_ast, renderer)
   def to_str(ret:ProgramSpec) -> str: return ret.src
-  return to_str(k2), to_str(k), (k.ast, renderer, k.applied_opts)
+  return to_str(p2), to_str(p), (p.ast, renderer, p.applied_opts)
 
 replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_kernelize_map":replay_kernelize, "get_program":replay_get_program}
 
@@ -63,8 +67,8 @@ def diff(offset:int) -> None:
       break
     try:
       name, args, kwargs, ctx_vals, loc, ret = pickle.loads(row[0])
-      if (replayer:=replayers.get(name)) is None: continue
       ctx_vars = {k:v.value for k,v in ctx_vals.items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
+      if (replayer:=replayers.get(name)) is None: continue
       with Context(**ctx_vars): good, compare, metadata = replayer(ret, *args, **kwargs)
       if good != compare:
         for m in metadata: trunc_log(m)

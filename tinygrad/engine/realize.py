@@ -8,29 +8,26 @@ from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.opt import get_optimized_ast
-from tinygrad.opt.kernel import OptOps
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.spec import type_verify
 
 # **************** Program Creation ****************
 
 @track_rewrites(name=lambda _ast,_renderer,ret:ret)
-def get_program(ast:UOp, renderer:Renderer, opts_override:list[OptOps]|None=None, name_override:str|None=None) -> ProgramSpec:
+def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
 
   Args:
     ast: The Ops.SINK rooted AST
     renderer: The renderer used to generate the code
-    opts_override: Optionally override the OptOps
-    name_override: Optionally override the name used to render the code
 
   Returns:
     The ProgramSpec of the program.
   """
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  modified_ast = get_optimized_ast(ast, renderer, opts_override, name_override) if ast.arg is None else ast
+  modified_ast = get_optimized_ast(ast, renderer) if ast.arg is None else ast
   if __debug__: type_verify(list(modified_ast.toposort()))
 
   # linearize
