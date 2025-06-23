@@ -258,6 +258,19 @@ def mel(
 
   return weights
 
+def resample(x, L, M, num_taps=64):
+  fc = 0.5 / max(L, M)
+  t = Tensor.arange(-num_taps//2, num_taps//2 + 1)
+  h:Tensor = (t * fc * np.pi).sin() / (t * fc * np.pi)
+  # hack fix NaN
+  h[num_taps//2] = 1.0
+  h *= 0.54 - 0.46 * (2 * np.pi * (t + num_taps//2) / num_taps).cos()  # hamming
+  h /= h.sum()
+  upsampled = x[None].cat(Tensor.zeros(L-1, x.shape[-1])).T.flatten().contiguous()
+  padding = (len(h) // 2)
+  filtered = upsampled[None][None].conv2d(h[None][None], stride=M, padding=padding).flatten()
+  return filtered
+
 RATE = 16000
 SEGMENT_SECONDS=30
 SAMPLES_PER_SEGMENT = RATE * SEGMENT_SECONDS # 480000
