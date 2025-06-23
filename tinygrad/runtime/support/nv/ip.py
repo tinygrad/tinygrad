@@ -160,7 +160,6 @@ class NV_FLCN(NV_IP):
     self.nvdev.NV_PGSP_FALCON_MAILBOX1.write(hi32(self.nvdev.gsp.libos_args_sysmem[0]))
 
     # booter
-    print("---- booter -----")
     self.reset(self.sec2)
     mbx = self.execute_hs(self.sec2, self.booter_image_sysmem[0], code_off=self.booter_code_off, data_off=self.booter_data_off,
       imemPa=0x0, imemVa=self.booter_code_off, imemSz=self.booter_code_sz, dmemPa=0x0, dmemVa=0x0, dmemSz=self.booter_data_sz,
@@ -169,8 +168,6 @@ class NV_FLCN(NV_IP):
 
     self.nvdev.NV_PFALCON_FALCON_OS.with_base(self.falcon).write(0x0)
     assert self.nvdev.NV_PRISCV_RISCV_CPUCTL.with_base(self.falcon).read_bitfields()['active_stat'] == 1, "GSP Core is not active"
-
-    print('--- falcon boot done ---')
 
   def execute_dma(self, base, cmd, dest, mem_off, sysmem, size):
     while self.nvdev.NV_PFALCON_FALCON_DMATRFCMD.with_base(base).read_bitfields()['full'] != 0: pass
@@ -241,7 +238,6 @@ class NV_FLCN(NV_IP):
     engine_reg.write(reset=1)
     time.sleep(0.1)
     engine_reg.write(reset=0)
-    time.sleep(0.1)
 
     while self.nvdev.NV_PFALCON_FALCON_HWCFG2.with_base(base).read_bitfields()['mem_scrubbing'] != 0: time.sleep(0.1)
 
@@ -416,14 +412,13 @@ class NV_GSP(NV_IP):
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC, bytes(alloc_args) + (bytes(params) if params is not None else b''))
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC)
 
-    if hClass == 0x0: return client # init root, return client
     if hClass == nv_gpu.FERMI_VASPACE_A and client != self.priv_root:
       self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr, client=client)
     if hClass == nv_gpu.NV20_SUBDEVICE_0: self.subdevice = obj # save subdevice handle
     if hClass == nv_gpu.ADA_COMPUTE_A and client != self.priv_root:
       phys_gr_ctx = self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
       self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
-    return obj
+    return obj if hClass != nv_gpu.NV1_ROOT else client
 
   def rpc_rm_control(self, hObject, cmd, params, client=None):
     control_args = nv.rpc_gsp_rm_control_v(hClient=(client:=client or self.priv_root), hObject=hObject, cmd=cmd, flags=0x0,
@@ -432,15 +427,8 @@ class NV_GSP(NV_IP):
     return self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)[len(bytes(control_args)):]
 
   def rpc_set_page_directory(self, device, hVASpace, pdir_paddr, client=None):
-    # UVM depth   HW level                            VA bits
-    # 0           PDE3                                48:47
-    # 1           PDE2                                46:38
-    # 2           PDE1 (or 512M PTE)                  37:29
-    # 3           PDE0 (dual 64k/4k PDE, or 2M PTE)   28:21
-    # 4           PTE_64K / PTE_4K                    20:16 / 20:12
-    # So, top level is 4 entries. Flags field is all channels, vid mem.
     params = nv.struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(physAddress=pdir_paddr,
-      numEntries=4, flags=0x8, hVASpace=hVASpace, pasid=0xffffffff, subDeviceId=1, chId=0)
+      numEntries=self.nvdev.mm.pte_cnt[0], flags=0x8, hVASpace=hVASpace, pasid=0xffffffff, subDeviceId=1, chId=0) # flags field is all channels.
     alloc_args = nv.rpc_set_page_directory_v(hClient=client or self.priv_root, hDevice=device, pasid=0xffffffff, params=params)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_SET_PAGE_DIRECTORY, bytes(alloc_args))
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_SET_PAGE_DIRECTORY)
@@ -468,37 +456,26 @@ class NV_GSP(NV_IP):
 
   def run_cpu_seq(self, seq_buf):
     hdr = nv.rpc_run_cpu_sequencer_v17_00.from_address(mv_address(seq_buf))
-    cmd_buf = seq_buf[ctypes.sizeof(nv.rpc_run_cpu_sequencer_v17_00):].cast('I')
+    cmd_iter = iter(seq_buf[ctypes.sizeof(nv.rpc_run_cpu_sequencer_v17_00):].cast('I')[:hdr.cmdIndex])
 
-    cmd_idx = 0
-    def _read(cnt):
-      nonlocal cmd_idx
-      cmd_idx += cnt
-      return tuple(cmd_buf[cmd_idx - cnt:cmd_idx]) if cnt > 1 else cmd_buf[cmd_idx - 1]
-
-    while cmd_idx < hdr.cmdIndex:
-      op_code = _read(1)
-      if op_code == 0x0: # reg write
-        addr, val = _read(2)
-        self.nvdev.wreg(addr, val)
-      elif op_code == 0x1: # reg modify
-        addr, val, mask = _read(3)
+    for op in cmd_iter:
+      if op == 0x0: self.nvdev.wreg(next(cmd_iter), next(cmd_iter)) # reg write
+      elif op == 0x1: # reg modify
+        addr, val, mask = next(cmd_iter), next(cmd_iter), next(cmd_iter)
         self.nvdev.wreg(addr, (self.nvdev.rreg(addr) & ~mask) | (val & mask))
-      elif op_code == 0x2: # reg poll
-        addr, mask, val, timeout, error = _read(5)
-        while (self.nvdev.rreg(addr) & mask) != val: pass # TODO: timeout
-      elif op_code == 0x3: # delay us
-        delay_us = _read(1)
-        time.sleep(delay_us / 1e6)
-      elif op_code == 0x4:
-        addr, index = _read(2)
+      elif op == 0x2: # reg poll
+        addr, mask, val, timeout, error = next(cmd_iter), next(cmd_iter), next(cmd_iter), next(cmd_iter), next(cmd_iter)
+        while (self.nvdev.rreg(addr) & mask) != val: pass
+      elif op == 0x3: time.sleep(next(cmd_iter) / 1e6) # delay us
+      elif op == 0x4: # save reg
+        addr, index = next(cmd_iter), next(cmd_iter)
         hdr.regSaveArea[index] = self.nvdev.rreg(addr)
-      elif op_code == 0x5: # core reset
+      elif op == 0x5: # core reset
         self.nvdev.flcn.reset(self.nvdev.flcn.falcon)
         self.nvdev.flcn.disable_ctx_req(self.nvdev.flcn.falcon)
-      elif op_code == 0x6: self.nvdev.flcn.start_cpu(self.nvdev.flcn.falcon)
-      elif op_code == 0x7: self.nvdev.flcn.wait_cpu_halted(self.nvdev.flcn.falcon)
-      elif op_code == 0x8: # core resume
+      elif op == 0x6: self.nvdev.flcn.start_cpu(self.nvdev.flcn.falcon)
+      elif op == 0x7: self.nvdev.flcn.wait_cpu_halted(self.nvdev.flcn.falcon)
+      elif op == 0x8: # core resume
         self.nvdev.flcn.reset(self.nvdev.flcn.falcon, riscv=True)
 
         self.nvdev.NV_PGSP_FALCON_MAILBOX0.write(lo32(self.libos_args_sysmem[0]))
@@ -509,4 +486,4 @@ class NV_GSP(NV_IP):
 
         mailbox = self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(self.nvdev.flcn.sec2).read()
         assert mailbox == 0x0, f"Falcon SEC2 failed to execute, mailbox is {mailbox:08x}"
-      else: raise ValueError(f"Unknown op code {op_code} at index {cmd_idx}")
+      else: raise ValueError(f"Unknown op code {op} in run_cpu_seq")

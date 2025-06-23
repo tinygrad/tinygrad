@@ -72,6 +72,12 @@ class NVDev(PCIDevImplBase):
     self.smi_dev, self.is_booting = False, True
     self._early_init()
 
+    # UVM depth   HW level                            VA bits
+    # 0           PDE3                                48:47
+    # 1           PDE2                                46:38
+    # 2           PDE1 (or 512M PTE)                  37:29
+    # 3           PDE0 (dual 64k/4k PDE, or 2M PTE)   28:21
+    # 4           PTE_64K / PTE_4K                    20:16 / 20:12
     self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, pte_cnt=[4, 512, 512, 256, 512],
       pte_covers=[0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000], first_lv=0, first_page_lv=4, va_base=0)
     self.flcn:NV_FLCN = NV_FLCN(self)
