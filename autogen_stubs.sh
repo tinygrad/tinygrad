@@ -115,57 +115,57 @@ generate_nv() {
     popd
   fi
 
-  # clang2py -k cdefstum \
-  #   extra/nv_gpu_driver/clc6c0qmd.h \
-  #   extra/nv_gpu_driver/clcec0qmd.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl0000.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl0080.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl2080.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl2080_notification.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc86f.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc96f.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc761.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl83de.h \
-  #   $NVKERN_SRC/src/nvidia/generated/g_allclasses.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc6c0.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clcdc0.h \
-  #   $NVKERN_SRC/kernel-open/nvidia-uvm/clc6b5.h \
-  #   $NVKERN_SRC/kernel-open/nvidia-uvm/clc9b5.h \
-  #   $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_ioctl.h \
-  #   $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_linux_ioctl.h \
-  #   $NVKERN_SRC/kernel-open/nvidia-uvm/hwref/ampere/ga100/dev_fault.h \
-  #   $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv_escape.h \
-  #   $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl.h \
-  #   $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl-numbers.h \
-  #   $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl-numa.h \
-  #   $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-unix-nvos-params-wrappers.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/alloc/alloc_channel.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/nvos.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrl0000/*.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrl0080/*.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrl2080/*.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrl83de/*.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrlc36f.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrlcb33.h \
-  #   $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrla06c.h \
-  #   --clang-args="-include $NVKERN_SRC/src/common/sdk/nvidia/inc/nvtypes.h -I$NVKERN_SRC/src/common/inc -I$NVKERN_SRC/kernel-open/nvidia-uvm -I$NVKERN_SRC/kernel-open/common/inc -I$NVKERN_SRC/src/common/sdk/nvidia/inc -I$NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include -I$NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl" \
-  #   -o $BASE/nv_gpu.py
-  # fixup $BASE/nv_gpu.py
-  # sed -i "s\(0000000001)\1\g" $BASE/nv_gpu.py
-  # sed -i "s\import ctypes\import ctypes, os\g" $BASE/nv_gpu.py
-  # sed -i 's/#\?\s\([A-Za-z0-9_]\+\) = MW ( \([0-9]\+\) : \([0-9]\+\) )/\1 = (\2 , \3)/' $BASE/nv_gpu.py # NVC6C0_QMDV03_00 processing
-  # sed -i 's/#\sdef NVC6C0_QMD\([A-Za-z0-9_()]\+\):/def NVC6C0_QMD\1:/' $BASE/nv_gpu.py
-  # sed -i 's/#\sdef NVCEC0_QMD\([A-Za-z0-9_()]\+\):/def NVCEC0_QMD\1:/' $BASE/nv_gpu.py
-  # sed -E -i -n '/^def (NVCEC0_QMDV05_00_RELEASE)(_ENABLE)\(i\):/{p;s//\1'"0"'\2=\1\2(0)\n\1'"1"'\2=\1\2(1)/;H;b};p;${x;s/^\n//;p}' "$BASE/nv_gpu.py"
-  # sed -i 's/#\s*return MW(\([0-9i()*+]\+\):\([0-9i()*+]\+\))/    return (\1 , \2)/' $BASE/nv_gpu.py
-  # sed -i 's/#\?\s*\(.*\)\s*=\s*\(NV\)\?BIT\(32\)\?\s*(\s*\([0-9]\+\)\s*)/\1 = (1 << \4)/' $BASE/nv_gpu.py # name = BIT(x) -> name = (1 << x)
-  # sed -i "s/UVM_\([A-Za-z0-9_]\+\) = \['i', '(', '\([0-9]\+\)', ')'\]/UVM_\1 = \2/" $BASE/nv_gpu.py # UVM_name = ['i', '(', '<num>', ')'] -> UVM_name = <num>
+  clang2py -k cdefstum \
+    extra/nv_gpu_driver/clc6c0qmd.h \
+    extra/nv_gpu_driver/clcec0qmd.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl0000.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl0080.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl2080.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl2080_notification.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc86f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc96f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc761.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl83de.h \
+    $NVKERN_SRC/src/nvidia/generated/g_allclasses.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc6c0.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clcdc0.h \
+    $NVKERN_SRC/kernel-open/nvidia-uvm/clc6b5.h \
+    $NVKERN_SRC/kernel-open/nvidia-uvm/clc9b5.h \
+    $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_ioctl.h \
+    $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_linux_ioctl.h \
+    $NVKERN_SRC/kernel-open/nvidia-uvm/hwref/ampere/ga100/dev_fault.h \
+    $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv_escape.h \
+    $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl.h \
+    $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl-numbers.h \
+    $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl-numa.h \
+    $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-unix-nvos-params-wrappers.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/alloc/alloc_channel.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/nvos.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrl0000/*.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrl0080/*.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrl2080/*.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrl83de/*.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrlc36f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrlcb33.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrla06c.h \
+    --clang-args="-include $NVKERN_SRC/src/common/sdk/nvidia/inc/nvtypes.h -I$NVKERN_SRC/src/common/inc -I$NVKERN_SRC/kernel-open/nvidia-uvm -I$NVKERN_SRC/kernel-open/common/inc -I$NVKERN_SRC/src/common/sdk/nvidia/inc -I$NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include -I$NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl" \
+    -o $BASE/nv_gpu.py
+  fixup $BASE/nv_gpu.py
+  sed -i "s\(0000000001)\1\g" $BASE/nv_gpu.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/nv_gpu.py
+  sed -i 's/#\?\s\([A-Za-z0-9_]\+\) = MW ( \([0-9]\+\) : \([0-9]\+\) )/\1 = (\2 , \3)/' $BASE/nv_gpu.py # NVC6C0_QMDV03_00 processing
+  sed -i 's/#\sdef NVC6C0_QMD\([A-Za-z0-9_()]\+\):/def NVC6C0_QMD\1:/' $BASE/nv_gpu.py
+  sed -i 's/#\sdef NVCEC0_QMD\([A-Za-z0-9_()]\+\):/def NVCEC0_QMD\1:/' $BASE/nv_gpu.py
+  sed -E -i -n '/^def (NVCEC0_QMDV05_00_RELEASE)(_ENABLE)\(i\):/{p;s//\1'"0"'\2=\1\2(0)\n\1'"1"'\2=\1\2(1)/;H;b};p;${x;s/^\n//;p}' "$BASE/nv_gpu.py"
+  sed -i 's/#\s*return MW(\([0-9i()*+]\+\):\([0-9i()*+]\+\))/    return (\1 , \2)/' $BASE/nv_gpu.py
+  sed -i 's/#\?\s*\(.*\)\s*=\s*\(NV\)\?BIT\(32\)\?\s*(\s*\([0-9]\+\)\s*)/\1 = (1 << \4)/' $BASE/nv_gpu.py # name = BIT(x) -> name = (1 << x)
+  sed -i "s/UVM_\([A-Za-z0-9_]\+\) = \['i', '(', '\([0-9]\+\)', ')'\]/UVM_\1 = \2/" $BASE/nv_gpu.py # UVM_name = ['i', '(', '<num>', ')'] -> UVM_name = <num>
 
-  # Parse status codes
-#   sed -n '1i\
-# nv_status_codes = {}
-# /^NV_STATUS_CODE/ { s/^NV_STATUS_CODE(\([^,]*\), *\([^,]*\), *"\([^"]*\)") *.*$/\1 = \2\nnv_status_codes[\1] = "\3"/; p }' $NVKERN_SRC/src/common/sdk/nvidia/inc/nvstatuscodes.h >> $BASE/nv_gpu.py
+  Parse status codes
+  sed -n '1i\
+nv_status_codes = {}
+/^NV_STATUS_CODE/ { s/^NV_STATUS_CODE(\([^,]*\), *\([^,]*\), *"\([^"]*\)") *.*$/\1 = \2\nnv_status_codes[\1] = "\3"/; p }' $NVKERN_SRC/src/common/sdk/nvidia/inc/nvstatuscodes.h >> $BASE/nv_gpu.py
 
   clang2py -k cdefstum \
     $NVKERN_SRC/src/nvidia/inc/kernel/gpu/fsp/kern_fsp_cot_payload.h \
