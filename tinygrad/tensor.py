@@ -3974,7 +3974,7 @@ class Tensor(MathTrait):
       s = -x[..., 0].sign()
       a = s * x.square().sum(-1).sqrt()
       u1 = x[..., 0] - a
-      w = x.clone().unsqueeze(-1) / u1.reshape(b_shape + 2 * (1,))
+      w = x.unsqueeze(-1) / u1.reshape(b_shape + 2 * (1,))
       w[..., 0, 0] = 1
       tau = (-s * u1 / x.square().sum(-1).sqrt()).reshape(b_shape + 2 * (1,)).expand(w.shape)
       old_R = R[..., i:m, :]
