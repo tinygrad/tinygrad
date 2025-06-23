@@ -3972,15 +3972,12 @@ class Tensor(MathTrait):
     for i in range(int(min(m, n))):
       x = R[..., i:m, i]
       s = -x[..., 0].sign()
-      a = s * x.square().sum(-1).sqrt()
-      u1 = x[..., 0] - a
+      u1 = x[..., 0] - s * x.square().sum(-1).sqrt()
       w = x.unsqueeze(-1) / u1.reshape(b_shape + 2 * (1,))
       w[..., 0, 0] = 1
       tau = (-s * u1 / x.square().sum(-1).sqrt()).reshape(b_shape + 2 * (1,)).expand(w.shape)
-      old_R = R[..., i:m, :]
-      R[..., i:m, :] = old_R - (w * tau) @ (w.transpose(-2, -1) @ old_R)
-      Q_old = Q[..., :, i:m]
-      Q[..., :, i:m] = Q_old - (Q_old @ w) @ (tau.transpose(-2, -1) * w.transpose(-2, -1))
+      R[..., i:m, :] = R[..., i:m, :] - (w * tau) @ (w.transpose(-2, -1) @ R[..., i:m, :])
+      Q[..., :, i:m] = Q[..., :, i:m] - (Q[..., :, i:m] @ w) @ (tau.transpose(-2, -1) * w.transpose(-2, -1))
     return Q,R
 
   def svd(self, full_matrices = True) -> tuple[Tensor, Tensor, Tensor]:
