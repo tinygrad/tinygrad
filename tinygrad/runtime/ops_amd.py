@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.uop.ops import sint
-from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
+from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, DMARef, DMAFdRef, PROFILE
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, all_same, flatten, DEBUG
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
@@ -467,6 +467,7 @@ class AMDProgram(HCQProgram):
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
     super().__init__(dev, copy_bufs=getattr(dev.dev_iface, 'copy_bufs', None), max_copyout_size=0x1000 if dev.is_usb() else None)
+    if hasattr(dev.dev_iface, "as_dmaref"): self._as_dmaref = dev.dev_iface.as_dmaref
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.dev_iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
@@ -596,6 +597,12 @@ class KFDIface:
     if mem.va_addr: FileIOInterface.munmap(mem.va_addr, mem.size)
     kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
 
+  def as_dmaref(self, mem:HCQBuffer) -> DMAFdRef:
+    base = mem._base if mem._base is not None else mem
+    dmaref = DMAFdRef(kfd.AMDKFD_IOC_EXPORT_DMABUF(KFDIface.kfd, handle=base.meta.handle, flags=0).dmabuf_fd, mem.va_addr-base.va_addr, mem.size)
+    weakref.finalize(dmaref, os.close, dmaref.fd)
+    return dmaref
+
   def map(self, mem):
     if self.gpu_id in getattr(mem.meta, "mapped_gpu_ids", []): return
     mem.meta.__setattr__("mapped_gpu_ids", getattr(mem.meta, "mapped_gpu_ids", []) + [self.gpu_id])
@@ -653,6 +660,14 @@ class PCIIface(PCIIfaceBase):
     self.props = {'simd_count': 2 * simd_count, 'simd_per_cu': 2, 'array_count': array_count, 'gfx_target_version': gfxver,
       'max_slots_scratch_cu': self.dev_impl.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.dev_impl.gc_info.gc_max_waves_per_simd,
       'simd_arrays_per_engine': self.dev_impl.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.dev_impl.gc_info.gc_lds_size}
+
+  # TODO: fix this
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
+    return super().alloc(size, host, uncached, cpu_access, contiguous or (not (host or (uncached and cpu_access))), **kwargs)
+
+  def as_dmaref(self, mem:HCQBuffer) -> DMARef:
+    assert len(mem.meta.mapping.paddrs) == 1, "can't export non-contiguous yet"
+    return DMAFdRef(self.pci_dev.export_bar(0), *mem.meta.mapping.paddrs[0])
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
     assert cwsr_buffer is None, "no cwsr buffer for am"

@@ -1,7 +1,7 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses
+import os, mmap, array, functools, re, ctypes, select, contextlib, dataclasses
 from typing import cast
 from tinygrad.helpers import round_up, to_mv, getenv, OSX
-from tinygrad.runtime.autogen import libc, vfio
+from tinygrad.runtime.autogen import libc, vfio, tdma
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQCompiled, HCQBuffer
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
 
@@ -46,10 +46,15 @@ class _System:
       return vfio_fd
     except OSError: return None
 
+  @functools.cache
+  def tdma(self) -> FileIOInterface|None:
+    try: return FileIOInterface("/dev/tdma", os.O_RDWR)
+    except OSError: return None
+
 System = _System()
 
 class PCIDevice:
-  def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+  def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None, export_bars:list[int]=[]):
     self.pcibus, self.irq_poller = pcibus, None
 
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
@@ -86,12 +91,16 @@ class PCIDevice:
     bar_info = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
     self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
+    self.p_domain, self.p_bus, self.p_dev, self.p_fn = tuple(int(x, 16) if i < 3 else int(x) for i, x in enumerate(re.split('[:.]', self.pcibus)))
   def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
   def write_config(self, offset:int, value:int, size:int): self.cfg_fd.write(value.to_bytes(size, byteorder='little'), binary=True, offset=offset)
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
+  @functools.cache
+  def export_bar(self, bar:int) -> int:
+    return tdma.TDMA_GET_DMABUF(System.tdma(), domain=self.p_domain, bus=self.p_bus, device=self.p_dev, function=self.p_fn, bar=bar).out_fd
 
 class PCIDevImplBase:
   mm: MemoryManager
@@ -122,7 +131,7 @@ class PCIIfaceBase:
       return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(self.dev, [self.dev], mapping, has_cpu_mapping=True),
         view=MMIOInterface(mapping.va_addr, size, fmt='B'))
 
-    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
+    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access or contiguous)
     if cpu_access: self.pci_dev.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], addr=mapping.va_addr, size=mapping.size)
     return HCQBuffer(mapping.va_addr, size, view=MMIOInterface(mapping.va_addr, size, fmt='B') if cpu_access else None,
       meta=PCIAllocationMeta(self.dev, [self.dev], mapping, has_cpu_mapping=cpu_access))
