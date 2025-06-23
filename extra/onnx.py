@@ -6,6 +6,23 @@ from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple,
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported, Device
 
+# https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L500-L544
+data_types: dict[int, DType] = {
+  1:dtypes.float32, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:dtypes.int16, 6:dtypes.int32, 7:dtypes.int64,
+  9:dtypes.bool, 10:dtypes.float32, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
+}
+
+# https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L128-L145
+attribute_types: dict[int, Callable] = {
+  1: lambda a: float(a.f),
+  2: lambda a: int(a.i),
+  3: lambda a: a.s.data().tobytes().decode("utf8") if isinstance(a.s, Tensor) else a.s.decode("utf8"),
+  4: lambda a: buffer_parse(a.t),
+  6: lambda a: tuple(float(x) for x in a.floats),
+  7: lambda a: tuple(int(x) for x in a.ints),
+  8: lambda a: tuple(x.data().tobytes().decode("utf8") for x in a.strings)
+}
+
 # ***** protobuf parsing ******
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, helper
 import numpy as np
@@ -15,40 +32,19 @@ def has_field(onnx_type: TypeProto|SimpleNamespace, field):
   return hasattr(onnx_type, field)
 
 def dtype_parse(onnx_dtype: int, fallback_context: str | None = None) -> DType:
-  supported: dict[int, DType] = {
-    TensorProto.FLOAT:dtypes.float32, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8,
-    TensorProto.UINT16:dtypes.uint16, TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64,
-    TensorProto.BOOL:dtypes.bool, TensorProto.FLOAT16:dtypes.float32, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32,
-    TensorProto.UINT64:dtypes.uint64, TensorProto.BFLOAT16:dtypes.bfloat16,
-  }
-  unsupported = {
-    TensorProto.UNDEFINED, TensorProto.STRING, TensorProto.COMPLEX64, TensorProto.COMPLEX128, TensorProto.FLOAT8E4M3FN, TensorProto.FLOAT8E4M3FNUZ,
-    TensorProto.FLOAT8E5M2, TensorProto.FLOAT8E5M2FNUZ, TensorProto.UINT4, TensorProto.INT4
-  }
-  if onnx_dtype in unsupported: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
-  if is_dtype_supported(dtype := supported[onnx_dtype]): return dtype
+  if onnx_dtype not in data_types: raise NotImplementedError(f"onnx dtype id {onnx_dtype} is not supported")
+  if is_dtype_supported(dtype := data_types[onnx_dtype]): return dtype
   # if fallback_context is provided, we can fall back to a default dtype
   if fallback_context is not None:
-    default_dtype = dtypes.float
+    default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
     warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {fallback_context} is not supported, falling back to {default_dtype}")
+    assert is_dtype_supported(default_dtype), f"dtype {default_dtype} must be supported on {Device.DEFAULT}"
     return default_dtype
   raise RuntimeError(f"dtype {dtype} on device {Device.DEFAULT} is not supported")
 
 def attribute_parse(onnx_attribute: AttributeProto):
-  supported: dict[AttributeProto.AttributeType, Callable[[AttributeProto], Any]] = {
-    AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i),
-    AttributeProto.STRING: lambda a: a.s.data().tobytes().decode("utf8") if isinstance(a.s, Tensor) else a.s.decode("utf8"),
-    AttributeProto.TENSOR: lambda a: buffer_parse(a.t),
-    AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats), AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints),
-    AttributeProto.STRINGS: lambda a: tuple(x.data().tobytes().decode("utf8") for x in a.strings)
-  }
-  unsupported = {
-    AttributeProto.UNDEFINED, AttributeProto.GRAPH, AttributeProto.SPARSE_TENSOR, AttributeProto.TYPE_PROTO, AttributeProto.TENSORS,
-    AttributeProto.GRAPHS, AttributeProto.SPARSE_TENSORS, AttributeProto.TYPE_PROTOS
-  }
-  if onnx_attribute.type in unsupported:
-    raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(onnx_attribute.type)} is not supported")
-  return supported[onnx_attribute.type](onnx_attribute)
+  if onnx_attribute.type not in attribute_types: raise NotImplementedError(f"attribute type {onnx_attribute.type} is not supported")
+  return attribute_types[onnx_attribute.type](onnx_attribute)
 
 def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
@@ -65,7 +61,7 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   if has_field(onnx_tensor, "raw_data"):
     raw_data = onnx_tensor.raw_data
     if not isinstance(raw_data, Tensor): raw_data = Tensor(raw_data)
-    if onnx_tensor.data_type == TensorProto.FLOAT16:
+    if onnx_tensor.data_type == TensorProto.FLOAT16 or not is_dtype_supported(data_types[onnx_tensor.data_type]):
       np_buffer = np.frombuffer(raw_data.data().tobytes(),
                                 dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
       if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
@@ -613,9 +609,13 @@ def get_onnx_ops():
 
   # Reimplemented here because you need legacy RNG for passing ONNX tests.
   def Dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
-    if not training_mode: return data, Tensor.ones(data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
-    mask = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)) >= ratio, requires_grad=False, device=data.device)
-    return data * mask * (1/(1.0 - ratio)), mask
+    if not training_mode: return data, data.full_like(True, dtype=dtypes.bool)
+    if seed is not None:
+      rand = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)), requires_grad=False, dtype=data.dtype, device=data.device)
+    else:
+      rand = data.rand_like(requires_grad=False)
+    mask = rand >= ratio
+    return data * mask / (1.0 - ratio), mask
   # 6 with 'is_test' needed for https://github.com/MTlab/onnx2caffe/raw/refs/heads/master/model/MobileNetV2.onnx
   def Dropout_6(data:Tensor, ratio:float=0.5, is_test=0): return Dropout_7(data, ratio, training_mode=not is_test)
   Dropout = {6:Dropout_6, 7:Dropout_7}
