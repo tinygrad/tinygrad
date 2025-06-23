@@ -4,7 +4,7 @@ from tinygrad.helpers import getenv, DEBUG, fetch, getbits, to_mv
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_GSP
-from tinygrad.runtime.support.system import System
+from tinygrad.runtime.support.system import System, PCIDevImplBase
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
 
@@ -34,14 +34,13 @@ class NVPageTableEntry:
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
     if not table:
-      assert self.lv >= 3
       x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=valid, address_sys=paddr >> 12, aperture=2 if system else 0, vol=uncached, kind=6)
     elif self.lv == 3:
-      x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=0)
+      x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=0, no_ats=1)
     else:
-      x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_sys=paddr >> 12, aperture=1 if valid else 0, vol=0)
+      x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_sys=paddr >> 12, aperture=1 if valid else 0, vol=0, no_ats=1)
 
-    if self.lv !=3: self.entries[entry_id] = x
+    if self.lv != 3: self.entries[entry_id] = x
     else:
       self.entries[2*entry_id] = x & 0xffffffffffffffff
       self.entries[2*entry_id+1] = x >> 64
@@ -49,11 +48,10 @@ class NVPageTableEntry:
   def entry(self, entry_id:int) -> int: return (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self.lv == 3 else self.entries[entry_id]
 
   def read_fields(self, entry_id:int) -> dict:
-    if self.lv == 3: return self.nvdev.NV_MMU_VER2_DUAL_PDE.decode(self.entry(entry_id))
-    elif self.lv == 4: return self.nvdev.NV_MMU_VER2_PTE.decode(self.entry(entry_id))
-    else: return self.nvdev.NV_MMU_VER2_PDE.decode(self.entry(entry_id))
+    if self.is_pte(entry_id): return self.nvdev.NV_MMU_VER2_PTE.decode(self.entry(entry_id))
+    return (self.nvdev.NV_MMU_VER2_DUAL_PDE if self.lv == 3 else self.nvdev.NV_MMU_VER2_PDE).decode(self.entry(entry_id))
 
-  def is_pte(self, entry_id) -> bool: return self.read_fields(entry_id)['is_pte'] if self.lv <= 3 else True
+  def is_pte(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv <= 3 else True
 
   def valid(self, entry_id):
     if self.is_pte(entry_id): return self.read_fields(entry_id)['valid']
@@ -66,7 +64,7 @@ class NVMemoryManager(MemoryManager):
 
   def on_range_mapped(self): self.dev.NV_VIRTUAL_FUNCTION_PRIV_MMU_INVALIDATE.write((1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
-class NVDev:
+class NVDev(PCIDevImplBase):
   def __init__(self, devfmt, mmio:MMIOInterface, vram:MMIOInterface, venid:int, subvenid:int, rev:int, bars:dict):
     self.devfmt, self.mmio, self.vram, self.venid, self.subvenid, self.rev, self.bars = devfmt, mmio, vram, venid, subvenid, rev, bars
     self.included_files, self.reg_names, self.reg_offsets = set(), set(), {}
@@ -76,8 +74,8 @@ class NVDev:
 
     self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, pte_cnt=[4, 512, 512, 256, 512],
       pte_covers=[0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000], first_lv=0, first_page_lv=4, va_base=0)
-    self.flcn = NV_FLCN(self)
-    self.gsp = NV_GSP(self)
+    self.flcn:NV_FLCN = NV_FLCN(self)
+    self.gsp:NV_GSP = NV_GSP(self)
 
     # Turn the booting early, gsp client is loaded from the clean.
     self.is_booting = False
@@ -85,6 +83,7 @@ class NVDev:
     for ip in [self.flcn, self.gsp]: ip.init_sw()
     for ip in [self.flcn, self.gsp]: ip.init_hw()
 
+  def reg(self, reg:str) -> NVReg: return self.__dict__[reg]
   def wreg(self, addr, value):
     self.mmio[addr // 4] = value
     if NV_DEBUG >= 4: print(f"wreg: {hex(addr)} = {hex(value)}")
@@ -92,12 +91,12 @@ class NVDev:
 
   def _early_init(self):
     self.include("src/common/inc/swref/published/nv_ref.h")
-    self.chip_id = self.NV_PMC_BOOT_0.read()
-    self.chip_details = self.NV_PMC_BOOT_42.read_bitfields()
+    self.chip_id = self.reg("NV_PMC_BOOT_0").read()
+    self.chip_details = self.reg("NV_PMC_BOOT_42").read_bitfields()
     self.chip_name = {0x17: "GA", 0x19: "AD"}[self.chip_details['architecture']] + str(100+self.chip_details['implementation'])
 
     self.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
-    if self.NV_PFB_PRI_MMU_WPR2_ADDR_HI.read() != 0:
+    if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
       if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.")
       System.pci_reset(self.devfmt)
       time.sleep(0.5)
@@ -111,7 +110,7 @@ class NVDev:
     for name in ['NV_MMU_VER2_PTE', 'NV_MMU_VER2_PDE', 'NV_MMU_VER2_DUAL_PDE']: self.__dict__[name] = NVReg(self, None, None, fields={})
     self.include("kernel-open/nvidia-uvm/hwref/turing/tu102/dev_mmu.h")
 
-    self.vram_size = self.NV_PGC6_AON_SECURE_SCRATCH_GROUP_42.read() << 20
+    self.vram_size = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read() << 20
 
   def _alloc_boot_struct(self, struct):
     va, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)

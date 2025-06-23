@@ -5,10 +5,12 @@ from tinygrad.helpers import to_mv, lo32, hi32, DEBUG, round_up, round_down, mv_
 from tinygrad.runtime.support.system import System
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.autogen import nv_gpu
-from tinygrad.device import CPUProgram
 
 @dataclasses.dataclass(frozen=True)
-class GRBufDesc: size:int; v:bool; p:bool; lc:bool=False # noqa: E702
+class GRBufDesc: size:int; v:int; p:int; lc:int=0 # noqa: E702
+
+class NV_IP:
+  def __init__(self, nvdev): self.nvdev = nvdev
 
 class NVRpcQueue:
   def __init__(self, gsp:NV_GSP, va:int, completion_q_va:int|None=None):
@@ -38,14 +40,14 @@ class NVRpcQueue:
     off = self.tx.writePtr * self.tx.msgSize
     self.queue_mv[off:off+len(msg)] = msg
     self.tx.writePtr = (self.tx.writePtr + round_up(len(msg), self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
-    CPUProgram.atomic_lib.atomic_thread_fence(5)
+    System.memory_barrier()
 
     self.seq += 1
     self.gsp.nvdev.NV_PGSP_QUEUE_HEAD[0].write(0x0)
 
   def wait_resp(self, cmd) -> memoryview:
     while True:
-      CPUProgram.atomic_lib.atomic_thread_fence(5)
+      System.memory_barrier()
       if self.rx.readPtr == self.tx.writePtr: continue
 
       off = self.rx.readPtr * self.tx.msgSize
@@ -58,7 +60,7 @@ class NVRpcQueue:
 
       # Update the read pointer
       self.rx.readPtr = (self.rx.readPtr + round_up(hdr.length, self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
-      CPUProgram.atomic_lib.atomic_thread_fence(5)
+      System.memory_barrier()
 
       if DEBUG >= 2:
         rpc_names = {**nv.c__Ea_NV_VGPU_MSG_FUNCTION_NOP__enumvalues, **nv.c__Ea_NV_VGPU_MSG_EVENT_FIRST_EVENT__enumvalues}
@@ -67,9 +69,7 @@ class NVRpcQueue:
       if hdr.rpc_result != 0: raise RuntimeError(f"RPC call {hdr.function} failed with result {hdr.rpc_result}")
       if hdr.function == cmd: return msg
 
-class NV_FLCN:
-  def __init__(self, nvdev): self.nvdev = nvdev
-
+class NV_FLCN(NV_IP):
   def init_sw(self):
     self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_gsp.h")
     self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_falcon_v4.h")
@@ -251,9 +251,7 @@ class NV_FLCN:
       while self.nvdev.NV_PRISCV_RISCV_BCR_CTRL.with_base(base).read_bitfields()['valid'] != 1: pass
       self.nvdev.NV_PFALCON_FALCON_RM.with_base(base).write(self.nvdev.chip_id)
 
-class NV_GSP:
-  def __init__(self, nvdev): self.nvdev = nvdev
-
+class NV_GSP(NV_IP):
   def init_sw(self):
     self.handle_gen = itertools.count(0xcf000000)
     self.init_rm_args()

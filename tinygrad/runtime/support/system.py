@@ -1,4 +1,4 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses
+import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys
 from typing import cast
 from tinygrad.helpers import round_up, to_mv, getenv, OSX
 from tinygrad.runtime.autogen import libc, vfio
@@ -9,6 +9,8 @@ MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000,
 
 class _System:
   def reserve_hugepages(self, cnt): os.system(f"sudo sh -c 'echo {cnt} > /proc/sys/vm/nr_hugepages'")
+
+  def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.atomic_lib()) is not None else None
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[int, list[int]]:
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
@@ -29,6 +31,9 @@ class _System:
       device = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
       if vendor == target_vendor and device in target_devices: result.append(pcibus)
     return sorted(result)
+
+  @functools.cache
+  def atomic_lib(self): return ctypes.CDLL(ctypes.util.find_library('atomic')) if sys.platform == "linux" else None
 
   @functools.cache
   def pagemap(self) -> FileIOInterface:
@@ -100,7 +105,7 @@ class PCIDevImplBase:
   mm: MemoryManager
 
 @dataclasses.dataclass
-class PCIAllocationMeta: owner:HCQCompiled; mapped_devs:list; mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int # noqa: E702
+class PCIAllocationMeta: owner:HCQCompiled; mapped_devs:list; mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int=0 # noqa: E702
 
 class PCIIfaceBase:
   dev_impl:PCIDevImplBase
