@@ -63,8 +63,12 @@ def diff(offset:int) -> None:
       break
     try:
       name, args, kwargs, ctx_vals, loc, ret = pickle.loads(row[0])
-      ctx_vars = {k:v.value for k,v in ctx_vals.items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
       if (replayer:=replayers.get(name)) is None: continue
+      ctx_vars:dict[str, int] = {}
+      for k,v in ctx_vals.items():
+        # process replay does not allow beaming or debug prints
+        if k not in {"IGNORE_BEAM_CACHE", "DEBUG"} and (default:=ContextVar._cache.get(k)) is not None and default.value != v.value:
+          ctx_vars[k] = v.value
       with Context(**ctx_vars): good, compare, metadata = replayer(ret, *args, **kwargs)
       if good != compare:
         for m in metadata: trunc_log(m)
