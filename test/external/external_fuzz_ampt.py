@@ -1,4 +1,5 @@
 import random
+from typing import Optional
 from tinygrad.helpers import round_up
 from tinygrad.runtime.support.am.amdev import AMPageTableTraverseContext
 from test.external.external_test_am import helper_read_entry_components, FakeAM
