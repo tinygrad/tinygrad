@@ -5,8 +5,65 @@ from dataclasses import dataclass, replace
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
 from tinygrad.helpers import dedup, partition, all_same, flatten, getenv
 
+def calc_register_pressure(lst: list[UOp]) -> int:
+  if not lst: return 0
+  in_this_block = set(lst)
+  starts: dict[int, UOp] = {}  # lifetime starts
+  ends: dict[int, list[UOp]] = defaultdict(list)  # lifetime ends
+  last_use = {}
+  for i, u in enumerate(lst):
+    for s in u.src:
+      if s in in_this_block: last_use[s] = i
+  for i, u in enumerate(lst):
+    if u in last_use:
+      starts[i] = u
+      ends[last_use[u]].append(u)
+  live_set = set()
+  max_pressure = 0
+  for i in range(len(lst)):
+    if i in ends:
+      for u_to_end in ends[i]: live_set.discard(u_to_end)
+    if i in starts: live_set.add(starts[i])
+    max_pressure = max(max_pressure, len(live_set))
+  return max_pressure
+
+def block_reorder_pressure_aware(lst: list[UOp]) -> list[UOp]:
+  in_this_block = set(lst)
+  local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
+  in_degree:dict[UOp, int] = {u: 0 for u in lst}
+  for u in lst:
+    for s in u.src:
+      if s in in_this_block:
+        local_children[s].append(u)
+        in_degree[u] += 1
+  usage_count: dict[UOp, int] = {u: len(local_children.get(u, [])) for u in lst}
+  depth: dict[UOp, int] = {}
+  for u in reversed(lst):
+    depth[u] = 1 + max([depth.get(c, 0) for c in local_children[u]], default=0)
+  original_pos: dict[UOp, int] = {u: i for i, u in enumerate(lst)}
+  ready_heap: list[tuple[tuple, UOp]] = []
+  for u in lst:
+    if in_degree[u] == 0:
+      score = (0, 0, -depth[u], original_pos[u])
+      heapq.heappush(ready_heap, (score, u))
+  newlst: list[UOp] = []
+  while ready_heap:
+    _, u = heapq.heappop(ready_heap)
+    newlst.append(u)
+    for s in u.src:
+      if s in usage_count:
+        usage_count[s] -= 1
+    for v in local_children[u]:
+      in_degree[v] -= 1
+      if in_degree[v] == 0:
+        releases_regs = sum(1 for s in v.src if usage_count.get(s, 0) == 1)
+        future_usage = len(local_children.get(v, []))
+        score = (-releases_regs, future_usage, -depth[v], original_pos[v])
+        heapq.heappush(ready_heap, (score, v))
+  assert len(newlst) == len(lst), f"len mismatch {len(newlst)} != {len(lst)}"
+  return newlst
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
-def block_reorder(lst:list[UOp]) -> list[UOp]:
+def block_reorder_old(lst:list[UOp]) -> list[UOp]:
   in_this_block = set(lst)
   local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
@@ -41,6 +98,13 @@ def block_reorder(lst:list[UOp]) -> list[UOp]:
   assert len(newlst) == len(lst), f"len mismatch {len(newlst)} != {len(lst)}"
   return newlst
 
+def block_reorder(lst:list[UOp]) -> list[UOp]:
+  newlst1 = block_reorder_old(lst)
+  newlst2 = block_reorder_pressure_aware(lst)
+  pressure1 = calc_register_pressure(newlst1)
+  pressure2 = calc_register_pressure(newlst2)
+  if pressure1 > 256 and pressure2 < pressure1: return newlst2
+  return newlst1
 # ***** basic block *****
 
 def disp(y:UOp) -> str:
