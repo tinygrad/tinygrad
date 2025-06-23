@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver, functools
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
@@ -74,6 +74,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
                     "ref":id(u.arg.ast) if u.op is Ops.KERNEL else None, "tag":u.tag}
   return graph
 
+@functools.cache
 def _reconstruct(a:int):
   op, dtype, src, arg, tag = contexts[2][a]
   arg = type(arg)(_reconstruct(arg.ast), arg.metadata) if op is Ops.KERNEL else arg
