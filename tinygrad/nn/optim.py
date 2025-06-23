@@ -21,7 +21,7 @@ class Optimizer:
     # store lr in at least float32 precision
     self.lr = Tensor(lr if getenv("CONST_LR") else [lr], requires_grad=False, device=self.device,
                      dtype=least_upper_dtype(dtypes.default_float, dtypes.float32))
-    if self.fused: self.pos_params = list(itertools.accumulate(self.params, lambda x,y: x+y.flatten().shape[0], initial=0))
+    if self.fused: self.pos_params = list(itertools.accumulate(self.params, lambda x,y: x+y.numel(), initial=0))
 
   def _new_optim_param(self) -> list[Tensor]:
     param_dtype = getenv("OPTIM_DTYPE", "float32")
