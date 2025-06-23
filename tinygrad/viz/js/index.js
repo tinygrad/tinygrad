@@ -223,8 +223,8 @@ const parseColors = (name) => [...name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u00
 
 // ** profiler graph
 
-function formatTime(ts, dur) {
-  if (dur<=1e3) return `${ts}us`;
+function formatTime(ts, dur=ts) {
+  if (dur<=1e3) return `${ts.toFixed(2)}us`;
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
   return `${(ts*1e-6).toFixed(2)}s`;
 }
@@ -335,7 +335,7 @@ async function renderProfiler() {
       const width = scale(e.x+e.dur)-x;
       ctx.fillStyle = e.bgColor;
       ctx.fillRect(x, e.y, width, e.height);
-      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, name:e.name })
+      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, name:e.name, dur:e.dur })
       // add labels
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
@@ -373,17 +373,33 @@ async function renderProfiler() {
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
+  function findRectAtPosition(x, y) {
+    const { top, left, width, height } = rect(canvas);
+    const X = ((x-left) * (canvas.width/width))/dpr;
+    const Y = ((y-top) * (canvas.height/height))/dpr;
+    for (const r of rectLst) {
+      if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r;
+    }
+  }
+
   canvas.addEventListener("click", e => {
     e.preventDefault();
-    const { top, left, width, height } = rect(canvas);
-    const clickX = ((e.clientX-left) * (canvas.width/width))/dpr;
-    const clickY = ((e.clientY-top) * (canvas.height/height))/dpr;
-    for (const r of rectLst) {
-      if (clickY>=r.y0 && clickY<=r.y1 && clickX>=r.x0 && clickX<=r.x1) {
-        return setCtxWithHistory(kernelMap.get(r.name)?.i);
-      }
-    }
+    const foundRect = findRectAtPosition(e.clientX, e.clientY);
+    if (foundRect != null) return setCtxWithHistory(kernelMap.get(foundRect.name)?.i);
   });
+
+  const tooltip = document.body.appendChild(document.createElement("div"));
+  tooltip.id = "tooltip";
+  canvas.addEventListener("mousemove", e => {
+    const foundRect = findRectAtPosition(e.clientX, e.clientY);
+    if (foundRect != null) {
+      tooltip.style.display = "block";
+      tooltip.style.left = (e.pageX+10)+"px";
+      tooltip.style.top = (e.pageY)+"px";
+      tooltip.textContent = formatTime(foundRect.dur);
+    } else tooltip.style.display = "none";
+  });
+  canvas.addEventListener("mouseleave", () => tooltip.style.display = "none");
 }
 
 // ** zoom and recentering
