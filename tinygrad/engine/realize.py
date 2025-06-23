@@ -1,11 +1,11 @@
-from typing import Optional, cast, Generator
+from typing import Optional, cast, Generator, Sequence
 import time, pprint
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites
 from tinygrad.device import Device, Buffer
-from tinygrad.renderer import Renderer, ProgramSpec, Estimates
+from tinygrad.renderer import Renderer, ProgramSpec, Estimates, Opt
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.opt import get_optimized_ast
 from tinygrad.codegen import full_rewrite
@@ -13,21 +13,23 @@ from tinygrad.uop.spec import type_verify
 
 # **************** Program Creation ****************
 
-@track_rewrites(name=lambda _ast,_renderer,ret:ret)
-def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
+@track_rewrites(name=lambda _ast,_renderer,ret,**_:ret)
+def get_program(ast:UOp, renderer:Renderer, opts_override:Sequence[Opt]|None=None, name_override:str|None=None) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
 
   Args:
     ast: The Ops.SINK rooted AST
     renderer: The renderer used to generate the code
+    opts_override: Optionally override the opts used to transform the AST
+    name_override: Optionally override the name of the rendered code
 
   Returns:
     The ProgramSpec of the program.
   """
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  modified_ast = get_optimized_ast(ast, renderer) if ast.arg is None else ast
+  modified_ast = get_optimized_ast(ast, renderer, opts_override=opts_override, name_override=name_override) if ast.arg is None else ast
   if __debug__: type_verify(list(modified_ast.toposort()))
 
   # linearize
