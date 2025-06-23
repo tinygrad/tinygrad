@@ -415,6 +415,10 @@ class Tensor(MathTrait):
     """
     assert self.dtype == dtypes.uint8, "hash is expected to be uint8"
     h = self.contiguous().flatten()
+    assert h.shape[0] % 16 == 0, "expected hashes"
+
+    base_chunks = math.ceil(size / 2**20)
+    tree_depth = math.ceil(math.log(base_chunks, 65536))
 
     # pad size to a multiple of 1mb and larger than size
     if (tsize := h.shape[0]) < size: h = h.pad((0, size - tsize))
