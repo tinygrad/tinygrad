@@ -305,7 +305,7 @@ HOP_LENGTH = 160
 N_MELS = 80
 FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
 
-def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
+def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=None) -> np.ndarray:
   """
   :param waveforms: A list of possibly variable length 16000Hz audio samples
   :param batch_size: The batch_size associated with the Whisper model being used to transcribe the audio.
@@ -321,6 +321,8 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
       return np.pad(arr, (0, target_len - curr_len), 'constant')
     else:
       return arr[:target_len]
+
+  waveforms = [np.array(resample_batched(Tensor(wv), sr, RATE)).flatten()[:wv.shape[-1]] for wv in waveforms]
 
   max_len = SAMPLES_PER_SEGMENT if truncate else max(len(wav) for wav in waveforms)
   if (r := max_len % SAMPLES_PER_SEGMENT) > 0: max_len += SAMPLES_PER_SEGMENT - r
@@ -412,19 +414,20 @@ def init_whisper(model_name="tiny.en", batch_size=1):
   return model, enc
 
 def load_file_waveform(filename):
-  waveform, _ = librosa.load(filename, sr=RATE)
-  return waveform
+  waveform, sr = librosa.load(filename, sr=None)
+  return waveform, sr
 
 def transcribe_file(model, enc, filename):
-  return transcribe_waveform(model, enc, [load_file_waveform(filename)])
+  wav, sr = load_file_waveform(filename)
+  return transcribe_waveform(model, enc, [wav], sr=sr)
 
-def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
+def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False, sr=None):
   """
   Expects an array of shape (N,S) where N is the number waveforms to transcribe in parallel and S is number of 16000Hz samples
   Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
   """
 
-  log_spec = prep_audio(waveforms, model.batch_size, truncate)
+  log_spec = prep_audio(waveforms, model.batch_size, truncate, sr=sr)
   nsample = model.decoder.max_tokens_to_sample
 
   def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
