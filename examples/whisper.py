@@ -258,18 +258,44 @@ def mel(
 
   return weights
 
+# @TinyJit
 def resample(x, L, M, num_taps=64):
   fc = 0.5 / max(L, M)
   t = Tensor.arange(-num_taps//2, num_taps//2 + 1)
+  # NOTE(irwin): poor man's sinc
   h:Tensor = (t * fc * np.pi).sin() / (t * fc * np.pi)
   # hack fix NaN
   h[num_taps//2] = 1.0
   h *= 0.54 - 0.46 * (2 * np.pi * (t + num_taps//2) / num_taps).cos()  # hamming
   h /= h.sum()
+  # TODO(irwin): contiguous sped up things before replacing decimation with stride=M, retest if still relevant
   upsampled = x[None].cat(Tensor.zeros(L-1, x.shape[-1])).T.flatten().contiguous()
   padding = (len(h) // 2)
   filtered = upsampled[None][None].conv2d(h[None][None], stride=M, padding=padding).flatten()
   return filtered
+
+def next_power_of_2(n):
+  if n <= 0:
+    return 1
+  return 1 << (n - 1).bit_length()
+
+def resample2(samples, source, target):
+  gcd = math.gcd(source, target)
+  M = source // gcd
+  L = target // gcd
+  # NOTE(irwin): overkill but works
+  taps = next_power_of_2(max(M, L))*2
+  #print(M, L, taps)
+  return resample(samples, L, M, taps)
+
+def resample_batched(samples, source, target):
+  result = []
+  vi = Variable("bs", 0, len(samples)//(source*10)*source*10)
+  for i in range(0, len(samples), source*10):
+    vib = vi.bind(i)
+    chunk = resample2(samples[vib:vib+(source*10)], source, target)
+    result.append(chunk.numpy())
+  return result
 
 RATE = 16000
 SEGMENT_SECONDS=30
