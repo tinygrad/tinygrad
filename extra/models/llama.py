@@ -1,5 +1,5 @@
 from typing import Union, Optional, Any
-import collections
+import collections, math
 from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
 from tinygrad.helpers import getenv, DEBUG
 
@@ -173,7 +173,7 @@ class Transformer:
     self.tok_embeddings = embedding(vocab_size, dim)
     self.output = nn.Linear(dim, vocab_size, bias=False) if embedding == nn.Embedding else linear(dim, vocab_size, bias=False)
     self.max_context = max_context
-    self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta).contiguous()
+    self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta).contiguous().requires_grad_(False)
     self.forward_jit = TinyJit(self.forward) if jit else None
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
@@ -186,6 +186,7 @@ class Transformer:
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1) if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h)).float()[:, -1, :]
+    if math.isnan(temperature): return logits
 
     return sample(logits.flatten(), temperature, top_k, top_p, alpha_f, alpha_p)
 
