@@ -13,9 +13,8 @@ from tinygrad.dtype import ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, unwrap
 from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import strides_for_shape
-from tinygrad.codegen.lowerer import get_contraction
-from tinygrad.engine.kernelize import view_left
+from tinygrad.shape.view import strides_for_shape, get_contraction
+from tinygrad.kernelize.kernelize import view_left
 from tinygrad.codegen import full_rewrite
 
 class KernelOptError(Exception): pass
@@ -380,7 +379,7 @@ class Kernel:
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
-      check(not self.tensor_core, "can't group with tensor cores")
+      check(self.use_tensor_cores != 3, "can't group with tensor cores emulation")
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
@@ -458,8 +457,8 @@ class Kernel:
         # otherwise we just replace the VIEW source
         return ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
       if op.op is Ops.SINK:
-        return ret.replace(arg = KernelInfo(to_function_name(self.name) if name_override is None else name_override,
-                                            self.local_dims, self.upcasted, self.dont_use_locals))
+        return ret.replace(arg = KernelInfo(self.name if name_override is None else name_override,
+                                            self.local_dims, self.upcasted, self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
 
@@ -507,9 +506,11 @@ class Kernel:
           else: # for TC=3 MUL/SUM instead of WMMA
             tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
 
-          return ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
+          ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
 
-        ret = ret.replace(arg = (op.arg[0], axes))
+        else:
+          ret = ret.replace(arg = (op.arg[0], axes))
+
         if self.group_for_reduces and grouped_axes:
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
@@ -566,10 +567,5 @@ class Kernel:
     self.linearize(name_override, ast_transform)
     assert self.uops[-1].op is Ops.SINK, "last uop must be sink"
     src = self.opts.render(self.uops)
-    # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
-    # TODO: these max and min don't work on symbolic, and results are very wrong.
-    mem_bytes = sum(max(x.src[0].dtype.nbytes() for x in group)
-      for _, group in itertools.groupby([x for x in self.ast.toposort() if x.op in GroupOp.Buffer and x.src[0].base.op is Ops.DEFINE_GLOBAL],
-                        key=lambda x: (x.op, x.src[0].base.arg)))
-    return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops, self.applied_opts, mem_bytes,
+    return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops,
                        global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
