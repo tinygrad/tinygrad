@@ -3,6 +3,7 @@ import unittest
 
 from tinygrad import Tensor
 from tinygrad.opt.kernel import Kernel
+from tinygrad.engine.realize import get_program
 from tinygrad.helpers import DEBUG
 from tinygrad.uop.ops import UOp, Ops, print_uops
 from tinygrad.uop.spec import type_verify, ast_spec, tensor_uop_spec
@@ -18,9 +19,9 @@ def helper_test_verify_ast(*stores:UOp) -> Kernel:
   try: type_verify(list(sink.toposort()), ast_spec)
   except RuntimeError as e: raise InvalidASTException(e.args)
   k = Kernel(sink)
-  k.linearize()
-  if DEBUG >= 6: print_uops(k.uops)
-  if DEBUG >= 4: print(k.to_program().src)
+  prg = get_program(k.get_optimized_ast(), k.opts)
+  if DEBUG >= 6: print_uops(prg.uops)
+  if DEBUG >= 4: print(prg.src)
   return k
 
 class TestUOpSpec(unittest.TestCase):

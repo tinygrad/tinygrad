@@ -11,6 +11,7 @@ from tinygrad import Device, dtypes, Tensor
 from tinygrad.dtype import PtrDType, DType, DTYPES_DICT
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
+from tinygrad.engine.realize import get_program
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -55,7 +56,7 @@ def randoms():
 def ast_to_cuda_prog(compiler, ast, opts):
   k = Kernel(ast)
   k.apply_opts(opts)
-  p = k.to_program()
+  p = get_program(k.get_optimized_ast(), k.opts)
   return CUDAProgram(device, p.function_name, compiler.compile(p.src))
 
 if __name__ == "__main__":

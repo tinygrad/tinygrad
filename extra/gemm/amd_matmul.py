@@ -5,7 +5,7 @@ from dataclasses import replace
 from tinygrad import Tensor, Device, Context
 from tinygrad.helpers import getenv
 from tinygrad.opt.kernel import Kernel, Opt, OptOps
-from tinygrad.engine.realize import CompiledRunner, ExecItem
+from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp
 
 # TODO: on METAL for `DEBUG=4 python3 extra/gemm/amd_matmul.py`
@@ -83,7 +83,10 @@ if __name__ == "__main__":
           Opt(op=OptOps.LOCAL, axis=1, arg=LN),
           Opt(op=OptOps.LOCAL, axis=0, arg=LN)]
   k.apply_opts(opts)
-  prg = k.to_program(ast_transform=ast_transform)
+  ast = k.get_optimized_ast()
+  if ast_transform is not None:
+    ast = ast_transform(k, ast)
+  prg = get_program(ast, k.opts)
   if getenv("FAST", 1) and Device.DEFAULT == "AMD":
     #src = (pathlib.Path(__file__).parent / "fp32_sgemm_amd" / "src" / "kernel8_batched_gmem.s").read_text()
     src = (pathlib.Path(__file__).parent / "kernel8_batched_gmem.s").read_text()

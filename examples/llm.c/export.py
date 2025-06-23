@@ -5,7 +5,7 @@ from tinygrad import Device, nn, Tensor, dtypes, Variable
 Device.DEFAULT = "CPU"
 from train_gpt2 import GPT, GPTConfig
 from tinygrad.helpers import dedup, to_function_name, flatten, getenv, GlobalCounters, ansilen, to_function_name
-from tinygrad.engine.realize import get_kernel, run_schedule
+from tinygrad.engine.realize import get_kernel, run_schedule, get_program
 from tinygrad.engine.memory import memory_planner
 from tinygrad.uop.ops import Ops
 
@@ -44,9 +44,9 @@ if __name__ == "__main__":
   srcs = {}
   for ast in ast_dedup:
     k = get_kernel(Device["CPU"].renderer, ast)
-    k.linearize()
-    src = Device["CPU"].renderer.render(to_function_name(k.name), k.uops)
-    srcs[ast] = (k.name, src)
+    prg = get_program(k.get_optimized_ast(), k.opts)
+    src = Device["CPU"].renderer.render(to_function_name(prg.name), prg.uops)
+    srcs[ast] = (prg.name, src)
   print("functions:", len(srcs))
   used_buffers = dedup(flatten([si.bufs for si in sched]))
   numbered_bufs = {x:i for i,x in enumerate(used_buffers)}

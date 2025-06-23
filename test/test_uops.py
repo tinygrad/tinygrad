@@ -11,7 +11,7 @@ from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
 from tinygrad.uop.spec import spec
 from tinygrad.renderer import ProgramSpec
 from tinygrad.kernelize.kernelize import fix_kernel_ops
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
 from tinygrad.device import is_dtype_supported
@@ -411,7 +411,7 @@ class TestAssembly(unittest.TestCase):
     c = (a*b).sum()
     k = Kernel(c.schedule()[-1].ast)
     k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
-    uops = k.linearize().uops
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
     self.assertEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
 class TestUOpMethod(unittest.TestCase):
