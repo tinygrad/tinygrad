@@ -3,7 +3,7 @@ import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrow
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
-from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
+from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, to_function_name
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
 from tinygrad.renderer import ProgramSpec
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
@@ -25,7 +25,8 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
   ret = []
   for k,v in zip(keys, contexts):
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":lines(s.loc[0])[s.loc[1]-1].strip()} for s in v]
-    if isinstance(k, ProgramSpec): ret.append({"name":k.name, "kernel_code":k.src, "ref":id(k.ast), "steps":steps})
+    if isinstance(k, ProgramSpec):
+      ret.append({"name":k.name, "kernel_code":k.src, "ref":id(k.ast), "function_name":to_function_name(k.name), "steps":steps})
     else: ret.append({"name":str(k), "steps":steps})
   return ret
 
