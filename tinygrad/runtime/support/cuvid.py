@@ -57,11 +57,31 @@ def get_cuvid_lib():
       search_paths.insert(0, os.path.join(cuda_path, "lib64"))
       search_paths.insert(0, os.path.join(cuda_path, "lib"))
   
+  # Add NVIDIA Video Codec SDK paths
   if nvidia_sdk_path:
     if system == "windows":
       search_paths.insert(0, os.path.join(nvidia_sdk_path, "Lib", "x64"))
+      search_paths.insert(0, os.path.join(nvidia_sdk_path, "Lib", "Win32"))
     else:
       search_paths.insert(0, os.path.join(nvidia_sdk_path, "lib"))
+      search_paths.insert(0, os.path.join(nvidia_sdk_path, "Lib", "linux", "stubs", "x86_64"))
+  
+  # Add standard Video Codec SDK installation paths
+  if system == "linux":
+    sdk_standard_paths = [
+      "/opt/nvidia-video-codec-sdk/lib",
+      "/opt/nvidia-video-codec-sdk/Lib/linux/stubs/x86_64",
+      "/usr/local/nvidia-video-codec-sdk/lib",
+      "/home/$USER/nvidia-video-codec-sdk/Lib/linux/stubs/x86_64"
+    ]
+    search_paths.extend(sdk_standard_paths)
+  elif system == "windows":
+    sdk_standard_paths = [
+      "C:/Program Files/NVIDIA Corporation/NVIDIA Video Codec SDK/Lib/x64",
+      "C:/NVIDIA Video Codec SDK/Lib/x64",
+      "C:/nvidia-video-codec-sdk/Lib/x64"
+    ]
+    search_paths.extend(sdk_standard_paths)
   
   # Add common CUDA installation detection with version info
   cuda_locations = []
@@ -202,17 +222,16 @@ def load_cuvid_with_diagnostics():
       exists = "✅" if os.path.exists(cuda_base) else "❌"
       print(f"   {exists} CUDA Toolkit: {cuda_base}")
       
-    print(f"\n💡 Installation suggestions:")
+    print(f"\n💡 Quick Setup:")
     if system == "linux":
-      print(f"   1. Install NVIDIA drivers: sudo apt install nvidia-driver-515")
-      print(f"   2. Install CUDA toolkit: sudo apt install nvidia-cuda-toolkit")
-      print(f"   3. Or download from: https://developer.nvidia.com/cuda-downloads")
+      print(f"   sudo apt install nvidia-driver-535 nvidia-cuda-toolkit")
+      print(f"   # Download SDK: https://developer.nvidia.com/nvidia-video-codec-sdk")
     elif system == "windows":
-      print(f"   1. Download CUDA Toolkit: https://developer.nvidia.com/cuda-downloads")
-      print(f"   2. Download Video Codec SDK: https://developer.nvidia.com/nvidia-video-codec-sdk")
+      print(f"   # Download CUDA: https://developer.nvidia.com/cuda-downloads")
+      print(f"   # Download SDK: https://developer.nvidia.com/nvidia-video-codec-sdk") 
     elif system == "darwin":
-      print(f"   1. Note: NVIDIA GPU support on macOS is limited")
-      print(f"   2. Consider using alternative acceleration (Metal, OpenCL)")
+      print(f"   # NVIDIA GPU not supported on recent macOS")
+      print(f"   # Use VideoToolbox or Metal instead")
     
     return None
 
