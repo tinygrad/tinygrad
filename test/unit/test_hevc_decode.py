@@ -12,7 +12,7 @@ if sys.platform == 'win32':
 
 try:
   from tinygrad.runtime.support.hevc import (
-    check_hevc_support, create_hevc_decoder, HEVCDecoder, create_hevc_decoder_auto,
+    check_hevc_support, HEVCDecoder, create_hevc_decoder_auto,
     validate_hevc_stream, create_sample_hevc_data, CUVIDDECODECAPS, CUVIDDECODECREATEINFO
   )
 except ImportError:
@@ -40,7 +40,7 @@ class TestHEVCDecode(unittest.TestCase):
     self.test_bitstream = create_test_hevc_bitstream()
 
   def test_cuvid_import_and_structs(self):
-    """Test CUVID module imports and data structures"""
+    """Test NVDEC module imports and data structures"""
     # Test structure creation
     caps = CUVIDDECODECAPS()
     create_info = CUVIDDECODECREATEINFO()
@@ -49,10 +49,8 @@ class TestHEVCDecode(unittest.TestCase):
     self.assertIsNotNone(create_info)
 
     # Test capability check
-    caps_result = check_hevc_support()
-    if caps_result:
-      self.assertTrue(hasattr(caps_result, 'nMaxWidth'))
-      self.assertTrue(hasattr(caps_result, 'nMaxHeight'))
+    caps_result = check_hevc_support(self.device)
+    self.assertIsInstance(caps_result, bool)
 
   def test_hevc_stream_validation(self):
     """Test HEVC bitstream validation"""
@@ -68,7 +66,7 @@ class TestHEVCDecode(unittest.TestCase):
   def test_decoder_creation_and_initialization(self):
     """Test HEVC decoder creation and initialization"""
     # Test manual decoder creation
-    decoder = HEVCDecoder(1920, 1080)
+    decoder = HEVCDecoder(self.device, 1920, 1080)
     self.assertIsNotNone(decoder)
     self.assertEqual(decoder.width, 1920)
     self.assertEqual(decoder.height, 1080)
@@ -150,16 +148,10 @@ class TestHEVCDecode(unittest.TestCase):
 
   def test_hardware_capability_detection(self):
     """Test hardware capability detection"""
-    caps = check_hevc_support()
+    caps = check_hevc_support(self.device)
 
-    if caps is not None:
-      # Hardware HEVC available
-      self.assertIsInstance(caps, CUVIDDECODECAPS)
-      self.assertGreater(caps.nMaxWidth, 0)
-      self.assertGreater(caps.nMaxHeight, 0)
-    else:
-      # No hardware HEVC support (expected in CI)
-      self.assertIsNone(caps)
+    # Should return boolean indicating support
+    self.assertIsInstance(caps, bool)
 
 if __name__ == '__main__':
   unittest.main()
