@@ -89,9 +89,12 @@ def simple_decode_example():
     
     try:
       width, height = get_frame_dimensions(hevc_data)
+      # Validate dimensions - reject unrealistic values from mock data
+      if width < 64 or height < 64 or width > 8192 or height > 8192:
+        raise ValueError(f"Invalid dimensions from mock data: {width}x{height}")
       print(f"✅ Frame dimensions: {width}x{height}")
     except:
-      width, height = 1920, 1080  # Default resolution
+      width, height = 1920, 1080  # Use realistic defaults for mock data
       print(f"⚠️  Using default dimensions: {width}x{height}")
     
     # Step 4: Create decoder
@@ -190,9 +193,12 @@ def file_decode_example(input_file: str, output_file: str = None):
     
     try:
       width, height = get_frame_dimensions(hevc_data)
+      # Validate dimensions - reject unrealistic values
+      if width < 64 or height < 64 or width > 8192 or height > 8192:
+        raise ValueError(f"Invalid dimensions: {width}x{height}")
       print(f"✅ Frame dimensions: {width}x{height}")
     except:
-      width, height = 1920, 1080
+      width, height = 1920, 1080  # Use realistic defaults
       print(f"⚠️  Using default dimensions: {width}x{height}")
     
     # Initialize mock device
