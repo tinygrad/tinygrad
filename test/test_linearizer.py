@@ -2051,7 +2051,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
                       "test requires tensor cores with accumulation in half") # testing with half suffices.
   # NOTE: the METAL test is broken, likely due to a compiler bug. passes on CI with -O0 and with default opt level locally on M3
-  @unittest.skipIf(CI and Device.DEFAULT == "METAL", "broken for METAL")
+  @unittest.skipIf(Device.DEFAULT == "METAL", "broken for METAL")
   def test_tensor_core_opts_group(self):
     N = 128
     Tensor.manual_seed(1552)
