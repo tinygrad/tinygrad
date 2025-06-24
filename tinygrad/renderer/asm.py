@@ -88,7 +88,7 @@ class AsmRenderer(Renderer):
   def render_reg(self, reg:str, dt:DType, alias:bool=False): raise NotImplementedError("arch specific")
   #def two_address(self, x:UOp, y:UOp) -> str: return cast(str, l)+"\n" if (l:=self.string_rewrite.rewrite(x.assign(y), self)) is not None else ""
   def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
-  def reg_class(self, x:UOp) -> list[str]: return self.regs[x.dtype.scalar()]
+  def reg_class(self, x:UOp) -> list[str]: return self.regs[x.dtype]
   def bypass(self, x:UOp) -> UOp: return self.bypass(x.src[0]) if x.op in (Ops.ASSIGN, Ops.NOOP) else x
   def srcs(self, x:UOp) -> tuple[UOp, ...]: return tuple(self.bypass(s) for s in x.src)
   def is_reg(self, r:str) -> bool: return r in self.all_regs
@@ -125,7 +125,7 @@ class AsmRenderer(Renderer):
       if u.op is Ops.ENDRANGE: ranges.append(u.src[0])
       if u.op is Ops.RANGE: ranges.pop()
 
-    def reg_class(x:UOp): return regs[x.dtype.scalar()]
+    def reg_class(x:UOp): return regs[x.dtype]
     def _alloc(x:UOp, cons:list[str]):
       # assign free register, otherwise spill one
       if (free:=next((r for r in reg_class(x) if r in cons), None)) is not None: return reg_class(x).pop(reg_class(x).index(free))
@@ -339,6 +339,17 @@ class Arm64Renderer(AsmRenderer):
   def render_kernel(self, name:str, kernel:list[str], stack_size:int, callee_saved:list[str]) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:", "stp x29, x30, [sp, #-16]!", "mov x29, sp", f"sub sp, sp, #{stack_size}"] + \
                       kernel + [f"add sp, sp, #{stack_size}", "ldp x29, x30, [sp], #16", "ret", "\n"])
+
+# *** x86 registers ***
+# rbp is frame pointer, kept for stack arg access
+x86_gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx", "r10", "r11", "r12", "r13", "r14", "r15"]
+x86_float_regs = ["ymm" + str(i) for i in range(0,16)]
+x86_regs = {**{x:x86_gen_regs for x in (dtypes.bool,)+dtypes.ints}, **{x:x86_float_regs for x in dtypes.floats},
+            **{x.vec(sz):x86_float_regs for x in dtypes.all for sz in [2,4,8,16,32]}}
+x86_reg_map = {**{"rdi": {4: "edi", 2: "di", 1: "dil"}, "rsi": {4: "esi", 2: "si", 1: "sil"}, "rdx": {4: "edx", 2: "dx", 1: "dl"},
+                "rcx": {4: "ecx", 2: "cx", 1: "cl"}, "rax": {4: "eax", 2: "ax", 1: "al"}, "rbx": {4: "ebx", 2: "bx", 1: "bl"},
+               **{f"r{i}": {4: f"r{i}d", 2: f"r{i}w", 1: f"r{i}b"} for i in range(8,16)}},
+               **{f"ymm{i}": {sz: f"xmm{i}" for sz in [16,8,4,2]} for i in range(0,16)}}
 
 # rbp is frame pointer, kept for stack arg access
 x86_gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx", "r10", "r11", "r12", "r13", "r14", "r15"]
