@@ -124,9 +124,10 @@ def simple_decode_example():
     
     device.decode_hevc.return_value = mock_surface
     
-    decoded_surface = decode_hevc(
-      device=device,
-      hevc_data=hevc_data,
+    decoded_surface = device.decode_hevc(
+      bitstream=hevc_data,
+      width=width,
+      height=height,
       output_format="NV12"
     )
     
