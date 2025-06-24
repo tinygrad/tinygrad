@@ -1,10 +1,10 @@
 # ruff: noqa: E501
 import unittest, random
 import numpy as np
-from tinygrad.codegen.kernel import Kernel, KernelOptError
+from tinygrad.opt.kernel import Kernel, KernelOptError
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.engine.search import Opt, OptOps
+from tinygrad.opt.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import CI, Context
 from test.external.fuzz_linearizer import compare_linearizer
@@ -1254,6 +1254,7 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.TC, axis=0, arg=(-1, 2, 1))]
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
+  @unittest.skip("allocating over 200MB buffer")
   @unittest.skipIf(CI and Device.DEFAULT in {"METAL"}, "hangs metal gpu CI")
   def test_failure_52(self):
     # resnet beam.
@@ -1451,7 +1452,7 @@ class TestLinearizerFailures(unittest.TestCase):
             UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(50257, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
     opts = [Opt(op=OptOps.GROUPTOP, axis=0, arg=29), Opt(op=OptOps.PADTO, axis=0, arg=32)]
     with Context(IGNORE_OOB=0):
-      helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["METAL", "GPU", "AMD", "NV", "CUDA"])
+      helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test needs local")
   def test_failure_59(self):
@@ -1701,6 +1702,45 @@ class TestLinearizerFailures(unittest.TestCase):
                    x7,)),)),)),)),)),)),))
     opts = [Opt(op=OptOps.LOCAL, axis=0, arg=32), Opt(op=OptOps.GROUP, axis=1, arg=0)]
     helper_test_lin(Kernel(ast), opts, failed_platforms=["AMD", "METAL", "CUDA", "NV"])
+
+  def test_failure_62(self):
+    # WINO=1 DEFAULT_FLOAT=HALF FUSE_ARANGE=1 JITBEAM=4 BS=1024 STEPS=500 python examples/hlb_cifar10.py
+    # RuntimeError: UOp verification failed at 4 on Ops.LOAD dtypes.half 2 [<Ops.DEFINE_GLOBAL: 24>, <Ops.VIEW: 23>] None
+    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(11808768), arg=0, src=()),
+        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 1, 12, 31, 31, 1, 1, 1), strides=(11532, 0, 961, 31, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(Ops.CAST, dtypes.half, arg=None, src=(
+          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (5, 6, 7)), src=(
+            UOp(Ops.CAST, dtypes.float, arg=None, src=(
+              UOp(Ops.MUL, dtypes.half, arg=None, src=(
+                UOp(Ops.LOAD, dtypes.half, arg=None, src=(
+                  UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(3145728), arg=1, src=()),
+                  UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 1, 12, 31, 31, 3, 2, 2), strides=(3072, 0, 0, 32, 1, 1024, 32, 1), offset=0, mask=None, contiguous=False),)), src=()),)),
+                UOp(Ops.LOAD, dtypes.half, arg=None, src=(
+                  UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(144), arg=2, src=()),
+                  UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 1, 12, 31, 31, 3, 2, 2), strides=(0, 0, 12, 0, 0, 4, 2, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),)),))
+    opts = [Opt(op=OptOps.LOCAL, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=1, arg=3), Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.PADTO, axis=2, arg=32), Opt(op=OptOps.UPCAST, axis=2, arg=4), Opt(op=OptOps.UPCAST, axis=2, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=0)]
+    helper_test_lin(Kernel(ast), opts, failed_platforms=["AMD", "HIP", "NV", "CUDA"])
+
+  def test_failure_63(self):
+    # BEAM=2 python3 examples/beautiful_mnist.py
+    # fails index_validation if implicit gate on store is not considered
+    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.VIEW, dtypes.uint.ptr(400), arg=ShapeTracker(views=(View(shape=(400, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=(
+          UOp(Ops.DEFINE_GLOBAL, dtypes.uint.ptr(400), arg=0, src=()),)),
+        UOp(Ops.REDUCE_AXIS, dtypes.uint, arg=(Ops.ADD, (1,)), src=(
+          UOp(Ops.WHERE, dtypes.uint, arg=None, src=(
+            UOp(Ops.VALID, dtypes.bool, arg=None, src=(
+              UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(401, 799), strides=(0, 0), offset=0, mask=((0, 401), (399, 799)), contiguous=False), View(shape=(400, 400), strides=(1, 800), offset=0, mask=None, contiguous=False))), src=()),)),
+            UOp(Ops.CONST, dtypes.uint, arg=1, src=(
+              x8:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(400, 400), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+            UOp(Ops.CONST, dtypes.uint, arg=0, src=(
+              x8,)),)),)),)),))
+    opts = [Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.PADTO, axis=0, arg=32)]
+    helper_test_lin(Kernel(ast), opts, failed_platforms=[])
+
 
 if __name__ == '__main__':
   unittest.main()

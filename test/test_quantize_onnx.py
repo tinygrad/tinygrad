@@ -4,9 +4,9 @@ import unittest
 from dataclasses import replace
 from tinygrad import Tensor, Context, Device, dtypes
 from tinygrad.uop.ops import Ops, UOp # noqa: F401 # pylint: disable=unused-import
-from tinygrad.codegen.kernel import Kernel, Opt, OptOps
+from tinygrad.opt.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, lower_schedule_item
-from tinygrad.engine.search import bufs_from_lin
+from tinygrad.opt.search import bufs_from_lin
 from tinygrad.shape.shapetracker import ShapeTracker, View # noqa: F401 # pylint: disable=unused-import
 
 N = 512
@@ -67,12 +67,12 @@ def get_quantized_model(sz):
 class TestQuantizeOnnxCPU(unittest.TestCase):
   def test_quant_128(self, sz=128):
     try:
-      import onnx
+      import onnx # noqa: F401 # pylint: disable=unused-import
     except ImportError:
       raise unittest.SkipTest()
-    from tinygrad.frontend.onnx import OnnxRunner
+    from tinygrad.frontend.onnx import OnnxRunner, onnx_load
     out_file = get_quantized_model(sz)
-    onnx_model = onnx.load(out_file)
+    onnx_model = onnx_load(out_file)
     run_onnx = OnnxRunner(onnx_model)
     inp = Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32))
     with Context(DONT_REALIZE_EXPAND=1, QUANTIZE=1):
