@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.uop.ops import sint
-from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
+from tinygrad.device import Compiled, ProfileEvent, BufferSpec, PROFILE
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, all_same, flatten, DEBUG
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
@@ -16,7 +16,7 @@ from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, setup_pci_bars
-from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, MAP_FIXED, MAP_NORESERVE
+from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -503,7 +503,7 @@ class AMDQueueDesc:
     for write_ptr in self.write_ptrs: write_ptr[0] = self.put_value
 
     # Ensure all prior writes are visible to the GPU.
-    if CPUProgram.atomic_lib is not None: CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
+    System.memory_barrier()
 
     # Flush hdp if queue is in dev mem.
     if dev.is_am() and not dev.is_usb(): dev.dev_iface.dev_impl.gmc.flush_hdp()
