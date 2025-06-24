@@ -12,7 +12,7 @@ class TestDiagonalViews(unittest.TestCase):
     linalg_tiny = torch.linalg.diagonal(a_tiny)
     diagonal_tiny = torch.diagonal(a_tiny, dim1=-2, dim2=-1) # linalg.diagonal is alias for diagonal with dim1=-2, dim2=-1
     np.testing.assert_equal(linalg_tiny.cpu().numpy(), linalg_torch.numpy())
-    np.testing.assert_equal(diagonal_tiny[-1].cpu().numpy(), linalg_tiny[-1].cpu().numpy()) 
+    np.testing.assert_equal(diagonal_tiny[-1].cpu().numpy(), linalg_tiny[-1].cpu().numpy())
     np.testing.assert_equal(linalg_tiny[-1].cpu().numpy(), linalg_torch[-1].numpy()) # row access is enough to trigger the bug
 
   def test_cube(self): self._check(3, 3, 3)
