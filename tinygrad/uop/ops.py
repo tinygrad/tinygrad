@@ -135,14 +135,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
+    from tinygrad.shape.shapetracker import ShapeTracker
+
     # VIEW and MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
+    # CONST with a DEVICE has a shape of ()
+    if self.op is Ops.CONST and len(self.src): return ShapeTracker.from_shape(())
     # BufferOps and ASSIGN flow ShapeTracker from a direct edge
     if self.op in GroupOp.Buffer: return views[0] if (views:=[x.st for x in self.src if x.op is Ops.VIEW]) else None
     if self.op is Ops.ASSIGN: return self.src[0].st
 
-    from tinygrad.shape.shapetracker import ShapeTracker
     # BUFFER/BUFFER_VIEW and KERNEL only have a size
     if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
     if self.op is Ops.KERNEL: return ShapeTracker.from_shape((self.arg.ast.size,))
@@ -242,11 +245,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
-    if shape is not None:
-      from tinygrad.shape.shapetracker import ShapeTracker
-      ret = ret.replace(src=(ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),))
-    if device is not None:
-      ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)),))
+    if device is not None: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
+    if shape is not None and shape != ():
+      assert device is not None, f"only consts on device can have shape {shape}"
+      ret = ret.reshape((1,)*len(shape)).expand(shape)
     return ret
   def valid(self): return UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)
   @staticmethod

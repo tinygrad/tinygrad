@@ -131,11 +131,19 @@ def lower_const(x:UOp):
   assert all(v.mask is None for v in unwrap(x.st).views), f"VIEW in CONST/DEFINE_VAR source must be unmasked, got {x.st}"
   return x.replace(src=())
 
+def view_const(ctx: IndexContext, c:UOp, view:UOp):
+  if all(x.mask is None for x in view.arg.views): return c
+  _, valid = view.arg.to_indexed_uops(ctx.idxs)
+  return valid.where(c, c.const_like(0))
+
 pm_lowerer = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
   (UPat((Ops.CONST, Ops.DEFINE_VAR), src=(UPat(Ops.VIEW),), name="x"), lower_const),
   (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
+
   # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat.var("buf").view(),), allow_any_len=True, name="x"), lower_load_store),
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),
+
+  (UPat(Ops.VIEW, src=(UPat.cvar("c"),), name="view"), view_const),
 ])

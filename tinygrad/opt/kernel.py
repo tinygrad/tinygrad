@@ -43,8 +43,10 @@ class Kernel:
     self.reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE_AXIS]
 
     self.vars: list[Variable] = self.ast.variables()
+    print(self.ast)
     # NOTE: this requires a specific order with the [::-1], this is likely a bug
-    self.bufs: list[UOp] = [x for x in self.ast.toposort() if x.op in GroupOp.Buffer][::-1]
+    self.bufs: list[UOp] = [x for x in self.ast.toposort() if x.op in {Ops.LOAD, Ops.STORE} or \
+                            (x.op is Ops.VIEW and x.src[0] not in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL})][::-1]
 
     # create new shapetrackers inside this kernel, we will permute them
     self.sts: list[ShapeTracker] = [x.st_arg for x in self.bufs]
