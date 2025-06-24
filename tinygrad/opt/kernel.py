@@ -4,18 +4,15 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
-from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, print_uops
-from tinygrad.uop.ops import PatternMatcher, smax
+from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, smax
 from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, unwrap
-from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, AMX
+from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, all_int, to_function_name, unwrap, DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
 from tinygrad.kernelize.kernelize import view_left
-from tinygrad.codegen import full_rewrite
 
 class KernelOptError(Exception): pass
 
@@ -379,7 +376,7 @@ class Kernel:
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
-      check(not self.tensor_core, "can't group with tensor cores")
+      check(self.use_tensor_cores != 3, "can't group with tensor cores emulation")
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
@@ -506,9 +503,11 @@ class Kernel:
           else: # for TC=3 MUL/SUM instead of WMMA
             tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
 
-          return ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
+          ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
 
-        ret = ret.replace(arg = (op.arg[0], axes))
+        else:
+          ret = ret.replace(arg = (op.arg[0], axes))
+
         if self.group_for_reduces and grouped_axes:
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
@@ -528,42 +527,13 @@ class Kernel:
     del fixup_ast
     return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
 
-  # **** this is the lowerer ****
+  # TODO: update the tests and delete these methods
 
-  @track_rewrites()
-  def linearize(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> Kernel:
-    # display the AST
-    if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
-
-    modified_ast = self.get_optimized_ast(name_override)
-    if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
-
-    if DEBUG >= 3:
-      print(self.name)
-      if DEBUG >= 5: print(self.ast)
-      for i,(buf,st) in enumerate([(buf,st) for buf,st in zip(self.bufs, self.sts) if buf.op not in {Ops.CONST, Ops.VALID}]):
-        print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s} {str(st.real_strides()):30s}",
-              str(st) if DEBUG >= 4 else "")
-      print(self.applied_opts)
-      if DEBUG >= 5: print(modified_ast)
-    # verify AST matches the spec after applying opts
-    if __debug__: type_verify(list(modified_ast.toposort()))
-    # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
-    #if __debug__: type_verify(list(modified_ast.toposort()), ast_spec)
-
-    try:
-      self.uops:list[UOp] = full_rewrite(modified_ast, self.opts)
-    except RuntimeError:
-      print("***** LINEARIZE FAILURE *****")
-      print(f"ast = {self.ast}")
-      print(f"opts = {self.applied_opts}")
-      raise
-    if DEBUG >= 6: print_uops(self.uops)
+  def linearize(self):
+    self.to_program()
     return self
-
-  def to_program(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> ProgramSpec:
-    self.linearize(name_override, ast_transform)
-    assert self.uops[-1].op is Ops.SINK, "last uop must be sink"
-    src = self.opts.render(self.uops)
-    return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops,
-                       global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
+  def to_program(self, name_override:Optional[str]=None) -> ProgramSpec:
+    from tinygrad.engine.realize import get_program
+    ret = get_program(self.get_optimized_ast(name_override), self.opts)
+    self.uops = ret.uops
+    return ret
