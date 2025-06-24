@@ -44,11 +44,16 @@ def halide_store(ctx:HalideContext, st):
 def halide_alu(ctx, x):
   if x.op is Ops.MUL: ctx.m[x] = ctx.m[x.src[0]] * ctx.m[x.src[1]]
   elif x.op is Ops.ADD: ctx.m[x] = ctx.m[x.src[0]] + ctx.m[x.src[1]]
+  elif x.op is Ops.WHERE: ctx.m[x] = (ctx.m[x.src[0]]*1)*ctx.m[x.src[1]] + (1-ctx.m[x.src[0]]*1)*ctx.m[x.src[2]]
   else:
     raise NotImplementedError(f"implement {x.op}")
 
+def halide_const(ctx, c):
+  ctx.m[c] = c.arg
+
 pm_hl = PatternMatcher([
   (UPat(Ops.LOAD, name="l"), halide_load),
+  (UPat(Ops.CONST, name="c"), halide_const),
   (UPat(Ops.STORE, name="st"), halide_store),
   (UPat(GroupOp.ALU, name="x"), halide_alu),
 ])

@@ -27,6 +27,10 @@ class TestTiny(unittest.TestCase):
     out = Tensor.ones(256).contiguous().sum()
     self.assertEqual(out.item(), 256)
 
+  def test_permute(self):
+    a = Tensor([[1,2], [3,4]])
+    self.assertListEqual(a.T.tolist(), [[1,3], [2,4]])
+
   def test_gemm(self, N=64, out_dtype=dtypes.float):
     a = Tensor.ones(N,N).contiguous()
     b = Tensor.eye(N).contiguous()
