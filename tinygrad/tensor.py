@@ -2957,6 +2957,18 @@ class Tensor(MathTrait):
     """
     return (1 + (self * (-1/math.log(2))).exp2()).reciprocal()
 
+  def logsigmoid(self) -> Tensor:
+    """
+    Applies the LogSigmoid function element-wise.
+
+    - See: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.logsigmoid.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).logsigmoid().numpy())
+    ```
+    """
+    return -(-self).softplus()
+
   def hardsigmoid(self, alpha:float=1/6, beta:float=0.5) -> Tensor:
     """
     Applies the Hardsigmoid function element-wise.

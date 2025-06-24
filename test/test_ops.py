@@ -946,6 +946,11 @@ class TestOps(unittest.TestCase):
     self.assertAlmostEqual(sigmoid(x)[0].gradient(x)[0].item(), 0.0)
     x = Tensor([-300.0])
     self.assertAlmostEqual(sigmoid(x)[0].gradient(x)[0].item(), 0.0)
+
+  def test_logsigmoid(self):
+    helper_test_op([(45,65)], torch.nn.functional.logsigmoid, Tensor.logsigmoid)
+    helper_test_op([()], torch.nn.functional.logsigmoid, Tensor.logsigmoid)
+
   def test_hardsigmoid(self):
     helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
     helper_test_op([()], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)

@@ -376,6 +376,7 @@ decomps = [
   aten.softshrink,
   aten.hardshrink,
   aten.log_sigmoid_forward,
+  aten.log_sigmoid_backward,
   aten.isneginf,
   aten.isposinf,
   aten.nan_to_num,
