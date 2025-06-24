@@ -110,7 +110,6 @@ class Buffer:
     if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
     self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = device, size, dtype, options, offset, 0
-    self.allocator: Allocator = Device[self.device].allocator
     if base is None:
       assert offset == 0, "base buffers can't have offset"
       self._base = None
@@ -140,6 +139,7 @@ class Buffer:
     assert not self.is_initialized(), "can't allocate already allocated buffer"
     if DEBUG >= 7: print(f"buffer: allocate {self.nbytes} bytes on {self.device}")
     if (mbs:=getenv("MAX_BUFFER_SIZE", 0)) > 0 and self.size > mbs: raise RuntimeError(f"buffer of size {self.size/1e6:.2f}M is too large")
+    self.allocator:Allocator = Device[self.device].allocator
     if external_ptr is not None:
       self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferSpec(external_ptr=external_ptr)
     if self._base is not None:
