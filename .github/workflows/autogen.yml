@@ -55,16 +55,19 @@ jobs:
       run: |
         cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
         cp tinygrad/runtime/autogen/kfd.py /tmp/kfd.py.bak
+        cp tinygrad/runtime/autogen/tdma.py /tmp/tdma.py.bak
         cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
         cp tinygrad/runtime/autogen/amd_gpu.py /tmp/amd_gpu.py.bak
         cp tinygrad/runtime/autogen/sqtt.py /tmp/sqtt.py.bak
         ./autogen_stubs.sh hsa
         ./autogen_stubs.sh kfd
+        ./autogen_stubs.sh tdma
         ./autogen_stubs.sh comgr
         ./autogen_stubs.sh amd
         ./autogen_stubs.sh sqtt
         diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
         diff /tmp/kfd.py.bak tinygrad/runtime/autogen/kfd.py
+        diff /tmp/tdma.py.bak tinygrad/runtime/autogen/tdma.py
         diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
         diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
         diff /tmp/sqtt.py.bak tinygrad/runtime/autogen/sqtt.py

@@ -677,6 +677,10 @@ class PCIIface(PCIIfaceBase):
       'max_slots_scratch_cu': self.dev_impl.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.dev_impl.gc_info.gc_max_waves_per_simd,
       'simd_arrays_per_engine': self.dev_impl.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.dev_impl.gc_info.gc_lds_size}
 
+  def as_dmaref(self, mem:HCQBuffer) -> DMAFdRef:
+    base = mem._base if mem._base is not None else mem
+    return DMAFdRef(self.pci_dev.export_bar_parts(0, base.meta.mapping.paddrs), mem.va_addr-base.va_addr, mem.size)
+
   def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
     assert cwsr_buffer is None, "no cwsr buffer for am"
 
