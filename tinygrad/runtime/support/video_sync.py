@@ -209,6 +209,8 @@ class VideoSyncManager:
       if sync.signal and hasattr(sync.signal, 'value'):
         # Update signal value to trigger completion
         sync.signal.value = sync.target_value
+        # Also update the sync state to completed
+        self._complete_sync(sync, SyncState.COMPLETED)
         print(f"🎬 Signaled decode complete: id={decode_id}")
 
   def wait_all_decodes(self, timeout_ms:float=10000.0) -> bool:
