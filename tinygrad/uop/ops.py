@@ -6,7 +6,7 @@ from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten
-from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put
+from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
@@ -90,6 +90,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
     if (self.op, self.dtype, self.src, self.arg, self.tag) == new_args: return self
     return UOp(*new_args)
+  def rtag(self, tag=True): return self.replace(tag=tag)
   @functools.cached_property
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
@@ -465,7 +466,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if self.op is Ops.SHR and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] >> t[2], t[1] >> t[2]
       if self.op is Ops.MOD:
         if s1_vmin > 0: return (0, s1_vmax-1) if s0_vmin >= 0 else (-(s1_vmax-1), 0) if s0_vmax <= 0 else (-(s1_vmax-1), s1_vmax-1)
-        if s1_vmax < 0: return (0, -s1_vmax-1) if s0_vmin >= 0 else (-(-s1_vmax-1), 0) if s0_vmax <= 0 else (-(-s1_vmax-1), -s1_vmax-1)
+        if s1_vmax < 0: return (0, -s1_vmin-1) if s0_vmin >= 0 else (-(-s1_vmin-1), 0) if s0_vmax <= 0 else (-(-s1_vmin-1), -s1_vmin-1)
       if self.op is Ops.IDIV:
         assert isinstance(s0_vmin, int) and isinstance(s0_vmax, int) and isinstance(s1_vmin, int) and isinstance(s1_vmax, int)
         if (c:=s1_vmin) == s1_vmax:  # s1 is a const
@@ -517,6 +518,9 @@ class KernelInfo:
   local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
   upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to UNROLL)
   dont_use_locals: bool = False # don't use local indexing
+  applied_opts: tuple = tuple()
+  @property
+  def function_name(self): return to_function_name(self.name)
 
 # ******** ops in python ********
 
@@ -708,7 +712,7 @@ class PatternMatcher:
     ler = {u.op for u in uop.src}
     for _,match,early_reject in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
-      if (ret:=match(uop, ctx)) is not None: return ret
+      if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
     return None
 
   def fixed_point_rewrite(self, uop:UOp, ctx=None) -> UOp:
@@ -717,15 +721,29 @@ class PatternMatcher:
     while new_n is not None: last_n, new_n = new_n, self.rewrite(new_n, ctx)
     return last_n
 
+# *** non-blocking UOp tracker ***
+
+ucount = itertools.count()
+uop_number:weakref.WeakKeyDictionary[UOp, int] = weakref.WeakKeyDictionary()
+uop_fields:dict[int, tuple] = {}
+def track_uop(u:UOp):
+  if (cret:=uop_number.get(u)) is not None: return cret
+  uop_number[u] = num = next(ucount)
+  # KERNEL also has a UOp in the arg
+  arg = type(u.arg)(track_uop(u.arg.ast), u.arg.metadata) if u.op is Ops.KERNEL else u.arg
+  uop_fields[num] = (u.op, u.dtype, tuple(track_uop(s) for s in u.src), arg, u.tag)
+  return num
+
 # *** tracking pattern matcher ***
 
-TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
+VIZ = ContextVar("VIZ", 0)
+TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if VIZ else 0)
 match_stats:dict[UPat, list[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
   loc: tuple[str, int]                                                                       # location that called graph_rewrite
-  sink: UOp                                                                                  # the sink input to graph_rewrite
-  matches: list[tuple[UOp, UOp, UPat]]                                                       # before+after of all the matches
+  sink: int                                                                                  # the sink input to graph_rewrite
+  matches: list[tuple[int, int, UPat]]                                                       # before+after of all the matches
   name: str|None                                                                             # optional name of the rewrite
   depth: int                                                                                 # depth if it's a subrewrite
   bottom_up: bool
@@ -747,7 +765,9 @@ def track_rewrites(name:Callable|bool|None=None):
         tracked_keys.append(args[0] if args and name is None else (fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}")
         tracked_ctxs.append([])
       ret = func(*args, **kwargs)
-      if TRACK_MATCH_STATS >= 2 and callable(name): tracked_keys[-1] = tracked_keys[-1].replace(fn, name(*args, **kwargs, ret=ret))
+      if TRACK_MATCH_STATS >= 2 and callable(name):
+        name_ret = name(*args, **kwargs, ret=ret)
+        tracked_keys[-1] = tracked_keys[-1].replace(fn, name_ret) if isinstance(name_ret, str) else name_ret
       if getenv("CAPTURE_PROCESS_REPLAY"):
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
@@ -767,7 +787,7 @@ def track_matches(func):
     if tracking:=(TRACK_MATCH_STATS >= 2 and tracked_ctxs):
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
       depth = len(active_rewrites)
-      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0], [], kwargs.get("name", None), depth, kwargs.get("bottom_up", False)))
+      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, track_uop(args[0]), [], kwargs.get("name", None), depth, kwargs.get("bottom_up", False)))
       active_rewrites.append(ctx)
     ret = func(*args, **kwargs)
     if tracking: active_rewrites.pop()
@@ -789,7 +809,7 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((uop, ret, p))
+        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((track_uop(uop),track_uop(ret), p))
         return ret
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -802,8 +822,8 @@ if TRACK_MATCH_STATS or PROFILE:
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
-        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
-    if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
+        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs, uop_fields), f)
+    if VIZ: launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
