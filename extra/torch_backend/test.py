@@ -206,5 +206,15 @@ class TestTorchBackend(unittest.TestCase):
       X.cpu(), Y.cpu()
       self.assertLessEqual(GlobalCounters.global_ops, 10_000_000)
 
+  def _check_diag(self, *shape, dtype=torch.float32):
+    a = torch.randn(*shape, dtype=dtype)
+    ref = np.diagonal(a.numpy(), axis1=-2, axis2=-1)
+    linalg_tiny = torch.linalg.diagonal(a)
+    np.testing.assert_equal(linalg_tiny.cpu().numpy(), ref)
+
+  def test_cube(self): self._check_diag(3, 3, 3)
+  def test_rectangular_last_dims(self): self._check_diag(4, 5, 6)
+  def test_high_dimensional(self): self._check_diag(2, 3, 4, 5)
+
 if __name__ == "__main__":
   unittest.main()
