@@ -2908,6 +2908,11 @@ class TestOps(unittest.TestCase):
                                          lambda x,y: x.sigmoid().binary_crossentropy(y.clip(0,1), reduction=r))
       helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(x, torch.clip(y,0,1), reduction=r),
                                          lambda x,y: x.binary_crossentropy_logits(y.clip(0,1), reduction=r))
+  def test_binary_crossentropy_pos_weights(self):
+    pos_weight = [0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+    helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(x,torch.clip(y,0,1),
+                                                                                                        pos_weight=torch.tensor(pos_weight)),
+                                       lambda x,y: x.binary_crossentropy_logits(y.clip(0,1),pos_weight=Tensor(pos_weight)))
   def test_cross_entropy(self):
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y),
                                        lambda x,y: x.cross_entropy(y))
