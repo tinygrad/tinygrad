@@ -1,6 +1,6 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses
+import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, fcntl
 from typing import cast
-from tinygrad.helpers import round_up, to_mv, getenv, OSX
+from tinygrad.helpers import round_up, to_mv, getenv, OSX, temp
 from tinygrad.runtime.autogen import libc, vfio
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQCompiled, HCQBuffer
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
@@ -8,6 +8,8 @@ from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
 MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
 
 class _System:
+  def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.atomic_lib()) is not None else None
+
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[int, list[int]]:
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
     flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
@@ -28,6 +30,9 @@ class _System:
     return sorted(result)
 
   @functools.cache
+  def atomic_lib(self): return ctypes.CDLL(ctypes.util.find_library('atomic')) if sys.platform == "linux" else None
+
+  @functools.cache
   def pagemap(self) -> FileIOInterface:
     if FileIOInterface(reloc_sysfs:="/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read()[0] != "0":
       os.system(cmd:=f"sudo sh -c 'echo 0 > {reloc_sysfs}'")
@@ -45,6 +50,18 @@ class _System:
 
       return vfio_fd
     except OSError: return None
+
+  def flock_acquire(self, name:str) -> int:
+    os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
+
+    # Avoid O_CREAT because we don’t want to re-create/replace an existing file (triggers extra perms checks) when opening as non-owner.
+    if os.path.exists(lock_name:=temp(name)): self.lock_fd = os.open(lock_name, os.O_RDWR)
+    else: self.lock_fd = os.open(lock_name, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o666)
+
+    try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError: raise RuntimeError(f"Failed to take lock file {name}. It's already in use.")
+
+    return self.lock_fd
 
 System = _System()
 

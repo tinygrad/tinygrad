@@ -252,7 +252,7 @@ async function renderProfiler() {
     }
   }
   const kernelMap = new Map();
-  for (const [i, c] of ctxs.entries()) kernelMap.set(c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1"), { name:c.name, i });
+  for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
   const deviceList = document.getElementById("device-list");

@@ -3876,7 +3876,7 @@ class Tensor(MathTrait):
     """
     return (-Y*self.log() - (1-Y)*(1-self).log())._do_reduction(reduction)
 
-  def binary_crossentropy_logits(self, Y:Tensor, reduction:ReductionStr="mean") -> Tensor:
+  def binary_crossentropy_logits(self, Y:Tensor, reduction:ReductionStr="mean", pos_weight:Tensor|None=None) -> Tensor:
     """
     Computes the binary cross-entropy loss between `self` and `Y` where `self` is logits.
 
@@ -3888,7 +3888,13 @@ class Tensor(MathTrait):
     print(t.binary_crossentropy_logits(Y).item())
     ```
     """
-    return (self.maximum(0) - Y * self + (1 + self.abs().neg().exp()).log())._do_reduction(reduction)
+    log_exp = (1 + self.abs().neg().exp()).log()
+    base = self.maximum(0) - Y * self
+    if pos_weight is None:
+      return (base + log_exp)._do_reduction(reduction)
+    pos_scalar = 1 + Y * (pos_weight - 1)
+    pos_addition = Y * (pos_weight - 1) * self.neg().maximum(0)
+    return (base + pos_addition + (pos_scalar * log_exp))._do_reduction(reduction)
 
   def sparse_categorical_crossentropy(self, Y:Tensor, ignore_index:int=-1, label_smoothing=0.0, reduction:ReductionStr="mean") -> Tensor:
     """
