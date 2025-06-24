@@ -114,15 +114,7 @@ class AMMemoryManager(MemoryManager):
 class AMDev(PCIDevImplBase):
   def __init__(self, devfmt, vram:MMIOInterface, doorbell:MMIOInterface, mmio:MMIOInterface, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
     self.devfmt, self.vram, self.doorbell64, self.mmio, self.dma_regions = devfmt, vram, doorbell, mmio, dma_regions
-
-    os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
-
-    # Avoid O_CREAT because we don’t want to re-create/replace an existing file (triggers extra perms checks) when opening as non-owner.
-    if os.path.exists(lock_name:=temp(f"am_{self.devfmt}.lock")): self.lock_fd = os.open(lock_name, os.O_RDWR)
-    else: self.lock_fd = os.open(lock_name, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o666)
-
-    try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError: raise RuntimeError(f"Failed to open AM device {self.devfmt}. It's already in use.")
+    self.lock_fd = System.flock_acquire(f"am_{self.devfmt}.lock")
 
     self._run_discovery()
     self._build_regs()

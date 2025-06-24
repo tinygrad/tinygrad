@@ -46,6 +46,18 @@ class _System:
       return vfio_fd
     except OSError: return None
 
+  def flock_acquire(self, name:str) -> int:
+    os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
+
+    # Avoid O_CREAT because we don’t want to re-create/replace an existing file (triggers extra perms checks) when opening as non-owner.
+    if os.path.exists(lock_name:=temp(name)): self.lock_fd = os.open(lock_name, os.O_RDWR)
+    else: self.lock_fd = os.open(lock_name, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o666)
+
+    try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError: raise RuntimeError(f"Failed to open AM device {self.devfmt}. It's already in use.")
+
+    return self.lock_fd
+
 System = _System()
 
 class PCIDevice:
