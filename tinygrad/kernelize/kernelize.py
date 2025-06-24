@@ -2,14 +2,13 @@ from dataclasses import dataclass
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, sint
 from tinygrad.uop.ops import track_rewrites, _substitute
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
-from tinygrad.codegen.lowerer import get_contraction_with_reduce
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
-from tinygrad.engine.multi import multi_pm
+from tinygrad.kernelize.multi import multi_pm
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View, strides_for_shape
-from tinygrad.engine.grouper import group_realizes, ALWAYS_CONTIGUOUS
+from tinygrad.shape.view import View, strides_for_shape, get_contraction_with_reduce
+from tinygrad.kernelize.grouper import group_realizes, ALWAYS_CONTIGUOUS
 
 # creation can recurse a lot
 import sys
@@ -420,30 +419,38 @@ finalize_gbarrier = PatternMatcher([
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
-@track_rewrites(name_fxn=lambda big_sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[big_sink].toposort() if u.op is Ops.KERNEL]))}")
-def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
+@track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}")
+def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
+  """
+  Function to transform the Tensor UOp graph into a version with Ops.KERNEL
+
+  Args:
+    sink: The Ops.SINK rooting the Tensor graph.
+
+  Returns:
+    Map transforming each UOp in the sink to the Ops.KERNEL graph.
+  """
+
   # multi + merge_views + simplify
-  tensor_map = graph_rewrite_map(big_sink, multi_pm+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
+  tensor_map = graph_rewrite_map(sink, multi_pm+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
 
   # display the cleaned up tensor graph
-  if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
+  if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Tensor Graph")
 
   # insert gbarriers in places determined by the realize map
-  realize_map = group_realizes(tensor_map[big_sink])
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], add_gbarrier, realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
-  # optionally reorder gbarriers or insert more (top down)
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], finalize_gbarrier, input_map=tensor_map, name="finalize_gbarrier")
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], remove_tags, input_map=tensor_map, name="remove_tags")
+  realize_map = group_realizes(tensor_map[sink])
+  tensor_map = graph_rewrite_map(tensor_map[sink], add_gbarrier, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="insert_gbarrier")
+  tensor_map = graph_rewrite_map(tensor_map[sink], finalize_gbarrier+remove_tags, input_map=tensor_map, name="finalize_gbarrier")
 
   # TODO: move view_left/view_right here
 
   # group into kernels (this is context-free)
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, input_map=tensor_map, name="create_kernels")
+  tensor_map = graph_rewrite_map(tensor_map[sink], create_kernels, input_map=tensor_map, name="create_kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
   assign_rep: dict[UOp, UOp] = {}
-  for u in tensor_map[big_sink].toposort():
+  for u in tensor_map[sink].toposort():
     if u.op is not Ops.ASSIGN: continue
     kernel_assign[u.buf_uop] = u
     for s in u.src[1].src:
@@ -453,13 +460,13 @@ def get_kernelize_map(big_sink:UOp) -> dict[UOp, UOp]:
         raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on ASSIGN or BUFFER")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep:
-    tensor_map = graph_rewrite_map(tensor_map[big_sink], _substitute, ctx=assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
+    tensor_map = graph_rewrite_map(tensor_map[sink], _substitute, ctx=assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
 
   # finally, create the AST for kernels
-  tensor_map = graph_rewrite_map(tensor_map[big_sink], create_ast+replace_metadata, bottom_up=True, input_map=tensor_map, name="create_ast")
+  tensor_map = graph_rewrite_map(tensor_map[sink], create_ast+replace_metadata, bottom_up=True, input_map=tensor_map, name="create_ast")
 
   # display the final graph
-  sched_sink = tensor_map[big_sink]
+  sched_sink = tensor_map[sink]
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
 

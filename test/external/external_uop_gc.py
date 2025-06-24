@@ -14,10 +14,10 @@ def two_plus_two(): Tensor([2])+Tensor([2])
 def two_plus_two_schedule(): (Tensor([2])+Tensor([2])).schedule()
 def two_plus_two_kernel():
   si = (Tensor([2])+Tensor([2])).schedule()[-1]
-  get_program(Device.default.renderer, si.ast)
+  get_program(si.ast, Device.default.renderer)
 def two_plus_two_linearize():
   si = (Tensor([2])+Tensor([2])).schedule()[-1]
-  get_program(Device.default.renderer, si.ast)
+  get_program(si.ast, Device.default.renderer)
 def two_plus_two_realize(): (Tensor([2])+Tensor([2])).realize()
 def two_plus_two_item(): (Tensor([2])+Tensor([2])).item()
 def gradient_test():
@@ -34,7 +34,7 @@ def kernel_matmul():
   y = Tensor([[2.0,0,-2.0]], requires_grad=True)
   z = y.matmul(x)
   si = z.schedule()[-1]
-  get_program(Device.default.renderer, si.ast)
+  get_program(si.ast, Device.default.renderer)
 def realized_matmul():
   x = Tensor.eye(3, requires_grad=True)
   y = Tensor([[2.0,0,-2.0]], requires_grad=True)
