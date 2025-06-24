@@ -145,7 +145,7 @@ class PCIIfaceBase:
       meta=PCIAllocationMeta(self.dev, [self.dev], mapping, has_cpu_mapping=cpu_access))
 
   def free(self, b:HCQBuffer):
-    for dev in b.meta.mapped_devs[1:]: dev.dev_iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
+    for dev in b.meta.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
     if not b.meta.mapping.system: self.dev_impl.mm.vfree(b.meta.mapping)
     if b.meta.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 
@@ -154,5 +154,5 @@ class PCIIfaceBase:
     if self.dev in b.meta.mapped_devs: return
     b.meta.mapped_devs.append(self.dev)
 
-    paddrs = [(paddr if b.meta.mapping.system else (paddr+b.meta.owner.dev_iface.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
+    paddrs = [(paddr if b.meta.mapping.system else (paddr+b.meta.owner.iface.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
     self.dev_impl.mm.map_range(cast(int, b.va_addr), b.size, paddrs, system=True, snooped=b.meta.mapping.snooped, uncached=b.meta.mapping.uncached)
