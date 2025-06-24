@@ -554,7 +554,7 @@ class TestLinearizer(unittest.TestCase):
     idxs = Tensor([0,3,5,6]).realize()
     with Context(FUSE_ARANGE=1):
       sink = dataset[idxs].contiguous().kernelize().uop.base.src[1].arg.ast
-    real_index = dataset.numpy()[idxs.numpy()].reshape(4, 1, 256, 1)
+    real_index = dataset.numpy()[idxs.numpy()].reshape(4, 256, 1, 1)
     helper_linearizer_ast(sink, [dataset, idxs], wanna_output=[real_index])
 
   # AssertionError: repeated stores in uops
