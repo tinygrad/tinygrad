@@ -1,15 +1,48 @@
-from typing import Optional, cast, Generator
+from typing import Optional, cast, Generator, Any
 import time, pprint
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites, GroupOp
 from tinygrad.device import Device, Buffer
+from tinygrad.dtype import dtypes
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.opt import get_optimized_ast
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.spec import type_verify
+
+import halide as hl
+
+def dtype_to_hl(d):
+  if d == dtypes.float: return hl.Float(32)
+
+
+@dataclass
+class HalideContext:
+  m: dict[UOp, Any] = field(default_factory=dict)
+
+def halide_load(ctx:HalideContext, l):
+  bufs = hl.InputBuffer(dtype_to_hl(l.dtype), len(l.src[0].shape))
+  #ctx.m[l] =
+
+def halide_store(ctx:HalideContext, s):
+  out = hl.OutputBuffer(dtype_to_hl(s.dtype), len(s.src[1].shape))
+
+
+
+def halide_alu(ctx, x):
+  if x.op is Ops.MUL: ctx.m[x] = ctx.m[x.src[0]] * ctx.m[x.src[1]]
+  elif x.op is Ops.ADD: ctx.m[x] = ctx.m[x.src[0]] + ctx.m[x.src[1]]
+  else:
+    raise NotImplementedError(f"implement {x.op}")
+
+pm_hl = PatternMatcher([
+  (UPat(Ops.STORE, name="s"), halide_store),
+  (UPat(Ops.LOAD, name="l"), halide_load),
+  (UPat(GroupOp.ALU, name="x"), halide_alu),
+])
+
 
 # **************** Program Creation ****************
 
@@ -27,6 +60,10 @@ def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
   """
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
+
+  halide = graph_rewrite(ast, pm_hl, ctx=HalideContext())
+
+
   modified_ast = get_optimized_ast(ast, renderer) if ast.arg is None else ast
   if __debug__: type_verify(list(modified_ast.toposort()))
 
