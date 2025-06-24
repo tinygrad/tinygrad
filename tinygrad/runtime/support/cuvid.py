@@ -1,40 +1,223 @@
-import ctypes, ctypes.util, os
+import ctypes, ctypes.util, os, sys, platform
 from typing import Optional, Callable
 from tinygrad.helpers import getenv
 
-# CUVID library path detection
-CUDA_PATH = getenv("CUDA_PATH", "")
-CUVID_PATHS = [
-  "nvcuvid",  # Standard library name
-  "libnvcuvid.so.1",  # Linux with version
-  "libnvcuvid.so",   # Linux generic
-]
-
 def get_cuvid_lib():
-  """Load CUVID library with fallback paths"""
-  # Try system library first
-  lib_path = ctypes.util.find_library('nvcuvid')
-  if lib_path: return ctypes.CDLL(lib_path)
+  """Load CUVID library with comprehensive platform detection"""
+  # Environment variables
+  cuda_path = getenv("CUDA_PATH", "")
+  nvidia_sdk_path = getenv("NVIDIA_VIDEO_CODEC_SDK_PATH", "")
   
-  # Try CUDA_PATH if available
-  if CUDA_PATH:
-    for lib_name in ["libnvcuvid.so.1", "libnvcuvid.so"]:
-      try: return ctypes.CDLL(os.path.join(CUDA_PATH, "lib64", lib_name))
-      except OSError: continue
+  # Platform-specific library names
+  system = platform.system().lower()
+  lib_names = []
+  search_paths = []
   
-  # Try standard paths
-  for lib_name in CUVID_PATHS:
-    try: return ctypes.CDLL(lib_name)
-    except OSError: continue
+  if system == "linux":
+    lib_names = ["libnvcuvid.so.1", "libnvcuvid.so", "nvcuvid"]
+    # Standard Linux paths
+    search_paths.extend([
+      "/usr/lib/x86_64-linux-gnu",
+      "/usr/lib64",
+      "/usr/local/lib",
+      "/usr/local/cuda/lib64",
+      "/opt/cuda/lib64",
+    ])
+  elif system == "windows":
+    lib_names = ["nvcuvid.dll", "nvcuvid64.dll"]
+    # Windows paths
+    search_paths.extend([
+      "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.0/bin",
+      "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.8/bin", 
+      "C:/Program Files/NVIDIA Corporation/NVIDIA Video Codec SDK",
+    ])
+  elif system == "darwin":  # macOS
+    lib_names = ["libnvcuvid.dylib", "nvcuvid"]
+    # macOS paths (if NVIDIA Web Drivers installed)
+    search_paths.extend([
+      "/usr/local/cuda/lib",
+      "/Developer/NVIDIA/CUDA-12.0/lib",
+      "/System/Library/Extensions/NVDANV50HalTesla.kext/Contents/MacOS",
+    ])
+  
+  # Try system library detection first
+  for lib_name in lib_names:
+    lib_path = ctypes.util.find_library(lib_name.replace('lib', '').replace('.so', '').replace('.dll', '').replace('.dylib', ''))
+    if lib_path:
+      try:
+        return ctypes.CDLL(lib_path)
+      except OSError:
+        continue
+  
+  # Add environment-specific paths
+  if cuda_path:
+    if system == "windows":
+      search_paths.insert(0, os.path.join(cuda_path, "bin"))
+    else:
+      search_paths.insert(0, os.path.join(cuda_path, "lib64"))
+      search_paths.insert(0, os.path.join(cuda_path, "lib"))
+  
+  if nvidia_sdk_path:
+    if system == "windows":
+      search_paths.insert(0, os.path.join(nvidia_sdk_path, "Lib", "x64"))
+    else:
+      search_paths.insert(0, os.path.join(nvidia_sdk_path, "lib"))
+  
+  # Add common CUDA installation detection with version info
+  cuda_locations = []
+  detected_versions = []
+  
+  if system == "linux":
+    cuda_locations = ["/usr/local/cuda", "/opt/cuda"]
+    # Check for versioned CUDA installations
+    for cuda_base in ["/usr/local", "/opt"]:
+      if os.path.exists(cuda_base):
+        try:
+          for item in os.listdir(cuda_base):
+            if item.startswith("cuda-"):
+              version = item.replace("cuda-", "")
+              cuda_locations.append(os.path.join(cuda_base, item))
+              detected_versions.append(version)
+              print(f"🔍 Found CUDA {version}: {os.path.join(cuda_base, item)}")
+        except OSError:
+          pass
+          
+  elif system == "windows":
+    cuda_base = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA"
+    if os.path.exists(cuda_base):
+      try:
+        for version in sorted(os.listdir(cuda_base), reverse=True):
+          cuda_locations.append(os.path.join(cuda_base, version))
+          detected_versions.append(version) 
+          print(f"🔍 Found CUDA {version}: {os.path.join(cuda_base, version)}")
+      except OSError:
+        pass
+        
+  elif system == "darwin":
+    # Check Homebrew CUDA (if installed)
+    brew_cuda = "/opt/homebrew/lib"
+    if os.path.exists(brew_cuda):
+      cuda_locations.append(brew_cuda)
+      print(f"🔍 Found Homebrew CUDA path: {brew_cuda}")
+  
+  if detected_versions:
+    print(f"🎯 Detected CUDA versions: {', '.join(detected_versions)}")
+  
+  # Add lib paths from detected CUDA installations
+  for cuda_loc in cuda_locations:
+    if system == "windows":
+      search_paths.append(os.path.join(cuda_loc, "bin"))
+    else:
+      search_paths.append(os.path.join(cuda_loc, "lib64"))
+      search_paths.append(os.path.join(cuda_loc, "lib"))
+  
+  # Try each combination of path and library name
+  for search_path in search_paths:
+    if not os.path.exists(search_path):
+      continue
+      
+    for lib_name in lib_names:
+      lib_full_path = os.path.join(search_path, lib_name)
+      if os.path.exists(lib_full_path):
+        try:
+          print(f"🔍 Trying CUVID library: {lib_full_path}")
+          return ctypes.CDLL(lib_full_path)
+        except OSError as e:
+          print(f"⚠️  Failed to load {lib_full_path}: {e}")
+          continue
+  
+  # Try direct library names as last resort
+  for lib_name in lib_names:
+    try:
+      print(f"🔍 Trying direct load: {lib_name}")
+      return ctypes.CDLL(lib_name)
+    except OSError:
+      continue
+  
+  # Generate helpful error message
+  error_msg = f"CUVID library not found on {system}. "
+  if system == "linux":
+    error_msg += "Install: apt-get install libnvidia-encode-515 (or latest driver)"
+  elif system == "windows": 
+    error_msg += "Install NVIDIA Video Codec SDK or CUDA Toolkit"
+  elif system == "darwin":
+    error_msg += "Install CUDA for macOS (if available) or use NVIDIA Web Drivers"
+  
+  error_msg += f"\n💡 Searched paths: {search_paths[:5]}..." if search_paths else ""
+  error_msg += f"\n💡 Set CUDA_PATH or NVIDIA_VIDEO_CODEC_SDK_PATH environment variables"
+  
+  raise RuntimeError(error_msg)
+
+# Load library with enhanced diagnostics
+def load_cuvid_with_diagnostics():
+  """Load CUVID library with detailed diagnostics"""
+  try:
+    print("🔍 Searching for CUVID library...")
+    cuvid_lib = get_cuvid_lib()
     
-  raise RuntimeError("CUVID library not found. Install NVIDIA Video Codec SDK or set CUDA_PATH")
+    # Test basic functionality
+    if hasattr(cuvid_lib, 'cuvidGetDecoderCaps'):
+      print("✅ CUVID library loaded successfully")
+      return cuvid_lib
+    else:
+      print("⚠️  CUVID library loaded but missing expected functions")
+      return None
+      
+  except RuntimeError as e:
+    print(f"❌ CUVID library loading failed: {e}")
+    
+    # Show diagnostic information
+    system = platform.system().lower()
+    print(f"\n🔧 Diagnostic Information:")
+    print(f"   Platform: {system}")
+    print(f"   Python: {sys.version}")
+    
+    # Check environment variables
+    cuda_path = getenv("CUDA_PATH", "")
+    sdk_path = getenv("NVIDIA_VIDEO_CODEC_SDK_PATH", "")
+    print(f"   CUDA_PATH: {cuda_path if cuda_path else 'Not set'}")
+    print(f"   NVIDIA_VIDEO_CODEC_SDK_PATH: {sdk_path if sdk_path else 'Not set'}")
+    
+    # Check common installation locations
+    if system == "linux":
+      common_paths = ["/usr/local/cuda", "/opt/cuda", "/usr/lib/x86_64-linux-gnu"]
+      print(f"   Common CUDA paths:")
+      for path in common_paths:
+        exists = "✅" if os.path.exists(path) else "❌"
+        print(f"     {exists} {path}")
+        
+      # Check NVIDIA driver
+      try:
+        import subprocess
+        result = subprocess.run(['nvidia-smi'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+          print(f"   ✅ NVIDIA driver detected")
+        else:
+          print(f"   ❌ NVIDIA driver not found or not working")
+      except:
+        print(f"   ❌ nvidia-smi not available")
+        
+    elif system == "windows":
+      cuda_base = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA"
+      exists = "✅" if os.path.exists(cuda_base) else "❌"
+      print(f"   {exists} CUDA Toolkit: {cuda_base}")
+      
+    print(f"\n💡 Installation suggestions:")
+    if system == "linux":
+      print(f"   1. Install NVIDIA drivers: sudo apt install nvidia-driver-515")
+      print(f"   2. Install CUDA toolkit: sudo apt install nvidia-cuda-toolkit")
+      print(f"   3. Or download from: https://developer.nvidia.com/cuda-downloads")
+    elif system == "windows":
+      print(f"   1. Download CUDA Toolkit: https://developer.nvidia.com/cuda-downloads")
+      print(f"   2. Download Video Codec SDK: https://developer.nvidia.com/nvidia-video-codec-sdk")
+    elif system == "darwin":
+      print(f"   1. Note: NVIDIA GPU support on macOS is limited")
+      print(f"   2. Consider using alternative acceleration (Metal, OpenCL)")
+    
+    return None
 
 # Load library
-try:
-  cuvid = get_cuvid_lib()
-except RuntimeError as e:
-  print(f"Warning: {e}")
-  cuvid = None
+cuvid = load_cuvid_with_diagnostics()
 
 # CUVID Constants
 CUVID_SUCCESS = 0
