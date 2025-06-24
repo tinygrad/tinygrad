@@ -545,7 +545,8 @@ class X86Renderer(AsmRenderer):
   def render_imm(self, imm:str) -> str: return imm
   def render_mem(self, sz:int) -> str: return f"rsp + {sz}"
   def render_reg(self, reg:str, dt:DType, alias:bool=False) -> str:
-    return reg if dt.itemsize == 8 or dtypes.is_float(dt) else x86_reg_map[reg][dt.itemsize]
+    if dtypes.is_float(dt) or dt.count > 1: return reg if dt.itemsize == 32 else x86_reg_map[reg][dt.itemsize]
+    return reg if dt.itemsize == 8 else x86_reg_map[reg][dt.itemsize]
   def render_kernel(self, name:str, kernel:list[str], stack_size:int, callee_saved:list[str]) -> str:
     return "\n".join([".text", f".global {name}", f"{name}:"] + ["push rbp", "mov rbp, rsp"] + [f"push {r}" for r in reversed(callee_saved)] +
                     [f"sub rsp, {stack_size}"] + kernel + [f"add rsp, {stack_size}"] + [f"pop {r}" for r in callee_saved] + ["pop rbp", "ret", "\n"])
