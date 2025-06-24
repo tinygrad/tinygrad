@@ -3,8 +3,6 @@ import unittest
 import torch
 import numpy as np
 from tinygrad.helpers import getenv, Context, GlobalCounters
-import tinygrad.frontend.torch # noqa: F401
-
 if getenv("TINY_BACKEND2"):
   import extra.torch_backend.backend2
   device = "cpu"
