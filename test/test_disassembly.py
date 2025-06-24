@@ -11,7 +11,7 @@ class TestDisassembly(unittest.TestCase):
   def test_float16_alu(self):
     c = Tensor([1], dtype=dtypes.float16) + Tensor([1], dtype=dtypes.float16)
     s = c.schedule()[-1]
-    p = get_program(Device[Device.DEFAULT].renderer, s.ast)
+    p = get_program(s.ast, Device[Device.DEFAULT].renderer)
     lib = Device[Device.DEFAULT].compiler.compile(p.src)
     out = io.StringIO()
     with redirect_stdout(out): Device[Device.DEFAULT].compiler.disassemble(lib)
