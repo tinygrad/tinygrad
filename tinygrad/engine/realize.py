@@ -1,5 +1,5 @@
 from typing import Optional, cast, Generator, Any
-import time, pprint
+import time, pprint, pathlib
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv
@@ -26,14 +26,20 @@ class HalideContext:
 
 def halide_load(ctx:HalideContext, l):
   buf = hl.InputBuffer(dtype_to_hl(l.dtype), len(l.src[0].shape))
+  for i,s in enumerate(l.src[0].shape):
+    buf.dim(i).set_bounds(0, s)
   ctx.params.append(buf)
   # TODO: view
   ctx.m[l] = buf[*ctx.hvars]
 
-def halide_store(ctx:HalideContext, s):
-  buf = hl.OutputBuffer(dtype_to_hl(s.dtype), len(s.src[0].shape))
-  buf[*ctx.hvars] = ctx.m[s.src[1]]
-  ctx.m[s] = buf
+def halide_store(ctx:HalideContext, st):
+  buf = hl.OutputBuffer(dtype_to_hl(st.dtype), len(st.src[0].shape))
+  buf[*ctx.hvars] = ctx.m[st.src[1]]
+  bufo = buf.output_buffer()
+  #ctx.params.append(bufo)
+  for i,s in enumerate(st.src[0].shape):
+    bufo.dim(i).set_bounds(0, s)
+  ctx.m[st] = buf
 
 def halide_alu(ctx, x):
   if x.op is Ops.MUL: ctx.m[x] = ctx.m[x.src[0]] * ctx.m[x.src[1]]
@@ -43,19 +49,9 @@ def halide_alu(ctx, x):
 
 pm_hl = PatternMatcher([
   (UPat(Ops.LOAD, name="l"), halide_load),
-  (UPat(Ops.STORE, name="s"), halide_store),
+  (UPat(Ops.STORE, name="st"), halide_store),
   (UPat(GroupOp.ALU, name="x"), halide_alu),
 ])
-
-"""
-t = hl.get_host_target() \
-        .with_feature(hl.Target.NoAsserts) \
-        .with_feature(hl.Target.NoBoundsQuery) \
-        .with_feature(hl.Target.NoRuntime)        # <- drop the runtime stubs
-# Extra size savers if you don't need LLVM loop opts
-t = t.with_feature(hl.Target.DisableLLVMLoopUnroll) \
-     .with_feature(hl.Target.DisableLLVMLoopVectorize)
-"""
 
 # **************** Program Creation ****************
 
@@ -78,9 +74,18 @@ def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
   ctx = HalideContext(hvars = [hl.Var(f'i{i}') for i in range(len(ast.src[0].src[1].shape))])
   graph_rewrite(ast, pm_hl, ctx=ctx)
   hout = ctx.m[ast.src[0]]
+
+  t = hl.get_host_target() \
+        .with_feature(hl.TargetFeature.NoAsserts) \
+        .with_feature(hl.TargetFeature.NoBoundsQuery) \
+        .with_feature(hl.TargetFeature.NoRuntime)        # <- drop the runtime stubs
+
   print(hout)
+  #print(hout.compile_to_header("my_function.c", ctx.params, "test", t))
   print(hout.compile_to_c("my_function.c", ctx.params, "test", t))
-  print(dir(hout))
+  #print(dir(hout))
+  #src = pathlib.Path("my_function.c").read_text()
+  #print(src)
 
   modified_ast = get_optimized_ast(ast, renderer) if ast.arg is None else ast
   if __debug__: type_verify(list(modified_ast.toposort()))

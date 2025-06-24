@@ -62,3 +62,4 @@ profile_stats
 *.log
 target
 .mypy_cache
+my_function.c
