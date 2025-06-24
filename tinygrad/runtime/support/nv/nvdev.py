@@ -67,6 +67,7 @@ class NVMemoryManager(MemoryManager):
 class NVDev(PCIDevImplBase):
   def __init__(self, devfmt, mmio:MMIOInterface, vram:MMIOInterface, venid:int, subvenid:int, rev:int, bars:dict):
     self.devfmt, self.mmio, self.vram, self.venid, self.subvenid, self.rev, self.bars = devfmt, mmio, vram, venid, subvenid, rev, bars
+    self.lock_fd = System.flock_acquire(f"nv_{self.devfmt}.lock")
 
     self.smi_dev, self.is_booting = False, True
     self._early_init()
