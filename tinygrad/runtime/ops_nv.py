@@ -301,7 +301,7 @@ class NVKIface:
   fd_ctl: FileIOInterface
   fd_uvm: FileIOInterface
   gpus_info: Union[list, ctypes.Array] = []
-  _vaspace: int  # Type annotation for mypy
+  _vaspace: int
 
   # TODO: Need a proper allocator for va addresses
   # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings
@@ -456,7 +456,7 @@ class NVDevice(HCQCompiled[NVSignal]):
   devices: ClassVar[list[HCQCompiled]] = []
   signal_pages: ClassVar[list[HCQBuffer]] = []
   signal_pool: ClassVar[list[HCQBuffer]] = []
-  _hevc_decoders: dict[str, object]  # Type annotation for mypy
+  _hevc_decoders: dict[str, object]
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
