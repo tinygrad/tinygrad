@@ -3900,13 +3900,8 @@ class Tensor(MathTrait):
     print(t.binary_crossentropy_logits(Y).item())
     ```
     """
-    log_exp = (1 + self.abs().neg().exp()).log()
-    base = self.maximum(0) - Y * self
-    if pos_weight is None:
-      return (base + log_exp)._do_reduction(reduction)
-    pos_scalar = 1 + Y * (pos_weight - 1)
-    pos_addition = Y * (pos_weight - 1) * self.neg().maximum(0)
-    return (base + pos_addition + (pos_scalar * log_exp))._do_reduction(reduction)
+    log_p, log_1_minus_p = self.logsigmoid(), (-self).logsigmoid()
+    return (-((1 if pos_weight is None else pos_weight) * Y * log_p + (1-Y) * log_1_minus_p))._do_reduction(reduction)
 
   def sparse_categorical_crossentropy(self, Y:Tensor, ignore_index:int=-1, label_smoothing=0.0, reduction:ReductionStr="mean") -> Tensor:
     """
