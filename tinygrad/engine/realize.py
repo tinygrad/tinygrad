@@ -22,7 +22,7 @@ def get_program(ast:UOp, renderer:Renderer, opts_override:Sequence[Opt]|None=Non
     ast: The Ops.SINK rooted AST
     renderer: The renderer used to generate the code
     opts_override: Optionally override the opts used to transform the AST
-    name_override: Optionally override the name of the rendered code
+    name_override: Optionally override the name of the output program
 
   Returns:
     The ProgramSpec of the program.

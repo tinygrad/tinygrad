@@ -1,6 +1,7 @@
 import unittest
 from tinygrad import Tensor, Context, Device
-from tinygrad.opt.kernel import Kernel, Opt, OptOps
+from tinygrad.engine.realize import get_program
+from tinygrad.renderer import Opt, OptOps
 
 class TestLinearizerRewrite(unittest.TestCase):
   def test_reduction(self):
@@ -8,20 +9,20 @@ class TestLinearizerRewrite(unittest.TestCase):
     out = (t*2).sum(axis=1)
     with Context(SPLIT_REDUCEOP=0, DEVECTORIZE=0):
       si = out.schedule()[-1]
-      k = Kernel(si.ast, Device["CPU"].renderer)
-      k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
-      k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
-      prg = k.to_program()
+      opts_override = []
+      opts_override.append(Opt(OptOps.UPCAST, 0, 4))
+      opts_override.append(Opt(OptOps.UNROLL, 0, 4))
+      prg = get_program(si.ast, Device["CPU"].renderer, opts_override=opts_override)
       print(prg.src)
 
   def test_arange(self):
     out = Tensor.arange(32, device="NULL")
     with Context(SPLIT_REDUCEOP=0, DEVECTORIZE=0):
       si = out.schedule()[-1]
-      k = Kernel(si.ast, Device["CPU"].renderer)
-      k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
-      k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
-      prg = k.to_program()
+      opts_override = []
+      opts_override.append(Opt(OptOps.UPCAST, 0, 4))
+      opts_override.append(Opt(OptOps.UNROLL, 0, 4))
+      prg = get_program(si.ast, Device["CPU"].renderer, opts_override=opts_override)
       print(prg.src)
 
 if __name__ == '__main__':
