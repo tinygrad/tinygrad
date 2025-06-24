@@ -105,7 +105,7 @@ class TextDecoder:
 
   def __call__(self, x: Tensor, encoded_audio: Tensor, pos: int=0):
     pos = Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len-1).bind(pos) if pos else 0
-    return self.getjitted[x.shape](x, pos, encoded_audio)
+    return self.getjitted[x.shape](x, encoded_audio, pos)
 
   def forward(self, x:Tensor, encoded_audio:Tensor, pos:Union[Variable, Literal[0]]=0):
     seqlen = x.shape[-1]
