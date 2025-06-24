@@ -1,6 +1,6 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses
+import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, fcntl
 from typing import cast
-from tinygrad.helpers import round_up, to_mv, getenv, OSX
+from tinygrad.helpers import round_up, to_mv, getenv, OSX, temp
 from tinygrad.runtime.autogen import libc, vfio
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQCompiled, HCQBuffer
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
