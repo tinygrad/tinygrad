@@ -473,7 +473,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     vaspace_params = nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS(vaBase=0x1000, vaSize=0x1fffffb000000,
       flags=nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_ENABLE_PAGE_FAULTING | nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_IS_EXTERNALLY_OWNED)
     vaspace = self.iface.rm_alloc(self.nvdevice, nv_gpu.FERMI_VASPACE_A, vaspace_params)
-    
+
     # Store vaspace for video channel access
     self.iface._vaspace = vaspace
 
@@ -589,34 +589,34 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     raise RuntimeError("\n".join(report))
 
-# Minimal HEVC decode integration  
+# Minimal HEVC decode integration
 def decode_hevc(self:'NVDevice', bitstream: bytes, width: int, height: int) -> object:
   """Decode HEVC bitstream using CUVID hardware acceleration"""
   if not bitstream or width <= 0 or height <= 0:
     raise ValueError("Invalid HEVC decode parameters")
-  
+
   try:
     from tinygrad.runtime.support.hevc import create_hevc_decoder_auto
-    
+
     # Cache decoders per resolution
     decoder_key = f"{width}x{height}"
     if not hasattr(self, '_hevc_decoders'):
       self._hevc_decoders = {}
-    
+
     if decoder_key not in self._hevc_decoders:
       self._hevc_decoders[decoder_key] = create_hevc_decoder_auto(self, width, height, allow_mock=True)
-    
+
     decoder = self._hevc_decoders[decoder_key]
     if not decoder:
       raise RuntimeError("Failed to create HEVC decoder")
-    
+
     # Decode frame
     surface = decoder.decode_frame(bitstream)
     if not surface:
       raise RuntimeError("HEVC decode failed")
-    
+
     return surface
-    
+
   except Exception as e:
     print(f"❌ HEVC decode error: {e}")
     raise

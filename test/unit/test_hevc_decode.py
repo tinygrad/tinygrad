@@ -1,7 +1,6 @@
-import os, unittest, time, sys
+import os, unittest, sys
 from unittest.mock import Mock
-from tinygrad import dtypes, Tensor, Device
-import numpy as np
+from tinygrad import dtypes
 
 # Add tinygrad to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
@@ -82,6 +81,7 @@ class TestHEVCDecode(unittest.TestCase):
   def test_frame_decoding(self):
     """Test HEVC frame decoding functionality"""
     decoder = create_hevc_decoder_auto(self.device, 1920, 1080, allow_mock=True)
+    assert decoder is not None
 
     # Test successful decode
     surface = decoder.decode_frame(self.test_bitstream)
@@ -101,10 +101,11 @@ class TestHEVCDecode(unittest.TestCase):
   def test_decoder_error_handling(self):
     """Test decoder error handling with invalid inputs"""
     decoder = create_hevc_decoder_auto(self.device, 1920, 1080, allow_mock=True)
+    assert decoder is not None
 
     # Test with invalid bitstream
     invalid_data = b'\x00\x00\x00\x00'
-    surface = decoder.decode_frame(invalid_data)
+    decoder.decode_frame(invalid_data)
     # Should handle gracefully (return None or raise controlled exception)
 
     # Check that failed counter increments
@@ -119,6 +120,7 @@ class TestHEVCDecode(unittest.TestCase):
       with self.subTest(resolution=f"{width}x{height}"):
         decoder = create_hevc_decoder_auto(self.device, width, height, allow_mock=True)
         self.assertIsNotNone(decoder)
+        assert decoder is not None
         self.assertEqual(decoder.width, width)
         self.assertEqual(decoder.height, height)
 
@@ -132,10 +134,11 @@ class TestHEVCDecode(unittest.TestCase):
   def test_decoder_lifecycle(self):
     """Test complete decoder lifecycle"""
     decoder = create_hevc_decoder_auto(self.device, 1920, 1080, allow_mock=True)
+    assert decoder is not None
 
     # Test multiple decode operations
     for i in range(5):
-      surface = decoder.decode_frame(self.test_bitstream)
+      decoder.decode_frame(self.test_bitstream)
       # Each decode should work independently
 
     # Test stats accumulation

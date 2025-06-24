@@ -3,7 +3,7 @@
 Simple HEVC decode using NVIDIA NVDEC engines via ioctls
 No external CUVID library dependency - uses tinygrad's native NV driver
 """
-import ctypes, time
+import time
 from typing import Optional
 
 try:
@@ -21,7 +21,9 @@ def validate_hevc_stream(data: bytes) -> bool:
   while pos < len(data) - 4:
     if data[pos:pos+4] == b'\x00\x00\x00\x01': start_len = 4
     elif data[pos:pos+3] == b'\x00\x00\x01': start_len = 3
-    else: pos += 1; continue
+    else:
+      pos += 1
+      continue
     if (nal_start := pos + start_len) >= len(data): break
     nal_types.append((data[nal_start] >> 1) & 0x3F)
     pos = nal_start + 1
@@ -42,9 +44,9 @@ def get_nvdec_engines(device: 'NVDevice') -> int:
     # Query NVDEC count from GPU info
     info = device._query_gpu_info('nvdec_count')[0] if hasattr(device, '_query_gpu_info') else 0
     return max(1, info) if info else 1  # Assume at least 1 engine if available
-  except: return 1
+  except Exception: return 1
 
-def check_hevc_support(device: 'NVDevice' = None) -> bool:
+def check_hevc_support(device: Optional['NVDevice'] = None) -> bool:
   """Check if NVDEC engines support HEVC decode"""
   if not NV_AVAILABLE: return False
   if device and hasattr(device, 'iface'):
@@ -52,13 +54,13 @@ def check_hevc_support(device: 'NVDevice' = None) -> bool:
       # Check if NVDEC engines exist
       engine_mask = getattr(nv_gpu, 'NV2080_ENGINE_TYPE_NVDEC0', 0x13)
       return engine_mask > 0
-    except: pass
+    except Exception: pass
   return True  # Assume support exists
 
 # === Mock Video Surface ===
 class VideoSurface:
-  def __init__(self, width: int, height: int, format: str = "NV12"):
-    self.width, self.height, self.format = width, height, format
+  def __init__(self, width: int, height: int, video_format: str = "NV12"):
+    self.width, self.height, self.format = width, height, video_format
     self.va_addr = 0x1000000 + id(self)  # Mock GPU address
 
 # === Simple HEVC Decoder ===
@@ -68,7 +70,7 @@ class HEVCDecoder:
     self.nvdec_engines = get_nvdec_engines(device)
     self.stats = {'decoded': 0, 'failed': 0}
     self.initialized = False
-    
+
   def initialize(self) -> bool:
     """Initialize NVDEC hardware decoder"""
     if not NV_AVAILABLE or not check_hevc_support(self.device):
@@ -78,26 +80,26 @@ class HEVCDecoder:
       # For now, just verify we have engine access
       self.initialized = self.nvdec_engines > 0
       return self.initialized
-    except: return False
+    except Exception: return False
 
   def decode_frame(self, bitstream: bytes) -> Optional[VideoSurface]:
     """Decode single HEVC frame using NVDEC"""
     if not validate_hevc_stream(bitstream):
       self.stats['failed'] += 1
       return None
-      
+
     try:
       if self.initialized:
         # Real implementation would:
-        # 1. Submit bitstream to NVDEC via ioctls  
+        # 1. Submit bitstream to NVDEC via ioctls
         # 2. Wait for decode completion
         # 3. Return GPU video surface
         time.sleep(0.001)  # Simulate decode latency
-        
+
       # For now, return mock surface
       self.stats['decoded'] += 1
       return VideoSurface(self.width, self.height, "NV12")
-      
+
     except Exception:
       self.stats['failed'] += 1
       return None
@@ -118,5 +120,5 @@ CUVIDDECODECAPS = type('CUVIDDECODECAPS', (), {'nMaxWidth': 7680, 'nMaxHeight': 
 CUVIDDECODECREATEINFO = type('CUVIDDECODECREATEINFO', (), {})
 HEVCParser = type('HEVCParser', (), {'parse_bitstream': lambda self, data: validate_hevc_stream(data)})
 
-__all__ = ['HEVCDecoder', 'create_hevc_decoder_auto', 'validate_hevc_stream', 'create_sample_hevc_data', 
+__all__ = ['HEVCDecoder', 'create_hevc_decoder_auto', 'validate_hevc_stream', 'create_sample_hevc_data',
            'check_hevc_support', 'get_nvdec_engines', 'VideoSurface', 'CUVIDDECODECAPS', 'CUVIDDECODECREATEINFO']
