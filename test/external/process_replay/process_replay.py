@@ -4,10 +4,9 @@ import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertoo
 from typing import Callable, Any
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 from tinygrad.kernelize.kernelize import get_kernelize_map
-from tinygrad.opt.kernel import Kernel
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.engine.realize import get_program
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 # *** process replay settings
 
@@ -42,13 +41,7 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
 def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer) -> tuple[str, str, tuple[Any, ...]]:
-  # only use Kernel class if captured ast isn't already optimized
-  if ast.arg is None:
-    k2 = Kernel(ast, opts=renderer)
-    k2.apply_opts(p.applied_opts)
-    optimized_ast = k2.get_optimized_ast(name_override=p.name)
-  else: optimized_ast = ast
-  p2 = get_program(optimized_ast, renderer)
+  p2 = get_program(ast.replace(arg=KernelInfo(opts_to_apply=p.applied_opts, name=p.name)) if ast.arg is None else ast, renderer)
   def to_str(ret:ProgramSpec) -> str: return ret.src
   return to_str(p2), to_str(p), (p.ast, renderer, p.applied_opts)
 
