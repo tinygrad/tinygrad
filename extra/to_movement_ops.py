@@ -43,7 +43,7 @@ def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
     buffer_size = sum((s-1)*st for s,st in zip(real_real_shape,strides)) + 1
     if i:
       prev_size = prod(st.views[i-1].shape)
-      if prev_size != 0: real_offset %= prev_size # bring offset within valid span [0, prod(prev_shape)] so buffer_size never makes the SHRINK range invalid
+      if prev_size != 0: real_offset %= prev_size # bring offset within valid span
       buffer_size = prev_size - real_offset if real_shape else 1
     def sort_by_strides(shape, strides): return sorted(zip(shape, strides), key=lambda k: (k[1],-k[0]), reverse=True), sorted(range(len(strides)), key=lambda k: (strides[k],-real_real_shape[k]), reverse=True)
     ordered_shape_strides, order = sort_by_strides(real_real_shape, strides)
