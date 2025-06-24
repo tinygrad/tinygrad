@@ -164,7 +164,7 @@ class AsmRenderer(Renderer):
     for i,u in enumerate(uops):
       inst_map[u] = []
       if u.op is Ops.SINK:
-        if u.arg is not None: name = u.arg.name
+        if u.arg is not None: name = u.arg.function_name
         continue
       # free dead registers
       for v in [v for v in live if live_range[v][1] < i]: reg_class(v).insert(0, live.pop(v))
