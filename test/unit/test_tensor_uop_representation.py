@@ -78,42 +78,19 @@ class TestTensorUopRepresentation(unittest.TestCase):
     is_pattern(a, const_pattern)
     self.assertEqual(a.uop.shape, (10, 10))
 
-  # currently, CONSTs have a "fake" BUFFER. this should be fixed
-  # current:
-  # UOp(Ops.EXPAND, dtypes.float, arg=(10, 10), src=(
-  #   UOp(Ops.RESHAPE, dtypes.float, arg=(1, 1), src=(
-  #     UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),)), src=(
-  #       UOp(Ops.BUFFER, dtypes.float, arg=(-1, 'METAL', 1), src=()),
-  #       UOp(Ops.CONST, dtypes.float, arg=1.0, src=()),)),)),))
-  # expected:
-  # UOp(Ops.EXPAND, dtypes.float, arg=(10, 10), src=(
-  #   UOp(Ops.RESHAPE, dtypes.float, arg=(1, 1), src=(
-  #     UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),)), src=(
-  #       UOp(Ops.CONST, dtypes.float, arg=1.0, src=(
-  #         UOp(Ops.DEVICE, dtypes.void, arg="METAL", src=()),)),)),))
+  # CONST is EXPAND -> RESHAPE -> CONST -> DEVICE
   def test_consts_dont_have_buffers(self):
     a = Tensor.ones(10, 10)
-    print(a.uop)
     buffers_in_parents = [x.op for x in a.uop.toposort() if x.op is Ops.BUFFER]
     self.assertEqual(len(buffers_in_parents), 0)
+    is_pattern(a, UPat(Ops.EXPAND, src=(UPat(Ops.RESHAPE, src=(const_pattern,)),)))
 
-  # currently, COPY has an extra BUFFER on the output
-  # current:
-  # UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
-  #   UOp(Ops.BUFFER, dtypes.float, arg=(2, 'TEST', 3), src=()),
-  #   UOp(Ops.COPY, dtypes.float, arg=('TEST', False), src=(
-  #     UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
-  #       UOp(Ops.BUFFER, dtypes.float, arg=(1, 'METAL', 3), src=()),)),)),))
-  # expected:
-  # UOp(Ops.COPY, dtypes.float, arg=('TEST', False), src=(
-  #   UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
-  #     UOp(Ops.BUFFER, dtypes.float, arg=(1, 'METAL', 3), src=()),))
-  # update: now the arg is just a single bool, the first source is a device.
+  # COPY has a copyin source and a device.
   def test_copyin(self):
     a = Tensor([1.,2,3]).realize()
     c = a.to("TEST")   # NOTE: this isn't checked
     print(c.uop)
-    is_pattern(c, UPat(Ops.COPY, src=(realized_pattern, UPat(Ops.DEVICE))))
+    is_pattern(c, UPat(Ops.COPY, src=(realized_pattern, UPat(Ops.DEVICE)), arg=None))
 
   def test_empty_buf(self):
     a = Tensor.empty(3, 3)

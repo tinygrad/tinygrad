@@ -60,7 +60,7 @@ s = UOp(Ops.SINK, dtypes.void, (st_0,))
 
 # convert the computation to a "linearized" format (print the format)
 from tinygrad.engine.realize import get_program, CompiledRunner
-program = get_program(Device[DEVICE].renderer, s)
+program = get_program(s, Device[DEVICE].renderer)
 
 # compile a program (and print the source)
 fxn = CompiledRunner(program)
@@ -78,7 +78,7 @@ print("******** third, the UOp ***********")
 
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule_with_vars
-from tinygrad.engine.kernelize import get_kernelize_map
+from tinygrad.kernelize.kernelize import get_kernelize_map
 
 # allocate some values + load in values
 a = UOp.new_buffer(DEVICE, 1, dtypes.int32)

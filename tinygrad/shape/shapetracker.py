@@ -28,13 +28,14 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...
   for view in reversed(views[0:-1]):
     view = view.minify()
     idx, valid = view.to_indexed_uops([sint_to_uop(i) for i in unravel(view.shape, idx)], valid)
-  # symbolic
-  idx, valid = graph_rewrite(UOp.sink(idx, valid), symbolic_flat, name="indexing sym @ 1").src
-  # simplify
-  if (newvalid:=simplify_valid(valid)) is not None: valid = newvalid
-  if (newidx:=uop_given_valid(valid, idx)) is not None: idx = newidx
-  # symbolic again, upcast if needed
-  return graph_rewrite(UOp.sink(idx, valid), symbolic_flat+pm_upcast, name="indexing sym @ 2").src
+  with Context(TRACK_MATCH_STATS=0):
+    # symbolic
+    idx, valid = graph_rewrite(UOp.sink(idx, valid), symbolic_flat, name="indexing sym @ 1").src
+    # simplify
+    if (newvalid:=simplify_valid(valid)) is not None: valid = newvalid
+    if (newidx:=uop_given_valid(valid, idx)) is not None: idx = newidx
+    # symbolic again, upcast if needed
+    return graph_rewrite(UOp.sink(idx, valid), symbolic_flat+pm_upcast, name="indexing sym @ 2").src
 
 @functools.cache
 def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[Optional[sint], ...]:
