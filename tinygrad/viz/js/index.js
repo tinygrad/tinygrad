@@ -217,21 +217,19 @@ function renderMemoryGraph(graph) {
   document.getElementById("zoom-to-fit-btn").click();
 }
 
+const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
+const parseColors = (name) => [...name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g)].map(([_, code, colored_st, st]) =>
+  ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : "#ffffff" }));
+
 // ** profiler graph
 
-function formatTime(ts, dur) {
-  if (dur<=1e3) return `${ts}us`;
+function formatTime(ts, dur=ts) {
+  if (dur<=1e3) return `${ts.toFixed(2)}us`;
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
   return `${(ts*1e-6).toFixed(2)}s`;
 }
 
-const colors = [
-  "#b6ccfe", "#74c69d", "#f1c0e8", "#90dbf4", "#5ca98c",
-  "#adc3f5", "#fde4cf", "#8eecf5", "#85c9a7", "#cfbaf0",
-  "#9eb8f0", "#52b788", "#ffcfd2", "#98f5e1", "#4c8d6e",
-  "#b6ceea", "#e7e2b6", "#96e5a5", "#3a5f4a", "#d8f3dc",
-  "#c3d2ee", "#3d6c5b", "#cfdaf0", "#c1d3fe"
-];
+const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"];
 
 var data, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
@@ -254,7 +252,7 @@ async function renderProfiler() {
     }
   }
   const kernelMap = new Map();
-  for (const [i, c] of ctxs.entries()) kernelMap.set(c.name.replace(/\x1b\[\d+m(.*?)\x1b\[0m/g, "$1"), { name:c.name, i });
+  for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
   const deviceList = document.getElementById("device-list");
@@ -290,8 +288,8 @@ async function renderProfiler() {
       const height = baseHeight-padding;
       const y = (baseY-canvasTop+padding/2)+height*depth;
       if (!nameMap.has(e.name)) {
-        const color = colors[i%colors.length];
-        nameMap.set(e.name, { color, labelWidth:ctx.measureText(e.name).width });
+        const labelParts = parseColors(kernelMap.get(e.name)?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+        nameMap.set(e.name, { bgColor:colors[i%colors.length], labelParts });
       }
       data.push({ x:start, dur:e.dur, name:e.name, height, y, ...nameMap.get(e.name) });
     }
@@ -300,6 +298,7 @@ async function renderProfiler() {
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
+  const ellipsisWidth = ctx.measureText("...").width;
   const rectLst = [];
   function render(transform=null) {
     if (transform != null) zoomLevel = transform;
@@ -334,14 +333,23 @@ async function renderProfiler() {
       // zoom only changes x and width
       const x = scale(e.x);
       const width = scale(e.x+e.dur)-x;
-      ctx.fillStyle = e.color;
+      ctx.fillStyle = e.bgColor;
       ctx.fillRect(x, e.y, width, e.height);
-      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, name:e.name })
-      if (width > e.labelWidth) {
-        ctx.fillStyle = "black";
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        ctx.fillText(e.name, x+2, e.y+e.height/2);
+      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, name:e.name, dur:e.dur })
+      // add labels
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      let [labelX, labelWidth] = [x+2, 0];
+      const labelY = e.y+e.height/2;
+      for (const [i,l] of e.labelParts.entries()) {
+        if (labelWidth+l.width+(i===e.labelParts.length-1 ? 0 : ellipsisWidth)+2 > width) {
+          if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
+          break;
+        }
+        ctx.fillStyle = l.color;
+        ctx.fillText(l.st, labelX, labelY);
+        labelWidth += l.width;
+        labelX += l.width;
       }
     }
     ctx.restore();
@@ -365,17 +373,33 @@ async function renderProfiler() {
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
+  function findRectAtPosition(x, y) {
+    const { top, left, width, height } = rect(canvas);
+    const X = ((x-left) * (canvas.width/width))/dpr;
+    const Y = ((y-top) * (canvas.height/height))/dpr;
+    for (const r of rectLst) {
+      if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r;
+    }
+  }
+
   canvas.addEventListener("click", e => {
     e.preventDefault();
-    const { top, left, width, height } = rect(canvas);
-    const clickX = ((e.clientX-left) * (canvas.width/width))/dpr;
-    const clickY = ((e.clientY-top) * (canvas.height/height))/dpr;
-    for (const r of rectLst) {
-      if (clickY>=r.y0 && clickY<=r.y1 && clickX>=r.x0 && clickX<=r.x1) {
-        return setCtxWithHistory(kernelMap.get(r.name)?.i);
-      }
-    }
+    const foundRect = findRectAtPosition(e.clientX, e.clientY);
+    if (foundRect != null) return setCtxWithHistory(kernelMap.get(foundRect.name)?.i);
   });
+
+  const tooltip = document.body.appendChild(document.createElement("div"));
+  tooltip.id = "tooltip";
+  canvas.addEventListener("mousemove", e => {
+    const foundRect = findRectAtPosition(e.clientX, e.clientY);
+    if (foundRect != null) {
+      tooltip.style.display = "block";
+      tooltip.style.left = (e.pageX+10)+"px";
+      tooltip.style.top = (e.pageY)+"px";
+      tooltip.textContent = formatTime(foundRect.dur);
+    } else tooltip.style.display = "none";
+  });
+  canvas.addEventListener("mouseleave", () => tooltip.style.display = "none");
 }
 
 // ** zoom and recentering
@@ -492,10 +516,7 @@ async function main() {
       const ul = ctxList.appendChild(document.createElement("ul"));
       ul.id = `ctx-${i}`;
       const p = ul.appendChild(document.createElement("p"));
-      p.innerHTML = name.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
-        const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
-        return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
-      });
+      p.innerHTML = parseColors(name).map(c => `<span style="color: ${c.color}">${c.st}</span>`).join("");
       p.onclick = () => {
         setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
