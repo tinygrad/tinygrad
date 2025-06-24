@@ -417,12 +417,9 @@ class Tensor(MathTrait):
     h = self.contiguous().flatten()
     assert h.shape[0] % 16 == 0, "expected hashes"
 
-    base_chunks = math.ceil(size / 2**20)
-    tree_depth = math.ceil(math.log(base_chunks, 65536))
-
     # pad size to a multiple of 1mb and larger than size
     if (tsize := h.shape[0]) < size: h = h.pad((0, size - tsize))
-    if size % 1024**2 != 0: h = h.pad((0, 1024**2 - size % 1024**2))
+    if size % 2**20 != 0: h = h.pad((0, 2**20 - size % 2**20))
 
     # load the tensor from tinyfs
     data = h.to("tinyfs:load")[:size].contiguous().to(self.device)
@@ -436,12 +433,19 @@ class Tensor(MathTrait):
     data = self.contiguous().flatten().bitcast(dtypes.uint8)
 
     # pad to a multiple of 1mb
-    if (tsize := data.shape[0]) % 1024**2 != 0: data = data.pad((0, 1024**2 - tsize % 1024**2))
+    if (tsize := data.shape[0]) % 2**20 != 0: data = data.pad((0, 2**20 - tsize % 2**20))
+    size = data.shape[0]
 
-    # store to tinyfs
-    h = data.to("tinyfs:store")[:16].contiguous().to(self.device)
+    base_chunks = math.ceil(size / 2**20)
+    tree_depth = math.ceil(math.log(base_chunks, 65536))
 
-    return h
+    level_chunks = base_chunks
+    for _ in range(tree_depth + 1):
+      data = data.to("tinyfs:store")[:level_chunks * 16].contiguous().to(self.device)
+      if (tsize := data.shape[0]) % 2**20 != 0: data = data.pad((0, 2**20 - tsize % 2**20))
+      level_chunks = math.ceil(data.shape[0] / 2**20)
+
+    return data[:16]
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
