@@ -41,7 +41,7 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
 def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer) -> tuple[str, str, tuple[Any, ...]]:
-  p2 = get_program(ast.replace(arg=KernelInfo(opts_to_apply=p.applied_opts, name=p.name)), renderer)
+  p2 = get_program(ast.replace(arg=KernelInfo(opts_to_apply=p.applied_opts, name=p.name)) if ast.arg is None else ast, renderer)
   def to_str(ret:ProgramSpec) -> str: return ret.src
   return to_str(p2), to_str(p), (p.ast, renderer, p.applied_opts)
 
