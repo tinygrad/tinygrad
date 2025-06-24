@@ -3991,9 +3991,9 @@ class Tensor(MathTrait):
     V = Tensor.eye(num, dtype = self.dtype).reshape((1,) * (self.ndim - 2) + (num, num)).expand(b_shape + 2 * (num,)).contiguous()
     #prepare round robin pairing
     permute, inverse_permute = Tensor.arange(0, num, dtype = dtypes.int), Tensor.zeros(num, dtype = dtypes.int).contiguous()
-    inverse_permute[permute] = Tensor.arange(num, dtype = dtypes.int)
     permute[num//2:num] = permute[num//2:num].flip(0)
-    def one_round_jacobi(U, V):
+    inverse_permute[permute] = Tensor.arange(num, dtype = dtypes.int)
+    def one_round_jacobi(U, V,permute,inverse_permute):
       #pair all the columns
       V_permuted, runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[..., permute], None)
       V_left, V_right = V_permuted.split(num//2, -1)
@@ -4010,14 +4010,14 @@ class Tensor(MathTrait):
       U_left, U_right = c * U_left - s * U_right, s * U_left + c * U_right
       U = U_left.cat(U_right.cat(runoff_U, dim = -1) if num % 2 == 1 else U_right, dim = -1)[..., inverse_permute]
       V_left, V_right = c * V_left - s * V_right, s * V_left + c * V_right
-      V = V_left.cat(V_right.cat(runoff_V, dim = -1) if num % 2 == 1 else V_right, dim = -1)[..., inverse_permute].realize()
+      V = V_left.cat(V_right.cat(runoff_V, dim = -1) if num % 2 == 1 else V_right, dim = -1)[..., inverse_permute]
       #prepare the next round robin pairings
-      if num % 2 == 1: permute[0:num] = ((permute[0:num] - 1) % num)
-      else: permute[1:num] = ((permute[1:num] - 2) % (num - 1)) + 1
-      inverse_permute[permute] = Tensor.arange(num, dtype = dtypes.int)
-      return U, V
+      if num % 2 == 1: permute = ((permute - 1) % num)
+      else: permute = permute[0].reshape(1).cat(((permute[1:num] - 2) % (num - 1)) + 1)
+      inverse_permute = inverse_permute.scatter(0,permute,Tensor.arange(num,dtype=dtypes.int32))
+      return U, V, permute, inverse_permute
     max_iterations, iterations_per_round = 1, int((num) * math.log2(num) * 2 + 2)#sorta heuristic, most use num*log2(num)
-    for _ in range(max_iterations * iterations_per_round): U, V = one_round_jacobi(U,V)
+    for _ in range(max_iterations * iterations_per_round): U, V, permute, inverse_permute = one_round_jacobi(U, V, permute, inverse_permute)
     #extract singular values and sort. construct U from Q
     S, indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
     new_indices = Tensor.arange(num).reshape((1,) * (self.ndim - 1) + (num,)).expand(b_shape + 2 * (num,)).contiguous()
