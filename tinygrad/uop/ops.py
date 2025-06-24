@@ -254,8 +254,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def r(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     if len(axis) == 0: return self
-    ret = self.permute(tuple([i for i in range(len(self.shape)) if i not in axis])+axis)
-    ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, tuple(range(len(self.shape)-len(axis), len(self.shape)))))
+    # move any non reduce axis before the first reduce axis
+    move_early = [i for i in range(axis[0], len(self.shape)) if i not in axis and resolve(self.shape[i] != 1)]
+    if move_early:
+      permute = tuple(range(axis[0])) + tuple(move_early) + tuple([i for i in range(axis[0], len(self.shape)) if i not in move_early])
+      ret = self.permute(permute)
+      new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
+      assert len(axis) == len(new_axis)
+    else:
+      ret, new_axis = self, axis
+    ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, new_axis))
     return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
