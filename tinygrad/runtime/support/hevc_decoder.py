@@ -382,21 +382,82 @@ class NVHEVCDecoder:
     if self.state != DecoderState.DESTROYED:
       self.destroy()
 
-# Factory function for decoder creation
+# Factory functions for decoder creation
+def is_hevc_available() -> bool:
+  """Check if HEVC hardware decode is available"""
+  try:
+    from tinygrad.runtime.support.cuvid import cuvid
+    return cuvid is not None
+  except ImportError:
+    return False
+
+def create_mock_decoder(width:int, height:int, max_surfaces:int=8):
+  """Create mock decoder for testing when hardware not available"""
+  from unittest.mock import Mock
+  
+  mock_decoder = Mock()
+  mock_decoder.width = width
+  mock_decoder.height = height
+  mock_decoder.max_surfaces = max_surfaces
+  mock_decoder.state = "READY"
+  
+  # Mock decode function
+  def mock_decode_frame(bitstream_data, wait=True):
+    mock_surface = Mock()
+    mock_surface.width = width
+    mock_surface.height = height
+    mock_surface.format = "NV12"
+    mock_surface.size = width * height * 3 // 2
+    mock_surface.va_addr = 0x10000000
+    return mock_surface
+  
+  mock_decoder.decode_frame = mock_decode_frame
+  mock_decoder.destroy = Mock()
+  mock_decoder.get_stats = Mock(return_value={
+    'frames_decoded': 0,
+    'frames_failed': 0,
+    'success_rate': 1.0
+  })
+  
+  return mock_decoder
+
 def create_hevc_decoder(device_interface, width:int, height:int, max_surfaces:int=8) -> Optional[NVHEVCDecoder]:
-  """Create and initialize HEVC decoder"""
+  """Create real HEVC decoder with availability checking"""
+  # Quick availability check before creating anything
+  if not is_hevc_available():
+    print(f"⚠️  CUVID library not available, cannot create real decoder")
+    return None
+  
   try:
     decoder = NVHEVCDecoder(device_interface, width, height, max_surfaces)
     if decoder.initialize():
       return decoder
     else:
+      decoder.destroy()
       return None
   except Exception as e:
     print(f"❌ Failed to create HEVC decoder: {e}")
     return None
 
+def create_hevc_decoder_auto(device_interface, width:int, height:int, max_surfaces:int=8, allow_mock:bool=True):
+  """Create HEVC decoder with automatic fallback to mock if needed"""
+  # Try real decoder first
+  decoder = create_hevc_decoder(device_interface, width, height, max_surfaces)
+  
+  if decoder is not None:
+    print(f"✅ Real HEVC decoder created: {width}x{height}")
+    return decoder
+  
+  # Fallback to mock if allowed
+  if allow_mock:
+    print(f"🎭 Creating mock HEVC decoder: {width}x{height}")
+    return create_mock_decoder(width, height, max_surfaces)
+  
+  print(f"❌ HEVC decoder unavailable and mock disabled")
+  return None
+
 # Export main classes and functions
 __all__ = [
   'NVHEVCDecoder', 'DecoderState', 'DecoderStats', 
-  'create_hevc_decoder'
+  'create_hevc_decoder', 'create_hevc_decoder_auto', 'create_mock_decoder', 'is_hevc_available'
 ] 

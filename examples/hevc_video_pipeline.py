@@ -20,13 +20,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
   from tinygrad.runtime.ops_nv import NVDevice
-  from tinygrad.runtime.support.hevc_decoder import create_hevc_decoder, DecoderState
+  from tinygrad.runtime.support.hevc_decoder import create_hevc_decoder_auto, DecoderState, is_hevc_available
   from tinygrad.runtime.support.video_memory import VideoMemoryManager
   from tinygrad.runtime.support.video_sync import VideoSyncManager
   from tinygrad.runtime.support.video_tensor import VideoTensorConverter, decode_hevc_batch_to_tensor
   from tinygrad.runtime.support.hevc_parser import extract_parameter_sets
   from tinygrad import Tensor
-  HEVC_AVAILABLE = True
+  HEVC_AVAILABLE = is_hevc_available()
 except ImportError as e:
   print(f"⚠️  HEVC decode not available: {e}")
   HEVC_AVAILABLE = False
@@ -100,17 +100,14 @@ class VideoProcessor:
       try:
         print(f"➕ Adding stream: {config.name}")
         
-        # Create decoder for this stream
-        decoder = create_hevc_decoder(
+        # Use auto decoder creation with fallback to mock
+        decoder = create_hevc_decoder_auto(
           device_interface=self.device,
           width=config.width,
           height=config.height,
-          max_surfaces=self.batch_size * 2  # Extra surfaces for buffering
+          max_surfaces=self.batch_size * 2,  # Extra surfaces for buffering
+          allow_mock=True
         )
-        
-        if not decoder:
-          print(f"❌ Failed to create decoder for stream {config.stream_id}")
-          return False
         
         self.decoders[config.stream_id] = decoder
         self.stream_configs[config.stream_id] = config
@@ -317,8 +314,8 @@ def multi_stream_demo(num_streams: int = 4, batch_size: int = 8):
   print("=" * 60)
   
   if not HEVC_AVAILABLE:
-    print("❌ HEVC decode support not available")
-    return False
+    print("⚠️  HEVC hardware decode not available, using mock mode")
+    print("💡 Install NVIDIA Video Codec SDK for full functionality")
   
   try:
     # Create mock device
@@ -432,8 +429,8 @@ def batch_processing_demo(batch_size: int = 8):
   print("=" * 50)
   
   if not HEVC_AVAILABLE:
-    print("❌ HEVC decode support not available")
-    return False
+    print("⚠️  HEVC hardware decode not available, using mock mode")
+    print("💡 Install NVIDIA Video Codec SDK for full functionality")
   
   try:
     # Create mock device

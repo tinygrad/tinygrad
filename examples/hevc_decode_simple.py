@@ -17,11 +17,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
   from tinygrad.runtime.ops_nv import NVDevice, decode_hevc, get_video_decode_caps
-  from tinygrad.runtime.support.hevc_decoder import create_hevc_decoder
+  from tinygrad.runtime.support.hevc_decoder import create_hevc_decoder_auto, is_hevc_available
   from tinygrad.runtime.support.hevc_parser import extract_parameter_sets, get_frame_dimensions
   from tinygrad.runtime.support.video_tensor import decode_hevc_to_tensor
   from tinygrad import Tensor
-  HEVC_AVAILABLE = True
+  HEVC_AVAILABLE = is_hevc_available()
 except ImportError as e:
   print(f"⚠️  HEVC decode not available: {e}")
   HEVC_AVAILABLE = False
@@ -53,9 +53,8 @@ def simple_decode_example():
   print("=" * 50)
   
   if not HEVC_AVAILABLE:
-    print("❌ HEVC decode support not available")
-    print("   Install NVIDIA Video Codec SDK and set CUDA_PATH")
-    return False
+    print("⚠️  HEVC hardware decode not available, using mock mode")
+    print("💡 Install NVIDIA Video Codec SDK for full functionality")
   
   try:
     # Step 1: Initialize device
@@ -99,17 +98,13 @@ def simple_decode_example():
     
     # Step 4: Create decoder
     print("🎥 Creating HEVC decoder...")
-    decoder = create_hevc_decoder(
+    decoder = create_hevc_decoder_auto(
       device_interface=device,
       width=width,
       height=height,
-      max_surfaces=4
+      max_surfaces=4,
+      allow_mock=True
     )
-    
-    if decoder:
-      print(f"✅ Decoder created: {decoder.__class__.__name__}")
-    else:
-      print("⚠️  Using mock decoder")
     
     # Step 5: Decode frame
     print("🎬 Decoding HEVC frame...")
@@ -172,8 +167,8 @@ def file_decode_example(input_file: str, output_file: str = None):
   print("=" * 60)
   
   if not HEVC_AVAILABLE:
-    print("❌ HEVC decode support not available")
-    return False
+    print("⚠️  HEVC hardware decode not available, using mock mode")
+    print("💡 Install NVIDIA Video Codec SDK for full functionality")
   
   try:
     # Check if input file exists
@@ -209,10 +204,11 @@ def file_decode_example(input_file: str, output_file: str = None):
     
     # Create decoder
     print("🎥 Creating decoder for file...")
-    decoder = create_hevc_decoder(
+    decoder = create_hevc_decoder_auto(
       device_interface=device,
       width=width,
-      height=height
+      height=height,
+      allow_mock=True
     )
     
     # Decode frame
@@ -260,8 +256,8 @@ def performance_benchmark():
   print("=" * 50)
   
   if not HEVC_AVAILABLE:
-    print("❌ HEVC decode support not available")
-    return False
+    print("⚠️  HEVC hardware decode not available, using mock mode")
+    print("💡 Install NVIDIA Video Codec SDK for full functionality")
   
   try:
     # Test parameters
@@ -286,10 +282,11 @@ def performance_benchmark():
       print(f"\n📊 Testing {name} ({width}x{height})...")
       
       # Create decoder for this resolution
-      decoder = create_hevc_decoder(
+      decoder = create_hevc_decoder_auto(
         device_interface=device,
         width=width,
-        height=height
+        height=height,
+        allow_mock=True
       )
       
       # Create mock HEVC data for this resolution

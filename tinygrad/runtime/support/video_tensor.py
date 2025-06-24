@@ -41,8 +41,7 @@ class VideoTensorConverter:
       }
     }
     
-  def surface_to_tensor(self, surface:NVVideoSurface, output_format:str="RGB", 
-                       normalize:bool=False, device:Optional[str]=None) -> Tensor:
+  def surface_to_tensor(self, surface:NVVideoSurface, output_format:str="RGB", normalize:bool=False, device:Optional[str]=None) -> Tensor:
     """
     Convert video surface to tinygrad Tensor
     
@@ -171,8 +170,7 @@ class VideoTensorConverter:
     
     return Tensor(rgb_data, device=target_device, dtype=dtypes.uint8)
 
-  def batch_surfaces_to_tensor(self, surfaces:list[NVVideoSurface], output_format:str="RGB", 
-                              normalize:bool=False, device:Optional[str]=None) -> Tensor:
+  def batch_surfaces_to_tensor(self, surfaces:list[NVVideoSurface], output_format:str="RGB", normalize:bool=False, device:Optional[str]=None) -> Tensor:
     """
     Convert multiple video surfaces to batched tensor
     
@@ -249,8 +247,7 @@ def rgb_to_yuv_tensor(rgb_tensor:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
   
   return y, u, v
 
-def tensor_to_video_surface(tensor:Tensor, width:int, height:int, format:str="RGBA", 
-                           device_interface=None) -> NVVideoSurface:
+def tensor_to_video_surface(tensor:Tensor, width:int, height:int, format:str="RGBA", device_interface=None) -> NVVideoSurface:
   """
   Convert tinygrad Tensor back to video surface
   
@@ -277,8 +274,7 @@ def tensor_to_video_surface(tensor:Tensor, width:int, height:int, format:str="RG
   return surface
 
 # High-level decode functions
-def decode_hevc_to_tensor(device_interface, hevc_data:bytes, output_format:str="RGB", 
-                         normalize:bool=False, device:Optional[str]=None) -> Optional[Tensor]:
+def decode_hevc_to_tensor(device_interface, hevc_data:bytes, output_format:str="RGB", normalize:bool=False, device:Optional[str]=None) -> Optional[Tensor]:
   """
   Decode HEVC data directly to tinygrad Tensor
   
@@ -308,8 +304,7 @@ def decode_hevc_to_tensor(device_interface, hevc_data:bytes, output_format:str="
     print(f"❌ HEVC to tensor decode failed: {e}")
     return None
 
-def decode_hevc_batch_to_tensor(device_interface, hevc_frames:list[bytes], output_format:str="RGB",
-                               normalize:bool=False, device:Optional[str]=None) -> Optional[Tensor]:
+def decode_hevc_batch_to_tensor(device_interface, hevc_frames:list[bytes], output_format:str="RGB", normalize:bool=False, device:Optional[str]=None) -> Optional[Tensor]:
   """
   Decode batch of HEVC frames to batched tensor
   
