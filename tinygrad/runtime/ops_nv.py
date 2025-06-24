@@ -301,6 +301,7 @@ class NVKIface:
   fd_ctl: FileIOInterface
   fd_uvm: FileIOInterface
   gpus_info: Union[list, ctypes.Array] = []
+  _vaspace: int  # Type annotation for mypy
 
   # TODO: Need a proper allocator for va addresses
   # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings
@@ -455,6 +456,7 @@ class NVDevice(HCQCompiled[NVSignal]):
   devices: ClassVar[list[HCQCompiled]] = []
   signal_pages: ClassVar[list[HCQBuffer]] = []
   signal_pool: ClassVar[list[HCQBuffer]] = []
+  _hevc_decoders: dict[str, object]  # Type annotation for mypy
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
@@ -610,8 +612,8 @@ def decode_hevc(self:'NVDevice', bitstream: bytes, width: int, height: int) -> o
     if not decoder:
       raise RuntimeError("Failed to create HEVC decoder")
 
-    # Decode frame
-    surface = decoder.decode_frame(bitstream)
+    # Decode frame (mypy: decoder has decode_frame method)
+    surface = getattr(decoder, 'decode_frame')(bitstream)
     if not surface:
       raise RuntimeError("HEVC decode failed")
 
@@ -622,4 +624,4 @@ def decode_hevc(self:'NVDevice', bitstream: bytes, width: int, height: int) -> o
     raise
 
 # Add decode function to NVDevice
-NVDevice.decode_hevc = decode_hevc
+setattr(NVDevice, 'decode_hevc', decode_hevc)
