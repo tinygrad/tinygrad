@@ -98,9 +98,6 @@ class BlockContext:
           idx_context, store_context = ctx.last_ctx(u.src[0]), ctx.last_ctx(u.src[1])
           ctx.child_ctxs[u] = tuple([y for y in store_context if y not in idx_context and y.op is Ops.RANGE])
         else: ctx.child_ctxs[u] = ()
-      elif u.op is Ops.ASSIGN:
-        assert u.src[0].op is Ops.DEFINE_ACC
-        ctx.child_ctxs[u] = tuple([y for y in ctx.last_ctx(u.src[1]) if y not in u.src[0].src[1:]])
     return ctx
 
 # ***** make blocks *****

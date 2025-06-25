@@ -34,6 +34,8 @@ pm_unbind = PatternMatcher([
   (UPat(Ops.BIND, name="x"), unbind_bind),
 ])
 
+def _is_scalar_store(u: UOp) -> bool:
+  return u.op is Ops.STORE and u.src[0].op is Ops.DEFINE_ACC
 # **** schedule linearizer
 
 def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int]]:
@@ -41,18 +43,18 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree: dict[UOp, int] = {}
   for u in sched_sink.toposort():
-    if u.op is not Ops.ASSIGN: continue  # anything that's not an ASSIGN doesn't write a kernel, so we can skip
+    if not _is_scalar_store(u): continue  # anything that's not an ASSIGN doesn't write a kernel, so we can skip
     k = u.src[1]
     in_degree.setdefault(k, 0)
     for s in k.src:
-      if s.op is Ops.ASSIGN:
+      if _is_scalar_store(s):
         children[s.src[1]].append(k)
         in_degree[k] += 1
       elif s.op in {Ops.MSELECT, Ops.MSTACK}:
         for ss in s.src:
           if ss.op is Ops.MSELECT: ss = ss.src[0]
           if ss.op is not Ops.BUFFER:
-            assert ss.op is Ops.ASSIGN
+            assert _is_scalar_store(ss)
             children[ss.src[1]].append(k)
             in_degree[k] += 1
       elif s.op is Ops.BUFFER:

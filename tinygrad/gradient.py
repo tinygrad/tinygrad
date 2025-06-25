@@ -46,12 +46,15 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.BITCAST), lambda ctx: (None,)),
 ])
 
+def _is_scalar_store(u: UOp) -> bool:
+  return u.op is Ops.STORE and u.src and u.src[0].op is Ops.DEFINE_ACC
+
 def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
   # compute the target path (top down)
   in_target_path: dict[UOp, bool] = {}
   for u in root.toposort(): in_target_path[u] = any(x in targets or in_target_path[x] for x in u.src)
   # don't flow through DETACH/ASSIGN or anything not in target path
-  return list(root.toposort(lambda node: node.op not in {Ops.DETACH, Ops.ASSIGN} and in_target_path[node]))
+  return list(root.toposort(lambda node: node.op is not Ops.DETACH and not _is_scalar_store(node)and in_target_path[node]))
 
 def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
   grads = {root: root_grad}

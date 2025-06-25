@@ -1150,7 +1150,7 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
     for u in k.uops:
       if u.op is Ops.WMMA:
-        assert u.src[-1].src[0].op != Ops.ASSIGN
+        assert u.src[-1].src[0].op != Ops.STORE
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "CPU does not support using a different type for accumulation")
@@ -1162,7 +1162,7 @@ class TestLinearizer(unittest.TestCase):
     for u in k.uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.src[-1].src[0].op != Ops.ASSIGN
+        assert u.src[-1].src[0].op != Ops.STORE
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "CPU does not support using a different type for accumulation")
@@ -1175,7 +1175,7 @@ class TestLinearizer(unittest.TestCase):
     for u in k.uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.src[-1].src[0].op != Ops.ASSIGN
+        assert u.src[-1].src[0].op != Ops.STORE
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_simple_unroll_no_between_phi_dependencies(self):
@@ -1184,10 +1184,10 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4)]])[-1]
     # the uops graph is RANGE -> DEFINE_ACC -> 4x ALU -> 4x ASSIGN -> ENDRANGE
     for u in k.uops:
-      if u.op is Ops.ASSIGN:
+      if u.op is Ops.STORE and u.src[0].op is Ops.DEFINE_ACC:
         assert u.src[1].op in GroupOp.ALU
       # children of ASSIGN are placed after ENDRANGE
-      if any(x.op is Ops.ASSIGN for x in u.src):
+      if any(x.op is Ops.STORE and x.src[0].op is Ops.DEFINE_ACC for x in u.src):
         end_range = [i for i, x in enumerate(k.uops) if x.op is Ops.ENDRANGE][0]
         assert end_range < k.uops.index(u)
 
@@ -1310,7 +1310,7 @@ class TestLinearizer(unittest.TestCase):
       if if_op:=next((u for u in uops if u.op is Ops.IF), None):
         uops = uops[:uops.index(if_op)]
       assert len(set([u.op for u in uops if u.op in {Ops.RANGE, Ops.SPECIAL}])) == 1, "has either specials or ranges, not both"
-      assert len([u for u in uops if u.op is Ops.ASSIGN]) == 0, "ASSIGN should have been simplified"
+      assert len([u for u in uops if u.op is Ops.STORE]) == 0, "former ASSIGN should have been simplified"
       # TODO: once uops track min/max this will be fixed
       #assert len([u for u in uops if u.op is Ops.MAX]) <= max_ops, "no unnecessary MAX ops"
 

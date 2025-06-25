@@ -11,6 +11,9 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 ctx_vars = { MULTIOUTPUT: (0, 1) }
 FUZZ_SCHEDULE_MAX_PATHS = getenv("FUZZ_SCHEDULE_MAX_PATHS", 10)
 
+def _is_scalar_store(u: UOp) -> bool:
+  return u.op is Ops.STORE and u.src[0].op is Ops.DEFINE_ACC
+
 def fuzz_schedule(outs:List[UOp]):
   # find toposorts across all tunable params
   unique_ts: Dict[Tuple[LBScheduleItem, ...], Dict[str, int]] = {}
@@ -32,7 +35,7 @@ def fuzz_schedule(outs:List[UOp]):
   for lsi in ts:
     for out in lsi.outputs:
       # freeze assign state before exec
-      if out.op is Ops.ASSIGN:
+      if _is_scalar_store(out):
         prerealized[out] = out.buffer.as_buffer()
         assign_targets[out.srcs[1]] = out
     for x in lsi.inputs:
@@ -51,7 +54,7 @@ def fuzz_schedule(outs:List[UOp]):
       for out in lsi.outputs:
         base = rawbufs[lsi.inputs[0]].base if out.op is Ops.BUFFER_VIEW else None
         rawbufs[out] = Buffer(out.buffer.device, out.buffer.size, out.buffer.dtype, base=base)
-        if out.op is Ops.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
+        if _is_scalar_store(out): rawbufs[out].ensure_allocated().copyin(prerealized[out])
       for x in lsi.inputs:
         if x not in rawbufs:
           # override the assign_target after ASSIGN
