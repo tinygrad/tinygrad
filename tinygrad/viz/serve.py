@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver, functools
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
@@ -25,7 +25,7 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
   ret = []
   for k,v in zip(keys, contexts):
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":lines(s.loc[0])[s.loc[1]-1].strip()} for s in v]
-    if isinstance(k, ProgramSpec): ret.append({"name":k.name, "kernel_code":k.src, "ref":id(k.ast), "steps":steps})
+    if isinstance(k, ProgramSpec): ret.append({"name":k.name, "kernel_code":k.src, "ref":id(k.ast), "function_name":k.function_name, "steps":steps})
     else: ret.append({"name":str(k), "steps":steps})
   return ret
 
@@ -74,11 +74,17 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
                     "ref":id(u.arg.ast) if u.op is Ops.KERNEL else None, "tag":u.tag}
   return graph
 
+@functools.cache
+def _reconstruct(a:int):
+  op, dtype, src, arg, tag = contexts[2][a]
+  arg = type(arg)(_reconstruct(arg.ast), arg.metadata) if op is Ops.KERNEL else arg
+  return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, tag)
+
 def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
-  yield {"graph":uop_to_json(next_sink:=ctx.sink), "uop":str(ctx.sink), "changed_nodes":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
-  for u0,u1,upat in tqdm(ctx.matches):
-    replaces[u0] = u1
+  for u0_num,u1_num,upat in tqdm(ctx.matches):
+    replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RecursionError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
@@ -189,7 +195,7 @@ if __name__ == "__main__":
   contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
 
   # NOTE: this context is a tuple of list[keys] and list[values]
-  ctxs = get_metadata(*contexts) if contexts is not None else []
+  ctxs = get_metadata(*contexts[:2]) if contexts is not None else []
 
   perfetto_profile = to_perfetto(profile) if profile is not None else None
 

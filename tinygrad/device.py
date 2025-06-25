@@ -23,7 +23,7 @@ class _Device:
   @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
     assert ALLOW_DEVICE_USAGE or ix.split(":")[0] in ["DISK", "NPY", "PYTHON"], f"usage of device {ix} disallowed"
-    base = __name__.split('.')[0]  # tinygrad
+    base = (__package__ or __name__).split('.')[0]  # tinygrad
     x = ix.split(":")[0].lower()
     ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{base}.runtime.ops_{x}')) \
            if (cname.lower() == x + "device")][0](ix)
@@ -130,10 +130,13 @@ class Buffer:
   def ref(self, cnt):
     self.base._uop_refcount += cnt
     return self
-  def is_allocated(self) -> bool: return hasattr(self, '_buf')
-  def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
+  # check if the underlying buffer is allocated and the current buffer/view is initialized
+  def is_initialized(self) -> bool: return self.is_allocated() and hasattr(self, '_buf')
+  # check if the underlying buffer is allocated, possibly from the base object
+  def is_allocated(self) -> bool: return self.base.is_allocated() if self._base is not None else hasattr(self, '_buf')
+  def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_initialized() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
-    assert not self.is_allocated(), "can't allocate already allocated buffer"
+    assert not self.is_initialized(), "can't allocate already allocated buffer"
     if DEBUG >= 7: print(f"buffer: allocate {self.nbytes} bytes on {self.device}")
     if (mbs:=getenv("MAX_BUFFER_SIZE", 0)) > 0 and self.size > mbs: raise RuntimeError(f"buffer of size {self.size/1e6:.2f}M is too large")
     self.allocator:Allocator = Device[self.device].allocator
@@ -149,7 +152,7 @@ class Buffer:
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
     return self
   def deallocate(self):
-    assert self.is_allocated(), "buffer must be allocated to deallocate"
+    assert hasattr(self, '_buf'), "buffer must be allocated to deallocate"
     if DEBUG is not None and DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if GlobalCounters is not None and not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
@@ -167,7 +170,7 @@ class Buffer:
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.uop_refcount)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
-  def __del__(self): (not self.is_allocated()) or self.deallocate()
+  def __del__(self): (not hasattr(self, '_buf')) or self.deallocate()
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
@@ -188,13 +191,13 @@ class Buffer:
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
-    assert self.is_allocated(), "can't copyin to unallocated buffer"
+    assert self.is_initialized(), "can't copyin to unallocated buffer"
     self.allocator._copyin(self._buf, mv)
     return self
   def copyout(self, mv:memoryview) -> memoryview:
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
-    assert self.is_allocated(), "can't copyout unallocated buffer"
+    assert self.is_initialized(), "can't copyout unallocated buffer"
     self.allocator._copyout(mv, self._buf)
     return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
@@ -270,7 +273,6 @@ MAP_JIT = 0x0800
 # CPUProgram is a jit/shellcode program that can be just mmapped and jumped to
 class CPUProgram:
   rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or sys.platform == "win32" else 'libgcc_s.so.1')
-  atomic_lib = ctypes.CDLL(ctypes.util.find_library('atomic')) if sys.platform == "linux" else None
 
   def __init__(self, name:str, lib:bytes):
     if sys.platform == "win32":

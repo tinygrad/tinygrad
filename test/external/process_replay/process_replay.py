@@ -2,10 +2,11 @@
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools
 from typing import Callable, Any
-from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm, to_function_name
+from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 from tinygrad.kernelize.kernelize import get_kernelize_map
-from tinygrad.opt.kernel import Kernel
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.renderer import Renderer, ProgramSpec
+from tinygrad.engine.realize import get_program
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 # *** process replay settings
 
@@ -39,17 +40,12 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
     return "\n".join([f"{len(asts)} kernels", *asts])
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
-def replay_linearize(k:Kernel, _:Kernel, name_override=None, ast_transform=None) -> tuple[str, str, tuple[Any, ...]]:
-  # create a copy because the Kernel class contains optimization parameters (other than applied_opts) in its state
-  # this should be made fully functional. It's fine for process replay since copy returns a fresh instance
-  k2 = k.copy()
-  k2.linearize(name_override=name_override or to_function_name(k.name), ast_transform=ast_transform)
-  def to_str(ret:Kernel) -> str:
-    try: return ret.opts.render(ret.uops)
-    except NotImplementedError: return "" # NULL backend doesn't have a renderer, this is okay
-  return to_str(k2), to_str(k), (k.ast, k.opts, k.applied_opts)
+def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer) -> tuple[str, str, tuple[Any, ...]]:
+  p2 = get_program(ast.replace(arg=KernelInfo(opts_to_apply=p.applied_opts, name=p.name)) if ast.arg is None else ast, renderer)
+  def to_str(ret:ProgramSpec) -> str: return ret.src
+  return to_str(p2), to_str(p), (p.ast, renderer, p.applied_opts)
 
-replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_kernelize_map":replay_kernelize, "linearize":replay_linearize}
+replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_kernelize_map":replay_kernelize, "get_program":replay_get_program}
 
 # *** run replayers on captured rows and print diffs
 
