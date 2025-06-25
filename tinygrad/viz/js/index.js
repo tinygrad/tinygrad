@@ -437,7 +437,7 @@ function codeBlock(st, language, { loc, wrap }) {
   if (wrap) ret.className = "wrap";
   if (loc != null) {
     const link = ret.appendChild(document.createElement("a"));
-    link.href = "vscode://file"+loc.join(":");
+    link.href = "vscode://file/"+loc.join(":");
     link.textContent = `${loc[0].split("/").at(-1)}:${loc[1]}`+"\n\n";
   }
   ret.appendChild(code);
