@@ -207,8 +207,21 @@ class CapturedJit(Generic[ReturnType]):
     self._clear_inputs()
     return self.ret
 
+def _find_tensors_recursive(obj, path=()):
+  tensors = []
+  if obj.__class__ is Tensor: tensors.append((path, obj))
+  elif isinstance(obj, (list, tuple)):
+    for i, item in enumerate(obj): tensors.extend(_find_tensors_recursive(item, path + (i,)))
+  elif isinstance(obj, dict):
+    for k, v in obj.items(): tensors.extend(_find_tensors_recursive(v, path + (k,)))
+  return tensors
+
 def _prepare_jit_inputs(args, kwargs):
-  input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
+  all_tensors = []
+  for i, arg in enumerate(args): all_tensors.extend(_find_tensors_recursive(arg, (i,)))
+  for k, v in kwargs.items(): all_tensors.extend(_find_tensors_recursive(v, (k,)))
+
+  input_tensors: list[tuple[int|str, Tensor]] = [(name, t) for name, t in all_tensors]
   names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
   if len(unrealized_tensors := [x for x in tensors if not x.uop.is_realized]): Tensor.realize(*unrealized_tensors)
   # TODO: this multi unpack stuff is not well tested.
