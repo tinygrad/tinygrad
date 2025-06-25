@@ -135,9 +135,9 @@ def lower_const(ctx:IndexContext, view:UOp, c:UOp):
 pm_lowerer = PatternMatcher([
   # TODO: remove these hacks
   # hack for old style CONST(VIEW) (now it's just VIEW(CONST))
-  (UPat((Ops.DEFINE_VAR, Ops.CONST), src=(UPat(Ops.VIEW, name="v"),), name="c"), lambda c,v: c.replace(src=()).view(v.arg)),
+  # (UPat((Ops.DEFINE_VAR, Ops.CONST), src=(UPat(Ops.VIEW, name="v"),), name="c"), lambda c,v: c.replace(src=()).view(v.arg)),
   # hack for old style VALID (now it's just VIEW(CONST))
-  (UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v"),)).where(UPat.cvar("c"), UPat(Ops.CONST, arg=0)), lambda c,v: c.replace(src=()).view(v.arg)),
+  # (UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v"),)).where(UPat.cvar("c"), UPat(Ops.CONST, arg=0)), lambda c,v: c.replace(src=()).view(v.arg)),
 
   # reduce/view_const
   (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),

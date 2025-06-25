@@ -43,11 +43,17 @@ class Kernel:
     self.reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE_AXIS]
 
     self.vars: list[Variable] = self.ast.variables()
-    # NOTE: this requires a specific order with the [::-1], this is likely a bug
-    self.bufs: list[UOp] = [x for x in self.ast.toposort() if x.op in GroupOp.Buffer][::-1]
-
+    self.bufs: list[UOp] = []
     # create new shapetrackers inside this kernel, we will permute them
-    self.sts: list[ShapeTracker] = [x.st_arg for x in self.bufs]
+    self.sts: list[ShapeTracker] = []
+    # NOTE: this requires a specific order with the reversed, this is likely a bug
+    for x in reversed(self.ast.toposort()):
+      if x.op is Ops.VIEW and len(x.src)!=0 and x.src[0].op is Ops.CONST:
+        self.bufs.append(x.src[0])
+        self.sts.append(x.arg)
+      elif x.op in GroupOp.Buffer - {Ops.CONST}:
+        self.bufs.append(x)
+        self.sts.append(x.st_arg)
 
     # add the shapetrackers for each reduce
     # we use this to track which axes are reduced in each reduce
@@ -449,8 +455,7 @@ class Kernel:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src)) # noqa: F821
       if op.op in GroupOp.Buffer and op in self.bufs:
         st = self.sts[self.bufs.index(op)]
-        # NOTE: if CONST got masked after applying opts, we create a new VALID
-        if op.op is Ops.CONST and any(v.mask is not None for v in st.views): return op.view(st).valid()
+        if op.op is Ops.CONST: return op.view(st)
         # otherwise we just replace the VIEW source
         return ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
       if op.op is Ops.SINK:
