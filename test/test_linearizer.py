@@ -6,12 +6,12 @@ from dataclasses import replace
 from test.helpers import ast_const
 from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
-from tinygrad.uop.ops import UOp, Ops, GroupOp
+from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
+from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
 from tinygrad.opt.heuristic import hand_coded_optimizations
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
 from tinygrad.dtype import DType, dtypes
@@ -64,6 +64,18 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
     assert tcs == 0, "tensor core opt is incorrectly included"
 
 class TestLinearizer(unittest.TestCase):
+  def test_applied_opts(self):
+    a, b = Tensor.rand(8, 8), Tensor.rand(8, 8)
+    r = a.matmul(b)
+
+    schedule = r.schedule()
+    ast = schedule[-1].ast
+    opts_to_apply = [Opt(OptOps.UPCAST, 0, 4)]
+    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
+    program = get_program(ast, Device[Device.DEFAULT].renderer)
+
+    assert program.ast.arg.applied_opts == program.applied_opts
+
   def test_arg_dedup(self):
     # NOTE: this realize exists because Tensor.numpy calls .contiguous() internally
     # without contiguous folding, rand.to("CPU") and rand.contiguous().to("CPU") are different UOps.
