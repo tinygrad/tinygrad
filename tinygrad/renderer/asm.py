@@ -457,11 +457,11 @@ def x86_load_consts(x:UOp) -> UOp|None:
   if x.op is Ops.LOAD and x.src[0].op is Ops.CONST: return None
   nsrc = []
   for s in x.src:
-    if s.op is Ops.CONST and (dtypes.is_float(s.dtype) or abs(s.arg) > dtypes.max(dtypes.int32)):
-      if s.dtype in (dtypes.int64, dtypes.uint64): s = s.load(dtype=s.dtype)
-      elif s.dtype is dtypes.float16: s = s.load(dtype=dtypes.int16).bitcast(dtypes.float16)
+    if s.op is Ops.CONST:
+      if s.dtype is dtypes.float16: s = s.load(dtype=dtypes.int16).bitcast(dtypes.float16)
       elif s.dtype is dtypes.float32: s = s.load(dtype=dtypes.int32).bitcast(dtypes.float32)
       elif s.dtype is dtypes.float64: s = s.load(dtype=dtypes.int64).bitcast(dtypes.float64)
+      elif x.dtype.count > 1 or abs(s.arg) > dtypes.max(dtypes.int32): s = s.load()
     nsrc.append(s)
   return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
 
@@ -520,8 +520,9 @@ class X86Renderer(AsmRenderer):
   def constraints(self, u:UOp, s:UOp|None=None) -> list[str]:
     if (base:=super().constraints(u, s)): return base
     # constraints for srcs
-    if u.op in (Ops.IDIV, Ops.MOD) and s in self.srcs(u): return [r for r in self.reg_class(s) if r not in ("rdx", "rax")]
-    if u.op in (Ops.SHL, Ops.SHR) and s is self.srcs(u)[1] and s.op != Ops.CONST: return ["rcx"]
+    if u.dtype.count == 1:
+      if u.op in (Ops.IDIV, Ops.MOD) and s in self.srcs(u): return [r for r in self.reg_class(s) if r not in ("rdx", "rax")]
+      if u.op in (Ops.SHL, Ops.SHR) and s is self.srcs(u)[1] and s.op != Ops.CONST: return ["rcx"]
     if s is not None: return self.reg_class(s)
     # constraints for destination
     # abi constraints, stack args are offset by 8
@@ -529,10 +530,11 @@ class X86Renderer(AsmRenderer):
       # on windows, caller reserves 32 bytes for arg registers
       if sys.platform == "win32": return [("rcx", "rdx", "r8", "r9")[i]] if (i:=self.uops.index(u)) < 4 else [f"rbp + {(i-3)*8+40}"]
       return [("rdi", "rsi", "rdx", "rcx", "r8", "r9")[i]] if (i:=self.uops.index(u)) < 6 else [f"rbp + {(i-5)*8+8}"]
-    if u.op is Ops.IDIV: return ["rax"]
-    if u.op is Ops.MOD: return ["rdx"]
-    # float cmp requires nan check, to avoid reserving temp reg we constrain dest to regs that have a high 8 bit portion
-    if u.op in (Ops.CMPLT, Ops.CMPNE) and self.srcs(u)[0].dtype in dtypes.floats: return ["rax", "rbx", "rcx", "rdx"]
+    if u.dtype.count == 1:
+      if u.op is Ops.IDIV: return ["rax"]
+      if u.op is Ops.MOD: return ["rdx"]
+      # float cmp requires nan check, to avoid reserving temp reg we constrain dest to regs that have a high 8 bit portion
+      if u.op in (Ops.CMPLT, Ops.CMPNE) and self.srcs(u)[0].dtype in dtypes.floats: return ["rax", "rbx", "rcx", "rdx"]
     return self.reg_class(u)
   def render_imm(self, imm:str) -> str: return imm
   def render_mem(self, sz:int) -> str: return f"rsp + {sz}"
