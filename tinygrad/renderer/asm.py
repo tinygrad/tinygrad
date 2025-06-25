@@ -350,35 +350,48 @@ x86_reg_map = {**{"rdi": {4: "edi", 2: "di", 1: "dil"}, "rsi": {4: "esi", 2: "si
                 "rcx": {4: "ecx", 2: "cx", 1: "cl"}, "rax": {4: "eax", 2: "ax", 1: "al"}, "rbx": {4: "ebx", 2: "bx", 1: "bl"},
                **{f"r{i}": {4: f"r{i}d", 2: f"r{i}w", 1: f"r{i}b"} for i in range(8,16)}},
                **{f"ymm{i}": {sz: f"xmm{i}" for sz in [16,8,4,2]} for i in range(0,16)}}
-
+# NOTE: because of inconsistent support avx512 instructions aren't used
+# *** x86 scalar ops ***
 x86_mov_ops = {Ops.STORE: "mov", Ops.LOAD: "mov", Ops.ASSIGN: "mov"}
 x86_branch_ops = {Ops.ENDRANGE: "jl", Ops.IF: "je"}
 x86_unsigned_ops = {**x86_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "div", Ops.MOD: "div", Ops.CMPNE: "cmp",
                     Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor", Ops.SHL: "shl", Ops.SHR: "shr", Ops.WHERE: "cmove"}
 x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR: "sar"}
-# NOTE: float16 alus are done in float32, load/store are done with general regs unless vectorized these are just for spill/fill,
-# these are just for local moves
-x86_float16_ops = {Ops.STORE: "movss", Ops.LOAD: "movss", Ops.ASSIGN: "movss"}
-# TODO: switch all float load/store to movd/q instead of moss/sd
-# TODO: add full float16/64 vec support, mainly need to change vectorize/gep
-x86_vec2_float16_ops = {Ops.STORE: "vmovd", Ops.LOAD: "vmovd", Ops.ASSIGN: "movss"}
-x86_vec4_float16_ops = {Ops.STORE: "vmovq", Ops.LOAD: "vmovq", Ops.ASSIGN: "movsd"}
-x86_vec8_float16_ops = {Ops.STORE: "vmovdqa", Ops.LOAD: "vmovdqa", Ops.ASSIGN: "movaps"}
-# NOTE: we use avx instructions for float ops
 x86_float32_ops = {Ops.ADD: "vaddss", Ops.SUB: "vsubss", Ops.MUL: "vmulss", Ops.FDIV: "vdivss", Ops.CMPLT: "vucomiss", Ops.CMPNE: "vucomiss",
                  Ops.SQRT: "sqrtss", Ops.MULACC: "vfmadd213ss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
 x86_float64_ops = {**{k:v[:-1]+"d" for k,v in x86_float32_ops.items()}}
-x86_vec2_float32_ops = {**{k:v[:-2]+"ps" for k,v in x86_float32_ops.items()}, **{k:"v"+v+"q" for k,v in x86_mov_ops.items()}}
-x86_vec4_float32_ops = {**{k:v[:-2]+"ps" for k,v in x86_float32_ops.items()}, **{k:"v"+v+"aps" for k,v in x86_mov_ops.items()}}
-# TODO: this requires ymm registers, must be 32 byte aligned
-x86_vec2_float64_ops = x86_vec4_float64_ops = {**{k:v[:-1]+"d" for k,v in x86_vec4_float32_ops.items()}}
-x86_vec8_float32_ops = x86_vec4_float32_ops
+# NOTE: these are just for local moves
+x86_float16_ops = {Ops.STORE: "movss", Ops.LOAD: "movss", Ops.ASSIGN: "movss"}
+# *** x86 vector ops ***
+x86_vec_mov_sz = {4: {Ops.STORE: "vmovd", Ops.LOAD: "vmovd", Ops.ASSIGN: "movss"},
+                  8: {Ops.STORE: "vmovq", Ops.LOAD: "vmovq", Ops.ASSIGN: "vmovq"},
+                  16: {Ops.STORE: "vmovdqa", Ops.LOAD: "vmovdqa", Ops.ASSIGN: "vmovdqa"},
+                  32: {Ops.STORE: "vmovdqa", Ops.LOAD: "vmovdqa", Ops.ASSIGN: "vmovdqa"}}
+x86_int_suf = {1: "b", 2: "w", 4: "d", 8: "q"}
+x86_uint_sz = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}
+# NOTE: no cmpne and cmplt for int vec cmp
+# NOTE: vec cmove is done at the byte level, x86 doesn't support 2 byte mask granularity
+x86_vec_int_shared = {Ops.WHERE: "vpblendvb", Ops.AND: "vpand", Ops.OR: "vpor"}
+x86_vec_sint_base = {Ops.ADD: "vpadd", Ops.SUB: "vpsub", Ops.MUL: "vpmull", Ops.SHL: "vpsllv", Ops.SHR: "vpsrav", Ops.CMPLT: "vpcmpgt",
+                     Ops.VECTORIZE: "vpbroadcast"}
+x86_vec_uint_base = {**x86_vec_sint_base, Ops.SHR: "vpsrlv"}
+# a vec bool is a mask, always uses the full reg
+x86_vec_bool_ops = {x.vec(l):{**{k:v+"b" for k,v in x86_vec_uint_base.items()}, **x86_vec_int_shared, **x86_vec_mov_sz[16]}
+                    for x in (dtypes.bool,) for l in [4,8,16,32]}
+x86_vec_sint_ops = {dt.vec(l):{**{k:v+x86_int_suf[dt.itemsize] for k,v in x86_vec_sint_base.items()}, **x86_vec_int_shared,
+                               **x86_vec_mov_sz[dt.vec(l).itemsize]} for dt in dtypes.sints for l in [2,4,8,16,32] if 4 <= dt.vec(l).itemsize <= 32}
+x86_vec_uint_ops = {dt.vec(l):{**{k:v+x86_int_suf[dt.itemsize] for k,v in x86_vec_uint_base.items()}, **x86_vec_int_shared,
+                               **x86_vec_mov_sz[dt.vec(l).itemsize]} for dt in dtypes.uints for l in [2,4,8,16,32] if 4 <= dt.vec(l).itemsize <= 32}
+x86_vec_float16_ops = {x.vec(l):{**x86_vec_mov_sz[x.vec(l).itemsize]} for x in (dtypes.float16,) for l in [2,4,8,16]}
+x86_vec_float32_ops = {x.vec(l):{**{k:v[:-2]+"ps" for k,v in x86_float32_ops.items()}, **x86_vec_mov_sz[x.vec(l).itemsize], Ops.CMPLT: "vcmpltps",
+                          Ops.CMPNE: "vcmpneqps", Ops.WHERE: "vblendvps", Ops.VECTORIZE: "vbroadcastss"} for x in (dtypes.float32,) for l in [2,4,8]}
+x86_vec_float64_ops = {x.vec(l):{**{k:v[:-2]+"pd" for k,v in x86_float32_ops.items()}, **x86_vec_mov_sz[x.vec(l).itemsize], Ops.CMPLT: "vcmpltpd",
+                          Ops.CMPNE: "vcmpneqpd", Ops.WHERE: "vblendvpd", Ops.VECTORIZE: "vbroadcastsd"} for x in (dtypes.float64,) for l in [2,4]}
+# final mapping
 x86_ops = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86_signed_ops for x in dtypes.sints},
-          dtypes.float32:x86_float32_ops, dtypes.float64:x86_float64_ops, dtypes.float16:x86_float16_ops,
-          dtypes.float16.vec(2):x86_vec2_float16_ops, dtypes.float16.vec(4):x86_vec4_float16_ops, dtypes.float16.vec(8):x86_vec8_float16_ops,
-          dtypes.float32.vec(2):x86_vec2_float32_ops, dtypes.float32.vec(4):x86_vec4_float32_ops,
-          dtypes.float64.vec(2):x86_vec2_float64_ops, dtypes.float64.vec(4):x86_vec4_float64_ops,
-          dtypes.float32.vec(8):x86_vec8_float32_ops, dtypes.void:x86_branch_ops}
+          dtypes.float16:x86_float16_ops, dtypes.float32:x86_float32_ops, dtypes.float64:x86_float64_ops,
+          **x86_vec_bool_ops, **x86_vec_sint_ops, **x86_vec_uint_ops, **x86_vec_float16_ops, **x86_vec_float32_ops, **x86_vec_float64_ops,
+          dtypes.void:x86_branch_ops}
 
 gep_imm = {0: "0x00", 1: "0x40", 2: "0x80", 3: "0xC0"}
 #bcast_imm = {0: "0x00", 1: "0x55", 2: "0xAA", 3: "0xFF"}
