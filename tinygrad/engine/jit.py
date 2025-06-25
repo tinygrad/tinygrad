@@ -219,7 +219,7 @@ def _find_tensors_recursive(obj, path=()):
 def _prepare_jit_inputs(args, kwargs):
   all_tensors = []
   for i, arg in enumerate(args): all_tensors.extend(_find_tensors_recursive(arg, (i,)))
-  for k, v in kwargs.items(): all_tensors.extend(_find_tensors_recursive(v, (k,)))
+  for k, v in sorted(kwargs.items()): all_tensors.extend(_find_tensors_recursive(v, (k,)))
 
   input_tensors: list[tuple[int|str, Tensor]] = [(name, t) for name, t in all_tensors]
   names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
