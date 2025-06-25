@@ -44,7 +44,7 @@ def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
   if DEBUG >= 6: print_uops(uops)
   src = renderer.render(uops)
 
-  return ProgramSpec(uops[-1].arg.name, src, renderer.device, ast, uops,
+  return ProgramSpec(uops[-1].arg.name, src, renderer.device, modified_ast, uops,
                      global_size=[1,1,1] if renderer.has_local else None, local_size=[1,1,1] if renderer.has_local else None)
 
 # **************** Runners ****************
