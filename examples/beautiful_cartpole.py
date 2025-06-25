@@ -104,7 +104,7 @@ if __name__ == "__main__":
     Rn += [(Tensor(rews[i:]) * discounts[:len(rews)-i]).sum().item() for i in range(len(rews))]
 
     Xn, An, Rn = Xn[-REPLAY_BUFFER_SIZE:], An[-REPLAY_BUFFER_SIZE:], Rn[-REPLAY_BUFFER_SIZE:]
-    X = Xn[0].stack(*Xn[1:]) if len(Xn) > 1 else (Xn[0].unsqueeze(0) if len(Xn) == 1 else Tensor([]))
+    X = Tensor.stack(*Xn) if Xn else Tensor.empty(0, env.observation_space.shape[0])
     A, R = Tensor(An), Tensor(Rn)
 
     # TODO: make this work
