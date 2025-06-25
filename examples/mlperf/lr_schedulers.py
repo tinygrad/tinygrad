@@ -1,4 +1,4 @@
-from tinygrad import Tensor, dtypes
+from tinygrad import dtypes
 from tinygrad.nn.optim import Optimizer
 
 from extra.lr_scheduler import LR_Scheduler
