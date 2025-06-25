@@ -63,7 +63,7 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
   else:
     try:
       program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
-      assert False, "Expected KernelOptError"
+      assert False, "OptOps.TC triggered, expected KernelOptError"
     except KernelOptError: pass
 
 class TestLinearizer(unittest.TestCase):
