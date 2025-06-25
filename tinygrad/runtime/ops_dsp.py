@@ -36,7 +36,7 @@ class DSPRenderer(ClangRenderer):
   device = "DSP"
   supports_float4 = True
   buffer_suffix = " restrict __attribute__((align_value(128)))"
-  kernel_prefix = "__attribute__((noinline)) "
+  kernel_typedef = "__attribute__((noinline)) void"
   pre_matcher = dsp_pm
   extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher
   string_rewrite = dsp_string+ClangRenderer.string_rewrite
@@ -130,7 +130,9 @@ class ClangCompiler(Compiler):
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",  "-mhvx=v65", "-mhvx-length=128b"]
-    try:
+    if getenv("MOCKDSP"):
+      super().__init__(device, MallocAllocator, MockDSPRenderer(), ClangCompiler(None, ["-static"] + compiler_args, 'llvm-objdump'), MockDSPProgram)
+    else:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
       sections = ['text', 'rela.plt', 'rela.dyn', 'plt', 'data', 'bss', 'hash', 'dynamic',
@@ -140,18 +142,14 @@ class DSPDevice(Compiled):
         self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
         self.link_ld.flush()
 
-      from tinygrad.runtime.graph.cpu import CPUGraph
       super().__init__(device, DSPAllocator(self), DSPRenderer(),
-        ClangCompiler("compile_dsp", ["-shared"] + compiler_args + [f"-T{self.link_ld.name}"], 'llvm-objdump'), functools.partial(DSPProgram, self),
-        functools.partial(CPUGraph, self))
+        ClangCompiler("compile_dsp", ["-shared"] + compiler_args + [f"-T{self.link_ld.name}"], 'llvm-objdump'), functools.partial(DSPProgram, self))
       fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
       self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
       ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
 
       self.init_dsp()
       RPCListener(self).start()
-    except FileNotFoundError:
-      super().__init__(device, MallocAllocator, MockDSPRenderer(), ClangCompiler(None, ["-static"] + compiler_args, 'llvm-objdump'), MockDSPProgram)
 
   def open_lib(self, lib):
     self.binded_lib, self.binded_lib_off = lib, 0
