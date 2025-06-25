@@ -1,9 +1,9 @@
 import numpy as np
 import halide as hl
-from tinygrad.helpers import Timing
+from tinygrad.helpers import Timing, getenv
 
 # HL_DEBUG_CODEGEN=1
-N = 1024
+N = getenv("N", 1024)
 
 def gemm_pipeline(gpu=False):
   # ---------------- Vars & Parameters ----------------
@@ -48,47 +48,47 @@ def gemm_pipeline(gpu=False):
     C.update().gpu_tile(i, j, io, jo, ii, ji, GRP_I, GRP_J, hl.TailStrategy.RoundUp)
 
     # 2. Put the reduction (update(0)) in the *same* kernel
-    C.update().reorder(k, ii, ji, io, jo)              # k innermost for locality
-    C.update().gpu_threads(ii, ji)                     # ii/ji become threads
-    C.update().unroll(k, 4)                            # small unroll over K
+    #C.update().reorder(k, ii, ji, io, jo)              # k innermost for locality
+    #C.update().gpu_threads(ii, ji)                     # ii/ji become threads
+    #C.update().unroll(k, 4)                            # small unroll over K
 
   return C, A, B
 
 if __name__ == "__main__":
-    pipe, A, B = gemm_pipeline(gpu=True)
+  pipe, A, B = gemm_pipeline(gpu=True)
 
-    # NOTE: meteal does nothing
-    target = hl.get_host_target().with_feature(hl.TargetFeature.Metal)
+  # NOTE: meteal does nothing
+  target = hl.get_host_target().with_feature(hl.TargetFeature.Metal)
 
-    a_np = np.random.randn(N, N).astype(np.float32)
-    b_np = np.random.randn(N, N).astype(np.float32)
+  a_np = np.random.randn(N, N).astype(np.float32)
+  b_np = np.random.randn(N, N).astype(np.float32)
 
-    # order is correct!
-    a_hal = hl.Buffer(b_np)
-    b_hal = hl.Buffer(a_np)
-    A.set(a_hal)
-    B.set(b_hal)
+  # reverse order is correct!
+  a_hal = hl.Buffer(b_np)
+  b_hal = hl.Buffer(a_np)
+  A.set(a_hal)
+  B.set(b_hal)
 
-    pipe.compile_to_lowered_stmt("/tmp/my_function.html", [A, B], hl.StmtOutputFormat.HTML, target=target)
+  pipe.compile_to_lowered_stmt("/tmp/my_function.html", [A, B], hl.StmtOutputFormat.HTML, target=target)
 
-    c_hal = hl.Buffer(hl.Float(32), [N,N])
-    with Timing("halide gemm "):
-      pipe.realize(c_hal, target)
-      c_hal.copy_to_host()
-      c_out = np.array(c_hal)
-    print(c_out)
+  c_hal = hl.Buffer(hl.Float(32), [N,N])
+  with Timing("halide gemm "):
+    pipe.realize(c_hal, target)
+    c_hal.copy_to_host()
+    c_out = np.array(c_hal)
+  print(c_out)
 
-    # tinygrad gets 60 ms with no BEAM, 20 ms with BEAM on CPU
-    with Timing("halide gemm "):
-      pipe.realize(c_hal, target)
-      c_hal.copy_to_host()
+  # tinygrad gets 60 ms with no BEAM, 20 ms with BEAM on CPU
+  with Timing("halide gemm "):
+    pipe.realize(c_hal, target)
+    c_hal.copy_to_host()
 
-    # Check correctness
-    with Timing("numpy gemm "):
-      ref = a_np @ b_np
-    max_err = np.abs(ref - c_out).max()
-    print("Max absolute error:", max_err)
-    assert max_err < 1e-4, "GEMM result incorrect!"
+  # Check correctness
+  with Timing("numpy gemm "):
+    ref = a_np @ b_np
+  max_err = np.abs(ref - c_out).max()
+  print("Max absolute error:", max_err)
+  assert max_err < 1e-4, "GEMM result incorrect!"
 
-    print("Pipeline ran on", target)
-    print("Success - GEMM Halide-Python output matches NumPy.")
+  print("Pipeline ran on", target)
+  print("Success - GEMM Halide-Python output matches NumPy.")
