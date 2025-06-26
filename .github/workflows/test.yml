@@ -372,10 +372,9 @@ jobs:
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
     - name: Verify extract_dataset output
-      run:
+      run: |
         PYTHONPATH=. python extra/optimization/extract_dataset.py
-        cp /tmp/sops extra/datasets/sops
-        gzip extra/datasets/sops
+        gzip -c /tmp/sops > extra/datasets/sops.gz
         DEBUG=1 MIN_ASTS=100 PYTHONPATH=. python extra/optimization/get_action_space.py
     - name: Repo line count < 14500 lines
       run: MAX_LINE_COUNT=14500 python sz.py
