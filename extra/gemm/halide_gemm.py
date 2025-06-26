@@ -18,10 +18,14 @@ def gemm_pipeline(gpu=False):
   B.dim(1).set_bounds(0, N)
 
   # ---------------- Definition ----------------
-  C = hl.Func("C")
+
+  partial = hl.Func("partial")
   k = hl.RDom([(0, N)])
-  C[i, j] = 0.0
-  C[i, j] += A[i, k] * B[k, j]
+  partial[i, j] = 0.0
+  partial[i, j] += A[i, k] * B[k, j]
+
+  C = hl.Func("C")
+  C[i, j] = partial[i, j]
 
   if not gpu:
     # ---------------- Schedule ----------------
@@ -33,24 +37,16 @@ def gemm_pipeline(gpu=False):
     C.update().tile(i, j, io, jo, ii, ji, TILE_I, TILE_J).fuse(io, jo, io).parallel(io).vectorize(ji, VEC)
   else:
     # ---------------- Schedule ----------------
-    VEC      = 16
-    GRP_I    = 4      # output tile size
-    GRP_J    = 4
+    GRP_I    = 8     # output tile size
+    GRP_J    = 16
 
-    # One Metal thread-group = one 64×64 output tile --------------------------------
+    partial.store_in(hl.MemoryType.Register)
+    partial.update().unroll(k, 4)
+
     io, jo, ii, ji = hl.Var(), hl.Var(), hl.Var(), hl.Var()
-
-    # 1. Place the producer (the pure definition) on the GPU
-    C.compute_root()                                   # make it its own kernel
-    # io/jo → thread-group ids
-    # ii/ji → threads inside group
     C.gpu_tile(i, j, io, jo, ii, ji, GRP_I, GRP_J, hl.TailStrategy.RoundUp)
-    C.update().gpu_tile(i, j, io, jo, ii, ji, GRP_I, GRP_J, hl.TailStrategy.RoundUp)
 
-    # 2. Put the reduction (update(0)) in the *same* kernel
-    #C.update().reorder(k, ii, ji, io, jo)              # k innermost for locality
-    #C.update().gpu_threads(ii, ji)                     # ii/ji become threads
-    #C.update().unroll(k, 4)                            # small unroll over K
+
 
   return C, A, B
 
@@ -70,6 +66,7 @@ if __name__ == "__main__":
   B.set(b_hal)
 
   pipe.compile_to_lowered_stmt("/tmp/my_function.html", [A, B], hl.StmtOutputFormat.HTML, target=target)
+  #exit(0)
 
   c_hal = hl.Buffer(hl.Float(32), [N,N])
   with Timing("halide gemm "):
