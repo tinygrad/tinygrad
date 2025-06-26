@@ -84,14 +84,14 @@ if __name__ == "__main__":
   obs_size = env.observation_space.shape[0]
   Xn, An, Rn = Tensor.empty((REPLAY_BUFFER_SIZE, obs_size)), Tensor.empty((REPLAY_BUFFER_SIZE,)), Tensor.empty((REPLAY_BUFFER_SIZE,))
   buffer_idx, buffer_size = 0, 0
-  
+
   for episode_number in (t:=trange(EPISODES)):
     get_action.reset()   # NOTE: if you don't reset the jit here it captures the wrong model on the first run through
 
     obs = env.reset()[0]
     rews, terminated, truncated = [], False, False
     ep_start_idx = buffer_idx
-    
+
     # NOTE: we don't want to early stop since then the rewards are wrong for the last episode
     while not terminated and not truncated:
       # pick actions
@@ -100,13 +100,13 @@ if __name__ == "__main__":
 
       Xn[buffer_idx] = Tensor(obs)
       An[buffer_idx] = act
-    
+
       obs, rew, terminated, truncated, _ = env.step(act)
       rews.append(float(rew))
-      
+
       buffer_idx = (buffer_idx + 1) % REPLAY_BUFFER_SIZE
       buffer_size = min(buffer_size + 1, REPLAY_BUFFER_SIZE)
-    
+
     steps += len(rews)
 
     discounts = Tensor([DISCOUNT_FACTOR ** i for i in range(len(rews))])
