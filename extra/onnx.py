@@ -67,7 +67,6 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
       if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
       return Tensor(np_buffer, dtype=dtype)
     ret = raw_data.bitcast(dtype).reshape(shape).to(Device.DEFAULT)
-    if shape == (): ret = Tensor(ret.item(), dtype=dtype).reshape(shape)
     return ret
   return Tensor(None)
 
