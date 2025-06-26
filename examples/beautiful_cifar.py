@@ -154,8 +154,7 @@ if __name__ == "__main__":
 
   for epoch in range(math.ceil(hyp['misc']['train_epochs'])):
     gst = time.perf_counter()
-    shuffled_idxs = Tensor.randperm(idx_shape)
-    tidxs = Tensor.arange(idx_shape, dtype='int')[shuffled_idxs][:num_steps_per_epoch*batchsize].reshape(num_steps_per_epoch, batchsize)
+    tidxs = Tensor.arange(idx_shape, dtype='int')[Tensor.randperm(idx_shape)][:num_steps_per_epoch*batchsize].reshape(num_steps_per_epoch, batchsize)
     train_loss:float = 0
     for epoch_step in (t:=trange(num_steps_per_epoch)):
       st = time.perf_counter()
