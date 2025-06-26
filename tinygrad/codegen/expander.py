@@ -112,5 +112,5 @@ def create_gate(root:UOp) -> UOp|None:
 
 migrate_indexing = PatternMatcher([
   # create gate MUST BE BEFORE expander
-  (UPat(Ops.STORE, name="root"), create_gate),
+  (UPat(Ops.STORE, arg="group_store", name="root"), create_gate),
 ])

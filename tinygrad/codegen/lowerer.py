@@ -122,10 +122,13 @@ def lower_load_store(ctx: IndexContext, x: UOp, buf: UOp):
     reduce_input = x.src[1].src[0]
     store_back = reduce_input.op is Ops.LOAD and cast(PtrDType, reduce_input.src[0].dtype).local
   else: store_back = False
+  store_arg = None
   if (not cast(PtrDType, buf.dtype).local) or store_back:
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
-      if oidx is not ridx: valid = valid * oidx.eq(0)
-  return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[1]))
+      if oidx is not ridx:
+        store_arg = "group_store"
+        valid = valid * oidx.eq(0)
+  return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[1]), arg=store_arg)
 
 def lower_const(ctx:IndexContext, view:UOp, c:UOp):
   if all(x.mask is None for x in view.arg.views): return c
