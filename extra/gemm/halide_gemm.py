@@ -19,8 +19,9 @@ def gemm_pipeline(gpu=False):
 
   # ---------------- Definition ----------------
 
-  partial = hl.Func("partial")
   k = hl.RDom([(0, N)])
+
+  partial = hl.Func("partial")
   partial[i, j] = 0.0
   partial[i, j] += A[i, k] * B[k, j]
 
@@ -40,13 +41,11 @@ def gemm_pipeline(gpu=False):
     GRP_I    = 8     # output tile size
     GRP_J    = 16
 
-    partial.store_in(hl.MemoryType.Register)
-    partial.update().unroll(k, 4)
+    #partial.store_in(hl.MemoryType.Register)
+    #partial.update().unroll(k, 4)
 
     io, jo, ii, ji = hl.Var(), hl.Var(), hl.Var(), hl.Var()
     C.gpu_tile(i, j, io, jo, ii, ji, GRP_I, GRP_J, hl.TailStrategy.RoundUp)
-
-
 
   return C, A, B
 
