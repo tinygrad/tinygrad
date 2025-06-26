@@ -273,6 +273,8 @@ async function renderProfiler() {
     // position events on the y axis, stack ones that overlap
     const levels = [];
     v.events.sort((a,b) => (a.ts-st) - (b.ts-st));
+    const levelHeight = baseHeight-padding;
+    const offsetY = baseY-canvasTop+padding/2;
     for (const [i,e] of v.events.entries()) {
       // assign to the first free depth
       const start = e.ts-st;
@@ -284,17 +286,15 @@ async function renderProfiler() {
       } else {
         levels[depth] = end;
       }
-      // offset y by depth
-      const height = baseHeight-padding;
-      const y = (baseY-canvasTop+padding/2)+height*depth;
       if (!nameMap.has(e.name)) {
         const labelParts = parseColors(kernelMap.get(e.name)?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         nameMap.set(e.name, { bgColor:colors[i%colors.length], labelParts });
       }
-      data.push({ x:start, dur:e.dur, name:e.name, height, y, ...nameMap.get(e.name) });
+      // offset y by depth
+      data.push({ x:start, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*depth, ...nameMap.get(e.name) });
     }
     // lastly, adjust device rect by number of levels
-    div.style.height = `${baseHeight*levels.length}px`;
+    div.style.height = `${levelHeight*levels.length+padding}px`;
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
