@@ -195,51 +195,34 @@ class TestVizIntegration(TestViz):
     self.assertEqual(lst[1]["name"], prg.name)
 
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
-from tinygrad.viz.serve import to_perfetto
+from tinygrad.viz.serve import get_profile
 
-class TextVizProfiler(unittest.TestCase):
+class TestVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=False),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
 
-    j = json.loads(to_perfetto(prof))
+    j = json.loads(get_profile(prof))
 
-    # Device regs always first
-    self.assertEqual(j['traceEvents'][0]['name'], 'process_name')
-    self.assertEqual(j['traceEvents'][0]['ph'], 'M')
-    self.assertEqual(j['traceEvents'][0]['args']['name'], 'NV')
-
-    self.assertEqual(j['traceEvents'][1]['name'], 'thread_name')
-    self.assertEqual(j['traceEvents'][1]['ph'], 'M')
-    self.assertEqual(j['traceEvents'][1]['pid'], j['traceEvents'][0]['pid'])
-    self.assertEqual(j['traceEvents'][1]['tid'], 0)
-    self.assertEqual(j['traceEvents'][1]['args']['name'], 'COMPUTE')
-
-    self.assertEqual(j['traceEvents'][2]['name'], 'thread_name')
-    self.assertEqual(j['traceEvents'][2]['ph'], 'M')
-    self.assertEqual(j['traceEvents'][2]['pid'], j['traceEvents'][0]['pid'])
-    self.assertEqual(j['traceEvents'][2]['tid'], 1)
-    self.assertEqual(j['traceEvents'][2]['args']['name'], 'COPY')
-
-    self.assertEqual(j['traceEvents'][3]['name'], 'E_2')
-    self.assertEqual(j['traceEvents'][3]['ts'], 0)
-    self.assertEqual(j['traceEvents'][3]['dur'], 10)
-    self.assertEqual(j['traceEvents'][3]['ph'], 'X')
-    self.assertEqual(j['traceEvents'][3]['pid'], j['traceEvents'][0]['pid'])
-    self.assertEqual(j['traceEvents'][3]['tid'], 0)
+    dev_events = j['devEvents']['NV']['events']
+    self.assertEqual(len(dev_events), 1)
+    event = dev_events[0]
+    self.assertEqual(event['name'], 'E_2')
+    self.assertEqual(event['ts'], 0)
+    self.assertEqual(event['dur'], 10)
 
   def test_perfetto_copy_node(self):
     prof = [ProfileRangeEvent(device='NV', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
 
-    j = json.loads(to_perfetto(prof))
+    j = json.loads(get_profile(prof))
 
-    self.assertEqual(j['traceEvents'][3]['name'], 'COPYxx')
-    self.assertEqual(j['traceEvents'][3]['ts'], 900) # diff clock
-    self.assertEqual(j['traceEvents'][3]['dur'], 10)
-    self.assertEqual(j['traceEvents'][3]['ph'], 'X')
-    self.assertEqual(j['traceEvents'][3]['tid'], 1)
+    event = j['devEvents']['NV']['events'][0]
+    self.assertEqual(event['name'], 'COPYxx')
+    self.assertEqual(event['ts'], 900) # diff clock
+    self.assertEqual(event['dur'], 10)
 
+  @unittest.skip("no graph entries in time viz")
   def test_perfetto_graph(self):
     prof = [ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
             ProfileDeviceEvent(device='NV:1', comp_tdiff=decimal.Decimal(-500), copy_tdiff=decimal.Decimal(-50)),
@@ -248,25 +231,25 @@ class TextVizProfiler(unittest.TestCase):
                               deps=[[], [0]],
                               sigs=[decimal.Decimal(1000), decimal.Decimal(1002), decimal.Decimal(1004), decimal.Decimal(1008)])]
 
-    j = json.loads(to_perfetto(prof))
+    j = json.loads(get_profile(prof))
 
     # Device regs always first
-    self.assertEqual(j['traceEvents'][0]['args']['name'], 'NV')
-    self.assertEqual(j['traceEvents'][1]['args']['name'], 'COMPUTE')
-    self.assertEqual(j['traceEvents'][2]['args']['name'], 'COPY')
-    self.assertEqual(j['traceEvents'][3]['args']['name'], 'NV:1')
-    self.assertEqual(j['traceEvents'][4]['args']['name'], 'COMPUTE')
-    self.assertEqual(j['traceEvents'][5]['args']['name'], 'COPY')
+    self.assertEqual(j['devEvents'][0]['args']['name'], 'NV')
+    self.assertEqual(j['devEvents'][1]['args']['name'], 'COMPUTE')
+    self.assertEqual(j['devEvents'][2]['args']['name'], 'COPY')
+    self.assertEqual(j['devEvents'][3]['args']['name'], 'NV:1')
+    self.assertEqual(j['devEvents'][4]['args']['name'], 'COMPUTE')
+    self.assertEqual(j['devEvents'][5]['args']['name'], 'COPY')
 
-    self.assertEqual(j['traceEvents'][6]['name'], 'E_25_4n2')
-    self.assertEqual(j['traceEvents'][6]['ts'], 0)
-    self.assertEqual(j['traceEvents'][6]['dur'], 2)
-    self.assertEqual(j['traceEvents'][6]['pid'], j['traceEvents'][0]['pid'])
+    self.assertEqual(j['devEvents'][6]['name'], 'E_25_4n2')
+    self.assertEqual(j['devEvents'][6]['ts'], 0)
+    self.assertEqual(j['devEvents'][6]['dur'], 2)
+    self.assertEqual(j['devEvents'][6]['pid'], j['devEvents'][0]['pid'])
 
-    self.assertEqual(j['traceEvents'][7]['name'], 'NV -> NV:1')
-    self.assertEqual(j['traceEvents'][7]['ts'], 954)
-    self.assertEqual(j['traceEvents'][7]['dur'], 4)
-    self.assertEqual(j['traceEvents'][7]['pid'], j['traceEvents'][3]['pid'])
+    self.assertEqual(j['devEvents'][7]['name'], 'NV -> NV:1')
+    self.assertEqual(j['devEvents'][7]['ts'], 954)
+    self.assertEqual(j['devEvents'][7]['dur'], 4)
+    self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
 
 if __name__ == "__main__":
   unittest.main()

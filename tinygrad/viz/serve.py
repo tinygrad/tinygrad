@@ -92,22 +92,21 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
     if not ctx.bottom_up: next_sink = new_sink
 
 # Profiler API
-devices:dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
-def prep_ts(device:str, ts:decimal.Decimal, is_copy): return int(decimal.Decimal(ts) + devices[device][is_copy])
 def get_profile(profile:list[ProfileEvent]):
-  dev_events:dict[str, dict] = {}
+  # start by mapping GPU time offsets
+  devices = {e.device:(e.comp_tdiff,e.copy_tdiff if e.copy_tdiff is not None else e.comp_tdiff) for e in profile if isinstance(e,ProfileDeviceEvent)}
+  def prep_ts(device:str, ts:decimal.Decimal, is_copy=False): return int(decimal.Decimal(ts)+devices[device][is_copy])
+  # get per device events
+  dev_events:dict[str, dict] = {d:{"events":[]} for d in devices}
   min_ts, max_ts = None, None
   for e in tqdm(profile, desc="preparing profile"):
-    if isinstance(e, ProfileDeviceEvent):
-      devices[e.device] = (e.comp_tdiff, e.copy_tdiff if e.copy_tdiff is not None else e.comp_tdiff, len(devices))
-      dev_events[e.device] = {"events":[]}
-    elif isinstance(e, ProfileRangeEvent):
+    if isinstance(e, ProfileRangeEvent):
       st = prep_ts(e.device, e.st, e.is_copy)
       et = st+float(e.en-e.st)
       dev_events[e.device]["events"].append({"name":e.name, "ts":st, "dur":et-st})
       min_ts = min(st, min_ts) if min_ts is not None else st
       max_ts = max(et, max_ts) if max_ts is not None else et
-  return json.dumps({"dev_events":dev_events, "st":min_ts, "et":max_ts}).encode("utf-8")
+  return json.dumps({"devEvents":dev_events, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 # ** HTTP server
 
