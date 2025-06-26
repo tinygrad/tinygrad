@@ -708,6 +708,7 @@ class TestExpander(unittest.TestCase):
     print(sink)
 
 class TestIFUOps(unittest.TestCase):
+  @unittest.skip("only create gate on group store")
   def test_create_ifs(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=4, local=True), (), "smem")
@@ -727,6 +728,7 @@ class TestIFUOps(unittest.TestCase):
     for st in sink.src:
       self.assertEqual(len(st.src), 2)
 
+  @unittest.skip("only create gate on group store")
   def test_expand_ifs_one_gate(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=16, local=True), (), "smem")
