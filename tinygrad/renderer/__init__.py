@@ -153,6 +153,7 @@ class Renderer:
   tensor_cores: list[TensorCore] = []
   pre_matcher: Optional[PatternMatcher] = None
   extra_matcher: Optional[PatternMatcher] = None
+  extra_spec: Optional[PatternMatcher] = None
   code_for_op: dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()

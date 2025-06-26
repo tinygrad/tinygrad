@@ -88,5 +88,5 @@ def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
   """
 
   lst = list(full_rewrite_to_sink(sink, opts, linearizer=True).arg.lst)
-  if __debug__: type_verify(lst)
+  if __debug__: type_verify(lst, opts.extra_spec)
   return lst
