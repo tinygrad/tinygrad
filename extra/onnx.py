@@ -68,7 +68,7 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
       return Tensor(np_buffer, dtype=dtype)
     ret = raw_data.bitcast(dtype).reshape(shape).to(Device.DEFAULT)
     if shape == ():
-      if ret.dtype is dtypes.float16 and sys.version_info < (3, 12): ret = ret.float()
+      if ret.dtype is dtypes.float16 and sys.version_info < (3, 12): ret = ret.cast(dtypes.float32)
       ret = Tensor(ret.item(), dtype=dtype).reshape(shape)
     return ret
   return Tensor(None)
