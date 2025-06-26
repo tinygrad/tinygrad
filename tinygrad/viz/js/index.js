@@ -236,21 +236,8 @@ async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
   if (data != null) return;
-  // fetch and process data
-  const { traceEvents } = await (await fetch("/get_profile")).json();
-  let st, et;
-  const events = new Map();
-  for (const e of traceEvents) {
-    if (e.name === "process_name") events.set(e.pid, { name:e.args.name, events:[] });
-    if (e.ph === "X") {
-      if (st == null) [st, et] = [e.ts, e.ts+e.dur];
-      else {
-        st = Math.min(st, e.ts);
-        et = Math.max(et, e.ts+e.dur);
-      }
-      events.get(e.pid).events.push(e);
-    }
-  }
+  const { dev_events, st, et } = await (await fetch("/get_profile")).json();
+  const events = new Map(Object.entries(dev_events))
   const kernelMap = new Map();
   for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
   // place devices on the y axis and set vertical positions
@@ -266,10 +253,10 @@ async function renderProfiler() {
   for (const [k, v] of events) {
     if (v.events.length === 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
-    div.id = `pid-${k}`;
-    div.innerText = v.name;
+    div.id = k;
+    div.innerText = k;
     div.style.padding = `${padding}px`;
-    const { y:baseY, height:baseHeight } = rect(`#pid-${k}`);
+    const { y:baseY, height:baseHeight } = rect(`#${k}`);
     // position events on the y axis, stack ones that overlap
     const levels = [];
     v.events.sort((a,b) => (a.ts-st) - (b.ts-st));
