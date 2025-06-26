@@ -371,6 +371,13 @@ jobs:
       run: PYTHONPATH="." python test/external/external_uop_gc.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
+    - name: Regen dataset on test_tiny
+      run: |
+        test/external/process_replay/reset.py
+        CAPTURE_PROCESS_REPLAY=1 python test/test_tiny.py TestTiny.test_plus
+        PYTHONPATH=. python extra/optimization/extract_dataset.py
+        gzip -c /tmp/sops > extra/datasets/sops.gz
+        DEBUG=1 MIN_ASTS=1 PYTHONPATH=. python extra/optimization/get_action_space.py
     - name: Repo line count < 14500 lines
       run: MAX_LINE_COUNT=14500 python sz.py
 
