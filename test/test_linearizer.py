@@ -1123,13 +1123,13 @@ class TestLinearizer(unittest.TestCase):
         c = a.conv2d(b, padding=1, dtype=tc.dtype_out)
         realized_ast, real_bufs = helper_realized_ast(c)
 
-        k = Kernel(realized_ast)
-        k.apply_tensor_cores(1, axis=axis, tc_opt=2)
-        k.linearize()
-        assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
-        assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
+        opts_to_apply = [Opt(OptOps.TC, axis, (-1, 2, 1))]
+        realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
+        program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+        assert len([uop for uop in program.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
+        assert len([x for x in program.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
 
-        prg = CompiledRunner(k.to_program())
+        prg = CompiledRunner(program)
         # TODO: support this even if numpy doesn't
         if _to_np_dtype(real_bufs[0].dtype) is None: continue
         real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=_to_np_dtype(real_bufs[0].dtype)).data) # Zero to check that all values are filled
