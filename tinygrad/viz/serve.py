@@ -104,14 +104,15 @@ def get_profile(profile:list[ProfileEvent]):
   devs = {e.device:(e.comp_tdiff, e.copy_tdiff if e.copy_tdiff is not None else e.comp_tdiff) for e in profile if isinstance(e,ProfileDeviceEvent)}
   # map events per device
   dev_events:dict[str, list] = {}
-  min_ts, max_ts = None, None
+  min_ts:int|None = None
+  max_ts:int|None = None
   for device, name, ts, en, is_copy in events_to_json(profile):
     time_diff = devs[device][is_copy]
     st = int(ts+time_diff)
     et = st if en is None else int(en+time_diff)
     dev_events.setdefault(device,[]).append({"name":name, "ts":st, "dur":et-st})
-    min_ts = min(st, min_ts) if min_ts is not None else st
-    max_ts = max(et, max_ts) if max_ts is not None else et
+    if min_ts is None or st < min_ts: min_ts = st
+    if max_ts is None or et > max_ts: max_ts = et
   return json.dumps({"devEvents":dev_events, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 # ** HTTP server
