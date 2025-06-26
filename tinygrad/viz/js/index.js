@@ -251,7 +251,7 @@ async function renderProfiler() {
   const nameMap = new Map();
   data = [];
   for (const [k, v] of events) {
-    if (v.events.length === 0) continue;
+    if (v.length === 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
     div.id = k;
     div.innerText = k;
@@ -259,10 +259,10 @@ async function renderProfiler() {
     const { y:baseY, height:baseHeight } = rect(`#${k}`);
     // position events on the y axis, stack ones that overlap
     const levels = [];
-    v.events.sort((a,b) => (a.ts-st) - (b.ts-st));
+    v.sort((a,b) => (a.ts-st) - (b.ts-st));
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
-    for (const [i,e] of v.events.entries()) {
+    for (const [i,e] of v.entries()) {
       // assign to the first free depth
       const start = e.ts-st;
       const end = start+e.dur;

@@ -112,7 +112,7 @@ def get_profile(profile:list[ProfileEvent]):
     dev_events.setdefault(device,[]).append({"name":name, "ts":st, "dur":et-st})
     min_ts = min(st, min_ts) if min_ts is not None else st
     max_ts = max(et, max_ts) if max_ts is not None else et
-  return json.dumps({"devEvents":dev_events, "min_ts":min_ts, "max_ts":max_ts}).encode("utf-8")
+  return json.dumps({"devEvents":dev_events, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 # ** HTTP server
 
