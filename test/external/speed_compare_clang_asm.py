@@ -2,11 +2,11 @@ from tinygrad import Device
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, colorize_float
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
-from tinygrad.engine.search import bufs_from_lin
+from tinygrad.opt.search import bufs_from_lin
 from tinygrad.runtime.ops_cpu import ClangJITCompiler
 from tinygrad.runtime.ops_x86 import X86Renderer
 from tinygrad.runtime.ops_arm64 import Arm64Renderer
-from tinygrad.codegen.heuristic import hand_coded_optimizations
+from tinygrad.opt.heuristic import hand_coded_optimizations
 import platform
 
 if __name__ == "__main__":
