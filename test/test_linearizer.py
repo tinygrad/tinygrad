@@ -3,6 +3,7 @@ import numpy as np
 import unittest
 from dataclasses import replace
 
+from test.helpers import ast_const
 from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
 from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo
