@@ -447,10 +447,11 @@ class Kernel:
       check(axis in self.smem_promotion and not self.smem_promotion[axis], f"invalid buffer selection for smem promotion ({axis})")
       buffer, buffer_st = get_single_element([(buf, st) for buf, st in zip(self.bufs, self.sts) if buf.src[0].base.arg == axis])
       smem_buffer_st = self.get_smem_buffer_shapetracker(buffer_st)
-      check(self.smem_usage + smem_buffer_st.real_size() * buffer.dtype.itemsize <= self.opts.shared_max, "smem memory use exceeds max memory size")
+      smem_buffer_dtype = buffer.src[0].base.dtype
+      check(self.smem_usage + smem_buffer_st.real_size() * smem_buffer_dtype.itemsize <= self.opts.shared_max, "new buffer exceeds max smem size")
       check(self.group_for_reduces == 0, "can't apply lds with group/grouptop") # TODO: support group/grouptop
       check(all(not buffer_st.axis_is_masked(i) for i in range(len(buffer_st.shape))), "can't apply lds with masked axis") # TODO: support masked axis
-      self.smem_usage += smem_buffer_st.real_size() * buffer.dtype.itemsize
+      self.smem_usage += smem_buffer_st.real_size() * smem_buffer_dtype.itemsize
       self.smem_promotion[axis] = True
 
     if append_opt: self.update_info(applied_opts=self.info.applied_opts + (opt,))
