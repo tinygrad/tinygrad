@@ -236,8 +236,8 @@ async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
   if (data != null) return;
-  const { events:eventsObj, st, et } = await (await fetch("/get_profile")).json();
-  const events = new Map(Object.entries(devEvents))
+  const { devEvents, st, et } = await (await fetch("/get_profile")).json();
+  const events = new Map(Object.entries(devEvents));
   const kernelMap = new Map();
   for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
   // place devices on the y axis and set vertical positions
