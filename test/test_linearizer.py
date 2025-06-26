@@ -234,6 +234,24 @@ class TestLinearizer(unittest.TestCase):
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
 
+  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
+  def test_load_cache_const_bufs(self):
+    # make sure const buffers are differentiated from local and mem buffers
+    ST, DT = ShapeTracker(views=(View(shape=((1,)), strides=(0, 0), offset=0, mask=None, contiguous=False),)).to_uop(), dtypes.int
+    VAL = ast_const(DT, 2, ST.arg.shape)
+    g0, g1 = [UOp(Ops.DEFINE_GLOBAL, DT.ptr(), arg=i) for i in range(2)]
+
+    # data1[0] + VAL
+    a = UOp(Ops.LOAD, DT, (g1.view(ST.arg),)) + VAL
+    # (literal const 1) + VAL
+    b = ast_const(DT, 1, ST.arg.shape) + VAL
+
+    store = UOp(Ops.STORE, src=(g0.view(ST.arg), (a+b)))
+    sink = UOp(Ops.SINK, src=(store,))
+    sink = sink.replace(arg=KernelInfo(opts_to_apply=tuple()))
+    program = get_program(sink, Device[Device.DEFAULT].renderer)
+    assert len(program.uops) <= 10, "too many uops"
+
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.
 
@@ -278,11 +296,12 @@ class TestLinearizer(unittest.TestCase):
   def test_upcast_with_locals(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
-    k = Kernel(r.schedule()[-1].ast)
-    k.apply_opts([Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)])
-    k.linearize()
+    realized_ast = r.schedule()[-1].ast
+    opts_to_apply = [Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
+    program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
 
-    stores = [u for u in k.uops if u.op is Ops.STORE]
+    stores = [u for u in program.uops if u.op is Ops.STORE]
 
     # the first store is to lds and can be upcasted
     assert stores[0].src[-1].dtype == dtypes.float.vec(4)
@@ -306,16 +325,18 @@ class TestLinearizer(unittest.TestCase):
       (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
       if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype):
         a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
-        k = Kernel(a.schedule()[-1].ast)
-        k.linearize()
-        local = [uop for uop in k.uops if uop.op is Ops.DEFINE_ACC]
+        realized_ast = a.schedule()[-1].ast
+        realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
+        program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+        local = [uop for uop in program.uops if uop.op is Ops.DEFINE_ACC]
         assert local[0].dtype == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
-      k = Kernel(c.schedule()[-1].ast)
-      k.linearize()
-      local = [uop for uop in k.uops if uop.op is Ops.DEFINE_ACC]
+      realized_ast = c.schedule()[-1].ast
+      realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
+      program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+      local = [uop for uop in program.uops if uop.op is Ops.DEFINE_ACC]
       assert local[0].dtype == expected_dtype
 
     tests = (
@@ -361,7 +382,6 @@ class TestLinearizer(unittest.TestCase):
       realized_ast = sched[-1].ast
       kernel = Kernel(realized_ast)
       kernel.apply_tensor_cores(1, axis=0, tc_select=-1, tc_opt=2)
-      kernel.linearize()
       prg = kernel.to_program()
       if Device.DEFAULT == "LLVM":
         assert "0x201000" in prg.src
@@ -423,13 +443,13 @@ class TestLinearizer(unittest.TestCase):
         c = a.conv2d(b, padding=1, dtype=tc.dtype_out)
         realized_ast, real_bufs = helper_realized_ast(c)
 
-        k = Kernel(realized_ast)
-        k.apply_tensor_cores(1, axis=axis, tc_opt=2)
-        k.linearize()
-        assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
-        assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
+        opts_to_apply = [Opt(OptOps.TC, axis, (-1, 2, 1))]
+        realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
+        program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+        assert len([uop for uop in program.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
+        assert len([x for x in program.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
 
-        prg = CompiledRunner(k.to_program())
+        prg = CompiledRunner(program)
         # TODO: support this even if numpy doesn't
         if _to_np_dtype(real_bufs[0].dtype) is None: continue
         real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=_to_np_dtype(real_bufs[0].dtype)).data) # Zero to check that all values are filled
@@ -603,9 +623,10 @@ class TestLinearizer(unittest.TestCase):
     sched_copy = sched[:]
     run_schedule(sched)
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
-    lin = Kernel(sched_copy[-1].ast)
-    lin.linearize()
-    assert not any(u.op == Ops.WHERE for u in lin.uops), "found where where where should be folded"
+    realized_ast = sched_copy[-1].ast
+    realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
+    program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+    assert not any(u.op == Ops.WHERE for u in program.uops), "found where where where should be folded"
 
   def test_phi_simplification(self):
     def helper(t, max_ops=0):
@@ -744,13 +765,13 @@ class TestLinearizer(unittest.TestCase):
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
-  def count_float4(k, n=4):
-    return (len([uop for uop in k.uops if uop.op is Ops.LOAD and uop.dtype == dtypes.float.vec(n)]),
-            len([uop for uop in k.uops if uop.op is Ops.STORE and uop.src[-1].dtype == dtypes.float.vec(n)]))
+  def count_float4(uops: list[UOp], n=4):
+    return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype == dtypes.float.vec(n)]),
+            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[-1].dtype == dtypes.float.vec(n)]))
   @staticmethod
-  def count_half4(k):
-    return (len([uop for uop in k.uops if uop.op is Ops.LOAD and uop.dtype == dtypes.half.vec(4)]),
-            len([uop for uop in k.uops if uop.op is Ops.STORE and uop.src[-1].dtype == dtypes.half.vec(4)]))
+  def count_half4(uops: list[UOp]):
+    return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype == dtypes.half.vec(4)]),
+            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[-1].dtype == dtypes.half.vec(4)]))
 
   def test_float4_basic(self):
     a = Tensor.empty(2, 8).realize()
@@ -758,11 +779,12 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opts([Opt(op=OptOps.UPCAST, axis=0, arg=4)])
-    k.linearize()
+    realized_ast = s.ast
+    opts_to_apply = [Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
+    program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
 
-    assert TestFloat4.count_float4(k) == (2, 1)
+    assert TestFloat4.count_float4(program.uops) == (2, 1)
 
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "CPU with AMX upcasts float up to size 16")
   def test_float4_multidim(self):
@@ -779,7 +801,7 @@ class TestFloat4(unittest.TestCase):
     k.local_dims += 1
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (4, 2)
+    assert TestFloat4.count_float4(k.uops) == (4, 2)
 
   @unittest.skipUnless(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "Only CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_amx(self):
@@ -812,11 +834,12 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opts([Opt(op=OptOps.UPCAST, axis=0, arg=4)])
-    k.linearize()
+    realized_ast = s.ast
+    opts_to_apply = [Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
+    program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
 
-    assert TestFloat4.count_float4(k) == (0, 1)
+    assert TestFloat4.count_float4(program.uops) == (0, 1)
 
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load(self):
@@ -833,7 +856,7 @@ class TestFloat4(unittest.TestCase):
     k.local_dims += 1
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (0, 2)
+    assert TestFloat4.count_float4(k.uops) == (0, 2)
 
   @unittest.skipUnless(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "Only CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load_amx(self):
@@ -858,7 +881,7 @@ class TestFloat4(unittest.TestCase):
     expected_output = [(0,3), (0,1), (0,1)]
 
     for i in range(len(sizes)):
-      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
+      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]).uops, excepted_upcast_size[i]) == expected_output[i]
 
   def test_float4_sometimes_unaligned(self):
     a = Tensor.empty(1, 1, 8).realize()
@@ -872,7 +895,7 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (0, 0)
+    assert TestFloat4.count_float4(k.uops) == (0, 0)
 
   def test_float4_multidim_sometimes_unaligned(self):
     a = Tensor.empty(1, 1, 7).realize()
@@ -889,7 +912,7 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.linearize()
 
-    assert TestFloat4.count_float4(k) in {(0,1), (1,1)}
+    assert TestFloat4.count_float4(k.uops) in {(0,1), (1,1)}
 
   def test_float4_noncontiguous(self):
     a = Tensor.empty(4, 2).realize()
@@ -905,7 +928,7 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (0, 0)
+    assert TestFloat4.count_float4(k.uops) == (0, 0)
 
   def test_float4_expand(self):
     a = Tensor.empty(9).realize().shrink(((1, 9),))
@@ -921,7 +944,7 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (0, 1)
+    assert TestFloat4.count_float4(k.uops) == (0, 1)
 
   def test_float4_heterogeneous(self):
     a = Tensor.empty(8).realize()
@@ -936,7 +959,7 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (1, 1)
+    assert TestFloat4.count_float4(k.uops) == (1, 1)
 
   def test_half4_load_unrolled(self):
     # from llama 7B shard 4 gpus
@@ -960,10 +983,10 @@ class TestFloat4(unittest.TestCase):
       ((5, 0), [Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UNROLL, axis=0, arg=4)]),
       ((2, 0), [Opt(op=OptOps.UNROLL, axis=0, arg=4)]),
     ]:
-      k = Kernel(ast)
-      k.apply_opts(opts)
-      k.linearize()
-      count = TestFloat4.count_half4(k)
+      ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
+      program = get_program(ast, Device[Device.DEFAULT].renderer)
+
+      count = TestFloat4.count_half4(program.uops)
       assert count == expected, f"{count=}, {expected=}"
 
   @unittest.skip("this doesn't happen anymore")
@@ -990,10 +1013,9 @@ class TestFloat4(unittest.TestCase):
       (1, [Opt(op=OptOps.UPCAST, axis=2, arg=4)]),
       (4, [Opt(op=OptOps.UPCAST, axis=2, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]),
     ]:
-      k = Kernel(ast)
-      k.apply_opts(opts)
-      k.linearize()
-      count = len([uop for uop in k.uops if uop.op is Ops.DEFINE_ACC and uop.dtype == dtypes.float.vec(4)])
+      ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
+      program = get_program(ast, Device[Device.DEFAULT].renderer)
+      count = len([uop for uop in program.uops if uop.op is Ops.DEFINE_ACC and uop.dtype == dtypes.float.vec(4)])
       assert count == expected, f"{count=}, {expected=}"
 
   @unittest.skip("this doesn't happen anymore")
@@ -1013,10 +1035,9 @@ class TestFloat4(unittest.TestCase):
       (16, [Opt(op=OptOps.LOCAL, axis=1, arg=16), Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=2, arg=2), Opt(op=OptOps.LOCAL, axis=2, arg=3), Opt(op=OptOps.UPCAST, axis=3, arg=4)]),  # noqa: E501
       (4, [Opt(op=OptOps.LOCAL, axis=1, arg=16), Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=2, arg=2)]),
     ]:
-      k = Kernel(ast)
-      k.apply_opts(opts)
-      k.linearize()
-      count = len([uop for uop in k.uops if uop.op is Ops.DEFINE_ACC and uop.dtype == dtypes.float.vec(2)])
+      ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
+      program = get_program(ast, Device[Device.DEFAULT].renderer)
+      count = len([uop for uop in program.uops if uop.op is Ops.DEFINE_ACC and uop.dtype == dtypes.float.vec(2)])
       assert count == expected, f"{count=}, {expected=}"
 
 class TestHandCodedOpts(unittest.TestCase):
@@ -1068,7 +1089,6 @@ class TestHandCodedOpts(unittest.TestCase):
       for si in backward_schedule:
         k = Kernel(si.ast)
         k.apply_opts(hand_coded_optimizations(k))
-        k.linearize()
         if len(k.bufs) < 20: continue  # not a tile transform kernel
         # heuristic number to make sure that at least some upcasts but not too many upcasts are being done
         assert 6 <= prod(k.full_shape[k.shape_len - k.upcasted:k.shape_len]) <= 216
