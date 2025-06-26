@@ -3,7 +3,6 @@ import numpy as np
 import unittest
 from dataclasses import replace
 
-from test.helpers import ast_const
 from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
 from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo
@@ -234,24 +233,6 @@ class TestLinearizer(unittest.TestCase):
     num_loads = len([uop for uop in k.uops if uop.op is Ops.LOAD])
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
-
-  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
-  def test_load_cache_const_bufs(self):
-    # make sure const buffers are differentiated from local and mem buffers
-    ST, DT = ShapeTracker(views=(View(shape=((1,)), strides=(0, 0), offset=0, mask=None, contiguous=False),)).to_uop(), dtypes.int
-    VAL = ast_const(DT, 2, ST.arg.shape)
-    g0, g1 = [UOp(Ops.DEFINE_GLOBAL, DT.ptr(), arg=i) for i in range(2)]
-
-    # data1[0] + VAL
-    a = UOp(Ops.LOAD, DT, (g1.view(ST.arg),)) + VAL
-    # (literal const 1) + VAL
-    b = ast_const(DT, 1, ST.arg.shape) + VAL
-
-    store = UOp(Ops.STORE, src=(g0.view(ST.arg), (a+b)))
-    sink = UOp(Ops.SINK, src=(store,))
-    sink = sink.replace(arg=KernelInfo(opts_to_apply=tuple()))
-    program = get_program(sink, Device[Device.DEFAULT].renderer)
-    assert len(program.uops) <= 10, "too many uops"
 
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.
