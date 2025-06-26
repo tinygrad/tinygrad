@@ -135,14 +135,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
+    from tinygrad.shape.shapetracker import ShapeTracker
     # VIEW and MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
+    # CONST with a DEVICE has a shape of ()
+    if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
     # BufferOps and ASSIGN flow ShapeTracker from a direct edge
     if self.op in GroupOp.Buffer: return views[0] if (views:=[x.st for x in self.src if x.op is Ops.VIEW]) else None
     if self.op is Ops.ASSIGN: return self.src[0].st
 
-    from tinygrad.shape.shapetracker import ShapeTracker
     # BUFFER/BUFFER_VIEW and KERNEL only have a size
     if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
     if self.op is Ops.KERNEL: return ShapeTracker.from_shape((self.arg.ast.size,))
@@ -253,7 +255,18 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
   def r(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
-    return self if len(axis) == 0 else UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
+    if len(axis) == 0: return self
+    # move any non reduce axis before the first reduce axis
+    move_early = [i for i in range(axis[0], len(self.shape)) if i not in axis and resolve(self.shape[i] != 1)]
+    if move_early:
+      permute = tuple(range(axis[0])) + tuple(move_early) + tuple([i for i in range(axis[0], len(self.shape)) if i not in move_early])
+      ret = self.permute(permute)
+      new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
+      assert len(axis) == len(new_axis)
+    else:
+      ret, new_axis = self, axis
+    ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, new_axis))
+    return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
@@ -466,7 +479,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if self.op is Ops.SHR and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] >> t[2], t[1] >> t[2]
       if self.op is Ops.MOD:
         if s1_vmin > 0: return (0, s1_vmax-1) if s0_vmin >= 0 else (-(s1_vmax-1), 0) if s0_vmax <= 0 else (-(s1_vmax-1), s1_vmax-1)
-        if s1_vmax < 0: return (0, -s1_vmax-1) if s0_vmin >= 0 else (-(-s1_vmax-1), 0) if s0_vmax <= 0 else (-(-s1_vmax-1), -s1_vmax-1)
+        if s1_vmax < 0: return (0, -s1_vmin-1) if s0_vmin >= 0 else (-(-s1_vmin-1), 0) if s0_vmax <= 0 else (-(-s1_vmin-1), -s1_vmin-1)
       if self.op is Ops.IDIV:
         assert isinstance(s0_vmin, int) and isinstance(s0_vmax, int) and isinstance(s1_vmin, int) and isinstance(s1_vmax, int)
         if (c:=s1_vmin) == s1_vmax:  # s1 is a const
@@ -519,6 +532,7 @@ class KernelInfo:
   upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to UNROLL)
   dont_use_locals: bool = False # don't use local indexing
   applied_opts: tuple = tuple()
+  opts_to_apply: tuple|None = None
   @property
   def function_name(self): return to_function_name(self.name)
 

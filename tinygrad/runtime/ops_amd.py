@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.uop.ops import sint
-from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
+from tinygrad.device import Compiled, ProfileEvent, BufferSpec, PROFILE
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, all_same, flatten, DEBUG
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
@@ -16,7 +16,7 @@ from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, setup_pci_bars
-from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, MAP_FIXED, MAP_NORESERVE
+from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -31,7 +31,7 @@ class AMDSignal(HCQSignal):
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
-    if time_spent_waiting_ms > 2000 and self.timeline_for_device is not None: self.timeline_for_device.dev_iface.sleep(200)
+    if time_spent_waiting_ms > 2000 and self.timeline_for_device is not None: self.timeline_for_device.iface.sleep(200)
 
 class AMDComputeQueue(HWQueue):
   def __init__(self, dev:AMDDevice):
@@ -437,7 +437,7 @@ class AMDProgram(HCQProgram):
     self.private_segment_size = image[rodata_entry+4:rodata_entry+8].cast("I")[0]
     self.kernargs_segment_size = image[rodata_entry+8:rodata_entry+12].cast("I")[0]
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
-    if lds_size > (self.dev.dev_iface.props['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requested: group_segment_size")
+    if lds_size > (self.dev.iface.props['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requested: group_segment_size")
 
     # Ensure scratch size
     self.dev._ensure_has_local_memory(self.private_segment_size)
@@ -466,18 +466,18 @@ class AMDProgram(HCQProgram):
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
-    super().__init__(dev, copy_bufs=getattr(dev.dev_iface, 'copy_bufs', None), max_copyout_size=0x1000 if dev.is_usb() else None)
+    super().__init__(dev, copy_bufs=getattr(dev.iface, 'copy_bufs', None), max_copyout_size=0x1000 if dev.is_usb() else None)
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    return self.dev.dev_iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
+    return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
 
   def _free(self, opaque, options:BufferSpec):
     try:
       self.dev.synchronize()
-      self.dev.dev_iface.free(opaque)
+      self.dev.iface.free(opaque)
     except AttributeError: pass
 
-  def map(self, buf:HCQBuffer): self.dev.dev_iface.map(buf._base if buf._base is not None else buf)
+  def map(self, buf:HCQBuffer): self.dev.iface.map(buf._base if buf._base is not None else buf)
 
 @dataclass(frozen=True)
 class ProfileSQTTEvent(ProfileEvent): device:str; se:int; blob:bytes; itrace:bool # noqa: E702
@@ -503,10 +503,10 @@ class AMDQueueDesc:
     for write_ptr in self.write_ptrs: write_ptr[0] = self.put_value
 
     # Ensure all prior writes are visible to the GPU.
-    if CPUProgram.atomic_lib is not None: CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
+    System.memory_barrier()
 
     # Flush hdp if queue is in dev mem.
-    if dev.is_am() and not dev.is_usb(): dev.dev_iface.dev_impl.gmc.flush_hdp()
+    if dev.is_am() and not dev.is_usb(): dev.iface.dev_impl.gmc.flush_hdp()
     for doorbell in self.doorbells: doorbell[0] = self.put_value
 
 class KFDIface:
@@ -673,7 +673,7 @@ class PCIIface(PCIIfaceBase):
       self.dev_impl.ih.interrupt_handler()
 
   def on_device_hang(self):
-    for d in self.dev.devices: d.dev_iface.dev_impl.gmc.on_interrupt()
+    for d in self.dev.devices: d.iface.dev_impl.gmc.on_interrupt()
     raise RuntimeError("Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()
@@ -723,8 +723,8 @@ class AMDDevice(HCQCompiled):
   signal_pages: ClassVar[list[HCQBuffer]] = []
   signal_pool: ClassVar[list[HCQBuffer]] = []
 
-  def is_am(self) -> bool: return isinstance(self.dev_iface, (PCIIface, USBIface))
-  def is_usb(self) -> bool: return isinstance(self.dev_iface, USBIface)
+  def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface))
+  def is_usb(self) -> bool: return isinstance(self.iface, USBIface)
 
   def _select_iface(self):
     if len(nm:=getenv("AMD_IFACE", "")) > 0: return getattr(sys.modules[__name__], f"{nm.upper()}Iface")(self, self.device_id)
@@ -737,16 +737,16 @@ class AMDDevice(HCQCompiled):
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.dev_iface = self._select_iface()
-    self.target:tuple[int, ...] = ((trgt:=self.dev_iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
+    self.iface = self._select_iface()
+    self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
     if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")
     if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {self.arch}")
 
-    self.max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] // self.dev_iface.props.get('num_xcc', 1) - 1
-    self.max_wave_id = (self.dev_iface.props['max_waves_per_simd'] * self.dev_iface.props['simd_per_cu'] - 1) if self.target >= (10,1,0) else \
-                       (min((self.max_cu_id+1)*40, self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine'] * 512) - 1)
-    self.xccs = self.dev_iface.props.get('num_xcc', 1) if getenv("XCCS", 1) else 1
+    self.max_cu_id = self.iface.props['simd_count'] // self.iface.props['simd_per_cu'] // self.iface.props.get('num_xcc', 1) - 1
+    self.max_wave_id = (self.iface.props['max_waves_per_simd'] * self.iface.props['simd_per_cu'] - 1) if self.target >= (10,1,0) else \
+                       (min((self.max_cu_id+1)*40, self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine'] * 512) - 1)
+    self.xccs = self.iface.props.get('num_xcc', 1) if getenv("XCCS", 1) else 1
     self.has_scratch_base_registers = self.target >= (11,0,0) or self.target == (9,4,2) # this is what llvm refers to as "architected flat scratch"
 
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
@@ -761,20 +761,20 @@ class AMDDevice(HCQCompiled):
 
     self.soc = importlib.import_module(f"tinygrad.runtime.autogen.am.{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[self.target[0]])}")
     self.pm4 = importlib.import_module(f"tinygrad.runtime.autogen.am.pm4_{'nv' if self.target[0] >= 10 else 'soc15'}")
-    self.sdma = import_module('sdma', min(self.dev_iface.ip_versions[am.SDMA0_HWIP], (6, 0, 0)))
-    self.gc = AMDIP('gc', self.dev_iface.ip_versions[am.GC_HWIP], self.dev_iface.ip_offsets[am.GC_HWIP])
+    self.sdma = import_module('sdma', min(self.iface.ip_versions[am.SDMA0_HWIP], (6, 0, 0)))
+    self.gc = AMDIP('gc', self.iface.ip_versions[am.GC_HWIP], self.iface.ip_offsets[am.GC_HWIP])
 
     # Define the regCOMPUTE_CURRENT_LOGIC_XCC_ID register, which is missing from the asic_regs files.
     if self.target[:2] == (9,4): self.regCOMPUTE_CURRENT_LOGIC_XCC_ID = AMDReg("regCOMPUTE_CURRENT_LOGIC_XCC_ID", 0xe25, 0, {}, self.gc.bases)
 
     nbio_name = 'nbio' if self.target[0] < 12 else 'nbif'
     nbio_pad = (0,) if self.target[0] == 9 else ()
-    self.nbio = AMDIP(nbio_name, self.dev_iface.ip_versions[am.NBIF_HWIP], nbio_pad+self.dev_iface.ip_offsets[am.NBIF_HWIP])
+    self.nbio = AMDIP(nbio_name, self.iface.ip_versions[am.NBIF_HWIP], nbio_pad+self.iface.ip_offsets[am.NBIF_HWIP])
 
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x2000 if self.is_usb() else 0x800000, eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
-    max_copy_size = 0x40000000 if self.dev_iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
+    max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else 0x800000)
 
     super().__init__(device, AMDAllocator(self), AMDLLVMRenderer(self.arch) if getenv("AMD_LLVM", 1) else AMDRenderer(self.arch),
@@ -802,21 +802,21 @@ class AMDDevice(HCQCompiled):
                            f"ppfeaturemask={(ppfeaturemask&~0x8000):#x} (current {ppfeaturemask=:#x} & ~PP_GFXOFF_MASK) to amdgpu module parameters\n"
                            "For more information read https://github.com/tinygrad/tinygrad/blob/master/extra/sqtt/README.md")
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
-      SQTT_NUM = self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine']
+      SQTT_NUM = self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine']
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(cpu_access=True, nolru=True)) for _ in range(SQTT_NUM)]
       self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", 2) # -1 enable all, 0 disable all, >0 bitmask for where to enable instruction tracing
       self.cmd_id = 0
       AMDComputeQueue(self).sqtt_start(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
-    ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
-    gart = self.dev_iface.alloc(0x100, uncached=True, cpu_access=True)
+    ring = self.iface.alloc(ring_size, uncached=True, cpu_access=True)
+    gart = self.iface.alloc(0x100, uncached=True, cpu_access=True)
 
-    cwsr_buffer_size = round_up((ctx_save_restore_size + debug_memory_size) * self.dev_iface.props.get('num_xcc', 1), mmap.PAGESIZE)
-    cwsr_buffer = self.dev_iface.alloc(cwsr_buffer_size) if ctx_save_restore_size else None
-    eop_buffer = self.dev_iface.alloc(eop_buffer_size) if eop_buffer_size else None
+    cwsr_buffer_size = round_up((ctx_save_restore_size + debug_memory_size) * self.iface.props.get('num_xcc', 1), mmap.PAGESIZE)
+    cwsr_buffer = self.iface.alloc(cwsr_buffer_size) if ctx_save_restore_size else None
+    eop_buffer = self.iface.alloc(eop_buffer_size) if eop_buffer_size else None
 
-    return AMDQueueDesc.multi(*(self.dev_iface.create_queue(queue_type, ring, gart, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer, xcc_id=xcc_id,
+    return AMDQueueDesc.multi(*(self.iface.create_queue(queue_type, ring, gart, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer, xcc_id=xcc_id,
                                                             ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size)
                                 for xcc_id in range(self.xccs if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE else 1)))
 
@@ -826,10 +826,10 @@ class AMDDevice(HCQCompiled):
     # <gfx103 requires alignment of 1024, >=gfx11 requires 256
     wave_scratch_len = round_up(((self.max_wave_id + 1) * required), 256 if self.target >= (11,0,0) else 1024)
 
-    scratch_size = (self.max_cu_id+1)*self.dev_iface.props['max_slots_scratch_cu']*wave_scratch_len # per xcc
+    scratch_size = (self.max_cu_id+1)*self.iface.props['max_slots_scratch_cu']*wave_scratch_len # per xcc
     self.scratch, ok = self._realloc(getattr(self, 'scratch', None), scratch_size*self.xccs)
     if ok:
-      engines = self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine']
+      engines = self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine']
       waves = wave_scratch_len // (256 if self.target >= (11,0,0) else 1024)
       # >=gfx11 wavesize is per SE
       wavesize = scratch_size // ((wave_scratch_len * engines) if self.target >= (11,0,0) else wave_scratch_len)
@@ -840,7 +840,7 @@ class AMDDevice(HCQCompiled):
     AMDComputeQueue(self).memory_barrier().signal(self.timeline_signal, self.next_timeline()).submit(self)
     self.synchronize()
 
-  def on_device_hang(self): self.dev_iface.on_device_hang()
+  def on_device_hang(self): self.iface.on_device_hang()
 
   def _at_profile_finalize(self):
     if self.sqtt_enabled:
@@ -862,4 +862,4 @@ class AMDDevice(HCQCompiled):
   def finalize(self):
     try: self.synchronize() # Try to finalize device in any case.
     except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
-    if hasattr(self.dev_iface, 'device_fini'): self.dev_iface.device_fini()
+    if hasattr(self.iface, 'device_fini'): self.iface.device_fini()

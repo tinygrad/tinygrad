@@ -5,7 +5,7 @@ from typing import cast
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint, sint_to_uop
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
+from tinygrad.helpers import all_int, prod, partition, flatten
 from tinygrad.shape.view import get_contraction
 
 # ***** indexing *****
@@ -122,21 +122,26 @@ def lower_load_store(ctx: IndexContext, x: UOp, buf: UOp):
     reduce_input = x.src[1].src[0]
     store_back = reduce_input.op is Ops.LOAD and cast(PtrDType, reduce_input.src[0].dtype).local
   else: store_back = False
-  # NOTE: If we're storing the reduced value back into each thread, need to zero-out the reduced axes
-  if store_back: idx, _ = x.st_arg.to_indexed_uops([u.const_like(0) if u in x.src[1].src else u for u in ctx.idxs])
   if (not cast(PtrDType, buf.dtype).local) or store_back:
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
       if oidx is not ridx: valid = valid * oidx.eq(0)
   return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[1]))
 
-def lower_const(x:UOp):
-  assert all(v.mask is None for v in unwrap(x.st).views), f"VIEW in CONST/DEFINE_VAR source must be unmasked, got {x.st}"
-  return x.replace(src=())
+def lower_const(ctx:IndexContext, view:UOp, c:UOp):
+  if all(x.mask is None for x in view.arg.views): return c
+  _, valid = view.arg.to_indexed_uops(ctx.idxs)
+  return valid.where(c, c.const_like(0))
 
 pm_lowerer = PatternMatcher([
+  # TODO: remove these hacks
+  # hack for old style CONST(VIEW) (now it's just VIEW(CONST))
+  (UPat((Ops.DEFINE_VAR, Ops.CONST), src=(UPat(Ops.VIEW, name="v"),), name="c"), lambda c,v: c.replace(src=()).view(v.arg)),
+  # hack for old style VALID (now it's just VIEW(CONST))
+  (UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v"),)).where(UPat.cvar("c"), UPat(Ops.CONST, arg=0)), lambda c,v: c.replace(src=()).view(v.arg)),
+
+  # reduce/view_const
   (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
-  (UPat((Ops.CONST, Ops.DEFINE_VAR), src=(UPat(Ops.VIEW),), name="x"), lower_const),
-  (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
+  (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),), name="view"), lower_const),
   # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat.var("buf").view(),), allow_any_len=True, name="x"), lower_load_store),
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),

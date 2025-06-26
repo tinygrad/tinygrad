@@ -336,7 +336,7 @@ jobs:
       run: |
         pip3 install --upgrade --force-reinstall ruff==0.11.0
         python3 -m ruff check .
-        python3 -m ruff check examples/mlperf/model_train.py --ignore E501
+        python3 -m ruff check examples/mlperf/ --ignore E501
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
@@ -371,8 +371,8 @@ jobs:
       run: PYTHONPATH="." python test/external/external_uop_gc.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
-    - name: Repo line count < 14000 lines
-      run: MAX_LINE_COUNT=14000 python sz.py
+    - name: Repo line count < 14500 lines
+      run: MAX_LINE_COUNT=14500 python sz.py
 
   fuzzing:
     name: Fuzzing
