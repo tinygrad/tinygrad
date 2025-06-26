@@ -6,12 +6,12 @@ from dataclasses import replace
 from test.helpers import ast_const
 from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
-from tinygrad.uop.ops import UOp, Ops, GroupOp
+from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
+from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
 from tinygrad.opt.heuristic import hand_coded_optimizations
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
 from tinygrad.dtype import DType, dtypes
@@ -51,17 +51,20 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
   r = a.matmul(b, dtype=dtype_out)
   sched = r.schedule()
   realized_ast = sched[-1].ast
-  k = Kernel(realized_ast)
-  k.apply_tensor_cores(1, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
-  k.linearize()
-  wmmas = len([uop for uop in k.uops if uop.op is Ops.WMMA])
-  tcs = len([x for x in k.applied_opts if x.op is OptOps.TC])
+  opts_to_apply = [Opt(OptOps.TC, axis, (tc_select, tc_opt, 1))]
+  realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
+
   if ensure_triggered:
+    program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+    wmmas = len([uop for uop in program.uops if uop.op is Ops.WMMA])
+    tcs = len([x for x in program.applied_opts if x.op is OptOps.TC])
     assert wmmas > 0, "tensor core not triggered"
     assert tcs == 1, "tensor core opt not included"
   else:
-    assert wmmas == 0, "tensor core is incorrectly triggered"
-    assert tcs == 0, "tensor core opt is incorrectly included"
+    try:
+      program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+      assert False, "OptOps.TC triggered, expected KernelOptError"
+    except KernelOptError: pass
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
