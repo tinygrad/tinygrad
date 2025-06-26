@@ -294,7 +294,7 @@ async function renderProfiler() {
       data.push({ x:start, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*depth, ...nameMap.get(e.name) });
     }
     // lastly, adjust device rect by number of levels
-    div.style.height = `${levelHeight*levels.length}px`;
+    div.style.height = `${levelHeight*levels.length+padding}px`;
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
