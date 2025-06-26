@@ -1442,13 +1442,13 @@ class TestLinearizer(unittest.TestCase):
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
-  def count_float4(k, n=4):
-    return (len([uop for uop in k.uops if uop.op is Ops.LOAD and uop.dtype == dtypes.float.vec(n)]),
-            len([uop for uop in k.uops if uop.op is Ops.STORE and uop.src[-1].dtype == dtypes.float.vec(n)]))
+  def count_float4(uops: list[UOp], n=4):
+    return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype == dtypes.float.vec(n)]),
+            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[-1].dtype == dtypes.float.vec(n)]))
   @staticmethod
-  def count_half4(k):
-    return (len([uop for uop in k.uops if uop.op is Ops.LOAD and uop.dtype == dtypes.half.vec(4)]),
-            len([uop for uop in k.uops if uop.op is Ops.STORE and uop.src[-1].dtype == dtypes.half.vec(4)]))
+  def count_half4(uops: list[UOp]):
+    return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype == dtypes.half.vec(4)]),
+            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[-1].dtype == dtypes.half.vec(4)]))
 
   def test_float4_basic(self):
     a = Tensor.empty(2, 8).realize()
@@ -1460,7 +1460,7 @@ class TestFloat4(unittest.TestCase):
     k.apply_opts([Opt(op=OptOps.UPCAST, axis=0, arg=4)])
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (2, 1)
+    assert TestFloat4.count_float4(k.uops) == (2, 1)
 
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "CPU with AMX upcasts float up to size 16")
   def test_float4_multidim(self):
@@ -1477,7 +1477,7 @@ class TestFloat4(unittest.TestCase):
     k.local_dims += 1
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (4, 2)
+    assert TestFloat4.count_float4(k.uops) == (4, 2)
 
   @unittest.skipUnless(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "Only CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_amx(self):
@@ -1514,7 +1514,7 @@ class TestFloat4(unittest.TestCase):
     k.apply_opts([Opt(op=OptOps.UPCAST, axis=0, arg=4)])
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (0, 1)
+    assert TestFloat4.count_float4(k.uops) == (0, 1)
 
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load(self):
@@ -1531,7 +1531,7 @@ class TestFloat4(unittest.TestCase):
     k.local_dims += 1
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (0, 2)
+    assert TestFloat4.count_float4(k.uops) == (0, 2)
 
   @unittest.skipUnless(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "Only CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load_amx(self):
@@ -1570,7 +1570,7 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (0, 0)
+    assert TestFloat4.count_float4(k.uops) == (0, 0)
 
   def test_float4_multidim_sometimes_unaligned(self):
     a = Tensor.empty(1, 1, 7).realize()
@@ -1587,7 +1587,7 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.linearize()
 
-    assert TestFloat4.count_float4(k) in {(0,1), (1,1)}
+    assert TestFloat4.count_float4(k.uops) in {(0,1), (1,1)}
 
   def test_float4_noncontiguous(self):
     a = Tensor.empty(4, 2).realize()
@@ -1603,7 +1603,7 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (0, 0)
+    assert TestFloat4.count_float4(k.uops) == (0, 0)
 
   def test_float4_expand(self):
     a = Tensor.empty(9).realize().shrink(((1, 9),))
@@ -1619,7 +1619,7 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (0, 1)
+    assert TestFloat4.count_float4(k.uops) == (0, 1)
 
   def test_float4_heterogeneous(self):
     a = Tensor.empty(8).realize()
@@ -1634,7 +1634,7 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.linearize()
 
-    assert TestFloat4.count_float4(k) == (1, 1)
+    assert TestFloat4.count_float4(k.uops) == (1, 1)
 
   def test_half4_load_unrolled(self):
     # from llama 7B shard 4 gpus
@@ -1661,7 +1661,7 @@ class TestFloat4(unittest.TestCase):
       k = Kernel(ast)
       k.apply_opts(opts)
       k.linearize()
-      count = TestFloat4.count_half4(k)
+      count = TestFloat4.count_half4(k.uops)
       assert count == expected, f"{count=}, {expected=}"
 
   @unittest.skip("this doesn't happen anymore")
