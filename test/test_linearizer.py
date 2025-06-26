@@ -928,9 +928,9 @@ class TestLinearizer(unittest.TestCase):
 
     store = UOp(Ops.STORE, src=(g0.view(ST.arg), (a+b)))
     sink = UOp(Ops.SINK, src=(store,))
-    lin = Kernel(sink)
-    lin.linearize()
-    assert len(lin.uops) <= 10, "too many uops"
+    sink = sink.replace(arg=KernelInfo(opts_to_apply=tuple()))
+    program = get_program(sink, Device[Device.DEFAULT].renderer)
+    assert len(program.uops) <= 10, "too many uops"
 
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.
@@ -976,11 +976,12 @@ class TestLinearizer(unittest.TestCase):
   def test_upcast_with_locals(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
-    k = Kernel(r.schedule()[-1].ast)
-    k.apply_opts([Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)])
-    k.linearize()
+    realized_ast = r.schedule()[-1].ast
+    opts_to_apply = [Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
+    program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
 
-    stores = [u for u in k.uops if u.op is Ops.STORE]
+    stores = [u for u in program.uops if u.op is Ops.STORE]
 
     # the first store is to lds and can be upcasted
     assert stores[0].src[-1].dtype == dtypes.float.vec(4)
@@ -1004,16 +1005,18 @@ class TestLinearizer(unittest.TestCase):
       (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
       if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype):
         a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
-        k = Kernel(a.schedule()[-1].ast)
-        k.linearize()
-        local = [uop for uop in k.uops if uop.op is Ops.DEFINE_ACC]
+        realized_ast = a.schedule()[-1].ast
+        realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
+        program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+        local = [uop for uop in program.uops if uop.op is Ops.DEFINE_ACC]
         assert local[0].dtype == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
-      k = Kernel(c.schedule()[-1].ast)
-      k.linearize()
-      local = [uop for uop in k.uops if uop.op is Ops.DEFINE_ACC]
+      realized_ast = c.schedule()[-1].ast
+      realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
+      program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+      local = [uop for uop in program.uops if uop.op is Ops.DEFINE_ACC]
       assert local[0].dtype == expected_dtype
 
     tests = (
@@ -1059,7 +1062,6 @@ class TestLinearizer(unittest.TestCase):
       realized_ast = sched[-1].ast
       kernel = Kernel(realized_ast)
       kernel.apply_tensor_cores(1, axis=0, tc_select=-1, tc_opt=2)
-      kernel.linearize()
       prg = kernel.to_program()
       if Device.DEFAULT == "LLVM":
         assert "0x201000" in prg.src
@@ -1301,9 +1303,10 @@ class TestLinearizer(unittest.TestCase):
     sched_copy = sched[:]
     run_schedule(sched)
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
-    lin = Kernel(sched_copy[-1].ast)
-    lin.linearize()
-    assert not any(u.op == Ops.WHERE for u in lin.uops), "found where where where should be folded"
+    realized_ast = sched_copy[-1].ast
+    realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
+    program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+    assert not any(u.op == Ops.WHERE for u in program.uops), "found where where where should be folded"
 
   def test_phi_simplification(self):
     def helper(t, max_ops=0):
