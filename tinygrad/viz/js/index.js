@@ -335,7 +335,7 @@ async function renderProfiler() {
       const width = scale(e.x+e.dur)-x;
       ctx.fillStyle = e.bgColor;
       ctx.fillRect(x, e.y, width, e.height);
-      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, name:e.name, dur:e.dur })
+      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:kernelMap.get(e.name)?.i, tooltipText:formatTime(e.dur) });
       // add labels
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
@@ -385,18 +385,18 @@ async function renderProfiler() {
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect != null) return setCtxWithHistory(kernelMap.get(foundRect.name)?.i);
+    if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref);
   });
 
   const tooltip = document.body.appendChild(document.createElement("div"));
   tooltip.id = "tooltip";
   canvas.addEventListener("mousemove", e => {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect != null) {
+    if (foundRect?.tooltipText != null) {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      tooltip.textContent = formatTime(foundRect.dur);
+      tooltip.textContent = foundRect.tooltipText;
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => tooltip.style.display = "none");
