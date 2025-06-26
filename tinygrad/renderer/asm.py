@@ -44,20 +44,25 @@ asm_matcher = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat())), UPat.var("val"), UPat.var("gate"))),
    lambda buf,idx,val,gate: UOp.store(buf.index(idx), val, gate)),
   # cast to pointer is a noop
-  (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) or x.src[0].dtype == dtypes.void else None),
+  (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
   # can't cast from float16 to ints/float64 directly and vice versa
-  (UPat(Ops.CAST, (*dtypes.ints, dtypes.float64), (UPat(dtype=dtypes.float16),), name="c"), lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
-  (UPat(Ops.CAST, dtypes.float16, (UPat(dtype=(*dtypes.ints, dtypes.float64)),), name="c"), lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
+  (UPat.var("y", dtypes.float16).cast((dtypes.float64,)+dtypes.ints, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
+  (UPat.var("y", (dtypes.float64,)+dtypes.ints).cast(dtypes.float16, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
   # can't cast from float to int8/16 directly and vice versa
-  (UPat(Ops.CAST, dtype=(dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16), src=(UPat(dtype=dtypes.floats),), name="c"),
-    lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
-  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=(dtypes.bool, dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16)),), name="c"),
-    lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
-  # some cast/bitcast are noops
-  (UPat(Ops.CAST, dtypes.ints, src=(UPat.var("y", dtypes.ints + (dtypes.bool,)),), name="x"),
-   lambda x,y: UOp(Ops.NOOP, x.dtype, x.src) if x.dtype.itemsize <= y.dtype.itemsize or y.dtype is dtypes.uint32 else None),
-  (UPat(Ops.BITCAST, dtypes.ints, src=(UPat.var("y", dtypes.ints),), name="x"),
-   lambda x,y: UOp(Ops.NOOP, x.dtype, x.src) if x.dtype.itemsize == y.dtype.itemsize else None),
+  (UPat.var("y", dtypes.floats).cast((dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16), name="x"),
+   lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
+  (UPat.var("y", (dtypes.bool, dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16)).cast(dtypes.floats, name="x"),
+   lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
+  # scalar cast to <= int, or zero extending int32 is a noop
+  (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints+(dtypes.bool,), name="x"),
+   lambda y,x: x.replace(op=Ops.NOOP) if (x.dtype.itemsize <= y.dtype.itemsize or y.dtype is dtypes.uint32) and y.dtype.count == 1 else None),
+  # vector cast between signed and unsigned is a noop
+  (UPat.var("y", dtypes.ints).cast(dtypes.ints, name="x"),
+   lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize == y.dtype.itemsize and y.dtype.count > 1 else None),
+  # bitcast between signed and unsigned is a noop
+  (UPat.var("y", dtypes.ints).bitcast(dtypes.ints).named("x"), lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize == y.dtype.itemsize else None),
+  # bitcast between vectors is a noop
+  (UPat.var("y").bitcast().named("x"), lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.count > 1 and y.dtype.count > 1 else None),
   # TODO: fold gep in store with vpextrd and arg is imm
   # a gep in a vectorize is folded and its arg is the imm of the instruction
   #(UPat(Ops.VECTORIZE, name="x"),
