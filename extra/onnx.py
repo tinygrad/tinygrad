@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from typing import Any, Sequence, cast, Literal, Callable
-import dataclasses, functools, io, math, types, warnings
+import dataclasses, functools, io, math, types, warnings, sys
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
@@ -47,6 +47,9 @@ def attribute_parse(onnx_attribute: AttributeProto):
   return attribute_types[onnx_attribute.type](onnx_attribute)
 
 def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
+  def build_const_tensor(t, dtype, shape):
+    if t.dtype is dtypes.float16 and sys.version_info < (3, 12): t = t.float()
+    return Tensor(t.item(), dtype=dtype).reshape(shape)
   if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
   dtype, shape = dtype_parse(onnx_tensor.data_type, "buffer parse"), tuple(onnx_tensor.dims)
   data = None
@@ -56,7 +59,7 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   elif len(onnx_tensor.double_data): data = onnx_tensor.double_data
   elif len(onnx_tensor.uint64_data): data = onnx_tensor.uint64_data
   if isinstance(data, Tensor):
-    if len(data) == 1: return Tensor(data.tolist()[0], dtype=dtype).reshape(shape)
+    if len(data) == 1: return build_const_tensor(data, dtype, shape)
     return data.cast(dtype).reshape(shape).to(Device.DEFAULT)
   if has_field(onnx_tensor, "raw_data"):
     raw_data = onnx_tensor.raw_data
@@ -67,7 +70,7 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
       if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
       return Tensor(np_buffer, dtype=dtype)
     ret = raw_data.bitcast(dtype).reshape(shape).to(Device.DEFAULT)
-    if shape == (): ret = Tensor(ret.item(), dtype=dtype).reshape(shape)
+    if shape == (): ret = build_const_tensor(ret, dtype, shape)
     return ret
   return Tensor(None)
 
