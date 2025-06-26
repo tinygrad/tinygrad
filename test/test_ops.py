@@ -2918,11 +2918,18 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(x,y.clip(0,1),
                                                                                                         pos_weight=torch.tensor(pos_weight)),
                                        lambda x,y: x.binary_crossentropy_logits(y.clip(0,1),pos_weight=Tensor(pos_weight)))
-  def test_cross_entropy(self):
-    helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y),
-                                       lambda x,y: x.cross_entropy(y))
-    helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, torch.argmax(y, dim=1)),
-                                       lambda x,y: x.cross_entropy(y.argmax(axis=1)), forward_only=True)
+  def test_cross_entropy_class_probabilities(self):
+    helper_test_op([(32,), (32,)], lambda x,y: torch.nn.functional.cross_entropy(x, y), lambda x,y: x.cross_entropy(y))
+    helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y), lambda x,y: x.cross_entropy(y))
+    helper_test_op([(32,4,4,4), (32,4,4,4)], lambda x,y: torch.nn.functional.cross_entropy(x, y), lambda x,y: x.cross_entropy(y))
+
+  def test_cross_entropy_class_indices(self):
+    classes = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
+    helper_test_op([(32,10)], lambda x: torch.nn.functional.cross_entropy(x, torch.tensor(classes)),
+                              lambda x: x.cross_entropy(Tensor(classes)))
+    self.helper_test_exception([(32,10), (32,1)], lambda x,y: torch.nn.functional.cross_entropy(x, y),
+                                                  lambda x,y: x.cross_entropy(y), expected=(AssertionError, RuntimeError))
+
   def test_cross_entropy_reductions(self):
     for r in ("mean", "sum", "none"):
       helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, reduction=r),
@@ -2934,6 +2941,9 @@ class TestOps(unittest.TestCase):
     for ls in (0., 0.3, 0.7, 1.):
       helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, label_smoothing=ls),
                                          lambda x,y: x.cross_entropy(y, label_smoothing=ls))
+      classes = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
+      helper_test_op([(32,10)], lambda x: torch.nn.functional.cross_entropy(x, torch.tensor(classes), label_smoothing=ls),
+                                lambda x: x.cross_entropy(Tensor(classes), label_smoothing=ls))
 
   def test_nll_loss(self):
     helper_test_op([(32,10), (32)],
