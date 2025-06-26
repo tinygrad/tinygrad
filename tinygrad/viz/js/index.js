@@ -283,15 +283,14 @@ async function renderProfiler() {
       if (depth === -1) {
         depth = levels.length;
         levels.push(end);
-      } else {
-        levels[depth] = end;
-      }
+      } else levels[depth] = end;
+      const kernel = kernelMap.get(e.name);
       if (!nameMap.has(e.name)) {
-        const labelParts = parseColors(kernelMap.get(e.name)?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-        nameMap.set(e.name, { bgColor:colors[i%colors.length], labelParts });
+        const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+        nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
       }
       // offset y by depth
-      data.push({ x:start, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*depth, ...nameMap.get(e.name) });
+      data.push({ x:start, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*depth, kernel, ...nameMap.get(e.name) });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${levelHeight*levels.length+padding}px`;
@@ -333,16 +332,16 @@ async function renderProfiler() {
       // zoom only changes x and width
       const x = scale(e.x);
       const width = scale(e.x+e.dur)-x;
-      ctx.fillStyle = e.bgColor;
+      ctx.fillStyle = e.fillColor;
       ctx.fillRect(x, e.y, width, e.height);
-      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, name:e.name, dur:e.dur })
-      // add labels
+      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.kernel?.i, tooltipText:formatTime(e.dur) });
+      // add label
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       let [labelX, labelWidth] = [x+2, 0];
       const labelY = e.y+e.height/2;
-      for (const [i,l] of e.labelParts.entries()) {
-        if (labelWidth+l.width+(i===e.labelParts.length-1 ? 0 : ellipsisWidth)+2 > width) {
+      for (const [i,l] of e.label.entries()) {
+        if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
           if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
           break;
         }
@@ -385,18 +384,18 @@ async function renderProfiler() {
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect != null) return setCtxWithHistory(kernelMap.get(foundRect.name)?.i);
+    if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref);
   });
 
   const tooltip = document.body.appendChild(document.createElement("div"));
   tooltip.id = "tooltip";
   canvas.addEventListener("mousemove", e => {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect != null) {
+    if (foundRect?.tooltipText != null) {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      tooltip.textContent = formatTime(foundRect.dur);
+      tooltip.textContent = foundRect.tooltipText;
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => tooltip.style.display = "none");
