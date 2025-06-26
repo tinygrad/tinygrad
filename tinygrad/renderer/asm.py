@@ -1,10 +1,11 @@
+import struct, copy, sys
 from typing import cast
+from functools import cached_property
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat
 from tinygrad.renderer import Renderer
+from tinygrad.codegen.devectorizer import no_vectorized_alu
 from tinygrad import dtypes
 from tinygrad.dtype import DType, PtrDType, truncate
-from functools import cached_property
-import struct, copy, sys
 
 def to_hex(x, dt:DType) -> str:
   if dt is dtypes.float64: return hex(struct.unpack('<Q', struct.pack('<d', x))[0])
@@ -490,6 +491,20 @@ x86_matcher = asm_matcher + PatternMatcher([
   (UPat((Ops.WHERE, Ops.IDIV, Ops.MOD, Ops.STORE), name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.cvar("c"), UPat()), name="x"), lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
+  # src must be in vector register for vectors, # TODO: do vpinsb/w/d/q instead
+  (UPat.var("y", dtypes.ints).broadcast(name="x"), lambda y,x: x.replace(src=(y.bitcast(dtypes.float),) * x.dtype.count)),
+  # boolean vector is a mask, each element all 1s or 0s
+  (UPat.var("y", dtypes.bool).broadcast(name="x"), lambda y,x: x.replace(src=((y.cast(dtypes.int32) * -1).bitcast(dtypes.float),) * x.dtype.count)),
+  # no vector idiv
+  (UPat(Ops.IDIV, name="alu"), no_vectorized_alu),
+  # no cmpne for vec int
+  (UPat.var("x", (dtypes.bool,)+dtypes.ints) != UPat.var("y"), lambda x,y: (x < y) | (y < x) if x.dtype.count > 1 else None),
+  # vector boolean is a mask of same size as src
+  (UPat(GroupOp.ALU, dtypes.bool, name="x"), lambda x: x.replace(dtype=x86_uint_sz[x.src[0].dtype.scalar().itemsize].vec(x.dtype.count))
+   if x.dtype.count > 1 and x.dtype.itemsize != x.src[0].dtype.itemsize else None),
+  # mask of vector conditional move must have the same size as the other operands
+  (UPat.var("m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: m.cast_vec(x86_uint_sz[a.dtype.scalar().itemsize]).where(a, b)
+   if a.dtype.count > 1 and m.dtype.itemsize != a.dtype.itemsize else None),
   # we use general registers to load/store the 2 bytes of float16
   (UPat(Ops.LOAD, dtypes.float16, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"),
    lambda x,idx,alt,mask: idx.load(alt.bitcast(dtypes.int16), mask, dtype=dtypes.int16).bitcast(x.dtype)),
