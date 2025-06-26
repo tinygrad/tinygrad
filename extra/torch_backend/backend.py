@@ -369,6 +369,7 @@ decomps = [
   aten.threshold,
   aten.nll_loss_forward,
   aten.nll_loss_backward,
+  aten.nll_loss2d_backward,
   # AttributeError: 'int' object has no attribute '_broadcasted'
   aten.sigmoid_backward,
   aten.tanh_backward,
