@@ -43,6 +43,8 @@ asm_matcher = PatternMatcher([
    lambda buf,idx,gate,alt: UOp(Ops.LOAD, alt.dtype, (buf.index(idx), alt, gate))),
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat())), UPat.var("val"), UPat.var("gate"))),
    lambda buf,idx,val,gate: UOp.store(buf.index(idx), val, gate)),
+  # rewrite cast to bool to CMPNE 0
+  (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
   # cast to pointer is a noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
   # can't cast from float16 to ints/float64 directly and vice versa
@@ -54,7 +56,7 @@ asm_matcher = PatternMatcher([
   (UPat.var("y", (dtypes.bool, dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16)).cast(dtypes.floats, name="x"),
    lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
   # scalar cast to <= int, or zero extending int32 is a noop
-  (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints+(dtypes.bool,), name="x"),
+  (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
    lambda y,x: x.replace(op=Ops.NOOP) if (x.dtype.itemsize <= y.dtype.itemsize or y.dtype is dtypes.uint32) and y.dtype.count == 1 else None),
   # vector cast between signed and unsigned is a noop
   (UPat.var("y", dtypes.ints).cast(dtypes.ints, name="x"),
@@ -67,8 +69,6 @@ asm_matcher = PatternMatcher([
   # a gep in a vectorize is folded and its arg is the imm of the instruction
   #(UPat(Ops.VECTORIZE, name="x"),
   # lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.replace(op=Ops.NOOP) if s.op is Ops.GEP else s for s in x.src)) != x.src else None),
-  # rewrite cast to bool to CMPNE 0
-  (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
   # rewrite RECIP to FDIV
   (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
   # rewrite MAX to CMPLT + WHERE
@@ -505,19 +505,18 @@ x86_matcher = asm_matcher + PatternMatcher([
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
    lambda x: UOp(x.op, x.dtype, tuple(s.cast(dtypes.float32) for s in x.src)) if any(s.dtype is dtypes.float16 for s in x.src) else None),
   # can't bitcast from uint16/int16 to float16 directly and vice versa
-  (UPat(Ops.BITCAST, (dtypes.uint16, dtypes.int16), (UPat(dtype=dtypes.float16),), name="c"), lambda c: c.src[0].bitcast(dtypes.uint).cast(c.dtype)),
-  (UPat(Ops.BITCAST, dtypes.float16, (UPat(dtype=(dtypes.uint16, dtypes.int16)),), name="c"), lambda c: c.src[0].cast(dtypes.uint).bitcast(c.dtype)),
-  # casting uint32 to float requires 64 bit register (float cast op assumes signed integers)
-  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint32),), name="c"), lambda c: c.src[0].cast(dtypes.uint64).cast(c.dtype)),
+  (UPat.var("y", dtypes.float16).bitcast((dtypes.uint16, dtypes.int16)).named("x"), lambda y,x: y.bitcast(dtypes.uint32).cast(x.dtype)),
+  (UPat.var("y", (dtypes.uint16, dtypes.int16)).bitcast(dtypes.float16).named("x"), lambda y,x: y.cast(dtypes.uint32).bitcast(x.dtype)),
+  # int float casts assume signed int so unsigned int32 gets casted to int64 first
+  (UPat.var("y", dtypes.uint32).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int64).cast(x.dtype)),
   # casting uint64 to float requires special handling if msb is 1
   (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint64),), name="c"),
    lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
                                                c.src[0].cast(dtypes.int64).cast(c.dtype))),
-  # 2 operand imul and cmov don't work with 8bit registers
-  (UPat(Ops.MUL, dtype=(dtypes.uint8, dtypes.int8), name="x"),
-    lambda x: UOp(Ops.MUL, dtype=dtypes.int16, src=(x.src[0].cast(dtypes.int16), x.src[1].cast(dtypes.int16))).cast(x.dtype)),
-  (UPat(Ops.WHERE, dtype=(dtypes.bool, dtypes.uint8, dtypes.int8), name="x"),
-    lambda x: UOp(Ops.WHERE, dtype=dtypes.int16, src=(x.src[0], x.src[1].cast(dtypes.int16), x.src[2].cast(dtypes.int16))).cast(x.dtype)),
+  # no int8 mul or cmove, casted to int16
+  (UPat.var("a", (dtypes.uint8, dtypes.int8)) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
+  (UPat.var("m").where(UPat.var("a", (dtypes.bool, dtypes.uint8, dtypes.int8)), UPat.var("b")),
+   lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype)),
   # mulacc only available for floats
   (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
 ])
