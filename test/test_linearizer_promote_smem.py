@@ -5,11 +5,11 @@ import unittest
 from dataclasses import replace
 
 from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel
-from tinygrad.uop.ops import Ops, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, KernelInfo
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import CompiledRunner, get_program
-from tinygrad.helpers import Context, CI
+from tinygrad.helpers import Context, CI, unwrap
 from tinygrad.dtype import dtypes, PtrDType
 from test.test_linearizer import helper_realized_ast
 
@@ -37,8 +37,10 @@ def helper_promote_smem_allclose(
   CompiledRunner(replace(program, device=Device.DEFAULT)).exec(bufs)
 
   np.testing.assert_allclose(bufs[0].numpy().reshape(r.shape), desired, atol=atol, rtol=rtol)
-  local_bufs = [uop for uop in program.uops if uop.op is Ops.DEFINE_LOCAL and "smem" in uop.arg]
-  global_bufs = [uop for uop in program.uops if uop.op is Ops.DEFINE_GLOBAL]
+
+  uops: list[UOp] = unwrap(program.uops)
+  local_bufs = [uop for uop in uops if uop.op is Ops.DEFINE_LOCAL and "smem" in uop.arg]
+  global_bufs = [uop for uop in uops if uop.op is Ops.DEFINE_GLOBAL]
 
   assert len(local_bufs) == len(desired_bufs_sizes), f"Expected exactly {len(desired_bufs_sizes)} local buffers, got {len(local_bufs)}"
   for i, (buf, sz) in enumerate(desired_bufs_sizes):
