@@ -173,7 +173,7 @@ class Kernel:
 
   def get_smem_buffer_shapetracker(self, buf_st:ShapeTracker) -> ShapeTracker:
     shape: list[sint] = []
-    for i, st in enumerate(buf_st.real_strides()):
+    for i, st in enumerate(buf_st.real_strides(True)):
       if i < self.global_dims or self.first_reduce <= i < self.first_upcast or st == 0: shape.append(1)
       else: shape.append(buf_st.shape[i])
     return ShapeTracker.from_shape(tuple(shape))
@@ -445,7 +445,7 @@ class Kernel:
       check(padded, "nothing was padded")
     elif opt.op is OptOps.PROMOTE_SMEM:
       check(axis in self.smem_promotion and not self.smem_promotion[axis], f"invalid buffer selection for smem promotion ({axis})")
-      buffer, buffer_st = get_single_element([(buf, st) for buf, st in zip(self.membufs, self.sts) if buf.arg == axis])
+      buffer, buffer_st = get_single_element([(buf, st) for buf, st in zip(self.bufs, self.sts) if buf.src[0].base.arg == axis])
       smem_buffer_st = self.get_smem_buffer_shapetracker(buffer_st)
       check(self.smem_usage + smem_buffer_st.real_size() * buffer.dtype.itemsize <= self.opts.shared_max, "smem memory use exceeds max memory size")
       check(self.group_for_reduces == 0, "can't apply lds with group/grouptop") # TODO: support group/grouptop
