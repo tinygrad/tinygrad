@@ -289,7 +289,7 @@ async function renderProfiler() {
       const kernel = kernelMap.get(e.name);
       if (!nameMap.has(e.name)) {
         const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-        nameMap.set(e.name, { bgColor:colors[i%colors.length], label });
+        nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
       }
       // offset y by depth
       data.push({ x:start, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*depth, kernel, ...nameMap.get(e.name) });
@@ -334,7 +334,7 @@ async function renderProfiler() {
       // zoom only changes x and width
       const x = scale(e.x);
       const width = scale(e.x+e.dur)-x;
-      ctx.fillStyle = e.bgColor;
+      ctx.fillStyle = e.fillColor;
       ctx.fillRect(x, e.y, width, e.height);
       rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.kernel?.i, tooltipText:formatTime(e.dur) });
       // add label
