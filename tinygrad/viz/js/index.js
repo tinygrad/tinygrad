@@ -283,9 +283,7 @@ async function renderProfiler() {
       if (depth === -1) {
         depth = levels.length;
         levels.push(end);
-      } else {
-        levels[depth] = end;
-      }
+      } else levels[depth] = end;
       const kernel = kernelMap.get(e.name);
       if (!nameMap.has(e.name)) {
         const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
