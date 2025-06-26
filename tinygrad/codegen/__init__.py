@@ -72,10 +72,10 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # return the list (with optional linearizer)
   return ret + (rewrites_for_linearizer if linearizer else [])
 
-def full_rewrite_to_sink(sink:UOp, opts:Renderer|None=None, linearizer:bool=False) -> UOp:
-  return apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer(), linearizer))
+def full_rewrite_to_sink(sink:UOp, opts:Renderer=Renderer(), linearizer:bool=False) -> UOp:
+  return apply_rewrites(sink, get_rewrites_for_renderer(opts, linearizer))
 
-def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
+def full_rewrite(sink:UOp, opts:Renderer=Renderer()) -> list[UOp]:
   """
   Function to transform the Kernel UOp graph into a linearized program.
 
