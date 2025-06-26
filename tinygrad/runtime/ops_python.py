@@ -45,7 +45,10 @@ class PythonProgram:
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
-        if uop is Ops.STORE:
+        if uop is Ops.STORE and dtype != dtypes.void:
+          for j in range(len(inp[0])): inp[0][j] = inp[1][j]
+          ul[i] = inp[0]
+        elif uop is Ops.STORE:
           assert len(inp) == 2, "expected store is ([(memory, offset, gate)], [value])"
           for j,val in enumerate(inp[1] if dtp[1].count > 1 else [inp[1]]):
             for (m,o,g),v in zip(inp[0], val):
@@ -107,9 +110,6 @@ class PythonProgram:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
           else:
             ul[i] = load(inp)
-        elif uop is Ops.ASSIGN:
-          for j in range(len(inp[0])): inp[0][j] = inp[1][j]
-          ul[i] = inp[0]
         elif uop is Ops.GEP: ul[i] = inp[0][get_single_element(arg)]
         elif uop is Ops.WMMA:
           # here are the models for the WMMA instruction on the different hardware
