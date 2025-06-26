@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver, functools
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
 from tinygrad.renderer import ProgramSpec
-from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent
+from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
 from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
@@ -92,21 +92,27 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
     if not ctx.bottom_up: next_sink = new_sink
 
 # Profiler API
+
+def events_to_json(profile:list[ProfileEvent]):
+  for e in profile:
+    if isinstance(e, ProfileRangeEvent): yield (e.device, e.name, e.st, e.en, e.is_copy)
+    if isinstance(e, ProfileGraphEvent):
+      for ent in e.ents: yield (ent.device, ent.name, e.sigs[ent.st_id], e.sigs[ent.en_id], ent.is_copy)
+
 def get_profile(profile:list[ProfileEvent]):
-  # start by mapping GPU time offsets
-  devices = {e.device:(e.comp_tdiff,e.copy_tdiff if e.copy_tdiff is not None else e.comp_tdiff) for e in profile if isinstance(e,ProfileDeviceEvent)}
-  def prep_ts(device:str, ts:decimal.Decimal, is_copy=False): return int(decimal.Decimal(ts)+devices[device][is_copy])
-  # get per device events
-  dev_events:dict[str, dict] = {d:{"events":[]} for d in devices}
+  # start by getting the time diffs
+  devs = {e.device:(e.comp_tdiff, e.copy_tdiff if e.copy_tdiff is not None else e.comp_tdiff) for e in profile if isinstance(e,ProfileDeviceEvent)}
+  # map events per device
+  dev_events:dict[str, list] = {}
   min_ts, max_ts = None, None
-  for e in tqdm(profile, desc="preparing profile"):
-    if isinstance(e, ProfileRangeEvent):
-      st = prep_ts(e.device, e.st, e.is_copy)
-      et = st+float(e.en-e.st)
-      dev_events[e.device]["events"].append({"name":e.name, "ts":st, "dur":et-st})
-      min_ts = min(st, min_ts) if min_ts is not None else st
-      max_ts = max(et, max_ts) if max_ts is not None else et
-  return json.dumps({"devEvents":dev_events, "st":min_ts, "et":max_ts}).encode("utf-8")
+  for device, name, ts, en, is_copy in events_to_json(profile):
+    time_diff = devs[device][is_copy]
+    st = int(ts+time_diff)
+    et = st if en is None else int(en+time_diff)
+    dev_events.setdefault(device,[]).append({"name":name, "ts":st, "dur":et-st})
+    min_ts = min(st, min_ts) if min_ts is not None else st
+    max_ts = max(et, max_ts) if max_ts is not None else et
+  return json.dumps({"devEvents":dev_events, "min_ts":min_ts, "max_ts":max_ts}).encode("utf-8")
 
 # ** HTTP server
 

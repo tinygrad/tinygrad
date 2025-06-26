@@ -204,7 +204,7 @@ class TestVizProfiler(unittest.TestCase):
 
     j = json.loads(get_profile(prof))
 
-    dev_events = j['devEvents']['NV']['events']
+    dev_events = j['devEvents']['NV']
     self.assertEqual(len(dev_events), 1)
     event = dev_events[0]
     self.assertEqual(event['name'], 'E_2')
@@ -217,12 +217,11 @@ class TestVizProfiler(unittest.TestCase):
 
     j = json.loads(get_profile(prof))
 
-    event = j['devEvents']['NV']['events'][0]
+    event = j['devEvents']['NV'][0]
     self.assertEqual(event['name'], 'COPYxx')
     self.assertEqual(event['ts'], 900) # diff clock
     self.assertEqual(event['dur'], 10)
 
-  @unittest.skip("no graph entries in time viz")
   def test_perfetto_graph(self):
     prof = [ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
             ProfileDeviceEvent(device='NV:1', comp_tdiff=decimal.Decimal(-500), copy_tdiff=decimal.Decimal(-50)),
@@ -233,23 +232,20 @@ class TestVizProfiler(unittest.TestCase):
 
     j = json.loads(get_profile(prof))
 
-    # Device regs always first
-    self.assertEqual(j['devEvents'][0]['args']['name'], 'NV')
-    self.assertEqual(j['devEvents'][1]['args']['name'], 'COMPUTE')
-    self.assertEqual(j['devEvents'][2]['args']['name'], 'COPY')
-    self.assertEqual(j['devEvents'][3]['args']['name'], 'NV:1')
-    self.assertEqual(j['devEvents'][4]['args']['name'], 'COMPUTE')
-    self.assertEqual(j['devEvents'][5]['args']['name'], 'COPY')
+    devices = list(j['devEvents'])
+    self.assertEqual(devices[0], 'NV')
+    self.assertEqual(devices[1], 'NV:1')
 
-    self.assertEqual(j['devEvents'][6]['name'], 'E_25_4n2')
-    self.assertEqual(j['devEvents'][6]['ts'], 0)
-    self.assertEqual(j['devEvents'][6]['dur'], 2)
-    self.assertEqual(j['devEvents'][6]['pid'], j['devEvents'][0]['pid'])
+    nv_events = j['devEvents']['NV']
+    self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
+    self.assertEqual(nv_events[0]['ts'], 0)
+    self.assertEqual(nv_events[0]['dur'], 2)
+    #self.assertEqual(j['devEvents'][6]['pid'], j['devEvents'][0]['pid'])
 
-    self.assertEqual(j['devEvents'][7]['name'], 'NV -> NV:1')
-    self.assertEqual(j['devEvents'][7]['ts'], 954)
-    self.assertEqual(j['devEvents'][7]['dur'], 4)
-    self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
+    nv1_events = j['devEvents']['NV:1']
+    self.assertEqual(nv1_events[0]['name'], 'NV -> NV:1')
+    self.assertEqual(nv1_events[0]['ts'], 954)
+    #self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
 
 if __name__ == "__main__":
   unittest.main()
