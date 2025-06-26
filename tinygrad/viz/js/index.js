@@ -288,8 +288,8 @@ async function renderProfiler() {
       }
       const kernel = kernelMap.get(e.name);
       if (!nameMap.has(e.name)) {
-        const labelParts = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-        nameMap.set(e.name, { bgColor:colors[i%colors.length], labelParts });
+        const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+        nameMap.set(e.name, { bgColor:colors[i%colors.length], label });
       }
       // offset y by depth
       data.push({ x:start, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*depth, kernel, ...nameMap.get(e.name) });
@@ -337,13 +337,13 @@ async function renderProfiler() {
       ctx.fillStyle = e.bgColor;
       ctx.fillRect(x, e.y, width, e.height);
       rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.kernel?.i, tooltipText:formatTime(e.dur) });
-      // add labels
+      // add label
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       let [labelX, labelWidth] = [x+2, 0];
       const labelY = e.y+e.height/2;
-      for (const [i,l] of e.labelParts.entries()) {
-        if (labelWidth+l.width+(i===e.labelParts.length-1 ? 0 : ellipsisWidth)+2 > width) {
+      for (const [i,l] of e.label.entries()) {
+        if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
           if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
           break;
         }
