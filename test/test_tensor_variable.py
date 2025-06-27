@@ -79,8 +79,6 @@ class TestTensorVariable(unittest.TestCase):
     ret = Tensor.arange(vv.bind(4), 7)
     self.assertListEqual(ret.reshape(3).tolist(), [4,5,6])
 
-  # TODO: add vmin/vmax pattern for symbolic denominator
-  @unittest.expectedFailure
   def test_symbolic_arange_sym_step(self):
     vv = Variable("step", 1, 3)
     ret = Tensor.arange(0, 10, vv.bind(2))
