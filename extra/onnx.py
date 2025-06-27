@@ -24,8 +24,7 @@ attribute_types: dict[int, Callable] = {
 }
 
 # ***** protobuf parsing ******
-from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, helper
-import numpy as np
+from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
 
 def has_field(onnx_type: TypeProto|SimpleNamespace, field):
   if isinstance(onnx_type, TypeProto): return onnx_type.HasField(field)
@@ -604,6 +603,7 @@ def get_onnx_ops():
 
   # Reimplemented here because you need legacy RNG for passing ONNX tests.
   def Dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
+    import numpy as np
     if not training_mode: return data, data.full_like(True, dtype=dtypes.bool)
     if seed is not None:
       rand = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)), requires_grad=False, dtype=data.dtype, device=data.device)
