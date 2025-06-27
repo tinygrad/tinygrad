@@ -4237,7 +4237,7 @@ class Tensor(MathTrait):
 
     # the conv!
     ret = (x*w).cast(base_image_type((bs*oy, ox*cout//4, 4)) if IMAGE >= 2 else dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
-    if dtype is None and (result_dtype:= least_upper_dtype(self.dtype, weight.dtype)) in (dtypes.float16, dtypes.bfloat16): ret = ret.cast(result_dtype)
+    if dtype is None and (ret_dtype:=least_upper_dtype(self.dtype, weight.dtype)) in (dtypes.float16, dtypes.bfloat16): ret = ret.cast(ret_dtype)
 
     # undo hack for non multiples of 4 on C.rcout
     if added_output_channels != 0:
