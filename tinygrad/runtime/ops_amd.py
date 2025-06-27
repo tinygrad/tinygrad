@@ -720,6 +720,8 @@ class USBIface(PCIIface):
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbells=[self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
       read_ptrs=[gart.cpu_view().view(size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=0x10, size=8, fmt='Q')])
 
+  def sleep(self, timeout): pass
+
 class AMDDevice(HCQCompiled):
   devices: ClassVar[list[HCQCompiled]] = []
   signal_pages: ClassVar[list[HCQBuffer]] = []
