@@ -256,6 +256,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def r(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     if len(axis) == 0: return self
+    # reduce axis must be at the end!
+    axis_dims, non_axis_dims = partition(range(len(self.shape)), lambda x: x in axis)
+    ret = self.permute(tuple(non_axis_dims+axis_dims))
+    new_axis = tuple(range(len(self.shape)-len(axis_dims), len(self.shape)))
+
+    """
     # move any non reduce axis before the first reduce axis
     move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis and resolve(self.shape[i] != 1))
     if move_early:
@@ -265,6 +271,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       assert len(axis) == len(new_axis)
     else:
       ret, new_axis = self, axis
+    """
     ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, new_axis))
     return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))

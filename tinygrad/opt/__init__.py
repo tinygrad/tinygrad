@@ -2,8 +2,8 @@
 
 from tinygrad.opt.kernel import Kernel
 from tinygrad.opt.heuristic import hand_coded_optimizations
-from tinygrad.uop.ops import UOp, KernelInfo, graph_rewrite, PatternMatcher, UPat, Ops
-from tinygrad.helpers import NOOPT, BEAM, USE_TC, getenv
+from tinygrad.uop.ops import UOp, KernelInfo, graph_rewrite, PatternMatcher, UPat, Ops, resolve
+from tinygrad.helpers import NOOPT, BEAM, USE_TC, getenv, colored, dedup
 from tinygrad.renderer import Renderer
 
 def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp:
@@ -41,10 +41,16 @@ def remove_ones_reduce(r:UOp):
 pm_no_ones = PatternMatcher([
   (UPat(Ops.VIEW, name="v"),
    lambda v: v.replace(arg=v.arg.reshape(tuple([x for x in v.arg.shape if x != 1]))) if 1 in v.arg.shape else None),
-  (UPat(Ops.REDUCE_AXIS, name="r"), remove_ones_reduce),
+  #(UPat(Ops.REDUCE_AXIS, name="r"), remove_ones_reduce),
 ])
 
 def get_optimized_ast_2(ast:UOp, renderer:Renderer) -> UOp:
   # remove all 1s from views
-  ast = graph_rewrite(ast, pm_no_ones, name="remove ones", bottom_up=True)
-  return ast.replace(arg=KernelInfo(name="test"))
+  #ast = graph_rewrite(ast, pm_no_ones, name="remove ones", bottom_up=True)
+
+  # namer from testgrad
+  rr = sorted(dedup([x.shape for x in ast.toposort() if x.st is not None]))
+  dims = [colored(x, 'blue') for x in rr[0] if resolve(x != 1)]
+  dims += [colored(x, 'red') for x in rr[-1][len(dims):] if resolve(x != 1)]
+  info = KernelInfo(name='k_'+colored('_', 'BLACK').join(dims))
+  return ast.replace(arg=info)
