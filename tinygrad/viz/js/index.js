@@ -236,21 +236,7 @@ async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
   if (data != null) return;
-  // fetch and process data
-  const { traceEvents } = await (await fetch("/get_profile")).json();
-  let st, et;
-  const events = new Map();
-  for (const e of traceEvents) {
-    if (e.name === "process_name") events.set(e.pid, { name:e.args.name, events:[] });
-    if (e.ph === "X") {
-      if (st == null) [st, et] = [e.ts, e.ts+e.dur];
-      else {
-        st = Math.min(st, e.ts);
-        et = Math.max(et, e.ts+e.dur);
-      }
-      events.get(e.pid).events.push(e);
-    }
-  }
+  const { layout, st, et } = await (await fetch("/get_profile")).json();
   const kernelMap = new Map();
   for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
   // place devices on the y axis and set vertical positions
@@ -263,38 +249,26 @@ async function renderProfiler() {
   // color by name
   const nameMap = new Map();
   data = [];
-  for (const [k, v] of events) {
-    if (v.events.length === 0) continue;
+  for (const [k, { timeline }] of Object.entries(layout)) {
+    if (timeline.shapes.length === 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
-    div.id = `pid-${k}`;
-    div.innerText = v.name;
+    div.id = k;
+    div.innerText = k;
     div.style.padding = `${padding}px`;
-    const { y:baseY, height:baseHeight } = rect(`#pid-${k}`);
-    // position events on the y axis, stack ones that overlap
-    const levels = [];
-    v.events.sort((a,b) => (a.ts-st) - (b.ts-st));
-    for (const [i,e] of v.events.entries()) {
-      // assign to the first free depth
-      const start = e.ts-st;
-      const end = start+e.dur;
-      let depth = levels.findIndex(l => start >= l);
-      if (depth === -1) {
-        depth = levels.length;
-        levels.push(end);
-      } else {
-        levels[depth] = end;
-      }
-      // offset y by depth
-      const height = baseHeight-padding;
-      const y = (baseY-canvasTop+padding/2)+height*depth;
-      if (!nameMap.has(e.name)) {
-        const labelParts = parseColors(kernelMap.get(e.name)?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-        nameMap.set(e.name, { bgColor:colors[i%colors.length], labelParts });
-      }
-      data.push({ x:start, dur:e.dur, name:e.name, height, y, ...nameMap.get(e.name) });
+    const { y:baseY, height:baseHeight } = rect(`#${k}`);
+    const levelHeight = baseHeight-padding;
+    const offsetY = baseY-canvasTop+padding/2;
+    for (const [i,e] of timeline.shapes.entries()) {
+     const kernel = kernelMap.get(e.name);
+     if (!nameMap.has(e.name)) {
+       const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+       nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
+     }
+     // offset y by depth
+      data.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
     }
     // lastly, adjust device rect by number of levels
-    div.style.height = `${baseHeight*levels.length}px`;
+    div.style.height = `${levelHeight*timeline.maxDepth+padding}px`;
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
@@ -333,16 +307,16 @@ async function renderProfiler() {
       // zoom only changes x and width
       const x = scale(e.x);
       const width = scale(e.x+e.dur)-x;
-      ctx.fillStyle = e.bgColor;
+      ctx.fillStyle = e.fillColor;
       ctx.fillRect(x, e.y, width, e.height);
-      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, name:e.name, dur:e.dur })
-      // add labels
+      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.kernel?.i, tooltipText:formatTime(e.dur) });
+      // add label
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       let [labelX, labelWidth] = [x+2, 0];
       const labelY = e.y+e.height/2;
-      for (const [i,l] of e.labelParts.entries()) {
-        if (labelWidth+l.width+(i===e.labelParts.length-1 ? 0 : ellipsisWidth)+2 > width) {
+      for (const [i,l] of e.label.entries()) {
+        if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
           if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
           break;
         }
@@ -385,18 +359,18 @@ async function renderProfiler() {
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect != null) return setCtxWithHistory(kernelMap.get(foundRect.name)?.i);
+    if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref);
   });
 
   const tooltip = document.body.appendChild(document.createElement("div"));
   tooltip.id = "tooltip";
   canvas.addEventListener("mousemove", e => {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect != null) {
+    if (foundRect?.tooltipText != null) {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      tooltip.textContent = formatTime(foundRect.dur);
+      tooltip.textContent = foundRect.tooltipText;
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => tooltip.style.display = "none");
@@ -437,7 +411,7 @@ function codeBlock(st, language, { loc, wrap }) {
   if (wrap) ret.className = "wrap";
   if (loc != null) {
     const link = ret.appendChild(document.createElement("a"));
-    link.href = "vscode://file"+loc.join(":");
+    link.href = "vscode://file/"+loc.join(":");
     link.textContent = `${loc[0].split("/").at(-1)}:${loc[1]}`+"\n\n";
   }
   ret.appendChild(code);

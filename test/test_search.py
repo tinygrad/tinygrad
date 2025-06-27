@@ -83,6 +83,7 @@ class TestBEAM(unittest.TestCase):
     actions_after = actions.copy()
     assert actions_after == actions_before, "actions state was not preserved"
 
+  @unittest.skip("invalid reduce now")
   def test_filter_global_buffer(self):
     # taken from https://github.com/tinygrad/tinygrad/issues/4612
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(

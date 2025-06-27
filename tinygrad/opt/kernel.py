@@ -58,11 +58,6 @@ class Kernel:
     # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
     self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*self.shape_len))
 
-    # move all reduce axes to the end
-    reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
-    permute = tuple([i for i,(s,n) in reduce if not resolve(s != n)] + [i for i,(s,n) in reduce if resolve(s != n)])
-    self.reshape_and_permute(None, permute)
-
     # parameters for optimization
     self.applied_opts: list[Opt] = []
     self.group_for_reduces: int = 0
@@ -76,6 +71,11 @@ class Kernel:
     # group simplifies
     self.simplify_ones()
     self.simplify_merge_adjacent()
+
+    # confirm all reduce axes are at the end
+    final_reduces = [i for i,(s,n) in enumerate(zip(self.full_shape, self.output_shape)) if resolve(s != n)]
+    if final_reduces != list(range(len(self.full_shape)-len(final_reduces), len(self.full_shape))):
+      raise RuntimeError(f"reduces are not at the end of the shape {self.full_shape} -> {self.output_shape}")
 
   def copy(self):
     ret = type(self).__new__(type(self))
@@ -376,7 +376,7 @@ class Kernel:
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
-      check(self.use_tensor_cores != 3, "can't group with tensor cores emulation")
+      check(not self.tensor_core, "can't group with tensor cores")
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
@@ -503,11 +503,9 @@ class Kernel:
           else: # for TC=3 MUL/SUM instead of WMMA
             tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
 
-          ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
+          return ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
 
-        else:
-          ret = ret.replace(arg = (op.arg[0], axes))
-
+        ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
