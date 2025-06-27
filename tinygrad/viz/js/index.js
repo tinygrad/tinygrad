@@ -52,11 +52,10 @@ async function renderDag(graph, additions, recenter=false) {
       return `translate(-${x}, -${y})`;
     }).selectAll("text").data(d => {
       const ret = [[]];
-      for (const { st, color } of parseColors(d.label)) {
+      for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
         for (const [i, l] of st.split("\n").entries()) {
           if (i > 0) ret.push([]);
-          // default node label color is black
-          ret.at(-1).push({ st:l, color: color == "#ffffff" ? "initial": color });
+          ret.at(-1).push({ st:l, color });
         }
       }
       return [ret];
@@ -228,8 +227,10 @@ function renderMemoryGraph(graph) {
 }
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
-const parseColors = (name) => [...name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g)].map(([_, code, colored_st, st]) =>
-  ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : "#ffffff" }));
+const parseColors = (name, defaultColor="#ffffff") => {
+  return [...name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g)].map(([_, code, colored_st, st]) =>
+    ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
+}
 
 // ** profiler graph
 
