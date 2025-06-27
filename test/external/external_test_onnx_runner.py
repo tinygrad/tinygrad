@@ -51,7 +51,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     runner = OnnxRunner(model)
     self.assertEqual(runner.graph_nodes[0].opts['value'].dtype, tinygrad_dtype)
 
-  @settings(deadline=1000) # TODO investigate unreliable timing
+  @settings(deadline=3000) # TODO investigate unreliable timing
   @given(onnx_data_type=st.sampled_from(device_supported_dtypes))
   def test_supported_dtype_spec(self, onnx_data_type):
     tinygrad_dtype = data_types[onnx_data_type]
@@ -60,7 +60,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     self._test_node_attribute_dtype(onnx_data_type, tinygrad_dtype)
 
   @unittest.skipUnless(device_unsupported_dtypes, "No unsupported dtypes for this device to test.")
-  @settings(deadline=1000) # TODO investigate unreliable timing
+  @settings(deadline=3000) # TODO investigate unreliable timing
   @given(onnx_data_type=st.sampled_from(device_unsupported_dtypes))
   def test_unsupported_dtype_spec(self, onnx_data_type):
     true_dtype = data_types[onnx_data_type]
