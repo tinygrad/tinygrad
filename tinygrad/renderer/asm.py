@@ -19,7 +19,7 @@ base_rewrite = PatternMatcher([
   # register move
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="cp"), lambda ctx,x,cp: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[cp]}, {ctx[x]}"),
   # accumulator
-  (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}"),
   # a bit hacky, if an assign moves to memory it's a store
   (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: ctx.string_rewrite.rewrite(x.src[0].store(x.src[1]), ctx) if not ctx.is_reg(ctx.r[x.src[0]]) else None),
   (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}" if ctx[x] != ctx[x.src[1]] else None),
