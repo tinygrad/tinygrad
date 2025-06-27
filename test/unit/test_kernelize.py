@@ -17,7 +17,7 @@ class TestKernelize(unittest.TestCase):
     a1 = a.sum(axis=1)
     a0 = a1.sum(axis=0)
     a0.kernelize()
-    self.assertIs(a1.uop.base.op, Ops.ASSIGN)
+    self.assertIs(a1.uop.base.op, Ops.STORE)
 
   def test_two_reduce_w_add(self):
     a = Tensor.ones(16,16).contiguous()
@@ -27,7 +27,7 @@ class TestKernelize(unittest.TestCase):
     # NOTE: the +1 is fused with a1, so a1 is not kernelized
     self.assertIs(a1.uop.base.op, Ops.REDUCE_AXIS)
     # the input to the REDUCE_AXIS is an ASSIGN though
-    self.assertIs(a1.uop.base.src[0].base.op, Ops.ASSIGN)
+    self.assertIs(a1.uop.base.src[0].base.op, Ops.STORE)
 
 if __name__ == '__main__':
   unittest.main()

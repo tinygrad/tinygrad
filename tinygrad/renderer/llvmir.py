@@ -151,7 +151,7 @@ class LLVMRenderer(Renderer):
     local_args: list[str] = []
     acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
-      if u.op is Ops.ASSIGN: # prealloc all assigns
+      if u.op is Ops.STORE: # prealloc all assigns
         vc += 1
         r[u] = r[u.src[1]] = f"%assign{vc}"
         assert u.src[0] not in acc_to_assign, "can't assign to DEFINE_ACC twice"
@@ -178,7 +178,7 @@ class LLVMRenderer(Renderer):
         else:
           local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
           kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{u.dtype.size} x {ldt(u.dtype)}]*")
-      elif u.op is Ops.ASSIGN: pass  # assign is already handled by the first pass
+      elif u.op is Ops.STORE: pass  # assign is already handled by the first pass
       elif u.op is Ops.DEFINE_ACC: r[u] = r[u.src[0]]  # a define acc can be used and never be assigned to
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
       elif u.op is Ops.CAST and (ldt(u.dtype) == ldt(u.src[0].dtype) or isinstance(u.dtype, PtrDType)):

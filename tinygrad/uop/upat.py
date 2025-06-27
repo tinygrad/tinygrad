@@ -21,7 +21,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.arg)), arg="{0}.arg == {1}"))
   if self.strict_length or self.required_len > 0:
     and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg=("len({0}.src)"+(" == " if self.strict_length else " >= ")+str(self.required_len))))
-  if self.name is not None: and_clause.append(UOp(Ops.ASSIGN, src=(UOp(Ops.DEFINE_VAR, arg=self.name), base)))
+  if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp(Ops.DEFINE_VAR, arg=self.name), base)))
   if self.dtype is not None:
     if len(self.dtype) > 1:
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(self.dtype))), arg="({0}.dtype in {1} or {0}.dtype._scalar in {1})"))
@@ -67,7 +67,7 @@ def do_process_and(a:UOp) -> UOp|None:
     found = True
 
   # handle assigns
-  assigns, new_src = partition(new_src, lambda x: x.op is Ops.ASSIGN)
+  assigns, new_src = partition(new_src, lambda x: x.op is Ops.STORE)
   if len(assigns):
     if len(or_clause):
       # push assigns to the top if we have an or_clause
@@ -85,7 +85,7 @@ def do_process_and(a:UOp) -> UOp|None:
         else:
           dict_assigns[a.src[0]] = a.src[1]
       # put the assigns back
-      for k,v in dict_assigns.items(): new_src.append(UOp(Ops.ASSIGN, src=(k,v)))
+      for k,v in dict_assigns.items(): new_src.append(UOp(Ops.STORE, src=(k,v)))
 
   # reassemble, if there's any deduping to do, do it
   if len(dretand:=dedup(new_src+or_clause)) != len(new_src)+len(or_clause): found = True
@@ -121,7 +121,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
     if s.op is Ops.OR:
       assert len(or_pieces) == 0 and len(s.src) >= 1
       for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1))
-    elif s.op is Ops.ASSIGN:
+    elif s.op is Ops.STORE:
       assert s.src[0].op is Ops.DEFINE_VAR and s.src[1].op is Ops.NOOP
       assign_pieces.append(f"{s.src[0].arg}={s.src[1].arg}")
     elif s.op is Ops.NOOP: and_pieces.append(s.arg)

@@ -2006,7 +2006,7 @@ class TestIndexing(unittest.TestCase):
     self.assertEqual(a.uop.shape, (32,))
 
 def swizzle_cnt(u:UOp) -> int:
-  return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL, Ops.ASSIGN}])
+  return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL, Ops.STORE}])
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
