@@ -4244,7 +4244,8 @@ class Tensor(MathTrait):
       cout = groups * (rcout - added_output_channels)
 
     # NCHW output
-    ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2).cast(dtype or least_upper_dtype(self.dtype, weight.dtype))
+    ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
+    if dtype is None: ret = ret.cast(least_upper_dtype(self.dtype, weight.dtype))
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
 P = ParamSpec("P")
