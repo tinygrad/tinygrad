@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 
 from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel
-from tinygrad.codegen.lowerer import get_grouped_dims
+from tinygrad.codegen.gpudims import get_grouped_dims
 from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker

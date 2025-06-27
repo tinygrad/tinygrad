@@ -23,21 +23,9 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   local_loads = [x for x in ast.toposort() if x.op is Ops.LOAD and x.src[0].base.op is Ops.DEFINE_LOCAL]
   # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
   group_for_reduces = sum([any(l.st_arg.shape[i]!=ast.src[0].st_arg.shape[i] for l in local_loads) for i in range(first_reduce,first_upcasted)])
-  """
-  global_dims = first_reduce-ki.local_dims
-  if opts.has_local:
-    if ki.dont_use_locals:
-      assert ki.local_dims == 0, "can't use locals if there's no local dims"
-      idxs = get_grouped_dims("idx", full_shape[:global_dims], opts.global_max, reverse=True)
-    else:
-      # define indexes for GPU-like execution
-      idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
-             get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
-  else:
-  """
 
   # all loops are RANGES
-  idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i) for i,g in enumerate(full_shape[:first_reduce])]
+  idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i) for i,g in enumerate(full_shape[:first_reduce+group_for_reduces])]
 
   # reduce loops
   idxs += [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i)

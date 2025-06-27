@@ -50,8 +50,9 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
   return ret[::-1] if reverse else ret
 
 def add_gpudims(ctx, s:UOp):
+  if s.arg is None: return None
   ki: KernelInfo = s.arg
-  if ki.global_dims == 0: return None
+  if ki.global_dims == 0 and ki.local_dims == 0: return None
   s_topo = list(s.toposort())
   if any(x.op is Ops.SPECIAL for x in s_topo): return None
   ranges = sorted([x for x in s_topo if x.op is Ops.RANGE and x.arg < (ki.global_dims+ki.local_dims)], key=lambda x: x.arg)
