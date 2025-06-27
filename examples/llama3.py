@@ -248,7 +248,7 @@ if __name__ == "__main__":
   parser.add_argument("--port", type=int, default=7776, help="Web server port")
   parser.add_argument("--debug", action="store_true", help="Enable debug mode")
   parser.add_argument("--seed", type=int, help="Random seed")
-  parser.add_argument("--temperature", type=int, default=0.85, help="Temperature")
+  parser.add_argument("--temperature", type=float, default=0.85, help="Temperature")
   parser.add_argument("--benchmark", action="store_true", help="Run a benchmark")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data")

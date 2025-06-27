@@ -105,7 +105,7 @@ class VirtMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached
 class PageTableTraverseContext:
   def __init__(self, dev, pt, vaddr, create_pts=False, free_pts=False, boot=False):
     self.dev, self.vaddr, self.create_pts, self.free_pts, self.boot = dev, vaddr - dev.mm.va_base, create_pts, free_pts, boot
-    self.pt_stack:list[tuple[Any, int, int]] = [(pt, self._pt_pte_idx(pt, vaddr), self._pt_pte_size(pt))]
+    self.pt_stack:list[tuple[Any, int, int]] = [(pt, self._pt_pte_idx(pt, self.vaddr), self._pt_pte_size(pt))]
 
   def _pt_pte_cnt(self, lv): return self.dev.mm.pte_cnt[lv]
   def _pt_pte_size(self, pt): return self.dev.mm.pte_covers[pt.lv]
@@ -173,6 +173,10 @@ class MemoryManager:
     """
     va_pwr2_div, sz_pwr2_div, sz_pwr2_max = va & -(va) if va > 0 else (1 << 63), sz & -(sz), (1 << (sz.bit_length() - 1))
     return (min(va_pwr2_div, sz_pwr2_div) if must_cover else min(va_pwr2_div, sz_pwr2_max)).bit_length() - 1 - 12
+
+  def page_tables(self, vaddr:int, size:int):
+    ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, create_pts=True)
+    for _ in ctx.next(size): return [pt for pt, _, _ in ctx.pt_stack]
 
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False) -> VirtMapping:
     if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
