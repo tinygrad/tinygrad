@@ -402,7 +402,6 @@ x86_ops = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86
 gep_imm = {0: "0x00", 1: "0x40", 2: "0x80", 3: "0xC0"}
 bcast_imm = {0: "0x00", 1: "0x55", 2: "0xAA", 3: "0xFF"}
 vec_imm = {0: "0x00", 1: "0x10", 2: "0x20", 3: "0x30"}
-vec_imm = {0: "0x00", 1: "0x10", 2: "0x20", 3: "0x30"}
 #size_prefix = {1: "byte ptr", 2: "word ptr", 4: "dword ptr", 8: "qword ptr", 16: "xmmword ptr"}
 idiv_signex = {1: "cbw", 2: "cwd", 4: "cdq", 8: "cqo"}
 def x86_cflag(x:UOp) -> str: return "setne" if x.op is Ops.CMPNE else "setl" if x.src[0].dtype in dtypes.sints else "setb"
@@ -444,7 +443,7 @@ x86_vec_rewrite = PatternMatcher([
 ]) + base_rewrite
 
 x86_rewrite = PatternMatcher([
-  (UPat(GroupOp.All, name="x"), lambda ctx,x: x86_vec_rewrite.rewrite(x, ctx) if x.dtype.count > 1 else None),
+  #(UPat(GroupOp.All, name="x"), lambda ctx,x: x86_vec_rewrite.rewrite(x, ctx) if x.dtype.count > 1 else None),
   # define local points to the start of the next stack slot, NOTE: unaligned, could cause issues
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"mov {ctx[x]}, rsp\nadd {ctx[x]}, {ctx.stack_size}"),
   # const load
@@ -457,6 +456,7 @@ x86_rewrite = PatternMatcher([
   (UPat.var("y").store(UPat.var("z"), name="x"), lambda ctx,y,z,x: f"{ctx.ops[z.dtype][x.op]} [{ctx[y]}], {ctx[z]}"),
   # devectorize
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"insertps {ctx[x]}, {ctx[x.src[0]]}, {gep_imm[x.arg[0]]}"),
+  (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {vec_imm[i]}" for i,s in enumerate(x.src))),
   # casts to > int (to <= int is a noop)
   (UPat.var("y", (dtypes.bool,)+dtypes.uints).cast(dtypes.ints, name="x"), lambda ctx,y,x: f"movzx {ctx[x]}, {ctx[y]}"),
   (UPat.var("y", dtypes.sints).cast(dtypes.ints, name="x"), lambda ctx,y,x: f"movs{'x' if y.dtype.itemsize < 4 else 'xd'} {ctx[x]}, {ctx[y]}"),
