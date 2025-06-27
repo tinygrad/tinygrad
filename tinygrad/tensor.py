@@ -3948,10 +3948,12 @@ class Tensor(MathTrait):
     ```
     """
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
-    Y = Y.one_hot(num_classes=cast(int, self.shape[1])) if Y.ndim < 2 else Y
-    Y = (1 - label_smoothing)*Y + label_smoothing / cast(int, Y.shape[1])
-    ret = -self.log_softmax(axis=1).mul(Y).sum(axis=1)
-    return ret._do_reduction(reduction)
+    classes_dim = 0 if self.ndim == 1 else 1
+    if self.shape != Y.shape:
+      if self.max(classes_dim).shape != Y.shape: raise RuntimeError(f"shape mismatch: {self.shape=}, {Y.shape=}")
+      Y = Y.unsqueeze(classes_dim)._one_hot_along_dim(num_classes=self.shape[classes_dim], dim=classes_dim)
+    Y = (1 - label_smoothing)*Y + label_smoothing / int(Y.shape[classes_dim])
+    return -self.log_softmax(classes_dim).mul(Y).sum(classes_dim)._do_reduction(reduction)
 
   def nll_loss(self, Y:Tensor, weight:Tensor|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean") -> Tensor:
     """

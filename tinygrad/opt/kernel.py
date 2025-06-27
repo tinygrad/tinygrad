@@ -59,11 +59,6 @@ class Kernel:
     # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
     self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*self.shape_len))
 
-    # move all reduce axes to the end
-    reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
-    permute = tuple([i for i,(s,n) in reduce if not resolve(s != n)] + [i for i,(s,n) in reduce if resolve(s != n)])
-    self.reshape_and_permute(None, permute)
-
     # parameters for optimization
     self.applied_opts: list[Opt] = []
     self.group_for_reduces: int = 0
@@ -77,6 +72,11 @@ class Kernel:
     # group simplifies
     self.simplify_ones()
     self.simplify_merge_adjacent()
+
+    # confirm all reduce axes are at the end
+    final_reduces = [i for i,(s,n) in enumerate(zip(self.full_shape, self.output_shape)) if resolve(s != n)]
+    if final_reduces != list(range(len(self.full_shape)-len(final_reduces), len(self.full_shape))):
+      raise RuntimeError(f"reduces are not at the end of the shape {self.full_shape} -> {self.output_shape}")
 
   def copy(self):
     ret = type(self).__new__(type(self))
@@ -453,8 +453,10 @@ class Kernel:
         st = self.sts[self.views.index(op)]
         return op.src[0].view(st)
       if op.op is Ops.SINK:
+        # NOTE: should group_for_reduces be added to the local_dims?
         return ret.replace(arg = KernelInfo(ret.arg.name if ret.arg is not None else self.name if name_override is None else name_override,
-                                            self.local_dims, self.upcasted, self.dont_use_locals, tuple(self.applied_opts)))
+                                            self.global_dims if self.opts.has_local else 0, self.local_dims+self.group_for_reduces,
+                                            self.upcasted, self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
 
