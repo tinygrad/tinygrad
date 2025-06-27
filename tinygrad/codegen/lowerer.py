@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop
-from tinygrad.renderer import Renderer
 from tinygrad.helpers import prod, partition, flatten
 
 # ***** indexing *****
@@ -13,7 +12,7 @@ class IndexContext:
   idxs: list[UOp]
   ridxs: list[UOp]
 
-def get_index(ast:UOp, opts:Renderer) -> IndexContext:
+def get_index(ast:UOp) -> IndexContext:
   ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
   # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
   full_shape = ast.full_shape
@@ -25,11 +24,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   group_for_reduces = sum([any(l.st_arg.shape[i]!=ast.src[0].st_arg.shape[i] for l in local_loads) for i in range(first_reduce,first_upcasted)])
 
   # all loops are RANGES
-  idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i) for i,g in enumerate(full_shape[:first_reduce+group_for_reduces])]
-
-  # reduce loops
-  idxs += [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i)
-    for i,g in enumerate(full_shape[first_reduce+group_for_reduces:first_upcasted], start=first_reduce+group_for_reduces)]
+  idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i) for i,g in enumerate(full_shape[:first_upcasted])]
 
   # upcast loops
   for i,g in enumerate(full_shape[first_upcasted:], start=first_upcasted):

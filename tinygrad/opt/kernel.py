@@ -456,8 +456,7 @@ class Kernel:
       if op.op is Ops.SINK:
         # NOTE: should group_for_reduces be added to the local_dims?
         return ret.replace(arg = KernelInfo(ret.arg.name if ret.arg is not None else self.name if name_override is None else name_override,
-                                            self.global_dims if self.opts.has_local else 0,
-                                            self.local_dims+self.group_for_reduces,
+                                            self.global_dims if self.opts.has_local else 0, self.local_dims+self.group_for_reduces,
                                             self.upcasted, self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2

@@ -3,6 +3,7 @@ from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, s
 from tinygrad.helpers import all_int
 from tinygrad.dtype import dtypes
 from tinygrad.shape.view import get_contraction
+from tinygrad.renderer import Renderer
 
 def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
   # TODO: symbolic shape
@@ -49,7 +50,7 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
     if a == 3 and b == 2: ret = [raw_idxs[0] * limited[1] + raw_idxs[1], raw_idxs[2]]
   return ret[::-1] if reverse else ret
 
-def add_gpudims(ctx, s:UOp):
+def add_gpudims(ctx:Renderer, s:UOp):
   if s.arg is None: return None
   ki: KernelInfo = s.arg
   if ki.global_dims == 0 and ki.local_dims == 0: return None
