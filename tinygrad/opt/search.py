@@ -93,17 +93,17 @@ def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_
 # get (scrap) buffers for timing the linearizer
 def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
   bufsts: defaultdict[int, list[UOp]] = defaultdict(list)
-  for x in lin.bufs:
-    if x.src[0].base.op is Ops.DEFINE_GLOBAL: bufsts[x.src[0].base.arg].append(x)
+  for b,st in zip(lin.bufs,lin.sts):
+    if b.op is Ops.DEFINE_GLOBAL: bufsts[b].append(st)
   # TODO: Nones are staying in here if buffers are optimized out!
   # TODO: add a test for this
-  rawbufs: list[Optional[Buffer]] = [None]*(max(bufsts)+1)
-  for k,lx in bufsts.items():
-    buf_size = prod(dtype.shape) if isinstance(dtype:=lx[0].src[0].dtype, ImageDType) else max(y.st_arg.real_size() for y in lx)
+  rawbufs: list[Optional[Buffer]] = [None]*(max(b.arg for b in bufsts)+1)
+  for b,sts in bufsts.items():
+    buf_size = prod(dtype.shape) if isinstance(dtype:=b.dtype, ImageDType) else max(st.real_size() for st in sts)
     assert isinstance(dtype, (PtrDType, ImageDType))
     if buf_size == 0: buf_size = 1  # create a size 1 buffer if no cell is accessed in kernel. # TODO: remove from kernel input in this case.
     buf_dtype = dtype if isinstance(dtype, ImageDType) else dtype.base
-    rawbufs[k] = Buffer(lin.opts.device, buf_size, buf_dtype).allocate() if allocate else Buffer(lin.opts.device, buf_size, buf_dtype)
+    rawbufs[b.arg] = Buffer(lin.opts.device, buf_size, buf_dtype).allocate() if allocate else Buffer(lin.opts.device, buf_size, buf_dtype)
   #assert all(r is not None for r in rawbufs)
   return cast(list[Buffer], rawbufs)
 

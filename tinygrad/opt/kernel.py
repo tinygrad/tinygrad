@@ -43,17 +43,12 @@ class Kernel:
     self.reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE_AXIS]
 
     self.vars: list[Variable] = self.ast.variables()
-    self.bufs: list[UOp] = []
+    # NOTE: the first buf/st is the output
+    store = self.ast.src[0]  # STORE(VIEW(DEFINE_GLOBAL), ...), see ast_spec
+    self.views = [store.src[0]] + [x for x in store.src[1].toposort() if x.op is Ops.VIEW]
+    self.bufs: list[UOp] = [v.src[0] for v in self.views]
     # create new shapetrackers inside this kernel, we will permute them
-    self.sts: list[ShapeTracker] = []
-    # NOTE: this requires a specific order with the reversed, this is likely a bug
-    for x in reversed(self.ast.toposort()):
-      if x.op is Ops.VIEW and len(x.src)!=0 and x.src[0].op is Ops.CONST:
-        self.bufs.append(x.src[0])
-        self.sts.append(x.arg)
-      elif x.op in GroupOp.Buffer - {Ops.CONST}:
-        self.bufs.append(x)
-        self.sts.append(x.st_arg)
+    self.sts: list[ShapeTracker] = [v.st_arg for v in self.views]
 
     # add the shapetrackers for each reduce
     # we use this to track which axes are reduced in each reduce
@@ -101,7 +96,7 @@ class Kernel:
     return ret
 
   @property
-  def membufs(self) -> list[UOp]: return dedup([x.src[0].base for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
+  def membufs(self) -> list[UOp]: return dedup([x for x in self.bufs if x.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}])
 
   def upcasted_axis(self, i:int) -> list[tuple[int, Optional[sint], bool]]:
     upcasted_shape, upcasted_stride = self.sts[i].shape[self.first_upcast:], self.sts[i].real_strides()[self.first_upcast:]
@@ -248,9 +243,9 @@ class Kernel:
 
     def buf_index(src:UOp) -> Optional[int]:
       # TODO: apply tc even if the sources are not from LOAD
-      if src.op is Ops.LOAD and src.dtype == tc.dtype_in: return self.bufs.index(src)
+      if src.op is Ops.LOAD and src.dtype == tc.dtype_in: return self.bufs.index(src.src[0].base)
       try:
-        if opt_level >= 1 and src.op is Ops.CAST and src.dtype == tc.dtype_in: return self.bufs.index(src.src[0])
+        if opt_level >= 1 and src.op is Ops.CAST and src.dtype == tc.dtype_in: return self.bufs.index(src.src[0].src[0].base)
       except ValueError: return None
       return None
     if (buf0:=buf_index(mul_op.src[0])) is None or (buf1:=buf_index(mul_op.src[1])) is None: return None
@@ -453,11 +448,10 @@ class Kernel:
     @functools.cache
     def fixup_ast(op:UOp) -> UOp:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src)) # noqa: F821
-      if op.op in GroupOp.Buffer and op in self.bufs:
-        st = self.sts[self.bufs.index(op)]
-        if op.op is Ops.CONST: return op.view(st)
-        # otherwise we just replace the VIEW source
-        return ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
+      if op in self.views:
+        # replace the permuted/padded shapetrackers
+        st = self.sts[self.views.index(op)]
+        return op.src[0].view(st)
       if op.op is Ops.SINK:
         return ret.replace(arg = KernelInfo(ret.arg.name if ret.arg is not None else self.name if name_override is None else name_override,
                                             self.local_dims, self.upcasted, self.dont_use_locals, tuple(self.applied_opts)))
