@@ -50,8 +50,18 @@ async function renderDag(graph, additions, recenter=false) {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
       return `translate(-${x}, -${y})`;
-    }).selectAll("text").data(d => [d.label.split("\n")]).join("text").selectAll("tspan").data(d => d).join("tspan").text(d => d).attr("x", "0")
-      .attr("dy", 14).attr("xml:space", "preserve");
+    }).selectAll("text").data(d => {
+      ret = [[]];
+      for (const { st, color } of parseColors(d.label)) {
+        for (const [i, l] of st.split("\n").entries()) {
+          if (i > 0) ret.push([]);
+          // default node label color is black
+          ret.at(-1).push({ st:l, color: color == "#ffffff" ? "initial": color });
+        }
+      }
+      return [ret];
+    }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
+      .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve");
     const tags = nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
       .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`);
     tags.selectAll("circle").data(d => [d]).join("circle");
