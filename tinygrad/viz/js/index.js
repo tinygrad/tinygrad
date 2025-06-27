@@ -50,8 +50,17 @@ async function renderDag(graph, additions, recenter=false) {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
       return `translate(-${x}, -${y})`;
-    }).selectAll("text").data(d => [d.label.split("\n")]).join("text").selectAll("tspan").data(d => d).join("tspan").text(d => d).attr("x", "0")
-      .attr("dy", 14).attr("xml:space", "preserve");
+    }).selectAll("text").data(d => {
+      const ret = [[]];
+      for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
+        for (const [i, l] of st.split("\n").entries()) {
+          if (i > 0) ret.push([]);
+          ret.at(-1).push({ st:l, color });
+        }
+      }
+      return [ret];
+    }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
+      .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve");
     const tags = nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
       .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`);
     tags.selectAll("circle").data(d => [d]).join("circle");
@@ -218,8 +227,8 @@ function renderMemoryGraph(graph) {
 }
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
-const parseColors = (name) => [...name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g)].map(([_, code, colored_st, st]) =>
-  ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : "#ffffff" }));
+const parseColors = (name, defaultColor="#ffffff") => [...name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g)]
+  .map(([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
 
 // ** profiler graph
 
@@ -236,21 +245,7 @@ async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
   if (data != null) return;
-  // fetch and process data
-  const { traceEvents } = await (await fetch("/get_profile")).json();
-  let st, et;
-  const events = new Map();
-  for (const e of traceEvents) {
-    if (e.name === "process_name") events.set(e.pid, { name:e.args.name, events:[] });
-    if (e.ph === "X") {
-      if (st == null) [st, et] = [e.ts, e.ts+e.dur];
-      else {
-        st = Math.min(st, e.ts);
-        et = Math.max(et, e.ts+e.dur);
-      }
-      events.get(e.pid).events.push(e);
-    }
-  }
+  const { layout, st, et } = await (await fetch("/get_profile")).json();
   const kernelMap = new Map();
   for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
   // place devices on the y axis and set vertical positions
@@ -263,37 +258,26 @@ async function renderProfiler() {
   // color by name
   const nameMap = new Map();
   data = [];
-  for (const [k, v] of events) {
-    if (v.events.length === 0) continue;
+  for (const [k, { timeline }] of Object.entries(layout)) {
+    if (timeline.shapes.length === 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
-    div.id = `pid-${k}`;
-    div.innerText = v.name;
+    div.id = k;
+    div.innerText = k;
     div.style.padding = `${padding}px`;
-    const { y:baseY, height:baseHeight } = rect(`#pid-${k}`);
-    // position events on the y axis, stack ones that overlap
-    const levels = [];
-    v.events.sort((a,b) => (a.ts-st) - (b.ts-st));
+    const { y:baseY, height:baseHeight } = rect(`#${k}`);
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
-    for (const [i,e] of v.events.entries()) {
-      // assign to the first free depth
-      const start = e.ts-st;
-      const end = start+e.dur;
-      let depth = levels.findIndex(l => start >= l);
-      if (depth === -1) {
-        depth = levels.length;
-        levels.push(end);
-      } else levels[depth] = end;
-      const kernel = kernelMap.get(e.name);
-      if (!nameMap.has(e.name)) {
-        const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-        nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
-      }
-      // offset y by depth
-      data.push({ x:start, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*depth, kernel, ...nameMap.get(e.name) });
+    for (const [i,e] of timeline.shapes.entries()) {
+     const kernel = kernelMap.get(e.name);
+     if (!nameMap.has(e.name)) {
+       const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+       nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
+     }
+     // offset y by depth
+      data.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
     }
     // lastly, adjust device rect by number of levels
-    div.style.height = `${levelHeight*levels.length+padding}px`;
+    div.style.height = `${levelHeight*timeline.maxDepth+padding}px`;
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;

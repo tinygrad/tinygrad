@@ -1,15 +1,13 @@
 import time, struct
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.uop.ops import UOp, Ops, sint, graph_rewrite
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
-from tinygrad.kernelize.kernelize import view_left
-from tinygrad.dtype import ConstType, DType
+from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import T, unwrap, CI
+from tinygrad.helpers import T, CI
 from tinygrad.codegen import full_rewrite
 from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler
 
@@ -39,13 +37,6 @@ def rand_for_dtype(dt:DType, size:int):
   elif dt == dtypes.bool:
     return np.random.choice([True, False], size=size)
   return np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
-
-def ast_const(dtype:DType, val:ConstType, shape:tuple[sint, ...]=(), st:Optional[ShapeTracker]=None, st_src:Optional[tuple[UOp]]=None) -> UOp:
-  if st_src is None:
-    st_src = (st.to_uop() if st is not None else ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)
-  st = unwrap(st_src[0].st)
-  if all(v.mask is None for v in st.views): return UOp.const(dtype, val).replace(src=(st.to_uop(),))
-  return graph_rewrite(UOp.const(dtype, val).view(st).valid(), view_left)
 
 def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
   st = time.perf_counter_ns()
