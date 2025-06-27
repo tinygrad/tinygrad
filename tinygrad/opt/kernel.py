@@ -55,6 +55,10 @@ class Kernel:
       self.sts.append(unwrap(x.st))
       self.sts.append(unwrap(x.src[0].st))
 
+    # add 1s to all shapetrackers
+    max_size = max([len(x.shape) for x in self.sts])
+    self.sts = [st.reshape(st.shape + (1,)*(max_size-len(st.shape))) for st in self.sts]
+
     # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
     self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*self.shape_len))
 
