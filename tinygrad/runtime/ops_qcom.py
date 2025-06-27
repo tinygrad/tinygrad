@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, functools, mmap, struct, array, math, sys
+import os, ctypes, functools, mmap, struct, array, math, sys, weakref
 assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Any, cast, ClassVar
@@ -193,7 +193,7 @@ class QCOMProgram(HCQProgram):
     self.name, self.lib = name, lib
     self._parse_lib()
 
-    self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, options=BufferSpec(cpu_access=True, nolru=True))
+    self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, buf_spec:=BufferSpec(cpu_access=True, nolru=True))
     to_mv(cast(int, self.lib_gpu.va_addr), self.image_size)[:] = self.image
 
     self.pvtmem_size_per_item: int = round_up(self.pvtmem, 512) >> 9
@@ -205,6 +205,7 @@ class QCOMProgram(HCQProgram):
 
     kernargs_alloc_size = round_up(2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + self.samp_cnt * 0x10, 0x100)
     super().__init__(QCOMArgsState, self.dev, self.name, kernargs_alloc_size=kernargs_alloc_size)
+    weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
@@ -261,9 +262,6 @@ class QCOMProgram(HCQProgram):
     # Registers info
     reg_desc_off = _read_lib(0x34)
     self.fregs, self.hregs = _read_lib(reg_desc_off + 0x14), _read_lib(reg_desc_off + 0x18)
-
-  def __del__(self):
-    if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferSpec(cpu_access=True, nolru=True))
 
 class QCOMTextureInfo:
   def __init__(self, pitch:int, real_stride:int, desc:list[int], ibo:list[int]):

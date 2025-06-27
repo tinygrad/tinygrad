@@ -12,22 +12,23 @@ testing_minimal = [
   "torch",
   "pytest",
   "pytest-xdist",
-  "hypothesis==6.131.0",
+  "hypothesis",
   "z3-solver",
   "ml_dtypes"
 ]
 
 setup(name='tinygrad',
-      version='0.10.2',
+      version='0.10.3',
       description='You like pytorch? You like micrograd? You love tinygrad! <3',
       author='George Hotz',
       license='MIT',
       long_description=long_description,
       long_description_content_type='text/markdown',
       packages = ['tinygrad', 'tinygrad.runtime.autogen', 'tinygrad.runtime.autogen.am', 'tinygrad.codegen', 'tinygrad.nn',
-                  'tinygrad.renderer', 'tinygrad.engine', 'tinygrad.viz', 'tinygrad.runtime', 'tinygrad.runtime.support',
-                  'tinygrad.runtime.support.am', 'tinygrad.runtime.graph', 'tinygrad.shape'],
-      package_data = {'tinygrad': ['py.typed'], 'tinygrad.viz': ['index.html', 'perfetto.html', 'assets/**/*', 'lib/**/*']},
+                  'tinygrad.renderer', 'tinygrad.engine', 'tinygrad.viz', 'tinygrad.runtime', 'tinygrad.runtime.support', 'tinygrad.kernelize',
+                  'tinygrad.runtime.support.am', 'tinygrad.runtime.graph', 'tinygrad.shape', 'tinygrad.uop', 'tinygrad.opt',
+                  'tinygrad.runtime.support.nv'],
+      package_data = {'tinygrad': ['py.typed'], 'tinygrad.viz': ['index.html', 'assets/**/*', 'js/*']},
       classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
@@ -73,7 +74,8 @@ setup(name='tinygrad',
             "capstone",
             "pycocotools",
             "boto3",
-            "pandas"
+            "pandas",
+            "influxdb3-python"
         ],
         'docs': [
             "mkdocs",
@@ -83,10 +85,6 @@ setup(name='tinygrad',
             "markdown-exec[ansi]",
             "black",
             "numpy",
-        ],
-        'testing_tf': [
-            "tensorflow==2.15.1",
-            "tensorflow_addons",
         ],
       },
       include_package_data=True)

@@ -1,8 +1,9 @@
+from typing import cast
 from dataclasses import dataclass, field
 from collections import deque, defaultdict
-from tinygrad.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
-from tinygrad.device import Buffer
-from tinygrad.helpers import Metadata, DEBUG, unwrap, merge_dicts
+from tinygrad.uop.ops import UOp, Variable, Ops, UPat, PatternMatcher, graph_rewrite, buffers
+from tinygrad.device import Buffer, MultiBuffer
+from tinygrad.helpers import Metadata, unwrap, merge_dicts
 
 # **** ScheduleItem return type
 
@@ -20,7 +21,8 @@ def unbind_view(ctx:list[dict[Variable, int]], x:UOp):
   if any(x.op is Ops.BIND for x in st.vars()):
     st, var_vals = st.unbind()
     ctx.append(var_vals)
-  return x.replace(arg=st) if st != x.st else None
+    return x.replace(arg=st)
+  return None
 
 def unbind_bind(ctx:list[dict[Variable, int]], x:UOp):
   var, val = x.unbind()
@@ -34,18 +36,29 @@ pm_unbind = PatternMatcher([
 
 # **** schedule linearizer
 
-def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
+def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int]]:
   # construct the KERNEL children graph based on assigns
   children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree: dict[UOp, int] = {}
-  for u in (toposort:=sched_sink.toposort()):
-    if u.op is not Ops.ASSIGN: continue
+  for u in sched_sink.toposort():
+    if u.op is not Ops.ASSIGN: continue  # anything that's not an ASSIGN doesn't write a kernel, so we can skip
     k = u.src[1]
     in_degree.setdefault(k, 0)
     for s in k.src:
-      if s.op is not Ops.ASSIGN: continue
-      children[s.src[1]].append(k)
-      in_degree[k] += 1
+      if s.op is Ops.ASSIGN:
+        children[s.src[1]].append(k)
+        in_degree[k] += 1
+      elif s.op in {Ops.MSELECT, Ops.MSTACK}:
+        for ss in s.src:
+          if ss.op is Ops.MSELECT: ss = ss.src[0]
+          if ss.op is not Ops.BUFFER:
+            assert ss.op is Ops.ASSIGN
+            children[ss.src[1]].append(k)
+            in_degree[k] += 1
+      elif s.op is Ops.BUFFER:
+        pass  # a BUFFER is already realized, nothing to do here
+      else:
+        raise RuntimeError(f"input to kernel must be ASSIGN or BUFFER, not {s.op}")
 
   # linearize KERNEL UOps into ScheduleItems in BFS order
   queue = deque(k for k,v in in_degree.items() if v == 0)
@@ -58,18 +71,21 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     ast = graph_rewrite(k.arg.ast, pm_unbind, ctx=local_var_vals, name="unbind vars")
     var_vals = merge_dicts([var_vals, *local_var_vals])
     # create subbuffers if needed
-    if ast.op is Ops.BUFFER_VIEW: buffers[k.src[0]] = (base:=k.src[1].buf_uop.buffer).view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-    schedule.append(ScheduleItem(ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
+    if ast.op is Ops.BUFFER_VIEW:
+      base = k.src[1].buf_uop.buffer
+      assert isinstance(base, Buffer), "base can't be MultiBuffer"
+      buffers[k.src[0]] = base.view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
+    ubufs = tuple(s.buf_uop.buffer for s in k.src)
+    if any(isinstance(x, MultiBuffer) for x in ubufs):
+      assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
+      dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
+      for i,bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
+        schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0]:i} if len(dnums) else {}))
+    else:
+      # ONE -> ONE
+      schedule.append(ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata))
     for x in children[k]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
 
-  # confirm everything was scheduled correctly
-  assert len(schedule) == len(in_degree), f"Schedule length mistmatch {len(schedule)} != {len(in_degree)}"
-  if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
-
-  # map ASSIGN to BUFFER after ScheduleItems are constructed
-  becomes_map = {u:u.buf_uop for u in toposort if u.op is Ops.ASSIGN}
-  assert all(u.op in {Ops.BUFFER, Ops.BUFFER_VIEW} for u in becomes_map.values()), f"Schedule didn't end with BUFFER {becomes_map.values()}"
-
-  return schedule, var_vals, becomes_map
+  return schedule, var_vals

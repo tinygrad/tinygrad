@@ -1,5 +1,5 @@
 import unittest, math
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
 
 class TestVminVmaxProperties(unittest.TestCase):

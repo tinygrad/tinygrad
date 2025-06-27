@@ -5,19 +5,19 @@ from tinygrad.nn import Linear
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import Adam
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_save, safe_load, load_state_dict
-from tinygrad.engine.search import actions
+from tinygrad.opt.search import actions
 from extra.optimization.helpers import load_worlds, ast_str_to_lin, lin_to_feats, assert_same_lin
-from tinygrad.codegen.kernel import Kernel
+from tinygrad.opt.kernel import Kernel
 from tinygrad.helpers import getenv
 
 # stuff needed to unpack a kernel
-from tinygrad.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
+from tinygrad.uop.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
 from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import Variable
+from tinygrad.uop.ops import Variable
 inf, nan = float('inf'), float('nan')
-from tinygrad.codegen.kernel import Opt, OptOps
+from tinygrad.opt.kernel import Opt, OptOps
 
 INNER = 256
 class PolicyNet:
@@ -82,7 +82,7 @@ if __name__ == "__main__":
       ys.append(Y[sel])
     return Tensor(xs), Tensor(ys)
 
-  Tensor.no_grad, Tensor.training = False, True
+  Tensor.training = True
   losses = []
   test_losses = []
   test_accuracy = 0

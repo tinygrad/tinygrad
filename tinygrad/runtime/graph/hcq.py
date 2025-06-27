@@ -1,10 +1,10 @@
 import collections, time
 from typing import Any, cast
-from tinygrad.helpers import round_up, PROFILE
+from tinygrad.helpers import round_up, PROFILE, merge_dicts
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, Variable
+from tinygrad.uop.ops import UOp, Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
 
@@ -64,8 +64,13 @@ class HCQGraph(MultiGraphRunner):
 
     for dev, queue in self.comp_queues.items(): dev_access[queue].add(dev)
 
+    self.fixedvars: dict[HCQCompiled, dict[Variable, int]] = {}
+
     for j,ji in enumerate(jit_cache):
       enqueue_dev: HCQCompiled = ji.prg.dev if (is_exec_prg:=isinstance(ji.prg, CompiledRunner)) else Device[ji.bufs[1].device] #type:ignore
+
+      # set any fixedvars on the device
+      self.fixedvars[enqueue_dev] = merge_dicts([self.fixedvars.get(enqueue_dev, {}), ji.fixedvars])
 
       if is_exec_prg:
         enqueue_queue = self.comp_queues[enqueue_dev]
@@ -182,8 +187,8 @@ class HCQGraph(MultiGraphRunner):
     for (j,i),input_idx in self.input_replace.items(): hcq_var_vals[self.input_replace_to_var.get((j,i))] = input_rawbuffers[input_idx]._buf.va_addr
 
     for dev in self.devices:
-      self.comp_queues[dev].submit(dev, hcq_var_vals)
-      if (copy_queue:=self.copy_queues.get(dev, None)) is not None: copy_queue.submit(dev, hcq_var_vals)
+      self.comp_queues[dev].submit(dev, hcq_var_vals_local:=hcq_var_vals|self.fixedvars.get(dev, {}))
+      if (copy_queue:=self.copy_queues.get(dev, None)) is not None: copy_queue.submit(dev, hcq_var_vals_local)
 
       self.last_timeline[dev] = (dev.timeline_signal, dev.next_timeline())
 

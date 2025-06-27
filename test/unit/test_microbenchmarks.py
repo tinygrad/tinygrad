@@ -1,5 +1,5 @@
 import unittest, time
-from tinygrad.ops import UOp
+from tinygrad.uop.ops import UOp
 from tinygrad.dtype import dtypes
 
 # it's about 1 ms per 1k UOps on M3
