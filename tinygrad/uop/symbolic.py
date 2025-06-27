@@ -469,4 +469,7 @@ sym = symbolic_flat+PatternMatcher([
   ((UPat.var("x")*UPat.cvar("c", vec=False)).reduce(arg=Ops.ADD, name="r", allow_any_len=True), lambda x,c,r: r.replace(src=(x,)+r.src[1:])*c.arg),
   # reduce mul chain, move muls after the reduce
   (UPat(Ops.MUL).reduce(name="r", allow_any_len=True), reduce_mul_chain),
+  # any CONST feeding REDUCE (in not first source) is removed. can this happen?
+  (UPat(Ops.REDUCE, name="r"), lambda r:
+    r.replace(src=new_src) if (new_src:=tuple(x for i,x in enumerate(r.src) if i == 0 or x.op is not Ops.CONST)) != r.src else None),
 ])
