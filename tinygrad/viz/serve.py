@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
@@ -25,7 +25,7 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
   ret = []
   for k,v in zip(keys, contexts):
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":lines(s.loc[0])[s.loc[1]-1].strip()} for s in v]
-    if isinstance(k, ProgramSpec): ret.append({"name":k.name, "kernel_code":k.src, "ref":id(k.ast), "steps":steps})
+    if isinstance(k, ProgramSpec): ret.append({"name":k.name, "kernel_code":k.src, "ref":id(k.ast), "function_name":k.function_name, "steps":steps})
     else: ret.append({"name":str(k), "steps":steps})
   return ret
 
@@ -74,11 +74,17 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
                     "ref":id(u.arg.ast) if u.op is Ops.KERNEL else None, "tag":u.tag}
   return graph
 
+@functools.cache
+def _reconstruct(a:int):
+  op, dtype, src, arg, tag = contexts[2][a]
+  arg = type(arg)(_reconstruct(arg.ast), arg.metadata) if op is Ops.KERNEL else arg
+  return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, tag)
+
 def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
-  yield {"graph":uop_to_json(next_sink:=ctx.sink), "uop":str(ctx.sink), "changed_nodes":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
-  for u0,u1,upat in tqdm(ctx.matches):
-    replaces[u0] = u1
+  for u0_num,u1_num,upat in tqdm(ctx.matches):
+    replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RecursionError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
@@ -86,33 +92,28 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
     if not ctx.bottom_up: next_sink = new_sink
 
 # Profiler API
-devices:dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
-def prep_ts(device:str, ts:decimal.Decimal, is_copy): return int(decimal.Decimal(ts) + devices[device][is_copy])
-def dev_to_pid(device:str, is_copy=False): return {"pid": devices[device][2], "tid": int(is_copy)}
-def dev_ev_to_perfetto_json(ev:ProfileDeviceEvent):
-  devices[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff, len(devices))
-  return [{"name": "process_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "args": {"name": ev.device}},
-          {"name": "thread_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "tid": 0, "args": {"name": "COMPUTE"}},
-          {"name": "thread_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "tid": 1, "args": {"name": "COPY"}}]
-def range_ev_to_perfetto_json(ev:ProfileRangeEvent):
-  return [{"name": ev.name, "ph": "X", "ts": prep_ts(ev.device, ev.st, ev.is_copy), "dur": float(ev.en-ev.st), **dev_to_pid(ev.device, ev.is_copy)}]
-def graph_ev_to_perfetto_json(ev:ProfileGraphEvent, reccnt):
-  ret = []
-  for i,e in enumerate(ev.ents):
-    st, en = ev.sigs[e.st_id], ev.sigs[e.en_id]
-    ret += [{"name": e.name, "ph": "X", "ts": prep_ts(e.device, st, e.is_copy), "dur": float(en-st), **dev_to_pid(e.device, e.is_copy)}]
-    for dep in ev.deps[i]:
-      d = ev.ents[dep]
-      ret += [{"ph": "s", **dev_to_pid(d.device, d.is_copy), "id": reccnt+len(ret), "ts": prep_ts(d.device, ev.sigs[d.en_id], d.is_copy), "bp": "e"}]
-      ret += [{"ph": "f", **dev_to_pid(e.device, e.is_copy), "id": reccnt+len(ret)-1, "ts": prep_ts(e.device, st, e.is_copy), "bp": "e"}]
-  return ret
-def to_perfetto(profile:list[ProfileEvent]):
-  # Start json with devices.
-  prof_json = [x for ev in profile if isinstance(ev, ProfileDeviceEvent) for x in dev_ev_to_perfetto_json(ev)]
-  for ev in tqdm(profile, desc="preparing profile"):
-    if isinstance(ev, ProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)
-    elif isinstance(ev, ProfileGraphEvent): prof_json += graph_ev_to_perfetto_json(ev, reccnt=len(prof_json))
-  return json.dumps({"traceEvents": prof_json}).encode() if len(prof_json) > 0 else None
+
+def events_to_json(profile:list[ProfileEvent]):
+  for e in profile:
+    if isinstance(e, ProfileRangeEvent): yield (e.device, e.name, e.st, e.en, e.is_copy)
+    if isinstance(e, ProfileGraphEvent):
+      for ent in e.ents: yield (ent.device, ent.name, e.sigs[ent.st_id], e.sigs[ent.en_id], ent.is_copy)
+
+def get_profile(profile:list[ProfileEvent]):
+  # start by getting the time diffs
+  devs = {e.device:(e.comp_tdiff, e.copy_tdiff if e.copy_tdiff is not None else e.comp_tdiff) for e in profile if isinstance(e,ProfileDeviceEvent)}
+  # map events per device
+  dev_events:dict[str, list] = {}
+  min_ts:int|None = None
+  max_ts:int|None = None
+  for device, name, ts, en, is_copy in events_to_json(profile):
+    time_diff = devs[device][is_copy]
+    st = int(ts+time_diff)
+    et = st if en is None else int(en+time_diff)
+    dev_events.setdefault(device,[]).append({"name":name, "ts":st, "dur":et-st})
+    if min_ts is None or st < min_ts: min_ts = st
+    if max_ts is None or et > max_ts: max_ts = et
+  return json.dumps({"devEvents":dev_events, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 # ** HTTP server
 
@@ -120,7 +121,7 @@ class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
 
-    if (fn:={"/":"index", "/profiler":"perfetto"}.get((url:=urlparse(self.path)).path)):
+    if (fn:={"/":"index"}.get((url:=urlparse(self.path)).path)):
       with open(os.path.join(os.path.dirname(__file__), f"{fn}.html"), "rb") as f: ret = f.read()
     elif self.path.startswith(("/assets/", "/js/")) and '/..' not in self.path:
       try:
@@ -145,7 +146,7 @@ class Handler(BaseHTTPRequestHandler):
         # pass if client closed connection
         except (BrokenPipeError, ConnectionResetError): return
       ret, content_type = json.dumps(ctxs).encode(), "application/json"
-    elif url.path == "/get_profile" and perfetto_profile is not None: ret, content_type = perfetto_profile, "application/json"
+    elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
     else: status_code = 404
 
     # send response
@@ -189,9 +190,9 @@ if __name__ == "__main__":
   contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
 
   # NOTE: this context is a tuple of list[keys] and list[values]
-  ctxs = get_metadata(*contexts) if contexts is not None else []
+  ctxs = get_metadata(*contexts[:2]) if contexts is not None else []
 
-  perfetto_profile = to_perfetto(profile) if profile is not None else None
+  profile_ret = get_profile(profile) if profile is not None else None
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
