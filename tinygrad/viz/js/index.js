@@ -236,8 +236,7 @@ async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
   if (data != null) return;
-  const { devEvents, st, et } = await (await fetch("/get_profile")).json();
-  const events = new Map(Object.entries(devEvents));
+  const { layout, st, et } = await (await fetch("/get_profile")).json();
   const kernelMap = new Map();
   for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
   // place devices on the y axis and set vertical positions
@@ -250,37 +249,26 @@ async function renderProfiler() {
   // color by name
   const nameMap = new Map();
   data = [];
-  for (const [k, v] of events) {
-    if (v.length === 0) continue;
+  for (const [k, { timeline }] of Object.entries(layout)) {
+    if (timeline.shapes.length === 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
     div.id = k;
     div.innerText = k;
     div.style.padding = `${padding}px`;
     const { y:baseY, height:baseHeight } = rect(`#${k}`);
-    // position events on the y axis, stack ones that overlap
-    const levels = [];
-    v.sort((a,b) => (a.ts-st) - (b.ts-st));
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
-    for (const [i,e] of v.entries()) {
-      // assign to the first free depth
-      const start = e.ts-st;
-      const end = start+e.dur;
-      let depth = levels.findIndex(l => start >= l);
-      if (depth === -1) {
-        depth = levels.length;
-        levels.push(end);
-      } else levels[depth] = end;
-      const kernel = kernelMap.get(e.name);
-      if (!nameMap.has(e.name)) {
-        const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-        nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
-      }
-      // offset y by depth
-      data.push({ x:start, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*depth, kernel, ...nameMap.get(e.name) });
+    for (const [i,e] of timeline.shapes.entries()) {
+     const kernel = kernelMap.get(e.name);
+     if (!nameMap.has(e.name)) {
+       const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+       nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
+     }
+     // offset y by depth
+      data.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
     }
     // lastly, adjust device rect by number of levels
-    div.style.height = `${levelHeight*levels.length+padding}px`;
+    div.style.height = `${levelHeight*timeline.maxDepth+padding}px`;
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;

@@ -204,11 +204,11 @@ class TestVizProfiler(unittest.TestCase):
 
     j = json.loads(get_profile(prof))
 
-    dev_events = j['devEvents']['NV']
+    dev_events = j['layout']['NV']['timeline']['shapes']
     self.assertEqual(len(dev_events), 1)
     event = dev_events[0]
     self.assertEqual(event['name'], 'E_2')
-    self.assertEqual(event['ts'], 0)
+    self.assertEqual(event['st'], 0)
     self.assertEqual(event['dur'], 10)
 
   def test_perfetto_copy_node(self):
@@ -217,9 +217,9 @@ class TestVizProfiler(unittest.TestCase):
 
     j = json.loads(get_profile(prof))
 
-    event = j['devEvents']['NV'][0]
+    event = j['layout']['NV']['timeline']['shapes'][0]
     self.assertEqual(event['name'], 'COPYxx')
-    self.assertEqual(event['ts'], 900) # diff clock
+    self.assertEqual(event['st'], 900) # diff clock
     self.assertEqual(event['dur'], 10)
 
   def test_perfetto_graph(self):
@@ -232,19 +232,19 @@ class TestVizProfiler(unittest.TestCase):
 
     j = json.loads(get_profile(prof))
 
-    devices = list(j['devEvents'])
+    devices = list(j['layout'])
     self.assertEqual(devices[0], 'NV')
     self.assertEqual(devices[1], 'NV:1')
 
-    nv_events = j['devEvents']['NV']
+    nv_events = j['layout']['NV']['timeline']['shapes']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
-    self.assertEqual(nv_events[0]['ts'], 0)
+    self.assertEqual(nv_events[0]['st'], 0)
     self.assertEqual(nv_events[0]['dur'], 2)
     #self.assertEqual(j['devEvents'][6]['pid'], j['devEvents'][0]['pid'])
 
-    nv1_events = j['devEvents']['NV:1']
+    nv1_events = j['layout']['NV:1']['timeline']['shapes']
     self.assertEqual(nv1_events[0]['name'], 'NV -> NV:1')
-    self.assertEqual(nv1_events[0]['ts'], 954)
+    self.assertEqual(nv1_events[0]['st'], 954)
     #self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
 
 if __name__ == "__main__":

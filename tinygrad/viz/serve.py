@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
 from tinygrad.renderer import ProgramSpec
-from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
+from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
@@ -93,27 +93,44 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
 
 # Profiler API
 
-def events_to_json(profile:list[ProfileEvent]):
+DevEvent = ProfileRangeEvent|ProfileGraphEntry
+def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[decimal.Decimal, decimal.Decimal, DevEvent], None, None]:
   for e in profile:
-    if isinstance(e, ProfileRangeEvent): yield (e.device, e.name, e.st, e.en, e.is_copy)
+    if isinstance(e, ProfileRangeEvent): yield (e.st, e.en, e)
     if isinstance(e, ProfileGraphEvent):
-      for ent in e.ents: yield (ent.device, ent.name, e.sigs[ent.st_id], e.sigs[ent.en_id], ent.is_copy)
+      for ent in e.ents: yield (e.sigs[ent.st_id], e.sigs[ent.en_id], ent)
+
+# timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
+def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
+  shapes:list[dict] = []
+  levels:list[int] = []
+  for st,et,dur,e in events:
+    if dur == 0: continue
+    # find a free level to put the event
+    depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
+    if depth < len(levels): levels[depth] = et
+    else: levels.append(et)
+    shapes.append({"name":e.name, "st":st, "dur":dur, "depth":depth})
+  return {"shapes":shapes, "maxDepth":len(levels)}
 
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
   devs = {e.device:(e.comp_tdiff, e.copy_tdiff if e.copy_tdiff is not None else e.comp_tdiff) for e in profile if isinstance(e,ProfileDeviceEvent)}
   # map events per device
-  dev_events:dict[str, list] = {}
+  dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   min_ts:int|None = None
   max_ts:int|None = None
-  for device, name, ts, en, is_copy in events_to_json(profile):
-    time_diff = devs[device][is_copy]
+  for ts,en,e in flatten_events(profile):
+    time_diff = devs[e.device][e.__dict__.get("is_copy",False)] if e.device in devs else decimal.Decimal(0)
     st = int(ts+time_diff)
     et = st if en is None else int(en+time_diff)
-    dev_events.setdefault(device,[]).append({"name":name, "ts":st, "dur":et-st})
+    dev_events.setdefault(e.device,[]).append((st, et, float(en-ts), e))
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
-  return json.dumps({"devEvents":dev_events, "st":min_ts, "et":max_ts}).encode("utf-8")
+  # return layout of per device events
+  for events in dev_events.values(): events.sort(key=lambda v:v[0])
+  dev_layout = {k:{"timeline":timeline_layout(v)} for k,v in dev_events.items()}
+  return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 # ** HTTP server
 
