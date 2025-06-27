@@ -4,7 +4,6 @@ from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 from tinygrad.device import is_dtype_supported
 from extra.onnx import data_types
 from hypothesis import given, settings, strategies as st
-import numpy as np
 
 device_supported_dtypes = [odt for odt, dtype in data_types.items() if is_dtype_supported(dtype)]
 device_unsupported_dtypes = [odt for odt, dtype in data_types.items() if not is_dtype_supported(dtype)]
