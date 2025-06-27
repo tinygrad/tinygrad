@@ -954,8 +954,9 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: windows-minimal
+          key: windows-${{ matrix.backend }}-minimal
           deps: testing_unit
+          pydeps: ${{ matrix.backend == 'webgpu' && 'dawn-python' || '' }}
       - name: Set env
         shell: bash
         run:  printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'webgpu' && 'WEBGPU=1'}}" >> $GITHUB_ENV

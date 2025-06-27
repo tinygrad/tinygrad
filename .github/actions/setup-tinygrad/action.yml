@@ -16,7 +16,7 @@ inputs:
   pydeps:
     description: 'Extra Python dependency groups (space separated)'
     required: false
-    default: 'dawn-python'
+    default: ''
   opencl:
     description: "Install OpenCL?"
     required: false
