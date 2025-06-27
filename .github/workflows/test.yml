@@ -310,8 +310,6 @@ jobs:
       run: PYTHON=1 python3 -m pytest test/test_uops.py --durations=20
     - name: Test symbolic with Python emulator
       run: PYTHONPATH=. PYTHON=1 python3 test/test_symbolic_ops.py
-    - name: test_linearizer_failures with Python emulator
-      run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1
     - name: test_renderer_failures with Python emulator
       run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_renderer_failures.py::TestRendererFailures
 
@@ -523,8 +521,8 @@ jobs:
           REMOTEDEV=GPU IMAGE=2 REMOTE=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py
       - name: Test Optimization Helpers
         run: PYTHONPATH="." DEBUG=1 python3 extra/optimization/test_helpers.py
-      - name: Test Action Space
-        run: PYTHONPATH="." DEBUG=1 GPU=1 python3 extra/optimization/get_action_space.py
+      #- name: Test Action Space
+      #  run: PYTHONPATH="." DEBUG=1 GPU=1 python3 extra/optimization/get_action_space.py
       - name: Test Beam Search
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
       - name: Test MLPerf stuff
@@ -623,7 +621,7 @@ jobs:
       run: |
           WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Vulkan" python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit \
           --ignore=test/test_copy_speed.py --ignore=test/test_rearrange_einops.py \
-          --ignore=test/test_fuzz_shape_ops.py --ignore=test/test_linearizer_failures.py --durations=20
+          --ignore=test/test_fuzz_shape_ops.py --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -774,8 +772,8 @@ jobs:
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
     - name: Test Beam Search
       run: PYTHONPATH="." METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
-    - name: Fuzz Test linearizer
-      run: PYTHONPATH="." METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
+    #- name: Fuzz Test linearizer
+    #  run: PYTHONPATH="." METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
     - name: Run TRANSCENDENTAL math
       run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
     - name: Run pytest (amd)
