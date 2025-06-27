@@ -50,8 +50,17 @@ async function renderDag(graph, additions, recenter=false) {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
       return `translate(-${x}, -${y})`;
-    }).selectAll("text").data(d => [d.label.split("\n")]).join("text").selectAll("tspan").data(d => d).join("tspan").text(d => d).attr("x", "0")
-      .attr("dy", 14).attr("xml:space", "preserve");
+    }).selectAll("text").data(d => {
+      const ret = [[]];
+      for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
+        for (const [i, l] of st.split("\n").entries()) {
+          if (i > 0) ret.push([]);
+          ret.at(-1).push({ st:l, color });
+        }
+      }
+      return [ret];
+    }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
+      .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve");
     const tags = nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
       .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`);
     tags.selectAll("circle").data(d => [d]).join("circle");
@@ -218,8 +227,8 @@ function renderMemoryGraph(graph) {
 }
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
-const parseColors = (name) => [...name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g)].map(([_, code, colored_st, st]) =>
-  ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : "#ffffff" }));
+const parseColors = (name, defaultColor="#ffffff") => [...name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g)]
+  .map(([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
 
 // ** profiler graph
 

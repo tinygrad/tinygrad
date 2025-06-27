@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 
 from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel
-from tinygrad.codegen.lowerer import get_grouped_dims
+from tinygrad.codegen.gpudims import get_grouped_dims
 from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -109,7 +109,7 @@ class TestLinearizer(unittest.TestCase):
 
   def _test_no_nested_ranges(self, lins, skip=None):
     for l in lins:
-      range_in_acc = flatten([[x for x in u.src if x.op is Ops.RANGE] for u in l.uops if u.op is Ops.DEFINE_ACC])
+      range_in_acc = flatten([[x for x in u.src if x.op is Ops.RANGE] for u in l.uops if u.op is Ops.DEFINE_REG])
       ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u in range_in_acc) or (u.op is Ops.ENDRANGE and u.src[0] in range_in_acc)]
       for i,u in enumerate(ranges):
         if skip and i in skip: continue
@@ -257,7 +257,7 @@ class TestLinearizer(unittest.TestCase):
     k.upcast()
     k.upcast()
     k.linearize()
-    accs = [u for u in k.uops if u.op is Ops.DEFINE_ACC]
+    accs = [u for u in k.uops if u.op is Ops.DEFINE_REG]
     stores = [u for u in k.uops if u.op is Ops.STORE]
     assert len(accs) == 0  # it's removed now
     assert len(stores) == 1
@@ -312,7 +312,7 @@ class TestLinearizer(unittest.TestCase):
         realized_ast = a.schedule()[-1].ast
         realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
         program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
-        local = [uop for uop in program.uops if uop.op is Ops.DEFINE_ACC]
+        local = [uop for uop in program.uops if uop.op is Ops.DEFINE_REG]
         assert local[0].dtype == acc_dtype
 
   def test_arg_acc_dtype(self):
@@ -320,7 +320,7 @@ class TestLinearizer(unittest.TestCase):
       realized_ast = c.schedule()[-1].ast
       realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
       program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
-      local = [uop for uop in program.uops if uop.op is Ops.DEFINE_ACC]
+      local = [uop for uop in program.uops if uop.op is Ops.DEFINE_REG]
       assert local[0].dtype == expected_dtype
 
     tests = (
@@ -782,7 +782,6 @@ class TestFloat4(unittest.TestCase):
     k.shift_to(0, 2, insert_before=k.shape_len-1)
     k.upcast()
     k.upcast()
-    k.local_dims += 1
     k.linearize()
 
     assert TestFloat4.count_float4(k.uops) == (4, 2)
@@ -800,7 +799,6 @@ class TestFloat4(unittest.TestCase):
       k.shift_to(0, shift, insert_before=k.shape_len-1)
       k.upcast()
       k.upcast()
-      k.local_dims += 1
       k.linearize()
       return k
 
@@ -837,7 +835,6 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.shift_to(len(k.full_unupcasted_shape)-1, 2, insert_before=k.shape_len-1)
     k.upcast()
-    k.local_dims += 1
     k.linearize()
 
     assert TestFloat4.count_float4(k.uops) == (0, 2)
@@ -855,7 +852,6 @@ class TestFloat4(unittest.TestCase):
       k.upcast()
       k.shift_to(len(k.full_unupcasted_shape)-1, shift, insert_before=k.shape_len-1)
       k.upcast()
-      k.local_dims += 1
       k.linearize()
       return k
 
@@ -1000,7 +996,7 @@ class TestFloat4(unittest.TestCase):
     ]:
       ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
       program = get_program(ast, Device[Device.DEFAULT].renderer)
-      count = len([uop for uop in program.uops if uop.op is Ops.DEFINE_ACC and uop.dtype == dtypes.float.vec(4)])
+      count = len([uop for uop in program.uops if uop.op is Ops.DEFINE_REG and uop.dtype == dtypes.float.vec(4)])
       assert count == expected, f"{count=}, {expected=}"
 
   @unittest.skip("this doesn't happen anymore")
@@ -1022,7 +1018,7 @@ class TestFloat4(unittest.TestCase):
     ]:
       ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
       program = get_program(ast, Device[Device.DEFAULT].renderer)
-      count = len([uop for uop in program.uops if uop.op is Ops.DEFINE_ACC and uop.dtype == dtypes.float.vec(2)])
+      count = len([uop for uop in program.uops if uop.op is Ops.DEFINE_REG and uop.dtype == dtypes.float.vec(2)])
       assert count == expected, f"{count=}, {expected=}"
 
 class TestHandCodedOpts(unittest.TestCase):
